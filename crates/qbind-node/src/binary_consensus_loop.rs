@@ -3865,34 +3865,53 @@ enum PostJournalRejection {
     AuthorizationRevalidationFailed(ConfirmError),
 }
 
-impl<'a> AdmittedSigningIdentity<'a> {
-    /// Re-confirm, AFTER the potentially-blocking journal work and immediately
-    /// before the signer invocation (fresh) or an authorized retained reuse,
-    /// that:
-    ///  1. the operation still signs through the snapshot's EXACT bound verifier
-    ///     (`signing_ctx` is that verifier by pointer identity — never a
-    ///     separately-supplied authority or a newly-selected signer), and
-    ///  2. the ORIGINAL admission ticket still confirms against its issuing
-    ///     owner (owner not replaced, generation not advanced, not foreign, not
-    ///     exhausted).
-    ///
-    /// The bound-context check is evaluated FIRST: a substituted context is
-    /// refused even if a supplied authority would confirm, so an equal-looking
-    /// but unbound verifier cannot redirect signing. On any failure the caller
-    /// performs zero signer calls, no result publication, and no delivery, and
-    /// preserves the durable reservation and its conflict obligation.
-    fn reconfirm_after_journal(
-        &self,
-        signing_ctx: &ProposalVoteAuthority,
-    ) -> Result<(), PostJournalRejection> {
-        if !std::ptr::eq(signing_ctx, self.snapshot.verifier()) {
-            return Err(PostJournalRejection::ContextUnbound);
-        }
-        self.snapshot
-            .owner()
-            .confirm(self.ticket)
-            .map_err(PostJournalRejection::AuthorizationRevalidationFailed)
+/// Run 422 D7-D10 Correction D — re-confirm a FROZEN
+/// [`BoundSigningOperation`] AFTER the potentially-blocking journal work and
+/// immediately before the signer invocation (fresh) or an authorized retained
+/// reuse.
+///
+/// The frozen operation is the source of truth; `current_snapshot` is supplied
+/// ONLY for drift detection and is compared against it:
+///
+///  1. the operation still signs through its FROZEN bound context — the frozen
+///     `op.ctx` must be the current snapshot's bound verifier BY POINTER
+///     IDENTITY (never a separately-supplied or equal-looking authority), and
+///  2. the FROZEN ORIGINAL admission ticket still confirms against the current
+///     owner (owner not replaced, generation not advanced, not foreign, not
+///     exhausted). A newly-minted ticket for the updated owner is never
+///     accepted — there is no ticket parameter, only the frozen original.
+///
+/// The bound-context check is evaluated FIRST: a substituted context is refused
+/// even if the owner would confirm, so an equal-looking but unbound verifier
+/// cannot redirect signing. A required operation (frozen `Some` ticket) with an
+/// absent `current_snapshot` is refused fail-closed rather than degrading into a
+/// fixture operation. A fixture operation (frozen `None` ticket) has nothing to
+/// re-confirm. On any failure the caller performs zero signer calls, no result
+/// publication, and no delivery, and preserves the durable reservation and its
+/// conflict obligation.
+fn reconfirm_bound_operation(
+    op: &BoundSigningOperation<'_>,
+    current_snapshot: Option<&AuthorizedProposalVoteSnapshot>,
+) -> Result<(), PostJournalRejection> {
+    let ticket = match &op.original_ticket {
+        Some(t) => t,
+        // Explicit fixture operation: no bound admission to re-confirm. It never
+        // becomes a required operation by acquiring one here.
+        None => return Ok(()),
+    };
+    // Required operation: the current snapshot is mandatory. Its absence cannot
+    // silently turn a required operation into a fixture one.
+    let current = match current_snapshot {
+        Some(s) => s,
+        None => return Err(PostJournalRejection::ContextUnbound),
+    };
+    if !std::ptr::eq(op.ctx, current.verifier()) {
+        return Err(PostJournalRejection::ContextUnbound);
     }
+    current
+        .owner()
+        .confirm(ticket)
+        .map_err(PostJournalRejection::AuthorizationRevalidationFailed)
 }
 
 /// Run 422 D7-D10 Correction D — record a Proposal post-journal revalidation
@@ -3909,7 +3928,9 @@ fn record_post_journal_proposal_rejection(
                 .saturating_add(1);
             eprintln!(
                 "[binary-consensus] Run 422 D7-D10 Correction D: outbound proposal SUPPRESSED \
-                 (bound signing context substituted after journal work) — fail-closed, not signed"
+                 (bound signing context substituted after journal work) — fail-closed; \
+                 fresh: no signer invocation, Reserved preserved; retained: no additional \
+                 signature, existing Signed preserved; no delivery"
             );
         }
         PostJournalRejection::AuthorizationRevalidationFailed(e) => {
@@ -3920,7 +3941,8 @@ fn record_post_journal_proposal_rejection(
             eprintln!(
                 "[binary-consensus] Run 422 D7-D10 Correction D: outbound proposal SUPPRESSED \
                  (original admission not revalidated after journal work) reason={:?} — \
-                 fail-closed, reservation preserved, not signed",
+                 fail-closed; fresh: no signer invocation, Reserved preserved; retained: no \
+                 additional signature, existing Signed preserved; no delivery",
                 e
             );
         }
@@ -3940,7 +3962,9 @@ fn record_post_journal_vote_rejection(
                 .saturating_add(1);
             eprintln!(
                 "[binary-consensus] Run 422 D7-D10 Correction D: outbound vote SUPPRESSED \
-                 (bound signing context substituted after journal work) — fail-closed, not signed"
+                 (bound signing context substituted after journal work) — fail-closed; \
+                 fresh: no signer invocation, Reserved preserved; retained: no additional \
+                 signature, existing Signed preserved; no delivery"
             );
         }
         PostJournalRejection::AuthorizationRevalidationFailed(e) => {
@@ -3951,7 +3975,8 @@ fn record_post_journal_vote_rejection(
             eprintln!(
                 "[binary-consensus] Run 422 D7-D10 Correction D: outbound vote SUPPRESSED \
                  (original admission not revalidated after journal work) reason={:?} — \
-                 fail-closed, reservation preserved, not signed",
+                 fail-closed; fresh: no signer invocation, Reserved preserved; retained: no \
+                 additional signature, existing Signed preserved; no delivery",
                 e
             );
         }
@@ -4160,7 +4185,44 @@ fn check_governed_suite_backend(
     Ok(())
 }
 
-/// Run 422 D7-D10 Correction C — a Proposal signing operation that has passed
+/// Run 422 D7-D10 Correction D — the FROZEN, operation-bound selection captured
+/// at preparation (BEFORE journal work) and carried UNCHANGED across the
+/// durable-journal split into the completion phase.
+///
+/// The whole point of this type is that completion is NOT handed a
+/// separately-supplied admission ticket, signing context, or signer that could
+/// silently rebind the prepared operation. Instead the operation freezes:
+///
+///  * `ctx` — the EXACT signing context selected at preparation (on the
+///    production route this is the admitted snapshot's coherence-validated bound
+///    verifier). It is held by the SAME borrow used to prepare, reserve and
+///    sign; completion compares it by POINTER IDENTITY against the current
+///    snapshot's bound verifier and never accepts a separately-supplied context.
+///  * `signer` — the EXACT signer selected at preparation, by `Arc` IDENTITY.
+///    Completion signs through THIS signer only; a same-`ValidatorId` /
+///    same-suite replacement is a different `Arc` and cannot be substituted at
+///    completion (there is no signer parameter to substitute).
+///  * `original_ticket` — a clone of the ORIGINAL admission ticket (its issuer
+///    identity + generation), captured before journal work. It is re-confirmed
+///    against the CURRENT owner at completion; a freshly-minted ticket obtained
+///    AFTER storage (e.g. following an owner replacement) is never accepted,
+///    because completion has no ticket parameter and confirms only this frozen
+///    original. `None` ONLY for the explicit test-only `LocalFixtureUnsigned`
+///    operation, which has no bound admission to re-confirm; a REQUIRED
+///    operation always carries `Some`, so it can never silently degrade into a
+///    fixture operation by omitting admission at completion.
+///
+/// Cloning the opaque ticket preserves its exact issuer/generation identity
+/// (the issuer is an allocation-backed `Arc`; the clone binds by `Arc::ptr_eq`
+/// in `confirm`). No serialized authorization token and no second authority
+/// system are introduced.
+struct BoundSigningOperation<'a> {
+    ctx: &'a ProposalVoteAuthority,
+    signer: &'a Arc<dyn ValidatorSigner>,
+    original_ticket: Option<AuthorizationTicket>,
+}
+
+/// Run 422 D7-D10 Correction C/D — a Proposal signing operation that has passed
 /// the pre-journal identity/version/suite checks AND completed its durable
 /// journal work (fresh reservation with a consumed one-use continuation, or an
 /// acknowledged retained result). It is the split point between the durable
@@ -4168,22 +4230,32 @@ fn check_governed_suite_backend(
 /// production completion path can be exercised after a between-phase mutation
 /// without duplicating the reconfirm/sign/publish logic in a test helper.
 ///
-/// It carries only the prepared, canonically-bound message (with its immutable
-/// signed fields already assigned), the exact D6 preimage, and — for a fresh
-/// operation — the operation-bound one-use publication capability. It never
-/// carries a fresh ticket, a reconstructed capability, or a replacement signer.
-enum PreparedProposalSigning {
+/// It carries the FROZEN [`BoundSigningOperation`] (original ticket, bound
+/// context, and selected signer) plus the prepared, canonically-bound message
+/// (with its immutable signed fields already assigned), the exact D6 preimage,
+/// and — for a fresh operation — the operation-bound one-use publication
+/// capability. It never carries a fresh ticket, a reconstructed capability, or a
+/// replacement signer.
+struct PreparedProposalSigning<'a> {
+    /// The frozen selection re-confirmed at completion.
+    op: BoundSigningOperation<'a>,
+    /// The message-specific journal outcome carried into completion.
+    kind: PreparedProposalKind,
+}
+
+enum PreparedProposalKind {
     /// A fresh durable reservation whose one-use continuation was consumed into
     /// the publication capability for THIS operation. Completion re-confirms the
-    /// original admission, signs EXACTLY once, and records the result.
+    /// frozen original operation, signs EXACTLY once through the frozen signer,
+    /// and records the result.
     Fresh {
         proposal: BlockProposal,
         preimage: Vec<u8>,
         publish_cap: ResultPublicationCapability,
     },
     /// An exact retry whose acknowledged retained signature is reused. Completion
-    /// re-confirms the original admission, then D6-verifies the retained result
-    /// before authorized reuse; it never invokes the signer.
+    /// re-confirms the frozen original operation, then D6-verifies the retained
+    /// result before authorized reuse; it never invokes the signer.
     Retained {
         proposal: BlockProposal,
         retained_sig: Vec<u8>,
@@ -4207,9 +4279,15 @@ fn guarded_sign_proposal_reserved(
     journal: &SigningReservationJournal,
     inbound_stats: &mut BinaryConsensusLoopInboundStats,
 ) -> Option<BlockProposal> {
-    let prepared =
-        prepare_proposal_signing_reservation(proposal, ctx, signer, journal, inbound_stats)?;
-    complete_proposal_signing(prepared, ctx, admission, signer, journal, inbound_stats)
+    let prepared = prepare_proposal_signing_reservation(
+        proposal, ctx, admission, signer, journal, inbound_stats,
+    )?;
+    // Completion receives ONLY the current snapshot for drift detection; the
+    // frozen operation (original ticket, bound context, selected signer) is
+    // carried inside `prepared`. On the production route the current snapshot is
+    // the same admitted snapshot, so revalidation confirms cleanly.
+    let current_snapshot = admission.map(|a| a.snapshot);
+    complete_proposal_signing(prepared, current_snapshot, journal, inbound_stats)
 }
 
 /// Run 422 D7-D10 Correction B/C — the pre-signer PREPARATION + durable journal
@@ -4220,17 +4298,23 @@ fn guarded_sign_proposal_reserved(
 ///
 /// Every refusal here happens BEFORE the signer invocation and, for the
 /// identity/version/suite checks, BEFORE any journal lookup or reservation. On a
-/// fresh reservation the returned [`PreparedProposalSigning::Fresh`] already
-/// holds the operation-bound publication capability. This function performs NO
+/// fresh reservation the returned [`PreparedProposalKind::Fresh`] already holds
+/// the operation-bound publication capability. This function performs NO
 /// post-journal authorization revalidation and NO signing — those belong to
 /// [`complete_proposal_signing`].
-fn prepare_proposal_signing_reservation(
+///
+/// Correction D: the `admission` is consulted ONLY to FREEZE the original ticket
+/// into the returned [`BoundSigningOperation`] before journal work; the bound
+/// context and selected signer are frozen from `ctx`/`signer`. Nothing here
+/// mints a fresh ticket or re-selects a signer.
+fn prepare_proposal_signing_reservation<'a>(
     mut proposal: BlockProposal,
-    ctx: &ProposalVoteAuthority,
-    signer: &Arc<dyn ValidatorSigner>,
+    ctx: &'a ProposalVoteAuthority,
+    admission: Option<&AdmittedSigningIdentity>,
+    signer: &'a Arc<dyn ValidatorSigner>,
     journal: &SigningReservationJournal,
     inbound_stats: &mut BinaryConsensusLoopInboundStats,
-) -> Option<PreparedProposalSigning> {
+) -> Option<PreparedProposalSigning<'a>> {
     //     founding profile a Proposal's height, round and originating view are
     //     one value; there is no Proposal step field to fabricate. The
     //     originating view is the ACTION's own view (`header.height`), never a
@@ -4334,6 +4418,17 @@ fn prepare_proposal_signing_reservation(
         canonical_preimage: &preimage,
     });
 
+    // Correction D — FREEZE the operation-bound selection BEFORE journal work:
+    // the original admission ticket (cloned, preserving its exact
+    // issuer/generation identity), the bound signing context, and the selected
+    // signer. Completion re-confirms THIS frozen selection and never accepts a
+    // replacement supplied after storage.
+    let op = BoundSigningOperation {
+        ctx,
+        signer,
+        original_ticket: admission.map(|a| a.ticket.clone()),
+    };
+
     match journal.reserve_for_sign(&position, &binding) {
         Ok(ReservationOutcome::FreshlyReserved(continuation)) => {
             inbound_stats.outbound_proposal_journal_reserved_total = inbound_stats
@@ -4352,19 +4447,25 @@ fn prepare_proposal_signing_reservation(
                     return None;
                 }
             };
-            Some(PreparedProposalSigning::Fresh {
-                proposal,
-                preimage,
-                publish_cap,
+            Some(PreparedProposalSigning {
+                op,
+                kind: PreparedProposalKind::Fresh {
+                    proposal,
+                    preimage,
+                    publish_cap,
+                },
             })
         }
         Ok(ReservationOutcome::ExactRetryRetained(sig)) => {
             // The B/C recovery-acknowledgement barrier has already completed
             // inside `reserve_for_sign`; the retained result is carried into the
             // completion phase for revalidation + D6 verification before reuse.
-            Some(PreparedProposalSigning::Retained {
-                proposal,
-                retained_sig: sig,
+            Some(PreparedProposalSigning {
+                op,
+                kind: PreparedProposalKind::Retained {
+                    proposal,
+                    retained_sig: sig,
+                },
             })
         }
         Ok(ReservationOutcome::Conflict) => {
@@ -4399,17 +4500,25 @@ fn prepare_proposal_signing_reservation(
     }
 }
 
-/// Run 422 D7-D10 Correction C — the post-journal COMPLETION phase for a
-/// Proposal: the post-storage authorization revalidation, then EITHER exactly
-/// one signer invocation + durable result recording (fresh) OR D6-verified
-/// authorized reuse of the acknowledged retained result (retained).
+/// Run 422 D7-D10 Correction C/D — the post-journal COMPLETION phase for a
+/// Proposal: the post-storage authorization revalidation of the FROZEN operation,
+/// then EITHER exactly one signer invocation + durable result recording (fresh)
+/// OR D6-verified authorized reuse of the acknowledged retained result
+/// (retained).
+///
+/// Correction D: completion takes NO independent `ctx`, `admission`, or `signer`
+/// parameter — those are FROZEN inside `prepared.op` and cannot be replaced
+/// after storage. The only external input is `current_snapshot`, used solely for
+/// drift detection: [`reconfirm_bound_operation`] compares it against the frozen
+/// operation (bound-context pointer identity + the frozen original ticket
+/// confirmed against the current owner). A supplied current snapshot never
+/// becomes the original issuer merely because its fields match.
 ///
 /// Fresh: AFTER the durable reservation + continuation consumption acquired the
 /// ownership-domain mutex, and IMMEDIATELY before the signer, re-confirm the
-/// ORIGINAL admission ticket against its issuer and that the operation still
-/// uses its bound context. On failure: zero signer calls, no result
-/// publication, no signed output/handoff, the durable `Reserved` record and its
-/// conflict obligation preserved (drop `publish_cap` without publishing, never
+/// frozen operation. On failure: zero signer calls, no result publication, no
+/// signed output/handoff, the durable `Reserved` record and its conflict
+/// obligation preserved (drop `publish_cap` without publishing, never
 /// release/reset), and no re-admit/retry.
 ///
 /// Retained-reuse rejection preserves the existing `Signed` record, produces no
@@ -4417,29 +4526,31 @@ fn prepare_proposal_signing_reservation(
 /// authorization and never turns the record back into `Reserved`.
 fn complete_proposal_signing(
     prepared: PreparedProposalSigning,
-    ctx: &ProposalVoteAuthority,
-    admission: Option<&AdmittedSigningIdentity>,
-    signer: &Arc<dyn ValidatorSigner>,
+    current_snapshot: Option<&AuthorizedProposalVoteSnapshot>,
     journal: &SigningReservationJournal,
     inbound_stats: &mut BinaryConsensusLoopInboundStats,
 ) -> Option<BlockProposal> {
-    match prepared {
-        PreparedProposalSigning::Fresh {
+    let PreparedProposalSigning { op, kind } = prepared;
+    // (7) Correction D — reconfirm the FROZEN original operation immediately
+    //     after the journal work and before signing / retained reuse. A required
+    //     operation confirms its frozen original ticket against the current
+    //     owner and its frozen bound context by pointer identity; a fixture
+    //     operation (no frozen ticket) has nothing to reconfirm.
+    if let Err(rej) = reconfirm_bound_operation(&op, current_snapshot) {
+        record_post_journal_proposal_rejection(inbound_stats, &rej);
+        // Any one-use publication capability falls out of scope WITHOUT
+        // publishing (fresh); the durable `Reserved`/`Signed` record and its
+        // obligation are intentionally NOT released or reset.
+        return None;
+    }
+    match kind {
+        PreparedProposalKind::Fresh {
             mut proposal,
             preimage,
             publish_cap,
         } => {
-            if let Some(adm) = admission {
-                if let Err(rej) = adm.reconfirm_after_journal(ctx) {
-                    record_post_journal_proposal_rejection(inbound_stats, &rej);
-                    // The one-use publication capability falls out of scope
-                    // WITHOUT publishing: no result is emitted and the durable
-                    // `Reserved` record + conflict obligation are intentionally
-                    // NOT released (a later exact retry sees `PotentiallySigned`).
-                    return None;
-                }
-            }
-            match signer.sign_proposal(&preimage) {
+            // Sign EXACTLY once through the FROZEN selected signer.
+            match op.signer.sign_proposal(&preimage) {
                 Ok(sig) => {
                     // Durable result handling bound to the same operation. On
                     // persistence failure/uncertainty preserve the
@@ -4471,26 +4582,21 @@ fn complete_proposal_signing(
                 }
             }
         }
-        PreparedProposalSigning::Retained {
+        PreparedProposalKind::Retained {
             mut proposal,
             retained_sig,
         } => {
-            if let Some(adm) = admission {
-                if let Err(rej) = adm.reconfirm_after_journal(ctx) {
-                    record_post_journal_proposal_rejection(inbound_stats, &rej);
-                    return None;
-                }
-            }
             // Validate the retained result's decision/context association and
-            // signature via the existing D6 verification machinery BEFORE reuse.
+            // signature via the existing D6 verification machinery BEFORE reuse,
+            // using the FROZEN bound context and selected signer identity.
             proposal.signature = retained_sig;
             let verified = verify_proposal_msg_with_domain(
                 &proposal,
-                *signer.validator_id(),
-                ctx.validators.as_ref(),
-                ctx.key_provider.as_ref(),
-                ctx.backend_registry.as_ref(),
-                &ctx.signing_domain,
+                *op.signer.validator_id(),
+                op.ctx.validators.as_ref(),
+                op.ctx.key_provider.as_ref(),
+                op.ctx.backend_registry.as_ref(),
+                &op.ctx.signing_domain,
             )
             .is_ok();
             if verified {
@@ -4595,10 +4701,16 @@ fn guarded_sign_vote_for_broadcast(
     guarded_sign_vote_reserved(vote, ctx, admission, signer, journal, inbound_stats)
 }
 
-/// Run 422 D7-D10 Correction C — the Vote analogue of
+/// Run 422 D7-D10 Correction C/D — the Vote analogue of
 /// [`PreparedProposalSigning`]: the split point between the durable journal
-/// phase and the reconfirm/sign/publish completion phase.
-enum PreparedVoteSigning {
+/// phase and the reconfirm/sign/publish completion phase. Carries the FROZEN
+/// [`BoundSigningOperation`] and the message-specific journal outcome.
+struct PreparedVoteSigning<'a> {
+    op: BoundSigningOperation<'a>,
+    kind: PreparedVoteKind,
+}
+
+enum PreparedVoteKind {
     Fresh {
         vote: Vote,
         preimage: Vec<u8>,
@@ -4623,21 +4735,24 @@ fn guarded_sign_vote_reserved(
     journal: &SigningReservationJournal,
     inbound_stats: &mut BinaryConsensusLoopInboundStats,
 ) -> Option<Vote> {
-    let prepared = prepare_vote_signing_reservation(vote, ctx, signer, journal, inbound_stats)?;
-    complete_vote_signing(prepared, ctx, admission, signer, journal, inbound_stats)
+    let prepared =
+        prepare_vote_signing_reservation(vote, ctx, admission, signer, journal, inbound_stats)?;
+    let current_snapshot = admission.map(|a| a.snapshot);
+    complete_vote_signing(prepared, current_snapshot, journal, inbound_stats)
 }
 
 /// Run 422 D7-D10 Correction B/C — the pre-signer PREPARATION + durable journal
 /// phase for a Vote. See [`prepare_proposal_signing_reservation`]; the per-kind
 /// preparation differs (a Vote's height, round and originating view are one
 /// value and `step` must be `0` for the founding profile).
-fn prepare_vote_signing_reservation(
+fn prepare_vote_signing_reservation<'a>(
     mut vote: Vote,
-    ctx: &ProposalVoteAuthority,
-    signer: &Arc<dyn ValidatorSigner>,
+    ctx: &'a ProposalVoteAuthority,
+    admission: Option<&AdmittedSigningIdentity>,
+    signer: &'a Arc<dyn ValidatorSigner>,
     journal: &SigningReservationJournal,
     inbound_stats: &mut BinaryConsensusLoopInboundStats,
-) -> Option<PreparedVoteSigning> {
+) -> Option<PreparedVoteSigning<'a>> {
     // (2) Per-kind identity/position checks BEFORE lookup/signing: for this
     //     founding profile height == round == originating view AND step == 0.
     let originating_view = vote.height;
@@ -4727,6 +4842,12 @@ fn prepare_vote_signing_reservation(
         canonical_preimage: &preimage,
     });
 
+    let op = BoundSigningOperation {
+        ctx,
+        signer,
+        original_ticket: admission.map(|a| a.ticket.clone()),
+    };
+
     match journal.reserve_for_sign(&position, &binding) {
         Ok(ReservationOutcome::FreshlyReserved(continuation)) => {
             inbound_stats.outbound_vote_journal_reserved_total = inbound_stats
@@ -4741,15 +4862,21 @@ fn prepare_vote_signing_reservation(
                     return None;
                 }
             };
-            Some(PreparedVoteSigning::Fresh {
-                vote,
-                preimage,
-                publish_cap,
+            Some(PreparedVoteSigning {
+                op,
+                kind: PreparedVoteKind::Fresh {
+                    vote,
+                    preimage,
+                    publish_cap,
+                },
             })
         }
-        Ok(ReservationOutcome::ExactRetryRetained(sig)) => Some(PreparedVoteSigning::Retained {
-            vote,
-            retained_sig: sig,
+        Ok(ReservationOutcome::ExactRetryRetained(sig)) => Some(PreparedVoteSigning {
+            op,
+            kind: PreparedVoteKind::Retained {
+                vote,
+                retained_sig: sig,
+            },
         }),
         Ok(ReservationOutcome::Conflict) => {
             inbound_stats.outbound_vote_journal_conflict_total = inbound_stats
@@ -4783,37 +4910,33 @@ fn prepare_vote_signing_reservation(
     }
 }
 
-/// Run 422 D7-D10 Correction C — the post-journal COMPLETION phase for a Vote.
-/// See [`complete_proposal_signing`] for the fresh/retained semantics and the
-/// preservation guarantees.
+/// Run 422 D7-D10 Correction C/D — the post-journal COMPLETION phase for a Vote.
+/// See [`complete_proposal_signing`] for the fresh/retained semantics, the
+/// frozen-operation reconfirmation, and the preservation guarantees.
 fn complete_vote_signing(
     prepared: PreparedVoteSigning,
-    ctx: &ProposalVoteAuthority,
-    admission: Option<&AdmittedSigningIdentity>,
-    signer: &Arc<dyn ValidatorSigner>,
+    current_snapshot: Option<&AuthorizedProposalVoteSnapshot>,
     journal: &SigningReservationJournal,
     inbound_stats: &mut BinaryConsensusLoopInboundStats,
 ) -> Option<Vote> {
-    match prepared {
-        PreparedVoteSigning::Fresh {
+    let PreparedVoteSigning { op, kind } = prepared;
+    // (7) Correction D — post-storage authorization revalidation of the FROZEN
+    //     operation, immediately before the signer and after the journal mutex
+    //     was taken by `consume_for_signing`.
+    if let Err(rej) = reconfirm_bound_operation(&op, current_snapshot) {
+        record_post_journal_vote_rejection(inbound_stats, &rej);
+        // See the Proposal path: any one-use publication capability falls out of
+        // scope WITHOUT publishing; the durable `Reserved` record + conflict
+        // obligation are NOT released.
+        return None;
+    }
+    match kind {
+        PreparedVoteKind::Fresh {
             mut vote,
             preimage,
             publish_cap,
         } => {
-            // (7) Correction D — post-storage authorization revalidation,
-            //     immediately before the signer and after the journal mutex was
-            //     taken by `consume_for_signing`. See the Proposal path for the
-            //     preservation guarantees.
-            if let Some(adm) = admission {
-                if let Err(rej) = adm.reconfirm_after_journal(ctx) {
-                    record_post_journal_vote_rejection(inbound_stats, &rej);
-                    // See the Proposal path: the one-use publication capability
-                    // falls out of scope WITHOUT publishing; the durable
-                    // `Reserved` record + conflict obligation are NOT released.
-                    return None;
-                }
-            }
-            match signer.sign_vote(&preimage) {
+            match op.signer.sign_vote(&preimage) {
                 Ok(sig) => {
                     if journal.record_signed_result(&publish_cap, &sig).is_err() {
                         inbound_stats.outbound_vote_journal_result_persist_failure_total =
@@ -4841,24 +4964,18 @@ fn complete_vote_signing(
                 }
             }
         }
-        PreparedVoteSigning::Retained {
+        PreparedVoteKind::Retained {
             mut vote,
             retained_sig,
         } => {
-            if let Some(adm) = admission {
-                if let Err(rej) = adm.reconfirm_after_journal(ctx) {
-                    record_post_journal_vote_rejection(inbound_stats, &rej);
-                    return None;
-                }
-            }
             vote.signature = retained_sig;
             let verified = verify_vote_msg_with_domain(
                 &vote,
-                *signer.validator_id(),
-                ctx.validators.as_ref(),
-                ctx.key_provider.as_ref(),
-                ctx.backend_registry.as_ref(),
-                &ctx.signing_domain,
+                *op.signer.validator_id(),
+                op.ctx.validators.as_ref(),
+                op.ctx.key_provider.as_ref(),
+                op.ctx.backend_registry.as_ref(),
+                &op.ctx.signing_domain,
             )
             .is_ok();
             if verified {
@@ -26458,22 +26575,34 @@ mod tests {
                             let ticket = capture_ticket(&snap);
                             let mut stats = BinaryConsensusLoopInboundStats::default();
 
+                            // Correction D — clone the snapshot's EXACT bound verifier
+                            // and selected signer `Arc`s into locals BEFORE prepare, so
+                            // the frozen operation borrows these locals (NOT `snap`) and
+                            // the between-phase `&mut snap` mutation is legal WITHOUT
+                            // unsafe aliasing. The clones share the same allocation as
+                            // `snap.verifier()` / the bound signer, so the completion
+                            // pointer-identity check still holds.
+                            let ctx_arc = Arc::clone(&snap.verifier);
+                            let signer_arc =
+                                ctx_arc.signer.as_ref().expect("signer").clone();
+
                             // Phase 1: prepare + durable reservation + one-use
-                            // continuation consumption. The `snap` borrow ends with
-                            // this block (the prepared value is owned).
-                            let prepared = {
-                                let ctx = snap.verifier();
-                                let signer = ctx.signer.as_ref().expect("signer");
-                                prepare_proposal_signing_reservation(
-                                    cd_proposal(0, 1, 0, 1, [7u8; 32]),
-                                    ctx,
-                                    signer,
-                                    &j,
-                                    &mut stats,
-                                )
-                            }
+                            // continuation consumption. The prepared value freezes the
+                            // ORIGINAL ticket/context/signer and owns them across the
+                            // split; `snap` is left free to mutate below.
+                            let admission =
+                                AdmittedSigningIdentity { snapshot: &snap, ticket: &ticket };
+                            let prepared = prepare_proposal_signing_reservation(
+                                cd_proposal(0, 1, 0, 1, [7u8; 32]),
+                                ctx_arc.as_ref(),
+                                Some(&admission),
+                                &signer_arc,
+                                &j,
+                                &mut stats,
+                            )
                             .expect("fresh reservation");
-                            assert!(matches!(prepared, PreparedProposalSigning::Fresh { .. }));
+                            drop(admission);
+                            assert!(matches!(prepared.kind, PreparedProposalKind::Fresh { .. }));
                             assert_eq!(stats.outbound_proposal_journal_reserved_total, 1);
                             assert_eq!(
                                 c.proposal_calls.load(SeqCst),
@@ -26484,24 +26613,22 @@ mod tests {
                             assert!(!reserved_bytes.is_empty(), "durable Reserved recorded");
 
                             // BETWEEN phases: mutate the fixture authorization state.
+                            // This advances/replaces the OWNER only; the bound verifier
+                            // `Arc` is unchanged, so the frozen context still matches by
+                            // pointer identity and the refusal is driven by the FROZEN
+                            // ORIGINAL ticket no longer confirming.
                             mutate(&mut snap);
 
-                            // Phase 2: the SAME production completion path with the
-                            // ORIGINAL ticket and the snapshot's exact bound verifier.
-                            let out = {
-                                let ctx = snap.verifier();
-                                let signer = ctx.signer.as_ref().expect("signer");
-                                let admission =
-                                    AdmittedSigningIdentity { snapshot: &snap, ticket: &ticket };
-                                complete_proposal_signing(
-                                    prepared,
-                                    ctx,
-                                    Some(&admission),
-                                    signer,
-                                    &j,
-                                    &mut stats,
-                                )
-                            };
+                            // Phase 2: the SAME production completion path. Completion
+                            // receives ONLY the current snapshot for drift detection;
+                            // the frozen original ticket/context/signer live inside
+                            // `prepared` and cannot be replaced.
+                            let out = complete_proposal_signing(
+                                prepared,
+                                Some(&snap),
+                                &j,
+                                &mut stats,
+                            );
                             assert!(out.is_none(), "post-reservation completion suppressed");
                             assert_eq!(c.proposal_calls.load(SeqCst), 0, "zero signer calls");
                             assert_eq!(stats.outbound_proposal_signing_success, 0);
@@ -26520,33 +26647,28 @@ mod tests {
                             // An exact retry sees the retained `Reserved` →
                             // conservative PotentiallySigned; a conflicting binding
                             // at the same position is refused. Neither re-signs nor
-                            // mutates the durable bytes.
+                            // mutates the durable bytes. These are journal-state probes
+                            // that resolve before completion, so no admission is needed.
                             let mut retry = BinaryConsensusLoopInboundStats::default();
-                            let retry_prepared = {
-                                let ctx = snap.verifier();
-                                let signer = ctx.signer.as_ref().expect("signer");
-                                prepare_proposal_signing_reservation(
-                                    cd_proposal(0, 1, 0, 1, [7u8; 32]),
-                                    ctx,
-                                    signer,
-                                    &j,
-                                    &mut retry,
-                                )
-                            };
+                            let retry_prepared = prepare_proposal_signing_reservation(
+                                cd_proposal(0, 1, 0, 1, [7u8; 32]),
+                                ctx_arc.as_ref(),
+                                None,
+                                &signer_arc,
+                                &j,
+                                &mut retry,
+                            );
                             assert!(retry_prepared.is_none());
                             assert_eq!(retry.outbound_proposal_journal_potentially_signed_total, 1);
                             let mut conflict = BinaryConsensusLoopInboundStats::default();
-                            let conflict_prepared = {
-                                let ctx = snap.verifier();
-                                let signer = ctx.signer.as_ref().expect("signer");
-                                prepare_proposal_signing_reservation(
-                                    cd_proposal(0, 1, 0, 1, [9u8; 32]), // different binding
-                                    ctx,
-                                    signer,
-                                    &j,
-                                    &mut conflict,
-                                )
-                            };
+                            let conflict_prepared = prepare_proposal_signing_reservation(
+                                cd_proposal(0, 1, 0, 1, [9u8; 32]), // different binding
+                                ctx_arc.as_ref(),
+                                None,
+                                &signer_arc,
+                                &j,
+                                &mut conflict,
+                            );
                             assert!(conflict_prepared.is_none());
                             assert_eq!(conflict.outbound_proposal_journal_conflict_total, 1);
                             assert_eq!(c.proposal_calls.load(SeqCst), 0);
@@ -26585,38 +26707,32 @@ mod tests {
                             let j = journal(store.clone());
                             let ticket = capture_ticket(&snap);
                             let mut stats = BinaryConsensusLoopInboundStats::default();
-                            let prepared = {
-                                let ctx = snap.verifier();
-                                let signer = ctx.signer.as_ref().expect("signer");
-                                prepare_vote_signing_reservation(
-                                    cd_vote(0, 1, 0, 1, [7u8; 32]),
-                                    ctx,
-                                    signer,
-                                    &j,
-                                    &mut stats,
-                                )
-                            }
+                            let ctx_arc = Arc::clone(&snap.verifier);
+                            let signer_arc = ctx_arc.signer.as_ref().expect("signer").clone();
+                            let admission =
+                                AdmittedSigningIdentity { snapshot: &snap, ticket: &ticket };
+                            let prepared = prepare_vote_signing_reservation(
+                                cd_vote(0, 1, 0, 1, [7u8; 32]),
+                                ctx_arc.as_ref(),
+                                Some(&admission),
+                                &signer_arc,
+                                &j,
+                                &mut stats,
+                            )
                             .expect("fresh reservation");
+                            drop(admission);
                             assert_eq!(stats.outbound_vote_journal_reserved_total, 1);
                             assert_eq!(c.vote_calls.load(SeqCst), 0);
                             let reserved_bytes = map_snapshot(&store);
 
                             advance_generation(&mut snap);
 
-                            let out = {
-                                let ctx = snap.verifier();
-                                let signer = ctx.signer.as_ref().expect("signer");
-                                let admission =
-                                    AdmittedSigningIdentity { snapshot: &snap, ticket: &ticket };
-                                complete_vote_signing(
-                                    prepared,
-                                    ctx,
-                                    Some(&admission),
-                                    signer,
-                                    &j,
-                                    &mut stats,
-                                )
-                            };
+                            let out = complete_vote_signing(
+                                prepared,
+                                Some(&snap),
+                                &j,
+                                &mut stats,
+                            );
                             assert!(out.is_none());
                             assert_eq!(c.vote_calls.load(SeqCst), 0);
                             assert_eq!(stats.outbound_vote_signing_success, 0);
@@ -26641,22 +26757,21 @@ mod tests {
                             let mut stats = BinaryConsensusLoopInboundStats::default();
                             let ctx = snap.verifier();
                             let signer = ctx.signer.as_ref().expect("signer");
+                            let admission =
+                                AdmittedSigningIdentity { snapshot: &snap, ticket: &ticket };
                             let prepared = prepare_proposal_signing_reservation(
                                 cd_proposal(0, 1, 0, 1, [7u8; 32]),
                                 ctx,
+                                Some(&admission),
                                 signer,
                                 &j,
                                 &mut stats,
                             )
                             .expect("fresh reservation");
                             assert_eq!(c.proposal_calls.load(SeqCst), 0, "no sign before completion");
-                            let admission =
-                                AdmittedSigningIdentity { snapshot: &snap, ticket: &ticket };
                             let out = complete_proposal_signing(
                                 prepared,
-                                ctx,
-                                Some(&admission),
-                                signer,
+                                Some(&snap),
                                 &j,
                                 &mut stats,
                             );
@@ -26700,19 +26815,21 @@ mod tests {
                             let j2 = journal(reopened.clone());
                             let ticket = capture_ticket(&snap);
                             let mut stats = BinaryConsensusLoopInboundStats::default();
-                            let prepared = {
-                                let ctx = snap.verifier();
-                                let signer = ctx.signer.as_ref().expect("signer");
-                                prepare_proposal_signing_reservation(
-                                    cd_proposal(0, 1, 0, 1, [7u8; 32]),
-                                    ctx,
-                                    signer,
-                                    &j2,
-                                    &mut stats,
-                                )
-                            }
+                            let ctx_arc = Arc::clone(&snap.verifier);
+                            let signer_arc = ctx_arc.signer.as_ref().expect("signer").clone();
+                            let admission =
+                                AdmittedSigningIdentity { snapshot: &snap, ticket: &ticket };
+                            let prepared = prepare_proposal_signing_reservation(
+                                cd_proposal(0, 1, 0, 1, [7u8; 32]),
+                                ctx_arc.as_ref(),
+                                Some(&admission),
+                                &signer_arc,
+                                &j2,
+                                &mut stats,
+                            )
                             .expect("recovered retained result");
-                            assert!(matches!(prepared, PreparedProposalSigning::Retained { .. }));
+                            drop(admission);
+                            assert!(matches!(prepared.kind, PreparedProposalKind::Retained { .. }));
                             assert_eq!(
                                 c.proposal_calls.load(SeqCst),
                                 1,
@@ -26721,20 +26838,12 @@ mod tests {
 
                             // Invalidate the ORIGINAL admission before completion.
                             advance_generation(&mut snap);
-                            let out = {
-                                let ctx = snap.verifier();
-                                let signer = ctx.signer.as_ref().expect("signer");
-                                let admission =
-                                    AdmittedSigningIdentity { snapshot: &snap, ticket: &ticket };
-                                complete_proposal_signing(
-                                    prepared,
-                                    ctx,
-                                    Some(&admission),
-                                    signer,
-                                    &j2,
-                                    &mut stats,
-                                )
-                            };
+                            let out = complete_proposal_signing(
+                                prepared,
+                                Some(&snap),
+                                &j2,
+                                &mut stats,
+                            );
                             assert!(out.is_none(), "no authorized reuse/handoff");
                             assert_eq!(
                                 stats
@@ -26769,27 +26878,282 @@ mod tests {
                             let mut stats = BinaryConsensusLoopInboundStats::default();
                             let ctx = snap.verifier();
                             let signer = ctx.signer.as_ref().expect("signer");
+                            let admission =
+                                AdmittedSigningIdentity { snapshot: &snap, ticket: &ticket };
                             let prepared = prepare_proposal_signing_reservation(
                                 cd_proposal(0, 1, 0, 1, [7u8; 32]),
                                 ctx,
+                                Some(&admission),
                                 signer,
                                 &j2,
                                 &mut stats,
                             )
                             .expect("recovered retained result");
-                            let admission =
-                                AdmittedSigningIdentity { snapshot: &snap, ticket: &ticket };
                             let out = complete_proposal_signing(
                                 prepared,
-                                ctx,
-                                Some(&admission),
-                                signer,
+                                Some(&snap),
                                 &j2,
                                 &mut stats,
                             );
                             assert!(out.is_some());
                             assert_eq!(stats.outbound_proposal_journal_retained_resend_total, 1);
                             assert_eq!(c.proposal_calls.load(SeqCst), 1, "no additional sign");
+                            assert!(qbind_consensus::verify_proposal_msg_with_domain(
+                                &out.unwrap(),
+                                ValidatorId(0),
+                                fixture.validators.as_ref(),
+                                fixture.kp.as_ref(),
+                                fixture.br.as_ref(),
+                                &d6_control_domain(),
+                            )
+                            .is_ok());
+                        }
+
+                        // ---- Correction D operation-binding across the split ----
+                        //
+                        // These STAGED cases drive the SAME production
+                        // `prepare_* → (between-phase change) → complete_*` split
+                        // the guarded callers use, and directly exercise the
+                        // FROZEN operation binding: a replacement ticket cannot
+                        // authorize the prepared operation, a substituted current
+                        // context is refused, a required operation cannot degrade
+                        // into a fixture one at completion, and completion signs
+                        // through the FROZEN signer only. A between-phase test is a
+                        // staged test of the serialized implementation; it is NOT
+                        // real-handler concurrency evidence.
+
+                        #[test]
+                        fn cd_i_replacement_ticket_t1_cannot_authorize_prepared_t0_operation() {
+                            // A. Obtain a valid ORIGINAL ticket T0, prepare / reserve
+                            // / consume the operation under T0, advance the owner
+                            // generation, then obtain a valid NEW ticket T1 for the
+                            // updated owner. T1 DOES confirm against the current
+                            // owner, yet it cannot replace T0 for the already-prepared
+                            // operation: completion has NO ticket parameter (source /
+                            // type elimination) and confirms only the FROZEN original
+                            // T0, which is now Stale. Zero signer calls, no
+                            // publication, byte-identical `Reserved`.
+                            let fixture = make_fixture(4);
+                            let (pv, c) = recording_pv(&fixture);
+                            let mut snap = snapshot_matching(&pv);
+                            let store = D10Store::new();
+                            let j = journal(store.clone());
+                            let t0 = capture_ticket(&snap);
+                            let mut stats = BinaryConsensusLoopInboundStats::default();
+                            let ctx_arc = Arc::clone(&snap.verifier);
+                            let signer_arc = ctx_arc.signer.as_ref().expect("signer").clone();
+
+                            let admission =
+                                AdmittedSigningIdentity { snapshot: &snap, ticket: &t0 };
+                            let prepared = prepare_proposal_signing_reservation(
+                                cd_proposal(0, 1, 0, 1, [7u8; 32]),
+                                ctx_arc.as_ref(),
+                                Some(&admission),
+                                &signer_arc,
+                                &j,
+                                &mut stats,
+                            )
+                            .expect("fresh reservation under T0");
+                            drop(admission);
+                            assert!(matches!(prepared.kind, PreparedProposalKind::Fresh { .. }));
+                            assert_eq!(stats.outbound_proposal_journal_reserved_total, 1);
+                            let reserved_bytes = map_snapshot(&store);
+
+                            // Advance the owner generation and obtain a NEW valid
+                            // ticket T1. T1 confirms against the updated owner (it is
+                            // itself valid) while T0 is now Stale.
+                            advance_generation(&mut snap);
+                            let t1 = capture_ticket(&snap);
+                            assert!(
+                                snap.owner().confirm(&t1).is_ok(),
+                                "T1 is a valid ticket for the updated owner"
+                            );
+                            assert!(
+                                matches!(
+                                    snap.owner().confirm(&t0),
+                                    Err(ConfirmError::Stale(_))
+                                ),
+                                "the original T0 is now Stale"
+                            );
+
+                            // Completion is handed ONLY the current snapshot; there is
+                            // no channel through which T1 could be supplied. The frozen
+                            // original T0 no longer confirms → refusal.
+                            let out = complete_proposal_signing(
+                                prepared,
+                                Some(&snap),
+                                &j,
+                                &mut stats,
+                            );
+                            assert!(out.is_none(), "T1 cannot authorize the T0 operation");
+                            assert_eq!(c.proposal_calls.load(SeqCst), 0, "zero signer calls");
+                            assert_eq!(stats.outbound_proposal_signing_success, 0);
+                            assert_eq!(
+                                stats
+                                    .outbound_proposal_post_journal_authorization_revalidation_failed_total,
+                                1
+                            );
+                            assert_eq!(
+                                map_snapshot(&store),
+                                reserved_bytes,
+                                "byte-identical Reserved after suppression"
+                            );
+                        }
+
+                        #[test]
+                        fn cd_i_substituted_current_context_refused_across_split() {
+                            // B. Prepare under context/owner A; at completion supply a
+                            // DIFFERENT snapshot whose bound verifier is an independent
+                            // instance with equal-looking configuration and generation.
+                            // The FROZEN bound context is decisive: pointer identity
+                            // fails → refused BEFORE signing, reservation preserved.
+                            let fixture = make_fixture(4);
+                            let (pv, c) = recording_pv(&fixture);
+                            let snap_a = snapshot_matching(&pv);
+                            let snap_b = snapshot_matching(&pv); // independent verifier, equal config
+                            let store = D10Store::new();
+                            let j = journal(store.clone());
+                            let ticket = capture_ticket(&snap_a);
+                            let mut stats = BinaryConsensusLoopInboundStats::default();
+                            let ctx_arc = Arc::clone(&snap_a.verifier);
+                            let signer_arc = ctx_arc.signer.as_ref().expect("signer").clone();
+
+                            let admission =
+                                AdmittedSigningIdentity { snapshot: &snap_a, ticket: &ticket };
+                            let prepared = prepare_proposal_signing_reservation(
+                                cd_proposal(0, 1, 0, 1, [7u8; 32]),
+                                ctx_arc.as_ref(),
+                                Some(&admission),
+                                &signer_arc,
+                                &j,
+                                &mut stats,
+                            )
+                            .expect("fresh reservation under context A");
+                            drop(admission);
+                            let reserved_bytes = map_snapshot(&store);
+
+                            let out = complete_proposal_signing(
+                                prepared,
+                                Some(&snap_b),
+                                &j,
+                                &mut stats,
+                            );
+                            assert!(out.is_none(), "substituted current context refused");
+                            assert_eq!(c.proposal_calls.load(SeqCst), 0, "zero signer calls");
+                            assert_eq!(stats.outbound_proposal_bound_context_unbound_total, 1);
+                            assert_eq!(stats.outbound_proposal_signing_success, 0);
+                            assert_eq!(
+                                map_snapshot(&store),
+                                reserved_bytes,
+                                "byte-identical Reserved after suppression"
+                            );
+                        }
+
+                        #[test]
+                        fn cd_i_required_operation_without_current_snapshot_refuses_before_sign() {
+                            // Required-versus-fixture semantics remain explicit across
+                            // the split: a REQUIRED operation (frozen `Some` ticket)
+                            // whose current snapshot is ABSENT at completion is refused
+                            // fail-closed. It never degrades into a fixture operation
+                            // by omitting admission at completion.
+                            let fixture = make_fixture(4);
+                            let (pv, c) = recording_pv(&fixture);
+                            let snap = snapshot_matching(&pv);
+                            let store = D10Store::new();
+                            let j = journal(store.clone());
+                            let ticket = capture_ticket(&snap);
+                            let mut stats = BinaryConsensusLoopInboundStats::default();
+                            let ctx_arc = Arc::clone(&snap.verifier);
+                            let signer_arc = ctx_arc.signer.as_ref().expect("signer").clone();
+
+                            let admission =
+                                AdmittedSigningIdentity { snapshot: &snap, ticket: &ticket };
+                            let prepared = prepare_proposal_signing_reservation(
+                                cd_proposal(0, 1, 0, 1, [7u8; 32]),
+                                ctx_arc.as_ref(),
+                                Some(&admission),
+                                &signer_arc,
+                                &j,
+                                &mut stats,
+                            )
+                            .expect("fresh reservation (required operation)");
+                            drop(admission);
+                            let reserved_bytes = map_snapshot(&store);
+
+                            let out = complete_proposal_signing(prepared, None, &j, &mut stats);
+                            assert!(out.is_none(), "required op with no current snapshot refused");
+                            assert_eq!(c.proposal_calls.load(SeqCst), 0, "zero signer calls");
+                            assert_eq!(stats.outbound_proposal_bound_context_unbound_total, 1);
+                            assert_eq!(stats.outbound_proposal_signing_success, 0);
+                            assert_eq!(
+                                map_snapshot(&store),
+                                reserved_bytes,
+                                "byte-identical Reserved after suppression"
+                            );
+                        }
+
+                        #[test]
+                        fn cd_i_completion_signs_through_frozen_signer_not_a_same_id_replacement() {
+                            // C. Frozen signer selection. An independently-instrumented
+                            // signer instance shares ValidatorId(0) + suite with the
+                            // snapshot's own bound signer but is a DIFFERENT `Arc` with
+                            // SEPARATE call counters. The signer FROZEN at preparation
+                            // is the one completion invokes; completion has NO signer
+                            // parameter through which a same-id / same-suite
+                            // replacement could be substituted. The snapshot's own
+                            // bound signer counter stays at zero, proving the FROZEN
+                            // selection drives completion. Positive control: exactly
+                            // one call to the frozen signer, a valid D6 result, and the
+                            // expected published message.
+                            let fixture = make_fixture(4);
+                            let (pv, c) = recording_pv(&fixture);
+                            let snap = snapshot_matching(&pv);
+                            let store = D10Store::new();
+                            let j = journal(store.clone());
+                            let ticket = capture_ticket(&snap);
+
+                            // An independent same-ValidatorId(0)/same-suite signer with
+                            // SEPARATE call counters (a different `Arc` than the
+                            // snapshot's bound signer).
+                            let frozen_calls = Arc::new(AtomicU64::new(0));
+                            let sk = fixture.sk_objs.get(&ValidatorId(0)).expect("sk").clone();
+                            let frozen_signer: Arc<dyn ValidatorSigner> = Arc::new(RecordingSigner {
+                                inner: LocalKeySigner::new(ValidatorId(0), TEST_SUITE_U16, sk),
+                                vote_calls: Arc::new(AtomicU64::new(0)),
+                                proposal_calls: frozen_calls.clone(),
+                            });
+
+                            let mut stats = BinaryConsensusLoopInboundStats::default();
+                            let ctx = snap.verifier();
+                            let admission =
+                                AdmittedSigningIdentity { snapshot: &snap, ticket: &ticket };
+                            let prepared = prepare_proposal_signing_reservation(
+                                cd_proposal(0, 1, 0, 1, [7u8; 32]),
+                                ctx,
+                                Some(&admission),
+                                &frozen_signer,
+                                &j,
+                                &mut stats,
+                            )
+                            .expect("fresh reservation with the frozen signer");
+                            let out = complete_proposal_signing(
+                                prepared,
+                                Some(&snap),
+                                &j,
+                                &mut stats,
+                            );
+                            assert!(out.is_some(), "positive control signs and publishes");
+                            assert_eq!(
+                                frozen_calls.load(SeqCst),
+                                1,
+                                "the FROZEN signer signs exactly once"
+                            );
+                            assert_eq!(
+                                c.proposal_calls.load(SeqCst),
+                                0,
+                                "the snapshot's own bound signer is NOT used at completion"
+                            );
+                            assert_eq!(stats.outbound_proposal_signing_success, 1);
                             assert!(qbind_consensus::verify_proposal_msg_with_domain(
                                 &out.unwrap(),
                                 ValidatorId(0),
