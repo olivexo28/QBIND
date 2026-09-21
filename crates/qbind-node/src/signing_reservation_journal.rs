@@ -39,7 +39,7 @@
 //!   and the admitted signer/domain identity; this module introduces no parallel
 //!   parser, signing format, or cryptographic construction.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Mutex};
 
 use crate::storage::{signing_journal_crc32, StorageError};
@@ -68,10 +68,46 @@ pub const MAX_RETAINED_SIGNATURE_LEN: usize = 8 * 1024;
 /// Maximum total encoded record length (bounded read/allocation guard).
 pub const MAX_RECORD_LEN: usize = MAX_RETAINED_SIGNATURE_LEN + 128;
 
-/// Default maximum number of distinct positions a single live journal instance
-/// will reserve before refusing further signing (exhaustion). Exhaustion refuses
-/// safely; it never silently evicts a conflict obligation.
+/// Default maximum number of distinct positions a journal will reserve before
+/// refusing further signing (exhaustion). This is the default **journal-wide**
+/// limit an explicit initialization establishes; it is durably recorded in the
+/// initialization metadata and reconstructed on open, not a per-handle bound.
+/// Exhaustion refuses safely; it never silently evicts a conflict obligation.
 pub const DEFAULT_MAX_RESERVED_POSITIONS: u64 = 1_048_576;
+
+/// Run 422 D7-D10 Correction E — the largest position limit a new journal may be
+/// initialized with. Larger requested limits are rejected (`UnsupportedLimit`)
+/// with checked arithmetic **before** any durable write. A limit of `0` is
+/// explicitly supported and means the journal accepts **no** reservations (every
+/// reservation is `Exhausted`). This bounds only the logical position counter; it
+/// is not a disk-space or process-RSS bound.
+pub const MAX_SUPPORTED_RESERVED_POSITIONS: u64 = DEFAULT_MAX_RESERVED_POSITIONS;
+
+/// Run 422 D7-D10 Correction E — signing-journal **initialization-metadata**
+/// format version. This is a distinct persistence-format identifier for the
+/// bounded initialization/accounting metadata record, independent of the
+/// signing-decision [`SIGNING_RECORD_FORMAT_VERSION`], the wire-message version,
+/// and the D6 signing-format version. Unknown/incompatible metadata versions are
+/// refused fail-closed; the journal never falls back to initialization.
+pub const SIGNING_METADATA_FORMAT_VERSION: u16 = 1;
+
+/// Magic prefix identifying an initialization-metadata record.
+const METADATA_MAGIC: [u8; 4] = *b"QSJM";
+
+/// Fixed encoded length of the initialization-metadata record:
+/// `magic[4] | metadata_format_version[2] | max_reserved_positions[8] |
+///  reserved_positions[8] | crc32[4]`.
+const METADATA_ENCODED_LEN: usize = 4 + 2 + 8 + 8 + 4;
+
+/// Run 422 D7-D10 Correction E — maximum number of distinct positions retained in
+/// the shared **recovered-acknowledgement cache**. The cache is process-local
+/// bookkeeping (never a durable record); at capacity the oldest process-local
+/// entry is evicted to admit a new one. Total retained payload is therefore
+/// bounded by `MAX_RECOVERED_ACK_ENTRIES * MAX_RETAINED_SIGNATURE_LEN`. Eviction
+/// only drops the process-local acknowledgement; it never deletes a durable
+/// signing record or a live conflict obligation, and a later cache miss simply
+/// repeats the durability barrier.
+pub const MAX_RECOVERED_ACK_ENTRIES: usize = 128;
 
 // ============================================================================
 // Position and binding
@@ -394,6 +430,118 @@ impl SigningDecisionRecord {
     }
 }
 
+// ============================================================================
+// Initialization / accounting metadata (Run 422 D7-D10 Correction E)
+// ============================================================================
+
+/// Bounded, versioned, checksummed **initialization-and-accounting metadata**
+/// for one local signing journal. A single metadata record is durably published
+/// by explicit initialization and validated (never re-created) on open. It is the
+/// evidence that the signing namespace was explicitly initialized and carries the
+/// established journal-wide position limit plus the durable count of persisted
+/// distinct positions, so capacity survives a backend close/reopen and cannot be
+/// relaxed by attaching another handle.
+///
+/// It is a **local storage** artefact only: a readable metadata record proves an
+/// explicit local initialization occurred, not that a validator key has never
+/// signed, and not that a prior uncertain durability operation was acknowledged.
+/// It contains no key material and no attacker-controlled content.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SigningJournalMetadata {
+    /// Metadata-record format version (persistence only; distinct from the
+    /// decision-record, wire-message, and D6 signing-format versions).
+    pub metadata_format_version: u16,
+    /// The established journal-wide position limit. One consistent limit applies
+    /// across every handle and across restarts; it is never relaxed by another
+    /// handle's configuration.
+    pub max_reserved_positions: u64,
+    /// The durable count of distinct persisted positions (both `Reserved` and
+    /// `Signed` count exactly once). Updated atomically with each new reservation
+    /// record and reconstructed/validated against the stored records on open.
+    pub reserved_positions: u64,
+}
+
+impl SigningJournalMetadata {
+    fn new(max_reserved_positions: u64, reserved_positions: u64) -> Self {
+        Self {
+            metadata_format_version: SIGNING_METADATA_FORMAT_VERSION,
+            max_reserved_positions,
+            reserved_positions,
+        }
+    }
+
+    /// Serialize to the fixed-length, checksummed metadata encoding.
+    ///
+    /// Layout (big-endian): `magic[4] | metadata_format_version[2] |
+    /// max_reserved_positions[8] | reserved_positions[8] | crc32[4]`, where
+    /// `crc32` covers all preceding bytes.
+    pub fn encode(&self) -> Vec<u8> {
+        let mut body = Vec::with_capacity(METADATA_ENCODED_LEN);
+        body.extend_from_slice(&METADATA_MAGIC);
+        body.extend_from_slice(&self.metadata_format_version.to_be_bytes());
+        body.extend_from_slice(&self.max_reserved_positions.to_be_bytes());
+        body.extend_from_slice(&self.reserved_positions.to_be_bytes());
+        let crc = signing_journal_crc32(&body);
+        body.extend_from_slice(&crc.to_be_bytes());
+        body
+    }
+
+    /// Decode from the checksummed metadata encoding, fail-closed on any
+    /// malformed, truncated, incompatible, or inconsistent input. A decode
+    /// failure never yields a usable "assume uninitialized" result — the journal
+    /// refuses rather than falling back to initialization.
+    pub fn decode(data: &[u8]) -> Result<Self, JournalError> {
+        // Fixed length: a metadata record is exactly `METADATA_ENCODED_LEN`
+        // bytes. Anything shorter is truncated; anything longer is inconsistent.
+        if data.len() < METADATA_ENCODED_LEN {
+            return Err(JournalError::Truncated);
+        }
+        if data.len() > METADATA_ENCODED_LEN {
+            return Err(JournalError::Corruption(
+                "metadata record length inconsistent".to_string(),
+            ));
+        }
+        let (body, crc_bytes) = data.split_at(data.len() - 4);
+        let stored_crc = u32::from_be_bytes([crc_bytes[0], crc_bytes[1], crc_bytes[2], crc_bytes[3]]);
+        if signing_journal_crc32(body) != stored_crc {
+            return Err(JournalError::Corruption(
+                "metadata checksum mismatch".to_string(),
+            ));
+        }
+        if body[0..4] != METADATA_MAGIC {
+            return Err(JournalError::Corruption("metadata magic mismatch".to_string()));
+        }
+        let metadata_format_version = u16::from_be_bytes([body[4], body[5]]);
+        if metadata_format_version != SIGNING_METADATA_FORMAT_VERSION {
+            return Err(JournalError::UnsupportedMetadataVersion(
+                metadata_format_version,
+            ));
+        }
+        let max_reserved_positions = u64::from_be_bytes(body[6..14].try_into().unwrap());
+        let reserved_positions = u64::from_be_bytes(body[14..22].try_into().unwrap());
+        // Structural accounting bounds independent of the stored records: the
+        // established limit must be supported, and the durable count must not
+        // exceed it. These are checked before any counter is trusted.
+        if max_reserved_positions > MAX_SUPPORTED_RESERVED_POSITIONS {
+            return Err(JournalError::AccountingInconsistent(format!(
+                "established limit {} exceeds supported maximum {}",
+                max_reserved_positions, MAX_SUPPORTED_RESERVED_POSITIONS
+            )));
+        }
+        if reserved_positions > max_reserved_positions {
+            return Err(JournalError::AccountingInconsistent(format!(
+                "durable reserved count {} exceeds established limit {}",
+                reserved_positions, max_reserved_positions
+            )));
+        }
+        Ok(Self {
+            metadata_format_version,
+            max_reserved_positions,
+            reserved_positions,
+        })
+    }
+}
+
 /// Test-only: fabricate a correctly-checksummed `Reserved` record encoding at
 /// `position`/`binding` while overriding the declared record-format version.
 /// Used by real-storage recovery tests to inject an otherwise-well-formed but
@@ -449,6 +597,38 @@ pub enum JournalError {
     /// overwrite an existing signed obligation with different content. The
     /// original obligation is never overwritten.
     InvalidResultPublication(String),
+    /// The stored initialization metadata declares a metadata-format version this
+    /// binary does not support. Refused fail-closed; never treated as
+    /// uninitialized.
+    UnsupportedMetadataVersion(u16),
+    /// Run 422 D7-D10 Correction E — an established-journal open found no
+    /// initialization metadata **and** no records: the local journal was never
+    /// explicitly initialized. Open refuses rather than silently initializing.
+    NotInitialized,
+    /// Run 422 D7-D10 Correction E — an established-journal open found signing
+    /// records but **no** initialization metadata (a legacy / externally-written
+    /// namespace). Refused fail-closed: such records are never silently adopted,
+    /// deleted, or migrated.
+    LegacyRecordsWithoutMetadata,
+    /// Run 422 D7-D10 Correction E — explicit initialization was requested for a
+    /// journal that is already established (initialization metadata present, or
+    /// the shared ownership domain already initialized in-process). Refused so a
+    /// repeated initialization can never reset an established journal.
+    AlreadyInitialized,
+    /// Run 422 D7-D10 Correction E — explicit initialization was requested over a
+    /// signing namespace that already contains records without metadata. A new
+    /// journal requires an empty signing namespace; existing records are never
+    /// adopted or overwritten.
+    NonEmptyNamespace,
+    /// Run 422 D7-D10 Correction E — a requested position limit exceeds the
+    /// supported maximum. Rejected with checked arithmetic before any durable
+    /// write or allocation.
+    UnsupportedLimit(u64),
+    /// Run 422 D7-D10 Correction E — the durable metadata accounting is
+    /// inconsistent with the stored records (counted positions disagree with the
+    /// recorded count, the count exceeds the limit, or a stored key does not match
+    /// its record's canonical position). Refused fail-closed; never repaired.
+    AccountingInconsistent(String),
 }
 
 impl std::fmt::Display for JournalError {
@@ -467,6 +647,28 @@ impl std::fmt::Display for JournalError {
             JournalError::LockPoisoned => write!(f, "signing-journal lock poisoned"),
             JournalError::InvalidResultPublication(m) => {
                 write!(f, "signing-journal invalid result publication: {}", m)
+            }
+            JournalError::UnsupportedMetadataVersion(v) => {
+                write!(f, "signing-journal unsupported metadata version: {}", v)
+            }
+            JournalError::NotInitialized => {
+                write!(f, "signing-journal not initialized (no established metadata)")
+            }
+            JournalError::LegacyRecordsWithoutMetadata => write!(
+                f,
+                "signing-journal has records without initialization metadata"
+            ),
+            JournalError::AlreadyInitialized => {
+                write!(f, "signing-journal already initialized")
+            }
+            JournalError::NonEmptyNamespace => {
+                write!(f, "signing-journal initialization requires an empty namespace")
+            }
+            JournalError::UnsupportedLimit(l) => {
+                write!(f, "signing-journal unsupported position limit: {}", l)
+            }
+            JournalError::AccountingInconsistent(m) => {
+                write!(f, "signing-journal accounting inconsistent: {}", m)
             }
         }
     }
@@ -592,6 +794,57 @@ pub trait SigningJournalStorage: Send + Sync {
     /// to stable storage (for a durable backend).
     fn put_signing_record_synced(&self, key: &[u8], value: &[u8]) -> Result<(), StorageError>;
 
+    /// Run 422 D7-D10 Correction E — read the raw initialization-metadata bytes
+    /// for this signing namespace, or `None` if absent. Corruption detected by the
+    /// storage envelope is surfaced as [`StorageError::Corruption`]. The metadata
+    /// is stored under a backend-owned key **within** the signing namespace and is
+    /// never returned by [`Self::for_each_signing_record`].
+    fn get_signing_metadata(&self) -> Result<Option<Vec<u8>>, StorageError>;
+
+    /// Run 422 D7-D10 Correction E — write the initialization-metadata bytes under
+    /// an explicit durability barrier (synced write). Used by explicit
+    /// initialization, where no decision record is written. MUST NOT return
+    /// `Ok(())` until the metadata is synchronized to stable storage (for a
+    /// durable backend).
+    fn put_signing_metadata_synced(&self, value: &[u8]) -> Result<(), StorageError>;
+
+    /// Run 422 D7-D10 Correction E — persist a new signing-decision record **and**
+    /// the updated accounting metadata in a **single atomic, synced** storage
+    /// operation. Either both the record at `record_key` and the metadata become
+    /// durable together, or neither does; a durable backend MUST NOT expose a
+    /// state where the record is present but the metadata count was not advanced
+    /// (or vice versa) after a crash. MUST NOT return `Ok(())` until the atomic
+    /// batch is synchronized to stable storage (for a durable backend).
+    ///
+    /// A non-durable model backend MUST still model the atomicity honestly by
+    /// applying both writes under a single lock acquisition; it documents that it
+    /// is not crash-atomic persistent storage.
+    fn put_signing_record_and_metadata_synced(
+        &self,
+        record_key: &[u8],
+        record_value: &[u8],
+        metadata_value: &[u8],
+    ) -> Result<(), StorageError>;
+
+    /// Run 422 D7-D10 Correction E — bounded **streaming** visit over every
+    /// signing-decision record in this namespace, in storage-key order. The
+    /// visitor is called once per record with the journal-level record key (the
+    /// same key space as [`Self::get_signing_record`], i.e. the backend's own
+    /// storage prefix is stripped) and the envelope-unwrapped record bytes.
+    ///
+    /// This is deliberately streaming: the backend yields one record at a time and
+    /// never materializes the whole namespace into a collection, and the caller
+    /// counts/validates incrementally. Read/iterator errors and envelope
+    /// corruption are propagated as [`StorageError`] and abort the scan; a visitor
+    /// error aborts the scan and is propagated. The initialization-metadata key is
+    /// excluded. Each yielded value is bounded by the record encoding the caller
+    /// enforces; the underlying database API still allocates one key/value buffer
+    /// per yielded record (documented, per-record bounded, honesty note).
+    fn for_each_signing_record(
+        &self,
+        visitor: &mut dyn FnMut(&[u8], &[u8]) -> Result<(), StorageError>,
+    ) -> Result<(), StorageError>;
+
     /// Run 422 D7-D10 Correction B — the single **ownership domain** for this
     /// local journal/storage instance. Implementations MUST return the SAME
     /// [`SigningOwnershipDomain`] `Arc` for every call on one backend instance
@@ -609,6 +862,86 @@ pub trait SigningJournalStorage: Send + Sync {
     /// This is not an anti-rollback anchor and makes no cross-copy/cross-host
     /// exclusivity claim.
     fn signing_ownership_domain(&self) -> Arc<SigningOwnershipDomain>;
+}
+
+/// Run 422 D7-D10 Correction E — a bounded, process-local cache of recovered
+/// signing-record durability acknowledgements. Entries are keyed by position and
+/// bound to the **exact** stored record; a hit authorizes only an exact retained
+/// resend of that identical record. The cache never holds a durable obligation:
+/// evicting an entry drops only the process-local acknowledgement and a later
+/// miss simply repeats the durability barrier. Bounds are enforced by
+/// [`MAX_RECOVERED_ACK_ENTRIES`] with FIFO eviction of the oldest entry.
+#[derive(Debug)]
+struct RecoveredAckCache {
+    map: HashMap<SigningPosition, SigningDecisionRecord>,
+    order: VecDeque<SigningPosition>,
+    max_entries: usize,
+}
+
+impl RecoveredAckCache {
+    fn new(max_entries: usize) -> Self {
+        Self {
+            map: HashMap::new(),
+            order: VecDeque::new(),
+            max_entries,
+        }
+    }
+
+    /// A cache hit only when the exact identical record is cached for `position`.
+    fn get(&self, position: &SigningPosition) -> Option<&SigningDecisionRecord> {
+        self.map.get(position)
+    }
+
+    /// Insert an acknowledged record, bounding the entry count. If `position` is
+    /// already cached its record is updated in place (no growth). Otherwise, if at
+    /// capacity, the oldest process-local entry is evicted first. A `max_entries`
+    /// of zero declines to cache (a later miss repeats the barrier). Returns the
+    /// evicted position, if any, so a caller/test can observe reclamation.
+    fn insert(
+        &mut self,
+        position: SigningPosition,
+        record: SigningDecisionRecord,
+    ) -> Option<SigningPosition> {
+        if self.map.contains_key(&position) {
+            self.map.insert(position, record);
+            return None;
+        }
+        if self.max_entries == 0 {
+            // Declining to cache is a safe outcome: the durable record is intact
+            // and a later miss re-establishes the barrier.
+            return None;
+        }
+        let mut evicted = None;
+        while self.map.len() >= self.max_entries {
+            if let Some(old) = self.order.pop_front() {
+                // Evict only the process-local acknowledgement; the durable record
+                // and any live obligation are untouched.
+                self.map.remove(&old);
+                evicted = Some(old);
+            } else {
+                break;
+            }
+        }
+        self.map.insert(position, record);
+        self.order.push_back(position);
+        evicted
+    }
+
+    #[cfg(any(test, feature = "test-utils"))]
+    fn len(&self) -> usize {
+        self.map.len()
+    }
+}
+
+/// Run 422 D7-D10 Correction E — the established (durably validated) state of one
+/// signing journal ownership domain: the journal-wide position limit read from
+/// (or written by) the initialization metadata. Present only after an explicit
+/// `initialize` or a validating `open` has established this domain in-process.
+#[derive(Debug, Clone, Copy)]
+struct EstablishedState {
+    /// The one consistent journal-wide position limit. Applies across every handle
+    /// and across restarts; never relaxed by another handle's configuration.
+    max_reserved_positions: u64,
 }
 
 /// Run 422 D7-D10 Correction B — the shared, in-process coordination state for
@@ -646,22 +979,38 @@ struct LiveState {
 
 #[derive(Debug)]
 struct DomainInner {
+    /// Run 422 D7-D10 Correction E — the established journal-wide limit, present
+    /// once this domain has been explicitly initialized or validated by open.
+    /// `None` means this backend instance's domain has not yet been established
+    /// in-process; the first `initialize`/`open` sets it under the domain lock, so
+    /// a second handle over the same instance shares it without re-scanning or
+    /// resetting, and concurrent init/open cannot duplicate-initialize.
+    established: Option<EstablishedState>,
     /// Positions with a live operation in this process.
     live: HashMap<SigningPosition, LiveState>,
-    /// Run 422 D7-D10 Correction B — recovery-acknowledgement cache. After a
-    /// recovered (no live entry) `Signed` record has had its signing-record
-    /// durability barrier established in THIS domain (an identical synced re-write
-    /// that returned `Ok`), the exact acknowledged record is retained here keyed
-    /// by position. This is deliberately bound to the EXACT stored record (the
-    /// full `SigningDecisionRecord`, position + binding + retained bytes): a cache
-    /// hit authorizes an exact retained resend of ONLY that record. It is never a
-    /// generic "position acknowledged" flag and can never authorize a different,
-    /// conflicting, or later-mutated record. It grants no signer-invocation and no
-    /// result-publication capability.
-    recovered_acked: HashMap<SigningPosition, SigningDecisionRecord>,
-    /// Count of distinct new positions reserved in this domain (exhaustion
-    /// accounting, checked arithmetic).
+    /// Run 422 D7-D10 Correction B/E — bounded recovery-acknowledgement cache.
+    /// After a recovered (no live entry) `Signed` record has had its
+    /// signing-record durability barrier established in THIS domain (an identical
+    /// synced re-write that returned `Ok`), the exact acknowledged record is
+    /// retained here keyed by position, bound to the EXACT stored record (position
+    /// + binding + retained bytes): a cache hit authorizes an exact retained
+    /// resend of ONLY that record. It is never a generic "position acknowledged"
+    /// flag and can never authorize a different, conflicting, or later-mutated
+    /// record. It grants no signer-invocation and no result-publication
+    /// capability, and is bounded by [`MAX_RECOVERED_ACK_ENTRIES`].
+    recovered_acked: RecoveredAckCache,
+    /// Durable count of distinct persisted positions reserved in this domain
+    /// (exhaustion accounting, checked arithmetic). Seeded from the durable
+    /// metadata on establishment and advanced only in lockstep with the atomic
+    /// record+metadata write.
     reserved_positions: u64,
+    /// Run 422 D7-D10 Correction E — set when an atomic reservation/accounting
+    /// write returned an error or uncertain outcome. Because a failed
+    /// acknowledgement does not prove no bytes were stored, the in-memory
+    /// `reserved_positions` may be stale; while this is set the next admission
+    /// re-reads the durable metadata count and reconciles before admitting any new
+    /// position, so stale accounting can never admit past the durable limit.
+    accounting_uncertain: bool,
     /// Monotonic source of unique live operation ids (checked; exhaustion is a
     /// terminal fail-closed state, never wraparound). In-process bookkeeping.
     next_operation_id: u64,
@@ -670,6 +1019,8 @@ struct DomainInner {
 impl SigningOwnershipDomain {
     /// Create a fresh ownership domain with a process-unique token. Backends call
     /// this once per instance (via a `OnceLock`) and share the resulting `Arc`.
+    /// The domain starts **unestablished**: no journal-wide limit and a zero
+    /// counter until an explicit `initialize`/`open` validates durable state.
     pub fn new() -> Arc<Self> {
         use std::sync::atomic::{AtomicU64, Ordering};
         // Process-unique, monotonically increasing domain token. This only needs
@@ -679,9 +1030,11 @@ impl SigningOwnershipDomain {
         Arc::new(Self {
             token: NEXT_TOKEN.fetch_add(1, Ordering::Relaxed),
             inner: Mutex::new(DomainInner {
+                established: None,
                 live: HashMap::new(),
-                recovered_acked: HashMap::new(),
+                recovered_acked: RecoveredAckCache::new(MAX_RECOVERED_ACK_ENTRIES),
                 reserved_positions: 0,
+                accounting_uncertain: false,
                 next_operation_id: 1,
             }),
         })
@@ -707,45 +1060,203 @@ impl SigningOwnershipDomain {
 pub struct SigningReservationJournal {
     store: Arc<dyn SigningJournalStorage>,
     domain: Arc<SigningOwnershipDomain>,
-    max_reserved_positions: u64,
 }
 
 impl std::fmt::Debug for SigningReservationJournal {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("SigningReservationJournal")
             .field("domain_token", &self.domain.token)
-            .field("max_reserved_positions", &self.max_reserved_positions)
             .finish()
     }
 }
 
 impl SigningReservationJournal {
-    /// Attach a handle over `store`'s single ownership domain, with the default
-    /// reservation budget.
+    /// Run 422 D7-D10 Correction E — **explicitly initialize a new local
+    /// journal**. This is the only route that creates initialization metadata; it
+    /// requires an **empty signing namespace** (no metadata and no records) and
+    /// durably publishes bounded, versioned initialization metadata carrying the
+    /// established journal-wide position `limit` and a zero position count.
     ///
-    /// This is deliberately non-scanning and non-initializing: it does not wipe,
-    /// repair, or convert missing/corrupt established state into an empty usable
-    /// journal. The shared domain's live-operation table is whatever the backend
-    /// instance already holds; a freshly opened backend instance starts empty,
-    /// which is exactly the crash-recovery posture — any `Reserved` record
-    /// already in the store is treated as potentially-signed on the next
-    /// reservation, and no live continuation is minted from it.
-    pub fn attach(store: Arc<dyn SigningJournalStorage>) -> Self {
-        Self::attach_with_budget(store, DEFAULT_MAX_RESERVED_POSITIONS)
+    /// It refuses fail-closed and never resets an established journal:
+    /// * `UnsupportedLimit` if `limit` exceeds [`MAX_SUPPORTED_RESERVED_POSITIONS`]
+    ///   (checked before any durable write). `limit == 0` is supported and admits
+    ///   no reservations.
+    /// * `AlreadyInitialized` if this backend instance's domain was already
+    ///   established in-process, or durable initialization metadata already exists
+    ///   (a repeated initialization preserves the existing established state).
+    /// * `NonEmptyNamespace` if the namespace already contains signing records
+    ///   without metadata — legacy records are never adopted, deleted, or migrated.
+    ///
+    /// Initialization is a **local storage** operation only. It is not proof that
+    /// a validator key has never signed: an empty directory and a lost or
+    /// rolled-back directory are locally indistinguishable. Production startup does
+    /// not call this; tests initialize fresh fixtures explicitly.
+    pub fn initialize(
+        store: Arc<dyn SigningJournalStorage>,
+        limit: u64,
+    ) -> Result<Self, JournalError> {
+        // Reject unsupported configuration with checked comparison BEFORE any
+        // durable write or allocation.
+        if limit > MAX_SUPPORTED_RESERVED_POSITIONS {
+            return Err(JournalError::UnsupportedLimit(limit));
+        }
+        let domain = store.signing_ownership_domain();
+        let mut inner = domain.inner.lock().map_err(|_| JournalError::LockPoisoned)?;
+
+        // Serialized against concurrent init/open on the same instance: an
+        // already-established domain is never re-initialized or reset.
+        if inner.established.is_some() {
+            return Err(JournalError::AlreadyInitialized);
+        }
+        // Durable metadata already present ⇒ established journal ⇒ refuse; never
+        // reset. (A fresh in-process domain over a reopened backend reaches here.)
+        if store.get_signing_metadata()?.is_some() {
+            return Err(JournalError::AlreadyInitialized);
+        }
+        // A new journal requires an empty namespace: refuse if any record exists.
+        // Bounded streaming existence check — abort on the first record.
+        if Self::namespace_has_any_record(store.as_ref())? {
+            return Err(JournalError::NonEmptyNamespace);
+        }
+
+        // Publish the initialization metadata durably (synced). Only on a
+        // successful acknowledgement do we establish the in-process domain.
+        let metadata = SigningJournalMetadata::new(limit, 0);
+        store.put_signing_metadata_synced(&metadata.encode())?;
+        inner.established = Some(EstablishedState {
+            max_reserved_positions: limit,
+        });
+        inner.reserved_positions = 0;
+        drop(inner);
+        Ok(Self { store, domain })
     }
 
-    /// Attach with an explicit reservation budget (small-fixture / bounds tests).
-    /// The budget is enforced by this handle against the shared domain's
-    /// reservation counter.
-    pub fn attach_with_budget(
-        store: Arc<dyn SigningJournalStorage>,
-        max_reserved_positions: u64,
-    ) -> Self {
+    /// Run 422 D7-D10 Correction E — **open and validate an established local
+    /// journal**. Requires valid initialization metadata and records consistent
+    /// with it; it never falls back to initialization and never creates metadata.
+    ///
+    /// If this backend instance's domain was already established in-process (an
+    /// earlier `initialize`/`open` over the SAME instance), opening another
+    /// supported handle simply shares that domain — live operations, operation
+    /// ids, acknowledgement state, the durable counter, and shared ownership are
+    /// preserved and the namespace is NOT re-scanned.
+    ///
+    /// Otherwise it performs bounded streaming validation of the signing
+    /// namespace under the domain lock and refuses fail-closed on:
+    /// * `NotInitialized` — no metadata and no records (never initialized).
+    /// * `LegacyRecordsWithoutMetadata` — records present but no metadata.
+    /// * metadata corruption / truncation / unsupported version.
+    /// * `AccountingInconsistent` — counted positions disagree with the recorded
+    ///   count, the count exceeds the limit, or a stored key does not match its
+    ///   record's canonical position.
+    /// Iterator/read errors and record corruption are propagated.
+    pub fn open(store: Arc<dyn SigningJournalStorage>) -> Result<Self, JournalError> {
         let domain = store.signing_ownership_domain();
-        Self {
-            store,
-            domain,
-            max_reserved_positions,
+        let mut inner = domain.inner.lock().map_err(|_| JournalError::LockPoisoned)?;
+
+        // A second supported handle over an already-established instance shares the
+        // domain unchanged: no re-scan, no reset, live/acked state preserved.
+        if inner.established.is_some() {
+            drop(inner);
+            return Ok(Self { store, domain });
+        }
+
+        // Validate the established metadata; never initialize on absence/corruption.
+        let metadata_bytes = store.get_signing_metadata()?;
+        let metadata = match metadata_bytes {
+            Some(bytes) => SigningJournalMetadata::decode(&bytes)?,
+            None => {
+                // No metadata: distinguish a never-initialized empty namespace from
+                // a legacy/foreign namespace that has records without metadata.
+                if Self::namespace_has_any_record(store.as_ref())? {
+                    return Err(JournalError::LegacyRecordsWithoutMetadata);
+                }
+                return Err(JournalError::NotInitialized);
+            }
+        };
+
+        // Bounded streaming validation: count distinct persisted positions and
+        // check key/record association, formats, bounds, and checksums per record.
+        // We never collect the namespace or allocate from stored counts. A record
+        // validation failure is captured as its precise `JournalError` and the
+        // scan is aborted via a sentinel; a genuine iterator/read error propagates
+        // distinctly.
+        const ABORT: &str = "__signing_validation_abort__";
+        let mut counted: u64 = 0;
+        let mut validation_err: Option<JournalError> = None;
+        let scan = store.for_each_signing_record(&mut |key: &[u8], value: &[u8]| {
+            let record = match SigningDecisionRecord::decode(value) {
+                Ok(r) => r,
+                Err(e) => {
+                    validation_err = Some(e);
+                    return Err(StorageError::Other(ABORT.to_string()));
+                }
+            };
+            // Key/record association: the stored key MUST be the record's own
+            // canonical position key.
+            if record.position.storage_key() != key {
+                validation_err = Some(JournalError::AccountingInconsistent(
+                    "stored key does not match record position".to_string(),
+                ));
+                return Err(StorageError::Other(ABORT.to_string()));
+            }
+            match counted.checked_add(1) {
+                Some(n) => counted = n,
+                None => {
+                    validation_err = Some(JournalError::Overflow);
+                    return Err(StorageError::Other(ABORT.to_string()));
+                }
+            }
+            Ok(())
+        });
+        match scan {
+            Ok(()) => {}
+            Err(StorageError::Other(ref m)) if m == ABORT => {
+                return Err(validation_err.unwrap_or_else(|| {
+                    JournalError::Corruption("record validation aborted".to_string())
+                }));
+            }
+            Err(e) => return Err(e.into()),
+        }
+
+        // Accounting consistency: the streamed count MUST equal the durable count,
+        // and the durable count MUST be within the established limit (already
+        // checked structurally in decode; re-checked against the stream here).
+        if counted != metadata.reserved_positions {
+            return Err(JournalError::AccountingInconsistent(format!(
+                "metadata records {} distinct positions but {} are stored",
+                metadata.reserved_positions, counted
+            )));
+        }
+        if counted > metadata.max_reserved_positions {
+            return Err(JournalError::AccountingInconsistent(format!(
+                "stored positions {} exceed established limit {}",
+                counted, metadata.max_reserved_positions
+            )));
+        }
+
+        inner.established = Some(EstablishedState {
+            max_reserved_positions: metadata.max_reserved_positions,
+        });
+        inner.reserved_positions = counted;
+        drop(inner);
+        Ok(Self { store, domain })
+    }
+
+    /// Bounded streaming existence check: returns `true` as soon as any signing
+    /// record is observed, aborting the scan. Never collects the namespace.
+    fn namespace_has_any_record(store: &dyn SigningJournalStorage) -> Result<bool, JournalError> {
+        // A sentinel `StorageError` signals "found one" and stops the scan early.
+        const FOUND: &str = "__signing_namespace_has_record__";
+        let mut found = false;
+        let scan = store.for_each_signing_record(&mut |_key, _value| {
+            found = true;
+            Err(StorageError::Other(FOUND.to_string()))
+        });
+        match scan {
+            Ok(()) => Ok(found),
+            Err(StorageError::Other(ref m)) if m == FOUND => Ok(true),
+            Err(e) => Err(e.into()),
         }
     }
 
@@ -753,6 +1264,32 @@ impl SigningReservationJournal {
     /// Two handles reporting the same token share one serialization boundary.
     pub fn ownership_domain_token(&self) -> u64 {
         self.domain.token
+    }
+
+    /// The established journal-wide position limit (from durable metadata). Panics
+    /// only on a poisoned lock or an unestablished domain, which cannot occur for a
+    /// handle returned by `initialize`/`open`.
+    #[cfg(any(test, feature = "test-utils"))]
+    pub fn established_limit(&self) -> u64 {
+        let inner = self.domain.inner.lock().expect("domain lock");
+        inner
+            .established
+            .expect("handle constructed via initialize/open is established")
+            .max_reserved_positions
+    }
+
+    /// The current durable count of distinct persisted positions in this domain.
+    #[cfg(any(test, feature = "test-utils"))]
+    pub fn reserved_position_count(&self) -> u64 {
+        let inner = self.domain.inner.lock().expect("domain lock");
+        inner.reserved_positions
+    }
+
+    /// The current number of live recovered-acknowledgement cache entries.
+    #[cfg(any(test, feature = "test-utils"))]
+    pub fn recovered_ack_cache_len(&self) -> usize {
+        let inner = self.domain.inner.lock().expect("domain lock");
+        inner.recovered_acked.len()
     }
 
     /// Reserve `position` for exactly one decision identified by `binding`,
@@ -776,6 +1313,20 @@ impl SigningReservationJournal {
         binding: &BindingDigest,
     ) -> Result<ReservationOutcome, JournalError> {
         let mut inner = self.domain.inner.lock().map_err(|_| JournalError::LockPoisoned)?;
+
+        // The handle was constructed via `initialize`/`open`, so the domain is
+        // established; read the one journal-wide position limit fail-closed.
+        let limit = inner
+            .established
+            .ok_or(JournalError::NotInitialized)?
+            .max_reserved_positions;
+
+        // Conservative revalidation (Run 422 D7-D10 Correction E): if a prior
+        // atomic accounting write was uncertain, the in-memory counter may be
+        // stale. Reconcile it against the durable metadata count BEFORE admitting
+        // any new position, so stale accounting can never admit past the durable
+        // limit. This runs under the ownership-domain lock.
+        self.reconcile_accounting_if_uncertain(&mut inner)?;
 
         let key = position.storage_key();
         let existing = self.store.get_signing_record(&key)?; // read failure ⇒ Err ⇒ no sign
@@ -826,11 +1377,9 @@ impl SigningReservationJournal {
             };
         }
 
-        // No existing record: a new position in this domain. Perform every
-        // checked-arithmetic step and the durable write BEFORE mutating any
-        // in-memory state, so a write failure leaves the domain pristine (a later
-        // attempt is a fresh reservation, not a conflict).
-        if inner.reserved_positions >= self.max_reserved_positions {
+        // No existing record: a new position in this domain. Check arithmetic and
+        // the journal-wide limit FIRST, before any durable effect.
+        if inner.reserved_positions >= limit {
             return Ok(ReservationOutcome::Exhausted);
         }
         let operation_id = inner.next_operation_id;
@@ -844,8 +1393,26 @@ impl SigningReservationJournal {
 
         let record = SigningDecisionRecord::reserved(*position, *binding);
         let encoded = record.encode()?;
-        // Durable reservation acknowledgement corresponds to THIS record write.
-        self.store.put_signing_record_synced(&key, &encoded)?; // failure ⇒ Err ⇒ no state change
+        // Persist the new record AND its accounting update (the advanced position
+        // count) in ONE atomic, synced storage operation. The durable
+        // acknowledgement corresponds to THIS combined write.
+        let metadata = SigningJournalMetadata::new(limit, new_reserved);
+        let metadata_encoded = metadata.encode();
+        match self.store.put_signing_record_and_metadata_synced(
+            &key,
+            &encoded,
+            &metadata_encoded,
+        ) {
+            Ok(()) => {}
+            Err(e) => {
+                // A failed/uncertain acknowledgement does NOT prove nothing was
+                // stored. Mark the in-memory accounting uncertain so the next
+                // admission reconciles against the durable count; grant no
+                // continuation and do not advance the in-memory counter.
+                inner.accounting_uncertain = true;
+                return Err(e.into());
+            }
+        }
 
         // Only after the durable ack do we commit the accounting and mint the
         // one-use continuation bound to this operation.
@@ -866,6 +1433,34 @@ impl SigningReservationJournal {
             binding: *binding,
             operation_id,
         }))
+    }
+
+    /// Run 422 D7-D10 Correction E — conservative accounting revalidation.
+    ///
+    /// If a prior atomic reservation/accounting write returned a failed or
+    /// uncertain acknowledgement, the in-memory `reserved_positions` counter can
+    /// no longer be trusted (a failed ack does not prove nothing was stored). This
+    /// re-reads the durable metadata count — the persisted source of truth — and
+    /// resets the in-memory counter to it before any further admission. If the
+    /// metadata read or decode fails, the uncertain flag stays set and the caller
+    /// fails closed (no new position is admitted). Runs under the domain lock.
+    fn reconcile_accounting_if_uncertain(
+        &self,
+        inner: &mut DomainInner,
+    ) -> Result<(), JournalError> {
+        if !inner.accounting_uncertain {
+            return Ok(());
+        }
+        let bytes = self.store.get_signing_metadata()?.ok_or_else(|| {
+            JournalError::AccountingInconsistent(
+                "initialization metadata missing during revalidation".to_string(),
+            )
+        })?;
+        let metadata = SigningJournalMetadata::decode(&bytes)?;
+        // The established limit is fixed; only the durable count is reconciled.
+        inner.reserved_positions = metadata.reserved_positions;
+        inner.accounting_uncertain = false;
+        Ok(())
     }
 
     /// Run 422 D7-D10 Correction B — establish the signing-record durability
@@ -1107,6 +1702,12 @@ mod tests {
     /// one domain (a concurrent second handle). A modelled restart is
     /// [`ModelStore::reopen`]: a NEW instance sharing the SAME byte map but with a
     /// FRESH domain — bytes survive, the live-operation table does not.
+    /// Reserved model-metadata key (Run 422 D7-D10 Correction E). It is stored in
+    /// the SAME byte map as records so the atomic record+metadata write is applied
+    /// under one lock acquisition. It does NOT start with `sj:v1:`, so it is
+    /// excluded from record iteration.
+    const MODEL_META_KEY: &[u8] = b"__model_signing_metadata_v1__";
+
     #[derive(Default)]
     struct ModelStore {
         map: Arc<RwLock<StdHashMap<Vec<u8>, Vec<u8>>>>,
@@ -1174,6 +1775,69 @@ mod tests {
             self.map.write().unwrap().insert(key.to_vec(), value.to_vec());
             Ok(())
         }
+        fn get_signing_metadata(&self) -> Result<Option<Vec<u8>>, StorageError> {
+            if *self.fail_reads.read().unwrap() {
+                return Err(StorageError::Io("injected read failure".to_string()));
+            }
+            Ok(self.map.read().unwrap().get(MODEL_META_KEY).cloned())
+        }
+        fn put_signing_metadata_synced(&self, value: &[u8]) -> Result<(), StorageError> {
+            if *self.fail_writes.read().unwrap() {
+                return Err(StorageError::Io("injected write failure".to_string()));
+            }
+            if *self.store_then_error.read().unwrap() {
+                self.map
+                    .write()
+                    .unwrap()
+                    .insert(MODEL_META_KEY.to_vec(), value.to_vec());
+                return Err(StorageError::Io("injected post-store sync failure".to_string()));
+            }
+            self.map
+                .write()
+                .unwrap()
+                .insert(MODEL_META_KEY.to_vec(), value.to_vec());
+            Ok(())
+        }
+        fn put_signing_record_and_metadata_synced(
+            &self,
+            record_key: &[u8],
+            record_value: &[u8],
+            metadata_value: &[u8],
+        ) -> Result<(), StorageError> {
+            if *self.fail_writes.read().unwrap() {
+                return Err(StorageError::Io("injected write failure".to_string()));
+            }
+            // Honest single-lock atomic model: BOTH writes happen (or, under
+            // store_then_error, both become readable) under one lock acquisition.
+            if *self.store_then_error.read().unwrap() {
+                let mut m = self.map.write().unwrap();
+                m.insert(record_key.to_vec(), record_value.to_vec());
+                m.insert(MODEL_META_KEY.to_vec(), metadata_value.to_vec());
+                return Err(StorageError::Io("injected post-store sync failure".to_string()));
+            }
+            let mut m = self.map.write().unwrap();
+            m.insert(record_key.to_vec(), record_value.to_vec());
+            m.insert(MODEL_META_KEY.to_vec(), metadata_value.to_vec());
+            Ok(())
+        }
+        fn for_each_signing_record(
+            &self,
+            visitor: &mut dyn FnMut(&[u8], &[u8]) -> Result<(), StorageError>,
+        ) -> Result<(), StorageError> {
+            if *self.fail_reads.read().unwrap() {
+                return Err(StorageError::Io("injected read failure".to_string()));
+            }
+            let m = self.map.read().unwrap();
+            let mut keys: Vec<&Vec<u8>> = m
+                .keys()
+                .filter(|k| k.starts_with(SIGNING_RECORD_KEY_PREFIX))
+                .collect();
+            keys.sort();
+            for k in keys {
+                visitor(k, &m[k])?;
+            }
+            Ok(())
+        }
         fn signing_ownership_domain(&self) -> Arc<SigningOwnershipDomain> {
             self.domain.get_or_init(SigningOwnershipDomain::new).clone()
         }
@@ -1192,6 +1856,31 @@ mod tests {
                 journal.consume_for_signing(cont).unwrap()
             }
             other => panic!("expected FreshlyReserved, got {:?}", other),
+        }
+    }
+
+    /// Test convenience mirroring production's initialize-vs-open selection with
+    /// the default limit.
+    fn attach(store: Arc<ModelStore>) -> SigningReservationJournal {
+        attach_with_budget(store, DEFAULT_MAX_RESERVED_POSITIONS)
+    }
+
+    /// Test convenience: an empty, un-initialized namespace is explicitly
+    /// initialized with `limit`; an established one is opened and validated.
+    /// BOTH routes validate — this is not an unchecked bypass, just a fixture
+    /// selector for pre-existing A–D tests. Correction-E tests call
+    /// [`SigningReservationJournal::initialize`]/[`SigningReservationJournal::open`]
+    /// directly to exercise each route and its refusals explicitly.
+    fn attach_with_budget(store: Arc<ModelStore>, limit: u64) -> SigningReservationJournal {
+        if store
+            .get_signing_metadata()
+            .expect("metadata probe must not fail in fixture setup")
+            .is_some()
+        {
+            SigningReservationJournal::open(store).expect("open established model store")
+        } else {
+            SigningReservationJournal::initialize(store, limit)
+                .expect("initialize fresh model store")
         }
     }
 
@@ -1265,7 +1954,7 @@ mod tests {
     #[test]
     fn fresh_reservation_then_signed_result_and_exact_retry() {
         let store = Arc::new(ModelStore::default());
-        let journal = SigningReservationJournal::attach(store.clone());
+        let journal = attach(store.clone());
         let pos = position(SigningKind::Proposal, 3);
         let b = binding(b"decision-A");
 
@@ -1284,7 +1973,7 @@ mod tests {
     #[test]
     fn conflicting_binding_is_refused() {
         let store = Arc::new(ModelStore::default());
-        let journal = SigningReservationJournal::attach(store);
+        let journal = attach(store);
         let pos = position(SigningKind::Vote, 4);
         let b1 = binding(b"content-1");
         let b2 = binding(b"content-2");
@@ -1302,7 +1991,7 @@ mod tests {
     #[test]
     fn proposal_and_self_vote_at_same_view_are_distinct() {
         let store = Arc::new(ModelStore::default());
-        let journal = SigningReservationJournal::attach(store);
+        let journal = attach(store);
         let prop = position(SigningKind::Proposal, 6);
         let vote = position(SigningKind::Vote, 6);
         let b = binding(b"x");
@@ -1324,7 +2013,7 @@ mod tests {
         let pos = position(SigningKind::Proposal, 8);
         let b = binding(b"decision-R");
         {
-            let journal = SigningReservationJournal::attach(store.clone());
+            let journal = attach(store.clone());
             let cont = match journal.reserve_for_sign(&pos, &b).unwrap() {
                 ReservationOutcome::FreshlyReserved(c) => c,
                 other => panic!("expected FreshlyReserved, got {:?}", other),
@@ -1336,7 +2025,7 @@ mod tests {
         // Reopen over the SAME durable bytes with a FRESH ownership domain: the
         // RESERVED byte survives, the live operation table does not ⇒
         // potentially-signed, refuse re-signing.
-        let reopened = SigningReservationJournal::attach(store.reopen());
+        let reopened = attach(store.reopen());
         assert!(matches!(
             reopened.reserve_for_sign(&pos, &b).unwrap(),
             ReservationOutcome::PotentiallySigned
@@ -1356,11 +2045,11 @@ mod tests {
         let pos = position(SigningKind::Vote, 2);
         let b = binding(b"decision-S");
         {
-            let journal = SigningReservationJournal::attach(store.clone());
+            let journal = attach(store.clone());
             let cap = reserve_and_invoke(&journal, &pos, &b);
             journal.record_signed_result(&cap, b"the-sig").unwrap();
         }
-        let reopened = SigningReservationJournal::attach(store.reopen());
+        let reopened = attach(store.reopen());
         assert!(matches!(
             reopened.reserve_for_sign(&pos, &b).unwrap(),
             ReservationOutcome::ExactRetryRetained(ref s) if s == b"the-sig"
@@ -1370,7 +2059,7 @@ mod tests {
     #[test]
     fn read_and_write_failures_yield_no_permit() {
         let store = Arc::new(ModelStore::default());
-        let journal = SigningReservationJournal::attach(store.clone());
+        let journal = attach(store.clone());
         let pos = position(SigningKind::Proposal, 11);
         let b = binding(b"decision-F");
 
@@ -1402,13 +2091,15 @@ mod tests {
         let pos = position(SigningKind::Proposal, 12);
         let b = binding(b"decision-C");
         {
-            let journal = SigningReservationJournal::attach(store.clone());
+            let journal = attach(store.clone());
             journal.reserve_for_sign(&pos, &b).unwrap();
         }
         store.corrupt(&pos.storage_key());
-        let reopened = SigningReservationJournal::attach(store.reopen());
+        // Opening an established namespace performs bounded streaming validation,
+        // so a corrupt record now fails closed AT OPEN — the journal is never
+        // constructed over inconsistent state.
         assert!(matches!(
-            reopened.reserve_for_sign(&pos, &b),
+            SigningReservationJournal::open(store.reopen()),
             Err(JournalError::Corruption(_))
         ));
     }
@@ -1416,8 +2107,8 @@ mod tests {
     #[test]
     fn second_handle_cannot_get_permit_for_reserved_position() {
         let store = Arc::new(ModelStore::default());
-        let handle_a = SigningReservationJournal::attach(store.clone());
-        let handle_b = SigningReservationJournal::attach(store.clone());
+        let handle_a = attach(store.clone());
+        let handle_b = attach(store.clone());
         let pos = position(SigningKind::Vote, 20);
         let b = binding(b"decision-X");
         // Handle A reserves.
@@ -1438,7 +2129,7 @@ mod tests {
     #[test]
     fn exhaustion_refuses_new_positions_and_preserves_existing() {
         let store = Arc::new(ModelStore::default());
-        let journal = SigningReservationJournal::attach_with_budget(store, 1);
+        let journal = attach_with_budget(store, 1);
         let p0 = position(SigningKind::Proposal, 30);
         let p1 = position(SigningKind::Proposal, 31);
         let b = binding(b"budget");
@@ -1470,13 +2161,15 @@ mod tests {
         let store = Arc::new(ModelStore::default());
         let pos = position(SigningKind::Proposal, 40);
         let b = binding(b"decision-M");
-        // Hand-craft a Signed record with a zero-length signature and valid crc.
+        // Initialize an empty namespace, then overwrite the position with a
+        // hand-crafted Signed record carrying a zero-length signature and a valid
+        // crc. Reading that exact key during a reservation must decode-reject it.
+        let journal = attach(store.clone());
         let mut record = SigningDecisionRecord::signed(pos, b, vec![9u8]);
         record.retained_signature = Some(vec![]); // force empty
         // encode() will produce sig_len=0 but stage=Signed; decode must reject.
         let bytes = record.encode().unwrap();
         store.overwrite(&pos.storage_key(), bytes);
-        let journal = SigningReservationJournal::attach(store);
         assert!(matches!(
             journal.reserve_for_sign(&pos, &b),
             Err(JournalError::Corruption(_))
@@ -1493,8 +2186,8 @@ mod tests {
         // Two DISTINCT backend instances ⇒ two distinct ownership domains.
         let store_a = Arc::new(ModelStore::default());
         let store_b = Arc::new(ModelStore::default());
-        let journal_a = SigningReservationJournal::attach(store_a);
-        let journal_b = SigningReservationJournal::attach(store_b);
+        let journal_a = attach(store_a);
+        let journal_b = attach(store_b);
         let pos = position(SigningKind::Proposal, 50);
         let b = binding(b"decision");
         let cont = match journal_a.reserve_for_sign(&pos, &b).unwrap() {
@@ -1518,8 +2211,8 @@ mod tests {
     fn record_signed_result_rejects_foreign_domain_capability() {
         let store_a = Arc::new(ModelStore::default());
         let store_b = Arc::new(ModelStore::default());
-        let journal_a = SigningReservationJournal::attach(store_a);
-        let journal_b = SigningReservationJournal::attach(store_b);
+        let journal_a = attach(store_a);
+        let journal_b = attach(store_b);
         let pos = position(SigningKind::Vote, 51);
         let b = binding(b"decision");
         let cap = reserve_and_invoke(&journal_a, &pos, &b);
@@ -1533,7 +2226,7 @@ mod tests {
     #[test]
     fn dropped_continuation_preserves_reservation_and_never_resigns() {
         let store = Arc::new(ModelStore::default());
-        let journal = SigningReservationJournal::attach(store.clone());
+        let journal = attach(store.clone());
         let pos = position(SigningKind::Proposal, 52);
         let b = binding(b"decision");
         // Reserve and then DROP the continuation without consuming it.
@@ -1553,8 +2246,8 @@ mod tests {
     fn second_supported_handle_cannot_obtain_a_continuation_for_a_live_position() {
         // Two supported handles over the SAME backend instance share one domain.
         let store = Arc::new(ModelStore::default());
-        let handle_a = SigningReservationJournal::attach(store.clone());
-        let handle_b = SigningReservationJournal::attach(store.clone());
+        let handle_a = attach(store.clone());
+        let handle_b = attach(store.clone());
         assert_eq!(
             handle_a.ownership_domain_token(),
             handle_b.ownership_domain_token()
@@ -1574,7 +2267,7 @@ mod tests {
     #[test]
     fn record_signed_result_conflicting_overwrite_refuses_and_preserves() {
         let store = Arc::new(ModelStore::default());
-        let journal = SigningReservationJournal::attach(store);
+        let journal = attach(store);
         let pos = position(SigningKind::Proposal, 54);
         let b = binding(b"decision");
         let cap = reserve_and_invoke(&journal, &pos, &b);
@@ -1595,7 +2288,7 @@ mod tests {
     #[test]
     fn record_signed_result_idempotent_identical_ok() {
         let store = Arc::new(ModelStore::default());
-        let journal = SigningReservationJournal::attach(store);
+        let journal = attach(store);
         let pos = position(SigningKind::Vote, 55);
         let b = binding(b"decision");
         let cap = reserve_and_invoke(&journal, &pos, &b);
@@ -1612,7 +2305,7 @@ mod tests {
     #[test]
     fn record_signed_result_oversize_signature_refused_and_preserves() {
         let store = Arc::new(ModelStore::default());
-        let journal = SigningReservationJournal::attach(store);
+        let journal = attach(store);
         let pos = position(SigningKind::Proposal, 56);
         let b = binding(b"decision");
         let cap = reserve_and_invoke(&journal, &pos, &b);
@@ -1636,7 +2329,7 @@ mod tests {
     #[test]
     fn uncertain_write_not_reported_success_and_retry_reissues_synced_write() {
         let store = Arc::new(ModelStore::default());
-        let journal = SigningReservationJournal::attach(store.clone());
+        let journal = attach(store.clone());
         let pos = position(SigningKind::Vote, 60);
         let b = binding(b"decision");
         let cap = reserve_and_invoke(&journal, &pos, &b);
@@ -1681,7 +2374,7 @@ mod tests {
     #[test]
     fn uncertain_write_does_not_permit_conflicting_replacement() {
         let store = Arc::new(ModelStore::default());
-        let journal = SigningReservationJournal::attach(store.clone());
+        let journal = attach(store.clone());
         let pos = position(SigningKind::Proposal, 61);
         let b = binding(b"decision");
         let cap = reserve_and_invoke(&journal, &pos, &b);
@@ -1715,7 +2408,7 @@ mod tests {
     #[test]
     fn empty_result_publication_refused_and_preserves_reservation() {
         let store = Arc::new(ModelStore::default());
-        let journal = SigningReservationJournal::attach(store.clone());
+        let journal = attach(store.clone());
         let pos = position(SigningKind::Proposal, 70);
         let b = binding(b"decision");
         let cap = reserve_and_invoke(&journal, &pos, &b);
@@ -1783,7 +2476,7 @@ mod tests {
         //         invocation boundary, and result publication makes the Signed
         //         bytes READABLE but returns an error (uncertain durable write).
         {
-            let journal = SigningReservationJournal::attach(store.clone());
+            let journal = attach(store.clone());
             let cap = reserve_and_invoke(&journal, &pos, &b);
             store.set_store_then_error(true);
             assert!(matches!(
@@ -1798,7 +2491,7 @@ mod tests {
         // (4)-(5) Original live ownership is discarded: a FRESH backend ownership
         //         domain is created over the surviving model bytes.
         let reopened_store = store.reopen();
-        let reopened = SigningReservationJournal::attach(reopened_store.clone());
+        let reopened = attach(reopened_store.clone());
 
         // (6)-(7) A retained-result lookup cannot succeed merely because those
         //         bytes are readable. With the recovery durability op failing, the
@@ -1838,12 +2531,12 @@ mod tests {
         let pos = position(SigningKind::Proposal, 72);
         let b = binding(b"decision");
         {
-            let journal = SigningReservationJournal::attach(store.clone());
+            let journal = attach(store.clone());
             let cap = reserve_and_invoke(&journal, &pos, &b);
             journal.record_signed_result(&cap, b"sig").unwrap();
         }
         let reopened_store = store.reopen();
-        let reopened = SigningReservationJournal::attach(reopened_store.clone());
+        let reopened = attach(reopened_store.clone());
 
         // A conflicting binding over a recovered Signed record is refused and does
         // NOT rewrite the record (the stored bytes are unchanged).
@@ -1872,14 +2565,14 @@ mod tests {
         let rpos = position(SigningKind::Proposal, 73);
         let rb = binding(b"reserved-only");
         {
-            let journal = SigningReservationJournal::attach(store.clone());
+            let journal = attach(store.clone());
             let cont = match journal.reserve_for_sign(&rpos, &rb).unwrap() {
                 ReservationOutcome::FreshlyReserved(c) => c,
                 other => panic!("expected FreshlyReserved, got {:?}", other),
             };
             let _cap = journal.consume_for_signing(cont).unwrap();
         }
-        let reopened2 = SigningReservationJournal::attach(store.reopen());
+        let reopened2 = attach(store.reopen());
         assert!(matches!(
             reopened2.reserve_for_sign(&rpos, &rb).unwrap(),
             ReservationOutcome::PotentiallySigned
@@ -1892,16 +2585,15 @@ mod tests {
         let pos = position(SigningKind::Vote, 74);
         let b = binding(b"decision");
         {
-            let journal = SigningReservationJournal::attach(store.clone());
+            let journal = attach(store.clone());
             let cap = reserve_and_invoke(&journal, &pos, &b);
             journal.record_signed_result(&cap, b"the-sig").unwrap();
         }
-        // Corrupt the stored Signed record; a fresh domain must fail closed BEFORE
-        // any recovery re-publication.
+        // Corrupt the stored Signed record; opening a fresh domain must fail closed
+        // during streaming validation, BEFORE any recovery re-publication.
         store.corrupt(&pos.storage_key());
-        let reopened = SigningReservationJournal::attach(store.reopen());
         assert!(matches!(
-            reopened.reserve_for_sign(&pos, &b),
+            SigningReservationJournal::open(store.reopen()),
             Err(JournalError::Corruption(_))
         ));
     }

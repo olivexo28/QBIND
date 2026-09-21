@@ -11539,9 +11539,11 @@ mod tests {
         /// path. It is MODEL-only accounting and never durability evidence.
         fn fresh_signing_journal(
         ) -> crate::signing_reservation_journal::SigningReservationJournal {
-            crate::signing_reservation_journal::SigningReservationJournal::attach(Arc::new(
-                crate::storage::InMemoryConsensusStorage::new(),
-            ))
+            crate::signing_reservation_journal::SigningReservationJournal::initialize(
+                Arc::new(crate::storage::InMemoryConsensusStorage::new()),
+                crate::signing_reservation_journal::DEFAULT_MAX_RESERVED_POSITIONS,
+            )
+            .expect("initialize fresh in-memory signing journal")
         }
 
         #[derive(Debug, Clone)]
@@ -23649,6 +23651,75 @@ mod tests {
                                 .insert(key.to_vec(), value.to_vec());
                             Ok(())
                         }
+                        fn get_signing_metadata(&self) -> Result<Option<Vec<u8>>, StorageError> {
+                            if self.fail_reads.load(SeqCst) {
+                                return Err(StorageError::Io("injected read failure".into()));
+                            }
+                            Ok(self.map.read().unwrap().get(D10_META_KEY).cloned())
+                        }
+                        fn put_signing_metadata_synced(
+                            &self,
+                            value: &[u8],
+                        ) -> Result<(), StorageError> {
+                            let remaining = self.write_budget.fetch_sub(1, SeqCst);
+                            if remaining <= 0 {
+                                self.write_budget.fetch_add(1, SeqCst);
+                                if self.store_then_error.load(SeqCst) {
+                                    self.map
+                                        .write()
+                                        .unwrap()
+                                        .insert(D10_META_KEY.to_vec(), value.to_vec());
+                                }
+                                return Err(StorageError::Io("injected write failure".into()));
+                            }
+                            self.map
+                                .write()
+                                .unwrap()
+                                .insert(D10_META_KEY.to_vec(), value.to_vec());
+                            Ok(())
+                        }
+                        fn put_signing_record_and_metadata_synced(
+                            &self,
+                            record_key: &[u8],
+                            record_value: &[u8],
+                            metadata_value: &[u8],
+                        ) -> Result<(), StorageError> {
+                            // One atomic synced op ⇒ one write-budget unit; both
+                            // values are applied (or, under store_then_error, both
+                            // become readable) under a single lock acquisition.
+                            let remaining = self.write_budget.fetch_sub(1, SeqCst);
+                            if remaining <= 0 {
+                                self.write_budget.fetch_add(1, SeqCst);
+                                if self.store_then_error.load(SeqCst) {
+                                    let mut m = self.map.write().unwrap();
+                                    m.insert(record_key.to_vec(), record_value.to_vec());
+                                    m.insert(D10_META_KEY.to_vec(), metadata_value.to_vec());
+                                }
+                                return Err(StorageError::Io("injected write failure".into()));
+                            }
+                            let mut m = self.map.write().unwrap();
+                            m.insert(record_key.to_vec(), record_value.to_vec());
+                            m.insert(D10_META_KEY.to_vec(), metadata_value.to_vec());
+                            Ok(())
+                        }
+                        fn for_each_signing_record(
+                            &self,
+                            visitor: &mut dyn FnMut(&[u8], &[u8]) -> Result<(), StorageError>,
+                        ) -> Result<(), StorageError> {
+                            if self.fail_reads.load(SeqCst) {
+                                return Err(StorageError::Io("injected read failure".into()));
+                            }
+                            let m = self.map.read().unwrap();
+                            let prefix =
+                                crate::signing_reservation_journal::SIGNING_RECORD_KEY_PREFIX;
+                            let mut keys: Vec<&Vec<u8>> =
+                                m.keys().filter(|k| k.starts_with(prefix)).collect();
+                            keys.sort();
+                            for k in keys {
+                                visitor(k, &m[k])?;
+                            }
+                            Ok(())
+                        }
                         fn signing_ownership_domain(
                             &self,
                         ) -> Arc<crate::signing_reservation_journal::SigningOwnershipDomain>
@@ -23661,8 +23732,30 @@ mod tests {
                         }
                     }
 
+                    /// Reserved model-metadata key stored in the SAME byte map as
+                    /// records (single-lock atomic model). It does NOT begin with
+                    /// `sj:v1:`, so it is excluded from record iteration.
+                    const D10_META_KEY: &[u8] = b"__d10_signing_metadata_v1__";
+
                     fn journal(store: Arc<D10Store>) -> SigningReservationJournal {
-                        SigningReservationJournal::attach(store)
+                        // Mirror production's initialize-vs-open selection: a fresh
+                        // (empty) namespace is explicitly initialized; an
+                        // established one is opened and validated. Both routes
+                        // validate.
+                        if store
+                            .get_signing_metadata()
+                            .expect("metadata probe must not fail in fixture setup")
+                            .is_some()
+                        {
+                            SigningReservationJournal::open(store)
+                                .expect("open established D10 store")
+                        } else {
+                            SigningReservationJournal::initialize(
+                                store,
+                                crate::signing_reservation_journal::DEFAULT_MAX_RESERVED_POSITIONS,
+                            )
+                            .expect("initialize fresh D10 store")
+                        }
                     }
 
                     /// Drive one engine action through the guarded immediate
@@ -23956,8 +24049,13 @@ mod tests {
                         assert_eq!(c.proposal_calls.load(SeqCst), 0, "no sign on bad position");
                         assert_eq!(s.outbound_proposals_sent, 0);
                         assert!(f.proposals.lock().unwrap().is_empty());
-                        // Nothing was reserved.
-                        assert!(store.map.read().unwrap().is_empty());
+                        // Nothing was reserved (only initialization metadata,
+                        // written when the journal was opened, is present).
+                        assert!(!store.map.read().unwrap().keys().any(|k| {
+                            k.starts_with(
+                                crate::signing_reservation_journal::SIGNING_RECORD_KEY_PREFIX,
+                            )
+                        }));
                     }
 
                     #[test]
@@ -23975,7 +24073,11 @@ mod tests {
                         assert_eq!(s.outbound_vote_journal_position_inconsistent_total, 1);
                         assert_eq!(c.vote_calls.load(SeqCst), 0);
                         assert!(f.broadcast_votes.lock().unwrap().is_empty());
-                        assert!(store.map.read().unwrap().is_empty());
+                        assert!(!store.map.read().unwrap().keys().any(|k| {
+                            k.starts_with(
+                                crate::signing_reservation_journal::SIGNING_RECORD_KEY_PREFIX,
+                            )
+                        }));
                     }
 
                     // ---- D. Persistence failures ----
@@ -23986,8 +24088,8 @@ mod tests {
                         let (pv, c) = recording_pv(&fixture);
                         let snap = snapshot_matching(&pv);
                         let store = D10Store::new();
-                        store.set_fail_reads(true);
                         let j = journal(store.clone());
+                        store.set_fail_reads(true);
 
                         let (s, f) = drive_j(&snap, &j, proposal_at(0, 1, [9u8; 32]));
                         assert_eq!(c.proposal_calls.load(SeqCst), 0, "no sign on read failure");
@@ -24001,14 +24103,26 @@ mod tests {
                         let (pv, c) = recording_pv(&fixture);
                         let snap = snapshot_matching(&pv);
                         let store = D10Store::new();
-                        store.set_write_budget(0); // even the reservation write fails
                         let j = journal(store.clone());
+                        store.set_write_budget(0); // even the reservation write fails
 
                         let (s, f) = drive_j(&snap, &j, proposal_at(0, 1, [9u8; 32]));
                         assert_eq!(c.proposal_calls.load(SeqCst), 0, "no sign without durable ack");
                         assert_eq!(s.outbound_proposal_journal_error_total, 1);
                         assert!(f.proposals.lock().unwrap().is_empty());
-                        assert!(store.map.read().unwrap().is_empty());
+                        // No decision RECORD was written (the atomic reservation
+                        // write failed); only the initialization metadata — written
+                        // during construction under the default budget — is present.
+                        let position = crate::signing_reservation_journal::SigningPosition {
+                            validator_id: 0,
+                            network_genesis: *d6_control_domain().genesis_identity(),
+                            kind: crate::signing_reservation_journal::SigningKind::Proposal,
+                            originating_view: 1,
+                        };
+                        assert!(store
+                            .get_signing_record(&position.storage_key())
+                            .unwrap()
+                            .is_none());
                     }
 
                     #[test]
@@ -24017,10 +24131,10 @@ mod tests {
                         let (pv, c) = recording_pv(&fixture);
                         let snap = snapshot_matching(&pv);
                         let store = D10Store::new();
+                        let j = journal(store.clone());
                         // Permit exactly ONE write (the reservation); the signed
                         // result write then fails.
                         store.set_write_budget(1);
-                        let j = journal(store.clone());
 
                         let (s, f) = drive_j(&snap, &j, proposal_at(0, 1, [9u8; 32]));
                         // The signer DID run once, but the result-persist failure
@@ -24159,11 +24273,11 @@ mod tests {
                         let (pv, c) = recording_pv(&fixture);
                         let snap = snapshot_matching(&pv);
                         let store = D10Store::new();
+                        let j1 = journal(store.clone());
                         // Permit only the reservation write, then fail — leaving a
                         // RESERVED-only record, no retained result. This is the
                         // durable state a crash after reserve/before result leaves.
                         store.set_write_budget(1);
-                        let j1 = journal(store.clone());
                         let (_s1, _f1) = drive_j(&snap, &j1, proposal_at(0, 1, [3u8; 32]));
                         assert_eq!(c.proposal_calls.load(SeqCst), 1);
 
@@ -24190,7 +24304,6 @@ mod tests {
                         let (_s1, _f1) = drive_j(&snap, &j1, proposal_at(0, 1, [4u8; 32]));
                         assert_eq!(c.proposal_calls.load(SeqCst), 1);
 
-                        // Corrupt the stored bytes at that position, then reopen.
                         let position = crate::signing_reservation_journal::SigningPosition {
                             validator_id: 0,
                             network_genesis: *d6_control_domain().genesis_identity(),
@@ -24198,10 +24311,15 @@ mod tests {
                             originating_view: 1,
                         };
                         let key = position.storage_key();
-                        store.poke(&key, vec![0xFF; 16]);
 
+                        // Reopen and OPEN the established (still valid) journal, then
+                        // corrupt the stored record. The corruption is thus observed
+                        // at reservation time, exercising the handler's fail-closed
+                        // path. (Opening AFTER corruption is separately covered by
+                        // the streaming-validation open tests.)
                         let store2 = store.reopen();
                         let j2 = journal(store2.clone());
+                        store2.poke(&key, vec![0xFF; 16]);
                         let (s2, f2) = drive_j(&snap, &j2, proposal_at(0, 1, [4u8; 32]));
                         // Corruption fails closed: journal error, no sign, no send.
                         assert_eq!(c.proposal_calls.load(SeqCst), 1, "no sign on corruption");
@@ -24238,8 +24356,9 @@ mod tests {
                         let (pv, c) = recording_pv(&fixture);
                         let snap = snapshot_matching(&pv);
                         let store = D10Store::new();
-                        // Budget of exactly one distinct position.
-                        let j = SigningReservationJournal::attach_with_budget(store, 1);
+                        // Journal-wide limit of exactly one distinct position.
+                        let j = SigningReservationJournal::initialize(store, 1)
+                            .expect("initialize fresh D10 store with limit 1");
 
                         // First position (view 1) reserves + signs.
                         let (s1, _f1) = drive_j(&snap, &j, proposal_at(0, 1, [1u8; 32]));
@@ -24262,12 +24381,12 @@ mod tests {
                         let (pv, c) = recording_pv(&fixture);
                         let snap = snapshot_matching(&pv);
                         let store = D10Store::new();
+                        let j = journal(store.clone());
                         // The reservation write succeeds durably; the RESULT write
                         // STORES its bytes (they become readable) and THEN returns
                         // an error — a clearly-labelled uncertain durable write.
                         store.set_write_budget(1);
                         store.set_store_then_error(true);
-                        let j = journal(store.clone());
 
                         // First attempt: the signer runs once, but the uncertain
                         // result write suppresses facade handoff and preserves the
@@ -25296,7 +25415,18 @@ mod tests {
                         }
 
                         fn map_snapshot(store: &D10Store) -> StdHashMap<Vec<u8>, Vec<u8>> {
-                            store.map.read().unwrap().clone()
+                            // Decision-record entries only. The initialization
+                            // metadata key is written when the journal is opened
+                            // and is not a decision record, so it is excluded:
+                            // an empty result means "no reservation persisted".
+                            store
+                                .map
+                                .read()
+                                .unwrap()
+                                .iter()
+                                .filter(|(k, _)| k.as_slice() != D10_META_KEY)
+                                .map(|(k, v)| (k.clone(), v.clone()))
+                                .collect()
                         }
 
                         // ---- A. Successful ordering (normal entrypoints) --------
@@ -25674,8 +25804,9 @@ mod tests {
                             let (pv, c) = recording_pv(&fixture);
                             let snap = snapshot_matching(&pv);
                             let store = D10Store::new();
-                            store.set_fail_reads(true); // any journal touch would error
                             let j = journal(store.clone());
+                            store.set_fail_reads(true); // any journal touch after this point would error
+
                             let ticket = capture_ticket(&snap);
                             let admission = AdmittedSigningIdentity { snapshot: &snap, ticket: &ticket };
                             let mut stats = BinaryConsensusLoopInboundStats::default();
@@ -25702,8 +25833,9 @@ mod tests {
                             let (pv, c) = recording_pv(&fixture); // signer id 0
                             let snap = snapshot_matching(&pv);
                             let store = D10Store::new();
-                            store.set_fail_reads(true);
                             let j = journal(store.clone());
+                            store.set_fail_reads(true);
+
                             let ticket = capture_ticket(&snap);
                             let admission = AdmittedSigningIdentity { snapshot: &snap, ticket: &ticket };
                             let mut stats = BinaryConsensusLoopInboundStats::default();
@@ -25729,8 +25861,9 @@ mod tests {
                             let (pv, pc, _vc) = pv_signer_id(&fixture, 9); // id 9 ∉ membership
                             let snap = snapshot_matching(&pv);
                             let store = D10Store::new();
-                            store.set_fail_reads(true);
                             let j = journal(store.clone());
+                            store.set_fail_reads(true);
+
                             let ticket = capture_ticket(&snap);
                             let admission = AdmittedSigningIdentity { snapshot: &snap, ticket: &ticket };
                             let mut stats = BinaryConsensusLoopInboundStats::default();
@@ -25760,8 +25893,9 @@ mod tests {
                             let (pv, pc, _vc) = pv_signer_id(&fixture, big);
                             let snap = snapshot_matching(&pv);
                             let store = D10Store::new();
-                            store.set_fail_reads(true);
                             let j = journal(store.clone());
+                            store.set_fail_reads(true);
+
                             let ticket = capture_ticket(&snap);
                             let admission = AdmittedSigningIdentity { snapshot: &snap, ticket: &ticket };
                             let mut stats = BinaryConsensusLoopInboundStats::default();
@@ -25785,8 +25919,9 @@ mod tests {
                             let (pv, c) = recording_pv(&fixture);
                             let snap = snapshot_matching(&pv);
                             let store = D10Store::new();
-                            store.set_fail_reads(true);
                             let j = journal(store.clone());
+                            store.set_fail_reads(true);
+
                             let ticket = capture_ticket(&snap);
 
                             // Unsupported wire version.
@@ -26057,8 +26192,9 @@ mod tests {
                             let (pv, c) = recording_pv(&fixture);
                             let snap = snapshot_matching(&pv);
                             let store = D10Store::new();
-                            store.set_fail_reads(true); // any journal touch would error
                             let j = journal(store.clone());
+                            store.set_fail_reads(true); // any journal touch after this point would error
+
 
                             let mut sp = BinaryConsensusLoopInboundStats::default();
                             let out = guarded_sign_proposal_for_broadcast(
@@ -26182,8 +26318,9 @@ mod tests {
                             pv.key_provider = Arc::new(NoKeyProvider);
                             let snap = snapshot_matching(&pv);
                             let store = D10Store::new();
-                            store.set_fail_reads(true);
                             let j = journal(store.clone());
+                            store.set_fail_reads(true);
+
                             let ticket = capture_ticket(&snap);
                             let admission =
                                 AdmittedSigningIdentity { snapshot: &snap, ticket: &ticket };
@@ -26213,8 +26350,9 @@ mod tests {
                                 Arc::new(MismatchedSuiteProvider(fixture.kp.clone()));
                             let snap = snapshot_matching(&pv);
                             let store = D10Store::new();
-                            store.set_fail_reads(true);
                             let j = journal(store.clone());
+                            store.set_fail_reads(true);
+
                             let ticket = capture_ticket(&snap);
                             let admission =
                                 AdmittedSigningIdentity { snapshot: &snap, ticket: &ticket };
@@ -26244,8 +26382,9 @@ mod tests {
                             pv.backend_registry = Arc::new(NoBackendRegistry);
                             let snap = snapshot_matching(&pv);
                             let store = D10Store::new();
-                            store.set_fail_reads(true);
                             let j = journal(store.clone());
+                            store.set_fail_reads(true);
+
                             let ticket = capture_ticket(&snap);
                             let admission =
                                 AdmittedSigningIdentity { snapshot: &snap, ticket: &ticket };
@@ -26273,8 +26412,9 @@ mod tests {
                             pv.backend_registry = Arc::new(NoBackendRegistry);
                             let snap = snapshot_matching(&pv);
                             let store = D10Store::new();
-                            store.set_fail_reads(true);
                             let j = journal(store.clone());
+                            store.set_fail_reads(true);
+
                             let ticket = capture_ticket(&snap);
                             let admission =
                                 AdmittedSigningIdentity { snapshot: &snap, ticket: &ticket };

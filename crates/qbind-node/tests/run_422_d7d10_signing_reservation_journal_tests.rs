@@ -27,6 +27,7 @@ use std::sync::Arc;
 use qbind_node::signing_reservation_journal::{
     BindingDigest, JournalError, ReservationOutcome, ResultPublicationCapability,
     SigningJournalStorage, SigningKind, SigningPosition, SigningReservationJournal,
+    DEFAULT_MAX_RESERVED_POSITIONS,
 };
 // Run 422 D7-D10 Correction F: the version-fabrication helper is a test-only
 // seam gated behind `test-utils`. Import it (and the record-format constant it
@@ -74,6 +75,24 @@ fn open_store(path: &std::path::Path) -> Arc<RocksDbConsensusStorage> {
     Arc::new(RocksDbConsensusStorage::open(path).expect("open rocksdb consensus storage"))
 }
 
+/// Open-or-initialize helper mirroring production's initialize-vs-open
+/// selection: a fresh (empty) signing namespace is explicitly initialized at the
+/// default supported limit and durably publishes bounded initialization
+/// metadata; an established namespace is opened and validated (never falling
+/// back to initialization). Both routes validate.
+fn journal(store: Arc<dyn SigningJournalStorage>) -> SigningReservationJournal {
+    if store
+        .get_signing_metadata()
+        .expect("metadata probe must not fail in fixture setup")
+        .is_some()
+    {
+        SigningReservationJournal::open(store).expect("open established journal")
+    } else {
+        SigningReservationJournal::initialize(store, DEFAULT_MAX_RESERVED_POSITIONS)
+            .expect("initialize fresh journal")
+    }
+}
+
 /// Reserve a fresh decision and consume its one-use continuation, returning the
 /// operation-bound publication capability (models the reserve→invoke boundary).
 fn reserve_and_invoke(
@@ -100,7 +119,7 @@ fn reserved_only_survives_reopen_and_refuses_resigning() {
 
     {
         let store = open_store(dir.path());
-        let journal = SigningReservationJournal::attach(store.clone() as Arc<dyn SigningJournalStorage>);
+        let journal = journal(store.clone() as Arc<dyn SigningJournalStorage>);
         // Fresh reservation acknowledged durably; the live operation dies before
         // recording any signed result (we drop the one-use continuation here).
         match journal
@@ -115,7 +134,7 @@ fn reserved_only_survives_reopen_and_refuses_resigning() {
     // Reopen: fresh journal (fresh ownership domain), empty live table — exactly
     // the crash posture.
     let store = open_store(dir.path());
-    let journal = SigningReservationJournal::attach(store as Arc<dyn SigningJournalStorage>);
+    let journal = journal(store as Arc<dyn SigningJournalStorage>);
     assert!(
         matches!(
             journal
@@ -162,7 +181,7 @@ fn signed_result_survives_reopen_and_supports_exact_resend() {
 
     {
         let store = open_store(dir.path());
-        let journal = SigningReservationJournal::attach(store.clone() as Arc<dyn SigningJournalStorage>);
+        let journal = journal(store.clone() as Arc<dyn SigningJournalStorage>);
         // Reserve → consume the one-use continuation → publish through the
         // matching operation's capability.
         let cap = reserve_and_invoke(&journal, &pos, &bind);
@@ -174,7 +193,7 @@ fn signed_result_survives_reopen_and_supports_exact_resend() {
     // Reopen: the signed record must survive and yield an exact-retry retained
     // signature (resend without signing again).
     let store = open_store(dir.path());
-    let journal = SigningReservationJournal::attach(store as Arc<dyn SigningJournalStorage>);
+    let journal = journal(store as Arc<dyn SigningJournalStorage>);
     match journal.reserve_for_sign(&pos, &bind).expect("lookup") {
         ReservationOutcome::ExactRetryRetained(sig) => assert_eq!(sig, signature),
         other => panic!("expected ExactRetryRetained, got {:?}", other),
@@ -210,7 +229,7 @@ fn empty_result_publication_refused_over_real_storage() {
 
     let store = open_store(dir.path());
     let journal =
-        SigningReservationJournal::attach(store.clone() as Arc<dyn SigningJournalStorage>);
+        journal(store.clone() as Arc<dyn SigningJournalStorage>);
     let cap = reserve_and_invoke(&journal, &pos, &bind);
 
     // Snapshot the durable RESERVED bytes before the invalid publication attempt.
@@ -262,7 +281,7 @@ fn proposal_and_vote_same_view_are_independent_records_across_reopen() {
 
     {
         let store = open_store(dir.path());
-        let journal = SigningReservationJournal::attach(store.clone() as Arc<dyn SigningJournalStorage>);
+        let journal = journal(store.clone() as Arc<dyn SigningJournalStorage>);
         assert!(matches!(
             journal.reserve_for_sign(&prop, &binding(1)).expect("reserve proposal"),
             ReservationOutcome::FreshlyReserved(_)
@@ -274,7 +293,7 @@ fn proposal_and_vote_same_view_are_independent_records_across_reopen() {
     }
 
     let store = open_store(dir.path());
-    let journal = SigningReservationJournal::attach(store as Arc<dyn SigningJournalStorage>);
+    let journal = journal(store as Arc<dyn SigningJournalStorage>);
     // Both recovered independently as potentially-signed (distinct keys).
     assert!(matches!(
         journal.reserve_for_sign(&prop, &binding(1)).expect("lookup proposal"),
@@ -295,7 +314,7 @@ fn corrupt_record_on_reopen_fails_closed() {
 
     {
         let store = open_store(dir.path());
-        let journal = SigningReservationJournal::attach(store.clone() as Arc<dyn SigningJournalStorage>);
+        let journal = journal(store.clone() as Arc<dyn SigningJournalStorage>);
         assert!(matches!(
             journal.reserve_for_sign(&pos, &bind).expect("reserve"),
             ReservationOutcome::FreshlyReserved(_)
@@ -316,10 +335,11 @@ fn corrupt_record_on_reopen_fails_closed() {
         .put_signing_record_synced(&key, &bytes)
         .expect("rewrite corrupted record");
 
-    let journal = SigningReservationJournal::attach(store as Arc<dyn SigningJournalStorage>);
-    let err = journal
-        .reserve_for_sign(&pos, &bind)
-        .expect_err("corrupt record must fail closed");
+    // Eager open-time streaming validation surfaces the corruption: opening the
+    // established journal fails closed (no handle, no permit) rather than
+    // deferring to the first reservation lookup.
+    let err = SigningReservationJournal::open(store as Arc<dyn SigningJournalStorage>)
+        .expect_err("corrupt record must fail closed at open");
     assert!(matches!(err, JournalError::Corruption(_)), "got {:?}", err);
 }
 
@@ -332,7 +352,7 @@ fn truncated_record_on_reopen_fails_closed() {
 
     {
         let store = open_store(dir.path());
-        let journal = SigningReservationJournal::attach(store.clone() as Arc<dyn SigningJournalStorage>);
+        let journal = journal(store.clone() as Arc<dyn SigningJournalStorage>);
         assert!(matches!(
             journal.reserve_for_sign(&pos, &bind).expect("reserve"),
             ReservationOutcome::FreshlyReserved(_)
@@ -351,10 +371,8 @@ fn truncated_record_on_reopen_fails_closed() {
         .put_signing_record_synced(&key, &truncated)
         .expect("rewrite truncated record");
 
-    let journal = SigningReservationJournal::attach(store as Arc<dyn SigningJournalStorage>);
-    let err = journal
-        .reserve_for_sign(&pos, &bind)
-        .expect_err("truncated record must fail closed");
+    let err = SigningReservationJournal::open(store as Arc<dyn SigningJournalStorage>)
+        .expect_err("truncated record must fail closed at open");
     assert!(matches!(err, JournalError::Truncated), "got {:?}", err);
 }
 
@@ -368,6 +386,14 @@ fn unknown_version_record_on_reopen_fails_closed() {
     let bind = binding(0x5C);
 
     let store = open_store(dir.path());
+    // Establish the journal first (durable initialization metadata) so this is
+    // an OPEN of an established journal — the unsupported-version record is then
+    // surfaced by streaming validation, not masked by a legacy-records refusal.
+    SigningReservationJournal::initialize(
+        store.clone() as Arc<dyn SigningJournalStorage>,
+        DEFAULT_MAX_RESERVED_POSITIONS,
+    )
+    .expect("initialize fresh journal");
     let key = pos.storage_key();
     // Inject a correctly-checksummed record with a bumped format version.
     let injected =
@@ -376,10 +402,12 @@ fn unknown_version_record_on_reopen_fails_closed() {
         .put_signing_record_synced(&key, &injected)
         .expect("store unsupported-version record");
 
-    let journal = SigningReservationJournal::attach(store as Arc<dyn SigningJournalStorage>);
-    let err = journal
-        .reserve_for_sign(&pos, &bind)
-        .expect_err("unsupported version must fail closed");
+    // Drop the in-process established domain by reopening the backend directory,
+    // forcing a full streaming revalidation of the on-disk namespace.
+    drop(store);
+    let store = open_store(dir.path());
+    let err = SigningReservationJournal::open(store as Arc<dyn SigningJournalStorage>)
+        .expect_err("unsupported version must fail closed at open");
     assert!(
         matches!(err, JournalError::UnsupportedRecordVersion(v) if v == SIGNING_RECORD_FORMAT_VERSION + 7),
         "got {:?}",
@@ -398,7 +426,7 @@ fn missing_expected_signature_on_reopen_fails_closed() {
 
     {
         let store = open_store(dir.path());
-        let journal = SigningReservationJournal::attach(store.clone() as Arc<dyn SigningJournalStorage>);
+        let journal = journal(store.clone() as Arc<dyn SigningJournalStorage>);
         let cap = reserve_and_invoke(&journal, &pos, &bind);
         journal
             .record_signed_result(&cap, &signature)
@@ -419,10 +447,8 @@ fn missing_expected_signature_on_reopen_fails_closed() {
         .put_signing_record_synced(&key, &bytes)
         .expect("rewrite");
 
-    let journal = SigningReservationJournal::attach(store as Arc<dyn SigningJournalStorage>);
-    let err = journal
-        .reserve_for_sign(&pos, &bind)
-        .expect_err("corrupt signed record must fail closed");
+    let err = SigningReservationJournal::open(store as Arc<dyn SigningJournalStorage>)
+        .expect_err("corrupt signed record must fail closed at open");
     assert!(matches!(err, JournalError::Corruption(_)), "got {:?}", err);
 }
 
@@ -436,7 +462,7 @@ fn second_handle_over_same_store_cannot_get_second_permit() {
     let bind = binding(0x7E);
 
     let store = open_store(dir.path());
-    let journal_a = SigningReservationJournal::attach(store.clone() as Arc<dyn SigningJournalStorage>);
+    let journal_a = journal(store.clone() as Arc<dyn SigningJournalStorage>);
     assert!(matches!(
         journal_a.reserve_for_sign(&pos, &bind).expect("reserve A"),
         ReservationOutcome::FreshlyReserved(_)
@@ -444,7 +470,7 @@ fn second_handle_over_same_store_cannot_get_second_permit() {
 
     // A second, independently-attached handle sharing the SAME durable store
     // (same backend instance ⇒ ONE shared ownership domain).
-    let journal_b = SigningReservationJournal::attach(store as Arc<dyn SigningJournalStorage>);
+    let journal_b = journal(store as Arc<dyn SigningJournalStorage>);
     assert!(
         matches!(
             journal_b
@@ -454,6 +480,308 @@ fn second_handle_over_same_store_cannot_get_second_permit() {
         ),
         "a second handle must not manufacture a second live continuation from a durable Reserved record"
     );
+}
+
+// ---------------------------------------------------------------------------
+// Correction E — explicit initialization / established-open validation and
+// persistent journal-wide capacity over the real RocksDB backend.
+// ---------------------------------------------------------------------------
+
+/// Explicit empty-namespace initialization succeeds and durably publishes
+/// initialization metadata; a real close/reopen then *opens and validates* the
+/// established journal (never re-initializing it).
+#[test]
+fn initialize_empty_namespace_succeeds_and_reopen_validates() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let pos = proposal_position(31);
+    let bind = binding(0x11);
+
+    {
+        let store = open_store(dir.path());
+        let j = SigningReservationJournal::initialize(
+            store.clone() as Arc<dyn SigningJournalStorage>,
+            DEFAULT_MAX_RESERVED_POSITIONS,
+        )
+        .expect("explicit initialize of empty namespace");
+        // Initialization metadata is durably present.
+        assert!(
+            store.get_signing_metadata().expect("meta read").is_some(),
+            "initialization must durably publish metadata"
+        );
+        // The initialized journal admits a fresh reservation.
+        assert!(matches!(
+            j.reserve_for_sign(&pos, &bind).expect("reserve"),
+            ReservationOutcome::FreshlyReserved(_)
+        ));
+    }
+
+    // Reopen the same on-disk directory and OPEN (validate) the established
+    // journal; the recovered reservation is potentially-signed.
+    let store = open_store(dir.path());
+    let j = SigningReservationJournal::open(store as Arc<dyn SigningJournalStorage>)
+        .expect("open established journal after reopen");
+    assert!(matches!(
+        j.reserve_for_sign(&pos, &bind).expect("recovered lookup"),
+        ReservationOutcome::PotentiallySigned
+    ));
+}
+
+/// Opening an established journal on absent metadata refuses fail-closed with
+/// `NotInitialized` and does NOT create metadata (never falls back to init).
+#[test]
+fn open_absent_metadata_refuses_not_initialized_without_creating_metadata() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let store = open_store(dir.path());
+    let err = SigningReservationJournal::open(store.clone() as Arc<dyn SigningJournalStorage>)
+        .expect_err("absent metadata must refuse");
+    assert!(matches!(err, JournalError::NotInitialized), "got {:?}", err);
+    // Refusal must not have written any initialization metadata.
+    assert!(
+        store.get_signing_metadata().expect("meta read").is_none(),
+        "a refused open must not create metadata"
+    );
+}
+
+/// Records present without initialization metadata refuse fail-closed as legacy
+/// records; they are neither adopted, migrated, nor deleted.
+#[test]
+fn records_without_metadata_refuses_as_legacy() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let pos = proposal_position(33);
+    let store = open_store(dir.path());
+    // A record byte-blob exists under a valid record key, but NO initialization
+    // metadata was ever published (a legacy / foreign namespace).
+    store
+        .put_signing_record_synced(&pos.storage_key(), &[0x01, 0x02, 0x03, 0x04])
+        .expect("write legacy record");
+    let err = SigningReservationJournal::open(store.clone() as Arc<dyn SigningJournalStorage>)
+        .expect_err("records without metadata must refuse");
+    assert!(
+        matches!(err, JournalError::LegacyRecordsWithoutMetadata),
+        "got {:?}",
+        err
+    );
+    // The legacy record is left untouched (not migrated or deleted).
+    assert!(
+        store
+            .get_signing_record(&pos.storage_key())
+            .expect("read")
+            .is_some(),
+        "a refused open must not delete legacy records"
+    );
+}
+
+/// Repeated initialization over an established (reopened) backend refuses with
+/// `AlreadyInitialized` and preserves the established state — it never resets.
+#[test]
+fn duplicate_initialize_over_reopened_backend_refuses_and_preserves_state() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let pos = proposal_position(35);
+    let bind = binding(0x22);
+
+    {
+        let store = open_store(dir.path());
+        let j = SigningReservationJournal::initialize(
+            store as Arc<dyn SigningJournalStorage>,
+            4,
+        )
+        .expect("initialize");
+        assert!(matches!(
+            j.reserve_for_sign(&pos, &bind).expect("reserve"),
+            ReservationOutcome::FreshlyReserved(_)
+        ));
+    }
+
+    // Reopen: a repeated initialization must be refused (metadata present).
+    let store = open_store(dir.path());
+    let err = SigningReservationJournal::initialize(
+        store.clone() as Arc<dyn SigningJournalStorage>,
+        4,
+    )
+    .expect_err("repeat initialize must refuse");
+    assert!(matches!(err, JournalError::AlreadyInitialized), "got {:?}", err);
+
+    // The established state is intact: opening validates and the earlier
+    // reservation is recovered as potentially-signed.
+    let j = SigningReservationJournal::open(store as Arc<dyn SigningJournalStorage>)
+        .expect("open established after refused re-init");
+    assert!(matches!(
+        j.reserve_for_sign(&pos, &bind).expect("recovered lookup"),
+        ReservationOutcome::PotentiallySigned
+    ));
+}
+
+/// One journal-wide position limit is enforced, both `Reserved` positions count
+/// toward it, refusal at capacity is `Exhausted`, and the same limit survives a
+/// real close/reopen. Recovery of an existing position never frees capacity.
+#[test]
+fn capacity_limit_enforced_and_survives_reopen() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let p1 = proposal_position(41);
+    let p2 = vote_position(41);
+    let p3 = proposal_position(42);
+
+    {
+        let store = open_store(dir.path());
+        let j = SigningReservationJournal::initialize(
+            store as Arc<dyn SigningJournalStorage>,
+            2,
+        )
+        .expect("initialize with limit 2");
+        assert!(matches!(
+            j.reserve_for_sign(&p1, &binding(1)).expect("reserve p1"),
+            ReservationOutcome::FreshlyReserved(_)
+        ));
+        assert!(matches!(
+            j.reserve_for_sign(&p2, &binding(2)).expect("reserve p2"),
+            ReservationOutcome::FreshlyReserved(_)
+        ));
+        // At capacity (two distinct persisted positions): a third distinct
+        // position is refused.
+        assert!(matches!(
+            j.reserve_for_sign(&p3, &binding(3)).expect("reserve p3"),
+            ReservationOutcome::Exhausted
+        ));
+    }
+
+    // Reopen: the persisted count (2) and limit (2) are restored from metadata
+    // and validated against the two stored records.
+    let store = open_store(dir.path());
+    let j = SigningReservationJournal::open(store as Arc<dyn SigningJournalStorage>)
+        .expect("open established journal");
+    // Still at capacity after reopen.
+    assert!(matches!(
+        j.reserve_for_sign(&p3, &binding(3)).expect("reserve p3 after reopen"),
+        ReservationOutcome::Exhausted
+    ));
+    // Recovering an existing position does not consume a further position and
+    // does not free capacity for a new one.
+    assert!(matches!(
+        j.reserve_for_sign(&p1, &binding(1)).expect("recovered p1"),
+        ReservationOutcome::PotentiallySigned
+    ));
+    assert!(matches!(
+        j.reserve_for_sign(&p3, &binding(3)).expect("reserve p3 again"),
+        ReservationOutcome::Exhausted
+    ));
+}
+
+/// A second supported handle over the same backend inherits the one established
+/// limit and cannot relax it, and re-initialization to a larger limit is refused.
+#[test]
+fn second_handle_cannot_relax_capacity() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let p1 = proposal_position(51);
+    let p2 = proposal_position(52);
+
+    let store = open_store(dir.path());
+    let j_a = SigningReservationJournal::initialize(
+        store.clone() as Arc<dyn SigningJournalStorage>,
+        1,
+    )
+    .expect("initialize with limit 1");
+    assert!(matches!(
+        j_a.reserve_for_sign(&p1, &binding(1)).expect("reserve p1"),
+        ReservationOutcome::FreshlyReserved(_)
+    ));
+
+    // A second handle over the SAME backend instance shares the ownership domain
+    // and inherits the established limit; it cannot admit a new position.
+    let j_b = SigningReservationJournal::open(store.clone() as Arc<dyn SigningJournalStorage>)
+        .expect("open second handle");
+    assert!(
+        matches!(
+            j_b.reserve_for_sign(&p2, &binding(2)).expect("reserve p2 via B"),
+            ReservationOutcome::Exhausted
+        ),
+        "a second handle must not relax the established capacity"
+    );
+
+    // Re-initialization to a larger limit over the established backend refuses.
+    let err = SigningReservationJournal::initialize(
+        store as Arc<dyn SigningJournalStorage>,
+        DEFAULT_MAX_RESERVED_POSITIONS,
+    )
+    .expect_err("re-initialize to relax capacity must refuse");
+    assert!(matches!(err, JournalError::AlreadyInitialized), "got {:?}", err);
+}
+
+/// A stored key that does not match its record's canonical position is an
+/// accounting inconsistency and refuses fail-closed on open.
+#[test]
+fn key_record_mismatch_refuses_on_open() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let p1 = proposal_position(61);
+    let p2 = proposal_position(62);
+    let bind = binding(0x77);
+
+    // Establish a journal with one genuine reservation and capture its exact
+    // stored record bytes.
+    let record_bytes = {
+        let store = open_store(dir.path());
+        let j = SigningReservationJournal::initialize(
+            store.clone() as Arc<dyn SigningJournalStorage>,
+            4,
+        )
+        .expect("initialize");
+        assert!(matches!(
+            j.reserve_for_sign(&p1, &bind).expect("reserve p1"),
+            ReservationOutcome::FreshlyReserved(_)
+        ));
+        store
+            .get_signing_record(&p1.storage_key())
+            .expect("read p1")
+            .expect("p1 present")
+    };
+
+    // Reopen and store p1's record bytes under p2's key: the stored key no longer
+    // matches the record's canonical position.
+    let store = open_store(dir.path());
+    store
+        .put_signing_record_synced(&p2.storage_key(), &record_bytes)
+        .expect("write mismatched record");
+    drop(store);
+
+    let store = open_store(dir.path());
+    let err = SigningReservationJournal::open(store as Arc<dyn SigningJournalStorage>)
+        .expect_err("key/record mismatch must refuse");
+    assert!(
+        matches!(err, JournalError::AccountingInconsistent(_)),
+        "got {:?}",
+        err
+    );
+}
+
+/// Explicit observable capacity accounting after a real reopen (uses the
+/// `test-utils` introspection accessors).
+#[cfg(feature = "test-utils")]
+#[test]
+fn established_limit_and_count_are_observable_after_reopen() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let p1 = proposal_position(71);
+    let p2 = vote_position(71);
+
+    {
+        let store = open_store(dir.path());
+        let j = SigningReservationJournal::initialize(
+            store as Arc<dyn SigningJournalStorage>,
+            3,
+        )
+        .expect("initialize with limit 3");
+        assert_eq!(j.established_limit(), 3);
+        assert_eq!(j.reserved_position_count(), 0);
+        let _ = j.reserve_for_sign(&p1, &binding(1)).expect("reserve p1");
+        let _ = j.reserve_for_sign(&p2, &binding(2)).expect("reserve p2");
+        assert_eq!(j.reserved_position_count(), 2);
+    }
+
+    let store = open_store(dir.path());
+    let j = SigningReservationJournal::open(store as Arc<dyn SigningJournalStorage>)
+        .expect("open established journal");
+    // The established limit and the counted positions are restored from durable
+    // metadata and validated against the two stored records.
+    assert_eq!(j.established_limit(), 3);
+    assert_eq!(j.reserved_position_count(), 2);
 }
 
 // ---------------------------------------------------------------------------
@@ -472,7 +800,7 @@ fn publication_is_idempotent_and_refuses_conflicting_overwrite() {
     let signature = vec![0xC0, 0xFF, 0xEE, 0x01];
 
     let store = open_store(dir.path());
-    let journal = SigningReservationJournal::attach(store as Arc<dyn SigningJournalStorage>);
+    let journal = journal(store as Arc<dyn SigningJournalStorage>);
     let cap = reserve_and_invoke(&journal, &pos, &bind);
     journal
         .record_signed_result(&cap, &signature)
@@ -508,7 +836,7 @@ fn d7d10_child_reserve_then_abort() {
     };
     let path = std::path::PathBuf::from(db);
     let store = open_store(&path);
-    let journal = SigningReservationJournal::attach(store as Arc<dyn SigningJournalStorage>);
+    let journal = journal(store as Arc<dyn SigningJournalStorage>);
     match journal
         .reserve_for_sign(&child_position(), &child_binding())
         .expect("child reservation must succeed")
@@ -566,7 +894,7 @@ fn reserved_only_child_death_then_reopen_refuses() {
     // Reopen the store the child left behind; a fresh journal has an empty
     // live-permit map, exactly the post-death posture.
     let store = open_store(&db_path);
-    let journal = SigningReservationJournal::attach(store as Arc<dyn SigningJournalStorage>);
+    let journal = journal(store as Arc<dyn SigningJournalStorage>);
     assert!(
         matches!(
             journal

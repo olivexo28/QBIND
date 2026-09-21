@@ -386,6 +386,15 @@ const EPOCH_TRANSITION_MARKER_KEY: &[u8] = b"meta:epoch_transition_marker";
 /// `sig:` + the journal's position-key bytes.
 const SIGNING_RECORD_STORAGE_PREFIX: &[u8] = b"sig:";
 
+/// Run 422 D7-D10 Correction E — full storage key for the signing journal's
+/// bounded, versioned **initialization metadata**. It lives inside the signing
+/// namespace (`sig:` prefix) but is deliberately NOT a decision-record key: it
+/// does not begin with the record key prefix `sig:sj:v1:`, so it is never
+/// yielded by the record iterator, and `meta:` sorts before `sj:` so it lies
+/// outside the record iteration range. This introduces no new global schema
+/// namespace and cannot alias any decision key.
+const SIGNING_METADATA_STORAGE_KEY: &[u8] = b"sig:meta:v1";
+
 // ============================================================================
 // Epoch Transition Batch (M16)
 // ============================================================================
@@ -1323,6 +1332,74 @@ impl crate::signing_reservation_journal::SigningJournalStorage for RocksDbConsen
             .map_err(|e| StorageError::Io(e.to_string()))
     }
 
+    fn get_signing_metadata(&self) -> Result<Option<Vec<u8>>, StorageError> {
+        match self.db.get(SIGNING_METADATA_STORAGE_KEY) {
+            Ok(Some(raw)) => {
+                let payload = unwrap_checksummed(&raw, "signing_metadata")?;
+                Ok(Some(payload))
+            }
+            Ok(None) => Ok(None),
+            Err(e) => Err(StorageError::Io(e.to_string())),
+        }
+    }
+
+    fn put_signing_metadata_synced(&self, value: &[u8]) -> Result<(), StorageError> {
+        let wrapped = wrap_checksummed(value);
+        let mut write_opts = rocksdb::WriteOptions::default();
+        write_opts.set_sync(true);
+        self.db
+            .put_opt(SIGNING_METADATA_STORAGE_KEY, &wrapped, &write_opts)
+            .map_err(|e| StorageError::Io(e.to_string()))
+    }
+
+    fn put_signing_record_and_metadata_synced(
+        &self,
+        record_key: &[u8],
+        record_value: &[u8],
+        metadata_value: &[u8],
+    ) -> Result<(), StorageError> {
+        // A single RocksDB WriteBatch committed with sync=true makes the record
+        // and the advanced accounting metadata durable together, atomically.
+        let full = Self::signing_record_key(record_key);
+        let mut batch = rocksdb::WriteBatch::default();
+        batch.put(&full, &wrap_checksummed(record_value));
+        batch.put(SIGNING_METADATA_STORAGE_KEY, &wrap_checksummed(metadata_value));
+        let mut write_opts = rocksdb::WriteOptions::default();
+        write_opts.set_sync(true);
+        self.db
+            .write_opt(batch, &write_opts)
+            .map_err(|e| StorageError::Io(e.to_string()))
+    }
+
+    fn for_each_signing_record(
+        &self,
+        visitor: &mut dyn FnMut(&[u8], &[u8]) -> Result<(), StorageError>,
+    ) -> Result<(), StorageError> {
+        // Bounded streaming over record keys only. The record range is
+        // `sig:` + `sj:v1:`; iterate forward from that prefix and stop at the
+        // first key outside it. The metadata key `sig:meta:v1` is before this
+        // range and never visited.
+        let mut prefix =
+            Vec::with_capacity(SIGNING_RECORD_STORAGE_PREFIX.len() + crate::signing_reservation_journal::SIGNING_RECORD_KEY_PREFIX.len());
+        prefix.extend_from_slice(SIGNING_RECORD_STORAGE_PREFIX);
+        prefix.extend_from_slice(crate::signing_reservation_journal::SIGNING_RECORD_KEY_PREFIX);
+        let iter = self
+            .db
+            .iterator(rocksdb::IteratorMode::From(&prefix, rocksdb::Direction::Forward));
+        for item in iter {
+            let (raw_key, raw_val) = item.map_err(|e| StorageError::Io(e.to_string()))?;
+            if !raw_key.starts_with(&prefix) {
+                break; // left the record range
+            }
+            // Strip the backend storage prefix so the visitor sees the
+            // journal-level record key (same space as `get_signing_record`).
+            let journal_key = &raw_key[SIGNING_RECORD_STORAGE_PREFIX.len()..];
+            let payload = unwrap_checksummed(&raw_val, "signing_record")?;
+            visitor(journal_key, &payload)?;
+        }
+        Ok(())
+    }
+
     fn signing_ownership_domain(
         &self,
     ) -> Arc<crate::signing_reservation_journal::SigningOwnershipDomain> {
@@ -1363,6 +1440,14 @@ pub struct InMemoryConsensusStorage {
     signing_domain: std::sync::OnceLock<Arc<crate::signing_reservation_journal::SigningOwnershipDomain>>,
 }
 
+/// Run 422 D7-D10 Correction E — reserved key under which
+/// `InMemoryConsensusStorage` stores the signing initialization metadata inside
+/// the SAME map as the records, so the atomic record+metadata write is applied
+/// under a single lock acquisition (an honest model of atomicity — NOT durable
+/// or crash-atomic). It does not begin with the record key prefix `sj:v1:`, so
+/// it is excluded from record iteration.
+const INMEM_SIGNING_METADATA_KEY: &[u8] = b"__signing_metadata_v1__";
+
 /// Run 422 D7-D10 — MODEL signing-journal backing store for
 /// `InMemoryConsensusStorage`. It provides NO power-loss durability; the synced
 /// write simply updates the in-memory map. It exists only for unit/model tests
@@ -1382,6 +1467,63 @@ impl crate::signing_reservation_journal::SigningJournalStorage for InMemoryConse
             .write()
             .map_err(|e| StorageError::Other(format!("lock poisoned: {}", e)))?;
         map.insert(key.to_vec(), value.to_vec());
+        Ok(())
+    }
+
+    fn get_signing_metadata(&self) -> Result<Option<Vec<u8>>, StorageError> {
+        let map = self
+            .signing_records
+            .read()
+            .map_err(|e| StorageError::Other(format!("lock poisoned: {}", e)))?;
+        Ok(map.get(INMEM_SIGNING_METADATA_KEY).cloned())
+    }
+
+    fn put_signing_metadata_synced(&self, value: &[u8]) -> Result<(), StorageError> {
+        let mut map = self
+            .signing_records
+            .write()
+            .map_err(|e| StorageError::Other(format!("lock poisoned: {}", e)))?;
+        map.insert(INMEM_SIGNING_METADATA_KEY.to_vec(), value.to_vec());
+        Ok(())
+    }
+
+    fn put_signing_record_and_metadata_synced(
+        &self,
+        record_key: &[u8],
+        record_value: &[u8],
+        metadata_value: &[u8],
+    ) -> Result<(), StorageError> {
+        // Single lock acquisition covers BOTH inserts: an honest in-process model
+        // of an atomic update (NOT durable, NOT crash-atomic).
+        let mut map = self
+            .signing_records
+            .write()
+            .map_err(|e| StorageError::Other(format!("lock poisoned: {}", e)))?;
+        map.insert(record_key.to_vec(), record_value.to_vec());
+        map.insert(INMEM_SIGNING_METADATA_KEY.to_vec(), metadata_value.to_vec());
+        Ok(())
+    }
+
+    fn for_each_signing_record(
+        &self,
+        visitor: &mut dyn FnMut(&[u8], &[u8]) -> Result<(), StorageError>,
+    ) -> Result<(), StorageError> {
+        let map = self
+            .signing_records
+            .read()
+            .map_err(|e| StorageError::Other(format!("lock poisoned: {}", e)))?;
+        // Visit only decision records (`sj:v1:` prefix); the metadata key is
+        // excluded. Sort keys for a deterministic, storage-key-like order.
+        let record_prefix = crate::signing_reservation_journal::SIGNING_RECORD_KEY_PREFIX;
+        let mut keys: Vec<&Vec<u8>> = map
+            .keys()
+            .filter(|k| k.starts_with(record_prefix))
+            .collect();
+        keys.sort();
+        for k in keys {
+            let v = &map[k];
+            visitor(k, v)?;
+        }
         Ok(())
     }
 
