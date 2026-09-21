@@ -127,9 +127,10 @@ use crate::peer_consensus_binding::{
 };
 use crate::storage::{ConsensusStorage, EpochTransitionBatch, StorageError};
 use crate::signing_reservation_journal::{
-    BindingDigest, DecisionBindingInput, ReservationOutcome, SigningKind, SigningPosition,
-    SigningReservationJournal,
+    BindingDigest, DecisionBindingInput, ReservationOutcome, ResultPublicationCapability,
+    SigningKind, SigningPosition, SigningReservationJournal,
 };
+use qbind_crypto::ConsensusSigSuiteId;
 use crate::validator_signer::ValidatorSigner;
 use crate::vm_v0_runtime::{SnapshotAnchor, VmV0RuntimeError, VmV0RuntimeState};
 
@@ -1944,6 +1945,39 @@ pub struct BinaryConsensusLoopInboundStats {
     pub outbound_vote_signer_identity_mismatch_total: u64,
     pub outbound_vote_post_journal_authorization_revalidation_failed_total: u64,
     pub outbound_vote_bound_context_unbound_total: u64,
+    // Run 422 D7-D10 Correction A/B — additional bounded, distinct categories.
+    // Kept SEPARATE from the admission/journal/pre-facade/post-journal
+    // categories above so a refusal at one stage is never relabelled as
+    // another stage's outcome.
+    //   * `*_required_admission_missing_total`: under
+    //     [`ConsensusVerificationPolicy::Required`] the shared signing guard was
+    //     reached with NO original admission (snapshot+ticket pair) to
+    //     re-confirm after journal work. Refused BEFORE any journal access,
+    //     retained-result reuse, or signer invocation. This is the Correction A
+    //     policy-aware requirement at the shared boundary itself, distinct from
+    //     the outer callers' earlier missing-authorization rejections and from
+    //     the test-only `LocalFixtureUnsigned` passthrough (which has no bound
+    //     admission to re-confirm).
+    //   * `*_signer_key_entry_missing_total`: no governed suite/key entry exists
+    //     for the bound (selected) validator in the admitted key provider.
+    //     Refused BEFORE journal lookup and signer invocation.
+    //   * `*_signer_suite_mismatch_total`: the bound signer's suite does not
+    //     match the governed suite the admitted key provider records for that
+    //     validator. Refused BEFORE journal lookup and signer invocation; the
+    //     suite field is never rewritten to make it pass. This establishes
+    //     signer/governance suite correspondence only — it does NOT prove
+    //     possession of the corresponding private key.
+    //   * `*_signer_backend_unavailable_total`: the admitted backend registry
+    //     does not permit/supply a verifier backend for the governed suite.
+    //     Refused BEFORE journal lookup and signer invocation.
+    pub outbound_proposal_required_admission_missing_total: u64,
+    pub outbound_proposal_signer_key_entry_missing_total: u64,
+    pub outbound_proposal_signer_suite_mismatch_total: u64,
+    pub outbound_proposal_signer_backend_unavailable_total: u64,
+    pub outbound_vote_required_admission_missing_total: u64,
+    pub outbound_vote_signer_key_entry_missing_total: u64,
+    pub outbound_vote_signer_suite_mismatch_total: u64,
+    pub outbound_vote_signer_backend_unavailable_total: u64,
 }
 
 /// Transition state for the bounded "restore-catchup mode → normal
@@ -3932,9 +3966,14 @@ fn record_post_journal_vote_rejection(
 ///  * `Ok(Some(identity))` when BOTH a wired snapshot and the exact ticket its
 ///    owner issued at admission are present (the `Required` path): the guard
 ///    MUST re-confirm the original admission after journal work.
-///  * `Ok(None)` when NEITHER is present (the test-only `LocalFixtureUnsigned`
-///    passthrough): there is no bound admission to re-confirm, but signer-bearing
-///    fixtures still require a journal and the identity/version checks.
+///  * `Ok(None)` when NEITHER is present. This is NOT by itself an
+///    authorization to sign without revalidation: the shared guard applies the
+///    Correction A policy relationship, so under
+///    [`ConsensusVerificationPolicy::Required`] a `None` admission is refused
+///    (`outbound_*_required_admission_missing_total`) BEFORE any journal access
+///    or signer invocation. Only the test-only `LocalFixtureUnsigned` policy
+///    reaches the journal/identity/version/suite checks with no bound admission
+///    to re-confirm.
 ///  * `Err(())` when EXACTLY ONE is present — a wired snapshot without its
 ///    corresponding ticket, or an orphan ticket. This never occurs on the
 ///    production admit path (admission issues them as a pair with a wired
@@ -4045,20 +4084,153 @@ fn guarded_sign_proposal_for_broadcast(
         }
     };
 
+    // (2b) Correction A (Run 422 D7-D10) — policy-aware REQUIRED admission at
+    //      the shared guard itself. Under the fail-closed
+    //      `ConsensusVerificationPolicy::Required` default, an original
+    //      admission (the coherently-bound snapshot AND the exact ticket its
+    //      owner issued at admission) MUST be present so it can be re-confirmed
+    //      after journal work. Its absence is refused HERE — before any journal
+    //      access (`reserve_for_sign`), retained-result reuse, or signer
+    //      invocation — rather than silently signing without revalidation. This
+    //      is the shared-guard contract; it does not rely on the outer callers'
+    //      earlier missing-authorization rejections. `resolve_admitted_identity`
+    //      still refuses an impossible half-pair (snapshot XOR ticket)
+    //      fail-closed; here neither component is accepted through the
+    //      test-only `LocalFixtureUnsigned` case: a signer-bearing fixture under
+    //      that policy has no bound admission to re-confirm but still reaches the
+    //      journal and the identity/version/suite checks below. The missing
+    //      journal above keeps its precedence.
+    if admission.is_none() && verification_policy.requires_context() {
+        inbound_stats.outbound_proposal_required_admission_missing_total = inbound_stats
+            .outbound_proposal_required_admission_missing_total
+            .saturating_add(1);
+        eprintln!(
+            "[binary-consensus] Run 422 D7-D10 Correction A: outbound proposal NOT signed \
+             (required admission absent at shared guard) — fail-closed, no journal access, \
+             no signer call"
+        );
+        return None;
+    }
+
     guarded_sign_proposal_reserved(proposal, ctx, admission, signer, journal, inbound_stats)
+}
+
+/// Run 422 D7-D10 Correction B — governed suite/key/backend correspondence for
+/// the OUTBOUND signer selection, reusing the admitted
+/// [`SuiteAwareValidatorKeyProvider`] and [`ConsensusSigBackendRegistry`] and
+/// their established policy semantics (no parallel suite allowlist or parser).
+///
+/// Returns `Err(())` — after recording the matching bounded counter via the
+/// supplied closures — when any of the following is false:
+///  * a governed suite/key entry exists for the bound (selected) validator,
+///  * the bound signer's suite matches that governed suite, and
+///  * the admitted backend registry permits and supplies the governed suite
+///    backend.
+///
+/// These three checks are kept distinct from signer identity/membership
+/// correspondence (checked earlier) and from cryptographic verification that a
+/// returned signature matches the governed public key (the retained-result D6
+/// verification). They establish signer/governance suite correspondence and
+/// backend availability ONLY — they do NOT prove possession of the
+/// corresponding private key, and no key introspection is performed.
+fn check_governed_suite_backend(
+    ctx: &ProposalVoteAuthority,
+    signer: &Arc<dyn ValidatorSigner>,
+    bound_id: ValidatorId,
+    record_key_missing: impl Fn(&mut BinaryConsensusLoopInboundStats),
+    record_suite_mismatch: impl Fn(&mut BinaryConsensusLoopInboundStats),
+    record_backend_unavailable: impl Fn(&mut BinaryConsensusLoopInboundStats),
+    inbound_stats: &mut BinaryConsensusLoopInboundStats,
+) -> Result<(), ()> {
+    let governed_suite = match ctx.key_provider.get_suite_and_key(bound_id) {
+        Some((suite, _pk)) => suite,
+        None => {
+            record_key_missing(inbound_stats);
+            return Err(());
+        }
+    };
+    if ConsensusSigSuiteId::new(signer.suite_id()) != governed_suite {
+        record_suite_mismatch(inbound_stats);
+        return Err(());
+    }
+    if ctx.backend_registry.get_backend(governed_suite).is_none() {
+        record_backend_unavailable(inbound_stats);
+        return Err(());
+    }
+    Ok(())
+}
+
+/// Run 422 D7-D10 Correction C — a Proposal signing operation that has passed
+/// the pre-journal identity/version/suite checks AND completed its durable
+/// journal work (fresh reservation with a consumed one-use continuation, or an
+/// acknowledged retained result). It is the split point between the durable
+/// journal phase and the reconfirm/sign/publish completion phase, so the exact
+/// production completion path can be exercised after a between-phase mutation
+/// without duplicating the reconfirm/sign/publish logic in a test helper.
+///
+/// It carries only the prepared, canonically-bound message (with its immutable
+/// signed fields already assigned), the exact D6 preimage, and — for a fresh
+/// operation — the operation-bound one-use publication capability. It never
+/// carries a fresh ticket, a reconstructed capability, or a replacement signer.
+enum PreparedProposalSigning {
+    /// A fresh durable reservation whose one-use continuation was consumed into
+    /// the publication capability for THIS operation. Completion re-confirms the
+    /// original admission, signs EXACTLY once, and records the result.
+    Fresh {
+        proposal: BlockProposal,
+        preimage: Vec<u8>,
+        publish_cap: ResultPublicationCapability,
+    },
+    /// An exact retry whose acknowledged retained signature is reused. Completion
+    /// re-confirms the original admission, then D6-verifies the retained result
+    /// before authorized reuse; it never invokes the signer.
+    Retained {
+        proposal: BlockProposal,
+        retained_sig: Vec<u8>,
+    },
 }
 
 /// Run 422 D7-D10 — reservation-guarded Proposal signing for an operation that
 /// has already passed the shared authority/signer/wire-domain admission and has
 /// a present journal. See [`guarded_sign_proposal_for_broadcast`].
+///
+/// This is the production caller: it runs the SAME
+/// [`prepare_proposal_signing_reservation`] then
+/// [`complete_proposal_signing`] the staged Correction-C tests use, so a
+/// between-phase authorization mutation is exercised against the real
+/// completion path rather than a duplicated helper.
 fn guarded_sign_proposal_reserved(
-    mut proposal: BlockProposal,
+    proposal: BlockProposal,
     ctx: &ProposalVoteAuthority,
     admission: Option<&AdmittedSigningIdentity>,
     signer: &Arc<dyn ValidatorSigner>,
     journal: &SigningReservationJournal,
     inbound_stats: &mut BinaryConsensusLoopInboundStats,
 ) -> Option<BlockProposal> {
+    let prepared =
+        prepare_proposal_signing_reservation(proposal, ctx, signer, journal, inbound_stats)?;
+    complete_proposal_signing(prepared, ctx, admission, signer, journal, inbound_stats)
+}
+
+/// Run 422 D7-D10 Correction B/C — the pre-signer PREPARATION + durable journal
+/// phase for a Proposal: the per-kind identity/version checks, the governed
+/// suite/key/backend correspondence checks, the permitted suite assignment, the
+/// D6 preimage + exact-decision binding, and the exclusive conflict lookup +
+/// durable reservation (with the one-use continuation consumed).
+///
+/// Every refusal here happens BEFORE the signer invocation and, for the
+/// identity/version/suite checks, BEFORE any journal lookup or reservation. On a
+/// fresh reservation the returned [`PreparedProposalSigning::Fresh`] already
+/// holds the operation-bound publication capability. This function performs NO
+/// post-journal authorization revalidation and NO signing — those belong to
+/// [`complete_proposal_signing`].
+fn prepare_proposal_signing_reservation(
+    mut proposal: BlockProposal,
+    ctx: &ProposalVoteAuthority,
+    signer: &Arc<dyn ValidatorSigner>,
+    journal: &SigningReservationJournal,
+    inbound_stats: &mut BinaryConsensusLoopInboundStats,
+) -> Option<PreparedProposalSigning> {
     //     founding profile a Proposal's height, round and originating view are
     //     one value; there is no Proposal step field to fabricate. The
     //     originating view is the ACTION's own view (`header.height`), never a
@@ -4099,6 +4271,45 @@ fn guarded_sign_proposal_reserved(
         return None;
     }
 
+    // (3c) Correction B — governed suite/key/backend correspondence, using the
+    //      admitted interfaces, BEFORE any journal lookup or reservation and
+    //      BEFORE the permitted suite assignment. This mirrors the inbound
+    //      `verify_proposal_msg_with_domain` policy (governed lookup → suite
+    //      match → backend dispatch) but on the OUTBOUND selection: it
+    //      establishes that a governed suite/key entry exists for the selected
+    //      validator, that the bound signer's suite matches that governed suite,
+    //      and that the admitted backend registry permits and supplies the
+    //      required suite backend. It does NOT re-derive validator identity,
+    //      epoch, chain, version, or position, never introduces a parallel
+    //      suite allowlist, and — critically — proves signer/governance suite
+    //      correspondence and backend availability ONLY; it does not prove
+    //      possession of the corresponding private key (no key introspection).
+    if check_governed_suite_backend(
+        ctx,
+        signer,
+        bound_id,
+        |s| {
+            s.outbound_proposal_signer_key_entry_missing_total = s
+                .outbound_proposal_signer_key_entry_missing_total
+                .saturating_add(1)
+        },
+        |s| {
+            s.outbound_proposal_signer_suite_mismatch_total = s
+                .outbound_proposal_signer_suite_mismatch_total
+                .saturating_add(1)
+        },
+        |s| {
+            s.outbound_proposal_signer_backend_unavailable_total = s
+                .outbound_proposal_signer_backend_unavailable_total
+                .saturating_add(1)
+        },
+        inbound_stats,
+    )
+    .is_err()
+    {
+        return None;
+    }
+
     // (3) Permitted suite assignment + existing D6 preimage construction. Signed
     //     fields cannot change after this point.
     proposal.header.suite_id = signer.suite_id();
@@ -4128,10 +4339,10 @@ fn guarded_sign_proposal_reserved(
             inbound_stats.outbound_proposal_journal_reserved_total = inbound_stats
                 .outbound_proposal_journal_reserved_total
                 .saturating_add(1);
-            // (6) Consume the one-use, operation-bound continuation immediately
-            //     BEFORE invoking the signer, converting it into the publication
-            //     capability for THIS operation. A live retry can never re-enter
-            //     as a fresh continuation.
+            // (6) Consume the one-use, operation-bound continuation immediately,
+            //     converting it into the publication capability for THIS
+            //     operation. A live retry can never re-enter as a fresh
+            //     continuation. Signing itself happens in the completion phase.
             let publish_cap = match journal.consume_for_signing(continuation) {
                 Ok(cap) => cap,
                 Err(_) => {
@@ -4141,94 +4352,20 @@ fn guarded_sign_proposal_reserved(
                     return None;
                 }
             };
-            // (7) Correction D — post-storage authorization revalidation. AFTER
-            //     the durable reservation and the continuation consumption
-            //     (which acquired the ownership-domain mutex), and IMMEDIATELY
-            //     before the signer, re-confirm the ORIGINAL admission ticket
-            //     against its issuer and that the operation still uses its bound
-            //     context. On failure: zero signer calls, no result publication,
-            //     the durable `Reserved` record and its conflict obligation
-            //     preserved (we drop `publish_cap` without publishing and never
-            //     release/reset the reservation), and no re-admit/retry.
-            if let Some(adm) = admission {
-                if let Err(rej) = adm.reconfirm_after_journal(ctx) {
-                    record_post_journal_proposal_rejection(inbound_stats, &rej);
-                    drop(publish_cap);
-                    return None;
-                }
-            }
-            match signer.sign_proposal(&preimage) {
-                Ok(sig) => {
-                    // (7) Durable result handling bound to the same operation. On
-                    //     persistence failure/uncertainty preserve the
-                    //     potentially-signed obligation, suppress facade handoff,
-                    //     and do NOT re-sign.
-                    if journal
-                        .record_signed_result(&publish_cap, &sig)
-                        .is_err()
-                    {
-                        inbound_stats.outbound_proposal_journal_result_persist_failure_total =
-                            inbound_stats
-                                .outbound_proposal_journal_result_persist_failure_total
-                                .saturating_add(1);
-                        return None;
-                    }
-                    proposal.signature = sig;
-                    inbound_stats.outbound_proposal_signing_success = inbound_stats
-                        .outbound_proposal_signing_success
-                        .saturating_add(1);
-                    Some(proposal)
-                }
-                Err(e) => {
-                    inbound_stats.outbound_proposal_signing_failure = inbound_stats
-                        .outbound_proposal_signing_failure
-                        .saturating_add(1);
-                    eprintln!(
-                        "[binary-consensus] Run 420: outbound proposal signing FAILED \
-                         (fail-closed, not broadcast): {:?}",
-                        e
-                    );
-                    None
-                }
-            }
+            Some(PreparedProposalSigning::Fresh {
+                proposal,
+                preimage,
+                publish_cap,
+            })
         }
         Ok(ReservationOutcome::ExactRetryRetained(sig)) => {
-            // Correction D — post-storage authorization revalidation for the
-            // retained-result reuse path. The B/C recovery-acknowledgement
-            // barrier has already completed inside `reserve_for_sign`; now, and
-            // BEFORE treating the retained result as an authorized reuse,
-            // re-confirm the ORIGINAL admission against its issuer and bound
-            // context. Rejection performs no new signature and no delivery, and
-            // preserves the record; reuse never repairs authorization.
-            if let Some(adm) = admission {
-                if let Err(rej) = adm.reconfirm_after_journal(ctx) {
-                    record_post_journal_proposal_rejection(inbound_stats, &rej);
-                    return None;
-                }
-            }
-            // Validate the retained result's decision/context association and
-            // signature via the existing D6 verification machinery BEFORE reuse.
-            proposal.signature = sig;
-            let verified = verify_proposal_msg_with_domain(
-                &proposal,
-                *signer.validator_id(),
-                ctx.validators.as_ref(),
-                ctx.key_provider.as_ref(),
-                ctx.backend_registry.as_ref(),
-                &ctx.signing_domain,
-            )
-            .is_ok();
-            if verified {
-                inbound_stats.outbound_proposal_journal_retained_resend_total = inbound_stats
-                    .outbound_proposal_journal_retained_resend_total
-                    .saturating_add(1);
-                Some(proposal)
-            } else {
-                inbound_stats.outbound_proposal_journal_error_total = inbound_stats
-                    .outbound_proposal_journal_error_total
-                    .saturating_add(1);
-                None
-            }
+            // The B/C recovery-acknowledgement barrier has already completed
+            // inside `reserve_for_sign`; the retained result is carried into the
+            // completion phase for revalidation + D6 verification before reuse.
+            Some(PreparedProposalSigning::Retained {
+                proposal,
+                retained_sig: sig,
+            })
         }
         Ok(ReservationOutcome::Conflict) => {
             inbound_stats.outbound_proposal_journal_conflict_total = inbound_stats
@@ -4258,6 +4395,115 @@ fn guarded_sign_proposal_reserved(
                 e
             );
             None
+        }
+    }
+}
+
+/// Run 422 D7-D10 Correction C — the post-journal COMPLETION phase for a
+/// Proposal: the post-storage authorization revalidation, then EITHER exactly
+/// one signer invocation + durable result recording (fresh) OR D6-verified
+/// authorized reuse of the acknowledged retained result (retained).
+///
+/// Fresh: AFTER the durable reservation + continuation consumption acquired the
+/// ownership-domain mutex, and IMMEDIATELY before the signer, re-confirm the
+/// ORIGINAL admission ticket against its issuer and that the operation still
+/// uses its bound context. On failure: zero signer calls, no result
+/// publication, no signed output/handoff, the durable `Reserved` record and its
+/// conflict obligation preserved (drop `publish_cap` without publishing, never
+/// release/reset), and no re-admit/retry.
+///
+/// Retained-reuse rejection preserves the existing `Signed` record, produces no
+/// additional signature, and delivers nothing; reuse never repairs
+/// authorization and never turns the record back into `Reserved`.
+fn complete_proposal_signing(
+    prepared: PreparedProposalSigning,
+    ctx: &ProposalVoteAuthority,
+    admission: Option<&AdmittedSigningIdentity>,
+    signer: &Arc<dyn ValidatorSigner>,
+    journal: &SigningReservationJournal,
+    inbound_stats: &mut BinaryConsensusLoopInboundStats,
+) -> Option<BlockProposal> {
+    match prepared {
+        PreparedProposalSigning::Fresh {
+            mut proposal,
+            preimage,
+            publish_cap,
+        } => {
+            if let Some(adm) = admission {
+                if let Err(rej) = adm.reconfirm_after_journal(ctx) {
+                    record_post_journal_proposal_rejection(inbound_stats, &rej);
+                    // The one-use publication capability falls out of scope
+                    // WITHOUT publishing: no result is emitted and the durable
+                    // `Reserved` record + conflict obligation are intentionally
+                    // NOT released (a later exact retry sees `PotentiallySigned`).
+                    return None;
+                }
+            }
+            match signer.sign_proposal(&preimage) {
+                Ok(sig) => {
+                    // Durable result handling bound to the same operation. On
+                    // persistence failure/uncertainty preserve the
+                    // potentially-signed obligation, suppress facade handoff,
+                    // and do NOT re-sign.
+                    if journal.record_signed_result(&publish_cap, &sig).is_err() {
+                        inbound_stats.outbound_proposal_journal_result_persist_failure_total =
+                            inbound_stats
+                                .outbound_proposal_journal_result_persist_failure_total
+                                .saturating_add(1);
+                        return None;
+                    }
+                    proposal.signature = sig;
+                    inbound_stats.outbound_proposal_signing_success = inbound_stats
+                        .outbound_proposal_signing_success
+                        .saturating_add(1);
+                    Some(proposal)
+                }
+                Err(e) => {
+                    inbound_stats.outbound_proposal_signing_failure = inbound_stats
+                        .outbound_proposal_signing_failure
+                        .saturating_add(1);
+                    eprintln!(
+                        "[binary-consensus] Run 420: outbound proposal signing FAILED \
+                         (fail-closed, not broadcast): {:?}",
+                        e
+                    );
+                    None
+                }
+            }
+        }
+        PreparedProposalSigning::Retained {
+            mut proposal,
+            retained_sig,
+        } => {
+            if let Some(adm) = admission {
+                if let Err(rej) = adm.reconfirm_after_journal(ctx) {
+                    record_post_journal_proposal_rejection(inbound_stats, &rej);
+                    return None;
+                }
+            }
+            // Validate the retained result's decision/context association and
+            // signature via the existing D6 verification machinery BEFORE reuse.
+            proposal.signature = retained_sig;
+            let verified = verify_proposal_msg_with_domain(
+                &proposal,
+                *signer.validator_id(),
+                ctx.validators.as_ref(),
+                ctx.key_provider.as_ref(),
+                ctx.backend_registry.as_ref(),
+                &ctx.signing_domain,
+            )
+            .is_ok();
+            if verified {
+                inbound_stats.outbound_proposal_journal_retained_resend_total = inbound_stats
+                    .outbound_proposal_journal_retained_resend_total
+                    .saturating_add(1);
+                Some(proposal)
+            } else {
+                inbound_stats.outbound_proposal_journal_error_total = inbound_stats
+                    .outbound_proposal_journal_error_total
+                    .saturating_add(1);
+                None
+            }
         }
     }
 }
@@ -4326,20 +4572,72 @@ fn guarded_sign_vote_for_broadcast(
         }
     };
 
+    // (2b) Correction A (Run 422 D7-D10) — policy-aware REQUIRED admission at
+    //      the shared guard itself. See `guarded_sign_proposal_for_broadcast`:
+    //      under `ConsensusVerificationPolicy::Required` an original admission
+    //      MUST be present to re-confirm after journal work; its absence is
+    //      refused HERE, before any journal access, retained-result reuse, or
+    //      signer invocation. Neither component is accepted through the
+    //      test-only `LocalFixtureUnsigned` case; the missing journal above
+    //      keeps its precedence.
+    if admission.is_none() && verification_policy.requires_context() {
+        inbound_stats.outbound_vote_required_admission_missing_total = inbound_stats
+            .outbound_vote_required_admission_missing_total
+            .saturating_add(1);
+        eprintln!(
+            "[binary-consensus] Run 422 D7-D10 Correction A: outbound vote NOT signed \
+             (required admission absent at shared guard) — fail-closed, no journal access, \
+             no signer call"
+        );
+        return None;
+    }
+
     guarded_sign_vote_reserved(vote, ctx, admission, signer, journal, inbound_stats)
+}
+
+/// Run 422 D7-D10 Correction C — the Vote analogue of
+/// [`PreparedProposalSigning`]: the split point between the durable journal
+/// phase and the reconfirm/sign/publish completion phase.
+enum PreparedVoteSigning {
+    Fresh {
+        vote: Vote,
+        preimage: Vec<u8>,
+        publish_cap: ResultPublicationCapability,
+    },
+    Retained {
+        vote: Vote,
+        retained_sig: Vec<u8>,
+    },
 }
 
 /// Run 422 D7-D10 — reservation-guarded Vote signing for an operation that has
 /// already passed the shared authority/signer/wire-domain admission and has a
-/// present journal. See [`guarded_sign_vote_for_broadcast`].
+/// present journal. See [`guarded_sign_vote_for_broadcast`]. Runs the SAME
+/// [`prepare_vote_signing_reservation`] + [`complete_vote_signing`] the staged
+/// Correction-C Vote tests use.
 fn guarded_sign_vote_reserved(
-    mut vote: Vote,
+    vote: Vote,
     ctx: &ProposalVoteAuthority,
     admission: Option<&AdmittedSigningIdentity>,
     signer: &Arc<dyn ValidatorSigner>,
     journal: &SigningReservationJournal,
     inbound_stats: &mut BinaryConsensusLoopInboundStats,
 ) -> Option<Vote> {
+    let prepared = prepare_vote_signing_reservation(vote, ctx, signer, journal, inbound_stats)?;
+    complete_vote_signing(prepared, ctx, admission, signer, journal, inbound_stats)
+}
+
+/// Run 422 D7-D10 Correction B/C — the pre-signer PREPARATION + durable journal
+/// phase for a Vote. See [`prepare_proposal_signing_reservation`]; the per-kind
+/// preparation differs (a Vote's height, round and originating view are one
+/// value and `step` must be `0` for the founding profile).
+fn prepare_vote_signing_reservation(
+    mut vote: Vote,
+    ctx: &ProposalVoteAuthority,
+    signer: &Arc<dyn ValidatorSigner>,
+    journal: &SigningReservationJournal,
+    inbound_stats: &mut BinaryConsensusLoopInboundStats,
+) -> Option<PreparedVoteSigning> {
     // (2) Per-kind identity/position checks BEFORE lookup/signing: for this
     //     founding profile height == round == originating view AND step == 0.
     let originating_view = vote.height;
@@ -4371,6 +4669,37 @@ fn guarded_sign_vote_reserved(
         inbound_stats.outbound_vote_signer_identity_mismatch_total = inbound_stats
             .outbound_vote_signer_identity_mismatch_total
             .saturating_add(1);
+        return None;
+    }
+
+    // (2c) Correction B — governed suite/key/backend correspondence, BEFORE any
+    //      journal lookup or reservation and before the permitted suite
+    //      assignment. See `prepare_proposal_signing_reservation` and
+    //      `check_governed_suite_backend`: proves signer/governance suite
+    //      correspondence and backend availability ONLY, not private-key
+    //      possession.
+    if check_governed_suite_backend(
+        ctx,
+        signer,
+        bound_id,
+        |s| {
+            s.outbound_vote_signer_key_entry_missing_total = s
+                .outbound_vote_signer_key_entry_missing_total
+                .saturating_add(1)
+        },
+        |s| {
+            s.outbound_vote_signer_suite_mismatch_total =
+                s.outbound_vote_signer_suite_mismatch_total.saturating_add(1)
+        },
+        |s| {
+            s.outbound_vote_signer_backend_unavailable_total = s
+                .outbound_vote_signer_backend_unavailable_total
+                .saturating_add(1)
+        },
+        inbound_stats,
+    )
+    .is_err()
+    {
         return None;
     }
 
@@ -4412,80 +4741,16 @@ fn guarded_sign_vote_reserved(
                     return None;
                 }
             };
-            // (7) Correction D — post-storage authorization revalidation,
-            //     immediately before the signer and after the journal mutex was
-            //     taken by `consume_for_signing`. See the Proposal path for the
-            //     preservation guarantees.
-            if let Some(adm) = admission {
-                if let Err(rej) = adm.reconfirm_after_journal(ctx) {
-                    record_post_journal_vote_rejection(inbound_stats, &rej);
-                    drop(publish_cap);
-                    return None;
-                }
-            }
-            match signer.sign_vote(&preimage) {
-                Ok(sig) => {
-                    if journal
-                        .record_signed_result(&publish_cap, &sig)
-                        .is_err()
-                    {
-                        inbound_stats.outbound_vote_journal_result_persist_failure_total =
-                            inbound_stats
-                                .outbound_vote_journal_result_persist_failure_total
-                                .saturating_add(1);
-                        return None;
-                    }
-                    vote.signature = sig;
-                    inbound_stats.outbound_vote_signing_success = inbound_stats
-                        .outbound_vote_signing_success
-                        .saturating_add(1);
-                    Some(vote)
-                }
-                Err(e) => {
-                    inbound_stats.outbound_vote_signing_failure = inbound_stats
-                        .outbound_vote_signing_failure
-                        .saturating_add(1);
-                    eprintln!(
-                        "[binary-consensus] Run 420: outbound vote signing FAILED \
-                         (fail-closed, not transmitted): {:?}",
-                        e
-                    );
-                    None
-                }
-            }
+            Some(PreparedVoteSigning::Fresh {
+                vote,
+                preimage,
+                publish_cap,
+            })
         }
-        Ok(ReservationOutcome::ExactRetryRetained(sig)) => {
-            // Correction D — post-storage authorization revalidation for the
-            // retained-result reuse path (after the B/C recovery-acknowledgement
-            // barrier, before treating the retained result as authorized reuse).
-            if let Some(adm) = admission {
-                if let Err(rej) = adm.reconfirm_after_journal(ctx) {
-                    record_post_journal_vote_rejection(inbound_stats, &rej);
-                    return None;
-                }
-            }
-            vote.signature = sig;
-            let verified = verify_vote_msg_with_domain(
-                &vote,
-                *signer.validator_id(),
-                ctx.validators.as_ref(),
-                ctx.key_provider.as_ref(),
-                ctx.backend_registry.as_ref(),
-                &ctx.signing_domain,
-            )
-            .is_ok();
-            if verified {
-                inbound_stats.outbound_vote_journal_retained_resend_total = inbound_stats
-                    .outbound_vote_journal_retained_resend_total
-                    .saturating_add(1);
-                Some(vote)
-            } else {
-                inbound_stats.outbound_vote_journal_error_total = inbound_stats
-                    .outbound_vote_journal_error_total
-                    .saturating_add(1);
-                None
-            }
-        }
+        Ok(ReservationOutcome::ExactRetryRetained(sig)) => Some(PreparedVoteSigning::Retained {
+            vote,
+            retained_sig: sig,
+        }),
         Ok(ReservationOutcome::Conflict) => {
             inbound_stats.outbound_vote_journal_conflict_total = inbound_stats
                 .outbound_vote_journal_conflict_total
@@ -4514,6 +4779,99 @@ fn guarded_sign_vote_reserved(
                 e
             );
             None
+        }
+    }
+}
+
+/// Run 422 D7-D10 Correction C — the post-journal COMPLETION phase for a Vote.
+/// See [`complete_proposal_signing`] for the fresh/retained semantics and the
+/// preservation guarantees.
+fn complete_vote_signing(
+    prepared: PreparedVoteSigning,
+    ctx: &ProposalVoteAuthority,
+    admission: Option<&AdmittedSigningIdentity>,
+    signer: &Arc<dyn ValidatorSigner>,
+    journal: &SigningReservationJournal,
+    inbound_stats: &mut BinaryConsensusLoopInboundStats,
+) -> Option<Vote> {
+    match prepared {
+        PreparedVoteSigning::Fresh {
+            mut vote,
+            preimage,
+            publish_cap,
+        } => {
+            // (7) Correction D — post-storage authorization revalidation,
+            //     immediately before the signer and after the journal mutex was
+            //     taken by `consume_for_signing`. See the Proposal path for the
+            //     preservation guarantees.
+            if let Some(adm) = admission {
+                if let Err(rej) = adm.reconfirm_after_journal(ctx) {
+                    record_post_journal_vote_rejection(inbound_stats, &rej);
+                    // See the Proposal path: the one-use publication capability
+                    // falls out of scope WITHOUT publishing; the durable
+                    // `Reserved` record + conflict obligation are NOT released.
+                    return None;
+                }
+            }
+            match signer.sign_vote(&preimage) {
+                Ok(sig) => {
+                    if journal.record_signed_result(&publish_cap, &sig).is_err() {
+                        inbound_stats.outbound_vote_journal_result_persist_failure_total =
+                            inbound_stats
+                                .outbound_vote_journal_result_persist_failure_total
+                                .saturating_add(1);
+                        return None;
+                    }
+                    vote.signature = sig;
+                    inbound_stats.outbound_vote_signing_success = inbound_stats
+                        .outbound_vote_signing_success
+                        .saturating_add(1);
+                    Some(vote)
+                }
+                Err(e) => {
+                    inbound_stats.outbound_vote_signing_failure = inbound_stats
+                        .outbound_vote_signing_failure
+                        .saturating_add(1);
+                    eprintln!(
+                        "[binary-consensus] Run 420: outbound vote signing FAILED \
+                         (fail-closed, not transmitted): {:?}",
+                        e
+                    );
+                    None
+                }
+            }
+        }
+        PreparedVoteSigning::Retained {
+            mut vote,
+            retained_sig,
+        } => {
+            if let Some(adm) = admission {
+                if let Err(rej) = adm.reconfirm_after_journal(ctx) {
+                    record_post_journal_vote_rejection(inbound_stats, &rej);
+                    return None;
+                }
+            }
+            vote.signature = retained_sig;
+            let verified = verify_vote_msg_with_domain(
+                &vote,
+                *signer.validator_id(),
+                ctx.validators.as_ref(),
+                ctx.key_provider.as_ref(),
+                ctx.backend_registry.as_ref(),
+                &ctx.signing_domain,
+            )
+            .is_ok();
+            if verified {
+                inbound_stats.outbound_vote_journal_retained_resend_total = inbound_stats
+                    .outbound_vote_journal_retained_resend_total
+                    .saturating_add(1);
+                Some(vote)
+            } else {
+                inbound_stats.outbound_vote_journal_error_total = inbound_stats
+                    .outbound_vote_journal_error_total
+                    .saturating_add(1);
+                None
+            }
         }
     }
 }
@@ -25683,6 +26041,624 @@ mod tests {
                             );
                             assert_eq!(facade.proposals.lock().unwrap().len(), 1);
                             assert_eq!(facade.broadcast_votes.lock().unwrap().len(), 1);
+                        }
+
+                        // ---- G. Correction A — policy-aware REQUIRED admission
+                        //      at the shared guard itself (direct-guard negatives)
+
+                        #[test]
+                        fn cd_g_required_missing_admission_refuses_before_journal_and_signer() {
+                            // Valid context, signer, and journal but NO admission
+                            // under `Required`: refuse BEFORE any journal access
+                            // (reads forced to fail would surface as a journal
+                            // error if reached) or signer invocation. Both
+                            // families.
+                            let fixture = make_fixture(4);
+                            let (pv, c) = recording_pv(&fixture);
+                            let snap = snapshot_matching(&pv);
+                            let store = D10Store::new();
+                            store.set_fail_reads(true); // any journal touch would error
+                            let j = journal(store.clone());
+
+                            let mut sp = BinaryConsensusLoopInboundStats::default();
+                            let out = guarded_sign_proposal_for_broadcast(
+                                cd_proposal(0, 1, 0, 1, [7u8; 32]),
+                                Some(snap.verifier()),
+                                None, // no original admission
+                                Some(&j),
+                                ConsensusVerificationPolicy::Required,
+                                &mut sp,
+                            );
+                            assert!(out.is_none());
+                            assert_eq!(sp.outbound_proposal_required_admission_missing_total, 1);
+                            assert_eq!(sp.outbound_proposal_journal_reserved_total, 0);
+                            assert_eq!(
+                                sp.outbound_proposal_journal_error_total, 0,
+                                "no journal access before the required-admission refusal"
+                            );
+                            assert_eq!(sp.outbound_proposal_signing_success, 0);
+                            assert_eq!(c.proposal_calls.load(SeqCst), 0);
+                            assert!(map_snapshot(&store).is_empty(), "zero journal writes");
+
+                            let mut sv = BinaryConsensusLoopInboundStats::default();
+                            let outv = guarded_sign_vote_for_broadcast(
+                                cd_vote(0, 1, 0, 1, [7u8; 32]),
+                                Some(snap.verifier()),
+                                None,
+                                Some(&j),
+                                ConsensusVerificationPolicy::Required,
+                                &mut sv,
+                            );
+                            assert!(outv.is_none());
+                            assert_eq!(sv.outbound_vote_required_admission_missing_total, 1);
+                            assert_eq!(sv.outbound_vote_journal_reserved_total, 0);
+                            assert_eq!(sv.outbound_vote_journal_error_total, 0);
+                            assert_eq!(c.vote_calls.load(SeqCst), 0);
+                            assert!(map_snapshot(&store).is_empty());
+                        }
+
+                        #[test]
+                        fn cd_g_localfixture_unsigned_signer_without_admission_still_signs() {
+                            // Permitted-fixture control: under `LocalFixtureUnsigned`
+                            // a signer-bearing fixture with NO bound admission is
+                            // NOT refused by Correction A — it still reaches the
+                            // journal and the identity/version/suite checks and
+                            // signs once (no admission to re-confirm).
+                            let fixture = make_fixture(4);
+                            let (pv, c) = recording_pv(&fixture);
+                            let snap = snapshot_matching(&pv);
+                            let store = D10Store::new();
+                            let j = journal(store.clone());
+                            let mut stats = BinaryConsensusLoopInboundStats::default();
+                            let out = guarded_sign_proposal_for_broadcast(
+                                cd_proposal(0, 1, 0, 1, [7u8; 32]),
+                                Some(snap.verifier()),
+                                None,
+                                Some(&j),
+                                ConsensusVerificationPolicy::LocalFixtureUnsigned,
+                                &mut stats,
+                            );
+                            assert!(out.is_some());
+                            assert_eq!(stats.outbound_proposal_required_admission_missing_total, 0);
+                            assert_eq!(stats.outbound_proposal_journal_reserved_total, 1);
+                            assert_eq!(stats.outbound_proposal_signing_success, 1);
+                            assert_eq!(c.proposal_calls.load(SeqCst), 1);
+                        }
+
+                        // ---- H. Correction B — governed suite/key/backend
+                        //      correspondence (pre-journal negatives + controls).
+                        //
+                        // These prove signer/governance suite correspondence and
+                        // backend availability ONLY; they do NOT assert private-key
+                        // possession. Each must refuse BEFORE journal access
+                        // (`journal_reserved_total == 0`, `journal_error_total == 0`
+                        // even with reads forced to fail) and before signing.
+
+                        #[derive(Debug)]
+                        struct NoKeyProvider;
+                        impl SuiteAwareValidatorKeyProvider for NoKeyProvider {
+                            fn get_suite_and_key(
+                                &self,
+                                _id: ValidatorId,
+                            ) -> Option<(ConsensusSigSuiteId, Vec<u8>)> {
+                                None
+                            }
+                        }
+
+                        struct NoBackendRegistry;
+                        impl ConsensusSigBackendRegistry for NoBackendRegistry {
+                            fn get_backend(
+                                &self,
+                                _suite: ConsensusSigSuiteId,
+                            ) -> Option<
+                                Arc<dyn qbind_crypto::consensus_sig::ConsensusSigVerifier>,
+                            > {
+                                None
+                            }
+                        }
+
+                        /// A key provider that reports member 0's real key under a
+                        /// GOVERNED suite that differs from the bound signer's stable
+                        /// suite, exercising the suite-correspondence refusal without
+                        /// fabricating a signer for an unsupported suite.
+                        #[derive(Debug)]
+                        struct MismatchedSuiteProvider(Arc<dyn SuiteAwareValidatorKeyProvider>);
+                        impl SuiteAwareValidatorKeyProvider for MismatchedSuiteProvider {
+                            fn get_suite_and_key(
+                                &self,
+                                id: ValidatorId,
+                            ) -> Option<(ConsensusSigSuiteId, Vec<u8>)> {
+                                self.0.get_suite_and_key(id).map(|(_s, k)| {
+                                    (ConsensusSigSuiteId::new(TEST_SUITE_U16 + 7), k)
+                                })
+                            }
+                        }
+
+                        #[test]
+                        fn cd_h_missing_key_entry_refused_before_journal() {
+                            let fixture = make_fixture(4);
+                            let (mut pv, c) = recording_pv(&fixture);
+                            // Member 0 is admitted but has NO governed key entry.
+                            pv.key_provider = Arc::new(NoKeyProvider);
+                            let snap = snapshot_matching(&pv);
+                            let store = D10Store::new();
+                            store.set_fail_reads(true);
+                            let j = journal(store.clone());
+                            let ticket = capture_ticket(&snap);
+                            let admission =
+                                AdmittedSigningIdentity { snapshot: &snap, ticket: &ticket };
+                            let mut stats = BinaryConsensusLoopInboundStats::default();
+                            let out = guarded_sign_proposal_for_broadcast(
+                                cd_proposal(0, 1, 0, 1, [7u8; 32]),
+                                Some(snap.verifier()),
+                                Some(&admission),
+                                Some(&j),
+                                ConsensusVerificationPolicy::Required,
+                                &mut stats,
+                            );
+                            assert!(out.is_none());
+                            assert_eq!(stats.outbound_proposal_signer_key_entry_missing_total, 1);
+                            assert_eq!(stats.outbound_proposal_journal_reserved_total, 0);
+                            assert_eq!(stats.outbound_proposal_journal_error_total, 0);
+                            assert_eq!(c.proposal_calls.load(SeqCst), 0);
+                            assert!(map_snapshot(&store).is_empty());
+                        }
+
+                        #[test]
+                        fn cd_h_suite_mismatch_refused_before_journal() {
+                            let fixture = make_fixture(4);
+                            let (mut pv, c) = recording_pv(&fixture);
+                            // Governed suite 107 ≠ the bound signer's stable suite 100.
+                            pv.key_provider =
+                                Arc::new(MismatchedSuiteProvider(fixture.kp.clone()));
+                            let snap = snapshot_matching(&pv);
+                            let store = D10Store::new();
+                            store.set_fail_reads(true);
+                            let j = journal(store.clone());
+                            let ticket = capture_ticket(&snap);
+                            let admission =
+                                AdmittedSigningIdentity { snapshot: &snap, ticket: &ticket };
+                            let mut stats = BinaryConsensusLoopInboundStats::default();
+                            let out = guarded_sign_proposal_for_broadcast(
+                                cd_proposal(0, 1, 0, 1, [7u8; 32]),
+                                Some(snap.verifier()),
+                                Some(&admission),
+                                Some(&j),
+                                ConsensusVerificationPolicy::Required,
+                                &mut stats,
+                            );
+                            assert!(out.is_none());
+                            assert_eq!(stats.outbound_proposal_signer_suite_mismatch_total, 1);
+                            assert_eq!(stats.outbound_proposal_journal_reserved_total, 0);
+                            assert_eq!(stats.outbound_proposal_journal_error_total, 0);
+                            assert_eq!(c.proposal_calls.load(SeqCst), 0);
+                            assert!(map_snapshot(&store).is_empty());
+                        }
+
+                        #[test]
+                        fn cd_h_missing_backend_refused_before_journal() {
+                            let fixture = make_fixture(4);
+                            let (mut pv, c) = recording_pv(&fixture);
+                            // Governed suite exists, but the admitted registry
+                            // supplies NO backend for it.
+                            pv.backend_registry = Arc::new(NoBackendRegistry);
+                            let snap = snapshot_matching(&pv);
+                            let store = D10Store::new();
+                            store.set_fail_reads(true);
+                            let j = journal(store.clone());
+                            let ticket = capture_ticket(&snap);
+                            let admission =
+                                AdmittedSigningIdentity { snapshot: &snap, ticket: &ticket };
+                            let mut stats = BinaryConsensusLoopInboundStats::default();
+                            let out = guarded_sign_proposal_for_broadcast(
+                                cd_proposal(0, 1, 0, 1, [7u8; 32]),
+                                Some(snap.verifier()),
+                                Some(&admission),
+                                Some(&j),
+                                ConsensusVerificationPolicy::Required,
+                                &mut stats,
+                            );
+                            assert!(out.is_none());
+                            assert_eq!(stats.outbound_proposal_signer_backend_unavailable_total, 1);
+                            assert_eq!(stats.outbound_proposal_journal_reserved_total, 0);
+                            assert_eq!(stats.outbound_proposal_journal_error_total, 0);
+                            assert_eq!(c.proposal_calls.load(SeqCst), 0);
+                            assert!(map_snapshot(&store).is_empty());
+                        }
+
+                        #[test]
+                        fn cd_h_vote_missing_backend_refused_before_journal() {
+                            let fixture = make_fixture(4);
+                            let (mut pv, c) = recording_pv(&fixture);
+                            pv.backend_registry = Arc::new(NoBackendRegistry);
+                            let snap = snapshot_matching(&pv);
+                            let store = D10Store::new();
+                            store.set_fail_reads(true);
+                            let j = journal(store.clone());
+                            let ticket = capture_ticket(&snap);
+                            let admission =
+                                AdmittedSigningIdentity { snapshot: &snap, ticket: &ticket };
+                            let mut stats = BinaryConsensusLoopInboundStats::default();
+                            let out = guarded_sign_vote_for_broadcast(
+                                cd_vote(0, 1, 0, 1, [7u8; 32]),
+                                Some(snap.verifier()),
+                                Some(&admission),
+                                Some(&j),
+                                ConsensusVerificationPolicy::Required,
+                                &mut stats,
+                            );
+                            assert!(out.is_none());
+                            assert_eq!(stats.outbound_vote_signer_backend_unavailable_total, 1);
+                            assert_eq!(stats.outbound_vote_journal_reserved_total, 0);
+                            assert_eq!(stats.outbound_vote_journal_error_total, 0);
+                            assert_eq!(c.vote_calls.load(SeqCst), 0);
+                        }
+
+                        // ---- I. Correction C — genuine BETWEEN-PHASE mutation
+                        //      through the ACTUAL production continuation split
+                        //      (`prepare_* → mutate → complete_*`). The completion
+                        //      is the same production path the guarded callers use;
+                        //      the fixture owner is mutated between the two owned
+                        //      phases (no unsafe aliasing, sleeps, production
+                        //      mutation hook, or replacement authorization callback).
+
+                        /// Prepare + reserve a fresh Proposal with a valid
+                        /// admission-era owner, capture the exact stored `Reserved`
+                        /// bytes, mutate the owner BETWEEN phases, then run the
+                        /// production completion and assert the shared preservation
+                        /// invariants.
+                        fn staged_between_phase_proposal(
+                            mutate: impl FnOnce(&mut AuthorizedProposalVoteSnapshot),
+                        ) {
+                            let fixture = make_fixture(4);
+                            let (pv, c) = recording_pv(&fixture);
+                            let mut snap = snapshot_matching(&pv);
+                            let store = D10Store::new();
+                            let j = journal(store.clone());
+                            let ticket = capture_ticket(&snap);
+                            let mut stats = BinaryConsensusLoopInboundStats::default();
+
+                            // Phase 1: prepare + durable reservation + one-use
+                            // continuation consumption. The `snap` borrow ends with
+                            // this block (the prepared value is owned).
+                            let prepared = {
+                                let ctx = snap.verifier();
+                                let signer = ctx.signer.as_ref().expect("signer");
+                                prepare_proposal_signing_reservation(
+                                    cd_proposal(0, 1, 0, 1, [7u8; 32]),
+                                    ctx,
+                                    signer,
+                                    &j,
+                                    &mut stats,
+                                )
+                            }
+                            .expect("fresh reservation");
+                            assert!(matches!(prepared, PreparedProposalSigning::Fresh { .. }));
+                            assert_eq!(stats.outbound_proposal_journal_reserved_total, 1);
+                            assert_eq!(
+                                c.proposal_calls.load(SeqCst),
+                                0,
+                                "no signer call in the prepare phase"
+                            );
+                            let reserved_bytes = map_snapshot(&store);
+                            assert!(!reserved_bytes.is_empty(), "durable Reserved recorded");
+
+                            // BETWEEN phases: mutate the fixture authorization state.
+                            mutate(&mut snap);
+
+                            // Phase 2: the SAME production completion path with the
+                            // ORIGINAL ticket and the snapshot's exact bound verifier.
+                            let out = {
+                                let ctx = snap.verifier();
+                                let signer = ctx.signer.as_ref().expect("signer");
+                                let admission =
+                                    AdmittedSigningIdentity { snapshot: &snap, ticket: &ticket };
+                                complete_proposal_signing(
+                                    prepared,
+                                    ctx,
+                                    Some(&admission),
+                                    signer,
+                                    &j,
+                                    &mut stats,
+                                )
+                            };
+                            assert!(out.is_none(), "post-reservation completion suppressed");
+                            assert_eq!(c.proposal_calls.load(SeqCst), 0, "zero signer calls");
+                            assert_eq!(stats.outbound_proposal_signing_success, 0);
+                            assert_eq!(stats.outbound_proposal_journal_retained_resend_total, 0);
+                            assert_eq!(
+                                stats
+                                    .outbound_proposal_post_journal_authorization_revalidation_failed_total,
+                                1
+                            );
+                            assert_eq!(
+                                map_snapshot(&store),
+                                reserved_bytes,
+                                "byte-identical Reserved after suppression"
+                            );
+
+                            // An exact retry sees the retained `Reserved` →
+                            // conservative PotentiallySigned; a conflicting binding
+                            // at the same position is refused. Neither re-signs nor
+                            // mutates the durable bytes.
+                            let mut retry = BinaryConsensusLoopInboundStats::default();
+                            let retry_prepared = {
+                                let ctx = snap.verifier();
+                                let signer = ctx.signer.as_ref().expect("signer");
+                                prepare_proposal_signing_reservation(
+                                    cd_proposal(0, 1, 0, 1, [7u8; 32]),
+                                    ctx,
+                                    signer,
+                                    &j,
+                                    &mut retry,
+                                )
+                            };
+                            assert!(retry_prepared.is_none());
+                            assert_eq!(retry.outbound_proposal_journal_potentially_signed_total, 1);
+                            let mut conflict = BinaryConsensusLoopInboundStats::default();
+                            let conflict_prepared = {
+                                let ctx = snap.verifier();
+                                let signer = ctx.signer.as_ref().expect("signer");
+                                prepare_proposal_signing_reservation(
+                                    cd_proposal(0, 1, 0, 1, [9u8; 32]), // different binding
+                                    ctx,
+                                    signer,
+                                    &j,
+                                    &mut conflict,
+                                )
+                            };
+                            assert!(conflict_prepared.is_none());
+                            assert_eq!(conflict.outbound_proposal_journal_conflict_total, 1);
+                            assert_eq!(c.proposal_calls.load(SeqCst), 0);
+                            assert_eq!(
+                                map_snapshot(&store),
+                                reserved_bytes,
+                                "Reserved unchanged by retries"
+                            );
+                        }
+
+                        #[test]
+                        fn cd_i_between_phase_generation_advance_suppresses_before_sign() {
+                            staged_between_phase_proposal(advance_generation);
+                        }
+
+                        #[test]
+                        fn cd_i_between_phase_made_unavailable_suppresses_before_sign() {
+                            staged_between_phase_proposal(|snap| {
+                                snap.owner_mut()
+                                    .replace_for_fixture(LocalAuthorizationState::MissingStorage);
+                            });
+                        }
+
+                        #[test]
+                        fn cd_i_between_phase_terminal_exhaustion_suppresses_before_sign() {
+                            staged_between_phase_proposal(exhaust);
+                        }
+
+                        #[test]
+                        fn cd_i_vote_between_phase_generation_advance_suppresses_before_sign() {
+                            // Vote counterpart for the shared safety boundary.
+                            let fixture = make_fixture(4);
+                            let (pv, c) = recording_pv(&fixture);
+                            let mut snap = snapshot_matching(&pv);
+                            let store = D10Store::new();
+                            let j = journal(store.clone());
+                            let ticket = capture_ticket(&snap);
+                            let mut stats = BinaryConsensusLoopInboundStats::default();
+                            let prepared = {
+                                let ctx = snap.verifier();
+                                let signer = ctx.signer.as_ref().expect("signer");
+                                prepare_vote_signing_reservation(
+                                    cd_vote(0, 1, 0, 1, [7u8; 32]),
+                                    ctx,
+                                    signer,
+                                    &j,
+                                    &mut stats,
+                                )
+                            }
+                            .expect("fresh reservation");
+                            assert_eq!(stats.outbound_vote_journal_reserved_total, 1);
+                            assert_eq!(c.vote_calls.load(SeqCst), 0);
+                            let reserved_bytes = map_snapshot(&store);
+
+                            advance_generation(&mut snap);
+
+                            let out = {
+                                let ctx = snap.verifier();
+                                let signer = ctx.signer.as_ref().expect("signer");
+                                let admission =
+                                    AdmittedSigningIdentity { snapshot: &snap, ticket: &ticket };
+                                complete_vote_signing(
+                                    prepared,
+                                    ctx,
+                                    Some(&admission),
+                                    signer,
+                                    &j,
+                                    &mut stats,
+                                )
+                            };
+                            assert!(out.is_none());
+                            assert_eq!(c.vote_calls.load(SeqCst), 0);
+                            assert_eq!(stats.outbound_vote_signing_success, 0);
+                            assert_eq!(
+                                stats.outbound_vote_post_journal_authorization_revalidation_failed_total,
+                                1
+                            );
+                            assert_eq!(map_snapshot(&store), reserved_bytes);
+                        }
+
+                        #[test]
+                        fn cd_i_staged_success_through_split_signs_once() {
+                            // Positive staged control: the SAME split with a VALID
+                            // original admission signs EXACTLY once and produces a
+                            // D6-verifiable result.
+                            let fixture = make_fixture(4);
+                            let (pv, c) = recording_pv(&fixture);
+                            let snap = snapshot_matching(&pv);
+                            let store = D10Store::new();
+                            let j = journal(store.clone());
+                            let ticket = capture_ticket(&snap);
+                            let mut stats = BinaryConsensusLoopInboundStats::default();
+                            let ctx = snap.verifier();
+                            let signer = ctx.signer.as_ref().expect("signer");
+                            let prepared = prepare_proposal_signing_reservation(
+                                cd_proposal(0, 1, 0, 1, [7u8; 32]),
+                                ctx,
+                                signer,
+                                &j,
+                                &mut stats,
+                            )
+                            .expect("fresh reservation");
+                            assert_eq!(c.proposal_calls.load(SeqCst), 0, "no sign before completion");
+                            let admission =
+                                AdmittedSigningIdentity { snapshot: &snap, ticket: &ticket };
+                            let out = complete_proposal_signing(
+                                prepared,
+                                ctx,
+                                Some(&admission),
+                                signer,
+                                &j,
+                                &mut stats,
+                            );
+                            assert!(out.is_some());
+                            assert_eq!(c.proposal_calls.load(SeqCst), 1);
+                            assert_eq!(stats.outbound_proposal_signing_success, 1);
+                            assert!(qbind_consensus::verify_proposal_msg_with_domain(
+                                &out.unwrap(),
+                                ValidatorId(0),
+                                fixture.validators.as_ref(),
+                                fixture.kp.as_ref(),
+                                fixture.br.as_ref(),
+                                &d6_control_domain(),
+                            )
+                            .is_ok());
+                        }
+
+                        #[test]
+                        fn cd_i_recovered_retained_reuse_suppressed_after_reopen_and_invalidation() {
+                            // Recovered retained result (MODEL reopen, not
+                            // power-loss/release-binary evidence): a genuine signed
+                            // record is produced with the real signer, the store is
+                            // reopened through a FRESH ownership domain, the
+                            // recovered-record acknowledgement completes inside
+                            // prepare (Retained, no new signer call), then the
+                            // ORIGINAL admission is invalidated before the
+                            // production retained-result completion — no new
+                            // signature, no authorized reuse/handoff, and the exact
+                            // `Signed` record preserved.
+                            let fixture = make_fixture(4);
+                            let (pv, c) = recording_pv(&fixture);
+                            let mut snap = snapshot_matching(&pv);
+                            let store = D10Store::new();
+                            let j = journal(store.clone());
+                            let _ = drive_j(&snap, &j, proposal_at(0, 1, [7u8; 32]));
+                            assert_eq!(c.proposal_calls.load(SeqCst), 1);
+                            let signed_bytes = map_snapshot(&store);
+
+                            // Reopen: durable bytes survive, live table does not.
+                            let reopened = store.reopen();
+                            let j2 = journal(reopened.clone());
+                            let ticket = capture_ticket(&snap);
+                            let mut stats = BinaryConsensusLoopInboundStats::default();
+                            let prepared = {
+                                let ctx = snap.verifier();
+                                let signer = ctx.signer.as_ref().expect("signer");
+                                prepare_proposal_signing_reservation(
+                                    cd_proposal(0, 1, 0, 1, [7u8; 32]),
+                                    ctx,
+                                    signer,
+                                    &j2,
+                                    &mut stats,
+                                )
+                            }
+                            .expect("recovered retained result");
+                            assert!(matches!(prepared, PreparedProposalSigning::Retained { .. }));
+                            assert_eq!(
+                                c.proposal_calls.load(SeqCst),
+                                1,
+                                "recovery acknowledgement makes no new signer call"
+                            );
+
+                            // Invalidate the ORIGINAL admission before completion.
+                            advance_generation(&mut snap);
+                            let out = {
+                                let ctx = snap.verifier();
+                                let signer = ctx.signer.as_ref().expect("signer");
+                                let admission =
+                                    AdmittedSigningIdentity { snapshot: &snap, ticket: &ticket };
+                                complete_proposal_signing(
+                                    prepared,
+                                    ctx,
+                                    Some(&admission),
+                                    signer,
+                                    &j2,
+                                    &mut stats,
+                                )
+                            };
+                            assert!(out.is_none(), "no authorized reuse/handoff");
+                            assert_eq!(
+                                stats
+                                    .outbound_proposal_post_journal_authorization_revalidation_failed_total,
+                                1
+                            );
+                            assert_eq!(stats.outbound_proposal_journal_retained_resend_total, 0);
+                            assert_eq!(c.proposal_calls.load(SeqCst), 1, "no new signature");
+                            assert_eq!(
+                                map_snapshot(&reopened),
+                                signed_bytes,
+                                "exact Signed record preserved"
+                            );
+                        }
+
+                        #[test]
+                        fn cd_i_recovered_retained_reuse_control_signs_once_and_reuses() {
+                            // Valid recovered reuse control: with a VALID original
+                            // admission the recovered retained result is reused
+                            // exactly (D6-verifies) with no additional signer call.
+                            let fixture = make_fixture(4);
+                            let (pv, c) = recording_pv(&fixture);
+                            let snap = snapshot_matching(&pv);
+                            let store = D10Store::new();
+                            let j = journal(store.clone());
+                            let _ = drive_j(&snap, &j, proposal_at(0, 1, [7u8; 32]));
+                            assert_eq!(c.proposal_calls.load(SeqCst), 1);
+
+                            let reopened = store.reopen();
+                            let j2 = journal(reopened.clone());
+                            let ticket = capture_ticket(&snap);
+                            let mut stats = BinaryConsensusLoopInboundStats::default();
+                            let ctx = snap.verifier();
+                            let signer = ctx.signer.as_ref().expect("signer");
+                            let prepared = prepare_proposal_signing_reservation(
+                                cd_proposal(0, 1, 0, 1, [7u8; 32]),
+                                ctx,
+                                signer,
+                                &j2,
+                                &mut stats,
+                            )
+                            .expect("recovered retained result");
+                            let admission =
+                                AdmittedSigningIdentity { snapshot: &snap, ticket: &ticket };
+                            let out = complete_proposal_signing(
+                                prepared,
+                                ctx,
+                                Some(&admission),
+                                signer,
+                                &j2,
+                                &mut stats,
+                            );
+                            assert!(out.is_some());
+                            assert_eq!(stats.outbound_proposal_journal_retained_resend_total, 1);
+                            assert_eq!(c.proposal_calls.load(SeqCst), 1, "no additional sign");
+                            assert!(qbind_consensus::verify_proposal_msg_with_domain(
+                                &out.unwrap(),
+                                ValidatorId(0),
+                                fixture.validators.as_ref(),
+                                fixture.kp.as_ref(),
+                                fixture.br.as_ref(),
+                                &d6_control_domain(),
+                            )
+                            .is_ok());
                         }
                     }
                 }
