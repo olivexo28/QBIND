@@ -24809,6 +24809,882 @@ mod tests {
                         assert_eq!(facade.proposals.lock().unwrap().len(), 1);
                         assert_eq!(facade.broadcast_votes.lock().unwrap().len(), 1);
                     }
+
+                    // ===========================================================
+                    // Run 422 D7-D10 Correction D — preserve the ORIGINAL
+                    // admission identity through journal work and REVALIDATE it
+                    // before signing (fresh) or before retained-result reuse,
+                    // and reject inconsistent signer identity / unsupported wire
+                    // versions BEFORE journal lookup.
+                    //
+                    // Evidence boundaries (task §7):
+                    //  * Normal-entrypoint controls drive the REAL immediate
+                    //    (`forward_actions_to_facade` via `drive_j`) and cached
+                    //    (`maybe_reemit_on_late_peer_connect`) callers so the
+                    //    production wiring is shown to reach the post-journal
+                    //    boundary and the new counters stay 0 on the success path.
+                    //  * STAGED tests call the SAME private post-journal
+                    //    continuation the production callers use
+                    //    (`guarded_sign_{proposal,vote}_for_broadcast` with an
+                    //    `AdmittedSigningIdentity`). The owner is non-cloneable and
+                    //    replacement needs `&mut`, so a rejection AFTER the durable
+                    //    reservation is exercised deterministically by mutating the
+                    //    fixture owner BETWEEN explicit phases (no unsafe aliasing,
+                    //    no production mutation hook, no sleeps, no fabricated
+                    //    concurrent owner). These are labelled STAGED.
+                    //
+                    // Signer invocation is observed DIRECTLY via the
+                    // `RecordingSigner` per-call atomics (underlying signer, not
+                    // wrapper entry). Durable reservation preservation is shown
+                    // both by unchanged stored bytes and by a retry resolving to
+                    // `PotentiallySigned`.
+                    // ===========================================================
+                    mod correction_d {
+                        use super::*;
+                        use crate::genesis_consensus_authority::{
+                            ConfirmError, LocalAuthorizationState,
+                        };
+                        use std::collections::HashMap as StdHashMap;
+
+                        // ---- shared builders ------------------------------------
+
+                        /// A Proposal with explicit wire `version` and
+                        /// `proposer_index`, otherwise a valid founding-profile
+                        /// frame (`height == round == view`, control-domain
+                        /// `chain_id == 0`).
+                        fn cd_proposal(
+                            proposer_index: u16,
+                            version: u8,
+                            epoch: u64,
+                            view: u64,
+                            payload: [u8; 32],
+                        ) -> BlockProposal {
+                            let mut header = base_header(proposer_index);
+                            header.version = version;
+                            header.epoch = epoch;
+                            header.height = view;
+                            header.round = view;
+                            header.payload_hash = payload;
+                            BlockProposal { header, qc: None, txs: vec![], signature: vec![] }
+                        }
+
+                        /// A founding-profile Vote (`step == 0`) with explicit
+                        /// wire `version` and `validator_index`.
+                        fn cd_vote(
+                            validator_index: u16,
+                            version: u8,
+                            epoch: u64,
+                            view: u64,
+                            block_id: [u8; 32],
+                        ) -> Vote {
+                            let mut v = base_vote(validator_index);
+                            v.version = version;
+                            v.step = 0;
+                            v.epoch = epoch;
+                            v.height = view;
+                            v.round = view;
+                            v.block_id = block_id;
+                            v
+                        }
+
+                        /// A recording `ProposalVoteAuthority` whose validator-0
+                        /// key material is presented under an ARBITRARY stable
+                        /// `ValidatorId` (`id`). Used to exercise the
+                        /// signer-identity / membership / no-narrowing checks
+                        /// without inventing key material (the signer is never
+                        /// actually invoked on the rejected paths).
+                        fn pv_signer_id(
+                            fixture: &Fixture,
+                            id: u64,
+                        ) -> (ProposalVoteAuthority, Arc<AtomicU64>, Arc<AtomicU64>) {
+                            let (mut pv, c) = recording_pv(fixture);
+                            let sk = fixture.sk_objs.get(&ValidatorId(0)).expect("sk").clone();
+                            let inner = LocalKeySigner::new(ValidatorId(id), TEST_SUITE_U16, sk);
+                            let signer: Arc<dyn ValidatorSigner> = Arc::new(RecordingSigner {
+                                inner,
+                                vote_calls: c.vote_calls.clone(),
+                                proposal_calls: c.proposal_calls.clone(),
+                            });
+                            pv.signer = Some(signer);
+                            (pv, c.proposal_calls, c.vote_calls)
+                        }
+
+                        /// Capture the ORIGINAL admission ticket the immediate/cached
+                        /// callers would obtain, at the owner's current generation.
+                        fn capture_ticket(
+                            snap: &AuthorizedProposalVoteSnapshot,
+                        ) -> AuthorizationTicket {
+                            snap.owner().admit().expect("coherent snapshot admits")
+                        }
+
+                        /// Advance the owner's generation while keeping an
+                        /// equivalent coherent configuration (models "replaced
+                        /// back to an equivalent configuration" / generation
+                        /// advance). Any outstanding ticket becomes `Stale`.
+                        fn advance_generation(snap: &mut AuthorizedProposalVoteSnapshot) {
+                            let coherent = snap.owner().candidate().config_identity();
+                            snap.owner_mut()
+                                .replace_for_fixture(LocalAuthorizationState::Established(coherent));
+                        }
+
+                        /// Drive the owner into the terminal exhausted state via
+                        /// the existing checked-overflow fixture. Any outstanding
+                        /// ticket becomes `Exhausted`.
+                        fn exhaust(snap: &mut AuthorizedProposalVoteSnapshot) {
+                            let coherent = snap.owner().candidate().config_identity();
+                            snap.owner_mut().set_generation_for_exhaustion_fixture(u64::MAX);
+                            snap.owner_mut()
+                                .replace_for_fixture(LocalAuthorizationState::Established(coherent));
+                        }
+
+                        fn map_snapshot(store: &D10Store) -> StdHashMap<Vec<u8>, Vec<u8>> {
+                            store.map.read().unwrap().clone()
+                        }
+
+                        // ---- A. Successful ordering (normal entrypoints) --------
+
+                        #[test]
+                        fn cd_a_immediate_success_keeps_revalidation_counters_zero() {
+                            // The REAL immediate caller signs once AFTER the
+                            // durable reservation and the post-journal confirm; the
+                            // Correction-D refusal counters stay at 0.
+                            let fixture = make_fixture(4);
+                            let (pv, c) = recording_pv(&fixture);
+                            let snap = snapshot_matching(&pv);
+                            let store = D10Store::new();
+                            let j = journal(store.clone());
+
+                            let (sp, _fp) = drive_j(&snap, &j, proposal_at(0, 1, [7u8; 32]));
+                            assert_eq!(c.proposal_calls.load(SeqCst), 1);
+                            assert_eq!(sp.outbound_proposal_journal_reserved_total, 1);
+                            assert_eq!(sp.outbound_proposal_signing_success, 1);
+                            assert_eq!(
+                                sp.outbound_proposal_post_journal_authorization_revalidation_failed_total,
+                                0
+                            );
+                            assert_eq!(sp.outbound_proposal_bound_context_unbound_total, 0);
+                            assert_eq!(sp.outbound_proposal_wire_version_unsupported_total, 0);
+                            assert_eq!(sp.outbound_proposal_signer_identity_mismatch_total, 0);
+
+                            let (sv, _fv) = drive_j(
+                                &snap,
+                                &j,
+                                ConsensusEngineAction::BroadcastVote(vote_v0(0, 2, [8u8; 32])),
+                            );
+                            assert_eq!(c.vote_calls.load(SeqCst), 1);
+                            assert_eq!(sv.outbound_vote_journal_reserved_total, 1);
+                            assert_eq!(sv.outbound_vote_signing_success, 1);
+                            assert_eq!(
+                                sv.outbound_vote_post_journal_authorization_revalidation_failed_total,
+                                0
+                            );
+                            assert_eq!(sv.outbound_vote_bound_context_unbound_total, 0);
+                        }
+
+                        #[test]
+                        fn cd_a_staged_success_signs_after_post_journal_confirm() {
+                            // STAGED: the same private continuation with a VALID
+                            // original admission signs exactly once; the retained
+                            // durable result then re-verifies with no extra sign.
+                            let fixture = make_fixture(4);
+                            let (pv, c) = recording_pv(&fixture);
+                            let snap = snapshot_matching(&pv);
+                            let store = D10Store::new();
+                            let j = journal(store.clone());
+                            let ticket = capture_ticket(&snap);
+                            let admission = AdmittedSigningIdentity { snapshot: &snap, ticket: &ticket };
+
+                            let mut stats = BinaryConsensusLoopInboundStats::default();
+                            let signed = guarded_sign_proposal_for_broadcast(
+                                cd_proposal(0, 1, 0, 1, [7u8; 32]),
+                                Some(snap.verifier()),
+                                Some(&admission),
+                                Some(&j),
+                                ConsensusVerificationPolicy::Required,
+                                &mut stats,
+                            );
+                            assert!(signed.is_some());
+                            assert_eq!(c.proposal_calls.load(SeqCst), 1);
+                            assert_eq!(stats.outbound_proposal_journal_reserved_total, 1);
+                            assert_eq!(stats.outbound_proposal_signing_success, 1);
+                            assert!(qbind_consensus::verify_proposal_msg_with_domain(
+                                &signed.unwrap(),
+                                ValidatorId(0),
+                                fixture.validators.as_ref(),
+                                fixture.kp.as_ref(),
+                                fixture.br.as_ref(),
+                                &d6_control_domain(),
+                            )
+                            .is_ok());
+                        }
+
+                        // ---- B. Original-ticket rejection AFTER reservation -----
+                        //
+                        // Each case reaches a durable reservation, then the
+                        // post-journal confirm refuses. All assert: exactly one
+                        // reservation, ZERO underlying signer calls, no publication
+                        // (`signing_success == 0`, `retained_resend == 0`), the
+                        // matching revalidation counter, UNCHANGED durable bytes,
+                        // and a retry resolving to `PotentiallySigned` (the
+                        // reservation and its conflict obligation are preserved and
+                        // never released/reset).
+
+                        /// Run one STAGED post-reservation rejection for a Proposal
+                        /// and assert the shared preservation invariants; returns
+                        /// the observed `ConfirmError`-shaped rejection via the
+                        /// counters already asserted by the caller.
+                        fn staged_proposal_post_reservation_reject(
+                            snap: &AuthorizedProposalVoteSnapshot,
+                            ticket: &AuthorizationTicket,
+                            ctx: &ProposalVoteAuthority,
+                            proposal_calls: &Arc<AtomicU64>,
+                            store: &Arc<D10Store>,
+                            j: &SigningReservationJournal,
+                        ) -> BinaryConsensusLoopInboundStats {
+                            let admission = AdmittedSigningIdentity { snapshot: snap, ticket };
+                            let mut stats = BinaryConsensusLoopInboundStats::default();
+                            let out = guarded_sign_proposal_for_broadcast(
+                                cd_proposal(0, 1, 0, 1, [7u8; 32]),
+                                Some(ctx),
+                                Some(&admission),
+                                Some(j),
+                                ConsensusVerificationPolicy::Required,
+                                &mut stats,
+                            );
+                            // Suppressed: no signed message, one reservation, zero
+                            // signer calls, no publication.
+                            assert!(out.is_none());
+                            assert_eq!(stats.outbound_proposal_journal_reserved_total, 1);
+                            assert_eq!(proposal_calls.load(SeqCst), 0);
+                            assert_eq!(stats.outbound_proposal_signing_success, 0);
+                            assert_eq!(stats.outbound_proposal_journal_retained_resend_total, 0);
+
+                            // Durable bytes preserved across the rejection, and a
+                            // retry sees the retained Reserved record → conservative
+                            // PotentiallySigned (never re-admitted / re-signed).
+                            let after = map_snapshot(store);
+                            let admission2 = AdmittedSigningIdentity { snapshot: snap, ticket };
+                            let mut retry = BinaryConsensusLoopInboundStats::default();
+                            let out2 = guarded_sign_proposal_for_broadcast(
+                                cd_proposal(0, 1, 0, 1, [7u8; 32]),
+                                Some(ctx),
+                                Some(&admission2),
+                                Some(j),
+                                ConsensusVerificationPolicy::Required,
+                                &mut retry,
+                            );
+                            assert!(out2.is_none());
+                            assert_eq!(retry.outbound_proposal_journal_potentially_signed_total, 1);
+                            assert_eq!(proposal_calls.load(SeqCst), 0);
+                            assert_eq!(map_snapshot(store), after, "durable Reserved bytes unchanged");
+                            stats
+                        }
+
+                        #[test]
+                        fn cd_b_different_owner_equal_config_generation_foreign_issuer() {
+                            // STAGED: a DIFFERENT owner with identical configuration
+                            // and equal generation cannot confirm the original
+                            // ticket (opaque issuer identity binding).
+                            let fixture = make_fixture(4);
+                            let (pv, c) = recording_pv(&fixture);
+                            let snap_a = snapshot_matching(&pv);
+                            let snap_b = snapshot_matching(&pv); // fresh OwnerIdentity, same config
+                            let store = D10Store::new();
+                            let j = journal(store.clone());
+                            let ticket_a = capture_ticket(&snap_a);
+
+                            // Present snap_b's owner/verifier with snap_a's ticket.
+                            let stats = staged_proposal_post_reservation_reject(
+                                &snap_b,
+                                &ticket_a,
+                                snap_b.verifier(),
+                                &c.proposal_calls,
+                                &store,
+                                &j,
+                            );
+                            assert_eq!(
+                                stats.outbound_proposal_post_journal_authorization_revalidation_failed_total,
+                                1
+                            );
+                        }
+
+                        #[test]
+                        fn cd_b_same_owner_generation_advance_stale() {
+                            // STAGED: the original owner whose generation advanced
+                            // (equivalent config replaced back) → Stale.
+                            let fixture = make_fixture(4);
+                            let (pv, c) = recording_pv(&fixture);
+                            let mut snap = snapshot_matching(&pv);
+                            let store = D10Store::new();
+                            let j = journal(store.clone());
+                            let ticket = capture_ticket(&snap);
+                            advance_generation(&mut snap);
+                            assert!(matches!(
+                                snap.owner().confirm(&ticket),
+                                Err(ConfirmError::Stale(_))
+                            ));
+                            let stats = staged_proposal_post_reservation_reject(
+                                &snap,
+                                &ticket,
+                                snap.verifier(),
+                                &c.proposal_calls,
+                                &store,
+                                &j,
+                            );
+                            assert_eq!(
+                                stats.outbound_proposal_post_journal_authorization_revalidation_failed_total,
+                                1
+                            );
+                        }
+
+                        #[test]
+                        fn cd_b_same_owner_made_unavailable_stale() {
+                            // STAGED: making the owner unavailable through the
+                            // replacement API advances the generation, so the
+                            // original ticket no longer confirms.
+                            let fixture = make_fixture(4);
+                            let (pv, c) = recording_pv(&fixture);
+                            let mut snap = snapshot_matching(&pv);
+                            let store = D10Store::new();
+                            let j = journal(store.clone());
+                            let ticket = capture_ticket(&snap);
+                            snap.owner_mut().replace_for_fixture(
+                                LocalAuthorizationState::MissingStorage,
+                            );
+                            assert!(snap.owner().confirm(&ticket).is_err());
+                            let stats = staged_proposal_post_reservation_reject(
+                                &snap,
+                                &ticket,
+                                snap.verifier(),
+                                &c.proposal_calls,
+                                &store,
+                                &j,
+                            );
+                            assert_eq!(
+                                stats.outbound_proposal_post_journal_authorization_revalidation_failed_total,
+                                1
+                            );
+                        }
+
+                        #[test]
+                        fn cd_b_terminal_exhaustion_rejected() {
+                            // STAGED: terminal generation exhaustion (checked
+                            // overflow fixture) → Exhausted; no ticket confirms.
+                            let fixture = make_fixture(4);
+                            let (pv, c) = recording_pv(&fixture);
+                            let mut snap = snapshot_matching(&pv);
+                            let store = D10Store::new();
+                            let j = journal(store.clone());
+                            let ticket = capture_ticket(&snap);
+                            exhaust(&mut snap);
+                            assert!(matches!(
+                                snap.owner().confirm(&ticket),
+                                Err(ConfirmError::Exhausted)
+                            ));
+                            let stats = staged_proposal_post_reservation_reject(
+                                &snap,
+                                &ticket,
+                                snap.verifier(),
+                                &c.proposal_calls,
+                                &store,
+                                &j,
+                            );
+                            assert_eq!(
+                                stats.outbound_proposal_post_journal_authorization_revalidation_failed_total,
+                                1
+                            );
+                        }
+
+                        #[test]
+                        fn cd_b_missing_pairing_fails_closed_before_signing() {
+                            // A wired snapshot without its ticket (or an orphan
+                            // ticket) is an impossible-in-production pairing that
+                            // `resolve_admitted_identity` refuses FAIL-CLOSED — it
+                            // never silently signs without revalidation.
+                            let fixture = make_fixture(4);
+                            let (pv, _c) = recording_pv(&fixture);
+                            let snap = snapshot_matching(&pv);
+                            let ticket = capture_ticket(&snap);
+                            assert!(resolve_admitted_identity(Some(&snap), None).is_err());
+                            assert!(resolve_admitted_identity(None, Some(&ticket)).is_err());
+                            // The genuine pairs are accepted / benign.
+                            assert!(resolve_admitted_identity(Some(&snap), Some(&ticket))
+                                .unwrap()
+                                .is_some());
+                            assert!(resolve_admitted_identity(None, None).unwrap().is_none());
+                        }
+
+                        #[test]
+                        fn cd_b_vote_generation_advance_stale_after_reservation() {
+                            // STAGED Vote analogue of the Proposal post-reservation
+                            // rejection with preservation invariants.
+                            let fixture = make_fixture(4);
+                            let (pv, c) = recording_pv(&fixture);
+                            let mut snap = snapshot_matching(&pv);
+                            let store = D10Store::new();
+                            let j = journal(store.clone());
+                            let ticket = capture_ticket(&snap);
+                            advance_generation(&mut snap);
+                            let admission = AdmittedSigningIdentity { snapshot: &snap, ticket: &ticket };
+                            let mut stats = BinaryConsensusLoopInboundStats::default();
+                            let out = guarded_sign_vote_for_broadcast(
+                                cd_vote(0, 1, 0, 1, [7u8; 32]),
+                                Some(snap.verifier()),
+                                Some(&admission),
+                                Some(&j),
+                                ConsensusVerificationPolicy::Required,
+                                &mut stats,
+                            );
+                            assert!(out.is_none());
+                            assert_eq!(stats.outbound_vote_journal_reserved_total, 1);
+                            assert_eq!(c.vote_calls.load(SeqCst), 0);
+                            assert_eq!(stats.outbound_vote_signing_success, 0);
+                            assert_eq!(
+                                stats.outbound_vote_post_journal_authorization_revalidation_failed_total,
+                                1
+                            );
+                            let after = map_snapshot(&store);
+                            // Retry → PotentiallySigned, reservation preserved.
+                            let admission2 = AdmittedSigningIdentity { snapshot: &snap, ticket: &ticket };
+                            let mut retry = BinaryConsensusLoopInboundStats::default();
+                            let out2 = guarded_sign_vote_for_broadcast(
+                                cd_vote(0, 1, 0, 1, [7u8; 32]),
+                                Some(snap.verifier()),
+                                Some(&admission2),
+                                Some(&j),
+                                ConsensusVerificationPolicy::Required,
+                                &mut retry,
+                            );
+                            assert!(out2.is_none());
+                            assert_eq!(retry.outbound_vote_journal_potentially_signed_total, 1);
+                            assert_eq!(c.vote_calls.load(SeqCst), 0);
+                            assert_eq!(map_snapshot(&store), after);
+                        }
+
+                        // ---- C. Bound-context substitution ----------------------
+
+                        #[test]
+                        fn cd_c_substituted_verifier_refused_before_signing() {
+                            // STAGED: the original owner/ticket paired with an
+                            // INDEPENDENTLY-supplied verifier (a different, even
+                            // equal-looking, `ProposalVoteAuthority`) must not
+                            // redirect signing. The bound-context check is by
+                            // pointer identity and is evaluated FIRST.
+                            let fixture = make_fixture(4);
+                            let (pv, c) = recording_pv(&fixture);
+                            let snap = snapshot_matching(&pv);
+                            let (other_pv, other_c) = recording_pv(&fixture); // equal-looking, different instance
+                            let store = D10Store::new();
+                            let j = journal(store.clone());
+                            let ticket = capture_ticket(&snap);
+                            let admission = AdmittedSigningIdentity { snapshot: &snap, ticket: &ticket };
+
+                            let mut stats = BinaryConsensusLoopInboundStats::default();
+                            let out = guarded_sign_proposal_for_broadcast(
+                                cd_proposal(0, 1, 0, 1, [7u8; 32]),
+                                Some(&other_pv), // NOT snap.verifier()
+                                Some(&admission),
+                                Some(&j),
+                                ConsensusVerificationPolicy::Required,
+                                &mut stats,
+                            );
+                            assert!(out.is_none());
+                            // Reserved (context-unbound is checked after the
+                            // reservation, immediately before the signer), zero
+                            // signer calls on EITHER authority, no publication.
+                            assert_eq!(stats.outbound_proposal_journal_reserved_total, 1);
+                            assert_eq!(stats.outbound_proposal_bound_context_unbound_total, 1);
+                            assert_eq!(
+                                stats.outbound_proposal_post_journal_authorization_revalidation_failed_total,
+                                0,
+                                "context substitution is distinct from ticket staleness"
+                            );
+                            assert_eq!(c.proposal_calls.load(SeqCst), 0);
+                            assert_eq!(other_c.proposal_calls.load(SeqCst), 0);
+                        }
+
+                        // ---- D. Identity / version negatives (pre-journal) ------
+                        //
+                        // All assert refusal BEFORE the journal lookup/write and
+                        // before signer invocation: `journal_reserved_total == 0`,
+                        // `journal_error_total == 0` even with reads forced to
+                        // fail, and zero signer calls.
+
+                        #[test]
+                        fn cd_d_proposal_wire_version_unsupported_before_journal() {
+                            let fixture = make_fixture(4);
+                            let (pv, c) = recording_pv(&fixture);
+                            let snap = snapshot_matching(&pv);
+                            let store = D10Store::new();
+                            store.set_fail_reads(true); // any journal touch would error
+                            let j = journal(store.clone());
+                            let ticket = capture_ticket(&snap);
+                            let admission = AdmittedSigningIdentity { snapshot: &snap, ticket: &ticket };
+                            let mut stats = BinaryConsensusLoopInboundStats::default();
+                            // Wire version 2 must NOT be mistaken for D6 format v2.
+                            let out = guarded_sign_proposal_for_broadcast(
+                                cd_proposal(0, 2, 0, 1, [7u8; 32]),
+                                Some(snap.verifier()),
+                                Some(&admission),
+                                Some(&j),
+                                ConsensusVerificationPolicy::Required,
+                                &mut stats,
+                            );
+                            assert!(out.is_none());
+                            assert_eq!(stats.outbound_proposal_wire_version_unsupported_total, 1);
+                            assert_eq!(stats.outbound_proposal_journal_reserved_total, 0);
+                            assert_eq!(stats.outbound_proposal_journal_error_total, 0);
+                            assert_eq!(c.proposal_calls.load(SeqCst), 0);
+                            assert!(map_snapshot(&store).is_empty());
+                        }
+
+                        #[test]
+                        fn cd_d_proposal_signer_index_mismatch_before_journal() {
+                            let fixture = make_fixture(4);
+                            let (pv, c) = recording_pv(&fixture); // signer id 0
+                            let snap = snapshot_matching(&pv);
+                            let store = D10Store::new();
+                            store.set_fail_reads(true);
+                            let j = journal(store.clone());
+                            let ticket = capture_ticket(&snap);
+                            let admission = AdmittedSigningIdentity { snapshot: &snap, ticket: &ticket };
+                            let mut stats = BinaryConsensusLoopInboundStats::default();
+                            // proposer_index 1 ≠ bound signer id 0.
+                            let out = guarded_sign_proposal_for_broadcast(
+                                cd_proposal(1, 1, 0, 1, [7u8; 32]),
+                                Some(snap.verifier()),
+                                Some(&admission),
+                                Some(&j),
+                                ConsensusVerificationPolicy::Required,
+                                &mut stats,
+                            );
+                            assert!(out.is_none());
+                            assert_eq!(stats.outbound_proposal_signer_identity_mismatch_total, 1);
+                            assert_eq!(stats.outbound_proposal_journal_reserved_total, 0);
+                            assert_eq!(stats.outbound_proposal_journal_error_total, 0);
+                            assert_eq!(c.proposal_calls.load(SeqCst), 0);
+                        }
+
+                        #[test]
+                        fn cd_d_proposal_signer_outside_membership_before_journal() {
+                            let fixture = make_fixture(4); // members 0..=3
+                            let (pv, pc, _vc) = pv_signer_id(&fixture, 9); // id 9 ∉ membership
+                            let snap = snapshot_matching(&pv);
+                            let store = D10Store::new();
+                            store.set_fail_reads(true);
+                            let j = journal(store.clone());
+                            let ticket = capture_ticket(&snap);
+                            let admission = AdmittedSigningIdentity { snapshot: &snap, ticket: &ticket };
+                            let mut stats = BinaryConsensusLoopInboundStats::default();
+                            // proposer_index 9 == bound id 9, but 9 ∉ membership.
+                            let out = guarded_sign_proposal_for_broadcast(
+                                cd_proposal(9, 1, 0, 1, [7u8; 32]),
+                                Some(snap.verifier()),
+                                Some(&admission),
+                                Some(&j),
+                                ConsensusVerificationPolicy::Required,
+                                &mut stats,
+                            );
+                            assert!(out.is_none());
+                            assert_eq!(stats.outbound_proposal_signer_identity_mismatch_total, 1);
+                            assert_eq!(stats.outbound_proposal_journal_reserved_total, 0);
+                            assert_eq!(pc.load(SeqCst), 0);
+                        }
+
+                        #[test]
+                        fn cd_d_proposal_large_id_cannot_alias_wire_index() {
+                            // A signer id of 0x1_0000 (65536) must NOT alias wire
+                            // `proposer_index == 0` through u16 narrowing. The
+                            // widened comparison rejects; a narrowing bug would
+                            // instead accept (65536 as u16 == 0).
+                            let fixture = make_fixture(4);
+                            let big: u64 = u64::from(u16::MAX) + 1; // 65536
+                            let (pv, pc, _vc) = pv_signer_id(&fixture, big);
+                            let snap = snapshot_matching(&pv);
+                            let store = D10Store::new();
+                            store.set_fail_reads(true);
+                            let j = journal(store.clone());
+                            let ticket = capture_ticket(&snap);
+                            let admission = AdmittedSigningIdentity { snapshot: &snap, ticket: &ticket };
+                            let mut stats = BinaryConsensusLoopInboundStats::default();
+                            let out = guarded_sign_proposal_for_broadcast(
+                                cd_proposal(0, 1, 0, 1, [7u8; 32]),
+                                Some(snap.verifier()),
+                                Some(&admission),
+                                Some(&j),
+                                ConsensusVerificationPolicy::Required,
+                                &mut stats,
+                            );
+                            assert!(out.is_none());
+                            assert_eq!(stats.outbound_proposal_signer_identity_mismatch_total, 1);
+                            assert_eq!(stats.outbound_proposal_journal_reserved_total, 0);
+                            assert_eq!(pc.load(SeqCst), 0);
+                        }
+
+                        #[test]
+                        fn cd_d_vote_wire_version_and_identity_before_journal() {
+                            let fixture = make_fixture(4);
+                            let (pv, c) = recording_pv(&fixture);
+                            let snap = snapshot_matching(&pv);
+                            let store = D10Store::new();
+                            store.set_fail_reads(true);
+                            let j = journal(store.clone());
+                            let ticket = capture_ticket(&snap);
+
+                            // Unsupported wire version.
+                            let admission = AdmittedSigningIdentity { snapshot: &snap, ticket: &ticket };
+                            let mut sv = BinaryConsensusLoopInboundStats::default();
+                            let out = guarded_sign_vote_for_broadcast(
+                                cd_vote(0, 2, 0, 1, [7u8; 32]),
+                                Some(snap.verifier()),
+                                Some(&admission),
+                                Some(&j),
+                                ConsensusVerificationPolicy::Required,
+                                &mut sv,
+                            );
+                            assert!(out.is_none());
+                            assert_eq!(sv.outbound_vote_wire_version_unsupported_total, 1);
+                            assert_eq!(sv.outbound_vote_journal_reserved_total, 0);
+                            assert_eq!(sv.outbound_vote_journal_error_total, 0);
+
+                            // validator_index 1 ≠ bound signer id 0.
+                            let admission2 = AdmittedSigningIdentity { snapshot: &snap, ticket: &ticket };
+                            let mut si = BinaryConsensusLoopInboundStats::default();
+                            let out2 = guarded_sign_vote_for_broadcast(
+                                cd_vote(1, 1, 0, 1, [7u8; 32]),
+                                Some(snap.verifier()),
+                                Some(&admission2),
+                                Some(&j),
+                                ConsensusVerificationPolicy::Required,
+                                &mut si,
+                            );
+                            assert!(out2.is_none());
+                            assert_eq!(si.outbound_vote_signer_identity_mismatch_total, 1);
+                            assert_eq!(si.outbound_vote_journal_reserved_total, 0);
+                            assert_eq!(c.vote_calls.load(SeqCst), 0);
+                        }
+
+                        #[test]
+                        fn cd_d_positive_control_valid_identity_version_signs() {
+                            // Positive control: valid identity + wire version 1
+                            // signs once through the same boundary.
+                            let fixture = make_fixture(4);
+                            let (pv, c) = recording_pv(&fixture);
+                            let snap = snapshot_matching(&pv);
+                            let store = D10Store::new();
+                            let j = journal(store.clone());
+                            let ticket = capture_ticket(&snap);
+                            let admission = AdmittedSigningIdentity { snapshot: &snap, ticket: &ticket };
+                            let mut stats = BinaryConsensusLoopInboundStats::default();
+                            let out = guarded_sign_proposal_for_broadcast(
+                                cd_proposal(0, 1, 0, 1, [7u8; 32]),
+                                Some(snap.verifier()),
+                                Some(&admission),
+                                Some(&j),
+                                ConsensusVerificationPolicy::Required,
+                                &mut stats,
+                            );
+                            assert!(out.is_some());
+                            assert_eq!(c.proposal_calls.load(SeqCst), 1);
+                            assert_eq!(stats.outbound_proposal_signing_success, 1);
+                        }
+
+                        // ---- E. Retained-result reuse --------------------------
+
+                        #[test]
+                        fn cd_e_valid_retained_reuse_no_additional_sign() {
+                            // A valid acknowledged retained result is reused
+                            // exactly, D6-verifies, and incurs no additional signer
+                            // call; reuse never obtains a NEW ticket.
+                            let fixture = make_fixture(4);
+                            let (pv, c) = recording_pv(&fixture);
+                            let snap = snapshot_matching(&pv);
+                            let store = D10Store::new();
+                            let j = journal(store.clone());
+
+                            // Phase 1: fresh sign + durable persist via the real
+                            // immediate caller.
+                            let _ = drive_j(&snap, &j, proposal_at(0, 1, [7u8; 32]));
+                            assert_eq!(c.proposal_calls.load(SeqCst), 1);
+
+                            // Phase 2: STAGED retained reuse over the SAME instance
+                            // with a VALID original admission.
+                            let ticket = capture_ticket(&snap);
+                            let admission = AdmittedSigningIdentity { snapshot: &snap, ticket: &ticket };
+                            let mut stats = BinaryConsensusLoopInboundStats::default();
+                            let out = guarded_sign_proposal_for_broadcast(
+                                cd_proposal(0, 1, 0, 1, [7u8; 32]),
+                                Some(snap.verifier()),
+                                Some(&admission),
+                                Some(&j),
+                                ConsensusVerificationPolicy::Required,
+                                &mut stats,
+                            );
+                            assert!(out.is_some());
+                            assert_eq!(stats.outbound_proposal_journal_retained_resend_total, 1);
+                            assert_eq!(c.proposal_calls.load(SeqCst), 1, "no additional sign");
+                            assert!(qbind_consensus::verify_proposal_msg_with_domain(
+                                &out.unwrap(),
+                                ValidatorId(0),
+                                fixture.validators.as_ref(),
+                                fixture.kp.as_ref(),
+                                fixture.br.as_ref(),
+                                &d6_control_domain(),
+                            )
+                            .is_ok());
+                        }
+
+                        #[test]
+                        fn cd_e_invalid_admission_suppresses_retained_reuse() {
+                            // Invalid original admission AFTER lookup/acknowledgement
+                            // suppresses reuse/delivery WITHOUT altering the
+                            // obligation and without a new signature.
+                            let fixture = make_fixture(4);
+                            let (pv, c) = recording_pv(&fixture);
+                            let mut snap = snapshot_matching(&pv);
+                            let store = D10Store::new();
+                            let j = journal(store.clone());
+
+                            let ticket = capture_ticket(&snap); // gen 0
+                            let _ = drive_j(&snap, &j, proposal_at(0, 1, [7u8; 32]));
+                            assert_eq!(c.proposal_calls.load(SeqCst), 1);
+                            let persisted = map_snapshot(&store);
+
+                            // Advance generation so the retained-reuse revalidation
+                            // fails.
+                            advance_generation(&mut snap);
+                            let admission = AdmittedSigningIdentity { snapshot: &snap, ticket: &ticket };
+                            let mut stats = BinaryConsensusLoopInboundStats::default();
+                            let out = guarded_sign_proposal_for_broadcast(
+                                cd_proposal(0, 1, 0, 1, [7u8; 32]),
+                                Some(snap.verifier()),
+                                Some(&admission),
+                                Some(&j),
+                                ConsensusVerificationPolicy::Required,
+                                &mut stats,
+                            );
+                            assert!(out.is_none());
+                            assert_eq!(
+                                stats.outbound_proposal_post_journal_authorization_revalidation_failed_total,
+                                1
+                            );
+                            assert_eq!(stats.outbound_proposal_journal_retained_resend_total, 0);
+                            assert_eq!(c.proposal_calls.load(SeqCst), 1, "no new signature on reuse");
+                            assert_eq!(map_snapshot(&store), persisted, "retained obligation unchanged");
+                        }
+
+                        // ---- F. Caller coverage / cached re-emission -----------
+
+                        #[test]
+                        fn cd_f_directed_vote_entrypoint_reaches_boundary() {
+                            // The directed-Vote immediate caller reaches the same
+                            // enforced boundary and signs once with clean counters.
+                            let fixture = make_fixture(4);
+                            let (pv, c) = recording_pv(&fixture);
+                            let snap = snapshot_matching(&pv);
+                            let store = D10Store::new();
+                            let j = journal(store.clone());
+                            let (stats, facade) = drive_j(
+                                &snap,
+                                &j,
+                                ConsensusEngineAction::SendVoteTo {
+                                    to: ValidatorId(1),
+                                    vote: vote_v0(0, 1, [7u8; 32]),
+                                },
+                            );
+                            assert_eq!(c.vote_calls.load(SeqCst), 1);
+                            assert_eq!(stats.outbound_vote_journal_reserved_total, 1);
+                            assert_eq!(stats.outbound_vote_signing_success, 1);
+                            assert_eq!(
+                                stats.outbound_vote_post_journal_authorization_revalidation_failed_total,
+                                0
+                            );
+                            assert_eq!(facade.directed_votes.lock().unwrap().len(), 1);
+                        }
+
+                        #[test]
+                        fn cd_f_cached_reemission_entrypoint_control() {
+                            // The cached re-emission caller reaches the boundary and
+                            // reuses retained signatures with no re-sign and no
+                            // revalidation failure (Proposal-first cached ordering).
+                            let fixture = make_fixture(4);
+                            let (pv, c) = recording_pv(&fixture);
+                            let snap = snapshot_matching(&pv);
+                            let store = D10Store::new();
+                            let j = journal(store.clone());
+
+                            let engine = make_engine(ValidatorId(0), 4);
+                            assert!(engine.is_leader_for_current_view());
+                            let view = engine.current_view();
+                            let _ = drive_j(&snap, &j, proposal_at(0, view, [9u8; 32]));
+                            let _ = drive_j(
+                                &snap,
+                                &j,
+                                ConsensusEngineAction::BroadcastVote(vote_v0(0, view, [9u8; 32])),
+                            );
+                            assert_eq!(c.proposal_calls.load(SeqCst), 1);
+                            assert_eq!(c.vote_calls.load(SeqCst), 1);
+
+                            let cached_proposal = {
+                                let mut header = base_header(0);
+                                header.epoch = 0;
+                                header.height = view;
+                                header.round = view;
+                                header.payload_hash = [9u8; 32];
+                                CachedLeaderProposal {
+                                    view,
+                                    proposal: BlockProposal {
+                                        header,
+                                        qc: None,
+                                        txs: vec![],
+                                        signature: vec![],
+                                    },
+                                    provenance: CachedReemissionProvenance::capture(Some(&snap)),
+                                }
+                            };
+                            let cached_vote = CachedLeaderVote {
+                                view,
+                                vote: vote_v0(0, view, [9u8; 32]),
+                                provenance: CachedReemissionProvenance::capture(Some(&snap)),
+                            };
+                            let facade = OutboundRecorder::default();
+                            let mut stats = BinaryConsensusLoopInboundStats::default();
+                            let mut lp = Some(cached_proposal);
+                            let mut lv = Some(cached_vote);
+                            let mut reemitted: Option<u64> = None;
+                            let mut last_peers: HashSet<NodeId> = HashSet::new();
+                            let connectivity = OneReemitPeer(pv_node_for(1));
+
+                            maybe_reemit_on_late_peer_connect(
+                                &engine,
+                                &mut lp,
+                                &mut lv,
+                                &mut reemitted,
+                                &mut last_peers,
+                                &connectivity,
+                                Some(&facade),
+                                &mut stats,
+                                Some(&snap),
+                                None,
+                                Some(&j),
+                                ConsensusVerificationPolicy::Required,
+                            );
+                            assert_eq!(c.proposal_calls.load(SeqCst), 1, "cached proposal reused");
+                            assert_eq!(c.vote_calls.load(SeqCst), 1, "cached vote reused");
+                            assert_eq!(stats.outbound_proposal_journal_retained_resend_total, 1);
+                            assert_eq!(stats.outbound_vote_journal_retained_resend_total, 1);
+                            assert_eq!(
+                                stats.outbound_proposal_post_journal_authorization_revalidation_failed_total,
+                                0
+                            );
+                            assert_eq!(
+                                stats.outbound_vote_post_journal_authorization_revalidation_failed_total,
+                                0
+                            );
+                            assert_eq!(facade.proposals.lock().unwrap().len(), 1);
+                            assert_eq!(facade.broadcast_votes.lock().unwrap().len(), 1);
+                        }
+                    }
                 }
             }
             // =============================================================
