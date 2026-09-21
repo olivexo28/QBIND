@@ -1001,29 +1001,39 @@ production; the guard engages only when a journal is explicitly wired (tests).
   stage | validator_id | network_genesis | originating_view | binding |
   sig_len | sig | crc32` (big-endian, checksum over the body). The checksum is
   corruption detection only — **not** authentication or rollback protection.
-* Bounds: retained signature ≤ 8 KiB, record ≤ bounded max, reservation count
-  budgeted **per attached handle** (checked arithmetic; overflow is terminal,
-  never wraparound). Exhaustion **refuses further signing** with no silent
-  eviction of conflict obligations. Decode is fail-closed on malformed/
-  truncated/incompatible/inconsistent input; no allocation from unchecked
-  stored lengths.
-* Attach is **not** an initialization step. `attach` only binds a handle to the
-  backend's ownership domain and starts with an empty in-memory live-permit map
-  (the crash-recovery posture): a `Reserved` record already in the store is
-  treated as potentially-signed on the next reservation, and no live
-  continuation is ever minted from it. Specifically, `attach`:
+* Bounds: retained signature ≤ 8 KiB, record ≤ bounded max. The reservation
+  counter (`reserved_positions`) is **shared by the ownership domain**, not held
+  per handle; each attached handle applies its **own configured limit**
+  (`max_reserved_positions`) against that single shared counter (checked
+  arithmetic; overflow is terminal, never wraparound). Exhaustion **refuses
+  further signing** with no silent eviction of conflict obligations. Decode is
+  fail-closed on malformed/truncated/incompatible/inconsistent input; no
+  allocation from unchecked stored lengths.
+* Attach is **not** an initialization step. `attach` **reuses the backend
+  instance's existing ownership domain** (fetched through
+  `signing_ownership_domain` and cached per-instance); it does **not** empty,
+  reset, or reinitialize that domain's shared live-operation table — the live
+  table is whatever the backend instance already holds. Only a **newly created**
+  domain (a freshly opened backend instance, i.e. a modelled restart) starts
+  with fresh, empty process-local state (empty live-permit and
+  recovered-acknowledgement maps and a zero reservation counter) — the honest
+  crash-recovery posture: a `Reserved` record already in the store is treated as
+  potentially-signed on the next reservation, and no live continuation is ever
+  minted from it. Specifically, `attach`:
   * does **not** implement explicit first-time initialization versus
     established-journal validation (distinguishing a never-initialized keyspace
     from a valid or a corrupt established journal);
-  * does **not** implement persistent capacity accounting (the reservation
-    budget is a per-handle in-memory bound, not a durable count reconstructed
-    from storage);
+  * does **not** implement persistent capacity accounting (the shared domain
+    reservation counter is process-local in-memory state, and each handle's
+    limit is likewise an in-memory bound, not a durable count reconstructed from
+    storage);
   * therefore does **not** wipe, repair, or convert missing/corrupt established
     state into an empty usable journal — it simply fails closed on the affected
     read.
-  Both established-journal initialization/validation and persistent capacity
-  accounting remain **OPEN under E** (see §12). Production startup does **not**
-  initialize a journal.
+  Established-journal initialization/validation, persistent capacity accounting,
+  and recovered-record **acknowledgement-cache** accounting (the per-domain
+  `recovered_acked` cache described in §9.4) all remain **OPEN under E** (see
+  §9.5). Production startup does **not** initialize a journal.
 
 ### 9.4 Exclusivity, live continuation, recovered-record behavior
 
@@ -1175,10 +1185,51 @@ production; the guard engages only when a journal is explicitly wired (tests).
   confirms a legitimate retained resend after publication costs zero additional
   signer calls (the current resend policy is not weakened to an incorrect global
   "one handoff" assertion).
-* **Still OPEN in D10 (not addressed by this pass):** Correction A
-  (missing-journal refusal across all signing routes), Correction D (post-storage
+* **Executed (Correction A — this pass):** the missing-journal signing refusal
+  now guards **every** signer-eligible outbound route. An otherwise-eligible
+  Proposal/Vote (admitted current authorization, present signer, matching wire
+  domain) with **no** signing-reservation journal refuses **before** the signer
+  runs — before any signer invocation, reservation, retained resend, or facade
+  handoff — and records a distinct per-family counter
+  (`outbound_proposal_journal_unavailable_total` /
+  `outbound_vote_journal_unavailable_total`). The guard sits **after** the
+  existing authority / current-state / epoch / provenance / signer-availability
+  / wire-domain admission (those earlier rejections keep their own counters and
+  are never relabelled), and a signature already present on the message does not
+  exempt it. The refusal is enforced inside `guarded_sign_proposal_for_broadcast`
+  / `guarded_sign_vote_for_broadcast`, through which **all** production signing
+  routes flow: immediate/broadcast Proposal and broadcast + directed Vote
+  (`forward_actions_to_facade`), the leader Proposal and paired self-Vote
+  (`do_leader_tick`), and the cached Proposal/Vote re-emission
+  (`maybe_reemit_on_late_peer_connect`). The raw `sign_proposal_for_broadcast` /
+  `sign_vote_for_broadcast` helpers are now `#[cfg(test)]` cryptographic-unit
+  fixtures with **no** production call site. `LocalFixtureUnsigned` is **not** an
+  exemption: its no-context passthrough has no signer and therefore no signing
+  decision to reserve, but once a signer is supplied a missing journal still
+  refuses. Route-level acceptance tests use otherwise-valid fixtures and assert
+  the exact refusal counter, **zero** underlying signer calls, **zero** facade
+  handoffs, and no false signing-success / reservation / resend / sent counters,
+  each paired with a journal-present positive control that actually signs and
+  delivers, plus earlier-refusal controls (authority/provenance/epoch/missing-
+  signer/wire-domain) so a missing journal cannot mask an earlier failure. The
+  immediate/broadcast/directed cases live in
+  `run422_d7a::run422_d7b::correction_a_immediate` (`ca_a_*`, `ca_b_*`, `ca_e_*`);
+  the leader-self-emit and cached re-emission cases live with their fixtures in
+  `run420::run422_d7b2` (`ca_c_leader_tick_missing_journal_refuses_both_families`,
+  `ca_d_cached_reemission_missing_journal_prevents_signing_and_reemission`). In
+  the cached path the Proposal is signed **first**, so its missing-journal
+  refusal short-circuits the whole attempt and the paired cached **Vote**'s
+  missing-journal branch is **not** reached (the negative reports Proposal
+  counter 1, Vote counter 0); cached-Vote missing-journal coverage is
+  established instead by the shared Vote guard negative (`ca_a_vote_*`), the
+  verified production cached-Vote call site, and the journal-present cached-Vote
+  positive control. This closes Correction A for its demonstrated local scope; it
+  does **not** supply configured-authority runtime evidence and does **not**
+  close the separate Correction F engine-progress obligation.
+* **Still OPEN in D10 (not addressed by this pass):** Correction D (post-storage
   original-owner revalidation and remaining identity/version checks), Correction E
-  (established-journal initialization and persistent capacity accounting), and the
+  (established-journal initialization and persistent capacity accounting, including
+  recovered-record acknowledgement-cache accounting), and the
   remaining F engine-progress/process-runner work.
 * **Not executed / still unmet (unchanged posture):** durable anti-rollback
   anchor (§6.6), consensus-lock recovery (§5.3/§6.7), whole-copy rollback,
@@ -1187,7 +1238,8 @@ production; the guard engages only when a journal is explicitly wired (tests).
   **not** close any of these.
 
 ```
-D7D10_LOCAL_SIGNING_RESERVATION=PARTIAL   (Corrections B/C complete for their demonstrated local scope; A, D, E, F remain OPEN. Supersedes the earlier CODE-AND-STORAGE-TEST-POSITIVE wording, which is retained only as historical evidence.)
+D7D10_MISSING_JOURNAL_SIGNING_REFUSAL=CODE-TEST-POSITIVE   (Correction A: signer-eligible Proposal/Vote with no journal refuses before the signer across every production route; distinct per-family counters; earlier admission precedence intact; LocalFixtureUnsigned no-signer passthrough preserved. Local demonstrated scope only — no configured-authority runtime evidence, F engine-progress obligation unaffected.)
+D7D10_LOCAL_SIGNING_RESERVATION=PARTIAL   (Corrections A and B/C complete for their demonstrated local scope; D, E, F remain OPEN. Supersedes the earlier CODE-AND-STORAGE-TEST-POSITIVE wording, which is retained only as historical evidence.)
 D7D9_SIGNING_STATE_CONTINUITY_CONTRACT=DEFINED-NOT-IMPLEMENTED   (D9 record preserved)
 D7D8_RESTORE_COMPLETION_CONTAINMENT=CODE-AND-RELEASE-TEST-POSITIVE   (preserved)
 D7_STATUS=PARTIAL-CODE-TEST / PRODUCTION-LIFECYCLE-UNAVAILABLE

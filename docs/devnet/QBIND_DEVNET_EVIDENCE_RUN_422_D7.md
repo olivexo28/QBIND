@@ -8934,3 +8934,180 @@ runner). No activation, readiness promotion, D11, or Run 423; no PR, branch rena
 force-push, rebase, or history rewrite.
 
 C4/C5 remain OPEN.
+
+## Run 422 D7-D10 — Correction A: missing-journal signing refusal (repaired checkpoint)
+
+Code + test + doc pass completing Correction A (the missing-journal signing
+refusal) and repairing the in-flight checkpoint whose library test target did
+not compile.
+
+### Actual branch / SHAs / object limitations
+
+* Branch: `copilot/missing-journal-signing-refusal` — the checkout's real
+  branch. The earlier report's `copilot/copilotcopilotcopilotcopilotrun-422-d7-d10`
+  name and the B/C revision `cd8a7e0a317aaa546cf707c19d96a77c073817df` are **not**
+  present in this shallow single-branch clone.
+* Starting HEAD `752c2a7` (parent `e468bc8`). By source inspection **this HEAD**,
+  not the named B/C revision, already carried the in-flight Correction-A
+  production guard **and** the misplaced tests. Content correspondence is not
+  ancestry; no pushed/tested checkpoint was manufactured.
+* Repaired tested checkpoint `9ea380c` (module-placement repair). Every
+  validation below was run against this tree. Final pushed SHA is this evidence
+  commit.
+* Object limitation: only these two commits exist locally; historical objects
+  (`cd8a7e0…`, `d9e625c`, `b618b4e`, …) are absent and were reasoned about by
+  source inspection only.
+
+### Module-placement repair (the compile break)
+
+The block `ca_leader_domain` + `ca_c_leader_tick_missing_journal_refuses_both_families`
++ `ca_d_cached_reemission_missing_journal_prevents_signing_and_reemission` had been
+pasted **inside the body** of the test fn
+`run422_d6_outbound_vote_wire_chain_refusal_through_forward_actions` (module
+`run420`). As inner items they were **not collected as tests**
+(`unnameable_test_items` warnings) and could not see the private helpers
+`recording_ctx_v2`, `RecordingFacade`, and `OnePeer` defined in the sibling module
+`run422_d7b2` (`E0425`/`E0433`). The block was moved verbatim into its owning
+module `run422_d7b2` — which defines those helpers and the `d7b2_*` positive
+controls the tests reference. No helper was made public, no fixture
+(`OnePeer`/`RecordingFacade`/`recording_ctx_v2`) was duplicated, no test was
+disabled or ignored, and no production accessor/bypass was added. The historical
+line boundary was not used; the fn/module braces were. `cargo test -p qbind-node
+--lib --no-run` then compiles (only 2 pre-existing, unrelated `dead_code`
+warnings).
+
+### Guard / caller audit (production vs test-only raw helpers)
+
+Every signer-eligible outbound route signs through
+`guarded_sign_proposal_for_broadcast` / `guarded_sign_vote_for_broadcast`, which
+refuse a missing/unavailable journal **after** the existing context / signer /
+wire-chain admission and **before** any signer invocation, reservation, retained
+resend, or facade handoff, recording `outbound_proposal_journal_unavailable_total`
+/ `outbound_vote_journal_unavailable_total`. Production call sites:
+`forward_actions_to_facade` (immediate/broadcast Proposal, broadcast Vote,
+directed Vote), `do_leader_tick` (leader Proposal + self-Vote), and
+`maybe_reemit_on_late_peer_connect` (cached Proposal/Vote re-emission). The raw
+`sign_proposal_for_broadcast` / `sign_vote_for_broadcast` helpers are
+`#[cfg(test)]` cryptographic-unit fixtures with **no** production call site (all
+raw call sites are inside `#[cfg(test)] mod tests`); their scoped crypto tests do
+not substitute for guarded-handler acceptance tests. A present signature does not
+exempt the guard; journal presence never constitutes authorization.
+`LocalFixtureUnsigned`'s no-context passthrough has no signer (no signing decision
+to reserve), but once a signer is supplied a missing journal still refuses.
+Production `main` still wires no activated authority/journal and remains
+fail-closed under `Required`.
+
+### Per-route observations & positive controls
+
+* Immediate Proposal / broadcast Vote / directed Vote —
+  `run422_d7a::run422_d7b::correction_a_immediate` (`ca_a_*`, `ca_b_*`, `ca_e_*`):
+  missing-journal negatives use otherwise-valid fixtures and assert the exact
+  refusal counter, **0** underlying signer calls, **0** facade handoffs, and no
+  false success/reservation/sent counters. `ca_b_*` add journal-present controls
+  that actually sign and deliver (passing existing D6 verification); `ca_e_*`
+  retain authority/wire-domain earlier-refusal precedence and the no-context
+  no-signer passthrough.
+* Leader Proposal + self-Vote —
+  `run422_d7b2::ca_c_leader_tick_missing_journal_refuses_both_families`: both
+  families refuse (proposal & vote unavailable counters = 1), 0 underlying
+  signatures, silent facade; positive control
+  `d7b2_valid_cache_current_auth_emits_both_families`.
+* Cached Proposal/Vote re-emission —
+  `run422_d7b2::ca_d_cached_reemission_missing_journal_prevents_signing_and_reemission`:
+  caches produced by a journaled leader tick, re-emission then driven with the
+  journal absent; nothing signed beyond setup, 0 re-emits, silent facade; positive
+  control `d7b2_do_leader_tick_creates_caches_then_real_reemission_uses_them`.
+
+### Cached ordering & evidence limits
+
+In `maybe_reemit_on_late_peer_connect` the cached **Proposal** is signed first;
+its missing-journal refusal `return`s and short-circuits the attempt **before**
+the paired cached **Vote** branch. `ca_d` therefore reports Proposal counter 1 and
+Vote counter 0 and does **not** claim the cached-Vote negative branch executed.
+Cached-Vote missing-journal coverage is established instead by the shared Vote
+guard negative (`ca_a_vote_*`), the verified cached-Vote call site
+(`guarded_sign_vote_for_broadcast` in the re-emit path), and the journal-present
+cached-Vote positive control. Production ordering was not changed to manufacture a
+path. Leader/self-Vote coverage does **not** close the separate F engine-progress
+obligation.
+
+### Validation (all against `9ea380c`, dev profile unless noted, exit 0)
+
+* `cargo test -p qbind-node --lib --no-run` — OK (2 pre-existing `dead_code` warnings).
+* `cargo test -p qbind-node --lib correction_a` — **16 passed** (8 immediate
+  `binary_consensus_loop` cases + 8 unrelated same-named `vm_v0_runtime` cases).
+* `cargo test -p qbind-node --lib run420::run422_d7b2` — **26 passed** (leader/cached,
+  incl. relocated `ca_c`/`ca_d`).
+* `cargo test -p qbind-node --lib run422_d7d10` — **24 passed**.
+* `cargo test -p qbind-node --lib run422_d7b` — **95 passed** (d7b/d7b2/d7b3 +
+  `correction_a_immediate` superset; overlaps the focused sets, reported separately).
+* `cargo test -p qbind-node --lib` — **1769 passed**, 0 failed.
+* `cargo test -p qbind-node --test run_422_d7d10_signing_reservation_journal_tests`
+  — default features **10 passed / 1 ignored**; `--features test-utils`
+  **11 passed / 1 ignored**.
+* `cargo test -p qbind-consensus --test run_422_d6_pv_domain_isolation_tests` — **34 passed**.
+* `cargo test -p qbind-node --test run_420_production_policy_reachability_tests` — **3 passed**.
+* `cargo test -p qbind-node --test run_422_startup_refusal_tests` — **4 passed**.
+* `cargo check -p qbind-node` — Finished, no errors.
+* `cargo clippy -p qbind-node --lib` — Finished; **95 pre-existing** style warnings
+  (large `Err` variants, `suspicious_open_options`, `ptr_arg`, `unnecessary_sort_by`)
+  in unrelated production code, **none** in the relocated test block; no errors.
+* `cargo build --release -p qbind-node --bin qbind-node` — Finished (release, optimized).
+
+### Release executable identity
+
+* Path `target/release/qbind-node`; source revision `9ea380c`; profile release
+  [optimized]; features **default** (no `--features`); bin `qbind-node`.
+* Byte length **17066744**; SHA-256
+  `b9046c9d5f4b1150d2db280aa4e35ab14270c0327b95c76e97c0d10e6dabf402`.
+* Compilation establishes buildability only — **not** configured-authority runtime
+  evidence.
+
+### Security-tool outcomes (literal)
+
+* Code Review: completed over 2 changed files, **no review comments**; the run also
+  reported a backend model-registry error, so this is **not** counted as a clean
+  completed independent review.
+* CodeQL: **Skipped** — declared trivial (test-relocation within `#[cfg(test)]` +
+  Markdown only). A CodeQL scope skip is **not** a completed scan.
+
+### Documentation & EOL reconciliation
+
+* `QBIND_PROPOSAL_VOTE_SIGNING_STATE_CONTINUITY_CONTRACT.md`: §9.3 corrected —
+  attach **reuses** the backend's existing ownership domain and does **not** empty
+  the shared live-operation table; only a newly created domain starts with fresh
+  process-local state; the reservation counter is **shared by the domain** and each
+  handle applies its configured limit against it (replacing the per-attached-handle
+  budget overclaim); persistent-capacity and recovered-record acknowledgement-cache
+  accounting remain OPEN under E; the dangling `(see §12)` now points to `§9.5`.
+  §9.5 records Correction A as executed and drops it from the Still-OPEN list; the
+  marker block adds `D7D10_MISSING_JOURNAL_SIGNING_REFUSAL=CODE-TEST-POSITIVE` and
+  keeps `D7D10_LOCAL_SIGNING_RESERVATION=PARTIAL`.
+* `contradiction.md`: inspected; **unchanged** — its only re-emission mentions are
+  historical B9/B10 milestone/changelog entries; no operative statement claims
+  outbound signing or re-emission succeeds without a journal, so nothing
+  contradicts this implementation.
+* EOL/EOF: `binary_consensus_loop.rs` and both edited docs remain **CRLF with no
+  final newline**; no repository-wide reformat; changed regions whitespace-clean.
+
+### Historical honesty
+
+The starting checkpoint `752c2a7` did **not** compile its library test target (the
+misplaced block). Its earlier per-module baseline numbers are not validation of the
+repaired tree; all pass counts above were produced on the repaired checkpoint
+`9ea380c`.
+
+### Scoped disposition
+
+`D7D10_MISSING_JOURNAL_SIGNING_REFUSAL=CODE-TEST-POSITIVE` (local demonstrated
+scope). `D7D10_LOCAL_SIGNING_RESERVATION=PARTIAL` unchanged. **Still OPEN:** D
+(post-storage original-owner/ticket revalidation + outstanding identity/version
+checks), E (established-journal initialization/validation and persistent capacity,
+incl. recovered-record acknowledgement-cache accounting), F (remaining
+engine-progress evidence + bounded/classified child-process runner). The accepted
+D8 result and all posture markers are preserved: D7 partial / production lifecycle
+unavailable; durable anti-rollback not established; genesis authority activation
+disabled; production wire-chain behavior unchanged; configured-authority
+release-binary evidence not yet captured; RS1 OPEN / public-DevNet NO-GO; C4/C5
+OPEN. No readiness promotion, D11, Run 423, PR, branch rename, force-push, rebase,
+or history rewrite; no activation change.

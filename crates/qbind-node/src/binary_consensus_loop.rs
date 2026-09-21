@@ -12514,6 +12514,173 @@ mod tests {
                 assert_eq!(out.stats.outbound_proposal_late_peer_reemits, 0);
                 out.facade.assert_silent();
             }
+
+            // =====================================================
+            // Run 422 D7-D10 Correction A — missing-journal refusal at the
+            // leader-self-emit (`do_leader_tick`) and cached re-emission
+            // (`maybe_reemit_on_late_peer_connect`) boundaries (task §6 C/D
+            // negatives). Positive controls for these paths already exist
+            // (`d7b2_do_leader_tick_creates_caches_then_real_reemission_uses_them`,
+            // `d7b2_valid_cache_current_auth_emits_both_families`,
+            // `d7b2_recording_signer_positive_control_directly_counts_both_invocations`).
+            // =====================================================
+            // The engine stamps wire chain id 1 / epoch 0 on its leader-emitted
+            // Proposal/Vote, so the bound authority's v2 domain must expect wire
+            // chain id 1 (this mirrors the existing leader-tick positive control).
+            fn ca_leader_domain() -> ProposalVoteSigningDomainV2 {
+                d6_domain(
+                    0xD6D6_0000_0000_00A1,
+                    1,
+                    d6_genesis_identity(0x51),
+                    d6_authority_commitment(0x61),
+                )
+            }
+
+            // C (negative): a leader tick with NO journal reaches the guarded
+            // outbound boundary for BOTH the leader Proposal and the paired
+            // self-Vote, and refuses each before the signer runs.
+            #[test]
+            fn ca_c_leader_tick_missing_journal_refuses_both_families() {
+                let fixture = make_fixture(4);
+                let (pv, counters) = recording_ctx_v2(&fixture, ca_leader_domain());
+                let snap = coherent_snapshot_for(&pv);
+
+                let mut engine = make_engine(ValidatorId(0), 4);
+                assert!(engine.is_leader_for_current_view());
+
+                let metrics = make_metrics();
+                let mut proposals_emitted: u64 = 0;
+                let mut last_leader_proposal: Option<CachedLeaderProposal> = None;
+                let mut last_leader_vote: Option<CachedLeaderVote> = None;
+                let mut reconfig_detector = BinaryReconfigDetector::default();
+                let mut stats = BinaryConsensusLoopInboundStats::default();
+                let facade = RecordingFacade::default();
+
+                do_leader_tick(
+                    &mut engine,
+                    &mut proposals_emitted,
+                    &metrics,
+                    &mut stats,
+                    Some(&facade),
+                    &mut last_leader_proposal,
+                    &mut last_leader_vote,
+                    &mut reconfig_detector,
+                    Some(&snap),
+                    None,
+                    None, // Run 422 D7-D10: journal ABSENT
+                    ConsensusVerificationPolicy::Required,
+                );
+
+                // Both the leader Proposal and the self-Vote reached the guarded
+                // boundary and refused (distinct per-family counters).
+                assert_eq!(stats.outbound_proposal_journal_unavailable_total, 1);
+                assert_eq!(stats.outbound_vote_journal_unavailable_total, 1);
+                // Neither obtained an underlying signature.
+                assert_eq!(counters.proposals(), 0);
+                assert_eq!(counters.votes(), 0);
+                // Nothing was signed, sent, or handed off.
+                assert_eq!(stats.outbound_proposal_signing_success, 0);
+                assert_eq!(stats.outbound_vote_signing_success, 0);
+                assert_eq!(stats.outbound_proposals_sent, 0);
+                assert_eq!(stats.outbound_votes_sent, 0);
+                facade.assert_silent();
+            }
+
+            // D (negative): a REAL cached re-emission with NO journal cannot sign
+            // or re-emit. Caches (with valid captured provenance) are first
+            // produced by a journaled leader tick; the re-emission itself is then
+            // driven with the journal ABSENT. The cached Proposal is signed
+            // FIRST; its missing-journal refusal short-circuits the whole
+            // attempt, so the cached Vote's missing-journal branch is NOT reached
+            // — we report that boundary accurately (Proposal counter 1, Vote
+            // counter 0). Cached-Vote missing-journal coverage is established
+            // separately by the shared Vote guard negative
+            // (`correction_a_immediate::ca_a_vote_*`), the verified production
+            // Vote call site, and the journal-present cached-Vote positive
+            // control (`d7b2_do_leader_tick_creates_caches_then_real_reemission_uses_them`).
+            #[test]
+            fn ca_d_cached_reemission_missing_journal_prevents_signing_and_reemission() {
+                let fixture = make_fixture(4);
+                let (pv, counters) = recording_ctx_v2(&fixture, ca_leader_domain());
+                let snap = coherent_snapshot_for(&pv);
+
+                let mut engine = make_engine(ValidatorId(0), 4);
+                assert!(engine.is_leader_for_current_view());
+
+                let metrics = make_metrics();
+                let mut proposals_emitted: u64 = 0;
+                let mut last_leader_proposal: Option<CachedLeaderProposal> = None;
+                let mut last_leader_vote: Option<CachedLeaderVote> = None;
+                let mut reconfig_detector = BinaryReconfigDetector::default();
+                let mut stats = BinaryConsensusLoopInboundStats::default();
+
+                // Produce the REAL Proposal/Vote caches (with captured
+                // provenance) via a journaled leader tick.
+                let setup_journal = fresh_signing_journal();
+                let setup_facade = RecordingFacade::default();
+                do_leader_tick(
+                    &mut engine,
+                    &mut proposals_emitted,
+                    &metrics,
+                    &mut stats,
+                    Some(&setup_facade),
+                    &mut last_leader_proposal,
+                    &mut last_leader_vote,
+                    &mut reconfig_detector,
+                    Some(&snap),
+                    None,
+                    Some(&setup_journal),
+                    ConsensusVerificationPolicy::Required,
+                );
+                assert!(last_leader_proposal.is_some(), "proposal cached");
+                assert!(last_leader_vote.is_some(), "vote cached");
+                let signed_p_baseline = counters.proposals();
+                let signed_v_baseline = counters.votes();
+                assert_eq!(signed_p_baseline, 1, "setup tick signed the Proposal once");
+                assert_eq!(signed_v_baseline, 1, "setup tick signed the Vote once");
+
+                // Now drive the REAL cached re-emission entrypoint over a genuine
+                // new-peer transition with the journal ABSENT.
+                let mut reemitted_for_view: Option<u64> = None;
+                let mut last_known_peers: HashSet<NodeId> = HashSet::new();
+                let peer = pv_node_for(1);
+                let connectivity = OnePeer(peer);
+                let reemit_facade = RecordingFacade::default();
+
+                maybe_reemit_on_late_peer_connect(
+                    &engine,
+                    &mut last_leader_proposal,
+                    &mut last_leader_vote,
+                    &mut reemitted_for_view,
+                    &mut last_known_peers,
+                    &connectivity,
+                    Some(&reemit_facade),
+                    &mut stats,
+                    Some(&snap),
+                    None,
+                    None, // Run 422 D7-D10: journal ABSENT
+                    ConsensusVerificationPolicy::Required,
+                );
+
+                // The cached Proposal's missing-journal refusal fired and
+                // short-circuited the attempt BEFORE the paired Vote branch.
+                assert_eq!(stats.outbound_proposal_journal_unavailable_total, 1);
+                assert_eq!(
+                    stats.outbound_vote_journal_unavailable_total, 0,
+                    "cached Vote missing-journal branch is not reached (Proposal-first short-circuit)"
+                );
+                // The re-emission signed nothing NEW beyond the setup tick.
+                assert_eq!(counters.proposals(), signed_p_baseline);
+                assert_eq!(counters.votes(), signed_v_baseline);
+                // No re-emission, no facade traffic on the re-emit path.
+                assert_eq!(stats.outbound_proposal_late_peer_reemits, 0);
+                assert_eq!(stats.outbound_vote_late_peer_reemits, 0);
+                assert!(reemitted_for_view.is_none());
+                reemit_facade.assert_silent();
+                // Peer-connectivity bookkeeping still ran (the transition was
+                // genuinely observed) even though signing was refused.
+                assert!(last_known_peers.contains(&peer));
+            }
         }
 
         fn base_header(proposer: u16) -> BlockHeader {
@@ -15706,173 +15873,6 @@ mod tests {
                     )
                     .is_err());
                 }
-            }
-
-            // =====================================================
-            // Run 422 D7-D10 Correction A — missing-journal refusal at the
-            // leader-self-emit (`do_leader_tick`) and cached re-emission
-            // (`maybe_reemit_on_late_peer_connect`) boundaries (task §6 C/D
-            // negatives). Positive controls for these paths already exist
-            // (`d7b2_do_leader_tick_creates_caches_then_real_reemission_uses_them`,
-            // `d7b2_valid_cache_current_auth_emits_both_families`,
-            // `d7b2_recording_signer_positive_control_directly_counts_both_invocations`).
-            // =====================================================
-            // The engine stamps wire chain id 1 / epoch 0 on its leader-emitted
-            // Proposal/Vote, so the bound authority's v2 domain must expect wire
-            // chain id 1 (this mirrors the existing leader-tick positive control).
-            fn ca_leader_domain() -> ProposalVoteSigningDomainV2 {
-                d6_domain(
-                    0xD6D6_0000_0000_00A1,
-                    1,
-                    d6_genesis_identity(0x51),
-                    d6_authority_commitment(0x61),
-                )
-            }
-
-            // C (negative): a leader tick with NO journal reaches the guarded
-            // outbound boundary for BOTH the leader Proposal and the paired
-            // self-Vote, and refuses each before the signer runs.
-            #[test]
-            fn ca_c_leader_tick_missing_journal_refuses_both_families() {
-                let fixture = make_fixture(4);
-                let (pv, counters) = recording_ctx_v2(&fixture, ca_leader_domain());
-                let snap = coherent_snapshot_for(&pv);
-
-                let mut engine = make_engine(ValidatorId(0), 4);
-                assert!(engine.is_leader_for_current_view());
-
-                let metrics = make_metrics();
-                let mut proposals_emitted: u64 = 0;
-                let mut last_leader_proposal: Option<CachedLeaderProposal> = None;
-                let mut last_leader_vote: Option<CachedLeaderVote> = None;
-                let mut reconfig_detector = BinaryReconfigDetector::default();
-                let mut stats = BinaryConsensusLoopInboundStats::default();
-                let facade = RecordingFacade::default();
-
-                do_leader_tick(
-                    &mut engine,
-                    &mut proposals_emitted,
-                    &metrics,
-                    &mut stats,
-                    Some(&facade),
-                    &mut last_leader_proposal,
-                    &mut last_leader_vote,
-                    &mut reconfig_detector,
-                    Some(&snap),
-                    None,
-                    None, // Run 422 D7-D10: journal ABSENT
-                    ConsensusVerificationPolicy::Required,
-                );
-
-                // Both the leader Proposal and the self-Vote reached the guarded
-                // boundary and refused (distinct per-family counters).
-                assert_eq!(stats.outbound_proposal_journal_unavailable_total, 1);
-                assert_eq!(stats.outbound_vote_journal_unavailable_total, 1);
-                // Neither obtained an underlying signature.
-                assert_eq!(counters.proposals(), 0);
-                assert_eq!(counters.votes(), 0);
-                // Nothing was signed, sent, or handed off.
-                assert_eq!(stats.outbound_proposal_signing_success, 0);
-                assert_eq!(stats.outbound_vote_signing_success, 0);
-                assert_eq!(stats.outbound_proposals_sent, 0);
-                assert_eq!(stats.outbound_votes_sent, 0);
-                facade.assert_silent();
-            }
-
-            // D (negative): a REAL cached re-emission with NO journal cannot sign
-            // or re-emit. Caches (with valid captured provenance) are first
-            // produced by a journaled leader tick; the re-emission itself is then
-            // driven with the journal ABSENT. The cached Proposal is signed
-            // FIRST; its missing-journal refusal short-circuits the whole
-            // attempt, so the cached Vote's missing-journal branch is NOT reached
-            // — we report that boundary accurately (Proposal counter 1, Vote
-            // counter 0). Cached-Vote missing-journal coverage is established
-            // separately by the shared Vote guard negative
-            // (`correction_a_immediate::ca_a_vote_*`), the verified production
-            // Vote call site, and the journal-present cached-Vote positive
-            // control (`d7b2_do_leader_tick_creates_caches_then_real_reemission_uses_them`).
-            #[test]
-            fn ca_d_cached_reemission_missing_journal_prevents_signing_and_reemission() {
-                let fixture = make_fixture(4);
-                let (pv, counters) = recording_ctx_v2(&fixture, ca_leader_domain());
-                let snap = coherent_snapshot_for(&pv);
-
-                let mut engine = make_engine(ValidatorId(0), 4);
-                assert!(engine.is_leader_for_current_view());
-
-                let metrics = make_metrics();
-                let mut proposals_emitted: u64 = 0;
-                let mut last_leader_proposal: Option<CachedLeaderProposal> = None;
-                let mut last_leader_vote: Option<CachedLeaderVote> = None;
-                let mut reconfig_detector = BinaryReconfigDetector::default();
-                let mut stats = BinaryConsensusLoopInboundStats::default();
-
-                // Produce the REAL Proposal/Vote caches (with captured
-                // provenance) via a journaled leader tick.
-                let setup_journal = fresh_signing_journal();
-                let setup_facade = RecordingFacade::default();
-                do_leader_tick(
-                    &mut engine,
-                    &mut proposals_emitted,
-                    &metrics,
-                    &mut stats,
-                    Some(&setup_facade),
-                    &mut last_leader_proposal,
-                    &mut last_leader_vote,
-                    &mut reconfig_detector,
-                    Some(&snap),
-                    None,
-                    Some(&setup_journal),
-                    ConsensusVerificationPolicy::Required,
-                );
-                assert!(last_leader_proposal.is_some(), "proposal cached");
-                assert!(last_leader_vote.is_some(), "vote cached");
-                let signed_p_baseline = counters.proposals();
-                let signed_v_baseline = counters.votes();
-                assert_eq!(signed_p_baseline, 1, "setup tick signed the Proposal once");
-                assert_eq!(signed_v_baseline, 1, "setup tick signed the Vote once");
-
-                // Now drive the REAL cached re-emission entrypoint over a genuine
-                // new-peer transition with the journal ABSENT.
-                let mut reemitted_for_view: Option<u64> = None;
-                let mut last_known_peers: HashSet<NodeId> = HashSet::new();
-                let peer = pv_node_for(1);
-                let connectivity = OnePeer(peer);
-                let reemit_facade = RecordingFacade::default();
-
-                maybe_reemit_on_late_peer_connect(
-                    &engine,
-                    &mut last_leader_proposal,
-                    &mut last_leader_vote,
-                    &mut reemitted_for_view,
-                    &mut last_known_peers,
-                    &connectivity,
-                    Some(&reemit_facade),
-                    &mut stats,
-                    Some(&snap),
-                    None,
-                    None, // Run 422 D7-D10: journal ABSENT
-                    ConsensusVerificationPolicy::Required,
-                );
-
-                // The cached Proposal's missing-journal refusal fired and
-                // short-circuited the attempt BEFORE the paired Vote branch.
-                assert_eq!(stats.outbound_proposal_journal_unavailable_total, 1);
-                assert_eq!(
-                    stats.outbound_vote_journal_unavailable_total, 0,
-                    "cached Vote missing-journal branch is not reached (Proposal-first short-circuit)"
-                );
-                // The re-emission signed nothing NEW beyond the setup tick.
-                assert_eq!(counters.proposals(), signed_p_baseline);
-                assert_eq!(counters.votes(), signed_v_baseline);
-                // No re-emission, no facade traffic on the re-emit path.
-                assert_eq!(stats.outbound_proposal_late_peer_reemits, 0);
-                assert_eq!(stats.outbound_vote_late_peer_reemits, 0);
-                assert!(reemitted_for_view.is_none());
-                reemit_facade.assert_silent();
-                // Peer-connectivity bookkeeping still ran (the transition was
-                // genuinely observed) even though signing was refused.
-                assert!(last_known_peers.contains(&peer));
             }
         }
 
