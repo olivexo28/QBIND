@@ -111,7 +111,7 @@ use qbind_wire::pv_signing_domain::ProposalVoteSigningDomainV2;
 
 use crate::consensus_network_facade::ConsensusNetworkFacade;
 use crate::genesis_consensus_authority::{
-    AuthorizationTicket, CurrentAuthorizationOwner, FreshnessError,
+    AuthorizationTicket, ConfirmError, CurrentAuthorizationOwner, FreshnessError,
 };
 use crate::metrics::{
     BinaryViewTimeoutRun030Snapshot, BinaryViewTimeoutRun420Snapshot, NodeMetrics,
@@ -1909,6 +1909,41 @@ pub struct BinaryConsensusLoopInboundStats {
     pub outbound_vote_journal_error_total: u64,
     pub outbound_vote_journal_result_persist_failure_total: u64,
     pub outbound_vote_journal_unavailable_total: u64,
+    // Run 422 D7-D10 Correction D — bounded, distinct categories for the
+    // post-storage authorization-revalidation boundary. Each is kept SEPARATE
+    // from the admission (`*_current_state_unavailable_total`,
+    // `*_epoch_unauthorized_total`), journal (`*_journal_*`), and pre-facade
+    // (`*_authority_stale_before_effect_total`) categories so a signature that
+    // was suppressed at a particular stage is never relabelled as a different
+    // stage's refusal.
+    //   * `*_wire_version_unsupported_total`: the locally-emitted message's wire
+    //     version is not the supported profile (v1). Refused BEFORE journal
+    //     lookup and signer invocation; distinct from the D6 signing-format
+    //     version and the journal-record format version.
+    //   * `*_signer_identity_mismatch_total`: the wire signer index does not
+    //     correspond to the bound signer's stable `ValidatorId` (compared by
+    //     widening the wire index, never truncating the id), or that bound
+    //     signer is outside the admitted membership. Refused BEFORE journal
+    //     lookup and signer invocation.
+    //   * `*_post_journal_authorization_revalidation_failed_total`: after the
+    //     potentially-blocking journal work (reservation + continuation
+    //     consumption, or retained-result lookup/acknowledgement), the ORIGINAL
+    //     admission ticket no longer confirmed against its issuing owner (owner
+    //     replaced / generation advanced / foreign / exhausted). Zero signer
+    //     calls, no publication/handoff, the durable `Reserved` record and its
+    //     conflict obligation preserved.
+    //   * `*_bound_context_unbound_total`: after journal work, the prepared
+    //     operation was not signing through its exact bound verifier (a
+    //     separately-supplied or substituted context). Fail-closed with the same
+    //     preservation guarantees.
+    pub outbound_proposal_wire_version_unsupported_total: u64,
+    pub outbound_proposal_signer_identity_mismatch_total: u64,
+    pub outbound_proposal_post_journal_authorization_revalidation_failed_total: u64,
+    pub outbound_proposal_bound_context_unbound_total: u64,
+    pub outbound_vote_wire_version_unsupported_total: u64,
+    pub outbound_vote_signer_identity_mismatch_total: u64,
+    pub outbound_vote_post_journal_authorization_revalidation_failed_total: u64,
+    pub outbound_vote_bound_context_unbound_total: u64,
 }
 
 /// Transition state for the bounded "restore-catchup mode → normal
@@ -3580,7 +3615,21 @@ fn maybe_reemit_on_late_peer_connect(
     // Run 420 / D6: the re-emitted proposal is signed fail-closed through the
     // snapshot's bound verifier, so a late-peer re-emit cannot become a bypass
     // that broadcasts unsigned or wrong-domain consensus material.
-    let proposal = match guarded_sign_proposal_for_broadcast(proposal, proposal_signer, journal, verification_policy, stats) {
+    // Correction D — carry the fresh admission (snapshot + its ticket) into the
+    // guard so the ORIGINAL admission is re-confirmed after journal work and
+    // immediately before the signer. A wired snapshot without its ticket refuses.
+    let proposal_admission = match resolve_admitted_identity(current_auth, proposal_ticket.as_ref())
+    {
+        Ok(a) => a,
+        Err(()) => {
+            stats
+                .outbound_proposal_post_journal_authorization_revalidation_failed_total = stats
+                .outbound_proposal_post_journal_authorization_revalidation_failed_total
+                .saturating_add(1);
+            return;
+        }
+    };
+    let proposal = match guarded_sign_proposal_for_broadcast(proposal, proposal_signer, proposal_admission.as_ref(), journal, verification_policy, stats) {
         Some(p) => p,
         None => return,
     };
@@ -3657,8 +3706,23 @@ fn maybe_reemit_on_late_peer_connect(
         ) {
             CachedReemitAdmission::Admitted { signer_ctx, fresh_ticket } => {
                 // Run 420 / D6: sign the re-emitted vote fail-closed as well.
+                // Correction D — carry the fresh admission into the guard for the
+                // post-journal, pre-sign revalidation. A wired snapshot without
+                // its ticket refuses.
+                let vote_admission =
+                    match resolve_admitted_identity(current_auth, fresh_ticket.as_ref()) {
+                        Ok(a) => a,
+                        Err(()) => {
+                            stats
+                                .outbound_vote_post_journal_authorization_revalidation_failed_total =
+                                stats
+                                    .outbound_vote_post_journal_authorization_revalidation_failed_total
+                                    .saturating_add(1);
+                            return;
+                        }
+                    };
                 if let Some(signed_vote) =
-                    guarded_sign_vote_for_broadcast(vote, signer_ctx, journal, verification_policy, stats)
+                    guarded_sign_vote_for_broadcast(vote, signer_ctx, vote_admission.as_ref(), journal, verification_policy, stats)
                 {
                     if confirm_outbound_before_effect(
                         current_auth,
@@ -3717,6 +3781,178 @@ fn maybe_reemit_on_late_peer_connect(
 /// (`SIGNING_RECORD_FORMAT_VERSION`, persistence only).
 const D6_SIGNING_FORMAT_VERSION: u8 = 2;
 
+/// Run 422 D7-D10 Correction D — the only supported wire-message version for a
+/// locally-emitted Proposal/Vote under the founding profile.
+///
+/// This is the Proposal/Vote **wire-message** version (`header.version` /
+/// `vote.version`), taken from the existing engine source contract
+/// ([`qbind_consensus::basic_hotstuff_engine`] emits `version: 1`). It is
+/// deliberately DISTINCT from:
+///  * the D6 signing-format version ([`D6_SIGNING_FORMAT_VERSION`] = 2), and
+///  * the journal-record format version
+///    ([`crate::signing_reservation_journal::SIGNING_RECORD_FORMAT_VERSION`]).
+///
+/// A message whose wire version is not this value is refused BEFORE any journal
+/// lookup or signer invocation, and the version field is never rewritten to make
+/// it pass. In particular wire version 2 is not silently accepted as if it were
+/// D6 signing-format version 2.
+const LOCAL_PROPOSAL_VOTE_WIRE_MESSAGE_VERSION: u8 = 1;
+
+/// Run 422 D7-D10 Correction D — the ORIGINAL admission identity and bound
+/// context an outbound signing operation carries UNCHANGED through the shared
+/// journal work, so that it can be re-confirmed after the potentially-blocking
+/// journal operations and immediately before the signer (fresh path) or before
+/// an authorized retained-result reuse.
+///
+/// It retains only borrowed references to the coherently-bound, currently
+/// authorized snapshot admitted for this operation and to the exact
+/// [`AuthorizationTicket`] that snapshot's owner issued at admission — never a
+/// freshly-obtained ticket, a separately-supplied authority, or a
+/// newly-selected signer. A reservation or a retained signature never grants
+/// authorization: only the original ticket confirming against its issuer does.
+struct AdmittedSigningIdentity<'a> {
+    /// The snapshot admitted for this operation. Its owner re-confirms the
+    /// ticket; its `verifier()` is the exact bound signing context.
+    snapshot: &'a AuthorizedProposalVoteSnapshot,
+    /// The ORIGINAL ticket issued for this operation at admission.
+    ticket: &'a AuthorizationTicket,
+}
+
+/// Run 422 D7-D10 Correction D — bounded reason the post-journal, pre-sign
+/// revalidation refused an operation. Non-secret; never leaks configuration or
+/// key material.
+enum PostJournalRejection {
+    /// The prepared operation was not signing through its snapshot's exact bound
+    /// verifier (a separately-supplied or substituted context). Fail-closed.
+    ContextUnbound,
+    /// The ORIGINAL admission ticket no longer confirmed against its issuing
+    /// owner after journal work (owner replaced / generation advanced / foreign
+    /// issuer / exhausted).
+    AuthorizationRevalidationFailed(ConfirmError),
+}
+
+impl<'a> AdmittedSigningIdentity<'a> {
+    /// Re-confirm, AFTER the potentially-blocking journal work and immediately
+    /// before the signer invocation (fresh) or an authorized retained reuse,
+    /// that:
+    ///  1. the operation still signs through the snapshot's EXACT bound verifier
+    ///     (`signing_ctx` is that verifier by pointer identity — never a
+    ///     separately-supplied authority or a newly-selected signer), and
+    ///  2. the ORIGINAL admission ticket still confirms against its issuing
+    ///     owner (owner not replaced, generation not advanced, not foreign, not
+    ///     exhausted).
+    ///
+    /// The bound-context check is evaluated FIRST: a substituted context is
+    /// refused even if a supplied authority would confirm, so an equal-looking
+    /// but unbound verifier cannot redirect signing. On any failure the caller
+    /// performs zero signer calls, no result publication, and no delivery, and
+    /// preserves the durable reservation and its conflict obligation.
+    fn reconfirm_after_journal(
+        &self,
+        signing_ctx: &ProposalVoteAuthority,
+    ) -> Result<(), PostJournalRejection> {
+        if !std::ptr::eq(signing_ctx, self.snapshot.verifier()) {
+            return Err(PostJournalRejection::ContextUnbound);
+        }
+        self.snapshot
+            .owner()
+            .confirm(self.ticket)
+            .map_err(PostJournalRejection::AuthorizationRevalidationFailed)
+    }
+}
+
+/// Run 422 D7-D10 Correction D — record a Proposal post-journal revalidation
+/// refusal in the matching bounded, distinct counter. A stale/foreign/exhausted
+/// original ticket and a substituted bound context are kept separate.
+fn record_post_journal_proposal_rejection(
+    inbound_stats: &mut BinaryConsensusLoopInboundStats,
+    rejection: &PostJournalRejection,
+) {
+    match rejection {
+        PostJournalRejection::ContextUnbound => {
+            inbound_stats.outbound_proposal_bound_context_unbound_total = inbound_stats
+                .outbound_proposal_bound_context_unbound_total
+                .saturating_add(1);
+            eprintln!(
+                "[binary-consensus] Run 422 D7-D10 Correction D: outbound proposal SUPPRESSED \
+                 (bound signing context substituted after journal work) — fail-closed, not signed"
+            );
+        }
+        PostJournalRejection::AuthorizationRevalidationFailed(e) => {
+            inbound_stats.outbound_proposal_post_journal_authorization_revalidation_failed_total =
+                inbound_stats
+                    .outbound_proposal_post_journal_authorization_revalidation_failed_total
+                    .saturating_add(1);
+            eprintln!(
+                "[binary-consensus] Run 422 D7-D10 Correction D: outbound proposal SUPPRESSED \
+                 (original admission not revalidated after journal work) reason={:?} — \
+                 fail-closed, reservation preserved, not signed",
+                e
+            );
+        }
+    }
+}
+
+/// Run 422 D7-D10 Correction D — record a Vote post-journal revalidation
+/// refusal in the matching bounded, distinct counter.
+fn record_post_journal_vote_rejection(
+    inbound_stats: &mut BinaryConsensusLoopInboundStats,
+    rejection: &PostJournalRejection,
+) {
+    match rejection {
+        PostJournalRejection::ContextUnbound => {
+            inbound_stats.outbound_vote_bound_context_unbound_total = inbound_stats
+                .outbound_vote_bound_context_unbound_total
+                .saturating_add(1);
+            eprintln!(
+                "[binary-consensus] Run 422 D7-D10 Correction D: outbound vote SUPPRESSED \
+                 (bound signing context substituted after journal work) — fail-closed, not signed"
+            );
+        }
+        PostJournalRejection::AuthorizationRevalidationFailed(e) => {
+            inbound_stats.outbound_vote_post_journal_authorization_revalidation_failed_total =
+                inbound_stats
+                    .outbound_vote_post_journal_authorization_revalidation_failed_total
+                    .saturating_add(1);
+            eprintln!(
+                "[binary-consensus] Run 422 D7-D10 Correction D: outbound vote SUPPRESSED \
+                 (original admission not revalidated after journal work) reason={:?} — \
+                 fail-closed, reservation preserved, not signed",
+                e
+            );
+        }
+    }
+}
+
+/// Run 422 D7-D10 Correction D — resolve the post-journal admission identity to
+/// carry into the shared signing guard from the caller's `(snapshot, ticket)`
+/// pair.
+///
+/// Returns:
+///  * `Ok(Some(identity))` when BOTH a wired snapshot and the exact ticket its
+///    owner issued at admission are present (the `Required` path): the guard
+///    MUST re-confirm the original admission after journal work.
+///  * `Ok(None)` when NEITHER is present (the test-only `LocalFixtureUnsigned`
+///    passthrough): there is no bound admission to re-confirm, but signer-bearing
+///    fixtures still require a journal and the identity/version checks.
+///  * `Err(())` when EXACTLY ONE is present — a wired snapshot without its
+///    corresponding ticket, or an orphan ticket. This never occurs on the
+///    production admit path (admission issues them as a pair with a wired
+///    snapshot, and neither without one), so it is refused FAIL-CLOSED rather
+///    than silently signing without revalidation. This is deliberately NOT an
+///    optional-pair check that returns success merely because one required
+///    component is absent.
+fn resolve_admitted_identity<'a>(
+    current_auth: Option<&'a AuthorizedProposalVoteSnapshot>,
+    ticket: Option<&'a AuthorizationTicket>,
+) -> Result<Option<AdmittedSigningIdentity<'a>>, ()> {
+    match (current_auth, ticket) {
+        (Some(snapshot), Some(ticket)) => Ok(Some(AdmittedSigningIdentity { snapshot, ticket })),
+        (None, None) => Ok(None),
+        _ => Err(()),
+    }
+}
+
 /// Run 422 D7-D10 — guard `sign_proposal_for_broadcast` with the local
 /// signing-reservation journal.
 ///
@@ -3747,6 +3983,7 @@ const D6_SIGNING_FORMAT_VERSION: u8 = 2;
 fn guarded_sign_proposal_for_broadcast(
     proposal: BlockProposal,
     ctx: Option<&ProposalVoteAuthority>,
+    admission: Option<&AdmittedSigningIdentity>,
     journal: Option<&SigningReservationJournal>,
     verification_policy: ConsensusVerificationPolicy,
     inbound_stats: &mut BinaryConsensusLoopInboundStats,
@@ -3808,7 +4045,7 @@ fn guarded_sign_proposal_for_broadcast(
         }
     };
 
-    guarded_sign_proposal_reserved(proposal, ctx, signer, journal, inbound_stats)
+    guarded_sign_proposal_reserved(proposal, ctx, admission, signer, journal, inbound_stats)
 }
 
 /// Run 422 D7-D10 — reservation-guarded Proposal signing for an operation that
@@ -3817,6 +4054,7 @@ fn guarded_sign_proposal_for_broadcast(
 fn guarded_sign_proposal_reserved(
     mut proposal: BlockProposal,
     ctx: &ProposalVoteAuthority,
+    admission: Option<&AdmittedSigningIdentity>,
     signer: &Arc<dyn ValidatorSigner>,
     journal: &SigningReservationJournal,
     inbound_stats: &mut BinaryConsensusLoopInboundStats,
@@ -3829,6 +4067,34 @@ fn guarded_sign_proposal_reserved(
     if proposal.header.round != originating_view {
         inbound_stats.outbound_proposal_journal_position_inconsistent_total = inbound_stats
             .outbound_proposal_journal_position_inconsistent_total
+            .saturating_add(1);
+        return None;
+    }
+
+    // (3a) Correction D — supported wire-message version. Reject an unsupported
+    //      Proposal wire version BEFORE any journal lookup or signer invocation.
+    //      This is the wire-message version, kept distinct from the D6 signing
+    //      format version and the journal-record format version; the field is
+    //      never rewritten to make it pass.
+    if proposal.header.version != LOCAL_PROPOSAL_VOTE_WIRE_MESSAGE_VERSION {
+        inbound_stats.outbound_proposal_wire_version_unsupported_total = inbound_stats
+            .outbound_proposal_wire_version_unsupported_total
+            .saturating_add(1);
+        return None;
+    }
+
+    // (3b) Correction D — signer-identity binding. The wire `proposer_index`
+    //      must correspond to the bound signer's stable `ValidatorId`, compared
+    //      by WIDENING the wire index to `u64` (a larger id can never alias a
+    //      representable wire index through narrowing), and that bound signer
+    //      must belong to the admitted membership. Refused BEFORE journal lookup
+    //      and signer invocation; the identity field is never rewritten.
+    let bound_id = *signer.validator_id();
+    if bound_id.as_u64() != proposal.header.proposer_index as u64
+        || !ctx.validators.contains(bound_id)
+    {
+        inbound_stats.outbound_proposal_signer_identity_mismatch_total = inbound_stats
+            .outbound_proposal_signer_identity_mismatch_total
             .saturating_add(1);
         return None;
     }
@@ -3875,6 +4141,22 @@ fn guarded_sign_proposal_reserved(
                     return None;
                 }
             };
+            // (7) Correction D — post-storage authorization revalidation. AFTER
+            //     the durable reservation and the continuation consumption
+            //     (which acquired the ownership-domain mutex), and IMMEDIATELY
+            //     before the signer, re-confirm the ORIGINAL admission ticket
+            //     against its issuer and that the operation still uses its bound
+            //     context. On failure: zero signer calls, no result publication,
+            //     the durable `Reserved` record and its conflict obligation
+            //     preserved (we drop `publish_cap` without publishing and never
+            //     release/reset the reservation), and no re-admit/retry.
+            if let Some(adm) = admission {
+                if let Err(rej) = adm.reconfirm_after_journal(ctx) {
+                    record_post_journal_proposal_rejection(inbound_stats, &rej);
+                    drop(publish_cap);
+                    return None;
+                }
+            }
             match signer.sign_proposal(&preimage) {
                 Ok(sig) => {
                     // (7) Durable result handling bound to the same operation. On
@@ -3911,6 +4193,19 @@ fn guarded_sign_proposal_reserved(
             }
         }
         Ok(ReservationOutcome::ExactRetryRetained(sig)) => {
+            // Correction D — post-storage authorization revalidation for the
+            // retained-result reuse path. The B/C recovery-acknowledgement
+            // barrier has already completed inside `reserve_for_sign`; now, and
+            // BEFORE treating the retained result as an authorized reuse,
+            // re-confirm the ORIGINAL admission against its issuer and bound
+            // context. Rejection performs no new signature and no delivery, and
+            // preserves the record; reuse never repairs authorization.
+            if let Some(adm) = admission {
+                if let Err(rej) = adm.reconfirm_after_journal(ctx) {
+                    record_post_journal_proposal_rejection(inbound_stats, &rej);
+                    return None;
+                }
+            }
             // Validate the retained result's decision/context association and
             // signature via the existing D6 verification machinery BEFORE reuse.
             proposal.signature = sig;
@@ -3975,6 +4270,7 @@ fn guarded_sign_proposal_reserved(
 fn guarded_sign_vote_for_broadcast(
     vote: Vote,
     ctx: Option<&ProposalVoteAuthority>,
+    admission: Option<&AdmittedSigningIdentity>,
     journal: Option<&SigningReservationJournal>,
     verification_policy: ConsensusVerificationPolicy,
     inbound_stats: &mut BinaryConsensusLoopInboundStats,
@@ -4030,7 +4326,7 @@ fn guarded_sign_vote_for_broadcast(
         }
     };
 
-    guarded_sign_vote_reserved(vote, ctx, signer, journal, inbound_stats)
+    guarded_sign_vote_reserved(vote, ctx, admission, signer, journal, inbound_stats)
 }
 
 /// Run 422 D7-D10 — reservation-guarded Vote signing for an operation that has
@@ -4039,6 +4335,7 @@ fn guarded_sign_vote_for_broadcast(
 fn guarded_sign_vote_reserved(
     mut vote: Vote,
     ctx: &ProposalVoteAuthority,
+    admission: Option<&AdmittedSigningIdentity>,
     signer: &Arc<dyn ValidatorSigner>,
     journal: &SigningReservationJournal,
     inbound_stats: &mut BinaryConsensusLoopInboundStats,
@@ -4049,6 +4346,30 @@ fn guarded_sign_vote_reserved(
     if vote.round != originating_view || vote.step != 0 {
         inbound_stats.outbound_vote_journal_position_inconsistent_total = inbound_stats
             .outbound_vote_journal_position_inconsistent_total
+            .saturating_add(1);
+        return None;
+    }
+
+    // (2a) Correction D — supported wire-message version. Reject an unsupported
+    //      Vote wire version BEFORE any journal lookup or signer invocation.
+    //      Distinct from the D6 signing-format version and the journal-record
+    //      format version; the field is never rewritten.
+    if vote.version != LOCAL_PROPOSAL_VOTE_WIRE_MESSAGE_VERSION {
+        inbound_stats.outbound_vote_wire_version_unsupported_total = inbound_stats
+            .outbound_vote_wire_version_unsupported_total
+            .saturating_add(1);
+        return None;
+    }
+
+    // (2b) Correction D — signer-identity binding. The wire `validator_index`
+    //      must correspond to the bound signer's stable `ValidatorId`, compared
+    //      by WIDENING the wire index to `u64`, and that bound signer must
+    //      belong to the admitted membership. Refused BEFORE journal lookup and
+    //      signer invocation; the identity field is never rewritten.
+    let bound_id = *signer.validator_id();
+    if bound_id.as_u64() != vote.validator_index as u64 || !ctx.validators.contains(bound_id) {
+        inbound_stats.outbound_vote_signer_identity_mismatch_total = inbound_stats
+            .outbound_vote_signer_identity_mismatch_total
             .saturating_add(1);
         return None;
     }
@@ -4091,6 +4412,17 @@ fn guarded_sign_vote_reserved(
                     return None;
                 }
             };
+            // (7) Correction D — post-storage authorization revalidation,
+            //     immediately before the signer and after the journal mutex was
+            //     taken by `consume_for_signing`. See the Proposal path for the
+            //     preservation guarantees.
+            if let Some(adm) = admission {
+                if let Err(rej) = adm.reconfirm_after_journal(ctx) {
+                    record_post_journal_vote_rejection(inbound_stats, &rej);
+                    drop(publish_cap);
+                    return None;
+                }
+            }
             match signer.sign_vote(&preimage) {
                 Ok(sig) => {
                     if journal
@@ -4123,6 +4455,15 @@ fn guarded_sign_vote_reserved(
             }
         }
         Ok(ReservationOutcome::ExactRetryRetained(sig)) => {
+            // Correction D — post-storage authorization revalidation for the
+            // retained-result reuse path (after the B/C recovery-acknowledgement
+            // barrier, before treating the retained result as authorized reuse).
+            if let Some(adm) = admission {
+                if let Err(rej) = adm.reconfirm_after_journal(ctx) {
+                    record_post_journal_vote_rejection(inbound_stats, &rej);
+                    return None;
+                }
+            }
             vote.signature = sig;
             let verified = verify_vote_msg_with_domain(
                 &vote,
@@ -4712,9 +5053,24 @@ fn forward_actions_to_facade(
                     }
                     OutboundAuthAdmission::Rejected => continue,
                 };
+                // Correction D — carry the ORIGINAL admission (snapshot + ticket)
+                // into the guard so it re-confirms after journal work and before
+                // the signer. A wired snapshot without its ticket is refused.
+                let admission = match resolve_admitted_identity(current_auth, ticket.as_ref()) {
+                    Ok(a) => a,
+                    Err(()) => {
+                        inbound_stats
+                            .outbound_proposal_post_journal_authorization_revalidation_failed_total =
+                            inbound_stats
+                                .outbound_proposal_post_journal_authorization_revalidation_failed_total
+                                .saturating_add(1);
+                        continue;
+                    }
+                };
                 let proposal = match guarded_sign_proposal_for_broadcast(
                     *proposal,
                     signer_ctx,
+                    admission.as_ref(),
                     journal,
                     verification_policy,
                     inbound_stats,
@@ -4767,9 +5123,21 @@ fn forward_actions_to_facade(
                     }
                     OutboundAuthAdmission::Rejected => continue,
                 };
+                let admission = match resolve_admitted_identity(current_auth, ticket.as_ref()) {
+                    Ok(a) => a,
+                    Err(()) => {
+                        inbound_stats
+                            .outbound_vote_post_journal_authorization_revalidation_failed_total =
+                            inbound_stats
+                                .outbound_vote_post_journal_authorization_revalidation_failed_total
+                                .saturating_add(1);
+                        continue;
+                    }
+                };
                 let vote = match guarded_sign_vote_for_broadcast(
                     vote,
                     signer_ctx,
+                    admission.as_ref(),
                     journal,
                     verification_policy,
                     inbound_stats,
@@ -4822,9 +5190,21 @@ fn forward_actions_to_facade(
                     }
                     OutboundAuthAdmission::Rejected => continue,
                 };
+                let admission = match resolve_admitted_identity(current_auth, ticket.as_ref()) {
+                    Ok(a) => a,
+                    Err(()) => {
+                        inbound_stats
+                            .outbound_vote_post_journal_authorization_revalidation_failed_total =
+                            inbound_stats
+                                .outbound_vote_post_journal_authorization_revalidation_failed_total
+                                .saturating_add(1);
+                        continue;
+                    }
+                };
                 let vote = match guarded_sign_vote_for_broadcast(
                     vote,
                     signer_ctx,
+                    admission.as_ref(),
                     journal,
                     verification_policy,
                     inbound_stats,
