@@ -662,9 +662,15 @@ HotStuff locking rule across later views. On restart:
   engine. The harness reconstruction's source comments call it "conservative," but
   that **recovery sufficiency is not established** — the reconstructed lock can be
   lower-view than the pre-crash lock and thereby enlarge the permitted voting set.
-  The owning analysis and proof obligation are in
+  Run 422 D7-D12 now demonstrates this with an **executed** predicate case (a
+  candidate rejected by a stronger pre-crash lock is accepted by the lower
+  reconstructed lock), and confirms the lock advances via `on_qc` **before** any
+  three-chain commit — so advancement does **not** require a commit. The owning
+  analysis, proof obligation, and D12 evidence are in
   `docs/protocol/QBIND_CONSENSUS_RECOVERY_SIGNING_HISTORY_CORRESPONDENCE_CONTRACT.md`
-  (§2.1, RUN 422 D7-D11).
+  (§2.1, RUN 422 D7-D11/D7-D12) and the devnet record's D12 evidence section.
+  This remains a predicate/reader characterization; it establishes no signing-state
+  continuity and no safety property.
 * Per D7-D2, neither recovery entrypoint carries a channel for an *uncommitted*
   vote or per-view anti-equivocation record.
 

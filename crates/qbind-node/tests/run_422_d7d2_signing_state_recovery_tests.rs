@@ -1086,11 +1086,13 @@ mod committed_state_recovery_control {
 
     /// D12 primary characterization (task §5A–§5D). The SAME explicitly-supplied
     /// candidate (justify view 15, ancestry extending NEITHER locked block) is:
-    ///   * REJECTED by the stronger pre-crash lock (view 20), evaluated before
-    ///     recovery on the real engine that formed it; and
-    ///   * ACCEPTED by the weaker reconstructed lock (view 7) produced by the
-    ///     REAL reader `load_persisted_state` over the surviving committed-state
-    ///     fixture.
+    ///
+    /// * REJECTED by the stronger pre-crash lock (view 20), evaluated before
+    ///   recovery on the real engine that formed it; and
+    /// * ACCEPTED by the weaker reconstructed lock (view 7) produced by the
+    ///   REAL reader `load_persisted_state` over the surviving committed-state
+    ///   fixture.
+    ///
     /// The only input that changed between the two evaluations is the lock view
     /// the predicate compares against. This is a predicate/reader
     /// characterization only; it establishes no recovery sufficiency, no
