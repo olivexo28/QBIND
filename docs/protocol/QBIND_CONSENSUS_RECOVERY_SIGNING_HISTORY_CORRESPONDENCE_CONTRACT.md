@@ -78,24 +78,34 @@ establishes (A) or (B), and no correspondence match defined here authorizes sign
 ## 1. Inspected revision and reachability inventory
 
 Inspected against the **actual supplied worktree**, not the SHAs the task recites.
+This D7-D11 contract was subsequently **corrected** (Corrections A–D below) against
+the same worktree source; the source line locators are unchanged because the
+correction pass altered only documentation.
 
-* **Working branch (actual):** `copilot/copilotcopilotrun-422-documentation-only-consolida`
+* **Working branch (actual):** `copilot/copilotcopilotcopilotrun-422-documentation-only-co`
   (`git branch --show-current`). Used **unchanged**; no rename, rebase,
-  force-push, or history rewrite.
-* **Starting worktree HEAD (actual, full SHA):**
-  `5435d22b917d1d078c94b633b18bd28d5802c1a3` (`update`). Worktree clean before
-  this documentation pass. This is the revision all source line references below
-  are taken against.
+  force-push, or history rewrite. (An earlier revision of this contract recorded a
+  shorter branch string; the branch actually carrying this work is the one named
+  here and is used as-is.)
+* **Source revision for line locators (full SHA):**
+  `5435d22b917d1d078c94b633b18bd28d5802c1a3` (`update`). All Rust source line
+  references below are taken against this revision. The D7-D11 documentation that
+  this correction pass edits was committed on top of it (`80baf08…`, `update`),
+  which changed **only** the three authorized documents; no tracked Rust source
+  changed, so every source locator below remains valid against the current
+  worktree. The correction pass begins from that documentation commit with a clean
+  worktree.
 * **Shallow, single-branch clone.** `git rev-list --count HEAD` = 2; only this
   branch is present. Other branches and older history are not fetched.
 * **Reference objects named by the task:**
-  * Accepted D10 final revision `3d7155eddc09f7071d1af277208a070695aabd66`:
-    **object absent** from this shallow clone (`git cat-file -t` → *could not get
-    object info*); not in local ancestry; not referenced by any tracked file.
+  * Accepted D10 final revision `3d7155eddc09f7071d1af277208a070695aabd66` and the
+    reviewed revision `515b531a321163c1e20458c4ccb9fc963863b54a`: **objects absent**
+    from this shallow clone (`git cat-file -t` → *could not get object info*); not in
+    local ancestry; not referenced by any tracked file.
   * Reported task branch
     `copilot/copilotrun-422-documentation-only-consolidation`: the **actual**
     branch carrying this work is
-    `copilot/copilotcopilotrun-422-documentation-only-consolida` (used unchanged).
+    `copilot/copilotcopilotcopilotrun-422-documentation-only-co` (used unchanged).
 * **Ancestry to an absent object is not manufactured.** For the absent D10 final
   revision, correspondence is asserted only against the *content* of the current
   worktree (the D10 journal/engine/process implementation and its evidence,
@@ -130,20 +140,51 @@ current source rather than trusting a line number.
   (~L1254), and the fresh `blocks` map / `vote_accumulator` on recovery.
   `verified_justification` evidence is **non-serialized** and is never restored
   (left `None` after restart/restore).
-* Harness recovery, `crates/qbind-node/src/hotstuff_node_sim.rs`:
+* **Harness restart**, `crates/qbind-node/src/hotstuff_node_sim.rs`:
   `load_persisted_state` (~L2035, **test-oriented harness**): schema-compat check,
   `get_last_committed`, `get_block`, `get_qc`, and the embedded `block.qc`, then a
-  **conservative lock** chosen as the higher-view of the separately-stored QC and
-  the embedded QC, passed to `initialize_from_restart`. **No** QC signature or
-  wire re-verification is performed on load; the stored QC is assumed trusted.
-* Production startup / restoration, `crates/qbind-node/src/main.rs`:
-  destination-lock acquire (Run 422 D7-D8), pre-materialization epoch-conflict
-  check (`evaluate_restore_epoch_compatibility`, Run 422 D7-D5),
-  `apply_guarded_snapshot_restore` (materialization + RTR `Intent`),
-  `open_production_consensus_storage` (Run 093), `persist_restored_snapshot_epoch_durable`
-  + RTR `Complete` publication (Run 097), then `spawn_binary_consensus_loop`. **No
-  signing-reservation journal is opened or wired anywhere in production
-  `main.rs`.**
+  logical lock that the source *comments* call **conservative** — chosen as the
+  higher-view of the separately-stored QC and the embedded QC — passed to
+  `initialize_from_restart`. **No** QC signature or wire re-verification is
+  performed on load; the stored QC is assumed trusted. This reader has **no**
+  non-test caller: `load_persisted_state` is reached only from tests and the
+  harness wrappers (`async_runner.rs`), **never** from production `main.rs` or the
+  binary consensus loop. Its lock reconstruction and whether that lock is
+  *sufficient* for recovery are examined in Correction B (§2.1); this audit does
+  **not** establish that the reconstructed lock preserves every pre-crash voting
+  restriction.
+* **Production ordinary startup / restoration**, consensus-loop engine
+  construction in `crates/qbind-node/src/binary_consensus_loop.rs` and the
+  `main.rs` driver:
+  * **Production ordinary startup builds a fresh engine.** The binary consensus
+    loop constructs `BasicHotStuffEngine::new(local_validator_id, validators)`
+    (~L2492) with no committed-state, lock, or journal input. It does **not** call
+    `load_persisted_state` and does **not** restore committed blocks, a
+    `locked_qc`, or any signing-journal state into the engine.
+  * **Production requested restoration applies a snapshot baseline only.** When —
+    and only when — a restore was requested, `main.rs` translates the restore
+    outcome into a `RestoreBaseline { snapshot_height, snapshot_block_id }`
+    (`main.rs` ~L2865) and the loop conditionally calls
+    `engine.initialize_from_snapshot_baseline(snapshot_block_id, snapshot_height)`
+    (~L2517). That initializer sets committed id/height from the snapshot meta,
+    `current_view = snapshot_height + 1`, inserts a synthetic baseline block, and
+    recovers **no** `locked_qc`. The snapshot `block_hash` is reused as an **opaque
+    baseline / parent identifier** in the engine's block tree (so documented at
+    `main.rs` ~L2860–2864); it is **not** equated with an authenticated historical
+    consensus block id, and no pre-snapshot QC / vote history is reconstructed.
+  * **Production storage opening is observation, not state restoration.** The
+    `main.rs` restore/startup path performs destination-lock acquire (Run 422
+    D7-D8), pre-materialization epoch-conflict check
+    (`evaluate_restore_epoch_compatibility`, Run 422 D7-D5),
+    `apply_guarded_snapshot_restore` (materialization + RTR `Intent`),
+    `open_production_consensus_storage` (Run 093) with its schema /
+    incomplete-epoch-transition checks, `persist_restored_snapshot_epoch_durable`
+    + RTR `Complete` publication (Run 097), then `spawn_binary_consensus_loop`.
+    These schema/incomplete-transition/epoch checks and the stored-epoch
+    observation **do not themselves restore** committed blocks, a lock, or
+    journal state into the engine — they establish storage availability and
+    observe a persisted epoch value only. **No signing-reservation journal is
+    opened or wired anywhere in production `main.rs`.**
 * Guarded signing routes, `crates/qbind-node/src/binary_consensus_loop.rs`:
   `ConsensusVerificationPolicy` (`Required` default / test-only
   `LocalFixtureUnsigned`), `guarded_sign_proposal_for_broadcast`,
@@ -198,35 +239,98 @@ current source rather than trusting a line number.
 ## 2. Source-backed recovery inventory
 
 Distinguish **exact restoration** (the recovered value is the pre-crash value),
-**conservative reconstruction** (a safe lower/weaker value derived from durable
-inputs), **fixture input** (supplied only by a test/harness, not production), and
-**unsupported assumption** (no durable channel exists). "Reachability" names
+**reconstruction** (a value derived from durable inputs whose *recovery
+sufficiency is a separate obligation* — it is **not** assumed to be a safe
+lower/weaker bound merely because a source comment calls it "conservative";
+see §2.1), **fixture input** (supplied only by a test/harness, not production),
+and **unsupported assumption** (no durable channel exists). "Reachability" names
 whether the recovery consumer runs in the **production** binary path or only in a
-**harness**/test.
+**harness**/test. Three production boundaries are kept distinct: (a) **production
+ordinary startup**, which builds a *fresh* engine and restores nothing; (b)
+**production requested restoration**, which applies only
+`initialize_from_snapshot_baseline` from the supplied snapshot baseline (no lock);
+and (c) **production storage opening**, whose schema/epoch checks *observe* stored
+values without restoring committed blocks, a lock, or journal state into the
+engine.
 
 | State or obligation | Producer / update point | Persistence & durability | Recovery consumer | Verification performed | Prod / harness reachability | Gap |
 |---|---|---|---|---|---|---|
-| Committed block id | `on_commit` / engine commit; `storage.put_last_committed` | `meta:last_committed`, checksummed | `load_persisted_state` → `initialize_from_restart`; snapshot sets from meta | Schema-compat only; decode/checksum | Production restart (via harness wrapper) **and** snapshot baseline | Exact restoration of *committed* id only |
-| Committed height | `block.header.height` of committed block | Embedded in persisted block | `load_persisted_state` reads `block.header.height`; snapshot from meta | Decode only | Production + snapshot | Exact, but a height is **not** a lock (§4-Q2) |
-| `locked_qc` (lock) | `set_locked_qc` on TC / 3-chain progress | Persisted QC (`q:<id>`) and/or embedded `block.qc` | **Restart:** `load_persisted_state` picks higher-view of stored/embedded QC → `initialize_from_restart`. **Snapshot:** `initialize_from_snapshot_baseline` recovers **none** | **No** signature/wire re-verification on load; assumed trusted | Restart path = **harness** reconstruction; snapshot path = **production**, recovers no lock | **Conservative** on restart; **absent** on snapshot baseline — lock recovery UNMET |
-| Uncommitted vote / per-view latch (`voted_in_view`) | Set during `ingest_proposal` vote emission | **Not persisted** | None — reset to `false` on both recovery paths | — | Lost on every restart/restore | **Unsupported assumption**: no durable channel (D7-D2) |
+| Committed block id | `on_commit` / engine commit; `storage.put_last_committed` | `meta:last_committed`, checksummed | **Harness restart:** `load_persisted_state` → `initialize_from_restart`. **Production requested restore:** `initialize_from_snapshot_baseline` sets committed id from the snapshot meta's opaque `block_hash` | Schema-compat only; decode/checksum | **Harness** restart; **production** snapshot baseline. **Production ordinary startup restores nothing (fresh engine)** | Exact restoration of a *committed id* only (harness); snapshot path carries an opaque baseline id, not an authenticated historical block id |
+| Committed height | `block.header.height` of committed block | Embedded in persisted block / snapshot meta | Harness `load_persisted_state` reads `block.header.height`; snapshot from `meta.height` | Decode only | **Harness** restart; **production** snapshot baseline (not ordinary startup) | Exact, but a height is **not** a lock (§4-Q2) |
+| `locked_qc` (lock) | `set_locked_qc` on TC / 3-chain progress | Persisted QC (`q:<id>`) and/or embedded `block.qc` | **Harness restart:** `load_persisted_state` picks higher-view of stored/embedded QC → `initialize_from_restart`. **Production snapshot:** `initialize_from_snapshot_baseline` recovers **none**. **Production ordinary startup:** fresh engine, no lock | **No** signature/wire re-verification on load; assumed trusted | Restart reconstruction = **harness only**; production (snapshot and ordinary) recovers no lock | Harness reconstruction's **recovery sufficiency is NOT established by this audit** (§2.1); **absent** on every production path — lock recovery UNMET |
+| Uncommitted vote / per-view latch (`voted_in_view`) | Set during `ingest_proposal` vote emission | **Not persisted** | None — reset to `false` on both initializers | — | Lost on every restart/restore | **Unsupported assumption**: no durable channel (D7-D2) |
 | Non-committed block tree, `vote_accumulator` | Engine runtime | **Not persisted** | Rebuilt as new proposals/votes arrive | — | Both paths start fresh | In-flight consensus work lost (safe by design, but not a lock) |
 | `verified_justification` evidence (D7-C3F) | `on_verified_proposal_event` | **Non-serialized** | Never restored (`None`) | — | Both paths | Evidence must be re-verified on re-admission |
-| Current epoch | `apply_epoch_transition_atomic` / restore persist | `meta:current_epoch`, synced; incomplete-transition marker | `open_production_consensus_storage` → `verify_epoch_consistency_on_startup`, `get_current_epoch` | Incomplete-transition marker check; fail-closed | **Production** | Exact restoration; coarse — epoch is **not** a signing-history commitment (continuity §6.3) |
+| Current epoch | `apply_epoch_transition_atomic` / restore persist | `meta:current_epoch`, synced; incomplete-transition marker | `open_production_consensus_storage` → `verify_epoch_consistency_on_startup`, `get_current_epoch` | Incomplete-transition marker check; fail-closed | **Production storage opening** (observation) | Exact restoration / observation; coarse — epoch is **not** a lock and **not** a signing-history commitment (continuity §6.3), and observing it does not restore engine state |
 | Restore completeness (RTR) | `apply_guarded_snapshot_restore` → `Intent`; Run 097 → `Complete` | `RESTORE_TRANSACTION.rtr`, SHA3-256, fsync + dir fsync; advisory lock | `main.rs` restore path reads/validates RTR | Strict fail-closed decode; digest = integrity only | **Production** (D7-D8) | `COMPLETE` proves *this attempt's* durability only; **not** lock recovery / signing freshness / anti-rollback |
 | Signing reservation (`Reserved`) | `reserve_for_sign` before signer | `sig:…` record, synced, checksummed | `journal.open` + `for_each_signing_namespace_entry` | Decode/checksum; accounting vs metadata; fail-closed | **Harness/test only** — not opened in production | No production reader; recovered `Reserved` ⇒ potentially-signed (continuity §5.2) |
 | Signing result (`Signed`) | `record_signed_result` after signer | `sig:…` (+signature) + metadata, atomic synced | `journal.open`; `RecoveredAckCache` for exact resend | Decode/checksum; ack barrier; exact-record binding | **Harness/test only** | No production reader; exact reuse retains D10 ack/verify/authorization |
-| Journal metadata (limit / count) | `initialize` then atomic advance with each signed result | `sig:meta:v1`, synced, checksummed | `journal.open` accounting validation | Count ≤ limit; version; fail-closed | **Harness/test only** | No production reader; `AccountingInconsistent` fail-closed |
-| Signing exclusivity (ownership) | `SigningOwnershipDomain` per backend instance | **In-process only** (process-unique token) | Re-created per process open | One `Mutex` serializes supported handles | In-process | Does **not** span processes/hosts/copies (continuity §4.2) |
+| Journal metadata (limit / count) | `initialize` then atomic advance with each **new reservation** | `sig:meta:v1`, synced, checksummed | `journal.open` accounting validation | Count ≤ limit; version; fail-closed | **Harness/test only** | No production reader; `reserved_positions` advances once per new reservation, not on result publication / ack (§5.1 X2, Correction D) |
+| Signing exclusivity (ownership) | `SigningOwnershipDomain` per backend instance | **In-process only** (process-unique token) | Re-created per process open | One `Mutex` serializes supported handles over **one** backend | In-process | Separate directories/hosts each hold their **own** domain; exclusivity does **not** span copies/hosts (continuity §4.2; §7 R10) |
 | Timeout / NewView dependency | `on_timeout_certificate` updates `locked_qc` | Lock persisted only via QC, as above | Same as `locked_qc` | As above | As above | Timeout/NewView compatibility is an explicit unmigrated dependency |
 
-**Reading of the inventory.** Production recovery establishes *committed state* and
-a *coarse epoch* exactly, reconstructs a *conservative* lock **only on the harness
-restart path**, recovers **no** lock on the production snapshot-baseline path,
-recovers **no** uncommitted-vote record on any path, and opens **no** signing
-journal at all in production. The correspondence this contract requires therefore
-has, today, **no production comparison inputs on the signing side** and an
-**incomplete safety-state input** on the consensus side.
+**Reading of the inventory.** Production recovery establishes *committed state*
+(only when a restore is requested, from the snapshot baseline) and *observes a
+coarse epoch* exactly; **production ordinary startup restores nothing and builds a
+fresh engine**. A lock is reconstructed **only on the harness restart path** and
+that reconstruction's recovery sufficiency is **not established by this audit**
+(§2.1); **no** production path recovers a lock, **no** path recovers an
+uncommitted-vote record, and production opens **no** signing journal at all. The
+correspondence this contract requires therefore has, today, **no production
+comparison inputs on the signing side** and an **incomplete safety-state input**
+on the consensus side.
+
+### 2.1 The limits of lock reconstruction (Correction B)
+
+The harness `load_persisted_state` reconstruction and the source comments that call
+it "conservative" (`hotstuff_node_sim.rs` ~L2088–2090, ~L2114, ~L2123) do **not**
+establish that the reconstructed lock preserves every pre-crash voting restriction.
+A comment is not a proof. The relevant predicate is
+`HotStuffStateEngine::is_safe_to_vote_on_block` (`hotstuff_state_engine.rs`
+~L1312), which admits a vote for a candidate block when **any** of:
+
+1. there is no `locked_qc` (returns `true`); or
+2. the candidate's `justify_qc.view >= locked_qc.view` (the HotStuff liveness
+   condition — a *view comparison*, independent of ancestry); or
+3. walking the candidate's registered ancestors reaches `locked_qc.block_id`
+   (the candidate extends the locked block).
+
+Lock updates advance `locked_qc` on three-chain progress and on
+`on_timeout_certificate` when `tc.high_qc.view > locked_qc.view`. The harness
+selects, from the *committed* block's separately-stored QC and its embedded
+`block.qc`, the higher-view of the two. Neither of those is guaranteed to equal the
+pre-crash `locked_qc`, which may have advanced to a **strictly higher view** via a
+timeout certificate or later three-chain progress that the committed block does not
+embed. The reconstructed lock can therefore be **lower-view** than the pre-crash
+lock.
+
+**Source-level reasoning example (not an executed test, not a demonstrated
+network-level attack).** Assume: pre-crash lock view = 20; reconstructed lock view
+= 10; a candidate block that does **not** extend either relevant locked block
+(ancestor walk fails for both); candidate `justify_qc.view` = 15. Applying the
+implemented condition (2) above:
+
+* Under the **reconstructed** lock (view 10): `15 >= 10` is true ⇒ the candidate
+  **passes** the safe-vote predicate.
+* Under the **pre-crash** lock (view 20): `15 >= 20` is false, and the ancestor
+  walk does not reach the locked block ⇒ the candidate **fails**.
+
+Lowering the lock from view 20 to view 10 thus **enlarges** the permitted voting
+set: a decision that the pre-crash lock would have refused is admitted under the
+reconstructed lock. This is a consequence of the implemented view comparison; the
+specific view numbers are illustrative assumptions, not measured values.
+
+**Proof obligation.** Labeling a reconstruction "conservative" does not discharge
+safety. For resumption to be safe, either (i) the reconstructed state must be shown
+to **preserve the required safety restrictions** (so the permitted voting set does
+not grow relative to the pre-crash lock), or (ii) an **independently justified
+protocol recovery rule** must establish why resuming from the reconstructed lock is
+safe. A QC's validity alone does **not** identify it as the sufficient recovery
+lock: being a valid certificate for the committed block is necessary but not
+sufficient to show it equals or dominates the pre-crash lock. Pending one of these,
+the current harness behavior is labeled **reconstruction whose recovery sufficiency
+is NOT established by this audit**, and the "safe/conservative" phrasing is not
+treated as a proven guarantee anywhere in this contract.
 
 ---
 
@@ -238,11 +342,16 @@ consensus rules, not invented):**
 * **INV-R1 (fail-closed recovery).** If any required safety evidence is missing,
   malformed, inconsistent, or unavailable, signing does **not** resume. Absence is
   never read as "unused" or "current".
-* **INV-R2 (lock before future votes).** Signing may resume only after the
+* **INV-R2 (lock before future votes).** Signing may resume only after a
   `locked_qc` sufficient to enforce `is_safe_to_vote_on_block` for future views is
-  recovered or conservatively reconstructed from durable inputs, **and** any
-  in-flight signing reservations are present. A high-water mark, an epoch, or a
-  single valid QC alone does **not** restore the lock (continuity §5.3, §6.7).
+  recovered **and** its recovery sufficiency is established — i.e. a reconstructed
+  lock must be shown to **preserve the required safety restrictions** (the
+  permitted voting set does not grow relative to the pre-crash lock) or an
+  **independently justified protocol recovery rule** must establish why resumption
+  is safe (§2.1) — **and** any in-flight signing reservations are present. A
+  high-water mark, an epoch, or a single valid QC alone does **not** restore the
+  lock, and the harness "conservative" reconstruction's sufficiency is **not**
+  established by this audit (continuity §5.3, §6.7).
 * **INV-R3 (recovered reservation is potentially-signed).** A recovered `Reserved`
   position with no usable retained result is treated as **potentially signed**: no
   automatic release, no automatic re-signing (continuity §5.2 row 4; D10 preserved).
@@ -296,10 +405,13 @@ recovered evidence can and cannot establish.
    and local; it does not answer Q2, Q3, Q4, or Q5, and in production the journal is
    not opened at all.
 2. **Consensus safety after recovery — do future decisions preserve the engine's
-   actual locking / safe-vote rule?** **UNMET on the production snapshot-baseline
-   path** (no `locked_qc` recovered) and **conservatively reconstructed only in the
-   harness** restart path; no uncommitted-vote latch is recovered anywhere (D7-D2).
-   This is the INV-R2 prerequisite and is **independent** of Q1.
+   actual locking / safe-vote rule?** **UNMET on every production path** (no
+   `locked_qc` recovered on the snapshot-baseline path and none on ordinary
+   startup) and, on the **harness** restart path, only *reconstructed* with a
+   sufficiency that this audit does **not** establish (§2.1: the reconstructed lock
+   can be lower-view than the pre-crash lock, enlarging the permitted voting set).
+   No uncommitted-vote latch is recovered anywhere (D7-D2). This is the INV-R2
+   prerequisite and is **independent** of Q1.
 3. **History correspondence — are the restored consensus/account state and the
    retained signing obligations compatible?** **No mechanism exists**: production
    opens no journal, so there is no reader that compares recovered consensus state
