@@ -10051,10 +10051,14 @@ Overlapping subsets reported separately (not summed):
 
 ### Security-tool outcomes (literal)
 
-Recorded in the Correction F validation run below; see the committed `parallel_validation`
-result. Any unavailable reviewer or skipped/oversized CodeQL analysis is recorded
-literally and does **not** constitute a security pass. Security posture remains
-RS1-OPEN / PUBLIC-DEVNET-NO-GO.
+Attempted once via the harness `parallel_validation` with the CodeQL change declared
+non-trivial. **Code Review DID NOT run** — the review tool was unavailable in this
+environment (the `autofind` binary was not found on any searched path), so "No review
+comments found" is **NOT** a clean review. **CodeQL DID NOT complete** — the `rust`
+analysis was **SKIPPED because the database size is too large** (the reported "0 alerts"
+is therefore **NOT** a successful scan). Neither constitutes a passed security analysis;
+both remain unexecuted obligations. Security posture remains RS1-OPEN /
+PUBLIC-DEVNET-NO-GO.
 
 ### Documentation reconciliation and scoped F disposition
 
