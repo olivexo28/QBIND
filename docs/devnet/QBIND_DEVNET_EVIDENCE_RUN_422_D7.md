@@ -10537,7 +10537,7 @@ build, test, or scan was executed by this pass.
 | Correction | Invariant | Enforcing mechanism | Evidence level | Limitation | Disposition |
 | --- | --- | --- | --- | --- | --- |
 | A | Missing-journal signing refusal with admission precedence preserved | `guarded_sign_{proposal,vote}_for_broadcast` refuse a missing journal before the signer on every production route; raw `sign_*_for_broadcast` are `#[cfg(test)]` | CODE-TEST | Serialized local handler; no configured-authority runtime evidence | CODE-TEST-POSITIVE |
-| B/C | Acknowledged reservation before signing; one-use operation-bound continuation; checked/suppressed publication | `SignGate::wait_release` –> `GateOutcome`; only `Released` reaches the underlying signer; failed/uncertain writes suppress delivery | CODE-AND-STORAGE-TEST | Model reopen; serialized handler; not power-loss/release-binary evidence | CODE-AND-STORAGE-TEST-POSITIVE (local) |
+| B/C | Acknowledged reservation before signing; one-use operation-bound continuation; checked/suppressed publication | Backend-shared `SigningOwnershipDomain` coordinates supported handles; `reserve_for_sign` grants a `SigningContinuation` only after a durable reservation acknowledgement; `consume_for_signing` consumes that operation-bound continuation at most once into its `ResultPublicationCapability`; `record_signed_result` validates ownership, position/binding, stored reservation, permitted transition, and result-write acknowledgement; failed or uncertain publication suppresses delivery while preserving the signing obligation | CODE-AND-STORAGE-TEST | Model reopen; serialized handler; test-only `SignGate`/`GateOutcome` drive the deterministic contention schedule (test evidence, not the production mechanism); not power-loss/release-binary evidence | CODE-AND-STORAGE-TEST-POSITIVE (local) |
 | D | Frozen-operation authorization revalidation of the original ticket, bound context, and signer | `BoundSigningOperation` freezes the admission ticket, bound context, and selected signer; completion reconfirms immediately before the signer and before retained reuse; distinct fail-closed counters | CODE-TEST | Serialized local handler; signer/suite correspondence only (no private-key possession); no runtime evidence | CODE-TEST-POSITIVE |
 | E | Explicit initialization/opening, namespace validation, persistent capacity, bounded recovery-acknowledgement cache | Explicit initialize/open vs established-journal validation; persisted journal-wide limit/count; bounded recovered-acknowledgement cache with post-eviction failed-retry assertions | CODE-AND-STORAGE-TEST | Serialized/local; no configured-authority runtime evidence | CODE-AND-STORAGE-TEST-POSITIVE |
 | F | Engine progress preserves the originating decision and conflict position; bounded child-process abort/reopen recovery | Engine-progress recorder preserves the originating decision/conflict; bounded, classified child-process runner with an unconditional drain deadline and test-owned verified cleanup; real-process abort/reopen | CODE-AND-PROCESS-TEST | Stated storage/OS assumptions; not power-loss durability; not configured-authority runtime evidence | CODE-AND-PROCESS-TEST-POSITIVE |
@@ -10647,5 +10647,18 @@ authorized.
 * `docs/whitepaper/contradiction.md` was inspected **read-only**; its C4/C5 posture is
   unchanged (C4 OPEN — partial; C5 OPEN / narrowed). No contradiction-ledger edit was
   made.
+* Reported security-tool outcomes of the documentation-consolidation pass ending at `9194638`
+  (retained report, recorded literally; not re-executed during this correction):
+  * **Code Review:** unavailable because the `autofind` binary was not found; no completed
+    independent review was produced. Any “no comments” wrapper result is **not** a successful review.
+  * **CodeQL:** skipped as trivial because the changes were Markdown-only; no completed scan ran.
+  These prior-pass outcomes are kept distinct from the aggregate review at `2cf125c` (Independent
+  Code Review — **NOT RUN**; CodeQL — **NOT RUN**) recorded above; a skip or tool-unavailable
+  error is never upgraded into a pass.
+* This bounded correction pass invoked the diff-oriented validation harness once over the two
+  changed Markdown files; its own outcomes, recorded as fresh executions (not a re-attribution
+  of the historical pass above): **Code Review** did not complete an independent review — the
+  `autofind` binary was not found on any searched path, so the “no comments” wrapper result is
+  **not** a successful review; **CodeQL** was skipped as trivial (Markdown-only), so no scan ran.
 * Local positivity here is bounded to the demonstrated local signing-reservation scope
   and must not be read as production, anti-rollback, or security-review completion.
