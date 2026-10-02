@@ -10244,11 +10244,22 @@ set); direct invocation is **not** an additional recovery scenario.
 
 ### Security-tool outcomes (literal)
 
-Attempted once via the harness `parallel_validation` with the CodeQL change declared
-non-trivial. Literal outcome recorded in the Clean-worktree/validation note of the final
-report and PR; neither "no review comments" nor "0 alerts" is treated as a completed
-analysis unless the tool actually ran to completion. Security posture remains
-`RS1-OPEN / PUBLIC-DEVNET-NO-GO`; this test/documentation-only change does not alter it.
+Attempted once via the harness `parallel_validation`. The CodeQL change was declared
+**trivial** (test-only + documentation-only changes, matching the CodeQL trivial
+categories), and the literal outcomes were:
+
+* **Code Review — DID NOT complete a real review.** The result line read "No review
+  comments found", but the accompanying note reported the review tool was **unavailable**
+  in this environment (`autofind` `command_failed`: model `claude-sonnet-4.6` "not found
+  in registry"). "No review comments found" is therefore **NOT** a clean review.
+* **CodeQL — Skipped (not executed).** Reported "Skipped: all changes are trivial" under
+  the trivial declaration for this test-only + documentation-only change; no scan ran, so
+  there is no "0 alerts" result to claim.
+
+Neither constitutes a completed security analysis. Per the task, unavailable/skipped
+tooling was attempted once and recorded literally (not re-run repeatedly, and no
+infrastructure was changed). Security posture remains `RS1-OPEN / PUBLIC-DEVNET-NO-GO`;
+this test/documentation-only change does not alter it.
 
 ### Documentation reconciliation and scoped verdict
 
