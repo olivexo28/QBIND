@@ -1544,10 +1544,14 @@ Release compilation evidence ONLY (not configured-authority runtime evidence):
 * SHA-256: `31ef90a69afc0608b38ca91ef585485168c775a31b2c82c854ba563625ee06df`
 
 Security-tool outcomes (recorded literally): independent Code Review and CodeQL
-security scanning are attempted via the harness's `parallel_validation` with
-production storage changes declared non-trivial for CodeQL; any unavailable tool,
-skipped analysis, backend failure, or unexecuted check is not a successful scan.
-Security posture remains RS1-OPEN / PUBLIC-DEVNET-NO-GO.
+were attempted via the harness's `parallel_validation` with production storage
+changes declared non-trivial for CodeQL. Code Review DID NOT run — the review tool
+was unavailable in this environment (the `autofind` binary was not found), so
+"no review comments" is NOT a clean review. CodeQL DID NOT complete — the `rust`
+analysis was SKIPPED because the database size was too large (0 alerts reported
+is therefore NOT a successful scan). Neither constitutes a passed security
+analysis; both remain unexecuted obligations. Security posture remains
+RS1-OPEN / PUBLIC-DEVNET-NO-GO.
 
 **Scoped verdict.** The scoped code, acceptance tests, documentation, and
 required validation for journal initialization, direct-read/iterator bounds, and

@@ -9733,11 +9733,14 @@ evidence.
 
 ### Security-tool outcomes (literal)
 
-Independent Code Review and CodeQL are attempted via the harness
+Independent Code Review and CodeQL were attempted via the harness
 `parallel_validation`, production storage changes declared non-trivial for
-CodeQL. Any unavailable tool, skipped analysis, backend failure, or unexecuted
-check is recorded as such and is NOT a successful scan. Security posture remains
-`RS1-OPEN / PUBLIC-DEVNET-NO-GO`.
+CodeQL. Literal outcomes: Code Review DID NOT run — the review tool was
+unavailable in this environment (`autofind` binary not found), so the empty
+result is NOT a clean review. CodeQL DID NOT complete — the `rust` analysis was
+SKIPPED because the database size was too large, so the reported 0 alerts is NOT
+a successful scan. Both remain unexecuted security obligations. Security posture
+remains `RS1-OPEN / PUBLIC-DEVNET-NO-GO`.
 
 ### Documentation & EOL reconciliation
 
