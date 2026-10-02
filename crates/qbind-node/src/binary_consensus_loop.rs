@@ -23689,6 +23689,13 @@ mod tests {
                         /// instead of failing before storing. Clearly labelled
                         /// per Correction C write-uncertainty testing.
                         store_then_error: AtomicBool,
+                        /// Run 422 D7-D10 Correction A — optional test-only
+                        /// recovered-ack cache capacity. When `Some(n)`, the
+                        /// per-instance ownership domain is built with a cache
+                        /// bounded to `n` entries so eviction can be forced through
+                        /// the real guarded-handler recovery flow. NOT a production
+                        /// configuration surface.
+                        cache_cap: StdRwLock<Option<usize>>,
                         domain: std::sync::OnceLock<
                             Arc<crate::signing_reservation_journal::SigningOwnershipDomain>,
                         >,
@@ -23700,6 +23707,7 @@ mod tests {
                                 fail_reads: AtomicBool::new(false),
                                 write_budget: AtomicI64::new(i64::MAX),
                                 store_then_error: AtomicBool::new(false),
+                                cache_cap: StdRwLock::new(None),
                                 domain: std::sync::OnceLock::new(),
                             })
                         }
@@ -23711,6 +23719,10 @@ mod tests {
                                 fail_reads: AtomicBool::new(false),
                                 write_budget: AtomicI64::new(i64::MAX),
                                 store_then_error: AtomicBool::new(false),
+                                // Preserve the test-only cache bound across the
+                                // modelled restart so an eviction sequence spanning a
+                                // reopen keeps its small cache.
+                                cache_cap: StdRwLock::new(*self.cache_cap.read().unwrap()),
                                 domain: std::sync::OnceLock::new(),
                             })
                         }
@@ -23721,9 +23733,23 @@ mod tests {
                         fn set_write_budget(&self, n: i64) {
                             self.write_budget.store(n, SeqCst);
                         }
+                        /// Test-only observation of the remaining write budget, so a
+                        /// recovery that issues a synced durability write can be
+                        /// directly distinguished (budget decremented) from an exact
+                        /// cache hit (budget unchanged). Not production instrumentation.
+                        fn write_budget_remaining(&self) -> i64 {
+                            self.write_budget.load(SeqCst)
+                        }
                         /// Enable "store the result then return an error" mode.
                         fn set_store_then_error(&self, v: bool) {
                             self.store_then_error.store(v, SeqCst);
+                        }
+                        /// Bound the per-instance ownership domain's recovered-ack
+                        /// cache to `cap` entries (test-only). MUST be set before the
+                        /// domain is first accessed (before `journal(..)`), since the
+                        /// domain is created once per instance.
+                        fn set_cache_capacity_for_test(&self, cap: usize) {
+                            *self.cache_cap.write().unwrap() = Some(cap);
                         }
                         /// Overwrite the stored bytes at a position's key with
                         /// arbitrary (e.g. corrupt) bytes, bypassing the
@@ -23887,9 +23913,14 @@ mod tests {
                         ) -> Arc<crate::signing_reservation_journal::SigningOwnershipDomain>
                         {
                             self.domain
-                                .get_or_init(
-                                    crate::signing_reservation_journal::SigningOwnershipDomain::new,
-                                )
+                                .get_or_init(|| match *self.cache_cap.read().unwrap() {
+                                    Some(cap) => {
+                                        crate::signing_reservation_journal::SigningOwnershipDomain::new_with_cache_capacity_for_test(cap)
+                                    }
+                                    None => {
+                                        crate::signing_reservation_journal::SigningOwnershipDomain::new()
+                                    }
+                                })
                                 .clone()
                         }
                     }
@@ -24768,6 +24799,212 @@ mod tests {
                         assert_eq!(
                             delivered[0].signature, retained_sig,
                             "delivered signature equals the retained journal signature"
+                        );
+                    }
+
+                    /// Run 422 D7-D10 Correction A — the recovery-barrier
+                    /// failure → uncertainty → success sequence over an EVICTED
+                    /// position, driven through the ACTUAL guarded handler. Three
+                    /// distinct proposals are durably signed, then recovered through
+                    /// a FRESH ownership domain whose recovered-ack cache is bounded
+                    /// (test-only) to 2 so recovering the third evicts the first.
+                    /// Revisiting the evicted position must re-establish its
+                    /// durability barrier from scratch: a failed and then uncertain
+                    /// barrier each suppress delivery/handoff with NO additional
+                    /// signer call, and only a successful barrier delivers the exact,
+                    /// D6-verified retained signature. The single signer counter `c`
+                    /// spans the whole sequence, so "no additional sign" is literal.
+                    #[test]
+                    fn d10_post_eviction_recovery_failure_uncertainty_success_through_handler() {
+                        let fixture = make_fixture(4);
+                        let (pv, c) = recording_pv(&fixture);
+                        let snap = snapshot_matching(&pv);
+
+                        // Bound the recovered-ack cache to 2 (survives the reopen).
+                        let store = D10Store::new();
+                        store.set_cache_capacity_for_test(2);
+                        let j = journal(store.clone());
+
+                        // Durably publish three distinct Signed proposals (views
+                        // 1,2,3). Each signs exactly once and delivers.
+                        for view in 1u64..=3 {
+                            let (s, f) = drive_j(&snap, &j, proposal_at(0, view, [view as u8; 32]));
+                            assert_eq!(s.outbound_proposals_sent, 1);
+                            assert_eq!(f.proposals.lock().unwrap().len(), 1);
+                        }
+                        assert_eq!(c.proposal_calls.load(SeqCst), 3, "three fresh signatures");
+
+                        // Capture the exact retained signature for view 1 (the
+                        // position that will be evicted) from the surviving bytes.
+                        let pos1 = crate::signing_reservation_journal::SigningPosition {
+                            validator_id: 0,
+                            network_genesis: *d6_control_domain().genesis_identity(),
+                            kind: crate::signing_reservation_journal::SigningKind::Proposal,
+                            originating_view: 1,
+                        };
+                        let key1 = pos1.storage_key();
+                        let bytes1 = store
+                            .map
+                            .read()
+                            .unwrap()
+                            .get(&key1)
+                            .cloned()
+                            .expect("view-1 Signed bytes survive");
+                        let retained_sig1 = crate::signing_reservation_journal::SigningDecisionRecord::decode(&bytes1)
+                            .expect("surviving record decodes")
+                            .retained_signature
+                            .clone()
+                            .expect("Signed record carries a retained signature");
+
+                        // Fresh ownership domain over the SAME durable bytes (lost
+                        // process-local knowledge); the small cache bound carries over.
+                        let store_r = store.reopen();
+                        let jr = journal(store_r.clone());
+
+                        // Recover views 1,2,3 through the handler: each is a retained
+                        // resend (no new signature). Recovering view 3 EVICTS view 1
+                        // from the 2-entry cache.
+                        for view in 1u64..=3 {
+                            let (s, f) = drive_j(&snap, &jr, proposal_at(0, view, [view as u8; 32]));
+                            assert_eq!(s.outbound_proposal_journal_retained_resend_total, 1);
+                            assert_eq!(s.outbound_proposals_sent, 1);
+                            assert_eq!(f.proposals.lock().unwrap().len(), 1);
+                        }
+                        assert_eq!(
+                            c.proposal_calls.load(SeqCst),
+                            3,
+                            "recovery resends reuse retained signatures; no new signing"
+                        );
+                        assert_eq!(jr.recovered_ack_cache_len(), 2, "the cache holds its bound (views 2,3)");
+
+                        // Revisit the EVICTED view 1 with the recovery barrier FAILING:
+                        // delivery is suppressed, the journal error counter ticks, and
+                        // NO additional signature runs.
+                        store_r.set_write_budget(0);
+                        let (sr1, fr1) = drive_j(&snap, &jr, proposal_at(0, 1, [1u8; 32]));
+                        assert_eq!(c.proposal_calls.load(SeqCst), 3, "failed barrier performs no signature");
+                        assert_eq!(sr1.outbound_proposal_journal_error_total, 1);
+                        assert_eq!(sr1.outbound_proposal_journal_retained_resend_total, 0);
+                        assert_eq!(sr1.outbound_proposals_sent, 0);
+                        assert!(fr1.proposals.lock().unwrap().is_empty(), "no delivery on a failed recovery barrier");
+
+                        // Repeat with an UNCERTAIN store-then-error barrier: readable
+                        // bytes are not an acknowledgement — delivery stays suppressed.
+                        store_r.set_write_budget(0);
+                        store_r.set_store_then_error(true);
+                        let (sr2, fr2) = drive_j(&snap, &jr, proposal_at(0, 1, [1u8; 32]));
+                        assert_eq!(c.proposal_calls.load(SeqCst), 3, "uncertain barrier performs no signature");
+                        assert_eq!(sr2.outbound_proposal_journal_error_total, 1);
+                        assert_eq!(sr2.outbound_proposals_sent, 0);
+                        assert!(fr2.proposals.lock().unwrap().is_empty(), "no delivery on an uncertain recovery barrier");
+                        assert_eq!(
+                            store.map.read().unwrap().get(&key1).cloned(),
+                            Some(bytes1.clone()),
+                            "the exact view-1 record is preserved across failed/uncertain recovery"
+                        );
+
+                        // (A/B) Immediately after the uncertain attempt: store-then-error
+                        //       is now disabled, but keep ORDINARY writes failing (budget
+                        //       0) and retry the SAME evicted view 1 through the handler.
+                        //       The barrier fails again: another journal error, NO retained
+                        //       delivery or facade handoff, and NO additional signer call.
+                        //       The uncertain attempt therefore left no usable cache
+                        //       acknowledgement (cache length unchanged), and the exact
+                        //       retained record is preserved.
+                        store_r.set_store_then_error(false);
+                        store_r.set_write_budget(0);
+                        let (sr2b, fr2b) = drive_j(&snap, &jr, proposal_at(0, 1, [1u8; 32]));
+                        assert_eq!(c.proposal_calls.load(SeqCst), 3, "failed retry performs no signature");
+                        assert_eq!(sr2b.outbound_proposal_journal_error_total, 1);
+                        assert_eq!(sr2b.outbound_proposal_journal_retained_resend_total, 0);
+                        assert_eq!(sr2b.outbound_proposals_sent, 0);
+                        assert!(
+                            fr2b.proposals.lock().unwrap().is_empty(),
+                            "no delivery or facade handoff on the failed retry"
+                        );
+                        assert_eq!(
+                            jr.recovered_ack_cache_len(),
+                            2,
+                            "the failed retry forms no usable cache acknowledgement for view 1"
+                        );
+                        assert_eq!(
+                            store.map.read().unwrap().get(&key1).cloned(),
+                            Some(bytes1.clone()),
+                            "the exact view-1 retained record survives the failed retry"
+                        );
+                        // Conflict obligation preserved: a conflicting view-1 proposal
+                        // (different payload → different binding) is refused with writes
+                        // permitted, so the refusal is a genuine conflict (not a write
+                        // failure); it delivers nothing, signs nothing, rewrites nothing.
+                        store_r.set_write_budget(i64::MAX);
+                        let (src, frc) = drive_j(&snap, &jr, proposal_at(0, 1, [9u8; 32]));
+                        assert_eq!(c.proposal_calls.load(SeqCst), 3, "a conflict performs no signature");
+                        assert_eq!(src.outbound_proposal_journal_conflict_total, 1);
+                        assert_eq!(src.outbound_proposals_sent, 0);
+                        assert!(frc.proposals.lock().unwrap().is_empty(), "a conflict delivers nothing");
+                        assert_eq!(
+                            store.map.read().unwrap().get(&key1).cloned(),
+                            Some(bytes1.clone()),
+                            "a conflict obligation does not rewrite the view-1 record"
+                        );
+
+                        // (C) Permit the next write and retry: the evicted position
+                        //     re-establishes its barrier with exactly ONE additional synced
+                        //     recovery write (budget decremented by one — direct proof the
+                        //     failed/uncertain attempts left no usable acknowledgement, which
+                        //     would be served WITHOUT a write), delivers its EXACT retained
+                        //     signature, and makes NO additional signer call.
+                        store_r.set_store_then_error(false);
+                        store_r.set_write_budget(4);
+                        let budget_before_success = store_r.write_budget_remaining();
+                        let (sr3, fr3) = drive_j(&snap, &jr, proposal_at(0, 1, [1u8; 32]));
+                        assert_eq!(
+                            store_r.write_budget_remaining(),
+                            budget_before_success - 1,
+                            "a successful post-eviction recovery issues exactly one additional synced write"
+                        );
+                        assert_eq!(
+                            c.proposal_calls.load(SeqCst),
+                            3,
+                            "successful post-eviction resend reuses the retained signature; \
+                             signer count stays three across the entire sequence"
+                        );
+                        assert_eq!(sr3.outbound_proposal_journal_retained_resend_total, 1);
+                        assert_eq!(sr3.outbound_proposals_sent, 1);
+                        let delivered = fr3.proposals.lock().unwrap();
+                        assert_eq!(delivered.len(), 1);
+                        assert!(qbind_consensus::verify_proposal_msg_with_domain(
+                            &delivered[0],
+                            ValidatorId(0),
+                            fixture.validators.as_ref(),
+                            fixture.kp.as_ref(),
+                            fixture.br.as_ref(),
+                            &d6_control_domain(),
+                        )
+                        .is_ok());
+                        assert_eq!(
+                            delivered[0].signature, retained_sig1,
+                            "delivered signature equals the view-1 retained journal signature"
+                        );
+                        drop(delivered);
+
+                        // Exact-cache-hit control: view 1 is now cached, so revisiting it
+                        // is served WITHOUT reissuing the durable write even with the write
+                        // budget exhausted — the budget does not move and no signer runs.
+                        store_r.set_write_budget(0);
+                        let (sr4, fr4) = drive_j(&snap, &jr, proposal_at(0, 1, [1u8; 32]));
+                        assert_eq!(
+                            store_r.write_budget_remaining(),
+                            0,
+                            "an exact cache hit reissues no synced durability write"
+                        );
+                        assert_eq!(c.proposal_calls.load(SeqCst), 3, "a cache hit performs no signature");
+                        assert_eq!(sr4.outbound_proposal_journal_retained_resend_total, 1);
+                        assert_eq!(sr4.outbound_proposals_sent, 1);
+                        assert_eq!(fr4.proposals.lock().unwrap().len(), 1);
+                        assert_eq!(
+                            fr4.proposals.lock().unwrap()[0].signature, retained_sig1,
+                            "the cache-hit delivery equals the exact retained signature"
                         );
                     }
 

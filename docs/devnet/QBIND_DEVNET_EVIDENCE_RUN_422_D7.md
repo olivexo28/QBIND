@@ -9440,6 +9440,10 @@ local demonstrated scope; model reopen, not power-loss/release-binary evidence).
 the remaining F work; C4/C5 remain OPEN. No authority activation, readiness
 promotion, D11, or Run 423 work; no PR, branch rename, force-push, rebase, or
 history rewrite.
+> **Superseded (historical).** This section's "Correction E … Still OPEN" verdict
+> is the conclusion of its own prior pass and is retained as historical evidence.
+> Correction E was subsequently implemented and tested — see "Run 422 D7-D10
+> Correction E execution" below; F remains OPEN.
 ## Run 422 D7-D10 — Correction D finalization: operation binding across the prepare/complete split
 
 ### Provenance and object limitations
@@ -9608,6 +9612,10 @@ reopen, not power-loss/release-binary evidence). Retained unchanged:
 remaining F work; C4/C5 remain OPEN. No authority activation, readiness promotion,
 D11, or Run 423 work; no PR, branch rename, force-push, rebase, or history rewrite;
 `task/warning.txt` and unrelated work preserved.
+> **Superseded (historical).** This "Correction E … Still OPEN" verdict is the
+> conclusion of its own prior pass, retained as historical evidence. Correction E
+> was subsequently implemented and tested — see "Run 422 D7-D10 Correction E
+> execution" below; F remains OPEN.
 
 
 ## Run 422 D7-D10 — Correction E: direct-read bounds, remaining acceptance evidence, and final validation
@@ -9717,7 +9725,12 @@ release compilation, and power-loss evidence are kept distinct.
 * `cargo test -p qbind-node --test run_422_startup_refusal_tests` — 4 passed.
 * `cargo check -p qbind-node` (binary-inclusive; required; the historical `--lib` check does not substitute) — exit 0.
 * `cargo build --release -p qbind-node --bin qbind-node` — exit 0.
-* Existing D6 signer-isolation target `cargo test -p qbind-node --test m10_signer_isolation_tests` — 13 passed.
+* D6 PV-domain isolation target — **correction**: the D6 target is
+  `cargo test -p qbind-consensus --test run_422_d6_pv_domain_isolation_tests`. The
+  earlier `cargo test -p qbind-node --test m10_signer_isolation_tests` (13 passed)
+  is **remote-signer key-isolation** coverage and **cannot substitute** for the
+  PV-domain isolation target; that line is withdrawn. The correct target was run in
+  the Correction E execution pass below (`34 passed, 0 failed`).
 * Focused Clippy `cargo clippy -p qbind-node --lib` — exit 0; no warnings in the changed files. The changed integration target reports only pre-existing style warnings. A whole-crate `--tests` clippy also compiles `m16_epoch_transition_hardening_tests`, which fails to build WITHOUT `--features test-utils` (pre-existing feature-gating of `set_inject_write_failure`/`clear_epoch_transition_marker`, unrelated to this change).
 
 ### Release executable identity (release compilation evidence only)
@@ -9769,3 +9782,159 @@ scope only; not configured-authority runtime evidence). Retained unchanged:
 (unbounded/unclassified child runner) and C4/C5. No authority activation,
 readiness promotion, D11, or Run 423 work; no PR, branch rename, force-push,
 rebase, or history rewrite; `task/warning.txt` and unrelated work preserved.
+
+## Run 422 D7-D10 Correction E execution (A–D implemented, freshly validated)
+
+This section records the **newly executed** Correction E work (corrections A–D
+implemented as source/test + documentation edits and validated in this pass). It
+does **not** relabel the historical figures above (attributed to their prior
+report at the unavailable checkpoint `fabb16c…`) as newly executed; those remain
+historical. The referenced ancestry objects `1c14369` and `fabb16c` were
+unavailable in the shallow single-branch clone and no ancestry was manufactured.
+
+**Baseline / checkpoint identity.** Continuation baseline branch
+`copilot/copilotcopilotcopilotcopilotrun-422-complete-corre`, inspected HEAD
+`c5ef2bb4990a6f0c753565155baa5d9cf9a0b2dd`. Implementation/test checkpoint
+committed at `45542d8` (A/B source/test edits); this evidence record and the
+documentation reconciliation (contract §9.3–§9.5 rewritten in place, m10
+corrections) are committed in the following checkpoint on the same task branch.
+
+**Scope.** Only the six authorized paths changed. `storage.rs` and the
+integration test file `run_422_d7d10_signing_reservation_journal_tests.rs` were
+**not** modified; storage-fixture tests therefore did not require a rerun.
+Production semantics preserved: the only production-source change is
+`SigningOwnershipDomain::new()` delegating to a private
+`with_recovered_ack_cache_capacity(DEFAULT)`, with a `#[cfg(test)]`
+`new_with_cache_capacity_for_test`; no new production configuration or bypass.
+
+**Correction A (post-eviction journal + handler evidence).** Container-test
+comments that claimed storage barriers were removed/softened. New full-flow
+journal tests create published `Signed` records, reopen through a fresh ownership
+domain, populate the acknowledgement cache through actual journal lookups, force
+FIFO eviction via further recovered acknowledgements, revisit the evicted position
+and directly observe the additional synced write, show an exact cache hit avoids
+that write, show failed and store-then-error acknowledgement produce no successful
+retained reuse / usable cache acknowledgement, show later success permits the
+exact retained signature, and assert persistent counts/limits/record bytes/
+conflict obligations are preserved. A small test-only cache capacity is reached
+through private `#[cfg(test)]` access only. The guarded-handler recovery fixture
+is extended with the post-eviction failure → uncertainty → success sequence,
+directly asserting zero additional signer calls and zero handoffs on
+failure/uncertainty and byte-identical D6-verified retained delivery on success.
+
+**Correction B (store-then-error initialization).** Using the existing fault
+injector, initialization metadata is made readable while its write returns an
+error; the test asserts `initialize` returns an error with no usable handle,
+surviving metadata is inspected directly, repeated initialization cannot silently
+reset/overwrite (`AlreadyInitialized`), and a subsequent explicit `open` succeeds
+over the surviving well-formed consistent metadata (outcome recorded as
+implemented; metadata absence is not required; readable bytes are not equated with
+a successful initialization acknowledgement). Clean-init, pre-write-failure,
+duplicate-init, malformed-metadata, and capacity controls are retained.
+
+**Corrections C/D (docs + D6 target).** The real D6 target was executed:
+`cargo test -p qbind-consensus --test run_422_d6_pv_domain_isolation_tests` ⇒
+**34 passed, 0 failed**. The documents were corrected: `m10_signer_isolation_tests`
+is remote-signer coverage and does not substitute for this target (fixed in the
+operative contract and in this devnet record). Operative contract §9.3–§9.5 were
+rewritten **in place** to describe the implemented `initialize`/`open` APIs, the
+persisted journal-wide limit/count, the shared ownership domain, and the bounded
+recovery-acknowledgement cache; obsolete "attach / per-handle limit /
+process-local-only accounting / OPEN under E" instructions were removed and the
+superseded wording marked explicitly historical. `docs/whitepaper/contradiction.md`
+was inspected read-only (outside write scope): its C4 (production `qbind-node`
+binary does not boot a fully operating node) and C5 (`TimeoutCertificate` transport
+PKI) remain OPEN and concern the production binary / transport, not the signing
+journal — no operative contradiction with this test/documentation work, and this
+work resolves none of those entries.
+
+**Executed validation (exact commands, observed counts, real exit statuses).**
+
+* `cargo test -p qbind-node --lib signing_reservation_journal` — **53 passed**, 0 failed (+3 over the historical 50: the two post-eviction full-flow tests and the store-then-error init test).
+* `cargo test -p qbind-node --lib run422_d7d10` — **62 passed**, 0 failed (includes the extended post-eviction guarded-handler test).
+* `cargo test -p qbind-node --lib correction_d` — **36 passed**, 0 failed (the four restored D regressions remain collected and pass).
+* `cargo test -p qbind-node --test run_422_d7d10_signing_reservation_journal_tests` — **22 passed, 1 ignored**, 0 failed (default features).
+* `cargo test -p qbind-node --features test-utils --test run_422_d7d10_signing_reservation_journal_tests` — **27 passed, 1 ignored**, 0 failed.
+* `cargo test -p qbind-consensus --test run_422_d6_pv_domain_isolation_tests` — **34 passed**, 0 failed (correct D6 target).
+* `cargo test -p qbind-node --lib` — **1837 passed**, 0 failed (+4 over the historical 1833).
+* `cargo check -p qbind-node` (binary-inclusive) — **exit 0**.
+* `cargo clippy -p qbind-node --lib` — **exit 0**; the reported warnings are pre-existing style lints (e.g. `type_complexity`, `contains_key`-then-`insert`, doc-list indentation, `unnecessary_sort_by` in `vm_v0_runtime.rs`), none introduced by the test additions or the small `new()` delegation.
+* EOL/whitespace checks on the three changed `.rs`/`.md` files in scope — all lines CRLF, zero trailing-whitespace lines, original no-trailing-newline EOF preserved; `storage.rs` remains LF; `task/warning.txt` untouched.
+
+**Test → requirement mapping.**
+
+* Correction A (journal) ⇒ `post_eviction_recovery_reissues_synced_write_then_cache_hit_avoids_it`, `post_eviction_failed_and_uncertain_recovery_refuse_reuse_then_success_permits_exact_signature`, plus the retained/reworded container cache tests.
+* Correction A (handler) ⇒ `run422_d7d10::…::d10_post_eviction_recovery_failure_uncertainty_success_through_handler`.
+* Correction B ⇒ `store_then_error_initialization_refuses_handle_but_leaves_readable_consistent_metadata`.
+* Corrections C/D ⇒ D6 target execution (34 passed) + contract §9.3–§9.5 in-place rewrite + m10 corrections here and in the contract.
+
+**Release artifact.** No new release build was performed; the historical release
+compilation artifact (build-source SHA `fabb16c…`) is retained at its actual
+revision as historical evidence only, not re-attested here.
+
+**Security-tool outcomes (literal — prior-pass outcomes).** Code Review and CodeQL
+were attempted once via the harness `parallel_validation` in the preceding pass
+(production-source change declared non-trivial for CodeQL). The literal outcomes
+already reported for that pass, labelled here as prior-pass outcomes (no fresh tool
+execution is claimed and no verbatim output beyond what was retained is invented):
+
+* **Code Review DID NOT run** — the reviewer was unavailable: the `autofind` tool
+  failed with a model-registry error (`model claude-sonnet-4.6 not found in
+  registry`). "No review comments" is therefore NOT a clean review.
+* **CodeQL DID NOT complete** — the `rust` analysis was SKIPPED because the
+  database size was too large, so the reported "0 alerts" is NOT a successful scan.
+
+Both remain unexecuted security obligations; neither constitutes a passed security
+analysis. Security posture remains `RS1-OPEN / PUBLIC-DEVNET-NO-GO`.
+
+**Scoped verdict (unchanged).** Overall D10 remains **PARTIAL**; Correction F and
+C4/C5 remain **OPEN**. Genesis authority activation DISABLED, durable anti-rollback
+NOT-ESTABLISHED, production lifecycle UNAVAILABLE, configured-authority runtime
+evidence NOT-CAPTURED, `PUBLIC-DEVNET-NO-GO`. No F implementation, D11, Run 423,
+production signing enablement, or architectural redesign; no PR, main change,
+rename, force-push, rebase, or history rewrite.
+
+### Correction E follow-up — post-uncertainty failed-retry assertions strengthened
+
+This test/documentation-only follow-up closes the two remaining review findings on
+top of the Correction E execution above. Starting/tested checkpoint
+`05b4eca654798d62e804505a3b97388d838385f7` (reported branch
+`copilot/copilotrun-422-complete-corre`); the referenced ancestry objects
+remained unavailable in the shallow single-branch clone and source correspondence
+was inspected directly (reported separately, no ancestry manufactured).
+
+**Strengthened tests (existing tests extended only; no new production scope).**
+
+* `signing_reservation_journal.rs::tests::post_eviction_failed_and_uncertain_recovery_refuse_reuse_then_success_permits_exact_signature` — immediately after the store-then-error recovery attempt, store-then-error is disabled while ordinary writes keep failing, and the SAME evicted position is retried through the actual journal: another `JournalError::Storage`, no retained reuse, and — via the existing `record_writes` counter — no successful synced write and thus no usable cache acknowledgement (cache length unchanged); the exact retained record and its conflict obligation (a conflicting binding still refused without rewrite) are preserved. Permitting the next write and retrying then issues exactly one additional synced recovery write (`record_writes + 1`) and reuses ONLY the exact retained signature. The exact-cache-hit control (an acknowledged cached result served with no further write even when writes are configured to fail) is preserved.
+* `binary_consensus_loop.rs::…::run422_d7d10::d10_post_eviction_recovery_failure_uncertainty_success_through_handler` — the same sequence through the actual guarded handler: after the uncertain attempt, store-then-error is disabled with the write budget held at 0 and the evicted view is retried: another `outbound_proposal_journal_error_total`, no delivery or facade handoff, no additional signer call (signer count frozen at 3), unchanged cache length, preserved record, and a preserved conflict obligation (a conflicting payload refused with `outbound_proposal_journal_conflict_total`, no delivery, no signature, no rewrite). Permitting the write then proves exactly one additional synced recovery write via a minimal test-only `write_budget_remaining()` observation (budget decremented by one), delivers the exact retained signature with no additional signer call, and retains the D6 `verify_proposal_msg_with_domain` check and signature-byte equality; an exact-cache-hit control (budget held at 0, served with no write) closes the test.
+
+The only non-test addition is the test-module accessor `D10Store::write_budget_remaining()` (read-only observation of the existing injected budget); no production instrumentation or configuration was introduced.
+
+**Focused validation (freshly executed this follow-up; real exit statuses).**
+
+* `cargo test -p qbind-node --lib signing_reservation_journal` — **53 passed, 0 failed** (exit 0).
+* `cargo test -p qbind-node --lib run422_d7d10` — **62 passed, 0 failed** (exit 0).
+* Changed-region whitespace / file-specific line endings — both changed `.rs` files remain fully CRLF with zero trailing-whitespace lines and their original no-trailing-newline EOF; `storage.rs` untouched (LF); `task/warning.txt` preserved.
+* Tested checkpoint for these counts: `52885e9897a681c6fd1a914d6cea3ea427dadeb7` (the strengthened-tests commit). No full-suite rerun or release rebuild was performed for this test/documentation-only follow-up; the earlier validation is retained at its actual checkpoint. Documentation reconciliation (contract status tokens and this record) is committed in the following checkpoint on the same task branch.
+
+**Documentation reconciliation.** The operative contract status tokens no longer
+say "E and F remain OPEN" alongside the completed-E statement: `…POST_STORAGE…`
+and `D7D10_LOCAL_SIGNING_RESERVATION=PARTIAL` now read "E is complete for its
+demonstrated local scope (see §9.6); F remains OPEN," a new
+`D7D10_CORRECTION_E_NAMESPACE_CAPACITY_CACHE=CODE-AND-STORAGE-TEST-POSITIVE` token
+records E's scoped positive disposition, and overall
+`D7D10_LOCAL_SIGNING_RESERVATION=PARTIAL`, Correction F OPEN, and C4/C5 OPEN are
+kept. Historical "Still OPEN: Correction E" section verdicts in this devnet record
+are retained and explicitly marked superseded/historical rather than rewritten.
+
+**Security-tool attribution (prior pass).** No fresh tool run was performed in this
+follow-up. The literal prior-pass outcomes are recorded above: Code Review DID NOT
+run (reviewer unavailable; `autofind` `claude-sonnet-4.6` model-registry error) and
+CodeQL DID NOT complete (analysis skipped, database too large; "0 alerts" was not a
+successful scan). Both remain unexecuted obligations.
+
+**Scoped E verdict.** `D7D10_CORRECTION_E_NAMESPACE_CAPACITY_CACHE=CODE-AND-STORAGE-TEST-POSITIVE`
+(demonstrated local code-and-storage scope only; not configured-authority runtime
+evidence; no readiness promotion). Overall D10 remains **PARTIAL**; Correction F and
+C4/C5 remain **OPEN**; activation DISABLED, anti-rollback NOT-ESTABLISHED,
+production lifecycle UNAVAILABLE, `PUBLIC-DEVNET-NO-GO`.
