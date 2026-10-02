@@ -158,9 +158,10 @@ current source rather than trusting a line number.
   reconstruction and whether that lock is *sufficient* for recovery are examined
   in Correction B (§2.1); this audit does **not** establish that the
   reconstructed lock preserves every pre-crash voting restriction — indeed Run
-  422 D7-D12 exhibits a concrete case where it does **not** (a candidate
-  rejected by a stronger pre-crash lock is accepted by the lower reconstructed
-  lock; see the D12 evidence section of the devnet record).
+  422 D7-D12 exhibits a concrete case where it does **not** (a candidate whose
+  ancestry extends neither locked block is rejected under a stronger advanced
+  pre-restart lock and accepted under the lower reconstructed lock; see the D12
+  evidence section of the devnet record).
 * **Production ordinary startup / restoration**, consensus-loop engine
   construction in `crates/qbind-node/src/binary_consensus_loop.rs` and the
   `main.rs` driver:
@@ -323,28 +324,38 @@ embed. The reconstructed lock can therefore be **lower-view** than the pre-crash
 lock.
 
 **Source-level reasoning promoted to executed predicate evidence (Run 422
-D7-D12). Still a predicate result, not a demonstrated network-level attack.**
-Run 422 D7-D12 realizes this relationship against actual engine/reader state
-rather than assumed view numbers: pre-crash lock view = 20 (established through
-the real `on_vote` → `on_qc` lock transition); reconstructed lock view = 7 (the
-actual output of `load_persisted_state` over the surviving committed-state
-fixture); a candidate that does **not** extend either relevant locked block;
-candidate `justify_qc.view` = 15. Applying the implemented condition (2) above:
+D7-D12, corrected). Still a predicate result, not a demonstrated network-level
+attack.** Run 422 D7-D12 realizes this relationship against actual engine/reader
+state as **one coherent fixture sequence** over a single surviving committed
+baseline, rather than assumed view numbers. A first harness loads the
+committed-height-7 fixture (reconstructed lock `(0x77…, view 7)`); **that same
+engine's** lock is then advanced to `(0xB0,20, view 20)` through the real
+`on_vote` → `on_qc` transition (using the single-validator harness quorum),
+leaving the committed baseline unchanged; a fresh harness over the **same**
+storage reconstructs `(0x77…, view 7)`. The two locks differ in **both** block id
+and view. The same candidate — ancestry extending **neither** locked block,
+`justify_qc.view` = 15 — is evaluated under each. Applying the implemented
+condition (2) above:
 
-* Under the **reconstructed** lock (view 7): `15 >= 7` is true ⇒ the candidate
-  **passes** the safe-vote predicate.
-* Under the **pre-crash** lock (view 20): `15 >= 20` is false, and the ancestor
-  walk does not reach the locked block ⇒ the candidate **fails**.
+* Under the **advanced pre-restart** lock (block `0xB0,20` / view 20):
+  `15 >= 20` is false, and the ancestor walk does not reach the locked block ⇒
+  the candidate **fails** the safe-vote predicate.
+* Under the **reconstructed** lock (block `0x77…` / view 7): `15 >= 7` is true ⇒
+  the candidate **passes** the safe-vote predicate.
 
-Lowering the lock from view 20 to view 7 thus **enlarges** the permitted voting
-set: a decision that the pre-crash lock would have refused is admitted under the
-reconstructed lock. This is now a measured `is_safe_to_vote_on_block` outcome
-(`d7d12_candidate_rejected_by_precrash_lock_accepted_by_reconstructed_lock`),
-not an assumption. The example view numbers quoted previously (10/15/20) remain
-illustrative; the executed case uses 7/15/20. A predicate result establishes
-**no** emitted vote, **no** signing, **no** facade handoff, **no** network
-transmission, and **no** production attack (task §3); other admission, leader,
-view, latch, and verified-justification checks still gate any real vote.
+The narrowed, demonstrated statement is therefore: *this candidate, whose
+ancestry extends neither locked block, is rejected under the advanced
+pre-restart lock and accepted under the reconstructed lock.* This is a measured
+`is_safe_to_vote_on_block` outcome
+(`d7d12_candidate_rejected_by_precrash_lock_accepted_by_reconstructed_lock`), not
+an assumption, and it is **not** a global claim that the reconstructed lock
+enlarges the whole permitted voting set: the predicate checks ancestry **as well
+as** view, so a lower view with a different locked block does not by itself prove
+global set inclusion. The example view numbers quoted previously (10/15/20)
+remain illustrative; the executed case uses 7/15/20. A predicate result
+establishes **no** emitted vote, **no** signing, **no** facade handoff, **no**
+network transmission, and **no** production attack (task §3); other admission,
+leader, view, latch, and verified-justification checks still gate any real vote.
 
 **Proof obligation.** Labeling a reconstruction "conservative" does not discharge
 safety. For resumption to be safe, either (i) the reconstructed state must be shown
@@ -435,7 +446,9 @@ recovered evidence can and cannot establish.
    `locked_qc` recovered on the snapshot-baseline path and none on ordinary
    startup) and, on the **harness** restart path, only *reconstructed* with a
    sufficiency that this audit does **not** establish (§2.1: the reconstructed lock
-   can be lower-view than the pre-crash lock, enlarging the permitted voting set).
+   can be lower-view than the pre-crash lock, admitting at least one candidate —
+   whose ancestry extends neither locked block — that the advanced pre-restart
+   lock refused; §2.1 does not establish any whole-set enlargement).
    No uncommitted-vote latch is recovered anywhere (D7-D2). This is the INV-R2
    prerequisite and is **independent** of Q1.
 3. **History correspondence — are the restored consensus/account state and the
@@ -649,7 +662,7 @@ production authority; a CodeQL scope skip is not a security pass.
 | F5 | Missing / corrupt / inconsistent journal or safety state | Corrupt record / omit metadata / drop lock input | Malformed store | Fail-closed | REFUSE (INV-R1) | unit/model + real-storage |
 | F6 | Whole-directory rollback; copied-key | Restore whole older copy; run two copies | Internally-consistent old copy / two keys | Local reader cannot distinguish; refuse on correspondence/exclusivity gap | REFUSE / documented indistinguishability | adversarial (needs out-of-domain anchor) |
 | F7 | Harness reconstruction vs production paths | `load_persisted_state` vs `initialize_from_snapshot_baseline` vs fresh ordinary startup | Reconstructed vs absent lock | Harness reconstructs (sufficiency unestablished); production snapshot + ordinary startup recover none | Distinguish paths; REFUSE on production paths | real-storage + release-binary |
-| F8 | Lower-view reconstructed lock enlarges the permitted set (§2.1 example) | Reconstructed lock vs pre-crash lock, future vote | Lock inputs at two views + candidate with `justify_qc.view` between them | Candidate passes under reconstructed lock yet would fail under the pre-crash lock | REFUSE until lock-sufficiency established (INV-R2/R6) | unit/model |
+| F8 | Lower-view reconstructed lock admits a candidate the advanced pre-restart lock refused (§2.1 example) | Reconstructed lock vs advanced pre-restart lock, future vote | Lock inputs at two identities (block id + view) + candidate with `justify_qc.view` between them, ancestry extending neither locked block | That candidate passes under the reconstructed lock yet fails under the advanced pre-restart lock (narrow; not a whole-set enlargement claim) | REFUSE until lock-sufficiency established (INV-R2/R6) | unit/model |
 | F9 | Committed-state recovery control | Normal committed recovery | Committed block + QC | Resume once S2–S5 met | ADMIT (control) | real-storage |
 | F10 | Power-loss durability of recovery decisions | Power-cut harness | Durable store | Decisions survive power loss | boundary TBD | power-loss |
 
@@ -717,12 +730,14 @@ engine/storage interfaces — no new reader, persistence format, freshness inter
 or recovery architecture.**
 
 * **Precise unanswered question.** On the **harness** restart path, can the lock
-  reconstructed by `load_persisted_state` be **strictly lower-view** than the
-  pre-crash `locked_qc` (because the pre-crash lock advanced via a timeout
-  certificate or later three-chain progress not embedded in the committed block),
-  and does that lower-view reconstruction **enlarge** the set admitted by
-  `is_safe_to_vote_on_block` relative to the pre-crash lock (the §2.1 example)?
-  This is the concrete, bounded form of the Q2 lock-sufficiency gap.
+  reconstructed by `load_persisted_state` be **strictly lower-view** (and a
+  different block id) than the pre-crash `locked_qc` (because the pre-crash lock
+  advanced via a timeout certificate or later three-chain progress not embedded
+  in the committed block), and does that lower reconstruction **admit at least one
+  specific candidate** — whose ancestry extends neither locked block — that the
+  advanced pre-restart lock refused under `is_safe_to_vote_on_block` (the §2.1
+  example)? This is the concrete, bounded form of the Q2 lock-sufficiency gap; it
+  is **not** a claim about the whole admitted set.
 * **Why this, and whether existing tests already cover it.** D7-D2
   (`run_422_d7d2_signing_state_recovery_tests.rs`) characterizes the
   **uncommitted-vote latch** loss and that the snapshot baseline carries **no**
@@ -733,20 +748,26 @@ or recovery architecture.**
   fixture — that reconstruction is **established prior coverage**, not something
   D12 re-establishes. What D7-D2 did **not** do is compare that reconstructed
   lock against a **stronger pre-crash lock** evaluated with the **same**
-  candidate. D7-D12 adds exactly that comparison: it establishes a pre-crash
-  lock through the real `on_vote` → QC → `on_qc` transition, evaluates a
-  candidate under it, then recovers and evaluates the **same** candidate,
-  showing the lower reconstructed lock admits a vote the pre-crash lock refused
-  (plus below-both / at-least-both / equal-lock controls). This successor is
-  therefore the next missing evidence, not a duplicate, and is strictly narrower
-  than a generic anchor (Q4) or a production lock-recovery redesign (Q2
-  implementation).
+  candidate. D7-D12 adds exactly that comparison as **one coherent sequence**: it
+  loads a common committed baseline into a first harness, **advances that same
+  engine's** lock through the real `on_vote` → QC → `on_qc` transition (using the
+  single-validator harness quorum, committed baseline unchanged), evaluates a
+  candidate under it, then discards that harness and recovers the baseline lock
+  from the **same** surviving storage and evaluates the **same** candidate —
+  showing the candidate is **rejected under the advanced pre-restart lock and
+  accepted under the reconstructed lock** (both complete lock identities
+  reported; plus below-both / at-least-both / unchanged-lock controls). This
+  successor is therefore the next missing evidence, not a duplicate, and is
+  strictly narrower than a generic anchor (Q4) or a production lock-recovery
+  redesign (Q2 implementation).
 * **Mechanisms reused (only existing interfaces):** `load_persisted_state` →
   `initialize_from_restart`, the engine's `locked_qc()` accessor and
   `is_safe_to_vote_on_block`, `HotStuffStateEngine::{register_block, on_vote}`,
   `initialize_from_snapshot_baseline`, `observe_consensus_storage`, and the
   storage `put_*`/`get_*` readers and writers — composed in **tests only**,
-  asserting the view relationship and the enlarged-admission consequence.
+  asserting both complete lock identities (block id **and** view) and the narrow
+  per-candidate predicate consequence (passes/fails), not a whole-set
+  enlargement.
   **Isolated fixture setup through the existing storage APIs** (e.g.
   `put_block` / `put_qc` / `put_last_committed` to lay down the surviving
   committed-state fixture, and post-recovery `register_block` of

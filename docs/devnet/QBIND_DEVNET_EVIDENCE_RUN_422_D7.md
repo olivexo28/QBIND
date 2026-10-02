@@ -10723,9 +10723,12 @@ activation change was made; no build, test, or scan was executed by this pass.
   separately-stored and embedded QC, no signature re-verification on load) →
   `initialize_from_restart`; the source comments call this "conservative," but its
   **recovery sufficiency is NOT established** — the reconstructed lock can be
-  lower-view than the pre-crash lock (which may have advanced via a timeout
-  certificate or later three-chain progress), enlarging the set admitted by
-  `is_safe_to_vote_on_block` (see the correction contract §2.1 worked example). The
+  lower-view (and a different block id) than the pre-crash lock (which may have
+  advanced via a timeout certificate or later three-chain progress), admitting at
+  least one specific candidate — whose ancestry extends neither locked block —
+  that `is_safe_to_vote_on_block` would otherwise refuse (see the correction
+  contract §2.1 worked example; a per-candidate result, not a whole-set
+  enlargement). The
   **production** snapshot-baseline path (`initialize_from_snapshot_baseline`)
   recovers **no** lock, and **production ordinary startup builds a fresh engine and
   recovers nothing**. No recovery entrypoint carries an uncommitted-vote / per-view
@@ -10947,28 +10950,50 @@ is characterized directly by
 `d7d12_precrash_lock_advances_via_on_vote_without_a_commit`, which forms a QC via
 `on_vote` and asserts `locked_qc.view == 20` while `committed_height() == None`.
 
-### How the pre-crash lock was established, and what was persisted
+### How the common baseline and the advanced pre-restart lock were established, and what was persisted
 
-* **Pre-crash lock (real transition, not `set_locked_qc`).** A fresh
-  `BasicHotStuffEngine::new(ValidatorId(1), 4 validators)` registers a standalone
-  block at view 20, then a quorum (3 of 4; `two_thirds_vp(4) == 3`) of votes is
-  fed through `HotStuffStateEngine::on_vote`. The 3rd vote forms a QC at view 20;
-  `on_qc` raises `locked_qc` to view 20. Observed: `locked_qc.view == 20`,
-  `locked_qc.block_id ==` the certified block, and `committed_height() == None`
-  (no three-chain existed). Two arbitrary `set_locked_qc` calls are **not** used
-  as the primary evidence.
-* **Persisted committed-state fixture (isolated fixture writes through existing
-  storage APIs).** `committed_block_and_qc(7)` lays down, via `put_block` /
-  `put_qc` / `put_last_committed`, a committed block id `0x77…`, height 7, with a
-  stored wire QC at height 7 whose `signatures` vector is **empty** (an
-  unverified reconstruction fixture, no constituent signatures) and no embedded
-  `block.qc`. No committed-epoch key is seeded. `observe_consensus_storage`
-  reports `PresentNoCommittedEpoch` before and after recovery.
+The corrected primary case (`d7d12_candidate_rejected_by_precrash_lock_accepted_by_reconstructed_lock`)
+runs as **one coherent fixture sequence** over a single surviving storage
+baseline, rather than comparing a disconnected fresh four-validator engine
+against a separately-configured recovered harness:
 
-### Actual harness reconstruction results
+* **Common baseline, loaded (real reader).** `committed_block_and_qc(7)` lays
+  down, via `put_block` / `put_qc` / `put_last_committed`, a committed block id
+  `0x77…`, height 7, with a stored wire QC at height 7 whose `signatures` vector
+  is **empty** (an unverified reconstruction fixture, no constituent signatures)
+  and no embedded `block.qc`. No committed-epoch key is seeded —
+  `observe_consensus_storage` reports `PresentNoCommittedEpoch` (an explicit
+  **absence**, distinct from an explicit zero). A first harness is constructed
+  with a concrete validator configuration and that storage, and the REAL reader
+  `NodeHotstuffHarness::load_persisted_state` loads it: committed block `0x77…`,
+  committed height `Some(7)`, reconstructed lock `locked_qc == (0x77…, view 7)`,
+  resume view 8, engine epoch 0. The committed baseline therefore already exists
+  in the pre-crash engine **before** its lock is advanced.
+* **Advanced pre-restart lock on that SAME engine (real transition, not
+  `set_locked_qc`).** On the loaded engine, `register_block` adds a standalone
+  block `0xB0,20` at view 20 and one vote from the single-validator harness
+  quorum (local `ValidatorId(1)`, `two_thirds_vp(1) == 1`) is fed through
+  `HotStuffStateEngine::on_vote`; the vote forms a QC at view 20 and `on_qc`
+  raises `locked_qc` to `(0xB0,20, view 20)`. The **loaded committed baseline is
+  unchanged** by this advance (`committed_block() == Some(0x77…)`,
+  `committed_height() == Some(7)`; no three-chain existed), and the named
+  persisted committed-state values (`get_last_committed`, `get_block(..).height`,
+  `get_qc(..).height`, `get_current_epoch`) are re-read and **unchanged** (the
+  in-memory lock advance performs no storage writes). A copied four-validator
+  quorum is **not** fed into this single-validator harness.
+* **Standalone "no committed block" observation kept separate.** The distinct
+  test `d7d12_precrash_lock_advances_via_on_vote_without_a_commit` shows that a
+  *fresh* `BasicHotStuffEngine::new(ValidatorId(1), 4 validators)` can advance
+  its lock to view 20 (3-of-4 quorum) with `committed_height() == None`. That is
+  a different, valid observation about lock-vs-commit ordering — **not** the
+  primary test's "existing committed baseline unchanged" result above.
 
-`NodeHotstuffHarness::load_persisted_state` over that surviving fixture (the real
-reader, not a reproduction) yields, asserted separately:
+### Actual harness reconstruction results (fresh harness, same surviving storage)
+
+After evaluating the pre-restart candidate, the first harness is **discarded**
+and a fresh harness is constructed with the same validator configuration over
+the **same surviving storage fixture**. `NodeHotstuffHarness::load_persisted_state`
+(the real reader, not a reproduction) yields, asserted separately:
 
 * recovered committed block id `== 0x77…`, committed height `== Some(7)`;
 * **reconstructed lock** `locked_qc.view == 7` (`== committed QC height`),
@@ -10980,12 +11005,15 @@ reader, not a reproduction) yields, asserted separately:
   `PresentNoCommittedEpoch` observation;
 * read-back of the persisted values confirms what recovery **preserved**
   (`get_last_committed == Some(0x77…)`, `get_block(..).header.height == 7`,
-  `get_qc(..).height == 7` with empty `signatures`, `get_current_epoch == None`).
-  This is a specific-value read-back, **not** a whole-directory byte-identity
-  claim.
+  `get_qc(..).height == 7` with empty `signatures`, `get_current_epoch == None`,
+  `observe_consensus_storage == PresentNoCommittedEpoch`). This is a
+  specific-value, semantic read-back, **not** a whole-directory byte-identity
+  claim; the stored QC remains an unverified fixture (recovery did not
+  authenticate it).
 
-The reconstructed lock (view 7) is strictly lower-view than the pre-crash lock
-(view 20).
+The two locks differ in **both** coordinates: the advanced pre-restart lock is
+`(0xB0,20, view 20)` and the reconstructed lock is `(0x77…, view 7)` — a
+different locked block id **and** a different view, not merely a changed view.
 
 ### Candidate identity / ancestry / justification and before/after predicate outcomes
 
@@ -10996,18 +11024,28 @@ The reconstructed lock (view 7) is strictly lower-view than the pre-crash lock
   candidate's ancestry (`0xC1… → 0xA1… → ⊥`) contains **neither** locked block
   (`0xB0,20` pre-crash nor `0x77…` reconstructed), so `is_safe_to_vote_on_block`
   can pass only via the justify-view liveness rule.
-* **Before recovery (pre-crash lock, view 20):**
+* **Under the advanced pre-restart lock (block `0xB0,20` / view 20):**
   `is_safe_to_vote_on_block(0xC1…) == false` — `15 >= 20` is false and the
-  ancestor walk does not reach the locked block ⇒ **rejected**.
-* **After recovery (reconstructed lock, view 7), same candidate id/ancestry/justify:**
-  `is_safe_to_vote_on_block(0xC1…) == true` — `15 >= 7` is true ⇒ **accepted**.
-* **What precisely changed:** only the lock view the predicate compares against
-  (20 → 7). Same candidate identity (asserted equal), same ancestry, same
-  justification view. The lower reconstructed lock **enlarges** the admitted set
-  relative to the pre-crash lock. This is a predicate result only — no emitted
-  vote, no signing, no facade handoff, no network transmission; other admission,
-  leader, view, latch, and verified-justification checks still gate any real vote
-  and were not bypassed.
+  ancestor walk does not reach the locked block ⇒ **fails the predicate**.
+* **Under the reconstructed lock (block `0x77…` / view 7), same candidate id/ancestry/justify:**
+  `is_safe_to_vote_on_block(0xC1…) == true` — `15 >= 7` is true ⇒ **passes the
+  predicate**.
+* **What precisely changed, and the narrowed conclusion.** Both complete lock
+  identities are reported: the advanced pre-restart lock `(0xB0,20, view 20)`
+  and the reconstructed lock `(0x77…, view 7)` differ in **both** block id and
+  view — this is **not** a "only the lock view changed" claim. The controlled
+  candidate comparison (same id, same ancestry, same justify view 15 on both
+  sides) isolates the predicate outcome to the lock the predicate compares
+  against; it asserts **no** whole-engine equivalence (other engine state, e.g.
+  the extra advanced-lock block and vote history, also differs after
+  reconstruction). The demonstrated statement is narrow: *this candidate, whose
+  ancestry extends neither locked block, fails the predicate under the advanced
+  pre-restart lock and passes it under the reconstructed lock.* The predicate
+  checks ancestry **as well as** view, so a lower view with a different locked
+  block does **not** by itself prove any global accepted-set enlargement. This is
+  a predicate result only — no emitted vote, no signing, no facade handoff, no
+  network transmission; other admission, leader, view, latch, and
+  verified-justification checks still gate any real vote and were not bypassed.
 
 ### Control results and evidence boundaries (§6)
 
@@ -11017,11 +11055,15 @@ The reconstructed lock (view 7) is strictly lower-view than the pre-crash lock
 * `d7d12_control_candidate_at_least_both_locks_accepted_under_both` — justify view
   25 (≥ both), non-extending ⇒ accepted by the predicate under **both** locks;
   candidate identity asserted and distinct from each locked block id.
-* `d7d12_control_equal_reconstructed_lock_preserves_restriction` — a recovery
-  case whose reconstructed lock view **equals** the pre-crash lock (both 20,
-  committed QC height 20) preserves the **same** rejection for a justify-15
-  candidate; guards against reading the primary result as "recovery always
-  weakens the restriction."
+* `d7d12_control_equal_reconstructed_lock_preserves_restriction` — the
+  **unchanged-lock** control: both sides reconstruct the **same lock identity**
+  (same block id `0x77…` **and** same view 20) from the same persisted baseline
+  and configuration — the pre-restart side is established by **loading** that
+  baseline, with **no** higher-lock advancement. The same justify-15 candidate
+  receives the **same** predicate result (fails) before and after, demonstrating
+  **preservation of that tested restriction** — not a proof of complete recovery
+  safety. Guards against reading the primary result as "recovery always weakens
+  the restriction."
 * Boundaries kept separate throughout: reconstruction (harness reader) vs lock
   advancement (engine `on_qc`) vs `is_safe_to_vote_on_block` (pure predicate) vs
   any emitted vote / signing / facade / network (none exercised). Full
@@ -11029,6 +11071,11 @@ The reconstructed lock (view 7) is strictly lower-view than the pre-crash lock
   outcome would be reported separately and its other checks not bypassed.
 
 ### Commands, counts, profiles, and literal tool outcomes
+
+> Historical record at the original `d7d12_*` test checkpoint
+> (`17d0fe30dfbe83b9fbe816b53f69b0957fac811a`). Preserved verbatim; **not**
+> relabelled as a new execution. The corrected-run results are recorded in the
+> "D12 correction" entry below.
 
 ```
 # Dev profile (unoptimized + debuginfo); default features (no extra features).
@@ -11065,6 +11112,107 @@ cargo clippy -p qbind-node --test run_422_d7d2_signing_state_recovery_tests
 * No production release-binary evidence is claimed for this harness/predicate
   characterization; no test executable or historical release build is relabelled
   as new production-runtime evidence.
+
+### D12 correction (superseding) — coherent restart sequence and complete lock-identity comparison
+
+This correction **supersedes** the operative claims of the original D12 record
+above wherever they conflict. It changes test-and-documentation evidence only;
+it preserves the accepted D10/D8 implementations and all activation
+restrictions, and adds no production-source, dependency, feature, schema, CLI,
+wire-format, signer, authorization, or recovery-algorithm change.
+
+* **Provenance (this correction run).** Working branch
+  `copilot/copilotcopilotcopilotcopilotcopilotrun-422-documen` (actual; used
+  unchanged — no rename/rebase/force-push/history rewrite). This string differs
+  from the task's reported branch
+  `copilot/copilotcopilotcopilotcopilotrun-422-documentation`; the supplied
+  branch is used as-is. Session starting HEAD
+  `f5fa01bdff7dbb921e1208bc41b246710803f255`. The reviewed objects
+  `252a4b3665548ded743f7cef04dff1c87cd3ea96` (reviewed final) and
+  `17d0fe30dfbe83b9fbe816b53f69b0957fac811a` (reviewed test checkpoint) are
+  **absent** in this shallow single-branch checkout (`git cat-file -t` → *could
+  not get object info*); content correspondence is established by inspecting the
+  current source and tests, not by comparison against those absent objects, and
+  ancestry to them is **not** manufactured. `task/warning.txt`, unrelated work,
+  and each file's existing line-ending/EOF conventions are preserved.
+
+* **Correction A — one coherent restart sequence.** The reviewed primary test
+  compared a *disconnected* fresh four-validator engine (no committed baseline)
+  against a separately-configured recovered harness. It is replaced with a
+  continuous fixture sequence over a **single** surviving storage baseline:
+  (A) prepare the committed-height-7 fixture and **load** it into a first harness
+  via the real `load_persisted_state` (committed `0x77…`/height 7, reconstructed
+  lock `(0x77…, view 7)`, resume view 8, epoch 0, storage observation
+  `PresentNoCommittedEpoch` — explicit absence, not zero); (B) advance **that
+  same engine's** lock to `(0xB0,20, view 20)` through the real
+  `register_block` → `on_vote` → `on_qc` transition, using the **single-validator
+  harness quorum** (`two_thirds_vp(1) == 1`; no copied four-validator quorum),
+  with the loaded committed baseline and the named persisted values **unchanged**
+  by the advance; (C) register the explicitly test-supplied candidate (`0xC1…`,
+  view 16, justify view 15; parent `0xA1…`, view 14; ancestry extends **neither**
+  locked block) and evaluate — it **fails** the predicate under the advanced
+  lock; (D) **discard** the first harness, build a fresh harness over the **same**
+  surviving storage, reconstruct `(0x77…, view 7)` via the real reader, register
+  the same test-supplied candidate/ancestry, and evaluate — it **passes** the
+  predicate; read back the surviving committed block, stored QC (still empty
+  `signatures`), last-committed pointer, and epoch observation (semantic
+  read-back, **not** whole-directory byte identity). The separate standalone test
+  `d7d12_precrash_lock_advances_via_on_vote_without_a_commit` (fresh engine,
+  `committed_height() == None`) is retained as a distinct observation.
+
+* **Correction B — complete lock identity, narrowed conclusion.** Both complete
+  locks are reported: advanced pre-restart `(block_id = 0xB0,20, view = 20)` and
+  reconstructed `(block_id = 0x77…, view = 7)` — they differ in **both** block id
+  and view. The "only the lock view changed," global accepted-set enlargement,
+  and equal-view-as-equal-lock claims are **removed**. The demonstrated statement
+  is: *this candidate, whose ancestry extends neither locked block, is rejected
+  under the advanced pre-restart lock and accepted under the reconstructed lock.*
+  Predicate outcomes are described as **passes/fails the predicate**, never as an
+  emitted vote, signature, delivery, or attack. The controlled comparison
+  isolates the predicate outcome without asserting whole-engine equivalence.
+
+* **Unchanged-lock control corrected.** `d7d12_control_equal_reconstructed_lock_preserves_restriction`
+  now reconstructs the **same relevant lock identity** on both sides (same block
+  id `0x77…` **and** same view 20) from the same persisted baseline and
+  configuration — the pre-restart side is established by **loading** that baseline
+  (no higher-lock advancement). The same candidate receives the **same** predicate
+  result (fails) before and after: preservation of that tested restriction, not a
+  proof of complete recovery safety. The below-both and at-least-both controls and
+  all D7-D2 cases are retained with explicit logical/unverified-fixture scope.
+
+* **Corrected-run validation (new execution at this correction checkpoint).**
+  Dev profile (unoptimized + debuginfo), default features (no extra features):
+
+  ```
+  cargo test -p qbind-node --test run_422_d7d2_signing_state_recovery_tests
+  #   test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
+  #   (5 d7d2_* + 5 d7d12_* cases; same count, corrected primary + unchanged-lock bodies.)
+
+  cargo test -p qbind-node --test hotstuff_restart_semantics_tests
+  #   test result: ok. 14 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
+
+  cargo test -p qbind-node --test persistence_integration_tests
+  #   test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
+
+  cargo clippy -p qbind-node --test run_422_d7d2_signing_state_recovery_tests
+  #   Finished (exit 0). The changed integration target emits 0 warnings; the
+  #   qbind-node LIB emits 103 PRE-EXISTING warnings unrelated to this change.
+  ```
+
+  No production release build is required for this test/documentation correction;
+  no historical executable is presented as newly-tested runtime evidence. Counts
+  are not summed across the overlapping subsets.
+
+* **Boundaries retained.** In-process harness reconstruction over surviving model
+  storage — **not** real process death, RocksDB durability, empirical power-loss
+  evidence, production startup recovery, or authenticated network behavior.
+  Fixture-created committed state and the unverified QC material (empty
+  `signatures`) remain labeled as such; the coherent sequence does not convert
+  them into authenticated consensus history. QC-authentication limitations, the
+  epoch-absence distinction, and the separation from signing/network evidence are
+  preserved, as are the D11 corrections (production-vs-harness reachability,
+  missing correspondence predicates/evidence, unavailable-vs-non-corresponding
+  evidence, and permitted fixture writes).
 
 ### Documentation corrections carried forward from D11 (§7)
 
