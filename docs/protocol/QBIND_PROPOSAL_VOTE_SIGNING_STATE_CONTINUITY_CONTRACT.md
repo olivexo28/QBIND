@@ -655,10 +655,16 @@ unestablished, signing remains refused under the stated prerequisites.
 Preventing conflicting signatures at one position does **not** preserve the
 HotStuff locking rule across later views. On restart:
 
-* The harness path (`load_persisted_state`) reconstructs a lock conservatively
-  from the committed block's embedded QC; the production snapshot-baseline path
+* The harness path (`load_persisted_state`) reconstructs a lock from the committed
+  block's separately-stored / embedded QC; the production snapshot-baseline path
   (`initialize_from_snapshot_baseline`, L1201) recovers **no** lock and resumes
-  unlocked above the snapshot anchor.
+  unlocked above the snapshot anchor, and production ordinary startup builds a fresh
+  engine. The harness reconstruction's source comments call it "conservative," but
+  that **recovery sufficiency is not established** — the reconstructed lock can be
+  lower-view than the pre-crash lock and thereby enlarge the permitted voting set.
+  The owning analysis and proof obligation are in
+  `docs/protocol/QBIND_CONSENSUS_RECOVERY_SIGNING_HISTORY_CORRESPONDENCE_CONTRACT.md`
+  (§2.1, RUN 422 D7-D11).
 * Per D7-D2, neither recovery entrypoint carries a channel for an *uncommitted*
   vote or per-view anti-equivocation record.
 
