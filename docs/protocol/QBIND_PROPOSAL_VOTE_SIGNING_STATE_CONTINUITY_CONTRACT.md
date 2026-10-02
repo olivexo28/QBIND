@@ -661,12 +661,18 @@ HotStuff locking rule across later views. On restart:
   unlocked above the snapshot anchor, and production ordinary startup builds a fresh
   engine. The harness reconstruction's source comments call it "conservative," but
   that **recovery sufficiency is not established** — the reconstructed lock can be
-  lower-view than the pre-crash lock and thereby enlarge the permitted voting set.
-  Run 422 D7-D12 now demonstrates this with an **executed** predicate case (a
-  candidate rejected by a stronger pre-crash lock is accepted by the lower
-  reconstructed lock), and confirms the lock advances via `on_qc` **before** any
-  three-chain commit — so advancement does **not** require a commit. The owning
-  analysis, proof obligation, and D12 evidence are in
+  lower-view (and a different block id) than the pre-crash lock and thereby admit
+  at least one specific candidate the pre-restart lock refused. Run 422 D7-D12
+  now demonstrates this with an **executed** predicate case run as one coherent
+  sequence (a common committed baseline is loaded, that same engine's lock is
+  advanced, and a fresh harness reconstructs the baseline lock from the same
+  storage): the same candidate — whose ancestry extends neither locked block —
+  **fails** the predicate under the advanced pre-restart lock `(0xB0,20, view 20)`
+  and **passes** it under the reconstructed lock `(0x77…, view 7)` (both complete
+  lock identities reported; not a whole-set enlargement claim), and it confirms
+  the lock advances via `on_qc` **before** any three-chain commit — so
+  advancement does **not** require a commit. The owning analysis, proof
+  obligation, and D12 evidence are in
   `docs/protocol/QBIND_CONSENSUS_RECOVERY_SIGNING_HISTORY_CORRESPONDENCE_CONTRACT.md`
   (§2.1, RUN 422 D7-D11/D7-D12) and the devnet record's D12 evidence section.
   This remains a predicate/reader characterization; it establishes no signing-state
