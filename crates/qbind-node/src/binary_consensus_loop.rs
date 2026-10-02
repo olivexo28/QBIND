@@ -24238,26 +24238,516 @@ mod tests {
 
                     // ---- C. Originating view and field/version checks ----
 
-                    #[test]
-                    fn d10_reserves_action_view_not_a_later_view() {
-                        // The action for view 7 must reserve position view 7, and
-                        // a conflicting view-7 decision remains a conflict even
-                        // when offered later (modelled by a fresh handle, i.e. a
-                        // subsequent tick after engine progress).
-                        let fixture = make_fixture(4);
-                        let (pv, c) = recording_pv(&fixture);
-                        let snap = snapshot_matching(&pv);
-                        let store = D10Store::new();
+                    // Run 422 D7-D10 Correction F-A — ACTUAL engine progress.
+                    //
+                    // The earlier `d10_reserves_action_view_not_a_later_view`
+                    // modelled "engine progress" synthetically (hand-built
+                    // actions + a fresh journal handle). That did not demonstrate
+                    // that the REAL engine advances before its own actions are
+                    // forwarded. The cases below drive the actual
+                    // `BasicHotStuffEngine::on_leader_step` on a single-validator
+                    // fixture: the self-vote forms a QC and advances the engine to
+                    // V+1 BEFORE the returned Proposal/self-Vote (still carrying
+                    // originating view V) are forwarded through the Required
+                    // guarded outbound path. They then assert the journal files
+                    // each at its distinct kind-specific position at V (never at
+                    // the engine's newer view), verify the delivered signatures
+                    // with the existing D6 verifier, and demonstrate conflict
+                    // preservation and the permitted exact-retry / new-view
+                    // positive controls — all over the real engine entrypoint, not
+                    // a simulated variable, handle, or restart initializer.
+                    mod correction_f_engine {
+                        use super::*;
+                        use crate::signing_reservation_journal::{SigningKind, SigningPosition};
+                        use qbind_consensus::{
+                            verify_proposal_msg_with_domain, verify_vote_msg_with_domain,
+                        };
 
-                        let j1 = journal(store.clone());
-                        let (_s1, _f1) = drive_j(&snap, &j1, proposal_at(0, 7, [1u8; 32]));
-                        assert_eq!(c.proposal_calls.load(SeqCst), 1);
+                        /// Engine-matching v2 signing domain. The real
+                        /// `BasicHotStuffEngine` hard-codes wire `chain_id = 1` and
+                        /// founding `epoch = 0` into every emitted
+                        /// `BlockHeader`/`Vote`, so the outbound wire-chain gate
+                        /// (`wire_chain_id_ok`) and the authorized-epoch admission
+                        /// only admit a domain whose expected wire chain id is 1
+                        /// and whose founding epoch is 0. (The other D10 fixtures
+                        /// use the base-header `chain_id = 0` domain.)
+                        fn engine_domain() -> ProposalVoteSigningDomainV2 {
+                            d6_domain(
+                                0xD6D6_0000_0000_00E1,
+                                1,
+                                d6_genesis_identity(0x31),
+                                d6_authority_commitment(0x41),
+                            )
+                        }
 
-                        // Conflict at view 7 after "progress": still a conflict.
-                        let j2 = journal(store.clone());
-                        let (s2, _f2) = drive_j(&snap, &j2, proposal_at(0, 7, [2u8; 32]));
-                        assert_eq!(s2.outbound_proposal_journal_conflict_total, 1);
-                        assert_eq!(c.proposal_calls.load(SeqCst), 1);
+                        /// A `ProposalVoteAuthority` over [`engine_domain`] whose
+                        /// validator-0 signer is the instrumented `RecordingSigner`
+                        /// (real ML-DSA-44 underneath), so the actual underlying
+                        /// signer invocations are counted directly.
+                        fn engine_recording_pv(
+                            fixture: &Fixture,
+                        ) -> (ProposalVoteAuthority, SignerCounters) {
+                            let vote_calls = Arc::new(AtomicU64::new(0));
+                            let proposal_calls = Arc::new(AtomicU64::new(0));
+                            let sk = fixture.sk_objs.get(&ValidatorId(0)).expect("sk").clone();
+                            let inner = LocalKeySigner::new(ValidatorId(0), TEST_SUITE_U16, sk);
+                            let signer: Arc<dyn ValidatorSigner> = Arc::new(RecordingSigner {
+                                inner,
+                                vote_calls: vote_calls.clone(),
+                                proposal_calls: proposal_calls.clone(),
+                            });
+                            let pv = ProposalVoteAuthority {
+                                validators: fixture.validators.clone(),
+                                key_provider: fixture.kp.clone(),
+                                backend_registry: fixture.br.clone(),
+                                chain_id: QBIND_DEVNET_CHAIN_ID,
+                                signer: Some(signer),
+                                signing_domain: engine_domain(),
+                            };
+                            (
+                                pv,
+                                SignerCounters {
+                                    vote_calls,
+                                    proposal_calls,
+                                    proposal_entries: Arc::new(AtomicU64::new(0)),
+                                },
+                            )
+                        }
+
+                        /// The canonical journal position a guarded Proposal/Vote
+                        /// signing reserves for validator 0 under [`engine_domain`]
+                        /// at `view` — computed exactly as the production
+                        /// `prepare_*_signing_reservation` does (validator id,
+                        /// domain genesis identity, kind, originating view).
+                        fn engine_position(view: u64, kind: SigningKind) -> SigningPosition {
+                            SigningPosition {
+                                validator_id: 0,
+                                network_genesis: *engine_domain().genesis_identity(),
+                                kind,
+                                originating_view: view,
+                            }
+                        }
+
+                        /// Split the engine's returned actions into exactly one
+                        /// Proposal and one self-Vote, cloning each for later field
+                        /// comparison. Panics if the shape is not the expected
+                        /// `[BroadcastProposal, BroadcastVote]`.
+                        fn split_leader_actions(
+                            actions: &[ConsensusEngineAction<ValidatorId>],
+                        ) -> (BlockProposal, Vote) {
+                            let mut proposal = None;
+                            let mut vote = None;
+                            for a in actions {
+                                match a {
+                                    ConsensusEngineAction::BroadcastProposal(p) => {
+                                        assert!(proposal.is_none(), "exactly one Proposal expected");
+                                        proposal = Some((**p).clone());
+                                    }
+                                    ConsensusEngineAction::BroadcastVote(v) => {
+                                        assert!(vote.is_none(), "exactly one self-Vote expected");
+                                        vote = Some(v.clone());
+                                    }
+                                    _ => panic!(
+                                        "unexpected action in single-validator leader step"
+                                    ),
+                                }
+                            }
+                            (
+                                proposal.expect("engine emitted a Proposal"),
+                                vote.expect("engine emitted a self-Vote"),
+                            )
+                        }
+
+                        /// Forward actual engine actions through the Required
+                        /// guarded outbound boundary WITH a wired journal.
+                        fn drive_actions(
+                            snap: &AuthorizedProposalVoteSnapshot,
+                            j: &SigningReservationJournal,
+                            actions: Vec<ConsensusEngineAction<ValidatorId>>,
+                        ) -> (BinaryConsensusLoopInboundStats, OutboundRecorder) {
+                            let facade = OutboundRecorder::default();
+                            let mut stats = BinaryConsensusLoopInboundStats::default();
+                            forward_actions_to_facade(
+                                actions,
+                                &facade,
+                                &mut stats,
+                                Some(snap),
+                                None,
+                                Some(j),
+                                ConsensusVerificationPolicy::Required,
+                            );
+                            (stats, facade)
+                        }
+
+                        #[test]
+                        fn d10_real_engine_progress_reserves_originating_view_not_current_view(
+                        ) {
+                            let fixture = make_fixture(1);
+                            let (pv, c) = engine_recording_pv(&fixture);
+                            let snap = snapshot_matching(&pv);
+                            let store = D10Store::new();
+                            let j = journal(store.clone());
+
+                            let mut engine = make_engine(ValidatorId(0), 1);
+                            let v = engine.current_view();
+                            assert_eq!(v, 0, "fresh single-validator engine starts at view 0");
+
+                            // Real engine entrypoint: propose, self-vote, form the
+                            // single-validator QC and ADVANCE — all before the
+                            // actions are returned for forwarding.
+                            let actions = engine.on_leader_step();
+                            assert_eq!(
+                                engine.current_view(),
+                                v + 1,
+                                "the self-vote QC advanced the engine to V+1 before its \
+                                 actions are forwarded"
+                            );
+
+                            // The returned actions still carry ORIGINATING view V.
+                            let (orig_proposal, orig_vote) = split_leader_actions(&actions);
+                            assert_eq!(
+                                orig_proposal.header.height, v,
+                                "proposal height == originating view"
+                            );
+                            assert_eq!(
+                                orig_proposal.header.round, v,
+                                "proposal round == originating view"
+                            );
+                            assert_eq!(orig_vote.height, v, "vote height == originating view");
+                            assert_eq!(orig_vote.round, v, "vote round == originating view");
+                            assert_eq!(orig_vote.step, 0, "founding-profile self-vote step 0");
+
+                            // Forward the ACTUAL engine actions through the Required
+                            // guarded outbound path.
+                            let (stats, facade) = drive_actions(&snap, &j, actions);
+
+                            // Exact signer-call and facade-handoff counts.
+                            assert_eq!(
+                                c.proposal_calls.load(SeqCst),
+                                1,
+                                "proposal signed exactly once"
+                            );
+                            assert_eq!(
+                                c.vote_calls.load(SeqCst),
+                                1,
+                                "self-vote signed exactly once"
+                            );
+                            assert_eq!(stats.outbound_proposal_journal_reserved_total, 1);
+                            assert_eq!(stats.outbound_vote_journal_reserved_total, 1);
+                            assert_eq!(stats.outbound_proposals_sent, 1);
+                            assert_eq!(stats.outbound_votes_sent, 1);
+                            let emitted_p = facade.proposals.lock().unwrap();
+                            let emitted_v = facade.broadcast_votes.lock().unwrap();
+                            assert_eq!(emitted_p.len(), 1, "exactly one proposal handed off");
+                            assert_eq!(emitted_v.len(), 1, "exactly one self-vote handed off");
+
+                            // Journal records occupy the DISTINCT kind-specific
+                            // positions at V ...
+                            let ppos = engine_position(v, SigningKind::Proposal);
+                            let vpos = engine_position(v, SigningKind::Vote);
+                            assert!(
+                                store
+                                    .get_signing_record(&ppos.storage_key())
+                                    .unwrap()
+                                    .is_some(),
+                                "proposal reserved at originating view V"
+                            );
+                            assert!(
+                                store
+                                    .get_signing_record(&vpos.storage_key())
+                                    .unwrap()
+                                    .is_some(),
+                                "self-vote reserved at originating view V"
+                            );
+                            // ... and are NOT misfiled at the engine's newer view
+                            // V+1.
+                            assert!(
+                                store
+                                    .get_signing_record(
+                                        &engine_position(v + 1, SigningKind::Proposal)
+                                            .storage_key()
+                                    )
+                                    .unwrap()
+                                    .is_none(),
+                                "proposal must not be filed at the engine's advanced view"
+                            );
+                            assert!(
+                                store
+                                    .get_signing_record(
+                                        &engine_position(v + 1, SigningKind::Vote)
+                                            .storage_key()
+                                    )
+                                    .unwrap()
+                                    .is_none(),
+                                "self-vote must not be filed at the engine's advanced view"
+                            );
+
+                            // Delivered signatures verify under the existing D6
+                            // verifier (same domain).
+                            assert!(verify_proposal_msg_with_domain(
+                                &emitted_p[0],
+                                ValidatorId(0),
+                                fixture.validators.as_ref(),
+                                fixture.kp.as_ref(),
+                                fixture.br.as_ref(),
+                                &engine_domain(),
+                            )
+                            .is_ok());
+                            assert!(verify_vote_msg_with_domain(
+                                &emitted_v[0],
+                                ValidatorId(0),
+                                fixture.validators.as_ref(),
+                                fixture.kp.as_ref(),
+                                fixture.br.as_ref(),
+                                &engine_domain(),
+                            )
+                            .is_ok());
+
+                            // Emitted fields preserved EXCEPT the permitted signing
+                            // preparation (suite assignment + signature population).
+                            let signed_p = &emitted_p[0];
+                            assert_eq!(
+                                signed_p.header.suite_id, TEST_SUITE_U16,
+                                "suite assigned from the signer"
+                            );
+                            assert!(!signed_p.signature.is_empty(), "signature populated");
+                            let mut normalized_p = signed_p.clone();
+                            normalized_p.header.suite_id = orig_proposal.header.suite_id;
+                            normalized_p.signature = orig_proposal.signature.clone();
+                            assert_eq!(
+                                normalized_p, orig_proposal,
+                                "no non-signing proposal field was rewritten"
+                            );
+
+                            let signed_v = &emitted_v[0];
+                            assert_eq!(signed_v.suite_id, TEST_SUITE_U16);
+                            assert!(!signed_v.signature.is_empty());
+                            let mut normalized_v = signed_v.clone();
+                            normalized_v.suite_id = orig_vote.suite_id;
+                            normalized_v.signature = orig_vote.signature.clone();
+                            assert_eq!(
+                                normalized_v, orig_vote,
+                                "no non-signing vote field was rewritten"
+                            );
+                        }
+
+                        #[test]
+                        fn d10_real_engine_conflict_preserves_original_at_originating_position(
+                        ) {
+                            let fixture = make_fixture(1);
+                            let (pv, c) = engine_recording_pv(&fixture);
+                            let snap = snapshot_matching(&pv);
+                            let store = D10Store::new();
+                            let j = journal(store.clone());
+
+                            let mut engine = make_engine(ValidatorId(0), 1);
+                            let v = engine.current_view();
+                            let actions = engine.on_leader_step();
+                            let (orig_proposal, orig_vote) = split_leader_actions(&actions);
+                            let (s0, _f0) = drive_actions(&snap, &j, actions);
+                            assert_eq!(s0.outbound_proposal_journal_reserved_total, 1);
+                            assert_eq!(s0.outbound_vote_journal_reserved_total, 1);
+                            assert_eq!(c.proposal_calls.load(SeqCst), 1);
+                            assert_eq!(c.vote_calls.load(SeqCst), 1);
+
+                            // Snapshot the durable bytes at the originating
+                            // positions so byte-identical preservation can be
+                            // asserted across the refused conflicts.
+                            let ppos = engine_position(v, SigningKind::Proposal);
+                            let vpos = engine_position(v, SigningKind::Vote);
+                            let p_bytes = store
+                                .get_signing_record(&ppos.storage_key())
+                                .unwrap()
+                                .expect("proposal record present");
+                            let v_bytes = store
+                                .get_signing_record(&vpos.storage_key())
+                                .unwrap()
+                                .expect("vote record present");
+
+                            // DELIBERATE conflicting test inputs (NOT additional
+                            // decisions legitimately emitted by the engine): same
+                            // validator identity, domain, epoch, kind, originating
+                            // view and canonical position fields; only the message
+                            // binding is changed intentionally.
+                            let mut conflict_proposal = orig_proposal.clone();
+                            conflict_proposal.header.payload_hash = [0xEE; 32];
+                            let (sc_p, fc_p) = drive_actions(
+                                &snap,
+                                &j,
+                                vec![ConsensusEngineAction::BroadcastProposal(Box::new(
+                                    conflict_proposal,
+                                ))],
+                            );
+                            assert_eq!(
+                                sc_p.outbound_proposal_journal_conflict_total, 1,
+                                "a different binding at the original position conflicts"
+                            );
+                            assert_eq!(
+                                c.proposal_calls.load(SeqCst),
+                                1,
+                                "no additional signer invocation on conflict"
+                            );
+                            assert!(
+                                fc_p.proposals.lock().unwrap().is_empty(),
+                                "no facade handoff on conflict"
+                            );
+                            assert_eq!(
+                                store
+                                    .get_signing_record(&ppos.storage_key())
+                                    .unwrap()
+                                    .expect("proposal record still present"),
+                                p_bytes,
+                                "original proposal record byte-identical after conflict"
+                            );
+
+                            let mut conflict_vote = orig_vote.clone();
+                            conflict_vote.block_id = [0xEE; 32];
+                            let (sc_v, fc_v) = drive_actions(
+                                &snap,
+                                &j,
+                                vec![ConsensusEngineAction::BroadcastVote(conflict_vote)],
+                            );
+                            assert_eq!(sc_v.outbound_vote_journal_conflict_total, 1);
+                            assert_eq!(
+                                c.vote_calls.load(SeqCst),
+                                1,
+                                "no additional signer invocation on vote conflict"
+                            );
+                            assert!(fc_v.broadcast_votes.lock().unwrap().is_empty());
+                            assert_eq!(
+                                store
+                                    .get_signing_record(&vpos.storage_key())
+                                    .unwrap()
+                                    .expect("vote record still present"),
+                                v_bytes,
+                                "original vote record byte-identical after conflict"
+                            );
+                        }
+
+                        #[test]
+                        fn d10_real_engine_exact_retry_and_new_view_positive_controls() {
+                            let fixture = make_fixture(1);
+                            let (pv, c) = engine_recording_pv(&fixture);
+                            let snap = snapshot_matching(&pv);
+                            let store = D10Store::new();
+                            let j = journal(store.clone());
+
+                            let mut engine = make_engine(ValidatorId(0), 1);
+                            let v0 = engine.current_view();
+                            let a0 = engine.on_leader_step();
+                            let (orig_p0, orig_v0) = split_leader_actions(&a0);
+                            let (s0, _f0) = drive_actions(&snap, &j, a0);
+                            assert_eq!(s0.outbound_proposal_journal_reserved_total, 1);
+                            assert_eq!(s0.outbound_vote_journal_reserved_total, 1);
+                            assert_eq!(c.proposal_calls.load(SeqCst), 1);
+                            assert_eq!(c.vote_calls.load(SeqCst), 1);
+
+                            // (a) Exact permitted retry: resend the SAME engine
+                            //     decisions. Retained signatures are reused with NO
+                            //     additional signer call, yet the decisions are
+                            //     still delivered.
+                            let retry = vec![
+                                ConsensusEngineAction::BroadcastProposal(Box::new(
+                                    orig_p0.clone(),
+                                )),
+                                ConsensusEngineAction::BroadcastVote(orig_v0.clone()),
+                            ];
+                            let (sr, fr) = drive_actions(&snap, &j, retry);
+                            assert_eq!(sr.outbound_proposal_journal_retained_resend_total, 1);
+                            assert_eq!(sr.outbound_vote_journal_retained_resend_total, 1);
+                            assert_eq!(
+                                c.proposal_calls.load(SeqCst),
+                                1,
+                                "exact retry reuses the retained signature"
+                            );
+                            assert_eq!(c.vote_calls.load(SeqCst), 1);
+                            assert_eq!(
+                                fr.proposals.lock().unwrap().len(),
+                                1,
+                                "retained resend still delivered"
+                            );
+                            assert_eq!(fr.broadcast_votes.lock().unwrap().len(), 1);
+
+                            // Snapshot V0 records to prove they are untouched by the
+                            // later new-view work.
+                            let p0_bytes = store
+                                .get_signing_record(
+                                    &engine_position(v0, SigningKind::Proposal).storage_key(),
+                                )
+                                .unwrap()
+                                .expect("V0 proposal present");
+                            let v0_bytes = store
+                                .get_signing_record(
+                                    &engine_position(v0, SigningKind::Vote).storage_key(),
+                                )
+                                .unwrap()
+                                .expect("V0 vote present");
+
+                            // (b) An ACTUAL subsequently-emitted action at a NEW
+                            //     originating view occupies a distinct legitimate
+                            //     position without disturbing the V0 obligation.
+                            let v1 = engine.current_view();
+                            assert_eq!(v1, v0 + 1);
+                            let a1 = engine.on_leader_step();
+                            assert_eq!(engine.current_view(), v1 + 1);
+                            let (orig_p1, _orig_v1) = split_leader_actions(&a1);
+                            assert_eq!(
+                                orig_p1.header.height, v1,
+                                "the new decision's originating view is V1"
+                            );
+                            let (s1, _f1) = drive_actions(&snap, &j, a1);
+                            assert_eq!(
+                                s1.outbound_proposal_journal_reserved_total, 1,
+                                "V1 proposal is a fresh reservation"
+                            );
+                            assert_eq!(s1.outbound_vote_journal_reserved_total, 1);
+                            assert_eq!(
+                                c.proposal_calls.load(SeqCst),
+                                2,
+                                "V1 is a new decision: exactly one more signer call"
+                            );
+                            assert_eq!(c.vote_calls.load(SeqCst), 2);
+                            assert!(
+                                store
+                                    .get_signing_record(
+                                        &engine_position(v1, SigningKind::Proposal)
+                                            .storage_key()
+                                    )
+                                    .unwrap()
+                                    .is_some(),
+                                "distinct legitimate V1 proposal position exists"
+                            );
+                            assert!(
+                                store
+                                    .get_signing_record(
+                                        &engine_position(v1, SigningKind::Vote).storage_key()
+                                    )
+                                    .unwrap()
+                                    .is_some()
+                            );
+                            // The earlier V0 obligation is byte-identical (unchanged).
+                            assert_eq!(
+                                store
+                                    .get_signing_record(
+                                        &engine_position(v0, SigningKind::Proposal)
+                                            .storage_key()
+                                    )
+                                    .unwrap()
+                                    .expect("V0 proposal still present"),
+                                p0_bytes,
+                                "V0 proposal obligation unchanged by V1 work"
+                            );
+                            assert_eq!(
+                                store
+                                    .get_signing_record(
+                                        &engine_position(v0, SigningKind::Vote).storage_key()
+                                    )
+                                    .unwrap()
+                                    .expect("V0 vote still present"),
+                                v0_bytes,
+                                "V0 vote obligation unchanged by V1 work"
+                            );
+                        }
                     }
 
                     #[test]
