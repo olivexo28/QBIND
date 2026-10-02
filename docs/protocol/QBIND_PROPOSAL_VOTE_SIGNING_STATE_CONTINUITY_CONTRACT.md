@@ -1048,38 +1048,60 @@ production; the guard engages only when a journal is explicitly wired (tests).
   sig_len | sig | crc32` (big-endian, checksum over the body). The checksum is
   corruption detection only — **not** authentication or rollback protection.
 * Bounds: retained signature ≤ 8 KiB, record ≤ bounded max. The reservation
-  counter (`reserved_positions`) is **shared by the ownership domain**, not held
-  per handle; each attached handle applies its **own configured limit**
-  (`max_reserved_positions`) against that single shared counter (checked
-  arithmetic; overflow is terminal, never wraparound). Exhaustion **refuses
-  further signing** with no silent eviction of conflict obligations. Decode is
-  fail-closed on malformed/truncated/incompatible/inconsistent input; no
-  allocation from unchecked stored lengths.
-* Attach is **not** an initialization step. `attach` **reuses the backend
-  instance's existing ownership domain** (fetched through
-  `signing_ownership_domain` and cached per-instance); it does **not** empty,
-  reset, or reinitialize that domain's shared live-operation table — the live
-  table is whatever the backend instance already holds. Only a **newly created**
-  domain (a freshly opened backend instance, i.e. a modelled restart) starts
-  with fresh, empty process-local state (empty live-permit and
-  recovered-acknowledgement maps and a zero reservation counter) — the honest
-  crash-recovery posture: a `Reserved` record already in the store is treated as
-  potentially-signed on the next reservation, and no live continuation is ever
-  minted from it. Specifically, `attach`:
-  * does **not** implement explicit first-time initialization versus
-    established-journal validation (distinguishing a never-initialized keyspace
-    from a valid or a corrupt established journal);
-  * does **not** implement persistent capacity accounting (the shared domain
-    reservation counter is process-local in-memory state, and each handle's
-    limit is likewise an in-memory bound, not a durable count reconstructed from
-    storage);
-  * therefore does **not** wipe, repair, or convert missing/corrupt established
-    state into an empty usable journal — it simply fails closed on the affected
-    read.
-  Established-journal initialization/validation, persistent capacity accounting,
-  and recovered-record **acknowledgement-cache** accounting (the per-domain
-  `recovered_acked` cache described in §9.4) all remain **OPEN under E** (see
-  §9.5). Production startup does **not** initialize a journal.
+  counter (`reserved_positions`) and the position `max_reserved_positions`
+  **limit** are both **journal-wide** and **persisted**: initialization durably
+  publishes the established limit with a zero count, and every supported handle
+  attached over the backend instance shares that single established limit and the
+  single shared counter (checked arithmetic; overflow is terminal, never
+  wraparound). A handle does **not** carry its own independent per-handle limit,
+  and a second handle **cannot** relax or raise the established limit. Exhaustion
+  **refuses further signing** with no silent eviction of conflict obligations.
+  Decode is fail-closed on malformed/truncated/incompatible/inconsistent input;
+  no allocation from unchecked stored lengths.
+* Lifecycle is **explicit initialize / open** (as implemented), not an implicit
+  "attach":
+  * `SigningReservationJournal::initialize` is the only route that creates
+    initialization metadata. It requires an **empty** signing namespace (no
+    metadata and no records), rejects an unsupported limit before any durable
+    write, durably publishes fixed-length initialization metadata (established
+    limit, zero count), and refuses fail-closed (`AlreadyInitialized`) rather
+    than resetting an established journal or one whose metadata already exists. A
+    store-then-error initialization write (bytes become readable, durability
+    acknowledgement uncertain) is **not** reported as a successful
+    initialization; it yields no handle, metadata absence is not required
+    afterwards, and a later validating `open` over the surviving well-formed,
+    consistent metadata may independently establish the journal.
+  * `SigningReservationJournal::open` validates an **established** journal
+    (metadata present, supported version, limit/count consistent with a bounded
+    whole-namespace streaming validation of every record's key/association and
+    bounds) and **never** falls back to initialization or creates metadata. It
+    refuses fail-closed on missing metadata (`NotInitialized`), records without
+    metadata (`LegacyRecordsWithoutMetadata`), corruption/truncation/unsupported
+    version, or accounting inconsistency. A second `open` over an
+    already-established instance **shares** the existing ownership domain unchanged
+    (live operations, operation ids, acknowledgement state, the durable counter,
+    and shared ownership preserved; the namespace is not re-scanned).
+  * Only a **newly created** domain (a freshly opened backend instance, i.e. a
+    modelled restart) starts with fresh, empty process-local state (empty
+    live-permit and recovered-acknowledgement maps); the durable reservation
+    count is **reconstructed from storage** on open rather than reset. This is the
+    honest crash-recovery posture: a `Reserved` record already in the store is
+    treated as potentially-signed on the next reservation, and no live
+    continuation is ever minted from it.
+  * Production startup does **not** initialize or open a journal; journal
+    initialization models a LOCAL storage operation only and does not authorize
+    production activation.
+  > **Historical (superseded).** Earlier drafts of this section described an
+  > implicit `attach` that "reuses the backend instance's existing ownership
+  > domain" and was "not an initialization step", asserted a **per-handle
+  > configured limit** against the shared counter, and recorded that explicit
+  > first-time-initialization-versus-validation and **persistent capacity
+  > accounting** were "OPEN under E" (the reservation counter and limit being
+  > process-local in-memory state only). That description is **historical and no
+  > longer operative**: explicit `initialize`/`open`, the journal-wide persisted
+  > limit and count, and the bounded recovered-acknowledgement cache (§9.4) are
+  > implemented and tested. The historical wording is retained only as superseded
+  > evidence.
 
 ### 9.4 Exclusivity, live continuation, recovered-record behavior
 
@@ -1151,7 +1173,15 @@ production; the guard engages only when a journal is explicitly wired (tests).
   acknowledgement **bound to the exact record** within the ownership domain (never
   a generic position flag that could authorize a different record); a conflicting,
   malformed, missing, or differently-associated record fails closed before any
-  recovery re-publication and is never overwritten.
+  recovery re-publication and is never overwritten. The acknowledgement cache is
+  **bounded** (`MAX_RECOVERED_ACK_ENTRIES`, FIFO): an exact cache hit serves the
+  retained resend **without** reissuing the synced write, while a position whose
+  acknowledgement has been **evicted** re-establishes the barrier from scratch on
+  revisit (one additional synced durability write) — eviction drops only
+  process-local state, never a durable record, the persisted count/limit, or a
+  conflict obligation. This full post-eviction flow is exercised **through the
+  journal** (and through the colocated D10 guarded handler), not by direct cache
+  insert/get alone.
 * **Uncertain / idempotent result writes:** readable byte-equality is **not** a
   durability barrier. If a result write becomes readable but its durability
   operation returns an error/uncertain outcome, publication is **not** reported
@@ -1516,11 +1546,17 @@ reopen, child-process observations, release compilation, and power-loss evidence
 are distinct and are not conflated.
 
 **Exact commands, checkpoints, feature counts, release identity, and tool
-outcomes.** Validated at implementation checkpoint
-`fabb16c5b5a0fae104d3e64a2cdd1b24868383ee` (reviewed-branch and reviewed
-checkpoint `7de6c7698a0567bbc598579f9a9f55e8164be126` were UNAVAILABLE in the
-shallow single-branch clone; source correspondence was inspected directly, no
-ancestry was manufactured). Per-command results:
+outcomes (historical — prior report).** The per-command figures below are the
+**historical** record attributed to the prior reporting pass at implementation
+checkpoint `fabb16c5b5a0fae104d3e64a2cdd1b24868383ee`; their logs were not
+retained and they are **not** relabelled as newly executed here (reviewed-branch
+and reviewed checkpoint `7de6c7698a0567bbc598579f9a9f55e8164be126` were
+UNAVAILABLE in the shallow single-branch clone; source correspondence was
+inspected directly, no ancestry was manufactured). The freshly executed
+Correction E validation — including the corrected D6 target and the added
+post-eviction and store-then-error acceptance tests — is recorded separately in
+`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_422_D7.md` (Run 422 D7-D10 Correction E
+execution). Historical per-command results:
 
 * `cargo test -p qbind-node --lib signing_reservation_journal` — 50 passed, 0 failed.
 * `cargo test -p qbind-node --lib correction_d` — 36 passed, 0 failed (the four restored D regressions remain collected and pass).
@@ -1532,7 +1568,15 @@ ancestry was manufactured). Per-command results:
 * `cargo test -p qbind-node --test run_422_startup_refusal_tests` — 4 passed, 0 failed.
 * `cargo check -p qbind-node` (binary-inclusive; the historical `--lib` check does not substitute) — exit 0.
 * `cargo build --release -p qbind-node --bin qbind-node` — exit 0.
-* Existing D6 signer-isolation target `cargo test -p qbind-node --test m10_signer_isolation_tests` — 13 passed, 0 failed.
+* D6 PV-domain isolation target. **Correction (this supersedes the earlier
+  claim):** the D6 target is
+  `cargo test -p qbind-consensus --test run_422_d6_pv_domain_isolation_tests`.
+  The previously recorded `cargo test -p qbind-node --test m10_signer_isolation_tests`
+  (13 passed) is **remote-signer key-isolation** coverage and **cannot substitute**
+  for the PV-domain isolation target; that earlier line is withdrawn as an
+  incorrect evidence claim. The correct target was executed in the Correction E
+  execution pass — see `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_422_D7.md` (Run 422
+  D7-D10 Correction E execution) for the observed `34 passed, 0 failed` result.
 * Focused Clippy `cargo clippy -p qbind-node --lib` — exit 0, no warnings in the changed files (`storage.rs`, `signing_reservation_journal.rs`, `binary_consensus_loop.rs`); the changed integration target reports only pre-existing style warnings. The whole-workspace `--tests` clippy run additionally compiles `m16_epoch_transition_hardening_tests`, which fails to build WITHOUT `--features test-utils` (a pre-existing feature-gating limitation on `set_inject_write_failure`/`clear_epoch_transition_marker`, unrelated to this change).
 
 Release compilation evidence ONLY (not configured-authority runtime evidence):

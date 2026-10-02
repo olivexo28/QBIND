@@ -9717,7 +9717,12 @@ release compilation, and power-loss evidence are kept distinct.
 * `cargo test -p qbind-node --test run_422_startup_refusal_tests` — 4 passed.
 * `cargo check -p qbind-node` (binary-inclusive; required; the historical `--lib` check does not substitute) — exit 0.
 * `cargo build --release -p qbind-node --bin qbind-node` — exit 0.
-* Existing D6 signer-isolation target `cargo test -p qbind-node --test m10_signer_isolation_tests` — 13 passed.
+* D6 PV-domain isolation target — **correction**: the D6 target is
+  `cargo test -p qbind-consensus --test run_422_d6_pv_domain_isolation_tests`. The
+  earlier `cargo test -p qbind-node --test m10_signer_isolation_tests` (13 passed)
+  is **remote-signer key-isolation** coverage and **cannot substitute** for the
+  PV-domain isolation target; that line is withdrawn. The correct target was run in
+  the Correction E execution pass below (`34 passed, 0 failed`).
 * Focused Clippy `cargo clippy -p qbind-node --lib` — exit 0; no warnings in the changed files. The changed integration target reports only pre-existing style warnings. A whole-crate `--tests` clippy also compiles `m16_epoch_transition_hardening_tests`, which fails to build WITHOUT `--features test-utils` (pre-existing feature-gating of `set_inject_write_failure`/`clear_epoch_transition_marker`, unrelated to this change).
 
 ### Release executable identity (release compilation evidence only)
@@ -9769,3 +9774,106 @@ scope only; not configured-authority runtime evidence). Retained unchanged:
 (unbounded/unclassified child runner) and C4/C5. No authority activation,
 readiness promotion, D11, or Run 423 work; no PR, branch rename, force-push,
 rebase, or history rewrite; `task/warning.txt` and unrelated work preserved.
+
+## Run 422 D7-D10 Correction E execution (A–D implemented, freshly validated)
+
+This section records the **newly executed** Correction E work (corrections A–D
+implemented as source/test + documentation edits and validated in this pass). It
+does **not** relabel the historical figures above (attributed to their prior
+report at the unavailable checkpoint `fabb16c…`) as newly executed; those remain
+historical. The referenced ancestry objects `1c14369` and `fabb16c` were
+unavailable in the shallow single-branch clone and no ancestry was manufactured.
+
+**Baseline / checkpoint identity.** Continuation baseline branch
+`copilot/copilotcopilotcopilotcopilotrun-422-complete-corre`, inspected HEAD
+`c5ef2bb4990a6f0c753565155baa5d9cf9a0b2dd`. Implementation/test checkpoint
+committed at `45542d8` (A/B source/test edits); this evidence record and the
+documentation reconciliation (contract §9.3–§9.5 rewritten in place, m10
+corrections) are committed in the following checkpoint on the same task branch.
+
+**Scope.** Only the six authorized paths changed. `storage.rs` and the
+integration test file `run_422_d7d10_signing_reservation_journal_tests.rs` were
+**not** modified; storage-fixture tests therefore did not require a rerun.
+Production semantics preserved: the only production-source change is
+`SigningOwnershipDomain::new()` delegating to a private
+`with_recovered_ack_cache_capacity(DEFAULT)`, with a `#[cfg(test)]`
+`new_with_cache_capacity_for_test`; no new production configuration or bypass.
+
+**Correction A (post-eviction journal + handler evidence).** Container-test
+comments that claimed storage barriers were removed/softened. New full-flow
+journal tests create published `Signed` records, reopen through a fresh ownership
+domain, populate the acknowledgement cache through actual journal lookups, force
+FIFO eviction via further recovered acknowledgements, revisit the evicted position
+and directly observe the additional synced write, show an exact cache hit avoids
+that write, show failed and store-then-error acknowledgement produce no successful
+retained reuse / usable cache acknowledgement, show later success permits the
+exact retained signature, and assert persistent counts/limits/record bytes/
+conflict obligations are preserved. A small test-only cache capacity is reached
+through private `#[cfg(test)]` access only. The guarded-handler recovery fixture
+is extended with the post-eviction failure → uncertainty → success sequence,
+directly asserting zero additional signer calls and zero handoffs on
+failure/uncertainty and byte-identical D6-verified retained delivery on success.
+
+**Correction B (store-then-error initialization).** Using the existing fault
+injector, initialization metadata is made readable while its write returns an
+error; the test asserts `initialize` returns an error with no usable handle,
+surviving metadata is inspected directly, repeated initialization cannot silently
+reset/overwrite (`AlreadyInitialized`), and a subsequent explicit `open` succeeds
+over the surviving well-formed consistent metadata (outcome recorded as
+implemented; metadata absence is not required; readable bytes are not equated with
+a successful initialization acknowledgement). Clean-init, pre-write-failure,
+duplicate-init, malformed-metadata, and capacity controls are retained.
+
+**Corrections C/D (docs + D6 target).** The real D6 target was executed:
+`cargo test -p qbind-consensus --test run_422_d6_pv_domain_isolation_tests` ⇒
+**34 passed, 0 failed**. The documents were corrected: `m10_signer_isolation_tests`
+is remote-signer coverage and does not substitute for this target (fixed in the
+operative contract and in this devnet record). Operative contract §9.3–§9.5 were
+rewritten **in place** to describe the implemented `initialize`/`open` APIs, the
+persisted journal-wide limit/count, the shared ownership domain, and the bounded
+recovery-acknowledgement cache; obsolete "attach / per-handle limit /
+process-local-only accounting / OPEN under E" instructions were removed and the
+superseded wording marked explicitly historical. `docs/whitepaper/contradiction.md`
+was inspected read-only (outside write scope): its C4 (production `qbind-node`
+binary does not boot a fully operating node) and C5 (`TimeoutCertificate` transport
+PKI) remain OPEN and concern the production binary / transport, not the signing
+journal — no operative contradiction with this test/documentation work, and this
+work resolves none of those entries.
+
+**Executed validation (exact commands, observed counts, real exit statuses).**
+
+* `cargo test -p qbind-node --lib signing_reservation_journal` — **53 passed**, 0 failed (+3 over the historical 50: the two post-eviction full-flow tests and the store-then-error init test).
+* `cargo test -p qbind-node --lib run422_d7d10` — **62 passed**, 0 failed (includes the extended post-eviction guarded-handler test).
+* `cargo test -p qbind-node --lib correction_d` — **36 passed**, 0 failed (the four restored D regressions remain collected and pass).
+* `cargo test -p qbind-node --test run_422_d7d10_signing_reservation_journal_tests` — **22 passed, 1 ignored**, 0 failed (default features).
+* `cargo test -p qbind-node --features test-utils --test run_422_d7d10_signing_reservation_journal_tests` — **27 passed, 1 ignored**, 0 failed.
+* `cargo test -p qbind-consensus --test run_422_d6_pv_domain_isolation_tests` — **34 passed**, 0 failed (correct D6 target).
+* `cargo test -p qbind-node --lib` — **1837 passed**, 0 failed (+4 over the historical 1833).
+* `cargo check -p qbind-node` (binary-inclusive) — **exit 0**.
+* `cargo clippy -p qbind-node --lib` — **exit 0**; the reported warnings are pre-existing style lints (e.g. `type_complexity`, `contains_key`-then-`insert`, doc-list indentation, `unnecessary_sort_by` in `vm_v0_runtime.rs`), none introduced by the test additions or the small `new()` delegation.
+* EOL/whitespace checks on the three changed `.rs`/`.md` files in scope — all lines CRLF, zero trailing-whitespace lines, original no-trailing-newline EOF preserved; `storage.rs` remains LF; `task/warning.txt` untouched.
+
+**Test → requirement mapping.**
+
+* Correction A (journal) ⇒ `post_eviction_recovery_reissues_synced_write_then_cache_hit_avoids_it`, `post_eviction_failed_and_uncertain_recovery_refuse_reuse_then_success_permits_exact_signature`, plus the retained/reworded container cache tests.
+* Correction A (handler) ⇒ `run422_d7d10::…::d10_post_eviction_recovery_failure_uncertainty_success_through_handler`.
+* Correction B ⇒ `store_then_error_initialization_refuses_handle_but_leaves_readable_consistent_metadata`.
+* Corrections C/D ⇒ D6 target execution (34 passed) + contract §9.3–§9.5 in-place rewrite + m10 corrections here and in the contract.
+
+**Release artifact.** No new release build was performed; the historical release
+compilation artifact (build-source SHA `fabb16c…`) is retained at its actual
+revision as historical evidence only, not re-attested here.
+
+**Security-tool outcomes (literal, this pass).** Code Review and CodeQL were
+attempted once via the harness `parallel_validation` (production-source change
+declared non-trivial for CodeQL). Their literal outcomes are recorded in the final
+task report; any missing tool, backend error, or skipped analysis remains an
+incomplete obligation and does not constitute a passed security analysis. Security
+posture remains `RS1-OPEN / PUBLIC-DEVNET-NO-GO`.
+
+**Scoped verdict (unchanged).** Overall D10 remains **PARTIAL**; Correction F and
+C4/C5 remain **OPEN**. Genesis authority activation DISABLED, durable anti-rollback
+NOT-ESTABLISHED, production lifecycle UNAVAILABLE, configured-authority runtime
+evidence NOT-CAPTURED, `PUBLIC-DEVNET-NO-GO`. No F implementation, D11, Run 423,
+production signing enablement, or architectural redesign; no PR, main change,
+rename, force-push, rebase, or history rewrite.
