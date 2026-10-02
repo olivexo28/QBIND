@@ -1152,11 +1152,12 @@ mod bounded_child_runner {
 
     /// A shared, one-shot "stop draining by" deadline. Drain threads normally run
     /// until EOF (so pipe pressure can never deadlock the live child); once the
-    /// parent is finalizing capture it ARMS this deadline, and a drain thread that
-    /// is still only seeing `WouldBlock` (a descendant is holding the pipe open)
-    /// stops at the deadline instead of blocking forever. This is the mechanism
-    /// that makes the join in `finalize_drains` bounded — joining is NOT itself a
-    /// deadline.
+    /// parent is finalizing capture it ARMS this deadline, and a drain thread
+    /// checks it on EVERY loop iteration (not only on `WouldBlock`). A thread that
+    /// is still seeing successful reads, repeated `Interrupted` retries, or
+    /// `WouldBlock` (a descendant is holding the pipe open) therefore stops at the
+    /// deadline instead of draining forever. This is the mechanism that makes the
+    /// join in `finalize_drains` bounded — joining is NOT itself a deadline.
     #[derive(Default)]
     struct DrainDeadline {
         at: Mutex<Option<Instant>>,
@@ -1212,11 +1213,19 @@ mod bounded_child_runner {
         m.lock().unwrap_or_else(|p| p.into_inner())
     }
 
-    /// Deadline-aware drain loop. The stream fd is made non-blocking; on
-    /// `WouldBlock` the loop honours the armed stop deadline (returning
-    /// `DeadlineReached`) instead of blocking, so it always terminates and is
-    /// joinable. A capture-size cap bounds MEMORY only — it is independent of the
-    /// time budget enforced here.
+    /// Deadline-aware drain loop. The stream fd is made non-blocking; the armed
+    /// stop deadline is checked on EVERY iteration, independent of the outcome of
+    /// `read()`, so the loop always terminates and is joinable:
+    ///
+    ///   * continuous successful reads (`Ok(n)`) cannot postpone or reset it;
+    ///   * repeated `Interrupted` retries cannot bypass it;
+    ///   * output that keeps arriving after the capture cap is reached still stops
+    ///     at the deadline (the cap drops bytes, it does not end the loop).
+    ///
+    /// A capture-size cap bounds MEMORY only — it is NOT a timing mechanism; the
+    /// armed deadline is the sole timing bound, and it makes the drain worker
+    /// return under the documented scheduling/kernel assumptions WITHOUT relying
+    /// on EOF or an eventual `WouldBlock`.
     fn drain_into(
         mut r: impl Read + AsRawFd,
         sink: Arc<Mutex<CapturedStream>>,
@@ -1236,6 +1245,15 @@ mod bounded_child_runner {
         }
         let mut chunk = [0u8; 8192];
         loop {
+            // Enforce the armed stop deadline on EVERY iteration, BEFORE the next
+            // read and regardless of the previous read's outcome. This is what
+            // makes expiry independent of `read()`: continuous successful reads
+            // and repeated `Interrupted` retries both return here and cannot
+            // bypass an armed, expired deadline. The capture cap below bounds
+            // memory only; it is not a timing mechanism.
+            if deadline.expired() {
+                break DrainTerminal::DeadlineReached;
+            }
             match r.read(&mut chunk) {
                 Ok(0) => break DrainTerminal::Eof,
                 Ok(n) => {
@@ -1257,9 +1275,9 @@ mod bounded_child_runner {
                 }
                 Err(ref e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
                 Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                    if deadline.expired() {
-                        break DrainTerminal::DeadlineReached;
-                    }
+                    // No separate expiry check is needed here: the top-of-loop
+                    // check already owns the deadline. Just back off briefly so a
+                    // descendant-held idle pipe is polled rather than busy-spun.
                     thread::sleep(DRAIN_POLL_STEP);
                 }
                 Err(e) => break DrainTerminal::ReadFailed(format!("read error kind={:?}", e.kind())),
@@ -1357,12 +1375,6 @@ mod bounded_child_runner {
 
         fn stderr_snapshot(&self) -> String {
             lock_recover(&self.stderr).buf.clone()
-        }
-
-        /// The direct child's PID. Used by the held-pipe control to clean up a
-        /// deliberately spawned descendant (via its process group).
-        pub(super) fn child_pid(&self) -> u32 {
-            self.child.id()
         }
 
         fn stderr_capture(&self) -> CaptureOutcome {
@@ -1605,6 +1617,301 @@ mod bounded_child_runner {
             }
             Some(sig) => ChildCrashClass::UnexpectedSignal { signal: sig },
         }
+    }
+
+    /// Spawn `direct` with its stdout+stderr wired to TEST-OWNED pipes that are
+    /// ALSO inherited by a separately spawned `holder` process, which keeps those
+    /// write ends open after the direct child exits. The drained streams then
+    /// never reach EOF until the holder is terminated — exercising the armed-
+    /// deadline drain bound against a pipe held open past direct-child death.
+    ///
+    /// Unlike a backgrounded descendant orphaned to init, the returned
+    /// [`OwnedHolder`] is a child THIS TEST owns: its cleanup guard is installed
+    /// immediately (its `Drop` protects assertion unwinds), and the normal path
+    /// verifies bounded kill+reap via [`OwnedHolder::verify_cleanup`] instead of
+    /// assuming init reaps an orphan. The direct child's own abort is observed
+    /// independently of the holder. No process group, subreaper, or process-global
+    /// signal handler is used, so parallel tests are unaffected.
+    impl BoundedChild {
+        pub(super) fn spawn_with_pipe_holder(
+            mut direct: Command,
+            mut holder: Command,
+            ctx: &'static str,
+        ) -> (Self, OwnedHolder) {
+            // TEST-OWNED pipes: the parent builds them, hands the read ends to the
+            // drain threads, and hands cloned write ends to BOTH children.
+            let (out_r, out_w) = std::io::pipe()
+                .unwrap_or_else(|e| panic!("TEST FAILURE: {ctx}: stdout pipe: {e}"));
+            let (err_r, err_w) = std::io::pipe()
+                .unwrap_or_else(|e| panic!("TEST FAILURE: {ctx}: stderr pipe: {e}"));
+            let dup = |w: &std::io::PipeWriter, which: &str| -> Stdio {
+                Stdio::from(
+                    w.try_clone()
+                        .unwrap_or_else(|e| panic!("TEST FAILURE: {ctx}: dup {which}: {e}")),
+                )
+            };
+
+            direct
+                .stdin(Stdio::null())
+                .stdout(dup(&out_w, "direct stdout"))
+                .stderr(dup(&err_w, "direct stderr"));
+            holder
+                .stdin(Stdio::null())
+                .stdout(dup(&out_w, "holder stdout"))
+                .stderr(dup(&err_w, "holder stderr"));
+
+            let child = direct
+                .spawn()
+                .unwrap_or_else(|e| panic!("TEST FAILURE: {ctx}: spawn direct child: {e}"));
+            // Install the holder's cleanup guard IMMEDIATELY after creating it and
+            // BEFORE any fallible observation below: `owned`'s `Drop` now protects
+            // every later panic/unwind (including a panic inside this constructor).
+            let holder_child = holder
+                .spawn()
+                .unwrap_or_else(|e| panic!("TEST FAILURE: {ctx}: spawn pipe holder: {e}"));
+            let owned = OwnedHolder::new(holder_child);
+
+            // The parent keeps NO write end open (only the two children do), so EOF
+            // arrives promptly once BOTH children have released the pipe.
+            drop(out_w);
+            drop(err_w);
+
+            let stderr = Arc::new(Mutex::new(CapturedStream::default()));
+            let stdout = Arc::new(Mutex::new(CapturedStream::default()));
+            let drain_deadline = Arc::new(DrainDeadline::default());
+            let ed = drain_deadline.clone();
+            let od = drain_deadline.clone();
+            let se = stderr.clone();
+            let stderr_thread = Some(thread::spawn(move || drain_into(err_r, se, ed)));
+            let stdout_thread = Some(thread::spawn(move || drain_into(out_r, stdout, od)));
+            (
+                BoundedChild {
+                    child,
+                    stderr,
+                    stderr_thread,
+                    stdout_thread,
+                    drain_deadline,
+                    stderr_join_failed: false,
+                    reaped: false,
+                },
+                owned,
+            )
+        }
+    }
+
+    /// A pipe-holder child whose lifetime THIS TEST owns. The cleanup guard is
+    /// installed at construction: `Drop` performs a best-effort, non-panicking,
+    /// bounded kill+reap so an assertion unwind cannot leak it. The normal path
+    /// must additionally call [`OwnedHolder::verify_cleanup`], which returns the
+    /// structured [`CleanupResult`] — it never discards the kill error and never
+    /// claims reaping merely because a signal was sent, so a cleanup failure is
+    /// REPORTED rather than assumed. (Best-effort `Drop` is a fallback; it does
+    /// NOT replace the normal-path verification.)
+    pub(super) struct OwnedHolder {
+        child: Child,
+        reaped: bool,
+    }
+
+    impl OwnedHolder {
+        fn new(child: Child) -> Self {
+            OwnedHolder {
+                child,
+                reaped: false,
+            }
+        }
+
+        /// Spawn a STANDALONE test-owned holder process (all stdio nulled) with
+        /// its cleanup guard installed at construction. Used by the unwind control
+        /// to show the guard runs during an assertion unwind, independent of the
+        /// shared-pipe constructor.
+        pub(super) fn spawn(mut command: Command, ctx: &'static str) -> Self {
+            let child = command
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .spawn()
+                .unwrap_or_else(|e| panic!("TEST FAILURE: {ctx}: spawn owned holder: {e}"));
+            OwnedHolder::new(child)
+        }
+
+        /// Terminate the owned holder and VERIFY reaping via bounded `try_wait`
+        /// polling within `reap_budget` (NEVER a blocking `wait()`). Reuses the
+        /// pure [`drive_cleanup`] driver, so `reaped` is set ONLY on an observed
+        /// status: a kill error followed by an observed reap is still verified
+        /// reaping (the exit-vs-kill race), while a kill error with no reaping is
+        /// reported as `TerminationRequestFailed`, not a false success.
+        pub(super) fn verify_cleanup(&mut self, reap_budget: Duration) -> CleanupResult {
+            let result = {
+                let mut ops = ChildCleanupOps {
+                    child: &mut self.child,
+                };
+                drive_cleanup(self.reaped, &mut ops, reap_budget, REAP_POLL_STEP)
+            };
+            if matches!(
+                result,
+                CleanupResult::AlreadyReaped | CleanupResult::KilledAndReaped
+            ) {
+                self.reaped = true;
+            }
+            result
+        }
+
+        /// The holder's PID (for independent liveness/ESRCH observation in the
+        /// unwind-guard control).
+        pub(super) fn holder_pid(&self) -> u32 {
+            self.child.id()
+        }
+    }
+
+    impl Drop for OwnedHolder {
+        fn drop(&mut self) {
+            // Best-effort unwind protection: bounded, non-panicking kill+reap. It
+            // does NOT substitute for the normal-path `verify_cleanup` assertion.
+            if !self.reaped {
+                let _ = self.verify_cleanup(REAP_BUDGET);
+            }
+        }
+    }
+
+    // ------------------------------------------------------------------------
+    // Correction A — deterministic reader-seam controls (NO real process).
+    //
+    // These drive the ACTUAL `run_drain` loop logic with synthetic `Read`
+    // fixtures to prove the armed deadline is enforced on EVERY iteration,
+    // independent of the read outcome. Each fixture is bounded INDEPENDENTLY of
+    // the runner deadline (its own `fixture_cap`): a regression that ignored the
+    // deadline reaches that cap and reports EOF — a DIFFERENT terminal — so the
+    // assertion fails WITHOUT the test hanging. A real fd (`/dev/null`) only
+    // satisfies `run_drain`'s `set_nonblocking`; the synthetic `read()` drives
+    // the loop.
+    // ------------------------------------------------------------------------
+
+    /// A: continuous successful reads cannot bypass an armed, expired deadline.
+    #[cfg(unix)]
+    #[test]
+    fn drain_deadline_enforced_across_continuous_successful_reads() {
+        use std::fs::File;
+        use std::io::Read;
+
+        struct AlwaysOk {
+            fd: File,
+            calls: usize,
+            arm_at: usize,
+            fixture_cap: usize,
+            deadline: Arc<DrainDeadline>,
+        }
+        impl Read for AlwaysOk {
+            fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+                self.calls += 1;
+                // Independent fixture bound: a regression that never checks the
+                // deadline stops HERE (as EOF), so the test fails fast, not hangs.
+                if self.calls > self.fixture_cap {
+                    return Ok(0);
+                }
+                // Arm the runner deadline (already expired) after a few real
+                // successful reads: reads before expiry are fine, but once it is
+                // armed+expired the loop must stop at the next iteration.
+                if self.calls == self.arm_at {
+                    self.deadline.arm(Instant::now());
+                }
+                let n = buf.len().min(64);
+                for b in &mut buf[..n] {
+                    *b = b'x';
+                }
+                Ok(n)
+            }
+        }
+        impl AsRawFd for AlwaysOk {
+            fn as_raw_fd(&self) -> RawFd {
+                self.fd.as_raw_fd()
+            }
+        }
+
+        const ARM_AT: usize = 3;
+        const FIXTURE_CAP: usize = 10_000; // >> ARM_AT; bounds a regression's spin.
+        let deadline = Arc::new(DrainDeadline::default());
+        let mut reader = AlwaysOk {
+            fd: File::open("/dev/null").expect("open /dev/null for a real fd"),
+            calls: 0,
+            arm_at: ARM_AT,
+            fixture_cap: FIXTURE_CAP,
+            deadline: deadline.clone(),
+        };
+        let sink = Mutex::new(CapturedStream::default());
+        let terminal = run_drain(&mut reader, &sink, &deadline);
+
+        assert!(
+            matches!(terminal, DrainTerminal::DeadlineReached),
+            "continuous successful reads must stop at the armed deadline, not run to the \
+             fixture's EOF cap (a non-DeadlineReached terminal ⇒ the loop ignored expiry)"
+        );
+        // Stopped at the first iteration after expiry was armed, NOT at the
+        // fixture cap — the runner deadline is distinct from the fixture bound.
+        assert_eq!(
+            reader.calls, ARM_AT,
+            "the drain must stop at the first iteration after expiry was armed; calls={} \
+             (fixture cap={FIXTURE_CAP})",
+            reader.calls
+        );
+    }
+
+    /// B: repeated `Interrupted` retries cannot bypass an armed, expired deadline.
+    #[cfg(unix)]
+    #[test]
+    fn drain_deadline_enforced_across_repeated_interrupted_reads() {
+        use std::fs::File;
+        use std::io::{Error, ErrorKind, Read};
+
+        struct AlwaysInterrupted {
+            fd: File,
+            calls: usize,
+            arm_at: usize,
+            fixture_cap: usize,
+            deadline: Arc<DrainDeadline>,
+        }
+        impl Read for AlwaysInterrupted {
+            fn read(&mut self, _buf: &mut [u8]) -> std::io::Result<usize> {
+                self.calls += 1;
+                if self.calls > self.fixture_cap {
+                    // Regression fallback: EOF ⇒ a failed assertion, never a hang.
+                    return Ok(0);
+                }
+                if self.calls == self.arm_at {
+                    self.deadline.arm(Instant::now());
+                }
+                Err(Error::from(ErrorKind::Interrupted))
+            }
+        }
+        impl AsRawFd for AlwaysInterrupted {
+            fn as_raw_fd(&self) -> RawFd {
+                self.fd.as_raw_fd()
+            }
+        }
+
+        const ARM_AT: usize = 4;
+        const FIXTURE_CAP: usize = 10_000;
+        let deadline = Arc::new(DrainDeadline::default());
+        let mut reader = AlwaysInterrupted {
+            fd: File::open("/dev/null").expect("open /dev/null for a real fd"),
+            calls: 0,
+            arm_at: ARM_AT,
+            fixture_cap: FIXTURE_CAP,
+            deadline: deadline.clone(),
+        };
+        let sink = Mutex::new(CapturedStream::default());
+        let terminal = run_drain(&mut reader, &sink, &deadline);
+
+        assert!(
+            matches!(terminal, DrainTerminal::DeadlineReached),
+            "repeated Interrupted retries must stop at the armed deadline, not spin until the \
+             fixture EOF cap (a non-DeadlineReached terminal ⇒ Interrupted bypassed expiry)"
+        );
+        assert_eq!(
+            reader.calls, ARM_AT,
+            "the drain must stop at the first iteration after expiry was armed; calls={} \
+             (fixture cap={FIXTURE_CAP})",
+            reader.calls
+        );
     }
 }
 
@@ -1986,60 +2293,140 @@ fn classify_child_crash_decision_table() {
 // Run 422 D7-D10 Correction F-B (repaired boundaries) — focused evidence.
 // ============================================================================
 
-/// Focused control A — the CAPTURE path when a descendant keeps the pipe open
-/// AFTER the direct child exits. This is the boundary the repair targets: a
-/// child's exit does NOT by itself establish capture completion, and the runner
-/// must not block indefinitely in a drain join.
+/// Focused control C — REAL active-output capture. A test-OWNED writer keeps
+/// output arriving on the captured stream AFTER the direct child exits, so the
+/// corrected runner's every-iteration deadline (Correction A) is the enforcement
+/// mechanism even under continuous successful reads.
 ///
-/// A real `sh` child backgrounds a `sleep` (which inherits stdout+stderr), emits
-/// the readiness marker to stderr, then SIGABRTs. The backgrounded `sleep` holds
-/// the pipes open past the direct child's death, so the stream never reaches EOF
-/// within the capture-finalize budget. Requirements demonstrated:
-///   * the runner returns within its declared capture/cleanup policy (its join
-///     is bounded by the armed drain deadline, not by the surviving descendant);
+/// A real `sh` direct child emits the readiness marker to stderr then SIGABRTs.
+/// A SEPARATE, test-owned `holder` process (NOT a backgrounded orphan) shares the
+/// same stderr pipe and writes to it continuously; the stream therefore never
+/// reaches EOF within the capture-finalize budget. Requirements demonstrated:
+///   * the runner returns within its declared capture policy (its join is bounded
+///     by the armed drain deadline under continuous output, not by the writer);
 ///   * the capture is classified UNUSABLE (`DeadlineExceeded`);
-///   * the incomplete capture is NOT accepted as the abort marker even though
-///     the marker bytes arrived and the signal is SIGABRT;
-///   * the deliberately spawned descendant is cleaned up (its whole process
-///     group is killed) so nothing is leaked.
+///   * the incomplete capture is NOT accepted as `AbortedAfterMarker` even though
+///     the signal is SIGABRT;
+///   * the test-owned writer's cleanup is EXPLICITLY verified (`KilledAndReaped`),
+///     not assumed or left to init.
 ///
-/// This is a runner control, NOT journal-recovery evidence.
+/// Runner-resource evidence, NOT journal recovery. Timing is corroboration; the
+/// drain-loop deadline is the enforcement mechanism.
 #[cfg(unix)]
 #[test]
-fn runner_capture_incomplete_after_direct_child_exit_is_unusable() {
+fn runner_active_output_after_direct_child_exit_is_unusable_and_writer_reaped() {
     use bounded_child_runner::*;
-    use std::os::unix::process::CommandExt as _;
     use std::time::{Duration, Instant};
 
-    // The direct child dies immediately, so the status-wait deadline is not the
-    // gate here — the capture-finalize budget is. The outer bound is comfortably
-    // above that budget but BELOW the descendant's lifetime, so a regression to
-    // an unbounded join (waiting on the descendant) would exceed it and fail.
     const STATUS_DEADLINE: Duration = Duration::from_secs(60);
     const OUTER_BOUND: Duration = Duration::from_secs(20);
 
-    // `sleep 45 &` keeps the inherited pipes open well past the finalize budget
-    // AND past OUTER_BOUND; the shell then emits the marker and self-aborts. New
-    // process group (`process_group(0)`) so the descendant can be reaped via the
-    // group once the assertions are done.
-    let script = format!("sleep 45 & printf '%s\\n' '{CHILD_RESERVED_MARKER}' 1>&2; kill -s ABRT $$");
-    let mut command = sh_control_command(&script);
-    command.process_group(0);
-    let mut child = BoundedChild::spawn(command, "spawn sh held-pipe control");
-    let pgid = child.child_pid() as i32;
+    // Direct child: marker to stderr, then self-abort (no backgrounding).
+    let direct = sh_control_command(&format!(
+        "printf '%s\\n' '{CHILD_RESERVED_MARKER}' 1>&2; kill -s ABRT $$"
+    ));
+    // Test-owned ACTIVE writer: a POSIX sh loop (no external binary) that keeps
+    // writing to the SHARED stderr pipe, so the captured stream stays active past
+    // the direct child's exit — exercising continuous successful reads.
+    let holder = sh_control_command("while :; do printf 'yyyy\\n' 1>&2; done");
+
+    let (mut child, mut writer) =
+        BoundedChild::spawn_with_pipe_holder(direct, holder, "spawn active-output held-pipe control");
 
     let start = Instant::now();
     let outcome = child.wait_self_termination(STATUS_DEADLINE);
     let elapsed = start.elapsed();
 
-    // Clean up the deliberately spawned descendant group (best-effort). The
-    // orphaned `sleep` is reparented to init, which reaps it after this SIGKILL.
-    let _ = unsafe { libc::kill(-pgid, libc::SIGKILL) };
-
-    // (1) The join did NOT block on the surviving descendant.
+    // (1) The join did NOT block on the active writer.
     assert!(
         elapsed < OUTER_BOUND,
-        "runner must return within the capture/cleanup policy, not block on the held pipe; \
+        "runner must return within the capture policy under continuous output, not block on the \
+         writer; elapsed={elapsed:?}"
+    );
+
+    match outcome {
+        SelfTermination::Exited {
+            status,
+            stderr,
+            capture,
+        } => {
+            // (2) Continuous output ⇒ never EOF ⇒ explicitly unusable.
+            assert_eq!(
+                capture,
+                CaptureOutcome::DeadlineExceeded,
+                "an active writer kept the stream open ⇒ capture is unusable (DeadlineExceeded), \
+                 got {capture:?}"
+            );
+            // (3) The incomplete capture is NOT accepted as AbortedAfterMarker,
+            // despite the SIGABRT (marker presence is irrelevant once the capture
+            // is not Complete).
+            let marker = stderr.contains(CHILD_RESERVED_MARKER);
+            assert_eq!(
+                classify_child_crash(status, marker, &capture, EXPECTED_ABORT_SIGNAL),
+                ChildCrashClass::SignalButMarkerUnusable {
+                    signal: EXPECTED_ABORT_SIGNAL
+                },
+                "an incomplete (active) capture cannot establish reservation-before-abort"
+            );
+        }
+        SelfTermination::Timeout {
+            cleanup,
+            capture,
+            stderr,
+        } => panic!(
+            "the direct child aborts promptly; expected Exited(SIGABRT), got Timeout \
+             cleanup={cleanup:?} capture={capture:?} stderr=\n{stderr}"
+        ),
+    }
+
+    // (4) NORMAL-PATH cleanup of the test-owned writer is EXPLICITLY verified and
+    // its result reported — not discarded, and not left to init.
+    let cleanup = writer.verify_cleanup(REAP_BUDGET);
+    assert_eq!(
+        cleanup,
+        CleanupResult::KilledAndReaped,
+        "the test-owned active writer must be explicitly killed+reaped on the normal path, got \
+         {cleanup:?}"
+    );
+}
+
+/// Focused control D — REAL idle held-pipe capture + owned-helper cleanup. A
+/// test-OWNED idle holder keeps the pipe open (no output) past the direct child's
+/// marker-then-SIGABRT, so the captured stream never reaches EOF and the drain
+/// stops at the armed deadline via the `WouldBlock` poll path. Requirements:
+///   * the runner returns within its capture policy (bounded join, not a block);
+///   * the capture is UNUSABLE (`DeadlineExceeded`) even though the marker bytes
+///     arrived and the signal is SIGABRT (`SignalButMarkerUnusable`);
+///   * the test-owned holder is EXPLICITLY cleaned up (`KilledAndReaped`) on the
+///     normal path — no orphan, no reliance on init.
+///
+/// Runner-resource evidence, NOT journal recovery.
+#[cfg(unix)]
+#[test]
+fn runner_idle_held_pipe_after_direct_child_exit_is_unusable_and_holder_reaped() {
+    use bounded_child_runner::*;
+    use std::time::{Duration, Instant};
+
+    const STATUS_DEADLINE: Duration = Duration::from_secs(60);
+    const OUTER_BOUND: Duration = Duration::from_secs(20);
+
+    let direct = sh_control_command(&format!(
+        "printf '%s\\n' '{CHILD_RESERVED_MARKER}' 1>&2; kill -s ABRT $$"
+    ));
+    // Test-owned IDLE holder: replaces the shell so the ONLY thing keeping the
+    // shared pipes open is this owned `sleep` (no output of its own).
+    let holder = sh_control_command("exec sleep 45");
+
+    let (mut child, mut owned) =
+        BoundedChild::spawn_with_pipe_holder(direct, holder, "spawn idle held-pipe control");
+
+    let start = Instant::now();
+    let outcome = child.wait_self_termination(STATUS_DEADLINE);
+    let elapsed = start.elapsed();
+
+    assert!(
+        elapsed < OUTER_BOUND,
+        "runner must return within the capture policy, not block on the idle held pipe; \
          elapsed={elapsed:?}"
     );
 
@@ -2050,15 +2437,19 @@ fn runner_capture_incomplete_after_direct_child_exit_is_unusable() {
             capture,
         } => {
             let marker = stderr.contains(CHILD_RESERVED_MARKER);
-            // (2) Capture never reached EOF ⇒ explicitly unusable.
+            // The idle holder adds no bytes, so the marker is retained; the
+            // capture is still unusable because EOF never arrived.
+            assert!(
+                marker,
+                "the direct child's marker should be captured before the held-open stall; \
+                 stderr=\n{stderr}"
+            );
             assert_eq!(
                 capture,
                 CaptureOutcome::DeadlineExceeded,
-                "a descendant held the pipe open ⇒ capture is unusable (DeadlineExceeded), got \
-                 {capture:?}; stderr=\n{stderr}"
+                "an idle descendant held the pipe open ⇒ capture is unusable (DeadlineExceeded), \
+                 got {capture:?}; stderr=\n{stderr}"
             );
-            // (3) The incomplete capture is NOT accepted as the abort marker,
-            // despite the SIGABRT signal and the marker bytes having arrived.
             assert_eq!(
                 classify_child_crash(status, marker, &capture, EXPECTED_ABORT_SIGNAL),
                 ChildCrashClass::SignalButMarkerUnusable {
@@ -2076,6 +2467,64 @@ fn runner_capture_incomplete_after_direct_child_exit_is_unusable() {
              cleanup={cleanup:?} capture={capture:?} stderr=\n{stderr}"
         ),
     }
+
+    // NORMAL-PATH cleanup of the test-owned holder is EXPLICITLY verified.
+    let cleanup = owned.verify_cleanup(REAP_BUDGET);
+    assert_eq!(
+        cleanup,
+        CleanupResult::KilledAndReaped,
+        "the test-owned idle holder must be explicitly killed+reaped on the normal path, got \
+         {cleanup:?}"
+    );
+}
+
+/// Focused control — the owned-helper cleanup GUARD is installed immediately and
+/// RUNS during an assertion unwind, so an early panic cannot leak the test-owned
+/// holder. Demonstrates the Correction-B requirement that cleanup protection is
+/// in place BEFORE fallible observations and executes during unwinding.
+///
+/// Runner-resource evidence, NOT journal recovery.
+#[cfg(unix)]
+#[test]
+fn owned_holder_cleanup_guard_runs_on_unwind() {
+    use bounded_child_runner::*;
+    use std::time::{Duration, Instant};
+
+    let holder = OwnedHolder::spawn(sh_control_command("exec sleep 45"), "unwind-control holder");
+    let pid = holder.holder_pid() as i32;
+
+    // Sanity: the holder is alive before the unwind.
+    assert_eq!(
+        unsafe { libc::kill(pid, 0) },
+        0,
+        "the owned holder must be alive before the unwind"
+    );
+
+    // Move the holder INTO a closure that panics after installation; the panic
+    // unwinds through `holder`'s Drop, which performs the bounded kill+reap. The
+    // guard is therefore exercised exactly as it would be on an assertion failure.
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || {
+        let _guard = holder; // owned here; its Drop runs on the panic below
+        panic!("deliberate early failure to exercise the owned-holder cleanup guard");
+    }));
+    assert!(result.is_err(), "the closure must have panicked");
+
+    // After the unwind the guard must have killed AND reaped the holder: its PID
+    // is no longer a live process (`kill(pid, 0)` → ESRCH). Bounded poll avoids a
+    // scheduling race; a leak would keep the PID live until this deadline.
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let mut gone = false;
+    while Instant::now() < deadline {
+        if unsafe { libc::kill(pid, 0) } == -1 {
+            gone = true;
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    assert!(
+        gone,
+        "the cleanup guard must kill+reap the owned holder during unwind (pid {pid} still live)"
+    );
 }
 
 /// Focused control B — SEAM-based cleanup classification. Uses the private

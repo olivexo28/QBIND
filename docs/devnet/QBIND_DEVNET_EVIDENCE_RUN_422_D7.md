@@ -10290,3 +10290,219 @@ Retained posture (unchanged): overall `D7D10_LOCAL_SIGNING_RESERVATION=PARTIAL`;
 verdicts preserved. No aggregate D10 promotion, D11, Run 423, production journal
 initialization, signing enablement, activation, or anti-rollback implementation is
 performed here.
+
+## Run 422 D7-D10 — Correction F-B — finalization: unconditional drain deadline and verified control cleanup
+
+Test/documentation-only follow-up to the Correction F-B repair above. It repairs the two
+residual F-B findings and **supersedes** the two earlier claims that a `WouldBlock`-only
+check bounded all draining and that the discarded process-group kill of a backgrounded
+orphan established descendant cleanup. **Only** the existing integration target
+`crates/qbind-node/tests/run_422_d7d10_signing_reservation_journal_tests.rs` and these two
+docs were changed. No production source, dependency, feature, storage API, journal
+semantic, or shared process framework changed. The accepted **F-A engine-progress tests
+are unchanged**, and the real child reserve–abort–reopen (E) evidence is preserved.
+
+**Checkpoint identity.** Actual branch
+`copilot/copilotcopilotcopilotcopilotrun-422-corrections` on a **shallow single-branch
+clone** (`.git/shallow`); the reviewed revisions `2c067a950660583006f13245a26d2fac7734aeb7`
+and `a8c26884845cf6784bb1c8b175c492fafabd655f` are **UNAVAILABLE** here (`git cat-file`
+fails), so the current implementation was inspected directly and no ancestry was
+manufactured. Starting HEAD for this pass: `fdae083`. Worktree was clean; `task/warning.txt`
+and unrelated files preserved. Code/test checkpoint committed as
+`06c6423e577f9235ea772e2e59267dbe693ee3e6` **before** recording these validation results;
+these doc edits are committed in the following checkpoint on the same branch and do not
+alter the executable or tests validated at the code/test checkpoint.
+
+### Correction A — the armed drain deadline is enforced on EVERY iteration
+
+`run_drain` now checks the armed stop deadline at the **top of the loop**, BEFORE the next
+`read` and regardless of the previous read's outcome. Expiry is therefore independent of
+`read()`:
+
+* continuous successful reads (`Ok(n)`) cannot postpone or reset it;
+* repeated `Interrupted` retries cannot bypass it (the `Interrupted => continue` arm returns
+  to the top-of-loop expiry check);
+* output that keeps arriving after the 256 KiB capture cap is reached still stops at the
+  deadline — the cap drops bytes, it does not end the loop.
+
+The capture cap bounds **memory only** and is explicitly not a timing mechanism; the armed
+deadline is the sole timing bound and makes the drain worker return (and be joined) WITHOUT
+relying on EOF or an eventual `WouldBlock`. Pipe reads stay non-blocking; both stdout and
+stderr follow this bounded drain. The five capture outcomes remain distinct, and deadline
+termination remains the explicit **unusable** `CaptureOutcome::DeadlineExceeded`. Normal
+EOF, marker classification, and the existing process/reap budgets are preserved; abort
+acceptance was not weakened.
+
+### Deterministic reader-seam controls (A/B) — no real process
+
+Two controls drive the **actual** `run_drain` loop with synthetic `Read` fixtures (a real
+`/dev/null` fd only satisfies `set_nonblocking`; the synthetic `read()` drives the logic):
+
+* `drain_deadline_enforced_across_continuous_successful_reads` — a reader that supplies
+  successful reads continuously arms an already-expired deadline after a few reads; the loop
+  stops with `DeadlineReached` at the next iteration (`calls == arm_at`).
+* `drain_deadline_enforced_across_repeated_interrupted_reads` — a reader that returns
+  `Interrupted` continuously, arming expiry after a few retries; the loop stops with
+  `DeadlineReached` (`calls == arm_at`).
+
+Each fixture is bounded INDEPENDENTLY of the runner deadline by its own `fixture_cap`
+(10 000): on the reviewed (regressed) implementation — top-of-loop check removed —
+both controls **fail** on a different terminal (fixture EOF) rather than hanging. This was
+verified directly: reverting only the top-of-loop check made both controls FAIL (bounded,
+`finished in 0.01s`), and restoring it made them pass.
+
+### Correction B — test-owned, verified pipe-holder cleanup (idle, active, and unwind)
+
+The held-pipe control no longer backgrounds a descendant orphaned to init and no longer
+discards a process-group kill. `BoundedChild::spawn_with_pipe_holder` builds the TEST's own
+stdout+stderr pipes, wires cloned write ends to BOTH the direct child and a separately
+spawned **holder process the test owns**, and hands the read ends to the existing drain
+threads — so the captured stream stays open after the direct child exits. The holder's
+cleanup guard (`OwnedHolder`) is installed **immediately** on creation, before any fallible
+observation: its `Drop` performs a best-effort, non-panicking, bounded kill+reap, and the
+normal path additionally calls `OwnedHolder::verify_cleanup`, which reuses the pure
+`drive_cleanup` driver and returns the structured `CleanupResult`. The kill error is never
+discarded and `reaped` is set only on an observed status, so a cleanup failure is reported,
+not assumed. No process group, subreaper, or process-global signal handler is used, so
+parallel tests are unaffected. The direct child's observed abort is kept distinct from the
+independently owned holder.
+
+Real-process controls (runner-resource evidence, NOT journal recovery):
+
+* `runner_idle_held_pipe_after_direct_child_exit_is_unusable_and_holder_reaped` — an **idle**
+  owned holder (`exec sleep 45`) holds the shared pipe open with no output; the direct child
+  emits the marker and SIGABRTs. The runner returns within its capture policy (< 20 s outer
+  bound), the capture is `DeadlineExceeded` (the drain stops via the `WouldBlock` poll path
+  at the armed deadline), the marker-present-but-incomplete capture is refused
+  (`SignalButMarkerUnusable`, never `AbortedAfterMarker`), and the holder is explicitly
+  `KilledAndReaped` on the normal path.
+* `runner_active_output_after_direct_child_exit_is_unusable_and_writer_reaped` — an **active**
+  owned writer (a POSIX `while :; do printf 'yyyy\n' 1>&2; done` loop, no external binary)
+  keeps writing to the shared stderr pipe after the direct child exits, exercising the
+  every-iteration deadline under **continuous successful reads**. Same outcomes:
+  `DeadlineExceeded`, `SignalButMarkerUnusable`, within the capture policy, writer explicitly
+  `KilledAndReaped`.
+* `owned_holder_cleanup_guard_runs_on_unwind` — a focused early-failure control owns a holder,
+  then panics inside `catch_unwind`; after the unwind it observes (bounded `kill(pid, 0)` →
+  ESRCH poll) that the guard killed+reaped the holder during unwinding, demonstrating the
+  guard is installed and used on the failure path.
+
+The idle and active controls exercise different drain paths (`WouldBlock`-poll vs.
+continuous-successful-read), both terminating at the same armed deadline. The injected-seam
+cleanup classifier `drive_cleanup_classifies_failures_without_false_reaping` (no real
+process) and the pure constructed-`ExitStatus` decision table are retained.
+
+### Real child-recovery outcome (unchanged journal/accounting)
+
+`reserved_only_child_death_then_reopen_refuses` runs through the corrected runner: observed
+`AbortedAfterMarker { signal: 6 }`; fresh RocksDB handle + ownership domain on reopen; valid
+`Reserved` record present at the exact position/binding; **exact retry → `PotentiallySigned`**;
+**conflicting binding → `Conflict`**; raw `get_signing_record` bytes and `get_signing_metadata`
+**byte-identical** across the refusals. Unchanged from the accepted F-B record/refusal
+assertions.
+
+### Validation (code/test checkpoint `06c6423e…` on this task branch; dev profile; exit 0)
+
+Overlapping subsets reported separately (not summed). The one ignored integration test is
+the child helper `d7d10_child_reserve_then_abort`; it runs as a harmless no-op when invoked
+directly (its recovery meaning exists only when the active parent re-executes it with
+`QBIND_D7D10_CHILD_DB` set), so a direct `--include-ignored` invocation is **not** an
+additional recovery scenario.
+
+* `cargo test -p qbind-node --test run_422_d7d10_signing_reservation_journal_tests`
+  (default features) — **34 passed, 0 failed, 1 ignored** (the child helper).
+* `cargo test -p qbind-node --test run_422_d7d10_signing_reservation_journal_tests -- --include-ignored`
+  (default features) — **35 passed, 0 failed, 0 ignored** (the child helper runs as a no-op).
+* `cargo test -p qbind-node --features test-utils --test run_422_d7d10_signing_reservation_journal_tests -- --include-ignored`
+  — **40 passed, 0 failed, 0 ignored** (the +5 over the default run are the `test-utils`-gated
+  unknown-version and raw-seam direct-read cases).
+* Focused new/strengthened controls, run directly on the built executable
+  (`drain_deadline_enforced_across_continuous_successful_reads`,
+  `drain_deadline_enforced_across_repeated_interrupted_reads`,
+  `runner_idle_held_pipe_after_direct_child_exit_is_unusable_and_holder_reaped`,
+  `runner_active_output_after_direct_child_exit_is_unusable_and_writer_reaped`,
+  `owned_holder_cleanup_guard_runs_on_unwind`) — **all passed**; and the regression check above
+  (reverted top-of-loop check) confirmed the two seam controls FAIL bounded, not hang.
+* `cargo test -p qbind-node --lib run422_d7d10` — **64 passed, 0 failed**.
+* `cargo test -p qbind-node --lib correction_f_engine` — **3 passed, 0 failed** (accepted F-A
+  engine-progress, unchanged).
+* `cargo check -p qbind-node --bins --lib` — exit 0.
+* Focused Clippy `cargo clippy -p qbind-node --test run_422_d7d10_signing_reservation_journal_tests`
+  — **no warnings in the changed file** (the reported warnings are pre-existing in the
+  `qbind-node` lib, unrelated to this change).
+* Changed-region hygiene: the changed `.rs` file and both docs remain **CRLF** with their
+  original no-trailing-newline EOF and no space-before-CR trailing whitespace; the diff is
+  confined to the F-B runner module (`run_drain`, `DrainDeadline` docs, the new
+  `spawn_with_pipe_holder`/`OwnedHolder`, the seam tests) and the control tests;
+  `task/warning.txt` preserved.
+
+### Re-executed integration-test artifact identity
+
+The child-recovery test re-executes the **default-feature** test executable. Both artifacts
+are recorded with correct attribution (build-dependent; the filename hash and SHA-256 change
+on any rebuild; no production-node release build is required for this test-only correction):
+
+* Default features (the artifact the child-recovery test re-executes):
+  * Source checkpoint: `06c6423e577f9235ea772e2e59267dbe693ee3e6` (code/test commit).
+  * Path: `target/debug/deps/run_422_d7d10_signing_reservation_journal_tests-278b729b96e64c0e`
+    (the **test executable**, NOT the production node binary).
+  * Profile / features: `dev`/debug (unoptimized + debuginfo); default features.
+  * Byte length: **306473976**.
+  * SHA-256: `37f28a05cc7d8e566d7545b4f14bca15ee85d62e1f8143e099d06f774b02d429`.
+* `--features test-utils`:
+  * Path: `target/debug/deps/run_422_d7d10_signing_reservation_journal_tests-3b3133d90dc6ef80`.
+  * Profile / features: `dev`/debug; `--features test-utils`.
+  * Byte length: **306440280**.
+  * SHA-256: `fc8142d7dac29338e7957dc47bc7d5211b138308387a0dbd96ad36a88cc5e83a`.
+
+### Security-tool outcomes (literal)
+
+Attempted once via the harness `parallel_validation`. The CodeQL change was declared
+**trivial** (test-only + documentation-only changes, matching the CodeQL trivial categories),
+and the literal outcomes were:
+
+* **Code Review — DID NOT complete a real review.** The result line read "No review comments
+  found", but the accompanying note reported the review tool was **unavailable** in this
+  environment (`autofind` binary not found at the searched paths). "No review comments found"
+  is therefore **NOT** a clean review.
+* **CodeQL — Skipped (not executed).** Reported "Skipped: all changes are trivial" under the
+  trivial declaration for this test-only + documentation-only change; no scan ran, so there
+  is no "0 alerts" result to claim.
+
+Neither constitutes a completed security analysis. Per the task, unavailable/skipped tooling
+was attempted once and recorded literally (not re-run repeatedly, and no infrastructure was
+changed). Security posture remains `RS1-OPEN / PUBLIC-DEVNET-NO-GO`; this
+test/documentation-only change does not alter it.
+
+### Documentation reconciliation and scoped verdict
+
+The contract (`docs/protocol/QBIND_PROPOSAL_VOTE_SIGNING_STATE_CONTINUITY_CONTRACT.md`,
+F-B finalization subsection) and the Correction F-B repair bullets above are reconciled: the
+claims that a `WouldBlock`-only check bounded all draining and that the discarded
+process-group kill of a backgrounded orphan established descendant cleanup are **superseded**
+by the every-iteration deadline and the test-owned, verified pipe-holder cleanup. Idle and
+active held-pipe controls are documented as exercising different drain paths; real-process
+evidence is kept distinct from the deterministic reader/cleanup seams; normal-path cleanup
+verification is distinguished from best-effort `Drop` unwind cleanup. Prior per-command,
+release, and artifact figures remain at their actual historical checkpoints and are not
+relabelled as newly executed. `contradiction.md` was inspected **read-only**; no new
+operative contradiction is introduced by this test/documentation-only change, and no C4/C5
+closure is claimed.
+
+With the repaired F-B requirements demonstrated (unconditional drain deadline + test-owned
+verified control cleanup, with the regression actually caught), the scoped verdict is
+reaffirmed:
+
+```
+D7D10_CORRECTION_F_ENGINE_PROGRESS_AND_CHILD_RECOVERY=CODE-AND-PROCESS-TEST-POSITIVE
+```
+
+Retained posture (unchanged): overall `D7D10_LOCAL_SIGNING_RESERVATION=PARTIAL`; accepted
+A–E and F-A evidence; `D7D8_RESTORE_COMPLETION_CONTAINMENT=CODE-AND-RELEASE-TEST-POSITIVE`;
+`D7_STATUS=PARTIAL-CODE-TEST / PRODUCTION-LIFECYCLE-UNAVAILABLE`;
+`DURABLE_ANTI_ROLLBACK=NOT-ESTABLISHED`; `GENESIS_AUTHORITY_ACTIVATION=DISABLED`;
+`PRODUCTION_WIRE_CHAIN_ID_BEHAVIOR=UNCHANGED`;
+`CONFIGURED_AUTHORITY_RELEASE_BINARY_EVIDENCE=NOT-YET-CAPTURED`;
+`SECURITY_POSTURE=RS1-OPEN / PUBLIC-DEVNET-NO-GO`; C4/C5 OPEN. No aggregate D10 promotion,
+D11, Run 423, production journal initialization, signing enablement, activation, or
+anti-rollback implementation is performed here.

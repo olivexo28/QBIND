@@ -1623,6 +1623,51 @@ without any false `reaped=true`. A pure constructed-`ExitStatus` decision table 
 No fixed sleep stands in for a child's exit, and no outer tool timeout is the runner
 deadline.
 
+*F-B finalization (this pass — test + documentation only).* Two residual F-B findings
+are now repaired, superseding the two statements above that (a) a `WouldBlock`-only check
+bounded all draining and (b) the discarded process-group kill of a backgrounded orphan
+established descendant cleanup:
+
+* **Unconditional drain deadline.** The armed stop deadline is now checked on **every**
+  `run_drain` iteration — at the top of the loop, BEFORE the next `read` and regardless of
+  the previous read's outcome — not only on `WouldBlock`. Continuous successful reads
+  (`Ok(n)`) can no longer postpone or reset it, repeated `Interrupted` retries can no
+  longer bypass it, and output that keeps arriving after the capture cap is reached still
+  terminates at the deadline. The capture cap bounds **memory only** and is explicitly not
+  a timing mechanism; the armed deadline is the sole timing bound and makes the drain
+  worker return (and be joined) without relying on EOF or an eventual `WouldBlock`. Both
+  stdout and stderr follow this bounded drain. The five capture outcomes remain distinct
+  (`Complete`, `Truncated`, `ReadFailed`, `DeadlineExceeded`, `ThreadPanicked`/
+  `StillDraining`); deadline termination remains the explicit **unusable** `DeadlineExceeded`
+  outcome. Two deterministic reader-seam controls drive the actual `run_drain` loop with
+  synthetic `Read` fixtures — one producing continuous successful reads, one producing
+  repeated `Interrupted` — each bounded INDEPENDENTLY of the runner deadline (its own
+  fixture cap) so a regression that ignored the deadline fails on a different terminal
+  (fixture EOF) rather than hanging. These are deterministic seams, not real processes.
+* **Test-owned, verified pipe-holder cleanup.** The held-pipe control no longer backgrounds
+  a descendant orphaned to init and no longer discards a process-group kill. Instead the
+  test builds its OWN pipes and spawns a separate **holder process whose lifetime the test
+  owns**, sharing the direct child's stdout+stderr so the captured stream stays open after
+  the direct child exits. The holder's cleanup guard (`OwnedHolder`) is installed
+  **immediately** on creation, before any fallible observation: its `Drop` performs a
+  best-effort, non-panicking, bounded kill+reap so an assertion unwind cannot leak it, and
+  the normal path additionally calls `verify_cleanup`, which returns the structured
+  `CleanupResult` (reusing the same `drive_cleanup` driver) — the kill error is never
+  discarded and reaping is claimed only on an observed status, so a cleanup failure is
+  reported, not assumed. The direct child's observed abort is kept distinct from the
+  independently owned holder. Two real-process controls exercise this: an **idle** holder
+  (`exec sleep`) that holds the pipe open without output, and an **active** holder (a POSIX
+  `while :; do printf … 1>&2; done` loop) that keeps writing after the direct child exits —
+  the latter exercising the every-iteration deadline under continuous successful reads.
+  Both require the runner to return within its capture policy, classify the capture
+  `DeadlineExceeded`, refuse the incomplete capture (`SignalButMarkerUnusable`, never
+  `AbortedAfterMarker`), and then **verify** `KilledAndReaped` on the normal path. A focused
+  early-failure control panics while a holder is owned and observes (via `kill(pid, 0)` →
+  ESRCH) that the guard killed+reaped the holder during unwinding — demonstrating the guard
+  is installed and used. No process group, subreaper, or process-global signal handler is
+  introduced, so parallel tests are unaffected. The injected-seam cleanup classifier
+  control and the pure constructed-`ExitStatus` decision table are retained.
+
 *Platform honesty.* The signal classification uses the Unix `ExitStatusExt::signal()`
 and the POSIX-fixed SIGABRT value, so the bounded parent and runner controls are
 `#[cfg(unix)]`; the supported profile is Unix/Linux. Model reopen, real-RocksDB reopen,
