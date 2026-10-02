@@ -1565,11 +1565,16 @@ is simulated by variable assignment, a second handle, a rewritten view, or a res
 initializer, and engine-current-view equality is **not** introduced as a new signing
 prerequisite. Cached-reemission eligibility rules are preserved unchanged.
 
-*F-B — bounded, classified child recovery.* `reserved_only_child_death_then_reopen_refuses`
+*F-B — bounded, classified child recovery (deadline-bounded draining + verified
+cleanup).* `reserved_only_child_death_then_reopen_refuses`
 is rewritten as a `#[cfg(unix)]` deadline-bounded, explicitly termination-classified
-runner (the capture + bounded process-status-wait + pure-classification patterns are
+runner whose process-status deadline **also bounds output draining and cleanup** and
+whose cleanup is a verified, structured result (superseding the earlier F-B posture,
+which left draining bounded only by unconditional thread joins and reported `Timeout` as
+"killed and reaped" without directly establishing reaping). The capture + bounded
+process-status-wait + pure-classification patterns are
 adapted **minimally** from the established D3 runner — the whole D3 target is **not**
-duplicated). It re-executes THIS integration-test executable with the exact ignored
+duplicated. It re-executes THIS integration-test executable with the exact ignored
 child-helper selection via **per-`Command`** environment configuration (no
 process-global `set_var`). `d7d10_child_reserve_then_abort` now emits+flushes a
 distinctive readiness marker to stderr **only after** the real RocksDB reservation
@@ -1579,20 +1584,43 @@ deadline and explicit `try_wait` process-status observation, preserves the FULL
 `ExitStatus`, and accepts the crash **only** when it is SIGABRT (signal 6) **and** the
 readiness marker was captured completely: an ordinary nonzero exit, a panic (nonzero
 exit, no signal), an unrelated terminating signal, a missing/unusable marker, or a
-deadline all fail. A deadline is a test failure with explicit kill+reap (never
-reinterpreted as crash evidence); spawn/status/capture/cleanup errors are handled
-explicitly and output draining is bounded (joined drain threads) so it cannot
-introduce an unbounded wait. After the child is reaped, the parent opens a FRESH
-RocksDB handle + ownership domain, inspects the valid `Reserved` record at the exact
-position/binding, and asserts exact retry returns `PotentiallySigned` (never a fresh
-continuation or signed result), a conflicting binding returns `Conflict`, and the raw
-record bytes + persistent accounting are unchanged across the refusals. Focused runner
-controls on the SAME classification path (controlled single-process `sh` children)
-cover: marker+SIGABRT accepted; marker+normal-nonzero-exit rejected; marker+unexpected
-signal (SIGTERM) rejected; SIGABRT-without-marker rejected; alive-past-deadline
-Timeout + reaped (returns within a generous outer bound, proving cleanup does not wait
-on the surviving process); plus a pure constructed-`ExitStatus` decision table. No
-fixed sleep stands in for a child's exit, and no outer tool timeout is the runner
+deadline all fail. **The process-status deadline additionally bounds the work that
+follows it via two separate finite budgets**, so no blocking boundary is unbounded:
+output draining is **deadline-aware** (non-blocking pipe reads plus an armed stop
+deadline — joining a drain thread is **not** itself the bound; the armed stop is), and
+cleanup/reaping is bounded by `try_wait` polling (never a blocking `Child::wait()` on a
+potentially live child). A drain thread that only ever sees `WouldBlock` because a
+descendant inherited the pipe after the direct child exited therefore **stops at the
+stop deadline and is joined**, and that stream's capture is classified as the explicit
+unusable outcome `DeadlineExceeded` rather than letting an incomplete capture pass or
+blocking the join forever. A deadline is a test failure with explicit kill+reap (never
+reinterpreted as crash evidence); spawn/status/capture/cleanup errors are surfaced as
+**structured, inspectable outcomes** rather than discarded. Cleanup is reported as an
+explicit `CleanupResult` — `AlreadyReaped`, `KilledAndReaped` (termination requested
+**and** reaping verified by an observed status, covering the exit-vs-kill race),
+`TerminationRequestFailed`, `ReapObservationFailed`, or `DeadlineExpired` — and `reaped`
+is set **only** on an observation that establishes reaping, so a failed cleanup is never
+described as "killed and reaped". The `Timeout` outcome carries this concrete
+`CleanupResult` and capture outcome; the timeout control **asserts verified reaping**
+(`KilledAndReaped`) and a bounded capture, with the short elapsed time as corroboration
+only — not as the mechanism enforcing the deadline. After the child is reaped, the
+parent opens a FRESH RocksDB handle + ownership domain, inspects the valid `Reserved`
+record at the exact position/binding, and asserts exact retry returns `PotentiallySigned`
+(never a fresh continuation or signed result), a conflicting binding returns `Conflict`,
+and the raw record bytes + persistent accounting are unchanged across the refusals. The
+child helper now **fails** (rather than silently discarding) if the readiness marker
+write or flush errors. Focused runner controls on the SAME classification path cover,
+over **real processes**: marker+SIGABRT accepted; marker+normal-nonzero-exit rejected;
+marker+unexpected signal (SIGTERM) rejected; SIGABRT-without-marker rejected;
+alive-past-deadline → `Timeout` with asserted `KilledAndReaped` + bounded capture; and a
+**held-pipe** control where a backgrounded descendant keeps the pipe open past the direct
+child's marker-then-SIGABRT, proving the runner returns within its capture budget,
+classifies the capture `DeadlineExceeded`, and refuses the incomplete capture
+(`SignalButMarkerUnusable`) while cleaning up the descendant's process group. A separate
+**injected-seam** control drives the pure cleanup classifier with scripted
+kill/observe/expiry results (no real process) to show each failure outcome is reached
+without any false `reaped=true`. A pure constructed-`ExitStatus` decision table remains.
+No fixed sleep stands in for a child's exit, and no outer tool timeout is the runner
 deadline.
 
 *Platform honesty.* The signal classification uses the Unix `ExitStatusExt::signal()`
