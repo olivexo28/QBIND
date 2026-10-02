@@ -6,9 +6,13 @@
 //! They exercise the journal over a *real* `RocksDbConsensusStorage` backend
 //! (durable `set_sync(true)` writes) using genuine close/reopen controls, plus
 //! a child-process death/reopen case using test-only self re-exec
-//! orchestration. The child runner is NOT a bounded or classified-termination
-//! runner (it waits with an unbounded `.status()` and only checks "not
-//! success"); it therefore does not close Correction F.
+//! orchestration. The child runner is a `#[cfg(unix)]` deadline-bounded,
+//! termination-classified runner: it waits for the child with repeated
+//! `try_wait` process-status polling under an internal deadline, bounds
+//! subsequent output draining and cleanup with separate finite budgets
+//! (deadline-aware non-blocking pipe drains + `try_wait`-based reaping), and
+//! only accepts an expected SIGABRT when the readiness marker was captured
+//! completely.
 //!
 //! Scope / honesty notes:
 //! * A "restart" or "reopen" is modelled by dropping the `RocksDbConsensusStorage`
@@ -1066,12 +1070,14 @@ fn d7d10_child_reserve_then_abort() {
     // Durable reservation acknowledged. Emit+flush the distinctive readiness
     // marker BEFORE the intentional abort, so the bounded parent can require
     // reliable, complete capture of "reservation acknowledged, not yet signed".
-    // The abort precedes any signer invocation or result publication.
+    // The abort precedes any signer invocation or result publication. A marker
+    // write/flush FAILURE must fail the helper (nonzero/panic exit, no SIGABRT),
+    // never be silently discarded so the parent sees a marker-less abort.
     {
         use std::io::Write as _;
         let mut err = std::io::stderr();
-        let _ = writeln!(err, "{}", CHILD_RESERVED_MARKER);
-        let _ = err.flush();
+        writeln!(err, "{}", CHILD_RESERVED_MARKER).expect("child must emit readiness marker");
+        err.flush().expect("child must flush readiness marker before abort");
     }
     std::process::abort();
 }
@@ -1108,6 +1114,7 @@ fn child_binding() -> BindingDigest {
 #[cfg(unix)]
 mod bounded_child_runner {
     use std::io::Read;
+    use std::os::unix::io::{AsRawFd, RawFd};
     use std::os::unix::process::ExitStatusExt;
     use std::process::{Child, Command, ExitStatus, Stdio};
     use std::sync::{Arc, Mutex, MutexGuard};
@@ -1120,25 +1127,120 @@ mod bounded_child_runner {
 
     const CAPTURE_CAP_BYTES: usize = 256 * 1024;
 
+    // ---- Overall deadline policy (honest statement) --------------------------
+    // The process-status wait (`wait_self_termination`) bounds how long we wait
+    // for the child to die ON ITS OWN. Two SEPARATE finite budgets then bound the
+    // work that follows it, so NO blocking boundary is unbounded:
+    //
+    //   * CAPTURE_FINALIZE_BUDGET bounds output draining. Draining is deadline
+    //     aware (non-blocking pipe reads + an armed stop deadline), so a drain
+    //     thread can never block indefinitely on a descendant that inherited the
+    //     pipe after the direct child exited — it stops and the join completes.
+    //   * REAP_BUDGET bounds termination + reaping via `try_wait` polling (never
+    //     a blocking `Child::wait()` on a potentially live child).
+    //
+    // Overall wall-clock bound for one runner call ≈ status deadline
+    // + REAP_BUDGET (timeout path only) + CAPTURE_FINALIZE_BUDGET. These are hard
+    // budgets on a cooperating Unix kernel; they are NOT a proof the kernel will
+    // always complete termination. Inability to verify reaping within the budget
+    // is surfaced as an explicit cleanup failure (see `CleanupResult`), never as a
+    // success claim.
+    pub(super) const CAPTURE_FINALIZE_BUDGET: Duration = Duration::from_secs(5);
+    pub(super) const REAP_BUDGET: Duration = Duration::from_secs(5);
+    const DRAIN_POLL_STEP: Duration = Duration::from_millis(5);
+    const REAP_POLL_STEP: Duration = Duration::from_millis(10);
+
+    /// A shared, one-shot "stop draining by" deadline. Drain threads normally run
+    /// until EOF (so pipe pressure can never deadlock the live child); once the
+    /// parent is finalizing capture it ARMS this deadline, and a drain thread that
+    /// is still only seeing `WouldBlock` (a descendant is holding the pipe open)
+    /// stops at the deadline instead of blocking forever. This is the mechanism
+    /// that makes the join in `finalize_drains` bounded — joining is NOT itself a
+    /// deadline.
+    #[derive(Default)]
+    struct DrainDeadline {
+        at: Mutex<Option<Instant>>,
+    }
+
+    impl DrainDeadline {
+        fn arm(&self, when: Instant) {
+            let mut g = self.at.lock().unwrap_or_else(|p| p.into_inner());
+            if g.is_none() {
+                *g = Some(when);
+            }
+        }
+        fn expired(&self) -> bool {
+            let g = self.at.lock().unwrap_or_else(|p| p.into_inner());
+            matches!(*g, Some(t) if Instant::now() >= t)
+        }
+    }
+
+    /// Put a raw fd into non-blocking mode so the drain loop can poll it and
+    /// honour the stop deadline rather than blocking inside `read(2)`.
+    fn set_nonblocking(fd: RawFd) -> std::io::Result<()> {
+        // SAFETY: `fd` is the pipe fd owned by the `ChildStdout`/`ChildStderr`
+        // handle the calling thread moved in; we only read/alter its O_NONBLOCK
+        // flag and never close or duplicate it here.
+        let flags = unsafe { libc::fcntl(fd, libc::F_GETFL) };
+        if flags < 0 {
+            return Err(std::io::Error::last_os_error());
+        }
+        let rc = unsafe { libc::fcntl(fd, libc::F_SETFL, flags | libc::O_NONBLOCK) };
+        if rc < 0 {
+            return Err(std::io::Error::last_os_error());
+        }
+        Ok(())
+    }
+
+    /// How a drain thread stopped. `DeadlineReached` is a deliberate, explicit
+    /// stop (the stream never reached EOF before the armed deadline), NOT a
+    /// silent abandonment — the thread returns and is joined.
+    enum DrainTerminal {
+        Eof,
+        DeadlineReached,
+        ReadFailed(String),
+    }
+
     #[derive(Default)]
     struct CapturedStream {
         buf: String,
         dropped: usize,
-        read_outcome: Option<Result<(), String>>,
+        terminal: Option<DrainTerminal>,
     }
 
     fn lock_recover(m: &Mutex<CapturedStream>) -> MutexGuard<'_, CapturedStream> {
         m.lock().unwrap_or_else(|p| p.into_inner())
     }
 
-    fn drain_into(mut r: impl Read, sink: Arc<Mutex<CapturedStream>>) {
+    /// Deadline-aware drain loop. The stream fd is made non-blocking; on
+    /// `WouldBlock` the loop honours the armed stop deadline (returning
+    /// `DeadlineReached`) instead of blocking, so it always terminates and is
+    /// joinable. A capture-size cap bounds MEMORY only — it is independent of the
+    /// time budget enforced here.
+    fn drain_into(
+        mut r: impl Read + AsRawFd,
+        sink: Arc<Mutex<CapturedStream>>,
+        deadline: Arc<DrainDeadline>,
+    ) {
+        let terminal = run_drain(&mut r, &sink, &deadline);
+        lock_recover(&sink).terminal = Some(terminal);
+    }
+
+    fn run_drain(
+        r: &mut (impl Read + AsRawFd),
+        sink: &Mutex<CapturedStream>,
+        deadline: &DrainDeadline,
+    ) -> DrainTerminal {
+        if let Err(e) = set_nonblocking(r.as_raw_fd()) {
+            return DrainTerminal::ReadFailed(format!("set_nonblocking failed: {}", e.kind()));
+        }
         let mut chunk = [0u8; 8192];
-        let terminal: Result<(), String> = loop {
+        loop {
             match r.read(&mut chunk) {
-                Ok(0) => break Ok(()),
+                Ok(0) => break DrainTerminal::Eof,
                 Ok(n) => {
                     let text = String::from_utf8_lossy(&chunk[..n]);
-                    let mut g = lock_recover(&sink);
+                    let mut g = lock_recover(sink);
                     let remaining = CAPTURE_CAP_BYTES.saturating_sub(g.buf.len());
                     if remaining == 0 {
                         g.dropped += text.len();
@@ -1154,10 +1256,15 @@ mod bounded_child_runner {
                     }
                 }
                 Err(ref e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
-                Err(e) => break Err(format!("read error kind={:?}", e.kind())),
+                Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                    if deadline.expired() {
+                        break DrainTerminal::DeadlineReached;
+                    }
+                    thread::sleep(DRAIN_POLL_STEP);
+                }
+                Err(e) => break DrainTerminal::ReadFailed(format!("read error kind={:?}", e.kind())),
             }
-        };
-        lock_recover(&sink).read_outcome = Some(terminal);
+        }
     }
 
     /// Completed capture integrity for the drained stderr stream, resolvable
@@ -1168,6 +1275,10 @@ mod bounded_child_runner {
         Complete,
         Truncated { dropped: usize },
         ReadFailed { detail: String },
+        /// The drain stop deadline fired before the stream reached EOF (e.g. a
+        /// descendant kept the pipe open after the direct child exited). An
+        /// UNUSABLE capture — it cannot support a marker present/absent claim.
+        DeadlineExceeded,
         ThreadPanicked,
         StillDraining,
     }
@@ -1182,10 +1293,11 @@ mod bounded_child_runner {
         if panicked {
             return CaptureOutcome::ThreadPanicked;
         }
-        match &s.read_outcome {
+        match &s.terminal {
             None => CaptureOutcome::StillDraining,
-            Some(Err(d)) => CaptureOutcome::ReadFailed { detail: d.clone() },
-            Some(Ok(())) => {
+            Some(DrainTerminal::ReadFailed(d)) => CaptureOutcome::ReadFailed { detail: d.clone() },
+            Some(DrainTerminal::DeadlineReached) => CaptureOutcome::DeadlineExceeded,
+            Some(DrainTerminal::Eof) => {
                 if s.dropped > 0 {
                     CaptureOutcome::Truncated { dropped: s.dropped }
                 } else {
@@ -1203,6 +1315,10 @@ mod bounded_child_runner {
         stderr: Arc<Mutex<CapturedStream>>,
         stderr_thread: Option<JoinHandle<()>>,
         stdout_thread: Option<JoinHandle<()>>,
+        /// Shared stop-deadline both drain threads observe; armed by
+        /// `finalize_drains` so a join can never wait on an indefinitely blocked
+        /// drain.
+        drain_deadline: Arc<DrainDeadline>,
         stderr_join_failed: bool,
         reaped: bool,
     }
@@ -1223,13 +1339,17 @@ mod bounded_child_runner {
             let e = child.stderr.take().expect("piped stderr");
             let o = child.stdout.take().expect("piped stdout");
             let se = stderr.clone();
-            let stderr_thread = Some(thread::spawn(move || drain_into(e, se)));
-            let stdout_thread = Some(thread::spawn(move || drain_into(o, stdout)));
+            let drain_deadline = Arc::new(DrainDeadline::default());
+            let ed = drain_deadline.clone();
+            let od = drain_deadline.clone();
+            let stderr_thread = Some(thread::spawn(move || drain_into(e, se, ed)));
+            let stdout_thread = Some(thread::spawn(move || drain_into(o, stdout, od)));
             BoundedChild {
                 child,
                 stderr,
                 stderr_thread,
                 stdout_thread,
+                drain_deadline,
                 stderr_join_failed: false,
                 reaped: false,
             }
@@ -1239,11 +1359,25 @@ mod bounded_child_runner {
             lock_recover(&self.stderr).buf.clone()
         }
 
+        /// The direct child's PID. Used by the held-pipe control to clean up a
+        /// deliberately spawned descendant (via its process group).
+        pub(super) fn child_pid(&self) -> u32 {
+            self.child.id()
+        }
+
         fn stderr_capture(&self) -> CaptureOutcome {
             classify_capture(&lock_recover(&self.stderr), self.stderr_join_failed)
         }
 
-        fn join_drains(&mut self) {
+        /// Finalize output draining within `budget`. Arms the shared stop
+        /// deadline FIRST (so any drain thread still blocked only by a
+        /// descendant-held pipe stops at the deadline rather than forever), then
+        /// joins both drain threads. Because the threads self-terminate at the
+        /// armed deadline, these joins are bounded — joining is not itself a
+        /// deadline, the armed stop is. A child's exit alone does NOT establish
+        /// capture completion; only the joined `terminal` does.
+        fn finalize_drains(&mut self, budget: Duration) {
+            self.drain_deadline.arm(Instant::now() + budget);
             if let Some(h) = self.stderr_thread.take() {
                 if h.join().is_err() {
                     self.stderr_join_failed = true;
@@ -1251,38 +1385,55 @@ mod bounded_child_runner {
             }
             if let Some(h) = self.stdout_thread.take() {
                 // stdout is not asserted on, but it must still be joined so a
-                // large stdout can never leave a drain thread blocked.
+                // large/held-open stdout can never leave a drain thread blocked.
                 let _ = h.join();
             }
         }
 
-        /// Explicit cleanup: kill the child and reap it, then join the drain
-        /// threads. Only marks cleanup complete when reaping actually succeeded,
-        /// so `Drop` retries a failed reap.
-        pub(super) fn kill_and_reap(&mut self) {
-            if !self.reaped {
-                let _ = self.child.kill();
-                if self.child.wait().is_ok() {
-                    self.reaped = true;
-                }
+        /// Explicit, deadline-bounded cleanup. Requests termination and verifies
+        /// reaping via `try_wait` polling within `reap_budget` (NEVER a blocking
+        /// `Child::wait()` on a potentially live child), then finalizes draining
+        /// within `capture_budget`. Returns the structured [`CleanupResult`];
+        /// `reaped` is set ONLY on an observation that establishes reaping, so a
+        /// failed cleanup leaves `reaped=false` and is reported as such (it is
+        /// never silently described as "killed and reaped").
+        pub(super) fn kill_and_reap(
+            &mut self,
+            reap_budget: Duration,
+            capture_budget: Duration,
+        ) -> CleanupResult {
+            let result = {
+                let mut ops = ChildCleanupOps {
+                    child: &mut self.child,
+                };
+                drive_cleanup(self.reaped, &mut ops, reap_budget, REAP_POLL_STEP)
+            };
+            if matches!(
+                result,
+                CleanupResult::AlreadyReaped | CleanupResult::KilledAndReaped
+            ) {
+                self.reaped = true;
             }
-            self.join_drains();
+            self.finalize_drains(capture_budget);
+            result
         }
 
         /// Wait for the child to terminate ON ITS OWN within `deadline` via
         /// repeated process-status polling (`try_wait`, NOT a fixed sleep
         /// guessing the child has exited). On natural exit the FULL `ExitStatus`
-        /// (signal preserved) is returned with drained+joined capture. A
-        /// deadline is a hard failure: the child is killed/reaped and `Timeout`
-        /// is returned — NEVER reinterpreted as a crash. `try_wait` errors are
-        /// handled explicitly (kill+reap, then panic).
+        /// (signal preserved) is returned with drained+joined, deadline-bounded
+        /// capture. A deadline is a hard failure: the child is killed/reaped
+        /// within the cleanup budget and `Timeout` carries the CONCRETE cleanup
+        /// result + capture outcome — NEVER reinterpreted as a crash, and never
+        /// claiming reaping the observations do not support. `try_wait` errors are
+        /// handled explicitly (bounded kill+reap, then panic).
         pub(super) fn wait_self_termination(&mut self, deadline: Duration) -> SelfTermination {
             let start = Instant::now();
             loop {
                 match self.child.try_wait() {
                     Ok(Some(status)) => {
                         self.reaped = true;
-                        self.join_drains();
+                        self.finalize_drains(CAPTURE_FINALIZE_BUDGET);
                         return SelfTermination::Exited {
                             status,
                             stderr: self.stderr_snapshot(),
@@ -1291,14 +1442,17 @@ mod bounded_child_runner {
                     }
                     Ok(None) => {
                         if start.elapsed() >= deadline {
-                            let stderr = self.stderr_snapshot();
-                            self.kill_and_reap();
-                            return SelfTermination::Timeout { stderr };
+                            let cleanup = self.kill_and_reap(REAP_BUDGET, CAPTURE_FINALIZE_BUDGET);
+                            return SelfTermination::Timeout {
+                                stderr: self.stderr_snapshot(),
+                                cleanup,
+                                capture: self.stderr_capture(),
+                            };
                         }
                         thread::sleep(Duration::from_millis(20));
                     }
                     Err(e) => {
-                        self.kill_and_reap();
+                        let _ = self.kill_and_reap(REAP_BUDGET, CAPTURE_FINALIZE_BUDGET);
                         panic!("TEST FAILURE: try_wait errored while waiting for child: {e}");
                     }
                 }
@@ -1308,13 +1462,98 @@ mod bounded_child_runner {
 
     impl Drop for BoundedChild {
         fn drop(&mut self) {
-            self.kill_and_reap();
+            // Best-effort, non-panicking, and already deadline-bounded: no
+            // unconditional blocking work is reintroduced after the explicit
+            // deadline path returned.
+            let _ = self.kill_and_reap(REAP_BUDGET, CAPTURE_FINALIZE_BUDGET);
+        }
+    }
+
+    /// Observable, inspectable termination/reaping operations behind a seam so
+    /// the cleanup decision ([`drive_cleanup`]) can be exercised with injected
+    /// error/expiry paths without a real child (see the Correction B seam tests).
+    pub(super) trait ChildCleanup {
+        /// Request termination of the child (e.g. SIGKILL).
+        fn request_termination(&mut self) -> Result<(), String>;
+        /// Observe reaping status WITHOUT blocking: `Ok(true)` = reaped,
+        /// `Ok(false)` = still running, `Err` = status observation failed.
+        fn poll_reaped(&mut self) -> Result<bool, String>;
+    }
+
+    struct ChildCleanupOps<'a> {
+        child: &'a mut Child,
+    }
+
+    impl ChildCleanup for ChildCleanupOps<'_> {
+        fn request_termination(&mut self) -> Result<(), String> {
+            self.child.kill().map_err(|e| e.to_string())
+        }
+        fn poll_reaped(&mut self) -> Result<bool, String> {
+            match self.child.try_wait() {
+                Ok(Some(_status)) => Ok(true),
+                Ok(None) => Ok(false),
+                Err(e) => Err(e.to_string()),
+            }
+        }
+    }
+
+    /// Structured, inspectable cleanup outcome. `reaped=true` may be claimed ONLY
+    /// for the two reaped variants; the failure variants carry the evidence and
+    /// are never collapsed into a success/crash result.
+    #[derive(Debug, PartialEq, Eq)]
+    pub(super) enum CleanupResult {
+        /// The child had already exited and been reaped before cleanup ran.
+        AlreadyReaped,
+        /// Termination was requested AND subsequent reaping was verified by an
+        /// explicit status observation. (Covers the exit-vs-kill race: a kill
+        /// error whose child is then observed reaped is still verified reaping.)
+        KilledAndReaped,
+        /// The termination request itself failed and reaping could not be
+        /// verified within the budget.
+        TerminationRequestFailed { detail: String },
+        /// A status/reap observation errored.
+        ReapObservationFailed { detail: String },
+        /// The cleanup budget expired without a verified reaping observation.
+        DeadlineExpired,
+    }
+
+    /// Pure cleanup driver over the [`ChildCleanup`] seam. Marks reaping ONLY on
+    /// an `Ok(true)` observation; on expiry it distinguishes a prior failed
+    /// termination request from a plain deadline, and a status-observation error
+    /// is surfaced distinctly. A kill error is NEVER silently treated as success:
+    /// it only yields `KilledAndReaped` if reaping is independently observed.
+    pub(super) fn drive_cleanup(
+        already_reaped: bool,
+        ops: &mut impl ChildCleanup,
+        budget: Duration,
+        poll_step: Duration,
+    ) -> CleanupResult {
+        if already_reaped {
+            return CleanupResult::AlreadyReaped;
+        }
+        let termination = ops.request_termination();
+        let start = Instant::now();
+        loop {
+            match ops.poll_reaped() {
+                Ok(true) => return CleanupResult::KilledAndReaped,
+                Ok(false) => {
+                    if start.elapsed() >= budget {
+                        return match termination {
+                            Err(detail) => CleanupResult::TerminationRequestFailed { detail },
+                            Ok(()) => CleanupResult::DeadlineExpired,
+                        };
+                    }
+                    thread::sleep(poll_step);
+                }
+                Err(detail) => return CleanupResult::ReapObservationFailed { detail },
+            }
         }
     }
 
     /// Result of a bounded self-termination wait. `Timeout` is a failure
-    /// condition (the child did not die on its own in time); the child has been
-    /// killed and reaped before it is returned.
+    /// condition (the child did not die on its own in time); it carries the
+    /// CONCRETE [`CleanupResult`] and capture outcome rather than an implicit
+    /// "killed and reaped" claim.
     #[derive(Debug)]
     pub(super) enum SelfTermination {
         Exited {
@@ -1324,6 +1563,8 @@ mod bounded_child_runner {
         },
         Timeout {
             stderr: String,
+            cleanup: CleanupResult,
+            capture: CaptureOutcome,
         },
     }
 
@@ -1418,7 +1659,7 @@ fn reserved_only_child_death_then_reopen_refuses() {
             stderr,
             capture,
         } => (status, stderr, capture),
-        SelfTermination::Timeout { stderr } => panic!(
+        SelfTermination::Timeout { stderr, .. } => panic!(
             "TEST FAILURE: child did not self-terminate within {CHILD_DEADLINE:?}; a timeout is \
              not crash evidence (child was killed+reaped). stderr so far=\n{stderr}"
         ),
@@ -1540,7 +1781,7 @@ fn runner_control_marker_then_sigabrt_is_accepted() {
                 "marker + SIGABRT with complete capture is the accepted positive; stderr=\n{stderr}"
             );
         }
-        SelfTermination::Timeout { stderr } => {
+        SelfTermination::Timeout { stderr, .. } => {
             panic!("control child should have aborted promptly; stderr=\n{stderr}")
         }
     }
@@ -1572,7 +1813,7 @@ fn runner_control_marker_then_nonzero_exit_is_rejected() {
                 "a normal nonzero exit is rejected even with the marker present; stderr=\n{stderr}"
             );
         }
-        SelfTermination::Timeout { stderr } => {
+        SelfTermination::Timeout { stderr, .. } => {
             panic!("control child should have exited promptly; stderr=\n{stderr}")
         }
     }
@@ -1606,7 +1847,7 @@ fn runner_control_marker_then_unexpected_signal_is_rejected() {
                 ),
             }
         }
-        SelfTermination::Timeout { stderr } => {
+        SelfTermination::Timeout { stderr, .. } => {
             panic!("control child should have signalled promptly; stderr=\n{stderr}")
         }
     }
@@ -1638,15 +1879,18 @@ fn runner_control_sigabrt_without_marker_is_rejected() {
                 "SIGABRT without the readiness marker is not accepted; stderr=\n{stderr}"
             );
         }
-        SelfTermination::Timeout { stderr } => {
+        SelfTermination::Timeout { stderr, .. } => {
             panic!("control child should have aborted promptly; stderr=\n{stderr}")
         }
     }
 }
 
 /// A child that stays alive past the internal deadline yields a TIMEOUT failure
-/// and is cleaned up/reaped; the result returns within a generous outer bound
-/// (so cleanup is proven not to wait on the surviving sleep).
+/// whose CONCRETE cleanup result is verified reaping (`KilledAndReaped`) with a
+/// bounded capture, and the runner returns within a generous outer bound. The
+/// elapsed-time bound is CORROBORATION that cleanup did not wait on the surviving
+/// process; the asserted mechanism enforcing the deadline is the structured
+/// cleanup result, not the clock.
 #[cfg(unix)]
 #[test]
 fn runner_control_alive_past_deadline_times_out_and_is_reaped() {
@@ -1662,7 +1906,21 @@ fn runner_control_alive_past_deadline_times_out_and_is_reaped() {
     let outcome = child.wait_self_termination(SHORT_DEADLINE);
     let elapsed = start.elapsed();
     match outcome {
-        SelfTermination::Timeout { .. } => {}
+        SelfTermination::Timeout { cleanup, capture, .. } => {
+            // The timeout directly establishes verified reaping — not merely a
+            // `Timeout` tag plus a short elapsed time.
+            assert_eq!(
+                cleanup,
+                CleanupResult::KilledAndReaped,
+                "a timeout must verify reaping, not assume it; cleanup={cleanup:?}"
+            );
+            // Killing the sole pipe holder closes the pipe, so draining
+            // completes within budget (no descendant keeps it open).
+            assert!(
+                matches!(capture, CaptureOutcome::Complete | CaptureOutcome::Truncated { .. }),
+                "cleanup draining must complete within budget, got {capture:?}"
+            );
+        }
         other => panic!("expected a bounded Timeout failure, got {other:?}"),
     }
     assert!(
@@ -1721,5 +1979,207 @@ fn classify_child_crash_decision_table() {
     assert_eq!(
         classify_child_crash(exit7, true, &CaptureOutcome::Complete, EXPECTED_ABORT_SIGNAL),
         ChildCrashClass::NormalExit { code: Some(7) }
+    );
+}
+
+// ============================================================================
+// Run 422 D7-D10 Correction F-B (repaired boundaries) — focused evidence.
+// ============================================================================
+
+/// Focused control A — the CAPTURE path when a descendant keeps the pipe open
+/// AFTER the direct child exits. This is the boundary the repair targets: a
+/// child's exit does NOT by itself establish capture completion, and the runner
+/// must not block indefinitely in a drain join.
+///
+/// A real `sh` child backgrounds a `sleep` (which inherits stdout+stderr), emits
+/// the readiness marker to stderr, then SIGABRTs. The backgrounded `sleep` holds
+/// the pipes open past the direct child's death, so the stream never reaches EOF
+/// within the capture-finalize budget. Requirements demonstrated:
+///   * the runner returns within its declared capture/cleanup policy (its join
+///     is bounded by the armed drain deadline, not by the surviving descendant);
+///   * the capture is classified UNUSABLE (`DeadlineExceeded`);
+///   * the incomplete capture is NOT accepted as the abort marker even though
+///     the marker bytes arrived and the signal is SIGABRT;
+///   * the deliberately spawned descendant is cleaned up (its whole process
+///     group is killed) so nothing is leaked.
+///
+/// This is a runner control, NOT journal-recovery evidence.
+#[cfg(unix)]
+#[test]
+fn runner_capture_incomplete_after_direct_child_exit_is_unusable() {
+    use bounded_child_runner::*;
+    use std::os::unix::process::CommandExt as _;
+    use std::time::{Duration, Instant};
+
+    // The direct child dies immediately, so the status-wait deadline is not the
+    // gate here — the capture-finalize budget is. The outer bound is comfortably
+    // above that budget but BELOW the descendant's lifetime, so a regression to
+    // an unbounded join (waiting on the descendant) would exceed it and fail.
+    const STATUS_DEADLINE: Duration = Duration::from_secs(60);
+    const OUTER_BOUND: Duration = Duration::from_secs(20);
+
+    // `sleep 45 &` keeps the inherited pipes open well past the finalize budget
+    // AND past OUTER_BOUND; the shell then emits the marker and self-aborts. New
+    // process group (`process_group(0)`) so the descendant can be reaped via the
+    // group once the assertions are done.
+    let script = format!("sleep 45 & printf '%s\\n' '{CHILD_RESERVED_MARKER}' 1>&2; kill -s ABRT $$");
+    let mut command = sh_control_command(&script);
+    command.process_group(0);
+    let mut child = BoundedChild::spawn(command, "spawn sh held-pipe control");
+    let pgid = child.child_pid() as i32;
+
+    let start = Instant::now();
+    let outcome = child.wait_self_termination(STATUS_DEADLINE);
+    let elapsed = start.elapsed();
+
+    // Clean up the deliberately spawned descendant group (best-effort). The
+    // orphaned `sleep` is reparented to init, which reaps it after this SIGKILL.
+    let _ = unsafe { libc::kill(-pgid, libc::SIGKILL) };
+
+    // (1) The join did NOT block on the surviving descendant.
+    assert!(
+        elapsed < OUTER_BOUND,
+        "runner must return within the capture/cleanup policy, not block on the held pipe; \
+         elapsed={elapsed:?}"
+    );
+
+    match outcome {
+        SelfTermination::Exited {
+            status,
+            stderr,
+            capture,
+        } => {
+            let marker = stderr.contains(CHILD_RESERVED_MARKER);
+            // (2) Capture never reached EOF ⇒ explicitly unusable.
+            assert_eq!(
+                capture,
+                CaptureOutcome::DeadlineExceeded,
+                "a descendant held the pipe open ⇒ capture is unusable (DeadlineExceeded), got \
+                 {capture:?}; stderr=\n{stderr}"
+            );
+            // (3) The incomplete capture is NOT accepted as the abort marker,
+            // despite the SIGABRT signal and the marker bytes having arrived.
+            assert_eq!(
+                classify_child_crash(status, marker, &capture, EXPECTED_ABORT_SIGNAL),
+                ChildCrashClass::SignalButMarkerUnusable {
+                    signal: EXPECTED_ABORT_SIGNAL
+                },
+                "an incomplete capture cannot establish reservation-before-abort; stderr=\n{stderr}"
+            );
+        }
+        SelfTermination::Timeout {
+            cleanup,
+            capture,
+            stderr,
+        } => panic!(
+            "the direct child aborts promptly; expected Exited(SIGABRT), got Timeout \
+             cleanup={cleanup:?} capture={capture:?} stderr=\n{stderr}"
+        ),
+    }
+}
+
+/// Focused control B — SEAM-based cleanup classification. Uses the private
+/// [`bounded_child_runner::ChildCleanup`] seam to deterministically exercise the
+/// kill/observe/expiry paths of the pure [`bounded_child_runner::drive_cleanup`]
+/// driver WITHOUT a real child, proving that a cleanup failure cannot masquerade
+/// as verified reaping. Labelled separately from the real-process controls: no
+/// process is spawned here.
+#[cfg(unix)]
+#[test]
+fn drive_cleanup_classifies_failures_without_false_reaping() {
+    use bounded_child_runner::{drive_cleanup, ChildCleanup, CleanupResult};
+    use std::time::Duration;
+
+    /// A scripted `ChildCleanup`: a fixed termination result plus a queue of
+    /// `poll_reaped` observations (defaulting to "still alive" once exhausted).
+    struct ScriptedCleanup {
+        termination: Result<(), String>,
+        polls: std::collections::VecDeque<Result<bool, String>>,
+    }
+    impl ChildCleanup for ScriptedCleanup {
+        fn request_termination(&mut self) -> Result<(), String> {
+            self.termination.clone()
+        }
+        fn poll_reaped(&mut self) -> Result<bool, String> {
+            self.polls.pop_front().unwrap_or(Ok(false))
+        }
+    }
+    fn ops(
+        termination: Result<(), String>,
+        polls: Vec<Result<bool, String>>,
+    ) -> ScriptedCleanup {
+        ScriptedCleanup {
+            termination,
+            polls: polls.into_iter().collect(),
+        }
+    }
+
+    // A tiny budget keeps the deadline/failure cases fast and deterministic.
+    const BUDGET: Duration = Duration::from_millis(60);
+    const STEP: Duration = Duration::from_millis(5);
+
+    // (a) Already reaped before cleanup ran ⇒ AlreadyReaped (no kill attempted).
+    assert_eq!(
+        drive_cleanup(true, &mut ops(Ok(()), vec![]), BUDGET, STEP),
+        CleanupResult::AlreadyReaped
+    );
+
+    // (b) Kill ok, reaping then verified ⇒ KilledAndReaped (the only reaped
+    //     non-already variant).
+    assert_eq!(
+        drive_cleanup(
+            false,
+            &mut ops(Ok(()), vec![Ok(false), Ok(true)]),
+            BUDGET,
+            STEP
+        ),
+        CleanupResult::KilledAndReaped
+    );
+
+    // (c) Exit-vs-kill race: kill reports an error, but the child is then
+    //     observed reaped ⇒ KilledAndReaped (verified, NOT silently assumed).
+    assert_eq!(
+        drive_cleanup(
+            false,
+            &mut ops(Err("ESRCH".into()), vec![Ok(true)]),
+            BUDGET,
+            STEP
+        ),
+        CleanupResult::KilledAndReaped
+    );
+
+    // (d) Kill failed and reaping never verified ⇒ TerminationRequestFailed
+    //     (NOT a false reaped=true, NOT a success).
+    assert_eq!(
+        drive_cleanup(
+            false,
+            &mut ops(Err("kill boom".into()), vec![Ok(false)]),
+            BUDGET,
+            STEP
+        ),
+        CleanupResult::TerminationRequestFailed {
+            detail: "kill boom".into()
+        }
+    );
+
+    // (e) A status/reap observation error ⇒ ReapObservationFailed (distinct;
+    //     never collapsed into reaped/crash).
+    assert_eq!(
+        drive_cleanup(
+            false,
+            &mut ops(Ok(()), vec![Ok(false), Err("waitpid boom".into())]),
+            BUDGET,
+            STEP
+        ),
+        CleanupResult::ReapObservationFailed {
+            detail: "waitpid boom".into()
+        }
+    );
+
+    // (f) Kill ok but the child never reaps within the budget ⇒ DeadlineExpired
+    //     (explicit cleanup-deadline expiry, NOT a verified reaping).
+    assert_eq!(
+        drive_cleanup(false, &mut ops(Ok(()), vec![]), BUDGET, STEP),
+        CleanupResult::DeadlineExpired
     );
 }
