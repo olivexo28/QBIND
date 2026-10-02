@@ -3624,18 +3624,79 @@ mod tests {
             "the exact record is preserved across failed/uncertain recovery"
         );
 
-        // A later SUCCESSFUL barrier permits ONLY the exact retained signature.
-        match reopened.reserve_for_sign(&pa, &ba).unwrap() {
-            ReservationOutcome::ExactRetryRetained(s) => assert_eq!(s, sig_a),
-            other => panic!("expected ExactRetryRetained, got {:?}", other),
-        }
-        // Now cached (evicting B): a subsequent exact lookup is served WITHOUT
-        // reissuing the durable write even when writes are configured to fail.
+        // (A/B) Immediately after the uncertain attempt: store-then-error is now
+        //       disabled, but keep ORDINARY writes failing and retry the SAME
+        //       evicted position A through the journal. The barrier write fails
+        //       again, so there is NO retained reuse (an error, never a fresh
+        //       continuation) and still NO usable cache acknowledgement. Proven
+        //       via the existing record-write counter: a failed barrier returns
+        //       before any synced write, so the counter does not advance.
         reopened_store.set_fail_writes(true);
+        let writes_before_failed_retry = reopened_store.record_writes();
+        assert!(
+            matches!(reopened.reserve_for_sign(&pa, &ba), Err(JournalError::Storage(_))),
+            "a still-failing barrier retry returns a storage error, not a retained reuse"
+        );
+        assert_eq!(
+            reopened_store.record_writes(),
+            writes_before_failed_retry,
+            "a failed barrier retry performs no successful synced write"
+        );
+        assert_eq!(
+            reopened.recovered_ack_cache_len(),
+            1,
+            "a failed retry forms no usable cache acknowledgement for A"
+        );
+        // The exact retained record and its conflict obligation are preserved.
+        assert_eq!(
+            store.map.read().unwrap().get(&pa.storage_key()).cloned(),
+            Some(bytes_a.clone()),
+            "the exact retained record survives the failed retry"
+        );
+        assert!(
+            matches!(
+                reopened.reserve_for_sign(&pa, &binding(b"conflicting")).unwrap(),
+                ReservationOutcome::Conflict
+            ),
+            "a conflicting binding is still refused after the failed retry"
+        );
+        assert_eq!(
+            store.map.read().unwrap().get(&pa.storage_key()).cloned(),
+            Some(bytes_a.clone()),
+            "the conflict obligation does not rewrite the stored record"
+        );
+
+        // (C) Permit the next write and retry: the barrier is re-established with
+        //     exactly ONE additional synced recovery write — direct proof the
+        //     failed/uncertain attempts left no usable acknowledgement (a cached
+        //     ack would be served WITHOUT a write) — and ONLY the exact retained
+        //     signature is reused.
+        reopened_store.set_fail_writes(false);
+        let writes_before_success = reopened_store.record_writes();
         match reopened.reserve_for_sign(&pa, &ba).unwrap() {
             ReservationOutcome::ExactRetryRetained(s) => assert_eq!(s, sig_a),
             other => panic!("expected ExactRetryRetained, got {:?}", other),
         }
+        assert_eq!(
+            reopened_store.record_writes(),
+            writes_before_success + 1,
+            "a successful recovery after failed/uncertain attempts issues exactly one additional synced write"
+        );
+
+        // Exact-cache-hit control (preserved): A is now cached (evicting B), so a
+        // subsequent exact lookup is served WITHOUT reissuing the durable write,
+        // even when writes are configured to fail — the counter does not advance.
+        reopened_store.set_fail_writes(true);
+        let writes_before_hit = reopened_store.record_writes();
+        match reopened.reserve_for_sign(&pa, &ba).unwrap() {
+            ReservationOutcome::ExactRetryRetained(s) => assert_eq!(s, sig_a),
+            other => panic!("expected ExactRetryRetained, got {:?}", other),
+        }
+        assert_eq!(
+            reopened_store.record_writes(),
+            writes_before_hit,
+            "an exact cache hit reissues no synced durability write"
+        );
     }
 
     // ------------------------------------------------------------------

@@ -23733,6 +23733,13 @@ mod tests {
                         fn set_write_budget(&self, n: i64) {
                             self.write_budget.store(n, SeqCst);
                         }
+                        /// Test-only observation of the remaining write budget, so a
+                        /// recovery that issues a synced durability write can be
+                        /// directly distinguished (budget decremented) from an exact
+                        /// cache hit (budget unchanged). Not production instrumentation.
+                        fn write_budget_remaining(&self) -> i64 {
+                            self.write_budget.load(SeqCst)
+                        }
                         /// Enable "store the result then return an error" mode.
                         fn set_store_then_error(&self, v: bool) {
                             self.store_then_error.store(v, SeqCst);
@@ -24896,11 +24903,66 @@ mod tests {
                             "the exact view-1 record is preserved across failed/uncertain recovery"
                         );
 
-                        // Permit the barrier to SUCCEED: the evicted position delivers
-                        // its exact retained signature with NO additional signer call.
+                        // (A/B) Immediately after the uncertain attempt: store-then-error
+                        //       is now disabled, but keep ORDINARY writes failing (budget
+                        //       0) and retry the SAME evicted view 1 through the handler.
+                        //       The barrier fails again: another journal error, NO retained
+                        //       delivery or facade handoff, and NO additional signer call.
+                        //       The uncertain attempt therefore left no usable cache
+                        //       acknowledgement (cache length unchanged), and the exact
+                        //       retained record is preserved.
                         store_r.set_store_then_error(false);
+                        store_r.set_write_budget(0);
+                        let (sr2b, fr2b) = drive_j(&snap, &jr, proposal_at(0, 1, [1u8; 32]));
+                        assert_eq!(c.proposal_calls.load(SeqCst), 3, "failed retry performs no signature");
+                        assert_eq!(sr2b.outbound_proposal_journal_error_total, 1);
+                        assert_eq!(sr2b.outbound_proposal_journal_retained_resend_total, 0);
+                        assert_eq!(sr2b.outbound_proposals_sent, 0);
+                        assert!(
+                            fr2b.proposals.lock().unwrap().is_empty(),
+                            "no delivery or facade handoff on the failed retry"
+                        );
+                        assert_eq!(
+                            jr.recovered_ack_cache_len(),
+                            2,
+                            "the failed retry forms no usable cache acknowledgement for view 1"
+                        );
+                        assert_eq!(
+                            store.map.read().unwrap().get(&key1).cloned(),
+                            Some(bytes1.clone()),
+                            "the exact view-1 retained record survives the failed retry"
+                        );
+                        // Conflict obligation preserved: a conflicting view-1 proposal
+                        // (different payload → different binding) is refused with writes
+                        // permitted, so the refusal is a genuine conflict (not a write
+                        // failure); it delivers nothing, signs nothing, rewrites nothing.
                         store_r.set_write_budget(i64::MAX);
+                        let (src, frc) = drive_j(&snap, &jr, proposal_at(0, 1, [9u8; 32]));
+                        assert_eq!(c.proposal_calls.load(SeqCst), 3, "a conflict performs no signature");
+                        assert_eq!(src.outbound_proposal_journal_conflict_total, 1);
+                        assert_eq!(src.outbound_proposals_sent, 0);
+                        assert!(frc.proposals.lock().unwrap().is_empty(), "a conflict delivers nothing");
+                        assert_eq!(
+                            store.map.read().unwrap().get(&key1).cloned(),
+                            Some(bytes1.clone()),
+                            "a conflict obligation does not rewrite the view-1 record"
+                        );
+
+                        // (C) Permit the next write and retry: the evicted position
+                        //     re-establishes its barrier with exactly ONE additional synced
+                        //     recovery write (budget decremented by one — direct proof the
+                        //     failed/uncertain attempts left no usable acknowledgement, which
+                        //     would be served WITHOUT a write), delivers its EXACT retained
+                        //     signature, and makes NO additional signer call.
+                        store_r.set_store_then_error(false);
+                        store_r.set_write_budget(4);
+                        let budget_before_success = store_r.write_budget_remaining();
                         let (sr3, fr3) = drive_j(&snap, &jr, proposal_at(0, 1, [1u8; 32]));
+                        assert_eq!(
+                            store_r.write_budget_remaining(),
+                            budget_before_success - 1,
+                            "a successful post-eviction recovery issues exactly one additional synced write"
+                        );
                         assert_eq!(
                             c.proposal_calls.load(SeqCst),
                             3,
@@ -24923,6 +24985,26 @@ mod tests {
                         assert_eq!(
                             delivered[0].signature, retained_sig1,
                             "delivered signature equals the view-1 retained journal signature"
+                        );
+                        drop(delivered);
+
+                        // Exact-cache-hit control: view 1 is now cached, so revisiting it
+                        // is served WITHOUT reissuing the durable write even with the write
+                        // budget exhausted — the budget does not move and no signer runs.
+                        store_r.set_write_budget(0);
+                        let (sr4, fr4) = drive_j(&snap, &jr, proposal_at(0, 1, [1u8; 32]));
+                        assert_eq!(
+                            store_r.write_budget_remaining(),
+                            0,
+                            "an exact cache hit reissues no synced durability write"
+                        );
+                        assert_eq!(c.proposal_calls.load(SeqCst), 3, "a cache hit performs no signature");
+                        assert_eq!(sr4.outbound_proposal_journal_retained_resend_total, 1);
+                        assert_eq!(sr4.outbound_proposals_sent, 1);
+                        assert_eq!(fr4.proposals.lock().unwrap().len(), 1);
+                        assert_eq!(
+                            fr4.proposals.lock().unwrap()[0].signature, retained_sig1,
+                            "the cache-hit delivery equals the exact retained signature"
                         );
                     }
 
