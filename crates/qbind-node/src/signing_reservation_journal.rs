@@ -1066,6 +1066,16 @@ impl SigningOwnershipDomain {
     /// The domain starts **unestablished**: no journal-wide limit and a zero
     /// counter until an explicit `initialize`/`open` validates durable state.
     pub fn new() -> Arc<Self> {
+        Self::with_recovered_ack_cache_capacity(MAX_RECOVERED_ACK_ENTRIES)
+    }
+
+    /// Construct a fresh ownership domain whose recovered-acknowledgement cache
+    /// holds at most `cache_capacity` entries. The production constructor
+    /// [`SigningOwnershipDomain::new`] always uses [`MAX_RECOVERED_ACK_ENTRIES`];
+    /// a smaller capacity is a test-only affordance (see
+    /// [`SigningOwnershipDomain::new_with_cache_capacity_for_test`]) and is NOT a
+    /// production configuration knob.
+    fn with_recovered_ack_cache_capacity(cache_capacity: usize) -> Arc<Self> {
         use std::sync::atomic::{AtomicU64, Ordering};
         // Process-unique, monotonically increasing domain token. This only needs
         // to distinguish concurrently-live domains within one process; it is not
@@ -1076,13 +1086,26 @@ impl SigningOwnershipDomain {
             inner: Mutex::new(DomainInner {
                 established: None,
                 live: HashMap::new(),
-                recovered_acked: RecoveredAckCache::new(MAX_RECOVERED_ACK_ENTRIES),
+                recovered_acked: RecoveredAckCache::new(cache_capacity),
                 reserved_positions: 0,
                 accounting_uncertain: false,
                 uncertain_attempt: None,
                 next_operation_id: 1,
             }),
         })
+    }
+
+    /// Run 422 D7-D10 Correction A (test-only) — construct a fresh ownership
+    /// domain with a deliberately SMALL recovered-acknowledgement cache so a test
+    /// can force FIFO eviction through the real journal flow without issuing
+    /// [`MAX_RECOVERED_ACK_ENTRIES`] distinct recoveries. This does not change the
+    /// production constructor and exposes no production configuration surface; it
+    /// is private test access reached only by a test backend's
+    /// `signing_ownership_domain`. The semantics (bound, FIFO eviction, exact
+    /// record binding) are identical to production — only the bound is smaller.
+    #[cfg(test)]
+    pub(crate) fn new_with_cache_capacity_for_test(cache_capacity: usize) -> Arc<Self> {
+        Self::with_recovered_ack_cache_capacity(cache_capacity)
     }
 }
 
@@ -1871,6 +1894,18 @@ mod tests {
         /// `for_each_signing_namespace_entry`. Lets a test observe that the journal
         /// aborted the scan EARLY (before the whole namespace was streamed).
         visits: std::sync::atomic::AtomicUsize,
+        /// Run 422 D7-D10 Correction A — counts successful AND store-then-error
+        /// `put_signing_record_synced` calls (the recovery durability op reissued
+        /// by `acknowledge_recovered_signed`). Lets a test observe that revisiting
+        /// an EVICTED recovered position reissues one additional synced write while
+        /// an exact cache hit reissues none. Test-only instrumentation.
+        record_writes: std::sync::atomic::AtomicUsize,
+        /// Run 422 D7-D10 Correction A — optional test-only recovered-ack cache
+        /// capacity. When `Some(n)`, the per-instance ownership domain is built
+        /// with a cache bounded to `n` entries via the private test constructor so
+        /// eviction can be forced through the real journal flow. `None` uses the
+        /// production bound. NOT a production configuration surface.
+        cache_cap: RwLock<Option<usize>>,
         domain: std::sync::OnceLock<Arc<SigningOwnershipDomain>>,
     }
 
@@ -1884,6 +1919,10 @@ mod tests {
                 store_then_error: RwLock::new(false),
                 fail_scan: RwLock::new(false),
                 visits: std::sync::atomic::AtomicUsize::new(0),
+                record_writes: std::sync::atomic::AtomicUsize::new(0),
+                // The modelled restart preserves the test-only cache bound so a
+                // recovery/eviction sequence spanning a reopen keeps a small cache.
+                cache_cap: RwLock::new(*self.cache_cap.read().unwrap()),
                 domain: std::sync::OnceLock::new(),
             })
         }
@@ -1905,6 +1944,17 @@ mod tests {
         }
         fn reset_visits(&self) {
             self.visits.store(0, std::sync::atomic::Ordering::SeqCst);
+        }
+        /// Successful/store-then-error `put_signing_record_synced` calls so far.
+        fn record_writes(&self) -> usize {
+            self.record_writes.load(std::sync::atomic::Ordering::SeqCst)
+        }
+        /// Bound the per-instance ownership domain's recovered-ack cache to `cap`
+        /// entries (test-only). MUST be called before the domain is first accessed
+        /// (before `initialize`/`open`), since the domain is created once per
+        /// instance via `signing_ownership_domain`.
+        fn set_cache_capacity_for_test(&self, cap: usize) {
+            *self.cache_cap.write().unwrap() = Some(cap);
         }
         fn corrupt(&self, key: &[u8]) {
             let mut m = self.map.write().unwrap();
@@ -1949,9 +1999,13 @@ mod tests {
                 // The bytes become readable, but the durability acknowledgement
                 // is reported uncertain (error). A correct journal must NOT treat
                 // the later readable bytes as an acknowledged barrier.
+                self.record_writes
+                    .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                 self.map.write().unwrap().insert(key.to_vec(), value.to_vec());
                 return Err(StorageError::Io("injected post-store sync failure".to_string()));
             }
+            self.record_writes
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
             self.map.write().unwrap().insert(key.to_vec(), value.to_vec());
             Ok(())
         }
@@ -2048,7 +2102,12 @@ mod tests {
             Ok(())
         }
         fn signing_ownership_domain(&self) -> Arc<SigningOwnershipDomain> {
-            self.domain.get_or_init(SigningOwnershipDomain::new).clone()
+            self.domain
+                .get_or_init(|| match *self.cache_cap.read().unwrap() {
+                    Some(cap) => SigningOwnershipDomain::new_with_cache_capacity_for_test(cap),
+                    None => SigningOwnershipDomain::new(),
+                })
+                .clone()
         }
     }
 
@@ -2174,11 +2233,17 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
-    // Run 422 D7-D10 Correction E (Section 4): recovered-acknowledgement FIFO
-    // cache acceptance matrix, exercised directly against the existing
-    // `RecoveredAckCache` with small colocated fixtures. These cover the cache's
-    // structural guarantees; the handler-level signer/handoff suppression is
-    // covered by the colocated D10 `binary_consensus_loop` tests.
+    // Run 422 D7-D10 Correction A (Section 4): recovered-acknowledgement FIFO
+    // cache CONTAINER tests, exercised directly against the in-memory
+    // `RecoveredAckCache` with small colocated fixtures. These cover only the
+    // container's structural guarantees (bound, FIFO order, exact-record binding,
+    // zero-capacity decline). They operate purely on process-local memory and do
+    // NOT exercise any storage durability barrier, journal lookup, synced write,
+    // signer, or facade handoff. The full post-eviction flow THROUGH the journal
+    // (an evicted position reissuing the synced durability write on revisit, an
+    // exact cache hit avoiding it) is covered by the journal-level tests below;
+    // the handler-level signer/handoff suppression is covered by the colocated
+    // D10 `binary_consensus_loop` tests.
     // -----------------------------------------------------------------------
 
     /// The entry limit holds under pressure: inserting far more than `max_entries`
@@ -2243,8 +2308,10 @@ mod tests {
         assert!(cache.get(&p1).is_some(), "re-ack must not evict a peer");
     }
 
-    /// Revisiting an evicted position simply re-inserts it (the durability barrier
-    /// is repeated); eviction only dropped process-local state.
+    /// Revisiting an evicted position re-inserts it into the in-memory container;
+    /// eviction only dropped process-local state. (Container-level only: this does
+    /// not reissue any storage durability barrier — that is asserted by the
+    /// journal-level post-eviction tests.)
     #[test]
     fn recovered_ack_cache_revisit_after_eviction_reinserts() {
         let mut cache = RecoveredAckCache::new(1);
@@ -2265,8 +2332,9 @@ mod tests {
         assert!(cache.get(&p0).is_some());
     }
 
-    /// A zero-capacity cache declines to cache: a later lookup is always a miss
-    /// (the durable record is intact and the barrier is simply repeated).
+    /// A zero-capacity container declines to cache: a later lookup is always a
+    /// miss. (Container-level only — it asserts the decline, not that any durable
+    /// record or storage barrier was involved.)
     #[test]
     fn recovered_ack_cache_zero_capacity_declines_to_cache() {
         let mut cache = RecoveredAckCache::new(0);
@@ -3375,5 +3443,269 @@ mod tests {
             SigningReservationJournal::open(store.reopen()),
             Err(JournalError::Corruption(_))
         ));
+    }
+
+    // ------------------------------------------------------------------
+    // Run 422 D7-D10 Correction A — post-eviction journal evidence. These
+    // drive the FULL recovery flow THROUGH the journal (reserve_for_sign over
+    // recovered Signed records), not direct cache insert/get. The ModelStore's
+    // `record_writes` counter observes the recovery durability op so that an
+    // evicted position reissuing the synced write (and an exact cache hit
+    // avoiding it) is directly asserted. The recovered-ack cache is bounded to a
+    // small test-only capacity via private test access so eviction is forced by
+    // a handful of real recoveries rather than MAX_RECOVERED_ACK_ENTRIES of them.
+    // ------------------------------------------------------------------
+
+    #[test]
+    fn post_eviction_recovery_reissues_synced_write_then_cache_hit_avoids_it() {
+        // Bound the recovered-ack cache to 2 so recovering a third position evicts
+        // the oldest process-local acknowledgement.
+        let store = Arc::new(ModelStore::default());
+        store.set_cache_capacity_for_test(2);
+
+        let pa = position(SigningKind::Proposal, 201);
+        let pb = position(SigningKind::Vote, 202);
+        let pc = position(SigningKind::Proposal, 203);
+        let ba = binding(b"aaa");
+        let bb = binding(b"bbb");
+        let bc = binding(b"ccc");
+        let sig_a = b"retained-sig-a".to_vec();
+        let sig_b = b"retained-sig-b".to_vec();
+        let sig_c = b"retained-sig-c".to_vec();
+
+        // (1) Create valid published Signed records under the ORIGINAL ownership
+        //     domain (reserve → invoke → publish for each distinct position).
+        {
+            let journal = attach(store.clone());
+            let ca = reserve_and_invoke(&journal, &pa, &ba);
+            journal.record_signed_result(&ca, &sig_a).unwrap();
+            let cb = reserve_and_invoke(&journal, &pb, &bb);
+            journal.record_signed_result(&cb, &sig_b).unwrap();
+            let cc = reserve_and_invoke(&journal, &pc, &bc);
+            journal.record_signed_result(&cc, &sig_c).unwrap();
+            assert_eq!(journal.reserved_position_count(), 3);
+            assert_eq!(journal.established_limit(), DEFAULT_MAX_RESERVED_POSITIONS);
+        }
+
+        // The exact durable record bytes, snapshotted for later preservation checks.
+        let bytes_a = store.map.read().unwrap().get(&pa.storage_key()).cloned().unwrap();
+        let bytes_b = store.map.read().unwrap().get(&pb.storage_key()).cloned().unwrap();
+        let bytes_c = store.map.read().unwrap().get(&pc.storage_key()).cloned().unwrap();
+
+        // (2) Reopen through a FRESH ownership domain: durable bytes survive, the
+        //     live-operation table and the process-local cache do not.
+        let reopened_store = store.reopen();
+        let reopened = attach(reopened_store.clone());
+        assert_eq!(reopened.reserved_position_count(), 3, "durable count survives reopen");
+        assert_eq!(
+            reopened.established_limit(),
+            DEFAULT_MAX_RESERVED_POSITIONS,
+            "established limit survives reopen"
+        );
+        assert_eq!(reopened.recovered_ack_cache_len(), 0, "a fresh domain starts with an empty cache");
+        assert_eq!(reopened_store.record_writes(), 0, "reopened instance starts its write counter at zero");
+
+        // Helper: a recovered Signed record must resolve to the exact retained
+        // signature (never a fresh continuation / signer invocation).
+        fn expect_retained(j: &SigningReservationJournal, p: &SigningPosition, b: &BindingDigest, want: &[u8]) {
+            match j.reserve_for_sign(p, b).unwrap() {
+                ReservationOutcome::ExactRetryRetained(s) => assert_eq!(s, want),
+                other => panic!("expected ExactRetryRetained, got {:?}", other),
+            }
+        }
+
+        // (3) Populate the acknowledgement cache through ACTUAL journal lookups.
+        //     Each FIRST recovery establishes the durability barrier via exactly
+        //     one additional synced write.
+        expect_retained(&reopened, &pa, &ba, &sig_a); // write #1 → cache {A}
+        assert_eq!(reopened_store.record_writes(), 1);
+        assert_eq!(reopened.recovered_ack_cache_len(), 1);
+        expect_retained(&reopened, &pb, &bb, &sig_b); // write #2 → cache {A,B}
+        assert_eq!(reopened_store.record_writes(), 2);
+        assert_eq!(reopened.recovered_ack_cache_len(), 2);
+
+        // (4) Force eviction through a FURTHER successful recovered acknowledgement:
+        //     recovering C (capacity 2) evicts the oldest entry A.
+        expect_retained(&reopened, &pc, &bc, &sig_c); // write #3 → evict A → {B,C}
+        assert_eq!(reopened_store.record_writes(), 3);
+        assert_eq!(reopened.recovered_ack_cache_len(), 2, "the cache stays at its bound");
+
+        // (5) Revisit the EVICTED position A through the journal and directly
+        //     observe the ADDITIONAL synced durability write (barrier re-established).
+        expect_retained(&reopened, &pa, &ba, &sig_a); // write #4 → evict B → {C,A}
+        assert_eq!(
+            reopened_store.record_writes(),
+            4,
+            "revisiting an evicted position reissues exactly one synced durability write"
+        );
+
+        // (6) An EXACT cache hit avoids that write: C is still cached, so revisiting
+        //     it reissues NOTHING — proven by configuring writes to fail yet still
+        //     succeeding with the retained signature and no counter advance.
+        reopened_store.set_fail_writes(true);
+        expect_retained(&reopened, &pc, &bc, &sig_c); // cache hit → NO write
+        assert_eq!(
+            reopened_store.record_writes(),
+            4,
+            "an exact cache hit reissues no synced durability write"
+        );
+        reopened_store.set_fail_writes(false);
+
+        // (7) Persistent counts, limit, exact record bytes, and conflict
+        //     obligations are preserved across the entire sequence.
+        assert_eq!(reopened.reserved_position_count(), 3);
+        assert_eq!(reopened.established_limit(), DEFAULT_MAX_RESERVED_POSITIONS);
+        assert_eq!(store.map.read().unwrap().get(&pa.storage_key()).cloned(), Some(bytes_a.clone()));
+        assert_eq!(store.map.read().unwrap().get(&pb.storage_key()).cloned(), Some(bytes_b));
+        assert_eq!(store.map.read().unwrap().get(&pc.storage_key()).cloned(), Some(bytes_c));
+        // A conflicting binding over a recovered position is refused (never a
+        // successful retained reuse) and does not rewrite the stored record.
+        assert!(matches!(
+            reopened.reserve_for_sign(&pa, &binding(b"conflicting")).unwrap(),
+            ReservationOutcome::Conflict
+        ));
+        assert_eq!(
+            store.map.read().unwrap().get(&pa.storage_key()).cloned(),
+            Some(bytes_a),
+            "a conflict obligation is preserved without rewrite"
+        );
+    }
+
+    #[test]
+    fn post_eviction_failed_and_uncertain_recovery_refuse_reuse_then_success_permits_exact_signature() {
+        // Bound the cache to 1 so recovering a second position evicts the first.
+        let store = Arc::new(ModelStore::default());
+        store.set_cache_capacity_for_test(1);
+        let pa = position(SigningKind::Proposal, 211);
+        let pb = position(SigningKind::Vote, 212);
+        let ba = binding(b"a");
+        let bb = binding(b"b");
+        let sig_a = b"retained-a".to_vec();
+        let sig_b = b"retained-b".to_vec();
+        {
+            let journal = attach(store.clone());
+            let ca = reserve_and_invoke(&journal, &pa, &ba);
+            journal.record_signed_result(&ca, &sig_a).unwrap();
+            let cb = reserve_and_invoke(&journal, &pb, &bb);
+            journal.record_signed_result(&cb, &sig_b).unwrap();
+        }
+        let bytes_a = store.map.read().unwrap().get(&pa.storage_key()).cloned().unwrap();
+
+        let reopened_store = store.reopen();
+        let reopened = attach(reopened_store.clone());
+
+        // Recover A (cache {A}), then recover B which EVICTS A (cache {B}).
+        match reopened.reserve_for_sign(&pa, &ba).unwrap() {
+            ReservationOutcome::ExactRetryRetained(s) => assert_eq!(s, sig_a),
+            other => panic!("expected ExactRetryRetained, got {:?}", other),
+        }
+        match reopened.reserve_for_sign(&pb, &bb).unwrap() {
+            ReservationOutcome::ExactRetryRetained(s) => assert_eq!(s, sig_b),
+            other => panic!("expected ExactRetryRetained, got {:?}", other),
+        }
+        assert_eq!(reopened.recovered_ack_cache_len(), 1);
+
+        // Revisit the EVICTED A with the recovery barrier write FAILING: the
+        // retained result is NOT reused and NO usable cache acknowledgement forms.
+        reopened_store.set_fail_writes(true);
+        assert!(matches!(reopened.reserve_for_sign(&pa, &ba), Err(JournalError::Storage(_))));
+        reopened_store.set_fail_writes(false);
+        assert_eq!(reopened.recovered_ack_cache_len(), 1, "a failed barrier caches nothing for A");
+
+        // Revisit the evicted A with a STORE-THEN-ERROR (uncertain) barrier:
+        // readable bytes are NOT a usable acknowledgement — still no reuse.
+        reopened_store.set_store_then_error(true);
+        assert!(matches!(reopened.reserve_for_sign(&pa, &ba), Err(JournalError::Storage(_))));
+        reopened_store.set_store_then_error(false);
+        assert_eq!(reopened.recovered_ack_cache_len(), 1, "an uncertain barrier caches nothing for A");
+        assert_eq!(
+            store.map.read().unwrap().get(&pa.storage_key()).cloned(),
+            Some(bytes_a.clone()),
+            "the exact record is preserved across failed/uncertain recovery"
+        );
+
+        // A later SUCCESSFUL barrier permits ONLY the exact retained signature.
+        match reopened.reserve_for_sign(&pa, &ba).unwrap() {
+            ReservationOutcome::ExactRetryRetained(s) => assert_eq!(s, sig_a),
+            other => panic!("expected ExactRetryRetained, got {:?}", other),
+        }
+        // Now cached (evicting B): a subsequent exact lookup is served WITHOUT
+        // reissuing the durable write even when writes are configured to fail.
+        reopened_store.set_fail_writes(true);
+        match reopened.reserve_for_sign(&pa, &ba).unwrap() {
+            ReservationOutcome::ExactRetryRetained(s) => assert_eq!(s, sig_a),
+            other => panic!("expected ExactRetryRetained, got {:?}", other),
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // Run 422 D7-D10 Correction B — store-then-error initialization. The
+    // existing fault injector makes the initialization metadata readable while
+    // its durable write returns an error. Readable bytes are NOT equated with a
+    // successful initialization acknowledgement, and metadata absence is NOT
+    // required afterwards.
+    // ------------------------------------------------------------------
+
+    #[test]
+    fn store_then_error_initialization_refuses_handle_but_leaves_readable_consistent_metadata() {
+        let store = Arc::new(ModelStore::default());
+        let limit = 8u64;
+        // The initialization metadata write STORES its bytes (readable) and THEN
+        // returns an error (uncertain durable write).
+        store.set_store_then_error(true);
+        let init = SigningReservationJournal::initialize(store.clone(), limit);
+        store.set_store_then_error(false);
+
+        // (A) `initialize` returns an error and yields NO usable handle.
+        assert!(matches!(init, Err(JournalError::Storage(_))), "store-then-error init must return an error");
+
+        // (B) Surviving metadata/namespace contents inspected DIRECTLY: the metadata
+        //     bytes are readable and decode to the requested limit with a zero
+        //     count; the record namespace stays empty (no records were created).
+        let meta_bytes = store
+            .get_signing_metadata()
+            .unwrap()
+            .expect("metadata bytes are readable after a store-then-error write");
+        let meta = SigningJournalMetadata::decode(&meta_bytes).expect("surviving metadata decodes");
+        assert_eq!(meta.max_reserved_positions, limit);
+        assert_eq!(meta.reserved_positions, 0);
+        assert!(
+            store
+                .map
+                .read()
+                .unwrap()
+                .keys()
+                .all(|k| !k.starts_with(SIGNING_RECORD_KEY_PREFIX)),
+            "a failed init creates no decision records"
+        );
+
+        // (C) Repeated initialization cannot silently reset or overwrite the
+        //     surviving metadata — even with a DIFFERENT limit, and even over a
+        //     freshly reopened instance (a fresh in-process domain).
+        assert!(matches!(
+            SigningReservationJournal::initialize(store.clone(), 999),
+            Err(JournalError::AlreadyInitialized)
+        ));
+        let reopened_store = store.reopen();
+        assert!(matches!(
+            SigningReservationJournal::initialize(reopened_store.clone(), 999),
+            Err(JournalError::AlreadyInitialized)
+        ));
+        let meta_after = SigningJournalMetadata::decode(
+            &store.get_signing_metadata().unwrap().expect("metadata still present"),
+        )
+        .expect("metadata still decodes");
+        assert_eq!(meta_after.max_reserved_positions, limit, "limit was not overwritten");
+        assert_eq!(meta_after.reserved_positions, 0, "count was not overwritten");
+
+        // (D) Subsequent explicit `open` behaves as the implementation specifies:
+        //     the surviving metadata is well-formed and the namespace is empty and
+        //     consistent (count 0), so a validating open ESTABLISHES the journal.
+        //     This is open's INDEPENDENT validation of durable state — NOT the
+        //     uncertain initialize write being treated as a success.
+        let opened = SigningReservationJournal::open(store.reopen())
+            .expect("open validates the surviving empty, consistent metadata and establishes the journal");
+        assert_eq!(opened.established_limit(), limit);
+        assert_eq!(opened.reserved_position_count(), 0);
     }
 }
