@@ -1385,10 +1385,12 @@ production; the guard engages only when a journal is explicitly wired (tests).
   described as having never existed. This is a bounded local demonstration on the
   **serialized** handler; it supplies **no** configured-authority runtime evidence
   and does **not** close E or F.
-* **Still OPEN in D10 (not addressed by this pass):** Correction E
-  (explicit initialization vs established-journal validation, persistent capacity
-  and recovered-record acknowledgement-cache accounting), and the remaining
-  F engine-progress evidence / bounded-and-classified child-process runner.
+* **Correction E now implemented and tested (see superseding §9.6):** explicit
+  initialization vs established-journal validation, persistent capacity accounting,
+  direct-read/iterator bounds, and recovered-record acknowledgement-cache evidence
+  are complete for their demonstrated local code-and-storage scope. **Still OPEN:**
+  the Correction F engine-progress evidence / bounded-and-classified child-process
+  runner (the active child-death test does NOT close F).
 * **Not executed / still unmet (unchanged posture):** durable anti-rollback
   anchor (§6.6), consensus-lock recovery (§5.3/§6.7), whole-copy rollback,
   copied-key/cross-host exclusivity, Timeout/NewView compatibility, power-loss
@@ -1410,3 +1412,152 @@ SECURITY_POSTURE=RS1-OPEN / PUBLIC-DEVNET-NO-GO
 ```
 
 C4/C5 remain OPEN. No production activation, PR, or Run 423 work is performed.
+
+
+### 9.6 RUN 422 D7-D10 Correction E — superseding evidence (direct-read bounds, acceptance matrix, validation)
+
+This section SUPERSEDES the "Still OPEN under E" wording in §9.3–§9.5 for the
+parts now implemented and tested. The accepted D restoration (§9.5,
+`run422_d7d10::correction_d`, four restored regressions) and the completed E
+namespace/accounting corrections are preserved unchanged; this pass finishes the
+remaining direct-read bounds and acceptance evidence without reopening their
+design.
+
+**Initialization / opening and namespace policy (as implemented).** Explicit
+`SigningReservationJournal::initialize` establishes a fresh namespace at a
+checked, supported position limit and durably publishes fixed-length
+initialization metadata before any signing; `SigningReservationJournal::open`
+validates an established namespace (metadata present, supported version,
+consistent limit/count, whole-namespace streaming validation) and never silently
+falls back to initialization. A store-then-error initialization write (readable
+bytes, uncertain durable acknowledgement) is not reported as a successful
+initialization. Duplicate initialization over an established namespace refuses
+and preserves state; opening another handle preserves an outstanding operation
+and its identity. These are exercised over the real RocksDB backend, the model
+reopen, and the colocated D10 store.
+
+**Direct-read and iterator bounds, with their allocation limits.** The
+whole-namespace iterator already length-checked each stored value before copying
+or unwrapping. This pass extends the same bounded-read discipline to the DIRECT
+reads on every supported backend (RocksDB, InMemory, the model store, and the
+colocated D10 store):
+
+* `get_signing_record` checks the backend-owned stored value's length against the
+  bounded decision-record size — `MAX_RECORD_LEN` for raw-stored backends, or
+  `4 + MAX_RECORD_LEN` for the CRC-enveloped RocksDB value — BEFORE copying the
+  payload or unwrapping the checksum envelope.
+* `get_signing_metadata` checks against the fixed metadata encoding size —
+  `METADATA_ENCODED_LEN`, or `4 + METADATA_ENCODED_LEN` enveloped — likewise
+  before any copy/unwrap.
+* The bounds reuse codec-owned constants (`MAX_RECORD_LEN`,
+  `METADATA_ENCODED_LEN`); no duplicated unexplained lengths are introduced.
+* Genuine absence returns `None`; a malformed, oversized, truncated, or otherwise
+  unreadable existing value returns an error. Version, checksum, and semantic
+  validation remain intact; there is no legacy fallback. Failure injection and
+  the established rejection precedence are preserved.
+
+Allocation-limit scope (stated honestly): these bounds limit the APPLICATION-
+owned copy/decode that follows a read. On RocksDB the underlying `get` still
+allocates its own backend-owned value; the length check limits only the
+subsequent payload copy and envelope unwrap. This does NOT make the RocksDB API
+allocation-free and does NOT constitute a complete storage DoS audit.
+
+**Persistent position accounting and uncertain-write behavior (preserved).** The
+shared ownership-domain reservation counter is reconstructed from durable state
+on open and enforced through additional handles and a real-backend reopen; both
+`Reserved` and `Signed` positions count, while publication, exact retry, and
+recovered acknowledgement do not increment position usage. An uncertain atomic
+reservation/accounting write is reconciled against the fixed limit and the
+prior/attempted counts (the only two consistent durable outcomes), refusing a
+regressed, overrun, or limit-changed count. A surviving `Reserved` record never
+grants a reconstructed live continuation, and no failed outcome erases or
+overwrites an obligation. This relies on the backend's atomic-write assumption;
+the local consistency checks are NOT whole-copy rollback detection.
+
+**Cache pressure, eviction, and re-acknowledgement evidence.** The bounded,
+process-local recovered-acknowledgement FIFO cache
+(`MAX_RECOVERED_ACK_ENTRIES`) is exercised with small colocated fixtures: the
+entry limit holds under pressure (never exceeding the bound; each over-capacity
+insert evicts exactly one oldest process-local entry, FIFO); the retained-payload
+bound follows from the enforced per-record bound and the checked entry count; a
+hit returns the EXACT identical record bound to its position (no cross-position
+substitution); re-acknowledging an already-cached position updates in place
+without growth or peer eviction; revisiting an evicted position simply re-inserts
+it (repeating the durability barrier); and a zero-capacity cache declines to
+cache. Eviction drops only process-local acknowledgement state — durable records,
+accounting, and conflict obligations are untouched. The handler-level guarantees
+(a cache hit/eviction/re-acknowledgement never re-invokes the signer and never
+mints a fresh continuation; failed/uncertain acknowledgement permits no retained
+delivery and creates no successful cache entry; successful acknowledgement
+permits only exact retained reuse) are covered by the colocated D10
+`binary_consensus_loop` handler tests with direct signer and handoff
+observations. Opaque journal-result fixtures remain distinct from
+cryptographically verified handler results.
+
+**Remaining first-use and rollback limitations (unchanged).** Journal
+initialization models a LOCAL storage operation only: it is not proof that a
+validator key has never signed, and it does not authorize production activation.
+Production journal initialization and authority activation remain UNWIRED. The
+durable anti-rollback anchor (§6.6), consensus-lock recovery (§5.3/§6.7),
+whole-copy rollback detection, copied-key/cross-host fencing, Timeout/NewView
+compatibility, and empirical power-loss behavior are NOT established. Synced
+writes implement a durability mechanism under the stated storage assumptions; the
+executed tests do not establish empirical power-loss behavior.
+
+**Correction F boundary (unchanged, not repaired here).**
+`d7d10_child_reserve_then_abort` is the `#[ignore]`d child-mode helper;
+`reserved_only_child_death_then_reopen_refuses` is the active parent. The parent
+still waits with an unbounded `.status()` and only checks "not success" — it
+neither bounds nor classifies the child termination, so a passing test does NOT
+close F. An outer command/tool execution deadline wrapping the run is not an
+internal child bound. The inaccurate "bounded child-process" wording has been
+removed from the test-file header and helper comments. Model reopen, real RocksDB
+reopen, child-process observations, release compilation, and power-loss evidence
+are distinct and are not conflated.
+
+**Exact commands, checkpoints, feature counts, release identity, and tool
+outcomes.** Validated at implementation checkpoint
+`fabb16c5b5a0fae104d3e64a2cdd1b24868383ee` (reviewed-branch and reviewed
+checkpoint `7de6c7698a0567bbc598579f9a9f55e8164be126` were UNAVAILABLE in the
+shallow single-branch clone; source correspondence was inspected directly, no
+ancestry was manufactured). Per-command results:
+
+* `cargo test -p qbind-node --lib signing_reservation_journal` — 50 passed, 0 failed.
+* `cargo test -p qbind-node --lib correction_d` — 36 passed, 0 failed (the four restored D regressions remain collected and pass).
+* `cargo test -p qbind-node --lib storage` — 61 passed, 0 failed.
+* `cargo test -p qbind-node --test run_422_d7d10_signing_reservation_journal_tests` — 22 passed, 1 ignored (child helper), 0 failed (default features).
+* `cargo test -p qbind-node --features test-utils --test run_422_d7d10_signing_reservation_journal_tests` — 27 passed, 1 ignored, 0 failed. The +5 cases over the default run are the `test-utils`-gated unknown-version and raw-seam direct-read cases; the 1 ignored helper and the shared passing subset overlap both runs.
+* `cargo test -p qbind-node --lib` — 1833 passed, 0 failed.
+* `cargo test -p qbind-node --test run_420_production_policy_reachability_tests` — 3 passed, 0 failed.
+* `cargo test -p qbind-node --test run_422_startup_refusal_tests` — 4 passed, 0 failed.
+* `cargo check -p qbind-node` (binary-inclusive; the historical `--lib` check does not substitute) — exit 0.
+* `cargo build --release -p qbind-node --bin qbind-node` — exit 0.
+* Existing D6 signer-isolation target `cargo test -p qbind-node --test m10_signer_isolation_tests` — 13 passed, 0 failed.
+* Focused Clippy `cargo clippy -p qbind-node --lib` — exit 0, no warnings in the changed files (`storage.rs`, `signing_reservation_journal.rs`, `binary_consensus_loop.rs`); the changed integration target reports only pre-existing style warnings. The whole-workspace `--tests` clippy run additionally compiles `m16_epoch_transition_hardening_tests`, which fails to build WITHOUT `--features test-utils` (a pre-existing feature-gating limitation on `set_inject_write_failure`/`clear_epoch_transition_marker`, unrelated to this change).
+
+Release compilation evidence ONLY (not configured-authority runtime evidence):
+
+* Build-source SHA: `fabb16c5b5a0fae104d3e64a2cdd1b24868383ee`
+* Path: `target/release/qbind-node`
+* Profile / features: `release` / default (`--bin qbind-node`)
+* Byte length: `17075336`
+* SHA-256: `31ef90a69afc0608b38ca91ef585485168c775a31b2c82c854ba563625ee06df`
+
+Security-tool outcomes (recorded literally): independent Code Review and CodeQL
+security scanning are attempted via the harness's `parallel_validation` with
+production storage changes declared non-trivial for CodeQL; any unavailable tool,
+skipped analysis, backend failure, or unexecuted check is not a successful scan.
+Security posture remains RS1-OPEN / PUBLIC-DEVNET-NO-GO.
+
+**Scoped verdict.** The scoped code, acceptance tests, documentation, and
+required validation for journal initialization, direct-read/iterator bounds, and
+persistent capacity accounting are complete for their demonstrated local
+code-and-storage scope:
+
+```
+D7D10_JOURNAL_INITIALIZATION_AND_CAPACITY=CODE-AND-STORAGE-TEST-POSITIVE
+```
+
+This is CODE-AND-STORAGE-TEST scope only. It is NOT configured-authority runtime
+evidence and does NOT promote readiness. Correction F and C4/C5 remain OPEN;
+production activation is not performed.

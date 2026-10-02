@@ -1330,12 +1330,15 @@ impl RocksDbConsensusStorage {
 }
 
 /// Run 422 D7-D10 — durable, synced backing store for the signing-reservation
-/// journal. This is a REAL power-loss-durable backend: writes go through
-/// `WriteOptions::set_sync(true)` (`fsync`) exactly like `put_current_epoch_synced`,
-/// and the durable acknowledgement corresponds to the signing-record write
-/// itself (not an unrelated epoch operation). Records are wrapped in the same
-/// CRC-32 checksum envelope used for blocks/QCs/epoch values (corruption
-/// detection only — not authentication, not rollback protection).
+/// journal. Writes go through `WriteOptions::set_sync(true)` (`fsync`) exactly
+/// like `put_current_epoch_synced`, and the durable acknowledgement corresponds
+/// to the signing-record write itself (not an unrelated epoch operation). This
+/// implements a durability MECHANISM under the stated storage assumptions
+/// (`fsync` semantics of the underlying filesystem/device); the executed tests
+/// do NOT establish empirical power-loss behavior, so it is not claimed as
+/// demonstrated power-loss durability. Records are wrapped in the same CRC-32
+/// checksum envelope used for blocks/QCs/epoch values (corruption detection
+/// only — not authentication, not rollback protection).
 impl crate::signing_reservation_journal::SigningJournalStorage for RocksDbConsensusStorage {
     fn get_signing_record(&self, key: &[u8]) -> Result<Option<Vec<u8>>, StorageError> {
         // Bounded direct read: a decision record is at most `MAX_RECORD_LEN`;

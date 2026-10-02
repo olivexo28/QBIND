@@ -9608,3 +9608,161 @@ reopen, not power-loss/release-binary evidence). Retained unchanged:
 remaining F work; C4/C5 remain OPEN. No authority activation, readiness promotion,
 D11, or Run 423 work; no PR, branch rename, force-push, rebase, or history rewrite;
 `task/warning.txt` and unrelated work preserved.
+
+
+## Run 422 D7-D10 — Correction E: direct-read bounds, remaining acceptance evidence, and final validation
+
+### Provenance and object limitations
+
+Reviewed branch `copilot/copilotcopilotrun-422-complete-correction-d-again` and
+reviewed checkpoint `7de6c7698a0567bbc598579f9a9f55e8164be126` were UNAVAILABLE
+as objects in this shallow single-branch clone. The supplied task branch
+(`copilot/copilotcopilotcopilotrun-422-complete-correction-d-again`) was used
+unchanged; source correspondence was inspected directly and no ancestry was
+manufactured. Implementation+test checkpoint: `fabb16c`. Normal commits and push
+only — no PR, main changes, branch rename, force-push, rebase, or history
+rewrite.
+
+### Changed paths and reused mechanisms
+
+* `crates/qbind-node/src/signing_reservation_journal.rs` — made the codec-owned
+  `METADATA_ENCODED_LEN` public for backend reuse; bounded the model store's
+  direct record/metadata reads before cloning; added recovered-ack FIFO cache
+  acceptance tests and model-store direct-read bound tests.
+* `crates/qbind-node/src/storage.rs` — bounded RocksDB `get_signing_record`
+  (`4 + MAX_RECORD_LEN`) and `get_signing_metadata` (`4 + METADATA_ENCODED_LEN`)
+  against the raw backend value before copy/unwrap; bounded the InMemory getters
+  before clone; added a minimal `#[cfg(any(test, feature = "test-utils"))]` raw
+  signing-namespace write seam to observe the truncation/oversize boundary; added
+  InMemory direct-read bound unit tests.
+* `crates/qbind-node/src/binary_consensus_loop.rs` — bounded the colocated D10
+  store's direct getters before clone (test fixtures/tests only; accepted
+  production code preserved); added a D10 direct-read bound test.
+* `crates/qbind-node/tests/run_422_d7d10_signing_reservation_journal_tests.rs` —
+  added direct-read bounds integration cases over real RocksDB (valid control,
+  genuine absence, oversized record, oversized metadata, at-limit, truncated
+  record/metadata, oversized-raw-before-unwrap); removed inaccurate "bounded
+  child-process" wording from the header and helper comments.
+
+Reused: existing CRC envelope codecs/`unwrap_checksummed`, the per-record and
+fixed-metadata length constants, the ownership domain, failure-injection
+facilities, recording signers, and the RocksDB fixtures. No production bypass or
+general test framework was added.
+
+### Direct-read bounds and backend-specific tests
+
+Each backend's DIRECT reads now apply the applicable length bound to the
+backend-owned value BEFORE copying the payload or unwrapping the checksum
+envelope (matching the iterator's existing discipline). Tested on the real
+RocksDB backend (integration target) and on InMemory / model / D10 stores (unit
+tests): valid control, genuine absence (`None`, never an error), oversized record
+and metadata (refused `Corruption`), exactly-at-limit (permitted; the gate is a
+strict `>`), truncated sub-envelope input (refused), and a raw oversized value
+refused before any unwrap. Allocation-limit scope is stated honestly: the RocksDB
+`get` still allocates its backend-owned value; the bound limits only the
+subsequent application-owned copy/decode and is NOT a complete storage DoS audit.
+
+### Cache-pressure, eviction, re-acknowledgement, signer, and handoff results
+
+Recovered-acknowledgement FIFO cache (small colocated fixtures): the entry limit
+holds under pressure (never exceeds the bound; one oldest process-local eviction
+per over-capacity insert, FIFO order); a hit returns the exact identical record
+bound to its position; re-acknowledging a cached position updates in place with
+no growth or peer eviction; revisiting an evicted position re-inserts (repeating
+the barrier); zero capacity declines to cache. Eviction drops only process-local
+state; durable records, accounting, and conflict obligations are untouched.
+Signer/handoff suppression (no re-invocation of the signer, no fresh continuation
+minted, no retained delivery on failed/uncertain acknowledgement, exact-only
+reuse on success) is covered by the colocated D10 handler tests with direct
+signer and handoff observations; opaque journal-result fixtures stay distinct
+from cryptographically verified handler results.
+
+### Initialization, uncertainty, and persistent-capacity matrix
+
+Preserved and re-validated: failed initialization write yields no usable handle
+and no signing; store-then-error initialization is not reported as a successful
+acknowledgement; established-open is explicit and never silently reinitializes;
+missing/corrupt/truncated/unsupported/inconsistent metadata fail closed;
+duplicate initialization preserves state; opening another handle preserves an
+outstanding operation and its identity. Uncertain reservation/accounting is
+reconciled against the fixed limit and the prior/attempted counts, refusing
+regressed/overrun/limit-changed durable counts; a surviving `Reserved` never
+grants a reconstructed continuation; no failed outcome erases an obligation.
+Capacity: both `Reserved` and `Signed` positions count; publication, exact retry,
+and recovered acknowledgement do not increment usage; capacity is enforced
+through another handle and a real-backend reopen; zero/unsupported limits behave
+as documented. The backend atomic-write assumption is explicit; local checks are
+NOT whole-copy rollback detection.
+
+### Preservation of accepted D and remaining F limitations
+
+The accepted `BoundSigningOperation` finalization and its four restored
+regression tests remain collected and pass (`run422_d7d10::correction_d`, 36
+tests). Correction F is NOT repaired here:
+`d7d10_child_reserve_then_abort` is the ignored helper;
+`reserved_only_child_death_then_reopen_refuses` is the active parent that still
+uses an unbounded `.status()` and does not classify termination — a passing test
+does not close F. Model reopen, real RocksDB reopen, child-process observations,
+release compilation, and power-loss evidence are kept distinct.
+
+### Validation (implementation+test checkpoint `fabb16c`, dev profile unless noted, exit 0)
+
+* `cargo test -p qbind-node --lib signing_reservation_journal` — 50 passed.
+* `cargo test -p qbind-node --lib correction_d` — 36 passed (four restored D regressions present and passing).
+* `cargo test -p qbind-node --lib storage` — 61 passed.
+* `cargo test -p qbind-node --test run_422_d7d10_signing_reservation_journal_tests` — 22 passed, 1 ignored (child helper).
+* `cargo test -p qbind-node --features test-utils --test run_422_d7d10_signing_reservation_journal_tests` — 27 passed, 1 ignored (the +5 cases are the `test-utils`-gated unknown-version and raw-seam direct-read cases; the ignored helper and shared passing subset overlap both runs).
+* `cargo test -p qbind-node --lib` — 1833 passed.
+* `cargo test -p qbind-node --test run_420_production_policy_reachability_tests` — 3 passed.
+* `cargo test -p qbind-node --test run_422_startup_refusal_tests` — 4 passed.
+* `cargo check -p qbind-node` (binary-inclusive; required; the historical `--lib` check does not substitute) — exit 0.
+* `cargo build --release -p qbind-node --bin qbind-node` — exit 0.
+* Existing D6 signer-isolation target `cargo test -p qbind-node --test m10_signer_isolation_tests` — 13 passed.
+* Focused Clippy `cargo clippy -p qbind-node --lib` — exit 0; no warnings in the changed files. The changed integration target reports only pre-existing style warnings. A whole-crate `--tests` clippy also compiles `m16_epoch_transition_hardening_tests`, which fails to build WITHOUT `--features test-utils` (pre-existing feature-gating of `set_inject_write_failure`/`clear_epoch_transition_marker`, unrelated to this change).
+
+### Release executable identity (release compilation evidence only)
+
+* Build-source SHA: `fabb16c5b5a0fae104d3e64a2cdd1b24868383ee`
+* Path: `target/release/qbind-node`
+* Profile / features: `release` / default (`--bin qbind-node`)
+* Byte length: `17075336`
+* SHA-256: `31ef90a69afc0608b38ca91ef585485168c775a31b2c82c854ba563625ee06df`
+
+This is release compilation evidence only, not configured-authority runtime
+evidence.
+
+### Security-tool outcomes (literal)
+
+Independent Code Review and CodeQL are attempted via the harness
+`parallel_validation`, production storage changes declared non-trivial for
+CodeQL. Any unavailable tool, skipped analysis, backend failure, or unexecuted
+check is recorded as such and is NOT a successful scan. Security posture remains
+`RS1-OPEN / PUBLIC-DEVNET-NO-GO`.
+
+### Documentation & EOL reconciliation
+
+Updated the operative contract §9.3–§9.5 and appended superseding §9.6. CRLF docs
+retain CRLF with no lone CR/LF; `storage.rs` remains LF; original EOF conventions
+preserved. Synced writes implement a durability mechanism under stated storage
+assumptions; the executed tests do not establish empirical power-loss behavior.
+Journal initialization remains a LOCAL storage operation — not proof a validator
+key has never signed and not authorization for production activation.
+
+### Scoped disposition
+
+`D7D10_JOURNAL_INITIALIZATION_AND_CAPACITY=CODE-AND-STORAGE-TEST-POSITIVE`
+(explicit initialization/opening, namespace policy, direct-read and iterator
+bounds, and persistent position accounting — demonstrated local code-and-storage
+scope only; not configured-authority runtime evidence). Retained unchanged:
+`D7D10_LOCAL_SIGNING_RESERVATION=PARTIAL`,
+`D7D10_MISSING_JOURNAL_SIGNING_REFUSAL=CODE-TEST-POSITIVE`,
+`D7D10_POST_STORAGE_AUTHORIZATION_REVALIDATION=CODE-TEST-POSITIVE`,
+`D7D8_RESTORE_COMPLETION_CONTAINMENT=CODE-AND-RELEASE-TEST-POSITIVE`,
+`D7_STATUS=PARTIAL-CODE-TEST / PRODUCTION-LIFECYCLE-UNAVAILABLE`,
+`DURABLE_ANTI_ROLLBACK=NOT-ESTABLISHED`, `GENESIS_AUTHORITY_ACTIVATION=DISABLED`,
+`PRODUCTION_WIRE_CHAIN_ID_BEHAVIOR=UNCHANGED`,
+`CONFIGURED_AUTHORITY_RELEASE_BINARY_EVIDENCE=NOT-YET-CAPTURED`,
+`SECURITY_POSTURE=RS1-OPEN / PUBLIC-DEVNET-NO-GO`. **Still OPEN:** Correction F
+(unbounded/unclassified child runner) and C4/C5. No authority activation,
+readiness promotion, D11, or Run 423 work; no PR, branch rename, force-push,
+rebase, or history rewrite; `task/warning.txt` and unrelated work preserved.
