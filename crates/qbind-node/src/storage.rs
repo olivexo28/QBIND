@@ -1300,6 +1300,33 @@ impl RocksDbConsensusStorage {
         key.extend_from_slice(position_key);
         key
     }
+
+    /// Test-only seam (Run 422 D7-D10 Correction E): write ARBITRARY RAW bytes at
+    /// a signing-namespace key, bypassing the checksum envelope. This exists only
+    /// so direct-read bound tests can observe the size/truncation boundary of
+    /// `get_signing_record`/`get_signing_metadata` against the real backend (for
+    /// example a sub-envelope-length value, or an oversized stored value). It is
+    /// NOT a production path and performs no validation.
+    ///
+    /// Passing `None` targets the exact backend-owned metadata key; `Some(key)`
+    /// targets the record key derived from the journal position-key bytes.
+    #[doc(hidden)]
+    #[cfg(any(test, feature = "test-utils"))]
+    pub fn put_signing_namespace_raw_for_test(
+        &self,
+        position_key: Option<&[u8]>,
+        raw_bytes: &[u8],
+    ) -> Result<(), StorageError> {
+        let full = match position_key {
+            Some(k) => Self::signing_record_key(k),
+            None => SIGNING_METADATA_STORAGE_KEY.to_vec(),
+        };
+        let mut write_opts = rocksdb::WriteOptions::default();
+        write_opts.set_sync(true);
+        self.db
+            .put_opt(&full, raw_bytes, &write_opts)
+            .map_err(|e| StorageError::Io(e.to_string()))
+    }
 }
 
 /// Run 422 D7-D10 — durable, synced backing store for the signing-reservation
@@ -1897,6 +1924,73 @@ pub fn ensure_compatible_schema<S: ConsensusStorage + ?Sized>(
 mod tests {
     use super::*;
     use qbind_wire::consensus::BlockHeader;
+
+    // Run 422 D7-D10 Correction E (Section 3): direct-read size bounds on the
+    // InMemory (MODEL) signing getters. Stored values are raw (no envelope), so
+    // the record bound is `MAX_RECORD_LEN` and the metadata bound is
+    // `METADATA_ENCODED_LEN`; both are checked BEFORE the value is cloned.
+    #[test]
+    fn inmemory_signing_record_direct_read_bounds() {
+        use crate::signing_reservation_journal::{SigningJournalStorage, MAX_RECORD_LEN};
+        let store = InMemoryConsensusStorage::new();
+        let key = b"sj:v1:some-position";
+
+        // Genuine absence stays None.
+        assert!(store.get_signing_record(key).expect("read").is_none());
+
+        // At-limit value round-trips.
+        store
+            .put_signing_record_synced(key, &vec![0u8; MAX_RECORD_LEN])
+            .expect("store at-limit");
+        assert_eq!(
+            store
+                .get_signing_record(key)
+                .expect("read")
+                .expect("present")
+                .len(),
+            MAX_RECORD_LEN
+        );
+
+        // Oversized value is refused BEFORE cloning.
+        store
+            .put_signing_record_synced(key, &vec![0u8; MAX_RECORD_LEN + 1])
+            .expect("store oversized");
+        assert!(matches!(
+            store.get_signing_record(key),
+            Err(StorageError::Corruption(_))
+        ));
+    }
+
+    #[test]
+    fn inmemory_signing_metadata_direct_read_bounds() {
+        use crate::signing_reservation_journal::{SigningJournalStorage, METADATA_ENCODED_LEN};
+        let store = InMemoryConsensusStorage::new();
+
+        // Genuine absence stays None.
+        assert!(store.get_signing_metadata().expect("read").is_none());
+
+        // At-limit value round-trips.
+        store
+            .put_signing_metadata_synced(&vec![0u8; METADATA_ENCODED_LEN])
+            .expect("store at-limit");
+        assert_eq!(
+            store
+                .get_signing_metadata()
+                .expect("read")
+                .expect("present")
+                .len(),
+            METADATA_ENCODED_LEN
+        );
+
+        // Oversized value is refused BEFORE cloning.
+        store
+            .put_signing_metadata_synced(&vec![0u8; METADATA_ENCODED_LEN + 1])
+            .expect("store oversized");
+        assert!(matches!(
+            store.get_signing_metadata(),
+            Err(StorageError::Corruption(_))
+        ));
+    }
 
     fn make_test_proposal(height: u64, suite_id: u16) -> BlockProposal {
         BlockProposal {

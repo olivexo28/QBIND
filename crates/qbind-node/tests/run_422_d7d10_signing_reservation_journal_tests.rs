@@ -5,8 +5,10 @@
 //! `docs/protocol/QBIND_PROPOSAL_VOTE_SIGNING_STATE_CONTINUITY_CONTRACT.md`.
 //! They exercise the journal over a *real* `RocksDbConsensusStorage` backend
 //! (durable `set_sync(true)` writes) using genuine close/reopen controls, plus
-//! a bounded child-process death/reopen case using test-only self re-exec
-//! orchestration.
+//! a child-process death/reopen case using test-only self re-exec
+//! orchestration. The child runner is NOT a bounded or classified-termination
+//! runner (it waits with an unbounded `.status()` and only checks "not
+//! success"); it therefore does not close Correction F.
 //!
 //! Scope / honesty notes:
 //! * A "restart" or "reopen" is modelled by dropping the `RocksDbConsensusStorage`
@@ -27,7 +29,7 @@ use std::sync::Arc;
 use qbind_node::signing_reservation_journal::{
     BindingDigest, JournalError, ReservationOutcome, ResultPublicationCapability,
     SigningJournalStorage, SigningKind, SigningPosition, SigningReservationJournal,
-    DEFAULT_MAX_RESERVED_POSITIONS,
+    DEFAULT_MAX_RESERVED_POSITIONS, MAX_RECORD_LEN, METADATA_ENCODED_LEN,
 };
 // Run 422 D7-D10 Correction F: the version-fabrication helper is a test-only
 // seam gated behind `test-utils`. Import it (and the record-format constant it
@@ -453,6 +455,210 @@ fn missing_expected_signature_on_reopen_fails_closed() {
     assert!(matches!(err, JournalError::Corruption(_)), "got {:?}", err);
 }
 
+// ---------------------------------------------------------------------------
+// Direct-read size bounds (Run 422 D7-D10 Correction E, Section 3).
+//
+// These exercise the REAL RocksDB direct-read APIs `get_signing_record` and
+// `get_signing_metadata` — distinct from the open-time namespace iterator. Each
+// bound is applied to the backend-owned stored bytes BEFORE the payload is
+// copied out / the checksum envelope is unwrapped. The underlying RocksDB `get`
+// still allocates its own value; the bound limits only subsequent
+// application-owned copying/decoding (NOT a complete storage DoS audit).
+// ---------------------------------------------------------------------------
+
+/// Valid control + genuine absence: a well-formed record round-trips through the
+/// direct record read, and a never-written position reads back as `None` (not an
+/// error).
+#[test]
+fn direct_read_record_valid_control_and_absence() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let present = proposal_position(31);
+    let absent = proposal_position(32);
+    let bind = binding(0x3A);
+
+    let store = open_store(dir.path());
+    let journal = journal(store.clone() as Arc<dyn SigningJournalStorage>);
+    assert!(matches!(
+        journal.reserve_for_sign(&present, &bind).expect("reserve"),
+        ReservationOutcome::FreshlyReserved(_)
+    ));
+
+    // Present: direct read returns Some(bytes) under the bound.
+    let got = store
+        .get_signing_record(&present.storage_key())
+        .expect("record read must not error");
+    assert!(got.is_some(), "a written record must read back as Some");
+    // Genuine absence stays None (never an error).
+    let missing = store
+        .get_signing_record(&absent.storage_key())
+        .expect("absent record read must not error");
+    assert!(missing.is_none(), "an unwritten position must read as None");
+}
+
+/// Valid control + genuine absence for the metadata direct read.
+#[test]
+fn direct_read_metadata_valid_control_and_absence() {
+    // Absence first: a fresh backend with no initialization has no metadata.
+    let empty_dir = tempfile::tempdir().expect("tempdir");
+    let empty = open_store(empty_dir.path());
+    assert!(
+        empty
+            .get_signing_metadata()
+            .expect("metadata read must not error")
+            .is_none(),
+        "uninitialized backend must report metadata absence as None"
+    );
+
+    // Present: after initialization the fixed-length metadata reads back Some.
+    let dir = tempfile::tempdir().expect("tempdir");
+    let store = open_store(dir.path());
+    SigningReservationJournal::initialize(
+        store.clone() as Arc<dyn SigningJournalStorage>,
+        DEFAULT_MAX_RESERVED_POSITIONS,
+    )
+    .expect("initialize fresh journal");
+    assert!(
+        store
+            .get_signing_metadata()
+            .expect("metadata read must not error")
+            .is_some(),
+        "initialized backend must read metadata back as Some"
+    );
+}
+
+/// An oversized stored record value (one byte beyond the bounded decision-record
+/// size, under a valid checksum envelope) is refused by the direct record read
+/// BEFORE the payload is unwrapped — it does not silently return bytes.
+#[test]
+fn direct_read_oversized_record_refused() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let pos = proposal_position(33);
+    let store = open_store(dir.path());
+    // Write an over-long payload through the public synced writer; the stored
+    // enveloped value is `4 + (MAX_RECORD_LEN + 1)`, exceeding `4 + MAX_RECORD_LEN`.
+    let over = vec![0u8; MAX_RECORD_LEN + 1];
+    store
+        .put_signing_record_synced(&pos.storage_key(), &over)
+        .expect("store oversized record");
+    let err = store
+        .get_signing_record(&pos.storage_key())
+        .expect_err("oversized record must be refused");
+    assert!(
+        matches!(err, qbind_node::storage::StorageError::Corruption(_)),
+        "oversized record must be a Corruption refusal, got {:?}",
+        err
+    );
+}
+
+/// An exactly-at-limit record value passes the size gate (the bound is a
+/// strict `>` ceiling); the direct read returns the stored payload.
+#[test]
+fn direct_read_record_at_limit_is_returned() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let pos = proposal_position(34);
+    let store = open_store(dir.path());
+    // Payload exactly `MAX_RECORD_LEN` ⇒ stored enveloped value `4 + MAX_RECORD_LEN`
+    // ⇒ equal to the bound, not greater; the size gate permits it.
+    let at = vec![0u8; MAX_RECORD_LEN];
+    store
+        .put_signing_record_synced(&pos.storage_key(), &at)
+        .expect("store at-limit record");
+    let got = store
+        .get_signing_record(&pos.storage_key())
+        .expect("at-limit record must pass the size gate");
+    assert_eq!(got.expect("payload present").len(), MAX_RECORD_LEN);
+}
+
+/// An oversized stored metadata value (one byte beyond the fixed metadata
+/// encoding size, under a valid envelope) is refused by the direct metadata read
+/// BEFORE unwrapping.
+#[test]
+fn direct_read_oversized_metadata_refused() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let store = open_store(dir.path());
+    let over = vec![0u8; METADATA_ENCODED_LEN + 1];
+    store
+        .put_signing_metadata_synced(&over)
+        .expect("store oversized metadata");
+    let err = store
+        .get_signing_metadata()
+        .expect_err("oversized metadata must be refused");
+    assert!(
+        matches!(err, qbind_node::storage::StorageError::Corruption(_)),
+        "oversized metadata must be a Corruption refusal, got {:?}",
+        err
+    );
+}
+
+/// A truncated (sub-envelope-length) RAW stored record value is refused by the
+/// direct read: the size gate passes (it is under the ceiling) but the envelope
+/// unwrap then rejects the too-short value fail-closed. Uses the test-only raw
+/// seam to bypass the checksum writer.
+#[cfg(feature = "test-utils")]
+#[test]
+fn direct_read_truncated_record_refused() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let pos = proposal_position(35);
+    let store = open_store(dir.path());
+    // Two raw bytes: below the 4-byte checksum envelope minimum.
+    store
+        .put_signing_namespace_raw_for_test(Some(&pos.storage_key()), &[0xAA, 0xBB])
+        .expect("raw truncated write");
+    let err = store
+        .get_signing_record(&pos.storage_key())
+        .expect_err("truncated record must be refused");
+    assert!(
+        matches!(err, qbind_node::storage::StorageError::Corruption(_)),
+        "truncated record must be a Corruption refusal, got {:?}",
+        err
+    );
+}
+
+/// A truncated (sub-envelope-length) RAW stored metadata value is refused by the
+/// direct metadata read. Uses the test-only raw seam.
+#[cfg(feature = "test-utils")]
+#[test]
+fn direct_read_truncated_metadata_refused() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let store = open_store(dir.path());
+    store
+        .put_signing_namespace_raw_for_test(None, &[0x01])
+        .expect("raw truncated metadata write");
+    let err = store
+        .get_signing_metadata()
+        .expect_err("truncated metadata must be refused");
+    assert!(
+        matches!(err, qbind_node::storage::StorageError::Corruption(_)),
+        "truncated metadata must be a Corruption refusal, got {:?}",
+        err
+    );
+}
+
+/// An oversized RAW stored record (beyond the envelope bound) is refused by the
+/// direct read BEFORE any unwrap, even when written with the raw seam (no valid
+/// checksum). This proves the size gate precedes envelope validation.
+#[cfg(feature = "test-utils")]
+#[test]
+fn direct_read_oversized_raw_record_refused_before_unwrap() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let pos = proposal_position(36);
+    let store = open_store(dir.path());
+    // Raw bytes beyond `4 + MAX_RECORD_LEN`, with NO valid checksum: the size
+    // gate must refuse before the envelope is ever examined.
+    let over = vec![0x7Au8; 4 + MAX_RECORD_LEN + 32];
+    store
+        .put_signing_namespace_raw_for_test(Some(&pos.storage_key()), &over)
+        .expect("raw oversized write");
+    let err = store
+        .get_signing_record(&pos.storage_key())
+        .expect_err("oversized raw record must be refused");
+    assert!(
+        matches!(err, qbind_node::storage::StorageError::Corruption(_)),
+        "oversized raw record must be a Corruption refusal, got {:?}",
+        err
+    );
+}
+
 /// A second journal handle over the *same* durable store cannot obtain a second
 /// live signing permit for an already-reserved position: the earlier durable
 /// reservation is visible and treated as potentially-signed.
@@ -786,7 +992,8 @@ fn established_limit_and_count_are_observable_after_reopen() {
 }
 
 // ---------------------------------------------------------------------------
-// Bounded child-process death / reopen.
+// Child-process death / reopen (unbounded, unclassified runner — does NOT
+// close Correction F).
 // ---------------------------------------------------------------------------
 
 /// Correction C over the real RocksDB backend: idempotent identical publication
@@ -863,9 +1070,10 @@ fn child_binding() -> BindingDigest {
     BindingDigest([0x9Fu8; 32])
 }
 
-/// Bounded child-process death then reopen: spawn this test binary in child
-/// mode, let it durably reserve and then abort, then reopen the same store in
-/// the parent and assert the recovered reserved-only record refuses re-signing.
+/// Child-process death then reopen (unbounded, unclassified runner): spawn this
+/// test binary in child mode, let it durably reserve and then abort, then reopen
+/// the same store in the parent and assert the recovered reserved-only record
+/// refuses re-signing.
 ///
 /// Correction-F boundary (NOT closed under E): this parent is the ACTIVE test;
 /// [`d7d10_child_reserve_then_abort`] is the `#[ignore]`d child-mode helper it

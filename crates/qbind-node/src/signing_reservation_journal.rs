@@ -2074,6 +2074,55 @@ mod tests {
         attach_with_budget(store, DEFAULT_MAX_RESERVED_POSITIONS)
     }
 
+    /// Run 422 D7-D10 Correction E (Section 3): the MODEL store's direct record
+    /// read refuses an oversized stored value BEFORE cloning it. The raw value is
+    /// injected via `overwrite` (bypassing the journal) to exceed `MAX_RECORD_LEN`.
+    #[test]
+    fn model_store_record_direct_read_refuses_oversized_before_clone() {
+        let store = Arc::new(ModelStore::default());
+        let key = b"sj:v1:model-pos".to_vec();
+        // Genuine absence stays None.
+        assert!(store.get_signing_record(&key).expect("read").is_none());
+        // At-limit round-trips.
+        store.overwrite(&key, vec![0u8; MAX_RECORD_LEN]);
+        assert_eq!(
+            store
+                .get_signing_record(&key)
+                .expect("read")
+                .expect("present")
+                .len(),
+            MAX_RECORD_LEN
+        );
+        // Oversized is refused before the clone.
+        store.overwrite(&key, vec![0u8; MAX_RECORD_LEN + 1]);
+        assert!(matches!(
+            store.get_signing_record(&key),
+            Err(StorageError::Corruption(_))
+        ));
+    }
+
+    /// Correction E (Section 3): the MODEL store's direct metadata read refuses an
+    /// oversized stored value BEFORE cloning (bound `METADATA_ENCODED_LEN`).
+    #[test]
+    fn model_store_metadata_direct_read_refuses_oversized_before_clone() {
+        let store = Arc::new(ModelStore::default());
+        assert!(store.get_signing_metadata().expect("read").is_none());
+        store.overwrite(MODEL_META_KEY, vec![0u8; METADATA_ENCODED_LEN]);
+        assert_eq!(
+            store
+                .get_signing_metadata()
+                .expect("read")
+                .expect("present")
+                .len(),
+            METADATA_ENCODED_LEN
+        );
+        store.overwrite(MODEL_META_KEY, vec![0u8; METADATA_ENCODED_LEN + 1]);
+        assert!(matches!(
+            store.get_signing_metadata(),
+            Err(StorageError::Corruption(_))
+        ));
+    }
+
     /// Test-fixture setup (NOT a mirror of production selection): an empty,
     /// un-initialized namespace is explicitly initialized with `limit`; an already-
     /// established one is opened and validated. BOTH routes validate — this is not

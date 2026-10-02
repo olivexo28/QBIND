@@ -23977,6 +23977,47 @@ mod tests {
 
                     // ---- A. Proposal / Vote success (reserve-before-sign) ----
 
+                    /// Run 422 D7-D10 Correction E (Section 3): the D10 store's
+                    /// direct record/metadata reads refuse an oversized stored
+                    /// value BEFORE cloning it. Raw bytes are injected via `poke`
+                    /// (bypassing the journal) at the record key and metadata key.
+                    #[test]
+                    fn d10_direct_read_size_bounds_refuse_oversized_before_clone() {
+                        use crate::signing_reservation_journal::{
+                            SigningJournalStorage, MAX_RECORD_LEN, METADATA_ENCODED_LEN,
+                        };
+                        let store = D10Store::new();
+                        let rec_key = b"sj:v1:d10-pos".to_vec();
+
+                        // Genuine absence stays None.
+                        assert!(store.get_signing_record(&rec_key).unwrap().is_none());
+                        assert!(store.get_signing_metadata().unwrap().is_none());
+
+                        // At-limit values round-trip.
+                        store.poke(&rec_key, vec![0u8; MAX_RECORD_LEN]);
+                        assert_eq!(
+                            store.get_signing_record(&rec_key).unwrap().unwrap().len(),
+                            MAX_RECORD_LEN
+                        );
+                        store.poke(D10_META_KEY, vec![0u8; METADATA_ENCODED_LEN]);
+                        assert_eq!(
+                            store.get_signing_metadata().unwrap().unwrap().len(),
+                            METADATA_ENCODED_LEN
+                        );
+
+                        // Oversized values are refused before the clone.
+                        store.poke(&rec_key, vec![0u8; MAX_RECORD_LEN + 1]);
+                        assert!(matches!(
+                            store.get_signing_record(&rec_key),
+                            Err(StorageError::Corruption(_))
+                        ));
+                        store.poke(D10_META_KEY, vec![0u8; METADATA_ENCODED_LEN + 1]);
+                        assert!(matches!(
+                            store.get_signing_metadata(),
+                            Err(StorageError::Corruption(_))
+                        ));
+                    }
+
                     #[test]
                     fn d10_proposal_success_reserves_before_single_sign() {
                         let fixture = make_fixture(4);
