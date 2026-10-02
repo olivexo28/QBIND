@@ -585,6 +585,16 @@ deferred unless required for correctness.
 
 ## 5. Crash recovery, rollback resistance, and consensus recovery (kept distinct)
 
+> **Ownership cross-reference (RUN 422 D7-D11).** The *recovery-admission ordering*
+> and the *recovered-consensus ↔ signing-history correspondence* requirements are
+> owned by
+> `docs/protocol/QBIND_CONSENSUS_RECOVERY_SIGNING_HISTORY_CORRESPONDENCE_CONTRACT.md`.
+> This section remains operative and authoritative for the **journal** (its records,
+> state machine, and recovery semantics); the correspondence contract references
+> these rows rather than redefining them and supplies the fuller source-anchored
+> admission sequence and per-comparison correspondence table. No statement here is
+> superseded.
+
 The three lifecycle requirements are kept separate: **(A) activation
 authorization**, **(B) current-authority freshness**, **(C) signing /
 consensus-state continuity**. A signing record establishes neither (A) nor (B).
@@ -761,7 +771,11 @@ supply. **Anchor selection remains UNRESOLVED.**
 Signing may resume only after the HotStuff lock state required for safe future
 voting is recovered (or signing is refused until it is), independently of the
 anchor question. This is a dependency on the engine recovery entrypoints
-(§5.3), not solved by the signing journal.
+(§5.3), not solved by the signing journal. The full recovery-admission ordering
+and the consensus-state ↔ signing-history correspondence requirements that build
+on this dependency are owned by
+`docs/protocol/QBIND_CONSENSUS_RECOVERY_SIGNING_HISTORY_CORRESPONDENCE_CONTRACT.md`
+(RUN 422 D7-D11).
 
 ---
 

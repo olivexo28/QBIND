@@ -10662,3 +10662,164 @@ authorized.
   **not** a successful review; **CodeQL** was skipped as trivial (Markdown-only), so no scan ran.
 * Local positivity here is bounded to the demonstrated local signing-reservation scope
   and must not be read as production, anti-rollback, or security-review completion.
+
+## Run 422 D7-D11 — Consensus-recovery / signing-history correspondence contract (documentation-only)
+
+This section records the D7-D11 **source audit and documentation-only contract**
+phase. It answers: *after an ordinary restart or a snapshot restoration, what
+observable evidence is required to establish that recovered consensus safety state
+and the signing journal are compatible before signing may resume?* No Rust, test,
+dependency, feature, schema, CLI, configuration, workflow, wire-format, or
+activation change was made; no build, test, or scan was executed by this pass.
+
+### Provenance and object limitations
+
+* **Working branch (actual):** `copilot/copilotcopilotrun-422-documentation-only-consolida`,
+  used unchanged (no rename/rebase/force-push/history rewrite). The task's reported
+  branch string `copilot/copilotrun-422-documentation-only-consolidation` differs
+  from the actual branch; the supplied branch is used as-is.
+* **Starting worktree HEAD (actual):** `5435d22b917d1d078c94b633b18bd28d5802c1a3`
+  (`update`); worktree clean before this pass. All source line references in the
+  new contract are taken against this revision.
+* **Shallow, single-branch clone** (`git rev-list --count HEAD` = 2). The accepted
+  D10 final revision `3d7155eddc09f7071d1af277208a070695aabd66` named by the task
+  is **absent** as an object in this checkout (`git cat-file -t` → *could not get
+  object info*); it is not in local ancestry and is not referenced by any tracked
+  file. Reachability of that reference object is reported **separately** from
+  content correspondence; ancestry to it is **not** manufactured.
+
+### Changed documents
+
+1. **NEW** `docs/protocol/QBIND_CONSENSUS_RECOVERY_SIGNING_HISTORY_CORRESPONDENCE_CONTRACT.md`
+   — the authoritative owner of the recovery-admission ordering and the
+   recovered-consensus ↔ signing-history correspondence requirements: inspected
+   revision + reachability inventory, source-backed recovery inventory, the five
+   safety questions separated, safety invariants + explicit trust assumptions,
+   existing vs missing mechanisms, per-comparison correspondence table + limitations,
+   proposed recovery-admission ordering, observable-state failure matrix, future
+   acceptance matrix, unresolved prerequisites, and exactly one bounded successor.
+2. `docs/protocol/QBIND_PROPOSAL_VOTE_SIGNING_STATE_CONTINUITY_CONTRACT.md`
+   — added concise ownership cross-references (§5 header, §6.7) naming the new
+   contract as owner of the recovery/correspondence surface; the journal
+   specification remains authoritative there and no operative statement was changed.
+3. `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_422_D7.md` — this section.
+
+### Source-backed recovery inventory (summary; full table in the new contract §2)
+
+* **Committed state + epoch:** exact restoration in production
+  (`open_production_consensus_storage`, `verify_epoch_consistency_on_startup`,
+  `get_current_epoch`); a height/epoch is **not** a lock and **not** a
+  signing-history commitment.
+* **Consensus lock (`locked_qc`):** reconstructed **conservatively** only on the
+  **harness** restart path (`hotstuff_node_sim.rs::load_persisted_state` chooses the
+  higher-view of the separately-stored and embedded QC, no signature re-verification
+  on load) → `initialize_from_restart`. The **production** snapshot-baseline path
+  (`initialize_from_snapshot_baseline`) recovers **no** lock. No recovery entrypoint
+  carries an uncommitted-vote / per-view `voted_in_view` record (reset to `false`);
+  consistent with D7-D2.
+* **Restore completion (RTR, D7-D8):** `restore_completion.rs` `COMPLETE` proves
+  only that *this attempt's* effects passed durability barriers; the SHA3-256
+  `snapshot_meta_digest` is integrity/association only; it is **not** anti-rollback,
+  freshness, consensus-lock recovery, or signing-history proof.
+* **Signing-reservation journal (D10):** `signing_reservation_journal.rs`
+  (`open` / `for_each_signing_namespace_entry`, `SigningRecordStage::{Reserved,
+  Signed}`, metadata accounting, bounded `RecoveredAckCache`, in-process
+  `SigningOwnershipDomain`) is fail-closed on reopen and never auto-initializes,
+  repairs, deletes, overwrites, resets counters, or migrates history; it provides
+  **no** anti-rollback/freshness property. **It is not opened or wired anywhere in
+  production `main.rs`.**
+* **Guarded signing routes:** `guarded_sign_{proposal,vote}_for_broadcast` fail
+  closed on a missing journal; `forward_actions_to_facade` / `do_leader_tick` /
+  `maybe_reemit_on_late_peer_connect` are wired with `journal = None` and
+  `current_auth = None` in production, so under `ConsensusVerificationPolicy::Required`
+  every outbound action is rejected at admission before the signing stage.
+
+### Production vs harness distinction
+
+Production recovers committed state and a coarse epoch exactly, recovers **no**
+lock on the snapshot-baseline path, recovers **no** uncommitted-vote record on any
+path, and opens **no** signing journal. The conservative lock reconstruction and
+the journal readers used by the correspondence comparisons are therefore
+**harness/test-reachable only** today; the production recovery path has no
+signing-side correspondence input and an incomplete consensus-side safety input.
+
+### Required safety state, correspondence inputs, and decisions
+
+* **Five questions separated:** (Q1) local non-equivocation — bounded D10 scope when
+  the journal is opened; (Q2) consensus safety after recovery — **UNMET** lock
+  recovery on the production path; (Q3) history correspondence — **no mechanism**
+  (journal not opened in production); (Q4) freshness/exclusivity — **UNRESOLVED**
+  (no anchor, in-process-only exclusivity); (Q5) authorization — owned by the
+  lifecycle contract, not granted by any correspondence match.
+* **Correspondence comparisons (X1–X6)** specify, for each, the two values, source
+  and phase, integrity/auth/freshness assumptions, what a match establishes, what
+  remains unproven, and fail-closed behavior on a missing/malformed/inconsistent
+  input. A record compared with itself (e.g. journal count vs its own records) is
+  **not** independent freshness evidence. Same-epoch older-snapshot cases use
+  **correspondence**, not epoch equality; whole-copy rollback and copied-key cases
+  are documented as **locally indistinguishable**, dependent on trusted evidence
+  outside the specified rollback domain — no anchor is selected and the local reader
+  is **not** claimed to detect it.
+* **Proposed admission ordering (S1–S8)** keeps storage-open, safety-state
+  validation, journal validation, correspondence, authorization/freshness/exclusivity,
+  signer invocation, retained-result reuse, and facade handoff distinct; a
+  successful local S1–S4 check does **not** become production activation
+  authorization, and `COMPLETE` restore admission (D8) is **not** proof of lock
+  recovery or signing-history freshness.
+
+### Single unstarted successor
+
+Exactly one bounded successor is specified and **not begun**: a non-authorizing,
+read-only recovery **correspondence observer** (source + tests only) that reads
+recovered consensus safety state and an opened journal and reports correspondence
+(match / non-correspondence / input-unavailable), fail-closed, with zero writes and
+zero signer calls. It is justified as the next missing prerequisite (it makes Q3
+observable and is the S4 precondition) rather than a prematurely-selected freshness
+anchor (Q4) or a distinct production lock-recovery change (Q2). Anchor selection,
+cross-host exclusivity, lock-recovery redesign, Timeout/NewView migration, opening a
+journal in the production signing path, and any activation/readiness change are
+explicit exclusions.
+
+### Checks actually executed (this pass) and literal tool outcomes
+
+* Re-traced the source symbols and call order against `5435d22` (engine recovery,
+  harness `load_persisted_state`, production `main.rs` startup/restore, guarded
+  signing routes, storage / production-storage recovery readers,
+  `restore_completion.rs`, `signing_reservation_journal.rs`). Line numbers are
+  locators; symbols are authoritative.
+* Verified reference-object reachability with `git cat-file -t` (D10 final
+  `3d7155e…` absent; reported separately from content correspondence).
+* Checked cross-document consistency against the continuity contract (§5/§5.2/§5.3/§6),
+  the authority lifecycle contract, the snapshot-restore completion contract, and the
+  genesis authority / QC integration audit (inspected read-only); `docs/whitepaper/contradiction.md`
+  inspected read-only, C4/C5 posture unchanged, no ledger edit made.
+* EOL (CRLF) and the existing no-final-newline EOF convention are preserved in all
+  three changed files; `task/warning.txt` and unrelated work are untouched.
+* **No Cargo tests, Clippy, or release rebuild** were run — none are required for
+  this documentation-only phase. No historical result is relabelled.
+* **Security-tool outcomes (literal):** the diff-oriented validation harness was
+  invoked over the changed Markdown files for this pass. **Code Review** did not
+  complete an independent review (the `autofind` binary was not found on any searched
+  path; a "no comments" wrapper is **not** a successful review). **CodeQL** was
+  skipped as trivial (Markdown-only), so no scan ran. A skip or tool-unavailable
+  error is never upgraded into a pass; these are kept distinct from earlier
+  historical outcomes at their own revisions.
+
+### Scoped verdict and preserved posture
+
+```
+D7D11_CONSENSUS_RECOVERY_SIGNING_HISTORY_CONTRACT=DEFINED-NOT-IMPLEMENTED
+```
+
+Design completion establishes **no** implemented recovery protection. Preserved
+unchanged (not reopened): `D7D10_LOCAL_SIGNING_RESERVATION=CODE-AND-STORAGE-TEST-POSITIVE`,
+`D7D10_CORRECTION_F_ENGINE_PROGRESS_AND_CHILD_RECOVERY=CODE-AND-PROCESS-TEST-POSITIVE`,
+`D7D9_SIGNING_STATE_CONTINUITY_CONTRACT=DEFINED-NOT-IMPLEMENTED`,
+`D7D8_RESTORE_COMPLETION_CONTAINMENT=CODE-AND-RELEASE-TEST-POSITIVE`,
+`D7_STATUS=PARTIAL-CODE-TEST / PRODUCTION-LIFECYCLE-UNAVAILABLE`,
+`DURABLE_ANTI_ROLLBACK=NOT-ESTABLISHED`, `GENESIS_AUTHORITY_ACTIVATION=DISABLED`,
+`PRODUCTION_WIRE_CHAIN_ID_BEHAVIOR=UNCHANGED`,
+`CONFIGURED_AUTHORITY_RELEASE_BINARY_EVIDENCE=NOT-YET-CAPTURED`, and
+`SECURITY_POSTURE=RS1-OPEN / PUBLIC-DEVNET-NO-GO`. C4/C5 remain OPEN. No production
+signing enablement, readiness promotion, or Run 423 work is authorized. Worktree
+clean after commit; changes pushed to the task branch; **no PR** opened.
