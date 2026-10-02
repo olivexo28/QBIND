@@ -11203,6 +11203,18 @@ wire-format, signer, authorization, or recovery-algorithm change.
   no historical executable is presented as newly-tested runtime evidence. Counts
   are not summed across the overlapping subsets.
 
+* **Security/review tooling (attempted once this correction run; literal
+  outcomes).** `parallel_validation` was invoked once.
+  * **Code Review:** the wrapper returned *"No review comments found"* over 4
+    files, **but** also reported the underlying reviewer **could not initialize**
+    — literal error: *"Code review tool is not available in this environment …
+    autofind binary not found …"*. Per the task's caution, "no comments" **after
+    a reviewer failure is NOT a completed review**; recorded as
+    **reviewer-unavailable**, not a clean review.
+  * **CodeQL Security Scan:** returned *"Skipped: all changes are trivial"*
+    (test-only Rust + Markdown). A skipped analysis is **NOT a passed scan**;
+    recorded as **not-run (skipped)**, not a clean security result.
+
 * **Boundaries retained.** In-process harness reconstruction over surviving model
   storage — **not** real process death, RocksDB durability, empirical power-loss
   evidence, production startup recovery, or authenticated network behavior.
