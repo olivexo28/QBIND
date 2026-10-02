@@ -23740,7 +23740,24 @@ mod tests {
                             if self.fail_reads.load(SeqCst) {
                                 return Err(StorageError::Io("injected read failure".into()));
                             }
-                            Ok(self.map.read().unwrap().get(key).cloned())
+                            // Bounded direct read: raw record (no envelope),
+                            // bound = MAX_RECORD_LEN; checked BEFORE cloning.
+                            const MAX_STORED_LEN: usize =
+                                crate::signing_reservation_journal::MAX_RECORD_LEN;
+                            let m = self.map.read().unwrap();
+                            match m.get(key) {
+                                None => Ok(None),
+                                Some(v) => {
+                                    if v.len() > MAX_STORED_LEN {
+                                        return Err(StorageError::Corruption(format!(
+                                            "signing_record: stored value exceeds bound (len={} max={})",
+                                            v.len(),
+                                            MAX_STORED_LEN
+                                        )));
+                                    }
+                                    Ok(Some(v.clone()))
+                                }
+                            }
                         }
                         fn put_signing_record_synced(
                             &self,
@@ -23772,7 +23789,25 @@ mod tests {
                             if self.fail_reads.load(SeqCst) {
                                 return Err(StorageError::Io("injected read failure".into()));
                             }
-                            Ok(self.map.read().unwrap().get(D10_META_KEY).cloned())
+                            // Bounded direct read: raw fixed-length metadata (no
+                            // envelope), bound = METADATA_ENCODED_LEN; checked
+                            // BEFORE cloning.
+                            const MAX_STORED_METADATA_LEN: usize =
+                                crate::signing_reservation_journal::METADATA_ENCODED_LEN;
+                            let m = self.map.read().unwrap();
+                            match m.get(D10_META_KEY) {
+                                None => Ok(None),
+                                Some(v) => {
+                                    if v.len() > MAX_STORED_METADATA_LEN {
+                                        return Err(StorageError::Corruption(format!(
+                                            "signing_metadata: stored value exceeds bound (len={} max={})",
+                                            v.len(),
+                                            MAX_STORED_METADATA_LEN
+                                        )));
+                                    }
+                                    Ok(Some(v.clone()))
+                                }
+                            }
                         }
                         fn put_signing_metadata_synced(
                             &self,

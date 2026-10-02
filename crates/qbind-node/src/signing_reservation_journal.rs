@@ -97,7 +97,11 @@ const METADATA_MAGIC: [u8; 4] = *b"QSJM";
 /// Fixed encoded length of the initialization-metadata record:
 /// `magic[4] | metadata_format_version[2] | max_reserved_positions[8] |
 ///  reserved_positions[8] | crc32[4]`.
-const METADATA_ENCODED_LEN: usize = 4 + 2 + 8 + 8 + 4;
+///
+/// This is the codec-owned metadata length. Backends reuse it as the bounded
+/// direct-read size for the metadata key (the fixed metadata encoding size)
+/// before copying or envelope-unwrapping a stored metadata value.
+pub const METADATA_ENCODED_LEN: usize = 4 + 2 + 8 + 8 + 4;
 
 /// Run 422 D7-D10 Correction E — maximum number of distinct positions retained in
 /// the shared **recovered-acknowledgement cache**. The cache is process-local
@@ -1920,7 +1924,22 @@ mod tests {
             if *self.fail_reads.read().unwrap() {
                 return Err(StorageError::Io("injected read failure".to_string()));
             }
-            Ok(self.map.read().unwrap().get(key).cloned())
+            // Bounded direct read: raw record (no envelope), bound = MAX_RECORD_LEN;
+            // checked BEFORE cloning the stored value.
+            let m = self.map.read().unwrap();
+            match m.get(key) {
+                None => Ok(None),
+                Some(v) => {
+                    if v.len() > MAX_RECORD_LEN {
+                        return Err(StorageError::Corruption(format!(
+                            "signing_record: stored value exceeds bound (len={} max={})",
+                            v.len(),
+                            MAX_RECORD_LEN
+                        )));
+                    }
+                    Ok(Some(v.clone()))
+                }
+            }
         }
         fn put_signing_record_synced(&self, key: &[u8], value: &[u8]) -> Result<(), StorageError> {
             if *self.fail_writes.read().unwrap() {
@@ -1940,7 +1959,22 @@ mod tests {
             if *self.fail_reads.read().unwrap() {
                 return Err(StorageError::Io("injected read failure".to_string()));
             }
-            Ok(self.map.read().unwrap().get(MODEL_META_KEY).cloned())
+            // Bounded direct read: raw fixed-length metadata (no envelope),
+            // bound = METADATA_ENCODED_LEN; checked BEFORE cloning.
+            let m = self.map.read().unwrap();
+            match m.get(MODEL_META_KEY) {
+                None => Ok(None),
+                Some(v) => {
+                    if v.len() > METADATA_ENCODED_LEN {
+                        return Err(StorageError::Corruption(format!(
+                            "signing_metadata: stored value exceeds bound (len={} max={})",
+                            v.len(),
+                            METADATA_ENCODED_LEN
+                        )));
+                    }
+                    Ok(Some(v.clone()))
+                }
+            }
         }
         fn put_signing_metadata_synced(&self, value: &[u8]) -> Result<(), StorageError> {
             if *self.fail_writes.read().unwrap() {

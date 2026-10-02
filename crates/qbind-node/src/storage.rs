@@ -1311,13 +1311,30 @@ impl RocksDbConsensusStorage {
 /// detection only — not authentication, not rollback protection).
 impl crate::signing_reservation_journal::SigningJournalStorage for RocksDbConsensusStorage {
     fn get_signing_record(&self, key: &[u8]) -> Result<Option<Vec<u8>>, StorageError> {
+        // Bounded direct read: a decision record is at most `MAX_RECORD_LEN`;
+        // with the 4-byte CRC envelope the stored value is at most
+        // `4 + MAX_RECORD_LEN`. Apply that length bound to the RAW backend-owned
+        // bytes BEFORE copying the payload or unwrapping the envelope. The
+        // RocksDB `get` itself still allocates the backend-owned value; this
+        // bound only limits subsequent application-owned copying/decoding (it
+        // does NOT make the underlying RocksDB API allocation-free).
+        const MAX_STORED_ENVELOPE_LEN: usize =
+            4 + crate::signing_reservation_journal::MAX_RECORD_LEN;
         let full = Self::signing_record_key(key);
         match self.db.get(&full) {
+            // Genuine absence stays `None`.
+            Ok(None) => Ok(None),
             Ok(Some(raw)) => {
+                if raw.len() > MAX_STORED_ENVELOPE_LEN {
+                    return Err(StorageError::Corruption(format!(
+                        "signing_record: stored value exceeds bound (len={} max={})",
+                        raw.len(),
+                        MAX_STORED_ENVELOPE_LEN
+                    )));
+                }
                 let payload = unwrap_checksummed(&raw, "signing_record")?;
                 Ok(Some(payload))
             }
-            Ok(None) => Ok(None),
             Err(e) => Err(StorageError::Io(e.to_string())),
         }
     }
@@ -1333,12 +1350,27 @@ impl crate::signing_reservation_journal::SigningJournalStorage for RocksDbConsen
     }
 
     fn get_signing_metadata(&self) -> Result<Option<Vec<u8>>, StorageError> {
+        // Bounded direct read: the initialization metadata is a FIXED-length
+        // encoding (`METADATA_ENCODED_LEN`); with the 4-byte CRC envelope the
+        // stored value is at most `4 + METADATA_ENCODED_LEN`. Apply that bound to
+        // the RAW backend-owned bytes BEFORE copying/unwrapping. Version and
+        // semantic validation remain in the metadata decoder.
+        const MAX_STORED_METADATA_LEN: usize =
+            4 + crate::signing_reservation_journal::METADATA_ENCODED_LEN;
         match self.db.get(SIGNING_METADATA_STORAGE_KEY) {
+            // Genuine absence stays `None`.
+            Ok(None) => Ok(None),
             Ok(Some(raw)) => {
+                if raw.len() > MAX_STORED_METADATA_LEN {
+                    return Err(StorageError::Corruption(format!(
+                        "signing_metadata: stored value exceeds bound (len={} max={})",
+                        raw.len(),
+                        MAX_STORED_METADATA_LEN
+                    )));
+                }
                 let payload = unwrap_checksummed(&raw, "signing_metadata")?;
                 Ok(Some(payload))
             }
-            Ok(None) => Ok(None),
             Err(e) => Err(StorageError::Io(e.to_string())),
         }
     }
@@ -1471,11 +1503,28 @@ const INMEM_SIGNING_METADATA_KEY: &[u8] = b"__signing_metadata_v1__";
 /// and must never masquerade as a durable production backend.
 impl crate::signing_reservation_journal::SigningJournalStorage for InMemoryConsensusStorage {
     fn get_signing_record(&self, key: &[u8]) -> Result<Option<Vec<u8>>, StorageError> {
+        // Bounded direct read: the MODEL stores the raw record (no envelope), so
+        // the applicable bound is the bounded decision-record size
+        // `MAX_RECORD_LEN`. Check the stored value's length BEFORE cloning it out
+        // of the map (subsequent application-owned copy).
+        const MAX_STORED_LEN: usize = crate::signing_reservation_journal::MAX_RECORD_LEN;
         let map = self
             .signing_records
             .read()
             .map_err(|e| StorageError::Other(format!("lock poisoned: {}", e)))?;
-        Ok(map.get(key).cloned())
+        match map.get(key) {
+            None => Ok(None),
+            Some(v) => {
+                if v.len() > MAX_STORED_LEN {
+                    return Err(StorageError::Corruption(format!(
+                        "signing_record: stored value exceeds bound (len={} max={})",
+                        v.len(),
+                        MAX_STORED_LEN
+                    )));
+                }
+                Ok(Some(v.clone()))
+            }
+        }
     }
 
     fn put_signing_record_synced(&self, key: &[u8], value: &[u8]) -> Result<(), StorageError> {
@@ -1488,11 +1537,28 @@ impl crate::signing_reservation_journal::SigningJournalStorage for InMemoryConse
     }
 
     fn get_signing_metadata(&self) -> Result<Option<Vec<u8>>, StorageError> {
+        // Bounded direct read: the MODEL stores the raw fixed-length metadata (no
+        // envelope), so the applicable bound is `METADATA_ENCODED_LEN`. Check the
+        // stored value's length BEFORE cloning.
+        const MAX_STORED_METADATA_LEN: usize =
+            crate::signing_reservation_journal::METADATA_ENCODED_LEN;
         let map = self
             .signing_records
             .read()
             .map_err(|e| StorageError::Other(format!("lock poisoned: {}", e)))?;
-        Ok(map.get(INMEM_SIGNING_METADATA_KEY).cloned())
+        match map.get(INMEM_SIGNING_METADATA_KEY) {
+            None => Ok(None),
+            Some(v) => {
+                if v.len() > MAX_STORED_METADATA_LEN {
+                    return Err(StorageError::Corruption(format!(
+                        "signing_metadata: stored value exceeds bound (len={} max={})",
+                        v.len(),
+                        MAX_STORED_METADATA_LEN
+                    )));
+                }
+                Ok(Some(v.clone()))
+            }
+        }
     }
 
     fn put_signing_metadata_synced(&self, value: &[u8]) -> Result<(), StorageError> {
