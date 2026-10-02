@@ -11049,10 +11049,19 @@ cargo clippy -p qbind-node --test run_422_d7d2_signing_state_recovery_tests
 #   warnings unrelated to this change (not introduced here).
 ```
 
-* **Security/review tooling:** the automated review + CodeQL validation wrapper
-  was attempted once for this diff; its literal outcome is recorded with the
-  final validation (a wrapper reporting "no comments" after a reviewer failure is
-  not a completed review, and a skipped CodeQL analysis is not a passed scan).
+* **Security/review tooling (attempted once; literal outcomes).** The automated
+  `parallel_validation` wrapper was run once for this diff.
+  * **Code Review:** the wrapper reported *"No review comments found"* over 4
+    files, **but** also reported that the underlying reviewer **failed to
+    initialize** — literal error: *"Code review tool is not available in this
+    environment: … model claude-sonnet-4.6 not found in registry …"*
+    (`autofind … command_failed`). Per the task's own caution, a wrapper
+    reporting "no comments" **after a reviewer failure is NOT a completed
+    review**; this is recorded as **reviewer-unavailable**, not a clean review.
+  * **CodeQL Security Scan:** **skipped** — the changes were declared trivial
+    (test-only + Markdown), and the wrapper returned *"Skipped: all changes are
+    trivial."* A skipped CodeQL analysis is **NOT a passed scan**; this is
+    recorded as **not-run (skipped)**, not a clean security result.
 * No production release-binary evidence is claimed for this harness/predicate
   characterization; no test executable or historical release build is relabelled
   as new production-runtime evidence.
