@@ -1510,7 +1510,7 @@ fn reserved_only_child_death_then_reopen_refuses() {
 #[cfg(unix)]
 fn sh_control_command(script: &str) -> std::process::Command {
     let mut c = std::process::Command::new("sh");
-    c.arg("-c").arg(script.to_string());
+    c.arg("-c").arg(script);
     c
 }
 

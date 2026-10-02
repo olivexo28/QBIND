@@ -8780,6 +8780,9 @@ process-local knowledge**, not a power-loss test.
   `.status()` wait and only asserts an unsuccessful exit. It remains OPEN under F;
   it must not be described as bounded/classified. The "bounded child-process"
   wording in the preceding historical block is corrected by this statement.
+  **(Superseded by Correction F execution, below: this runner is now rewritten as a
+  `#[cfg(unix)]` deadline-bounded, SIGABRT-classified runner; this historical
+  OPEN-under-F statement describes the prior posture only.)**
 * **Established-journal initialization and persistent capacity remain OPEN under
   E.** The current `attach` API opens an established/empty journal with an in-
   memory live table; it does **not** implement explicit journal initialization
@@ -9712,6 +9715,8 @@ tests). Correction F is NOT repaired here:
 uses an unbounded `.status()` and does not classify termination — a passing test
 does not close F. Model reopen, real RocksDB reopen, child-process observations,
 release compilation, and power-loss evidence are kept distinct.
+**(Historical — superseded by the Correction F execution section below, which
+repairs both the F-A engine-progress evidence and this F-B child runner.)**
 
 ### Validation (implementation+test checkpoint `fabb16c`, dev profile unless noted, exit 0)
 
@@ -9938,3 +9943,142 @@ successful scan). Both remain unexecuted obligations.
 evidence; no readiness promotion). Overall D10 remains **PARTIAL**; Correction F and
 C4/C5 remain **OPEN**; activation DISABLED, anti-rollback NOT-ESTABLISHED,
 production lifecycle UNAVAILABLE, `PUBLIC-DEVNET-NO-GO`.
+
+## Run 422 D7-D10 — Correction F execution: real engine progress and bounded/classified child recovery
+
+Test/documentation-only. Reported branch `copilot/copilotcopilotrun-422-corrections`;
+HEAD at start `bdaaf9b…` on a **shallow single-branch clone** (`.git/shallow` =
+`c5ef2bb…`): the accepted baseline `c7098cb85c4705aef885a9098acc03d8c856ce72` and
+other ancestry objects are **UNAVAILABLE** here, so source correspondence was
+inspected directly and no ancestry was manufactured. `task/warning.txt` and unrelated
+files preserved. Authorized files only: `crates/qbind-node/src/binary_consensus_loop.rs`
+(test code/fixtures only), `crates/qbind-node/tests/run_422_d7d10_signing_reservation_journal_tests.rs`,
+and these two docs. Production behavior unchanged.
+
+### Correction F-A — actual engine progress (supersedes synthetic evidence)
+
+The prior lib test `d10_reserves_action_view_not_a_later_view` (synthetic actions +
+second journal handle; **not** engine progress) is replaced by
+`binary_consensus_loop::tests::run420::run422_d7a::run422_d7b::run422_d7d10::correction_f_engine`
+(3 tests). Boundary demonstrated: **real engine → returned action → guarded
+signer/journal → facade.**
+
+* Engine view **before = V (0)**, **after `on_leader_step` = V+1 (1)**: a
+  single-validator `BasicHotStuffEngine` self-votes, forms a QC, and `advance_view()`s
+  to V+1 **before** the returned actions are forwarded.
+* Returned originating-action fields: Proposal `height/round = V`; self-Vote
+  `height/round = V`, `step = 0` — originating view V, **not** the engine's newer view.
+* Guarded forward through the existing Required-policy path: **signer calls = 1**
+  (one Proposal entry + one Vote), **facade handoffs = 1** Proposal broadcast + 1 Vote;
+  delivered signatures D6-verified (`verify_proposal_msg_with_domain` /
+  `verify_vote_msg_with_domain`). Journal positions: Proposal and Vote at their distinct
+  kind-specific positions **at V** (direct `get_signing_record(position.storage_key())`
+  inspection), never at V+1. Emitted fields unchanged except the permitted suite
+  assignment + signature population.
+* Conflict preservation: a **deliberately labelled** conflicting variant at the SAME
+  originating position (changed message binding only) → journal `Conflict`, **no**
+  additional signer call, **no** handoff, original record **byte-identical**.
+* Positive controls: exact permitted retry reuses the retained signature with **no**
+  new signer call; a second `on_leader_step` at V+1 emits a NEW-originating-view action
+  occupying a **distinct** legitimate position without disturbing the V obligation.
+* No progress simulated by variable assignment, a second handle, a rewritten view, or a
+  restart initializer; engine-current-view equality is NOT a new signing prerequisite;
+  cached-reemission eligibility rules preserved.
+
+### Correction F-B — bounded, classified child-process recovery
+
+`reserved_only_child_death_then_reopen_refuses` is rewritten as a `#[cfg(unix)]`
+deadline-bounded, termination-classified runner (capture + bounded process-status-wait
++ pure classification adapted **minimally** from the D3 runner; the whole D3 target is
+**not** duplicated). Boundary demonstrated: **integration-test child executable → real
+RocksDB reservation → classified SIGABRT process death → fresh reopen.**
+
+* Re-executed artifact (the **test executable**, NOT the production node binary):
+  * Path: `target/debug/deps/run_422_d7d10_signing_reservation_journal_tests-278b729b96e64c0e`
+  * Profile: `dev`/debug (unoptimized + debuginfo); default features
+  * Byte length: `306103912`
+  * SHA-256: `84a4a38177b849dd5e145a6ba300f9e5362508277c51bd2c3a4788747d54adea`
+  * (The filename hash and SHA-256 are build-dependent and change on any rebuild.)
+* Child-helper selection via **per-`Command`** env (`QBIND_D7D10_CHILD_DB`); no
+  process-global `set_var`. Readiness marker
+  `D7D10-CHILD: reserved-durable-ack-before-abort` is emitted+flushed to stderr **only
+  after** the real RocksDB reservation returns `FreshlyReserved`, immediately before the
+  intentional `std::process::abort()` (before any signer invocation or result
+  publication).
+* Deadline/cleanup controls: internal 120 s deadline with repeated `try_wait`
+  process-status polling (no fixed sleep guessing exit, no outer tool timeout as the
+  deadline); FULL `ExitStatus` preserved; drain threads joined (bounded output handling);
+  spawn/status/capture/cleanup errors handled explicitly; a deadline is a **failure**
+  with explicit kill+reap (never reinterpreted as crash evidence).
+* Termination classification: **accepted only** when signal == SIGABRT (6) **and** the
+  readiness marker was captured completely. Observed on this Linux profile:
+  `AbortedAfterMarker { signal: 6 }`.
+* Real-storage reopen after reap: fresh RocksDB handle + ownership domain; the valid
+  `Reserved` record is present at the exact position/binding; **exact retry →
+  `PotentiallySigned`** (never a fresh continuation or signed result); **conflicting
+  binding → `Conflict`**; raw record bytes (`get_signing_record`) and persistent
+  accounting (`get_signing_metadata`) **unchanged** across refusals.
+* Runner controls (same classification path; single-process `sh` children):
+  marker+SIGABRT **accepted**; marker+normal-nonzero-exit (`exit 7`) **rejected**
+  (`NormalExit`); marker+unexpected signal (SIGTERM 15) **rejected** (`UnexpectedSignal`);
+  SIGABRT **without** marker **rejected** (`SignalButMarkerUnusable`); alive-past-deadline
+  (`exec sleep 30`, 2 s deadline) → **Timeout + reaped**, returning within a 20 s outer
+  bound (cleanup does not wait on the surviving process); plus a pure constructed-
+  `ExitStatus::from_raw` decision table.
+* Platform honesty: signal classification uses `ExitStatusExt::signal()` and the
+  POSIX-fixed SIGABRT value, so the parent + controls are `#[cfg(unix)]`; supported
+  profile Unix/Linux. This establishes crash-consistency of the LOCAL journal across real
+  process death — **not** empirical power-loss / whole-copy rollback resistance (no
+  DB-wide monotonic anchor established); process-death recovery and power-loss/rollback
+  resistance are kept distinct.
+
+### Validation (implementation+test checkpoint on this task branch; dev profile unless noted, exit 0)
+
+Overlapping subsets reported separately (not summed):
+
+* `cargo test -p qbind-node --lib correction_f_engine` — **3 passed, 0 failed** (focused F-A engine-progress).
+* `cargo test -p qbind-node --lib run422_d7d10` — **64 passed, 0 failed**.
+* `cargo test -p qbind-node --lib correction_d` — **36 passed, 0 failed**.
+* `cargo test -p qbind-node --lib signing_reservation_journal` — **53 passed, 0 failed**.
+* Outbound/cached-reemission regression subset: `--lib outbound` **25 passed**, `--lib reemit` **3 passed**, `--lib cached_reemission` **3 passed**, 0 failed.
+* `cargo test -p qbind-node --test run_422_d7d10_signing_reservation_journal_tests` (default features) — **29 passed, 0 failed** (with `--include-ignored`; the child helper runs as a no-op when invoked directly and is re-executed by the active parent).
+* `cargo test -p qbind-node --test run_422_d7d10_signing_reservation_journal_tests --features test-utils` — **33 passed, 1 ignored, 0 failed** (the +4/ignored-helper difference is the `test-utils`-gated cases and the directly-ignored child helper).
+* `cargo test -p qbind-consensus --test run_422_d6_pv_domain_isolation_tests` — **34 passed, 0 failed**.
+* `cargo test -p qbind-node --lib` (full, after fixture changes) — **1839 passed, 0 failed**.
+* `cargo check -p qbind-node --bins --lib` (binary-inclusive) — exit 0. (`--all-targets` additionally pulls in `m16_epoch_transition_hardening_tests`, which fails to build **without** `--features test-utils` — a pre-existing feature-gating limitation on `set_inject_write_failure`/`clear_epoch_transition_marker`, unrelated to this change; it builds with `--features test-utils`.)
+* Focused Clippy `cargo clippy -p qbind-node --test run_422_d7d10_signing_reservation_journal_tests` — exit 0, **no warnings in the changed file** (one `unnecessary_to_owned` suggestion was fixed; remaining warnings are pre-existing in dependency crates).
+* Changed-region whitespace / line endings: both changed `.rs` files and both docs remain **CRLF** with their original no-trailing-newline EOF and no space-before-CR trailing whitespace; `task/warning.txt` preserved.
+
+### Security-tool outcomes (literal)
+
+Recorded in the Correction F validation run below; see the committed `parallel_validation`
+result. Any unavailable reviewer or skipped/oversized CodeQL analysis is recorded
+literally and does **not** constitute a security pass. Security posture remains
+RS1-OPEN / PUBLIC-DEVNET-NO-GO.
+
+### Documentation reconciliation and scoped F disposition
+
+The operative contract statements that described synthetic/fresh-handle "engine
+progress" and the active parent's unbounded `.status()` + generic unsuccessful-exit
+acceptance are updated: the synthetic/unbounded descriptions are explicitly marked
+**historical/superseded**, and the new boundaries (real engine → returned action →
+guarded signer/journal → facade; integration-test child executable → real RocksDB
+reservation → classified SIGABRT death → fresh reopen; model fixtures vs real storage;
+test-executable evidence vs production runtime evidence) are recorded here and in
+`docs/protocol/QBIND_PROPOSAL_VOTE_SIGNING_STATE_CONTINUITY_CONTRACT.md`. Earlier
+per-command/release figures are retained at their actual historical checkpoints and not
+relabelled. `contradiction.md` was inspected read-only (outside this task's write scope);
+no new operative contradiction is introduced by this test/documentation-only change.
+
+Scoped verdict (both obligations demonstrated for their code-and-process-test scope):
+
+```
+D7D10_CORRECTION_F_ENGINE_PROGRESS_AND_CHILD_RECOVERY=CODE-AND-PROCESS-TEST-POSITIVE
+```
+
+Retained posture (unchanged): overall `D7D10_LOCAL_SIGNING_RESERVATION=PARTIAL` pending
+the subsequent aggregate D10 review (closing F does not itself promote readiness);
+accepted A/B/C/D/E and D7–D8 scoped verdicts preserved; production lifecycle UNAVAILABLE;
+durable anti-rollback NOT-ESTABLISHED; genesis authority activation DISABLED; production
+wire-chain behavior unchanged; configured-authority release/runtime evidence
+NOT-YET-CAPTURED; `SECURITY_POSTURE=RS1-OPEN / PUBLIC-DEVNET-NO-GO`; C4/C5 OPEN.

@@ -1254,8 +1254,10 @@ production; the guard engages only when a journal is explicitly wired (tests).
   **unrepaired** child-process death/reopen runner (the child self-aborts after a
   durable reserve and the parent reopens a fresh domain; this control uses an
   **unbounded** `.status()` wait and only asserts an unsuccessful exit — it is
-  explicitly **not** a bounded/classified process-death test, which remains OPEN
-  under F, and is retained here only as historical evidence). Direct
+  explicitly **not** a bounded/classified process-death test. This earlier runner
+  is **superseded by Correction F (below)**, which replaces it with a
+  deadline-bounded, SIGABRT-classified runner; the description here is retained
+  only as the historical prior posture). Direct
   signer-call counts and facade effects are
   asserted (not logs alone). A separate post-publication exact-retry control
   confirms a legitimate retained resend after publication costs zero additional
@@ -1535,16 +1537,72 @@ compatibility, and empirical power-loss behavior are NOT established. Synced
 writes implement a durability mechanism under the stated storage assumptions; the
 executed tests do not establish empirical power-loss behavior.
 
-**Correction F boundary (unchanged, not repaired here).**
-`d7d10_child_reserve_then_abort` is the `#[ignore]`d child-mode helper;
-`reserved_only_child_death_then_reopen_refuses` is the active parent. The parent
-still waits with an unbounded `.status()` and only checks "not success" — it
-neither bounds nor classifies the child termination, so a passing test does NOT
-close F. An outer command/tool execution deadline wrapping the run is not an
-internal child bound. The inaccurate "bounded child-process" wording has been
-removed from the test-file header and helper comments. Model reopen, real RocksDB
-reopen, child-process observations, release compilation, and power-loss evidence
-are distinct and are not conflated.
+**Correction F (executed — this pass; test + documentation only).** Both
+remaining F obligations are now demonstrated; the earlier synthetic/unbounded
+evidence above is retained only as the historical prior posture.
+
+*F-A — actual engine progress.* The prior lib test `d10_reserves_action_view_not_a_later_view`
+(which constructed synthetic actions and opened a second journal handle, and did
+**not** demonstrate engine progress) is replaced by a `correction_f_engine`
+module driving the real `BasicHotStuffEngine` through its real guarded outbound
+path. A single-validator engine at view V has its `on_leader_step` entrypoint
+invoked: the self-vote forms a QC and the engine **advances to V+1 before the
+returned actions are forwarded**, yet the returned Proposal (height/round V) and
+self-Vote (height/round V, step 0) still carry originating view V. Those actual
+actions are forwarded through the existing Required-policy guarded signer/journal/
+facade path; direct journal inspection shows the Proposal and Vote occupy their
+distinct kind-specific positions at **V, not the engine's newer view**. Signer-call
+and facade-handoff counts are asserted exactly and the delivered signatures are
+D6-verified; emitted fields are unchanged except the permitted signing preparation
+(suite assignment + signature population). A deliberately-labelled conflicting
+variant submitted at the SAME originating position for each kind yields the journal
+`Conflict` outcome with **no** additional signer call, **no** handoff, and a
+byte-identical original record. Positive controls confirm an exact permitted retry
+reuses the retained signature without another signer call, and that a subsequently
+emitted action at a NEW originating view (a second `on_leader_step` at V+1) occupies
+a distinct legitimate position without disturbing the earlier obligation. No progress
+is simulated by variable assignment, a second handle, a rewritten view, or a restart
+initializer, and engine-current-view equality is **not** introduced as a new signing
+prerequisite. Cached-reemission eligibility rules are preserved unchanged.
+
+*F-B — bounded, classified child recovery.* `reserved_only_child_death_then_reopen_refuses`
+is rewritten as a `#[cfg(unix)]` deadline-bounded, explicitly termination-classified
+runner (the capture + bounded process-status-wait + pure-classification patterns are
+adapted **minimally** from the established D3 runner — the whole D3 target is **not**
+duplicated). It re-executes THIS integration-test executable with the exact ignored
+child-helper selection via **per-`Command`** environment configuration (no
+process-global `set_var`). `d7d10_child_reserve_then_abort` now emits+flushes a
+distinctive readiness marker to stderr **only after** the real RocksDB reservation
+returns its `FreshlyReserved` durable acknowledgement, then intentionally `abort()`s
+before any signer invocation or result publication. The parent waits with an INTERNAL
+deadline and explicit `try_wait` process-status observation, preserves the FULL
+`ExitStatus`, and accepts the crash **only** when it is SIGABRT (signal 6) **and** the
+readiness marker was captured completely: an ordinary nonzero exit, a panic (nonzero
+exit, no signal), an unrelated terminating signal, a missing/unusable marker, or a
+deadline all fail. A deadline is a test failure with explicit kill+reap (never
+reinterpreted as crash evidence); spawn/status/capture/cleanup errors are handled
+explicitly and output draining is bounded (joined drain threads) so it cannot
+introduce an unbounded wait. After the child is reaped, the parent opens a FRESH
+RocksDB handle + ownership domain, inspects the valid `Reserved` record at the exact
+position/binding, and asserts exact retry returns `PotentiallySigned` (never a fresh
+continuation or signed result), a conflicting binding returns `Conflict`, and the raw
+record bytes + persistent accounting are unchanged across the refusals. Focused runner
+controls on the SAME classification path (controlled single-process `sh` children)
+cover: marker+SIGABRT accepted; marker+normal-nonzero-exit rejected; marker+unexpected
+signal (SIGTERM) rejected; SIGABRT-without-marker rejected; alive-past-deadline
+Timeout + reaped (returns within a generous outer bound, proving cleanup does not wait
+on the surviving process); plus a pure constructed-`ExitStatus` decision table. No
+fixed sleep stands in for a child's exit, and no outer tool timeout is the runner
+deadline.
+
+*Platform honesty.* The signal classification uses the Unix `ExitStatusExt::signal()`
+and the POSIX-fixed SIGABRT value, so the bounded parent and runner controls are
+`#[cfg(unix)]`; the supported profile is Unix/Linux. Model reopen, real-RocksDB reopen,
+classified process-death observation, release compilation, and empirical power-loss
+evidence remain distinct and are not conflated — this establishes crash-consistency of
+the LOCAL journal across real process death, **not** empirical power-loss / whole-copy
+rollback resistance (no DB-wide monotonic anchor is established). The re-executed
+artifact is the **test executable**, never the production node binary.
 
 **Exact commands, checkpoints, feature counts, release identity, and tool
 outcomes (historical — prior report).** The per-command figures below are the
@@ -1608,5 +1666,13 @@ D7D10_JOURNAL_INITIALIZATION_AND_CAPACITY=CODE-AND-STORAGE-TEST-POSITIVE
 ```
 
 This is CODE-AND-STORAGE-TEST scope only. It is NOT configured-authority runtime
-evidence and does NOT promote readiness. Correction F and C4/C5 remain OPEN;
-production activation is not performed.
+evidence and does NOT promote readiness. Correction F is now demonstrated for its
+code-and-process-test scope:
+
+```
+D7D10_CORRECTION_F_ENGINE_PROGRESS_AND_CHILD_RECOVERY=CODE-AND-PROCESS-TEST-POSITIVE
+```
+
+C4/C5 remain OPEN; `D7D10_LOCAL_SIGNING_RESERVATION=PARTIAL` is retained pending the
+subsequent aggregate D10 review (closing Correction F does not itself promote
+readiness). Production activation is not performed.
