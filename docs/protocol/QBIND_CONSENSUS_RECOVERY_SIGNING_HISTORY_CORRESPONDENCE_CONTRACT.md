@@ -435,31 +435,59 @@ lock or establishes correspondence.
 
 ## 5. Correspondence contract
 
-For each proposed comparison: the two values, their actual source and recovery
-phase, the integrity/authentication/freshness assumptions, what a match
-establishes, what remains unproven, and the behavior on a missing / malformed /
+For each proposed comparison: the two values, their **exact data representation**,
+their actual **source**, the recovery **phase**, the **relation** being checked,
+the integrity/authentication/freshness assumptions, the **limited conclusion**
+available, what remains unproven, and the behavior on a missing / malformed /
 inconsistent / unavailable input. **No comparison invents an input that an ordinary
-restart does not possess, and a record compared with itself is never treated as
-independent evidence.**
+restart does not possess, a record compared with itself is never treated as
+independent evidence, and no structural match implies full recovery
+compatibility.**
+
+### 5.0 Classification of each item (Correction C)
+
+Each X-item is first classified by *what kind of check it is*, because several are
+not defined correspondence predicates today:
+
+* **(a) Existing structural / internal-consistency check** — compares two values
+  the opened journal already holds; establishes self-consistency only, never
+  freshness or history compatibility. (**X2**.)
+* **(b) Operation-specific check requiring independently supplied inputs** — can
+  only run when a trusted, independently obtained input (a canonical message /
+  domain, or an actual candidate decision with its trusted context) is supplied;
+  the stored record alone is insufficient. (**X3**, **X5**.)
+* **(c) Unresolved recovery-safety predicate requiring missing evidence** — the
+  intended relation is not yet defined and/or the required recovered state is not
+  present (no lock on production paths; no reconstructed ancestry); numerical
+  relations are observations, not a correspondence verdict. (**X1**, **X4**.)
+* **(d) Freshness / exclusivity requirement outside local detection** — depends on
+  trusted evidence outside the rollback domain; no local comparison resolves it.
+  (The §5.2 whole-copy / copied-key scenarios; partly **X6**.)
 
 ### 5.1 Comparison table
 
-| # | Value A | Value B | Source & phase | Integrity / auth / freshness | A match establishes | Remains unproven | On missing / malformed / inconsistent / unavailable |
-|---|---|---|---|---|---|---|---|
-| X1 | Recovered `locked_qc` block id | Committed block id / recovered chain | Engine recovery (conservative restart; **none** on snapshot) | Integrity: checksum on persisted QC; auth: **assumed trusted on load** (T-TRUST-STORAGE); freshness: none | The reconstructed lock is anchored in recovered committed state | That the lock equals the **pre-crash** lock; snapshot path has no lock to compare | Refuse to sign (INV-R2); no synthesis of a lock from height/epoch |
-| X2 | Journal metadata `reserved_positions` count | Count of decodable `sig:` records | `journal.open` accounting (both from the **same** store) | Integrity: CRC32; auth/freshness: none | Internal journal self-consistency only | Latestness; this is a record-vs-itself check, **not** independent freshness evidence | `AccountingInconsistent` → fail-closed; no repair/reset |
-| X3 | Recovered signing records' bound epoch/network/key | Recovered consensus authority epoch/network/key | Journal records vs recovered authority/epoch | Integrity: checksum; auth: pinned-identity check is a **separate** obligation (A/B); freshness: none | The retained obligations name the same validator/network/epoch as recovered state | Current authorization; freshness; that the snapshot is not an older copy | Refuse; mismatch is treated as non-correspondence, never a new namespace (INV-R6) |
-| X4 | Highest signing position retained (`Reserved`/`Signed`) | Recovered consensus view / committed height | Journal vs engine recovery | Integrity: checksum; freshness: none | Whether retained obligations sit at/above the recovered consensus frontier (the compatibility question) | That either side is current; a same-epoch older snapshot can satisfy height yet be stale | If retained obligations exceed what recovered state can safely support, refuse (potentially-stale restore) |
-| X5 | Recovered `Signed` retained result | Canonical decision at that position | D10 exact-reuse path | Integrity: checksum; auth: D10 verification + current-authorization revalidation (INV-R4) | Eligibility for an **exact resend** of that one result | Authorization/freshness beyond D10's local scope | Refuse reuse; retain the obligation; never re-sign |
-| X6 | RTR `snapshot_meta_digest` | `StateSnapshotMeta` of the restored input | Restore completion (D7-D8) | Integrity: SHA3-256 association; auth/freshness: **none** (T-INTEG) | The restored effects correspond to *that* snapshot meta | That *that* snapshot is the **latest** authorized state (rollback not detected) | Strict fail-closed decode; `Invalid` ⇒ refuse |
+| # | Class | Value A (representation) | Value B (representation) | Source & phase | Relation checked | Integrity / auth / freshness | Limited conclusion | Remains unproven | On missing / malformed / inconsistent / unavailable |
+|---|---|---|---|---|---|---|---|---|---|
+| X1 | (c) unresolved predicate | Recovered `locked_qc` (logical QC: `block_id`, `view`) | Committed block id (`[u8;32]`) / the recovered block tree | Engine recovery; harness restart only (no lock on any production path) | **The intended relation must be stated explicitly** — identity (`locked_qc.block_id == committed_id`), ancestry (committed id is an ancestor of the locked block in the registered tree), or another justified condition. It is **not** a defined predicate today, and the recovered block tree does **not** restore ancestry it did not re-register | Integrity: checksum on persisted QC; auth: **assumed trusted on load** (T-TRUST-STORAGE); freshness: none | At most, that a reconstructed lock is *anchored in* recovered committed state — **not** a correspondence verdict | That the lock equals or dominates the **pre-crash** lock (§2.1); that the tree contains the ancestry the relation would require; every production path has no lock to compare | Refuse to sign (INV-R2); no synthesis of a lock from height/epoch; no assumption of unrestored ancestry |
+| X2 | (a) structural | Journal metadata `reserved_positions` (`u64`) | Count of decodable `sig:` records (`usize`) | `journal.open` accounting (both from the **same** store) | Equality of the persisted count and the record count | Integrity: CRC32; auth/freshness: none | Internal journal self-consistency only | Latestness; this is a record-vs-itself check, **not** independent freshness evidence | `AccountingInconsistent` → fail-closed; no repair/reset |
+| X3 | (b) operation-specific | A `SigningDecisionRecord`: readable `position` (`validator_id`, `network_genesis`, `kind`, `originating_view`), `stage`, optional `retained_signature`; plus an **opaque** `BindingDigest` (`[u8;32]`) | Independently obtained canonical message/domain evidence for that position | Journal records vs an independently supplied canonical preimage/domain | The **readable** `position` fields may be compared to recovered identity/kind/view; the `BindingDigest` is a one-way SHA3 over the prepared preimage + `authorized_epoch`/`suite_id`/versions/`authority_commitment`/`block_id` and does **not** expose those fields for decoding — a further comparison requires **recomputing** the digest from independently obtained canonical evidence and checking equality | Integrity: checksum; auth: pinned-identity (A/B) is a **separate** obligation; freshness: none | That the retained record's *position* names the same validator/network/kind/view as recovered state; a digest match (only if the canonical inputs are independently supplied) that the prepared decision binds those exact inputs | Epoch/key/authority/block/message cannot be **reconstructed from the digest**; caller-supplied claims are **not** trusted provenance; current authorization; freshness | Refuse; a mismatch (or absent independent evidence) is non-correspondence, never a new namespace (INV-R6) |
+| X4 | (c) unresolved predicate | Highest retained signing position (`originating_view` of a `Reserved`/`Signed`) | Recovered consensus view / committed height (`u64`) | Journal vs engine recovery | A **numerical** relation (position view vs recovered height/view) — **recorded only as an observation** | Integrity: checksum; freshness: none | Only the raw numerical relation. A journal position **above** the committed frontier can be ordinary uncommitted work; a maximum view cannot establish branch compatibility, complete history, or stale restoration | That either side is current; branch/history compatibility; that the restore is not a same-epoch older copy. Missing evidence stays **unavailable/unestablished** | If required recovery-safety evidence is unestablished, refuse (not because the number "matched" but because safety is not shown) |
+| X5 | (b) operation-specific | Recovered `Signed` record (`position`, `BindingDigest`, retained `signature`) | The **actual candidate decision** and its trusted context at that position | D10 exact-reuse path | Exact-reuse eligibility: the candidate decision, rebuilt from trusted context, binds to the same position+digest as the retained result | Integrity: checksum; auth: D10 verification + current-authorization revalidation (INV-R4) | Eligibility for an **exact resend** of that one result — **only** when the candidate decision and its trusted context are supplied | A stored signature + digest **alone do not reconstruct** the candidate decision; authorization/freshness beyond D10's local scope | Refuse reuse; retain the obligation; never re-sign |
+| X6 | (b)/(d) active-restore only | RTR `snapshot_meta_digest` (`[u8;32]`) | `StateSnapshotMeta` of the restored input (the **validated snapshot metadata**, available during an **active restore**) | Restore completion (D7-D8) — **active restoration only** | Association of the restored effects with *that* snapshot meta, for attempt binding | Integrity: SHA3-256 association; auth/freshness: **none** (T-INTEG) | During an **active restore**, that the restored effects correspond to *that* snapshot meta | That *that* snapshot is the **latest** authorized state (rollback not detected). An **ordinary restart** need not retain or receive the original snapshot input, so this binding is simply **unavailable** then — its absence is **not** a failure (preserve D8 historical-COMPLETE; §5.3) | Strict fail-closed decode during an active restore; `Invalid` ⇒ refuse. Absent on an ordinary restart ⇒ **not required** |
 
 ### 5.2 The specific scenarios the task requires addressed
 
 * **Newer journal retained while older state is restored in the same epoch.** Epoch
-  equality does **not** prove freshness. The test is **correspondence** (X4), not
-  epoch inequality: if the retained signing records already cover positions at or
-  above the restored consensus frontier, signing is refused at those positions until
-  trusted out-of-domain state resolves latestness (continuity §5.2 row 10).
+  equality does **not** prove freshness. The X4 numerical relation (a retained
+  position view at or above the restored frontier) is **only an observation**: it
+  can equally be ordinary uncommitted work, so it does **not** by itself establish
+  stale restoration. Signing is refused at the covered positions because the
+  **required recovery-safety evidence is unestablished**, not because the number
+  proves staleness; refusal persists until trusted out-of-domain state resolves
+  latestness (continuity §5.2 row 10). Distinguish D10's **per-position** conflict
+  refusal (a conflicting binding at one recovered position is refused) from this
+  **broader** requirement to refuse *new* signing whenever the required recovery
+  safety is unestablished, even where no per-position conflict exists.
 * **Newer consensus state retained while journal state is lost or reverted.** A lost
   `Reserved`/`Signed` record relative to newer recovered consensus state is the
   first-use-vs-lost-state ambiguity (continuity §5.1): an empty/older journal must
@@ -475,11 +503,21 @@ independent evidence.**
   missing-metadata/established-records state is `LegacyRecordsWithoutMetadata` /
   `NotInitialized` → fail-closed; it is never auto-adopted. Distinguishing a
   legitimate first initialization from a lost/rolled-back journal requires an
-  activation gate (A), not a local inference.
-* **Copied validator keys or directories on another host.** In-process ownership
-  exclusivity does not span copies/hosts; two instances with the same key are not
-  mutually detected locally (continuity §4.2 / §5.2 row 13). Exclusivity depends on
-  the same unresolved out-of-domain evidence.
+  activation gate (A), not a local inference. This prohibition on silent
+  **repair / history replacement** (no auto-init, delete, overwrite, counter reset,
+  or migration; INV-R5) is distinct from D10's **permitted** behavior of
+  re-acknowledging a **byte-identical** existing record through a fresh synced
+  write (an idempotent re-publication of the same retained result, never a content
+  change). The accepted D10 uncertainty handling and exact-reuse rules are
+  preserved unchanged.
+* **Copied validator keys or directories on another host.** `SigningOwnershipDomain`
+  is **per backend instance**: supported handles over **one** backend share a single
+  in-process coordination domain, but separate directories/hosts each hold their
+  **own** domain. Two instances with the same key on separate copies therefore do
+  **not** share ownership and are **not** mutually detected locally. The unmet
+  requirement is **cross-copy exclusivity** (a fence spanning copies/hosts); local
+  ownership does **not** provide or enforce it, and depends on the same unresolved
+  out-of-domain evidence (continuity §4.2 / §5.2 row 13).
 
 Checksums and untrusted digests provide integrity/association only; they do not
 establish authorization or freshness. Whole-copy rollback remains outside local
@@ -507,13 +545,30 @@ prerequisite, and so that a local check never becomes production activation.
 
 **Ordering rules preserved:**
 
+* **S6 (fresh signing) and S7 (retained reuse) are alternative branches, not a
+  sequence.** After the applicable S1–S5 prerequisites, a **fresh** operation
+  follows D10's acknowledged reservation, one-use continuation, frozen-operation
+  revalidation, signer invocation, checked result publication, and pre-effect
+  confirmation. A **retained-result** branch performs the required
+  acknowledgement / record-and-binding verification / frozen-operation
+  revalidation and pre-effect confirmation with **zero new signer calls** — it
+  resends the one retained result and never invokes the signer.
+* **The persistent position count advances only on a new reservation.**
+  `reserve_for_sign` advances `reserved_positions` by exactly one and writes the
+  `Reserved` record + metadata in a single atomic synced write; a `Reserved` and
+  its later `Signed` record occupy the **same** position **once**
+  (`record_signed_result` overwrites in place at the same key). Result publication
+  and recovery acknowledgement do **not** create another position or re-advance
+  the count.
 * Recovered `Reserved` records remain **potentially signed**: no automatic release
   or re-signing (INV-R3).
 * Exact retained-result reuse retains D10's acknowledgement, verification, and
-  authorization requirements (INV-R4).
+  authorization requirements, and the original-ticket / bound-context / selected-
+  signer binding and post-storage revalidation are preserved intact (INV-R4).
 * Missing or inconsistent required safety evidence prevents signing (INV-R1/R2).
 * No automatic journal initialization, repair, deletion, overwrite, counter reset,
-  or history migration occurs during recovery (INV-R5).
+  or history migration occurs during recovery; this is distinct from D10's
+  permitted re-acknowledgement of a **byte-identical** record (INV-R5).
 * **D8 `COMPLETE` admission is not proof of consensus-lock recovery or signing-history
   freshness.** S2–S5 remain required after a `COMPLETE` restore.
 * Crash decisions are based on observable durable state only (INV-R7).
@@ -530,18 +585,23 @@ continuity-contract decision for the recovery surface rather than re-deriving it
 
 | # | Observable durable state | Permitted | Refused | Supporting assumption |
 |---|---|---|---|---|
-| R1 | Ordinary restart; committed state + reconstructable lock + consistent journal | Resume after S2–S5 satisfied | Signing before lock + correspondence established | Harness restart reconstructs a conservative lock; production snapshot path does not (INV-R2) |
+| R1 | Ordinary restart; committed state + reconstructed lock + consistent journal | Resume after S2–S5 satisfied **and** lock-sufficiency established | Signing before lock-sufficiency + correspondence established | Harness restart *reconstructs* a lock whose sufficiency is **not** established by this audit; production paths reconstruct none (§2.1, INV-R2) |
 | R2 | Snapshot-baseline recovery; **no** `locked_qc` recovered | Nothing (sign) | All future votes until lock established | Snapshot path recovers no lock (§2) |
 | R3 | Recovered `Reserved`, no usable retained result | Retain reservation | Re-sign; release | Potentially signed (INV-R3) |
-| R4 | Recovered `Signed` with ack'd retained result | Exact resend after D10 reuse checks | Re-sign; resend without D10 checks | INV-R4; *(continuity §5.2 row 5/6)* |
-| R5 | Same-epoch older snapshot + newer journal records | Refuse at covered positions | Signing from stale restored state | Correspondence (X4), not epoch equality *(continuity §5.2 row 10)* |
+| R4 | Recovered `Signed` with ack'd retained result | Exact resend after D10 reuse checks, **zero new signer calls** | Re-sign; resend without D10 checks | INV-R4; fresh vs reuse are alternative branches *(continuity §5.2 row 5/6)* |
+| R5 | Same-epoch older snapshot + newer journal records | Refuse at covered positions | Signing from stale restored state; **treating the X4 numerical relation as a correspondence match or stale-state verdict** | Refusal is because required recovery safety is unestablished, not because the number "matched"; epoch equality is not freshness (§5.2; X4 observation) *(continuity §5.2 row 10)* |
 | R6 | Newer consensus state + lost/older journal | Refuse (fail-closed) | Assuming "never signed" | First-use-vs-lost ambiguity (continuity §5.1) |
 | R7 | Internally-consistent whole-directory older copy | Refuse pending out-of-domain evidence | Trusting the restored copy as current | Locally indistinguishable (T-DOMAIN) |
-| R8 | Missing / malformed / inconsistent journal or safety state | Refuse (fail-closed) | Auto-init / repair / adopt | INV-R1/R5 |
+| R8 | Missing / malformed / inconsistent journal or safety state | Refuse (fail-closed) | Auto-init / repair / adopt | INV-R1/R5 (distinct from byte-identical re-acknowledgement) |
 | R9 | Missing journal metadata with established records | Refuse (`LegacyRecordsWithoutMetadata`) | Auto-adopt as authorized first init | Needs activation gate, not local inference |
-| R10 | Two instances, same validator key / copied directory | At most one holds in-process exclusivity | Both signing; assuming local detection | Exclusivity does not span hosts (continuity §4.2) |
+| R10 | Two instances, same validator key / copied directory | At most one holds in-process exclusivity **over one backend** | Both signing; **assuming local ownership enforces cross-copy exclusivity** | Separate copies hold separate ownership domains; **cross-copy exclusivity is UNMET** and not provided locally (continuity §4.2) |
 | R11 | Committed-state-only recovery (control) | Resume once S2–S5 met | Treating committed recovery as lock/freshness proof | Committed height is not a lock (§4-Q2) |
-| R12 | Later-view decision that would violate the pre-crash lock though it avoids same-position equivocation | Refuse under the recovered/required lock | Signing because no same-position conflict exists | Lock rule, not only non-equivocation (INV-R2/R6) |
+| R12 | Later-view decision that would violate the pre-crash lock though it avoids same-position equivocation | Refuse under the recovered/required lock | Signing because no same-position conflict exists | Lock rule, not only non-equivocation (INV-R2/R6; §2.1 example) |
+
+**No structural match implies full recovery compatibility.** A numerical or
+record-vs-itself relation (X2, X4) is an observation only; correspondence requires
+the operation-specific evidence (X3, X5) or the unresolved safety predicate (X1,
+X4) to be independently established.
 
 ---
 
@@ -559,11 +619,11 @@ production authority; a CodeQL scope skip is not a security pass.
 | F1 | Ordinary restart, all required state intact | Recovery parent over real storage | Recovered engine + journal | Resume only after S2–S5 | ADMIT after correspondence | real-storage restart |
 | F2 | Recovery after an uncommitted signing decision | Reserve then process-death, reopen | `Reserved` record | Potentially-signed; refuse re-sign | REFUSE (INV-R3) | process-death |
 | F3 | Reserved-only recovery; retained-`Signed` exact reuse | Reopen journal | `Reserved` / ack'd `Signed` | Refuse re-sign / exact resend only | REFUSE / ADMIT-RESEND | real-storage + process-death |
-| F4 | Same-epoch older snapshot + newer journal | Restore older snapshot, keep journal | Snapshot + `sig:` records | Refuse at covered positions | REFUSE (X4) | real-storage |
+| F4 | Same-epoch older snapshot + newer journal | Restore older snapshot, keep journal | Snapshot + `sig:` records | Refuse at covered positions (X4 relation is an **observation**, not a match) | REFUSE because safety unestablished (not because the number matched) | real-storage |
 | F5 | Missing / corrupt / inconsistent journal or safety state | Corrupt record / omit metadata / drop lock input | Malformed store | Fail-closed | REFUSE (INV-R1) | unit/model + real-storage |
 | F6 | Whole-directory rollback; copied-key | Restore whole older copy; run two copies | Internally-consistent old copy / two keys | Local reader cannot distinguish; refuse on correspondence/exclusivity gap | REFUSE / documented indistinguishability | adversarial (needs out-of-domain anchor) |
-| F7 | Harness reconstruction vs production snapshot path | `load_persisted_state` vs `initialize_from_snapshot_baseline` | Reconstructed vs absent lock | Harness reconstructs; production recovers none | Distinguish paths; REFUSE on production path | real-storage + release-binary |
-| F8 | Later-view decision violating the pre-crash lock | Recovered lock vs future vote | Lock input + future proposal | Refuse despite no same-position conflict | REFUSE (INV-R2/R6, F12-style) | unit/model |
+| F7 | Harness reconstruction vs production paths | `load_persisted_state` vs `initialize_from_snapshot_baseline` vs fresh ordinary startup | Reconstructed vs absent lock | Harness reconstructs (sufficiency unestablished); production snapshot + ordinary startup recover none | Distinguish paths; REFUSE on production paths | real-storage + release-binary |
+| F8 | Lower-view reconstructed lock enlarges the permitted set (§2.1 example) | Reconstructed lock vs pre-crash lock, future vote | Lock inputs at two views + candidate with `justify_qc.view` between them | Candidate passes under reconstructed lock yet would fail under the pre-crash lock | REFUSE until lock-sufficiency established (INV-R2/R6) | unit/model |
 | F9 | Committed-state recovery control | Normal committed recovery | Committed block + QC | Resume once S2–S5 met | ADMIT (control) | real-storage |
 | F10 | Power-loss durability of recovery decisions | Power-cut harness | Durable store | Decisions survive power loss | boundary TBD | power-loss |
 
@@ -573,8 +633,9 @@ production authority; a CodeQL scope skip is not a security pass.
 
 **Existing (reusable) mechanisms:**
 
-* Committed-state and conservative-lock reconstruction on the **harness** restart
-  path (`load_persisted_state` → `initialize_from_restart`).
+* Committed-state and (harness-only) lock reconstruction on the **harness** restart
+  path (`load_persisted_state` → `initialize_from_restart`), whose recovery
+  sufficiency is **not** established by this audit (§2.1).
 * Epoch durability and incomplete-transition fail-closed checks
   (`open_production_consensus_storage`, `verify_epoch_consistency_on_startup`).
 * Restore-completion containment and its strict fail-closed RTR
@@ -591,8 +652,14 @@ production authority; a CodeQL scope skip is not a security pass.
   / per-view** recovery on all paths (INV-R2; D7-D2).
 * **Production journal open/wiring** — the journal is not opened in production, so
   every §5 comparison lacks its signing-side input (Q3).
-* **The correspondence reader** that performs X1–X6 (S4).
-* **A freshness / anti-rollback anchor** and **cross-host exclusivity** (Q4; continuity §6).
+* **Defined correspondence predicates and their inputs** — X1 and X4 are
+  **unresolved predicates** (undefined intended relation / missing recovered
+  state), and X3/X5 require independently supplied canonical evidence or an actual
+  candidate decision; a correspondence reader that performs X1–X6 (S4) cannot be
+  built meaningfully until these are resolved and the journal is opened in
+  production.
+* **A freshness / anti-rollback anchor** and **cross-copy / cross-host exclusivity**
+  (Q4; continuity §6).
 * **Authorization (A) + current-authority freshness (B)** wiring (S5; lifecycle contract).
 
 **Unresolved trust assumptions:** T-TRUST-STORAGE (QCs trusted on load without
@@ -604,38 +671,57 @@ this contract.
 
 ## 10. The single bounded successor task
 
-**Exactly one** smallest justified successor. It must address the **next missing
-prerequisite** demonstrated above — not a generic freshness module or production
-wiring chosen without that demonstration.
+**Exactly one** smallest justified successor, based on the corrected findings.
 
-**Successor (D7-D12 candidate): a non-authorizing, read-only recovery
-*correspondence observer* — source + tests only.**
+**Withdrawal of the previously-proposed observer.** An earlier revision proposed a
+read-only *correspondence observer* that would "implement X1–X6 and report an
+overall `match / non-correspondence`" from the recovered inputs. That proposal is
+**withdrawn**: §5 shows that today X1 and X4 are **unresolved predicates** (no
+production lock; undefined intended relation; no restored ancestry), X3 and X5 are
+**operation-specific** checks that require independently supplied canonical
+evidence or an actual candidate decision the stored record cannot reconstruct, and
+X6 binds only during an active restore. An observer cannot produce a *meaningful
+overall* correspondence verdict from inputs that do not exist, and a
+"non-authorizing" label does **not** compensate for unavailable inputs or undefined
+predicates. Proposing it would manufacture a successful-looking comparison.
 
-* **Why this and not something else.** §2 shows production recovers committed state
-  and an epoch but opens no journal and (on the snapshot path) recovers no lock.
-  Before any anchor (Q4) or authorization wiring (Q5) can matter, the system needs a
-  component that can *read* recovered consensus safety state and an *opened* journal
-  and *report* whether they correspond (X1–X6), fail-closed, **without** signing or
-  authorizing. This is the smallest step that makes Q3 observable and is a strict
-  prerequisite for S4; a freshness anchor (Q4) is premature because there is nothing
-  yet consuming correspondence, and production lock recovery (Q2) is a distinct,
-  separately-scoped consensus change.
-* **Extends / reuses:** the existing `journal.open` + `for_each_signing_namespace_entry`
-  readers, `ConsensusStorageState` / `open_production_consensus_storage`
-  observation, and the engine recovery outputs (`locked_qc`, committed height) —
-  composed in a new **read-only** observer that returns a typed
-  correspondence result (match / non-correspondence / input-unavailable) and
-  **never** writes, signs, initializes, repairs, or authorizes.
-* **Proposed tests:** the §8 rows reachable without an anchor — F1 (intact), F2/F3
-  (reserved/retained), F4 (same-epoch older snapshot), F5 (missing/corrupt), F9
-  (committed control), and F7's path distinction — asserting fail-closed outcomes
-  and zero writes/zero signer calls.
+**Replacement successor (D7-D12 candidate): a bounded source+test characterization
+of the existing lock reconstruction and recovery-input loss, using existing
+engine/storage interfaces — no new reader, persistence format, freshness interface,
+or recovery architecture.**
+
+* **Precise unanswered question.** On the **harness** restart path, can the lock
+  reconstructed by `load_persisted_state` be **strictly lower-view** than the
+  pre-crash `locked_qc` (because the pre-crash lock advanced via a timeout
+  certificate or later three-chain progress not embedded in the committed block),
+  and does that lower-view reconstruction **enlarge** the set admitted by
+  `is_safe_to_vote_on_block` relative to the pre-crash lock (the §2.1 example)?
+  This is the concrete, bounded form of the Q2 lock-sufficiency gap.
+* **Why this, and whether existing tests already cover it.** D7-D2
+  (`run_422_d7d2_signing_state_recovery_tests.rs`) characterizes the
+  **uncommitted-vote latch** loss and that the snapshot baseline carries **no**
+  lock, using an *explicitly-absent* QC baseline; it does **not** exercise the
+  `load_persisted_state` higher-view QC selection or demonstrate the
+  lower-view-than-pre-crash reconstruction. No other inspected test covers it.
+  This successor is therefore the next missing evidence, not a duplicate, and is
+  strictly narrower than a generic anchor (Q4) or a production lock-recovery
+  redesign (Q2 implementation).
+* **Mechanisms reused (only existing interfaces):** `load_persisted_state` →
+  `initialize_from_restart`, the engine's `locked_qc()` accessor and
+  `is_safe_to_vote_on_block`, `initialize_from_snapshot_baseline`, and the storage
+  `get_qc` / embedded-`block.qc` readers — composed in **tests only**, asserting
+  the view relationship and the enlarged-admission consequence. No production
+  wiring, no new module, no writes, no signer calls.
+* **Evidence required for a *safety* conclusion (not produced here):** a proof or
+  construction that the reconstructed lock preserves the required restrictions, or
+  an independently justified recovery rule (§2.1 proof obligation). The successor
+  **characterizes** the gap; it does **not** claim to close it.
 * **Explicit exclusions:** the freshness/anti-rollback anchor (continuity §6.6),
-  whole-copy/cross-host rollback detection, production lock-recovery redesign,
-  Timeout/NewView migration, opening a journal in the production signing path,
-  enabling signing, and any activation/readiness change. The observer is
-  **non-authorizing** and reports correspondence only; it must never be called
-  rollback protection, freshness, or authorization.
+  whole-copy/cross-host rollback detection, a production lock-recovery redesign,
+  Timeout/NewView migration, opening or wiring a journal in the production signing
+  path, any new reader / persistence format / freshness interface / recovery
+  architecture, enabling signing, and any activation/readiness change. The
+  characterization is **non-authorizing** and reports a bounded observation only.
 
 The successor **implementation is not begun** in this task.
 
@@ -645,31 +731,52 @@ The successor **implementation is not begun** in this task.
 
 ### 11.1 Checks actually performed (documentation-only)
 
-* Source symbols and call order were re-traced against the `5435d22` worktree
+* **Corrections A–D applied by re-inspection, not restatement.** Correction A
+  re-traced the production vs harness recovery boundaries
+  (`binary_consensus_loop.rs` fresh `BasicHotStuffEngine::new`; conditional
+  `initialize_from_snapshot_baseline`; `main.rs` opaque `block_hash` baseline;
+  storage-opening observation). Correction B re-read `is_safe_to_vote_on_block`
+  and the harness lock selection and recorded the view-comparison example and proof
+  obligation (§2.1). Correction C reclassified X1–X6 and read
+  `SigningDecisionRecord` / `BindingDigest` to bound what X3/X5 can read. Correction
+  D re-read `reserve_for_sign` / `record_signed_result` / `SigningOwnershipDomain`
+  for the position-count, fresh-vs-reuse, and ownership-scope statements.
+* Source symbols and call order were re-traced against the `5435d22` source
   (engine recovery, harness `load_persisted_state`, production `main.rs` startup /
-  restore, guarded signing routes, storage / production-storage recovery readers,
-  `restore_completion.rs`, and `signing_reservation_journal.rs`). Line numbers are
-  locators; symbols are authoritative.
+  restore, the binary consensus loop engine construction, guarded signing routes,
+  storage / production-storage recovery readers, `restore_completion.rs`, and
+  `signing_reservation_journal.rs`). Line numbers are locators; symbols are
+  authoritative.
 * Reference-object reachability was checked with `git cat-file -t`: the accepted
-  D10 final `3d7155e…` is **absent** from this shallow clone and is reported
-  separately from content correspondence; ancestry to it is not manufactured.
+  D10 final `3d7155e…` **and** the reviewed revision `515b531a…` are **absent** from
+  this shallow clone and are reported separately from content correspondence;
+  ancestry to them is not manufactured.
 * Cross-document consistency was checked against the continuity contract (§5, §5.2,
-  §5.3, §6), the authority lifecycle contract, the snapshot-restore completion
-  contract, and the genesis authority / QC integration audit (inspected read-only).
+  §5.3, §6 — including the narrow recovery-claim correction to its §5.3 made so it
+  no longer calls the harness reconstruction unqualifiedly "conservative"), the
+  authority lifecycle contract, the snapshot-restore completion contract, and the
+  genesis authority / QC integration audit (inspected read-only).
+  `docs/whitepaper/contradiction.md` was inspected read-only; C4/C5 posture is
+  unchanged and no ledger edit was made.
 * Markdown structure, relative links, and table well-formedness in the changed
   files were reviewed. EOL (CRLF) and the existing no-final-newline EOF convention
   are preserved to match sibling documents.
 * No Cargo tests, Clippy, or release rebuild were executed — none are required for
-  this documentation-only phase. No historical result is relabelled; fresh tool
-  outcomes (if any) are recorded literally and separately in
+  this documentation-only correction. No historical result is relabelled; fresh
+  tool outcomes are recorded literally and separately in
   `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_422_D7.md`. A skip, an unavailable
   reviewer, or a "no comments" wrapper does **not** establish completed security
-  analysis.
+  analysis. The §2.1 reasoning example and the §8/§10 future tests are labeled as
+  reasoning / not-yet-executed; no new execution evidence is claimed.
 
 ### 11.2 Scoped verdict and retained posture
 
-Design completion of this contract establishes **no** implemented recovery
-protection. If the required contract is complete, the token is:
+The corrected contract defines the recovery-admission requirements, the available
+evidence, the missing prerequisites, and the unresolved proof obligations (lock
+sufficiency, §2.1; the undefined X1/X4 predicates and the operation-specific
+X3/X5 inputs, §5) **without** asserting any unsupported safety guarantee. On that
+basis — not merely because all sections exist — design completion of this contract
+establishes **no** implemented recovery protection, and the token is:
 
 ```
 D7D11_CONSENSUS_RECOVERY_SIGNING_HISTORY_CONTRACT=DEFINED-NOT-IMPLEMENTED
