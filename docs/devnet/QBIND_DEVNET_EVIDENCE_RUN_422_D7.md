@@ -9440,6 +9440,10 @@ local demonstrated scope; model reopen, not power-loss/release-binary evidence).
 the remaining F work; C4/C5 remain OPEN. No authority activation, readiness
 promotion, D11, or Run 423 work; no PR, branch rename, force-push, rebase, or
 history rewrite.
+> **Superseded (historical).** This section's "Correction E … Still OPEN" verdict
+> is the conclusion of its own prior pass and is retained as historical evidence.
+> Correction E was subsequently implemented and tested — see "Run 422 D7-D10
+> Correction E execution" below; F remains OPEN.
 ## Run 422 D7-D10 — Correction D finalization: operation binding across the prepare/complete split
 
 ### Provenance and object limitations
@@ -9608,6 +9612,10 @@ reopen, not power-loss/release-binary evidence). Retained unchanged:
 remaining F work; C4/C5 remain OPEN. No authority activation, readiness promotion,
 D11, or Run 423 work; no PR, branch rename, force-push, rebase, or history rewrite;
 `task/warning.txt` and unrelated work preserved.
+> **Superseded (historical).** This "Correction E … Still OPEN" verdict is the
+> conclusion of its own prior pass, retained as historical evidence. Correction E
+> was subsequently implemented and tested — see "Run 422 D7-D10 Correction E
+> execution" below; F remains OPEN.
 
 
 ## Run 422 D7-D10 — Correction E: direct-read bounds, remaining acceptance evidence, and final validation
@@ -9864,12 +9872,20 @@ work resolves none of those entries.
 compilation artifact (build-source SHA `fabb16c…`) is retained at its actual
 revision as historical evidence only, not re-attested here.
 
-**Security-tool outcomes (literal, this pass).** Code Review and CodeQL were
-attempted once via the harness `parallel_validation` (production-source change
-declared non-trivial for CodeQL). Their literal outcomes are recorded in the final
-task report; any missing tool, backend error, or skipped analysis remains an
-incomplete obligation and does not constitute a passed security analysis. Security
-posture remains `RS1-OPEN / PUBLIC-DEVNET-NO-GO`.
+**Security-tool outcomes (literal — prior-pass outcomes).** Code Review and CodeQL
+were attempted once via the harness `parallel_validation` in the preceding pass
+(production-source change declared non-trivial for CodeQL). The literal outcomes
+already reported for that pass, labelled here as prior-pass outcomes (no fresh tool
+execution is claimed and no verbatim output beyond what was retained is invented):
+
+* **Code Review DID NOT run** — the reviewer was unavailable: the `autofind` tool
+  failed with a model-registry error (`model claude-sonnet-4.6 not found in
+  registry`). "No review comments" is therefore NOT a clean review.
+* **CodeQL DID NOT complete** — the `rust` analysis was SKIPPED because the
+  database size was too large, so the reported "0 alerts" is NOT a successful scan.
+
+Both remain unexecuted security obligations; neither constitutes a passed security
+analysis. Security posture remains `RS1-OPEN / PUBLIC-DEVNET-NO-GO`.
 
 **Scoped verdict (unchanged).** Overall D10 remains **PARTIAL**; Correction F and
 C4/C5 remain **OPEN**. Genesis authority activation DISABLED, durable anti-rollback
@@ -9877,3 +9893,48 @@ NOT-ESTABLISHED, production lifecycle UNAVAILABLE, configured-authority runtime
 evidence NOT-CAPTURED, `PUBLIC-DEVNET-NO-GO`. No F implementation, D11, Run 423,
 production signing enablement, or architectural redesign; no PR, main change,
 rename, force-push, rebase, or history rewrite.
+
+### Correction E follow-up — post-uncertainty failed-retry assertions strengthened
+
+This test/documentation-only follow-up closes the two remaining review findings on
+top of the Correction E execution above. Starting/tested checkpoint
+`05b4eca654798d62e804505a3b97388d838385f7` (reported branch
+`copilot/copilotrun-422-complete-corre`); the referenced ancestry objects
+remained unavailable in the shallow single-branch clone and source correspondence
+was inspected directly (reported separately, no ancestry manufactured).
+
+**Strengthened tests (existing tests extended only; no new production scope).**
+
+* `signing_reservation_journal.rs::tests::post_eviction_failed_and_uncertain_recovery_refuse_reuse_then_success_permits_exact_signature` — immediately after the store-then-error recovery attempt, store-then-error is disabled while ordinary writes keep failing, and the SAME evicted position is retried through the actual journal: another `JournalError::Storage`, no retained reuse, and — via the existing `record_writes` counter — no successful synced write and thus no usable cache acknowledgement (cache length unchanged); the exact retained record and its conflict obligation (a conflicting binding still refused without rewrite) are preserved. Permitting the next write and retrying then issues exactly one additional synced recovery write (`record_writes + 1`) and reuses ONLY the exact retained signature. The exact-cache-hit control (an acknowledged cached result served with no further write even when writes are configured to fail) is preserved.
+* `binary_consensus_loop.rs::…::run422_d7d10::d10_post_eviction_recovery_failure_uncertainty_success_through_handler` — the same sequence through the actual guarded handler: after the uncertain attempt, store-then-error is disabled with the write budget held at 0 and the evicted view is retried: another `outbound_proposal_journal_error_total`, no delivery or facade handoff, no additional signer call (signer count frozen at 3), unchanged cache length, preserved record, and a preserved conflict obligation (a conflicting payload refused with `outbound_proposal_journal_conflict_total`, no delivery, no signature, no rewrite). Permitting the write then proves exactly one additional synced recovery write via a minimal test-only `write_budget_remaining()` observation (budget decremented by one), delivers the exact retained signature with no additional signer call, and retains the D6 `verify_proposal_msg_with_domain` check and signature-byte equality; an exact-cache-hit control (budget held at 0, served with no write) closes the test.
+
+The only non-test addition is the test-module accessor `D10Store::write_budget_remaining()` (read-only observation of the existing injected budget); no production instrumentation or configuration was introduced.
+
+**Focused validation (freshly executed this follow-up; real exit statuses).**
+
+* `cargo test -p qbind-node --lib signing_reservation_journal` — **53 passed, 0 failed** (exit 0).
+* `cargo test -p qbind-node --lib run422_d7d10` — **62 passed, 0 failed** (exit 0).
+* Changed-region whitespace / file-specific line endings — both changed `.rs` files remain fully CRLF with zero trailing-whitespace lines and their original no-trailing-newline EOF; `storage.rs` untouched (LF); `task/warning.txt` preserved.
+* Tested checkpoint for these counts: `52885e9897a681c6fd1a914d6cea3ea427dadeb7` (the strengthened-tests commit). No full-suite rerun or release rebuild was performed for this test/documentation-only follow-up; the earlier validation is retained at its actual checkpoint. Documentation reconciliation (contract status tokens and this record) is committed in the following checkpoint on the same task branch.
+
+**Documentation reconciliation.** The operative contract status tokens no longer
+say "E and F remain OPEN" alongside the completed-E statement: `…POST_STORAGE…`
+and `D7D10_LOCAL_SIGNING_RESERVATION=PARTIAL` now read "E is complete for its
+demonstrated local scope (see §9.6); F remains OPEN," a new
+`D7D10_CORRECTION_E_NAMESPACE_CAPACITY_CACHE=CODE-AND-STORAGE-TEST-POSITIVE` token
+records E's scoped positive disposition, and overall
+`D7D10_LOCAL_SIGNING_RESERVATION=PARTIAL`, Correction F OPEN, and C4/C5 OPEN are
+kept. Historical "Still OPEN: Correction E" section verdicts in this devnet record
+are retained and explicitly marked superseded/historical rather than rewritten.
+
+**Security-tool attribution (prior pass).** No fresh tool run was performed in this
+follow-up. The literal prior-pass outcomes are recorded above: Code Review DID NOT
+run (reviewer unavailable; `autofind` `claude-sonnet-4.6` model-registry error) and
+CodeQL DID NOT complete (analysis skipped, database too large; "0 alerts" was not a
+successful scan). Both remain unexecuted obligations.
+
+**Scoped E verdict.** `D7D10_CORRECTION_E_NAMESPACE_CAPACITY_CACHE=CODE-AND-STORAGE-TEST-POSITIVE`
+(demonstrated local code-and-storage scope only; not configured-authority runtime
+evidence; no readiness promotion). Overall D10 remains **PARTIAL**; Correction F and
+C4/C5 remain **OPEN**; activation DISABLED, anti-rollback NOT-ESTABLISHED,
+production lifecycle UNAVAILABLE, `PUBLIC-DEVNET-NO-GO`.
