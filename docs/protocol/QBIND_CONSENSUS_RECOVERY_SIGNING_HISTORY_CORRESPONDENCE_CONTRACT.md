@@ -146,13 +146,21 @@ current source rather than trusting a line number.
   logical lock that the source *comments* call **conservative** — chosen as the
   higher-view of the separately-stored QC and the embedded QC — passed to
   `initialize_from_restart`. **No** QC signature or wire re-verification is
-  performed on load; the stored QC is assumed trusted. This reader has **no**
-  non-test caller: `load_persisted_state` is reached only from tests and the
-  harness wrappers (`async_runner.rs`), **never** from production `main.rs` or the
-  binary consensus loop. Its lock reconstruction and whether that lock is
-  *sufficient* for recovery are examined in Correction B (§2.1); this audit does
-  **not** establish that the reconstructed lock preserves every pre-crash voting
-  restriction.
+  performed on load; the stored QC is assumed trusted. This reader has **no
+  production-startup caller**: the production binary startup path (`main.rs`)
+  does **not** invoke `load_persisted_state` (it references neither that method
+  nor `AsyncNodeRunner`; see §7A correction). A *compiled* (non-test) wrapper
+  does exist — `AsyncNodeRunner::load_persisted_state`
+  (`crates/qbind-node/src/async_runner.rs` ~L506) simply delegates to
+  `self.harness.load_persisted_state()` — but a compiled harness wrapper is
+  **not** evidence that the production binary startup path invokes recovery;
+  nothing in `main.rs` constructs an `AsyncNodeRunner` or calls it. Its lock
+  reconstruction and whether that lock is *sufficient* for recovery are examined
+  in Correction B (§2.1); this audit does **not** establish that the
+  reconstructed lock preserves every pre-crash voting restriction — indeed Run
+  422 D7-D12 exhibits a concrete case where it does **not** (a candidate
+  rejected by a stronger pre-crash lock is accepted by the lower reconstructed
+  lock; see the D12 evidence section of the devnet record).
 * **Production ordinary startup / restoration**, consensus-loop engine
   construction in `crates/qbind-node/src/binary_consensus_loop.rs` and the
   `main.rs` driver:
@@ -295,30 +303,48 @@ A comment is not a proof. The relevant predicate is
 3. walking the candidate's registered ancestors reaches `locked_qc.block_id`
    (the candidate extends the locked block).
 
-Lock updates advance `locked_qc` on three-chain progress and on
-`on_timeout_certificate` when `tc.high_qc.view > locked_qc.view`. The harness
-selects, from the *committed* block's separately-stored QC and its embedded
-`block.qc`, the higher-view of the two. Neither of those is guaranteed to equal the
-pre-crash `locked_qc`, which may have advanced to a **strictly higher view** via a
-timeout certificate or later three-chain progress that the committed block does not
+Lock updates advance `locked_qc` on **every** higher-view QC the engine forms,
+**before** any three-chain commit is attempted, and also on
+`on_timeout_certificate` when `tc.high_qc.view > locked_qc.view`. Concretely,
+`HotStuffStateEngine::on_qc` (`hotstuff_state_engine.rs` ~L995) sets
+`locked_qc = Some(qc)` whenever `qc.view > existing.view` and only **then**
+calls `try_commit_with_qc` (the three-chain rule). Lock advancement therefore
+does **not** require a successful three-chain commit: a QC formed via `on_vote`
+raises the lock even when no block is committed. Run 422 D7-D12 exercises this
+directly — `d7d12_precrash_lock_advances_via_on_vote_without_a_commit` drives a
+quorum through `on_vote`, observes `locked_qc.view` advance, and asserts
+`committed_height() == None` (see the D12 evidence section of the devnet
+record). The harness `load_persisted_state`, by contrast, selects from the
+*committed* block's separately-stored QC and its embedded `block.qc` the
+higher-view of the two. Neither of those is guaranteed to equal the pre-crash
+`locked_qc`, which may have advanced to a **strictly higher view** via a
+timeout certificate or a later QC that the committed block does not
 embed. The reconstructed lock can therefore be **lower-view** than the pre-crash
 lock.
 
-**Source-level reasoning example (not an executed test, not a demonstrated
-network-level attack).** Assume: pre-crash lock view = 20; reconstructed lock view
-= 10; a candidate block that does **not** extend either relevant locked block
-(ancestor walk fails for both); candidate `justify_qc.view` = 15. Applying the
-implemented condition (2) above:
+**Source-level reasoning promoted to executed predicate evidence (Run 422
+D7-D12). Still a predicate result, not a demonstrated network-level attack.**
+Run 422 D7-D12 realizes this relationship against actual engine/reader state
+rather than assumed view numbers: pre-crash lock view = 20 (established through
+the real `on_vote` → `on_qc` lock transition); reconstructed lock view = 7 (the
+actual output of `load_persisted_state` over the surviving committed-state
+fixture); a candidate that does **not** extend either relevant locked block;
+candidate `justify_qc.view` = 15. Applying the implemented condition (2) above:
 
-* Under the **reconstructed** lock (view 10): `15 >= 10` is true ⇒ the candidate
+* Under the **reconstructed** lock (view 7): `15 >= 7` is true ⇒ the candidate
   **passes** the safe-vote predicate.
 * Under the **pre-crash** lock (view 20): `15 >= 20` is false, and the ancestor
   walk does not reach the locked block ⇒ the candidate **fails**.
 
-Lowering the lock from view 20 to view 10 thus **enlarges** the permitted voting
+Lowering the lock from view 20 to view 7 thus **enlarges** the permitted voting
 set: a decision that the pre-crash lock would have refused is admitted under the
-reconstructed lock. This is a consequence of the implemented view comparison; the
-specific view numbers are illustrative assumptions, not measured values.
+reconstructed lock. This is now a measured `is_safe_to_vote_on_block` outcome
+(`d7d12_candidate_rejected_by_precrash_lock_accepted_by_reconstructed_lock`),
+not an assumption. The example view numbers quoted previously (10/15/20) remain
+illustrative; the executed case uses 7/15/20. A predicate result establishes
+**no** emitted vote, **no** signing, **no** facade handoff, **no** network
+transmission, and **no** production attack (task §3); other admission, leader,
+view, latch, and verified-justification checks still gate any real vote.
 
 **Proof obligation.** Labeling a reconstruction "conservative" does not discharge
 safety. For resumption to be safe, either (i) the reconstructed state must be shown
@@ -470,7 +496,7 @@ not defined correspondence predicates today:
 |---|---|---|---|---|---|---|---|---|---|
 | X1 | (c) unresolved predicate | Recovered `locked_qc` (logical QC: `block_id`, `view`) | Committed block id (`[u8;32]`) / the recovered block tree | Engine recovery; harness restart only (no lock on any production path) | **The intended relation must be stated explicitly** — identity (`locked_qc.block_id == committed_id`), ancestry (committed id is an ancestor of the locked block in the registered tree), or another justified condition. It is **not** a defined predicate today, and the recovered block tree does **not** restore ancestry it did not re-register | Integrity: checksum on persisted QC; auth: **assumed trusted on load** (T-TRUST-STORAGE); freshness: none | At most, that a reconstructed lock is *anchored in* recovered committed state — **not** a correspondence verdict | That the lock equals or dominates the **pre-crash** lock (§2.1); that the tree contains the ancestry the relation would require; every production path has no lock to compare | Refuse to sign (INV-R2); no synthesis of a lock from height/epoch; no assumption of unrestored ancestry |
 | X2 | (a) structural | Journal metadata `reserved_positions` (`u64`) | Count of decodable `sig:` records (`usize`) | `journal.open` accounting (both from the **same** store) | Equality of the persisted count and the record count | Integrity: CRC32; auth/freshness: none | Internal journal self-consistency only | Latestness; this is a record-vs-itself check, **not** independent freshness evidence | `AccountingInconsistent` → fail-closed; no repair/reset |
-| X3 | (b) operation-specific | A `SigningDecisionRecord`: readable `position` (`validator_id`, `network_genesis`, `kind`, `originating_view`), `stage`, optional `retained_signature`; plus an **opaque** `BindingDigest` (`[u8;32]`) | Independently obtained canonical message/domain evidence for that position | Journal records vs an independently supplied canonical preimage/domain | The **readable** `position` fields may be compared to recovered identity/kind/view; the `BindingDigest` is a one-way SHA3 over the prepared preimage + `authorized_epoch`/`suite_id`/versions/`authority_commitment`/`block_id` and does **not** expose those fields for decoding — a further comparison requires **recomputing** the digest from independently obtained canonical evidence and checking equality | Integrity: checksum; auth: pinned-identity (A/B) is a **separate** obligation; freshness: none | That the retained record's *position* names the same validator/network/kind/view as recovered state; a digest match (only if the canonical inputs are independently supplied) that the prepared decision binds those exact inputs | Epoch/key/authority/block/message cannot be **reconstructed from the digest**; caller-supplied claims are **not** trusted provenance; current authorization; freshness | Refuse; a mismatch (or absent independent evidence) is non-correspondence, never a new namespace (INV-R6) |
+| X3 | (b) operation-specific | A `SigningDecisionRecord`: readable `position` (`validator_id`, `network_genesis`, `kind`, `originating_view`), `stage`, optional `retained_signature`; plus an **opaque** `BindingDigest` (`[u8;32]`) | Independently obtained canonical message/domain evidence for that position | Journal records vs an independently supplied canonical preimage/domain | The **readable** `position` fields may be compared to recovered identity/kind/view; the `BindingDigest` is a one-way SHA3 over the prepared preimage + `authorized_epoch`/`suite_id`/versions/`authority_commitment`/`block_id` and does **not** expose those fields for decoding — a further comparison requires **recomputing** the digest from independently obtained canonical evidence and checking equality | Integrity: checksum; auth: pinned-identity (A/B) is a **separate** obligation; freshness: none | That the retained record's *position* names the same validator/network/kind/view as recovered state; a digest match (only if the canonical inputs are independently supplied) that the prepared decision binds those exact inputs | Epoch/key/authority/block/message cannot be **reconstructed from the digest**; caller-supplied claims are **not** trusted provenance; current authorization; freshness | Refuse in both cases, but record the finding precisely: a **digest mismatch** (independent canonical evidence supplied and it does not match) is **demonstrated non-correspondence**, whereas **absent independent evidence** (no canonical preimage/domain obtained, so the digest cannot be recomputed) is **unavailable evidence** — an *undetermined* comparison, not a proof of non-correspondence. Either requires refusal; neither ever mints a new namespace (INV-R6) |
 | X4 | (c) unresolved predicate | Highest retained signing position (`originating_view` of a `Reserved`/`Signed`) | Recovered consensus view / committed height (`u64`) | Journal vs engine recovery | A **numerical** relation (position view vs recovered height/view) — **recorded only as an observation** | Integrity: checksum; freshness: none | Only the raw numerical relation. A journal position **above** the committed frontier can be ordinary uncommitted work; a maximum view cannot establish branch compatibility, complete history, or stale restoration | That either side is current; branch/history compatibility; that the restore is not a same-epoch older copy. Missing evidence stays **unavailable/unestablished** | If required recovery-safety evidence is unestablished, refuse (not because the number "matched" but because safety is not shown) |
 | X5 | (b) operation-specific | Recovered `Signed` record (`position`, `BindingDigest`, retained `signature`) | The **actual candidate decision** and its trusted context at that position | D10 exact-reuse path | Exact-reuse eligibility: the candidate decision, rebuilt from trusted context, binds to the same position+digest as the retained result | Integrity: checksum; auth: D10 verification + current-authorization revalidation (INV-R4) | Eligibility for an **exact resend** of that one result — **only** when the candidate decision and its trusted context are supplied | A stored signature + digest **alone do not reconstruct** the candidate decision; authorization/freshness beyond D10's local scope | Refuse reuse; retain the obligation; never re-sign |
 | X6 | (b)/(d) active-restore only | RTR `snapshot_meta_digest` (`[u8;32]`) | `StateSnapshotMeta` of the restored input (the **validated snapshot metadata**, available during an **active restore**) | Restore completion (D7-D8) — **active restoration only** | Association of the restored effects with *that* snapshot meta, for attempt binding | Integrity: SHA3-256 association; auth/freshness: **none** (T-INTEG) | During an **active restore**, that the restored effects correspond to *that* snapshot meta | That *that* snapshot is the **latest** authorized state (rollback not detected). An **ordinary restart** need not retain or receive the original snapshot input, so this binding is simply **unavailable** then — its absence is **not** a failure (preserve D8 historical-COMPLETE; §5.3) | Strict fail-closed decode during an active restore; `Invalid` ⇒ refuse. Absent on an ordinary restart ⇒ **not required** |
@@ -537,7 +563,7 @@ prerequisite, and so that a local check never becomes production activation.
 | S1 | Open storage and read state | `open_production_consensus_storage`; `ConsensusStorageState` | — | Schema incompat, incomplete-epoch marker, decode error |
 | S2 | Validate / reconstruct consensus safety state | `load_persisted_state` (harness) / `initialize_from_restart`; `initialize_from_snapshot_baseline` | **Production lock recovery** (snapshot path recovers none); **uncommitted-vote recovery** (none anywhere) | Lock not reconstructable; required safety state absent (INV-R2) |
 | S3 | Open and validate the established journal | `journal.open`; `for_each_signing_namespace_entry`; metadata accounting | **Production journal open/wiring** (not opened in production today) | `NotInitialized` / `LegacyRecordsWithoutMetadata` / `AccountingInconsistent` / corrupt record |
-| S4 | Establish required correspondence | §5 comparisons (X1–X6) | **The correspondence reader itself** (no production component performs X1–X6) | Any §5 non-correspondence; stale-restore indication |
+| S4 | Establish required correspondence | §5 comparisons (X1–X6) | **The X1–X6 predicates *and* their required evidence** — not merely an absent reader. Even a correspondence reader cannot establish correspondence without: X1's resolved pre-crash-vs-reconstructed lock safety predicate (today **unmet** — D7-D12 shows the reconstructed lock can be strictly lower and admit a vote the pre-crash lock refused); X3/X5's **independently-obtained** canonical message/domain evidence and an actual candidate decision (the retained `BindingDigest` cannot be decoded back into its inputs); and the pinned-identity (A/B) and freshness (S5) obligations, which S4 does not discharge | Any §5 non-correspondence; stale-restore indication; **absent independent evidence** (unavailable evidence ≠ demonstrated non-correspondence, but either fails closed) |
 | S5 | Establish authorization (A), freshness (B), exclusivity | Authority lifecycle contract; admission gate (`current_auth`) | **Anchor** (freshness/anti-rollback); **cross-host exclusivity** | Missing/invalid authorization; no freshness anchor |
 | S6 | Invoke a signer | `guarded_sign_{proposal,vote}_for_broadcast` → reserved signing | — (gated by S1–S5) | Any prior stage unmet |
 | S7 | Reuse a retained signature | D10 exact-reuse (`ExactRetryRetained`) | — | Failed D10 verification/ack/authorization (INV-R4) |
@@ -700,18 +726,35 @@ or recovery architecture.**
 * **Why this, and whether existing tests already cover it.** D7-D2
   (`run_422_d7d2_signing_state_recovery_tests.rs`) characterizes the
   **uncommitted-vote latch** loss and that the snapshot baseline carries **no**
-  lock, using an *explicitly-absent* QC baseline; it does **not** exercise the
-  `load_persisted_state` higher-view QC selection or demonstrate the
-  lower-view-than-pre-crash reconstruction. No other inspected test covers it.
-  This successor is therefore the next missing evidence, not a duplicate, and is
-  strictly narrower than a generic anchor (Q4) or a production lock-recovery
-  redesign (Q2 implementation).
+  lock. Its committed-state recovery control (`committed_state_recovery_control`,
+  the `d7d2_c_*` cases) already drives the **real** reader `load_persisted_state`
+  and asserts that it recovers the committed baseline **and a QC-derived lock**
+  (`locked_qc.view == committed QC height`) from a persisted committed-state
+  fixture — that reconstruction is **established prior coverage**, not something
+  D12 re-establishes. What D7-D2 did **not** do is compare that reconstructed
+  lock against a **stronger pre-crash lock** evaluated with the **same**
+  candidate. D7-D12 adds exactly that comparison: it establishes a pre-crash
+  lock through the real `on_vote` → QC → `on_qc` transition, evaluates a
+  candidate under it, then recovers and evaluates the **same** candidate,
+  showing the lower reconstructed lock admits a vote the pre-crash lock refused
+  (plus below-both / at-least-both / equal-lock controls). This successor is
+  therefore the next missing evidence, not a duplicate, and is strictly narrower
+  than a generic anchor (Q4) or a production lock-recovery redesign (Q2
+  implementation).
 * **Mechanisms reused (only existing interfaces):** `load_persisted_state` →
   `initialize_from_restart`, the engine's `locked_qc()` accessor and
-  `is_safe_to_vote_on_block`, `initialize_from_snapshot_baseline`, and the storage
-  `get_qc` / embedded-`block.qc` readers — composed in **tests only**, asserting
-  the view relationship and the enlarged-admission consequence. No production
-  wiring, no new module, no writes, no signer calls.
+  `is_safe_to_vote_on_block`, `HotStuffStateEngine::{register_block, on_vote}`,
+  `initialize_from_snapshot_baseline`, `observe_consensus_storage`, and the
+  storage `put_*`/`get_*` readers and writers — composed in **tests only**,
+  asserting the view relationship and the enlarged-admission consequence.
+  **Isolated fixture setup through the existing storage APIs** (e.g.
+  `put_block` / `put_qc` / `put_last_committed` to lay down the surviving
+  committed-state fixture, and post-recovery `register_block` of
+  explicitly test-supplied candidate/ancestry inputs) is **authorized and
+  necessary** — these are test fixture writes, **not** production recovery
+  writes and **not** recovery repair. **Excluded:** production wiring, a new
+  module, a new reader/persistence format, signer calls, and any recovery-repair
+  write.
 * **Evidence required for a *safety* conclusion (not produced here):** a proof or
   construction that the reconstructed lock preserves the required restrictions, or
   an independently justified recovery rule (§2.1 proof obligation). The successor
@@ -723,7 +766,12 @@ or recovery architecture.**
   architecture, enabling signing, and any activation/readiness change. The
   characterization is **non-authorizing** and reports a bounded observation only.
 
-The successor **implementation is not begun** in this task.
+The successor **has now been executed** as Run 422 D7-D12 (tests +
+documentation only); its results, controls, limitations, and exact commands are
+recorded in the D12 evidence section of the devnet record
+(`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_422_D7.md`). The *safety* conclusion
+(§2.1 proof obligation) remains **not** produced: D12 characterizes the gap and
+does **not** close it.
 
 ---
 

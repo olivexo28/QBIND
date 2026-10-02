@@ -935,4 +935,411 @@ mod committed_state_recovery_control {
         assert_eq!(loaded, None, "a fresh node recovers no committed baseline");
         assert_eq!(harness.committed_height(), None);
     }
+
+    // =======================================================================
+    // RUN 422 D7-D12 — Lock reconstruction vs. pre-crash voting restriction.
+    // =======================================================================
+    //
+    // The existing D7-D2 `C` controls above already establish that the REAL
+    // reader `NodeHotstuffHarness::load_persisted_state` reconstructs the
+    // committed baseline AND a QC-derived lock (view == committed QC height)
+    // from the persisted committed-state fixture. D12 does NOT re-establish
+    // that; its ADDED evidence is the comparison of that reconstructed lock
+    // against a strictly stronger *pre-crash* lock, evaluated with the SAME
+    // explicitly-supplied candidate and ancestry.
+    //
+    // Evidence boundaries kept strictly separate (task §3):
+    //   * reconstruction performed by the actual harness reader
+    //     (`load_persisted_state`);
+    //   * lock advancement performed by existing engine logic
+    //     (`HotStuffStateEngine::on_vote` → QC formation → `on_qc`);
+    //   * the result of `is_safe_to_vote_on_block` (a pure predicate);
+    //   * NO emitted engine vote decision, NO cryptographic signing, NO facade
+    //     handoff, NO network transmission are exercised here. A predicate
+    //     result establishes none of those later boundaries and no production
+    //     network attack.
+    //
+    // Lock-update order (task §4/§7E): in the reviewed source,
+    // `HotStuffStateEngine::on_qc` updates `locked_qc` to the higher-view QC
+    // *before* calling `try_commit_with_qc` (the three-chain rule). The
+    // pre-crash lock below is therefore established through a real QC-formed
+    // lock transition that does NOT require — and here does not produce — any
+    // committed-state advance.
+    //
+    // The candidate and its ancestry registered after recovery are explicitly
+    // TEST-SUPPLIED inputs, not recovered historical ancestry.
+
+    use qbind_consensus::QuorumCertificate as ConsensusQc;
+
+    /// Drive a fresh `BasicHotStuffEngine` to a pre-crash lock at `lock_view`
+    /// through the REAL lock transition: register a block at `lock_view`, then
+    /// feed a quorum (3 of 4; `two_thirds_vp(4) == 3`) of votes through
+    /// `on_vote`, forming a QC whose `on_qc` handler sets `locked_qc`. Returns
+    /// `(engine, locked_block_id)`. This is NOT `set_locked_qc`: it is the same
+    /// lock transition the running engine performs.
+    fn precrash_engine_locked_at(lock_view: u64) -> (BasicHotStuffEngine<[u8; 32]>, [u8; 32]) {
+        let mut engine = make_engine(1, 4);
+        let mut locked_block_id = [0u8; 32];
+        locked_block_id[0] = 0xB0;
+        locked_block_id[1] = (lock_view & 0xFF) as u8;
+        // The block that will be certified at `lock_view`. Parent `None`: it is
+        // a standalone block and is deliberately NOT part of the candidate
+        // ancestry registered below.
+        engine
+            .state_mut()
+            .register_block(locked_block_id, lock_view, None, None);
+        for v in 0..3u64 {
+            let formed = engine
+                .state_mut()
+                .on_vote(ValidatorId(v), lock_view, &locked_block_id)
+                .expect("on_vote membership/quorum ok");
+            if v < 2 {
+                assert!(formed.is_none(), "no QC before the 2/3 quorum is reached");
+            } else {
+                assert!(formed.is_some(), "the quorum-th vote forms a QC");
+            }
+        }
+        (engine, locked_block_id)
+    }
+
+    /// Register the explicitly test-supplied candidate and its one-node
+    /// ancestry into `engine`, with `justify_qc.view == justify_view`. The
+    /// candidate's ancestry (`candidate → parent → ⊥`) deliberately does NOT
+    /// contain any locked block id, so `is_safe_to_vote_on_block` can only pass
+    /// via the justify-view liveness rule (`justify_qc.view >= locked.view`),
+    /// never via the ancestor-walk. Returns the candidate block id.
+    fn register_candidate(engine: &mut BasicHotStuffEngine<[u8; 32]>, justify_view: u64) -> [u8; 32] {
+        let parent_id = [0xA1u8; 32];
+        let candidate_id = [0xC1u8; 32];
+        let justify_block = [0xB1u8; 32];
+        let st = engine.state_mut();
+        // Standalone parent at view 14 (no ancestry; not a locked block).
+        st.register_block(parent_id, 14, None, None);
+        // Candidate at view 16 whose justification is an unverified logical QC
+        // (empty signers — a controlled test input, not authenticated quorum
+        // evidence) over an unrelated `justify_block`.
+        let justify = ConsensusQc::new(justify_block, justify_view, vec![]);
+        st.register_block(candidate_id, 16, Some(parent_id), Some(justify));
+        candidate_id
+    }
+
+    /// Persist a surviving committed-state fixture (committed block + stored QC
+    /// at `height` + last-committed pointer) through the existing storage APIs.
+    /// This is isolated fixture setup through existing storage APIs (task §2),
+    /// NOT a production recovery write. Returns `(storage, committed_block_id)`.
+    fn persisted_committed_fixture(height: u64) -> (Arc<InMemoryConsensusStorage>, [u8; 32]) {
+        let (block_id, block, qc) = committed_block_and_qc(height);
+        let storage = Arc::new(InMemoryConsensusStorage::new());
+        storage.put_block(&block_id, &block).expect("put_block");
+        storage.put_qc(&block_id, &qc).expect("put_qc");
+        storage
+            .put_last_committed(&block_id)
+            .expect("put_last_committed");
+        (storage, block_id)
+    }
+
+    /// Construct a fresh harness over the surviving persisted fixture and run
+    /// the REAL reader `load_persisted_state`.
+    fn recover_harness(storage: &Arc<InMemoryConsensusStorage>) -> NodeHotstuffHarness {
+        let setup = create_test_setup();
+        let cfg = node_cfg();
+        let mut harness = NodeHotstuffHarness::new_from_validator_config(
+            &cfg,
+            setup.client_cfg,
+            setup.server_cfg,
+            None,
+        )
+        .expect("create harness")
+        .with_storage(storage.clone() as Arc<dyn ConsensusStorage>);
+        harness
+            .load_persisted_state()
+            .expect("load_persisted_state");
+        harness
+    }
+
+    /// D12-B / §7E evidence: the pre-crash lock is established through the REAL
+    /// QC-formed lock transition (`on_vote` → `on_qc`), and the lock advances
+    /// WITHOUT any three-chain commit. This is the executed counter-evidence to
+    /// any claim that lock advancement happens only after a successful commit.
+    #[test]
+    fn d7d12_precrash_lock_advances_via_on_vote_without_a_commit() {
+        let lock_view = 20u64;
+        let (engine, locked_block) = precrash_engine_locked_at(lock_view);
+
+        let lock = engine.locked_qc().cloned().expect("a pre-crash lock is set");
+        assert_eq!(lock.view, lock_view, "on_qc set locked_qc to the formed QC view");
+        assert_eq!(lock.block_id, locked_block, "lock points at the certified block");
+
+        // The lock advanced through `on_qc` (which updates `locked_qc` before
+        // `try_commit_with_qc`); no three-chain existed, so committed state did
+        // NOT advance. Lock advancement did not require a successful commit.
+        assert_eq!(
+            engine.committed_height(),
+            None,
+            "lock advanced without any committed-state advance"
+        );
+        assert!(
+            engine.committed_block().is_none(),
+            "no block was committed by the lock transition"
+        );
+    }
+
+    /// D12 primary characterization (task §5A–§5D). The SAME explicitly-supplied
+    /// candidate (justify view 15, ancestry extending NEITHER locked block) is:
+    ///
+    /// * REJECTED by the stronger pre-crash lock (view 20), evaluated before
+    ///   recovery on the real engine that formed it; and
+    /// * ACCEPTED by the weaker reconstructed lock (view 7) produced by the
+    ///   REAL reader `load_persisted_state` over the surviving committed-state
+    ///   fixture.
+    ///
+    /// The only input that changed between the two evaluations is the lock view
+    /// the predicate compares against. This is a predicate/reader
+    /// characterization only; it establishes no recovery sufficiency, no
+    /// authenticated safety, and no signing or network behavior.
+    #[test]
+    fn d7d12_candidate_rejected_by_precrash_lock_accepted_by_reconstructed_lock() {
+        // --- Baseline persisted fixture (surviving committed state). ---
+        let committed_height = 7u64;
+        let (storage, committed_block_id) = persisted_committed_fixture(committed_height);
+        let obs_before =
+            observe_consensus_storage(Some(storage.as_ref())).expect("observe before");
+        assert_eq!(obs_before, ConsensusStorageObservation::PresentNoCommittedEpoch);
+
+        // --- (§5B) Pre-crash lock via the REAL lock transition. ---
+        let precrash_lock_view = 20u64;
+        let (mut precrash_engine, precrash_locked_block) =
+            precrash_engine_locked_at(precrash_lock_view);
+        let pl = precrash_engine
+            .locked_qc()
+            .cloned()
+            .expect("pre-crash lock present");
+        assert_eq!(pl.view, precrash_lock_view);
+        assert_eq!(pl.block_id, precrash_locked_block);
+        // Lock advanced with no committed-state advance (no three-chain).
+        assert_eq!(precrash_engine.committed_height(), None);
+        // The pre-crash lock is strictly newer than the recoverable lock.
+        assert!(precrash_lock_view > committed_height);
+
+        // --- (§5C) Candidate evaluated BEFORE recovery, under the pre-crash lock. ---
+        let candidate_justify_view = 15u64;
+        // Justification sits strictly between the two lock views.
+        assert!(
+            committed_height <= candidate_justify_view
+                && candidate_justify_view < precrash_lock_view
+        );
+        let candidate_id = register_candidate(&mut precrash_engine, candidate_justify_view);
+        let safe_precrash = precrash_engine
+            .state()
+            .is_safe_to_vote_on_block(&candidate_id);
+        assert!(
+            !safe_precrash,
+            "pre-crash lock (view 20) rejects a candidate justified only at view 15 whose \
+             ancestry does not extend the locked block"
+        );
+
+        // --- (§5A/§5D) Recover the SAME committed fixture with the REAL reader. ---
+        let mut harness = recover_harness(&storage);
+        assert_eq!(
+            harness.driver().engine().committed_height(),
+            Some(committed_height),
+            "committed baseline recovered"
+        );
+        assert_eq!(
+            harness.driver().engine().committed_block(),
+            Some(&committed_block_id)
+        );
+        let recovered_lock = harness
+            .driver()
+            .engine()
+            .locked_qc()
+            .cloned()
+            .expect("reconstructed lock");
+        assert_eq!(
+            recovered_lock.view, committed_height,
+            "reconstructed lock view == committed QC height (7)"
+        );
+        assert_eq!(recovered_lock.block_id, committed_block_id);
+        assert_eq!(
+            harness.current_view(),
+            committed_height + 1,
+            "resume view == committed_height + 1"
+        );
+        assert_eq!(harness.driver().engine().current_epoch(), 0);
+        let obs_after =
+            observe_consensus_storage(Some(storage.as_ref())).expect("observe after");
+        assert_eq!(obs_after, ConsensusStorageObservation::PresentNoCommittedEpoch);
+        // Reconstructed lock is strictly lower than the pre-crash lock.
+        assert!(recovered_lock.view < pl.view);
+
+        // Read back what recovery PRESERVED (specific persisted values; NOT a
+        // whole-directory byte-identity claim).
+        assert_eq!(
+            storage.get_last_committed().expect("read last_committed"),
+            Some(committed_block_id)
+        );
+        let rb_block = storage
+            .get_block(&committed_block_id)
+            .expect("read block")
+            .expect("committed block present");
+        assert_eq!(rb_block.header.height, committed_height);
+        let rb_qc = storage
+            .get_qc(&committed_block_id)
+            .expect("read qc")
+            .expect("committed QC present");
+        assert_eq!(rb_qc.height, committed_height);
+        assert!(
+            rb_qc.signatures.is_empty(),
+            "stored QC is an unverified fixture (no constituent signatures)"
+        );
+        assert_eq!(
+            storage.get_current_epoch().expect("read epoch"),
+            None,
+            "recovery wrote no committed-epoch key"
+        );
+
+        // --- (§5D) Evaluate the SAME candidate inputs after recovery. ---
+        // These nodes are explicitly TEST-SUPPLIED inputs registered after
+        // recovery, NOT recovered historical ancestry.
+        let recovered_candidate_id =
+            register_candidate(harness.driver_mut().engine_mut(), candidate_justify_view);
+        assert_eq!(
+            recovered_candidate_id, candidate_id,
+            "the same candidate identity is evaluated under both lock views"
+        );
+        let safe_recovered = harness
+            .driver()
+            .engine()
+            .state()
+            .is_safe_to_vote_on_block(&recovered_candidate_id);
+        assert!(
+            safe_recovered,
+            "reconstructed lock (view 7) accepts the same candidate (justify view 15 >= 7)"
+        );
+
+        // --- What precisely changed. ---
+        // Same candidate id, same ancestry, same justification view (15). The
+        // ONLY difference is the lock view the predicate compares against:
+        // the stronger pre-crash lock (20) rejects; the weaker reconstructed
+        // lock (7) accepts.
+        assert!(!safe_precrash && safe_recovered);
+        assert_ne!(safe_precrash, safe_recovered);
+    }
+
+    /// Control (task §6, bullet 1): a non-extending candidate whose
+    /// justification is BELOW both locks is rejected under BOTH the pre-crash
+    /// lock and the reconstructed lock.
+    #[test]
+    fn d7d12_control_candidate_below_both_locks_rejected_under_both() {
+        let justify = 5u64; // below both 7 and 20
+        let (mut precrash_engine, _precrash_block) = precrash_engine_locked_at(20);
+        let cand = register_candidate(&mut precrash_engine, justify);
+        assert!(
+            !precrash_engine.state().is_safe_to_vote_on_block(&cand),
+            "below-both candidate rejected under the pre-crash lock (20)"
+        );
+
+        let (storage, committed_block_id) = persisted_committed_fixture(7);
+        let mut harness = recover_harness(&storage);
+        let rl = harness
+            .driver()
+            .engine()
+            .locked_qc()
+            .cloned()
+            .expect("reconstructed lock");
+        assert_eq!(rl.view, 7);
+        assert_eq!(rl.block_id, committed_block_id);
+        let cand2 = register_candidate(harness.driver_mut().engine_mut(), justify);
+        assert_eq!(cand2, cand, "same candidate identity");
+        assert!(
+            !harness
+                .driver()
+                .engine()
+                .state()
+                .is_safe_to_vote_on_block(&cand2),
+            "below-both candidate rejected under the reconstructed lock (7)"
+        );
+    }
+
+    /// Control (task §6, bullet 2): a non-extending candidate whose
+    /// justification is AT LEAST AS HIGH AS both locks is accepted by the
+    /// predicate under BOTH locks (the justify-view liveness rule).
+    #[test]
+    fn d7d12_control_candidate_at_least_both_locks_accepted_under_both() {
+        let justify = 25u64; // >= both 7 and 20
+        let (mut precrash_engine, precrash_block) = precrash_engine_locked_at(20);
+        let cand = register_candidate(&mut precrash_engine, justify);
+        assert!(
+            precrash_engine.state().is_safe_to_vote_on_block(&cand),
+            "at-least-both candidate accepted under the pre-crash lock (20)"
+        );
+        // Candidate ancestry still does not include the pre-crash locked block.
+        assert_ne!(cand, precrash_block);
+
+        let (storage, committed_block_id) = persisted_committed_fixture(7);
+        let mut harness = recover_harness(&storage);
+        let rl = harness
+            .driver()
+            .engine()
+            .locked_qc()
+            .cloned()
+            .expect("reconstructed lock");
+        assert_eq!(rl.view, 7);
+        let cand2 = register_candidate(harness.driver_mut().engine_mut(), justify);
+        assert_eq!(cand2, cand, "same candidate identity");
+        // Candidate ancestry does not include the reconstructed locked block.
+        assert_ne!(cand2, committed_block_id);
+        assert!(
+            harness
+                .driver()
+                .engine()
+                .state()
+                .is_safe_to_vote_on_block(&cand2),
+            "at-least-both candidate accepted under the reconstructed lock (7)"
+        );
+    }
+
+    /// Control (task §6, bullet 3): when the reconstructed lock EQUALS the
+    /// pre-crash lock view (both 20), the recovered predicate preserves the
+    /// SAME restriction — a candidate justified only at view 15 is rejected
+    /// under both. This guards against reading the primary result as "recovery
+    /// always weakens the restriction": it only does so when the reconstructed
+    /// lock is genuinely lower.
+    #[test]
+    fn d7d12_control_equal_reconstructed_lock_preserves_restriction() {
+        let lock_view = 20u64;
+        let justify = 15u64; // below the (equal) lock view
+
+        let (mut precrash_engine, _precrash_block) = precrash_engine_locked_at(lock_view);
+        let cand = register_candidate(&mut precrash_engine, justify);
+        assert!(
+            !precrash_engine.state().is_safe_to_vote_on_block(&cand),
+            "pre-crash lock (20) rejects the justify-15 candidate"
+        );
+
+        // Reconstructed lock ALSO at view 20 (committed QC height 20).
+        let (storage, committed_block_id) = persisted_committed_fixture(lock_view);
+        let mut harness = recover_harness(&storage);
+        let rl = harness
+            .driver()
+            .engine()
+            .locked_qc()
+            .cloned()
+            .expect("reconstructed lock");
+        assert_eq!(
+            rl.view, lock_view,
+            "reconstructed lock equals the pre-crash lock view"
+        );
+        assert_eq!(rl.block_id, committed_block_id);
+        let cand2 = register_candidate(harness.driver_mut().engine_mut(), justify);
+        assert_eq!(cand2, cand, "same candidate identity");
+        assert!(
+            !harness
+                .driver()
+                .engine()
+                .state()
+                .is_safe_to_vote_on_block(&cand2),
+            "equal reconstructed lock preserves the rejection restriction"
+        );
+    }
 }
