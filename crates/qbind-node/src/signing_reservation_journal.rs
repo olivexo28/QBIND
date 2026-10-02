@@ -97,7 +97,11 @@ const METADATA_MAGIC: [u8; 4] = *b"QSJM";
 /// Fixed encoded length of the initialization-metadata record:
 /// `magic[4] | metadata_format_version[2] | max_reserved_positions[8] |
 ///  reserved_positions[8] | crc32[4]`.
-const METADATA_ENCODED_LEN: usize = 4 + 2 + 8 + 8 + 4;
+///
+/// This is the codec-owned metadata length. Backends reuse it as the bounded
+/// direct-read size for the metadata key (the fixed metadata encoding size)
+/// before copying or envelope-unwrapping a stored metadata value.
+pub const METADATA_ENCODED_LEN: usize = 4 + 2 + 8 + 8 + 4;
 
 /// Run 422 D7-D10 Correction E — maximum number of distinct positions retained in
 /// the shared **recovered-acknowledgement cache**. The cache is process-local
@@ -1920,7 +1924,22 @@ mod tests {
             if *self.fail_reads.read().unwrap() {
                 return Err(StorageError::Io("injected read failure".to_string()));
             }
-            Ok(self.map.read().unwrap().get(key).cloned())
+            // Bounded direct read: raw record (no envelope), bound = MAX_RECORD_LEN;
+            // checked BEFORE cloning the stored value.
+            let m = self.map.read().unwrap();
+            match m.get(key) {
+                None => Ok(None),
+                Some(v) => {
+                    if v.len() > MAX_RECORD_LEN {
+                        return Err(StorageError::Corruption(format!(
+                            "signing_record: stored value exceeds bound (len={} max={})",
+                            v.len(),
+                            MAX_RECORD_LEN
+                        )));
+                    }
+                    Ok(Some(v.clone()))
+                }
+            }
         }
         fn put_signing_record_synced(&self, key: &[u8], value: &[u8]) -> Result<(), StorageError> {
             if *self.fail_writes.read().unwrap() {
@@ -1940,7 +1959,22 @@ mod tests {
             if *self.fail_reads.read().unwrap() {
                 return Err(StorageError::Io("injected read failure".to_string()));
             }
-            Ok(self.map.read().unwrap().get(MODEL_META_KEY).cloned())
+            // Bounded direct read: raw fixed-length metadata (no envelope),
+            // bound = METADATA_ENCODED_LEN; checked BEFORE cloning.
+            let m = self.map.read().unwrap();
+            match m.get(MODEL_META_KEY) {
+                None => Ok(None),
+                Some(v) => {
+                    if v.len() > METADATA_ENCODED_LEN {
+                        return Err(StorageError::Corruption(format!(
+                            "signing_metadata: stored value exceeds bound (len={} max={})",
+                            v.len(),
+                            METADATA_ENCODED_LEN
+                        )));
+                    }
+                    Ok(Some(v.clone()))
+                }
+            }
         }
         fn put_signing_metadata_synced(&self, value: &[u8]) -> Result<(), StorageError> {
             if *self.fail_writes.read().unwrap() {
@@ -2040,6 +2074,55 @@ mod tests {
         attach_with_budget(store, DEFAULT_MAX_RESERVED_POSITIONS)
     }
 
+    /// Run 422 D7-D10 Correction E (Section 3): the MODEL store's direct record
+    /// read refuses an oversized stored value BEFORE cloning it. The raw value is
+    /// injected via `overwrite` (bypassing the journal) to exceed `MAX_RECORD_LEN`.
+    #[test]
+    fn model_store_record_direct_read_refuses_oversized_before_clone() {
+        let store = Arc::new(ModelStore::default());
+        let key = b"sj:v1:model-pos".to_vec();
+        // Genuine absence stays None.
+        assert!(store.get_signing_record(&key).expect("read").is_none());
+        // At-limit round-trips.
+        store.overwrite(&key, vec![0u8; MAX_RECORD_LEN]);
+        assert_eq!(
+            store
+                .get_signing_record(&key)
+                .expect("read")
+                .expect("present")
+                .len(),
+            MAX_RECORD_LEN
+        );
+        // Oversized is refused before the clone.
+        store.overwrite(&key, vec![0u8; MAX_RECORD_LEN + 1]);
+        assert!(matches!(
+            store.get_signing_record(&key),
+            Err(StorageError::Corruption(_))
+        ));
+    }
+
+    /// Correction E (Section 3): the MODEL store's direct metadata read refuses an
+    /// oversized stored value BEFORE cloning (bound `METADATA_ENCODED_LEN`).
+    #[test]
+    fn model_store_metadata_direct_read_refuses_oversized_before_clone() {
+        let store = Arc::new(ModelStore::default());
+        assert!(store.get_signing_metadata().expect("read").is_none());
+        store.overwrite(MODEL_META_KEY, vec![0u8; METADATA_ENCODED_LEN]);
+        assert_eq!(
+            store
+                .get_signing_metadata()
+                .expect("read")
+                .expect("present")
+                .len(),
+            METADATA_ENCODED_LEN
+        );
+        store.overwrite(MODEL_META_KEY, vec![0u8; METADATA_ENCODED_LEN + 1]);
+        assert!(matches!(
+            store.get_signing_metadata(),
+            Err(StorageError::Corruption(_))
+        ));
+    }
+
     /// Test-fixture setup (NOT a mirror of production selection): an empty,
     /// un-initialized namespace is explicitly initialized with `limit`; an already-
     /// established one is opened and validated. BOTH routes validate — this is not
@@ -2088,6 +2171,111 @@ mod tests {
             pos.storage_key(),
             SigningDecisionRecord::reserved(*pos, *b).encode().unwrap(),
         )
+    }
+
+    // -----------------------------------------------------------------------
+    // Run 422 D7-D10 Correction E (Section 4): recovered-acknowledgement FIFO
+    // cache acceptance matrix, exercised directly against the existing
+    // `RecoveredAckCache` with small colocated fixtures. These cover the cache's
+    // structural guarantees; the handler-level signer/handoff suppression is
+    // covered by the colocated D10 `binary_consensus_loop` tests.
+    // -----------------------------------------------------------------------
+
+    /// The entry limit holds under pressure: inserting far more than `max_entries`
+    /// distinct positions never grows the cache beyond the bound, and each
+    /// over-capacity insert evicts exactly one oldest process-local entry (FIFO).
+    #[test]
+    fn recovered_ack_cache_entry_limit_holds_under_pressure() {
+        const CAP: usize = 4;
+        let mut cache = RecoveredAckCache::new(CAP);
+        let mut evictions = 0usize;
+        for v in 0..(CAP as u64 * 3) {
+            let p = position(SigningKind::Proposal, v);
+            let rec = SigningDecisionRecord::reserved(p, binding(&v.to_be_bytes()));
+            if cache.insert(p, rec).is_some() {
+                evictions += 1;
+            }
+            assert!(cache.len() <= CAP, "cache must never exceed its bound");
+        }
+        assert_eq!(cache.len(), CAP, "cache fills to exactly its bound");
+        // Every insert beyond the first CAP evicted exactly one entry.
+        assert_eq!(evictions, CAP * 2);
+        // FIFO: the oldest positions (views 0..2*CAP) are gone; the newest remain.
+        for v in 0..(CAP as u64 * 2) {
+            assert!(cache.get(&position(SigningKind::Proposal, v)).is_none());
+        }
+        for v in (CAP as u64 * 2)..(CAP as u64 * 3) {
+            assert!(cache.get(&position(SigningKind::Proposal, v)).is_some());
+        }
+    }
+
+    /// A cache hit returns the EXACT identical record bound to that position; a
+    /// different position is a miss (never a cross-position substitution).
+    #[test]
+    fn recovered_ack_cache_hit_is_bound_to_identical_record() {
+        let mut cache = RecoveredAckCache::new(8);
+        let p = position(SigningKind::Vote, 9);
+        let b = binding(b"exact");
+        let sig = vec![0xAB, 0xCD, 0xEF];
+        cache.insert(p, SigningDecisionRecord::signed(p, b, sig.clone()));
+        let got = cache.get(&p).expect("hit");
+        assert_eq!(got.stage, SigningRecordStage::Signed);
+        assert_eq!(got.retained_signature.as_deref(), Some(sig.as_slice()));
+        assert_eq!(got.binding, b);
+        // Different position ⇒ miss.
+        assert!(cache.get(&position(SigningKind::Vote, 10)).is_none());
+    }
+
+    /// Re-inserting an already-cached position updates in place without growth and
+    /// without evicting another entry (idempotent re-acknowledgement).
+    #[test]
+    fn recovered_ack_cache_reinsert_same_position_does_not_grow_or_evict() {
+        let mut cache = RecoveredAckCache::new(2);
+        let p0 = position(SigningKind::Proposal, 0);
+        let p1 = position(SigningKind::Proposal, 1);
+        cache.insert(p0, SigningDecisionRecord::reserved(p0, binding(b"0")));
+        cache.insert(p1, SigningDecisionRecord::reserved(p1, binding(b"1")));
+        assert_eq!(cache.len(), 2);
+        // Re-ack p0: no growth, no eviction, p1 still present.
+        let evicted = cache.insert(p0, SigningDecisionRecord::reserved(p0, binding(b"0b")));
+        assert!(evicted.is_none(), "re-insert must not evict");
+        assert_eq!(cache.len(), 2);
+        assert!(cache.get(&p1).is_some(), "re-ack must not evict a peer");
+    }
+
+    /// Revisiting an evicted position simply re-inserts it (the durability barrier
+    /// is repeated); eviction only dropped process-local state.
+    #[test]
+    fn recovered_ack_cache_revisit_after_eviction_reinserts() {
+        let mut cache = RecoveredAckCache::new(1);
+        let p0 = position(SigningKind::Proposal, 0);
+        let p1 = position(SigningKind::Proposal, 1);
+        cache.insert(p0, SigningDecisionRecord::reserved(p0, binding(b"0")));
+        // Inserting p1 evicts p0 (the oldest process-local entry).
+        assert_eq!(
+            cache.insert(p1, SigningDecisionRecord::reserved(p1, binding(b"1"))),
+            Some(p0)
+        );
+        assert!(cache.get(&p0).is_none());
+        // Revisit p0: re-inserting succeeds (evicting p1 in turn).
+        assert_eq!(
+            cache.insert(p0, SigningDecisionRecord::reserved(p0, binding(b"0"))),
+            Some(p1)
+        );
+        assert!(cache.get(&p0).is_some());
+    }
+
+    /// A zero-capacity cache declines to cache: a later lookup is always a miss
+    /// (the durable record is intact and the barrier is simply repeated).
+    #[test]
+    fn recovered_ack_cache_zero_capacity_declines_to_cache() {
+        let mut cache = RecoveredAckCache::new(0);
+        let p = position(SigningKind::Proposal, 3);
+        assert!(cache
+            .insert(p, SigningDecisionRecord::reserved(p, binding(b"x")))
+            .is_none());
+        assert_eq!(cache.len(), 0);
+        assert!(cache.get(&p).is_none());
     }
 
     /// Craft metadata bytes with an arbitrary format version and a valid checksum
