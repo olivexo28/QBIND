@@ -10032,6 +10032,18 @@ RocksDB reservation → classified SIGABRT process death → fresh reopen.**
   DB-wide monotonic anchor established); process-death recovery and power-loss/rollback
   resistance are kept distinct.
 
+> **Superseded in part by “Correction F-B — repair: bound output draining and verify
+> child cleanup” (below).** Two operative claims in the bullets above are corrected
+> there: “drain threads joined (bounded output handling)” overstated boundedness —
+> joining a thread is **not** itself a deadline, so a descendant that inherited the pipe
+> after the direct child exited could block the join indefinitely; and “Timeout +
+> reaped” did not directly establish reaping, because the prior cleanup discarded a
+> failed `wait()` (leaving `reaped=false`) yet still reported `Timeout`. The repair makes
+> draining deadline-aware, bounds reaping with `try_wait` polling, and returns a
+> structured, asserted `CleanupResult`. The F-A engine-progress evidence and all other
+> F-B claims above are unchanged. The per-command figures below are retained at their
+> prior checkpoint and are **not** relabelled as newly executed.
+
 ### Validation (implementation+test checkpoint on this task branch; dev profile unless noted, exit 0)
 
 Overlapping subsets reported separately (not summed):
@@ -10086,3 +10098,184 @@ accepted A/B/C/D/E and D7–D8 scoped verdicts preserved; production lifecycle U
 durable anti-rollback NOT-ESTABLISHED; genesis authority activation DISABLED; production
 wire-chain behavior unchanged; configured-authority release/runtime evidence
 NOT-YET-CAPTURED; `SECURITY_POSTURE=RS1-OPEN / PUBLIC-DEVNET-NO-GO`; C4/C5 OPEN.
+
+## Run 422 D7-D10 — Correction F-B — repair: bound output draining and verify child cleanup
+
+Test/documentation-only follow-up to the Correction F execution above. It repairs the
+two material gaps in the F-B runner (output draining and cleanup were not bounded by the
+process-status deadline; cleanup errors were discarded so `Timeout` could claim "killed
+and reaped" without establishing reaping). **Only** the existing integration target
+`crates/qbind-node/tests/run_422_d7d10_signing_reservation_journal_tests.rs` and these two
+docs were changed. No production source, dependency, feature, storage API, journal
+semantic, or shared process framework changed. The accepted **F-A engine-progress tests
+are unchanged**.
+
+**Checkpoint identity.** Reported branch `copilot/copilotcopilotcopilotrun-422-corrections`
+on a **shallow single-branch clone** (`.git/shallow`); the reviewed revision
+`3e1b5244771787f47405194d0e2906c45bb0809f` and other ancestry objects are **UNAVAILABLE**
+here (`git cat-file` fails), so the current implementation was inspected directly and no
+ancestry was manufactured. Starting HEAD for this pass: `c69491d`. Worktree was clean;
+`task/warning.txt` and unrelated files preserved. Code/test checkpoint committed before
+recording these validation results.
+
+### Deadline policy (how every blocking boundary is bounded)
+
+The process-status wait (`wait_self_termination`) bounds waiting for the child to die on
+its own via repeated `try_wait` polling under an internal deadline. Two **separate finite
+budgets** then bound the work that follows it, so no blocking boundary is unbounded:
+
+* **Draining** is deadline-aware. Each stream fd is set non-blocking (`fcntl`
+  `O_NONBLOCK`); the drain loop polls and, on `WouldBlock`, honours a shared armed stop
+  deadline (`DrainDeadline`). `finalize_drains(CAPTURE_FINALIZE_BUDGET = 5 s)` **arms**
+  that deadline and then joins the drain threads — the join completes because the thread
+  self-terminates at the armed stop, **not** because joining is itself a deadline. A
+  drain thread that only sees `WouldBlock` (a descendant inherited the pipe after the
+  direct child exited) stops at the deadline and is joined; that stream's capture becomes
+  the explicit unusable outcome `CaptureOutcome::DeadlineExceeded`. The 256 KiB capture
+  cap bounds **memory**, independently of this time budget. A drain thread is never
+  silently abandoned; joining an already-finished thread is the only join performed.
+* **Reaping** is bounded by `try_wait` polling within `REAP_BUDGET = 5 s` (never a
+  blocking `Child::wait()` on a potentially live child).
+
+Overall wall-clock bound for one runner call ≈ status deadline + `REAP_BUDGET` (timeout
+path only) + `CAPTURE_FINALIZE_BUDGET`. **OS-assumption honesty:** these are hard budgets
+on a cooperating Unix kernel, **not** a proof the kernel always completes termination —
+inability to verify reaping within the budget is surfaced as an explicit cleanup failure,
+never a success. `Drop` stays best-effort/non-panicking and reuses the same bounded
+cleanup, reintroducing no unconditional blocking after the explicit deadline path returns.
+
+### Cleanup result model and direct reaping observations
+
+Cleanup is a pure, inspectable driver (`drive_cleanup`) over a `ChildCleanup` seam
+(`request_termination`, non-blocking `poll_reaped`). `reaped` is set **only** on an
+`Ok(true)` observation that establishes reaping. The structured `CleanupResult` is:
+
+* `AlreadyReaped` — the child had already exited and been reaped.
+* `KilledAndReaped` — termination requested **and** reaping verified by an observed
+  status (covers the exit-vs-kill race: a kill error whose child is then observed reaped
+  is still *verified* reaping, never a silent success).
+* `TerminationRequestFailed { detail }` — the kill request failed and reaping was not
+  verified within the budget.
+* `ReapObservationFailed { detail }` — a status/reap observation errored.
+* `DeadlineExpired` — the cleanup budget expired without verified reaping.
+
+`SelfTermination::Timeout` now carries this concrete `CleanupResult` **and** the capture
+outcome; it is never implicitly "killed and reaped". The child helper
+`d7d10_child_reserve_then_abort` now **fails** (panics/non-SIGABRT exit) if the readiness
+marker write or flush errors, instead of discarding those results.
+
+### Focused controls (real processes vs injected seam)
+
+Real-process controls on the SAME classification path:
+
+* marker+SIGABRT **accepted** (`AbortedAfterMarker`); marker+normal-nonzero-exit (`exit
+  7`) **rejected** (`NormalExit`); marker+unexpected signal (SIGTERM 15) **rejected**
+  (`UnexpectedSignal`); SIGABRT-without-marker **rejected** (`SignalButMarkerUnusable`).
+* `runner_control_alive_past_deadline_times_out_and_is_reaped` (`exec sleep 30`, 2 s
+  deadline) now **asserts** `CleanupResult::KilledAndReaped` and a bounded capture
+  (`Complete`/`Truncated`), returning within a 20 s outer bound (elapsed time is
+  corroboration only).
+* **NEW** `runner_capture_incomplete_after_direct_child_exit_is_unusable`: a backgrounded
+  `sleep 45` keeps the pipes open past the direct `sh` child's marker-then-SIGABRT (new
+  process group). The runner returns within its capture budget (< 20 s outer bound),
+  classifies the capture `DeadlineExceeded`, and **refuses** the incomplete capture
+  (`SignalButMarkerUnusable`) despite the SIGABRT and the marker bytes having arrived; the
+  descendant's process group is then SIGKILL'd so nothing is leaked.
+
+Injected-seam control (no real process, labelled separately):
+
+* **NEW** `drive_cleanup_classifies_failures_without_false_reaping`: scripted
+  kill/observe/expiry results deterministically reach `AlreadyReaped`, `KilledAndReaped`
+  (incl. the kill-error exit-race), `TerminationRequestFailed`, `ReapObservationFailed`,
+  and `DeadlineExpired` — with **no** false `reaped=true` and **no** accepted crash.
+
+Plus the retained pure constructed-`ExitStatus::from_raw` decision table.
+
+### Real child-recovery outcome (unchanged journal/accounting)
+
+`reserved_only_child_death_then_reopen_refuses` runs through the corrected runner:
+observed `AbortedAfterMarker { signal: 6 }`; fresh RocksDB handle + ownership domain on
+reopen; valid `Reserved` record present at the exact position/binding; **exact retry →
+`PotentiallySigned`**; **conflicting binding → `Conflict`**; raw `get_signing_record`
+bytes and `get_signing_metadata` **byte-identical** across the refusals. Unchanged from
+the accepted F-B record/refusal assertions.
+
+### Validation (code+test checkpoint on this task branch; dev profile, default features unless noted; exit 0)
+
+Overlapping subsets reported separately (not summed). The one ignored integration test is
+the child helper, which runs as a harmless no-op when invoked directly (its recovery
+meaning exists only when the active parent re-executes it with `QBIND_D7D10_CHILD_DB`
+set); direct invocation is **not** an additional recovery scenario.
+
+* `cargo test -p qbind-node --test run_422_d7d10_signing_reservation_journal_tests -- --include-ignored`
+  (default features) — **31 passed, 0 failed, 0 ignored** (29 prior + 2 new focused
+  controls; the child helper runs as a no-op).
+* `cargo test -p qbind-node --test run_422_d7d10_signing_reservation_journal_tests --features test-utils -- --include-ignored`
+  — **36 passed, 0 failed, 0 ignored**.
+* Focused controls + real child-recovery parent, run directly on the built executable
+  (`runner_* reserved_only_child_death drive_cleanup classify_child_crash`) — **9 passed,
+  0 failed**.
+* `cargo test -p qbind-node --lib run422_d7d10` — **64 passed, 0 failed** (accepted
+  handler/engine coverage preserved).
+* `cargo test -p qbind-node --lib correction_f_engine` — **3 passed, 0 failed** (accepted
+  F-A engine-progress, unchanged).
+* `cargo check -p qbind-node --bins --lib` — exit 0.
+* Focused Clippy `cargo clippy -p qbind-node --test run_422_d7d10_signing_reservation_journal_tests`
+  — **no warnings in the changed file** (one `doc_lazy_continuation` suggestion was
+  fixed; remaining warnings are pre-existing in the `qbind-node` lib, unrelated to this
+  change).
+* Changed-region hygiene: the changed `.rs` file and both docs remain **CRLF** with their
+  original no-trailing-newline EOF and no space-before-CR trailing whitespace; the diff is
+  confined to the F-B runner module, the child helper marker write, the control/new tests,
+  and the module doc; `task/warning.txt` preserved.
+
+### Re-executed integration-test artifact identity
+
+* Tested source checkpoint: `a8c26884845cf6784bb1c8b175c492fafabd655f` (code/test commit;
+  these doc edits are committed in the following checkpoint on the same branch and do not
+  alter the executable or tests validated at the checkpoint).
+* Executable path: `target/debug/deps/run_422_d7d10_signing_reservation_journal_tests-278b729b96e64c0e`
+  (the **test executable**, NOT the production node binary).
+* Build profile/features: `dev`/debug (unoptimized + debuginfo); default features.
+* Byte length: **306280248**.
+* SHA-256: `b91ed5e118e9c6528ec87a97b83564a45b413a2cd9987684dbf9c8c63592bee7`.
+* (The filename hash and SHA-256 are build-dependent and change on any rebuild; no new
+  production-node release build is required for this test-only correction.)
+
+### Security-tool outcomes (literal)
+
+Attempted once via the harness `parallel_validation` with the CodeQL change declared
+non-trivial. Literal outcome recorded in the Clean-worktree/validation note of the final
+report and PR; neither "no review comments" nor "0 alerts" is treated as a completed
+analysis unless the tool actually ran to completion. Security posture remains
+`RS1-OPEN / PUBLIC-DEVNET-NO-GO`; this test/documentation-only change does not alter it.
+
+### Documentation reconciliation and scoped verdict
+
+The contract (`docs/protocol/QBIND_PROPOSAL_VOTE_SIGNING_STATE_CONTINUITY_CONTRACT.md`,
+F-B paragraph) and the prior F execution bullets above are reconciled: the claims that
+joining drain threads makes draining time-bounded, that the timeout outcome necessarily
+proves reaping, and that cleanup errors were "handled explicitly" when they were
+discarded, are superseded; the new deadline policy, observable `CleanupResult` outcomes,
+and the real-vs-seam control distinction are documented. Prior per-command/release figures
+remain at their actual historical checkpoints and are not relabelled as newly executed.
+`contradiction.md` was inspected **read-only**; no new operative contradiction is
+introduced by this test/documentation-only change, and no C4/C5 closure is claimed.
+
+With the repaired F-B requirements demonstrated (deadline-bounded draining + cleanup, and
+verified reaping without false success), the scoped verdict is reaffirmed:
+
+```
+D7D10_CORRECTION_F_ENGINE_PROGRESS_AND_CHILD_RECOVERY=CODE-AND-PROCESS-TEST-POSITIVE
+```
+
+Retained posture (unchanged): overall `D7D10_LOCAL_SIGNING_RESERVATION=PARTIAL`;
+`D7D8_RESTORE_COMPLETION_CONTAINMENT=CODE-AND-RELEASE-TEST-POSITIVE`;
+`D7_STATUS=PARTIAL-CODE-TEST / PRODUCTION-LIFECYCLE-UNAVAILABLE`;
+`DURABLE_ANTI_ROLLBACK=NOT-ESTABLISHED`; `GENESIS_AUTHORITY_ACTIVATION=DISABLED`;
+`PRODUCTION_WIRE_CHAIN_ID_BEHAVIOR=UNCHANGED`;
+`CONFIGURED_AUTHORITY_RELEASE_BINARY_EVIDENCE=NOT-YET-CAPTURED`;
+`SECURITY_POSTURE=RS1-OPEN / PUBLIC-DEVNET-NO-GO`; C4/C5 OPEN; all accepted A–E scoped
+verdicts preserved. No aggregate D10 promotion, D11, Run 423, production journal
+initialization, signing enablement, activation, or anti-rollback implementation is
+performed here.
