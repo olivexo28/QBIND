@@ -1420,9 +1420,12 @@ production; the guard engages only when a journal is explicitly wired (tests).
 * **Correction E now implemented and tested (see superseding §9.6):** explicit
   initialization vs established-journal validation, persistent capacity accounting,
   direct-read/iterator bounds, and recovered-record acknowledgement-cache evidence
-  are complete for their demonstrated local code-and-storage scope. **Still OPEN:**
-  the Correction F engine-progress evidence / bounded-and-classified child-process
-  runner (the active child-death test does NOT close F).
+  are complete for their demonstrated local code-and-storage scope. Correction F
+  (engine-progress evidence + bounded-and-classified child-process runner) is now
+  demonstrated for its local code-and-process-test scope
+  (D7D10_CORRECTION_F_ENGINE_PROGRESS_AND_CHILD_RECOVERY=CODE-AND-PROCESS-TEST-POSITIVE);
+  the aggregate A–F review (§9.7) consolidates the local verdict. The earlier
+  stand-alone child-death test alone did not close F.
 * **Not executed / still unmet (unchanged posture):** durable anti-rollback
   anchor (§6.6), consensus-lock recovery (§5.3/§6.7), whole-copy rollback,
   copied-key/cross-host exclusivity, Timeout/NewView compatibility, power-loss
@@ -1431,9 +1434,9 @@ production; the guard engages only when a journal is explicitly wired (tests).
 
 ```
 D7D10_MISSING_JOURNAL_SIGNING_REFUSAL=CODE-TEST-POSITIVE   (Correction A: signer-eligible Proposal/Vote with no journal refuses before the signer across every production route; distinct per-family counters; earlier admission precedence intact; LocalFixtureUnsigned no-signer passthrough preserved. Local demonstrated scope only — no configured-authority runtime evidence, F engine-progress obligation unaffected.)
-D7D10_POST_STORAGE_AUTHORIZATION_REVALIDATION=CODE-TEST-POSITIVE   (Correction D: policy-aware Required admission refuses a missing original admission at the shared guard before journal/reuse/signer; governed suite/key/backend correspondence is checked before reservation (establishing signer/governance suite correspondence and backend availability only — not private-key possession); the prepared operation FREEZES its original admission ticket, bound context, and selected signer before journal work into a private BoundSigningOperation, and completion takes no independent ctx/admission/signer parameter — it receives only the current snapshot for drift detection and reconfirms the frozen selection immediately before the signer on the fresh path (after the ownership-domain mutex is taken by consume_for_signing) and before retained-result reuse; a replacement ticket minted for a replaced/advanced owner cannot authorize the prepared operation, substituted context, foreign/stale/exhausted issuer, unsupported wire version, signer-index/membership mismatch, and missing key/suite-mismatch/missing-backend all refuse fail-closed with distinct counters; genuine between-phase mutation through the same production completion preserves the durable Reserved record byte-identically (retry ⇒ PotentiallySigned, conflict ⇒ refused) and recovered-retained reuse preserves the exact Signed record with no new signature; immediate and cached callers share the boundary. Serialized-handler local demonstrated scope only — model reopen is not power-loss/release-binary evidence; no configured-authority runtime evidence; E is complete for its demonstrated local scope (see §9.6) and F remains OPEN.)
-D7D10_CORRECTION_E_NAMESPACE_CAPACITY_CACHE=CODE-AND-STORAGE-TEST-POSITIVE   (Correction E: explicit initialize/open vs established-journal validation, persisted journal-wide limit/count, shared ownership domain, and the bounded recovered-acknowledgement cache — including the strengthened post-eviction failed-retry assertions proving a failed/uncertain recovery leaves no usable cache acknowledgement (another storage error, no retained delivery/handoff, no additional signer call, preserved record and conflict obligation) and that the later permitted write issues exactly one additional synced recovery write before the exact retained signature is reused — are complete for their demonstrated local code-and-storage scope. Serialized/local demonstrated scope only — no configured-authority runtime evidence. F remains OPEN.)
-D7D10_LOCAL_SIGNING_RESERVATION=PARTIAL   (Corrections A, B/C, D, and E complete for their demonstrated local scope; F remains OPEN. Supersedes the earlier CODE-AND-STORAGE-TEST-POSITIVE wording, which is retained only as historical evidence.)
+D7D10_POST_STORAGE_AUTHORIZATION_REVALIDATION=CODE-TEST-POSITIVE   (Correction D: policy-aware Required admission refuses a missing original admission at the shared guard before journal/reuse/signer; governed suite/key/backend correspondence is checked before reservation (establishing signer/governance suite correspondence and backend availability only — not private-key possession); the prepared operation FREEZES its original admission ticket, bound context, and selected signer before journal work into a private BoundSigningOperation, and completion takes no independent ctx/admission/signer parameter — it receives only the current snapshot for drift detection and reconfirms the frozen selection immediately before the signer on the fresh path (after the ownership-domain mutex is taken by consume_for_signing) and before retained-result reuse; a replacement ticket minted for a replaced/advanced owner cannot authorize the prepared operation, substituted context, foreign/stale/exhausted issuer, unsupported wire version, signer-index/membership mismatch, and missing key/suite-mismatch/missing-backend all refuse fail-closed with distinct counters; genuine between-phase mutation through the same production completion preserves the durable Reserved record byte-identically (retry ⇒ PotentiallySigned, conflict ⇒ refused) and recovered-retained reuse preserves the exact Signed record with no new signature; immediate and cached callers share the boundary. Serialized-handler local demonstrated scope only — model reopen is not power-loss/release-binary evidence; no configured-authority runtime evidence; E is complete for its demonstrated local scope (see §9.6) and F is likewise demonstrated for its local code-and-process-test scope (D7D10_CORRECTION_F_ENGINE_PROGRESS_AND_CHILD_RECOVERY=CODE-AND-PROCESS-TEST-POSITIVE); the aggregate A–F review (§9.7) consolidates the local verdict.)
+D7D10_CORRECTION_E_NAMESPACE_CAPACITY_CACHE=CODE-AND-STORAGE-TEST-POSITIVE   (Correction E: explicit initialize/open vs established-journal validation, persisted journal-wide limit/count, shared ownership domain, and the bounded recovered-acknowledgement cache — including the strengthened post-eviction failed-retry assertions proving a failed/uncertain recovery leaves no usable cache acknowledgement (another storage error, no retained delivery/handoff, no additional signer call, preserved record and conflict obligation) and that the later permitted write issues exactly one additional synced recovery write before the exact retained signature is reused — are complete for their demonstrated local code-and-storage scope. Serialized/local demonstrated scope only — no configured-authority runtime evidence. F is now demonstrated for its local code-and-process-test scope; see the aggregate A–F consolidation (§9.7).)
+D7D10_LOCAL_SIGNING_RESERVATION=CODE-AND-STORAGE-TEST-POSITIVE   (Corrections A, B/C, D, E, and F are complete for their demonstrated local scope; the subsequent aggregate A–F review (§9.7) concluded LOCAL SCOPE SUPPORTED and reconciles this canonical local verdict. Scope: a non-authorizing local signing-reservation component; shared ownership coordination over supported handles of one backend instance; acknowledged reservation before signing; one-use operation-bound continuation; checked result publication and exact retained-result reuse; frozen-operation authorization revalidation; explicit initialization/opening, namespace validation, persistent capacity, and a bounded recovery-acknowledgement cache; and demonstrated real-process abort/reopen behavior under the stated storage and operating-system assumptions. Production wiring was an explicit exclusion from this bounded local component and is NOT a completion requirement for this local token; production lifecycle and readiness remain represented by their own separate markers. This is a scoped local disposition following the completed A–F review; it does not retroactively approve the earlier defective D10 implementation or establish production readiness.)
 D7D9_SIGNING_STATE_CONTINUITY_CONTRACT=DEFINED-NOT-IMPLEMENTED   (D9 record preserved)
 D7D8_RESTORE_COMPLETION_CONTAINMENT=CODE-AND-RELEASE-TEST-POSITIVE   (preserved)
 D7_STATUS=PARTIAL-CODE-TEST / PRODUCTION-LIFECYCLE-UNAVAILABLE
@@ -1746,6 +1749,122 @@ code-and-process-test scope:
 D7D10_CORRECTION_F_ENGINE_PROGRESS_AND_CHILD_RECOVERY=CODE-AND-PROCESS-TEST-POSITIVE
 ```
 
-C4/C5 remain OPEN; `D7D10_LOCAL_SIGNING_RESERVATION=PARTIAL` is retained pending the
-subsequent aggregate D10 review (closing Correction F does not itself promote
-readiness). Production activation is not performed.
+C4/C5 remain OPEN. The subsequent aggregate A–F D10 review (§9.7) has now been
+completed and concluded LOCAL SCOPE SUPPORTED, reconciling the canonical local
+verdict to `D7D10_LOCAL_SIGNING_RESERVATION=CODE-AND-STORAGE-TEST-POSITIVE` for its
+demonstrated local scope; closing Correction F and this local consolidation do NOT
+promote production readiness, anti-rollback, or security-analysis completion.
+Production activation is not performed.
+
+### 9.7 RUN 422 D7-D10 aggregate A–F consolidation — LOCAL SCOPE SUPPORTED and reconciled canonical verdict
+
+This subsection is the authoritative in-contract summary of the completed aggregate
+A–F review. The corresponding evidence record is in
+`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_422_D7.md` (RUN 422 D10 aggregate
+consolidation). It supersedes every prior §9 statement that said “F remains OPEN”,
+that the active child test does not close F, that E or F remains unfinished for its
+demonstrated local scope, or that `D7D10_LOCAL_SIGNING_RESERVATION` is PARTIAL
+pending the aggregate review. Accurately labelled historical partial verdicts in the
+earlier evidence passes are preserved unchanged.
+
+**Aggregate-reviewed revision.** Reviewed/tested HEAD
+`2cf125ccd2ee9b4af29280095b48461ec0eae975`, reported on branch
+`copilot/run-422-corrections`. The review ran against a shallow, single-branch
+clone: the previously accepted Correction F references
+`f069bd7dfeaac3dd6e5de91efefe644cf2d9257f` (final) and
+`06c6423e577f9235ea772e2e59267dbe693ee3e6` (code/test checkpoint) are not present as
+objects in this checkout. The source reviewer verified identical Git blob hashes
+between `2cf125c` and `f069bd7` for the journal, storage, handler, D10 integration
+target, this continuity contract, and the D7 evidence document — establishing
+correspondence of those files only, not ancestry or identity of every repository
+file. The aggregate review was **read-only**: it produced no change set.
+
+**A–F invariant matrix (aggregate review).**
+
+| Correction | Invariant | Enforcing mechanism | Evidence level | Limitation | Disposition |
+| --- | --- | --- | --- | --- | --- |
+| A | Missing-journal signing refusal with admission precedence preserved | `guarded_sign_{proposal,vote}_for_broadcast` refuse a missing journal before the signer on every production route; raw `sign_*_for_broadcast` are `#[cfg(test)]` | CODE-TEST | Serialized local handler; no configured-authority runtime evidence | CODE-TEST-POSITIVE |
+| B/C | Acknowledged reservation before signing; one-use operation-bound continuation; checked/suppressed publication | `SignGate::wait_release` –> `GateOutcome`; only `Released` reaches the underlying signer; failed/uncertain writes suppress delivery | CODE-AND-STORAGE-TEST | Model reopen; serialized handler; not power-loss/release-binary evidence | CODE-AND-STORAGE-TEST-POSITIVE (local) |
+| D | Frozen-operation authorization revalidation of the original ticket, bound context, and signer | `BoundSigningOperation` freezes the admission ticket, bound context, and selected signer; completion reconfirms immediately before the signer and before retained reuse; distinct fail-closed counters | CODE-TEST | Serialized local handler; signer/suite correspondence only (no private-key possession); no runtime evidence | CODE-TEST-POSITIVE |
+| E | Explicit initialization/opening, namespace validation, persistent capacity, bounded recovery-acknowledgement cache | Explicit initialize/open vs established-journal validation; persisted journal-wide limit/count; bounded recovered-acknowledgement cache with post-eviction failed-retry assertions | CODE-AND-STORAGE-TEST | Serialized/local; no configured-authority runtime evidence | CODE-AND-STORAGE-TEST-POSITIVE |
+| F | Engine progress preserves the originating decision and conflict position; bounded child-process abort/reopen recovery | Engine-progress recorder preserves the originating decision/conflict; bounded, classified child-process runner with an unconditional drain deadline and test-owned verified cleanup; real-process abort/reopen | CODE-AND-PROCESS-TEST | Stated storage/OS assumptions; not power-loss durability; not configured-authority runtime evidence | CODE-AND-PROCESS-TEST-POSITIVE |
+
+**Reviewed interactions between corrections.**
+
+1. Admission precedence and missing-journal refusal.
+2. Reservation acknowledgement, one-use capability, and original-ticket revalidation.
+3. Failed/uncertain result publication suppressing delivery.
+4. Recovery acknowledgement/cache handling followed by authorization revalidation and exact reuse.
+5. Cache eviction and failed/uncertain retries requiring a later successful acknowledgement.
+6. Capacity or metadata failure refusing without signing or erasing obligations.
+7. Engine progress preserving the originating decision and conflict position.
+
+**Conclusion — LOCAL SCOPE SUPPORTED.** The aggregate A–F review found **no material
+findings** in the reviewed local signing-reservation implementation and evidence.
+“No material findings” is attributed to the aggregate review; it is not proof that
+the implementation is free of every possible defect. On that basis the canonical
+local verdict is reconciled to:
+
+```
+D7D10_LOCAL_SIGNING_RESERVATION=CODE-AND-STORAGE-TEST-POSITIVE
+```
+
+**Scope of the reconciled local token.**
+
+* A non-authorizing local signing-reservation component.
+* Shared ownership coordination over supported handles of one backend instance.
+* Acknowledged reservation before signing.
+* One-use operation-bound continuation.
+* Checked result publication and exact retained-result reuse.
+* Frozen-operation authorization revalidation.
+* Explicit initialization/opening, namespace validation, persistent capacity, and a bounded recovery-acknowledgement cache.
+* Demonstrated real-process abort/reopen behavior under the stated storage and operating-system assumptions.
+
+Production wiring was an **explicit exclusion** from this bounded local component. It
+must not become a newly invented completion requirement for the local token.
+Production lifecycle and readiness remain represented by their existing separate
+markers (`D7_STATUS`, `DURABLE_ANTI_ROLLBACK`, `GENESIS_AUTHORITY_ACTIVATION`,
+`CONFIGURED_AUTHORITY_RELEASE_BINARY_EVIDENCE`, `SECURITY_POSTURE`). This scoped
+disposition does not retroactively approve the earlier defective D10 implementation
+or establish production readiness.
+
+The separate process-evidence token is retained:
+
+```
+D7D10_CORRECTION_F_ENGINE_PROGRESS_AND_CHILD_RECOVERY=CODE-AND-PROCESS-TEST-POSITIVE
+```
+
+**Security-tool outcomes (aggregate review, recorded literally).** Independent Code
+Review — **NOT RUN**. CodeQL — **NOT RUN**. The aggregate review did not invoke the
+diff-oriented validation harness because it produced no change set; an empty diff
+does not establish completed source review or security analysis. Prior
+tool-unavailable errors and CodeQL skips remain historical outcomes at their own
+revisions. “NOT RUN” is not “unavailable”, “passed”, “zero findings”, or “nothing
+exists to analyze”. The aggregate source review is kept distinct from completed
+independent tooling.
+
+**Validation attribution.** The validations tabulated in the D7 evidence document
+(lib tests; the `run_422_d7d10_signing_reservation_journal_tests` D10 integration
+target under default and `test-utils` features; the
+`run_422_d6_pv_domain_isolation_tests` D6 PV-domain isolation target; the
+`run_420_production_policy_reachability_tests` reachability target; the
+`run_422_startup_refusal_tests` startup-refusal target; `cargo check`; and the
+Clippy runs) were executed at `2cf125c` during the aggregate review. They are prior
+aggregate-review executions, not commands executed by this documentation-only
+consolidation; no new build, test, or scan was performed here.
+
+**Unchanged remaining obligations (kept separate and OPEN).** Production journal
+initialization and wiring; activation authorization and current-authority freshness;
+consensus-lock and broader consensus-state recovery; same-epoch snapshot/signing-
+history correspondence; whole-copy rollback resistance and independent freshness-
+anchor selection; copied-key/cross-host signing exclusivity; Timeout/NewView
+compatibility; empirical power-loss durability; configured-authority release/runtime
+evidence; independent security-analysis obligations; and C4/C5 and broader
+production readiness. The preserved markers `D7_STATUS=PARTIAL-CODE-TEST /
+PRODUCTION-LIFECYCLE-UNAVAILABLE`, `DURABLE_ANTI_ROLLBACK=NOT-ESTABLISHED`,
+`GENESIS_AUTHORITY_ACTIVATION=DISABLED`,
+`PRODUCTION_WIRE_CHAIN_ID_BEHAVIOR=UNCHANGED`,
+`CONFIGURED_AUTHORITY_RELEASE_BINARY_EVIDENCE=NOT-YET-CAPTURED`, and
+`SECURITY_POSTURE=RS1-OPEN / PUBLIC-DEVNET-NO-GO` are unchanged. No D11, Run 423,
+production initialization, signing enablement, activation, or architectural redesign
+is authorized.

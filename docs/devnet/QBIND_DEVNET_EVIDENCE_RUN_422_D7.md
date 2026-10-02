@@ -10497,7 +10497,7 @@ reaffirmed:
 D7D10_CORRECTION_F_ENGINE_PROGRESS_AND_CHILD_RECOVERY=CODE-AND-PROCESS-TEST-POSITIVE
 ```
 
-Retained posture (unchanged): overall `D7D10_LOCAL_SIGNING_RESERVATION=PARTIAL`; accepted
+Retained posture at the F-B pass (superseded below by the RUN 422 D10 aggregate consolidation, which reconciles the canonical local verdict to `D7D10_LOCAL_SIGNING_RESERVATION=CODE-AND-STORAGE-TEST-POSITIVE` for its demonstrated local scope): overall `D7D10_LOCAL_SIGNING_RESERVATION=PARTIAL` at that pass; accepted
 A–E and F-A evidence; `D7D8_RESTORE_COMPLETION_CONTAINMENT=CODE-AND-RELEASE-TEST-POSITIVE`;
 `D7_STATUS=PARTIAL-CODE-TEST / PRODUCTION-LIFECYCLE-UNAVAILABLE`;
 `DURABLE_ANTI_ROLLBACK=NOT-ESTABLISHED`; `GENESIS_AUTHORITY_ACTIVATION=DISABLED`;
@@ -10506,3 +10506,146 @@ A–E and F-A evidence; `D7D8_RESTORE_COMPLETION_CONTAINMENT=CODE-AND-RELEASE-TE
 `SECURITY_POSTURE=RS1-OPEN / PUBLIC-DEVNET-NO-GO`; C4/C5 OPEN. No aggregate D10 promotion,
 D11, Run 423, production journal initialization, signing enablement, activation, or
 anti-rollback implementation is performed here.
+
+## RUN 422 D10 aggregate A–F consolidation (documentation-only)
+
+This section records the completed aggregate A–F review and the reconciled canonical
+local verdict. The authoritative in-contract summary is
+`docs/protocol/QBIND_PROPOSAL_VOTE_SIGNING_STATE_CONTINUITY_CONTRACT.md` §9.7. This is
+a documentation-only consolidation: no Rust, test, dependency, feature, schema, CLI,
+configuration, workflow, wire-format, or activation changes were made, and no new
+build, test, or scan was executed by this pass.
+
+### Aggregate-reviewed revision and limitations
+
+* Reviewed/tested HEAD: `2cf125ccd2ee9b4af29280095b48461ec0eae975`.
+* Reported branch: `copilot/run-422-corrections` (the actual task branch carrying this
+  consolidation is `copilot/run-422-documentation-only-consolidation`; its starting HEAD
+  is the same `2cf125c`).
+* Shallow, single-branch clone. The previously accepted Correction F references
+  `f069bd7dfeaac3dd6e5de91efefe644cf2d9257f` (final) and
+  `06c6423e577f9235ea772e2e59267dbe693ee3e6` (code/test checkpoint) are **not present as
+  objects** in this checkout.
+* The source reviewer verified identical Git blob hashes between `2cf125c` and `f069bd7`
+  for the journal, storage, handler, D10 integration target, the continuity contract,
+  and this D7 evidence document — establishing correspondence of those files only, not
+  ancestry or identity of every repository file.
+* The aggregate review was **read-only**: it produced no change set.
+
+### A–F invariant matrix
+
+| Correction | Invariant | Enforcing mechanism | Evidence level | Limitation | Disposition |
+| --- | --- | --- | --- | --- | --- |
+| A | Missing-journal signing refusal with admission precedence preserved | `guarded_sign_{proposal,vote}_for_broadcast` refuse a missing journal before the signer on every production route; raw `sign_*_for_broadcast` are `#[cfg(test)]` | CODE-TEST | Serialized local handler; no configured-authority runtime evidence | CODE-TEST-POSITIVE |
+| B/C | Acknowledged reservation before signing; one-use operation-bound continuation; checked/suppressed publication | `SignGate::wait_release` –> `GateOutcome`; only `Released` reaches the underlying signer; failed/uncertain writes suppress delivery | CODE-AND-STORAGE-TEST | Model reopen; serialized handler; not power-loss/release-binary evidence | CODE-AND-STORAGE-TEST-POSITIVE (local) |
+| D | Frozen-operation authorization revalidation of the original ticket, bound context, and signer | `BoundSigningOperation` freezes the admission ticket, bound context, and selected signer; completion reconfirms immediately before the signer and before retained reuse; distinct fail-closed counters | CODE-TEST | Serialized local handler; signer/suite correspondence only (no private-key possession); no runtime evidence | CODE-TEST-POSITIVE |
+| E | Explicit initialization/opening, namespace validation, persistent capacity, bounded recovery-acknowledgement cache | Explicit initialize/open vs established-journal validation; persisted journal-wide limit/count; bounded recovered-acknowledgement cache with post-eviction failed-retry assertions | CODE-AND-STORAGE-TEST | Serialized/local; no configured-authority runtime evidence | CODE-AND-STORAGE-TEST-POSITIVE |
+| F | Engine progress preserves the originating decision and conflict position; bounded child-process abort/reopen recovery | Engine-progress recorder preserves the originating decision/conflict; bounded, classified child-process runner with an unconditional drain deadline and test-owned verified cleanup; real-process abort/reopen | CODE-AND-PROCESS-TEST | Stated storage/OS assumptions; not power-loss durability; not configured-authority runtime evidence | CODE-AND-PROCESS-TEST-POSITIVE |
+
+### Reviewed interactions between corrections
+
+1. Admission precedence and missing-journal refusal.
+2. Reservation acknowledgement, one-use capability, and original-ticket revalidation.
+3. Failed/uncertain result publication suppressing delivery.
+4. Recovery acknowledgement/cache handling followed by authorization revalidation and exact reuse.
+5. Cache eviction and failed/uncertain retries requiring a later successful acknowledgement.
+6. Capacity or metadata failure refusing without signing or erasing obligations.
+7. Engine progress preserving the originating decision and conflict position.
+
+### Conclusion and reconciled canonical verdict
+
+The aggregate A–F review concluded **LOCAL SCOPE SUPPORTED** — **no material findings** in
+the reviewed local signing-reservation implementation and evidence. “No material
+findings” is attributed to the aggregate review; it is not proof that the
+implementation is free of every possible defect. The canonical local verdict is
+reconciled to:
+
+```
+D7D10_LOCAL_SIGNING_RESERVATION=CODE-AND-STORAGE-TEST-POSITIVE
+```
+
+Local scope of this token: a non-authorizing local signing-reservation component;
+shared ownership coordination over supported handles of one backend instance;
+acknowledged reservation before signing; one-use operation-bound continuation; checked
+result publication and exact retained-result reuse; frozen-operation authorization
+revalidation; explicit initialization/opening, namespace validation, persistent
+capacity, and a bounded recovery-acknowledgement cache; and demonstrated real-process
+abort/reopen behavior under the stated storage and operating-system assumptions.
+Production wiring was an **explicit exclusion** from this bounded local component and
+must not become a newly invented completion requirement for the local token; it is a
+scoped local disposition that does not retroactively approve the earlier defective D10
+implementation or establish production readiness. The separate process-evidence token is
+retained: `D7D10_CORRECTION_F_ENGINE_PROGRESS_AND_CHILD_RECOVERY=CODE-AND-PROCESS-TEST-POSITIVE`.
+
+### Validation attribution (executed at `2cf125c`, not re-run here)
+
+The aggregate report records these executions at `2cf125c`. They are prior
+aggregate-review executions, not commands executed by this documentation-only pass; no
+missing logs, timings, artifact hashes, or exact command flags are invented, and no
+historical production binary or integration-test artifact is relabelled as newly built.
+
+| Validation | Reported result |
+| --- | --- |
+| `cargo test -p qbind-node --lib` | 1839 passed, 0 failed, 0 ignored; exit 0 |
+| `run_422_d7d10_signing_reservation_journal_tests` (D10 integration, default features) | 34 passed, 0 failed, 1 ignored; exit 0 |
+| `run_422_d7d10_signing_reservation_journal_tests` (D10 integration, `test-utils`) | 39 passed, 0 failed, 1 ignored; exit 0 |
+| `run_422_d6_pv_domain_isolation_tests` (D6 PV-domain isolation) | 34 passed, 0 failed; exit 0 |
+| `run_420_production_policy_reachability_tests` (Run 420 production-policy reachability) | 3 passed; exit 0 |
+| `run_422_startup_refusal_tests` (Run 422 startup refusal) | 4 passed; exit 0 |
+| `cargo check -p qbind-node --bins --lib` | exit 0 |
+| `cargo clippy -p qbind-node --lib --no-deps` | exit 0; reported baseline warnings |
+| Focused D10 integration Clippy with `test-utils` | exit 0; reported cosmetic warnings |
+
+The ignored child helper is executed through the active recovery parent; its direct
+no-environment invocation is not another recovery scenario. The 1 ignored entry in the
+D10 integration target rows is that child helper.
+
+### Security-tool outcomes (aggregate review, recorded literally)
+
+* Independent Code Review — **NOT RUN**.
+* CodeQL — **NOT RUN**.
+* The aggregate review did not invoke the diff-oriented validation harness because it
+  produced no change set. An empty diff does not establish completed source review or
+  security analysis.
+* Prior tool-unavailable errors and CodeQL skips remain historical outcomes at their own
+  revisions. “NOT RUN” is not “unavailable”, “passed”, “zero findings”, or “nothing
+  exists to analyze”. The aggregate source review is kept distinct from completed
+  independent tooling.
+
+For this documentation-only pass, any repository documentation-validation checks are
+recorded with their actual outcomes separately below (“Documentation checks”); skips or
+backend errors are never upgraded into passes.
+
+### Remaining obligations (kept separate and OPEN)
+
+Production journal initialization and wiring; activation authorization and
+current-authority freshness; consensus-lock and broader consensus-state recovery;
+same-epoch snapshot/signing-history correspondence; whole-copy rollback resistance and
+independent freshness-anchor selection; copied-key/cross-host signing exclusivity;
+Timeout/NewView compatibility; empirical power-loss durability; configured-authority
+release/runtime evidence; independent security-analysis obligations; and C4/C5 and
+broader production readiness. Preserved literally and unchanged:
+`D7_STATUS=PARTIAL-CODE-TEST / PRODUCTION-LIFECYCLE-UNAVAILABLE`,
+`DURABLE_ANTI_ROLLBACK=NOT-ESTABLISHED`, `GENESIS_AUTHORITY_ACTIVATION=DISABLED`,
+`PRODUCTION_WIRE_CHAIN_ID_BEHAVIOR=UNCHANGED`,
+`CONFIGURED_AUTHORITY_RELEASE_BINARY_EVIDENCE=NOT-YET-CAPTURED`,
+`SECURITY_POSTURE=RS1-OPEN / PUBLIC-DEVNET-NO-GO`, and
+`D7D8_RESTORE_COMPLETION_CONTAINMENT=CODE-AND-RELEASE-TEST-POSITIVE`. No D11, Run 423,
+production initialization, signing enablement, activation, or architectural redesign is
+authorized.
+
+### Documentation checks (this pass)
+
+* Only the two authorized Markdown files were changed:
+  `docs/protocol/QBIND_PROPOSAL_VOTE_SIGNING_STATE_CONTINUITY_CONTRACT.md` and
+  `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_422_D7.md`.
+* Current status sections agree; no operative “F OPEN” or “pending aggregate review”
+  statement contradicts the consolidated result. Historical passes remain visibly
+  historical at their own checkpoints.
+* CRLF line endings and the existing no-final-newline EOF convention are preserved in
+  both files; `task/warning.txt` and unrelated work are untouched.
+* `docs/whitepaper/contradiction.md` was inspected **read-only**; its C4/C5 posture is
+  unchanged (C4 OPEN — partial; C5 OPEN / narrowed). No contradiction-ledger edit was
+  made.
+* Local positivity here is bounded to the demonstrated local signing-reservation scope
+  and must not be read as production, anti-rollback, or security-review completion.
