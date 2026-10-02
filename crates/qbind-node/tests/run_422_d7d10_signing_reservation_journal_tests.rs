@@ -42,8 +42,17 @@ use qbind_node::signing_reservation_journal::{
 use qbind_node::storage::RocksDbConsensusStorage;
 
 /// Environment variable that switches a single re-executed test binary into the
-/// bounded "child" mode used by [`reserved_only_child_death_then_reopen_refuses`].
+/// "child" mode used by [`reserved_only_child_death_then_reopen_refuses`].
 const CHILD_DB_ENV: &str = "QBIND_D7D10_CHILD_DB";
+
+/// Run 422 D7-D10 Correction F-B — the distinctive readiness marker the child
+/// emits (and flushes) to stderr ONLY after the real RocksDB reservation has
+/// returned its successful durability acknowledgement (`FreshlyReserved`) and
+/// IMMEDIATELY before the intentional `abort()` (which precedes any signer
+/// invocation or result publication). The bounded parent requires this marker,
+/// captured completely, before it will accept a crash as reservation-before-abort
+/// evidence; a SIGABRT without this marker is NOT accepted.
+const CHILD_RESERVED_MARKER: &str = "D7D10-CHILD: reserved-durable-ack-before-abort";
 
 fn genesis() -> [u8; 32] {
     [7u8; 32]
@@ -1032,9 +1041,11 @@ fn publication_is_idempotent_and_refuses_conflicting_overwrite() {
 }
 
 /// Child mode: open the real store at `$QBIND_D7D10_CHILD_DB`, durably reserve a
-/// fixed Proposal position, then abort BEFORE recording any signed result. This
-/// is invoked by re-executing this test binary with the env var set; a normal
-/// (unset) run of this `#[ignore]`d test is a harmless no-op.
+/// fixed Proposal position, emit+flush the [`CHILD_RESERVED_MARKER`] readiness
+/// line AFTER the reservation's successful durability acknowledgement, then abort
+/// BEFORE recording any signed result. This is invoked by re-executing this test
+/// binary with the env var set; a normal (unset) run of this `#[ignore]`d test is
+/// a harmless no-op.
 #[test]
 #[ignore = "child-mode helper; only meaningful when re-executed with QBIND_D7D10_CHILD_DB set"]
 fn d7d10_child_reserve_then_abort() {
@@ -1052,8 +1063,16 @@ fn d7d10_child_reserve_then_abort() {
         ReservationOutcome::FreshlyReserved(_cont) => { /* durable ack; drop before sign */ }
         other => panic!("expected FreshlyReserved, got {:?}", other),
     }
-    // Durable reservation acknowledged; simulate crash before signing/recording.
-    std::io::Write::flush(&mut std::io::stdout()).ok();
+    // Durable reservation acknowledged. Emit+flush the distinctive readiness
+    // marker BEFORE the intentional abort, so the bounded parent can require
+    // reliable, complete capture of "reservation acknowledged, not yet signed".
+    // The abort precedes any signer invocation or result publication.
+    {
+        use std::io::Write as _;
+        let mut err = std::io::stderr();
+        let _ = writeln!(err, "{}", CHILD_RESERVED_MARKER);
+        let _ = err.flush();
+    }
     std::process::abort();
 }
 
@@ -1070,33 +1089,317 @@ fn child_binding() -> BindingDigest {
     BindingDigest([0x9Fu8; 32])
 }
 
-/// Child-process death then reopen (unbounded, unclassified runner): spawn this
-/// test binary in child mode, let it durably reserve and then abort, then reopen
-/// the same store in the parent and assert the recovered reserved-only record
-/// refuses re-signing.
+/// Run 422 D7-D10 Correction F-B — a deadline-bounded, explicitly
+/// termination-classified child-process runner, adapted MINIMALLY from the
+/// established D3 process-runner patterns
+/// (`run_422_d7d3_binary_snapshot_restore_characterization_tests.rs`). It does
+/// NOT duplicate the whole D3 target: only the piped-capture + bounded
+/// process-status-wait + pure-classification pieces this test needs are
+/// reproduced, retargeted at THIS integration-test executable (re-executed in
+/// child mode) and at small single-process `sh` control children.
 ///
-/// Correction-F boundary (NOT closed under E): this parent is the ACTIVE test;
-/// [`d7d10_child_reserve_then_abort`] is the `#[ignore]`d child-mode helper it
-/// re-executes. The child runner here is deliberately left UNCORRECTED under E:
-/// * It waits with an UNBOUNDED [`std::process::Command::status`] — there is no
-///   timeout or runtime bound on the child; a hung child would block here, so
-///   this does NOT establish bounded process termination.
-/// * It accepts ANY unsuccessful exit (`!status.success()`) — it does not
-///   classify the termination (e.g. it does not require the specific SIGABRT
-///   from `std::process::abort()` vs. any other nonzero/​signalled exit), so it
-///   does NOT establish classified process termination either.
+/// Platform restriction (honest): terminating-signal classification uses the
+/// Unix `ExitStatusExt::signal()` and the POSIX-fixed SIGABRT value, so the
+/// bounded parent and the runner controls are `#[cfg(unix)]`. On the supported
+/// Unix/Linux profile the parent requires the child's intentional
+/// `std::process::abort()` to surface as SIGABRT; an ordinary nonzero exit, a
+/// panic (nonzero exit, no signal), an unrelated terminating signal, or a
+/// deadline cannot pass.
+#[cfg(unix)]
+mod bounded_child_runner {
+    use std::io::Read;
+    use std::os::unix::process::ExitStatusExt;
+    use std::process::{Child, Command, ExitStatus, Stdio};
+    use std::sync::{Arc, Mutex, MutexGuard};
+    use std::thread::{self, JoinHandle};
+    use std::time::{Duration, Instant};
+
+    /// SIGABRT. `std::process::abort()` raises this on Unix; `std` has no
+    /// constant, and 6 is the POSIX-fixed value.
+    pub(super) const EXPECTED_ABORT_SIGNAL: i32 = 6;
+
+    const CAPTURE_CAP_BYTES: usize = 256 * 1024;
+
+    #[derive(Default)]
+    struct CapturedStream {
+        buf: String,
+        dropped: usize,
+        read_outcome: Option<Result<(), String>>,
+    }
+
+    fn lock_recover(m: &Mutex<CapturedStream>) -> MutexGuard<'_, CapturedStream> {
+        m.lock().unwrap_or_else(|p| p.into_inner())
+    }
+
+    fn drain_into(mut r: impl Read, sink: Arc<Mutex<CapturedStream>>) {
+        let mut chunk = [0u8; 8192];
+        let terminal: Result<(), String> = loop {
+            match r.read(&mut chunk) {
+                Ok(0) => break Ok(()),
+                Ok(n) => {
+                    let text = String::from_utf8_lossy(&chunk[..n]);
+                    let mut g = lock_recover(&sink);
+                    let remaining = CAPTURE_CAP_BYTES.saturating_sub(g.buf.len());
+                    if remaining == 0 {
+                        g.dropped += text.len();
+                    } else if text.len() <= remaining {
+                        g.buf.push_str(&text);
+                    } else {
+                        let mut end = remaining;
+                        while end > 0 && !text.is_char_boundary(end) {
+                            end -= 1;
+                        }
+                        g.buf.push_str(&text[..end]);
+                        g.dropped += text.len() - end;
+                    }
+                }
+                Err(ref e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
+                Err(e) => break Err(format!("read error kind={:?}", e.kind())),
+            }
+        };
+        lock_recover(&sink).read_outcome = Some(terminal);
+    }
+
+    /// Completed capture integrity for the drained stderr stream, resolvable
+    /// only AFTER the drain thread is joined. A missing-marker/absence claim —
+    /// or a present-marker claim — may only rest on [`CaptureOutcome::Complete`].
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    pub(super) enum CaptureOutcome {
+        Complete,
+        Truncated { dropped: usize },
+        ReadFailed { detail: String },
+        ThreadPanicked,
+        StillDraining,
+    }
+
+    impl CaptureOutcome {
+        pub(super) fn is_complete(&self) -> bool {
+            matches!(self, CaptureOutcome::Complete)
+        }
+    }
+
+    fn classify_capture(s: &CapturedStream, panicked: bool) -> CaptureOutcome {
+        if panicked {
+            return CaptureOutcome::ThreadPanicked;
+        }
+        match &s.read_outcome {
+            None => CaptureOutcome::StillDraining,
+            Some(Err(d)) => CaptureOutcome::ReadFailed { detail: d.clone() },
+            Some(Ok(())) => {
+                if s.dropped > 0 {
+                    CaptureOutcome::Truncated { dropped: s.dropped }
+                } else {
+                    CaptureOutcome::Complete
+                }
+            }
+        }
+    }
+
+    /// A deadline-bounded child with drained stdout/stderr. `Drop` always
+    /// kills+reaps, so an assertion unwind never leaks the child or blocks on a
+    /// surviving descendant.
+    pub(super) struct BoundedChild {
+        child: Child,
+        stderr: Arc<Mutex<CapturedStream>>,
+        stderr_thread: Option<JoinHandle<()>>,
+        stdout_thread: Option<JoinHandle<()>>,
+        stderr_join_failed: bool,
+        reaped: bool,
+    }
+
+    impl BoundedChild {
+        /// Spawn `command` with piped stdio and start the drain threads.
+        /// Per-`Command` configuration only — the caller sets env on the
+        /// `Command`, never via process-global `std::env::set_var`.
+        pub(super) fn spawn(mut command: Command, ctx: &'static str) -> Self {
+            let mut child = command
+                .stdin(Stdio::null())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .spawn()
+                .unwrap_or_else(|e| panic!("TEST FAILURE: {ctx}: spawn failed: {e}"));
+            let stderr = Arc::new(Mutex::new(CapturedStream::default()));
+            let stdout = Arc::new(Mutex::new(CapturedStream::default()));
+            let e = child.stderr.take().expect("piped stderr");
+            let o = child.stdout.take().expect("piped stdout");
+            let se = stderr.clone();
+            let stderr_thread = Some(thread::spawn(move || drain_into(e, se)));
+            let stdout_thread = Some(thread::spawn(move || drain_into(o, stdout)));
+            BoundedChild {
+                child,
+                stderr,
+                stderr_thread,
+                stdout_thread,
+                stderr_join_failed: false,
+                reaped: false,
+            }
+        }
+
+        fn stderr_snapshot(&self) -> String {
+            lock_recover(&self.stderr).buf.clone()
+        }
+
+        fn stderr_capture(&self) -> CaptureOutcome {
+            classify_capture(&lock_recover(&self.stderr), self.stderr_join_failed)
+        }
+
+        fn join_drains(&mut self) {
+            if let Some(h) = self.stderr_thread.take() {
+                if h.join().is_err() {
+                    self.stderr_join_failed = true;
+                }
+            }
+            if let Some(h) = self.stdout_thread.take() {
+                // stdout is not asserted on, but it must still be joined so a
+                // large stdout can never leave a drain thread blocked.
+                let _ = h.join();
+            }
+        }
+
+        /// Explicit cleanup: kill the child and reap it, then join the drain
+        /// threads. Only marks cleanup complete when reaping actually succeeded,
+        /// so `Drop` retries a failed reap.
+        pub(super) fn kill_and_reap(&mut self) {
+            if !self.reaped {
+                let _ = self.child.kill();
+                if self.child.wait().is_ok() {
+                    self.reaped = true;
+                }
+            }
+            self.join_drains();
+        }
+
+        /// Wait for the child to terminate ON ITS OWN within `deadline` via
+        /// repeated process-status polling (`try_wait`, NOT a fixed sleep
+        /// guessing the child has exited). On natural exit the FULL `ExitStatus`
+        /// (signal preserved) is returned with drained+joined capture. A
+        /// deadline is a hard failure: the child is killed/reaped and `Timeout`
+        /// is returned — NEVER reinterpreted as a crash. `try_wait` errors are
+        /// handled explicitly (kill+reap, then panic).
+        pub(super) fn wait_self_termination(&mut self, deadline: Duration) -> SelfTermination {
+            let start = Instant::now();
+            loop {
+                match self.child.try_wait() {
+                    Ok(Some(status)) => {
+                        self.reaped = true;
+                        self.join_drains();
+                        return SelfTermination::Exited {
+                            status,
+                            stderr: self.stderr_snapshot(),
+                            capture: self.stderr_capture(),
+                        };
+                    }
+                    Ok(None) => {
+                        if start.elapsed() >= deadline {
+                            let stderr = self.stderr_snapshot();
+                            self.kill_and_reap();
+                            return SelfTermination::Timeout { stderr };
+                        }
+                        thread::sleep(Duration::from_millis(20));
+                    }
+                    Err(e) => {
+                        self.kill_and_reap();
+                        panic!("TEST FAILURE: try_wait errored while waiting for child: {e}");
+                    }
+                }
+            }
+        }
+    }
+
+    impl Drop for BoundedChild {
+        fn drop(&mut self) {
+            self.kill_and_reap();
+        }
+    }
+
+    /// Result of a bounded self-termination wait. `Timeout` is a failure
+    /// condition (the child did not die on its own in time); the child has been
+    /// killed and reaped before it is returned.
+    #[derive(Debug)]
+    pub(super) enum SelfTermination {
+        Exited {
+            status: ExitStatus,
+            stderr: String,
+            capture: CaptureOutcome,
+        },
+        Timeout {
+            stderr: String,
+        },
+    }
+
+    /// Pure classification of a completed child termination over its full
+    /// `ExitStatus`, the readiness-marker presence and the stderr capture
+    /// integrity. Deterministically unit-testable with constructed statuses.
+    #[derive(Debug, PartialEq, Eq)]
+    pub(super) enum ChildCrashClass {
+        /// The only accepted positive: terminated by the expected abort signal
+        /// AND the readiness marker was present in a COMPLETE capture.
+        AbortedAfterMarker { signal: i32 },
+        /// Terminated by the expected abort signal but the marker was absent or
+        /// the capture was not complete — NOT accepted (cannot establish
+        /// reservation-before-abort).
+        SignalButMarkerUnusable { signal: i32 },
+        /// Terminated by a DIFFERENT terminating signal (e.g. a panic abort is
+        /// never a normal exit; a crash signal other than SIGABRT). Not accepted.
+        UnexpectedSignal { signal: i32 },
+        /// Exited with a code and no terminating signal (ordinary success/
+        /// nonzero exit, including a Rust panic's nonzero exit). Not accepted.
+        NormalExit { code: Option<i32> },
+    }
+
+    pub(super) fn classify_child_crash(
+        status: ExitStatus,
+        marker_present: bool,
+        capture: &CaptureOutcome,
+        expected_signal: i32,
+    ) -> ChildCrashClass {
+        match status.signal() {
+            None => ChildCrashClass::NormalExit { code: status.code() },
+            Some(sig) if sig == expected_signal => {
+                if marker_present && capture.is_complete() {
+                    ChildCrashClass::AbortedAfterMarker { signal: sig }
+                } else {
+                    ChildCrashClass::SignalButMarkerUnusable { signal: sig }
+                }
+            }
+            Some(sig) => ChildCrashClass::UnexpectedSignal { signal: sig },
+        }
+    }
+}
+
+/// Run 422 D7-D10 Correction F-B — bounded, classified child-death-then-reopen.
 ///
-/// Consequently a PASS here evidences only durable reserved-only recovery across
-/// a real child death; it does NOT close Correction F. An outer command/tool
-/// timeout wrapping the whole test run is not a child bound and does not close F.
+/// Boundary (what this establishes): an integration-test child executable (THIS
+/// binary, re-executed in child mode) performs a REAL `RocksDbConsensusStorage`
+/// reservation, emits+flushes a readiness marker only after the durable
+/// acknowledgement, then intentionally `abort()`s before any signer invocation
+/// or result publication. The parent waits with an INTERNAL deadline and
+/// explicit process-status observation, preserves the FULL `ExitStatus`, and
+/// accepts the crash ONLY when it is SIGABRT AND the readiness marker was
+/// captured completely. It then opens a FRESH RocksDB handle + ownership domain
+/// and asserts the recovered reserved-only record refuses re-signing and that
+/// refusals leave the durable record and accounting byte-identical.
+///
+/// This demonstrates crash-consistency of the LOCAL journal across real process
+/// death; it is explicitly NOT empirical power-loss / rollback-resistance
+/// evidence (no DB-wide monotonic anchor is established here).
+#[cfg(unix)]
 #[test]
 fn reserved_only_child_death_then_reopen_refuses() {
+    use bounded_child_runner::*;
+    use std::time::Duration;
+
+    /// Internal child deadline. Generous for a loaded CI host but a hard bound:
+    /// exceeding it is a test failure, not crash evidence.
+    const CHILD_DEADLINE: Duration = Duration::from_secs(120);
+
     // Isolate the RocksDB directory outside the child so it survives the abort.
     let dir = tempfile::tempdir().expect("tempdir");
     let db_path = dir.path().join("child_journal_db");
 
     let exe = std::env::current_exe().expect("current test exe");
-    let status = std::process::Command::new(exe)
+    let mut command = std::process::Command::new(exe);
+    command
         .args([
             "--exact",
             "d7d10_child_reserve_then_abort",
@@ -1104,39 +1407,319 @@ fn reserved_only_child_death_then_reopen_refuses() {
             "--nocapture",
             "--test-threads=1",
         ])
-        .env(CHILD_DB_ENV, &db_path)
-        .status()
-        .expect("spawn child test process");
+        // Per-`Command` environment configuration only (no process-global
+        // `set_var`): this child-helper selection cannot leak into siblings.
+        .env(CHILD_DB_ENV, &db_path);
+    let mut child = BoundedChild::spawn(command, "spawn d7d10 child test executable");
 
-    // The child aborted: it must NOT have exited successfully. NOTE (Correction
-    // F, unmet under E): this only checks "not success" — it neither bounds the
-    // child's runtime nor classifies HOW it terminated, so it does not establish
-    // bounded/classified termination.
-    assert!(
-        !status.success(),
-        "child was expected to abort before completing, got {:?}",
-        status
-    );
+    let (status, stderr, capture) = match child.wait_self_termination(CHILD_DEADLINE) {
+        SelfTermination::Exited {
+            status,
+            stderr,
+            capture,
+        } => (status, stderr, capture),
+        SelfTermination::Timeout { stderr } => panic!(
+            "TEST FAILURE: child did not self-terminate within {CHILD_DEADLINE:?}; a timeout is \
+             not crash evidence (child was killed+reaped). stderr so far=\n{stderr}"
+        ),
+    };
 
-    // Reopen the store the child left behind; a fresh journal has an empty
-    // live-permit map, exactly the post-death posture.
+    let marker_present = stderr.contains(CHILD_RESERVED_MARKER);
+    match classify_child_crash(status, marker_present, &capture, EXPECTED_ABORT_SIGNAL) {
+        ChildCrashClass::AbortedAfterMarker { signal } => {
+            assert_eq!(signal, EXPECTED_ABORT_SIGNAL, "intentional abort ⇒ SIGABRT");
+        }
+        other => panic!(
+            "TEST FAILURE: child termination is not an accepted reserve-then-SIGABRT crash: \
+             {other:?}; status={status:?}, marker_present={marker_present}, capture={capture:?}, \
+             stderr=\n{stderr}"
+        ),
+    }
+
+    // Reopen a FRESH RocksDB handle + ownership domain (the post-death posture:
+    // durable records survive, the in-memory live-permit map does not).
     let store = open_store(&db_path);
+    let store_for_raw = store.clone();
     let journal = journal(store as Arc<dyn SigningJournalStorage>);
+
+    // Inspect the expected valid Reserved record at the exact position/binding,
+    // and snapshot the raw record + persistent accounting so the refusals below
+    // can be shown to leave them byte-identical.
+    let rec_before = store_for_raw
+        .get_signing_record(&child_position().storage_key())
+        .expect("record read must not error")
+        .expect("a reserved record must be present after the child's durable reservation");
+    let meta_before = store_for_raw
+        .get_signing_metadata()
+        .expect("metadata read must not error");
+
+    // Exact retry MUST return PotentiallySigned — never a fresh continuation or a
+    // retained signed result (the child never signed; this is a recovered
+    // Reserved record).
     assert!(
         matches!(
             journal
                 .reserve_for_sign(&child_position(), &child_binding())
-                .expect("post-death lookup must not error"),
+                .expect("post-death exact-retry lookup must not error"),
             ReservationOutcome::PotentiallySigned
         ),
-        "a reservation recovered after child death must refuse re-signing"
+        "a reservation recovered after child death must refuse re-signing (PotentiallySigned)"
     );
 
-    // A conflicting request after death is refused without altering the record.
-    assert!(matches!(
-        journal
-            .reserve_for_sign(&child_position(), &binding(0x01))
-            .expect("post-death conflict lookup"),
-        ReservationOutcome::Conflict
-    ));
+    // A conflicting binding MUST return Conflict.
+    assert!(
+        matches!(
+            journal
+                .reserve_for_sign(&child_position(), &binding(0x01))
+                .expect("post-death conflict lookup must not error"),
+            ReservationOutcome::Conflict
+        ),
+        "a conflicting binding at the recovered position must be refused as Conflict"
+    );
+
+    // The record and persistent accounting are unchanged across the refusals.
+    let rec_after = store_for_raw
+        .get_signing_record(&child_position().storage_key())
+        .expect("record read must not error")
+        .expect("the reserved record must still be present after refused attempts");
+    let meta_after = store_for_raw
+        .get_signing_metadata()
+        .expect("metadata read must not error");
+    assert_eq!(
+        rec_before, rec_after,
+        "the recovered Reserved record is byte-identical across refused attempts"
+    );
+    assert_eq!(
+        meta_before, meta_after,
+        "persistent accounting is unchanged across refused attempts"
+    );
+}
+
+// ============================================================================
+// Run 422 D7-D10 Correction F-B — runner negative/positive CONTROLS.
+//
+// These exercise the SAME bounded runner + classification path with controlled
+// single-process `sh` children (no pipe-holding descendant, so cleanup is
+// bounded). They do NOT touch RocksDB: they establish the runner's termination
+// decision table against real processes, complementing the pure
+// constructed-status table below. No fixed sleep stands in for a child's exit,
+// and no outer tool timeout is used as the runner deadline.
+// ============================================================================
+
+/// Build a single-process `sh -c <script>` control child command.
+#[cfg(unix)]
+fn sh_control_command(script: &str) -> std::process::Command {
+    let mut c = std::process::Command::new("sh");
+    c.arg("-c").arg(script);
+    c
+}
+
+/// A controlled child that emits the readiness marker then intentionally aborts
+/// (SIGABRT) is ACCEPTED — the positive control for the runner itself.
+#[cfg(unix)]
+#[test]
+fn runner_control_marker_then_sigabrt_is_accepted() {
+    use bounded_child_runner::*;
+    use std::time::Duration;
+    const DEADLINE: Duration = Duration::from_secs(10);
+
+    let script = format!("printf '%s\\n' '{CHILD_RESERVED_MARKER}' 1>&2; kill -s ABRT $$");
+    let mut child = BoundedChild::spawn(sh_control_command(&script), "spawn sh ABRT control");
+    match child.wait_self_termination(DEADLINE) {
+        SelfTermination::Exited {
+            status,
+            stderr,
+            capture,
+        } => {
+            let marker = stderr.contains(CHILD_RESERVED_MARKER);
+            assert_eq!(
+                classify_child_crash(status, marker, &capture, EXPECTED_ABORT_SIGNAL),
+                ChildCrashClass::AbortedAfterMarker {
+                    signal: EXPECTED_ABORT_SIGNAL
+                },
+                "marker + SIGABRT with complete capture is the accepted positive; stderr=\n{stderr}"
+            );
+        }
+        SelfTermination::Timeout { stderr } => {
+            panic!("control child should have aborted promptly; stderr=\n{stderr}")
+        }
+    }
+}
+
+/// A child that emits the marker but exits with a NORMAL nonzero code is
+/// REJECTED (no terminating signal ⇒ not a crash), even though the marker is
+/// present.
+#[cfg(unix)]
+#[test]
+fn runner_control_marker_then_nonzero_exit_is_rejected() {
+    use bounded_child_runner::*;
+    use std::time::Duration;
+    const DEADLINE: Duration = Duration::from_secs(10);
+
+    let script = format!("printf '%s\\n' '{CHILD_RESERVED_MARKER}' 1>&2; exit 7");
+    let mut child = BoundedChild::spawn(sh_control_command(&script), "spawn sh nonzero-exit control");
+    match child.wait_self_termination(DEADLINE) {
+        SelfTermination::Exited {
+            status,
+            stderr,
+            capture,
+        } => {
+            assert!(stderr.contains(CHILD_RESERVED_MARKER), "marker WAS emitted");
+            let marker = stderr.contains(CHILD_RESERVED_MARKER);
+            assert_eq!(
+                classify_child_crash(status, marker, &capture, EXPECTED_ABORT_SIGNAL),
+                ChildCrashClass::NormalExit { code: Some(7) },
+                "a normal nonzero exit is rejected even with the marker present; stderr=\n{stderr}"
+            );
+        }
+        SelfTermination::Timeout { stderr } => {
+            panic!("control child should have exited promptly; stderr=\n{stderr}")
+        }
+    }
+}
+
+/// A child that emits the marker but terminates with an UNEXPECTED signal
+/// (SIGTERM) is REJECTED.
+#[cfg(unix)]
+#[test]
+fn runner_control_marker_then_unexpected_signal_is_rejected() {
+    use bounded_child_runner::*;
+    use std::time::Duration;
+    const DEADLINE: Duration = Duration::from_secs(10);
+
+    // SIGTERM (15) — a terminating signal that is NOT the expected SIGABRT.
+    let script = format!("printf '%s\\n' '{CHILD_RESERVED_MARKER}' 1>&2; kill -s TERM $$");
+    let mut child = BoundedChild::spawn(sh_control_command(&script), "spawn sh SIGTERM control");
+    match child.wait_self_termination(DEADLINE) {
+        SelfTermination::Exited {
+            status,
+            stderr,
+            capture,
+        } => {
+            let marker = stderr.contains(CHILD_RESERVED_MARKER);
+            match classify_child_crash(status, marker, &capture, EXPECTED_ABORT_SIGNAL) {
+                ChildCrashClass::UnexpectedSignal { signal } => {
+                    assert_ne!(signal, EXPECTED_ABORT_SIGNAL, "a non-SIGABRT signal is rejected");
+                }
+                other => panic!(
+                    "expected UnexpectedSignal rejection, got {other:?}; stderr=\n{stderr}"
+                ),
+            }
+        }
+        SelfTermination::Timeout { stderr } => {
+            panic!("control child should have signalled promptly; stderr=\n{stderr}")
+        }
+    }
+}
+
+/// A child that aborts with SIGABRT but WITHOUT emitting the marker cannot
+/// establish reservation-before-abort — it is REJECTED despite the right signal.
+#[cfg(unix)]
+#[test]
+fn runner_control_sigabrt_without_marker_is_rejected() {
+    use bounded_child_runner::*;
+    use std::time::Duration;
+    const DEADLINE: Duration = Duration::from_secs(10);
+
+    let mut child = BoundedChild::spawn(sh_control_command("kill -s ABRT $$"), "spawn sh ABRT-no-marker control");
+    match child.wait_self_termination(DEADLINE) {
+        SelfTermination::Exited {
+            status,
+            stderr,
+            capture,
+        } => {
+            let marker = stderr.contains(CHILD_RESERVED_MARKER);
+            assert!(!marker, "the control emitted no marker");
+            assert_eq!(
+                classify_child_crash(status, marker, &capture, EXPECTED_ABORT_SIGNAL),
+                ChildCrashClass::SignalButMarkerUnusable {
+                    signal: EXPECTED_ABORT_SIGNAL
+                },
+                "SIGABRT without the readiness marker is not accepted; stderr=\n{stderr}"
+            );
+        }
+        SelfTermination::Timeout { stderr } => {
+            panic!("control child should have aborted promptly; stderr=\n{stderr}")
+        }
+    }
+}
+
+/// A child that stays alive past the internal deadline yields a TIMEOUT failure
+/// and is cleaned up/reaped; the result returns within a generous outer bound
+/// (so cleanup is proven not to wait on the surviving sleep).
+#[cfg(unix)]
+#[test]
+fn runner_control_alive_past_deadline_times_out_and_is_reaped() {
+    use bounded_child_runner::*;
+    use std::time::{Duration, Instant};
+    const SHORT_DEADLINE: Duration = Duration::from_secs(2);
+    const OUTER_BOUND: Duration = Duration::from_secs(20);
+
+    // `exec sleep 30` replaces the shell, so the ONLY process holding the pipes
+    // is the sleep — killing it closes them at once (no surviving descendant).
+    let mut child = BoundedChild::spawn(sh_control_command("exec sleep 30"), "spawn sh sleep control");
+    let start = Instant::now();
+    let outcome = child.wait_self_termination(SHORT_DEADLINE);
+    let elapsed = start.elapsed();
+    match outcome {
+        SelfTermination::Timeout { .. } => {}
+        other => panic!("expected a bounded Timeout failure, got {other:?}"),
+    }
+    assert!(
+        elapsed < OUTER_BOUND,
+        "deadline+cleanup must return within the generous outer bound (no wait on the surviving \
+         sleep); elapsed={elapsed:?}"
+    );
+}
+
+/// Constructed-status decision table for [`classify_child_crash`] — pure over
+/// its inputs (no process scheduling), using `ExitStatus::from_raw`.
+#[cfg(unix)]
+#[test]
+fn classify_child_crash_decision_table() {
+    use bounded_child_runner::*;
+    use std::os::unix::process::ExitStatusExt;
+    use std::process::ExitStatus;
+
+    let sigabrt = ExitStatus::from_raw(EXPECTED_ABORT_SIGNAL);
+    // (a) SIGABRT + marker + complete capture ⇒ accepted.
+    assert_eq!(
+        classify_child_crash(sigabrt, true, &CaptureOutcome::Complete, EXPECTED_ABORT_SIGNAL),
+        ChildCrashClass::AbortedAfterMarker {
+            signal: EXPECTED_ABORT_SIGNAL
+        }
+    );
+    // (b) SIGABRT but marker absent ⇒ rejected.
+    assert_eq!(
+        classify_child_crash(sigabrt, false, &CaptureOutcome::Complete, EXPECTED_ABORT_SIGNAL),
+        ChildCrashClass::SignalButMarkerUnusable {
+            signal: EXPECTED_ABORT_SIGNAL
+        }
+    );
+    // (c) SIGABRT + marker but TRUNCATED capture ⇒ rejected (unusable capture).
+    assert_eq!(
+        classify_child_crash(
+            sigabrt,
+            true,
+            &CaptureOutcome::Truncated { dropped: 1 },
+            EXPECTED_ABORT_SIGNAL
+        ),
+        ChildCrashClass::SignalButMarkerUnusable {
+            signal: EXPECTED_ABORT_SIGNAL
+        }
+    );
+    // (d) A different terminating signal (SIGTERM=15) ⇒ rejected.
+    let sigterm = ExitStatus::from_raw(15);
+    assert_eq!(
+        classify_child_crash(sigterm, true, &CaptureOutcome::Complete, EXPECTED_ABORT_SIGNAL),
+        ChildCrashClass::UnexpectedSignal { signal: 15 }
+    );
+    // (e) A normal nonzero exit (code 7, no signal) ⇒ rejected even with marker.
+    let exit7 = ExitStatus::from_raw(7 << 8);
+    assert_eq!(exit7.code(), Some(7));
+    assert_eq!(exit7.signal(), None);
+    assert_eq!(
+        classify_child_crash(exit7, true, &CaptureOutcome::Complete, EXPECTED_ABORT_SIGNAL),
+        ChildCrashClass::NormalExit { code: Some(7) }
+    );
 }
