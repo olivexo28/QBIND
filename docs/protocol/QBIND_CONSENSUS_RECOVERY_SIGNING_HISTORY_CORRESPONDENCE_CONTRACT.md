@@ -1032,7 +1032,7 @@ verification evidence or history.
 
 ### 12.3 The durability boundary before dependent signing (protected frontier)
 
-**Selected ordinary-crash profile (a) — recoverable safety-restriction record 
+**Selected ordinary-crash profile (a) — recoverable safety-restriction record
 (conservative; PROPOSED, not current behavior).** This pass **selects** this profile
 (§12.2 relation (i); §12.7) as the frontier rule: an effective lock transition is
 backed by a **durable, recoverable safety-restriction record** (lock identity + view
@@ -1172,20 +1172,20 @@ recovery inputs):
 
 | # | Observable input (profile (a)) | Decision |
 |---|---|---|
-| S-1 | No new authoritative L1 record; prior established L0 state valid | Resume from **L0** after S2–S5 and the frontier (no new transition to complete) |
-| S-2 | Incomplete, malformed, or mismatched L1 publication | **Refuse** the transition; frontier not reached (keep L0); fail-closed (INV-R7) |
-| S-3 | Valid, complete surviving L1 record, **no** process-local acknowledgement knowledge | **Complete** the published transition as effective **only after** the recovery durability operation below confirms it; until then, dependent signing stays blocked |
-| S-4 | Recovery durability operation **succeeds** | L1 is effective; dependent signing may proceed through the remaining gates |
-| S-5 | Recovery durability operation **fails or remains uncertain** | **Refuse** (fail-closed); do **not** treat the readable L1 bytes as effective |
-| S-6 | Valid safety state, **no** new D10 reservation recorded | **Not** itself unsafe (D13-12/G8): proceed to the remaining checks; synthesize no reservation |
-| S-7 | Recovered D10 `Reserved` | Potentially-signed (INV-R3); **refuse** re-sign |
-| S-8 | Recovered D10 `Signed` | Exact resend only, **zero** new signer calls (INV-R4) |
+| SW-1 | No new authoritative L1 record; prior established L0 state valid | Resume from **L0** after S2–S5 and the frontier (no new transition to complete) |
+| SW-2 | Incomplete, malformed, or mismatched L1 publication | **Refuse** the transition; frontier not reached (keep L0); fail-closed (INV-R7) |
+| SW-3 | Valid, complete surviving L1 record, **no** process-local acknowledgement knowledge | **Complete** the published transition as effective **only after** the recovery durability operation below confirms it; until then, dependent signing stays blocked |
+| SW-4 | Recovery durability operation **succeeds** | L1 is effective; dependent signing may proceed through the remaining gates |
+| SW-5 | Recovery durability operation **fails or remains uncertain** | **Refuse** (fail-closed); do **not** treat the readable L1 bytes as effective |
+| SW-6 | Valid safety state, **no** new D10 reservation recorded | **Not** itself unsafe (D13-12/G8): proceed to the remaining checks; synthesize no reservation |
+| SW-7 | Recovered D10 `Reserved` | Potentially-signed (INV-R3); **refuse** re-sign |
+| SW-8 | Recovered D10 `Signed` | Exact resend only, **zero** new signer calls (INV-R4) |
 
 **Recovery durability operation (PROPOSED; interface does not exist today).**
-Completing a surviving L1 (S-3→S-4) requires a **safety-state durability operation**:
+Completing a surviving L1 (SW-3→SW-4) requires a **safety-state durability operation**:
 a synced (acknowledged) re-publication of the L1 safety-restriction record and its
 supporting evidence, whose **protected effect** is that L1 is treated as effective
-only after the acknowledged barrier. Its **failure behavior** is fail-closed (S-5):
+only after the acknowledged barrier. Its **failure behavior** is fail-closed (SW-5):
 on error or uncertainty, L1 is not admitted and signing does not proceed. **No such
 safety-state API exists today** — it must **not** silently reuse the epoch-specific
 (`put_current_epoch_synced`, `flush_epoch_durable`) or D10 journal-specific synced
@@ -1326,9 +1326,9 @@ lost acknowledgement from readable bytes.
 | D13-10 | Internally consistent whole-copy rollback | **Locally indistinguishable**; refuse pending out-of-domain evidence (T-DOMAIN) |
 | D13-11 | Historical D8 `COMPLETE` with later legitimate progress | `COMPLETE` must **not** reapply old epoch/baseline; S2–S5 still required |
 | D13-12 | Valid durable safety state + established journal, but **no** new reservation recorded (crash after safety persistence, before reserving) | **Not** itself an unsafe observable condition. The recovered safety state and established journal are both available; under the selected local ordinary-crash model the operation **may proceed** to the remaining checks (S2–S5, the §12.3 frontier, and D10's reservation/conflict gates). No reservation is synthesized; D10's reservation/conflict rules and all independent authorization/freshness gates are preserved |
-| D13-13 | Valid, complete surviving **new** safety record, **no** process-local acknowledgement knowledge (crash after the record reached storage, before ack/install; §12.3 S-3) | **Complete** the published transition **only after** the recovery durability operation confirms it; until then dependent signing stays **blocked**. A readable record is **not** a received acknowledgement, and exact pre-crash restoration is **not** assumed to be the only outcome |
-| D13-14 | Recovery durability operation **succeeds** (§12.3 S-4) | The surviving transition is **effective**; proceed through the remaining gates |
-| D13-15 | Recovery durability operation **fails or remains uncertain** (§12.3 S-5) | **Refuse** (fail-closed); never treat readable bytes as effective (INV-R7) |
+| D13-13 | Valid, complete surviving **new** safety record, **no** process-local acknowledgement knowledge (crash after the record reached storage, before ack/install; §12.3 SW-3) | **Complete** the published transition **only after** the recovery durability operation confirms it; until then dependent signing stays **blocked**. A readable record is **not** a received acknowledgement, and exact pre-crash restoration is **not** assumed to be the only outcome |
+| D13-14 | Recovery durability operation **succeeds** (§12.3 SW-4) | The surviving transition is **effective**; proceed through the remaining gates |
+| D13-15 | Recovery durability operation **fails or remains uncertain** (§12.3 SW-5) | **Refuse** (fail-closed); never treat readable bytes as effective (INV-R7) |
 
 **Lost acknowledgement vs observable records (separate these).** A restarted
 process **cannot** directly observe that a former caller lost an acknowledgement; it
