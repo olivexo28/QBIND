@@ -11875,9 +11875,13 @@ One supported arrangement: the record **and** all required supporting material
 context reference) **co-located in the one canonical consensus database**, made
 visible in **one atomic publication unit** = a single same-database `WriteBatch`
 committed with `WriteOptions::set_sync(true)` (atomic **and** acknowledged-durable in
-one `db.write(batch, sync)`). This combined synced-atomic operation **does not exist
-today**: `apply_epoch_transition_atomic`'s `db.write` (`storage.rs` ~L1163) is atomic
-but **not** synced; `put_current_epoch_synced` (~L1042) is synced but epoch-only.
+one `db.write(batch, sync)`). The **atomic-plus-sync pattern already exists**: D10's
+`put_signing_record_and_metadata_synced` (`storage.rs` ~L1417) commits a multi-key
+`WriteBatch` with `WriteOptions::set_sync(true)`; what is missing is the
+**safety-state-specific** interface with validation/ownership integration (not routed
+through the epoch or D10 APIs). `apply_epoch_transition_atomic`'s `db.write` (~L1163) is
+atomic-but-not-synced and `put_current_epoch_synced` (~L1042) is synced-but-epoch-only
+are only the narrower precedents.
 **Non-co-located** publication is **explicitly unsupported** in the initial profile
 (no distributed-transaction framework / second journal / two-phase commit invented).
 Single local writer; `fsync`-honoured, no-silent-device-rollback (T-FS) stated as the
@@ -11896,8 +11900,10 @@ versions and from D10's `SIGNING_RECORD_FORMAT_VERSION`/`SIGNING_METADATA_FORMAT
 `signing_reservation_journal.rs` ~L52/~L92); `network_genesis_id` + `authority_context_ref`
 (**obtained independently** from the pinned `ExpectedGenesisIdentity::load_pinned`
 context, compared not trusted); `lock_block_id`+`lock_view` (stored directly);
-`supporting_certificate` (QC, or TC+`high_qc`; bounded by the `qc_verify_domain`
-limits `MAX_BITMAP_LEN`/`MAX_SIGNATURE_LEN`, `ceil(2W/3)` in `u128`);
+`supporting_certificate` (the **wire** QC carrying `signer_bitmap`+`signatures` — the
+logical `qc.rs` QC has **no** cryptographic material; bounded by `MAX_BITMAP_LEN`=8192 /
+`MAX_SIGNATURE_COUNT`=`MAX_SIGNATURE_LEN`=`u16::MAX`, `ceil(2W/3)` in `u128`; a TC whose
+only form is **logical** is **not** recovery-verifiable — a named material design gap);
 `evidence_lock_binding` (SHA3-256 `BindingDigest` over lock+certificate+context,
 recomputed on read); `committed_state_assoc` (checked against recovered committed
 state); `publication_revision` (monotonic local **bookkeeping**, not an anti-rollback
@@ -11919,14 +11925,20 @@ Five distinct operations, each with inputs/preconditions/allowed-writes/success/
 failure/uncertainty: **O1 initialize** (genuine absence + explicit intent + pinned
 context; refuses over any existing unrelated/partial/legacy/malformed/unsupported
 state; duplicate init over a survived write refused; init metadata written
-**atomically with** the initial record); **O2 open** (read-only; refuses missing /
+**atomically with** the initial record — **always** a `BootstrapNoLock` record, never
+metadata-only); **O2 open** (read-only; refuses missing /
 malformed / partial / inconsistent established state; does **not** auto-initialize);
 **O3 read-validate** (structural + bounds + CRC + association); **O4 publish**; **O5
-re-acknowledge**. An empty directory is **not** equated with an unused validator. A
-**bootstrap no-lock** state is **representable** and **distinct from missing**,
-requires the external initialization prerequisite, and fabricates **no**
-QC/epoch/authorization (and does not establish production first-use legitimacy). No
-automatic adoption, repair, reset, or migration.
+re-acknowledge**. An empty directory is **not** equated with an unused validator. The
+initialization layout has **two explicit variants** — `BootstrapNoLock` (lock/evidence
+fields absent by variant) and `Locked` (all §13.2 fields present) — with no third
+metadata-only shape; a **bootstrap no-lock** state is **representable** and **distinct
+from missing**, requires the external initialization prerequisite, and fabricates **no**
+QC/epoch/authorization (the first view-zero lock uses the engine's actual first
+`locked_qc`, no synthetic predecessor; and no production first-use legitimacy is
+established). Absence is scoped to **this component's owned namespace** (unrelated
+consensus-DB namespaces need not be empty). No automatic adoption, repair, reset, or
+migration.
 
 ### Recovery acknowledgement and ownership / concurrency rules (summary)
 
@@ -11935,9 +11947,12 @@ barrier over the whole unit; **only then** is the transition **effective** and
 installed in memory, admitting dependent work. Recovery decides **only** from
 observable durable records (reusing §12.3 SW-1…SW-8 and §12.5 D13-1…D13-15): a valid
 complete surviving record is completed via **O5** — a **synced re-publication of
-identical validated bytes**, identity checked byte-for-byte (checksum + binding)
-before re-acknowledging, **never** a silent repair — and fails closed on any
-failure/uncertainty. The D13 surviving-write case is preserved: recovery **cannot**
+identical validated bytes**, identity established by a **complete-content** comparison
+against the currently stored publication (under the owner boundary and the expected
+revision, never overwriting a newer publication; **not** a CRC32-plus-`evidence_lock_binding`
+equivalence — the checksum detects corruption and the binding covers selected fields,
+neither establishes complete identity) before re-acknowledging, **never** a silent
+repair — and returns failure on any failed/uncertain durability acknowledgement. The D13 surviving-write case is preserved: recovery **cannot**
 use former-caller acknowledgement knowledge. A single in-process **safety-record
 owner** (a **new** coordinator, reusing the D10 single-writer **pattern** but not its
 instance) serializes validation/publish/recover/install; every O4/O5 carries the
@@ -11970,11 +11985,17 @@ invariant).
 
 ### Retention / replacement / capacity (summary)
 
-Exactly **one** authoritative record is retained (no generation history — superseded
-safety records have no recovery/outstanding-operation consumer); replacement is safe
-**only** after the successor is acknowledged-durable (atomic-after-ack; a crash leaves
-the intact predecessor or a complete successor, never a torn mix); **pruning is
-disabled** because a safe discharge condition cannot be reduced to observable local
+Exactly **one** authoritative **disk** generation is retained (no disk generation
+history); an outstanding prepared L0 decision that still needs its originating lock/
+evidence is served by **bounded immutable in-memory** L0 evidence (D10's `BindingDigest`
+cannot reconstruct L0's lock/evidence), not a second disk generation. Replacement keeps
+the **storage publication** (atomic), the **caller-observed acknowledgement**, and the
+**in-memory install** distinct: because the storage publication is atomic, a crash
+leaves the intact predecessor **or** a complete successor (never a torn mix) — and a
+complete successor may be durable **even when the caller observed an error or died
+before success**, so the predecessor is **not** assumed to remain stored after an
+uncertain replacement (recovery decides via O3/O5 and never discards/repairs/overwrites
+a possibly-published successor); **pruning is disabled** because a safe discharge condition cannot be reduced to observable local
 inputs without the unresolved anti-rollback anchor (so no undefined "prune after
 discharge" rule and **no** unbounded second journal); oversize → **fail-closed**
 (prior record preserved); restart preserves the bounded single-record invariant;
@@ -11982,7 +12003,7 @@ discharge" rule and **no** unbounded second journal); oversize → **fail-closed
 
 ### Future acceptance matrix and the unstarted successor
 
-The §13.8 H-matrix (H1…H18, **no row a current PASS**) covers the D12 advanced-lock
+The §13.8 H-matrix (H1…H23, **no row a current PASS**) covers the D12 advanced-lock
 case, initialize/open/duplicate-init/uncertain-init, valid/invalid lock-evidence-context
 association, size/arithmetic/version/corruption, atomic publication and partial/uncertain
 outcomes, crash before ack/install, successful/failed recovery re-acknowledgement,
@@ -12066,4 +12087,192 @@ SECURITY_POSTURE=RS1-OPEN / PUBLIC-DEVNET-NO-GO
 
 C4/C5 remain OPEN. No production signing enablement, anchor selection, readiness
 promotion, D15 implementation, or Run 423 work. Worktree clean after the commit;
+changes pushed to the actual task branch; **no PR** opened.
+
+## Run 422 D7-D14 correction pass — Resolve safety-record design findings (documentation only)
+
+This entry records the bounded **documentation-only** correction pass that resolved the
+five D14 design findings and the storage-inventory correction **in place** in the
+authoritative § 13, reconciled the continuity cross-reference, and updated this
+evidence. O1–O5 were **not** implemented and D15 was **not** started. Prior D14 history
+(SHAs, counts, artifact identities, tool outcomes) above is **preserved**, not
+rewritten.
+
+### Provenance and object limitations (this pass)
+
+* **Working branch (actual):** `copilot/copilotcopilotcopilotcopilotcopilotcopilotcopilotc-one-more-time`,
+  used **unchanged** (no rename/rebase/force-push/history rewrite). The task's reported
+  branch `copilot/copilotcopilotcopilotcopilotcopilotcopilotcopilotc-yet-again` differs
+  from the actual branch; the supplied task branch is used as-is.
+* **Starting HEAD (actual):** `a83d673ff5bc12404955f6fb048c62fbd0c49440` (`update`);
+  clean worktree before this pass (`git rev-list --count HEAD` = 2; root/graft base
+  `6b1a942ad882645691707dcfede02d510d045a61`).
+* **Reference object.** The reviewed D14 revision
+  `a646e29ab68e3dc393221209389b589bd1804f9a` was **absent** as an object on open
+  (`git cat-file -t a646e29…` → *could not get object info*) and became available only
+  after an on-demand `git fetch origin a646e29…`; it then resolves
+  (`git cat-file -t` → `commit`) and its tree content is **identical** to the starting
+  worktree for the three changed documents (`git diff --stat a646e29… HEAD` empty), yet
+  it is **not** an ancestor of HEAD (`git merge-base --is-ancestor a646e29… HEAD` fails).
+  Object availability, content correspondence, and ancestry are reported **separately**;
+  ancestry is **not** manufactured from content equality.
+* `task/warning.txt`, `task/RUN_422_TASK.txt`, and unrelated work were **preserved**;
+  each changed file keeps its CRLF line endings and no-final-newline EOF convention.
+
+### Changed paths (authorized scope only)
+
+1. `docs/protocol/QBIND_CONSENSUS_RECOVERY_SIGNING_HISTORY_CORRESPONDENCE_CONTRACT.md`
+   — authoritative owner: corrections A–E and the storage-inventory correction applied
+   **in place** in § 13 (§ 13.1–§ 13.9).
+2. `docs/protocol/QBIND_PROPOSAL_VOTE_SIGNING_STATE_CONTINUITY_CONTRACT.md` — the one
+   § 5 D14 cross-reference reconciled (complete-content O5 identity; atomic-plus-sync
+   pattern exists in D10; one disk generation + bounded in-memory L0 evidence). No § 4.1
+   step, conflict rule, state machine, or § 6 anchor requirement changed.
+3. `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_422_D7.md` — in-place summary corrections and
+   this entry.
+
+`docs/whitepaper/contradiction.md` was inspected **read-only** (durable anti-rollback
+NOT-established; C4/C5 OPEN) and **not** edited.
+
+### A–E dispositions and the storage-inventory correction
+
+* **A — Exact O5 identity (RESOLVED).** Removed every statement equating byte-for-byte
+  equality with matching `integrity_checksum` + `evidence_lock_binding`. O5 now receives
+  the **complete** recovered publication, the independently supplied context, and the
+  expected revision; compares the **complete authoritative content** against the
+  **currently stored** publication under the owner/serialization boundary; refuses stale
+  or mismatched input; republishes identical bytes **without** changing revision,
+  initialization state, association fields, or supporting material; returns **failure**
+  on failed/uncertain durability acknowledgement; and cannot overwrite a newer
+  publication between comparison and re-publication. CRC32/digest retained as
+  **additional** checks only; no new cryptography.
+* **B — Prepared L0 evidence vs single-record retention (RESOLVED).** One disk
+  generation remains; an outstanding prepared L0 decision carries **bounded immutable
+  in-memory** L0 evidence for its own lifetime (D10's `BindingDigest` cannot reconstruct
+  L0's lock/evidence — `signing_reservation_journal.rs` ~L190/~L281). Defined: what is
+  retained/referenced and for how long; same-event self-vote L1 keeps the captured L0
+  eligibility; external L1 blocks then revalidates the exact candidate; pending/uncertain
+  publication blocks protected work; nothing volatile survives process death; and
+  authoritative-record replacement is safe because no consumer reads a superseded L0
+  **disk** record. No failure authorizes fallback L0 signing; D10 records untouched.
+* **C — Publication vs acknowledgement (RESOLVED).** Removed
+  “atomic-after-acknowledgement” as the description of stored replacement; distinguished
+  validation, **atomic storage publication**, **caller-observed acknowledgement**,
+  **in-memory install**, and **recovery's own durability acknowledgement**. A complete
+  successor can survive a missing acknowledgement; a crash before acknowledgement is
+  **not** universally “nothing to reconcile”; “uncertain bytes” is not a stored format; a
+  live uncertain result blocks dependent work; the predecessor is not assumed to remain
+  stored; a possibly-published successor is neither discarded, repaired, nor overwritten.
+  Reconciled § 13.5–§ 13.7, INV-D14-5, and H8/H9/H16.
+* **D — Evidence, semantic checks, and bounds (RESOLVED, with one named gap).** The
+  persisted `supporting_certificate` is the **wire** QC (`signer_bitmap`+`signatures`);
+  the logical `qc.rs` QC carries **no** cryptographic material and cannot be the stored
+  evidence. Empty-signer certificates are refused **structurally** (stage 1 threshold),
+  resolving the O3/H6 conflict; an **unverified** stored certificate is carried as
+  unverified and never satisfies a verified-evidence prerequisite; O5's “effective” is a
+  durability (not authentication) result. `committed_state_assoc` comparison defined
+  (anchor present on recovered committed chain; committed progress allowed; refuse when
+  unestablished). “Fixed maxima” replaced with concrete constants (`MAX_BITMAP_LEN`=8192,
+  `MAX_SIGNATURE_COUNT`/`MAX_SIGNATURE_LEN`=`u16::MAX`, 32-byte ids/digests, checked `u64`
+  revisions) and the honest allocation-bound note (`MAX_AGGREGATE_SIGNATURE_BYTES`
+  ≈ 4.29 GB is not a buffer size; the real cap is validator-set-derived). **Named
+  material design gap:** no wire `TimeoutCertificate` / `signed_timeouts` verifier exists,
+  so a logical-only TC-derived lock is not recovery-verifiable — the successor must
+  persist the wire `high_qc` or refuse TC-derived locks on recovery (no invented
+  signatures).
+* **E — Coherent bootstrap/initialization (RESOLVED).** One layout: initialized
+  metadata is **never** written without an associated record. Two explicit variants
+  (`BootstrapNoLock` / `Locked`) with required/absent fields each; initial revision with
+  checked increments and wrap-→-refuse; first view-zero lock uses the engine's actual
+  first `locked_qc` (no fabricated predecessor QC); O2/O3/O5 defined per variant;
+  duplicate and survived-but-unacknowledged initialization handled; absence scoped to
+  this component's **owned** namespace; `initialize` and `open` kept separate; no
+  adoption/repair/reset/migration.
+* **Storage-inventory correction (APPLIED).** `storage.rs::put_signing_record_and_metadata_synced`
+  (~L1417) already commits an atomic `WriteBatch` with `WriteOptions::set_sync(true)`, so
+  the claim that no existing mechanism combines atomicity and sync is **corrected**: the
+  missing element is the **safety-state-specific** interface plus its validation/ownership
+  integration, not the atomic-plus-sync pattern. Safety records are **not** routed through
+  the epoch or D10 APIs.
+
+### Selected design rules (operative)
+
+Co-located single-database profile; one atomic-plus-sync safety-scoped publication unit
+(pattern exists, interface missing); wire-QC supporting evidence; four separated checks
+(structural / evidence verification / context binding / current authorization) plus the
+distinct durability-acknowledgement and eligibility levels; complete-content O5
+re-acknowledgement; single-writer ownership with an expected-revision fence; one disk
+generation + bounded in-memory L0 evidence; pruning disabled; two initialization
+variants; D10 preserved by ordering, not a spanning transaction.
+
+### Remaining material gaps and the single successor
+
+The **TC recovery-verifiability** sub-case is the one named record-design obligation
+left to the successor (persist the wire `high_qc`, or refuse TC-derived locks on
+recovery). Separate prerequisites remain out of scope: the durable **anti-rollback
+anchor** (UNRESOLVED), whole-copy rollback resistance and cross-host/copied-key
+exclusivity (UNMET), and recovery-time certificate-verification wiring (stage 2).
+Exactly **one** bounded, unstarted successor is retained: implement and
+unit/real-storage-test the O1–O5 operations and the safety-scoped synced-atomic
+publication interface behind a disabled-by-default, non-production-wired interface,
+resolving the TC obligation, **without** engine integration, signer calls, anchor
+selection, activation, or readiness change. Not executed here.
+
+### Future acceptance (requirements, not executed tests)
+
+Added/updated future cases for: a complete identity change **outside**
+`evidence_lock_binding` (caught only by complete-content comparison, not CRC+binding); a
+**stale** O5 against a newer publication (refused, no older-over-newer overwrite);
+outstanding **L0 evidence** during an L1 replacement (served by bounded in-memory
+evidence, revalidated or rejected); a **complete publication surviving a missing
+acknowledgement** (O5 re-acknowledges; not “nothing to reconcile”); a certificate/lock
+**mismatch despite valid CRC and recomputed digest** (refused — digest is not semantic
+correspondence); **verified vs unverified** outcomes (unverified never satisfies a
+verified prerequisite); **committed-state** comparison failures (refuse when
+unestablished); **bootstrap / view-zero / duplicate / survived** initialization; and
+**bounds / revision exhaustion** (checked, wrap-→-refuse). These are future requirements.
+
+### Checks executed and literal tool outcomes (this pass)
+
+* **Source/type/API checks** against the checkout: `put_signing_record_and_metadata_synced`
+  (`storage.rs` ~L1417, atomic `WriteBatch` + `set_sync(true)`); logical QC
+  (`qc.rs` — `block_id`/`view`/`signers`, no crypto) vs wire QC
+  (`qbind-wire/src/consensus.rs` — `signer_bitmap`/`signatures`/`suite_id`);
+  `verify_quorum_certificate_with_domain` consumes the **wire** QC
+  (`qc_verify_domain.rs`); no wire `TimeoutCertificate`/`signed_timeouts` verifier exists;
+  `BindingDigest`/`SigningDecisionRecord` (`signing_reservation_journal.rs` ~L190/~L281);
+  bound constants `MAX_BITMAP_LEN`/`MAX_SIGNATURE_LEN`/`MAX_SIGNATURE_COUNT`/
+  `MAX_AGGREGATE_SIGNATURE_BYTES`.
+* **Cross-document consistency:** § 13 reconciled internally (field table, four checks,
+  O1–O5, § 13.5–§ 13.9, INV-D14-x, H-matrix) and with the continuity § 5 cross-reference;
+  D10/D12/D13 dispositions preserved; stage numbering (1–4) kept stable.
+* **Observable-state / field-consumer / bound walkthroughs, links/tables, scope,
+  whitespace, EOL/EOF, secrets:** all three files remain CRLF with no final newline;
+  tables column-consistent; no secret introduced.
+* **No** Cargo tests, Clippy, or release rebuild run or claimed.
+* **Automated review / CodeQL:** attempted once where appropriate; outcomes recorded
+  literally and **separately** from history. A skip, unavailable tool, model error, or
+  “no comments” wrapper is **not** a completed independent review.
+
+### Status (stated separately)
+
+All **five** findings (A–E) and the storage-inventory correction are **resolved** in
+the authoritative § 13, with **one** named remaining record-design obligation (TC
+recovery-verifiability) left to the successor. Implementation readiness is **not**
+justified by this pass: the token below marks a defined-not-implemented design, not
+acceptance; O1–O5 remain unimplemented and the separate prerequisites remain open.
+
+```
+D7D14_CONSENSUS_SAFETY_RECORD_DESIGN=DEFINED-NOT-IMPLEMENTED
+```
+
+Preserved restrictions (unchanged): D8/D10/D11/D12/D13 dispositions; profile (a); the
+co-located canonical-consensus-DB arrangement; non-co-located publication unsupported;
+`D7_STATUS=PARTIAL-CODE-TEST / PRODUCTION-LIFECYCLE-UNAVAILABLE`,
+`DURABLE_ANTI_ROLLBACK=NOT-ESTABLISHED`, `GENESIS_AUTHORITY_ACTIVATION=DISABLED`,
+`PRODUCTION_WIRE_CHAIN_ID_BEHAVIOR=UNCHANGED`,
+`CONFIGURED_AUTHORITY_RELEASE_BINARY_EVIDENCE=NOT-YET-CAPTURED`,
+`SECURITY_POSTURE=RS1-OPEN / PUBLIC-DEVNET-NO-GO`. C4/C5 remain OPEN. No activation,
+readiness promotion, anchor selection, D15 implementation, or Run 423 work.
+`task/warning.txt` and unrelated work preserved; worktree clean after the commit;
 changes pushed to the actual task branch; **no PR** opened.
