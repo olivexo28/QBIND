@@ -11563,3 +11563,135 @@ implementation, activation, or Run 423 work).
   `CONFIGURED_AUTHORITY_RELEASE_BINARY_EVIDENCE=NOT-YET-CAPTURED`,
   `SECURITY_POSTURE=RS1-OPEN / PUBLIC-DEVNET-NO-GO`. C4/C5 remain OPEN; no readiness
   promotion or D14 implementation.
+
+### D7-D13 frontier-resolution entry (RUN 422 D7-D13 — select profile (a); close surviving-write)
+
+A later **documentation-only** pass executed the single design-resolution successor
+that the prior D13 entry had named (resolve §12.7 (a)/(b)). No Rust, test, dependency,
+storage key/schema, persistence format, wire format, CLI flag, configuration,
+workflow, signing-preimage, or activation change was made or proposed for
+implementation. No PR, branch rename, force-push, rebase, history rewrite, production
+implementation, activation, or Run 423 / D14 work was performed.
+
+* **Actual branch / revision / object availability.** Actual branch
+  `copilot/copilotcopilotcopilotcopilotcopilotcopilotcopilotc-again`, used
+  **unchanged** (the task's reported branch
+  `copilot/copilotcopilotcopilotcopilotcopilotcopilotcopilotr` differs). Starting
+  HEAD `fd6a167b99bfe1ce511c10f0be2c1f9eefba5118`; clean worktree before this pass;
+  final pushed SHA is the last commit on the branch. The task's reviewed revision
+  `9b56dc04ae5d989afef6fee6cdf1ddf172867652` **is** available here (fetched on
+  demand): `git cat-file -t 9b56dc04…` → `commit`, its tree content is **identical**
+  to the starting worktree (`git diff --stat 9b56dc04 HEAD` is empty), yet it is
+  **not** an ancestor of HEAD (`git merge-base --is-ancestor` fails). Content
+  correspondence is reported **separately** from ancestry; ancestry is **not**
+  manufactured from content equality. `task/warning.txt`, unrelated work, and each
+  file's CRLF / no-final-newline convention were preserved.
+* **Changed paths (authorized scope only).** `…RECOVERY_SIGNING_HISTORY_CORRESPONDENCE_CONTRACT.md`
+  (owner §12.1/§12.2/§12.3/§12.5/§12.7/§12.8),
+  `…PROPOSAL_VOTE_SIGNING_STATE_CONTINUITY_CONTRACT.md` (§5.3 cross-reference only),
+  and this evidence record. `docs/whitepaper/contradiction.md` inspected read-only;
+  not edited.
+* **Selected frontier rule and why.** **Profile (a)** — a durable, recoverable
+  **safety-restriction record** persisted at each **effective** lock raise (lock id +
+  view + supporting QC/TC evidence + network/genesis/validator context), with a
+  stated atomicity + ordering rule relative to D10's reservation/result writes. It is
+  the §12.2 relation (i). Selected over the relation-(ii) reconstruction rule
+  (profile (b)) because the existing committed-QC reconstruction has the
+  **demonstrated D12 gap** (it can be strictly lower-view and admit a candidate the
+  pre-crash lock refused) and relation (ii) has **no** supplied construction, inputs,
+  or preservation argument (a higher view / valid QC / committed height / epoch /
+  checksum is **not** that argument).
+* **Publication / acknowledgement / installation / signing ordering.** Distinct
+  events: compute transition → publish recoverable record+evidence → receive
+  **durability acknowledgement** (the linearization point; the restriction becomes
+  irrevocable and **effective** here) → install in-memory → admit a dependent
+  decision → reserve (D10 synced) → sign. Before the acknowledged-durable point the
+  reserve/sign/retain/confirm steps that depend on the newly raised restriction are
+  **blocked**; a readable byte is never an acknowledged write (INV-R7).
+* **Surviving-write recovery outcomes (observable inputs only).** The §12.3 schedule
+  (L0 → compute L1 → record partly/fully reaches storage → crash before ack/install →
+  restart reads surviving records) is closed by a compact matrix over observable
+  inputs (SW-1…SW-8, reconciled to §12.5 rows D13-13/14/15): no new record → resume L0;
+  incomplete/malformed/mismatched publication → refuse; a valid complete surviving
+  record with no process-local ack knowledge → complete it **only after** the PROPOSED
+  safety-state durability operation (a synced re-publication; interface does **not**
+  exist today and must **not** reuse the epoch/journal synced APIs) confirms it;
+  operation succeeds → effective; operation fails/uncertain → refuse (fail-closed);
+  valid safety state with no new D10 reservation → may proceed (D13-12/G8); recovered
+  `Reserved` → potentially-signed, refuse re-sign; recovered `Signed` → exact resend,
+  zero signer calls. The illustrative schedule is kept **separate** from the recovery
+  inputs. The prior "exact pre-crash restoration is the only reachable case" claim is
+  **corrected**: a surviving valid publication is also reachable.
+* **Decision-binding corrections (stale instructions eliminated).** Removed the
+  instruction to bind the justifying lock/evidence **at construction** from the §12.1
+  originating-action row and the §12.3 originating-action integration bullet; the
+  binding is now to the **route-specific decision/eligibility point** (the lock that
+  justified the vote/proposal), while the **originating view** stays fixed at
+  construction. A self-vote-generated QC must **not** retroactively justify its own
+  vote; per-route points (`ingest_proposal` safe-vote check before the self-vote;
+  `on_leader_step` parent/justification + Proposal before its self-vote;
+  `on_vote_event`; `on_timeout_certificate`) are kept distinct, and action types do
+  **not** carry the lock/evidence they justified.
+* **Storage atomicity / durability / publication and remaining interface gaps.**
+  Re-verified against the checkout: `put_block`/`put_qc`/`put_last_committed` use
+  ordinary `db.put` (no `set_sync`); `apply_epoch_transition_atomic` uses a
+  same-database `WriteBatch` via `db.write` (atomic, **not** synced);
+  `put_current_epoch_synced` sets sync; `flush_epoch_durable` flushes the WAL. The
+  §12.5 parenthetical that presented **ordered separate operations** as satisfying
+  cross-artifact atomicity is **removed**: where record + supporting evidence cannot
+  be co-located, a **specified publication/recovery protocol** is required (ordered
+  separate writes do not satisfy atomicity), else the case is **unsupported**. No
+  safety-state persistence interface exists today; the §2 inventory carries no
+  blanket "synced" attribution over the unsynced committed-QC path.
+* **Cross-document reconciliation and the single unstarted successor.** Owner updated
+  first; continuity §5.3 reconciled to the selected rule; this evidence entry records
+  it. The named design-resolution successor (select (a)/(b)) is now **completed** and
+  is **not** left as the next task. Exactly **one** new bounded successor is named
+  (§12.7): **specify profile (a)'s record at implementation-design granularity** —
+  logical record layout, the non-co-located cross-artifact publication/recovery
+  protocol (or mark unsupported), first-initialization-vs-open semantics, and
+  retention/pruning — documentation-only, three authorized files, no code, no
+  promoted acceptance row, no anchor selection, no new characterization tests, no
+  activation. Local ordinary-crash consistency stays **separate** from whole-copy
+  rollback; the anti-rollback anchor remains unresolved and is **not** part of it.
+* **Checks executed and literal tooling outcomes (this pass).** Re-traced the cited
+  symbols/callers/ordering against the checkout (`on_qc` sets `locked_qc` ~L1004
+  before `try_commit_with_qc` ~L1013; `on_leader_step` view ~L1443 / header fixed
+  ~L1503–1504; `is_safe_to_vote_on_block` ~L1312; `on_timeout_certificate`
+  `set_locked_qc`; the storage durability facts above). Cross-section and
+  cross-document consistency reviewed; every recovery row walked using only its stated
+  observable inputs; Markdown table/link/reference, diff-scope, whitespace, CRLF, and
+  no-final-newline EOF checks performed; secret scan of the changed files run. No
+  Cargo / Clippy / release build or new test count was run or is required for a
+  documentation-only change. Available automated review / CodeQL tooling outcome for
+  this pass is recorded verbatim below; a skipped CodeQL is not a completed scan, and
+  an unavailable or errored reviewer is not a completed independent review.
+* **Scoped verdict.** `D7D13_CONSENSUS_SAFETY_STATE_DURABILITY_CONTRACT=DEFINED-NOT-IMPLEMENTED`.
+  The **frontier-rule decision is now RESOLVED** (profile (a) selected and justified;
+  surviving-write case closed; decision binding per-route; storage/publication
+  requirements mutually consistent), so the frontier **design** is coherent; but the
+  record is **not** implemented (no persistence interface) and the token therefore
+  stays DEFINED-NOT-IMPLEMENTED — it implies no implemented protection, empirical
+  durability, independent review, or activation. Preserved unchanged:
+  `D7D10_LOCAL_SIGNING_RESERVATION=CODE-AND-STORAGE-TEST-POSITIVE`,
+  `D7D10_CORRECTION_F_ENGINE_PROGRESS_AND_CHILD_RECOVERY=CODE-AND-PROCESS-TEST-POSITIVE`,
+  the accepted D10 A–E verdicts,
+  `D7D12_LOCK_RECOVERY_CHARACTERIZATION=COMPLETE-FOR-TESTED-SCOPE`,
+  `D7D11_CONSENSUS_RECOVERY_SIGNING_HISTORY_CONTRACT=DEFINED-NOT-IMPLEMENTED`,
+  `D7D8_RESTORE_COMPLETION_CONTAINMENT=CODE-AND-RELEASE-TEST-POSITIVE`,
+  `D7_STATUS=PARTIAL-CODE-TEST / PRODUCTION-LIFECYCLE-UNAVAILABLE`,
+  `DURABLE_ANTI_ROLLBACK=NOT-ESTABLISHED`, `GENESIS_AUTHORITY_ACTIVATION=DISABLED`,
+  `PRODUCTION_WIRE_CHAIN_ID_BEHAVIOR=UNCHANGED`,
+  `CONFIGURED_AUTHORITY_RELEASE_BINARY_EVIDENCE=NOT-YET-CAPTURED`,
+  `SECURITY_POSTURE=RS1-OPEN / PUBLIC-DEVNET-NO-GO`. C4/C5 remain OPEN; no readiness
+  promotion or D14 implementation. Worktree clean after each commit; changes pushed to
+  the task branch; **no PR** opened.
+* **Automated review / CodeQL — literal outcome (this pass, kept separate from prior
+  passes).** **CodeQL:** **skipped** — declared trivial (three Markdown files, no
+  code); a skipped scan is **not** a completed CodeQL analysis. **Automated review:**
+  the wrapper reported **"No review comments found"** over **3 files**, but also
+  returned a **model-availability error** (`model claude-sonnet-4.6 not found in
+  registry`) and noted the **review tool is not available in this environment**, so a
+  **completed independent review could not be established** for this pass either. The
+  outcome is recorded exactly as returned and is **not** upgraded to a completed
+  independent review, nor merged with prior passes.
