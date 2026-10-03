@@ -11813,3 +11813,257 @@ D12 is not repeated, and the record is neither implemented nor its design begun.
   `SECURITY_POSTURE=RS1-OPEN / PUBLIC-DEVNET-NO-GO`. C4/C5 remain OPEN; no readiness
   promotion or D14 implementation. Worktree clean after each commit; changes pushed to
   the task branch; **no PR** opened.
+
+## Run 422 D7-D14 — Recoverable consensus safety record (profile (a) implementation-design, documentation only)
+
+This section records the D7-D14 **documentation-only** pass that executes the single
+§12.7 successor: it specifies the D13-selected **profile (a)** safety-restriction
+record at **implementation-design** granularity (contents, operations, publication/
+recovery, ownership, engine/D10 binding, retention/capacity). No Rust, test,
+dependency, actual storage key/schema, concrete serialized persistence/wire format,
+signing preimage, CLI, configuration, workflow, production wiring, or activation
+change was made or proposed for implementation. The (a)/(b) choice is **not**
+reopened and D12 is **not** repeated. No PR; no branch rename, force-push, rebase,
+history rewrite, or Run 423 / D15 work.
+
+### Provenance and object limitations
+
+* **Working branch (actual):**
+  `copilot/copilotcopilotcopilotcopilotcopilotcopilotcopilotc-yet-again`, used
+  **unchanged** (no rename/rebase/force-push/history rewrite). The task's reported
+  branch string `copilot/copilotcopilotcopilotcopilotcopilotcopilotcopilotc-another-one`
+  differs from the actual branch; the supplied task branch is used as-is.
+* **Starting HEAD (actual):** `6b1a942ad882645691707dcfede02d510d045a61` (`update`);
+  clean worktree before this pass. The final documentation + validation commit is the
+  last commit on the branch (recorded in the branch history); worktree clean after.
+* **Shallow, single-branch clone** (`git rev-list --count HEAD` = 2; graft/root base
+  `5da2820f8a40b3819cd86cfeb6b7788bcfa2ea02`). The accepted D13 revision
+  `696c30754b3fc41f401be39da03e58ae1ee2f2bd` was **absent** as an object on open
+  (`git cat-file -t 696c3075…` → *could not get object info*) and became available
+  only after an on-demand `git fetch --depth=1 origin 696c3075…`; it then resolves
+  (`git cat-file -t` → `commit`) and its tree content is **identical** to the starting
+  worktree (`git diff --stat 696c3075… HEAD` empty), yet it is **not** an ancestor of
+  HEAD (`git merge-base --is-ancestor 696c3075… HEAD` fails). Reference-object
+  availability and content correspondence are reported **separately** from ancestry;
+  ancestry is **not** manufactured from content equality.
+* `task/warning.txt`, unrelated work, and each changed file's existing line-ending /
+  EOF conventions were preserved (all three changed documents remain CRLF with no
+  trailing final newline).
+
+### Changed paths (authorized scope only)
+
+1. `docs/protocol/QBIND_CONSENSUS_RECOVERY_SIGNING_HISTORY_CORRESPONDENCE_CONTRACT.md`
+   — the **authoritative owner**: added **§13 (D14)** and the
+   `D7D14_CONSENSUS_SAFETY_RECORD_DESIGN=DEFINED-NOT-IMPLEMENTED` header token and Run
+   line; the D13 **§12 is unchanged** and remains consistent (it already names this
+   record-design as its single successor).
+2. `docs/protocol/QBIND_PROPOSAL_VOTE_SIGNING_STATE_CONTINUITY_CONTRACT.md` —
+   **minimal reconciliation only**: one concise §5.3 cross-reference naming §13 as the
+   owner of the record design (ordering-not-spanning-transaction, one authoritative
+   record with pruning disabled, DEFINED-NOT-IMPLEMENTED, anchor separate). No §4.1
+   step, conflict rule, state machine, or anchor requirement changed; no competing
+   contract created.
+3. `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_422_D7.md` — this evidence entry.
+
+`docs/whitepaper/contradiction.md` was inspected **read-only** (durable anti-rollback
+NOT-established; C4/C5 OPEN — unchanged) and **not** edited.
+
+### Supported storage / publication profile and exclusions
+
+One supported arrangement: the record **and** all required supporting material
+(lock id+view, supporting QC or TC+`high_qc`, network/genesis + validator/authority
+context reference) **co-located in the one canonical consensus database**, made
+visible in **one atomic publication unit** = a single same-database `WriteBatch`
+committed with `WriteOptions::set_sync(true)` (atomic **and** acknowledged-durable in
+one `db.write(batch, sync)`). This combined synced-atomic operation **does not exist
+today**: `apply_epoch_transition_atomic`'s `db.write` (`storage.rs` ~L1163) is atomic
+but **not** synced; `put_current_epoch_synced` (~L1042) is synced but epoch-only.
+**Non-co-located** publication is **explicitly unsupported** in the initial profile
+(no distributed-transaction framework / second journal / two-phase commit invented).
+Single local writer; `fsync`-honoured, no-silent-device-rollback (T-FS) stated as the
+profile assumption, not an empirical claim. Six properties distinguished; only
+**atomic visibility**, **acknowledged durability**, and **validation of contents +
+transition eligibility** belong to this record — authorization/freshness (A/B),
+whole-copy rollback resistance, and cross-host/copied-key exclusivity remain
+**separate** and UNMET/UNRESOLVED.
+
+### Record fields, evidence sources, bounds, and validation (summary)
+
+The proposed bounded, versioned `SafetyRestrictionRecord` (logical; concrete byte
+framing deferred to the successor) carries, each with a **named** recovery/validation
+consumer: `persistence_format_version` (distinct from wire and signing-domain
+versions and from D10's `SIGNING_RECORD_FORMAT_VERSION`/`SIGNING_METADATA_FORMAT_VERSION`,
+`signing_reservation_journal.rs` ~L52/~L92); `network_genesis_id` + `authority_context_ref`
+(**obtained independently** from the pinned `ExpectedGenesisIdentity::load_pinned`
+context, compared not trusted); `lock_block_id`+`lock_view` (stored directly);
+`supporting_certificate` (QC, or TC+`high_qc`; bounded by the `qc_verify_domain`
+limits `MAX_BITMAP_LEN`/`MAX_SIGNATURE_LEN`, `ceil(2W/3)` in `u128`);
+`evidence_lock_binding` (SHA3-256 `BindingDigest` over lock+certificate+context,
+recomputed on read); `committed_state_assoc` (checked against recovered committed
+state); `publication_revision` (monotonic local **bookkeeping**, not an anti-rollback
+anchor); `integrity_checksum` (CRC32 via `compute_crc32`/`signing_journal_crc32`,
+corruption only); and `bounds_metadata` (checked lengths/arithmetic). Per-candidate
+ancestry is **not** stored — supplied and checked per candidate; missing ancestry
+blocks **that candidate** only. Four checks kept distinct — **structural decode**,
+**evidence verification** (T-TRUST-STORAGE; not wired today; empty-signer QC is not
+authentication), **context binding**, **current authorization (A/B; never granted
+here)** — and the empty-signer-QC / digest-is-not-bytes / snapshot-id-is-not-authenticated /
+per-candidate-ancestry source facts are carried forward so the record cannot
+over-claim. Named missing integration obligations: the engine→writer boundary,
+recovery-time certificate verification, the decision→evidence binding, and the
+synced-atomic publication API.
+
+### Initialization / opening and uncertainty behavior (summary)
+
+Five distinct operations, each with inputs/preconditions/allowed-writes/success/
+failure/uncertainty: **O1 initialize** (genuine absence + explicit intent + pinned
+context; refuses over any existing unrelated/partial/legacy/malformed/unsupported
+state; duplicate init over a survived write refused; init metadata written
+**atomically with** the initial record); **O2 open** (read-only; refuses missing /
+malformed / partial / inconsistent established state; does **not** auto-initialize);
+**O3 read-validate** (structural + bounds + CRC + association); **O4 publish**; **O5
+re-acknowledge**. An empty directory is **not** equated with an unused validator. A
+**bootstrap no-lock** state is **representable** and **distinct from missing**,
+requires the external initialization prerequisite, and fabricates **no**
+QC/epoch/authorization (and does not establish production first-use legitimacy). No
+automatic adoption, repair, reset, or migration.
+
+### Recovery acknowledgement and ownership / concurrency rules (summary)
+
+Durability contract: publication returns success only after an `fsync`-acknowledged
+barrier over the whole unit; **only then** is the transition **effective** and
+installed in memory, admitting dependent work. Recovery decides **only** from
+observable durable records (reusing §12.3 SW-1…SW-8 and §12.5 D13-1…D13-15): a valid
+complete surviving record is completed via **O5** — a **synced re-publication of
+identical validated bytes**, identity checked byte-for-byte (checksum + binding)
+before re-acknowledging, **never** a silent repair — and fails closed on any
+failure/uncertainty. The D13 surviving-write case is preserved: recovery **cannot**
+use former-caller acknowledgement knowledge. A single in-process **safety-record
+owner** (a **new** coordinator, reusing the D10 single-writer **pattern** but not its
+instance) serializes validation/publish/recover/install; every O4/O5 carries the
+**expected `publication_revision`** so a stale handle cannot overwrite or
+re-acknowledge a newer record with an older one; after an uncertain write no dependent
+signing is admitted until O2/O3/O5 re-establish state; after process death O2 rebuilds
+the authoritative state from the durable record. Local ownership does **not** fence a
+copied database/key on another host.
+
+### Prepared-decision policy and D10 integration (summary)
+
+Per-route decision binding (inbound `Proposal` → `is_safe_to_vote_on_block` ~L1810
+before the self-vote; leader `on_leader_step` ~L1434 proposal built before self-vote
+~L1538; received vote/QC `on_vote_event` ~L1867; TC `on_timeout_certificate` ~L2162
+before the view advance; D10 fresh S6; retained reuse S7). The L0→L1 prepared-decision
+policy is **explicit**: a self-vote-generated L1 is recorded **separately** and must
+**not** retroactively justify the decision (decision stays bound to L0; rejected if
+invalid under L0); an externally-driven effective L1 **blocks** the prepared L0
+decision, **permitted only if** per-candidate revalidation against L1 passes, else
+**rejected** — explicit serialization / conservative refusal, no concurrency
+machinery. D10 preserved unchanged (position identity, prepared-preimage binding,
+frozen ticket/context/signer, post-storage revalidation, durable reservation before
+signing, one-use checked continuation, recovered `Reserved` potentially-signed,
+exact retained reuse with zero signer calls, no conflict released by a safety-state
+transition). A **single transaction spanning** safety + D10 writes is **not** required
+— the two are related by **ordering**, and each supported crash state is independently
+recoverable from the two ordered barriers (crash before the safety barrier;
+after-safety-before-reservation = D13-12/G8, not unsafe; after-reservation = D10's own
+invariant).
+
+### Retention / replacement / capacity (summary)
+
+Exactly **one** authoritative record is retained (no generation history — superseded
+safety records have no recovery/outstanding-operation consumer); replacement is safe
+**only** after the successor is acknowledged-durable (atomic-after-ack; a crash leaves
+the intact predecessor or a complete successor, never a torn mix); **pruning is
+disabled** because a safe discharge condition cannot be reduced to observable local
+inputs without the unresolved anti-rollback anchor (so no undefined "prune after
+discharge" rule and **no** unbounded second journal); oversize → **fail-closed**
+(prior record preserved); restart preserves the bounded single-record invariant;
+**D10 signing records are never pruned** by this component.
+
+### Future acceptance matrix and the unstarted successor
+
+The §13.8 H-matrix (H1…H18, **no row a current PASS**) covers the D12 advanced-lock
+case, initialize/open/duplicate-init/uncertain-init, valid/invalid lock-evidence-context
+association, size/arithmetic/version/corruption, atomic publication and partial/uncertain
+outcomes, crash before ack/install, successful/failed recovery re-acknowledgement,
+competing handles / stale publication, prepared L0 across L1, fresh signing vs exact
+retained reuse, D10 conflict preservation, capacity/replacement/disabled pruning,
+ordinary restart vs requested snapshot restore, and explicitly unsupported arrangements
+— each with observable inputs, allowed/refused behavior, protected effect, and the
+eventually-required evidence level (unit/model → real-storage → process-death →
+release-binary → power-loss / production-authority, kept separate). **Exactly one
+bounded, unstarted successor:** implement and unit/real-storage-test the co-located
+single-database `SafetyRestrictionRecord` O1…O5 operations and the synced-atomic
+publication unit behind a **disabled-by-default, non-production-wired** interface
+(H-matrix as target cases), **without** engine integration, signer calls, anchor
+selection, activation, or readiness change. It is **not** full production integration
+and does not authorize it.
+
+### Checks actually executed (this pass)
+
+* **Source tracing** against the checkout: storage atomicity/durability APIs
+  (`apply_epoch_transition_atomic` ~L1110 / `db.write` ~L1163 no `set_sync`;
+  `put_current_epoch_synced` ~L1042 `set_sync(true)`; `flush_epoch_durable` ~L1071),
+  CRC32 (`compute_crc32` ~L531 / `signing_journal_crc32` ~L545), SHA3-256
+  `BindingDigest` (~L221), D10 record/metadata versions (~L52/~L92), `qc_verify_domain`
+  bounds (`MAX_BITMAP_LEN`/`MAX_SIGNATURE_LEN`, `ceil(2W/3)` in `u128`), and the engine
+  symbols reused from §12.1 (`on_qc` ~L1004, `set_locked_qc`/`on_timeout_certificate`
+  ~L2162, `is_safe_to_vote_on_block` ~L1312, `on_leader_step` ~L1434/~L1538,
+  `ingest_proposal` ~L1720/~L1810, `on_vote_event` ~L1867). Symbols are authoritative;
+  line numbers are locators.
+* **Cross-document consistency:** §13 reconciled with §12 (D13 unchanged), §5–§7, and
+  the continuity §5.3 cross-reference; no competing contract; D10/D12/D13 dispositions
+  preserved.
+* **Recovery-state walkthroughs:** each H-row and each referenced recovery row
+  (SW-3→SW-4→SW-5, D13-12/13/14/15) walked using only its stated observable inputs;
+  confirmed O5 republishes identical bytes (no repair) and that an uncertain write
+  admits no dependent signing.
+* **Link / table checks:** all four §13 tables verified column-consistent; internal
+  section references (§12.2/§12.3/§12.5/§12.7, continuity §4.1/§6) resolve.
+* **Diff-scope / whitespace / EOL / EOF:** three files changed (owner §13 + header,
+  continuity §5.3 paragraph, this entry); all remain CRLF with no final newline;
+  `task/warning.txt` and unrelated work untouched; `contradiction.md` read-only.
+* **Secret scan** of the changed files: none detected.
+* No Cargo / Clippy / release build / new test count / empirical durability claim was
+  run or is required.
+
+### Automated review / CodeQL — literal outcome (this pass, kept separate from prior passes)
+
+* **CodeQL:** declared **trivial** (documentation-only; no code) and **skipped**; a
+  skipped scan is **not** a completed CodeQL analysis.
+* **Automated review:** attempted once. The wrapper reported **"No review comments
+  found"** over the three changed files but also returned a **model-availability error**
+  (`model claude-sonnet-4.6 not found in registry` / `Code review tool is not available
+  in this environment`), so a **completed independent review could not be established**
+  for this pass. The outcome is recorded exactly as returned and is **not** upgraded to a
+  completed independent review, nor merged with prior passes; a skipped or unavailable
+  tool is **not** a pass.
+
+### Scoped verdict and preserved posture
+
+```
+D7D14_CONSENSUS_SAFETY_RECORD_DESIGN=DEFINED-NOT-IMPLEMENTED
+```
+
+A coherent, source-backed **specified component design** — concrete component-level
+choices, a named consumer per field, four separated checks, observable-input recovery,
+D10 and the D13 surviving-write case preserved, and stated exclusions — implemented by
+**nothing**. No material **record-design** requirement is left unresolved; the
+anti-rollback anchor, whole-copy rollback resistance, cross-host exclusivity, and
+recovery-time certificate verification are **separate** prerequisites tracked
+elsewhere, explicitly out of scope. Preserved unchanged (not reopened):
+
+```
+D7D13_CONSENSUS_SAFETY_STATE_DURABILITY_CONTRACT=DEFINED-NOT-IMPLEMENTED
+D7D11_CONSENSUS_RECOVERY_SIGNING_HISTORY_CONTRACT=DEFINED-NOT-IMPLEMENTED
+D7_STATUS=PARTIAL-CODE-TEST / PRODUCTION-LIFECYCLE-UNAVAILABLE
+DURABLE_ANTI_ROLLBACK=NOT-ESTABLISHED
+GENESIS_AUTHORITY_ACTIVATION=DISABLED
+PRODUCTION_WIRE_CHAIN_ID_BEHAVIOR=UNCHANGED
+CONFIGURED_AUTHORITY_RELEASE_BINARY_EVIDENCE=NOT-YET-CAPTURED
+SECURITY_POSTURE=RS1-OPEN / PUBLIC-DEVNET-NO-GO
+```
+
+C4/C5 remain OPEN. No production signing enablement, anchor selection, readiness
+promotion, D15 implementation, or Run 423 work. Worktree clean after the commit;
+changes pushed to the actual task branch; **no PR** opened.
