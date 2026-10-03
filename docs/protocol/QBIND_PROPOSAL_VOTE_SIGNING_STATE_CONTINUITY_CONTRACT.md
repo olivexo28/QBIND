@@ -700,8 +700,19 @@ a later `current_view`. Consequently the § 4.1 durable-before-sign reservation
 (step 4) is **not** the earliest barrier: before a signing decision may depend on
 a **newly raised** restriction, that restriction's supporting QC/TC material must
 first be durable and recoverable **as the lock** (D13 § 12.3 protected frontier).
-This adds only a cross-reference; no § 4.1 step, the conflict rule, the state
-machine, or the anchor requirement (§ 6) is changed.
+Two corrected points of that owner are reconciled here (not restated in full):
+the D13 **preservation rule is a recovery decision against the durable state a
+restarted process can observe**, not a runtime comparison against the (unobservable)
+pre-crash lock — exact lock restoration or an independently justified
+restriction-preservation relation discharges a **design-level** obligation, not a
+per-restart check; and the **decision-binding point is per route** (D13 § 12.3),
+because the state present when a `Vote`/`Proposal` object is **constructed** (after a
+self-vote may have formed a QC and raised the lock) is **not** necessarily the state
+that justified the decision, so a self-vote-generated QC must not retroactively
+justify its own vote. Which production rule supplies that frontier remains the D13
+§ 12.7 **unresolved** decision (disposition **PARTIAL**). This adds only a
+cross-reference; no § 4.1 step, the conflict rule, the state machine, or the anchor
+requirement (§ 6) is changed.
 
 ---
 
