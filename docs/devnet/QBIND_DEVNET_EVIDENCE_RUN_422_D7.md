@@ -12031,10 +12031,13 @@ and does not authorize it.
 
 * **CodeQL:** declared **trivial** (documentation-only; no code) and **skipped**; a
   skipped scan is **not** a completed CodeQL analysis.
-* **Automated review:** attempted once; the literal tool outcome is recorded here as
-  returned and is **not** upgraded to a completed independent review, nor merged with
-  prior passes. (See the run's tooling output; a skipped or unavailable tool is not a
-  pass.)
+* **Automated review:** attempted once. The wrapper reported **"No review comments
+  found"** over the three changed files but also returned a **model-availability error**
+  (`model claude-sonnet-4.6 not found in registry` / `Code review tool is not available
+  in this environment`), so a **completed independent review could not be established**
+  for this pass. The outcome is recorded exactly as returned and is **not** upgraded to a
+  completed independent review, nor merged with prior passes; a skipped or unavailable
+  tool is **not** a pass.
 
 ### Scoped verdict and preserved posture
 
