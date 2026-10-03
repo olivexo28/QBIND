@@ -1609,13 +1609,19 @@ consensus database** (the same RocksDB instance that already holds blocks/QCs/ep
 state) and are made visible in **one atomic publication unit**. The publication unit
 is a **single same-database `WriteBatch`** (the atomicity model of
 `apply_epoch_transition_atomic`, `storage.rs` ~L1110) committed with
-`WriteOptions::set_sync(true)` (the acknowledged-barrier model of
-`put_current_epoch_synced`, ~L1042) — i.e. one `db.write(batch, sync)` that is
-**both** atomic over its keys **and** an acknowledged durability barrier. This single
-operation does **not** exist today: `apply_epoch_transition_atomic`'s `db.write`
-(~L1163) is atomic but **not** synced, and `put_current_epoch_synced` is synced but
-single-key/epoch-only (§12.5 table). Combining the two patterns into one
-safety-scoped operation is a **proposed requirement**, not an existing API.
+`WriteOptions::set_sync(true)` — i.e. one `db.write(batch, sync)` that is **both**
+atomic over its keys **and** an acknowledged durability barrier. The **atomic-plus-sync
+pattern already exists**: D10's `put_signing_record_and_metadata_synced`
+(`storage.rs` ~L1417) commits a multi-key `WriteBatch` with `WriteOptions::set_sync(true)`
+via `db.write_opt(batch, &write_opts)` — atomic over its keys **and** `fsync`-acknowledged
+in one call. (`apply_epoch_transition_atomic`'s `db.write` ~L1163 is atomic but not
+synced, and `put_current_epoch_synced` ~L1042 is synced but epoch-only; the combined
+pattern is **not** absent — D10 already demonstrates it.) What does **not** exist today
+is a **safety-state-specific** interface built on that pattern, with the
+safety-record **validation and single-writer ownership** integration (§13.5); supplying
+**that** interface is the **proposed requirement**. The safety record must **not** be
+routed through the epoch API or the D10 signing API — it reuses the atomic-plus-sync
+**pattern** on its own keys, not those APIs.
 
 **Explicitly unsupported in the initial profile.** **Non-co-located** publication —
 the record in one store and its required supporting evidence/context in another, or
@@ -1665,12 +1671,12 @@ from the record's own claim. "Logical type" is prose; no concrete encoding is fi
 | `persistence_format_version` (`u16`) | This component's writer | Read/open structural gate | Must equal a supported constant, checked **before** any further decode; unsupported → refuse (no migration) | Stored directly | Proves which layout to decode. **Distinct** from the wire-message version and the signing-domain/preimage version and from D10's `SIGNING_RECORD_FORMAT_VERSION` / `SIGNING_METADATA_FORMAT_VERSION` (`signing_reservation_journal.rs` ~L52/~L92, both `u16=1`). Does **not** prove authenticity, authority, or freshness |
 | `network_genesis_id` + `authority_context_ref` (genesis identity + authorized-epoch validator-set descriptor) | Boot-time **pinned** genesis identity (`ExpectedGenesisIdentity::load_pinned`, `genesis_authority_record_correspondence.rs`) and the authorized-epoch validator set | Certificate **interpretation** (signer set / threshold) and the **context-binding** check | Must **match** the independently pinned runtime context; mismatch → refuse (`ValidationPolicyMismatch`-style, reusing the C3B correspondence shape) | **Obtained independently** — the record stores an identifier that is compared to the pinned context; the pinned context is **not** taken from the record | Proves which validator set/threshold would interpret the QC. Does **not** prove the certificate is authentic, nor that the authority is current/authorized (A/B separate). A snapshot-baseline identifier is **not** automatically an authenticated historical block id |
 | `lock_block_id` (`[u8;32]`) + `lock_view` (`u64`) | Engine `locked_qc` identity at the **effective** transition (`on_qc` ~L1004 / `set_locked_qc` via `on_timeout_certificate` ~L2162) | `is_safe_to_vote_on_block` (~L1312): the ancestor walk uses the **id**, the liveness test uses the **view** | 32-byte id; `view` ≤ a checked maximum; `view` **strictly greater** than the predecessor record's `view` (bookkeeping monotonicity, **not** anti-rollback) | Stored directly | Proves the **restriction identity + view** to enforce. Does **not** prove candidate ancestry is present, nor that the lock is verified or fresh. A higher **view** is **not** a stronger restriction and block id carries **no** numeric "dominance" (§2.1) |
-| `supporting_certificate` (logical `QuorumCertificate`, **or** `TimeoutCertificate` + its `high_qc`) | Engine evidence (`on_qc`'s `qc`; `on_timeout_certificate`'s `tc.high_qc`) | Recovery-time **evidence verification** (if required) and the association check | Signer-bitmap length ≤ `MAX_BITMAP_LEN`; per-signature length ≤ `MAX_SIGNATURE_LEN`; threshold `ceil(2W/3)` recomputed in `u128` (reuse `qc_verify_domain` bounds, D7-C3D) | Stored directly | Proves the **evidence that justified** the raise exists and is structurally bounded. Does **not** prove it is **authenticated**: a logical QC with an **empty signer list** is **not** authentication evidence, and verification against the trusted validator context is a **separate** step (T-TRUST-STORAGE), not performed on load today |
+| `supporting_certificate` (**wire** `QuorumCertificate`, `qbind_wire::consensus::QuorumCertificate` — the form carrying `signer_bitmap` + `signatures` + `suite_id`) | Engine evidence (`on_qc`'s `qc`; for a TC-derived raise, the `high_qc` **in wire form**) | Structural threshold observation + the association check; recovery-time **signature verification** only if wired (stage 2) | Signer-bitmap length ≤ `MAX_BITMAP_LEN` (=8192); `signatures.len()` ≤ `MAX_SIGNATURE_COUNT` (=`u16::MAX`); per-signature length ≤ `MAX_SIGNATURE_LEN` (=`u16::MAX`); threshold `ceil(2W/3)` recomputed in `u128` (reuse `qc_verify_domain` bounds + constants, D7-C3D) | Stored directly | Proves the **evidence that justified** the raise exists and is structurally bounded. The **logical** `QuorumCertificate` (`qc.rs`: `block_id`/`view`/`signers` only) **cannot** be stored here because it carries **no** cryptographic material; the **wire** form is required so stage-2 verification is even possible. A certificate with an **empty signer list** fails the structural threshold (`ceil(2W/3) ≥ 1`) and is refused **without** cryptography; full signature verification against the trusted validator context is a **separate** stage (T-TRUST-STORAGE), not performed on load today. **TC support (stated honestly):** only a TC whose `high_qc` is available **in wire form** is recovery-verifiable via the supporting QC; there is **no** wire `TimeoutCertificate` type and **no** TC/`signed_timeouts` domain verifier today, so a TC whose only form is **logical** is **not** recovery-verifiable — that case is a **material design gap** (§13.9), **not** invented evidence |
 | `evidence_lock_binding` (SHA3-256 digest over {`lock_block_id`,`lock_view`, `supporting_certificate`, `authority_context_ref`}) | Writer at publication (reuse `BindingDigest`/`Sha3_256`, `signing_reservation_journal.rs` ~L221) | Read/validate: **recompute and compare** | 32-byte; recomputed digest must equal the stored digest from the **re-derived** inputs | Stored directly (digest); its **inputs** are re-derived, not trusted from the digest | Proves the stored certificate/context **corresponds** to the stored lock (integrity/association). Does **not** reconstruct the committed bytes or trusted context, and is **not** authentication, authorization, or freshness (a digest ≠ a signature; §5 X3) |
-| `committed_state_assoc` (committed block id + height anchor) | Engine committed baseline at the transition | Anchoring the lock in **recovered committed state** (§5 X1) | Height via checked arithmetic; must be **consistent** with recovered committed state on open | **Obtained independently** — compared against recovered committed state; stored as a reference | Proves the lock's **relation to the committed baseline**. Does **not** prove ancestry of arbitrary candidates (that is per-candidate, below) |
+| `committed_state_assoc` (committed block id + height anchor) | Engine committed baseline at the transition | Anchoring the lock in **recovered committed state** (§5 X1) | **Comparison relation (explicit):** the stored anchor `(id, height)` must name a block that is **present in the recovered committed history** at that height (equal id at the anchored height), with `height` via checked arithmetic; the recovered committed baseline **may legitimately be at or beyond** the anchor height (committed progress since the last lock publication is **expected and allowed**), but the anchored block must still be on the recovered committed chain; if the anchor block is **absent** from recovered committed state or the height is **inconsistent**, the comparison **cannot be established** → **refuse** | **Obtained independently** — compared against recovered committed state; stored as a reference | Proves the lock's **relation to the committed baseline**. Does **not** prove ancestry of arbitrary candidates (that is per-candidate, below), and a later committed height does **not** by itself invalidate the anchor |
 | `publication_revision` (`u64`, monotonic) + optional `predecessor_ref` | Writer (single-writer counter) | Ownership **stale-work fencing** (§13.5) and open's **authoritative-record selection** | Strictly increasing under the single writer; checked arithmetic; wrap → **refuse** (no silent reuse) | Stored directly | Proves **ordering among this host's own publications** (local bookkeeping). Does **not** prove whole-copy freshness or anti-rollback — a local revision/counter is **not** an anchor (§12.5; continuity §6.3) |
 | `integrity_checksum` (CRC32 over the record payload) | Writer (reuse `compute_crc32` / `signing_journal_crc32`, `storage.rs` ~L531/~L545) | Read: **accidental-corruption** detection | 4-byte; recomputed checksum must match | Stored directly | Proves **accidental-corruption** detection (T-INTEG). Does **not** prove authenticity or authorization (a CRC is **not** a MAC) |
-| `bounds_metadata` (declared lengths / counts for the variable-length members) | Writer | Read decode gate | Every declared length ≤ its fixed maximum; total record size ≤ a fixed cap; all offset/length arithmetic **checked** (no wrap) | Stored directly | Proves the record is **structurally bounded** so decode cannot over-read. Does **not** prove any semantic property |
+| `bounds_metadata` (declared lengths / counts for the variable-length members) | Writer | Read decode gate | **Concrete bounds, not “fixed maxima”:** `signer_bitmap.len()` ≤ `MAX_BITMAP_LEN` (8192); `signatures.len()` ≤ `MAX_SIGNATURE_COUNT` (`u16::MAX`=65535); per-signature ≤ `MAX_SIGNATURE_LEN` (`u16::MAX`=65535); `lock_block_id`/`committed id`/digests fixed at 32 bytes; `lock_view`/`publication_revision` are `u64` with **checked** increments (wrap → refuse); total record size ≤ a declared `MAX_SAFETY_RECORD_BYTES` constant **to be fixed by the successor**. The purely structural worst case is dominated by `MAX_AGGREGATE_SIGNATURE_BYTES = MAX_SIGNATURE_COUNT × MAX_SIGNATURE_LEN` (≈ 4.29 GB) — **not a safe allocation target**; the **real** deployment cap is derived from the authorized validator-set size `W` (`signatures.len()` ≤ `W`, aggregate bytes ≤ `W ×` per-signature cap), checked against the pinned context. All offset/length arithmetic is **checked** (no wrap) | Stored directly | Proves the record is **structurally bounded** so decode cannot over-read. Does **not** prove any semantic property. The u16×u16 product is an honest **allocation-bound limitation**, not a usable buffer size |
 
 **Per-candidate ancestry is deliberately NOT a stored field.** The record stores the
 **locked block identity + view** (required at startup) and the committed-state
@@ -1687,29 +1693,51 @@ reconstructed by this component.
 
 ### 13.3 Source-representation tracing and the four separated checks
 
-**Four checks are distinct and must not be conflated.** The record design keeps
-these as separate stages; passing an earlier stage never implies a later one:
+**Four checks are distinct and must not be conflated.** The record design keeps these
+as separate stages; passing an earlier stage never implies a later one, and an
+explicitly **unverified** result **must not** silently satisfy a prerequisite that
+requires a **verified** one:
 
-1. **Structural decoding** — `persistence_format_version` + `bounds_metadata` +
-   `integrity_checksum` (CRC32). Detects unsupported layout / oversize / accidental
-   corruption. Proves **nothing** about evidence or authority.
-2. **Evidence verification** — verifying the `supporting_certificate`'s signatures
-   against the trusted validator context (the D7-C3D `verify_quorum_certificate_with_domain`
-   shape). **Separate**; **not** performed on load today (T-TRUST-STORAGE). An
-   empty-signer QC fails this stage; it is not satisfied by a present-but-unverified
-   certificate, a digest, or a comment.
-3. **Context binding** — `network_genesis_id` / `authority_context_ref` match the
-   **independently pinned** genesis + validator context; and `evidence_lock_binding`
-   recomputes. Proves association/interpretability, **not** authenticity.
+1. **Structural decoding (structural observation)** — `persistence_format_version` +
+   `bounds_metadata` + `integrity_checksum` (CRC32) + the **structural threshold
+   observation** of the certificate (signer-count / bitmap bounds and `ceil(2W/3) ≥ 1`).
+   Detects unsupported layout / oversize / accidental corruption, and refuses an
+   **empty-signer** certificate **structurally** — zero signers cannot meet the
+   threshold, so this needs **no** cryptography. Proves **nothing** about signature
+   authenticity or authority.
+2. **Evidence verification (verified evidence)** — verifying the **wire**
+   `supporting_certificate`'s **signatures** against the trusted validator context (the
+   D7-C3D `verify_quorum_certificate_with_domain` shape, which consumes the **wire** QC).
+   **Separate**; **not** performed on load today (T-TRUST-STORAGE). It is **not**
+   satisfied by a present-but-unverified certificate, a CRC, a digest, or a comment; the
+   empty-signer certificate refused at stage 1 could never reach a verified result.
+3. **Context binding (context / association validation)** — `network_genesis_id` /
+   `authority_context_ref` match the **independently pinned** genesis + validator
+   context; and `evidence_lock_binding` recomputes. Proves association/interpretability,
+   **not** authenticity.
 4. **Current authorization (A) / current-authority freshness (B)** — owned by the
    authority-lifecycle contract; **never** granted by any check here, however many of
    stages 1–3 pass.
 
+**Durability acknowledgement and eligibility are two further, distinct levels.** The
+O4/O5 `fsync`-acknowledged **durability** barrier is an existence/persistence result
+(the bytes are durable), **not** a verification result: O5's “effective” outcome is a
+**durability** acknowledgement of an already-validated record, **never** an
+authentication result. **Eligibility for protected recovery** then still requires the
+stage-2 verified evidence and the stage-4 current authorization. Consequently an
+explicitly **unverified** stored certificate (stage 2 not run) is carried as
+**unverified** and must **not** be treated downstream as if it satisfied a
+verified-evidence prerequisite, no matter how many of stages 1, 3, and the durability
+barrier passed.
+
 **Source-representation facts carried from §2.1/§12.6 (so the record cannot
 over-claim).**
 
-* A logical QC with **empty signer material** is **not** authenticated certificate
-  evidence (stage 2 would reject it).
+* A certificate with **empty signer material** is **not** authenticated certificate
+  evidence and is refused **structurally at stage 1** (zero signers cannot meet
+  `ceil(2W/3) ≥ 1`), before any stage-2 cryptography.
+* The **logical** QC (`qc.rs`: `block_id`/`view`/`signers`) carries **no** signatures;
+  only the **wire** QC can be stage-2 verified, so the wire form is what is persisted.
 * A **digest** (`evidence_lock_binding`, `BindingDigest`) does **not** reconstruct
   the bytes or the trusted context it commits to; it only re-compares them.
 * A **snapshot baseline identifier** is **not** automatically an authenticated
@@ -1730,8 +1758,11 @@ required input, use is refused — no input is invented).**
 * **Decision→evidence binding.** Action/operation types carry **only** header fields
   and do **not** carry the lock/evidence that justified a decision (§12.3); binding
   them is a proposed requirement (§13.6), not an existing capability.
-* **The synced-atomic publication API** (§13.1) does **not** exist; it must **not**
-  silently reuse the epoch-only synced API or the D10 journal's synced API.
+* **The safety-scoped synced-atomic publication interface** (§13.1) does **not** exist,
+  although the underlying **atomic-plus-sync pattern does** (D10's
+  `put_signing_record_and_metadata_synced`, `storage.rs` ~L1417). The missing element is
+  the **safety-state-specific** interface with its validation/ownership integration; it
+  must **not** be routed through the epoch-only synced API or the D10 journal's API.
 
 ### 13.4 Distinct logical operations (initialize / open / read-validate / publish / re-acknowledge)
 
@@ -1747,9 +1778,12 @@ reset, or migration.
 * *Preconditions:* the target slot holds **genuinely no** established safety state
   (not merely an empty directory — see below). Any existing unrelated / partial /
   legacy / malformed / unsupported state → **refuse** (no overwrite).
-* *Allowed writes:* the initialization metadata **and**, atomically with it, either a
-  representable **bootstrap no-lock marker** (below) or nothing beyond the metadata —
-  in **one** atomic unit so the metadata and the initial record cannot diverge.
+* *Allowed writes:* the initialization metadata **and**, atomically with it, an
+  explicit initial **record** — **always** the `BootstrapNoLock` variant at first
+  initialization (below) — in **one** atomic unit. The “metadata but no record” option
+  is **removed**: this component uses the **one coherent layout** in which initialized
+  metadata is **never** written without an associated record (resolving the prior O1/
+  invariant conflict). So the metadata and the initial record can never diverge.
 * *Success:* an established, openable store with no admitted signing.
 * *Failure:* refuse on any pre-existing or unsupported state; no partial store left
   claimed as initialized.
@@ -1777,11 +1811,17 @@ reset, or migration.
 * *Inputs:* the durable bytes.
 * *Preconditions:* a candidate record is present.
 * *Allowed writes:* **none**.
-* *Success:* a structurally-decoded, bounds-checked, CRC-valid, association-bound
-  record (stages 1 and 3 of §13.3; stage 2 only if recovery verification is wired).
-* *Failure:* any stage-1/stage-3 failure → **refuse** (frontier not reached).
+* *Success:* a structurally-decoded, bounds-checked, CRC-valid, **structurally
+  threshold-observed** (non-empty signer set), association-bound record (stages 1 and 3
+  of §13.3). Stage 2 signature verification runs **only** if recovery verification is
+  wired; when it does not run, the record is returned explicitly flagged **unverified**
+  and must **not** satisfy any verified-evidence prerequisite downstream.
+* *Failure:* any stage-1 failure (including an **empty-signer** certificate, refused
+  **structurally**) or any stage-3 association/context failure → **refuse** (frontier
+  not reached).
 * *Uncertainty:* a readable byte is **not** an acknowledged write (INV-R7); validity
-  of bytes is **not** evidence a former acknowledgement was received.
+  of bytes is **not** evidence a former acknowledgement was received; an **unverified**
+  result is **not** upgraded to verified by being durable or association-bound.
 
 **(O4) Publishing an eligible transition — `publish_transition`.** (Detailed in §13.5.)
 * *Inputs:* the engine's computed higher-view lock + its supporting certificate +
@@ -1797,17 +1837,37 @@ reset, or migration.
   stays blocked until O2/O5 re-establish state.
 
 **(O5) Re-acknowledging an identical recovered publication — `reacknowledge_recovered`.** (Detailed in §13.5.)
-* *Inputs:* a **valid, complete** surviving record read by O3 and the pinned context.
-* *Preconditions:* O3 validated the surviving record; **no** process-local
-  acknowledgement knowledge is required or used.
-* *Allowed writes:* a **synced re-publication of the identical validated bytes** —
-  the recovery durability operation. It must **not** alter, repair, or rewrite content;
-  identity is checked by re-serializing the validated record and comparing it
-  **byte-for-byte** (equivalently, matching `integrity_checksum` + `evidence_lock_binding`)
-  against the surviving bytes before re-acknowledging.
-* *Success:* the surviving transition becomes **effective** (SW-4 / D13-14).
-* *Failure / uncertainty:* **refuse** (SW-5 / D13-15); never treat readable bytes as
-  effective.
+* *Inputs:* the **complete** recovered publication (the whole O3-validated record and
+  all of its supporting material), the **independently supplied** pinned context, and
+  the **expected `publication_revision`**. No process-local acknowledgement knowledge is
+  an input.
+* *Preconditions:* O3 validated the surviving record; the owner holds the
+  serialization boundary that protects re-publication (below); the expected revision is
+  supplied.
+* *Allowed writes:* a **synced re-publication of the identical validated bytes** — the
+  recovery durability operation. It must **not** alter, repair, or rewrite content: it
+  does **not** change the `publication_revision`, the initialization/bootstrap state,
+  the association fields, or any supporting material. Identity is established by
+  comparing the **complete authoritative content** (the whole re-serialized validated
+  record and its supporting material) against the **currently stored publication**,
+  under the owner/serialization boundary, **before** re-acknowledging. This is a
+  **complete-content** comparison, **not** an equivalence to matching
+  `integrity_checksum` + `evidence_lock_binding`: the CRC32 covers only accidental
+  corruption and the SHA3-256 `evidence_lock_binding` covers only the selected bound
+  fields, so **neither, nor both together, establishes complete publication identity**.
+  The checksum and the binding are retained as **additional** corruption/association
+  checks over their own inputs; no new cryptographic construction is introduced.
+* *Refusal:* refuse on **stale** input (the stored current revision no longer matches
+  the expected revision — e.g. a newer publication exists) or on any content
+  **mismatch** between the recovered and the currently stored publication.
+* *No-overwrite-of-newer:* because the comparison and the re-publication both occur
+  under the single owner boundary against the **currently stored** publication and the
+  expected revision, a **newer** publication cannot be overwritten by an older recovered
+  one in the window **between** the comparison and the re-publication.
+* *Success:* the surviving transition becomes **effective** (SW-4 / D13-14) only after
+  O5's own synced durability acknowledgement.
+* *Failure / uncertainty:* a **failed or uncertain** durability acknowledgement returns
+  **failure** — **refuse** (SW-5 / D13-15); never treat readable bytes as effective.
 
 **Edge cases addressed explicitly.**
 
@@ -1827,14 +1887,66 @@ reset, or migration.
   **atomically with** the initial record (one unit) so a reader can never see metadata
   claiming "initialized" without the associated record, or vice versa.
 
-**Bootstrap no-lock state — representable, and distinct from missing.** An initial
-**no-lock** state (a validator that has legitimately not yet locked) is
-**representable** as an explicit bootstrap marker inside an established store — it is
-**distinct** from *missing established state* (which O2 refuses). The external
-initialization prerequisite (the pinned genesis/validator context) must be present;
-the component **does not fabricate** a QC, epoch, or authorization, and representing
+**Coherent initialization layout — two explicit variants (resolves the O1/invariant
+conflict).** An established store always holds metadata **and** exactly one record, in
+one of **two** explicit variants; there is no third “metadata-only” shape:
+
+* **`BootstrapNoLock` variant** (a validator that has legitimately not yet locked).
+  * *Required fields:* `persistence_format_version`, the `network_genesis_id` +
+    `authority_context_ref` (matched against the pinned context), an explicit
+    bootstrap discriminant, `publication_revision` = the **initial** revision, and
+    `integrity_checksum` + `bounds_metadata`.
+  * *Absent fields:* `lock_block_id` / `lock_view`, `supporting_certificate`,
+    `evidence_lock_binding`, and `committed_state_assoc` are **absent by variant** (not
+    zeroed-and-claimed): the decoder requires them to be absent for this variant and
+    present for `Locked`.
+* **`Locked` variant** (an effective lock has been published).
+  * *Required fields:* **all** §13.2 fields, including `lock_block_id` / `lock_view`,
+    the wire `supporting_certificate`, `evidence_lock_binding`, and
+    `committed_state_assoc`.
+  * *Absent fields:* none; a missing required field → **refuse** (stage 1).
+
+**Revision rules.** `publication_revision` starts at a fixed **initial** value in
+`BootstrapNoLock` and is a `u64` incremented by **checked** arithmetic on every O4
+publication; **exhaustion** (wrap) → **refuse** (no silent reuse), never a reset.
+
+**First transition to a legitimate view-zero lock (no fabricated predecessor).** The
+first `Locked` publication raises from `BootstrapNoLock` to a genuine view-zero (or
+first legitimate) lock using the engine's **actual** first `locked_qc` and its wire
+supporting certificate; the component **fabricates no** predecessor QC, epoch, or
+authorization to “justify” the first lock. The monotonic-`view` rule applies from the
+bootstrap baseline (the first lock's `view` is simply the first stored lock view; there
+is no synthetic prior lock to out-rank).
+
+**O2/O3/O5 for both variants.** O2 opens either variant from durable state; O3
+validates the **variant-correct** field set (absent fields required absent for
+`BootstrapNoLock`, all present for `Locked`); O5 re-acknowledges either variant by the
+**complete-content** comparison of §13.4 (it preserves the variant and its revision and
+repairs nothing). A `BootstrapNoLock` store admits **no** dependent signing until a
+`Locked` record is effective.
+
+**Duplicate and survived-but-unacknowledged initialization.** A second O1 over **any**
+observable established state (either variant) → **refuse**. An initialization whose
+write **survived** despite a returned error is decided by a later O2 from the durable
+state (open the survived valid record, or refuse if partial/malformed); O1 is **not**
+re-run to “fix” it.
+
+**Missing / partial / malformed / unsupported / inconsistent established state.**
+Missing-but-expected established state → O2 **refuses** (no auto-init); partial /
+malformed / unsupported-version / variant-inconsistent (e.g. a `Locked` discriminant
+with an absent `lock_block_id`, or a `BootstrapNoLock` discriminant carrying lock
+fields) → **refuse** (fail-closed). These stay **distinct** from a valid
+`BootstrapNoLock` state and from a valid prior `Locked` publication.
+
+**Absence is scoped to this component's owned state.** “Genuine absence” (O1's
+precondition) means **no established safety record in this component's own owned
+namespace** — **not** that the whole consensus DB or unrelated namespaces are empty; an
+empty directory is **not** an unused validator. The external initialization
+prerequisite (the pinned genesis/validator context) must be present; representing
 no-lock **does not** establish that production first use is legitimate (that is A/B,
-separate).
+separate). `initialize` and `open` stay **separate**; there is **no** automatic
+adoption, repair, reset, or migration, and local absence plus a pinned context does
+**not** prove a validator has never operated or authorize production first use.
 
 ### 13.5 Publication, recovery, durability contract, and ownership/concurrency
 
@@ -1880,9 +1992,17 @@ matrix SW-1…SW-8 and the §12.5 rows D13-1…D13-15, which remain authoritativ
   after the shared gates (SW-1).
 
 **The recovery operation does not silently repair.** O5 **republishes identical
-validated bytes** and **checks identity** (byte-for-byte / checksum + binding) before
-re-acknowledging; it never edits, truncates, or "fixes" content. If identity cannot be
-established, it **refuses** — it does not synthesize a corrected record.
+validated bytes** and establishes identity by a **complete-content comparison** of the
+whole recovered publication against the **currently stored** publication under the
+owner boundary before re-acknowledging; it never edits, truncates, or "fixes" content,
+and it does **not** change the revision, initialization state, association fields, or
+supporting material. The `integrity_checksum` and `evidence_lock_binding` are retained
+as **additional** corruption/association checks over their own inputs only — matching
+them is **not** equivalent to byte-for-byte publication identity (a CRC detects
+corruption; the binding covers selected fields; neither establishes complete identity).
+If complete identity cannot be established, or the stored current revision no longer
+matches the expected revision (a newer publication exists), O5 **refuses** — it does
+not synthesize a corrected record and does not overwrite a newer publication.
 
 **The surviving-write case is preserved (D13).** Recovery **cannot** use knowledge of
 whether a former caller received an acknowledgement; a valid surviving publication is
@@ -1936,18 +2056,50 @@ safety-state prerequisite, and the **proposed missing interface** (all binding i
 **Prepared-decision policy across an L0→L1 transition (stated explicitly, not left to
 scheduling).** A decision prepared under effective lock **L0** when an **L1**
 transition is pending or becomes effective before external signing/reuse is handled
-by **defined checks**, not an unstated assumption:
+by **defined checks**, not an unstated assumption. The L0 eligibility inputs the
+decision needs are **not** re-read from disk after replacement and are **not**
+reconstructable from D10's records (D10's `BindingDigest` is an opaque one-way digest
+over the preimage/position; it does **not** carry L0's `lock_block_id`/`lock_view` or
+supporting certificate — §13.2, `signing_reservation_journal.rs` ~L190/~L281). They are
+therefore captured **at decision time** as a **bounded, immutable in-memory evidence
+reference** (the L0 lock identity+view and the supporting-evidence/context reference
+the check used), carried with the prepared operation for **its own lifetime only** and
+never written as a second disk generation (§13.7):
 
-* **Within the same event (self-vote-generated L1).** The L1 raise produced while
-  processing the event is recorded **separately** and the decision stays bound to
-  **L0**; L1 **must not** retroactively justify it. If the decision is not valid under
-  L0's durable record, it is **rejected** (not rescued by L1).
+* **Within the same event (self-vote-generated L1).** The decision's L0 eligibility
+  check is the one captured at decision time against the **then-effective L0** record;
+  the L1 raise produced while processing the event is recorded **separately** and the
+  decision stays bound to **L0**; L1 **must not** retroactively justify it. If the
+  decision was not valid under that captured L0 eligibility, it is **rejected** (not
+  rescued by L1). No failure here authorizes a **fallback** signing under L0.
 * **Across events (an externally-driven L1 became effective before signing/reuse).**
-  The prepared L0 decision is **blocked** until revalidated; it is **permitted only
-  if** re-checking `is_safe_to_vote_on_block` for that **exact** candidate against the
-  now-effective **L1** durable record (and the supplied per-candidate ancestry) passes;
-  otherwise it is **rejected**. Preference is **explicit serialization and
-  conservative refusal** over any concurrency machinery.
+  The prepared L0 decision is **blocked** until revalidated; the captured L0 in-memory
+  evidence is used only to identify the **exact** prepared candidate, **not** to
+  authorize it under L0. It is **permitted only if** re-checking `is_safe_to_vote_on_block`
+  for that **exact** candidate against the now-effective **L1** durable record (and the
+  supplied per-candidate ancestry) passes; otherwise it is **rejected**. Preference is
+  **explicit serialization and conservative refusal** over any concurrency machinery.
+* **Pending or uncertain publication of L1.** While the L1 publication is pending or its
+  acknowledgement is uncertain, the prepared work stays **blocked** and admits **no**
+  dependent signing until O2/O3/O5 re-establish a durable effective record; no partial
+  or uncertain L1 relabels or releases the protected work.
+* **Across process death.** The bounded in-memory L0 evidence and every prepared
+  operation are **volatile** and are **not** reconstructed on restart (`voted_in_view`
+  is likewise lost, D7-D2); only the single durable authoritative record survives. A
+  prepared decision not yet durably reserved under D10 is simply **not** reconstructed —
+  it is re-derived from scratch under the recovered effective record (conservative
+  refusal), never resurrected under a stale L0.
+
+**Why authoritative-record replacement is safe under this lifecycle.** Replacing the
+single durable record with an acknowledged L1 successor never strands an outstanding
+consumer that needed L0's **disk** bytes: an outstanding prepared decision either
+carries its own captured **in-memory** L0 evidence (used for identity, then
+revalidated against L1 or rejected) or, if it did not survive, is not reconstructed at
+all. No outstanding consumer reads the superseded L0 disk record, so retaining exactly
+one authoritative disk generation is consistent with §13.6. This **local**
+replacement/retention safety is **separate** from the unresolved anti-rollback anchor
+(a newer local record is not whole-copy freshness; §13.9), and **no** D10 record is
+read, replaced, or pruned by this lifecycle.
 
 **D10 preserved (unchanged).** The §13 prerequisites sit **before** D10's reservation;
 D10's accepted properties are preserved: canonical position identity and
@@ -1962,9 +2114,15 @@ released by a safety-state transition.
 atomic transaction spanning the safety publication and the D10 writes is **not**
 required, because the two have an **ordering** relation, not a joint-atomicity one:
 for every supported crash state the safety record is durable **before** D10's
-reservation, so (i) crash **before** the safety barrier ⇒ no effective transition and
-no admitted D10 reservation (nothing to reconcile); (ii) crash **after** the safety
-barrier, **before** the reservation ⇒ valid safety state with no new reservation,
+reservation, so (i) crash **before the atomic storage publication completes** ⇒ nothing
+stored, no effective transition, no admitted D10 reservation (nothing to reconcile);
+(i′) crash **after the atomic publication but before/at the acknowledgement** ⇒ a
+**complete successor may be durably stored** while the live caller observed no success
+— this is **not** “nothing to reconcile”: it leaves no effective transition and no
+admitted D10 reservation for the live caller, but a restarted process must run **O3/O5**
+against the observed record (complete → O5; incomplete/malformed → refuse) and must not
+assume the predecessor remained stored; (ii) crash **after** the safety barrier,
+**before** the reservation ⇒ valid safety state with no new reservation,
 which is **not** unsafe (D13-12 / G8) — recovery proceeds to D10's own gates and
 synthesizes no reservation; (iii) crash **after** the reservation ⇒ D10's own
 durable-before-sign invariant governs (recovered `Reserved` = potentially signed).
@@ -1979,16 +2137,29 @@ record; pruning disabled.**
 * **One authoritative record, not multiple generations.** The component retains the
   single current **effective** `SafetyRestrictionRecord` (plus, transiently during
   O4, the in-progress publication until it is acknowledged or discarded). Recovery
-  needs only the **current** effective record and its supporting evidence/context;
-  older superseded safety records have **no** recovery or outstanding-operation
-  consumer, so no generation history is kept. Outstanding **prepared** D10 operations
-  depend on **D10's** records, not on retained older safety records.
-* **When replacement is safe.** A new record **replaces** the current one only via a
-  successful O4: validated eligibility, atomic synced publication, acknowledged
-  barrier, then in-memory install. The predecessor is logically superseded **only
-  after** the successor is acknowledged-durable — never before — so a crash during
-  replacement leaves either the intact predecessor or a complete successor (atomic
-  visibility), never a torn mix.
+  needs only the **current** effective record and its supporting evidence/context, so
+  no superseded **disk** generation is kept. An outstanding **prepared** decision that
+  still needs its originating L0 eligibility does **not** read a superseded L0 disk
+  record and is **not** satisfied by D10's records (D10's `BindingDigest` cannot
+  reconstruct L0's lock/evidence — §13.6): it carries a **bounded, immutable in-memory
+  L0 evidence reference** for its own lifetime only (§13.6), which is volatile and not
+  reconstructed across restart. This keeps a single authoritative **disk** generation
+  while still handling outstanding consumers; it adds **no** unbounded second journal
+  and leaves D10's own records untouched.
+* **When replacement is safe (storage publication vs caller acknowledgement vs
+  in-memory install, kept distinct).** A new record **replaces** the current one only
+  via a successful O4, whose stages are **separate**: (1) validated eligibility; (2)
+  **atomic storage publication** of the successor (the single `WriteBatch` — atomic
+  over its keys); (3) a **durability acknowledgement** that the live caller may or may
+  not observe; (4) **in-memory installation** admitting dependent work, reached only
+  when the caller observes success. Because step (2) is atomic, a crash during
+  replacement leaves either the intact predecessor **or** a **complete successor**,
+  never a torn mix — and a complete successor **can** be the durable outcome **even
+  when the original caller received an error or died before observing success** (step
+  (3)/(4) did not complete for that caller). The design therefore does **not** claim
+  the predecessor **necessarily remains stored** after an uncertain replacement; a
+  restarted process decides from the **observed** durable state via O2/O3/O5 and does
+  **not** discard, repair, or overwrite a possibly-published successor.
 * **Deletion / pruning — disabled.** Because a safe prune would require a defined
   **discharge condition** with observable inputs, and the only honest discharge here
   ("the superseded safety obligation is fully discharged") cannot be reduced to
@@ -2021,8 +2192,13 @@ only against an effective record (atomic visibility + acknowledged durability).
 never an acknowledged write, and a valid surviving transition is completed only via
 O5's fresh barrier. (INV-D14-4) Single-writer ownership with an expected-revision
 check prevents a stale handle from overwriting or re-acknowledging a newer record with
-an older one. (INV-D14-5) Exactly one authoritative record is retained; replacement is
-atomic-after-acknowledgement; pruning is disabled; D10 records are untouched.
+an older one. (INV-D14-5) Exactly one authoritative **disk** generation is retained;
+replacement's **storage publication is atomic** (a crash leaves the intact predecessor
+or a complete successor), **separate** from the caller-observed acknowledgement and the
+in-memory install — so a complete successor may be durable even when the caller
+observed no success, and the predecessor is **not** assumed to remain stored after an
+uncertain replacement; outstanding prepared L0 consumers are served by bounded
+in-memory evidence (§13.6); pruning is disabled; D10 records are untouched.
 (INV-D14-6) No operation performs automatic adoption, repair, reset, or migration, and
 none fabricates a QC/epoch/authorization. **No row below is an executed PASS.**
 
@@ -2033,9 +2209,9 @@ none fabricates a QC/epoch/authorization. **No row below is an executed PASS.**
 | H3 | `open` on missing-but-expected state | Absent record where established expected | REFUSE (no auto-init) | No fabricated state | unit/model |
 | H4 | Duplicate `initialize` / uncertain-init survival | Survived init bytes + a second O1 | REFUSE second O1; O2 opens the survived valid state | No duplicate/overwrite | process-death |
 | H5 | Valid lock/evidence/context association | Complete record, CRC+binding match, context pinned | ADMIT read/validate (stages 1,3) | Interpretable record | unit/model + real-storage |
-| H6 | Invalid association / context mismatch / empty-signer QC | Mismatched binding or empty signer list | REFUSE (stage 2/3) | No unverified adoption | unit/model |
+| H6 | Invalid association / context mismatch / empty-signer QC; unverified-but-durable certificate | Mismatched binding or empty signer list; or a present certificate with stage 2 not wired | Empty-signer → REFUSE **structurally** (stage 1 threshold); association/context mismatch → REFUSE (stage 3); present-but-unverified → carried **unverified**, never satisfying a verified prerequisite | No unverified adoption; no unverified result treated as verified | unit/model |
 | H7 | Size limits / checked arithmetic / unsupported version / corruption | Oversize, wrap, bad version, bad CRC | REFUSE at structural decode | No over-read / no migration | unit/model |
-| H8 | Atomic publication; partial / uncertain outcome | Torn or uncertain publication bytes | REFUSE (frontier not reached); fail-closed | No torn record admitted | real-storage + process-death |
+| H8 | Atomic publication; partial outcome vs complete-but-unacknowledged successor | A torn/partial record **or** a complete successor whose acknowledgement the caller never observed (“uncertain bytes” is **not** a stored format) | Torn/partial → REFUSE (frontier not reached); complete successor → O5 re-acknowledges; live uncertain result → fail-closed and block dependent work | No torn record admitted; a complete successor is neither discarded nor overwritten | real-storage + process-death |
 | H9 | Crash before acknowledgement or in-memory install | Surviving (possibly partial) record, no ack knowledge | Decide from observable record: complete→O5; else REFUSE | No effect from an unacknowledged write | process-death |
 | H10 | Successful recovery re-acknowledgement | Valid complete surviving record + O5 success | ADMIT; transition effective | Effective only after O5 barrier | process-death |
 | H11 | Failed recovery re-acknowledgement | Valid record + O5 failure/uncertainty | REFUSE (fail-closed) | No effect from readable bytes | process-death |
@@ -2043,9 +2219,14 @@ none fabricates a QC/epoch/authorization. **No row below is an executed PASS.**
 | H13 | Prepared L0 decision across an L1 transition | L0 decision + effective L1 record + candidate ancestry | Self-vote L1: bound to L0 / REJECT if invalid under L0; external L1: BLOCK then PERMIT only if revalidation passes, else REJECT | No retroactive justification | unit/model + process-death |
 | H14 | Fresh signing vs exact retained reuse | S6 vs S7 recovery state | Fresh: full prerequisites then reserve/sign; reuse: exact resend, zero signer calls, D10 checks | D10 semantics preserved | real-storage + process-death |
 | H15 | Preservation of D10 conflicts across the frontier | Conflicting binding at one position | REFUSE (no conflict released by a safety transition) | D10 conflict invariant intact | unit/model |
-| H16 | Capacity / replacement / disabled pruning | Oversize record; successful replacement; prune request | Oversize→fail-closed; replace atomically-after-ack; prune→disabled | Bounded single-record invariant | unit/model + real-storage |
+| H16 | Capacity / replacement / disabled pruning | Oversize record; successful replacement; complete-but-unacknowledged successor; prune request | Oversize→fail-closed (prior record preserved); replacement's **storage publication is atomic** and **separate** from the caller-observed acknowledgement (a complete successor may be durable even if the caller saw no success; predecessor not assumed retained); prune→disabled | Bounded single-disk-generation invariant | unit/model + real-storage |
 | H17 | Ordinary restart vs requested snapshot restore | Restart (record present) vs restore (no lock recovered) | Distinguish paths; REFUSE where no durable effective record is recovered | No unlocked resume above a baseline | real-storage + release-binary |
 | H18 | Explicitly unsupported arrangement | Non-co-located record/evidence split | REFUSE (unsupported in initial profile) | No partial cross-store publication | unit/model |
+| H19 | Complete identity change **outside** `evidence_lock_binding` | A field outside the digest's inputs differs between recovered and stored bytes, CRC and recomputed digest both still match | O5 **refuses** (complete-content comparison detects it; CRC+binding do **not**) | No non-identical re-acknowledgement | unit/model + process-death |
+| H20 | Stale O5 against a newer publication | A recovered older record + a newer stored publication (expected revision no longer current) | O5 **refuses** (no older-over-newer overwrite between comparison and re-publication) | Newer publication preserved | unit/model + real-storage |
+| H21 | Certificate/lock mismatch despite valid CRC and recomputed digest | Certificate fields do not semantically correspond to the lock id/view, yet CRC and digest recompute | REFUSE (semantic association, not a recomputed hash, is required) | No false semantic correspondence | unit/model |
+| H22 | Verified vs unverified evidence outcome | Present certificate, stage 2 not wired, used where a verified prerequisite is required | Carry **unverified**; REFUSE to treat it as satisfying a verified prerequisite | No unverified-as-verified | unit/model |
+| H23 | Committed-state comparison failure | Anchor block absent from recovered committed chain, or height inconsistent | REFUSE (comparison cannot be established); legitimate committed progress since the lock is **allowed** | No lock admitted off the committed chain | unit/model + real-storage |
 
 Evidence levels are kept **separate**: *unit/model → real-storage → process-death →
 release-binary → power-loss / production-authority*. Process termination is **not**
@@ -2053,27 +2234,36 @@ power-loss; an isolated writer is **not** configured production authority.
 
 ### 13.9 Existing vs missing, resolved vs unresolved, the single successor, and verdict
 
-**Existing mechanisms reused (patterns, not instances).** Same-database `WriteBatch`
-atomicity (`apply_epoch_transition_atomic`); `WriteOptions::set_sync(true)` acknowledged
-barriers (`put_current_epoch_synced`, `flush_epoch_durable`); CRC32 corruption
-detection (`compute_crc32` / `signing_journal_crc32`); SHA3-256 association binding
-(`BindingDigest`); distinct `u16` persistence-format versioning (the D10 record/metadata
-version precedent); bounded QC verification shape (`qc_verify_domain`, D7-C3D); pinned
-genesis/validator correspondence (`genesis_authority_record_correspondence`, C3A/C3B);
-the backend-shared single-writer ownership **shape** (D10).
+**Existing mechanisms reused (patterns, not instances).** The **atomic-plus-sync**
+publication pattern — a multi-key `WriteBatch` committed with `WriteOptions::set_sync(true)`
+— **already exists** in D10's `put_signing_record_and_metadata_synced` (`storage.rs`
+~L1417); same-database `WriteBatch` atomicity (`apply_epoch_transition_atomic`) and the
+epoch-only `set_sync(true)` barrier (`put_current_epoch_synced`, `flush_epoch_durable`)
+are the narrower precedents; CRC32 corruption detection (`compute_crc32` /
+`signing_journal_crc32`); SHA3-256 association binding (`BindingDigest`); distinct `u16`
+persistence-format versioning (the D10 record/metadata version precedent); bounded
+**wire**-QC verification shape (`qc_verify_domain`, D7-C3D); pinned genesis/validator
+correspondence (`genesis_authority_record_correspondence`, C3A/C3B); the backend-shared
+single-writer ownership **shape** (D10).
 
-**Missing implementation (named).** The synced-**atomic** safety-publication operation
-(neither existing synced nor existing atomic API is both); the safety-record
-reader/validator (O3) and recovery durability operation (O5); the engine→writer
-integration boundary and the decision→evidence binding; recovery-time certificate
-verification wiring (stage 2). **None** of these exists today.
+**Missing implementation (named).** **Not** the atomic-plus-sync primitive (D10 already
+combines them) but a **safety-state-specific** publication interface built on it with
+the safety-record **validation and single-writer ownership** integration — not routed
+through the epoch or D10 APIs; the safety-record reader/validator (O3) and recovery
+durability operation (O5); the engine→writer integration boundary and the
+decision→evidence binding; recovery-time certificate verification wiring (stage 2); and
+a **wire**-form TC verifier (no wire `TimeoutCertificate` type / `signed_timeouts`
+verifier exists, so logical-only TC evidence is not recovery-verifiable — a **material
+design gap**, §13.2). **None** of these exists today.
 
 **Resolved design choices (this pass).** One supported co-located single-database
 profile with a single synced-atomic publication unit (non-co-located **unsupported**);
-the bounded versioned field set with a named consumer per field; the five distinct
-operations and their uncertainty behavior; a representable bootstrap no-lock state
-distinct from missing state; recovery decided from observable durable records with an
-identity-checked, non-repairing re-acknowledgement; single-writer ownership with an
+the bounded versioned field set (concrete bounds, not "fixed maxima") with a named
+consumer per field; the five distinct operations and their uncertainty behavior; the
+**two explicit initialization variants** (`BootstrapNoLock` / `Locked`) in one coherent
+layout (no metadata-without-record); recovery decided from observable durable records
+with a **complete-content**, non-repairing re-acknowledgement (O5 identity is not a
+CRC+binding equivalence); single-writer ownership with an
 expected-revision fence; per-route decision binding and the explicit L0→L1
 prepared-decision policy; D10 preserved via **ordering**, not a spanning transaction;
 and **one authoritative record with pruning disabled and fail-closed capacity**.
@@ -2084,7 +2274,17 @@ discharge it, and pruning is disabled **because** a safe discharge condition dep
 it. Whole-copy rollback resistance (property 5) and cross-host/copied-key exclusivity
 (property 6) remain **UNMET**. Recovery-time certificate verification (stage 2) is a
 named integration obligation, **not** wired. These are prerequisites tracked elsewhere,
-not gaps in the record **design**, so the design itself is coherent.
+not gaps in the record **design**.
+
+**One material record-design gap is named honestly (TC recovery-verifiability).** For a
+**TC-derived** lock raise, recovery-time verification requires the supporting QC in
+**wire** form; there is **no** wire `TimeoutCertificate` type and **no**
+`signed_timeouts` domain verifier today (§13.2). The implementation successor must
+**resolve** this precise obligation — either persist the TC's `high_qc` in wire form as
+the verifiable supporting QC, or declare TC-derived locks **recovery-unverifiable** and
+**refuse** them on the protected recovery path — and must **not** invent TC signatures
+or a verifier. The QC-derived path is fully specified; only this TC sub-case is an open
+design choice for the successor.
 
 **Exactly one bounded, unstarted successor.** *Implement and unit/real-storage-test the
 co-located single-database `SafetyRestrictionRecord` publish/open/read-validate/
@@ -2093,17 +2293,21 @@ re-acknowledge operations behind a disabled-by-default, non-production-wired int
 as its target cases, **without** engine integration, signer calls, anchor selection,
 activation, or readiness change. This successor neither re-opens the (a)/(b) choice
 (resolved, §12.7) nor repeats D12; it builds the **storage component** whose logical
-design §13 fixes. It is **not** full production integration and does **not** authorize
+design §13 fixes, and it must **resolve the named TC recovery-verifiability design
+obligation** above (persist the wire `high_qc`, or refuse TC-derived locks on recovery)
+before that sub-case is implemented. It is **not** full production integration and does **not** authorize
 it: engine/decision binding, recovery-time certificate verification, the anti-rollback
 anchor, and activation remain **separate** later work, each gated independently.
 
 **Validation and verdict.** The §13 design makes concrete component-level choices
 (not merely "bounded/atomic/validated"), names a consumer for every field, separates
 the four checks, decides recovery from observable inputs, preserves D10 and the D13
-surviving-write case, and states its exclusions. No material **record-design**
-requirement is left unresolved (the unresolved items above are **separate**
-prerequisites, explicitly out of scope), so this pass reports a coherent specified
-component design, implemented by nothing:
+surviving-write case, and states its exclusions. The QC-derived record design is
+complete; **one** record-design obligation is named and left to the successor (TC
+recovery-verifiability, above), and the anti-rollback anchor / rollback resistance /
+cross-host exclusivity / stage-2 wiring remain **separate** prerequisites explicitly
+out of scope. This pass therefore reports a coherent specified component design, with a
+single named open sub-case, implemented by nothing:
 
 ```
 D7D14_CONSENSUS_SAFETY_RECORD_DESIGN=DEFINED-NOT-IMPLEMENTED

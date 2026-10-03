@@ -726,13 +726,19 @@ The **implementation-design** of the selected profile (a) record — the recover
 `SafetyRestrictionRecord` contents, its initialize/open/read-validate/publish/
 re-acknowledge operations, ownership/concurrency, retention, and engine/D10 binding
 — is owned by that contract's § 13 (D14), **not** restated here. It reconciles with
-§ 4.1 unchanged: the safety record is durable (one same-database atomic+`set_sync`
-publication unit) **before** D10's step-4 `reserve_for_sign`, D10 and the safety
-record are related by **ordering, not a spanning transaction**, and a recovered valid
-surviving record is completed only through a fresh identity-checked re-acknowledgement
-(D14 § 13.5). The record retains **one** authoritative generation with pruning
-**disabled** (fail-closed capacity), so no second journal is added and no D10 record is
-pruned. The design stays **DEFINED-NOT-IMPLEMENTED** (no safety-state persistence
+§ 4.1 unchanged: the safety record is durable (one same-database atomic +
+`set_sync(true)` publication unit — the **atomic-plus-sync pattern already exists** in
+D10's `put_signing_record_and_metadata_synced`; only the safety-state-specific
+interface is missing) **before** D10's step-4 `reserve_for_sign`; D10 and the safety
+record are related by **ordering, not a spanning transaction**; and a recovered valid
+surviving record is completed only through a fresh re-acknowledgement whose identity
+check is a **complete-content** comparison (**not** a CRC32-plus-`evidence_lock_binding`
+equivalence) against the currently stored publication, under the owner boundary and the
+expected revision, never overwriting a newer publication (D14 § 13.4/§ 13.5). The record
+retains **one** authoritative **disk** generation with pruning **disabled** (fail-closed
+capacity); an outstanding prepared L0 decision is served by **bounded in-memory** L0
+evidence (not a second disk generation, since D10's `BindingDigest` cannot reconstruct
+L0's lock/evidence), so no second journal is added and no D10 record is pruned. The design stays **DEFINED-NOT-IMPLEMENTED** (no safety-state persistence
 interface exists); the anti-rollback anchor (§ 6) remains **separate and unresolved**.
 This adds only a cross-reference; no § 4.1 step, the conflict rule, the state machine,
 or the anchor requirement (§ 6) is changed.
