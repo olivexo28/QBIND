@@ -709,10 +709,17 @@ per-restart check; and the **decision-binding point is per route** (D13 § 12.3)
 because the state present when a `Vote`/`Proposal` object is **constructed** (after a
 self-vote may have formed a QC and raised the lock) is **not** necessarily the state
 that justified the decision, so a self-vote-generated QC must not retroactively
-justify its own vote. Which production rule supplies that frontier remains the D13
-§ 12.7 **unresolved** decision (disposition **PARTIAL**). This adds only a
-cross-reference; no § 4.1 step, the conflict rule, the state machine, or the anchor
-requirement (§ 6) is changed.
+justify its own vote. Which production rule supplies that frontier is **now selected**
+by the owner — **profile (a)**, a durable, recoverable **safety-restriction record**
+persisted at each effective lock raise (D13 § 12.2/§ 12.7) — chosen over an
+independently justified reconstruction rule because the committed-QC reconstruction
+carries the demonstrated D12 gap; the owner's surviving-write / lost-acknowledgement
+case is closed from observable durable inputs (D13 § 12.3/§ 12.5), so exact pre-crash
+restoration is **not** treated as the only reachable outcome. The rule is selected but
+**not implemented** (no safety-state persistence interface exists — D13 § 12.5), so
+the owner token stays **DEFINED-NOT-IMPLEMENTED** and the anti-rollback anchor (§ 6)
+remains **separate and unresolved**. This adds only a cross-reference; no § 4.1 step,
+the conflict rule, the state machine, or the anchor requirement (§ 6) is changed.
 
 ---
 
