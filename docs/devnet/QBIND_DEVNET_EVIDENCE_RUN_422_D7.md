@@ -11380,7 +11380,7 @@ lock identity/certificate blocks signing **generally**.
 
 ### Durability boundary and protected frontier (summary)
 
-The seven events — receive evidence → update in-memory lock (immediate, not
+**[SUPERSEDED — corrected, not accurate as originally written; see the "D7-D13 frontier-resolution entry" below and §12.3 per-route ordering.]** The original uniform receive → update-lock → construct-action sequence quoted next was **corrected**: decision binding is **per route** — each production route (`ingest_proposal`, `on_leader_step`, received vote/QC, `on_timeout_certificate`, D10 fresh/reuse) has its own decision/eligibility point, and a self-vote-generated QC must not retroactively justify its own vote — not one uniform ordering. The events are retained only as the historical description. The seven events — receive evidence → update in-memory lock (immediate, not
 staged, no durable write) → construct unsigned action (view fixed) → durably
 reserve → sign → retain result → confirm/handoff — are kept distinct. The
 **protected frontier** is the acknowledged-durable point of the restriction's
@@ -11404,11 +11404,14 @@ correspondence observer is **not** reintroduced.
 
 ### Observable-state recovery decisions and trust boundaries
 
-The D13 recovery matrix (§12.5, rows D13-1…D13-11) covers valid/missing/present-
-but-unusable safety state, incomplete publication, uncertain writes, recovered
-`Reserved` (potentially-signed), retained `Signed` (exact resend only), safety
-state ahead of the committed baseline (refuse because safety is unestablished, not
-because a number matched), same-epoch older snapshot, internally-consistent
+**[SUPERSEDED in part — corrected, not accurate as originally written; see the "D7-D13 frontier-resolution entry" below and §12.5 row D13-8.]** The D13 recovery matrix (now §12.5, rows D13-1…D13-15) covers valid/missing/present-
+but-unusable safety state, incomplete publication, write-outcome uncertainty attributed by
+phase, recovered `Reserved` (potentially-signed), retained `Signed` (exact resend only), safety
+state ahead of the committed baseline (being ahead is **not** itself a refusal reason — a
+**validated** safety state with the required correspondence **may proceed**; refusal follows
+only from **unavailable** evidence or **demonstrated inconsistency**, never from a number
+matching — this corrects the earlier "refuse because safety is unestablished" wording),
+same-epoch older snapshot, internally-consistent
 whole-copy rollback (locally indistinguishable), and historical D8 `COMPLETE` with
 later legitimate progress (must not reapply old state). Trust boundaries (§12.6)
 are stated separately: accidental-corruption detection; cryptographic certificate
@@ -11427,7 +11430,7 @@ unchanged and was not edited.
   scheduling/liveness, including engine guards vs D10 durable protection); the
   corrected preservation rule; the refusal matrix and common gates; the D10 branch
   prerequisites; the storage atomicity-vs-durability table.
-* **Unresolved — design disposition PARTIAL (named, not disguised):** which
+* **[HISTORICAL — RESOLVED below]** Unresolved at the original revision (now **RESOLVED**: profile (a) selected — see the "D7-D13 frontier-resolution entry" and §12.7; the "PARTIAL" disposition no longer applies): which
   production rule supplies the §12.3 protected-frontier integration boundary — (a) a
   dedicated recoverable safety record at each lock raise (with atomicity/ordering vs
   D10), or (b) an independently justified reconstruction rule proving the §12.2
@@ -11446,10 +11449,14 @@ power-loss); **no row is marked PASS**. The completed D12 successor is recorded 
 historical completion — D12 already executes *lock advancement without commitment →
 unchanged stored baseline → reconstruction of the older lock* and retains the
 standalone no-commit test, so re-proposing that characterization would be a
-**duplicate** and is **withdrawn**. The single corrected unstarted successor is a
+**duplicate** and is **withdrawn**. **[SUPERSEDED — this successor is COMPLETED; see the "D7-D13 frontier-resolution entry" below.]** As originally written, the single corrected unstarted successor was a
 **design-resolution deliverable**: select and justify one of §12.7 (a)/(b) — the
-production rule that supplies the protected-frontier boundary — because the
-§12.2/§12.3 disposition is **PARTIAL** until it is resolved. D12 does not answer it
+production rule that supplies the protected-frontier boundary. That design-resolution is
+**now complete**: **profile (a) is selected** (§12.7), the §12.2/§12.3 frontier-rule
+disposition is **RESOLVED**, and the single remaining unstarted successor is instead to
+**specify profile (a)'s record at implementation-design granularity** (logical layout,
+cross-artifact publication/recovery protocol, initialization/opening semantics, and
+retention) — documentation-only, still unstarted. D12 does not answer it
 (it only demonstrated the gap). Output: the three authorized documents only
 (design/specification); **no** code, **no** new characterization tests, **no**
 promoted acceptance row. Production wiring, a new module/reader/persistence
@@ -11555,7 +11562,7 @@ implementation, activation, or Run 423 work).
   prior pass's partial/unavailable review.
 * **Scoped verdict.** `D7D13_CONSENSUS_SAFETY_STATE_DURABILITY_CONTRACT=DEFINED-NOT-IMPLEMENTED`
   for the coherent, source-backed scoped contract, with the §12.2/§12.3 frontier
-  decision disposition **PARTIAL**. Preserved unchanged: D8/D10/D12 verdicts,
+  decision disposition **PARTIAL at that pass** (subsequently **RESOLVED** — profile (a) — in the frontier-resolution entry below). Preserved unchanged: D8/D10/D12 verdicts,
   `D7D11_…=DEFINED-NOT-IMPLEMENTED`, `D7_STATUS=PARTIAL-CODE-TEST /
   PRODUCTION-LIFECYCLE-UNAVAILABLE`, `DURABLE_ANTI_ROLLBACK=NOT-ESTABLISHED`,
   `GENESIS_AUTHORITY_ACTIVATION=DISABLED`,
@@ -11695,3 +11702,114 @@ implementation, activation, or Run 423 / D14 work was performed.
   **completed independent review could not be established** for this pass either. The
   outcome is recorded exactly as returned and is **not** upgraded to a completed
   independent review, nor merged with prior passes.
+
+### D7-D13 recovery-table / evidence reconciliation entry (RUN 422 D7-D13 — D13-5 / G7 / SW-2; storage attribution; evidence supersession)
+
+A later **documentation-only** correction pass resolved the three remaining review
+findings in place (no PR, branch rename, force-push, rebase, history rewrite, code,
+test, dependency, schema, CLI, configuration, workflow, cryptographic,
+production-wiring, activation, or Run 423 / D14 work). Profile (a) selection and the
+single unstarted record-design successor are preserved; (a)/(b) is **not** reopened,
+D12 is not repeated, and the record is neither implemented nor its design begun.
+
+* **Actual branch / revision / object availability.** Actual branch
+  `copilot/copilotcopilotcopilotcopilotcopilotcopilotcopilotc-another-one`, used
+  **unchanged** (the task's reported branch
+  `copilot/copilotcopilotcopilotcopilotcopilotcopilotcopilotc-again` differs; the
+  supplied task branch is used as-is). Starting HEAD
+  `5da2820f8a40b3819cd86cfeb6b7788bcfa2ea02`; clean worktree before this pass; the
+  final pushed SHA is the last commit on the branch. Shallow single-branch clone
+  (`git rev-list --count HEAD` = 2; graft base `fd6a167b…`). The task's reviewed
+  revision `bf9420eeb360419f98681674d356a1453fbe17fd` was **absent** as an object on
+  open and became available only after an on-demand `git fetch --depth=1`; it then
+  resolves (`git cat-file -t bf9420…` → `commit`) and its tree content is
+  **identical** to the starting worktree (`git diff --stat bf9420… HEAD` empty),
+  yet it is **not** an ancestor of HEAD (`git merge-base --is-ancestor` fails).
+  Content correspondence is reported **separately** from ancestry; ancestry is
+  **not** manufactured from content equality. `task/warning.txt`, unrelated work, and
+  each file's CRLF / no-final-newline convention were preserved.
+* **Changed paths (authorized scope only).**
+  `…RECOVERY_SIGNING_HISTORY_CORRESPONDENCE_CONTRACT.md` (§2 inventory row,
+  §12.1 QC row, §12.3 SW-2 + protected-frontier paragraph, §12.5 D13-5,
+  §12.7 G7) and this evidence record. The continuity contract's §5.3
+  cross-reference was inspected and **left unchanged** (already accurate: profile (a)
+  selected, per-route decision binding, recovery against observable durable state,
+  surviving-write closed, DEFINED-NOT-IMPLEMENTED, anchor separate/unresolved).
+  `docs/whitepaper/contradiction.md` was not touched.
+* **A — observable recovery decisions.** **D13-5** no longer presents a former
+  caller's "uncertain writes (no acknowledged barrier)" as an observable durable
+  state; it is re-expressed by **phase**: a live operation knows its **own** failed /
+  uncertain write (fails closed then); a restarted process **cannot** observe a former
+  caller's acknowledgement and therefore decides only from observable inputs —
+  recovered record validity/completeness (D13-4/D13-13) and the outcome of its **own**
+  current recovery durability operation (D13-14 success / D13-15 fail-or-uncertain;
+  §12.3 SW-3…SW-5) — with no unconditional refusal on an unobservable former
+  acknowledgement. **G7** is aligned to the selected recovery rule
+  (incomplete/malformed/mismatched/unavailable publication → REFUSE; valid surviving
+  publication → no protected use before the **current** recovery barrier; barrier
+  succeeds → remaining S2–S5 / frontier / D10 prerequisites; barrier
+  fails/uncertain → REFUSE; an illustrative crash location frames the schedule but
+  is **not** an input to the restarted process); **G8** and D10/D13-12 are preserved.
+  **SW-2** states the refusal scope explicitly (blocks protected signing **and**
+  retained-result reuse; "keep L0" = preserve existing durable evidence, **not**
+  permission to fall back to L0 and continue signing; no delete/repair/overwrite/
+  discard; SW-1's valid-prior-state case unaffected; all shared recovery /
+  authorization / freshness / exclusivity / D10 gates intact).
+* **B — storage durability attribution (re-verified against the checkout).**
+  `apply_epoch_transition_atomic` (`storage.rs` ~L1110) commits a same-database
+  `WriteBatch` via `db.write` (~L1163) with **no** `set_sync` (atomic, **not** a
+  durability barrier); the D7-D8 restore-completion path
+  (`persist_restored_snapshot_epoch_durable`, `production_consensus_storage.rs` ~L716)
+  uses `put_current_epoch_synced` (`WriteOptions::set_sync(true)`, ~L1042) /
+  `flush_epoch_durable` (`flush_wal(true)`, ~L1071). The §2 current-epoch row no
+  longer carries a blanket "synced" attribution over both producers. The §12.1 QC
+  row now states that ordinary `put_block`/`put_qc`/`put_last_committed` (`db.put`,
+  no `set_sync`) persist bytes **without** an acknowledged sync barrier. §12.3's
+  "the only durability is incidental" is replaced by a distinction between
+  **incidental** committed-state persistence/reconstruction and the **absent**
+  dedicated, acknowledged safety-state durability channel. The §12.5
+  atomicity-vs-durability table remains authoritative and consistent.
+* **C — evidence reconciliation.** Three stale passages in the earlier D13 summary
+  were marked **superseded in place** with cross-references to the current rule: the
+  uniform receive → update-lock → construct-action sequence (corrected to per-route
+  decision binding, §12.3); the broad safety-ahead refusal (corrected — being ahead
+  is **not** itself a refusal reason; §12.5 D13-8; matrix now D13-1…D13-15); and the
+  "unresolved (a)/(b) / disposition PARTIAL" status and the "select and justify one of
+  (a)/(b)" successor (profile (a) is selected; the remaining successor is to specify
+  profile (a)'s record at implementation-design granularity, still unstarted). Each
+  passage is labelled as **corrected**, not as technically correct at its original
+  revision. Genuine historical facts (revision identities, commands/counts, executable
+  identities, tool outcomes and execution limitations) are preserved.
+* **Checks executed (this pass).** Source verification of the changed storage claims
+  against `storage.rs` / `production_consensus_storage.rs`; cross-section and
+  cross-document consistency (§2 / §12.1 / §12.3 / §12.5 / §12.7 and the
+  continuity §5.3 cross-reference); each affected recovery row (D13-5, SW-2, G7)
+  walked using only its stated observable inputs; confirmed SW-2 cannot authorize
+  fallback signing; confirmed no remaining operative uniform ordering, blanket sync
+  claim, or unresolved (a)/(b) status; Markdown table column counts and links,
+  diff-scope (two files; continuity unchanged), whitespace, CRLF, and no-final-newline
+  EOF verified; secret scan of the changed files run (none detected). No Cargo /
+  Clippy / release build or new test count was run or is required.
+* **Automated review / CodeQL — literal outcome (this pass, kept separate from prior
+  passes).** **CodeQL:** **skipped** — declared trivial (documentation-only; no code);
+  a skipped scan is **not** a completed CodeQL analysis. **Automated review:** the
+  wrapper reported **"No review comments found"** over the changed files but also
+  returned a **model-availability error** (`model claude-sonnet-4.6 not found in
+  registry`) and that the **review tool is not available in this environment**, so a
+  **completed independent review could not be established** for this pass either. The
+  outcome is recorded exactly as returned and is **not** upgraded to a completed
+  independent review, nor merged with prior passes.
+* **Scoped verdict and preserved posture.**
+  `D7D13_CONSENSUS_SAFETY_STATE_DURABILITY_CONTRACT=DEFINED-NOT-IMPLEMENTED` (the
+  frontier-rule decision stays **RESOLVED** — profile (a) — with the record
+  **not** implemented and its detailed design **unstarted**). Preserved unchanged:
+  the accepted D8/D10/D12 dispositions,
+  `D7D13_CONSENSUS_SAFETY_STATE_DURABILITY_CONTRACT=DEFINED-NOT-IMPLEMENTED`,
+  `D7D11_CONSENSUS_RECOVERY_SIGNING_HISTORY_CONTRACT=DEFINED-NOT-IMPLEMENTED`,
+  `D7_STATUS=PARTIAL-CODE-TEST / PRODUCTION-LIFECYCLE-UNAVAILABLE`,
+  `DURABLE_ANTI_ROLLBACK=NOT-ESTABLISHED`, `GENESIS_AUTHORITY_ACTIVATION=DISABLED`,
+  `PRODUCTION_WIRE_CHAIN_ID_BEHAVIOR=UNCHANGED`,
+  `CONFIGURED_AUTHORITY_RELEASE_BINARY_EVIDENCE=NOT-YET-CAPTURED`,
+  `SECURITY_POSTURE=RS1-OPEN / PUBLIC-DEVNET-NO-GO`. C4/C5 remain OPEN; no readiness
+  promotion or D14 implementation. Worktree clean after each commit; changes pushed to
+  the task branch; **no PR** opened.
