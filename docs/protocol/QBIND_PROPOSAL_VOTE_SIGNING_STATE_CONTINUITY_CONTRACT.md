@@ -738,7 +738,17 @@ expected revision, never overwriting a newer publication (D14 § 13.4/§ 13.5). 
 retains **one** authoritative **disk** generation with pruning **disabled** (fail-closed
 capacity); an outstanding prepared L0 decision is served by **bounded in-memory** L0
 evidence (not a second disk generation, since D10's `BindingDigest` cannot reconstruct
-L0's lock/evidence), so no second journal is added and no D10 record is pruned. The design stays **DEFINED-NOT-IMPLEMENTED** (no safety-state persistence
+L0's lock/evidence), so no second journal is added and no D10 record is pruned.
+**D7-D14 source-grounding reconciliation (owner-corrected, not restated here):** a
+TC/`signed_timeouts` evidence verifier **does** exist and is wired at NewView time
+(`verify_timeout_certificate_with_evidence`), but it is **not** a persisted-record
+recovery verifier and does not authenticate the TC `high_qc`'s constituent votes, so a
+TC-derived lock is persisted/enforced as a **restriction** yet carried **unverified**
+(D14 § 13.3A); the record now fixes **explicit semantic predicates** (certificate
+`block_id`/`round` vs lock id/view, context vs pinned runtime — a CRC/digest is **not** a
+substitute), a **checked `MAX_SAFETY_RECORD_BYTES`** size cap over the pinned
+validator-set parameters, and **bootstrap/no-commit** lock representations reached
+**non-circularly** from the durable no-lock state. The design stays **DEFINED-NOT-IMPLEMENTED** (no safety-state persistence
 interface exists); the anti-rollback anchor (§ 6) remains **separate and unresolved**.
 This adds only a cross-reference; no § 4.1 step, the conflict rule, the state machine,
 or the anchor requirement (§ 6) is changed.

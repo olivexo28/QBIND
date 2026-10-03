@@ -11903,7 +11903,7 @@ context, compared not trusted); `lock_block_id`+`lock_view` (stored directly);
 `supporting_certificate` (the **wire** QC carrying `signer_bitmap`+`signatures` — the
 logical `qc.rs` QC has **no** cryptographic material; bounded by `MAX_BITMAP_LEN`=8192 /
 `MAX_SIGNATURE_COUNT`=`MAX_SIGNATURE_LEN`=`u16::MAX`, `ceil(2W/3)` in `u128`; a TC whose
-only form is **logical** is **not** recovery-verifiable — a named material design gap);
+only form is **logical** is **not** recovery-verifiable — a named material design gap **[SUPERSEDED — see the “RUN 422 D7-D14 complete source grounding” correction entry below: a serialized `TimeoutCertificate` and a wired `verify_timeout_certificate_with_evidence` over `tc.signed_timeouts` DO exist (`timeout_verify.rs` ~L350 / `binary_consensus_loop.rs` ~L6892); the TC-derived rule is now selected as restriction-persisted / evidence-unverified, not a design gap]**);
 `evidence_lock_binding` (SHA3-256 `BindingDigest` over lock+certificate+context,
 recomputed on read); `committed_state_assoc` (checked against recovered committed
 state); `publication_revision` (monotonic local **bookkeeping**, not an anti-rollback
@@ -12179,7 +12179,9 @@ NOT-established; C4/C5 OPEN) and **not** edited.
   material design gap:** no wire `TimeoutCertificate` / `signed_timeouts` verifier exists,
   so a logical-only TC-derived lock is not recovery-verifiable — the successor must
   persist the wire `high_qc` or refuse TC-derived locks on recovery (no invented
-  signatures).
+  signatures). **[SUPERSEDED — see the “RUN 422 D7-D14 complete source grounding” correction entry below: a serialized `TimeoutCertificate` and a wired `verify_timeout_certificate_with_evidence` over `tc.signed_timeouts` DO exist (`timeout_verify.rs` ~L350 / `binary_consensus_loop.rs` ~L6892); the TC-derived rule is now selected as restriction-persisted / evidence-unverified, not a design gap]** The absence-of-verifier premise was **incorrect**: a wired
+  TC/`signed_timeouts` evidence verifier exists; the corrected rule carries TC-derived
+  evidence **unverified** while enforcing the restriction (no new verifier invented).
 * **E — Coherent bootstrap/initialization (RESOLVED).** One layout: initialized
   metadata is **never** written without an associated record. Two explicit variants
   (`BootstrapNoLock` / `Locked`) with required/absent fields each; initial revision with
@@ -12239,7 +12241,7 @@ unestablished); **bootstrap / view-zero / duplicate / survived** initialization;
   (`qc.rs` — `block_id`/`view`/`signers`, no crypto) vs wire QC
   (`qbind-wire/src/consensus.rs` — `signer_bitmap`/`signatures`/`suite_id`);
   `verify_quorum_certificate_with_domain` consumes the **wire** QC
-  (`qc_verify_domain.rs`); no wire `TimeoutCertificate`/`signed_timeouts` verifier exists;
+  (`qc_verify_domain.rs`); **[SUPERSEDED — see the “RUN 422 D7-D14 complete source grounding” correction entry below: a serialized `TimeoutCertificate` and a wired `verify_timeout_certificate_with_evidence` over `tc.signed_timeouts` DO exist (`timeout_verify.rs` ~L350 / `binary_consensus_loop.rs` ~L6892); the TC-derived rule is now selected as restriction-persisted / evidence-unverified, not a design gap]** a serialized `TimeoutCertificate` (`timeout.rs` ~L232) and the `verify_timeout_certificate_with_evidence` verifier over `tc.signed_timeouts` DO exist (the earlier “no verifier” statement is corrected);
   `BindingDigest`/`SigningDecisionRecord` (`signing_reservation_journal.rs` ~L190/~L281);
   bound constants `MAX_BITMAP_LEN`/`MAX_SIGNATURE_LEN`/`MAX_SIGNATURE_COUNT`/
   `MAX_AGGREGATE_SIGNATURE_BYTES`.
@@ -12276,3 +12278,216 @@ co-located canonical-consensus-DB arrangement; non-co-located publication unsupp
 readiness promotion, anchor selection, D15 implementation, or Run 423 work.
 `task/warning.txt` and unrelated work preserved; worktree clean after the commit;
 changes pushed to the actual task branch; **no PR** opened.
+
+## Run 422 D7-D14 — complete source grounding, bootstrap rules, and component bounds (correction pass, documentation only)
+
+This entry records the bounded **documentation-only** pass that completes the D7-D14
+source grounding in the authoritative § 13, correcting the five findings A–E **in place**,
+reconciling the continuity cross-reference, and updating this evidence. O1–O5 were **not**
+implemented and D15 was **not** started. All prior D14 history above (SHAs, counts,
+artifact identities, tool outcomes) is **preserved**; the superseded "no TC verifier"
+claims above are **annotated in place**, not rewritten as if originally correct.
+
+### Provenance and object limitations (this pass)
+
+* **Working branch (actual):** `copilot/copilotcopilotcopilotcopilotcopilotcopilotcopilotc-please-work`,
+  used **unchanged** (no rename/rebase/force-push/history rewrite). The task's reported
+  branch `copilot/copilotcopilotcopilotcopilotcopilotcopilotcopilotc-one-more-time` differs
+  from the actual branch; the supplied task branch is used as-is.
+* **Starting HEAD (actual):** `9edd44d945642ff64cf2e4fa29be34c0fbb5f441` (`update`); clean
+  worktree before this pass.
+* **Reference object.** The reviewed revision `e58eaded78c8dcca5fe0a2d928deee16d1c7a1e9`
+  was **absent** as an object on open (`git cat-file -t e58eade…` → *could not get object
+  info*) and became available only after an on-demand `git fetch origin e58eade…`; it then
+  resolves (`git cat-file -t` → `commit`), and its content for the three changed documents
+  is **identical** to the starting worktree (`git diff e58eade… HEAD --` over the three
+  paths empty), yet it is **not** an ancestor of HEAD
+  (`git merge-base --is-ancestor e58eade… HEAD` fails). Object availability, content
+  correspondence, and ancestry are reported **separately**; ancestry is **not**
+  manufactured from content equality.
+* `task/warning.txt`, `task/RUN_422_TASK.txt`, and unrelated work were **preserved**; each
+  changed file keeps its CRLF line endings and no-final-newline EOF convention.
+
+### Changed paths (authorized scope only)
+
+1. `docs/protocol/QBIND_CONSENSUS_RECOVERY_SIGNING_HISTORY_CORRESPONDENCE_CONTRACT.md` —
+   authoritative owner: corrections A–E applied **in place** in § 13 (§ 13.2 field table,
+   new § 13.3A predicate table + TC rule, § 13.3 stage-3, § 13.4 O3 inputs + variants,
+   § 13.6 TC row, § 13.7 retention/capacity/pruning, § 13.8 invariants + H24–H27, § 13.9).
+2. `docs/protocol/QBIND_PROPOSAL_VOTE_SIGNING_STATE_CONTINUITY_CONTRACT.md` — the one § 5
+   D14 cross-reference reconciled (TC verifier exists / restriction-unverified, explicit
+   predicates, checked size cap, bootstrap/no-commit). No § 4.1 step, conflict rule, state
+   machine, or § 6 anchor requirement changed.
+3. `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_422_D7.md` — in-place superseded-claim
+   annotations and this entry.
+
+`docs/whitepaper/contradiction.md` was inspected **read-only** (durable anti-rollback
+NOT-established; C4/C5 OPEN) and **not** edited.
+
+### Correction A — TC source inventory repaired; evidence rule selected
+
+The claim that no TC/`signed_timeouts` verifier exists is **corrected**. Traced in the
+executable code (not stale module comments): `TimeoutCertificate` (`timeout.rs` ~L232)
+carries `signed_timeouts: Vec<TimeoutMsg>` and is a serialized/decoded type;
+`verify_timeout_certificate_with_evidence` (`timeout_verify.rs` ~L350) is called over
+`tc.signed_timeouts` on every inbound `NewView` **before** `engine.on_timeout_certificate`
+(`binary_consensus_loop.rs` ~L6892). Stated boundaries: it verifies **timeout** signatures,
+membership/quorum (`two_thirds_vp`), and the **derived `high_qc` identity**
+(`high_qc_eq` = `view` + `block_id` only, ~L435); it does **not** authenticate the
+embedded logical `high_qc`'s constituent votes, and establishes **nothing** about D14
+persisted-record recovery, current authority, anti-rollback, or production readiness. The
+absence of a `qbind-wire` `TimeoutCertificate` type does **not** imply no serialized TC or
+verifier. **Selected evidence rule (§ 13.3A):** because the TC carries its `high_qc` only
+in **logical** form (no constituent signatures on any path), a TC-derived lock's
+**restriction** (`lock_block_id`+`lock_view`) is persisted and enforced, while its evidence
+is carried **unverified** and may not satisfy any verified-evidence prerequisite —
+distinguishing *persisting a restriction* from *authenticating/replaying the whole TC
+view-change event*. No signatures invented, no logical→wire upgrade, no verifier added.
+
+### Correction B — Bootstrap non-circular path and no-commit lock
+
+`BootstrapNoLock` is a **durable no-lock restriction state**, distinct from missing state,
+that governs **candidate eligibility** (under `is_safe_to_vote_on_block` a no-lock state
+imposes no lock-ancestry refusal) **without** being signing authorization (A/B separate).
+Non-circular path: established `BootstrapNoLock` → first bootstrap vote under no-lock
+eligibility + separate A/B → **first real QC** → `on_qc` sets `locked_qc` → O4 publishes
+the first `Locked` (view-zero). No genesis QC fabricated, no external certificate assumed.
+A lock can form **before any commit** (`committed_height`/`committed_block` both `None`;
+`run_422_d7d2_signing_state_recovery_tests::d7d12_precrash_lock_advances_via_on_vote_without_a_commit`):
+a **`Locked`-with-no-commit** variant with an explicit no-commit discriminant omits
+`committed_state_assoc` **by variant** — never coercing `None` to height zero or
+manufacturing a committed block — kept distinct from the committed-anchor variant and from
+missing/corrupt state. O1–O5 handling specified per variant (§ 13.4).
+
+### Correction C — Semantic predicates and independent inputs
+
+New § 13.3A names, for each association, Value A + source, independent Value B + source,
+the exact predicate, the phase (stage 3 / O3), failure-or-unavailable behavior, and what a
+match proves/leaves unproven: **P1** block identity (`certificate.block_id == lock_block_id`),
+**P2** view (`certificate.round == lock_view`, with `round` the view carrier per
+`header.round = current_view` and `height` ≠ view), **P3** committed anchor (present on the
+recovered committed chain; skipped when no-commit), **P4** context/domain
+(`chain_id`/`epoch`/`suite_id` vs the pinned context). Mapping traced to the actual
+wire↔logical conversion (`qc_verify_domain.rs` ~L976; `basic_hotstuff_engine.rs` ~L1180),
+not inferred from names. A valid CRC and a recomputed `evidence_lock_binding` are
+integrity/co-publication checks and are **not** a substitute for P1–P4 (H21). O3's inputs
+now include the **pinned context** and, for anchored records, the **recovered committed
+baseline**; a missing independent input → the dependent predicate cannot be established →
+refuse. Production startup is **not** claimed to reconstruct lock history (committed +
+QC-derived lock only, D7-D2).
+
+### Correction D — Record and outstanding-evidence bounds
+
+`MAX_SAFETY_RECORD_BYTES` is no longer deferred: it is a **checked formula**
+`FIXED_OVERHEAD + ceil(N/8) + N × S_sig` over hard-bounded parameters — `N` validator/member
+count (so `signatures.len()` ≤ `N`, bitmap span `ceil(N/8)`), `S_sig` per-signature suite
+length (aggregate ≤ `N × S_sig`), `FIXED_OVERHEAD` the summed fixed members + framing — with
+the quorum `ceil(2W/3)` over voting power `W` kept **distinct** from the count `N`. Summed
+with checked arithmetic; enforced **before** application-owned allocation/copy; the
+`u16×u16` structural ceiling (≈ 4.29 GB) retained only as an honest over-read guard, and
+backend-internal allocation explicitly out of this cap. Retained L0 evidence is bounded:
+`MAX_OUTSTANDING_PREPARED_L0` count; per-operation = identity (32+8) + a **shared
+reference** (not a certificate copy); aggregate ≤ count × per-op (shared evidence counted
+once); acquired at decision time, released at end of the operation's lifetime; **refusal at
+capacity** that never evicts an admitted operation's evidence or releases a D10 conflict;
+all volatile across process death. No cache or generation journal added.
+
+### Correction E — Retention, successor, status reconciled
+
+Distinguished **unpublished preparation** (droppable, pre-submit) from **possibly-published**
+state (post-submit, resolved via O2/O3/O5) — removing "acknowledged or discarded".
+"Pruning disabled" now explicitly separates **authoritative replacement** (allowed; no
+anchor needed), **deletion/reset of required state** (never), **release of volatile
+evidence** (allowed; no anchor needed), and **D10-history pruning** (D10's own, untouched);
+only superseded-historical-generation pruning is disabled, and with one disk generation
+there is none to prune. No claim that local replacement or memory release requires the
+anti-rollback anchor. With bounds and predicates now fixed, **all material
+component-design choices are resolved**, so exactly **one** bounded, unstarted successor is
+retained: the **storage-component implementation** with an explicit acceptance subset
+(§ 13.8 H2–H12, H16, H18–H27), excluding engine-integration rows. The anti-rollback anchor
+remains a **separate** unmet prerequisite, not something to invent or select here.
+
+### Selected design rules (operative, this pass)
+
+TC-derived → restriction persisted/enforced, evidence **unverified** (§ 13.3A);
+bootstrap → non-circular first-QC path from a durable no-lock state; no-commit lock →
+explicit `Locked`-with-no-commit discriminant (no coerced zero); semantic comparison →
+explicit P1–P4 on the certificate's own fields vs independent sources (CRC/digest not a
+substitute); bounds → checked `MAX_SAFETY_RECORD_BYTES` formula + bounded retained-L0
+evidence.
+
+### Remaining material design gap and the single successor
+
+**No material record-design choice remains open.** The one named separate prerequisite is
+the durable **anti-rollback anchor** (UNRESOLVED); whole-copy rollback resistance and
+cross-host/copied-key exclusivity remain UNMET; recovery-time stage-2 wire-QC verification
+wiring remains a named integration obligation. The single bounded, unstarted successor is
+the storage-component implementation above; it is not started here.
+
+### Checks executed and literal tool outcomes (this pass)
+
+* **Source/type/caller verification** against the checkout: `TimeoutCertificate` +
+  `signed_timeouts` (`timeout.rs` ~L232/~L244); `verify_timeout_certificate_with_evidence`
+  + `high_qc_eq` (`timeout_verify.rs` ~L350/~L435); inbound NewView call over
+  `tc.signed_timeouts` (`binary_consensus_loop.rs` ~L6869/~L6892);
+  `on_timeout_certificate` / `set_locked_qc` (`basic_hotstuff_engine.rs` ~L2162);
+  logical QC (`qc.rs` — `block_id`/`view`/`signers`) vs wire QC (`qbind-wire/src/consensus.rs`
+  ~L282 — `height`/`round`/`epoch`/`chain_id`/`block_id`/`signer_bitmap`/`signatures`/`suite_id`);
+  `qc_verify_domain` vote reconstruction (~L976); `header.round = current_view`
+  (`basic_hotstuff_engine.rs` ~L1180); the no-commit lock test
+  (`run_422_d7d2_signing_state_recovery_tests.rs` ~L1103). Symbols authoritative; line
+  numbers are locators.
+* **Cross-section / cross-document consistency:** § 13 reconciled internally (field table,
+  § 13.3A, four checks, O1–O5, § 13.5–§ 13.9, INV-D14-x incl. new 7/8, H1–H27) and with the
+  continuity § 5 cross-reference; D8/D10/D11/D12/D13 dispositions preserved; stage numbering
+  (1–4) stable.
+* **Walkthroughs:** bootstrap/first-lock, pre-commit (no-commit) and later-commit,
+  surviving-publication/stale-O5, field-input/predicate (P1–P4), and resource-bound (size
+  cap + L0 capacity) walked from stated observable inputs only.
+* **Table/link/reference, scope, whitespace, EOL/EOF, secret checks:** all three files
+  remain CRLF with no final newline; tables column-consistent; `task/warning.txt` and
+  unrelated work untouched; no secret introduced.
+* **No** Cargo tests, Clippy, or release rebuild run or claimed.
+* **Automated review / CodeQL (literal, this pass, separate from history):** the
+  `parallel_validation` wrapper returned **Code Review ✅ "Reviewed 3 file(s). No review
+  comments found."**, but the **same output carried a backend error** —
+  `Code review tool is not available in this environment: … model claude-sonnet-4.6 not
+  found in registry …` with `ERROR autofind command_failed`. Per this pass's own standard a
+  "no comments" wrapper emitted alongside a backend/model error is **not** a completed
+  independent review; it is recorded literally as **attempted, tool unavailable (backend
+  model error), no independent review obtained**. **CodeQL Security Scan ✅ "Skipped: all
+  changes are trivial"** (documentation-only; declared trivial for CodeQL).
+  **Secret scan:** `No secrets detected in the scanned files` across the three paths.
+
+### Status (stated separately) and preserved verdicts
+
+Findings **A–E are resolved** in the authoritative § 13; **no material record-design
+obligation remains** (the earlier "TC recovery-verifiability" gap is dissolved by the
+corrected source inventory and the selected rule). The component design is **ready for
+implementation at the design level**, by the single storage-component successor; the token
+marks a defined-not-implemented design, **not** acceptance, and O1–O5 remain unimplemented.
+Separate prerequisites (anti-rollback anchor, rollback resistance, cross-host exclusivity,
+stage-2 wiring) remain **open**.
+
+```
+D7D14_CONSENSUS_SAFETY_RECORD_DESIGN=DEFINED-NOT-IMPLEMENTED
+```
+
+Preserved unchanged (not reopened): D8/D10/D11/D12/D13 dispositions; profile (a); the
+co-located canonical-consensus-DB arrangement; non-co-located publication unsupported.
+
+```
+D7_STATUS=PARTIAL-CODE-TEST / PRODUCTION-LIFECYCLE-UNAVAILABLE
+DURABLE_ANTI_ROLLBACK=NOT-ESTABLISHED
+GENESIS_AUTHORITY_ACTIVATION=DISABLED
+PRODUCTION_WIRE_CHAIN_ID_BEHAVIOR=UNCHANGED
+CONFIGURED_AUTHORITY_RELEASE_BINARY_EVIDENCE=NOT-YET-CAPTURED
+SECURITY_POSTURE=RS1-OPEN / PUBLIC-DEVNET-NO-GO
+```
+
+C4/C5 remain OPEN. No activation, readiness promotion, anchor selection, D15
+implementation, or Run 423 work. **Final commit SHA:** __FINAL_SHA__. `task/warning.txt`
+and unrelated work preserved; worktree re-checked after committing and pushing (the three
+authorized documents are the only tracked changes — this is the pre-commit scope, not a
+claim that an uncommitted worktree is clean); changes pushed to the actual task branch;
+**no PR** opened.
