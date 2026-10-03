@@ -11380,7 +11380,7 @@ lock identity/certificate blocks signing **generally**.
 
 ### Durability boundary and protected frontier (summary)
 
-The seven events — receive evidence → update in-memory lock (immediate, not
+**[SUPERSEDED — corrected, not accurate as originally written; see the "D7-D13 frontier-resolution entry" below and §12.3 per-route ordering.]** The original uniform receive → update-lock → construct-action sequence quoted next was **corrected**: decision binding is **per route** — each production route (`ingest_proposal`, `on_leader_step`, received vote/QC, `on_timeout_certificate`, D10 fresh/reuse) has its own decision/eligibility point, and a self-vote-generated QC must not retroactively justify its own vote — not one uniform ordering. The events are retained only as the historical description. The seven events — receive evidence → update in-memory lock (immediate, not
 staged, no durable write) → construct unsigned action (view fixed) → durably
 reserve → sign → retain result → confirm/handoff — are kept distinct. The
 **protected frontier** is the acknowledged-durable point of the restriction's
@@ -11404,11 +11404,14 @@ correspondence observer is **not** reintroduced.
 
 ### Observable-state recovery decisions and trust boundaries
 
-The D13 recovery matrix (§12.5, rows D13-1…D13-11) covers valid/missing/present-
-but-unusable safety state, incomplete publication, uncertain writes, recovered
-`Reserved` (potentially-signed), retained `Signed` (exact resend only), safety
-state ahead of the committed baseline (refuse because safety is unestablished, not
-because a number matched), same-epoch older snapshot, internally-consistent
+**[SUPERSEDED in part — corrected, not accurate as originally written; see the "D7-D13 frontier-resolution entry" below and §12.5 row D13-8.]** The D13 recovery matrix (now §12.5, rows D13-1…D13-15) covers valid/missing/present-
+but-unusable safety state, incomplete publication, write-outcome uncertainty attributed by
+phase, recovered `Reserved` (potentially-signed), retained `Signed` (exact resend only), safety
+state ahead of the committed baseline (being ahead is **not** itself a refusal reason — a
+**validated** safety state with the required correspondence **may proceed**; refusal follows
+only from **unavailable** evidence or **demonstrated inconsistency**, never from a number
+matching — this corrects the earlier "refuse because safety is unestablished" wording),
+same-epoch older snapshot, internally-consistent
 whole-copy rollback (locally indistinguishable), and historical D8 `COMPLETE` with
 later legitimate progress (must not reapply old state). Trust boundaries (§12.6)
 are stated separately: accidental-corruption detection; cryptographic certificate
@@ -11427,7 +11430,7 @@ unchanged and was not edited.
   scheduling/liveness, including engine guards vs D10 durable protection); the
   corrected preservation rule; the refusal matrix and common gates; the D10 branch
   prerequisites; the storage atomicity-vs-durability table.
-* **Unresolved — design disposition PARTIAL (named, not disguised):** which
+* **[HISTORICAL — RESOLVED below]** Unresolved at the original revision (now **RESOLVED**: profile (a) selected — see the "D7-D13 frontier-resolution entry" and §12.7; the "PARTIAL" disposition no longer applies): which
   production rule supplies the §12.3 protected-frontier integration boundary — (a) a
   dedicated recoverable safety record at each lock raise (with atomicity/ordering vs
   D10), or (b) an independently justified reconstruction rule proving the §12.2
@@ -11446,10 +11449,14 @@ power-loss); **no row is marked PASS**. The completed D12 successor is recorded 
 historical completion — D12 already executes *lock advancement without commitment →
 unchanged stored baseline → reconstruction of the older lock* and retains the
 standalone no-commit test, so re-proposing that characterization would be a
-**duplicate** and is **withdrawn**. The single corrected unstarted successor is a
+**duplicate** and is **withdrawn**. **[SUPERSEDED — this successor is COMPLETED; see the "D7-D13 frontier-resolution entry" below.]** As originally written, the single corrected unstarted successor was a
 **design-resolution deliverable**: select and justify one of §12.7 (a)/(b) — the
-production rule that supplies the protected-frontier boundary — because the
-§12.2/§12.3 disposition is **PARTIAL** until it is resolved. D12 does not answer it
+production rule that supplies the protected-frontier boundary. That design-resolution is
+**now complete**: **profile (a) is selected** (§12.7), the §12.2/§12.3 frontier-rule
+disposition is **RESOLVED**, and the single remaining unstarted successor is instead to
+**specify profile (a)'s record at implementation-design granularity** (logical layout,
+cross-artifact publication/recovery protocol, initialization/opening semantics, and
+retention) — documentation-only, still unstarted. D12 does not answer it
 (it only demonstrated the gap). Output: the three authorized documents only
 (design/specification); **no** code, **no** new characterization tests, **no**
 promoted acceptance row. Production wiring, a new module/reader/persistence
@@ -11555,7 +11562,7 @@ implementation, activation, or Run 423 work).
   prior pass's partial/unavailable review.
 * **Scoped verdict.** `D7D13_CONSENSUS_SAFETY_STATE_DURABILITY_CONTRACT=DEFINED-NOT-IMPLEMENTED`
   for the coherent, source-backed scoped contract, with the §12.2/§12.3 frontier
-  decision disposition **PARTIAL**. Preserved unchanged: D8/D10/D12 verdicts,
+  decision disposition **PARTIAL at that pass** (subsequently **RESOLVED** — profile (a) — in the frontier-resolution entry below). Preserved unchanged: D8/D10/D12 verdicts,
   `D7D11_…=DEFINED-NOT-IMPLEMENTED`, `D7_STATUS=PARTIAL-CODE-TEST /
   PRODUCTION-LIFECYCLE-UNAVAILABLE`, `DURABLE_ANTI_ROLLBACK=NOT-ESTABLISHED`,
   `GENESIS_AUTHORITY_ACTIVATION=DISABLED`,
