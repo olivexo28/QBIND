@@ -745,9 +745,9 @@ TC/`signed_timeouts` evidence verifier **does** exist and is wired at NewView ti
 recovery verifier and does not authenticate the TC `high_qc`'s constituent votes, so a
 TC-derived lock is persisted/enforced as a **restriction** yet carried **unverified**
 (D14 § 13.3A); the record now fixes **explicit semantic predicates** (certificate
-`block_id`/`round` vs lock id/view, context vs pinned runtime — a CRC/digest is **not** a
-substitute), a **checked `MAX_SAFETY_RECORD_BYTES`** size cap over the pinned
-validator-set parameters, and **bootstrap/no-commit** lock representations reached
+`block_id`/**`height`** vs lock id/view — the engine reads the wire **`height`** into the logical QC view, so P2 binds `height == lock_view` and `round` is **not** the view carrier; `height == round` is only an **optional** additional eligibility check sourced from local emission, not a verifier guarantee — plus context vs pinned runtime, a CRC/digest being **not** a
+substitute), a **discriminated evidence** representation (`QcDerived` wire QC vs `TcDerived` logical `high_qc` + retained `TimeoutCertificate`, so a TC-derived lock is representable without a wire QC), a **checked `MAX_SAFETY_RECORD_BYTES`** size cap over the pinned
+validator-set parameters (dense-index `ceil(N/8)` vs `MAX_BITMAP_LEN` identifier-span, per variant) with **distinct-allocation** retained-L0 accounting, an O3 committed-history input that is **independently supplied / proposed** (ordinary production startup builds a fresh engine and reconstructs none; `load_persisted_state` is a harness path), and **bootstrap/no-commit** lock representations reached
 **non-circularly** from the durable no-lock state. The design stays **DEFINED-NOT-IMPLEMENTED** (no safety-state persistence
 interface exists); the anti-rollback anchor (§ 6) remains **separate and unresolved**.
 This adds only a cross-reference; no § 4.1 step, the conflict rule, the state machine,
