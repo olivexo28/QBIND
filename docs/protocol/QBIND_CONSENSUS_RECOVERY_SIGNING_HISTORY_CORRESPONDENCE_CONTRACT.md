@@ -1,6 +1,6 @@
 # QBIND Consensus-Recovery / Signing-History Correspondence Contract
 
-**Run:** 422 D7-D11
+**Run:** 422 D7-D11 (extended by D7-D13 — consensus safety-state durability, § 12)
 **Status:** Source audit and protocol definition only. No Rust, test, dependency,
 storage key/schema, CLI flag, configuration, workflow, wire-format,
 signing-preimage, or activation change is made or proposed for implementation in
@@ -11,6 +11,7 @@ ordinary restart or a snapshot restoration **before signing may resume**; it doe
 item to Green.
 
 ```
+D7D13_CONSENSUS_SAFETY_STATE_DURABILITY_CONTRACT=DEFINED-NOT-IMPLEMENTED   (RUN 422 D7-D13; see § 12)
 D7D11_CONSENSUS_RECOVERY_SIGNING_HISTORY_CONTRACT=DEFINED-NOT-IMPLEMENTED
 D7D10_LOCAL_SIGNING_RESERVATION=CODE-AND-STORAGE-TEST-POSITIVE          (preserved, not reopened)
 D7D10_CORRECTION_F_ENGINE_PROGRESS_AND_CHILD_RECOVERY=CODE-AND-PROCESS-TEST-POSITIVE (preserved)
@@ -794,6 +795,12 @@ recorded in the D12 evidence section of the devnet record
 (§2.1 proof obligation) remains **not** produced: D12 characterizes the gap and
 does **not** close it.
 
+**Successor status (RUN 422 D7-D13).** This D12 successor is now a **historical
+completion**; the single smallest justified *next* successor — a bounded source +
+test characterization that the in-memory lock raise has **no durability channel**
+today — is defined in § 12.7, which is the authoritative owner of the D13
+requirements. No second competing successor is proposed.
+
 ---
 
 ## 11. Validation performed and retained posture
@@ -868,3 +875,420 @@ SECURITY_POSTURE=RS1-OPEN / PUBLIC-DEVNET-NO-GO
 
 C4/C5 remain OPEN. No production signing enablement, readiness promotion, or
 Run 423 work is authorized or implied by this contract.
+
+---
+
+## 12. RUN 422 D7-D13 — Consensus safety-state durability and recovery-ordering contract
+
+This section extends this recovery contract — its **authoritative owner** — with
+the **durability boundary for the consensus safety restriction itself** (the
+HotStuff lock and its supporting QC/TC evidence) relative to dependent signing,
+and the ordering obligations that follow. It is **documentation-only**: no Rust,
+test, dependency, storage key/schema, persistence format, wire format, CLI flag,
+configuration, workflow, signing-preimage, or activation change is made or
+proposed for implementation here. No competing contract is created; the
+continuity contract receives only cross-references and a scope reconciliation.
+
+```
+D7D13_CONSENSUS_SAFETY_STATE_DURABILITY_CONTRACT=DEFINED-NOT-IMPLEMENTED
+```
+
+**What D13 adds beyond D11.** D11 (§5–§7) owns recovery-admission *ordering* and
+the *correspondence* table; the continuity contract §4.1 owns the
+durable-before-sign boundary for the signing **reservation**. D13 adds the
+distinct, **earlier** boundary: *when the in-memory safety restriction changes,
+when its supporting material must become durable, which dependent operations must
+block before that point, and how a future implementation must bind a signed
+decision to the safety state that justified it.* Every statement below is
+labelled **implemented behavior**, **proposed requirement**, or **unresolved
+proof/trust obligation**. Nothing here enables signing, moves a readiness item to
+Green, or authorizes Run 423 work.
+
+### 12.1 Source-backed safety-state transition inventory
+
+Line numbers are locators against the inspected worktree; the **symbols** are
+authoritative. "Durability obligation" is a **proposed requirement**, not an
+implemented write.
+
+| State / transition | Actual source / caller | Safety use | Current persistence / recovery | Proposed durability obligation | Limitation |
+|---|---|---|---|---|---|
+| QC formation → lock raise | `HotStuffStateEngine::on_vote_event` → private `on_qc` (`hotstuff_state_engine.rs` ~L995); sets `locked_qc = Some(qc)` at ~L1004 when `qc.view > existing.view`, **before** `try_commit_with_qc` (~L1013) | Raises the lock enforcing `is_safe_to_vote_on_block` for future views | **In-memory only** at this point. A QC becomes durable only when separately stored (`q:<id>`) or embedded in a later committed block (`put_block`/`put_qc`/`put_last_committed`) | Before any signing that relies on the raised restriction, the supporting QC must be durable **and** recoverable *as the lock* | **Implemented:** the raise is immediate and **not** itself persisted. A lock advanced via `on_vote` **without** a commit has **no** durability channel; recovery reconstructs only the committed-embedded/stored QC (D12) |
+| TC lock update | `BasicHotStuffEngine::on_timeout_certificate` (`basic_hotstuff_engine.rs` ~L2162) → `set_locked_qc(tc.high_qc)` when `tc.high_qc.view > locked_qc.view`, **before** the `current_view` advance | Lock inherited into the new view | TC is **not** persisted as a lock input; only its embedded QC, if later stored | Same as the QC row: a TC-derived raise needs a durable, recoverable supporting QC | Timeout/NewView durability is **unmigrated** (explicit gate) |
+| Lock replacement mechanism | `set_locked_qc` (~L1144): replaces `locked_qc` on a strictly higher `view` | The write point of the restriction | — | — | A higher view is **not** the same claim as exact lock identity (§2.1) |
+| Safe-vote predicate | `is_safe_to_vote_on_block` (~L1312): admits when (no lock) **or** `justify_qc.view >= locked_qc.view` **or** the ancestor walk reaches `locked_qc.block_id` | **The actual restriction** — classify: *enforces a restriction* | Evaluated against the live/recovered lock + registered tree | The recovered state must preserve this predicate for future views (§12.2) | A view comparison and an ancestry comparison are **different** claims |
+| Per-view vote latch | `voted_in_view` (`basic_hotstuff_engine.rs` field ~L317; **reset** in both initializers ~L1148/§2) | Per-view anti-equivocation | **Not persisted**; lost on every restart/restore (D7-D2) | A future per-view/uncommitted-vote record (not designed here) | No durable channel exists today |
+| Originating action view | `on_leader_step` (~L1434) captures `view = self.current_view` at ~L1443 and sets `header.height = view` / `round = view` at ~L1503–1504; `ingest_proposal` reads `view = proposal.header.height` (~L1732). `current_view` advances separately (`advance_view` ~L1000) | The action binds to its **construction** view, not a later `current_view` | The wire message carries the construction view immutably; the engine may advance afterward | A future implementation must associate the signed decision with the safety state in force **at construction** (§12.3) | **Implemented:** action types carry only header fields; they do **not** carry the lock/evidence that justified the decision |
+| Committed id/height + lock on recovery | `initialize_from_restart` (~L1134 basic / ~L1190 state); `initialize_from_snapshot_baseline` (~L1201 basic / ~L1254 state, recovers **no** `locked_qc`) | Committed baseline; harness-only lock reconstruction | Reuse §2 inventory | Reuse §2/§2.1 (lock-sufficiency unestablished; absent on production paths) | Cross-ref §2.1; D12 |
+| Verified-justification evidence | `verified_justification` (non-serialized; never restored, `None`) | Supports **verification**, not the restriction | Not persisted | Must be **re-verified** on re-admission | Cross-ref §1.1 |
+| Signing-reservation durability | `reserve_for_sign` writes `Reserved` + metadata in **one atomic synced write** before the signer; `record_signed_result` overwrites in place; `reserved_positions` advances **only** on a new reservation | Durable-before-sign linearization (continuity §4.1 step 4) | `sig:` namespace, synced, checksummed (harness/test only; not opened in production) | The §12.3 safety-state frontier must precede this reservation | Cross-ref continuity §4.1 / §9; D10 preserved |
+
+**Field classification (not every in-memory field is equally safety-critical).**
+
+* **Enforce a safety restriction:** `locked_qc` (block id **and** view) and the
+  per-view `voted_in_view` latch (per-view non-equivocation). These gate whether a
+  vote is permitted.
+* **Support verification / ancestry:** the QC/TC certificate bytes, the
+  validator/authority + network/genesis context needed to interpret them, the
+  registered block tree / ancestry walked by the predicate, and
+  `verified_justification`. These let the restriction be *checked*, but are not the
+  restriction.
+* **Support scheduling / liveness:** `current_view`, `proposed_in_view`,
+  `timeout_emitted_in_view`, `vote_accumulator`. These drive progress, not a safety
+  restriction — with the one qualification that `current_view` must not be reset in
+  a way that **relaxes** the restriction (§12.2); a high `current_view` is **not**
+  itself a lock.
+
+### 12.2 Protected safety state and the preservation requirement
+
+**Minimal logical contents** for the proposed recovery profile, each justified by
+an actual consumer:
+
+* **Lock block id *and* lock view** (`locked_qc` identity). Consumer:
+  `is_safe_to_vote_on_block` — the ancestor walk uses the **block id**, the
+  liveness condition uses the **view**. Exact identity and a higher view are
+  **different** claims.
+* **The certificate / evidence supporting the lock** (the QC, or the TC plus its
+  `high_qc`). Consumer: the trust-on-load assumption (T-TRUST-STORAGE) or any
+  future recovery re-verification. A block-id/view pair **alone** restores neither
+  verification evidence nor ancestry.
+* **Network/genesis and validator/authority context.** Consumer: interpreting the
+  QC signer set and threshold; without it the certificate is uninterpretable.
+* **Committed-state association.** Consumer: anchoring the lock in recovered
+  committed state (§5 X1).
+* **Required block/header/ancestry material.** Consumer: the ancestor walk. The
+  **locked block identity + view** must be present **at startup**; candidate
+  ancestry may be **supplied and checked per candidate**. Missing candidate
+  ancestry must **never** become assumed ancestry.
+* **View material needed to avoid an unjustified reset.** `current_view` must not
+  be lowered into a range that relaxes the restriction; but a view value alone is
+  not a lock.
+* **Relationship to outstanding D10 signing obligations.** A recovered `Reserved`
+  is potentially-signed (INV-R3); the lock profile neither releases nor discharges
+  it.
+
+**Preservation rule (the actual predicate).** Signing may resume only when the
+recovered safety state **preserves `is_safe_to_vote_on_block` for future views** —
+i.e. the recovered lock **equals or dominates the pre-crash lock in both block
+identity and the restriction it imposes** (not merely a higher view *number*), or
+an **independently justified recovery rule** discharges the §2.1 proof obligation.
+None of the following is sufficient **by itself**: committed height; current
+epoch; highest journal position; a valid QC; a higher lock view; D8 `COMPLETE`; a
+checksum or digest. ("Higher means safer," "conservative," and numerical-dominance
+are **not** accepted as a rule.)
+
+**Absence classification** — whether an absence blocks startup, signing generally,
+or only the affected candidate:
+
+* Missing **lock identity + view** at startup → blocks signing **generally** (and
+  the future-vote path) until established (INV-R2).
+* Missing **supporting certificate / context** → blocks signing **generally**
+  (the lock cannot be interpreted or verified).
+* Missing **candidate ancestry** → blocks **only the affected candidate** (refuse
+  that candidate; never assume the ancestry).
+
+Do **not** require retaining the entire block tree: the profile needs the locked
+block identity + view, the supporting certificate/context, and **per-candidate**
+ancestry as supplied. Conversely, a block-id/view pair alone does **not** restore
+verification evidence or history.
+
+### 12.3 The durability boundary before dependent signing (protected frontier)
+
+**Events kept separate** (ordered; "durable" means an acknowledged barrier, not a
+readable byte):
+
+1. **Receiving evidence** — a QC/TC arrives or is locally formed.
+2. **Updating the in-memory lock** — `on_qc` (~L1004) / `on_timeout_certificate`
+   `set_locked_qc`. **Implemented:** this is **immediate and in-memory, not
+   staged, with no durable write at this point.**
+3. **Constructing an unsigned action** — `on_leader_step` captures the view at
+   construction (~L1443/L1503); this may **precede** the engine's view advance.
+4. **Durably reserving a signing position** — `reserve_for_sign` synced write
+   (continuity §4.1 step 4 linearization point).
+5. **Invoking the signer and completing a signature** — `signer.sign_*`.
+6. **Retaining the result** — `record_signed_result` synced write;
+   `result_acked` is set **only after** the durable acknowledgement.
+7. **Confirming and handing to the facade** — `confirm_outbound_before_effect` →
+   facade. *A later confirmation cannot undo a completed signature.*
+
+**Implemented fact grounding the boundary.** The safety-restriction change (event
+2) is applied in memory **immediately** and is **not** itself made durable there;
+today the only durability is **incidental** — a committed block's embedded/stored
+QC. A lock raised via `on_vote`/TC **without** a commit is therefore lost on
+recovery (D12).
+
+**Proposed durability boundary / protected frontier.** Before any dependent
+signing (event 4 onward) that relies on a **newly raised** safety restriction,
+that restriction's supporting material must be **durable and recoverable as the
+lock**. The **protected frontier** is the acknowledged-durable point of that
+supporting material; events 4–7 for a decision justified by the raised restriction
+must remain **blocked** before the frontier.
+
+**Which transitions create a recovery obligation.** Only a transition that
+**raises** the restriction a subsequent signing decision depends upon creates a
+durability obligation. A volatile observation that **no** signing decision depends
+on does not, by itself, require persistence — but it must **not** be discarded in a
+way that **relaxes** the restriction on recovery (the reconstructed-lower-lock
+problem, §2.1). Do **not** assume every volatile field must be persisted, and do
+**not** assume any may be safely discarded.
+
+**Write failure / uncertain acknowledgement.** On a write failure or an uncertain
+acknowledgement of the supporting material, dependent signing does **not** proceed
+(fail-closed); a successful **read** of bytes is **never** treated as acknowledged
+persistence (INV-R7).
+
+**Originating-action semantics (proposed integration requirement, source-backed).**
+
+* Actions **may be constructed before the engine advances** (`on_leader_step`
+  builds the proposal with the view captured at L1443; `advance_view`/timeout
+  change `current_view` independently).
+* A returned action **must not be relabeled** using a later `current_view`; the
+  wire `header.height`/`round` are fixed at construction (L1503–1504).
+* A later safety-state snapshot **must not retroactively authorize** an earlier
+  decision.
+* **How a future implementation would bind the decision to its justifying safety
+  state:** carry, alongside the reserved position, the **originating view** and a
+  reference to the lock/evidence in force **at construction**, and revalidate that
+  at the durable reservation — **not** re-derive it from `current_view`.
+* This is a **proposed** requirement. Current action types carry **only** header
+  fields; they do **not** already bind the justifying lock/evidence, and no claim
+  is made that they do.
+
+**Latency / throughput (qualitative).** The durability barrier can add a wait
+before dependent signing. Batching is permissible **only if** the required
+acknowledgement still **precedes** the protected effect; any optimization that
+would weaken the accepted preservation requirement is **excluded** pending
+justification. No performance figures are given (none measured).
+
+### 12.4 Integration with D10 (semantics unchanged)
+
+The §12.2 preservation rule and the §12.3 protected frontier sit **before** D10's
+reservation (continuity §4.1 step 4). D10's accepted properties are **preserved
+unchanged**: the canonical signing-position identity; prepared-preimage binding;
+one-use operation-bound continuation; backend-shared ownership over supported
+handles; the frozen ticket/context/signer; post-storage authorization
+revalidation; checked result publication; exact retained-result verification and
+recovery acknowledgement; recovered `Reserved` treated as potentially-signed;
+uncertain publication suppressing delivery; and no release/reset to regain
+progress.
+
+**Fresh signing vs retained reuse are separate branches.**
+
+* **Fresh signing (S6):** the §12.2 preservation rule and the §12.3 durability
+  boundary are **prerequisites** to the reservation and signer, in addition to
+  D10's own acknowledged reservation and revalidation.
+* **Retained reuse (S7):** resends the one retained `Signed` result with **zero
+  new signer calls** — but it does **not** bypass recovery admission. The
+  fresh-signing rule is **not** automatically sufficient for resend, and resend is
+  still gated by the §12.2/§12.3 prerequisites and D10's acknowledgement /
+  record-and-binding verification / current-authorization revalidation (INV-R4).
+
+**BindingDigest limitation.** The journal's opaque `BindingDigest` cannot
+reconstruct a canonical message, authority context, or block history (§5 X3). Any
+comparison needs **additional** inputs: an **independently obtained** canonical
+preimage/domain **and** the pinned validator/authority context (trusted source:
+the authority-lifecycle (A/B) obligations and the genesis identity) — **not** the
+digest and **not** caller-supplied claims. The withdrawn generic "correspondence
+observer" is **not** reintroduced, and no global match is manufactured from
+unavailable evidence.
+
+### 12.5 Storage, initialization, uncertainty, and recovery decisions
+
+**Prefer existing mechanisms.** Synced writes (`put_*_synced`,
+`flush_epoch_durable`), the atomic-batch model (`apply_epoch_transition_atomic`),
+and the block/QC writers (`put_block`/`put_qc`/`put_last_committed`) are the
+reuse surface. **Concrete missing interface:** there is **no** production API that
+durably records *the safety restriction currently in force* as a recoverable
+record **distinct from** a committed-embedded QC; today the lock is reconstructed
+from committed state only on the harness path and **not at all** on production
+paths. A signing-scoped safety record would be **new** (it is **not** claimed to
+exist).
+
+Requirements for such a (future, not-designed-here) record: bounded/versioned
+record + evidence; canonical interpretation + context binding; **atomicity** among
+a safety record and its required supporting QC/context (a same-database **atomic
+batch** where co-located; ordered **separate operations** otherwise); ordering so
+the safety record is durable **before** the dependent D10 reservation/result
+writes; single-writer ownership with no assumed concurrent updater; explicit
+**first initialization** versus **opening established** state; **fail-closed** on
+malformed / missing / unsupported / inconsistent state and on write-before-error /
+uncertain acknowledgement; and retention/pruning **only after** the safety
+obligation is discharged. A local record revision or counter is **bookkeeping, not
+an anti-rollback anchor.** No transaction framework, second journal, authority
+registry, or freshness service is invented to state these requirements.
+
+**Observable-state recovery matrix (D13 safety-state frontier).** Each row is
+keyed to observable durable state; none infers an unrecorded crash location or a
+lost acknowledgement from readable bytes.
+
+| # | Observable durable state | Decision |
+|---|---|---|
+| D13-1 | Valid required safety state + consistent established journal | Resume after S2–S5 **and** the §12.3 durability boundary is met |
+| D13-2 | Missing required safety state, existing journal | **Refuse** (INV-R1/R2) |
+| D13-3 | Safety state present but journal missing / unusable | **Refuse** (fail-closed) |
+| D13-4 | Incomplete safety-record / supporting-evidence publication | **Refuse** (frontier not reached) |
+| D13-5 | Uncertain writes (no acknowledged barrier) | **Refuse**; never trust readable bytes (INV-R7) |
+| D13-6 | Recovered `Reserved` | Potentially-signed; **refuse** re-sign (INV-R3) |
+| D13-7 | Retained `Signed` | Exact resend only, **zero** new signer calls (INV-R4) |
+| D13-8 | Safety state ahead of the committed baseline | Could be ordinary uncommitted work **or** stale; **refuse** new signing because safety is unestablished (not because a number "matched"; §5 X4) |
+| D13-9 | Same-epoch older snapshot | **Refuse** (epoch equality ≠ freshness; §5.2) |
+| D13-10 | Internally consistent whole-copy rollback | **Locally indistinguishable**; refuse pending out-of-domain evidence (T-DOMAIN) |
+| D13-11 | Historical D8 `COMPLETE` with later legitimate progress | `COMPLETE` must **not** reapply old epoch/baseline; S2–S5 still required |
+
+Keep **live in-process continuation** distinct from **recovery after process-local
+knowledge is lost**: a successful read is **not** acknowledged persistence; any
+required recovery-durability operation (e.g. a synced re-publication after an
+uncertain write) must be named and performed, not assumed.
+
+### 12.6 Trust and scope boundaries (stated separately)
+
+* **Accidental corruption detection** — CRC32/SHA3-256 (T-INTEG): integrity /
+  association only.
+* **Cryptographic certificate verification** — **separate**; **not** performed on
+  load today (T-TRUST-STORAGE). A logical QC with an **empty signer list** is
+  **not** retained authentication evidence. If the profile requires recovery-time
+  verification, it requires the **certificate bytes + trusted validator/authority
+  context**, not comments or fixture acceptance.
+* **Local storage integrity assumptions** — T-FS (fsync honored; no silent device
+  rollback); the supported profile, not empirical power-loss durability.
+* **Current authorization (A)** and **current-authority freshness (B)** — owned by
+  the authority-lifecycle contract; no correspondence/durability check here grants
+  them.
+* **Ordinary crash consistency** — the **only** property the §12.3 boundary
+  provides.
+* **Whole-copy rollback resistance** — **UNMET** (T-DOMAIN; locally
+  indistinguishable).
+* **Copied-key / cross-host exclusivity** — **UNMET**; ownership is in-process over
+  one backend only (§5.2; §7 R10).
+
+Timeout/TC paths are **inventoried** (they affect locks) but **not** redesigned;
+Timeout/NewView compatibility is **not** claimed solved — it remains an explicit
+gate. First-use ambiguity stays explicit: a genuinely new directory and a
+lost/rolled-back state can be **locally indistinguishable**, and this is **not**
+resolved by silently initializing missing established state. No local checksum,
+digest, synced write, or ownership mutex establishes whole-copy freshness or
+cross-host exclusivity. D8 restore completion remains **separate** from consensus
+safety and signing-history correspondence.
+
+**Contradiction ledger (read-only).** `docs/whitepaper/contradiction.md` was
+inspected read-only; the relevant remaining contradiction — durable anti-rollback
+**NOT-established** and C4/C5 **OPEN** — is **unchanged** by this section, and no
+edit was made to it.
+
+### 12.7 Future acceptance matrix (not executed) and one successor
+
+Future tests only; **no row is a current PASS.** Evidence levels are kept
+separate: *unit/model → real-storage → process-death → release-binary →
+power-loss*. Process termination is not power-loss; an isolated signer is not
+configured production authority.
+
+| # | Scenario | Expected boundary | Evidence level |
+|---|---|---|---|
+| G1 | The accepted D12 candidate restriction across the proposed recovery path | REFUSE until lock-sufficiency + frontier established | unit/model + real-storage |
+| G2 | Unchanged-lock preservation (no raise since last durable point) | ADMIT after S2–S5 (control) | real-storage |
+| G3 | Lock **identity** vs **view-only** comparison | REFUSE a view-only "match"; require identity + restriction | unit/model |
+| G4 | Missing required ancestry / evidence | REFUSE (candidate-scoped vs general per §12.2) | unit/model + real-storage |
+| G5 | QC-derived lock-update durability | REFUSE dependent signing before the supporting QC is durable | real-storage |
+| G6 | TC-derived lock-update durability | REFUSE dependent signing before the supporting QC is durable | real-storage |
+| G7 | Failure / uncertainty **before** the safety-state durability boundary | REFUSE (fail-closed) | process-death |
+| G8 | Interruption **between** safety persistence and the D10 reservation | REFUSE; no reservation without the frontier | process-death |
+| G9 | Interruption **after** reservation and after possible signing | Recovered `Reserved` = potentially-signed; REFUSE re-sign | process-death |
+| G10 | Retained-result reuse without a new signature | ADMIT exact resend only (D10 checks); zero signer calls | real-storage + process-death |
+| G11 | Missing / corrupt established state | REFUSE (fail-closed) | unit/model + real-storage |
+| G12 | Unchanged D10 conflict obligations across the frontier | REFUSE a conflicting binding at the same position | unit/model |
+| G13 | Ordinary restart vs snapshot restore | Distinguish paths; REFUSE where no lock is recovered | real-storage + release-binary |
+| G14 | Rollback cases that remain locally undetectable | Document indistinguishability; REFUSE on the correspondence/exclusivity gap | adversarial (needs out-of-domain anchor) |
+
+**Historical completion note (replacing the §10 D12 successor).** The §10
+successor — the bounded source+test characterization comparing the
+`load_persisted_state` reconstruction against a stronger pre-crash lock with the
+same candidate — **has been completed** as Run 422 D7-D12 (tests + documentation
+only). Its results, controls, and limitations are recorded in the D12 evidence
+section of `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_422_D7.md`; the §2.1 *safety*
+proof obligation remains **not** discharged.
+
+**Exactly one smallest justified successor (unstarted).** A **bounded source +
+test characterization** that the in-memory lock raise via `on_vote` → `on_qc`
+(and `on_timeout_certificate`) has **no durability channel today**: using only
+existing engine/storage interfaces, drive a quorum through `on_vote` so
+`locked_qc` advances **without** a commit (`committed_height() == None`), then show
+that **no** persisted artifact records that raised lock — a fresh reader
+(`load_persisted_state` / `observe_consensus_storage`) reconstructs only the
+**lower** committed-embedded/stored lock. This is the concrete durability-gap
+analogue of the D12 identity gap and is strictly narrower than a production
+lock-recovery redesign or an anti-rollback anchor.
+
+* **Mechanisms reused (existing interfaces only):** `on_vote`, `locked_qc()`,
+  `committed_height()`, `is_safe_to_vote_on_block`, `register_block`,
+  `put_block`/`put_qc`/`put_last_committed`, `load_persisted_state`,
+  `initialize_from_snapshot_baseline`, `observe_consensus_storage` — composed in
+  **tests only**. Isolated fixture setup through those storage APIs is **test
+  fixture writes**, not production recovery writes and not recovery repair.
+* **Anticipated files:** new `d7d13_*` cases in the existing
+  `crates/qbind-node/tests/run_422_d7d2_signing_state_recovery_tests.rs`, plus the
+  three authorized documents for the evidence entry.
+* **Explicit exclusions:** production wiring; a new module / reader / persistence
+  format / freshness interface / recovery architecture; a durable safety-record
+  implementation; signer calls; any recovery-repair write; the anti-rollback
+  anchor; whole-copy / cross-host rollback detection; Timeout/NewView migration;
+  enabling signing; and any activation/readiness change. The characterization is
+  **non-authorizing** and reports a bounded observation only; it does **not** close
+  the gap.
+
+**Unresolved material protocol decision (named, not disguised).** Whether
+production should (a) persist a dedicated, recoverable **safety record at each lock
+raise** (with its supporting certificate/context and an atomicity/ordering rule
+relative to D10 writes), or (b) rely on an **independently justified recovery
+rule** that reconstructs a *sufficient* lock from committed state. The evidence
+needed is either a **proof/construction** that the reconstructed lock dominates the
+pre-crash lock (§2.1), or a **durable safety-record design plus an anti-rollback
+anchor** (continuity §6.6). Until one is produced, this design is **not**
+implementation-ready, and the decision is **not** an implementation detail.
+
+### 12.8 Validation performed and retained posture
+
+* **Source re-traced against the checkout** (symbols authoritative; line numbers
+  are locators): `on_qc` sets `locked_qc` at ~L1004 **before** `try_commit_with_qc`
+  at ~L1013; `on_leader_step` captures the view at ~L1443 and fixes
+  `header.height`/`round` at ~L1503–1504; `is_safe_to_vote_on_block` (~L1312);
+  `on_timeout_certificate` `set_locked_qc` before the view advance;
+  `initialize_from_restart` / `initialize_from_snapshot_baseline`;
+  `reserve_for_sign` / `record_signed_result` ordering.
+* **Reference objects.** The accepted D12 final
+  `6ca4a72d47cc878a96bfc63b767ac893cbf22ed8` is **absent** from this shallow clone
+  (`git cat-file -t` → *could not get object info*); the reported task branch
+  string differs from the **actual** branch, which is used **unchanged**. Ancestry
+  to the absent object is **not** manufactured; correspondence is asserted against
+  the **current source content** only.
+* **Cross-document consistency** checked against D10/D11/D12 (this contract) and
+  the continuity contract (§4.1, §5.3, §6), which receives only a cross-reference /
+  scope reconciliation. `docs/whitepaper/contradiction.md` inspected read-only; no
+  edit. CRLF line endings and the existing no-final-newline EOF convention are
+  preserved; `task/warning.txt` and unrelated work are untouched.
+* **Tooling.** Available review/security tooling was attempted once; the literal
+  outcome is recorded in the D13 evidence section of
+  `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_422_D7.md`. No Cargo/Clippy/release
+  rebuild was run to produce new counts; no historical tool outcome is relabelled
+  as a fresh execution.
+
+On that basis — not merely because the sections exist — this section **defines**,
+and does **not** implement, the consensus safety-state durability and
+recovery-ordering requirements:
+
+```
+D7D13_CONSENSUS_SAFETY_STATE_DURABILITY_CONTRACT=DEFINED-NOT-IMPLEMENTED
+```
+
+Preserved unchanged (not reopened):
+
+```
+D7D11_CONSENSUS_RECOVERY_SIGNING_HISTORY_CONTRACT=DEFINED-NOT-IMPLEMENTED
+D7_STATUS=PARTIAL-CODE-TEST / PRODUCTION-LIFECYCLE-UNAVAILABLE
+DURABLE_ANTI_ROLLBACK=NOT-ESTABLISHED
+GENESIS_AUTHORITY_ACTIVATION=DISABLED
+PRODUCTION_WIRE_CHAIN_ID_BEHAVIOR=UNCHANGED
+CONFIGURED_AUTHORITY_RELEASE_BINARY_EVIDENCE=NOT-YET-CAPTURED
+SECURITY_POSTURE=RS1-OPEN / PUBLIC-DEVNET-NO-GO
+```
+
+C4/C5 remain OPEN. No production signing enablement, wiring, activation, readiness
+promotion, or Run 423 / D14 work is authorized or implied by this section.

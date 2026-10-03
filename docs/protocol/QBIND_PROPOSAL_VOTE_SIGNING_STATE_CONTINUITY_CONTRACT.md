@@ -687,6 +687,22 @@ signing reservations for any in-flight position. **A high-water mark alone does
 not recover a lock.** Timeout / NewView compatibility is an explicit dependency;
 no migration or redesign is performed here.
 
+**Durability boundary for the restriction itself (RUN 422 D7-D13 — owner cross-
+reference).** The *when-durable* ordering of the consensus safety restriction
+relative to dependent signing is owned by
+`docs/protocol/QBIND_CONSENSUS_RECOVERY_SIGNING_HISTORY_CORRESPONDENCE_CONTRACT.md`
+§ 12, not restated here. Two implemented facts reconcile the ordering in § 4.1
+with that owner: the lock raise is applied **in memory immediately** by the
+engine's `on_qc` (before any three-chain commit) and by `on_timeout_certificate`,
+with **no durable write at that point**; and an outbound action is constructed
+with its **originating view fixed at construction** and MUST NOT be relabelled by
+a later `current_view`. Consequently the § 4.1 durable-before-sign reservation
+(step 4) is **not** the earliest barrier: before a signing decision may depend on
+a **newly raised** restriction, that restriction's supporting QC/TC material must
+first be durable and recoverable **as the lock** (D13 § 12.3 protected frontier).
+This adds only a cross-reference; no § 4.1 step, the conflict rule, the state
+machine, or the anchor requirement (§ 6) is changed.
+
 ---
 
 ## 6. Rollback resistance and the anchor requirement
