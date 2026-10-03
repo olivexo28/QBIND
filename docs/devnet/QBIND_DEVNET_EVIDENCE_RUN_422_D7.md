@@ -12486,7 +12486,11 @@ SECURITY_POSTURE=RS1-OPEN / PUBLIC-DEVNET-NO-GO
 ```
 
 C4/C5 remain OPEN. No activation, readiness promotion, anchor selection, D15
-implementation, or Run 423 work. **Final commit SHA:** __FINAL_SHA__. `task/warning.txt`
+implementation, or Run 423 work. **Final commit SHA:** the substantive content of this
+pass landed in commit `cc5c8568fe0cc24b356b406eb15ff7a51c579da1` (branch
+`copilot/copilotcopilotcopilotcopilotcopilotcopilotcopilotc-please-work`, starting HEAD
+`9edd44d945642ff64cf2e4fa29be34c0fbb5f441`); this SHA line is recorded in the immediately
+following trailing metadata commit on the same branch. `task/warning.txt`
 and unrelated work preserved; worktree re-checked after committing and pushing (the three
 authorized documents are the only tracked changes — this is the pre-commit scope, not a
 claim that an uncommitted worktree is clean); changes pushed to the actual task branch;
