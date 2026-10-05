@@ -357,10 +357,130 @@ fn encode_evidence_payload(
     match evidence {
         SupportingEvidence::QcDerived(qc) => encode_wire_qc(out, qc),
         SupportingEvidence::TcDerived { high_qc, tc } => {
+            // Record-level `high_qc` presence discriminant `D` (§ 13.2A(e)
+            // `REC_HIGH_QC`). A TcDerived record always carries its own logical
+            // high-QC copy (TA1), so the discriminant is always `1` here; it is
+            // emitted so the serialized layout matches the profile row and so a
+            // malformed record with an absent record-level high-QC is refused on
+            // decode rather than silently coerced.
+            out.push(1);
             encode_logical_qc(out, high_qc)?;
             encode_timeout_cert(out, tc)
         }
     }
+}
+
+// ---------------------------------------------------------------------------
+// Authoritative structural admission (§ 13.2A / § 13.7)
+// ---------------------------------------------------------------------------
+
+/// The one authoritative structural-admission path, applied **before** any
+/// encode/publish allocation or copy and mirrored by the bounded decoder. It
+/// enforces every profile-defined count/length/width against the pinned context
+/// (signer/signature counts, per-signature length `S_sig`, bitmap span, timeout
+/// entries, and nested logical high-QC signer counts) with checked arithmetic.
+///
+/// Checking a length **after** encoding is not allocation prevention; this
+/// admission makes the refusal happen before the component owns the buffer. The
+/// concrete prior failure case — with `S_sig = 8`, a QC carrying a 9-byte
+/// signature — is refused here even when the whole record is below the total
+/// serialized cap.
+pub fn admit_record_structure(
+    rec: &DecodedRecord,
+    ctx: &PinnedSafetyContext,
+) -> Result<(), SafetyStoreError> {
+    let n = ctx.n();
+    match &rec.record {
+        SafetyRecord::BootstrapNoLock { .. } => {}
+        SafetyRecord::Locked(l) => match &l.evidence {
+            SupportingEvidence::QcDerived(qc) => admit_wire_qc(qc, ctx)?,
+            SupportingEvidence::TcDerived { high_qc, tc } => {
+                admit_logical_qc_signers(high_qc.signers.len(), n, "record-level high_qc")?;
+                admit_timeout_cert(tc, ctx)?;
+            }
+        },
+    }
+    Ok(())
+}
+
+fn admit_count_fits_prefix(count: usize, what: &str) -> Result<(), SafetyStoreError> {
+    u16::try_from(count)
+        .map(|_| ())
+        .map_err(|_| SafetyStoreError::DeclaredBoundExceeded(format!("{what} exceeds u16 prefix")))
+}
+
+fn admit_logical_qc_signers(count: usize, n: usize, what: &str) -> Result<(), SafetyStoreError> {
+    admit_count_fits_prefix(count, what)?;
+    if count > n {
+        return Err(SafetyStoreError::DeclaredBoundExceeded(format!(
+            "{what} signer count {count} > N={n}"
+        )));
+    }
+    Ok(())
+}
+
+fn admit_wire_qc(qc: &WireQc, ctx: &PinnedSafetyContext) -> Result<(), SafetyStoreError> {
+    let bitmap_len = qc.signer_bitmap.len() as u128;
+    admit_count_fits_prefix(qc.signer_bitmap.len(), "signer bitmap length")?;
+    if bitmap_len > MAX_BITMAP_LEN || bitmap_len > ctx.b_span() {
+        return Err(SafetyStoreError::DeclaredBoundExceeded(format!(
+            "signer bitmap len {bitmap_len} exceeds span bound"
+        )));
+    }
+    // Structural threshold: an empty-signer certificate cannot meet ceil(2W/3)≥1.
+    if qc.signatures.is_empty() {
+        return Err(SafetyStoreError::StructuralRefusal(
+            "empty-signer certificate refused at structural threshold".into(),
+        ));
+    }
+    admit_count_fits_prefix(qc.signatures.len(), "signature count")?;
+    if qc.signatures.len() > ctx.n() {
+        return Err(SafetyStoreError::DeclaredBoundExceeded(format!(
+            "signature count {} > N={}",
+            qc.signatures.len(),
+            ctx.n()
+        )));
+    }
+    for sig in &qc.signatures {
+        let sl = sig.len() as u128;
+        admit_count_fits_prefix(sig.len(), "signature length")?;
+        if sl > MAX_SIGNATURE_LEN || sl > ctx.s_sig as u128 {
+            return Err(SafetyStoreError::DeclaredBoundExceeded(format!(
+                "signature length {sl} > s_sig={}",
+                ctx.s_sig
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn admit_timeout_cert(tc: &TimeoutCert, ctx: &PinnedSafetyContext) -> Result<(), SafetyStoreError> {
+    let n = ctx.n();
+    admit_logical_qc_signers(tc.signers.len(), n, "tc.signers")?;
+    if let Some(h) = &tc.high_qc {
+        admit_logical_qc_signers(h.signers.len(), n, "tc.high_qc")?;
+    }
+    admit_count_fits_prefix(tc.signed_timeouts.len(), "signed_timeouts count")?;
+    if tc.signed_timeouts.len() > n {
+        return Err(SafetyStoreError::DeclaredBoundExceeded(format!(
+            "signed_timeouts count {} > N={n}",
+            tc.signed_timeouts.len()
+        )));
+    }
+    for t in &tc.signed_timeouts {
+        if let Some(h) = &t.high_qc {
+            admit_logical_qc_signers(h.signers.len(), n, "signed_timeout high_qc")?;
+        }
+        let sl = t.signature.len() as u128;
+        admit_count_fits_prefix(t.signature.len(), "timeout signature length")?;
+        if sl > MAX_SIGNATURE_LEN || sl > ctx.s_sig as u128 {
+            return Err(SafetyStoreError::DeclaredBoundExceeded(format!(
+                "timeout signature length {sl} > s_sig={}",
+                ctx.s_sig
+            )));
+        }
+    }
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------
@@ -373,6 +493,10 @@ pub fn encode_record(
     rec: &DecodedRecord,
     ctx: &PinnedSafetyContext,
 ) -> Result<Vec<u8>, SafetyStoreError> {
+    // Authoritative structural admission BEFORE building/copying any buffer
+    // (§ 13.2A / § 13.7): refuse an over-bound count/length/width here rather
+    // than after encoding.
+    admit_record_structure(rec, ctx)?;
     let mut out = Vec::new();
     put_u16(&mut out, rec.persistence_format_version);
     out.extend_from_slice(&rec.network_genesis_id);
@@ -509,7 +633,22 @@ pub fn decode_record(
             let lock_block_id = r.arr32()?;
             let lock_view = r.u64()?;
             let evidence_lock_binding = r.arr32()?;
-            let high_qc = decode_logical_qc(&mut r, ctx)?;
+            // Record-level `high_qc` presence discriminant `D` (§ 13.2A(e)).
+            // A TcDerived record requires a carried record-level high-QC (TA1);
+            // an absent/unknown discriminant is refused, never coerced.
+            let high_qc = match r.u8()? {
+                1 => decode_logical_qc(&mut r, ctx)?,
+                0 => {
+                    return Err(SafetyStoreError::StructuralRefusal(
+                        "tc-derived record requires a carried record-level high_qc (TA1)".into(),
+                    ))
+                }
+                other => {
+                    return Err(SafetyStoreError::StructuralRefusal(format!(
+                        "invalid record-level high_qc discriminant {other}"
+                    )))
+                }
+            };
             let tc = decode_timeout_cert(&mut r, ctx)?;
             let committed_anchor = read_optional_anchor(&mut r, d_ca)?;
             let predecessor_ref = read_optional_predecessor(&mut r, d_pred)?;
