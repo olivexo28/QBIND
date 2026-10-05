@@ -13165,3 +13165,105 @@ No named generation/scratch/buffer term is left without a bound, and no table/fo
 disagreement remains. The anti-rollback anchor, lock-recovery, and current-authority remain
 **UNRESOLVED**; the design stays **DEFINED-NOT-IMPLEMENTED**; C4/C5 remain **OPEN**. This
 correction does **not** implement storage and does **not** begin D15 or Run 423.
+
+## RUN 422 D7-D14 — Finish wrapper ownership and withdraw unsupported dominance claim (corrects `29b48cae68b80d2b90d976631c18f0ca2b105fa5`)
+
+This entry is a **clearly-identified correction** appended to the Run 422 D7-D14 evidence; all
+prior entries and tables are **preserved** (historical text is retained, not rewritten). It
+finishes the reconciliation of the accepted single whole-type size correction across the
+remaining inline-wrapper rows and withdraws an unsupported dominance/“cap-unchanged” conclusion.
+Documentation-only: no Rust, test, dependency, schema, CLI, workflow, wire-format,
+signing-preimage, or production-wiring change. Required status is unchanged
+(`D7D14_CONSENSUS_SAFETY_RECORD_DESIGN=DEFINED-NOT-IMPLEMENTED`;
+`DURABLE_ANTI_ROLLBACK=NOT-ESTABLISHED`; `GENESIS_AUTHORITY_ACTIVATION=DISABLED`;
+`SECURITY_POSTURE=RS1-OPEN / PUBLIC-DEVNET-NO-GO`; C4/C5 **OPEN**). Storage is **not**
+implemented; D15 / Run 423 are **not** begun; **no** accepted architectural decision is reopened.
+
+### Starting state (this pass)
+
+* **Branch** `copilot/run-422-d7-d14-finish-wrapper-ownership` (used unchanged); **starting HEAD**
+  `c07e95482495cc160d611b3e121f15494c5705d0`; **worktree** clean at entry (`git status --porcelain`
+  empty before edits). Unrelated work on the branch was preserved.
+* **Reviewed-object availability / ancestry / correspondence** (each reported separately; none
+  inferred from another):
+  * **Availability.** `29b48cae68b80d2b90d976631c18f0ca2b105fa5` was **not** present in the
+    initial shallow clone; `git fetch origin 29b48cae…` made it available (`git cat-file -t` →
+    **commit**).
+  * **Ancestry.** It is **not** a linear ancestor of HEAD (`git merge-base --is-ancestor 29b48cae…
+    HEAD` → false). HEAD `c07e954` and the reviewed `29b48ca` are **siblings** sharing merge-base
+    `36c87167fa287ba57aebd7ea641ab1e55722dc7c` (the reviewed object’s own parent).
+  * **Scoped content correspondence.** Before this pass’s edits, `git diff --stat 29b48cae… HEAD`
+    over each of the three authorized paths
+    (`docs/protocol/QBIND_CONSENSUS_RECOVERY_SIGNING_HISTORY_CORRESPONDENCE_CONTRACT.md`,
+    `docs/protocol/QBIND_PROPOSAL_VOTE_SIGNING_STATE_CONTINUITY_CONTRACT.md`,
+    `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_422_D7.md`) was **empty** — the worktree content of all
+    three authorized files was **byte-identical** to the reviewed revision, so the review’s
+    accepted single whole-type size correction applies directly to HEAD.
+* **AGENTS.md.** None exists in the tree (`git ls-files | grep -i AGENTS.md` → empty), so none
+  applies.
+
+### Finding — unfinished inline-wrapper reconciliation and an unsupported dominance claim
+
+The accepted correction established `GEN_STRUCT = size_of::<RetainedGeneration>()` as a **single
+whole-enum constant** (≤ `GEN_STRUCT_MAX = 384` B), **identical** in both variant totals, and fixed
+the § 13.7A(c.1)/(c.2) summary rows. Two reconciliation defects remained:
+
+1. **Inline-wrapper rows still read per-variant.** The § 13.7A(a)/(b) **per-allocation** tables
+   charged `GEN_STRUCT` as `size_of::<QuorumCertificate>()` (QcDerived) and `size_of::<…>()`
+   (TcDerived) “(inline only)”, and the joining prose stated `GEN_STRUCT` “is the **sum of the
+   inline struct rows**” — a **per-variant** inline reading that contradicts the whole-enum
+   constant selected in § 13.7A(c).
+2. **Unsupported dominance / cap-unchanged claim.** § 13.7A(c)’s Rust-layout paragraph and (c.3)
+   asserted the operative `checked_max` “remains **TcDerived-dominated**” and that
+   `MAX_RETAINED_GENERATION_BYTES` is therefore **unchanged**. Raising the QcDerived inline-wrapper
+   term from the **withdrawn** `256`-B arm reading to the uniform `384`-B whole-enum constant
+   **raises** `MAX_QC_GENERATION_BYTES` by up to `128` B; no proof was given that the TcDerived
+   total exceeds the QcDerived total by that margin at the pinned profile, so “TcDerived-dominated”
+   and “numerically unchanged” were **unsupported conclusions**.
+
+### Correction (in `docs/protocol/QBIND_CONSENSUS_RECOVERY_SIGNING_HISTORY_CORRESPONDENCE_CONTRACT.md`)
+
+* **Every inline-wrapper row reconciled to one authoritative term.** Both § 13.7A(a) and (b)
+  `GEN_STRUCT` rows now charge the **single whole-enum constant** `GEN_STRUCT =
+  size_of::<RetainedGeneration>()` ≤ `GEN_STRUCT_MAX = 384` B, **identical** across variants, with
+  the embedded-certificate scalars and inline `Vec` descriptors enumerated in each row noted as
+  **already included once** within it (**not** the `size_of::<QuorumCertificate>()` / inner-arm
+  footprint). The joining prose now states `GEN_STRUCT` **is** that whole-enum constant and is
+  **not** a per-variant sum of the inline struct rows (it includes those inline members once; the
+  `*_CAP`/`SIG_TERMS` rows remain the separately-added outer backings). The selected single
+  complete `RetainedGeneration` representation is **preserved**.
+* **Unsupported dominance claim withdrawn.** The § 13.7A(c) Rust-layout paragraph and (c.3) now
+  state that substituting the uniform `384`-B constant into **both** totals **raises** the
+  QcDerived inline term by up to `128` B, that whether the operative `checked_max` changes is
+  decided by the **pinned-profile backing-allocation rows**, and that the earlier
+  **TcDerived-dominated** / cap-**unchanged** conclusion is **withdrawn as unsupported**. What is
+  preserved is everything independent of that inline term: the § 13.2A **serialized** formulas,
+  the **backing-allocation** totals (`SIGNERS_CAP`, `SIG_VEC_BACKING`, `SIG_TERMS`, the TC
+  signer/`signed_timeouts`/per-entry/`8N²` rows), `DECODED_SIGNERS = 0`, `CTX_OWNED`, `ARC_CTRL`,
+  the `CAPNORM_SLACK` coefficients, the `VALIDATION_SCRATCH` representations (§ 13.7B), the
+  conservative three-buffer peak, and the corrected wire/logical QC attribution.
+* **Prior entry preserved.** The preceding “Complete-Wrapper Rust Layout Correction” entry’s
+  “Operative cap unchanged … TcDerived-dominated … numerically unchanged” wording is **retained
+  as historical evidence**; its dominance conclusion is **superseded** by this entry, not deleted.
+
+### Validation (literal outcomes, this pass)
+
+* `git status --porcelain` → **exactly two** modified paths
+  (`docs/protocol/QBIND_CONSENSUS_RECOVERY_SIGNING_HISTORY_CORRESPONDENCE_CONTRACT.md` and this
+  evidence file). `docs/protocol/QBIND_PROPOSAL_VOTE_SIGNING_STATE_CONTINUITY_CONTRACT.md` needed
+  **no** change — it references the named totals `MAX_QC_GENERATION_BYTES` /
+  `MAX_TC_GENERATION_BYTES` and the `checked_max`, **not** any per-arm `GEN_STRUCT` quantity or
+  dominance claim. `docs/whitepaper/contradiction.md` and all other tracked files are unchanged.
+* **No residual per-variant inline-wrapper reading:** no `(inline only)` `GEN_STRUCT` cell and no
+  “sum of the inline struct rows” prose remain in § 13.7A; the two inline-wrapper rows and (c.1)/
+  (c.2)/(c.3) all read the single whole-enum constant ≤ `GEN_STRUCT_MAX = 384` B. The only `256`
+  tokens left in the contract are unrelated `SHA3-256` references and the intentional withdrawal
+  notes.
+* **No residual asserted dominance:** the two remaining `TcDerived-dominated` tokens in § 13.7A(c)
+  are both the **withdrawal**/not-asserted statements, not a standing claim.
+* **EOL conventions preserved** on both edited files: CRLF throughout, **0** bare-LF bytes, and
+  **no** final newline — unchanged from entry.
+* **Tooling not run (documentation-only):** no Cargo build, Cargo tests, Clippy, or
+  release-binary rebuild were run or claimed; recorded as **not run**. `parallel_validation`
+  (Code Review + CodeQL) was run over the Markdown-only change; CodeQL triviality was declared
+  (non-code Markdown, no analyzable surface). Prior evidence is preserved with its original scope.
