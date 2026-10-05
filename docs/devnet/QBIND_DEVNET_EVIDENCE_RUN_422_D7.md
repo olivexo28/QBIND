@@ -12635,3 +12635,9 @@ readiness or authorize the successor. No Rust, tests, dependencies, schemas, sto
 CLI/configuration, workflows, wire formats, signing preimages, or production wiring changed; no
 signing enablement, activation, or transport-boundary weakening; fail-closed
 `CurrentEpochUnavailable` preserved.
+
+**Validation addendum (literal `parallel_validation` outcome, this pass).** Code Review:
+**completed**, 3 files reviewed, **no review comments** (the run also reported the review model
+unavailable in this environment, a registry/tool-availability caveat, not a clean-vs-findings
+signal). CodeQL Security Scan: **skipped — all changes trivial** (documentation-only; no
+CodeQL-analyzable surface). No other review/security result is claimed.
