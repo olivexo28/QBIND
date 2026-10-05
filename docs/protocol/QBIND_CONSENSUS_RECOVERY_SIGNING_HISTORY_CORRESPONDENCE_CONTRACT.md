@@ -2113,8 +2113,10 @@ reset, or migration.
   recovery durability operation. It must **not** alter, repair, or rewrite content: it
   does **not** change the `publication_revision`, the initialization/bootstrap state,
   the association fields, or any supporting material. Identity is established by
-  comparing the **complete authoritative content** (the whole re-serialized validated
-  record and its supporting material) against the **currently stored publication**,
+  comparing the **complete authoritative content** (the whole **retained original validated
+  publication** — the complete O3-validated encoded record retained verbatim in `ENC_INPUT` and
+  kept live through O5, § 13.7A(c.5) — and its supporting material) against the **currently stored
+  publication** (read back as operand 2),
   under the owner/serialization boundary, **before** re-acknowledging. This is a
   **complete-content** comparison, **not** an equivalence to matching
   `integrity_checksum` + `evidence_lock_binding`: the CRC32 covers only accidental
