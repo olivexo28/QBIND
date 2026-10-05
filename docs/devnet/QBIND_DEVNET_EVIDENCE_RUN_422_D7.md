@@ -13519,3 +13519,228 @@ stale-publication fencing, D10 semantics, the acceptance-scope split) is reopene
 * **Not run (documentation-only):** Cargo build, Cargo tests, Clippy, and release-binary
   acceptance were **not run** and are **not** claimed. Prior evidence is preserved with its
   original scope.
+
+## Run 422 D7-D14 — Safety-Record Storage Component (IMPLEMENTED-ISOLATED)
+
+This entry records the **implementation** (source + tests + executed validation) of the accepted
+D14 safety-record storage component specified in
+`QBIND_CONSENSUS_RECOVERY_SIGNING_HISTORY_CORRESPONDENCE_CONTRACT.md` §13. It is an **isolated,
+disabled-by-default** bounded storage successor. It is **not** wired into any production
+startup / consensus / signing path, authorizes no activation, and does not begin Run 423.
+
+### Baseline, branch, and reviewed-object correspondence
+
+* **Branch:** `copilot/run-422-d7-implement-accepted-d14-safety-record-st` (the supplied branch).
+* **Starting HEAD:** `41d69ba5d545de6df140cac87d2adc7279a8245d`; worktree clean at start.
+* **Reviewed object:** `d52a378569a65d5ce35471e73c39d72ce98374ac`. Not initially present locally;
+  fetched via `git fetch origin <sha>`. Its tree (`cad32e2d…`) is **byte-identical** to the
+  starting HEAD tree (exact content correspondence). Merge-base with HEAD is `422e459`; HEAD is
+  **not** a descendant of the reviewed object but carries identical content for the scoped files.
+* **Unrelated work preserved:** the only tracked file modified by this implementation is
+  `crates/qbind-node/src/lib.rs` (a six-line `pub mod safety_record_store;` registration with a
+  scope comment). All other source is new, under one dedicated directory.
+
+### Changed paths and component gating
+
+* **New component (new files):** `crates/qbind-node/src/safety_record_store/` —
+  `mod.rs`, `profile.rs`, `record.rs`, `error.rs`, `codec.rs`, `validate.rs`, `accounting.rs`,
+  `backend.rs`, `owner.rs`.
+* **New tests (new file):** `crates/qbind-node/tests/run_422_d7d14_safety_record_store_tests.rs`.
+* **Module registration:** `crates/qbind-node/src/lib.rs` (`pub mod safety_record_store;`).
+* **Gating:** `SafetyBackendPolicy::Disabled` is the `#[default]`; `open_or_initialize` refuses a
+  `Disabled` policy (`SafetyStoreError::BackendDisabled`) and refuses MainNet
+  (`TrustBundleEnvironment::Mainnet` → `MainNetRefused`). No Cargo feature is added; the component
+  is constructed **only** from its own tests. No public CLI command is added.
+
+### O1–O5 and the ownership boundary
+
+* **Serialization domain:** `SafetyBackend` holds `Arc<rocksdb::DB>` + `Arc<Mutex<SerializationDomain>>`.
+  Every attached `SafetyRecordOwner` handle shares the **one** mutex of that backend instance
+  (not a per-handle advisory mutex). Each O1/O4/O5 check-then-write holds that guard; the atomic
+  publication requires a `&MutexGuard` witness.
+* **O1 initialize:** requires an explicit `first_use_intent` assertion and a genuinely unused
+  backend (no metadata, no record). Refuses established (`AlreadyEstablished`), partial
+  (record-without-metadata → `StructuralRefusal`), and intent-absent
+  (`MissingIndependentInput`). An empty directory alone does **not** authorize initialization.
+  Writes metadata + `BootstrapNoLock` atomically at revision 0.
+* **O2 open:** reads established metadata + record, checks the pinned-context digest and that the
+  record revision equals the metadata revision; performs **no** auto-init, migration, repair, or
+  safety-state write.
+* **O3 read/validate:** structural decode + semantic validation with **no** write; returns the
+  validated record, the explicit (always `Unverified`) evidence status, and the retained original
+  encoded publication (`ENC_INPUT`) needed by O5.
+* **O4 publish:** re-reads authoritative state under the domain guard, fences on the caller's
+  expected revision (`StaleRevision` on mismatch), enforces strictly-increasing lock view
+  (`TransitionIneligible`), uses a **checked** revision increment (overflow → refuse), fully
+  re-validates the candidate, then publishes metadata + record atomically with
+  `WriteOptions::set_sync(true)`. The new restriction is effective only after an acknowledged
+  durable success.
+* **O5 re-acknowledge:** compares the retained `ENC_INPUT` against a **fresh read** of the stored
+  publication **byte-for-byte** under the owner/revision boundary. On complete equality it
+  republishes the **original bytes verbatim** and requires a fresh durability acknowledgement. A
+  stale O5 (stored bytes differ, including divergence outside the binding digest's coverage)
+  refuses (`PublicationMismatch`) and never overwrites newer state. No re-encode, normalize,
+  repair, or digest-equality substitution.
+* **Outcome separation:** `PublishResult` distinguishes `RefusedPreWrite`, `WriteFailedAmbiguous`,
+  `UncertainDurable`, and `DurableAcknowledged`. `UncertainDurable` never implies the predecessor
+  survived; dependent use stays blocked until explicit O2/O3/O5 re-establishment.
+
+### Concrete profile, measured layout, and allocation limits
+
+* **Persistence profile:** `SAFETY_PERSISTENCE_FORMAT_VERSION = 1`; `C = 2`, `W_id = 8`, `D = 1`;
+  `FIXED_OVERHEAD = 153`; `QC_FIXED = 64`; big-endian framing with a trailing CRC-32 (reusing the
+  existing `signing_journal_crc32`, a corruption detector only — not authentication, not
+  anti-rollback). Bounded decode checks every declared count/length against the pinned `N`/`S_sig`
+  **before** the application-owned allocation it protects; it does **not** use the unbounded wire
+  deserializer.
+* **Serialized caps (checked u128):** `MAX_QC_BYTES = 269 + B_span + N·(2+S_sig)`;
+  `MAX_TC_BYTES` is the summed worst case over `REC_HIGH_QC`, `TC_VIEW`, `TC_TIMEOUT_VIEW`,
+  `TC_HIGH_QC`, `TC_SIGNERS`, and `SIGNED_TIMEOUTS` (nested high-QC per signed timeout);
+  `MAX_SAFETY_RECORD_BYTES = max(…)`. Test `h12`/`h26` assert actual encodings are within these
+  caps for N ∈ {1,4,8,16}.
+* **Measured native layout:** `size_of::<RetainedGeneration>() = 336` bytes on the supported
+  64-bit target (`x86_64-unknown-linux-gnu`), **≤ GEN_STRUCT_MAX = 384**. A **compile-time
+  assertion** in `mod.rs` enforces the ceiling (build fails if ever exceeded — no concealment by
+  omitting retained fields). Native layout widths are kept distinct from serialized widths. **No
+  contract discrepancy was observed** at this profile.
+* **Allocation accounting:** `generation_charge` computes the whole-enum wrapper + heap backings +
+  `ARC_CTRL` (16 B) charged **once**, bounded by `MAX_RETAINED_GENERATION_BYTES`.
+  `AllocationAccountant` admits each charge against `MAX_AGGREGATE_RETAINED_BYTES` **before**
+  allocation (checked arithmetic; `CapacityRefusal` on exceed) and tracks the peak. The three
+  encoded-buffer roles (retained `ENC_INPUT`, stored-publication read-back, verbatim publication)
+  are used by O5; `CMP_SPAN` owns no fourth record-sized allocation. Accounting tests use
+  **synthetic holders** and do not establish real engine/prepared-decision integration.
+
+### Representation and validation distinctions
+
+* **Variants:** `BootstrapNoLock`, `Locked` with no committed anchor, `Locked` with a committed
+  anchor; QC-derived vs TC-derived supporting evidence. Absent values stay absent by variant
+  (`Option`); no genesis QC, committed block, height-zero anchor, or constituent signature is
+  manufactured.
+* **P1–P4:** block-id binding (P1); QC logical view binds to wire **`height`** not `round` (P2);
+  committed anchor requires the **independently supplied** committed-history relation
+  (`CommittedHistory`), missing history refuses (P3); chain/epoch/suite correspondence (P4). The
+  optional `height == round` profile choice is an **explicit** opt-in flag
+  (`require_height_equals_round`), never conflated with the P2 view binding.
+* **TA1–TA8:** timeout signer membership, uniqueness, signer-set correspondence, view consistency,
+  and voting-power quorum are checked **separately** from cryptographic verification; both retained
+  high-QC copies (record-level and TC-level) must correspond; equal-view high-QC selection reuses
+  `select_max_high_qc` (first-encountered; no invented tie-break).
+* **Evidence status:** stage-2 recovery verification is **unwired**; every validated record is
+  carried `EvidenceStatus::Unverified`. TC-derived evidence is carried **unverified**. Structural
+  / semantic success and durability never create a verified-evidence result. Test producers are
+  clearly-labelled fixtures (`FixtureCommittedHistory`), not production history recovery, and never
+  derive evidence from the candidate being checked.
+
+### H-row → test → executed evidence mapping
+
+| H row | Test(s) | Level |
+|-------|---------|-------|
+| H2  | `h2_encode_decode_roundtrip_bootstrap_and_locked` | unit/model |
+| H3  | `h3_unsupported_version_refused` | unit |
+| H4  | `h4_crc_and_truncation_refused` | unit |
+| H5  | `h5_oversize_refused_pre_allocation` | unit |
+| H6  | `h6_empty_signer_certificate_refused` | unit |
+| H7  | `h7_declared_count_over_bound_refused` | unit (bounded decode) |
+| H8  | `h8_p1_p2_binding_enforced` | unit |
+| H9  | `h9_p4_context_mismatch_refused` | unit |
+| H10 | `h10_quorum_threshold_enforced` | unit |
+| H11 | `h11_success_is_unverified` | unit |
+| H12 | `h12_serialized_caps_bound_actual_encodings` | unit/model |
+| H16 | `h16_real_rocksdb_publish_and_reopen` | real-storage |
+| H18 | `h18_o1_refuses_duplicate_initialization` | real-storage |
+| H19 | `h19_o5_refuses_divergence_outside_binding_digest` | real-storage |
+| H20 | `h20_stale_o5_does_not_overwrite_newer` | real-storage |
+| H21 | `h21_revision_fence_refuses_stale_publish` | real-storage |
+| H22 | `h22_o4_rejects_non_increasing_view` | real-storage |
+| H23 | `h23_o2_refuses_absent_state_o3_no_write` | real-storage |
+| H24 | `h24_bootstrap_nocommit_committed_distinctions` | unit |
+| H25 | `h25_first_lock_evidence_storage_layer_only` | real-storage (storage layer only) |
+| H26 | `h26_both_evidence_variants_and_nested_bounds` | unit (both variants + nested bounds) |
+| H27 | `h27_tc_derived_restriction_persisted_unverified` | real-storage (unverified TC restriction) |
+| H30 | `h30_height_vs_round_distinction` | unit |
+
+Supporting: `accounting_admits_below_cap_and_refuses_over_cap`, `layout_sizes_within_ceiling`, and
+the four process-death boundary tests below.
+
+**Scope honesty for this subset:** H25 uses supplied first-lock evidence at the **storage layer**;
+it does **not** prove engine voting or first-QC formation. H27 proves persistence and component
+handling of an **unverified** TC-derived restriction; it does **not** prove live safe-vote
+enforcement. H19 exercises divergence **outside** the binding digest's coverage while CRC + binding
+still pass; O5 still refuses by complete byte comparison. H20 refuses a stale O5 without overwriting
+newer state. **Explicitly excluded from completion claims:** H1, H13, H14, H15, H17, H25e, H26l,
+H28, H29.
+
+### Process-death outcomes and their limits
+
+A deterministic child-process harness re-executes the test binary at `child_process_entry`, driving
+the real component + RocksDB adapter in a temporary directory to a **test-coordinated** boundary
+(not a timing guess), then exits/aborts. The parent reopens and decides purely from surviving bytes:
+
+* `pd_before_publish_survives_bootstrap` — death **before** publication submission → only the
+  bootstrap record survives; O3 reads a valid complete publication.
+* `pd_uncertain_after_write_successor_survives` — a **completed durable write before success is
+  delivered** (injected `UncertainAfterWrite`) → the complete successor (locked rev 1) survives
+  even though the caller observed `UncertainDurable`; we do **not** claim the dead process observed
+  an acknowledgement.
+* `pd_ack_then_abort_survives_locked` — death **after** durability acknowledgement but before
+  in-memory installation (via `process::abort`) → the acknowledged publication survives; O3 reads
+  it and O5 re-acknowledges it byte-for-byte.
+* `pd_write_error_before_commit_predecessor_unchanged` — an injected write error **before** commit
+  (labelled distinctly from process termination) → nothing was written; the bootstrap predecessor
+  survives unchanged.
+
+**Limits:** process termination here is **not** power-loss testing; release-profile component tests
+are **not** configured-authority node evidence; CRC/binding checks are **not** certificate
+authentication; local synced writes do **not** establish whole-copy anti-rollback or cross-host
+exclusivity.
+
+### Default release build and production non-wiring audit
+
+* **Default release build:** `cargo build -p qbind-node --release --bin qbind-node` → **Finished
+  `release` profile** (exit 0). A successful build is **not** claimed as proof of runtime recovery
+  or authority acceptance.
+* **Non-wiring audit:** `grep -rn "safety_record_store\|SafetyRecordOwner\|SafetyBackend"` over
+  `crates/**.rs` returns matches **only** inside the component's own directory, its test, and the
+  two `lib.rs` registration lines. No reference in `main.rs`, `binary_consensus_loop.rs`, or
+  `basic_hotstuff_engine.rs`. The component is a dormant `pub mod` compiled into the binary but
+  never constructed on a production path.
+
+### Validation (literal outcomes, this pass)
+
+* `cargo fmt` applied to the new files only (via direct `rustfmt` on the component files, **not**
+  `cargo fmt -p`); `rustfmt --check` on them → clean (exit 0). Target/toolchain:
+  `x86_64-unknown-linux-gnu`, stable toolchain, edition 2021.
+* `cargo build -p qbind-node` (dev) → **0 warnings** for the component.
+* `cargo clippy -p qbind-node --lib` → **no warnings** attributable to `safety_record_store`
+  (two initial lints — an equality-`match` and `large_enum_variant` — were resolved; the latter is
+  documented as an intentional layout with the memory bound enforced on `RetainedGeneration`). A
+  pre-existing, unrelated `cargo clippy --tests` failure in `m16_epoch_transition_hardening_tests.rs`
+  (references `#[cfg(test)]`-only storage methods from an integration test) is **not** caused by
+  this change and is left untouched.
+* `cargo test -p qbind-node --test run_422_d7d14_safety_record_store_tests -- --include-ignored` →
+  **30 run: 29 passed, 0 failed, 1 ignored** (the ignored test is the child-process entrypoint,
+  invoked out-of-band by the four `pd_*` parent tests, which pass). Feature configuration: default
+  features; backend opened with the non-default `EnabledForTesting` policy on `Devnet`.
+* **Secret scan — run this pass: no secrets detected** in the eleven changed/added files. No
+  database directories, secrets, or large binaries are committed.
+* **Default configuration checked:** `SafetyBackend::open_or_initialize(_, Disabled, _)` returns
+  `BackendDisabled`; MainNet returns `MainNetRefused` (exercised by the gating logic; the
+  opt-in `EnabledForTesting`/`Devnet` path is what the tests use).
+
+### Component verdict and preserved status
+
+```text
+D7D14_STORAGE_COMPONENT=IMPLEMENTED-ISOLATED
+DURABLE_ANTI_ROLLBACK=NOT-ESTABLISHED
+GENESIS_AUTHORITY_ACTIVATION=DISABLED
+PRODUCTION_WIRE_CHAIN_ID_BEHAVIOR=UNCHANGED
+CONFIGURED_AUTHORITY_RELEASE_BINARY_EVIDENCE=NOT-YET-CAPTURED
+SECURITY_POSTURE=RS1-OPEN / PUBLIC-DEVNET-NO-GO
+```
+
+The included acceptance subset (H2–H12, H16, H18–H25, H26, H27, H30) is completed with executed
+evidence; the excluded rows (H1, H13–H15, H17, H25e, H26l, H28, H29) are **not** claimed. C4/C5
+remain OPEN. Fail-closed `CurrentEpochUnavailable` is preserved. This is an isolated component
+verdict only — **no** production-readiness promotion, engine/decision/signing integration,
+recovery-time verifier wiring, anti-rollback establishment, activation, or Run 423 is claimed.
