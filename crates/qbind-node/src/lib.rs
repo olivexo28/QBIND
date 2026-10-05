@@ -1395,6 +1395,11 @@ pub mod pqc_governance_execution_mutation_engine;
 // readiness, MainNet evidence, or release-binary evidence. Full C4 remains OPEN;
 // C5 remains OPEN.
 pub mod pqc_governance_production_durable_replay_rocksdb;
+// Run 422 D7-D14 — isolated, disabled-by-default safety-record storage
+// component (accepted D14 contract, §13). Never wired into production startup,
+// consensus, or signing paths; backend policy defaults to Disabled and MainNet
+// is refused. See `safety_record_store::mod` for scope/isolation.
+pub mod safety_record_store;
 // Run 244 — source/test governance modeled trust-state mutation applier
 // boundary. Adds the smallest in-memory model of what a future governance
 // mutation applier would do after every Run 242 mutation-engine gate has already

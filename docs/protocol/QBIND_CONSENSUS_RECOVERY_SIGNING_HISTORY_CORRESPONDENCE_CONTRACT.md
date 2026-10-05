@@ -1588,6 +1588,12 @@ offsets, encodings) is deliberately **left to the implementation successor** (§
 D7D14_CONSENSUS_SAFETY_RECORD_DESIGN=DEFINED-NOT-IMPLEMENTED
 ```
 
+**Implementation availability (Run 422 D7-D14).** The design verdict above is preserved as **historical**: it records that this contract pass implemented nothing. An **isolated, disabled-by-default** implementation successor now exists as the `qbind_node::safety_record_store` component (source + scoped acceptance tests under `crates/qbind-node`), implementing the §13.2A encoding/bounded decode, the §13.3A validation (P1–P4 with wire-`height` view binding and the optional explicit `height == round` profile choice; TA1–TA8; evidence carried **unverified**), the §13.4/§13.5 O1–O5 operations under one shared serialization domain with expected-revision fencing and byte-for-byte O5 re-acknowledgement, the §13.2A/§13.7A bounds (measured `size_of::<RetainedGeneration>() = 336 B ≤ 384`), and the accepted H-subset (H2–H12, H16, H18–H25, H26, H27, H30) with unit, real-RocksDB, and child-process evidence. The component is **never** constructed on any production startup/consensus/signing path (backend policy defaults to `Disabled`, MainNet refused), so the still-missing **production integration** — engine/prepared-decision wiring, recovery-time signature verification (stage 2), durable anti-rollback, and activation — remains **unimplemented** and the operative integration posture is unchanged. The operative component status is:
+
+```
+D7D14_STORAGE_COMPONENT=IMPLEMENTED-ISOLATED
+```
+
 **What D14 adds beyond D13.** §12 fixed the frontier **rule** (when the restriction
 must be durable, which dependent operations block, how recovery decides from
 observable inputs). §13 fixes the **record and its operations** at component level:
