@@ -2574,7 +2574,7 @@ backing** allocation of `capacity() × size_of::<T>()`. Capacities are `≤` the
 
 | Allocation (owner) | Element type / in-memory element size | Max admitted capacity | Charged bytes | Inline or outer backing | Sharing / lifetime |
 |---|---|---|---|---|---|
-| `GEN_STRUCT` — decoded struct value | fixed scalars (`version`/`chain_id`/`epoch`/`height`/`round`/`step`/`block_id`/`suite_id`) **+ 2 inline `Vec` descriptors** (`signer_bitmap: Vec<u8>`, `signatures: Vec<Vec<u8>>`); each descriptor `24` B | 1 struct | `size_of::<QuorumCertificate>()` (inline only) | **inline** | generation; charged once per generation |
+| `GEN_STRUCT` — decoded struct value | fixed scalars (`version`/`chain_id`/`epoch`/`height`/`round`/`step`/`block_id`/`suite_id`) **+ 2 inline `Vec` descriptors** (`signer_bitmap: Vec<u8>`, `signatures: Vec<Vec<u8>>`); each descriptor `24` B | 1 struct | `GEN_STRUCT = size_of::<RetainedGeneration>()` — **single whole-enum constant**, identical in both variants, ≤ `GEN_STRUCT_MAX = 384` B (§ 13.7A(c); the embedded-QC scalars **+** its 2 inline `Vec` descriptors named here are **already included once** within it — **not** the `size_of::<QuorumCertificate>()` inner-arm footprint) | **inline** | generation; charged once per generation |
 | `SIGNERS_CAP` — `signer_bitmap` backing | `u8` / `1` B | ≤ `B_span` (dense `ceil(N/8)`, else `MAX_BITMAP_LEN` 8192) | `capacity() × 1` ≤ `B_span` | **outer backing** | generation |
 | `signatures` outer backing (descriptor array) | `Vec<u8>` descriptor / `24` B | ≤ `N` | `capacity() × 24` ≤ `N × 24` | **outer backing** | generation |
 | `SIG_TERMS` — per-signature buffers | `u8` / `1` B | ≤ `N` buffers, each cap ≤ `S_sig` | `Σ capacity()` ≤ `N × S_sig` | **outer backing** (one allocation per signature) | generation |
@@ -2586,7 +2586,7 @@ retained `TimeoutCertificate`, `timeout.rs` ~L232).**
 
 | Allocation (owner) | Element type / in-memory element size | Max admitted capacity | Charged bytes | Inline or outer backing | Sharing / lifetime |
 |---|---|---|---|---|---|
-| `GEN_STRUCT` — decoded struct value | record-level `high_qc` (inline `block_id` 32, `view` 8, `signers: Vec` descriptor 24) **+** `TimeoutCertificate` struct (`view` 8, `timeout_view` 8, `high_qc: Option<QC>` inline, `signers: Vec` descriptor 24, `signed_timeouts: Vec` descriptor 24) | 1 struct | `size_of::<…>()` (inline only) | **inline** | generation |
+| `GEN_STRUCT` — decoded struct value | record-level `high_qc` (inline `block_id` 32, `view` 8, `signers: Vec` descriptor 24) **+** `TimeoutCertificate` struct (`view` 8, `timeout_view` 8, `high_qc: Option<QC>` inline, `signers: Vec` descriptor 24, `signed_timeouts: Vec` descriptor 24) | 1 struct | `GEN_STRUCT = size_of::<RetainedGeneration>()` — **same single whole-enum constant** as the QcDerived row, ≤ `GEN_STRUCT_MAX = 384` B (§ 13.7A(c); the record-level `high_qc` **+** `TimeoutCertificate` inline members named here are **already included once** within it) | **inline** | generation |
 | record-level `high_qc.signers` backing | `ValidatorId` / `size_of::<ValidatorId>() = 8` B | ≤ `N` | `capacity() × 8` ≤ `N × 8` | **outer backing** | generation |
 | `TimeoutCertificate.signers` backing | `ValidatorId` / `8` B | ≤ `N` | ≤ `N × 8` | **outer backing** | generation |
 | `TimeoutCertificate.high_qc.signers` backing (optional) | `ValidatorId` / `8` B | ≤ `N` (when `high_qc` present) | ≤ `N × 8` | **outer backing** | generation |
@@ -2596,7 +2596,7 @@ retained `TimeoutCertificate`, `timeout.rs` ~L232).**
 | `CTX_OWNED` — pinned context bytes owned | `u8` / `1` B | **0 under the initial profile** (32-byte descriptor counted inline in `GEN_STRUCT`), else ≤ `CTX_MAX` | `0` initial, else `≤ CTX_MAX` (§ 13.7A(c)) | **outer backing** | generation; owned, not shared |
 | `ARC_CTRL` — shared `Arc` control block | `2 × AtomicUsize` / `16` B (64-bit) | 1 | `≤ 16` B, counted **once to canonical owner** | **outer backing** (control-block header) | shared; released with last holder |
 
-In both variants `GEN_STRUCT` is the sum of the **inline** struct rows (including each
+In both variants `GEN_STRUCT` is the **single whole-enum constant** `size_of::<RetainedGeneration>()` (§ 13.7A(c)) — **identical** across variants and **not** a per-variant sum of the inline struct rows; it already **includes once** the **inline** struct members (including each
 `Vec`'s 3-word descriptor), and the `*_CAP`/`SIG_TERMS` rows are the **outer backing**
 allocations. A generation's heap is charged **once** regardless of how many `Arc`
 holders reference it; the shared control block is charged **once to its designated
@@ -2657,9 +2657,9 @@ breach). A deployment that wants a tighter **per-variant inline** charge must me
 variant payload struct** (`size_of::<QcGenerationArm>()` / `size_of::<TcGenerationArm>()`) plus the
 shared discriminant/padding — **not** `size_of::<RetainedGeneration>()`, whose own `size_of` is
 not a per-variant quantity. Because the operative cap is
-`checked_max(MAX_QC_GENERATION_BYTES, MAX_TC_GENERATION_BYTES)` and the TcDerived total already
-used `384`, substituting the single `384` whole-enum constant into both totals leaves
-`MAX_RETAINED_GENERATION_BYTES` **unchanged** (TC-dominated); the backing-allocation totals,
+`checked_max(MAX_QC_GENERATION_BYTES, MAX_TC_GENERATION_BYTES)`, substituting the single `384`-B
+whole-enum constant into **both** totals **raises the QcDerived inline-wrapper term** by up to `128` B over the **withdrawn** `256`-B arm reading (the TcDerived total already used `384`, so it is unchanged); whether that leaves
+`MAX_RETAINED_GENERATION_BYTES` **unchanged** depends on the **pinned-profile** backing-allocation rows of the two variants — it is **not** asserted to remain TcDerived-dominated (that dominance is **withdrawn as unsupported**; see the D7-D14 dominance-claim correction entry). Independent of the inline term, the backing-allocation totals,
 serialized formulas, scratch representations, three-buffer peak, and corrected QC attribution are
 all **preserved**.
 
@@ -2717,9 +2717,12 @@ checked_max(MAX_QC_GENERATION_BYTES, MAX_TC_GENERATION_BYTES)` (checked `u128`).
 row maps to exactly one named term above, so **every allocation row contributes** to its
 variant total and none is counted twice. The two inline-wrapper terms are the **same** single
 whole-enum constant — `GEN_STRUCT_QC = GEN_STRUCT_TC = size_of::<RetainedGeneration>() ≤
-GEN_STRUCT_MAX = 384` B — so the variants differ **only** in their backing-allocation rows, and
-the `checked_max` remains **TcDerived-dominated**; the operative cap is **unchanged** by the
-Rust-layout correction. **Honest scope:** these are **application-owned**
+GEN_STRUCT_MAX = 384` B — so the variants differ **only** in their backing-allocation rows, so
+the operative `checked_max` is decided by those backing rows at the **pinned profile**; the earlier
+claim that it remains **TcDerived-dominated** and that the cap is **unchanged** by the
+Rust-layout correction is **withdrawn as unsupported** (raising the QcDerived inline term to the
+uniform `384` constant can raise `MAX_QC_GENERATION_BYTES`, and no proof was given that the
+TcDerived total exceeds it by the required margin). **Honest scope:** these are **application-owned**
 charges; allocator rounding and storage-backend-internal allocations are **excluded** and that
 exclusion is stated — this is **not** a process-RSS bound. This total feeds the aggregate peak
 `MAX_AGGREGATE_RETAINED_BYTES` (§ 13.7 / § 13.7B) and is **never** bounded by the serialized
