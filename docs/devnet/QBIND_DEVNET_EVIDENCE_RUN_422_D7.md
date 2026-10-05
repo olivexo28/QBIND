@@ -13267,3 +13267,120 @@ the § 13.7A(c.1)/(c.2) summary rows. Two reconciliation defects remained:
   release-binary rebuild were run or claimed; recorded as **not run**. `parallel_validation`
   (Code Review + CodeQL) was run over the Markdown-only change; CodeQL triviality was declared
   (non-code Markdown, no analyzable surface). Prior evidence is preserved with its original scope.
+
+## RUN 422 D7-D14 — Complete retained-field inventory and Arc allocation ownership (corrects `54652c7584b40d2c066290cb76d4f374a7f903f3`)
+
+This entry is a **clearly-identified correction** appended to the Run 422 D7-D14 evidence; all
+prior entries and tables are **preserved** (historical text is retained, not rewritten). It
+completes the two unfinished inventory/ownership requirements left after the accepted
+wrapper-row reconciliation and the accepted withdrawal of the unconditional TcDerived-dominance
+claim (both **preserved**). Documentation-only: no Rust, test, dependency, schema, CLI,
+workflow, wire-format, signing-preimage, or production-wiring change. Required status is
+unchanged (`D7D14_CONSENSUS_SAFETY_RECORD_DESIGN=DEFINED-NOT-IMPLEMENTED`;
+`DURABLE_ANTI_ROLLBACK=NOT-ESTABLISHED`; `GENESIS_AUTHORITY_ACTIVATION=DISABLED`;
+`SECURITY_POSTURE=RS1-OPEN / PUBLIC-DEVNET-NO-GO`; C4/C5 **OPEN**). Storage is **not**
+implemented; D15 / Run 423 are **not** begun; **no** accepted architectural decision is reopened.
+
+### Starting state (this pass)
+
+* **Branch** `copilot/run-422-d7-d14-complete-retained-field-inventory` (used unchanged);
+  **starting HEAD** `83c2f84431e88fa2ec62cd945aae7fd626d895c7`; **worktree** clean at entry
+  (`git status --porcelain` empty before edits).
+* **Reviewed-object availability / ancestry / correspondence** (each reported separately; none
+  inferred from another):
+  * **Availability.** `54652c7584b40d2c066290cb76d4f374a7f903f3` was **not** present in the
+    initial shallow clone; `git fetch origin 54652c75…` made it available (`git cat-file -t` →
+    **commit**).
+  * **Ancestry.** It is **not** a linear ancestor of HEAD (`git merge-base --is-ancestor
+    54652c75… HEAD` → false). HEAD `83c2f84` and the reviewed `54652c7` are **siblings** whose
+    merge-base is `c07e95482495cc160d611b3e121f15494c5705d0` (HEAD's parent and the reviewed
+    object's parent).
+  * **Scoped content correspondence.** Before this pass's edits, `git diff --stat 54652c75… HEAD`
+    over each of the three authorized paths — and over the **whole tree** — was **empty**: the
+    worktree content was **byte-identical** to the reviewed revision, so the review's accepted
+    wrapper-row reconciliation and dominance withdrawal apply directly to HEAD and are preserved.
+* **AGENTS.md.** None exists in the tree (`git ls-files | grep -i AGENTS.md` → empty), so none
+  applies.
+
+### Finding — two unfinished inventory/ownership requirements
+
+The accepted pass fixed `GEN_STRUCT` to the single whole-enum constant and withdrew the
+unconditional dominance claim, but § 13.7A(c) still (1) lacked an explicit **retained-field
+inventory** attributing each common serialized field's post-validation treatment, consumer,
+owner, and allocation charge (and did not state how **O5** obtains its complete-content
+comparison inputs), and (2) described the shared `Arc` as a **bare 16-byte control block** that
+the generation **co-owned** — an internal-handle description with no distinct retained field or
+consumer, omitting required layout padding and conflating the value, the shared allocation, and
+external handles.
+
+### Correction (in `docs/protocol/QBIND_CONSENSUS_RECOVERY_SIGNING_HISTORY_CORRESPONDENCE_CONTRACT.md`)
+
+* **§ 13.7A(c.4) retained-field inventory added.** A new table (`Field | Post-validation
+  treatment | Consumer/reason | Owner | Allocation charge`) covers every common serialized field
+  — `persistence_format_version`, `network_genesis_id`, `authority_context_ref`,
+  `lock_block_id`/`lock_view`, `evidence_lock_binding`, `committed_state_assoc` + presence
+  discriminant, `publication_revision`, `predecessor_ref` + presence discriminant,
+  `integrity_checksum`, and the initialization + evidence discriminants — each assigned exactly
+  one treatment (**retained inline** inside the single whole-enum `GEN_STRUCT`, **retained
+  through a named owner**, or **discarded after validation**). Bootstrap/no-commit distinctions
+  are preserved and **no absent value is manufactured** (an absent field is only its presence
+  discriminant). The inventory **attributes** the single wrapper constant field-by-field rather
+  than adding a charge, and the complete-wrapper definition now **is** this table plus the
+  § 13.7A(a)/(b) backing rows — not a pointer to a non-existent inventory.
+* **§ 13.7A(c.5) O5 complete-content inputs added.** O5's byte-for-byte comparison is
+  reconstructed from the generation's **retained inline fields** (owner: the generation; charge:
+  already in `GEN_STRUCT`) plus its **backing allocations**, re-encoded into the single
+  **`CMP_SPAN`** `≤ MAX_SAFETY_RECORD_BYTES` encoded buffer (owner: `VALIDATION_SCRATCH`,
+  multiplicity 1, § 13.7B) — adding **no** new peak term. Byte-for-byte complete-content identity
+  is preserved; **digest equality is insufficient** (auxiliary fast-reject only; H19).
+* **§ 13.7A(c.6) Arc ownership / alignment table added, internal-handle description removed.** A
+  new table (`Object/allocation | Owner | Lifetime | Charge | Sharing rule`) distinguishes the
+  `RetainedGeneration` **value** (charged by `GEN_STRUCT`), the **shared allocation** containing
+  it, the **external `Arc` handles** (pointer words charged to their **holders**), the
+  **strong/weak counter header**, the **header→value alignment padding**, and the **required
+  final layout padding**. The generation no longer "co-owns" the control block: wrapper item
+  **(iv)** and the charge-the-wrapper paragraph now state the value carries **no** self-pointer or
+  `Arc` handle word and is the payload placed **inside** the shared allocation.
+* **`ARC_CTRL` redefined as the complete target-profile shared-allocation charge.** `ARC_CTRL` =
+  `2 × size_of::<AtomicUsize>()` header **+** header→value alignment padding **+** required final
+  layout padding, charged **once** to the canonical owner and bounded by a pinned `ARC_CTRL_MAX`
+  — a **proposed implementation obligation computed per target profile**, **not** a stable
+  guarantee about `std::sync::Arc` internals. On the 64-bit profile it evaluates to `16` B header
+  `+ 0 + 0` padding. The required alignment/layout padding is **part of `ARC_CTRL`** and is **not**
+  dismissed as allocator rounding; only the allocator's whole-block size-class rounding stays
+  **outside** the accounting scope (honestly excluded), a **distinct** quantity. The § 13.7A(a)/(b)
+  and (c.1)/(c.2) `ARC_CTRL` rows and the § 13.7 prose definition are reconciled to this charge.
+* **Wording corrections.** `GEN_STRUCT_MAX = 384` B and its `const` assertion
+  `size_of::<RetainedGeneration>() ≤ GEN_STRUCT_MAX` are labelled **proposed and unexecuted**
+  (not asserted compiled/executed in this documentation-only pass); the counter header is
+  expressed as `2 × size_of::<AtomicUsize>()` (not a bare `16`).
+
+### No change required in the two other authorized files
+
+* `docs/protocol/QBIND_PROPOSAL_VOTE_SIGNING_STATE_CONTINUITY_CONTRACT.md` references the named
+  totals `MAX_QC_GENERATION_BYTES` / `MAX_TC_GENERATION_BYTES`, the `checked_max`, the § 13.7A
+  allocation tables, and "accounted **once per distinct `Arc`-shared allocation**" — none of
+  which the inventory/`ARC_CTRL` reconciliation contradicts. It needs **no** edit and was left
+  unchanged (edit only files requiring reconciliation).
+
+### Validation (literal outcomes, this pass)
+
+* `git status --porcelain` → **exactly two** modified paths
+  (`docs/protocol/QBIND_CONSENSUS_RECOVERY_SIGNING_HISTORY_CORRESPONDENCE_CONTRACT.md` and this
+  evidence file). `docs/protocol/QBIND_PROPOSAL_VOTE_SIGNING_STATE_CONTINUITY_CONTRACT.md`,
+  `docs/whitepaper/contradiction.md`, and all other tracked files are **unchanged**.
+* **No residual bare-16-byte / co-owned-handle claim:** § 13.7A no longer describes the shared
+  `Arc` as a bare 16-byte control block the generation co-owns; every `ARC_CTRL` cell reads the
+  complete shared-allocation charge (header + required layout padding), and the external handle is
+  charged to holders.
+* **Totals reconciled:** the inventory charges are the same single whole-enum `GEN_STRUCT`
+  constant (no new per-field charge); `MAX_QC_GENERATION_BYTES` / `MAX_TC_GENERATION_BYTES`,
+  the per-operation `identity + Arc-handle` term, and the aggregate peak `MAX_AGGREGATE_RETAINED_BYTES`
+  are unchanged in form (the `ARC_CTRL` redefinition renames/clarifies the same once-charged
+  overhead and adds the required-padding terms, `0` B on the 64-bit profile).
+* **EOL conventions preserved** on both edited files: CRLF throughout, **0** bare-LF bytes, and
+  **no** final newline — unchanged from entry.
+* **Tooling not run (documentation-only):** no Cargo build, Cargo tests, Clippy, or
+  release-binary rebuild were run or claimed; recorded as **not run**. `parallel_validation`
+  (Code Review + CodeQL) was run over the Markdown-only change; CodeQL triviality was declared
+  (non-code Markdown, no analyzable surface). Prior evidence is preserved with its original scope.
