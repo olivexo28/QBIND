@@ -2627,8 +2627,9 @@ a 32-byte authority-context descriptor the generation references (ownership opti
 **(iv)** the **`Arc` handle** (pointer word + the shared control-block it co-owns).
 
 **Charge the complete wrapper (which inline fields are already included — not double-counted).**
-`GEN_STRUCT_*` is `size_of::<RetainedGeneration>()` for the active variant arm and **already
-includes**, counted **once**: every embedded-certificate **scalar** field, every embedded
+`GEN_STRUCT` is the **single** whole-enum constant `size_of::<RetainedGeneration>()` — **invariant
+across the active variant** (see the Rust-layout correction below) — and **already includes**,
+counted **once**: every embedded-certificate **scalar** field, every embedded
 **inline `Vec` descriptor** (`ptr`/`len`/`cap`, `24` B each — e.g. the wire QC's `signer_bitmap`
 and `signatures` descriptors; the TC's `signers`/`signed_timeouts` descriptors), the common
 identity fields, the 32-byte context-reference digest, and the `Arc` handle word. These inline
@@ -2636,15 +2637,31 @@ members are **not** re-counted in the backing rows; only the **outer backing** a
 (bitmap bytes, signatures descriptor array, per-signature buffers, signer-id backings,
 `signed_timeouts` backing, owned context bytes, `Arc` control block) are added separately.
 **Native alignment/padding** inflates `size_of` above the sum of field widths and is **distinct**
-from the § 13.2A **serialized** widths. Measurable bound: `GEN_STRUCT_QC = size_of::<RetainedGeneration>()`
-(QcDerived arm) `≤ GEN_STRUCT_QC_MAX = 256` B on a 64-bit target (common identity + context digest
-+ `Arc` handle ≤ `136` + embedded wire-QC inline incl. its two `Vec` descriptors ≤ `120`); and
-`GEN_STRUCT_TC = size_of::<RetainedGeneration>()` (TcDerived arm) `≤ GEN_STRUCT_TC_MAX = 384` B
-(common ≤ `136` + record-level `high_qc` inline `64` + `TimeoutCertificate` inline struct incl.
-its `Vec` descriptors ≤ `184`). Validation requirement: a `const` assertion
-`size_of::<RetainedGeneration>() ≤ max(GEN_STRUCT_QC_MAX, GEN_STRUCT_TC_MAX)` (compile-time
-refusal on breach). The enum's `size_of` is the **max** of its variant arms plus a 1-byte tag;
-the per-arm ceilings above are the documented conservative bounds.
+from the § 13.2A **serialized** widths.
+
+**Rust-layout correction (complete-wrapper `size_of`, D7-D14).** `size_of::<RetainedGeneration>()`
+is a **single compile-time constant** — `max(size_of` over the variant payload arms`) +
+discriminant tag + alignment padding` — and does **not** vary with the active variant: an enum
+occupies its **largest** arm (plus tag/padding) for **every** variant and never shrinks to a
+smaller arm. The earlier per-arm reading `GEN_STRUCT_QC = size_of::<RetainedGeneration>()`
+`≤ 256` B (QcDerived arm) vs `GEN_STRUCT_TC = size_of::<RetainedGeneration>()` `≤ 384` B
+(TcDerived arm) is therefore **withdrawn as a layout error**: the `≤ 256` figure mislabeled the
+**inner QcDerived payload-arm** footprint as the whole-enum footprint, but a decoded `QcDerived`
+generation still occupies the full enum (the larger TcDerived arm plus tag/padding). The
+corrected accounting charges **one** inline wrapper term `GEN_STRUCT = size_of::<RetainedGeneration>()`,
+**identical in both variant totals**, bounded by a **single** ceiling `GEN_STRUCT_MAX = 384` B on
+a 64-bit target (the larger TcDerived arm: common ≤ `136` + record-level `high_qc` inline `64` +
+`TimeoutCertificate` inline struct incl. its `Vec` descriptors ≤ `184`), with a **single**
+`const` assertion `size_of::<RetainedGeneration>() ≤ GEN_STRUCT_MAX` (compile-time refusal on
+breach). A deployment that wants a tighter **per-variant inline** charge must measure the **inner
+variant payload struct** (`size_of::<QcGenerationArm>()` / `size_of::<TcGenerationArm>()`) plus the
+shared discriminant/padding — **not** `size_of::<RetainedGeneration>()`, whose own `size_of` is
+not a per-variant quantity. Because the operative cap is
+`checked_max(MAX_QC_GENERATION_BYTES, MAX_TC_GENERATION_BYTES)` and the TcDerived total already
+used `384`, substituting the single `384` whole-enum constant into both totals leaves
+`MAX_RETAINED_GENERATION_BYTES` **unchanged** (TC-dominated); the backing-allocation totals,
+serialized formulas, scratch representations, three-buffer peak, and corrected QC attribution are
+all **preserved**.
 
 **`CTX_OWNED` (bounded explicitly).** Under the **initial profile** the generation **references**
 the pinned context by the 32-byte descriptor already counted inline in `GEN_STRUCT`, so the
@@ -2662,7 +2679,7 @@ rounding of the backing block is **excluded** and that exclusion is stated (see 
 
 | Named term | § 13.7A(a) row | Measurable bound |
 |---|---|---|
-| `GEN_STRUCT_QC` | decoded struct value (inline wrapper) | `size_of::<RetainedGeneration>()` ≤ `256` B |
+| `GEN_STRUCT_QC` | decoded struct value (inline wrapper) | `size_of::<RetainedGeneration>()` ≤ `GEN_STRUCT_MAX = 384` B (single whole-enum constant — **not** a `256`-B QC-only arm size; see the Rust-layout correction) |
 | `SIGNERS_CAP` | `signer_bitmap` backing | `capacity() × 1` ≤ `B_span` |
 | `SIG_VEC_BACKING` | `signatures` outer descriptor array | `capacity() × 24` ≤ `N × 24` |
 | `SIG_TERMS` | per-signature `u8` buffers (≤ `N`) | `Σ capacity()` ≤ `N × S_sig` |
@@ -2679,7 +2696,7 @@ DECODED_SIGNERS + CTX_OWNED + ARC_CTRL + CAPNORM_SLACK_QC` (checked `u128`; over
 
 | Named term | § 13.7A(b) row | Measurable bound |
 |---|---|---|
-| `GEN_STRUCT_TC` | decoded struct value (inline wrapper) | `size_of::<RetainedGeneration>()` ≤ `384` B |
+| `GEN_STRUCT_TC` | decoded struct value (inline wrapper) | `size_of::<RetainedGeneration>()` ≤ `GEN_STRUCT_MAX = 384` B (same single whole-enum constant as `GEN_STRUCT_QC`) |
 | `REC_HIGH_QC_SIGNERS` | record-level `high_qc.signers` backing | `capacity() × 8` ≤ `N × 8` |
 | `TC_SIGNERS` | `TimeoutCertificate.signers` backing | ≤ `N × 8` |
 | `TC_HIGH_QC_SIGNERS` | `TimeoutCertificate.high_qc.signers` backing (optional) | ≤ `N × 8` (when present) |
@@ -2698,7 +2715,11 @@ charged **explicitly**, never approximated away.
 **(c.3) Operative single-generation cap.** `MAX_RETAINED_GENERATION_BYTES =
 checked_max(MAX_QC_GENERATION_BYTES, MAX_TC_GENERATION_BYTES)` (checked `u128`). Each § 13.7A
 row maps to exactly one named term above, so **every allocation row contributes** to its
-variant total and none is counted twice. **Honest scope:** these are **application-owned**
+variant total and none is counted twice. The two inline-wrapper terms are the **same** single
+whole-enum constant — `GEN_STRUCT_QC = GEN_STRUCT_TC = size_of::<RetainedGeneration>() ≤
+GEN_STRUCT_MAX = 384` B — so the variants differ **only** in their backing-allocation rows, and
+the `checked_max` remains **TcDerived-dominated**; the operative cap is **unchanged** by the
+Rust-layout correction. **Honest scope:** these are **application-owned**
 charges; allocator rounding and storage-backend-internal allocations are **excluded** and that
 exclusion is stated — this is **not** a process-RSS bound. This total feeds the aggregate peak
 `MAX_AGGREGATE_RETAINED_BYTES` (§ 13.7 / § 13.7B) and is **never** bounded by the serialized
