@@ -13384,3 +13384,138 @@ external handles.
   release-binary rebuild were run or claimed; recorded as **not run**. `parallel_validation`
   (Code Review + CodeQL) was run over the Markdown-only change; CodeQL triviality was declared
   (non-code Markdown, no analyzable surface). Prior evidence is preserved with its original scope.
+
+## RUN 422 D7-D14 — Reconcile O5 byte identity, holder accounting, and layout claims (corrects `d487f5ef1adefbaef670b44255c2d03b67a1f9f5`)
+
+This entry is a **clearly-identified correction** appended to the Run 422 D7-D14 evidence; all
+prior entries and tables are **preserved** (historical text retained, superseded claims marked
+where necessary, not rewritten). Documentation-only: no Rust, test, dependency, schema, CLI,
+workflow, wire-format, signing-preimage, or production-wiring change. Required status is
+unchanged (`D7D14_CONSENSUS_SAFETY_RECORD_DESIGN=DEFINED-NOT-IMPLEMENTED`;
+`DURABLE_ANTI_ROLLBACK=NOT-ESTABLISHED`; `GENESIS_AUTHORITY_ACTIVATION=DISABLED`;
+`SECURITY_POSTURE=RS1-OPEN / PUBLIC-DEVNET-NO-GO`; C4/C5 **OPEN**; fail-closed
+`CurrentEpochUnavailable` and the activation/transport boundaries preserved). Storage is **not**
+implemented; D15 / Run 423 are **not** begun; **no** accepted architectural decision
+(serialized bounds, QC view mapping, bootstrap/no-commit, TC association predicates,
+unverified-evidence restrictions, committed-history requirements, O1–O5 ordering,
+stale-publication fencing, D10 semantics, the acceptance-scope split) is reopened.
+
+### Starting state (this pass)
+
+* **Branch** `copilot/run-422-d7-d14-reconcile-o5-byte-identity` (used unchanged); **starting
+  HEAD** `422e45979bb492b4ec87fde3826ae9247bd7a443`; **worktree** clean at entry
+  (`git status --porcelain` empty before edits).
+* **Reviewed-object availability / ancestry / content correspondence** (each reported separately;
+  none inferred from another):
+  * **Availability.** `d487f5ef1adefbaef670b44255c2d03b67a1f9f5` was **not** present in the
+    initial shallow clone; `git fetch origin d487f5ef…` made it available (`git cat-file -t` →
+    **commit**).
+  * **Ancestry.** It is **not** a linear ancestor of HEAD (`git merge-base --is-ancestor
+    d487f5ef… HEAD` → false). HEAD `422e459` and the reviewed `d487f5e` are **siblings** sharing
+    merge-base `83c2f84431e88fa2ec62cd945aae7fd626d895c7`.
+  * **Scoped content correspondence.** Before this pass's edits, `git diff --stat d487f5ef… HEAD`
+    over the three authorized paths showed the continuity contract and the evidence file
+    **byte-identical** to the reviewed revision, and the correspondence contract differing by a
+    **single** cosmetic line near the “charged once to its designated owner” sentence (HEAD had
+    split the reviewed `CRCRLF` into a blank line). The review's findings therefore apply to HEAD.
+* **AGENTS.md.** None exists in the tree (`git ls-files | grep -i AGENTS.md` → empty), so none
+  applies.
+
+### Corrections (in `docs/protocol/QBIND_CONSENSUS_RECOVERY_SIGNING_HISTORY_CORRESPONDENCE_CONTRACT.md`)
+
+* **O5 whole-publication byte identity made explicit — retain the original validated bytes
+  (selected approach).** § 13.7A(c.5) is rewritten from the previous **reconstruction** story
+  (which excluded `persistence_format_version` / `network_genesis_id` / `integrity_checksum` from
+  a “semantic complete-content span”) to the explicit retention of the **original, complete
+  O3-validated encoded publication**. **Source / owner / capacity / lifetime:** the original bytes
+  reside **verbatim** in the candidate **encoded input buffer** (`ENC_INPUT`) — the same
+  `≤ MAX_SAFETY_RECORD_BYTES` buffer O3 decoded/validated — owned by the single in-flight
+  candidate/publication operation under the single-owner serialization boundary, **kept live
+  through O5** (no longer “released after decode”), lifetime O3 admission → O5 completion. **O5's
+  currently-stored operand** is obtained by **reading back** the stored publication into a
+  publication-side `≤ MAX_SAFETY_RECORD_BYTES` buffer (operand 2) under the expected-revision
+  check. **Charging:** both operands and the verbatim re-publication are charged by the existing
+  § 13.7B **three-buffer model** (input + encoding + publication); **no** new retained copy and
+  **no** fourth record-sized buffer are added (`CMP_SPAN` now owns no separate buffer, `0` extra
+  bytes). **Release:** the read-back buffer at end of comparison; the retained `ENC_INPUT` and the
+  re-publication buffer only **after** O5's successful durability acknowledgement. **Re-publication**
+  writes operand 1 **verbatim** (no re-encode/repair/normalization/content change). Whole-publication
+  comparison, digest-insufficiency (H19), discriminant comparison, expected-revision + single-owner
+  boundary, stale-publication refusal, and effectiveness-only-after-durability are all preserved.
+* **Inventory reconciled to the encoded-byte source.** § 13.7A(c.4) now states the
+  `persistence_format_version` / `network_genesis_id` / `integrity_checksum` fields are **discarded
+  from the decoded generation** yet their exact bytes **survive in the retained encoded
+  publication** (c.5) that supplies O5's whole-publication bytes — retained decoded fields may
+  discard information because the encoded publication carries O5's required bytes.
+* **One bounded holder inventory; “pointer + shared control block” contradiction removed.** The
+  earlier § 13.7 prose calling each operation's handle “pointer + shared control block” (which
+  double-charged the control block per holder) is replaced by the **`Arc`-handle pointer word**
+  (`8` B) only. § 13.7A(c.6) and the § 13.7 prose define a **single bounded inventory** of owning
+  handles — **current-authoritative** (`1`), **candidate** (`MAX_CONCURRENT_CANDIDATES`), and
+  **prepared-operation** (`MAX_OUTSTANDING_PREPARED_L0`); a **superseded** generation is held
+  **directly by the prepared-operation handle** that captured it, **not** by a separate slot and
+  **not** by a new registry. Each handle is charged once to its holder; each generation value and
+  its backings once per distinct generation; `ARC_CTRL` once per allocation; moves/borrows add no
+  owning handle.
+* **Aggregate charge reconciled (handle charged exactly once).** Both aggregate formulas (§ 13.7
+  and § 13.7B) and the § 13.7B phase table replace the prepared-operation-only holder term with
+  `((1 + MAX_CONCURRENT_CANDIDATES) × Arc-handle + MAX_OUTSTANDING_PREPARED_L0 × (identity +
+  Arc-handle))`, so the current-authoritative and candidate holder slots are now charged (one
+  `8`-B pointer word each) alongside the prepared-operation `identity + Arc-handle` terms.
+* **Allocation-lifetime row corrected (strong vs `Weak`).** The `RetainedGeneration` **value**
+  drops when the **last strong** handle drops; outstanding **`Weak`** handles can keep the
+  **backing allocation** alive after the value is dropped. The **initial profile explicitly
+  excludes external `Weak` handles** (no weak-reference subsystem is requested), so with no
+  outstanding `Weak` the allocation is reclaimed with the last strong handle.
+* **Unsupported layout guidance removed (§ 13.7A(c)).** The generic native-enum sizing equation
+  `max(size_of over the variant payload arms) + tag + padding` and the advice that measuring a
+  smaller inner payload permits a smaller charge for the unchanged whole-enum allocation are both
+  **removed**. One `GEN_STRUCT = size_of::<RetainedGeneration>()` (identical across active
+  variants) is retained; `GEN_STRUCT_MAX = 384` and its `const` assertion remain **proposed and
+  unexecuted**; the eventual implementation **must measure and enforce the complete chosen
+  representation** on its supported target. Alignment and shared-allocation overhead stay tied to
+  the actual target-profile layout; native-layout / `std::sync::Arc`-internal assumptions are not
+  presented as stable language guarantees. The withdrawal of unconditional TcDerived dominance is
+  preserved; the representation was not redesigned for a smaller number.
+
+### Line-ending repair and attachment caveat (§ 6)
+
+* The **reviewed committed contract** (`d487f5e`) contained **one** malformed `CRCRLF` sequence
+  near the “charged once to its designated owner” sentence (one bare `CR` at that location). The
+  starting HEAD had already split it into a **blank line** inside that sentence. This pass repairs
+  it to a single CRLF line break, restoring the contiguous sentence, while preserving the CRLF and
+  no-final-newline conventions. **No claim of attachment/repository byte identity is made** — the
+  reviewed location and any supplied attachment represent it differently, and no attachment was
+  treated as byte-identical to the repository.
+* **Line-ending validation (re-measurable after commit), correspondence contract:** bare `LF`
+  bytes (`LF` not preceded by `CR`) = **0**; bare `CR` bytes (`CR` not followed by `LF`, including
+  any `CRCRLF`) = **0**; `CRLF` = **3132**; **final byte** `.` (`section.`), **no final newline**.
+  Evidence file after this entry: bare `LF` = **0**, bare `CR` = **0**, **no final newline**.
+
+### Validation (literal outcomes, this pass)
+
+* `git status --porcelain` → **exactly two** modified paths
+  (`docs/protocol/QBIND_CONSENSUS_RECOVERY_SIGNING_HISTORY_CORRESPONDENCE_CONTRACT.md` and this
+  evidence file). `docs/protocol/QBIND_PROPOSAL_VOTE_SIGNING_STATE_CONTINUITY_CONTRACT.md`,
+  `docs/whitepaper/contradiction.md`, and all other tracked files are **unchanged**.
+* **Continuity contract left unchanged (references remain accurate).** Its O5 reference — a
+  “complete-content comparison … against the currently stored publication, under the owner
+  boundary and the expected revision, never overwriting a newer publication” — and the named
+  totals / `checked_max` / § 13.7A references are all consistent with the retained-publication
+  approach, so no edit was required (edit only files requiring correction).
+* **Consistency re-checked:** the operative inventory (c.4), the O5 description (c.5), the
+  ownership/lifetime table (c.6), the § 13.7B phase table, and **both** aggregate formulas describe
+  the **same** selected representation; a residual § 13.5 O5 summary that still said “re-serialized
+  validated record” was corrected to the retained original `ENC_INPUT`; no residual “pointer +
+  shared control block”, “semantic complete-content span”, or native-enum sizing equation remains
+  (historical lock-reconstruction wording is unrelated and preserved).
+* **Code Review — completed, 1 file reviewed, no review comments**, with an explicit **model /
+  tool availability caveat**: `parallel_validation` reported the backing review model unavailable
+  in this environment, so the “no comments” outcome is **not** relied on as a clean-vs-findings
+  signal (a skipped/again-unavailable check is not an executed clean pass).
+* **CodeQL Security Scan — skipped: all changes trivial** (documentation-only Markdown; no
+  analyzable code surface).
+* **Secret scan — run this pass: no secrets detected** in the two changed files.
+* **Not run (documentation-only):** Cargo build, Cargo tests, Clippy, and release-binary
+  acceptance were **not run** and are **not** claimed. Prior evidence is preserved with its
+  original scope.
