@@ -14055,10 +14055,12 @@ acknowledgement.
   path constructs the component. The test-gated bypasses are absent from the default/release build.
 * **Secret scan:** the secret-scanning tool was run over the changed files → **no secrets**; no
   databases or large binaries are committed.
-* **Independent review / CodeQL:** `parallel_validation` (Code Review + CodeQL) was invoked for this
-  change; see the correction notes for any addressed feedback. Any unavailable review model or skipped
-  scan is reported explicitly and is **not** counted as an independently completed review or as zero
-  alerts.
+* **Independent review / CodeQL:** `parallel_validation` was invoked for this change. The **Code
+  Review model was unavailable** in this environment (`model claude-sonnet-4.6 not found in
+  registry`); its "no review comments" result is therefore **not** counted as an independently
+  completed review. **CodeQL** reported **0 alerts but the analysis was *skipped*** ("database size is
+  too large"); a skipped scan is **not** asserted as zero real alerts. Both limitations are reported
+  explicitly rather than claimed as clean passes.
 
 ### Why the verdict remains INCOMPLETE — the concrete remaining blocker
 
