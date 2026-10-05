@@ -2459,7 +2459,7 @@ record; pruning disabled.**
     (`lock_block_id` 32 + `lock_view` 8) plus a **shared reference** (an `Arc`-style
     handle) to the validated evidence/context **generation effective at its decision time** — **not** necessarily the current authoritative record's
     evidence/context — **not** a second copy of the certificate. After an O4 replacement advances the effective record from generation `G_k` to `G_{k+1}`, an outstanding operation that captured `G_k` still **pins `G_k` alive** through its `Arc`: the `Arc` avoids copying but does **not** eliminate the allocation it keeps alive (cf. `VerifiedQuorumCertificate::retained_byte_size`, which charges shared `Arc` evidence **once to its canonical owner**, `qc_verify_domain.rs` ~L607). Each entry's **owned** retained
-    memory is therefore the fixed identity bytes + the `Arc` handle (pointer + shared control block), a small constant independent of certificate size; the **pinned evidence/context generation** is charged **separately**, once per distinct generation (below).
+    memory is therefore the fixed identity bytes + the `Arc` **handle pointer word** (`8` B — **not** the shared control block, which is the generation-owned `ARC_CTRL` charged **once per generation** to the generation's canonical owner, § 13.7A(c.6)), a small constant independent of certificate size; the **pinned evidence/context generation** is charged **separately**, once per distinct generation (below).
   * **Aggregate retained bytes and the separate retained-memory cap (distinct-allocation accounting).**
     The serialized-record cap `MAX_SAFETY_RECORD_BYTES` (§ 13.2) bounds a record's **on-disk
     encoded** length and is **not** a bound on a **decoded generation's in-memory** footprint; the
@@ -2482,8 +2482,9 @@ record; pruning disabled.**
   * **Ownership scope and shared-once counting.** Each distinct allocation is counted **once**
     within a stated **ownership scope**: a generation's heap is owned by that generation and charged
     to it once, no matter how many outstanding operations hold an `Arc` to it; a per-operation entry
-    owns only its **identity bytes** (`lock_block_id` 32 + `lock_view` 8) and its **`Arc` handle**
-    (pointer + shared control block), a small constant independent of certificate size. Operations
+    owns only its **identity bytes** (`lock_block_id` 32 + `lock_view` 8) and its **`Arc` handle
+    pointer word** (`8` B — the shared control block is **not** owned per entry; it is the
+    generation-owned `ARC_CTRL`, charged **once per generation**, § 13.7A(c.6)), a small constant independent of certificate size. Operations
     that captured **different** generations across an O4 replacement charge **each** such generation;
     a **superseded** generation `G_k` is counted until its **last** outstanding `Arc` is released (at
     that operation's end-of-lifetime), and is only then collectible. The accounting **scope** spans
@@ -2492,7 +2493,7 @@ record; pruning disabled.**
     this is **not** once per outstanding operation.
   * **Separate limits and the encoded-vs-decoded buffer taxonomy (no decoded bound inferred from a serialized length).** Three caps are stated distinctly and are **not** interchangeable: (1) the **serialized-record** cap `MAX_SAFETY_RECORD_BYTES` (§ 13.2) bounds **only an encoded byte buffer** of that enforced capacity (on-disk / in-flight **encoded** length); (2) a **retained-generation** cap `MAX_RETAINED_GENERATION_BYTES` bounds a single **decoded** generation's `retained_generation_bytes`; (3) an **aggregate / peak** cap `MAX_AGGREGATE_RETAINED_BYTES` bounds the coexisting peak. **A decoded candidate/preparation object's in-memory footprint is NOT bounded by `MAX_SAFETY_RECORD_BYTES`** — that cap applies only where the allocation is explicitly an **encoded byte buffer with that enforced capacity**. The distinct allocation kinds are therefore charged **separately**: **(i) encoded input/output byte buffers** — the candidate's **encoded** decode-input bytes and the in-flight **publication/encoding** bytes, each a real byte buffer **bounded by `MAX_SAFETY_RECORD_BYTES`**; **(ii) the decoded candidate object** and its backing allocations — a **decoded generation** bounded by `MAX_RETAINED_GENERATION_BYTES`, **not** the serialized cap; **(iii) the current authoritative decoded generation**; **(iv) superseded generations** still pinned by outstanding decisions; **(v) preparation-owned decoded objects**; **(vi) capacity-normalization overlap** (below); **(vii) publication-owned encoded buffers**; and **(viii) bounded validation scratch** — each counted **once** within its stated ownership scope (a generation's heap charged once no matter how many `Arc` holders; a shared control block charged once to its designated owner; shared context neither omitted nor double-charged).
   * **`MAX_RETAINED_GENERATION_BYTES` (checked formula over bounded profile parameters, with the variant-specific per-allocation tables in § 13.7A).** A single decoded generation's charge is **variant-specific** — the **checked `u128` maximum** across the two variants' explicit per-allocation totals: `MAX_RETAINED_GENERATION_BYTES = checked_max(MAX_QC_GENERATION_BYTES, MAX_TC_GENERATION_BYTES)`, where each per-variant total is the explicit checked `u128` **sum of every § 13.7A allocation row** for that variant (the named totals `MAX_QC_GENERATION_BYTES` and `MAX_TC_GENERATION_BYTES` are derived mechanically in § 13.7A(c)). **The earlier incomplete `GEN_STRUCT + SIGNERS_CAP + SIG_TERMS + CTX_OWNED + ARC_CTRL` sum is superseded** — it buried the `signatures` **outer descriptor-array** backing inside `SIG_TERMS` and, for `TcDerived`, omitted the record-level/TC/nested `high_qc` signer backings, the `signed_timeouts` backing, the per-entry timeout-signature buffers, and the `O(N²)` nested-signer term; **every** such allocation is now charged in the variant-specific allocation tables in § 13.7A, which enumerate, per allocation, its **owner**, **element type and in-memory element size**, **maximum admitted capacity**, **charged bytes**, whether descriptors are **inline or in an outer backing allocation**, and **sharing/lifetime**. The terms are **decoded** backing allocations charged at `capacity()`, not `len()`: `GEN_STRUCT` is the decoded struct value including inline `Vec` pointer/len/capacity descriptors; `SIGNERS_CAP` is the signer-vector backing `N ×` `size_of::<ValidatorId>()`; `SIG_TERMS` is `N × S_sig` for `QcDerived` (signature buffers) and, for `TcDerived`, the retained `TimeoutCertificate`'s decoded vectors (its `signers`, and each of ≤ `N` `signed_timeouts` entries' own signature ≤ `S_sig` plus optional nested `high_qc` signer vector — the `O(N²)` term); `CTX_OWNED` is the pinned genesis/authority context bytes the generation owns; and `ARC_CTRL` is the shared-allocation overhead (strong/weak counter header **plus** required layout padding, **not** the value) charged **once to its canonical owner** — the complete target-profile charge of § 13.7A(c.6), not a bare 16-byte-header assumption (modelled on `VerifiedQuorumCertificate::retained_byte_size`, `qc_verify_domain.rs` ~L618). `N`, `S_sig`, and each framing constant are the **pinned authorized-epoch** profile parameters, **fixed before use**; these are **decoded capacities** (and **in-memory** `size_of`), never the **serialized** widths of § 13.2A. Any overflow → **refuse**.
-  * **`MAX_AGGREGATE_RETAINED_BYTES` (checked peak with finite multiplicity).** The aggregate cap is a **checked `u128`** peak over explicit, bounded multiplicities: `MAX_AGGREGATE_RETAINED_BYTES ≥ (MAX_OUTSTANDING_PREPARED_L0 × (identity + Arc-handle)) + ((MAX_OUTSTANDING_PREPARED_L0 + 1 + MAX_CONCURRENT_CANDIDATES) × MAX_RETAINED_GENERATION_BYTES) + (MAX_CONCURRENT_CANDIDATES × CAPNORM_OVERLAP) + ((MAX_CONCURRENT_CANDIDATES + 2 × MAX_CONCURRENT_PUBLICATIONS) × MAX_SAFETY_RECORD_BYTES) + VALIDATION_SCRATCH`. The `(MAX_OUTSTANDING_PREPARED_L0 + 1 + MAX_CONCURRENT_CANDIDATES)` term charges the **current** generation, every **pinned superseded** generation, **and the candidate generation being decoded** — the candidate is included **in addition to** current/pinned whenever they coexist during O3. The encoded term charges the **three** separately-owned encoded byte buffers under the conservative three-buffer model (§ 13.7B) — the candidate **input** (`× MAX_CONCURRENT_CANDIDATES`) plus the successor **encoding** and in-flight **publication** buffers (`2 × MAX_CONCURRENT_PUBLICATIONS`), each ≤ `MAX_SAFETY_RECORD_BYTES` (so **3** record-sized buffers under the initial `1`/`1` limits). **`MAX_CONCURRENT_CANDIDATES`**, **`MAX_CONCURRENT_PUBLICATIONS`**, and `MAX_OUTSTANDING_PREPARED_L0` are **proposed component limits** (concrete initial profile: **1**, **1**, **2**), **not** claims about existing engine enforcement; they give the peak a **finite** multiplicity (without them the multiplicity would be unbounded). A deployment pipelining more concurrency must raise them **explicitly**.
+  * **`MAX_AGGREGATE_RETAINED_BYTES` (checked peak with finite multiplicity).** The aggregate cap is a **checked `u128`** peak over explicit, bounded multiplicities: `MAX_AGGREGATE_RETAINED_BYTES ≥ ((1 + MAX_CONCURRENT_CANDIDATES) × Arc-handle + MAX_OUTSTANDING_PREPARED_L0 × (identity + Arc-handle)) + ((MAX_OUTSTANDING_PREPARED_L0 + 1 + MAX_CONCURRENT_CANDIDATES) × MAX_RETAINED_GENERATION_BYTES) + (MAX_CONCURRENT_CANDIDATES × CAPNORM_OVERLAP) + ((MAX_CONCURRENT_CANDIDATES + 2 × MAX_CONCURRENT_PUBLICATIONS) × MAX_SAFETY_RECORD_BYTES) + VALIDATION_SCRATCH`. The **holder term** charges every **owning `Arc` handle** exactly once from a **bounded holder inventory** (§ 13.7A(c.6)): the **current-authoritative** holder (`1`) and each **candidate** holder (`MAX_CONCURRENT_CANDIDATES`) contribute **one `Arc`-handle pointer word** (`8` B) each, and each **outstanding prepared-operation** holder (`MAX_OUTSTANDING_PREPARED_L0`) contributes its **identity bytes** (`40` B) **plus** one `Arc`-handle pointer word; a **superseded** generation is pinned **directly by the prepared-operation handle** that captured it, **not** by a separate slot, so it adds **no** extra handle. The shared control block is **not** in this term — it is the generation-owned `ARC_CTRL`, charged **once per distinct generation** (§ 13.7A(c.6)), never per handle. The `(MAX_OUTSTANDING_PREPARED_L0 + 1 + MAX_CONCURRENT_CANDIDATES)` term charges the **current** generation, every **pinned superseded** generation, **and the candidate generation being decoded** — the candidate is included **in addition to** current/pinned whenever they coexist during O3. The encoded term charges the **three** separately-owned encoded byte buffers under the conservative three-buffer model (§ 13.7B) — the candidate **input** (`× MAX_CONCURRENT_CANDIDATES`) plus the successor **encoding** and in-flight **publication** buffers (`2 × MAX_CONCURRENT_PUBLICATIONS`), each ≤ `MAX_SAFETY_RECORD_BYTES` (so **3** record-sized buffers under the initial `1`/`1` limits). **`MAX_CONCURRENT_CANDIDATES`**, **`MAX_CONCURRENT_PUBLICATIONS`**, and `MAX_OUTSTANDING_PREPARED_L0` are **proposed component limits** (concrete initial profile: **1**, **1**, **2**), **not** claims about existing engine enforcement; they give the peak a **finite** multiplicity (without them the multiplicity would be unbounded). A deployment pipelining more concurrency must raise them **explicitly**.
   * **Capacity-normalization overlap (both allocations charged at peak; no exact-capacity assumption).** Decoded generation vectors are **capacity-normalized** on admission so `capacity()` cannot exceed the `len()`-derived term by more than a fixed `CAPNORM_SLACK`. If normalization **reallocates** a vector while its **original** allocation remains live, **both** are charged at peak — that is the `CAPNORM_OVERLAP` term (bounded by one `MAX_RETAINED_GENERATION_BYTES` per concurrent candidate). A `shrink_to_fit`/shrink is **not** assumed to yield exact capacity; the bound uses either the explicit `CAPNORM_SLACK` or a bounded allocation representation, never an assumed exact shrink.
   * **`CAPNORM_SLACK` — concrete bounded profile parameter (elements per vector, converted to bytes; explicit multiplicity).** `CAPNORM_SLACK` is defined in **elements**, not bytes: it is the maximum number of **spare element slots** a capacity-normalized growable backing may retain beyond its `len()` after admission (`capacity() ≤ len() + CAPNORM_SLACK`). **Initial profile value `CAPNORM_SLACK = 0` elements** (admission normalizes to an exact bounded representation; a non-zero value is permitted only if a deployment documents it). It applies to **each** decoded growable backing a generation owns — for `QcDerived`: the `signer_bitmap` backing, the `signatures` outer descriptor array, and **each** per-signature buffer (≤ `N` of them); for `TcDerived`: the record-level `high_qc.signers` backing, the `TimeoutCertificate.signers` backing, the optional TC `high_qc.signers` backing, the `signed_timeouts` outer descriptor array, **each** per-entry `signature` buffer, and **each** per-entry nested `high_qc.signers` backing. Its **byte** contribution per vector is `CAPNORM_SLACK × size_of::<element>()`, and its **multiplicity** per generation is the count of such vectors, which is itself bounded: `O(N)` flat vectors plus the `O(N)` per-entry buffers and `O(N)` per-entry nested-signer backings, so the total slack bytes charged into a variant's generation total are bounded with **named per-variant coefficients** (no unspecified `c₁`/`c₂`): for `QcDerived`, `≤ CAPNORM_SLACK × (N + 25)` bytes (one `u8` `signer_bitmap` backing at `1` B/elt + one `signatures` descriptor array at `24` B/elt + ≤ `N` per-signature `u8` buffers at `1` B/elt); for `TcDerived`, `≤ CAPNORM_SLACK × (9·N + 24 + size_of::<TimeoutMsg>())` bytes (three `ValidatorId` signer backings at `8` B/elt + one `signed_timeouts` backing at `size_of::<TimeoutMsg>()` B/elt + ≤ `N` per-entry `u8` signature buffers at `1` B/elt + ≤ `N` per-entry nested `ValidatorId` signer backings at `8` B/elt) — finite, and **0** under the initial profile `CAPNORM_SLACK = 0`. Validation rule: a decoded vector whose `capacity()` exceeds `len() + CAPNORM_SLACK` after normalization → **refuse** (no silent over-capacity retention). This slack is the only capacity excess admitted; it is charged, never assumed away by `shrink_to_fit`.
   * **Allocation admission sequence (check before allocate; a post-allocation check is not prevention).** Allocations are admitted in this order: **(1)** validate profile parameters and declared shapes (version, discriminants, declared counts/lengths vs pinned `N`/`S_sig`); **(2)** compute **conservative** charges for the proposed allocations and their coexistence (the peak terms above) in checked `u128`; **(3)** **check available capacity against each cap before performing the allocations those checks protect**; **(4)** allocate **only within** the admitted bounds; **(5)** validate the **actual** capacities/charges and retain **only** admissible objects, refusing/dropping any that exceed their charge. Step (5)'s post-allocation capacity check is a **confirmation**, **not** the prevention of step (4)'s allocation — prevention is **step (3)**, performed **before** allocation; a post-allocation check **never** justifies an allocation that could not be pre-admitted.
@@ -2600,7 +2601,6 @@ In both variants `GEN_STRUCT` is the **single whole-enum constant** `size_of::<R
 `Vec`'s 3-word descriptor), and the `*_CAP`/`SIG_TERMS` rows are the **outer backing**
 allocations. A generation's heap is charged **once** regardless of how many `Arc`
 holders reference it; the shared-allocation overhead `ARC_CTRL` (counter header + required layout padding, **not** the value; § 13.7A(c.6)) is charged **once to its designated
-
 owner** (never double-charged, never omitted), and external `Arc` handle pointer words are charged to their holders. These decoded charges feed
 `MAX_RETAINED_GENERATION_BYTES` and, with the multiplicities of § 13.7, the aggregate
 peak `MAX_AGGREGATE_RETAINED_BYTES` — **never** bounded by the serialized
@@ -2625,7 +2625,7 @@ inline `Vec` descriptors `signer_bitmap: Vec<u8>` and `signatures: Vec<Vec<u8>>`
 `TcDerived`, the record-level logical `high_qc` inline struct **plus** the `TimeoutCertificate`
 inline struct (each with its own inline `Vec` descriptors); **(iii)** a **context reference** —
 a 32-byte authority-context descriptor the generation references (ownership optional); and
-**(iv)** placement **inside** a single shared `Arc<RetainedGeneration>` allocation whose strong/weak counter header and **required layout padding** are the `ARC_CTRL` overhead (§ 13.7A(c) Arc ownership / alignment table): the **external** `Arc` handle (pointer word) that references the value is held by **holders** (the current-authoritative slot, each pinned-superseded slot, and any candidate/preparation holder), charged to those holders, and is **not** owned inside the value — the generation does **not** own its external sharing handle.
+**(iv)** placement **inside** a single shared `Arc<RetainedGeneration>` allocation whose strong/weak counter header and **required layout padding** are the `ARC_CTRL` overhead (§ 13.7A(c) Arc ownership / alignment table): the **external** `Arc` handle (pointer word) that references the value is held by the **bounded holder inventory** — the **current-authoritative** slot, each **candidate** holder, and each **prepared-operation** holder (a prepared-operation handle is what pins a **superseded** generation; there is **no** separate pinned-superseded slot) — charged to those holders, and is **not** owned inside the value — the generation does **not** own its external sharing handle.
 
 **Charge the complete wrapper (which inline fields are already included — not double-counted).**
 `GEN_STRUCT` is the **single** whole-enum constant `size_of::<RetainedGeneration>()` — **invariant
@@ -2641,10 +2641,12 @@ members are **not** re-counted in the backing rows; only the **outer backing** a
 from the § 13.2A **serialized** widths.
 
 **Rust-layout correction (complete-wrapper `size_of`, D7-D14).** `size_of::<RetainedGeneration>()`
-is a **single compile-time constant** — `max(size_of` over the variant payload arms`) +
-discriminant tag + alignment padding` — and does **not** vary with the active variant: an enum
-occupies its **largest** arm (plus tag/padding) for **every** variant and never shrinks to a
-smaller arm. The earlier per-arm reading `GEN_STRUCT_QC = size_of::<RetainedGeneration>()`
+is a **single compile-time constant** fixed by the chosen representation on its supported
+target; it does **not** vary with the active variant and does **not** shrink when a smaller
+inner payload is active — the enum occupies the **whole** chosen layout for **every** variant
+and never collapses to one arm. This whole-enum invariance is a property of the selected
+representation measured on its target profile, **not** a generic native-layout sizing formula
+or a stable language guarantee. The earlier per-arm reading `GEN_STRUCT_QC = size_of::<RetainedGeneration>()`
 `≤ 256` B (QcDerived arm) vs `GEN_STRUCT_TC = size_of::<RetainedGeneration>()` `≤ 384` B
 (TcDerived arm) is therefore **withdrawn as a layout error**: the `≤ 256` figure mislabeled the
 **inner QcDerived payload-arm** footprint as the whole-enum footprint, but a decoded `QcDerived`
@@ -2654,10 +2656,10 @@ corrected accounting charges **one** inline wrapper term `GEN_STRUCT = size_of::
 a 64-bit target (the larger TcDerived arm: common ≤ `136` + record-level `high_qc` inline `64` +
 `TimeoutCertificate` inline struct incl. its `Vec` descriptors ≤ `184`) — a **proposed, unexecuted** value, **not** a stable guarantee about the Rust enum layout — with a **single proposed, unexecuted**
 `const` assertion `size_of::<RetainedGeneration>() ≤ GEN_STRUCT_MAX` (a compile-time refusal the implementation **would** carry; it is **not** asserted to have been compiled or executed in this
-documentation-only pass). A deployment that wants a tighter **per-variant inline** charge must measure the **inner
-variant payload struct** (`size_of::<QcGenerationArm>()` / `size_of::<TcGenerationArm>()`) plus the
-shared discriminant/padding — **not** `size_of::<RetainedGeneration>()`, whose own `size_of` is
-not a per-variant quantity. Because the operative cap is
+documentation-only pass). The eventual implementation must **measure and enforce the complete chosen representation**
+`size_of::<RetainedGeneration>()` on its supported target; measuring a smaller inner variant
+payload (`size_of::<QcGenerationArm>()` / `size_of::<TcGenerationArm>()`) does **not** license a
+smaller charge for the **unchanged whole-enum allocation**, which does not shrink to one arm. Because the operative cap is
 `checked_max(MAX_QC_GENERATION_BYTES, MAX_TC_GENERATION_BYTES)`, substituting the single `384`-B
 whole-enum constant into **both** totals **raises the QcDerived inline-wrapper term** by up to `128` B over the **withdrawn** `256`-B arm reading (the TcDerived total already used `384`, so it is unchanged); whether that leaves
 `MAX_RETAINED_GENERATION_BYTES` **unchanged** depends on the **pinned-profile** backing-allocation rows of the two variants — it is **not** asserted to remain TcDerived-dominated (that dominance is **withdrawn as unsupported**; see the D7-D14 dominance-claim correction entry). Independent of the inline term, the backing-allocation totals,
@@ -2738,15 +2740,15 @@ in § 13.2 / § 13.4.
 
 | Field | Post-validation treatment | Consumer / reason | Owner | Allocation charge |
 |---|---|---|---|---|
-| `persistence_format_version` (`u16`) | **Discarded after validation** — the layout gate is checked **before** decode and selects the decoder; it has **no** post-decode consumer | structural decode/open gate (§ 13.2) | none retained — validated then dropped; it is **not** a field of `RetainedGeneration` | `0` B (transient decode-time scalar; not in `GEN_STRUCT`) |
-| `network_genesis_id` (`[u8;32]`) | **Discarded after validation** — the record's copy is **compared** to the independently pinned genesis identity, which is the authority; the record's copy is not retained as truth | context interpretation / binding (P4), compared vs the pinned identity | the **pinned** `ExpectedGenesisIdentity` (external, obtained-independently), **not** the generation | `0` B in the generation (the pinned identity is charged outside § 13.7A) |
+| `persistence_format_version` (`u16`) | **Discarded from the decoded generation after validation** — the layout gate is checked **before** decode and selects the decoder; it has **no** post-decode consumer in `RetainedGeneration`, yet its exact bytes survive in the **retained encoded publication** (c.5), which supplies O5's whole-publication comparison | structural decode/open gate (§ 13.2) | none retained — validated then dropped; it is **not** a field of `RetainedGeneration` | `0` B (transient decode-time scalar; not in `GEN_STRUCT`) |
+| `network_genesis_id` (`[u8;32]`) | **Discarded from the decoded generation after validation** — the record's copy is **compared** to the independently pinned genesis identity, which is the authority, and is not retained as truth in the decoded generation; its exact bytes nonetheless survive in the **retained encoded publication** (c.5) for O5's whole-publication comparison | context interpretation / binding (P4), compared vs the pinned identity | the **pinned** `ExpectedGenesisIdentity` (external, obtained-independently), **not** the generation | `0` B in the generation (the pinned identity is charged outside § 13.7A) |
 | `authority_context_ref` (32-byte descriptor) | **Retained inline** as a 32-byte reference descriptor (the owned context bytes, if any, are a separate backing) | P4 context binding and an input re-derived for the `evidence_lock_binding` recompute; part of the O5 complete-content span | **generation** holds the 32-byte descriptor inline; the full pinned context is owned **externally** | `32` B inside `GEN_STRUCT`; owned-copy bytes are `CTX_OWNED` (`0` initial, else ≤ `CTX_MAX`) via the named owner |
 | `lock_block_id` (`[u8;32]`) + `lock_view` (`u64`) | **Retained inline** — the enforced restriction identity + view | `is_safe_to_vote_on_block` — the `id` drives the ancestor walk, the `view` the liveness test | **generation** (inline) | `32 + 8 = 40` B inside `GEN_STRUCT` |
 | `evidence_lock_binding` (32-byte SHA3-256 digest) | **Retained inline** — recomputed and compared at validation; its **inputs are re-derived**, never trusted from the digest | integrity / co-publication recompute; part of the O5 complete-content span (digest ≠ semantic correspondence) | **generation** (inline digest); inputs re-derived | `32` B inside `GEN_STRUCT` |
 | `committed_state_assoc` (committed `block_id` 32 + `height` 8) **+ presence discriminant** | **Present sub-case** (`Locked`-with-committed-anchor): retained inline (`40` B) plus its 1-byte discriminant, compared vs recovered committed history (P3). **Absent by variant** (`BootstrapNoLock`, `Locked`-with-no-commit): **only the discriminant** is retained and P3 is **skipped** — the absence is an explicit discriminant, **never** a coerced height-zero or a manufactured committed block | P3 committed-anchor comparison vs recovered committed state, **when present** | **generation** (inline when present); the presence discriminant is always inline | `D (1) + [40 when present, else 0]` B inside `GEN_STRUCT`; **no** value charged or manufactured when absent |
 | `publication_revision` (`u64`, monotonic) | **Retained inline** — local ordering bookkeeping | ownership stale-work fencing and open's authoritative-record selection (§ 13.5) | **generation** (inline) | `8` B inside `GEN_STRUCT` |
 | `predecessor_ref` (optional reference) **+ presence discriminant** | **Retained inline when present** (a reference, not a copied predecessor) plus its 1-byte discriminant; **absent** → the discriminant only, no manufactured predecessor | authoritative-record selection / ordering among this host's own publications | **generation** (inline); the referenced predecessor is **not** copied in | `D (1) + [ref width when present, else 0]` B inside `GEN_STRUCT` |
-| `integrity_checksum` (CRC32, `4` B) | **Discarded after validation** — recomputed and compared for accidental-corruption detection at decode; **no** post-decode consumer (it is present in the retained **encoded** bytes only if those bytes are kept, see (c.5)) | accidental-corruption detection (T-INTEG) at decode | none retained in the decoded generation (validated then dropped) | `0` B in `GEN_STRUCT` (transient decode-time scalar) |
+| `integrity_checksum` (CRC32, `4` B) | **Discarded from the decoded generation after validation** — recomputed and compared for accidental-corruption detection at decode; **no** post-decode consumer in `RetainedGeneration`, yet its exact bytes survive in the **retained encoded publication** (c.5), which is kept live through O5 and supplies O5's whole-publication comparison | accidental-corruption detection (T-INTEG) at decode | none retained in the decoded generation (validated then dropped) | `0` B in `GEN_STRUCT` (transient decode-time scalar) |
 | `initialization` discriminant (bootstrap / established) and `evidence` discriminant (`QcDerived` / `TcDerived`) | **Retained inline** (1 byte each) — they drive variant decode and O5's **variant-correct** comparison and preserve the bootstrap/no-commit distinctions | variant selection; bootstrap/no-commit preservation; O5 discriminant comparison (a discriminant difference → refuse) | **generation** (inline) | `D (1)` B each inside `GEN_STRUCT` (already summed once into the whole-enum constant; not re-counted) |
 
 Every inline row above is one of the members **already included once** in `GEN_STRUCT =
@@ -2755,47 +2757,60 @@ size_of::<RetainedGeneration>()` (§ 13.7A(c)); the inventory does **not** add a
 elsewhere or discarded. This replaces any bare pointer to a non-existent inventory: the
 complete-wrapper definition of § 13.7A(c) is **this** table plus the backing rows of § 13.7A(a)/(b).
 
-**(c.5) How O5 obtains every input for the complete-content comparison.** O5 re-acknowledges by a
-**byte-for-byte complete-content** comparison (§ 13.4 / § 13.5); **digest equality is insufficient**
-(an auxiliary 32-byte digest MAY be computed as a fast-reject but **never** replaces the full
-comparison — H19). O5's comparison inputs are obtained by **reconstruction**, not by retaining a
-second copy of the original bytes inside the generation:
+**(c.5) How O5 obtains the whole publication for the byte-for-byte comparison.** O5 re-acknowledges
+by a **whole-publication byte-for-byte** comparison (§ 13.4 / § 13.5); **digest equality is
+insufficient** (an auxiliary 32-byte digest MAY be computed as a fast-reject but **never** replaces
+the full comparison — H19). O5 compares the **identical validated publication** — the complete
+O3-validated encoded record **including** its framing/version/genesis/checksum bytes, all
+discriminants, lengths, ordering, and supporting evidence — against the currently stored
+publication. It obtains **both** operands from **already-budgeted encoded buffers**, **not** by
+reconstructing the bytes from the decoded fields (which have dropped the framing/integrity bytes)
+and **not** by retaining a second copy inside the generation:
 
-* **Retained inputs (owner / lifetime / charge).** The comparison is reconstructed from the
-  decoded generation's **retained inline fields** (the (c.4) inline rows — owner: the generation;
-  lifetime: decode-admit to last-holder drop; charge: already in `GEN_STRUCT`) **plus** its
-  **backing allocations** (§ 13.7A(a)/(b): `signer_bitmap`/`signatures` for `QcDerived`; the
-  record-level/TC/nested `high_qc` signer arrays, `signed_timeouts`, and per-entry signature
-  buffers for `TcDerived` — owner: the generation; charge: the named backing terms). No field that
-  the inventory marks **discarded** (`persistence_format_version`, `integrity_checksum`,
-  `network_genesis_id`) is needed for the semantic complete-content span; where the **framed
-  on-disk** form is compared, those framing/integrity bytes live **only** in the retained encoded
-  buffer named next, never re-synthesized as truth.
-* **Charged encoding buffer (reconstruction target).** The retained inputs are re-encoded into the
-  single **`CMP_SPAN`** buffer — one `≤ MAX_SAFETY_RECORD_BYTES` **encoded** byte buffer, owned by
-  `VALIDATION_SCRATCH` (§ 13.7B), **multiplicity 1** (not pipelined across candidates in the initial
-  profile), released at the end of the comparison. This is the **only** buffer charged for the span;
-  it reuses the encoded-buffer taxonomy already counted, adding **no** new term to the peak.
-* **Byte-for-byte identity preserved.** The comparison spans the **evidence discriminant and its
-  variant-specific supporting material** (the wire-QC bytes for `QcDerived`; the logical `high_qc`
-  plus the retained `TimeoutCertificate` bytes for `TcDerived`): any discriminant difference, a
-  differing retained TC, or any other content divergence → **refuse**; and a **stale** publication
-  (expected revision no longer current) is still refused so an older recovered record of either
-  representation cannot overwrite a newer stored one. Because the span is reconstructed
-  deterministically from the retained inline fields and backings, the complete-content identity is
-  preserved **without** charging a second retained copy of the original bytes.
+* **Operand 1 — the retained original validated bytes (source / owner / capacity / lifetime).**
+  The **original, complete O3-validated encoded publication** is retained **verbatim** in the
+  candidate **encoded input buffer** (`ENC_INPUT`, § 13.7B) — the **same** `≤ MAX_SAFETY_RECORD_BYTES`
+  byte buffer whose bytes O3 decoded and validated — and is **kept live through O5** (it is **not**
+  released after decode). Owner: the single in-flight candidate/publication operation under the
+  single-owner serialization boundary (§ 13.5); capacity bound: `≤ MAX_SAFETY_RECORD_BYTES`;
+  lifetime: O3 admission → O5 completion. Because these are the exact validated bytes, every field
+  the (c.4) inventory marks **discarded from the decoded generation** (`persistence_format_version`,
+  `network_genesis_id`, `integrity_checksum`) still survives **here**, in the retained encoded
+  publication, and is **never re-synthesized as truth** from the decoded fields.
+* **Operand 2 — the currently stored comparison operand.** O5 obtains the second operand by
+  **reading back the currently stored publication** from storage into a **publication-side**
+  encoded buffer (§ 13.7B), `≤ MAX_SAFETY_RECORD_BYTES`, under the **expected-revision** check and
+  the single-owner boundary. A **stale** publication (expected revision no longer current) is
+  **refused** so an older recovered record of either representation cannot overwrite a newer stored
+  one.
+* **Charging (no new term) and release.** Both operands and the re-publication copy are charged by
+  the **existing § 13.7B three-buffer model**: operand 1 is the candidate **input** term
+  (`× MAX_CONCURRENT_CANDIDATES`); the read-back operand 2 and the re-publication copy are the two
+  **publication-side** terms (encoding + publication, `2 × MAX_CONCURRENT_PUBLICATIONS`). **No** new
+  retained copy and **no** fourth record-sized buffer are added. The read-back buffer is released at
+  the end of the comparison; the retained `ENC_INPUT` operand and the re-publication buffer are
+  released only **after** O5's **successful durability acknowledgement** and the identical
+  re-publication.
+* **Byte-for-byte identity and re-publication.** The comparison spans the **whole publication** —
+  the evidence discriminant and its variant-specific supporting material (the wire-QC bytes for
+  `QcDerived`; the logical `high_qc` plus the retained `TimeoutCertificate` bytes for `TcDerived`)
+  **together with** all framing/version/genesis/checksum/length/ordering bytes: any discriminant
+  difference, a differing retained TC, or **any** other byte divergence → **refuse**. On
+  **complete** equality O5 **republishes exactly the retained validated bytes** — a **verbatim**
+  write of operand 1, with **no** re-encode, repair, normalization, or content change — and the
+  transition is **effective only after** O5's successful durability acknowledgement.
 
 **(c.6) Arc ownership and alignment.** The one decoded generation lives in a **single shared
 `Arc<RetainedGeneration>` allocation**. The table below separates the **value** (charged by
 `GEN_STRUCT`) from the **shared-allocation overhead** (`ARC_CTRL`) and from the **external handles**
 (charged to their holders), so nothing is double-counted and no required padding is dismissed as
-allocator rounding. The generation does **not** own its external sharing handle.
+allocator rounding. The generation does **not** own its external sharing handle. The **holders** are a **single bounded inventory** of actual owning handles — the **current-authoritative** holder (`1`), the **candidate** holders (`MAX_CONCURRENT_CANDIDATES`), and the **outstanding prepared-operation** holders (`MAX_OUTSTANDING_PREPARED_L0`); a **superseded** generation is pinned **directly by the prepared-operation handle** that captured it, **not** by a separate slot or a new registry. Each handle is charged **once** to its holder; each generation value and its backing allocations are charged **once per distinct generation**; the shared-allocation overhead `ARC_CTRL` is charged **once per allocation**; moves and borrows create **no** additional owning handle (any admitted clone has a **bounded** multiplicity already counted in the inventory).
 
 | Object / allocation | Owner | Lifetime | Charge | Sharing rule |
 |---|---|---|---|---|
-| `RetainedGeneration` **value** (the decoded wrapper placed inside the shared allocation) | the shared `Arc<RetainedGeneration>` allocation | decode-admit → last strong-handle drop | `GEN_STRUCT = size_of::<RetainedGeneration>()` ≤ `GEN_STRUCT_MAX = 384` B (proposed; the single whole-enum constant, charged **once**) | one value per generation; shared **by reference**, never copied per holder |
-| **Shared allocation** containing that value (`Arc<RetainedGeneration>` heap block) | the first producer allocates it; it is conceptually owned by the Arc's shared ownership | released when the **last strong handle** drops | value portion = `GEN_STRUCT`; non-value overhead = `ARC_CTRL` (rows below); charged **once to the canonical owner** | a **single** allocation shared across all handles |
-| **External `Arc` handles** (clones — pointer words in current / pinned-superseded / candidate / preparation slots) | each **holding slot** | each handle's own lifetime (per holder) | `size_of::<*const ()>() = 8` B pointer word **per handle**, charged to the **holder** (the per-operation `identity + Arc-handle` terms, § 13.7 / § 13.7B) | a clone bumps the strong count; it does **not** duplicate the value or the header |
+| `RetainedGeneration` **value** (the decoded wrapper placed inside the shared allocation) | the shared `Arc<RetainedGeneration>` allocation | decode-admit → **last strong-handle** drop (the value is dropped when the last **strong** handle drops) | `GEN_STRUCT = size_of::<RetainedGeneration>()` ≤ `GEN_STRUCT_MAX = 384` B (proposed; the single whole-enum constant, charged **once**) | one value per generation; shared **by reference**, never copied per holder |
+| **Shared allocation** containing that value (`Arc<RetainedGeneration>` heap block) | the first producer allocates it; it is conceptually owned by the Arc's shared ownership | reclaimed when the last **strong *and* weak** handle drops — outstanding `Weak` handles can keep the **backing allocation** alive after the value is dropped; the **initial profile excludes external `Weak` handles** (no weak-reference subsystem is requested), so with no outstanding `Weak` the allocation is reclaimed with the last **strong** handle | value portion = `GEN_STRUCT`; non-value overhead = `ARC_CTRL` (rows below); charged **once to the canonical owner** | a **single** allocation shared across all handles |
+| **External `Arc` handles** (the bounded holder inventory — pointer words in the **current-authoritative**, **candidate**, and **prepared-operation** slots; a prepared-operation handle is what pins a **superseded** generation, so there is **no separate pinned-superseded slot**) | each **holding slot** | each handle's own lifetime (per holder) | `size_of::<*const ()>() = 8` B pointer word **per handle**, charged to the **holder** (the holder term `(1 + MAX_CONCURRENT_CANDIDATES) × Arc-handle + MAX_OUTSTANDING_PREPARED_L0 × (identity + Arc-handle)`, § 13.7 / § 13.7B) | a clone bumps the strong count; it does **not** duplicate the value or the header |
 | **Strong/weak counter header** (`strong: AtomicUsize`, `weak: AtomicUsize`) | the shared allocation | allocation lifetime | `2 × size_of::<AtomicUsize>()` (`= 16` B on the 64-bit profile) — part of `ARC_CTRL` | one header per allocation; charged **once to the canonical owner** |
 | **Header→value alignment padding** (pads so the value begins at `align_of::<RetainedGeneration>()`) | the shared allocation | allocation lifetime | `pad(2 × size_of::<AtomicUsize>() → align_of::<RetainedGeneration>())` — part of `ARC_CTRL`; `0` B on the 64-bit profile (value align `8` divides the `16`-B header) | once per allocation; **required layout padding, NOT allocator rounding** |
 | **Required final layout padding** within the requested allocation (rounds the whole layout up to a multiple of the allocation's alignment) | the shared allocation | allocation lifetime | `pad(header + padding + value → alloc align)` — part of `ARC_CTRL`; `0` B when `size_of::<RetainedGeneration>()` is a multiple of its alignment | once per allocation; **required layout padding, NOT allocator size-class rounding (which is excluded)** |
@@ -2835,10 +2850,10 @@ addition.
 | Candidate generation (decoded) | **live** (being decoded) | live (being installed) | not decoded (comparison is content-level) | `+1 × MAX_RETAINED_GENERATION_BYTES` |
 | Preparation-owned decoded objects | **alias** to candidate/current `Arc` | alias | alias | **aliased — no extra copy** (profile excludes preparation copying) |
 | Normalization old + new allocations | both live during reallocation | — | — | `CAPNORM_OVERLAP` (≤ `MAX_CONCURRENT_CANDIDATES × MAX_RETAINED_GENERATION_BYTES`) |
-| Encoded **input** buffer (candidate) | **live** | released after decode | live (comparison input) | charged `≤ MAX_SAFETY_RECORD_BYTES` |
-| Encoding buffer (successor serialization) | — | **live** | live (re-publication) | charged separately `≤ MAX_SAFETY_RECORD_BYTES` |
-| Publication buffer (in-flight write) | — | **live** | live | charged separately `≤ MAX_SAFETY_RECORD_BYTES` |
-| O5 comparison / re-publication buffers | — | — | **live** (input + encoding + publication) | O5 reuses the **same three** `≤ MAX_SAFETY_RECORD_BYTES` encoded kinds (input + encoding + publication), adding **no** new kind; **all three** are charged in the peak |
+| Encoded **input** buffer (candidate) = retained validated publication (`ENC_INPUT`, operand 1) | **live** (decode input) | **retained** (kept live as O5 operand 1) | **live** — the retained original validated bytes (operand 1) | charged `≤ MAX_SAFETY_RECORD_BYTES` |
+| Encoding buffer (successor serialization) | — | **live** | live (read-back of stored publication, operand 2) | charged separately `≤ MAX_SAFETY_RECORD_BYTES` |
+| Publication buffer (in-flight write) | — | **live** | live (verbatim re-publication of operand 1) | charged separately `≤ MAX_SAFETY_RECORD_BYTES` |
+| O5 comparison / re-publication buffers | — | — | **live** (operand 1 retained `ENC_INPUT` + read-back of the stored publication + verbatim re-publication) | O5 reuses the **same three** `≤ MAX_SAFETY_RECORD_BYTES` encoded kinds — the retained **input** (operand 1), the **read-back** of the currently stored publication (operand 2), and the **re-publication** write — adding **no** new kind; **all three** are charged in the peak |
 | Validation scratch | **live** | — | live | `VALIDATION_SCRATCH` (bounded below) |
 
 **Preparation-owned objects (decision made and documented).** Preparation does **not** own
@@ -2852,8 +2867,9 @@ buffer, the successor **encoding** buffer, and the in-flight **publication** buf
 treated as **three separate** owned allocations and **all three** charged (each
 `≤ MAX_SAFETY_RECORD_BYTES`); none is assumed to alias another. This is the **conservative
 three-buffer model** — separate ownership is the selected representation, so **no**
-aliasing/release rule is claimed and no two-buffer peak is asserted. O5's comparison input,
-re-encoding, and re-publication reuse these **same three** encoded kinds, so O5 introduces
+aliasing/release rule is claimed and no two-buffer peak is asserted. O5's two comparison operands — the retained validated **input** (operand 1) and the **read-back**
+of the currently stored publication — and its **verbatim re-publication** reuse these **same three**
+encoded kinds (there is **no** re-encode), so O5 introduces
 **no** additional encoded kind; the peak charges `MAX_CONCURRENT_CANDIDATES` input buffers +
 `2 × MAX_CONCURRENT_PUBLICATIONS` (encoding + publication) buffers = **3** under the initial
 `1`/`1` limits.
@@ -2870,8 +2886,11 @@ of ≤ `N` ids (no hashing), charged `24` B inline descriptor **+** `≤ N × si
 TC-association/`signed_timeouts`↔`signers` correspondence represented as a
 **`Vec<(ValidatorId, u32)>`** of ≤ `N` entries, charged `24` B inline descriptor **+**
 `≤ N × size_of::<(ValidatorId, u32)>()` = `24 + N × 16` B backing (capacity ≤ `N`); and
-**`CMP_SPAN`** is the `high_qc` **complete-content** byte-identity comparison span, bounded
-by one `≤ MAX_SAFETY_RECORD_BYTES` encoded buffer. **O5 retains the accepted complete-content
+**`CMP_SPAN`** is the **whole-publication** byte-for-byte comparison performed **over the two
+already-charged encoded operands** — the retained original validated publication (`ENC_INPUT`,
+operand 1) and the read-back of the currently stored publication (operand 2, § 13.7A(c.5)) — so it
+**owns no separate buffer** and adds **no** fourth record-sized allocation (`CMP_SPAN = 0` extra
+bytes). **O5 retains the accepted complete-content
 identity requirement**: an optional 32-byte digest MAY be computed as an **auxiliary**
 fast-reject, but it **never replaces** the full byte-for-byte comparison — `CMP_SPAN` is the
 **complete** span, not a digest-only equality. Each component is finite and tied to the
@@ -2882,9 +2901,14 @@ pinned `N` and the serialized cap; a scratch structure that would exceed its ter
 simultaneously-live rows across O3/O4/O5 (each phase is dominated by this union) gives the
 single peak already stated in §13.7:
 
-`MAX_AGGREGATE_RETAINED_BYTES ≥ (MAX_OUTSTANDING_PREPARED_L0 × (identity + Arc-handle)) + ((MAX_OUTSTANDING_PREPARED_L0 + 1 + MAX_CONCURRENT_CANDIDATES) × MAX_RETAINED_GENERATION_BYTES) + (MAX_CONCURRENT_CANDIDATES × CAPNORM_OVERLAP) + ((MAX_CONCURRENT_CANDIDATES + 2 × MAX_CONCURRENT_PUBLICATIONS) × MAX_SAFETY_RECORD_BYTES) + VALIDATION_SCRATCH`.
+`MAX_AGGREGATE_RETAINED_BYTES ≥ ((1 + MAX_CONCURRENT_CANDIDATES) × Arc-handle + MAX_OUTSTANDING_PREPARED_L0 × (identity + Arc-handle)) + ((MAX_OUTSTANDING_PREPARED_L0 + 1 + MAX_CONCURRENT_CANDIDATES) × MAX_RETAINED_GENERATION_BYTES) + (MAX_CONCURRENT_CANDIDATES × CAPNORM_OVERLAP) + ((MAX_CONCURRENT_CANDIDATES + 2 × MAX_CONCURRENT_PUBLICATIONS) × MAX_SAFETY_RECORD_BYTES) + VALIDATION_SCRATCH`.
 
-Here the `(G + MAX_CONCURRENT_CANDIDATES)` generation term covers the current + pinned +
+Here the **holder term** `((1 + MAX_CONCURRENT_CANDIDATES) × Arc-handle + MAX_OUTSTANDING_PREPARED_L0 × (identity + Arc-handle))`
+charges each **owning handle once** — the current-authoritative holder and each candidate holder
+one `8`-B `Arc`-handle pointer word, each prepared-operation holder its `40`-B identity **plus** one
+pointer word — with **superseded** generations pinned **by the prepared-operation handles** (no
+separate slot) and the shared control block charged **once per generation** as `ARC_CTRL`
+(§ 13.7A(c.6)), not in this term; the `(G + MAX_CONCURRENT_CANDIDATES)` generation term covers the current + pinned +
 candidate decoded-generation rows; `CAPNORM_OVERLAP` covers the normalization old/new row;
 the `(MAX_CONCURRENT_CANDIDATES + 2 × MAX_CONCURRENT_PUBLICATIONS) × MAX_SAFETY_RECORD_BYTES`
 term covers the **three** separately-charged encoded buffers — the candidate **input**
