@@ -12804,7 +12804,7 @@ correction entry.
   but **`crates/qbind-consensus/src/consensus.rs` is not present** in this tree; the
   `QuorumCertificate` struct is in `crates/qbind-consensus/src/qc.rs` L29. The accepted table
   is **preserved** (not edited for citations this pass); this caveat is recorded so the
-  locator is not over-attributed.
+  locator is not over-attributed. **[CORRECTION, D7-D14: this caveat was ERRONEOUS and is WITHDRAWN. The citation resolves to `crates/qbind-wire/src/consensus.rs` — wire `QuorumCertificate` L282, `WireEncode` encoder L304; `crates/qbind-consensus/src/qc.rs` L29 is the **distinct logical** QC (`block_id`/`view`/`signers`, no signatures), **not** the wire QC. The prior text looked for the non-existent `crates/qbind-consensus/src/consensus.rs`. Historical text retained for evidence continuity; see the D7-D14 Correction Pass entry below.]**
 
 ### Changed paths (authorized scope only)
 
@@ -12931,9 +12931,15 @@ commands). Existing conventions are preserved on all three files.
 
 ### Remaining unresolved items (completeness claims narrowed honestly)
 
-* The accepted § 13.2A citation `consensus.rs ~L282/~L304` does not resolve in this tree (the
-  wire `QuorumCertificate` is in `qc.rs` L29); the citation is **preserved** per the
-  "preserve accepted tables" instruction and flagged here rather than silently edited.
+* **QC source attribution (corrected this pass, D7-D14 — no longer an unresolved item).** The
+  accepted § 13.2A citation `consensus.rs ~L282/~L304` **does resolve**: it names
+  `crates/qbind-wire/src/consensus.rs`, where the **wire** `QuorumCertificate` struct is at
+  **L282** and its `WireEncode` encoder at **L304**. The **logical** `QuorumCertificate<BlockIdT>`
+  (`block_id`/`view`/`signers`, **no** constituent signatures) is a **separate** type at
+  `crates/qbind-consensus/src/qc.rs` **L29** — it is **not** the wire QC. The prior caveat's
+  claim that the citation 'does not resolve' and that `qc.rs` L29 holds the wire QC was
+  **erroneous** (it searched for the non-existent `crates/qbind-consensus/src/consensus.rs`
+  instead of the `qbind-wire` crate) and is **withdrawn**; no citation edit is required.
 * Anti-rollback anchor, lock-recovery, and current-authority remain **UNRESOLVED**; the
   design stays **DEFINED-NOT-IMPLEMENTED**; C4/C5 remain **OPEN**. This pass corrects
   resource-accounting **presentation** only — no storage, verifier, signing-preimage, wire,
@@ -12946,3 +12952,118 @@ commands). Existing conventions are preserved on all three files.
 `SECURITY_POSTURE=RS1-OPEN / PUBLIC-DEVNET-NO-GO`. C4/C5 remain **OPEN**. Fail-closed
 `CurrentEpochUnavailable` and the activation/transport boundaries are preserved. This pass
 completes here and does **not** begin the storage successor, D15, or Run 423.
+
+## RUN 422 D7-D14 Correction Pass — generation totals, buffer multiplicity, QC attribution (corrects `bbdb0e8e673a6d6b0892be9a531941dda13fd4b0`)
+
+This entry is a **clearly-identified correction** appended to the Run 422 D7-D14 evidence;
+all prior entries and tables are **preserved** (historical text is retained, not rewritten).
+Documentation-only: no Rust, test, dependency, schema, CLI, workflow, wire-format,
+signing-preimage, or production-wiring change. Required status is unchanged
+(`DEFINED-NOT-IMPLEMENTED`; `DURABLE_ANTI_ROLLBACK=NOT-ESTABLISHED`;
+`GENESIS_AUTHORITY_ACTIVATION=DISABLED`; `SECURITY_POSTURE=RS1-OPEN / PUBLIC-DEVNET-NO-GO`;
+C4/C5 **OPEN**).
+
+### Starting state (this pass)
+
+* **Branch** `copilot/run-422-d7-d14-docs-only`; **starting HEAD** `d98df890deb7361a7b8be09881e41686d81a8db7`;
+  **worktree** clean at entry (`git status --porcelain` empty before edits).
+* **Reviewed-object availability/ancestry/correspondence.** `bbdb0e8…` was **not** present in the
+  initial shallow clone; `git fetch --depth=50 origin bbdb0e8…` made it available
+  (type **commit**). It is **not** a linear ancestor of HEAD — both descend from merge-base
+  `ffc0e92b9b946b486c7bae9a881100a15a98b8d9` (HEAD = `ffc0e92`→`d98df89`; reviewed =
+  `ffc0e92`→`a72010d`→`bbdb0e8`). **Scoped content correspondence:**
+  `git diff --stat d98df890… bbdb0e8…` over the three authorized paths is **empty** — the
+  worktree content of all three authorized files is **byte-identical** to the reviewed
+  revision, so the review's findings apply directly to HEAD. No `AGENTS.md` exists in the tree
+  (`git ls-files | grep -i AGENTS.md` → empty), so none applies.
+
+### Correction 1 — complete variant-specific generation totals
+
+The incomplete operative sum `GEN_STRUCT + SIGNERS_CAP + SIG_TERMS + CTX_OWNED + ARC_CTRL`
+(correspondence contract § 13.7) is **superseded** by named per-variant totals in new
+**§ 13.7A(c)**: `MAX_RETAINED_GENERATION_BYTES = checked_max(MAX_QC_GENERATION_BYTES,
+MAX_TC_GENERATION_BYTES)`. Each total is the explicit checked-`u128` **sum of every § 13.7A
+allocation row** for its variant, charging the **complete wrapper** (`RetainedGeneration`), not
+merely the embedded certificate, and stating which embedded fields (scalars + inline `Vec`
+descriptors + context-ref digest + `Arc` handle) are already in `GEN_STRUCT` so they are **not**
+double-counted; native alignment/padding is kept distinct from serialized widths.
+`MAX_QC_GENERATION_BYTES` explicitly includes the complete wrapper inline, the `signer_bitmap`
+backing, the **outer `signatures` descriptor-array** backing, every per-signature buffer, an
+**explicit `DECODED_SIGNERS = 0`** (no decoded signer array is retained — the wire QC carries
+`signer_bitmap` + `signatures`), owned context, `Arc` control block, and all permitted slack.
+`MAX_TC_GENERATION_BYTES` explicitly includes the complete wrapper inline, the record-level
+`high_qc` signer backing, the TC `high_qc` signer backing, the `TimeoutCertificate.signers`
+backing, the `signed_timeouts` backing, every per-entry timeout-signature buffer, every nested
+timeout `high_qc` signer backing (the explicit `8N²` O(N²) term), owned context, `Arc` control
+block, and all permitted slack. Every term now has a **measurable bound**:
+`GEN_STRUCT_*` = `size_of::<RetainedGeneration>()` (≤ `256`/`384` B ceilings with a `const`
+assertion), `CTX_OWNED` = `0` initial / ≤ `CTX_MAX` (not "bounded by the descriptor"),
+`ARC_CTRL` ≤ `16` B (`2 × size_of::<AtomicUsize>()`), and `CAPNORM_SLACK` with **named**
+per-variant byte coefficients `≤ CAPNORM_SLACK × (N + 25)` (QC) and
+`≤ CAPNORM_SLACK × (9·N + 24 + size_of::<TimeoutMsg>())` (TC) — no unspecified `c₁`/`c₂`,
+preserving the zero-slack initial profile and honestly excluding allocator/backend cost (not a
+process-RSS bound). § 13.7, § 13.7A, INV-D14-7 and the continuity-contract cross-reference now
+reference these named totals rather than restating a divergent formula.
+
+### Correction 2 — encoded-buffer multiplicity resolved (conservative three-buffer model)
+
+§ 13.7B previously marked all three encoded buffers (input/encoding/publication) live in the O5
+column while the prose and the peak coefficient charged only **two** record-sized buffers. The
+**conservative three-buffer model** is selected (separate ownership is the chosen
+representation, so **no** aliasing/release rule is claimed): the candidate **input**, successor
+**encoding**, and in-flight **publication** buffers are **three separate** owned allocations,
+**all three charged**. The O5 cell, the encoding-vs-publication prose, the derived peak, and the
+§ 13.7 aggregate formula now use the coefficient
+`(MAX_CONCURRENT_CANDIDATES + 2 × MAX_CONCURRENT_PUBLICATIONS) × MAX_SAFETY_RECORD_BYTES`
+= **3** record-sized buffers under the initial `1`/`1` limits, so the **peak formula and the
+coexistence table agree**. `VALIDATION_SCRATCH` is bounded concretely: `UNIQ_SET` = sorted
+`Vec<ValidatorId>` (`24 + N×8` B), `ASSOC_MAP` = `Vec<(ValidatorId,u32)>` (`24 + N×16` B),
+`CMP_SPAN` = one `≤ MAX_SAFETY_RECORD_BYTES` span. **O5 retains the complete-content identity
+requirement**: a 32-byte digest may be an **auxiliary** fast-reject only and **never** replaces
+the full byte-for-byte comparison. Pre-allocation admission, checked arithmetic, and refusal
+without evicting established evidence or releasing D10 conflicts are preserved.
+
+### Correction 3 — wire/logical QC source attribution corrected
+
+The prior "Locator caveat" and the "Remaining unresolved items" bullet erroneously claimed the
+§ 13.2A citation `consensus.rs ~L282/~L304` does **not** resolve and that `qc.rs` L29 holds the
+**wire** QC. Verified this pass against the worktree: the **wire** `QuorumCertificate` is
+`crates/qbind-wire/src/consensus.rs` **L282** (`pub struct QuorumCertificate` carrying
+`chain_id`/`epoch`/`height`/`round`/`step`/`block_id`/`suite_id`/`signer_bitmap`/`signatures`),
+with its `impl WireEncode for QuorumCertificate` encoder at **L304** (`fn encode` L305). The
+**logical** `QuorumCertificate<BlockIdT>` (`block_id`/`view`/`signers`, **no** constituent
+signatures) is the **distinct** type at `crates/qbind-consensus/src/qc.rs` **L29**. The prior
+finding conflated them (it searched for the non-existent `crates/qbind-consensus/src/consensus.rs`
+instead of the `qbind-wire` crate). The false attribution is **removed from the operative
+summary**, the historical caveat is **retained with an inline withdrawal marker**, and the
+accepted § 13.2A tables are unchanged. No logical-QC evidence is upgraded to wire evidence and
+no cryptographic claim is altered.
+
+### Validation (literal outcomes, this pass)
+
+* `git status --porcelain` → **exactly three** modified paths (the three authorized files);
+  `contradiction.md` and all other tracked files unchanged.
+* **EOL conventions preserved** on all three files: CRLF throughout, **0** bare-LF bytes
+  (`perl` count), and **no** final newline (`tail -c1` non-newline) — unchanged from entry.
+* **Every § 13.7A allocation row maps to a named term** in `MAX_QC_GENERATION_BYTES` /
+  `MAX_TC_GENERATION_BYTES` (§ 13.7A(c) tables); each named term carries a measurable bound and
+  a checked-`u128`/`const`-assertion validation requirement.
+* **Peak/coexistence agreement:** both the § 13.7 and § 13.7B formulas and the O3/O4/O5 table
+  charge `1 + 2×1 = 3` record-sized encoded buffers under the initial limits.
+* **No digest-only O5:** `CMP_SPAN` remains a complete-content span; grep confirms no residual
+  "same two" slot claim.
+* **Source locators verified:** `grep -n 'struct QuorumCertificate' crates/qbind-wire/src/consensus.rs`
+  → L282; `'impl WireEncode for QuorumCertificate'` → L304; `crates/qbind-consensus/src/qc.rs` → L29.
+* **Tooling not run (documentation-only):** no Cargo build, Cargo tests, Clippy, or
+  release-binary rebuild were run or claimed; recorded as **not run**. `parallel_validation`
+  (Code Review + CodeQL) was run this pass over the Markdown-only change; CodeQL triviality was
+  declared (non-code Markdown, no analyzable surface). Prior evidence is preserved with its
+  original scope.
+
+### Remaining unresolved (narrowed honestly)
+
+No named generation/scratch/buffer term is left without a bound, and no table/formula
+disagreement remains. The anti-rollback anchor, lock-recovery, and current-authority remain
+**UNRESOLVED**; the design stays **DEFINED-NOT-IMPLEMENTED**; C4/C5 remain **OPEN**. Fail-closed
+`CurrentEpochUnavailable` and the activation/transport boundaries are preserved. This correction
+pass completes here and does **not** begin storage implementation, D15, or Run 423.
