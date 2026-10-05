@@ -12745,3 +12745,201 @@ The summarizing paragraph of `QBIND_PROPOSAL_VOTE_SIGNING_STATE_CONTINUITY_CONTR
 ### Scope boundaries (unchanged by this pass)
 
 Only resource-accounting **presentation** is corrected: no new verifier, no logical-to-wire QC upgrade, no fabricated signature, no implementation, no signing-preimage change. The design remains **DEFINED-NOT-IMPLEMENTED**; anti-rollback / lock-recovery / current-authority remain **UNRESOLVED**; C4/C5 remain **OPEN**. This pass completes here and does **not** begin the storage successor, D15, or Run 423.
+
+## Run 422 D7-D14 — Reconcile authoritative bounds and complete outstanding corrections (correction pass, documentation only)
+
+This entry records the bounded **documentation-only** reconciliation pass applied to the
+design reviewed at `709495d936c2a263ffdaa89f19ef8485b4508c98`. It **preserves** the accepted
+§ 13.2A serialized-field tables and § 13.7A allocation tables, reconciles the operative
+serialized formulas to those tables, completes the decoded-generation and peak-memory
+accounting, and records this pass's **own** evidence. It implements **no** storage, does
+**not** advance to D15 / Run 423, and reopens **no** accepted decision. `contradiction.md`
+and every other tracked file outside the three authorized paths are unchanged. All prior
+entries above are **preserved** as historical evidence; this is a clearly identified new
+correction entry.
+
+### Provenance (each reported separately; none inferred from another)
+
+* **Branch (used unchanged).** `copilot/run-422-d7-d14-reconcile-authoritative-bounds`
+  (`git rev-parse --abbrev-ref HEAD`, exit 0).
+* **Starting HEAD.** `ffc0e92b9b946b486c7bae9a881100a15a98b8d9` (`git rev-parse HEAD`,
+  exit 0); worktree **clean** before editing (`git status --porcelain` empty). Starting
+  HEAD is **not** assumed equal to the reviewed revision.
+* **Reviewed-object availability.** The reviewed revision
+  `709495d936c2a263ffdaa89f19ef8485b4508c98` was **unavailable** in the initial shallow
+  single-branch checkout — `git cat-file -t 709495d…` → `fatal: git cat-file: could not
+  get object info` (exit 128). A **targeted fetch**
+  `git fetch --depth=200 origin 709495d936c2a263ffdaa89f19ef8485b4508c98` succeeded
+  (exit 0), after which `git cat-file -t 709495d…` → `commit` (`copilot-swe-agent[bot]`,
+  `Mon Oct 5 09:15:47 2026 +0000`, message "docs(run422-d7d14): explicit serialized-framing
+  (§13.2A) and decoded-allocation (§13.7A) tables").
+* **Ancestry (reported independently of availability and correspondence).**
+  `git merge-base --is-ancestor 709495d… HEAD` → **exit 1** (the reviewed object is **not**
+  an ancestor of starting HEAD); `git merge-base 709495d… HEAD` →
+  `302e51c1abf1bd8746cb5c4a75dada8cdf938e2a` (the shared parent — both HEAD and the reviewed
+  commit are sibling children of `302e51c`). `git rev-list --count 709495d…HEAD` = 1 and
+  `git rev-list --count HEAD…709495d…` = 1 (one commit each side of the shared base).
+* **Scoped content correspondence (full revisions + exact compared paths named).**
+  `git diff --stat 709495d936c2a263ffdaa89f19ef8485b4508c98 ffc0e92b9b946b486c7bae9a881100a15a98b8d9 -- docs/protocol/QBIND_CONSENSUS_RECOVERY_SIGNING_HISTORY_CORRESPONDENCE_CONTRACT.md docs/protocol/QBIND_PROPOSAL_VOTE_SIGNING_STATE_CONTINUITY_CONTRACT.md docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_422_D7.md`
+  reported the **two protocol paths byte-identical** (no stat line) and the **evidence path
+  differing by `41` insertions / `41` deletions** (`git diff --numstat` → `41  41  …RUN_422_D7.md`).
+  A `git diff --word-diff=porcelain` over the evidence path showed **no word-level content
+  change** — the 41/41 delta is purely **line-ending / final-newline** normalization of the
+  previously-appended block (the reviewed blob carried LF / a final newline on those lines;
+  the repository HEAD carries CRLF / no final newline). As instructed, **repository content
+  (HEAD) is used as the baseline**; the previously uploaded evidence attachment did **not**
+  match the reviewed commit's evidence blob and was **not** used to overwrite repository
+  content.
+* **Applicable AGENTS.md.** `git ls-files | grep -i AGENTS.md` → **empty**: no `AGENTS.md`
+  exists anywhere in the tree, so none applies to the three authorized documentation paths.
+* **Source re-inspection (locators verified against the worktree this pass).**
+  `timeout.rs` — `TimeoutMsg` L73 (`view` L75, `high_qc: Option<QuorumCertificate>` L78,
+  `validator_id` L80, `suite_id: u8` L82, `signature: Vec<u8>` L84), `TimeoutCertificate`
+  L232 (`view` L235, `high_qc` L238, `signers: Vec<ValidatorId>` L241,
+  `signed_timeouts: Vec<TimeoutMsg>` L244, `timeout_view` L246) — **all match** the § 13.2A
+  cited lines. `ids.rs` — `ValidatorId(pub u64)` L29, `validator_index` (u16) note L11 —
+  **match**. `qc_verify_domain.rs` — `MAX_BITMAP_LEN = 8192` L163, `MAX_SIGNATURE_LEN` L170,
+  `MAX_AGGREGATE_SIGNATURE_BYTES` L198 — **match**. **Locator caveat (honest):** the accepted
+  § 13.2A table cites `consensus.rs ~L282/~L304` for the wire `QuorumCertificate` + encoder,
+  but **`crates/qbind-consensus/src/consensus.rs` is not present** in this tree; the
+  `QuorumCertificate` struct is in `crates/qbind-consensus/src/qc.rs` L29. The accepted table
+  is **preserved** (not edited for citations this pass); this caveat is recorded so the
+  locator is not over-attributed.
+
+### Changed paths (authorized scope only)
+
+1. `docs/protocol/QBIND_CONSENSUS_RECOVERY_SIGNING_HISTORY_CORRESPONDENCE_CONTRACT.md`
+2. `docs/protocol/QBIND_PROPOSAL_VOTE_SIGNING_STATE_CONTINUITY_CONTRACT.md`
+3. `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_422_D7.md` (this entry)
+
+`git status --porcelain` after editing lists **exactly** these three paths (changed-path
+check: no unauthorized file touched; `contradiction.md` unchanged).
+
+### Correction 1 — Reconcile serialized bounds to the authoritative § 13.2A
+
+§ 13.2A is now the **authoritative owner** of the serialized formulas via two **named
+variant caps** added to § 13.2A(f):
+
+* **`MAX_QC_BYTES`** derived mechanically from the (b)/(c)/(d) rows at the initial profile
+  `C = 2`: `FIXED_OVERHEAD 153 + anchor 40 + predecessor 8 + QC_FIXED 64 + bitmap-length
+  prefix 2 + signatures-count prefix 2 + B_span + N × (2 + S_sig)` = **`269 + B_span +
+  N × (2 + S_sig)`** (worst case with both optional payloads present; actual-length form
+  uses real discriminants/counts).
+* **`MAX_TC_BYTES` = `FIXED_OVERHEAD + [40 + 8]_{anchor+pred} + REC_HIGH_QC + TC_VIEW +
+  TC_TIMEOUT_VIEW + TC_HIGH_QC + TC_SIGNERS + SIGNED_TIMEOUTS`**, mechanically from the (e)
+  table, with **`D_ev` NOT re-added** (the evidence discriminant is already one of the
+  always-present (b) rows summed into `FIXED_OVERHEAD = 153`). Both `high_qc` copies charged
+  once each and required byte-identical; the `O(N²)` nested-`high_qc` signer term charged
+  explicitly.
+* **Reader enforcement stated.** `MAX_SAFETY_RECORD_BYTES = max(MAX_QC_BYTES, MAX_TC_BYTES)`
+  (checked `u128`); a post-discriminant reader enforces the variant-specific cap, a
+  pre-discriminant size gate enforces the cross-variant maximum.
+
+The previously **divergent** operative formulas were **replaced by references** to these
+names (no bound now has two different formulas): the § 13.2 `bounds_metadata` cell (which had
+`FIXED_OVERHEAD + B_span + N × S_sig` for `QcDerived` and `FIXED_OVERHEAD + D_ev + …` for
+`TcDerived`), **INV-D14-7**, **H26**, and the continuity-contract § 9.x summary. The stale
+`QcDerived` form omitted the anchor/predecessor payloads (48), `QC_FIXED` (64), and the
+count/length prefixes; the stale `TcDerived` form **double-counted** `D_ev`. A worktree grep
+confirms **zero** remaining occurrences of either stale string in the two protocol files.
+
+### Correction 2 — Complete decoded-generation caps (§ 13.7A authoritative; `CAPNORM_SLACK` defined)
+
+§ 13.7A remains the authoritative owner of decoded-allocation accounting; § 13.7's
+`MAX_RETAINED_GENERATION_BYTES = GEN_STRUCT + SIGNERS_CAP + SIG_TERMS + CTX_OWNED + ARC_CTRL`
+explicitly defers its per-allocation breakdown to § 13.7A. `CAPNORM_SLACK` — previously
+referenced but undefined — is now a **concrete bounded profile parameter** in **elements**
+per vector (`capacity() ≤ len() + CAPNORM_SLACK`, **initial profile = 0**), applied to each
+named decoded growable backing (both variants enumerated), with per-vector byte contribution
+`CAPNORM_SLACK × size_of::<element>()` and an explicit **finite multiplicity** (`O(N)`
+vectors + `O(N)` per-entry buffers/nested-signer backings), charged into
+`MAX_RETAINED_GENERATION_BYTES`; over-capacity beyond the slack → **refuse**. Both decoded
+`high_qc` copies are retained and charged **separately** (no implicit sharing). The charge is
+honestly an **application-owned allocation** charge, **not** a process-RSS bound.
+
+### Correction 3 — O3/O4/O5 phase/coexistence table, `VALIDATION_SCRATCH` bound, derived peak (new § 13.7B)
+
+A new **§ 13.7B** adds the O3/O4/O5 **phase/coexistence table** identifying which
+allocations are simultaneously live per phase (current / superseded-pinned / candidate
+decoded generations; preparation-owned objects; normalization old+new; encoded input;
+encoding; publication; O5 comparison/re-publication; validation scratch). Two decisions are
+**made and documented**: preparation-owned objects **alias** the already-charged
+candidate/current `Arc` (no extra copy in the selected profile); the **encoding** and
+**publication** buffers are **separate owned allocations, both charged**. `VALIDATION_SCRATCH`
+is given an **explicit finite bound** `UNIQ_SET + ASSOC_MAP + CMP_SPAN` (signer
+uniqueness/membership over ≤ `N`, TC-association scratch over ≤ `N`, and one
+`≤ MAX_SAFETY_RECORD_BYTES` comparison span, multiplicity 1). The single conservative peak
+`MAX_AGGREGATE_RETAINED_BYTES` is **derived from the union of the table rows** (preserving the
+proposed limits `MAX_OUTSTANDING_PREPARED_L0 = 2`, `MAX_CONCURRENT_CANDIDATES = 1`,
+`MAX_CONCURRENT_PUBLICATIONS = 1`). Admission checks the conservative charges **before** the
+protected allocations; the post-allocation check only confirms. Capacity refusal preserves
+established/outstanding evidence and D10 obligations, kept separate from future
+decision-lifecycle integration.
+
+### Correction 4 — EOL terminology correction (historical) and this pass's EOL/EOF results
+
+**Historical terminology correction (no command outcome manufactured).** Prior D7-D14
+entries in this file described the no-final-newline EOF as "**bare-LF line count 1** = the
+pre-existing no-final-newline EOF line" (and "exactly one bare-LF line"). That label is
+**imprecise**: these files are **all-CRLF**, and an **unterminated final line is not a
+bare-LF newline** (it contains **no** LF at all). The byte-accurate measure is
+**`bare-LF newline bytes = count(LF) − count(CRLF)`**, which is **0** for every file here
+(every LF belongs to a CRLF). The historical entries' underlying byte observations
+(all-CRLF, final byte `.`, no final newline) are **not** disputed or altered — only the
+"bare-LF" wording is corrected; no different historical command output is claimed.
+
+**This pass's EOL/EOF results (per changed file, measured this pass).** Method:
+`CRLF = grep -c $'\r' <file>`; `LF = tr -cd '\n' | wc -c`;
+`bare-LF newline bytes = LF − CRLF`; `final byte = tail -c1 | xxd`.
+
+| Changed file | CRLF count | LF total | bare-LF newline bytes (LF−CRLF) | final byte | final newline present |
+|---|---|---|---|---|---|
+| `QBIND_CONSENSUS_RECOVERY_SIGNING_HISTORY_CORRESPONDENCE_CONTRACT.md` | 2887 | 2887 | **0** | `0x2e` (`.`) | **no** |
+| `QBIND_PROPOSAL_VOTE_SIGNING_STATE_CONTINUITY_CONTRACT.md` | 1967 | 1967 | **0** | `0x2e` (`.`) | **no** |
+| `QBIND_DEVNET_EVIDENCE_RUN_422_D7.md` | 12944 (re-measured after this append) | 12944 | **0** (every LF is part of a CRLF) | `0x2e` (`.`) | **no** |
+
+The evidence file's own CRLF/LF counts change as this block is appended; it retains the
+**CRLF, no-final-newline, zero-bare-LF** convention (re-measurable after commit with the same
+commands). Existing conventions are preserved on all three files.
+
+### Validation / coverage checks (this pass's literal outcomes)
+
+* **Field-to-formula coverage.** Every § 13.2A(b)/(c)/(d)/(e) row maps to exactly one term of
+  `MAX_QC_BYTES` / `MAX_TC_BYTES`; the only non-row byte is `F = 0`. `D_ev` appears **once**
+  (in `FIXED_OVERHEAD`), not twice. **Covered.**
+* **Allocation-to-charge coverage.** Every § 13.7A row (GEN_STRUCT inline, outer backings,
+  per-signature / per-entry buffers, nested `O(N²)` signer backing, `CTX_OWNED`, `ARC_CTRL`)
+  plus `CAPNORM_SLACK` is charged into `MAX_RETAINED_GENERATION_BYTES`; both `high_qc` copies
+  charged separately. **Covered.**
+* **Phase/coexistence coverage.** Each § 13.7B table row is placed in O3/O4/O5 and mapped to
+  a peak term; preparation aliases a charged owner; encoding and publication charged
+  separately; `VALIDATION_SCRATCH` bounded. **Covered.**
+* **Changed-path check.** Exactly the three authorized files changed (`git status
+  --porcelain`); `contradiction.md` and all other tracked files unchanged. **Covered.**
+* **EOL/EOF.** All three files CRLF, final byte `.`, no final newline, **0** bare-LF newline
+  bytes (table above). **Covered.**
+* **Available review/security tooling (this pass; not reused from prior passes).**
+  `parallel_validation` (Code Review + CodeQL) and the secret scan over the three authorized
+  files were run **this pass**; their literal outcomes and any availability caveats are
+  recorded with the final report below, **separate** from historical outcomes. **No** Cargo
+  build, Cargo tests, Clippy, or release-binary rebuild were run or claimed — this is a
+  documentation-only pass; those are recorded as **not run** (prior evidence preserved with
+  its original scope).
+
+### Remaining unresolved items (completeness claims narrowed honestly)
+
+* The accepted § 13.2A citation `consensus.rs ~L282/~L304` does not resolve in this tree (the
+  wire `QuorumCertificate` is in `qc.rs` L29); the citation is **preserved** per the
+  "preserve accepted tables" instruction and flagged here rather than silently edited.
+* Anti-rollback anchor, lock-recovery, and current-authority remain **UNRESOLVED**; the
+  design stays **DEFINED-NOT-IMPLEMENTED**; C4/C5 remain **OPEN**. This pass corrects
+  resource-accounting **presentation** only — no storage, verifier, signing-preimage, wire,
+  schema, CLI, workflow, or production wiring changed.
+
+### Preserved required status
+
+`D7D14_CONSENSUS_SAFETY_RECORD_DESIGN=DEFINED-NOT-IMPLEMENTED`;
+`DURABLE_ANTI_ROLLBACK=NOT-ESTABLISHED`; `GENESIS_AUTHORITY_ACTIVATION=DISABLED`;
+`SECURITY_POSTURE=RS1-OPEN / PUBLIC-DEVNET-NO-GO`. C4/C5 remain **OPEN**. Fail-closed
+`CurrentEpochUnavailable` and the activation/transport boundaries are preserved. This pass
+completes here and does **not** begin the storage successor, D15, or Run 423.
