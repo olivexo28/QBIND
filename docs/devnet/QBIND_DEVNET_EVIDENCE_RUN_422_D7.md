@@ -13744,3 +13744,124 @@ evidence; the excluded rows (H1, H13–H15, H17, H25e, H26l, H28, H29) are **not
 remain OPEN. Fail-closed `CurrentEpochUnavailable` is preserved. This is an isolated component
 verdict only — **no** production-readiness promotion, engine/decision/signing integration,
 recovery-time verifier wiring, anti-rollback establishment, activation, or Run 423 is claimed.
+## RUN 422 D7-D14 — Correction: withdraw unsupported acceptance claim; partial storage-component corrections (code + test, corrects `8f6d332db7eca35f14a2a3160dca9fa1b3eea494`)
+
+This is a **clearly-identified correction** appended to the Run 422 D7-D14 evidence. All prior
+D7-D14 entries above — including the `D7D14_STORAGE_COMPONENT=IMPLEMENTED-ISOLATED` verdict and the
+"acceptance subset (H2–H12, H16, H18–H25, H26, H27, H30) is completed with executed evidence"
+statement — are **preserved as historical evidence** and are **not** deleted. This correction
+**withdraws** that acceptance claim as unsupported and records the scoped corrections actually
+applied and validated in this pass.
+
+### Baseline (reported, not assumed)
+
+* **Branch:** `copilot/run-422-d7-d14-correct-safety-record-storage`.
+* **Starting HEAD:** `db4a6113371590a3dc00141e730ccaf5b20c70c1` (`update`), worktree clean.
+* **Reviewed object:** `8f6d332db7eca35f14a2a3160dca9fa1b3eea494` was **not** present in the shallow
+  clone; it was fetched (`git fetch origin 8f6d332…`). It is **not** an ancestor of HEAD; the
+  merge-base of HEAD and the reviewed object is `41d69ba`. Scoped content correspondence:
+  `git diff -w 8f6d332 HEAD -- crates/qbind-node/src/safety_record_store/ <test>` is **empty** — the
+  working-tree HEAD was **byte-identical to the reviewed object modulo line endings** (worktree CRLF
+  vs reviewed LF). The reviewed implementation is therefore exactly what was corrected here.
+* **Pre-correction test run:** `cargo test … --test run_422_d7d14_safety_record_store_tests --
+  --include-ignored` → **30 passed, 0 failed, 0 ignored**.
+
+### Review findings → correction → regression (this pass)
+
+1. **Empty serialization domain did not enforce uncertainty across handles (§13.5).** `publish_atomic`
+   returned `UncertainDurable`/`WriteError` without latching any shared state, so a subsequent O4 on
+   the same or another handle proceeded. **Correction:** added an `Arc<AtomicBool>` recovery-required
+   latch to `SafetyBackend` (shared by every attached handle). An ambiguous write error or an
+   uncertain-but-durable outcome sets it; O4 (`publish_locked`) refuses pre-write with a new
+   `SafetyStoreError::RecoveryRequired` while set; O2/O3 may still inspect surviving state without
+   clearing it; **only** a successful O5 recovery (`reacknowledge` → `DurableAcknowledged`) clears it.
+   The latch is in-process shared state by construction — a reopened backend starts clear and cannot
+   infer an earlier acknowledgement from readable bytes (consistent with the accepted in-process
+   model and INV-R7). **Regression:** `corr_uncertain_publish_blocks_dependent_o4_until_o5_recovers`
+   (same-handle **and** second-handle refusal after uncertainty, O3 inspection without clearing, O5
+   recovery clears, dependent O4 then proceeds).
+
+2. **O3/O4/O5 did not independently enforce the pinned-context / established-state prerequisite
+   (§13.3/§13.4).** O3 read only the record; O4/O5 carried the stored `context_digest` forward without
+   comparing it to the attached handle's pinned context. A handle attached under a **foreign** context
+   could read or publish over a store initialized under a different context, and callers were trusted
+   to invoke `open` first. **Correction:** added a private `load_established()` on `SafetyRecordOwner`
+   that requires present-and-consistent metadata+record and `meta.context_digest ==
+   context_digest(self.ctx)`, and routed O2/O3/O4/O5 through it so the prerequisite is enforced in the
+   implementation, not by caller discipline. **Regression:**
+   `corr_foreign_context_handle_refuses_o3_and_o4` (context-B handle attached to a context-A store:
+   O3 and O4 both refuse; context-A state is untouched at rev 0).
+
+3. **Raw write/inject bypasses were unrestricted `pub fn` (§13.5).** `SafetyBackend::set_inject`,
+   `SafetyBackend::debug_overwrite_record`, and `SafetyRecordOwner::debug_overwrite_record_for_test`
+   were callable from any build. **Correction:** gated all three behind
+   `#[cfg(any(test, feature = "test-utils"))]`, so they are absent from the default (production) build
+   and the integration tests must be run with `--features test-utils`. The injected-fault reading path
+   stays inert in production (the setter no longer exists, so the atomic remains `None`).
+
+These three corrections are genuine and validated. They do **not**, by themselves, establish the full
+accepted subset; see "Why INCOMPLETE" below.
+
+### Validation (literal outcomes, this pass)
+
+* **Toolchain:** `rustc 1.98.1` / `cargo 1.98.1`, `x86_64-unknown-linux-gnu`, edition 2021.
+* **Formatting:** `rustfmt --edition 2021 --check` on the four edited files (`backend.rs`, `error.rs`,
+  `owner.rs`, the integration test) → clean (exit 0). The edited files were normalized to LF.
+* **Default lib build:** `cargo build -p qbind-node --lib` → **Finished** (exit 0), no
+  `safety_record_store` warnings.
+* **Clippy (default lib):** `cargo clippy -p qbind-node --lib` → no warnings attributable to
+  `safety_record_store` (the remaining warnings are pre-existing and belong to other modules/crates).
+* **Component tests (required feature explicit):**
+  `cargo test -p qbind-node --features test-utils --test run_422_d7d14_safety_record_store_tests --
+  --include-ignored` → **32 passed, 0 failed, 0 ignored** (30 prior + the 2 new `corr_*` regressions;
+  the four `pd_*` child-process boundary tests pass; the `child_process_entry` is spawned out-of-band).
+* **`--include-ignored` reconciliation.** The earlier entry reported "30 run: 29 passed, 0 failed,
+  **1 ignored**". The actual reported ignored-test count under `--include-ignored` is **0 ignored**
+  (the `#[ignore]` child entrypoint is **run** under that flag and returns early when not a child
+  invocation). The inconsistent "1 ignored" figure is **not** carried forward.
+* **Default release node build:** `cargo build -p qbind-node --release --bin qbind-node` → **Finished
+  `release`** (exit 0). A successful build is not claimed as runtime recovery or authority acceptance.
+* **Production non-wiring audit:** `grep -rn "safety_record_store\|SafetyRecordOwner\|SafetyBackend"`
+  over `main.rs`, `binary_consensus_loop.rs`, `basic_hotstuff_engine.rs` returns **no** matches; the
+  only registration is the two `lib.rs` lines. The component remains a dormant, disabled-by-default
+  `pub mod`, never constructed on a production path. The test-gated bypasses are now absent from the
+  default/release build.
+* **Secret scan:** no secrets in the changed files; no databases or large binaries committed.
+
+### Why INCOMPLETE (outstanding work, not completed this pass)
+
+The following accepted-subset requirements are **not** established and remain open; the component is
+therefore `PARTIAL-IMPLEMENTATION` and acceptance is `INCOMPLETE`:
+
+* Opaque validated-publication type with controlled construction / immutable contents
+  (`ValidatedRecord` still exposes mutable public fields and `validate_decoded` still accepts
+  unrelated bytes without correspondence).
+* One structural-admission preflight path shared by construction/encoding/publication/recovery
+  (publication still validates semantics without a unified pre-allocation structural preflight).
+* Allocation-admission wiring into the real O1–O5 objects/lifetimes (the accountant remains a
+  standalone/synthetic facility; `RetainedGeneration` still omits `evidence_lock_binding`).
+* Record-level high-QC encoder discriminant (§13.2A) and the TA-identifier reconciliation.
+* Bounded legacy/unknown safety-namespace classification in O1.
+* Full H-matrix rename/remap to the contract's actual row meanings (e.g. H4/H11/H12/H18/H23/H26) and
+  coordinated deterministic crash coverage (child-reached-phase verification rather than an arbitrary
+  unsuccessful exit).
+
+### Component verdict and preserved status
+
+```text
+D7D14_STORAGE_COMPONENT=PARTIAL-IMPLEMENTATION
+D7D14_STORAGE_ACCEPTANCE=INCOMPLETE
+DURABLE_ANTI_ROLLBACK=NOT-ESTABLISHED
+GENESIS_AUTHORITY_ACTIVATION=DISABLED
+PRODUCTION_WIRE_CHAIN_ID_BEHAVIOR=UNCHANGED
+CONFIGURED_AUTHORITY_RELEASE_BINARY_EVIDENCE=NOT-YET-CAPTURED
+SECURITY_POSTURE=RS1-OPEN / PUBLIC-DEVNET-NO-GO
+```
+
+C4/C5 remain **OPEN**. Fail-closed `CurrentEpochUnavailable` is preserved. No production integration,
+signing, recovery-time verifier wiring, anti-rollback establishment, activation, or Run 423 work is
+performed or claimed. Changed paths this pass:
+`crates/qbind-node/src/safety_record_store/{backend.rs,error.rs,owner.rs}`,
+`crates/qbind-node/tests/run_422_d7d14_safety_record_store_tests.rs`,
+`docs/protocol/QBIND_CONSENSUS_RECOVERY_SIGNING_HISTORY_CORRESPONDENCE_CONTRACT.md`,
+`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_422_D7.md`, and `docs/whitepaper/contradiction.md`.

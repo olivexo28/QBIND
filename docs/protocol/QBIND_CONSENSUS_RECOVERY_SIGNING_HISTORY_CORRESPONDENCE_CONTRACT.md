@@ -1594,6 +1594,29 @@ D7D14_CONSENSUS_SAFETY_RECORD_DESIGN=DEFINED-NOT-IMPLEMENTED
 D7D14_STORAGE_COMPONENT=IMPLEMENTED-ISOLATED
 ```
 
+**Correction (Run 422 D7-D14 code-and-test correction pass).** The
+`IMPLEMENTED-ISOLATED` token above is **withdrawn** as unsupported and is
+**superseded** by `PARTIAL-IMPLEMENTATION`. The reviewed object
+(`8f6d332db7eca35f14a2a3160dca9fa1b3eea494`) was a **partial** implementation
+whose claimed acceptance subset was **not** established: the shared serialization
+domain was an empty value that did not block dependent publication after an
+ambiguous/uncertain write; O3/O4/O5 did not enforce the pinned-context /
+established-state prerequisite independently of a caller voluntarily invoking
+`open` (a foreign-context handle could read/publish); the raw write/inject
+bypasses were unrestricted `pub fn`; and several H-row test names did not exercise
+the row meaning they claimed. This correction pass closes the shared-uncertainty,
+foreign-context, and raw-bypass gaps (with regressions) but does **not** complete
+the full accepted subset (opaque validated-publication type, allocation-admission
+wiring into O1–O5, the retained `evidence_lock_binding`, the record-level high-QC
+encoder discriminant, bounded legacy-namespace classification, the full H-matrix
+rename/remap, and coordinated deterministic crash coverage remain outstanding).
+The operative component status is therefore:
+
+```
+D7D14_STORAGE_COMPONENT=PARTIAL-IMPLEMENTATION
+D7D14_STORAGE_ACCEPTANCE=INCOMPLETE
+```
+
 **What D14 adds beyond D13.** §12 fixed the frontier **rule** (when the restriction
 must be durable, which dependent operations block, how recovery decides from
 observable inputs). §13 fixes the **record and its operations** at component level:
