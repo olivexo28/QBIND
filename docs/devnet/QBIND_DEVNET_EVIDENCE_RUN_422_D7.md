@@ -12896,7 +12896,7 @@ bare-LF newline** (it contains **no** LF at all). The byte-accurate measure is
 |---|---|---|---|---|---|
 | `QBIND_CONSENSUS_RECOVERY_SIGNING_HISTORY_CORRESPONDENCE_CONTRACT.md` | 2887 | 2887 | **0** | `0x2e` (`.`) | **no** |
 | `QBIND_PROPOSAL_VOTE_SIGNING_STATE_CONTINUITY_CONTRACT.md` | 1967 | 1967 | **0** | `0x2e` (`.`) | **no** |
-| `QBIND_DEVNET_EVIDENCE_RUN_422_D7.md` | 12944 (re-measured after this append) | 12944 | **0** (every LF is part of a CRLF) | `0x2e` (`.`) | **no** |
+| `QBIND_DEVNET_EVIDENCE_RUN_422_D7.md` | 12947 (re-measured after this append) | 12947 | **0** (every LF is part of a CRLF) | `0x2e` (`.`) | **no** |
 
 The evidence file's own CRLF/LF counts change as this block is appended; it retains the
 **CRLF, no-final-newline, zero-bare-LF** convention (re-measurable after commit with the same
@@ -12918,13 +12918,16 @@ commands). Existing conventions are preserved on all three files.
   --porcelain`); `contradiction.md` and all other tracked files unchanged. **Covered.**
 * **EOL/EOF.** All three files CRLF, final byte `.`, no final newline, **0** bare-LF newline
   bytes (table above). **Covered.**
-* **Available review/security tooling (this pass; not reused from prior passes).**
-  `parallel_validation` (Code Review + CodeQL) and the secret scan over the three authorized
-  files were run **this pass**; their literal outcomes and any availability caveats are
-  recorded with the final report below, **separate** from historical outcomes. **No** Cargo
-  build, Cargo tests, Clippy, or release-binary rebuild were run or claimed — this is a
-  documentation-only pass; those are recorded as **not run** (prior evidence preserved with
-  its original scope).
+* **Available review/security tooling (this pass's literal outcomes; not reused from prior
+  passes).** `parallel_validation` was run **this pass**: **Code Review — completed, 3 files
+  reviewed, no review comments** (with an environment **availability caveat**: the review
+  model was reported unavailable — `model claude-sonnet-4.6 not found in registry` — a
+  tooling caveat, not a clean-vs-findings signal). **CodeQL Security Scan — skipped: all
+  changes trivial** (documentation-only Markdown; no analyzable code surface). **Secret scan**
+  over the three authorized files — **no secrets detected**. **No** Cargo build, Cargo tests,
+  Clippy, or release-binary rebuild were run or claimed; they are recorded as **not run**
+  (documentation-only pass; prior evidence preserved with its original scope). No other
+  review/security result is claimed.
 
 ### Remaining unresolved items (completeness claims narrowed honestly)
 
