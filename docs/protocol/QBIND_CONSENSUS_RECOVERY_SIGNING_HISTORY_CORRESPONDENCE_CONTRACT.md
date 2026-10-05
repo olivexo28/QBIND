@@ -1676,7 +1676,7 @@ from the record's own claim. "Logical type" is prose; no concrete encoding is fi
 | `committed_state_assoc` (committed block id + height anchor) **— present only in the `Locked`-with-committed-anchor sub-case; absent by variant in `BootstrapNoLock` and `Locked`-with-no-commit** | Engine committed baseline at the transition (**may be genuinely `None`** — a lock can advance via `on_qc` with no three-chain commit: `run_422_d7d2_signing_state_recovery_tests::d7d12_precrash_lock_advances_via_on_vote_without_a_commit`) | Anchoring the lock in **recovered committed state** (§5 X1), when an anchor exists | **Comparison relation (explicit, when present):** the stored anchor `(id, height)` must name a block that is **present in the recovered committed history** at that height (equal id at the anchored height), with `height` via checked arithmetic; the recovered committed baseline **may legitimately be at or beyond** the anchor height (committed progress since the last lock publication is **expected and allowed**), but the anchored block must still be on the recovered committed chain; if the anchor block is **absent** from recovered committed state or the height is **inconsistent**, the comparison **cannot be established** → **refuse**. **When absent by variant** (`Locked`-with-no-commit / `BootstrapNoLock`): the anchor predicate is **skipped** (there is nothing to anchor) — the absence is an **explicit discriminant**, **never** a coerced height-zero or a manufactured committed block, and it is **distinct** from a missing/corrupt anchor on a variant that requires one | **Obtained independently** — compared against recovered committed state; stored as a reference (or **absent by variant**) | Proves the lock's **relation to the committed baseline** when one exists. A genuine **no-commit** lock proves a legitimately uncommitted restriction, **not** a committed anchor. Does **not** prove ancestry of arbitrary candidates (per-candidate, below), and a later committed height does **not** by itself invalidate a present anchor |
 | `publication_revision` (`u64`, monotonic) + optional `predecessor_ref` | Writer (single-writer counter) | Ownership **stale-work fencing** (§13.5) and open's **authoritative-record selection** | Strictly increasing under the single writer; checked arithmetic; wrap → **refuse** (no silent reuse) | Stored directly | Proves **ordering among this host's own publications** (local bookkeeping). Does **not** prove whole-copy freshness or anti-rollback — a local revision/counter is **not** an anchor (§12.5; continuity §6.3) |
 | `integrity_checksum` (CRC32 over the record payload) | Writer (reuse `compute_crc32` / `signing_journal_crc32`, `storage.rs` ~L531/~L545) | Read: **accidental-corruption** detection | 4-byte; recomputed checksum must match | Stored directly | Proves **accidental-corruption** detection (T-INTEG). Does **not** prove authenticity or authorization (a CRC is **not** a MAC) |
-| `bounds_metadata` (declared lengths / counts for the variable-length members) | Writer | Read decode gate | **Concrete bounds, not “fixed maxima”:** `signer_bitmap.len()` ≤ `MAX_BITMAP_LEN` (8192); `signatures.len()` ≤ `MAX_SIGNATURE_COUNT` (`u16::MAX`=65535); per-signature ≤ `MAX_SIGNATURE_LEN` (`u16::MAX`=65535); `lock_block_id`/`committed id`/digests fixed at 32 bytes; `lock_view`/`publication_revision` are `u64` with **checked** increments (wrap → refuse); total record size ≤ a declared `MAX_SAFETY_RECORD_BYTES`, **fixed here as a checked formula over hard-bounded parameters** (not deferred): `MAX_SAFETY_RECORD_BYTES = FIXED_OVERHEAD + B_span + N × S_sig` (for the `QcDerived` variant), where **`N`** = the pinned authorized-epoch **validator/member count** (so the signature **count** `signatures.len()` ≤ `N`; `N` is a *count*, not voting power), **`B_span`** = the signer-**bitmap identifier span** in bytes, which is `ceil(N/8)` **only under an explicitly established dense-index profile** (members indexed contiguously `0..N-1`) and is otherwise bounded by the **identifier-span bound `qc_verify_domain` already demonstrates** — `MAX_BITMAP_LEN` = 8192 bytes, i.e. the span needed to represent any set bit up to `u16::MAX` (`qc_verify_domain.rs` ~L163, ~L752) — because **sparse / non-dense member identifiers** within the representable span make `ceil(N/8)` insufficient, **`S_sig`** = the pinned signature-suite's per-signature byte length (individual-signature bound; aggregate signature bytes ≤ `N × S_sig`), with the four quantities — **validator count `N`**, **bitmap identifier span `B_span`**, **signature count (`≤ N`)**, and **signature bytes (`≤ N × S_sig`)** — kept explicitly distinct from each other and from **voting power `W`**. For the **`TcDerived`** variant there is **no** wire signer-bitmap or signature vector; its serialized members are the record's **own** logical `high_qc` **and** the retained serialized `TimeoutCertificate` (which carries its **own** second `high_qc`), so the cap is a checked sum over **explicit encoded terms** (not in-memory `size_of` used as a serialization width): `MAX_SAFETY_RECORD_BYTES = FIXED_OVERHEAD + D_ev + REC_HIGH_QC + TC_VIEW + TC_TIMEOUT_VIEW + TC_HIGH_QC + TC_SIGNERS + SIGNED_TIMEOUTS`. The **identifier width** `W_id` = the **encoded** width of a `ValidatorId` — a `u64`, **8 bytes** (`ids.rs` ~L29; a compact profile may instead encode a `u16` `validator_index` per `ids.rs` ~L11, but the persisted **logical** form uses the 8-byte id), bounded to `N` distinct members; `C` = a declared **length/count-prefix** width (a context-derived framing constant); `D_ev`/`D` = a 1-byte evidence/`Option` **discriminant**. The retained `TimeoutCertificate` (`timeout.rs` ~L232) also contributes its **two fixed `u64` fields** — **`TC_VIEW`** = `8` (`view`, ~L235) and **`TC_TIMEOUT_VIEW`** = `8` (`timeout_view`, ~L246), **counted explicitly** (previously omitted). **Both `high_qc` copies are charged once each, not shared:** **`REC_HIGH_QC`** = `D + 32 + 8 + (C + N × W_id)` is the **record-level** logical `high_qc` (discriminant + `block_id` 32 + `view` 8 + its **nested** `signers` id list ≤ `N × W_id`), and **`TC_HIGH_QC`** = `D + 32 + 8 + (C + N × W_id)` is the retained `TimeoutCertificate`'s **own** `high_qc` (`timeout.rs` ~L238, identical shape); the two are **distinct serialized occurrences, each counted exactly once**, and the selected rule **requires them byte-identical** (`REC_HIGH_QC`'s `(block_id, view, signers)` == `TimeoutCertificate.high_qc`; §13.3A P1/P2/TA1 compare that **one** identity) — a mismatch → **refuse**, and **neither** copy is silently dropped. The remaining variable terms are: **`TC_SIGNERS`** = `C + N × W_id` (the TC's **own** `signers: Vec<ValidatorId>`, `timeout.rs` ~L241, ≤ `N`); **`SIGNED_TIMEOUTS`** = `C + N × T_msg` (the `signed_timeouts` **count** ≤ `N` entries, `timeout.rs` ~L244), where **`T_msg`** is itself a checked per-entry sum — **not** one pinned `TimeoutMsg` length — over each timeout's fields: `T_msg = 8 (view) + W_id (validator_id) + 1 (suite_id: u8) + (C + S_sig) (signature length prefix + signature bytes ≤ the suite's per-signature length) + D (high_qc discriminant) + [ 32 + 8 + (C + N × W_id) ] (its **optional** `high_qc`: `block_id` 32 + `view` 8 + **nested** `signers` ≤ `N × W_id`, included only when the discriminant is set) + per-message framing`. Here `S_sig` bounds **one signature**, **not** the whole `TimeoutMsg`, and the per-entry `suite_id: u8` (`timeout.rs` ~L82) is counted **explicitly** (previously omitted). Every `C`/`D` length/count prefix and discriminant is counted explicitly; and **`FIXED_OVERHEAD`** = the summed fixed-size members (`persistence_format_version` 2 + the four 32-byte ids/digests + `network_genesis_id`/`authority_context_ref` context fields + `lock_view`/`publication_revision` at 8 each + `integrity_checksum` 4 + per-member length/count prefixes + a declared framing constant). The **quorum** relation `ceil(2W/3)` over total **voting power `W`** is validated separately (threshold observation) and is a *power* sum, kept **distinct** from the *count* `N` that bounds bytes. Every term is summed with **checked** `u128`/`usize` arithmetic; any overflow, or a declared length/count exceeding its term, → **refuse before any application-owned allocation or copy** of the variable-length members. The bound's **source** is the pinned authorized-epoch context (`N`, `S_sig`, `W`), enforced by the reader against the pinned context. The purely structural ceiling `MAX_AGGREGATE_SIGNATURE_BYTES = MAX_SIGNATURE_COUNT × MAX_SIGNATURE_LEN` (≈ 4.29 GB) is retained **only** as the over-read guard — an honest **allocation-bound limitation**, not a buffer size and not the applied cap. The formula bounds **this component's** serialized record; it does **not** bound the storage backend's own internal allocations (that limitation is retained honestly). All offset/length arithmetic is **checked** (no wrap) | Stored directly | Proves the record is **structurally bounded** so decode cannot over-read. Does **not** prove any semantic property. The u16×u16 product is an honest **allocation-bound limitation**, not a usable buffer size |
+| `bounds_metadata` (declared lengths / counts for the variable-length members) | Writer | Read decode gate | **Concrete bounds, not “fixed maxima”:** `signer_bitmap.len()` ≤ `MAX_BITMAP_LEN` (8192); `signatures.len()` ≤ `MAX_SIGNATURE_COUNT` (`u16::MAX`=65535); per-signature ≤ `MAX_SIGNATURE_LEN` (`u16::MAX`=65535); `lock_block_id`/`committed id`/digests fixed at 32 bytes; `lock_view`/`publication_revision` are `u64` with **checked** increments (wrap → refuse); total record size ≤ a declared `MAX_SAFETY_RECORD_BYTES`, **fixed here as a checked formula over hard-bounded parameters (every width enumerated in the § 13.2A field tables, with actual-length and worst-case stated separately)** (not deferred): `MAX_SAFETY_RECORD_BYTES = FIXED_OVERHEAD + B_span + N × S_sig` (for the `QcDerived` variant), where **`N`** = the pinned authorized-epoch **validator/member count** (so the signature **count** `signatures.len()` ≤ `N`; `N` is a *count*, not voting power), **`B_span`** = the signer-**bitmap identifier span** in bytes, which is `ceil(N/8)` **only under an explicitly established dense-index profile** (members indexed contiguously `0..N-1`) and is otherwise bounded by the **identifier-span bound `qc_verify_domain` already demonstrates** — `MAX_BITMAP_LEN` = 8192 bytes, i.e. the span needed to represent any set bit up to `u16::MAX` (`qc_verify_domain.rs` ~L163, ~L752) — because **sparse / non-dense member identifiers** within the representable span make `ceil(N/8)` insufficient, **`S_sig`** = the pinned signature-suite's per-signature byte length (individual-signature bound; aggregate signature bytes ≤ `N × S_sig`), with the four quantities — **validator count `N`**, **bitmap identifier span `B_span`**, **signature count (`≤ N`)**, and **signature bytes (`≤ N × S_sig`)** — kept explicitly distinct from each other and from **voting power `W`**. For the **`TcDerived`** variant there is **no** wire signer-bitmap or signature vector; its serialized members are the record's **own** logical `high_qc` **and** the retained serialized `TimeoutCertificate` (which carries its **own** second `high_qc`), so the cap is a checked sum over **explicit encoded terms** (not in-memory `size_of` used as a serialization width): `MAX_SAFETY_RECORD_BYTES = FIXED_OVERHEAD + D_ev + REC_HIGH_QC + TC_VIEW + TC_TIMEOUT_VIEW + TC_HIGH_QC + TC_SIGNERS + SIGNED_TIMEOUTS`. The **identifier width** `W_id` = the **encoded** width of a `ValidatorId` — a `u64`, **8 bytes** (`ids.rs` ~L29; a compact profile may instead encode a `u16` `validator_index` per `ids.rs` ~L11, but the persisted **logical** form uses the 8-byte id), bounded to `N` distinct members; `C` = the profile's fixed **length/count-prefix** width, **concretely `2` bytes** (`u16`) in the initial profile (§ 13.2A(a), allowed {2,4}, pinned before decode, never read from the record); `D_ev`/`D` = a **1-byte** (`u8`) evidence/`Option`/variant **discriminant**. **All widths are enumerated row-by-row in the § 13.2A field tables; this cell summarizes them.** The retained `TimeoutCertificate` (`timeout.rs` ~L232) also contributes its **two fixed `u64` fields** — **`TC_VIEW`** = `8` (`view`, ~L235) and **`TC_TIMEOUT_VIEW`** = `8` (`timeout_view`, ~L246), **counted explicitly** (previously omitted). **Both `high_qc` copies are charged once each, not shared:** **`REC_HIGH_QC`** = `D + 32 + 8 + (C + N × W_id)` is the **record-level** logical `high_qc` (discriminant + `block_id` 32 + `view` 8 + its **nested** `signers` id list ≤ `N × W_id`), and **`TC_HIGH_QC`** = `D + 32 + 8 + (C + N × W_id)` is the retained `TimeoutCertificate`'s **own** `high_qc` (`timeout.rs` ~L238, identical shape); the two are **distinct serialized occurrences, each counted exactly once**, and the selected rule **requires them byte-identical** (`REC_HIGH_QC`'s `(block_id, view, signers)` == `TimeoutCertificate.high_qc`; §13.3A P1/P2/TA1 compare that **one** identity) — a mismatch → **refuse**, and **neither** copy is silently dropped. The remaining variable terms are: **`TC_SIGNERS`** = `C + N × W_id` (the TC's **own** `signers: Vec<ValidatorId>`, `timeout.rs` ~L241, ≤ `N`); **`SIGNED_TIMEOUTS`** = `C + N × T_msg` (the `signed_timeouts` **count** ≤ `N` entries, `timeout.rs` ~L244), where **`T_msg`** is itself a checked per-entry sum — **not** one pinned `TimeoutMsg` length — over each timeout's fields: `T_msg = 8 (view) + W_id (validator_id) + 1 (suite_id: u8) + (C + S_sig) (signature length prefix + signature bytes ≤ the suite's per-signature length) + D (high_qc discriminant) + [ 32 + 8 + (C + N × W_id) ] (its **optional** `high_qc`: `block_id` 32 + `view` 8 + **nested** `signers` ≤ `N × W_id`, included only when the discriminant is set) + `F` framing (**= 0**, no extra per-message framing, § 13.2A)`. Here `S_sig` bounds **one signature**, **not** the whole `TimeoutMsg`, and the per-entry `suite_id: u8` (`timeout.rs` ~L82) is counted **explicitly** (previously omitted). Every `C`/`D` length/count prefix and discriminant is counted explicitly; and **`FIXED_OVERHEAD`** = the summed fixed-size common rows **derived mechanically in § 13.2A(b) to `153` bytes** (`persistence_format_version` 2 + the four 32-byte ids/digests + `network_genesis_id`/`authority_context_ref` context fields + `lock_view`/`publication_revision` at 8 each + `integrity_checksum` 4 + the always-present evidence/anchor/predecessor discriminants + `F = 0` framing), **not** an unexplained constant. The **quorum** relation `ceil(2W/3)` over total **voting power `W`** is validated separately (threshold observation) and is a *power* sum, kept **distinct** from the *count* `N` that bounds bytes. Every term is summed with **checked** `u128`/`usize` arithmetic; any overflow, or a declared length/count exceeding its term, → **refuse before any application-owned allocation or copy** of the variable-length members. The bound's **source** is the pinned authorized-epoch context (`N`, `S_sig`, `W`), enforced by the reader against the pinned context. The purely structural ceiling `MAX_AGGREGATE_SIGNATURE_BYTES = MAX_SIGNATURE_COUNT × MAX_SIGNATURE_LEN` (≈ 4.29 GB) is retained **only** as the over-read guard — an honest **allocation-bound limitation**, not a buffer size and not the applied cap. The formula bounds **this component's** serialized record; it does **not** bound the storage backend's own internal allocations (that limitation is retained honestly). All offset/length arithmetic is **checked** (no wrap) | Stored directly | Proves the record is **structurally bounded** so decode cannot over-read. Does **not** prove any semantic property. The u16×u16 product is an honest **allocation-bound limitation**, not a usable buffer size |
 
 **Per-candidate ancestry is deliberately NOT a stored field.** The record stores the
 **locked block identity + view** (required at startup) and the committed-state
@@ -1690,6 +1690,142 @@ recovery or validation consumer. Fields with no recovery/validation consumer (e.
 `current_view`, scheduling counters, the volatile `voted_in_view` latch) are **not**
 in this record; `voted_in_view` remains lost on restart (D7-D2) and is **not**
 reconstructed by this component.
+
+### 13.2A Proposed serialized persistence profile — explicit field, prefix, and contribution tables (Correction 1, D7-D14)
+
+This subsection **replaces** the prior ambiguous inline descriptions of `C`,
+"per-message framing," and `FIXED_OVERHEAD` with mechanical tables. It specifies a
+**proposed persistence encoding** for the `SafetyRestrictionRecord`, **distinct from**
+the existing `qbind-wire` wire encoding (`consensus.rs` ~L304 `WireEncode for
+QuorumCertificate`) and from every signing preimage (`timeout.rs`
+`timeout_signing_bytes_with_chain_id` ~L155; the Proposal/Vote signing-domain v2
+preimage). **No** implementation, wire format, or signing preimage is changed here;
+these rows describe only how a future on-disk record *would* be framed so the size
+bound derives from named rows rather than an unexplained constant. `MAX_SAFETY_RECORD_BYTES`
+is the **serialized** cap (an encoded byte buffer); decoded in-memory footprint is a
+**separate** charge accounted in §13.7A, never inferred from this serialized length.
+
+**(a) Profile parameters — fixed before any encode/decode, validated against the pinned
+authorized-epoch context, and never accepted as policy from an untrusted record.**
+
+| Parameter | Meaning | Concrete width / initial profile value | Allowed range | Validation rule (reader) |
+|---|---|---|---|---|
+| `C` | Width of **every** length/count prefix in this profile | **2 bytes** (`u16` prefix), matching the wire encoding's `u16` prefixes (`consensus.rs` ~L316/~L321/~L324) | Fixed element of {`2` (`u16`), `4` (`u32`)}, chosen at profile instantiation; initial profile = **2** | Every count/length this prefixes is independently bounded (≤ `N`, ≤ `MAX_BITMAP_LEN`, ≤ `S_sig`), so a value needing more than `C` bytes → **refuse**. `C` is a pinned constant, **not** read from the record |
+| `W_id` | **Encoded** width of a `ValidatorId` | **8 bytes** (`u64`, `ids.rs` ~L29) | Fixed `8` for the logical form (a compact profile may encode a `u16` `validator_index`, `ids.rs` ~L11, but the persisted logical form is 8) | Fixed by profile; distinct from the **in-memory** `size_of::<ValidatorId>()` charged in §13.7A |
+| `D` | Width of a `1`-byte discriminant/`Option`/variant tag | **1 byte** (`u8`) | Fixed `1` | Tag must decode to a defined variant; unknown tag → **refuse** (no coercion of `None`) |
+| `S_sig` | Pinned signature-suite **per-signature** byte length | Suite constant (e.g. ML-DSA-44); bounds **one** signature, **not** a whole message | `1 ..= MAX_SIGNATURE_LEN` (`u16::MAX` = 65535) | A declared per-signature length `>` the pinned `S_sig` → **refuse** |
+| `N` | Pinned authorized-epoch validator/member **count** (a count, not voting power `W`) | Context constant | `1 ..= MAX_SIGNATURE_COUNT` (`u16::MAX` = 65535) | A declared count (signatures, signers, `signed_timeouts`) `>` pinned `N` → **refuse** |
+| `F` | **Extra per-record framing** beyond the counted prefixes/discriminants (magic/envelope/trailer) | **0 bytes — stated explicitly: this profile adds no extra framing** (unlike the wire encoding, there is no leading `MSG_TYPE_QC` byte; every structural byte is a named row below) | Fixed `0` | n/a (nothing to validate; no uncounted bytes exist) |
+
+`B_span` (bitmap span in bytes) = `ceil(N/8)` **only** under an explicitly established
+**dense-index** profile (members indexed contiguously `0..N-1`); otherwise it is bounded
+by the identifier-span bound `qc_verify_domain` already demonstrates, `MAX_BITMAP_LEN`
+= `8192` (`qc_verify_domain.rs` ~L163/~L752), because sparse/non-dense identifiers make
+`ceil(N/8)` insufficient.
+
+**(b) Common record fields (present in every variant) — these rows sum to `FIXED_OVERHEAD`.**
+
+| Field (owning scope) | Encoded width / formula | Presence | Max count/length | Prefix/discriminant contribution | Named contribution |
+|---|---|---|---|---|---|
+| `persistence_format_version` (`u16`) | `2` | always | 1 value | none | `+2` |
+| `network_genesis_id` (`[u8;32]`) | `32` | always | fixed 32 | none | `+32` |
+| `authority_context_ref` (32-byte descriptor digest) | `32` | always | fixed 32 | none | `+32` |
+| `lock_block_id` (`[u8;32]`) | `32` | always | fixed 32 | none | `+32` |
+| `lock_view` (`u64`) | `8` | always | 1 value | none | `+8` |
+| `evidence_lock_binding` (SHA3-256) | `32` | always | fixed 32 | none | `+32` |
+| `publication_revision` (`u64`) | `8` | always | 1 value | none | `+8` |
+| `integrity_checksum` (CRC32) | `4` | always | fixed 4 | none | `+4` |
+| evidence discriminant `D_ev` | `D = 1` | always | 1 tag | `QcDerived` vs `TcDerived` | `+1` |
+| committed-anchor presence discriminant `D_ca` | `D = 1` | always | 1 tag | gates the anchor payload in (d) | `+1` |
+| predecessor presence discriminant `D_pred` | `D = 1` | always | 1 tag | gates `predecessor_ref` in (d) | `+1` |
+| per-record framing `F` | `0` | always | — | **explicit zero** | `+0` |
+
+**`FIXED_OVERHEAD` = 2 + 32 + 32 + 32 + 8 + 32 + 8 + 4 + 1 + 1 + 1 + 0 = `153` bytes**
+— derived **mechanically** from the named rows above, **not** an unexplained constant.
+
+**(c) Committed-anchor and predecessor-reference representations (present-only payloads,
+gated by their always-present discriminants in (b)).**
+
+| Field (owning scope) | Encoded width / formula | Presence condition | Max count/length | Prefix/discriminant | Named contribution |
+|---|---|---|---|---|---|
+| `committed_state_assoc` = committed `block_id` (`[u8;32]`) + `height` (`u64`) | `32 + 8 = 40` | only when `D_ca` set (`Locked`-with-committed-anchor) | fixed 40 | discriminant counted in (b) | `+40` when present, else `+0` |
+| `predecessor_ref` (`u64` revision) | `8` | only when `D_pred` set | 1 value | discriminant counted in (b) | `+8` when present, else `+0` |
+
+**(d) `QcDerived` supporting certificate (the stored wire `QuorumCertificate`,
+`consensus.rs` ~L282) — fixed members, then every count/length prefix and the per-signature
+prefix charged in the variable part.**
+
+| Field (owning variant) | Encoded width / formula | Presence | Max count/length | Prefix/discriminant | Named contribution |
+|---|---|---|---|---|---|
+| `version` (`u8`) | `1` | `QcDerived` | 1 | none | `+1` |
+| `chain_id` (`u32`) | `4` | `QcDerived` | 1 | none | `+4` |
+| `epoch` (`u64`) | `8` | `QcDerived` | 1 | none | `+8` |
+| `height` (`u64`) | `8` | `QcDerived` | 1 | none | `+8` |
+| `round` (`u64`) | `8` | `QcDerived` | 1 | none | `+8` |
+| `step` (`u8`) | `1` | `QcDerived` | 1 | none | `+1` |
+| `block_id` (`[u8;32]`) | `32` | `QcDerived` | fixed 32 | none | `+32` |
+| `suite_id` (`u16`) | `2` | `QcDerived` | 1 | none | `+2` |
+| **`QC_FIXED` subtotal** | `1+4+8+8+8+1+32+2 = 64` | — | — | — | **`+64`** |
+| `signer_bitmap` outer length prefix | `C = 2` | `QcDerived` | prefix | **count/length prefix** | `+C` |
+| `signer_bitmap` bytes | `B_span` | `QcDerived` | ≤ `ceil(N/8)` (dense) else ≤ `MAX_BITMAP_LEN` (8192) | — | `+B_span` |
+| `signatures` outer count prefix | `C = 2` | `QcDerived` | prefix | **outer count prefix** | `+C` |
+| per-signature length prefix × count | `C` per entry | `QcDerived` | ≤ `N` entries | **per-entry prefix — NOT fixed overhead** | `+ N × C` |
+| per-signature bytes × count | ≤ `S_sig` per entry | `QcDerived` | ≤ `N` entries | — | `+ N × S_sig` |
+
+`QcDerived` variable part `QC_VAR = C + B_span + C + N × (C + S_sig)` — the outer bitmap
+prefix, the bitmap span, the outer signature count, and, for **each** of the ≤ `N`
+signatures, **its own length prefix `C` plus ≤ `S_sig` bytes**. The per-entry `C` is
+multiplied by the count and is therefore **variable, never folded into `FIXED_OVERHEAD`**.
+
+**(e) `TcDerived` supporting evidence (the record-level **logical** `high_qc` plus the
+retained serialized `TimeoutCertificate`, `timeout.rs` ~L232). Both `high_qc` copies are
+charged **once each** and the selected rule requires them byte-identical.**
+
+| Field (owning variant / nesting) | Encoded width / formula | Presence | Max count/length | Prefix/discriminant | Named contribution |
+|---|---|---|---|---|---|
+| record-level `high_qc` discriminant | `D = 1` | `TcDerived` | 1 tag | Option/variant tag | `+D` |
+| record-level `high_qc.block_id` (`[u8;32]`) | `32` | when set | fixed 32 | none | `+32` |
+| record-level `high_qc.view` (`u64`) | `8` | when set | 1 | none | `+8` |
+| record-level `high_qc.signers` count prefix + ids | `C + N × W_id` | when set | ≤ `N` ids | **count prefix** | `+ C + N × W_id` |
+| **`REC_HIGH_QC` subtotal** | `D + 32 + 8 + (C + N × W_id)` | — | — | — | **record-level copy #1** |
+| `TimeoutCertificate.view` (`u64`, ~L235) | `8` | `TcDerived` | 1 | none | **`TC_VIEW` = +8** |
+| `TimeoutCertificate.timeout_view` (`u64`, ~L246) | `8` | `TcDerived` | 1 | none | **`TC_TIMEOUT_VIEW` = +8** |
+| `TimeoutCertificate.high_qc` (Option, ~L238) | `D + [32 + 8 + (C + N × W_id)]` | discriminant always; payload when set | ≤ `N` ids | Option tag | **`TC_HIGH_QC`** — copy #2, **byte-identical to copy #1** or **refuse** |
+| `TimeoutCertificate.signers` (`Vec<ValidatorId>`, ~L241) | `C + N × W_id` | `TcDerived` | ≤ `N` | **count prefix** | **`TC_SIGNERS`** |
+| `TimeoutCertificate.signed_timeouts` (`Vec<TimeoutMsg>`, ~L244) | `C + Σ T_msg` over ≤ `N` entries | `TcDerived` | ≤ `N` entries | **outer count prefix** | **`SIGNED_TIMEOUTS`** |
+
+Per-entry `T_msg` (one `TimeoutMsg`, `timeout.rs` ~L72) — **not** one pinned length:
+
+| `TimeoutMsg` field | Encoded width / formula | Presence | Prefix/discriminant | Named contribution |
+|---|---|---|---|---|
+| `view` (`u64`, ~L75) | `8` | always | none | `+8` |
+| `high_qc` (Option, ~L78) | `D + [32 + 8 + (C + N × W_id)]` | discriminant always; payload when set | Option tag | `+D (+ nested high_qc when set)` |
+| `validator_id` (`ValidatorId`, ~L80) | `W_id = 8` | always | none | `+8` |
+| `suite_id` (`u8`, ~L82) | `1` | always | none | `+1` **(previously omitted)** |
+| `signature` (`Vec<u8>`, ~L84) | `C + ≤ S_sig` | always | **length prefix** | `+ C + S_sig` |
+| per-entry framing | `F = 0` | always | **explicit zero** | `+0` |
+
+Worst-case `T_msg = 8 + (D + 32 + 8 + C + N × W_id) + W_id + 1 + (C + S_sig) + 0`.
+
+**(f) Actual-length and worst-case totals (stated separately; every stored byte appears
+exactly once).**
+
+* **Actual length** uses the record's **real** present discriminants and **real** counts
+  (`k ≤ N` signatures/signers, real signature lengths `s_i ≤ S_sig`, optional members
+  present only when their discriminant is set). No parameter is inflated to its maximum.
+* **Worst case** substitutes `N` for every count, `S_sig` for every signature, and treats
+  every optional discriminant as **set** (all payloads present):
+  * `QcDerived`: `MAX_SAFETY_RECORD_BYTES = FIXED_OVERHEAD + [40 + 8]_{anchor+pred} + QC_FIXED + QC_VAR` where `QC_FIXED = 64` and `QC_VAR = C + B_span + C + N × (C + S_sig)`.
+  * `TcDerived`: `MAX_SAFETY_RECORD_BYTES = FIXED_OVERHEAD + [40 + 8]_{anchor+pred} + REC_HIGH_QC + TC_VIEW + TC_TIMEOUT_VIEW + TC_HIGH_QC + TC_SIGNERS + SIGNED_TIMEOUTS`, with `SIGNED_TIMEOUTS = C + N × T_msg`. The `N × (N × W_id)` nested-`high_qc` signer term inside `SIGNED_TIMEOUTS` is the `O(N²)` worst case and is charged explicitly.
+
+Every `C` and `D` is a named row; the only byte not attributable to a row is `F = 0`.
+All sums are **checked** `u128`/`usize`; any overflow, or a declared length/count
+exceeding its term, → **refuse before any application-owned allocation or copy** of the
+variable-length members. The purely structural ceiling `MAX_AGGREGATE_SIGNATURE_BYTES =
+MAX_SIGNATURE_COUNT × MAX_SIGNATURE_LEN` (≈ 4.29 GB) is retained **only** as the over-read
+guard — an honest **allocation-bound limitation**, not a buffer size and not the applied
+cap. This formula bounds **this component's** serialized record; it does **not** bound the
+storage backend's own internal allocations (that limitation is retained honestly).
 
 ### 13.3 Source-representation tracing and the four separated checks
 
@@ -2354,7 +2490,7 @@ record; pruning disabled.**
     outstanding operation — at most `(MAX_OUTSTANDING_PREPARED_L0 + 1)` **distinct** generations;
     this is **not** once per outstanding operation.
   * **Separate limits and the encoded-vs-decoded buffer taxonomy (no decoded bound inferred from a serialized length).** Three caps are stated distinctly and are **not** interchangeable: (1) the **serialized-record** cap `MAX_SAFETY_RECORD_BYTES` (§ 13.2) bounds **only an encoded byte buffer** of that enforced capacity (on-disk / in-flight **encoded** length); (2) a **retained-generation** cap `MAX_RETAINED_GENERATION_BYTES` bounds a single **decoded** generation's `retained_generation_bytes`; (3) an **aggregate / peak** cap `MAX_AGGREGATE_RETAINED_BYTES` bounds the coexisting peak. **A decoded candidate/preparation object's in-memory footprint is NOT bounded by `MAX_SAFETY_RECORD_BYTES`** — that cap applies only where the allocation is explicitly an **encoded byte buffer with that enforced capacity**. The distinct allocation kinds are therefore charged **separately**: **(i) encoded input/output byte buffers** — the candidate's **encoded** decode-input bytes and the in-flight **publication/encoding** bytes, each a real byte buffer **bounded by `MAX_SAFETY_RECORD_BYTES`**; **(ii) the decoded candidate object** and its backing allocations — a **decoded generation** bounded by `MAX_RETAINED_GENERATION_BYTES`, **not** the serialized cap; **(iii) the current authoritative decoded generation**; **(iv) superseded generations** still pinned by outstanding decisions; **(v) preparation-owned decoded objects**; **(vi) capacity-normalization overlap** (below); **(vii) publication-owned encoded buffers**; and **(viii) bounded validation scratch** — each counted **once** within its stated ownership scope (a generation's heap charged once no matter how many `Arc` holders; a shared control block charged once to its designated owner; shared context neither omitted nor double-charged).
-  * **`MAX_RETAINED_GENERATION_BYTES` (checked formula over bounded profile parameters, not merely named).** A single decoded generation's charge is a **checked `u128`** sum of **decoded** terms: `MAX_RETAINED_GENERATION_BYTES = GEN_STRUCT + SIGNERS_CAP + SIG_TERMS + CTX_OWNED + ARC_CTRL`. The terms are **decoded** backing allocations charged at `capacity()`, not `len()`: `GEN_STRUCT` is the decoded struct value including inline `Vec` pointer/len/capacity descriptors; `SIGNERS_CAP` is the signer-vector backing `N × W_id`; `SIG_TERMS` is `N × S_sig` for `QcDerived` (signature buffers) and, for `TcDerived`, the retained `TimeoutCertificate`'s decoded vectors (its `signers` `N × W_id`, and each of ≤ `N` `signed_timeouts` entries' own signature ≤ `S_sig` plus optional nested `high_qc` signer vector ≤ `N × W_id`); `CTX_OWNED` is the pinned genesis/authority context bytes the generation owns; and `ARC_CTRL` is shared control-block overhead charged **once to its canonical owner** (modelled on `VerifiedQuorumCertificate::retained_byte_size`, `qc_verify_domain.rs` ~L618). `N`, `S_sig`, `W_id`, and each framing constant are the **pinned authorized-epoch** profile parameters, **fixed before use**; these are **decoded capacities**, never serialized widths. Any overflow → **refuse**.
+  * **`MAX_RETAINED_GENERATION_BYTES` (checked formula over bounded profile parameters, with the variant-specific per-allocation tables in § 13.7A).** A single decoded generation's charge is a **checked `u128`** sum of **decoded** terms: `MAX_RETAINED_GENERATION_BYTES = GEN_STRUCT + SIGNERS_CAP + SIG_TERMS + CTX_OWNED + ARC_CTRL`. **The incomplete `GEN_STRUCT + SIGNERS_CAP + SIG_TERMS` description is replaced by the variant-specific allocation tables in § 13.7A**, which enumerate, per allocation, its **owner**, **element type and in-memory element size**, **maximum admitted capacity**, **charged bytes**, whether descriptors are **inline or in an outer backing allocation**, and **sharing/lifetime**. The terms are **decoded** backing allocations charged at `capacity()`, not `len()`: `GEN_STRUCT` is the decoded struct value including inline `Vec` pointer/len/capacity descriptors; `SIGNERS_CAP` is the signer-vector backing `N ×` `size_of::<ValidatorId>()`; `SIG_TERMS` is `N × S_sig` for `QcDerived` (signature buffers) and, for `TcDerived`, the retained `TimeoutCertificate`'s decoded vectors (its `signers`, and each of ≤ `N` `signed_timeouts` entries' own signature ≤ `S_sig` plus optional nested `high_qc` signer vector — the `O(N²)` term); `CTX_OWNED` is the pinned genesis/authority context bytes the generation owns; and `ARC_CTRL` is shared control-block overhead charged **once to its canonical owner** (modelled on `VerifiedQuorumCertificate::retained_byte_size`, `qc_verify_domain.rs` ~L618). `N`, `S_sig`, and each framing constant are the **pinned authorized-epoch** profile parameters, **fixed before use**; these are **decoded capacities** (and **in-memory** `size_of`), never the **serialized** widths of § 13.2A. Any overflow → **refuse**.
   * **`MAX_AGGREGATE_RETAINED_BYTES` (checked peak with finite multiplicity).** The aggregate cap is a **checked `u128`** peak over explicit, bounded multiplicities: `MAX_AGGREGATE_RETAINED_BYTES ≥ (MAX_OUTSTANDING_PREPARED_L0 × (identity + Arc-handle)) + ((MAX_OUTSTANDING_PREPARED_L0 + 1 + MAX_CONCURRENT_CANDIDATES) × MAX_RETAINED_GENERATION_BYTES) + (MAX_CONCURRENT_CANDIDATES × CAPNORM_OVERLAP) + ((MAX_CONCURRENT_CANDIDATES + MAX_CONCURRENT_PUBLICATIONS) × MAX_SAFETY_RECORD_BYTES) + VALIDATION_SCRATCH`. The `(MAX_OUTSTANDING_PREPARED_L0 + 1 + MAX_CONCURRENT_CANDIDATES)` term charges the **current** generation, every **pinned superseded** generation, **and the candidate generation being decoded** — the candidate is included **in addition to** current/pinned whenever they coexist during O3. The encoded term charges only the **encoded** input/output byte buffers (each ≤ `MAX_SAFETY_RECORD_BYTES`). **`MAX_CONCURRENT_CANDIDATES`**, **`MAX_CONCURRENT_PUBLICATIONS`**, and `MAX_OUTSTANDING_PREPARED_L0` are **proposed component limits** (concrete initial profile: **1**, **1**, **2**), **not** claims about existing engine enforcement; they give the peak a **finite** multiplicity (without them the multiplicity would be unbounded). A deployment pipelining more concurrency must raise them **explicitly**.
   * **Capacity-normalization overlap (both allocations charged at peak; no exact-capacity assumption).** Decoded generation vectors are **capacity-normalized** on admission so `capacity()` cannot exceed the `len()`-derived term by more than a fixed `CAPNORM_SLACK`. If normalization **reallocates** a vector while its **original** allocation remains live, **both** are charged at peak — that is the `CAPNORM_OVERLAP` term (bounded by one `MAX_RETAINED_GENERATION_BYTES` per concurrent candidate). A `shrink_to_fit`/shrink is **not** assumed to yield exact capacity; the bound uses either the explicit `CAPNORM_SLACK` or a bounded allocation representation, never an assumed exact shrink.
   * **Allocation admission sequence (check before allocate; a post-allocation check is not prevention).** Allocations are admitted in this order: **(1)** validate profile parameters and declared shapes (version, discriminants, declared counts/lengths vs pinned `N`/`S_sig`); **(2)** compute **conservative** charges for the proposed allocations and their coexistence (the peak terms above) in checked `u128`; **(3)** **check available capacity against each cap before performing the allocations those checks protect**; **(4)** allocate **only within** the admitted bounds; **(5)** validate the **actual** capacities/charges and retain **only** admissible objects, refusing/dropping any that exceed their charge. Step (5)'s post-allocation capacity check is a **confirmation**, **not** the prevention of step (4)'s allocation — prevention is **step (3)**, performed **before** allocation; a post-allocation check **never** justifies an allocation that could not be pre-admitted.
@@ -2415,6 +2551,56 @@ record; pruning disabled.**
 * **D10 records are never pruned here.** This component does **not** prune, rewrite,
   or modify D10 signing records as part of retention; D10 retains its own policy
   (continuity §9).
+
+### 13.7A Decoded-generation allocation tables (Correction 2, D7-D14)
+
+These tables **replace** the incomplete `GEN_STRUCT + SIGNERS_CAP + SIG_TERMS`
+description with a **per-allocation, variant-specific** accounting of one decoded
+generation's `retained_generation_bytes`. Every row is a **decoded in-memory**
+allocation charged at `capacity()` (not `len()`); none is a serialized width. The
+**encoded** `ValidatorId` width (`W_id = 8`, § 13.2A) is **distinct** from the
+**in-memory** `size_of::<ValidatorId>()` (the newtype wraps a single `u64`, so it is
+also `8`, but the two are conceptually and dimensionally different — a serialized byte
+count vs a Rust type size); likewise a `Vec<T>` contributes an **inline** 3-word
+descriptor (`ptr`/`len`/`cap`, `24` bytes on a 64-bit target) **plus** an **outer
+backing** allocation of `capacity() × size_of::<T>()`. Capacities are `≤` the pinned
+`N`/`S_sig` (+ a fixed `CAPNORM_SLACK`, § 13.7). Any overflow → **refuse**.
+
+**(a) `QcDerived` decoded generation (the decoded wire `QuorumCertificate`,
+`consensus.rs` ~L282).**
+
+| Allocation (owner) | Element type / in-memory element size | Max admitted capacity | Charged bytes | Inline or outer backing | Sharing / lifetime |
+|---|---|---|---|---|---|
+| `GEN_STRUCT` — decoded struct value | fixed scalars (`version`/`chain_id`/`epoch`/`height`/`round`/`step`/`block_id`/`suite_id`) **+ 2 inline `Vec` descriptors** (`signer_bitmap: Vec<u8>`, `signatures: Vec<Vec<u8>>`); each descriptor `24` B | 1 struct | `size_of::<QuorumCertificate>()` (inline only) | **inline** | generation; charged once per generation |
+| `SIGNERS_CAP` — `signer_bitmap` backing | `u8` / `1` B | ≤ `B_span` (dense `ceil(N/8)`, else `MAX_BITMAP_LEN` 8192) | `capacity() × 1` ≤ `B_span` | **outer backing** | generation |
+| `signatures` outer backing (descriptor array) | `Vec<u8>` descriptor / `24` B | ≤ `N` | `capacity() × 24` ≤ `N × 24` | **outer backing** | generation |
+| `SIG_TERMS` — per-signature buffers | `u8` / `1` B | ≤ `N` buffers, each cap ≤ `S_sig` | `Σ capacity()` ≤ `N × S_sig` | **outer backing** (one allocation per signature) | generation |
+| `CTX_OWNED` — pinned context bytes the generation owns | `u8` / `1` B | bounded by the pinned context descriptor | `capacity()` | **outer backing** | generation; owned, not shared |
+| `ARC_CTRL` — shared `Arc` control block | control block | 1 | counted **once to canonical owner** | n/a | shared across `Arc` holders; released with last holder |
+
+**(b) `TcDerived` decoded generation (the record-level logical `high_qc` plus the
+retained `TimeoutCertificate`, `timeout.rs` ~L232).**
+
+| Allocation (owner) | Element type / in-memory element size | Max admitted capacity | Charged bytes | Inline or outer backing | Sharing / lifetime |
+|---|---|---|---|---|---|
+| `GEN_STRUCT` — decoded struct value | record-level `high_qc` (inline `block_id` 32, `view` 8, `signers: Vec` descriptor 24) **+** `TimeoutCertificate` struct (`view` 8, `timeout_view` 8, `high_qc: Option<QC>` inline, `signers: Vec` descriptor 24, `signed_timeouts: Vec` descriptor 24) | 1 struct | `size_of::<…>()` (inline only) | **inline** | generation |
+| record-level `high_qc.signers` backing | `ValidatorId` / `size_of::<ValidatorId>() = 8` B | ≤ `N` | `capacity() × 8` ≤ `N × 8` | **outer backing** | generation |
+| `TimeoutCertificate.signers` backing | `ValidatorId` / `8` B | ≤ `N` | ≤ `N × 8` | **outer backing** | generation |
+| `TimeoutCertificate.high_qc.signers` backing (optional) | `ValidatorId` / `8` B | ≤ `N` (when `high_qc` present) | ≤ `N × 8` | **outer backing** | generation |
+| `signed_timeouts` outer backing (descriptor/struct array) | `TimeoutMsg` / `size_of::<TimeoutMsg>()` (inline `view` 8, `high_qc: Option<QC>`, `validator_id` 8, `suite_id` 1, `signature: Vec` descriptor 24) | ≤ `N` entries | `capacity() × size_of::<TimeoutMsg>()` | **outer backing** | generation |
+| per-entry `signature` buffers | `u8` / `1` B | ≤ `N` buffers, each ≤ `S_sig` | `Σ capacity()` ≤ `N × S_sig` | **outer backing** (one per entry) | generation |
+| per-entry nested `high_qc.signers` backing | `ValidatorId` / `8` B | ≤ `N` entries × ≤ `N` ids | ≤ `N × (N × 8)` = **`8N²` (O(N²) term, charged explicitly)** | **outer backing** (one per entry) | generation |
+| `CTX_OWNED` — pinned context bytes owned | `u8` / `1` B | bounded by pinned descriptor | `capacity()` | **outer backing** | generation; owned, not shared |
+| `ARC_CTRL` — shared `Arc` control block | control block | 1 | counted **once to canonical owner** | n/a | shared; released with last holder |
+
+In both variants `GEN_STRUCT` is the sum of the **inline** struct rows (including each
+`Vec`'s 3-word descriptor), and the `*_CAP`/`SIG_TERMS` rows are the **outer backing**
+allocations. A generation's heap is charged **once** regardless of how many `Arc`
+holders reference it; the shared control block is charged **once to its designated
+owner** (never double-charged, never omitted). These decoded charges feed
+`MAX_RETAINED_GENERATION_BYTES` and, with the multiplicities of § 13.7, the aggregate
+peak `MAX_AGGREGATE_RETAINED_BYTES` — **never** bounded by the serialized
+`MAX_SAFETY_RECORD_BYTES` (§ 13.2A).
 
 ### 13.8 Invariants and future acceptance matrix (not executed)
 
