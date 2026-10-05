@@ -12511,3 +12511,133 @@ claim that an uncommitted worktree is clean); changes pushed to the actual task 
 **Checks executed (this pass).** Source/type/caller re-verification against the cited symbols; cross-section consistency (field table ↔ P1–P4 ↔ invariants ↔ H-matrix ↔ successor subset); table/link scan; scoped `git diff` review limited to the three authorized documents; whitespace/EOL/EOF verification (all three remain CRLF with no final newline; zero bare-LF lines introduced); secret scan (no secrets). Required review/security tooling attempted once this pass; the actual outcome is recorded with the final report, separate from historical outcomes. **No** Cargo tests, Clippy, or release rebuild were run or claimed (Markdown-only).
 
 **Limitations / disposition.** This is a documentation-only correction pass; it changes no Rust, tests, schema, wire format, signing preimage, CLI, configuration, workflow, or initialization, and performs no D15 or Run 423 work. `D7D14_CONSENSUS_SAFETY_RECORD_DESIGN=DEFINED-NOT-IMPLEMENTED` is retained and is **not** equated with implementation readiness, independent review, or operational protection. Preserved posture: `D7_STATUS=PARTIAL-CODE-TEST / PRODUCTION-LIFECYCLE-UNAVAILABLE`, `DURABLE_ANTI_ROLLBACK=NOT-ESTABLISHED`, `GENESIS_AUTHORITY_ACTIVATION=DISABLED`, `PRODUCTION_WIRE_CHAIN_ID_BEHAVIOR=UNCHANGED`, `CONFIGURED_AUTHORITY_RELEASE_BINARY_EVIDENCE=NOT-YET-CAPTURED`, `SECURITY_POSTURE=RS1-OPEN / PUBLIC-DEVNET-NO-GO`; accepted D8/D10/D11/D12/D13 dispositions and C4/C5=OPEN unchanged. Changed paths this pass: the recovery/correspondence contract, the proposal/vote continuity contract, and this evidence document. No PR, no force-push, no rebase, no history rewrite.
+
+## Run 422 D7-D14 correction pass — TC association, nested serialized bounds, retained-memory accounting, evidence attribution (this pass)
+
+This entry records the bounded **documentation-only** pass that corrects the six residual
+findings from the review of revision `0994fd887aa450ab18d488cd49617f9c63687f8e`. It implements
+no storage successor and does **not** advance to D15 / Run 423.
+
+**Provenance (four observations kept separate; none inferred from another).**
+
+* **Branch (used unchanged).** `copilot/run-422-d7-d14` (`git rev-parse --abbrev-ref HEAD`, exit 0).
+* **Starting HEAD.** `ce8296a103474b5db691480e3bc8b26bab2a5075` (`git rev-parse HEAD`, exit 0);
+  worktree **clean** before editing (`git status --porcelain` empty).
+* **Object availability.** The reviewed revision `0994fd887aa450ab18d488cd49617f9c63687f8e` was
+  **unavailable** in the initial shallow checkout — `git cat-file -t 0994fd8…` returned
+  `fatal: git cat-file: could not get object info` (exit 128). A **targeted fetch** `git fetch
+  origin 0994fd887aa450ab18d488cd49617f9c63687f8e` succeeded (exit 0), after which
+  `git cat-file -t 0994fd8…` → `commit`. Availability is reported as its own observation.
+* **Ancestry.** `git merge-base --is-ancestor 0994fd8… HEAD` → **exit 1** (the reviewed object
+  is **not** an ancestor of HEAD); `git merge-base 0994fd8… HEAD` →
+  `db95e17c485b694627e4b5b463fc649d52815d34`. Ancestry is reported independently of availability
+  and of content correspondence (Correction 5).
+
+**Correction 5 — named comparison baseline (scoped, not repository-wide).** The byte-content comparison this pass relies on names **both** full SHAs and the **exact compared path scope**: starting HEAD `ce8296a103474b5db691480e3bc8b26bab2a5075` vs reviewed revision
+`0994fd887aa450ab18d488cd49617f9c63687f8e`. The compared paths are the **three authorized
+documents** plus the **six source paths cited by this pass** —
+`docs/protocol/QBIND_CONSENSUS_RECOVERY_SIGNING_HISTORY_CORRESPONDENCE_CONTRACT.md`,
+`docs/protocol/QBIND_PROPOSAL_VOTE_SIGNING_STATE_CONTINUITY_CONTRACT.md`,
+`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_422_D7.md`, `crates/qbind-consensus/src/timeout.rs`,
+`crates/qbind-consensus/src/timeout_verify.rs`, `crates/qbind-consensus/src/qc_verify_domain.rs`,
+`crates/qbind-consensus/src/basic_hotstuff_engine.rs`, `crates/qbind-node/src/hotstuff_node_sim.rs`,
+and `crates/qbind-consensus/src/ids.rs`. **Outcome:** `git diff --stat 0994fd8… HEAD -- <those
+nine paths>` produced **empty output** (exit 0) — **byte-identical** across the compared paths.
+Separately observed: the two commits' **tree** objects are equal
+(`git rev-parse HEAD^{tree}` = `git rev-parse 0994fd8…^{tree}` = `68cfa9bd2515df89f2a435cc50a104b7007aecba`),
+so content corresponds across the whole tree — but that is stated as a **tree-equality**
+observation, **not** inferred from ancestry (the reviewed revision is not an ancestor). **No**
+repository-wide correspondence is claimed beyond the compared paths and this tree-equality note.
+The cited `~Lnnnn` source locators were (re-)read against the worktree copies of those paths this
+pass, which the comparison shows are byte-identical to the reviewed revision.
+
+**Correction 6 — literal tooling outcomes (executed / failed / unavailable / not-run).** Recorded
+here, in this document, not deferred:
+
+| Command / check | Literal outcome |
+|---|---|
+| `git rev-parse --abbrev-ref HEAD` | `copilot/run-422-d7-d14` (exit 0) — **executed** |
+| `git rev-parse HEAD` | `ce8296a103474b5db691480e3bc8b26bab2a5075` (exit 0) — **executed** |
+| `git cat-file -t 0994fd8…` (initial, shallow clone) | `fatal: … could not get object info` (exit 128) — **failed / object unavailable** |
+| `git fetch origin 0994fd887aa450ab18d488cd49617f9c63687f8e` | exit 0; `git cat-file -t` then → `commit` — **executed** (targeted fetch) |
+| `git merge-base --is-ancestor 0994fd8… HEAD` | **exit 1** (not an ancestor) — **executed** |
+| `git merge-base 0994fd8… HEAD` | `db95e17c485b694627e4b5b463fc649d52815d34` — **executed** |
+| `git diff --stat 0994fd8… HEAD -- <3 docs + 6 source paths>` | **empty** (exit 0) = byte-identical — **executed** |
+| `git diff --name-only` (working tree, after edits) | the **three** authorized documents only — **executed** |
+| Whitespace / EOL / EOF check (per changed file) | each remains **CRLF**, last byte `.` (no final newline), bare-LF line count **1** = the pre-existing no-final-newline EOF line only; **zero** bare-LF lines introduced — **executed** |
+| Secret scan (3 authorized files) | **No secrets detected** — **executed** |
+| Code review + CodeQL (`parallel_validation`) | **executed this pass**; literal outcome in the validation addendum at the end of this section |
+| `cargo test` / `cargo check` / `cargo clippy` | **NOT RUN** (documentation-only; no Rust, test, schema, or wire change). No PASS, test count, or source result is claimed |
+| Release-binary acceptance | **NOT RUN** this pass (documentation-only). Earlier release-binary evidence is preserved with its **original** scope; no release-binary observation is invented here |
+
+**Corrections applied (operative locations).**
+
+1. **TC semantic association (§ 13.3A).** Added the explicitly named predicates **TA1–TA8**
+   linking the recovered logical lock, the retained `TimeoutCertificate.high_qc`, and the
+   `select_max_high_qc` derivation over `signed_timeouts`, with duplicate-signer rejection (TA3),
+   authorized membership (TA4), signer-set correspondence (TA5), timeout-view consistency (TA6),
+   and power-quorum accounting kept distinct from validator count (TA7); absent high-QCs,
+   equal-view candidates (first-seen, iteration-order, **no** invented tie-break), and inconsistent
+   equal-view identities are described **as the code behaves** (`timeout.rs` ~L410/~L419/~L420,
+   `timeout_verify.rs` ~L350/~L419/~L435, `basic_hotstuff_engine.rs` ~L2162/~L2177–L2185);
+   structural/semantic checks are separated from timeout-signature cryptography (TA8), and a valid
+   CRC/digest or matching lock fields do **not** admit unrelated TC evidence. The selected
+   persist-restriction / carry-unverified TC rule is preserved.
+2. **Complete serialized TC bounds (§ 13.2 `bounds_metadata`; INV-D14-7; H26).** Replaced the
+   incomplete `N × T_msg` term with the explicit checked sum
+   `FIXED_OVERHEAD + D_ev + TC_SIGNERS + TC_HIGH_QC + SIGNED_TIMEOUTS`, covering the TC's own
+   signer list, the logical `high_qc` + its nested signer list, the `signed_timeouts` count, and
+   each timeout's fixed fields / signer id / signature (suite length bounds a **signature**, not
+   the message) / framing / optional `high_qc` with its nested signer list, plus all discriminants
+   and length/count prefixes; identifier width `W_id` (encoded `u64` = 8 bytes, `ids.rs` ~L29/~L11)
+   and prefix/discriminant widths are defined explicitly, encoded lengths are bounded rather than
+   in-memory `size_of`, overflow/excess is refused before allocation/copy, and the
+   backend-internal-allocation limitation is preserved.
+3. **Separate retained-memory accounting (§ 13.7; INV-D14-7; H28/H29).** Removed the assertion
+   that each decoded generation is ≤ `MAX_SAFETY_RECORD_BYTES`; defined a separate per-generation
+   `retained_generation_bytes` (decoded objects/descriptors, vector capacities + backing
+   allocations, signer arrays + signature buffers, owned context allocations, shared
+   control-block overhead, per-operation identity + handle, and bounded candidate
+   decode/preparation/encoding/publication buffers coexisting at peak) modelled on the
+   `VerifiedQuorumCertificate::retained_byte_size` **precedent** (`qc_verify_domain.rs` ~L618),
+   noting that method is a `VerifiedQuorumCertificate` accessor, **not** an implemented
+   safety-record accounting service; stated three distinct caps (serialized-record /
+   retained-generation / aggregate-peak), shared-once ownership-scope counting with superseded
+   generations charged until the last `Arc` is released, capacity-normalization + admission limits,
+   and refusal-at-capacity that never evicts admitted evidence or releases a D10 conflict.
+4. **Removed false committed-history attribution (§ 13.4 inputs).** Removed the “only existing
+   realization” claim for `load_persisted_state`; described its actual scope (loads the **last
+   committed block + its QCs** for the harness restart path, `hotstuff_node_sim.rs` ~L2035) and
+   that it establishes **no** arbitrary older-anchor membership; kept the committed-history relation
+   explicitly **proposed** and independently supplied, with the dependent comparison (P3) unable to
+   succeed when the relation is unavailable. The continuity-contract cross-reference was reconciled
+   accordingly.
+5. **Named comparison baseline** — see above.
+6. **Literal tooling outcomes** — see the table above.
+
+**Preserved decisions and status (unchanged by this pass).** QC logical view binds to certificate
+height (`round` is not the view carrier); any `height == round` rule remains separately labelled;
+`BootstrapNoLock` vs `Locked`-with-no-commit remain distinct; H25 (storage supplied-evidence
+acceptance) / H25e (real-engine) / H26 (serialized-record) / H26l/H28/H29 (decision-lifecycle)
+splits are intact; O1–O5, complete-content O5 comparison, stale-publication fencing, and
+surviving complete-but-unacknowledged successor semantics are intact; D10
+reservation/conflict/exact-reuse behavior is unchanged. `contradiction.md` was **not** touched.
+
+```
+D7D14_CONSENSUS_SAFETY_RECORD_DESIGN=DEFINED-NOT-IMPLEMENTED
+DURABLE_ANTI_ROLLBACK=NOT-ESTABLISHED
+GENESIS_AUTHORITY_ACTIVATION=DISABLED
+SECURITY_POSTURE=RS1-OPEN / PUBLIC-DEVNET-NO-GO
+```
+
+C4/C5 remain **OPEN**. This component-design correction does **not** establish implementation
+readiness or authorize the successor. No Rust, tests, dependencies, schemas, storage keys,
+CLI/configuration, workflows, wire formats, signing preimages, or production wiring changed; no
+signing enablement, activation, or transport-boundary weakening; fail-closed
+`CurrentEpochUnavailable` preserved.
+
+**Validation addendum (literal `parallel_validation` outcome, this pass).** Code Review:
+**completed**, 3 files reviewed, **no review comments** (the run also reported the review model
+unavailable in this environment, a registry/tool-availability caveat, not a clean-vs-findings
+signal). CodeQL Security Scan: **skipped — all changes trivial** (documentation-only; no
+CodeQL-analyzable surface). No other review/security result is claimed.
