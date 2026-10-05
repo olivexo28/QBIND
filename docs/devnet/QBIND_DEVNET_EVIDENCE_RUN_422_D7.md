@@ -13067,3 +13067,101 @@ disagreement remains. The anti-rollback anchor, lock-recovery, and current-autho
 **UNRESOLVED**; the design stays **DEFINED-NOT-IMPLEMENTED**; C4/C5 remain **OPEN**. Fail-closed
 `CurrentEpochUnavailable` and the activation/transport boundaries are preserved. This correction
 pass completes here and does **not** begin storage implementation, D15, or Run 423.
+
+## RUN 422 D7-D14 — Complete-Wrapper Rust Layout Correction (corrects `71c7773efb15b3bc3516b6e4942514c1e6421788`)
+
+This entry is a **clearly-identified correction** appended to the Run 422 D7-D14 evidence; all
+prior entries and tables are **preserved** (historical text is retained, not rewritten).
+Documentation-only: no Rust, test, dependency, schema, CLI, workflow, wire-format,
+signing-preimage, or production-wiring change. Required status is unchanged
+(`D7D14_CONSENSUS_SAFETY_RECORD_DESIGN=DEFINED-NOT-IMPLEMENTED`;
+`DURABLE_ANTI_ROLLBACK=NOT-ESTABLISHED`; `GENESIS_AUTHORITY_ACTIVATION=DISABLED`;
+`SECURITY_POSTURE=RS1-OPEN / PUBLIC-DEVNET-NO-GO`; C4/C5 **OPEN**).
+
+### Starting state (this pass)
+
+* **Branch** `copilot/run-422-d7-d14-correct-layout-accounting` (used unchanged); **starting HEAD**
+  `36c87167fa287ba57aebd7ea641ab1e55722dc7c`; **worktree** clean at entry (`git status --porcelain`
+  empty before edits). Unrelated work on the branch was preserved.
+* **Reviewed-object availability / ancestry / correspondence** (each reported separately; none
+  inferred from another):
+  * **Availability.** `71c7773efb15b3bc3516b6e4942514c1e6421788` was **not** present in the
+    initial shallow clone (`depth 2`); `git fetch --depth=100 origin 71c7773…` made it available
+    (`git cat-file -t` → **commit**).
+  * **Ancestry.** It is **not** a linear ancestor of HEAD (`git merge-base --is-ancestor 71c7773…
+    HEAD` → false). Both are **siblings** sharing parent/merge-base
+    `d98df890deb7361a7b8be09881e41686d81a8db7` (HEAD `36c8716`→`d98df89`; reviewed
+    `71c7773`→`d98df89`).
+  * **Scoped content correspondence.** `git diff --stat HEAD 71c7773…` over each of the three
+    authorized paths
+    (`docs/protocol/QBIND_CONSENSUS_RECOVERY_SIGNING_HISTORY_CORRESPONDENCE_CONTRACT.md`,
+    `docs/protocol/QBIND_PROPOSAL_VOTE_SIGNING_STATE_CONTINUITY_CONTRACT.md`,
+    `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_422_D7.md`) is **empty** — the worktree content of all
+    three authorized files is **byte-identical** to the reviewed revision, so the review's
+    wrapper-layout finding applies directly to HEAD.
+* **AGENTS.md.** None exists in the tree (`git ls-files | grep -i AGENTS.md` → empty), so none
+  applies.
+
+### Correction — `size_of::<RetainedGeneration>()` is a single whole-enum constant, not a per-variant arm
+
+The reviewed § 13.7A(c) (correspondence contract) charged the complete-wrapper inline term
+**per variant** as `GEN_STRUCT_QC = size_of::<RetainedGeneration>()` `≤ 256` B (QcDerived arm)
+vs `GEN_STRUCT_TC = size_of::<RetainedGeneration>()` `≤ 384` B (TcDerived arm). That reading is a
+**Rust-layout error**: `size_of` of an `enum` is a **single compile-time constant** —
+`max(size_of` over the variant payload arms`) + discriminant tag + alignment padding` — and does
+**not** vary with the active variant. An enum occupies its **largest** arm (plus tag/padding) for
+**every** variant and never shrinks to a smaller arm, so `size_of::<RetainedGeneration>()` cannot
+be `256` for the QcDerived arm and `384` for the TcDerived arm; it is **one** value. The `≤ 256`
+figure mislabeled the **inner QcDerived payload-arm** footprint as the whole-enum footprint.
+
+**Corrected in place in § 13.7A(c)** (the normative correspondence contract; historical per-arm
+wording is **retained with an explicit withdrawal marker**, not deleted):
+
+* The complete-wrapper charge is now **one** inline term `GEN_STRUCT = size_of::<RetainedGeneration>()`,
+  **identical in both variant totals**, bounded by a **single** ceiling `GEN_STRUCT_MAX = 384` B
+  on a 64-bit target (the larger TcDerived arm: common ≤ `136` + record-level `high_qc` inline
+  `64` + `TimeoutCertificate` inline struct incl. its `Vec` descriptors ≤ `184`), with a
+  **single** `const` assertion `size_of::<RetainedGeneration>() ≤ GEN_STRUCT_MAX`.
+* The (c.1)/(c.2) table rows for `GEN_STRUCT_QC`/`GEN_STRUCT_TC` now both read the single
+  whole-enum constant `≤ GEN_STRUCT_MAX = 384` B; (c.3) states
+  `GEN_STRUCT_QC = GEN_STRUCT_TC = size_of::<RetainedGeneration>()`.
+* A deployment wanting a tighter **per-variant inline** charge must measure the **inner variant
+  payload struct** (`size_of::<QcGenerationArm>()` / `size_of::<TcGenerationArm>()`) plus the
+  shared discriminant/padding — **not** `size_of::<RetainedGeneration>()`.
+
+**Operative cap unchanged.** Because `MAX_RETAINED_GENERATION_BYTES =
+checked_max(MAX_QC_GENERATION_BYTES, MAX_TC_GENERATION_BYTES)` and the TcDerived total already
+used `384`, substituting the single `384`-B whole-enum constant into both totals raises only the
+QcDerived total's inline term (by ≤ `128` B) while the `checked_max` remains
+**TcDerived-dominated** — so `MAX_RETAINED_GENERATION_BYTES` is **numerically unchanged**. The
+accepted **serialized** § 13.2A formulas, the **backing-allocation** totals (`SIGNERS_CAP`,
+`SIG_VEC_BACKING`, `SIG_TERMS`, the TC signer/`signed_timeouts`/per-entry/`8N²` rows),
+`DECODED_SIGNERS = 0`, `CTX_OWNED`, `ARC_CTRL`, the `CAPNORM_SLACK` coefficients, the concrete
+`VALIDATION_SCRATCH` representations (§ 13.7B), the **conservative three-buffer** peak
+(`1 + 2×1 = 3` record-sized buffers), and the **corrected wire/logical QC attribution** are all
+**preserved unchanged**.
+
+### Validation (literal outcomes, this pass)
+
+* `git status --porcelain` → **exactly two** modified paths
+  (`docs/protocol/QBIND_CONSENSUS_RECOVERY_SIGNING_HISTORY_CORRESPONDENCE_CONTRACT.md` and this
+  evidence file). `docs/protocol/QBIND_PROPOSAL_VOTE_SIGNING_STATE_CONTINUITY_CONTRACT.md` needed
+  **no** change (it references the named totals `MAX_QC_GENERATION_BYTES` /
+  `MAX_TC_GENERATION_BYTES`, not the per-arm `GEN_STRUCT` quantity). `contradiction.md` and all
+  other tracked files are unchanged.
+* **No residual per-variant `size_of::<RetainedGeneration>()` claim:** no `GEN_STRUCT`-as-`256`
+  reading remains in § 13.7A(c); the only `256` tokens left in the contract are unrelated
+  `SHA3-256` references and the intentional withdrawal note.
+* **EOL conventions preserved** on both edited files: CRLF throughout, **0** bare-LF bytes
+  (`perl` count), and **no** final newline (`tail -c1` non-newline) — unchanged from entry.
+* **Tooling not run (documentation-only):** no Cargo build, Cargo tests, Clippy, or
+  release-binary rebuild were run or claimed; recorded as **not run**. `parallel_validation`
+  (Code Review + CodeQL) was run over the Markdown-only change; CodeQL triviality was declared
+  (non-code Markdown, no analyzable surface). Prior evidence is preserved with its original scope.
+
+### Remaining unresolved (narrowed honestly)
+
+No named generation/scratch/buffer term is left without a bound, and no table/formula
+disagreement remains. The anti-rollback anchor, lock-recovery, and current-authority remain
+**UNRESOLVED**; the design stays **DEFINED-NOT-IMPLEMENTED**; C4/C5 remain **OPEN**. This
+correction does **not** implement storage and does **not** begin D15 or Run 423.
