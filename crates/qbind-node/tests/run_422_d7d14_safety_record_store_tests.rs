@@ -889,6 +889,144 @@ fn layout_sizes_within_ceiling() {
 }
 
 // ---------------------------------------------------------------------------
+// Correction pass (D7-D14 correction) — foreign-context refusal (§13.3/§13.4)
+// ---------------------------------------------------------------------------
+//
+// A store initialized under context A must not be read or published over by a
+// second handle attached under a different (foreign) pinned context B, even
+// though that handle never invoked `open`. The prerequisite is enforced in the
+// implementation, not left to caller discipline.
+#[test]
+fn corr_foreign_context_handle_refuses_o3_and_o4() {
+    let dir = tempfile::tempdir().unwrap();
+    let ctx_a = ctx_n(4);
+    // Context B differs only in the authority-context descriptor, so its context
+    // digest differs from the stored one.
+    let mut ctx_b = ctx_n(4);
+    ctx_b.authority_context_ref = [0x7Eu8; 32];
+
+    // One backend instance (RocksDB holds a single-process lock on the path);
+    // attach both handles to it.
+    let backend = open_enabled(dir.path());
+    let owner_a = SafetyRecordOwner::attach(backend.clone(), ctx_a.clone()).unwrap();
+    owner_a
+        .initialize(true)
+        .expect("O1 initialize under context A");
+
+    // A second handle attached under context B to the SAME backend.
+    let owner_b = SafetyRecordOwner::attach(backend.clone(), ctx_b.clone()).unwrap();
+
+    // O3 under the foreign context refuses (does not accept the record).
+    let r3 = owner_b.read_validate(None::<&FixtureCommittedHistory>);
+    assert!(
+        matches!(r3, Err(SafetyStoreError::SemanticRefusal(_))),
+        "O3 foreign-context should refuse, got {r3:?}"
+    );
+
+    // O4 under the foreign context refuses BEFORE any write; the stored state is
+    // untouched.
+    let qc = valid_wire_qc(&ctx_b, [9u8; 32], 5);
+    let locked = make_locked_qc(&ctx_b, [9u8; 32], 5, qc, None).unwrap();
+    let r4 = owner_b.publish_locked(locked, 0, None::<&FixtureCommittedHistory>);
+    assert!(
+        matches!(
+            r4,
+            PublishResult::RefusedPreWrite(SafetyStoreError::SemanticRefusal(_))
+        ),
+        "O4 foreign-context should refuse pre-write, got {r4:?}"
+    );
+
+    // The owner under context A still observes the original bootstrap at rev 0.
+    let v = owner_a
+        .read_validate(None::<&FixtureCommittedHistory>)
+        .unwrap();
+    assert!(!v.decoded.is_locked());
+    assert_eq!(v.decoded.publication_revision, 0);
+}
+
+// ---------------------------------------------------------------------------
+// Correction pass (D7-D14 correction) — uncertainty blocks dependent O4 across
+// all handles until O5 recovery clears it (§13.5)
+// ---------------------------------------------------------------------------
+#[test]
+fn corr_uncertain_publish_blocks_dependent_o4_until_o5_recovers() {
+    let dir = tempfile::tempdir().unwrap();
+    let ctx = ctx_n(4);
+    let backend = open_enabled(dir.path());
+    let owner = SafetyRecordOwner::attach(backend.clone(), ctx.clone()).unwrap();
+    owner.initialize(true).expect("O1 initialize");
+    // A second handle sharing the SAME backend instance observes the shared latch
+    // (clone shares the backend's Arc-held serialization domain + latch).
+    let owner2 = owner.clone();
+
+    // A normal publication (rev 0 -> 1) succeeds and does NOT latch.
+    let qc1 = valid_wire_qc(&ctx, [9u8; 32], 5);
+    let l1 = make_locked_qc(&ctx, [9u8; 32], 5, qc1, None).unwrap();
+    assert_eq!(
+        owner.publish_locked(l1, 0, None::<&FixtureCommittedHistory>),
+        PublishResult::DurableAcknowledged { new_revision: 1 }
+    );
+    assert!(!owner.recovery_required());
+
+    // An uncertain-but-durable publication (rev 1 -> 2): the write became durable
+    // but the caller observed no acknowledgement, latching the shared requirement.
+    backend.set_inject(InjectFault::UncertainAfterWrite);
+    let qc2 = valid_wire_qc(&ctx, [0x11u8; 32], 6);
+    let l2 = make_locked_qc(&ctx, [0x11u8; 32], 6, qc2, None).unwrap();
+    assert!(matches!(
+        owner.publish_locked(l2, 1, None::<&FixtureCommittedHistory>),
+        PublishResult::UncertainDurable
+    ));
+    backend.set_inject(InjectFault::None);
+    assert!(owner.recovery_required());
+    assert!(
+        owner2.recovery_required(),
+        "second handle observes the latch"
+    );
+
+    // Dependent O4 is now refused on BOTH handles until recovery.
+    let qc3 = valid_wire_qc(&ctx, [0x22u8; 32], 7);
+    let l3 = make_locked_qc(&ctx, [0x22u8; 32], 7, qc3, None).unwrap();
+    assert!(
+        matches!(
+            owner.publish_locked(l3.clone(), 2, None::<&FixtureCommittedHistory>),
+            PublishResult::RefusedPreWrite(SafetyStoreError::RecoveryRequired(_))
+        ),
+        "same handle O4 must be blocked"
+    );
+    assert!(
+        matches!(
+            owner2.publish_locked(l3.clone(), 2, None::<&FixtureCommittedHistory>),
+            PublishResult::RefusedPreWrite(SafetyStoreError::RecoveryRequired(_))
+        ),
+        "second handle O4 must be blocked"
+    );
+
+    // O2/O3 may still inspect the surviving state (rev 2) without claiming
+    // effectiveness and without clearing the latch.
+    let surviving = owner
+        .read_validate(None::<&FixtureCommittedHistory>)
+        .unwrap();
+    assert_eq!(surviving.decoded.publication_revision, 2);
+    assert!(owner.recovery_required(), "O3 does not clear the latch");
+
+    // Only the successful recovery operation (O5 re-acknowledge of the surviving
+    // publication) clears the shared requirement.
+    assert!(matches!(
+        owner.reacknowledge(&surviving),
+        PublishResult::DurableAcknowledged { new_revision: 2 }
+    ));
+    assert!(!owner.recovery_required());
+    assert!(!owner2.recovery_required());
+
+    // Dependent O4 proceeds again (rev 2 -> 3).
+    assert_eq!(
+        owner.publish_locked(l3, 2, None::<&FixtureCommittedHistory>),
+        PublishResult::DurableAcknowledged { new_revision: 3 }
+    );
+}
+
+// ---------------------------------------------------------------------------
 // Process-death harness (deterministic child-process boundaries)
 // ---------------------------------------------------------------------------
 //

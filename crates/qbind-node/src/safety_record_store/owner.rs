@@ -124,9 +124,44 @@ impl SafetyRecordOwner {
         &self.ctx
     }
 
+    /// Whether the shared backend is currently in a recovery-required state
+    /// (a prior ambiguous/uncertain publication under any handle has not yet
+    /// been cleared by the required successful recovery operation).
+    pub fn recovery_required(&self) -> bool {
+        self.backend.recovery_required()
+    }
+
+    /// Load the established metadata + authoritative record bytes under the
+    /// ownership boundary, enforcing the O2/`open` prerequisites that every
+    /// public operation depends on: present-and-consistent metadata+record and a
+    /// pinned-context digest that matches the stored one. Enforcing these here
+    /// (rather than trusting callers to invoke `open` first) prevents a handle
+    /// attached under a **foreign** pinned context from reading or publishing
+    /// over a store initialized under a different context, and prevents O3/O4/O5
+    /// from acting on missing/partial/foreign-context metadata.
+    fn load_established(&self) -> Result<(SafetyMeta, Vec<u8>), SafetyStoreError> {
+        let meta_bytes = self
+            .backend
+            .read_meta()?
+            .ok_or_else(|| SafetyStoreError::MissingEstablishedState("no metadata".into()))?;
+        let record_bytes = self
+            .backend
+            .read_record()?
+            .ok_or_else(|| SafetyStoreError::StructuralRefusal("metadata without record".into()))?;
+        let meta = SafetyMeta::decode(&meta_bytes)?;
+        if meta.context_digest != context_digest(&self.ctx) {
+            return Err(SafetyStoreError::SemanticRefusal(
+                "stored context digest does not match this handle's pinned context".into(),
+            ));
+        }
+        Ok((meta, record_bytes))
+    }
+
     /// Source/test-only: overwrite the stored record bytes out-of-band to
     /// simulate a surviving divergent publication (used to exercise O5's
-    /// byte-for-byte refusal). Never called by production.
+    /// byte-for-byte refusal). Never called by production. Gated behind
+    /// `test-utils` so it is not a production-reachable escape.
+    #[cfg(any(test, feature = "test-utils"))]
     pub fn debug_overwrite_record_for_test(
         &self,
         record_bytes: &[u8],
@@ -204,20 +239,7 @@ impl SafetyRecordOwner {
     /// and a matching pinned-context digest.
     pub fn open(&self) -> Result<SafetyMeta, SafetyStoreError> {
         let _guard = self.backend.lock_domain();
-        let meta_bytes = self
-            .backend
-            .read_meta()?
-            .ok_or_else(|| SafetyStoreError::MissingEstablishedState("no metadata".into()))?;
-        let record_bytes = self
-            .backend
-            .read_record()?
-            .ok_or_else(|| SafetyStoreError::StructuralRefusal("metadata without record".into()))?;
-        let meta = SafetyMeta::decode(&meta_bytes)?;
-        if meta.context_digest != context_digest(&self.ctx) {
-            return Err(SafetyStoreError::SemanticRefusal(
-                "stored context digest does not match pinned context".into(),
-            ));
-        }
+        let (meta, record_bytes) = self.load_established()?;
         // Structural decode to confirm the record is well-formed and revisions agree.
         let decoded = decode_record(&record_bytes, &self.ctx)?;
         if decoded.publication_revision != meta.current_revision {
@@ -240,11 +262,16 @@ impl SafetyRecordOwner {
         history: Option<&H>,
     ) -> Result<ValidatedRecord, SafetyStoreError> {
         let _guard = self.backend.lock_domain();
-        let record_bytes = self
-            .backend
-            .read_record()?
-            .ok_or_else(|| SafetyStoreError::MissingEstablishedState("no record".into()))?;
+        // Enforce the established-state + pinned-context prerequisites (do not
+        // rely on the caller having invoked `open`). Reject missing/partial or
+        // foreign-context metadata before validating the record.
+        let (meta, record_bytes) = self.load_established()?;
         let decoded = decode_record(&record_bytes, &self.ctx)?;
+        if decoded.publication_revision != meta.current_revision {
+            return Err(SafetyStoreError::SemanticRefusal(
+                "record revision disagrees with metadata revision".into(),
+            ));
+        }
         validate_decoded(decoded, record_bytes, &self.ctx, history)
     }
 
@@ -264,18 +291,20 @@ impl SafetyRecordOwner {
     ) -> PublishResult {
         let guard = self.backend.lock_domain();
 
-        // Re-read authoritative state under the ownership boundary.
-        let meta_bytes = match self.backend.read_meta() {
-            Ok(Some(b)) => b,
-            Ok(None) => {
-                return PublishResult::RefusedPreWrite(SafetyStoreError::MissingEstablishedState(
-                    "absent".into(),
-                ))
-            }
-            Err(e) => return PublishResult::RefusedPreWrite(e),
-        };
-        let meta = match SafetyMeta::decode(&meta_bytes) {
-            Ok(m) => m,
+        // A prior ambiguous/uncertain publication under any handle blocks further
+        // dependent publication until the required successful recovery operation
+        // (O5) clears it. Refuse before any read/write.
+        if self.backend.recovery_required() {
+            return PublishResult::RefusedPreWrite(SafetyStoreError::RecoveryRequired(
+                "a prior ambiguous/uncertain publication requires recovery before O4".into(),
+            ));
+        }
+
+        // Re-read authoritative state under the ownership boundary, enforcing the
+        // established-state + pinned-context prerequisites (foreign-context or
+        // missing/partial metadata is refused before any write).
+        let (meta, current_bytes) = match self.load_established() {
+            Ok(pair) => pair,
             Err(e) => return PublishResult::RefusedPreWrite(e),
         };
         // Expected-revision fence.
@@ -285,15 +314,6 @@ impl SafetyRecordOwner {
                 stored: meta.current_revision,
             });
         }
-        let current_bytes = match self.backend.read_record() {
-            Ok(Some(b)) => b,
-            Ok(None) => {
-                return PublishResult::RefusedPreWrite(SafetyStoreError::MissingEstablishedState(
-                    "absent".into(),
-                ))
-            }
-            Err(e) => return PublishResult::RefusedPreWrite(e),
-        };
         let current = match decode_record(&current_bytes, &self.ctx) {
             Ok(d) => d,
             Err(e) => return PublishResult::RefusedPreWrite(e),
@@ -383,27 +403,12 @@ impl SafetyRecordOwner {
     pub fn reacknowledge(&self, retained: &ValidatedRecord) -> PublishResult {
         let guard = self.backend.lock_domain();
 
-        let meta_bytes = match self.backend.read_meta() {
-            Ok(Some(b)) => b,
-            Ok(None) => {
-                return PublishResult::RefusedPreWrite(SafetyStoreError::MissingEstablishedState(
-                    "absent".into(),
-                ))
-            }
-            Err(e) => return PublishResult::RefusedPreWrite(e),
-        };
-        let meta = match SafetyMeta::decode(&meta_bytes) {
-            Ok(m) => m,
-            Err(e) => return PublishResult::RefusedPreWrite(e),
-        };
-
-        let stored = match self.backend.read_record() {
-            Ok(Some(b)) => b,
-            Ok(None) => {
-                return PublishResult::RefusedPreWrite(SafetyStoreError::MissingEstablishedState(
-                    "absent".into(),
-                ))
-            }
+        // O5 is the recovery operation; it is permitted to run while the shared
+        // recovery requirement is set, and a successful fresh acknowledgement is
+        // what clears it. Enforce the established-state + pinned-context
+        // prerequisites first (foreign-context metadata is refused).
+        let (meta, stored) = match self.load_established() {
+            Ok(pair) => pair,
             Err(e) => return PublishResult::RefusedPreWrite(e),
         };
 
@@ -428,9 +433,14 @@ impl SafetyRecordOwner {
             .backend
             .publish_atomic(&guard, &meta.encode(), &retained.encoded)
         {
-            PublishOutcome::DurableAcknowledged => PublishResult::DurableAcknowledged {
-                new_revision: meta.current_revision,
-            },
+            PublishOutcome::DurableAcknowledged => {
+                // The required successful recovery durability operation clears the
+                // shared recovery requirement for every handle.
+                self.backend.clear_recovery_requirement();
+                PublishResult::DurableAcknowledged {
+                    new_revision: meta.current_revision,
+                }
+            }
             PublishOutcome::PreWriteRefused(m) => {
                 PublishResult::RefusedPreWrite(SafetyStoreError::WriteFailed(m))
             }

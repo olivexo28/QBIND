@@ -54,6 +54,10 @@ pub enum SafetyStoreError {
     UncertainPublication(String),
     /// A read failed at the storage layer.
     ReadFailed(String),
+    /// A prior ambiguous/uncertain publication left the shared serialization
+    /// domain in a recovery-required state; dependent publication is refused for
+    /// every handle until the required successful recovery operation clears it.
+    RecoveryRequired(String),
 }
 
 impl std::fmt::Display for SafetyStoreError {
@@ -89,6 +93,7 @@ impl std::fmt::Display for SafetyStoreError {
             Self::WriteFailed(s) => write!(f, "safety store: write failed: {s}"),
             Self::UncertainPublication(s) => write!(f, "safety store: uncertain publication: {s}"),
             Self::ReadFailed(s) => write!(f, "safety store: read failed: {s}"),
+            Self::RecoveryRequired(s) => write!(f, "safety store: recovery required: {s}"),
         }
     }
 }

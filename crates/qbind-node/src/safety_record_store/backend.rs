@@ -10,7 +10,7 @@
 //! write-serialization domain (`Arc<Mutex<..>>`), so there is exactly one
 //! serialization domain per backend instance — not a per-handle advisory mutex.
 
-use std::sync::atomic::{AtomicU8, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use super::error::SafetyStoreError;
@@ -61,6 +61,14 @@ pub struct SafetyBackend {
     db: Arc<rocksdb::DB>,
     domain: Arc<Mutex<SerializationDomain>>,
     inject: Arc<AtomicU8>,
+    /// Shared, in-process recovery-required latch (§ 13.5). Set when an
+    /// ambiguous write error or an uncertain-but-durable outcome is produced
+    /// under this backend instance; observed by **every** attached handle so
+    /// dependent publication is blocked until the required successful recovery
+    /// operation clears it. This is in-process shared state by construction: a
+    /// reopened backend starts clear and cannot infer an earlier acknowledgement
+    /// from readable bytes.
+    recovery_required: Arc<AtomicBool>,
 }
 
 impl std::fmt::Debug for SafetyBackend {
@@ -96,6 +104,7 @@ impl SafetyBackend {
             db: Arc::new(db),
             domain: Arc::new(Mutex::new(SerializationDomain)),
             inject: Arc::new(AtomicU8::new(InjectFault::None as u8)),
+            recovery_required: Arc::new(AtomicBool::new(false)),
         })
     }
 
@@ -177,6 +186,7 @@ impl SafetyBackend {
         write_opts.set_sync(true);
 
         if self.injected() == InjectFault::WriteErrors {
+            self.recovery_required.store(true, Ordering::SeqCst);
             return PublishOutcome::WriteError("injected write error (ambiguous)".into());
         }
 
@@ -185,14 +195,33 @@ impl SafetyBackend {
                 if self.injected() == InjectFault::UncertainAfterWrite {
                     // Durable write happened, but the success acknowledgement is
                     // lost: the caller must treat the outcome as uncertain and
-                    // must NOT assume the predecessor remained stored.
+                    // must NOT assume the predecessor remained stored. Latch the
+                    // shared recovery requirement so every handle blocks further
+                    // dependent publication until recovery clears it.
+                    self.recovery_required.store(true, Ordering::SeqCst);
                     PublishOutcome::UncertainDurable
                 } else {
                     PublishOutcome::DurableAcknowledged
                 }
             }
-            Err(e) => PublishOutcome::WriteError(e.to_string()),
+            Err(e) => {
+                self.recovery_required.store(true, Ordering::SeqCst);
+                PublishOutcome::WriteError(e.to_string())
+            }
         }
+    }
+
+    /// Whether a prior ambiguous/uncertain publication left this shared backend
+    /// in a recovery-required state. Observed by every attached handle.
+    pub fn recovery_required(&self) -> bool {
+        self.recovery_required.load(Ordering::SeqCst)
+    }
+
+    /// Clear the shared recovery requirement. Intended to be called only by the
+    /// successful recovery operation (O5) after a fresh durable acknowledgement;
+    /// a normal O4 success never clears it.
+    pub fn clear_recovery_requirement(&self) {
+        self.recovery_required.store(false, Ordering::SeqCst);
     }
 
     fn injected(&self) -> InjectFault {
@@ -206,7 +235,9 @@ impl SafetyBackend {
 
     /// Source/test-only: install an injected fault. This never enables any
     /// production runtime path; the production binary never constructs this
-    /// backend and so never calls it.
+    /// backend and so never calls it. Gated behind `test-utils` so it is not a
+    /// production-reachable escape.
+    #[cfg(any(test, feature = "test-utils"))]
     pub fn set_inject(&self, fault: InjectFault) {
         self.inject.store(fault as u8, Ordering::SeqCst);
     }
@@ -214,6 +245,8 @@ impl SafetyBackend {
     /// Source/test-only: overwrite the stored record bytes out-of-band (wrapped
     /// in the CRC envelope), simulating a surviving divergent publication. Never
     /// called by production; used only to exercise O5 byte-for-byte refusal.
+    /// Gated behind `test-utils` so it is not a production-reachable escape.
+    #[cfg(any(test, feature = "test-utils"))]
     pub fn debug_overwrite_record(&self, record_bytes: &[u8]) -> Result<(), SafetyStoreError> {
         let mut write_opts = rocksdb::WriteOptions::default();
         write_opts.set_sync(true);
