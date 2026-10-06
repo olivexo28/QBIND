@@ -15,7 +15,10 @@ use sha3::{Digest, Sha3_256};
 use super::backend::{PublishOutcome, SafetyBackend};
 use super::codec::{compute_evidence_lock_binding, decode_record, encode_record};
 use super::error::SafetyStoreError;
-use super::profile::{max_retained_generation_bytes, max_safety_record_bytes, PinnedSafetyContext};
+use super::profile::{
+    context_owner_ceiling_term, context_ownership_charge, max_context_ownership_bytes,
+    max_retained_generation_bytes, max_safety_record_bytes, PinnedSafetyContext,
+};
 use super::record::{
     size_of_timeout_msg, DecodedRecord, EvidenceStatus, LockedRecord, SafetyRecord,
     SupportingEvidence, ValidatedRecord,
@@ -88,19 +91,38 @@ pub fn context_digest(ctx: &PinnedSafetyContext) -> [u8; 32] {
     out
 }
 
+/// A pinned context plus the retained **context-ownership reservation** charged
+/// for its distinct allocation (§ 13.7B). Held behind the owner's single `Arc`,
+/// so cloning an owner shares this one allocation *and* its one charge; the
+/// charge releases (via the reservation's drop) only when the **last** owner
+/// clone drops the `Arc`. Each independent `attach()` builds a fresh
+/// `OwnedContext` with its own reservation, so distinct retained contexts are
+/// charged distinctly against the backend's dedicated context accountant.
+#[derive(Debug)]
+struct OwnedContext {
+    ctx: PinnedSafetyContext,
+    /// The retained context-ownership charge; released when this (clone-shared)
+    /// context allocation is finally dropped. Field is never read directly — its
+    /// lifetime *is* the accounting (RAII).
+    _context_reservation: super::accounting::Reservation,
+}
+
 /// The owner of a safety-record store: one attached handle to a shared
 /// [`SafetyBackend`] instance plus the pinned context.
 ///
 /// The pinned [`PinnedSafetyContext`] (which owns a validator vector) is held
 /// behind an [`Arc`] so that cloning an owner handle shares the single immutable
 /// context allocation rather than copying the validator vector into an
-/// unaccounted second buffer (§ 13.7B). Every clone observes the same backend
-/// serialization domain and the same shared accountant; attaching or cloning a
-/// handle therefore cannot mint an uncharged per-handle context copy.
+/// unaccounted second buffer (§ 13.7B). The distinct retained context allocation
+/// is charged against the backend's dedicated context-ownership accountant at
+/// [`SafetyRecordOwner::attach`] and released when the last clone drops; every
+/// clone observes the same backend serialization domain, the same shared
+/// accountant, and the same single context charge. Attaching or cloning a handle
+/// therefore cannot mint an uncharged per-handle context copy.
 #[derive(Debug, Clone)]
 pub struct SafetyRecordOwner {
     backend: SafetyBackend,
-    ctx: Arc<PinnedSafetyContext>,
+    ctx: Arc<OwnedContext>,
 }
 
 /// The result of O4/O5 publication, distinguishing every outcome class.
@@ -135,9 +157,38 @@ impl SafetyRecordOwner {
         // uncharged record-sized buffer.
         let validation_scratch = max_safety_record_bytes(&ctx)?;
         backend.accounting().bind(&ctx, validation_scratch)?;
+
+        // Account for this attachment's *distinct* retained context allocation
+        // (§ 13.7B). `bind()` above only establishes the operational ceiling; it
+        // does NOT reserve context ownership. Here we:
+        //   1. bind the dedicated context-ownership accountant's ceiling (a
+        //      bounded multiplicity of the per-owner context term, stable across
+        //      every same-profile handle),
+        //   2. refuse an over-capacity validator vector (actual capacity beyond
+        //      the normalized per-owner term) before charging it, and
+        //   3. admit (reserve) the actual context charge BEFORE the `Arc<OwnedContext>`
+        //      retains the context — so the charge precedes the retained allocation.
+        // The reservation is moved into the `Arc<OwnedContext>`: a clone shares it
+        // (one charge), an independent `attach()` takes its own, and the charge is
+        // released when the last clone drops. A capacity refusal here leaves the
+        // backend and any already-attached handles untouched.
+        backend
+            .context_accounting()
+            .bind_cap(max_context_ownership_bytes(&ctx)?)?;
+        let charge = context_ownership_charge(&ctx)?;
+        if charge > context_owner_ceiling_term(&ctx)? {
+            return Err(SafetyStoreError::CapacityRefusal(format!(
+                "context validator vector capacity {} exceeds the normalized per-owner term",
+                ctx.validators.capacity()
+            )));
+        }
+        let context_reservation = backend.context_accounting().reserve(charge)?;
         Ok(SafetyRecordOwner {
             backend,
-            ctx: Arc::new(ctx),
+            ctx: Arc::new(OwnedContext {
+                ctx,
+                _context_reservation: context_reservation,
+            }),
         })
     }
 
@@ -146,15 +197,21 @@ impl SafetyRecordOwner {
     /// (§ 13.7A / § 13.7B). Charged against the shared aggregate accountant for
     /// the lifetime of the returned proof.
     fn retained_holder_charge(&self) -> Result<u128, SafetyStoreError> {
-        let rec = max_safety_record_bytes(&self.ctx)?;
-        let gen = max_retained_generation_bytes(&self.ctx, size_of_timeout_msg())?;
+        let rec = max_safety_record_bytes(self.pinned())?;
+        let gen = max_retained_generation_bytes(self.pinned(), size_of_timeout_msg())?;
         rec.checked_add(gen)
             .ok_or_else(|| SafetyStoreError::ArithmeticOverflow("retained holder charge".into()))
     }
 
-    /// The pinned context.
+    /// The pinned context (immutable), reached through the shared `Arc<OwnedContext>`.
     pub fn context(&self) -> &PinnedSafetyContext {
-        self.ctx.as_ref()
+        &self.ctx.ctx
+    }
+
+    /// Crate-internal shorthand for the pinned context behind the shared Arc.
+    #[inline]
+    fn pinned(&self) -> &PinnedSafetyContext {
+        &self.ctx.ctx
     }
 
     /// Source/test-only: the shared backend handle, so accounting regressions can
@@ -167,12 +224,12 @@ impl SafetyRecordOwner {
 
     /// Source/test-only: the identity (allocation address) of this handle's shared
     /// pinned context. Two owner handles that share the one immutable
-    /// `Arc<PinnedSafetyContext>` return the **same** pointer; a by-value context
-    /// copy (the escape this closes) would return distinct pointers. Used by the
+    /// `Arc<OwnedContext>` return the **same** pointer; a by-value context copy
+    /// (the escape this closes) would return distinct pointers. Used by the
     /// owner-clone context-sharing regression. Gated behind `test-utils`.
     #[cfg(any(test, feature = "test-utils"))]
     pub fn context_ptr_for_test(&self) -> *const PinnedSafetyContext {
-        Arc::as_ptr(&self.ctx)
+        &self.ctx.ctx as *const PinnedSafetyContext
     }
 
     /// Whether the shared backend is currently in a recovery-required state
@@ -204,17 +261,17 @@ impl SafetyRecordOwner {
             .ok_or_else(|| SafetyStoreError::MissingEstablishedState("no metadata".into()))?;
         let record_bytes = self
             .backend
-            .read_record(super::profile::max_safety_record_bytes(&self.ctx)?)?
+            .read_record(super::profile::max_safety_record_bytes(self.pinned())?)?
             .ok_or_else(|| SafetyStoreError::StructuralRefusal("metadata without record".into()))?;
         let meta = SafetyMeta::decode(&meta_bytes)?;
-        if meta.context_digest != context_digest(&self.ctx) {
+        if meta.context_digest != context_digest(self.pinned()) {
             return Err(SafetyStoreError::SemanticRefusal(
                 "stored context digest does not match this handle's pinned context".into(),
             ));
         }
         // Structural decode (bounds-checked) and metadata↔record revision
         // consistency are established here, once, for every dependent operation.
-        let decoded = decode_record(&record_bytes, &self.ctx)?;
+        let decoded = decode_record(&record_bytes, self.pinned())?;
         if decoded.publication_revision != meta.current_revision {
             return Err(SafetyStoreError::SemanticRefusal(
                 "record revision disagrees with metadata revision".into(),
@@ -255,7 +312,7 @@ impl SafetyRecordOwner {
         let meta = self.backend.read_meta(super::backend::META_ENCODED_LEN)?;
         let record = self
             .backend
-            .read_record(super::profile::max_safety_record_bytes(&self.ctx)?)?;
+            .read_record(super::profile::max_safety_record_bytes(self.pinned())?)?;
         match (meta.is_some(), record.is_some()) {
             (true, _) => {
                 return Err(SafetyStoreError::AlreadyEstablished(
@@ -285,10 +342,10 @@ impl SafetyRecordOwner {
 
         let decoded = DecodedRecord {
             persistence_format_version: super::profile::SAFETY_PERSISTENCE_FORMAT_VERSION,
-            network_genesis_id: self.ctx.network_genesis_id,
+            network_genesis_id: self.pinned().network_genesis_id,
             publication_revision: 0,
             record: SafetyRecord::BootstrapNoLock {
-                authority_context_ref: self.ctx.authority_context_ref,
+                authority_context_ref: self.pinned().authority_context_ref,
                 predecessor_ref: None,
             },
         };
@@ -299,15 +356,15 @@ impl SafetyRecordOwner {
         let _pub_res = self
             .backend
             .accounting()
-            .reserve(max_safety_record_bytes(&self.ctx)?)?;
-        let encoded = encode_record(&decoded, &self.ctx)?;
+            .reserve(max_safety_record_bytes(self.pinned())?)?;
+        let encoded = encode_record(&decoded, self.pinned())?;
         debug_assert!(
             encoded.capacity() as u128 <= _pub_res.charge(),
             "O1 bootstrap encoding exceeded its reserved charge"
         );
         let meta = SafetyMeta {
             meta_format_version: META_FORMAT_VERSION,
-            context_digest: context_digest(&self.ctx),
+            context_digest: context_digest(self.pinned()),
             current_revision: 0,
         };
         match self
@@ -370,7 +427,7 @@ impl SafetyRecordOwner {
         let _scratch_res = self
             .backend
             .accounting()
-            .reserve(max_safety_record_bytes(&self.ctx)?)?;
+            .reserve(max_safety_record_bytes(self.pinned())?)?;
         // Enforce the established-state + pinned-context + revision-consistency
         // prerequisites centrally (do not rely on the caller having invoked
         // `open`). Reject missing/partial, foreign-context, or revision-
@@ -381,7 +438,7 @@ impl SafetyRecordOwner {
         // capability, stamped with THIS backend's ownership incarnation. Only a
         // successful O3 on an established backend mints an O5-usable token — the
         // public `validate_decoded` and the bootstrap builder never do.
-        let validated = validate_decoded(decoded, record_bytes, &self.ctx, history)?;
+        let validated = validate_decoded(decoded, record_bytes, self.pinned(), history)?;
         Ok(validated
             .with_holder(holder_res)
             .grant_recovery_capability(self.backend.incarnation()))
@@ -426,11 +483,11 @@ impl SafetyRecordOwner {
         // established evidence and any admitted retained holders untouched; the
         // reservation releases on every exit (refusal, error, uncertainty,
         // success) via its drop at end of scope.
-        let gen = match max_retained_generation_bytes(&self.ctx, size_of_timeout_msg()) {
+        let gen = match max_retained_generation_bytes(self.pinned(), size_of_timeout_msg()) {
             Ok(v) => v,
             Err(e) => return PublishResult::RefusedPreWrite(e),
         };
-        let rec = match max_safety_record_bytes(&self.ctx) {
+        let rec = match max_safety_record_bytes(self.pinned()) {
             Ok(v) => v,
             Err(e) => return PublishResult::RefusedPreWrite(e),
         };
@@ -468,7 +525,7 @@ impl SafetyRecordOwner {
         // Validate the authoritative PREDECESSOR itself (structural + semantic)
         // before relying on it as the eligibility base; O4 must not act on an
         // unvalidated predecessor. The candidate is validated separately below.
-        if let Err(e) = validate_decoded(current.clone(), _current_bytes, &self.ctx, history) {
+        if let Err(e) = validate_decoded(current.clone(), _current_bytes, self.pinned(), history) {
             return PublishResult::RefusedPreWrite(e);
         }
 
@@ -490,7 +547,8 @@ impl SafetyRecordOwner {
         // `encode_record`'s buffer all follow. Refuse an over-bound count/length/width
         // (e.g. `S_sig=8` with a 9-byte signature) here, before allocating the binding
         // buffer — not after encoding.
-        if let Err(e) = super::codec::admit_supporting_evidence(&candidate.evidence, &self.ctx) {
+        if let Err(e) = super::codec::admit_supporting_evidence(&candidate.evidence, self.pinned())
+        {
             return PublishResult::RefusedPreWrite(e);
         }
 
@@ -501,7 +559,7 @@ impl SafetyRecordOwner {
             candidate.lock_view,
             &candidate.evidence,
             &candidate.authority_context_ref,
-            &self.ctx,
+            self.pinned(),
         ) {
             Ok(b) => b,
             Err(e) => return PublishResult::RefusedPreWrite(e),
@@ -521,16 +579,16 @@ impl SafetyRecordOwner {
 
         let decoded = DecodedRecord {
             persistence_format_version: super::profile::SAFETY_PERSISTENCE_FORMAT_VERSION,
-            network_genesis_id: self.ctx.network_genesis_id,
+            network_genesis_id: self.pinned().network_genesis_id,
             publication_revision: new_revision,
             record: SafetyRecord::Locked(candidate),
         };
         // Full semantic validation of the candidate before any write.
-        let encoded = match encode_record(&decoded, &self.ctx) {
+        let encoded = match encode_record(&decoded, self.pinned()) {
             Ok(b) => b,
             Err(e) => return PublishResult::RefusedPreWrite(e),
         };
-        if let Err(e) = validate_decoded(decoded.clone(), encoded.clone(), &self.ctx, history) {
+        if let Err(e) = validate_decoded(decoded.clone(), encoded.clone(), self.pinned(), history) {
             return PublishResult::RefusedPreWrite(e);
         }
 
@@ -587,12 +645,11 @@ impl SafetyRecordOwner {
         // buffer; this single read-back reservation plus the pre-charged retained
         // holder bound the O5 complete-content comparison. Releases on every exit
         // via drop at end of scope.
-        let _o5_res = match self.backend.accounting().reserve(
-            match max_safety_record_bytes(&self.ctx) {
-                Ok(v) => v,
-                Err(e) => return PublishResult::RefusedPreWrite(e),
-            },
-        ) {
+        let o5_readback = match max_safety_record_bytes(self.pinned()) {
+            Ok(v) => v,
+            Err(e) => return PublishResult::RefusedPreWrite(e),
+        };
+        let _o5_res = match self.backend.accounting().reserve(o5_readback) {
             Ok(r) => r,
             Err(e) => return PublishResult::RefusedPreWrite(e),
         };
@@ -609,7 +666,7 @@ impl SafetyRecordOwner {
         // The retained proof must have been sealed under THIS handle's pinned
         // context; a proof produced under a foreign context cannot authorize a
         // re-publication here.
-        if retained.origin_context_digest() != &context_digest(&self.ctx) {
+        if retained.origin_context_digest() != &context_digest(self.pinned()) {
             return PublishResult::RefusedPreWrite(SafetyStoreError::SemanticRefusal(
                 "retained publication was validated under a different pinned context".into(),
             ));

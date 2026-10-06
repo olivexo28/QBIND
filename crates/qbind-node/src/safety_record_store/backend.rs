@@ -101,6 +101,16 @@ pub struct SafetyBackend {
     /// budget that bypasses the aggregate ceiling. Bound to the per-context
     /// ceiling the first attached handle supplies.
     accounting: SharedAccountant,
+    /// The dedicated **context-ownership** accountant (§ 13.7B). Shared by every
+    /// attached handle / clone of this instance (the inner `Arc` is cloned, never
+    /// re-created). It charges each *distinct* retained pinned-context allocation
+    /// taken by an independent `attach()` — a genuinely separate validator-vector
+    /// backing + context struct value + shared-allocation overhead — held for the
+    /// clone-shared lifetime of that context and released on final drop. Kept
+    /// separate from the operational `accounting` pool so a context charge does
+    /// not perturb the O1–O5 working-set/holder measurements, while still bounding
+    /// the concurrent distinct context owners (`MAX_CONCURRENT_CONTEXT_OWNERS`).
+    context_accounting: SharedAccountant,
     /// Source/test-only: a deterministic hook fired by the owner at the exact
     /// point **after** an atomic publication has returned its durability
     /// acknowledgement but **before** the component performs its in-memory
@@ -165,6 +175,9 @@ impl SafetyBackend {
             // A fresh, unbound shared accountant; the first attached handle binds
             // its per-context aggregate ceiling.
             accounting: SharedAccountant::new(),
+            // A fresh, unbound dedicated context-ownership accountant; the first
+            // attached handle binds its per-profile context ceiling (§ 13.7B).
+            context_accounting: SharedAccountant::new(),
             // No crash-boundary hook installed unless a test installs one.
             #[cfg(any(test, feature = "test-utils"))]
             pre_effective_hook: Arc::new(Mutex::new(None)),
@@ -185,6 +198,13 @@ impl SafetyBackend {
         &self.accounting
     }
 
+    /// The dedicated context-ownership accountant (§ 13.7B), observed by every
+    /// attached handle. Crate-internal: reservations are taken only by `attach()`
+    /// when it accepts ownership of a distinct retained pinned context.
+    pub(crate) fn context_accounting(&self) -> &SharedAccountant {
+        &self.context_accounting
+    }
+
     /// Source/test-only: the shared accountant's observed peak, so a regression
     /// can assert that a real operation actually reserved against the shared
     /// budget (not a synthetic counter). Gated behind `test-utils`.
@@ -202,6 +222,25 @@ impl SafetyBackend {
     pub fn accounting_cap(&self) -> Option<u128> {
         self.accounting.cap()
     }
+    /// Source/test-only: the dedicated context-ownership accountant's current
+    /// charged total / observed peak / bound ceiling, so the context-ownership
+    /// regressions observe the real shared context accountant (not a mock).
+    /// Gated behind `test-utils`.
+    #[cfg(any(test, feature = "test-utils"))]
+    pub fn context_accounting_current(&self) -> u128 {
+        self.context_accounting.current()
+    }
+    /// Source/test-only: see [`SafetyBackend::context_accounting_current`].
+    #[cfg(any(test, feature = "test-utils"))]
+    pub fn context_accounting_peak(&self) -> u128 {
+        self.context_accounting.peak()
+    }
+    /// Source/test-only: see [`SafetyBackend::context_accounting_current`].
+    #[cfg(any(test, feature = "test-utils"))]
+    pub fn context_accounting_cap(&self) -> Option<u128> {
+        self.context_accounting.cap()
+    }
+
     /// Source/test-only: take a standing reservation against the shared budget to
     /// model concurrent peers / retained holders consuming the aggregate ceiling,
     /// so capacity-refusal regressions exercise the real shared accountant rather

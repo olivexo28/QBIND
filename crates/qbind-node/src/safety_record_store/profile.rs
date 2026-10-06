@@ -58,6 +58,16 @@ pub const MAX_CONCURRENT_PUBLICATIONS: u128 = 1;
 /// Initial-profile capacity-normalization slack, in **elements** (§ 13.7).
 pub const CAPNORM_SLACK: u128 = 0;
 
+/// Bounded number of **distinct retained context allocations** that may coexist
+/// against one backend's dedicated context-ownership accountant (§ 13.7B).
+///
+/// Cloning an owner shares the single `Arc`-held context allocation (one charge);
+/// each independent `attach()` creates a genuinely distinct retained context
+/// allocation and takes its own charge. This constant bounds the concurrent
+/// distinct context owners, so a further independent attachment past the bound is
+/// refused for capacity rather than minting an unaccounted context copy.
+pub const MAX_CONCURRENT_CONTEXT_OWNERS: u128 = 4;
+
 /// The independently-supplied, pinned genesis / validator / authority context.
 ///
 /// Obtained from the boot-time pinned genesis identity and the authorized-epoch
@@ -312,4 +322,54 @@ pub fn max_aggregate_retained_bytes(
     total = add(total, enc_term)?;
     total = add(total, validation_scratch)?;
     Ok(total)
+}
+
+/// Measured in-memory size of one `(ValidatorId, u64)` validator-vector element
+/// on the supported target (the dense-index profile's heap-backing element).
+pub fn size_of_validator_entry() -> u128 {
+    std::mem::size_of::<(ValidatorId, u64)>() as u128
+}
+
+/// Measured in-memory size of the pinned-context **struct value** on the
+/// supported target (`size_of::<PinnedSafetyContext>()`), excluding the separate
+/// heap backing of its validator vector.
+pub fn size_of_pinned_context() -> u128 {
+    std::mem::size_of::<PinnedSafetyContext>() as u128
+}
+
+/// The **actual** retained charge for one distinct context allocation
+/// (§ 13.7B): the pinned-context struct value + its validator-vector heap backing
+/// at the vector's *actual capacity* + the shared-allocation (`Arc`) control
+/// overhead charged once. This is what `attach()` reserves and holds for the
+/// (clone-shared) lifetime of the context.
+pub fn context_ownership_charge(ctx: &PinnedSafetyContext) -> Result<u128, SafetyStoreError> {
+    let backing = mul(ctx.validators.capacity() as u128, size_of_validator_entry())?;
+    let mut total = add(size_of_pinned_context(), backing)?;
+    total = add(total, ARC_CTRL)?;
+    Ok(total)
+}
+
+/// The per-owner context **ceiling term**, computed from the profile validator
+/// count `N` (stable across every same-profile context) plus the capacity-
+/// normalization slack, so the dedicated context accountant's ceiling never
+/// depends on any individual vector's spare capacity. An actual allocation whose
+/// vector capacity exceeds `N + CAPNORM_SLACK` is refused at admission (see
+/// `context_ownership_charge` vs this term) rather than silently over-running it.
+pub fn context_owner_ceiling_term(ctx: &PinnedSafetyContext) -> Result<u128, SafetyStoreError> {
+    let normalized = add(ctx.n() as u128, CAPNORM_SLACK)?;
+    let backing = mul(normalized, size_of_validator_entry())?;
+    let mut total = add(size_of_pinned_context(), backing)?;
+    total = add(total, ARC_CTRL)?;
+    Ok(total)
+}
+
+/// The dedicated context-ownership accountant's aggregate ceiling: the bounded
+/// multiplicity (`MAX_CONCURRENT_CONTEXT_OWNERS`) of the per-owner context term
+/// (§ 13.7B). Shared across every handle on one backend; a divergent-profile
+/// ceiling is refused at bind rather than silently widened.
+pub fn max_context_ownership_bytes(ctx: &PinnedSafetyContext) -> Result<u128, SafetyStoreError> {
+    mul(
+        MAX_CONCURRENT_CONTEXT_OWNERS,
+        context_owner_ceiling_term(ctx)?,
+    )
 }
