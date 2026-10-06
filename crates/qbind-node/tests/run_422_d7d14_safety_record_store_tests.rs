@@ -1242,7 +1242,11 @@ fn ctxacct_clone_shares_one_context_charge() {
     let dir = tempfile::tempdir().unwrap();
     let ctx = ctx_n(4);
     let backend = open_enabled(dir.path());
-    let per_owner = context_ownership_charge(&ctx).unwrap();
+    let per_owner = context_ownership_charge(
+        &ctx,
+        qbind_node::safety_record_store::owner::size_of_owned_context_wrapper(),
+    )
+    .unwrap();
 
     let owner = SafetyRecordOwner::attach(backend.clone(), ctx.clone()).unwrap();
     // One distinct attachment holds exactly one context charge.
@@ -1286,7 +1290,11 @@ fn ctxacct_independent_attach_charges_distinctly_and_releases() {
     let dir = tempfile::tempdir().unwrap();
     let ctx = ctx_n(4);
     let backend = open_enabled(dir.path());
-    let per_owner = context_ownership_charge(&ctx).unwrap();
+    let per_owner = context_ownership_charge(
+        &ctx,
+        qbind_node::safety_record_store::owner::size_of_owned_context_wrapper(),
+    )
+    .unwrap();
 
     // Two genuinely INDEPENDENT attachments (not clones) to the same backend are
     // distinct retained context allocations: each takes its own charge.
@@ -1342,6 +1350,149 @@ fn ctxacct_independent_attach_multiplicity_is_bounded() {
     // Clones never count against the bound even while it is otherwise full.
     let _clone = owners[0].clone();
     assert!(backend.context_accounting_current() <= backend.context_accounting_cap().unwrap());
+}
+
+// Finding #3 — the context charge must account for the COMPLETE `OwnedContext`
+// wrapper (inline pinned context + inline reservation + layout padding), not the
+// partial inner pinned context. The expected lower bound is derived INDEPENDENTLY
+// of the charge helper (from `size_of` of the reservation and the pinned context),
+// so a regression that dropped the reservation field would fail here.
+#[test]
+fn ctxacct_charge_includes_reservation_field_and_layout_padding() {
+    use qbind_node::safety_record_store::accounting::size_of_reservation;
+    use qbind_node::safety_record_store::owner::size_of_owned_context_wrapper;
+    use qbind_node::safety_record_store::profile::{
+        context_ownership_charge, size_of_pinned_context, size_of_validator_entry, ARC_CTRL,
+    };
+    let ctx = ctx_n(4);
+    let wrapper = size_of_owned_context_wrapper();
+    let pinned = size_of_pinned_context();
+    let reservation = size_of_reservation();
+    println!(
+        "MEASURED size_of::<OwnedContext>()={wrapper} size_of::<PinnedSafetyContext>()={pinned} \
+         size_of::<Reservation>()={reservation}"
+    );
+
+    // Independent evidence (not from the charge helper): a reservation has a
+    // non-zero footprint, and the complete wrapper lays out BOTH inline fields,
+    // so it is at least `pinned + reservation`. A wrapper that omitted the
+    // reservation field would measure exactly `pinned`.
+    assert!(
+        reservation > 0,
+        "a Reservation has a real footprint to charge"
+    );
+    assert!(
+        wrapper >= pinned + reservation,
+        "OwnedContext wrapper {wrapper} must include the inline reservation \
+         (pinned {pinned} + reservation {reservation}); omission detected"
+    );
+
+    // The charge is computed from the complete wrapper (+ actual validator
+    // backing + one Arc header), so it strictly exceeds the reservation-omitting
+    // (pinned-only) charge the reviewed implementation previously used.
+    let backing = ctx.validators.capacity() as u128 * size_of_validator_entry();
+    let charge = context_ownership_charge(&ctx, wrapper).unwrap();
+    assert_eq!(
+        charge,
+        wrapper + backing + ARC_CTRL,
+        "charge == complete wrapper + validator backing + one Arc header"
+    );
+    let reservation_omitting = pinned + backing + ARC_CTRL;
+    assert!(
+        charge > reservation_omitting,
+        "charge {charge} must exceed the reservation-omitting charge {reservation_omitting}"
+    );
+    assert_eq!(
+        charge - reservation_omitting,
+        wrapper - pinned,
+        "the additional charge is exactly the wrapper's reservation field + layout padding"
+    );
+}
+
+// Finding #4 — one accepted component aggregate ceiling bounds BOTH the
+// operational working set and the context-ownership allocations. The aggregate
+// equals the sum of the two partition sub-ceilings (demonstrated combined
+// bound), and the live combined charge — observed on the real shared aggregate
+// authority — never exceeds it across real operations, while a surviving context
+// owner keeps a standing charge after operational cleanup.
+#[test]
+fn agg_combined_context_and_operational_bounded() {
+    let dir = tempfile::tempdir().unwrap();
+    let ctx = ctx_n(4);
+    let owner = init_owner(dir.path(), &ctx);
+    let backend = owner.backend_for_test();
+
+    let agg_cap = backend
+        .accounting_aggregate_cap()
+        .expect("aggregate ceiling bound at attach");
+    let op_cap = backend
+        .accounting_cap()
+        .expect("operational sub-ceiling bound at attach");
+    let ctx_cap = backend
+        .context_accounting_cap()
+        .expect("context sub-ceiling bound at attach");
+    // Demonstrated combined bound: the aggregate is exactly the two partitions.
+    assert_eq!(
+        agg_cap,
+        op_cap + ctx_cap,
+        "aggregate ceiling == operational sub-ceiling + context sub-ceiling"
+    );
+    println!(
+        "MEASURED agg_cap={agg_cap} op_cap={op_cap} ctx_cap={ctx_cap} per_owner_charge={}",
+        backend.context_accounting_current()
+    );
+
+    // The attached owner holds a live standing context charge, reflected in the
+    // aggregate authority (= operational partition + context partition).
+    let ctx_standing = backend.context_accounting_current();
+    assert!(
+        ctx_standing > 0,
+        "the attached owner holds a live context charge"
+    );
+    assert_eq!(
+        backend.accounting_aggregate_current(),
+        backend.accounting_current() + ctx_standing,
+        "aggregate current == operational partition + context partition"
+    );
+    assert!(
+        backend.accounting_aggregate_current() <= agg_cap,
+        "aggregate current within the accepted ceiling after O1"
+    );
+
+    // A real O4 publication then a live O3 holder: the aggregate stays within the
+    // ceiling and tracks the sum of both partitions throughout.
+    let qc = valid_wire_qc(&ctx, [9u8; 32], 5);
+    let locked = make_locked_qc(&ctx, [9u8; 32], 5, qc, None).unwrap();
+    assert_eq!(
+        owner.publish_locked(locked, 0, None::<&FixtureCommittedHistory>),
+        PublishResult::DurableAcknowledged { new_revision: 1 }
+    );
+    let proof = owner
+        .read_validate(None::<&FixtureCommittedHistory>)
+        .unwrap();
+    assert_eq!(
+        backend.accounting_aggregate_current(),
+        backend.accounting_current() + backend.context_accounting_current(),
+        "aggregate current == operational partition + context partition during O3 hold"
+    );
+    assert!(
+        backend.accounting_aggregate_current() <= agg_cap,
+        "aggregate current within the accepted ceiling during O3 hold"
+    );
+    assert!(
+        backend.accounting_aggregate_peak() <= agg_cap,
+        "aggregate peak within the accepted ceiling"
+    );
+
+    // Operational cleanup returns to the surviving owner (and any holder) charge,
+    // not zero: the live context owner's standing charge remains after the holder
+    // drops.
+    drop(proof);
+    assert_eq!(
+        backend.accounting_aggregate_current(),
+        ctx_standing,
+        "after the operational holder drops, the live context-owner charge remains"
+    );
 }
 
 #[test]

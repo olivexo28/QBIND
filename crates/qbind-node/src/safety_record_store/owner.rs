@@ -16,8 +16,9 @@ use super::backend::{PublishOutcome, SafetyBackend};
 use super::codec::{compute_evidence_lock_binding, decode_record, encode_record};
 use super::error::SafetyStoreError;
 use super::profile::{
-    context_owner_ceiling_term, context_ownership_charge, max_context_ownership_bytes,
-    max_retained_generation_bytes, max_safety_record_bytes, PinnedSafetyContext,
+    context_owner_ceiling_term, context_ownership_charge, max_component_aggregate_bytes,
+    max_context_ownership_bytes, max_retained_generation_bytes, max_safety_record_bytes,
+    PinnedSafetyContext,
 };
 use super::record::{
     size_of_timeout_msg, DecodedRecord, EvidenceStatus, LockedRecord, SafetyRecord,
@@ -107,6 +108,19 @@ struct OwnedContext {
     _context_reservation: super::accounting::Reservation,
 }
 
+/// Measured in-memory size of the complete `OwnedContext` wrapper **value** on
+/// the supported target (`size_of::<OwnedContext>()`): the inline
+/// [`PinnedSafetyContext`] + the inline retained `Reservation` + any required
+/// layout padding, each counted once. This is the whole value retained behind
+/// `Arc<OwnedContext>`, so charging it (plus the validator-vector heap backing
+/// and the Arc header) leaves no inline field — in particular the reservation —
+/// uncharged (§ 13.7B, finding #3). The separately-charged validator-vector heap
+/// backing and the `Arc` shared-allocation header are deliberately NOT included
+/// here; `context_ownership_charge` adds them.
+pub fn size_of_owned_context_wrapper() -> u128 {
+    std::mem::size_of::<OwnedContext>() as u128
+}
+
 /// The owner of a safety-record store: one attached handle to a shared
 /// [`SafetyBackend`] instance plus the pinned context.
 ///
@@ -159,24 +173,38 @@ impl SafetyRecordOwner {
         backend.accounting().bind(&ctx, validation_scratch)?;
 
         // Account for this attachment's *distinct* retained context allocation
-        // (§ 13.7B). `bind()` above only establishes the operational ceiling; it
-        // does NOT reserve context ownership. Here we:
-        //   1. bind the dedicated context-ownership accountant's ceiling (a
+        // (§ 13.7B). `bind()` above only establishes the operational sub-ceiling;
+        // it does NOT reserve context ownership. Here we:
+        //   1. bind the dedicated context-ownership accountant's sub-ceiling (a
         //      bounded multiplicity of the per-owner context term, stable across
-        //      every same-profile handle),
+        //      every same-profile handle) AND the shared aggregate ceiling that
+        //      bounds the operational + context partitions jointly (§ 13.7,
+        //      finding #4),
         //   2. refuse an over-capacity validator vector (actual capacity beyond
         //      the normalized per-owner term) before charging it, and
         //   3. admit (reserve) the actual context charge BEFORE the `Arc<OwnedContext>`
         //      retains the context — so the charge precedes the retained allocation.
+        // The charge measures the COMPLETE `OwnedContext` wrapper value (the
+        // inline pinned context + the inline reservation + layout padding), not a
+        // partial inner type, so the reservation field is never uncharged.
         // The reservation is moved into the `Arc<OwnedContext>`: a clone shares it
         // (one charge), an independent `attach()` takes its own, and the charge is
         // released when the last clone drops. A capacity refusal here leaves the
         // backend and any already-attached handles untouched.
+        let wrapper_size = size_of_owned_context_wrapper();
         backend
             .context_accounting()
-            .bind_cap(max_context_ownership_bytes(&ctx)?)?;
-        let charge = context_ownership_charge(&ctx)?;
-        if charge > context_owner_ceiling_term(&ctx)? {
+            .bind_cap(max_context_ownership_bytes(&ctx, wrapper_size)?)?;
+        backend
+            .accounting()
+            .bind_aggregate(max_component_aggregate_bytes(
+                &ctx,
+                size_of_timeout_msg(),
+                validation_scratch,
+                wrapper_size,
+            )?)?;
+        let charge = context_ownership_charge(&ctx, wrapper_size)?;
+        if charge > context_owner_ceiling_term(&ctx, wrapper_size)? {
             return Err(SafetyStoreError::CapacityRefusal(format!(
                 "context validator vector capacity {} exceeds the normalized per-owner term",
                 ctx.validators.capacity()

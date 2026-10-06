@@ -338,27 +338,41 @@ pub fn size_of_pinned_context() -> u128 {
 }
 
 /// The **actual** retained charge for one distinct context allocation
-/// (§ 13.7B): the pinned-context struct value + its validator-vector heap backing
-/// at the vector's *actual capacity* + the shared-allocation (`Arc`) control
-/// overhead charged once. This is what `attach()` reserves and holds for the
-/// (clone-shared) lifetime of the context.
-pub fn context_ownership_charge(ctx: &PinnedSafetyContext) -> Result<u128, SafetyStoreError> {
+/// (§ 13.7B, finding #3): the complete `OwnedContext` wrapper **value** —
+/// supplied by the owner as `wrapper_struct_size` = `size_of::<OwnedContext>()`,
+/// which includes the inline `PinnedSafetyContext`, the inline retained
+/// `Reservation`, and any required layout padding, each counted once — plus its
+/// validator-vector heap backing at the vector's *actual capacity*, plus the
+/// shared-allocation (`Arc`) control overhead charged once. This is the whole
+/// value retained behind `Arc<OwnedContext>`, so no inline field (in particular
+/// the reservation) is omitted. Required layout padding is included here;
+/// allocator size-class rounding of the `Arc` allocation is deliberately
+/// excluded (it is not part of the representation's required layout).
+pub fn context_ownership_charge(
+    ctx: &PinnedSafetyContext,
+    wrapper_struct_size: u128,
+) -> Result<u128, SafetyStoreError> {
     let backing = mul(ctx.validators.capacity() as u128, size_of_validator_entry())?;
-    let mut total = add(size_of_pinned_context(), backing)?;
+    let mut total = add(wrapper_struct_size, backing)?;
     total = add(total, ARC_CTRL)?;
     Ok(total)
 }
 
-/// The per-owner context **ceiling term**, computed from the profile validator
-/// count `N` (stable across every same-profile context) plus the capacity-
-/// normalization slack, so the dedicated context accountant's ceiling never
-/// depends on any individual vector's spare capacity. An actual allocation whose
-/// vector capacity exceeds `N + CAPNORM_SLACK` is refused at admission (see
+/// The per-owner context **ceiling term**, computed from the complete
+/// `OwnedContext` wrapper size (`wrapper_struct_size`, including the inline
+/// reservation field and layout padding) plus the profile validator count `N`
+/// (stable across every same-profile context) plus the capacity-normalization
+/// slack, so the dedicated context accountant's ceiling never depends on any
+/// individual vector's spare capacity. An actual allocation whose vector
+/// capacity exceeds `N + CAPNORM_SLACK` is refused at admission (see
 /// `context_ownership_charge` vs this term) rather than silently over-running it.
-pub fn context_owner_ceiling_term(ctx: &PinnedSafetyContext) -> Result<u128, SafetyStoreError> {
+pub fn context_owner_ceiling_term(
+    ctx: &PinnedSafetyContext,
+    wrapper_struct_size: u128,
+) -> Result<u128, SafetyStoreError> {
     let normalized = add(ctx.n() as u128, CAPNORM_SLACK)?;
     let backing = mul(normalized, size_of_validator_entry())?;
-    let mut total = add(size_of_pinned_context(), backing)?;
+    let mut total = add(wrapper_struct_size, backing)?;
     total = add(total, ARC_CTRL)?;
     Ok(total)
 }
@@ -367,9 +381,32 @@ pub fn context_owner_ceiling_term(ctx: &PinnedSafetyContext) -> Result<u128, Saf
 /// multiplicity (`MAX_CONCURRENT_CONTEXT_OWNERS`) of the per-owner context term
 /// (§ 13.7B). Shared across every handle on one backend; a divergent-profile
 /// ceiling is refused at bind rather than silently widened.
-pub fn max_context_ownership_bytes(ctx: &PinnedSafetyContext) -> Result<u128, SafetyStoreError> {
+pub fn max_context_ownership_bytes(
+    ctx: &PinnedSafetyContext,
+    wrapper_struct_size: u128,
+) -> Result<u128, SafetyStoreError> {
     mul(
         MAX_CONCURRENT_CONTEXT_OWNERS,
-        context_owner_ceiling_term(ctx)?,
+        context_owner_ceiling_term(ctx, wrapper_struct_size)?,
+    )
+}
+
+/// The accepted **component aggregate ceiling** (§ 13.7, finding #4): the
+/// operational working-set ceiling (`max_aggregate_retained_bytes`) **plus** the
+/// context-ownership ceiling (`max_context_ownership_bytes`). This is the single
+/// combined coexistence budget both partitions are admitted against, so a
+/// concurrent operation and attachment can never jointly exceed it even though
+/// each partition also enforces its own sub-ceiling. The sub-ceilings sum to
+/// exactly this aggregate, which both demonstrates the combined bound and keeps
+/// the operational sub-numbers unchanged.
+pub fn max_component_aggregate_bytes(
+    ctx: &PinnedSafetyContext,
+    size_of_timeout_msg: u128,
+    validation_scratch: u128,
+    wrapper_struct_size: u128,
+) -> Result<u128, SafetyStoreError> {
+    add(
+        max_aggregate_retained_bytes(ctx, size_of_timeout_msg, validation_scratch)?,
+        max_context_ownership_bytes(ctx, wrapper_struct_size)?,
     )
 }

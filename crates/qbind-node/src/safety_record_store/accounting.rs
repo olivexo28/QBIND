@@ -152,6 +152,135 @@ impl AllocationAccountant {
     }
 }
 
+/// Measured in-memory size of one [`Reservation`] value on the supported target
+/// (`size_of::<Reservation>()`). Exposed so a layout regression can establish —
+/// independently of any charge helper — that a wrapper which embeds a
+/// `Reservation` inline (e.g. the owner's `OwnedContext`) actually accounts for
+/// that field rather than silently omitting it (§ 13.7B, finding #3).
+pub fn size_of_reservation() -> u128 {
+    std::mem::size_of::<Reservation>() as u128
+}
+
+/// The shared **aggregate admission authority** enforcing the accepted component
+/// coexistence ceiling across BOTH accounting partitions — the operational
+/// O1–O5 working set AND the context-ownership allocations (§ 13.7, finding #4
+/// combined-bound correction).
+///
+/// The two partitions keep their own sub-ledgers (so the operational peak /
+/// holder numbers are unchanged and the bounded context multiplicity is still
+/// refused on its own sub-cap), but **every** reservation — operational or
+/// context — must also be admitted here first. Because the aggregate ceiling is
+/// bound to `operational_sub_cap + context_sub_cap`, the live operational and
+/// context charges can never *jointly* exceed the accepted aggregate, and a
+/// concurrent operation + attachment cannot admit against two independent
+/// ceilings whose sum would exceed the permitted coexistence budget.
+#[derive(Debug)]
+struct AggregateGuard {
+    cap: u128,
+    current: u128,
+    peak: u128,
+}
+
+/// The shared, cloneable handle to the single [`AggregateGuard`]. One instance
+/// is created per `SafetyBackend` open and shared (the inner `Arc` is cloned,
+/// never re-created) by both the operational and the context [`SharedAccountant`]
+/// of that backend, so there is exactly one aggregate admission authority per
+/// backend instance.
+#[derive(Clone, Debug)]
+pub struct AggregateAuthority {
+    inner: Arc<Mutex<Option<AggregateGuard>>>,
+}
+
+impl Default for AggregateAuthority {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl AggregateAuthority {
+    /// A fresh, unbound aggregate authority (no ceiling until [`AggregateAuthority::bind`]).
+    pub fn new() -> Self {
+        AggregateAuthority {
+            inner: Arc::new(Mutex::new(None)),
+        }
+    }
+
+    fn lock(&self) -> std::sync::MutexGuard<'_, Option<AggregateGuard>> {
+        self.inner
+            .lock()
+            .expect("safety aggregate authority poisoned")
+    }
+
+    /// Establish (once) the accepted aggregate ceiling. A second bind with the
+    /// identical ceiling is a no-op; a divergent ceiling is refused so a foreign
+    /// profile can never widen the combined coexistence budget.
+    pub fn bind(&self, cap: u128) -> Result<(), SafetyStoreError> {
+        let mut g = self.lock();
+        match g.as_ref() {
+            None => {
+                *g = Some(AggregateGuard {
+                    cap,
+                    current: 0,
+                    peak: 0,
+                });
+                Ok(())
+            }
+            Some(existing) => {
+                if existing.cap != cap {
+                    return Err(SafetyStoreError::CapacityRefusal(format!(
+                        "aggregate authority already bound to cap {} (attempted {})",
+                        existing.cap, cap
+                    )));
+                }
+                Ok(())
+            }
+        }
+    }
+
+    /// Admit `charge` against the accepted aggregate ceiling **before** the
+    /// protected allocation. Refuses without disturbing the running total when
+    /// the combined charge would exceed the aggregate.
+    fn admit(&self, charge: u128) -> Result<(), SafetyStoreError> {
+        let mut g = self.lock();
+        let guard = g.as_mut().ok_or_else(|| {
+            SafetyStoreError::CapacityRefusal("aggregate authority not bound".into())
+        })?;
+        let next = add(guard.current, charge)?;
+        if next > guard.cap {
+            return Err(SafetyStoreError::CapacityRefusal(format!(
+                "aggregate admission of {charge} would raise {}→{next} over aggregate cap {}",
+                guard.current, guard.cap
+            )));
+        }
+        guard.current = next;
+        if next > guard.peak {
+            guard.peak = next;
+        }
+        Ok(())
+    }
+
+    /// Release a previously admitted aggregate `charge` (accounting bookkeeping
+    /// only; never evidence a durable write was undone).
+    fn release(&self, charge: u128) {
+        if let Some(guard) = self.lock().as_mut() {
+            guard.current = guard.current.saturating_sub(charge);
+        }
+    }
+
+    /// The configured aggregate ceiling, or `None` when not yet bound.
+    pub fn cap(&self) -> Option<u128> {
+        self.lock().as_ref().map(|g| g.cap)
+    }
+    /// The current combined charged total across both partitions (0 when unbound).
+    pub fn current(&self) -> u128 {
+        self.lock().as_ref().map(|g| g.current).unwrap_or(0)
+    }
+    /// The observed combined peak across both partitions (0 when unbound).
+    pub fn peak(&self) -> u128 {
+        self.lock().as_ref().map(|g| g.peak).unwrap_or(0)
+    }
+}
+
 /// The shared, cloneable aggregate accountant owned by a `SafetyBackend` and
 /// observed by **every** attached handle / clone (§ 13.7 / § 13.7B). Attaching
 /// another handle to the same backend clones the `Arc` below — it never creates
@@ -162,23 +291,37 @@ impl AllocationAccountant {
 /// (enforced by the stored context digest), so a later bind with the same
 /// parameters is a no-op and a divergent cap is refused rather than silently
 /// widened.
+///
+/// Each `SharedAccountant` is one **partition** sub-ledger (operational or
+/// context); both partitions of one backend share a single
+/// [`AggregateAuthority`], so every reservation is admitted against the accepted
+/// aggregate ceiling as well as its own sub-cap (§ 13.7, finding #4).
 #[derive(Clone, Debug)]
 pub struct SharedAccountant {
     inner: Arc<Mutex<Option<AllocationAccountant>>>,
+    aggregate: AggregateAuthority,
 }
 
 impl Default for SharedAccountant {
     fn default() -> Self {
-        Self::new()
+        Self::new(AggregateAuthority::new())
     }
 }
 
 impl SharedAccountant {
-    /// A fresh, unbound shared accountant (no ceiling until [`SharedAccountant::bind`]).
-    pub fn new() -> Self {
+    /// A fresh, unbound shared accountant (no sub-ceiling until
+    /// [`SharedAccountant::bind`]) sharing the supplied aggregate authority with
+    /// its sibling partition on the same backend.
+    pub fn new(aggregate: AggregateAuthority) -> Self {
         SharedAccountant {
             inner: Arc::new(Mutex::new(None)),
+            aggregate,
         }
+    }
+
+    /// The shared aggregate admission authority this partition admits against.
+    pub fn aggregate(&self) -> &AggregateAuthority {
+        &self.aggregate
     }
 
     fn lock(&self) -> std::sync::MutexGuard<'_, Option<AllocationAccountant>> {
@@ -238,34 +381,58 @@ impl SharedAccountant {
         }
     }
 
-    /// The configured aggregate ceiling, or `None` when not yet bound.
+    /// Bind the shared [`AggregateAuthority`] to the accepted component aggregate
+    /// ceiling (§ 13.7, finding #4). Idempotent with the identical ceiling;
+    /// delegates to the single authority both partitions share.
+    pub fn bind_aggregate(&self, cap: u128) -> Result<(), SafetyStoreError> {
+        self.aggregate.bind(cap)
+    }
+
+    /// The configured sub-ceiling for this partition, or `None` when not yet bound.
     pub fn cap(&self) -> Option<u128> {
         self.lock().as_ref().map(|a| a.cap())
     }
-    /// The current shared charged total (0 when unbound).
+    /// The current charged total for this partition (0 when unbound).
     pub fn current(&self) -> u128 {
         self.lock().as_ref().map(|a| a.current()).unwrap_or(0)
     }
-    /// The observed shared peak charged total (0 when unbound).
+    /// The observed peak charged total for this partition (0 when unbound).
     pub fn peak(&self) -> u128 {
         self.lock().as_ref().map(|a| a.peak()).unwrap_or(0)
     }
 
-    /// Admit `charge` bytes against the shared ceiling **before** the protected
-    /// allocation or copy. On success returns an RAII [`Reservation`] that holds
-    /// the charge until it is dropped (or explicitly released). Refuses with
-    /// [`SafetyStoreError::CapacityRefusal`] when the charge would exceed the
-    /// shared ceiling — without disturbing any already-admitted charge.
+    /// Admit `charge` bytes **before** the protected allocation or copy. The
+    /// charge is admitted first against the shared [`AggregateAuthority`] (the
+    /// accepted combined coexistence ceiling) and then against this partition's
+    /// own sub-ledger; if the partition admission fails the aggregate admission
+    /// is rolled back, so neither running total is disturbed by a refusal. On
+    /// success returns an RAII [`Reservation`] that releases **both** the
+    /// aggregate and the partition charge when dropped. Refuses with
+    /// [`SafetyStoreError::CapacityRefusal`] when the charge would exceed either
+    /// ceiling.
     pub fn reserve(&self, charge: u128) -> Result<Reservation, SafetyStoreError> {
+        self.aggregate.admit(charge)?;
         {
             let mut g = self.lock();
-            let acct = g.as_mut().ok_or_else(|| {
-                SafetyStoreError::CapacityRefusal("shared accountant not bound".into())
-            })?;
-            acct.admit(charge)?;
+            let acct = match g.as_mut() {
+                Some(acct) => acct,
+                None => {
+                    drop(g);
+                    self.aggregate.release(charge);
+                    return Err(SafetyStoreError::CapacityRefusal(
+                        "shared accountant not bound".into(),
+                    ));
+                }
+            };
+            if let Err(e) = acct.admit(charge) {
+                drop(g);
+                self.aggregate.release(charge);
+                return Err(e);
+            }
         }
         Ok(Reservation {
             inner: Arc::clone(&self.inner),
+            aggregate: self.aggregate.clone(),
             charge,
             released: false,
         })
@@ -277,10 +444,13 @@ impl SharedAccountant {
 /// refusal, write error, uncertain outcome, and an early return (via the `?`
 /// unwind) **all** release the appropriate reservation without any explicit
 /// bookkeeping at every exit. The release is accounting-only (buffer lifetime);
-/// it is never evidence that a durable write was undone.
+/// it is never evidence that a durable write was undone. Each reservation holds
+/// both its partition sub-ledger charge and the shared aggregate charge, and
+/// releases both together.
 #[derive(Debug)]
 pub struct Reservation {
     inner: Arc<Mutex<Option<AllocationAccountant>>>,
+    aggregate: AggregateAuthority,
     charge: u128,
     released: bool,
 }
@@ -292,21 +462,35 @@ impl Reservation {
     }
 
     /// Reserve an **additional** holder of the same charge against the same
-    /// shared accountant. Used when a charged retained proof is duplicated: a
-    /// clone owns a genuinely separate record-sized buffer, so it must take its
-    /// own reservation rather than aliasing one — repeated cloning therefore
-    /// cannot produce unbounded uncharged holders, and exhausting the shared
-    /// budget refuses the duplication.
+    /// shared accountant (both the partition sub-ledger and the shared
+    /// aggregate). Used when a charged retained proof is duplicated: a clone owns
+    /// a genuinely separate record-sized buffer, so it must take its own
+    /// reservation rather than aliasing one — repeated cloning therefore cannot
+    /// produce unbounded uncharged holders, and exhausting either the partition
+    /// or the aggregate budget refuses the duplication.
     pub fn try_duplicate(&self) -> Result<Reservation, SafetyStoreError> {
+        self.aggregate.admit(self.charge)?;
         {
             let mut g = self.inner.lock().expect("safety accountant poisoned");
-            let acct = g.as_mut().ok_or_else(|| {
-                SafetyStoreError::CapacityRefusal("shared accountant not bound".into())
-            })?;
-            acct.admit(self.charge)?;
+            let acct = match g.as_mut() {
+                Some(acct) => acct,
+                None => {
+                    drop(g);
+                    self.aggregate.release(self.charge);
+                    return Err(SafetyStoreError::CapacityRefusal(
+                        "shared accountant not bound".into(),
+                    ));
+                }
+            };
+            if let Err(e) = acct.admit(self.charge) {
+                drop(g);
+                self.aggregate.release(self.charge);
+                return Err(e);
+            }
         }
         Ok(Reservation {
             inner: Arc::clone(&self.inner),
+            aggregate: self.aggregate.clone(),
             charge: self.charge,
             released: false,
         })
@@ -329,6 +513,7 @@ impl Reservation {
             {
                 acct.release(self.charge);
             }
+            self.aggregate.release(self.charge);
             self.released = true;
         }
     }

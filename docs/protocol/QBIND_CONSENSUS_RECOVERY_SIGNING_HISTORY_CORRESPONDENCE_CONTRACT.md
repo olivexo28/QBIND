@@ -3337,3 +3337,37 @@ anti-rollback. `DURABLE_ANTI_ROLLBACK=NOT-ESTABLISHED`, `GENESIS_AUTHORITY_ACTIV
 `PRODUCTION_WIRE_CHAIN_ID_BEHAVIOR=UNCHANGED`, and the open C4/C5 / RS1 posture are all unchanged; this
 subsection authorizes no production integration, signing, verifier wiring, anti-rollback, activation,
 D15, or Run 423 work.
+### 13.7B.1 Complete context-wrapper charge and single component aggregate budget (D7-D14 correction)
+
+This subsection records two corrections to the context-ownership accounting note above. **No bound,
+ownership requirement, or evidence level defined above is weakened**; these are implementation notes, not
+contract changes, and the operative verdict stays `PARTIAL-IMPLEMENTATION` / `INCOMPLETE`.
+
+- **Complete allocated representation (§ 13.7B).** The context charge measures the **complete**
+  `OwnedContext` value retained behind the owner's `Arc` — the inline `PinnedSafetyContext`, the inline
+  retained `Reservation`, and required layout padding, each counted once — plus the validator-vector
+  backing at **actual capacity** plus one shared-allocation (`ARC_CTRL`) header. The earlier charge, which
+  counted only `size_of::<PinnedSafetyContext>()` + backing + `ARC_CTRL`, **omitted** the inline
+  reservation field and wrapper padding; that omission is corrected. Required layout padding is included;
+  allocator size-class rounding of the `Arc` allocation is **excluded** (it is not part of the required
+  layout). Measured (64-bit): `size_of::<OwnedContext>() = 160`, `size_of::<PinnedSafetyContext>() = 112`,
+  `size_of::<Reservation>() = 48`; per-owner charge for N=4 is `160 + 64 + 16 = 240` (previously `192`).
+- **One accepted component aggregate budget (§ 13.7).** The operational working-set ceiling and the
+  context-ownership ceiling are now the **two partitions of a single accepted aggregate ceiling**
+  `MAX_COMPONENT_AGGREGATE_BYTES = MAX_AGGREGATE_RETAINED_BYTES + MAX_CONTEXT_OWNERSHIP_BYTES`, enforced by
+  **one shared aggregate admission authority** per backend that every reservation (operational **and**
+  context) is admitted against **in addition to** its own partition sub-ledger. The two sub-ceilings sum
+  to exactly the aggregate (the demonstrated combined bound), so concurrent operations and attachments can
+  never **jointly** exceed the permitted coexistence budget, while the operational sub-numbers and the
+  bounded context multiplicity (`MAX_CONCURRENT_CONTEXT_OWNERS = 4`, still refused on its own sub-cap) are
+  unchanged. Separate ledgers are retained **only** with this demonstrated combined bound and shared
+  admission mechanism; the count limit authorizes **no** aggregate memory outside the accepted cap.
+  Measured (N=4): `op = 7772`, `ctx = 960`, aggregate `8732 = 7772 + 960`.
+- **Accountant counters sum reservations; they do not independently measure memory.** A counter staying
+  below its own ceiling is **not**, by itself, sufficient evidence; the layout/charge regression derives
+  its expected omission-detecting bound from `size_of::<Reservation>()` independently of the charge helper.
+
+The prior note's claim that the context-ownership item was **discharged** is **withdrawn**: the reviewed
+wrapper charge (reservation-omitting) and the independent-budget arrangement did not establish that
+closure. The literal commands, measured values, regressions, and open blockers for this revision are
+recorded in the latest RUN 422 D7-D14 section of `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_422_D7.md`.
