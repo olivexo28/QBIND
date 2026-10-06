@@ -874,6 +874,68 @@ fn h26_both_evidence_variants_and_nested_bounds() {
     assert!((etc.len() as u128) <= max_tc_bytes(&ctx).unwrap());
 }
 
+/// H26 (adversarial, through actual storage operations) — an over-bound nested
+/// record-level high-QC signer list inside a TC-derived publication is refused by
+/// O4's single admission path BEFORE any evidence-binding allocation, and the
+/// established predecessor is left intact. Helper-only refusal and valid
+/// round-trips are not a substitute: this drives the real `publish_locked`.
+#[test]
+fn h26_adversarial_nested_tc_high_qc_signers_refused_through_o4() {
+    use qbind_node::safety_record_store::codec::{
+        evidence_payload_encode_count, reset_evidence_payload_encode_count,
+    };
+    let dir = tempfile::tempdir().unwrap();
+    let ctx = ctx_n(4); // N = 4
+    let owner = init_owner(dir.path(), &ctx);
+
+    // Start from a valid TC-derived record, then inflate the nested record-level
+    // high-QC signer list to N + 1 (boundary-plus-one). The stored binding stays
+    // the original valid digest, so O4 cannot rely on a binding mismatch: its
+    // bound-admission must catch the over-bound nested signer list directly.
+    let mut ltc = valid_tc_record(&ctx, 5, 6);
+    if let SupportingEvidence::TcDerived { high_qc, .. } = &mut ltc.evidence {
+        high_qc.signers = (0..=ctx.n() as u64).map(ValidatorId::new).collect();
+    }
+
+    reset_evidence_payload_encode_count();
+    let res = owner.publish_locked(ltc, 0, None::<&FixtureCommittedHistory>);
+    assert!(
+        matches!(
+            res,
+            PublishResult::RefusedPreWrite(SafetyStoreError::DeclaredBoundExceeded(_))
+        ),
+        "over-bound nested high-QC signer list must be refused pre-write, got {res:?}"
+    );
+    assert_eq!(
+        evidence_payload_encode_count(),
+        0,
+        "O4 must refuse the over-bound nested evidence BEFORE the binding allocation"
+    );
+
+    // The established predecessor (bootstrap rev 0) is untouched.
+    let v = owner
+        .read_validate(None::<&FixtureCommittedHistory>)
+        .unwrap();
+    assert_eq!(v.decoded().publication_revision, 0);
+    assert!(!v.decoded().is_locked());
+
+    // A VALID TC-derived publication of the same shape IS admitted and round-trips
+    // through storage (positive control: the refusal is bound-specific, not a
+    // blanket TC rejection).
+    let good = valid_tc_record(&ctx, 5, 6);
+    assert_eq!(
+        owner.publish_locked(good, 0, None::<&FixtureCommittedHistory>),
+        PublishResult::DurableAcknowledged { new_revision: 1 }
+    );
+    let rv = owner
+        .read_validate(None::<&FixtureCommittedHistory>)
+        .unwrap();
+    assert!(matches!(
+        &rv.decoded().record,
+        SafetyRecord::Locked(l) if matches!(l.evidence, SupportingEvidence::TcDerived { .. })
+    ));
+}
+
 // ---------------------------------------------------------------------------
 // H27 — persistence + handling of an unverified TC-derived restriction
 //       (does NOT prove live safe-vote enforcement) (real-storage)
