@@ -127,6 +127,7 @@ fn validate_locked<H: CommittedHistory + ?Sized>(
         l.lock_view,
         &l.evidence,
         &l.authority_context_ref,
+        ctx,
     )?;
     if recomputed != l.evidence_lock_binding {
         return Err(SafetyStoreError::SemanticRefusal(

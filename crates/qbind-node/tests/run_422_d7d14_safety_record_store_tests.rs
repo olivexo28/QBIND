@@ -371,11 +371,14 @@ fn h11_success_is_unverified() {
 }
 
 // ---------------------------------------------------------------------------
-// H12 — checked serialized caps match measured encodings (unit/model)
+// H26 (model support) — checked serialized caps match measured encodings.
+// NOTE: previously mislabeled `h12_*`; the real H12 competing-handle stale
+// O4/O5 obligation is exercised by `h12_competing_handles_stale_o4_o5_*` below.
+// This case is model/unit support for the H26 serialized-bound obligation.
 // ---------------------------------------------------------------------------
 
 #[test]
-fn h12_serialized_caps_bound_actual_encodings() {
+fn h26_serialized_caps_bound_actual_encodings() {
     for n in [1u64, 4, 8, 16] {
         let ctx = ctx_n(n);
         let qc = valid_wire_qc(&ctx, [9u8; 32], 5);
@@ -390,6 +393,92 @@ fn h12_serialized_caps_bound_actual_encodings() {
         assert!((enc.len() as u128) <= max_qc_bytes(&ctx).unwrap());
         assert!((enc.len() as u128) <= max_safety_record_bytes(&ctx).unwrap());
     }
+}
+
+// ---------------------------------------------------------------------------
+// H12 — competing handles over ONE shared backend: deterministically
+// interleaved stale O4 and stale O5 attempts are refused and the newer
+// publication bytes remain byte-for-byte unchanged (real-storage).
+// ---------------------------------------------------------------------------
+
+#[test]
+fn h12_competing_handles_stale_o4_o5_leave_newer_bytes_unchanged() {
+    let dir = tempfile::tempdir().unwrap();
+    let ctx = ctx_n(4);
+    // Two handles A and B share the SAME backend incarnation (clone shares the
+    // Arc-held DB + serialization domain), so this is a genuine competing-handle
+    // scenario, not a sequential reopen.
+    let backend = open_enabled(dir.path());
+    let owner_a = SafetyRecordOwner::attach(backend.clone(), ctx.clone()).unwrap();
+    owner_a.initialize(true).expect("O1 initialize");
+    let owner_b = SafetyRecordOwner::attach(backend.clone(), ctx.clone()).unwrap();
+
+    // A publishes v5 (rev 0 -> 1). B captures a retained O3 token for v5 BEFORE
+    // A advances, so B now holds a soon-to-be-stale O5 capability.
+    let qc5 = valid_wire_qc(&ctx, [9u8; 32], 5);
+    let l5 = make_locked_qc(&ctx, [9u8; 32], 5, qc5, None).unwrap();
+    assert_eq!(
+        owner_a.publish_locked(l5, 0, None::<&FixtureCommittedHistory>),
+        PublishResult::DurableAcknowledged { new_revision: 1 }
+    );
+    let stale_b_token = owner_b
+        .read_validate(None::<&FixtureCommittedHistory>)
+        .expect("B observes v5 via its own O3");
+
+    // A advances to the newer v9 (rev 1 -> 2). Capture the authoritative newer
+    // bytes to prove no competing stale attempt disturbs them.
+    let qc9 = valid_wire_qc(&ctx, [0x11u8; 32], 9);
+    let l9 = make_locked_qc(&ctx, [0x11u8; 32], 9, qc9, None).unwrap();
+    assert_eq!(
+        owner_a.publish_locked(l9, 1, None::<&FixtureCommittedHistory>),
+        PublishResult::DurableAcknowledged { new_revision: 2 }
+    );
+    let newer_bytes = owner_a
+        .read_validate(None::<&FixtureCommittedHistory>)
+        .unwrap()
+        .encoded()
+        .to_vec();
+
+    // Interleave step 1: B issues a STALE O4 (expected revision 1, actual is 2).
+    // It must be refused by revision fencing before any write.
+    let qc_stale = valid_wire_qc(&ctx, [0x22u8; 32], 7);
+    let l_stale = make_locked_qc(&ctx, [0x22u8; 32], 7, qc_stale, None).unwrap();
+    assert!(
+        matches!(
+            owner_b.publish_locked(l_stale, 1, None::<&FixtureCommittedHistory>),
+            PublishResult::RefusedPreWrite(SafetyStoreError::StaleRevision { .. })
+        ),
+        "B's stale O4 must be refused by the shared revision fence"
+    );
+    assert_eq!(
+        owner_a
+            .read_validate(None::<&FixtureCommittedHistory>)
+            .unwrap()
+            .encoded(),
+        newer_bytes.as_slice(),
+        "newer bytes unchanged after B's stale O4"
+    );
+
+    // Interleave step 2: B issues a STALE O5 (reacknowledge of the v5 token it
+    // captured earlier). It must refuse and NOT overwrite the newer v9 bytes.
+    assert!(
+        matches!(
+            owner_b.reacknowledge(&stale_b_token),
+            PublishResult::RefusedPreWrite(_)
+        ),
+        "B's stale O5 must be refused"
+    );
+    let after = owner_a.read_validate(None::<&FixtureCommittedHistory>).unwrap();
+    assert_eq!(
+        after.decoded().publication_revision,
+        2,
+        "revision still 2 after competing stale O4/O5"
+    );
+    assert_eq!(
+        after.encoded(),
+        newer_bytes.as_slice(),
+        "newer publication bytes remain byte-for-byte unchanged"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -738,6 +827,7 @@ fn valid_tc_record(ctx: &PinnedSafetyContext, lock_view: u64, timeout_view: u64)
         lock_view,
         &evidence,
         &ctx.authority_context_ref,
+        ctx,
     )
     .unwrap();
     LockedRecord {
@@ -1199,8 +1289,10 @@ fn corr_missing_committed_history_for_anchored_refused() {
 // ---------------------------------------------------------------------------
 /// Construct a QC-derived `LockedRecord` DIRECTLY (bypassing `make_locked_qc`'s
 /// admission) so O4's own admission-before-allocation ordering can be exercised
-/// with an over-bound candidate. The binding digest computed here is test-setup
-/// only; the counter used by the regressions is reset AFTER this helper runs.
+/// with an over-bound candidate. No real binding is computed here — the public
+/// `compute_evidence_lock_binding` now admits, and would (correctly) refuse the
+/// over-bound evidence this helper deliberately carries. O4 recomputes the
+/// binding after its own admission step anyway, so a placeholder digest is used.
 fn locked_qc_unadmitted(
     ctx: &PinnedSafetyContext,
     block: [u8; 32],
@@ -1208,17 +1300,11 @@ fn locked_qc_unadmitted(
     qc: WireQc,
 ) -> LockedRecord {
     let evidence = SupportingEvidence::QcDerived(qc);
-    let binding = qbind_node::safety_record_store::codec::compute_evidence_lock_binding(
-        &block,
-        view,
-        &evidence,
-        &ctx.authority_context_ref,
-    )
-    .unwrap();
     LockedRecord {
         lock_block_id: block,
         lock_view: view,
-        evidence_lock_binding: binding,
+        // Placeholder: O4 refuses at admission before recomputing/using this.
+        evidence_lock_binding: [0u8; 32],
         authority_context_ref: ctx.authority_context_ref,
         committed_anchor: None,
         predecessor_ref: None,
@@ -1358,7 +1444,117 @@ fn corr_nested_tc_and_boundary_admission_before_allocation() {
 }
 
 // ---------------------------------------------------------------------------
-// Correction pass (§8 / TA2 vs TA1) — the SELECTED timeout-entry high-QC may
+// §3.1 — the PUBLIC `compute_evidence_lock_binding` helper is a context-checking
+// entry point: it refuses over-bound evidence BEFORE allocating/encoding the
+// `cert` scratch, so a direct caller cannot bypass admission. The evidence-encode
+// instrumentation stays at 0 on the refusal, and increments on a valid call.
+// ---------------------------------------------------------------------------
+#[test]
+fn corr_binding_helper_enforces_admission_before_allocation() {
+    use qbind_node::safety_record_store::codec::{
+        compute_evidence_lock_binding, evidence_payload_encode_count,
+        reset_evidence_payload_encode_count,
+    };
+    let ctx = ctx_n(4); // s_sig = 8
+    let mut qc = valid_wire_qc(&ctx, [9u8; 32], 5);
+    qc.signatures[0] = vec![0xABu8; 9]; // over-bound: S_sig + 1
+    let bad = SupportingEvidence::QcDerived(qc);
+
+    reset_evidence_payload_encode_count();
+    let res = compute_evidence_lock_binding(&[9u8; 32], 5, &bad, &ctx.authority_context_ref, &ctx);
+    assert!(
+        matches!(res, Err(SafetyStoreError::DeclaredBoundExceeded(_))),
+        "binding helper must refuse over-bound evidence via admission, got {res:?}"
+    );
+    assert_eq!(
+        evidence_payload_encode_count(),
+        0,
+        "binding helper must refuse BEFORE allocating/encoding the cert scratch"
+    );
+
+    // Positive control: valid evidence is admitted and DOES reach the encode.
+    let good = SupportingEvidence::QcDerived(valid_wire_qc(&ctx, [9u8; 32], 5));
+    reset_evidence_payload_encode_count();
+    assert!(
+        compute_evidence_lock_binding(&[9u8; 32], 5, &good, &ctx.authority_context_ref, &ctx)
+            .is_ok()
+    );
+    assert!(
+        evidence_payload_encode_count() >= 1,
+        "a valid binding computation must exercise the cert-scratch encode path"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// §3.2 — backend reads enforce the applicable record-size bound on the
+// backend-internal (borrowed) view BEFORE any component-owned copy. An
+// over-bound stored payload is refused with `Oversize`, never copied out whole.
+// ---------------------------------------------------------------------------
+#[test]
+fn corr_backend_read_bounds_before_component_copy() {
+    let dir = tempfile::tempdir().unwrap();
+    let ctx = ctx_n(4);
+    let backend = open_enabled(dir.path());
+    let rec_max = max_safety_record_bytes(&ctx).unwrap();
+
+    // Plant an over-bound (max + 1) record payload under a valid CRC envelope.
+    let oversize = vec![0u8; rec_max as usize + 1];
+    backend.debug_overwrite_record(&oversize).unwrap();
+    match backend.read_record(rec_max) {
+        Err(SafetyStoreError::Oversize { len, max }) => {
+            assert_eq!(len, rec_max + 1);
+            assert_eq!(max, rec_max);
+        }
+        other => panic!("expected Oversize refusal before copy, got {other:?}"),
+    }
+
+    // A within-bound payload is still returned (bound is a ceiling, not equality).
+    let within = vec![7u8; rec_max as usize];
+    backend.debug_overwrite_record(&within).unwrap();
+    assert_eq!(backend.read_record(rec_max).unwrap(), Some(within));
+
+    // The metadata read enforces its own (fixed) bound the same way.
+    backend
+        .debug_put_raw(b"safetyrec:meta:v1", &[0u8; 4 + 64])
+        .unwrap();
+    assert!(matches!(
+        backend.read_meta(42),
+        Err(SafetyStoreError::Oversize { .. })
+    ));
+}
+
+// ---------------------------------------------------------------------------
+// §3.3 — bounded namespace classification reports only the offending key's
+// LENGTH (no key/value bytes copied into an application-owned buffer), even when
+// the planted value is large; O1 still refuses over it without repair.
+// ---------------------------------------------------------------------------
+#[test]
+fn corr_namespace_classification_reports_length_without_value_copy() {
+    let dir = tempfile::tempdir().unwrap();
+    let ctx = ctx_n(4);
+    let backend = open_enabled(dir.path());
+    let unknown_key: &[u8] = b"safetyrec:legacy:v0";
+    // A deliberately large value: classification must NOT materialize it.
+    backend
+        .debug_put_raw(unknown_key, &vec![0xEEu8; 1 << 16])
+        .unwrap();
+    assert_eq!(
+        backend.first_unrecognized_safety_key().unwrap(),
+        Some(unknown_key.len()),
+        "classification reports the offending key length only"
+    );
+    let owner = SafetyRecordOwner::attach(backend.clone(), ctx.clone()).unwrap();
+    assert!(matches!(
+        owner.initialize(true),
+        Err(SafetyStoreError::StructuralRefusal(_))
+    ));
+    // Still present: nothing repaired/deleted/migrated.
+    assert_eq!(
+        backend.first_unrecognized_safety_key().unwrap(),
+        Some(unknown_key.len())
+    );
+}
+
 // differ in its SIGNER LIST from tc.high_qc (TA2 compares view+block_id only),
 // while the record-level high_qc must remain byte-identical to tc.high_qc (TA1).
 // ---------------------------------------------------------------------------
@@ -1399,9 +1595,14 @@ fn corr_tc_ta2_permits_signer_diff_ta1_requires_exact_copy() {
             high_qc: rec_high,
             tc,
         };
-        let binding =
-            compute_evidence_lock_binding(&block, lock_view, &evidence, &ctx.authority_context_ref)
-                .unwrap();
+        let binding = compute_evidence_lock_binding(
+            &block,
+            lock_view,
+            &evidence,
+            &ctx.authority_context_ref,
+            &ctx,
+        )
+        .unwrap();
         let l = LockedRecord {
             lock_block_id: block,
             lock_view,

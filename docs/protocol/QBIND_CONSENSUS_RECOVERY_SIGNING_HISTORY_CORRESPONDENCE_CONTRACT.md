@@ -1617,6 +1617,44 @@ D7D14_STORAGE_COMPONENT=PARTIAL-IMPLEMENTATION
 D7D14_STORAGE_ACCEPTANCE=INCOMPLETE
 ```
 
+**Correction (Run 422 D7-D14 — complete allocation admission at the binding /
+backend-read / namespace boundaries, reviewed object
+`92d95e4c6448e592b1eca6714bbd288aa825f127`; supersedes the broad "every dependent
+allocation/copy" phrasing of the immediately following entry).** The prior entry
+claimed structural admission was "moved ahead of **every** dependent component-owned
+variable-size allocation/copy." That phrasing was an **overclaim**: three
+component-owned allocation/copy paths still ran before any bound. This pass closes
+them (with regressions) and does **not** weaken any obligation: **(a)** the public
+`compute_evidence_lock_binding` helper is now a **context-checking entry point** — it
+runs the single `admit_supporting_evidence` path **before** allocating/encoding the
+evidence `cert` scratch, so a direct caller can no longer bypass admission (the
+thread-local evidence-encode counter is **0** on an over-bound refusal, **≥ 1** on a
+valid call); **(b)** backend `read_checksummed` now reads through `db.get_pinned` — a
+borrowed, backend-internal view — and enforces the applicable record-size bound
+(record: `MAX_SAFETY_RECORD_BYTES`; metadata: the fixed `2+32+8` bound) on that view
+**before** taking the single component-owned copy, refusing an over-bound payload with
+`Oversize`; **(c)** `first_unrecognized_safety_key` now scans with a raw iterator that
+reads only **borrowed keys** (never materializing values) and returns only the
+offending key's **byte length**, so namespace classification copies **zero**
+application-owned key/value bytes while remaining bounded by work (`MAX_SCAN = 64`) and
+by application-owned bytes. The evidence-encode instrumentation comment now states its
+exact, single measurement scope. Admission now precedes these specific
+component-owned variable-size allocations/copies; this is **not** a claim that the full
+**operational** peak is enforced through the real O1–O5 objects (that remains blocker
+(1) below). **Still outstanding (plural blockers):** (1) §13.7A operational
+allocation-admission wiring into the real O1–O5 objects/lifetimes with measured
+peak/lifetime enforcement and the complete retained-field inventory; (2) §7
+deterministic crash coverage (uncertain-init, pre-effectiveness publish, failed/
+uncertain O5, complete-content divergence, locked-with-no-commit) with hooks at the
+actual boundaries; (3) full §6 original-H-matrix mapping corrections (H12 competing
+handles, H21 reuse of `h8_p1_p2_binding_enforced`, H26 real-storage adversarial TC,
+H3/H10 crediting/removals); and (4) the independent CodeQL / Code Review security gate.
+The default release node build (exit 0) and the production non-wiring audit are
+captured this pass; a release build establishes build compatibility, **not**
+running-node recovery acceptance. The operative component status therefore **remains**
+`D7D14_STORAGE_COMPONENT=PARTIAL-IMPLEMENTATION` /
+`D7D14_STORAGE_ACCEPTANCE=INCOMPLETE`.
+
 **Correction (Run 422 D7-D14 — admission-before-allocation / backend-bound
 recovery tokens pass, supersedes the "named blocker" framing of the prior D7-D14
 entry below).** This pass implements a further part of the accepted subset and does
