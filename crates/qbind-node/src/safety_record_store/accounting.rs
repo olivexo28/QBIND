@@ -102,6 +102,18 @@ impl AllocationAccountant {
         })
     }
 
+    /// Build an accountant with a directly-supplied aggregate ceiling. Used by
+    /// the dedicated **context-ownership** accountant (§ 13.7B), whose ceiling is
+    /// the bounded multiplicity of the per-owner context charge rather than the
+    /// operational § 13.7A generation/record sum.
+    pub fn with_cap(cap: u128) -> Self {
+        AllocationAccountant {
+            cap,
+            current: 0,
+            peak: 0,
+        }
+    }
+
     /// The configured aggregate ceiling.
     pub fn cap(&self) -> u128 {
         self.cap
@@ -194,6 +206,31 @@ impl SharedAccountant {
                         "shared accountant already bound to cap {} (attempted {})",
                         existing.cap(),
                         acct.cap()
+                    )));
+                }
+                Ok(())
+            }
+        }
+    }
+
+    /// Establish (once) a **directly-supplied** aggregate ceiling, used by the
+    /// dedicated context-ownership accountant (§ 13.7B) whose ceiling is the
+    /// bounded multiplicity of the per-owner context charge. A second bind with
+    /// the identical ceiling is a no-op; a divergent ceiling is refused (a
+    /// foreign-profile handle can never widen the shared context budget).
+    pub fn bind_cap(&self, cap: u128) -> Result<(), SafetyStoreError> {
+        let mut g = self.lock();
+        match g.as_ref() {
+            None => {
+                *g = Some(AllocationAccountant::with_cap(cap));
+                Ok(())
+            }
+            Some(existing) => {
+                if existing.cap() != cap {
+                    return Err(SafetyStoreError::CapacityRefusal(format!(
+                        "shared context accountant already bound to cap {} (attempted {})",
+                        existing.cap(),
+                        cap
                     )));
                 }
                 Ok(())

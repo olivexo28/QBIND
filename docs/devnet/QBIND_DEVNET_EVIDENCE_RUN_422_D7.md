@@ -14912,3 +14912,177 @@ pass: `crates/qbind-node/src/safety_record_store/backend.rs`,
 `crates/qbind-node/src/safety_record_store/owner.rs`,
 `crates/qbind-node/tests/run_422_d7d14_safety_record_store_tests.rs`,
 `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_422_D7.md`, and `docs/whitepaper/contradiction.md`.
+## RUN 422 D7-D14 — Accounted context ownership and strengthened post-acknowledgement crash termination (code + test + docs)
+
+This section is the **operative** Run 422 D7-D14 statement for the §3 context-ownership and §7
+`pd_ack_then_abort` items and **supersedes** the immediately preceding sections **only** for those
+items. Every prior D7-D14 section above is **preserved verbatim as historical evidence** and is **not**
+deleted. It also **withdraws** the earlier `final revision` section's promotion to
+`IMPLEMENTED-ISOLATED` / `PASS-ACCEPTED-SUBSET` and its full-operational-accounting / measured-memory /
+row-by-row-H-subset claims as unsupported (their text is preserved historically); the operative verdict
+is and stays `PARTIAL-IMPLEMENTATION` / `INCOMPLETE`.
+
+### 1. Baseline and reviewed-object correspondence
+
+- Actual working branch (as supplied): `copilot/copilotcopilotcopilotcopilotcopilotcopilotcopilotr-again`.
+  The task's reported branch (`copilot/copilotcopilotcopilotcopilotcopilotcopilotrun-422-another-one`)
+  differs; per instruction the **actual supplied branch** was used and **not** switched.
+- Starting HEAD: `04a78e0d8d6c7c138b509fbb9a60a33a9434920d`. Worktree clean at start.
+- Reviewed object `8b4a87239cffb87fa119b3d12dd415ea11bb4d4f` was fetched (`git cat-file -t` -> `commit`).
+  It is **not** an ancestor of the starting HEAD; it is a **sibling** sharing merge-base
+  `fba7ab7c525918a72b77b0f931ca760deafb497d`. The reviewed object's tree
+  (`8b4a8723^{tree}` = `0f3b60f084607671881492d3578e99c07f9fdb37f`) is **byte-identical** to the starting
+  HEAD's tree (`HEAD^{tree}` = `0f3b60f084607671881492d3578e99c07f9fdb37f`); `git diff 8b4a8723 HEAD` is
+  **empty** — exact blob identity of every tracked file (not a whitespace-ignoring diff).
+- Correspondence scope stated precisely: **repository tree equality establishes repository
+  correspondence; it does not by itself establish attachment byte identity.** With that caveat, all
+  **three** attachments reviewed for `8b4a8723` — this evidence document, `docs/whitepaper/contradiction.md`,
+  and the correspondence contract `docs/protocol/QBIND_CONSENSUS_RECOVERY_SIGNING_HISTORY_CORRESPONDENCE_CONTRACT.md`
+  — match their repository blobs at the starting HEAD.
+- Provenance corrections to the prior (`e6c2dc11`) section: its §1 recorded the two reviewed attachments
+  as "this evidence document and `docs/whitepaper/contradiction.md`"; the two attachments reviewed for
+  `e6c2dc11` were in fact the **evidence document and the correspondence contract**. That section's
+  changed-path list also **omitted the correspondence contract**; reconciled here against the actual
+  diff of that pass.
+- Unrelated work preserved: edits are confined to the authorized component
+  (`safety_record_store/accounting.rs`, `backend.rs`, `owner.rs`, `profile.rs`), its test file, and the
+  authorized documents.
+
+### 2. Finding -> implementation correction -> regression (task §3, accounted context ownership)
+
+**Finding.** At the reviewed revision `attach()` created a fresh `Arc<PinnedSafetyContext>` on each
+independent attachment and `SharedAccountant::bind()` only established the budget ceiling — no ownership
+of the retained context allocation was charged, so independent attachments and clones carried uncharged
+context memory.
+
+**Correction.** Each `SafetyBackend` now owns a dedicated `SharedAccountant context_accounting`
+(separate from the operational `accounting` pool so existing operational measurements are unperturbed).
+`attach()` binds the per-context ceiling (`SharedAccountant::bind_cap`) and reserves the **actual**
+context-ownership charge **before** constructing the shared owner:
+
+- `profile.rs` adds `size_of_validator_entry()`, `size_of_pinned_context()`,
+  `context_ownership_charge(ctx)` (= context struct + `validators.capacity()`·entry + `ARC_CTRL`
+  shared-allocation overhead), `context_owner_ceiling_term(ctx)` (the per-owner ceiling term, normalized
+  by `N + CAPNORM_SLACK` so it is stable across same-profile contexts), `max_context_ownership_bytes(ctx)`
+  (= `MAX_CONCURRENT_CONTEXT_OWNERS · term`), and `MAX_CONCURRENT_CONTEXT_OWNERS = 4`.
+- `owner.rs` introduces `struct OwnedContext { ctx: PinnedSafetyContext, _context_reservation: Reservation }`
+  and changes `SafetyRecordOwner.ctx` to `Arc<OwnedContext>`. `attach()` refuses an over-capacity context
+  vector (`CapacityRefusal`) when the actual charge exceeds the normalized term, reserves the charge, then
+  moves the `Reservation` into the `Arc<OwnedContext>` so the charge lives exactly as long as the owner.
+- A clone of one owner shares the **single** `Arc<OwnedContext>` (and its one `Reservation`); the charge
+  releases only on last-clone drop. Independent `attach()` calls create **distinct** `Arc<OwnedContext>`
+  values charged **distinctly**; `MAX_CONCURRENT_CONTEXT_OWNERS = 4` bounds concurrent independent owners,
+  and the 5th concurrent independent attach is `CapacityRefusal`.
+
+**Regressions** (`ctxacct_*`):
+
+- `ctxacct_clone_shares_one_context_charge` — a clone does not increase `context_accounting_current()`
+  (shared charge), and the charge persists while any clone lives.
+- `ctxacct_independent_attach_charges_distinctly_and_releases` — two independent attachments to the same
+  backend each add a distinct charge; dropping one releases exactly its charge; final drop returns the
+  pool to zero.
+- `ctxacct_independent_attach_multiplicity_is_bounded` — a 5th concurrent independent attach is
+  `CapacityRefusal`; releasing one owner readmits a new one.
+
+Pointer equality alone is **not** treated as accounting: the sharing regressions assert the **charge
+counter**, not merely `Arc` pointer identity.
+
+### 3. Operational allocation inventory (context-ownership tranche; honest scope)
+
+Format: `object/allocation | operation+phase | owner | admitted bound | actual capacity/layout | coexistence | lifetime/release`.
+
+- `PinnedSafetyContext` struct + `validators` backing + `Arc` control block | `attach` (handle creation) | `Arc<OwnedContext>` holding a `Reservation` in `context_accounting` | `context_owner_ceiling_term(ctx)` per owner, `MAX_CONCURRENT_CONTEXT_OWNERS=4` aggregate | `size_of::<PinnedSafetyContext>()` + `validators.capacity()`·`size_of_validator_entry()` + `ARC_CTRL` | shared by all clones of one owner; up to 4 independent owners coexist | reserved **before** `Arc` creation; released on last-clone drop, on `attach` refusal, and on final drop.
+
+**Scope stated honestly (not overclaimed):** this pass charges and bounds **context ownership** only.
+The operational O1–O5 object/allocation inventory (retained input, decoded data, re-encode/binding
+scratch, candidate/validation clones, read-back and publication envelopes, nested QC/TC backings) is
+**still enforced by the pre-existing standalone/synthetic accountant and the synthetic
+`RetainedGeneration` layout proof**; wiring those reservations from the real O1–O5 objects/lifetimes and
+making the layout/capacity proof measure the operational `ValidatedRecord`/`DecodedRecord` remain
+**open blockers** (task §4/§5/§6). `AllocationAccountant::current()`/`peak()` sum admitted charges and do
+not independently measure memory; no process-RSS bound is claimed.
+
+### 4. Finding -> implementation correction -> regression (task §7, strengthened `pd_ack_then_abort`)
+
+**Finding.** `pd_ack_then_abort_survives_locked` accepted any `!status.success()`; an unrelated panic
+after publication could satisfy it while leaving the expected bytes behind.
+
+**Correction.** The child, after driving a real O1+O4 and reaching the post-acknowledgement/
+post-effectiveness phase (asserting `!recovery_required()`), writes a phase-reached sentinel to a
+**sibling** path **outside** the RocksDB directory, then calls `std::process::abort()`. The parent now
+requires **both** the sentinel's presence **and** `SIGABRT` (signal 6) on unix. Because the workspace
+uses `panic=unwind` (no `panic=abort` profile), a harness/assertion panic exits 101 — distinct from
+`SIGABRT` — so setup failures, assertion panics, and unexpected exits are **rejected**; a missing
+sentinel also fails the case. The surviving-bytes and fresh-O3/O5-recovery checks are retained, and the
+uncertain-O1 / failed-and-uncertain-O5 live-state checks are unchanged.
+
+### 5. Validation (literal commands and outcomes)
+
+- `cargo build -p qbind-node --lib` (default features) -> **Finished `dev`, exit 0** (context-accounting
+  methods are crate-internal / test-only where applicable; compiles clean).
+- `cargo test -p qbind-node --test run_422_d7d14_safety_record_store_tests --no-run` (default features)
+  -> **error: target … requires the features: `test-utils`** — expected **gating** behaviour for the
+  `required-features` target, reported **separately** from the successful default-feature library build.
+- `cargo test -p qbind-node --features test-utils --test run_422_d7d14_safety_record_store_tests` ->
+  **65 passed, 0 failed, 1 ignored** (`child_process_entry`, spawned out-of-band). Delta vs the prior 62:
+  the three `ctxacct_*` context-ownership regressions. Crash-topology (corrected): **10** `pd_*` parent
+  tests and **10** child launches using **nine** distinct phase labels (`ack_locked_clean_exit` is reused
+  by `pd_reopen_after_clean_exit_requires_o5_before_o4` and `pd_duplicate_o1_after_surviving_init_refused`);
+  the earlier "9 `pd_*` parents" figure is corrected. This pass adds no `pd_*` parent, so the final counts
+  are 10 parents / 10 launches / 9 labels.
+- `cargo clippy -p qbind-node --lib --features test-utils` -> **exit 0**, **no** `safety_record_store`
+  warnings.
+- `cargo build -p qbind-node --release --bin qbind-node` -> **Finished `release`, exit 0** (compile/
+  isolation compatibility only, **not** running-node recovery acceptance, configured-authority evidence,
+  or anti-rollback). The release exit-0 evidence already recorded above (this document, the prior
+  final-revision section) is preserved, not reported as missing.
+- Formatting: `rustfmt --edition 2021 --check` on the edited files shows diffs **only** in pre-existing
+  EOF / wide-line regions (the crate is not rustfmt-clean at baseline); `owner.rs` was reduced **below**
+  its baseline diff count by a surgical local cleanup. **Not** claimed as a clean rustfmt run; no new
+  divergence introduced in the inserted regions.
+- Production non-wiring audit: `grep -rn` over `crates/qbind-node/src` outside the component finds only
+  `pub mod safety_record_store;` (+ one comment) in `lib.rs`. `context_accounting`, `bind_cap`,
+  `with_cap`, and the context-ownership helpers have **no** reference outside the component. No production
+  startup / consensus / decision / signing reference.
+- Secret scan over the edited files: **no secrets detected**.
+- Independent review model / CodeQL security scan: the required independent-review / CodeQL security gate
+  remains **OPEN** at this revision (a skipped CodeQL is **not** zero alerts; an unavailable review model
+  is **not** a passing review).
+
+### 6. Operative verdicts (unchanged — not promoted) and remaining blockers
+
+```
+D7D14_STORAGE_COMPONENT=PARTIAL-IMPLEMENTATION
+D7D14_STORAGE_ACCEPTANCE=INCOMPLETE
+DURABLE_ANTI_ROLLBACK=NOT-ESTABLISHED
+GENESIS_AUTHORITY_ACTIVATION=DISABLED
+PRODUCTION_WIRE_CHAIN_ID_BEHAVIOR=UNCHANGED
+CONFIGURED_AUTHORITY_RELEASE_BINARY_EVIDENCE=NOT-YET-CAPTURED
+SECURITY_POSTURE=RS1-OPEN / PUBLIC-DEVNET-NO-GO
+```
+
+C4/C5 remain **OPEN**; fail-closed `CurrentEpochUnavailable` is unchanged; QBIND naming and all
+cryptographic domain-separation bytes are unchanged. This pass discharges the §3 context-ownership item
+and the §7 `pd_ack_then_abort` weakness. The following blockers remain **open** and prevent acceptance
+promotion:
+
+1. §4/§6 operational O1–O5 reservation coverage driven from the real traced allocations/owners/
+   capacities/lifetimes (the operational accountant is still standalone/synthetic; this pass's context
+   accounting is a separate dedicated pool).
+2. §5 make the compile-time layout/capacity proof measure the operational `ValidatedRecord`/
+   `DecodedRecord` rather than the synthetic `RetainedGeneration`.
+3. §4/§6 check actual object capacities (not counter-sum tautologies) and bound validation scratch by
+   simultaneous lifetime.
+4. §8 H18/H22 (type/consumer-boundary PARTIAL), H19 (process-death recovery with a fresh backend-bound
+   O3 over complete-content divergence outside the binding), H24 (malformed committed-anchor presence/
+   payload), H26 (`tc.signed_timeouts[i].high_qc` adversarial signer bounds through real operations).
+5. Independent-review / CodeQL security gate is **unexecuted** and remains a required open gate.
+
+No production integration, engine/decision/signing integration, verifier wiring, anti-rollback
+establishment, activation, D15, Run 423, or project rename is performed or claimed. Changed paths this
+pass: `crates/qbind-node/src/safety_record_store/accounting.rs`,
+`crates/qbind-node/src/safety_record_store/backend.rs`,
+`crates/qbind-node/src/safety_record_store/owner.rs`,
+`crates/qbind-node/src/safety_record_store/profile.rs`,
+`crates/qbind-node/tests/run_422_d7d14_safety_record_store_tests.rs`,
+`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_422_D7.md`, and `docs/whitepaper/contradiction.md`.

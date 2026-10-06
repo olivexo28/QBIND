@@ -1225,6 +1225,124 @@ fn corr_owner_clone_shares_one_context_allocation() {
     );
 }
 
+// ---------------------------------------------------------------------------
+// Operational context-ownership accounting (§ 13.7B)
+//
+// `attach()` now charges each *distinct* retained pinned-context allocation
+// against the backend's dedicated context-ownership accountant, BEFORE the
+// `Arc<OwnedContext>` retains it. Cloning an owner shares the single Arc-held
+// context (one charge); each independent `attach()` takes its own charge;
+// exhausting the bounded multiplicity refuses a further attachment; and the
+// charge is released only when the last clone drops. These regressions observe
+// the real shared context accountant, not a mock.
+// ---------------------------------------------------------------------------
+#[test]
+fn ctxacct_clone_shares_one_context_charge() {
+    use qbind_node::safety_record_store::profile::context_ownership_charge;
+    let dir = tempfile::tempdir().unwrap();
+    let ctx = ctx_n(4);
+    let backend = open_enabled(dir.path());
+    let per_owner = context_ownership_charge(&ctx).unwrap();
+
+    let owner = SafetyRecordOwner::attach(backend.clone(), ctx.clone()).unwrap();
+    // One distinct attachment holds exactly one context charge.
+    assert_eq!(
+        backend.context_accounting_current(),
+        per_owner,
+        "a single attachment charges one context allocation"
+    );
+
+    // Cloning the owner shares the one Arc-held context: NO additional charge.
+    let clone1 = owner.clone();
+    let clones: Vec<SafetyRecordOwner> = (0..8).map(|_| owner.clone()).collect();
+    assert_eq!(
+        backend.context_accounting_current(),
+        per_owner,
+        "clones share the single context charge (no per-handle copy charged)"
+    );
+    assert!(backend.context_accounting_current() <= backend.context_accounting_cap().unwrap());
+
+    // Dropping clones while any clone survives keeps the charge live.
+    drop(clones);
+    drop(clone1);
+    assert_eq!(
+        backend.context_accounting_current(),
+        per_owner,
+        "charge stays live while the original owner clone survives"
+    );
+
+    // Dropping the LAST clone releases the single context charge.
+    drop(owner);
+    assert_eq!(
+        backend.context_accounting_current(),
+        0,
+        "the context charge releases only when the last clone drops"
+    );
+}
+
+#[test]
+fn ctxacct_independent_attach_charges_distinctly_and_releases() {
+    use qbind_node::safety_record_store::profile::context_ownership_charge;
+    let dir = tempfile::tempdir().unwrap();
+    let ctx = ctx_n(4);
+    let backend = open_enabled(dir.path());
+    let per_owner = context_ownership_charge(&ctx).unwrap();
+
+    // Two genuinely INDEPENDENT attachments (not clones) to the same backend are
+    // distinct retained context allocations: each takes its own charge.
+    let a = SafetyRecordOwner::attach(backend.clone(), ctx.clone()).unwrap();
+    assert_eq!(backend.context_accounting_current(), per_owner);
+    let b = SafetyRecordOwner::attach(backend.clone(), ctx.clone()).unwrap();
+    assert_eq!(
+        backend.context_accounting_current(),
+        per_owner * 2,
+        "independent attachments charge distinctly (different allocations)"
+    );
+    // Distinct allocations: different context pointers.
+    assert_ne!(a.context_ptr_for_test(), b.context_ptr_for_test());
+
+    // Dropping one independent owner releases only its own charge.
+    drop(b);
+    assert_eq!(backend.context_accounting_current(), per_owner);
+    drop(a);
+    assert_eq!(backend.context_accounting_current(), 0);
+}
+
+#[test]
+fn ctxacct_independent_attach_multiplicity_is_bounded() {
+    use qbind_node::safety_record_store::profile::MAX_CONCURRENT_CONTEXT_OWNERS;
+    let dir = tempfile::tempdir().unwrap();
+    let ctx = ctx_n(4);
+    let backend = open_enabled(dir.path());
+    let cap = MAX_CONCURRENT_CONTEXT_OWNERS as usize;
+
+    // Exactly MAX_CONCURRENT_CONTEXT_OWNERS independent attachments fit.
+    let mut owners = Vec::new();
+    for _ in 0..cap {
+        owners.push(SafetyRecordOwner::attach(backend.clone(), ctx.clone()).expect("within bound"));
+    }
+    assert_eq!(
+        backend.context_accounting_current(),
+        backend.context_accounting_cap().unwrap(),
+        "the bounded multiplicity exactly fills the context ceiling"
+    );
+
+    // A further INDEPENDENT attachment past the bound is refused for capacity —
+    // it is not permitted to mint an unaccounted context copy.
+    match SafetyRecordOwner::attach(backend.clone(), ctx.clone()) {
+        Err(SafetyStoreError::CapacityRefusal(_)) => {}
+        other => panic!("expected CapacityRefusal past the context-owner bound, got {other:?}"),
+    }
+
+    // Releasing one attachment readmits a fresh independent attachment.
+    owners.pop();
+    let _readmitted =
+        SafetyRecordOwner::attach(backend.clone(), ctx.clone()).expect("readmit after release");
+
+    // Clones never count against the bound even while it is otherwise full.
+    let _clone = owners[0].clone();
+    assert!(backend.context_accounting_current() <= backend.context_accounting_cap().unwrap());
+}
 
 #[test]
 fn corr_reopen_established_store_blocks_o4_until_o5() {
@@ -2265,6 +2383,10 @@ use std::process::Command;
 
 const ENV_DIR: &str = "QBIND_D7D14_DIR";
 const ENV_PHASE: &str = "QBIND_D7D14_PHASE";
+/// Path at which a child writes a sentinel proving it reached the intended
+/// post-acknowledgement / post-effectiveness phase *before* aborting. Kept
+/// OUTSIDE the RocksDB directory so it never perturbs the parent's reopen.
+const ENV_MARKER: &str = "QBIND_D7D14_MARKER";
 
 #[test]
 #[ignore = "child-process entrypoint; spawned by the process-death parent tests"]
@@ -2309,9 +2431,25 @@ fn child_process_entry() {
             assert!(matches!(r, PublishResult::DurableAcknowledged { .. }));
             // `publish_locked` has already returned, so the in-memory
             // effectiveness transition (`mark_effective`) ALSO already ran in this
-            // process. Abort now without unwinding: this is post-acknowledgement
-            // AND post-effectiveness termination (the surviving bytes are durable;
-            // the in-memory `effective` flag dies with the process regardless).
+            // process: confirm we are genuinely POST-acknowledgement AND
+            // POST-effectiveness before recording phase evidence.
+            assert!(
+                !owner.recovery_required(),
+                "post-ack must be effective"
+            );
+            // Record phase evidence (a sentinel the parent requires) ONLY once the
+            // intended phase is proven reached. A setup failure or an assertion
+            // panic above unwinds the harness and exits WITHOUT writing this
+            // sentinel, so its presence — paired with the abort signal below —
+            // distinguishes the intended crash boundary from any unrelated exit.
+            if let Ok(marker) = std::env::var(ENV_MARKER) {
+                std::fs::write(&marker, b"ack_then_abort reached post-ack/post-effective\n")
+                    .expect("write phase-reached sentinel");
+            }
+            // Abort now without unwinding: this is post-acknowledgement AND
+            // post-effectiveness termination (the surviving bytes are durable; the
+            // in-memory `effective` flag dies with the process regardless). On the
+            // tested platform this raises SIGABRT, a signal the parent verifies.
             std::process::abort();
         }
         "ack_before_effective" => {
@@ -2428,12 +2566,21 @@ fn child_process_entry() {
     }
 }
 
+fn marker_path_for(dir: &std::path::Path) -> std::path::PathBuf {
+    // A sibling of the RocksDB directory (never inside it), so writing the
+    // phase-reached sentinel cannot perturb the parent's reopen of `dir`.
+    let mut s = dir.as_os_str().to_os_string();
+    s.push(".reached");
+    std::path::PathBuf::from(s)
+}
+
 fn spawn_child(dir: &std::path::Path, phase: &str) -> std::process::ExitStatus {
     let exe = std::env::current_exe().expect("current_exe");
     Command::new(exe)
         .args(["--exact", "child_process_entry", "--ignored", "--nocapture"])
         .env(ENV_DIR, dir)
         .env(ENV_PHASE, phase)
+        .env(ENV_MARKER, marker_path_for(dir))
         .status()
         .expect("spawn child")
 }
@@ -2483,10 +2630,43 @@ fn pd_uncertain_after_write_successor_survives() {
 fn pd_ack_then_abort_survives_locked() {
     let dir = tempfile::tempdir().unwrap();
     let status = spawn_child(dir.path(), "ack_then_abort");
+
+    // The child must have reached the intended post-acknowledgement /
+    // post-effectiveness phase AND terminated by the expected abort, NOT by a
+    // setup failure, an assertion panic, or an unexpected clean/other exit:
+    //
+    //   (1) phase evidence — the sentinel is written ONLY after the child proved
+    //       it was post-ack and effective; a harness-caught panic or setup error
+    //       above it exits without writing the sentinel; and
+    //   (2) termination evidence — on this platform `std::process::abort()`
+    //       raises SIGABRT. An assertion panic unwinds to a harness failure exit
+    //       (code 101), never SIGABRT, so requiring the abort signal rejects it.
+    let marker = marker_path_for(dir.path());
+    assert!(
+        marker.exists(),
+        "child must record post-ack/post-effective phase evidence before aborting: {status:?}"
+    );
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::ExitStatusExt;
+        assert_eq!(
+            status.signal(),
+            Some(libc_sigabrt()),
+            "child must terminate via the expected abort signal (SIGABRT), not an \
+             assertion/setup exit: {status:?}"
+        );
+        assert_eq!(
+            status.code(),
+            None,
+            "a signalled abort has no ordinary exit code: {status:?}"
+        );
+    }
+    #[cfg(not(unix))]
     assert!(
         !status.success(),
         "aborted child is not a success: {status:?}"
     );
+
     let ctx = ctx_n(4);
     let owner = SafetyRecordOwner::attach(open_enabled(dir.path()), ctx).unwrap();
     let v = owner
@@ -2500,6 +2680,13 @@ fn pd_ack_then_abort_survives_locked() {
         matches!(res, PublishResult::DurableAcknowledged { .. }),
         "got {res:?}"
     );
+}
+
+/// SIGABRT numeric value on the supported Unix target (avoids a `libc`
+/// dependency for a single well-known constant).
+#[cfg(unix)]
+fn libc_sigabrt() -> i32 {
+    6
 }
 
 /// Boundary (pre-effectiveness): the child drives a real O4 lock publication and
