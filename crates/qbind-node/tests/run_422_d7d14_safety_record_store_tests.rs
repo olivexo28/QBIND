@@ -1184,10 +1184,48 @@ fn corr_uncertain_publish_blocks_dependent_o4_until_o5_recovers() {
 }
 
 // ---------------------------------------------------------------------------
-// Correction pass (§3) — a freshly REOPENED established store carries no
-// inherited acknowledgement: dependent O4 is blocked until a successful O5 (or
-// an acknowledged O1). Reopening must not bypass the restriction.
+// Correction pass (D7-D14 correction, task §4) — cloning an owner handle shares
+// the single immutable pinned context allocation rather than copying its
+// validator vector into a second, unaccounted buffer. The clone escape is
+// closed by holding the context behind an `Arc`: both handles report the same
+// context pointer and the same context digest, and repeated cloning does not
+// mint per-handle context copies.
 // ---------------------------------------------------------------------------
+#[test]
+fn corr_owner_clone_shares_one_context_allocation() {
+    let dir = tempfile::tempdir().unwrap();
+    let ctx = ctx_n(4);
+    let backend = open_enabled(dir.path());
+    let owner = SafetyRecordOwner::attach(backend.clone(), ctx.clone()).unwrap();
+
+    // Cloning the owner shares the single Arc-held context: identical pointer.
+    let owner2 = owner.clone();
+    assert_eq!(
+        owner.context_ptr_for_test(),
+        owner2.context_ptr_for_test(),
+        "owner clone must share one context allocation, not copy the validator vector"
+    );
+
+    // Repeated cloning keeps sharing the same allocation (no per-handle copies).
+    let clones: Vec<SafetyRecordOwner> = (0..8).map(|_| owner.clone()).collect();
+    for c in &clones {
+        assert_eq!(
+            c.context_ptr_for_test(),
+            owner.context_ptr_for_test(),
+            "every clone shares the one context allocation"
+        );
+    }
+
+    // The shared context is still observable and consistent across handles.
+    assert_eq!(owner.context().n(), owner2.context().n());
+    assert_eq!(
+        owner.context().validators,
+        owner2.context().validators,
+        "shared context exposes the same validator set"
+    );
+}
+
+
 #[test]
 fn corr_reopen_established_store_blocks_o4_until_o5() {
     let dir = tempfile::tempdir().unwrap();

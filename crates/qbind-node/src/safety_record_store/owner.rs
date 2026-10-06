@@ -8,6 +8,8 @@
 //! write failure, uncertain publication, acknowledged durable success, and
 //! in-memory effectiveness are returned as distinct outcomes.
 
+use std::sync::Arc;
+
 use sha3::{Digest, Sha3_256};
 
 use super::backend::{PublishOutcome, SafetyBackend};
@@ -88,10 +90,17 @@ pub fn context_digest(ctx: &PinnedSafetyContext) -> [u8; 32] {
 
 /// The owner of a safety-record store: one attached handle to a shared
 /// [`SafetyBackend`] instance plus the pinned context.
+///
+/// The pinned [`PinnedSafetyContext`] (which owns a validator vector) is held
+/// behind an [`Arc`] so that cloning an owner handle shares the single immutable
+/// context allocation rather than copying the validator vector into an
+/// unaccounted second buffer (§ 13.7B). Every clone observes the same backend
+/// serialization domain and the same shared accountant; attaching or cloning a
+/// handle therefore cannot mint an uncharged per-handle context copy.
 #[derive(Debug, Clone)]
 pub struct SafetyRecordOwner {
     backend: SafetyBackend,
-    ctx: PinnedSafetyContext,
+    ctx: Arc<PinnedSafetyContext>,
 }
 
 /// The result of O4/O5 publication, distinguishing every outcome class.
@@ -126,7 +135,10 @@ impl SafetyRecordOwner {
         // uncharged record-sized buffer.
         let validation_scratch = max_safety_record_bytes(&ctx)?;
         backend.accounting().bind(&ctx, validation_scratch)?;
-        Ok(SafetyRecordOwner { backend, ctx })
+        Ok(SafetyRecordOwner {
+            backend,
+            ctx: Arc::new(ctx),
+        })
     }
 
     /// The conservative retained-holder charge for a single O3-minted proof: the
@@ -142,7 +154,7 @@ impl SafetyRecordOwner {
 
     /// The pinned context.
     pub fn context(&self) -> &PinnedSafetyContext {
-        &self.ctx
+        self.ctx.as_ref()
     }
 
     /// Source/test-only: the shared backend handle, so accounting regressions can
@@ -151,6 +163,16 @@ impl SafetyRecordOwner {
     #[cfg(any(test, feature = "test-utils"))]
     pub fn backend_for_test(&self) -> &SafetyBackend {
         &self.backend
+    }
+
+    /// Source/test-only: the identity (allocation address) of this handle's shared
+    /// pinned context. Two owner handles that share the one immutable
+    /// `Arc<PinnedSafetyContext>` return the **same** pointer; a by-value context
+    /// copy (the escape this closes) would return distinct pointers. Used by the
+    /// owner-clone context-sharing regression. Gated behind `test-utils`.
+    #[cfg(any(test, feature = "test-utils"))]
+    pub fn context_ptr_for_test(&self) -> *const PinnedSafetyContext {
+        Arc::as_ptr(&self.ctx)
     }
 
     /// Whether the shared backend is currently in a recovery-required state
