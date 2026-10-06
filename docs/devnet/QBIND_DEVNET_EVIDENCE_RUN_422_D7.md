@@ -14771,3 +14771,144 @@ cryptographic domain-separation bytes are unchanged. Changed paths this pass:
 `crates/qbind-node/src/safety_record_store/owner.rs`,
 `crates/qbind-node/tests/run_422_d7d14_safety_record_store_tests.rs`, and
 `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_422_D7.md`.
+
+## RUN 422 D7-D14 — Implement the deterministic post-acknowledgement / pre-effectiveness crash boundary (code + test + docs)
+
+This section is the **operative** Run 422 D7-D14 statement for the §7 crash-boundary item and
+**supersedes** the immediately preceding correction entry **only** for that item (its remaining-blocker
+#4, "Implement the genuine pre-effectiveness crash hook"). Every prior D7-D14 entry above is
+**preserved verbatim as historical evidence** and is **not** deleted; where a prior statement conflicts
+with this one on the crash-boundary item, **this section governs**. No verdict is promoted: the
+component stays `PARTIAL-IMPLEMENTATION` and acceptance stays `INCOMPLETE`.
+
+### 1. Baseline and reviewed-object correspondence
+
+- Actual working branch (as supplied): `copilot/copilotcopilotcopilotcopilotcopilotcopilotrun-422-another-one`.
+  The task's reported branch (`copilot/copilotcopilotcopilotcopilotcopilotrun-422-d7-d14`) differs; per
+  instruction the **actual supplied branch** was used and **not** switched.
+- Starting HEAD: `fba7ab7c525918a72b77b0f931ca760deafb497d`. Worktree clean at start.
+- Reviewed object `e6c2dc11e8c03a005bfc55626819e38df1f8f514` was fetched
+  (`git fetch --depth=50 origin e6c2dc11…`; `git cat-file -t` -> `commit`). It is **not** an ancestor of
+  the starting HEAD (`git merge-base --is-ancestor` -> not ancestor); it is a **sibling** sharing the
+  parent `4df2f8ac3aa02f38b5d036ef31b09047140b1be6`. The reviewed object's tree
+  (`e6c2dc11^{tree}` = `aac1e06db2c3872526bef91e0c7fa0ef0edbb37f`) is **byte-identical** to the starting
+  HEAD's tree (`HEAD^{tree}` = `aac1e06db2c3872526bef91e0c7fa0ef0edbb37f`); `git diff e6c2dc11 HEAD` is
+  **empty**. This is exact byte identity of every tracked blob (not a whitespace-ignoring diff), so the
+  two attachments reviewed for `e6c2dc11` (this evidence document and `docs/whitepaper/contradiction.md`)
+  correspond **byte-for-byte** to their repository blobs at the starting HEAD; no obsolete
+  attachment-correspondence caveat applies.
+- Unrelated work preserved: edits are confined to the authorized component
+  (`safety_record_store/backend.rs`, `owner.rs`), its test file, and the authorized documents.
+
+### 2. Finding -> implementation correction -> regression (task §7, prior blocker #4)
+
+**Finding.** The prior pass's own §2(4) recorded that `pd_ack_then_abort` terminates **after**
+`publish_locked` returns `DurableAcknowledged`, i.e. **after** the owner already ran `mark_effective`;
+that is post-acknowledgement **and** post-effectiveness termination, not the acknowledged-publication-
+**before**-component-effectiveness boundary the contract (§13.5) requires. The genuine pre-effectiveness
+hook was listed as remaining blocker #4.
+
+**Correction.** A test-only, default/release-**absent** hook now fires at the exact point between the
+durable acknowledgement and the effectiveness transition:
+
+- `backend.rs` carries a `#[cfg(any(test, feature = "test-utils"))]` `pre_effective_hook` slot
+  (`Arc<Mutex<Option<Arc<dyn Fn(&str, u64) + Send + Sync>>>>`, aliased `PreEffectiveHook` /
+  `PreEffectiveHookFn`), plus `set_pre_effective_hook` (test-utils-gated) and the crate-internal
+  `run_pre_effective_hook(op, revision)`. The field, both methods, and the owner call site are **all**
+  behind `cfg(any(test, feature = "test-utils"))`, so a default/release production build contains no
+  field, no method, and no call — confirmed by the default library and release builds below and the
+  non-wiring audit.
+- `owner.rs` `publish_locked` (O4) invokes `self.backend.run_pre_effective_hook("O4", new_revision)` in
+  the `DurableAcknowledged` arm **immediately before** `self.backend.mark_effective()`. The hook receives
+  the operation label and the acknowledged revision so a parent can verify the exact phase reached.
+
+**Regression** (`pd_ack_before_effective_terminates_before_transition`, child phase `ack_before_effective`):
+a child drives a real O1 then a real O4 QC-locked publication; its installed hook asserts
+`op == "O4"` and `rev == 1`, then `std::process::exit(18)` — terminating strictly **before**
+`mark_effective`. Any path that does not reach this exact boundary (panic -> SIGABRT/101; falling through
+without hitting the hook -> exit 118; wrong op/rev -> assertion panic) yields a different status and
+**fails** the parent. The parent then asserts `status.code() == Some(18)`, reopens a fresh backend
+incarnation, and verifies purely from surviving bytes: the acknowledged locked publication survived at
+revision 1; `recovery_required()` is **true** (no inherited effectiveness); dependent O4 is
+`RefusedPreWrite(RecoveryRequired(_))`; and only a fresh O3 + O5 over the surviving bytes re-acknowledges
+(`DurableAcknowledged`) and clears `recovery_required()`. Process termination is **not** power-loss
+testing and this is **component** effectiveness evidence, not engine-installation evidence. The existing
+`pd_ack_then_abort` is **retained** as post-acknowledgement/post-effectiveness evidence with a corrected
+label and comment; the genuine uncertain-O1 and failed/uncertain-O5 live checks are unchanged.
+
+### 3. Validation (literal commands and outcomes)
+
+- `cargo build -p qbind-node` (default features) -> **Finished `dev`, exit 0** (hook absent in default
+  build; compiles clean).
+- `cargo test -p qbind-node --test run_422_d7d14_safety_record_store_tests --no-run` (default features)
+  -> **error: target … requires the features: `test-utils`** — expected **gating** behaviour for the
+  `required-features` target, reported **separately** from the successful default-feature library build;
+  not a compilation failure of the default build.
+- `cargo test -p qbind-node --features test-utils --test run_422_d7d14_safety_record_store_tests` ->
+  **62 passed, 0 failed, 1 ignored** (`child_process_entry`, spawned out-of-band). Delta vs the prior
+  61: the one new `pd_ack_before_effective_terminates_before_transition` parent case. Crash coverage
+  counted through executed parent-coordinated cases: **9** `pd_*` parents
+  (`before_publish`, `uncertain_after_write`, `ack_then_abort`, `ack_before_effective`,
+  `write_error_before_commit`, `ack_locked_clean_exit` ×2, `init_uncertain`, `o5_uncertain`,
+  `o5_write_error`) each spawning the single ignored `child_process_entry`.
+- `cargo clippy -p qbind-node --features test-utils --lib` -> **exit 0**, **no** `safety_record_store`
+  warnings (the one `type_complexity` warning the hook setter initially introduced was removed by adding
+  the `PreEffectiveHookFn` type alias).
+- `cargo clippy -p qbind-node --features test-utils --test run_422_d7d14_safety_record_store_tests` ->
+  the only warnings are **4 pre-existing** `manual_div_ceil` hits in untouched test helpers
+  (lines 58, 59, 802, 1665); no new warning from the added test.
+- `cargo build -p qbind-node --release --bin qbind-node` -> **Finished `release`, exit 0** (see note
+  below). Establishes compile/isolation compatibility only, **not** running-node recovery acceptance,
+  configured-authority evidence, or anti-rollback.
+- Formatting: `rustfmt --edition 2021 --check` on the three edited files shows diffs **only** in
+  pre-existing regions (the uniform CRLF / no-final-newline EOF convention of these files and untouched
+  wide lines), **not** in the inserted regions; the crate is not rustfmt-clean at baseline, so `rustfmt`
+  was **not** run to rewrite tracked files. **Not** claimed as a clean rustfmt run; no new divergence
+  introduced.
+- Production non-wiring audit: `grep -rn` for the component/types/new hook methods over
+  `crates/qbind-node/src` outside the component finds only `pub mod safety_record_store;` and one comment
+  in `lib.rs`. `set_pre_effective_hook` / `run_pre_effective_hook` have **no** reference outside the
+  component; the owner call site is `cfg`-gated. No production startup / consensus / decision / signing
+  reference.
+- Secret scan over the three edited files: **no secrets detected**.
+- Independent review model / CodeQL security scan: the required independent-review / CodeQL security gate
+  remains **OPEN** at this revision (a skipped CodeQL is **not** zero alerts; an unavailable review model
+  is **not** a passing review).
+
+### 4. Operative verdicts (unchanged — not promoted) and remaining blockers
+
+```
+D7D14_STORAGE_COMPONENT=PARTIAL-IMPLEMENTATION
+D7D14_STORAGE_ACCEPTANCE=INCOMPLETE
+DURABLE_ANTI_ROLLBACK=NOT-ESTABLISHED
+GENESIS_AUTHORITY_ACTIVATION=DISABLED
+PRODUCTION_WIRE_CHAIN_ID_BEHAVIOR=UNCHANGED
+CONFIGURED_AUTHORITY_RELEASE_BINARY_EVIDENCE=NOT-YET-CAPTURED
+SECURITY_POSTURE=RS1-OPEN / PUBLIC-DEVNET-NO-GO
+```
+
+C4/C5 remain **OPEN**; fail-closed `CurrentEpochUnavailable` is unchanged; QBIND naming and all
+cryptographic domain-separation bytes are unchanged.
+
+This pass discharges the prior entry's remaining blocker **#4** (the pre-effectiveness crash hook). The
+following blockers from the prior entry remain **open** and prevent acceptance promotion:
+
+1. O1–O5 reservation coverage across the actual allocations enumerated in the prior §2(1), each traced to
+   its real owner/admission/capacity/lifetime/release (task §4/§6).
+2. Make the layout/capacity proof measure the **operational** `ValidatedRecord`/`DecodedRecord` types,
+   not the synthetic `RetainedGeneration`; make `generation_charge` govern operational construction
+   (task §5).
+3. Check **actual object capacities** against admitted charges (not counter-sum tautologies); bound the
+   validation scratch sets/maps and re-encode/binding scratch by simultaneous lifetime (task §4/§6).
+4. H18/H22 (type/consumer-boundary PARTIAL — retain the precise gap), H19 (process-death recovery with a
+   fresh backend-bound O3 capability over divergence outside the binding), H24 (malformed committed-anchor
+   presence/payload), H26 (`tc.signed_timeouts[i].high_qc` adversarial signer bounds through real
+   operations) (task §8).
+5. Independent-review / CodeQL security gate is **unexecuted** and remains a required open gate.
+
+No production integration, engine/decision/signing integration, verifier wiring, anti-rollback
+establishment, activation, D15, Run 423, or project rename is performed or claimed. Changed paths this
+pass: `crates/qbind-node/src/safety_record_store/backend.rs`,
+`crates/qbind-node/src/safety_record_store/owner.rs`,
+`crates/qbind-node/tests/run_422_d7d14_safety_record_store_tests.rs`,
+`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_422_D7.md`, and `docs/whitepaper/contradiction.md`.

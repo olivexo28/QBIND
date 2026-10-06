@@ -3289,6 +3289,18 @@ section.
 > `D7D14_STORAGE_ACCEPTANCE=INCOMPLETE`; see the operative correction section of
 > `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_422_D7.md` for the full withdrawn-claim list and remaining
 > blockers.
+>
+> **CONTINUATION (D7-D14, pre-effectiveness crash boundary).** A subsequent pass implements the
+> deterministic post-acknowledgement / pre-effectiveness crash boundary (§13.5): a test-only,
+> default/release-**absent** hook fires in O4 `publish_locked` **after** the atomic synced publication
+> returns its durability acknowledgement and **before** the owner's `mark_effective` transition, and a
+> child-coordinated regression terminates there and proves the reopened process carries no inherited
+> effectiveness (dependent O4 refused until a fresh O3/O5 recovery). This discharges one prior remaining
+> blocker only; it does **not** promote any verdict — the component stays `PARTIAL-IMPLEMENTATION`,
+> acceptance stays `INCOMPLETE`, the operational-accounting (§13.7/§13.7A/§13.7B through the real
+> objects), operational-layout (`ValidatedRecord`), remaining H-rows (H18/H22/H19/H24/H26), and
+> independent CodeQL / review gate remain **open**. See the latest RUN 422 D7-D14 section of
+> `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_422_D7.md`.
 
 This subsection records that the §13.7 / §13.7A / §13.7B accounting — previously a **defined model**
 exercised only by standalone arithmetic helpers (`AllocationAccountant`, `generation_charge`) — is now

@@ -544,6 +544,15 @@ impl SafetyRecordOwner {
             .publish_atomic(&guard, &new_meta.encode(), &encoded)
         {
             PublishOutcome::DurableAcknowledged => {
+                // Deterministic post-acknowledgement / pre-effectiveness crash
+                // boundary (§ 13.5): the durable acknowledgement has returned, but
+                // the in-memory effectiveness transition has NOT yet happened. A
+                // test-only hook (unavailable in a default/release build) may
+                // identify and terminate at exactly this point, proving that
+                // termination precedes the transition and that a reopen starts
+                // without inherited effectiveness.
+                #[cfg(any(test, feature = "test-utils"))]
+                self.backend.run_pre_effective_hook("O4", new_revision);
                 // An acknowledged O4 durable success keeps the shared state
                 // effective for subsequent eligible transitions.
                 self.backend.mark_effective();

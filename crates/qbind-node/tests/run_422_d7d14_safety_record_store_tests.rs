@@ -2307,9 +2307,33 @@ fn child_process_entry() {
             let locked = make_locked_qc(&ctx, [9u8; 32], 5, qc, None).unwrap();
             let r = owner.publish_locked(locked, 0, None::<&FixtureCommittedHistory>);
             assert!(matches!(r, PublishResult::DurableAcknowledged { .. }));
-            // Simulate a crash AFTER durable acknowledgement but before any
-            // in-memory installation: abort without unwinding.
+            // `publish_locked` has already returned, so the in-memory
+            // effectiveness transition (`mark_effective`) ALSO already ran in this
+            // process. Abort now without unwinding: this is post-acknowledgement
+            // AND post-effectiveness termination (the surviving bytes are durable;
+            // the in-memory `effective` flag dies with the process regardless).
             std::process::abort();
+        }
+        "ack_before_effective" => {
+            owner.initialize(true).expect("O1");
+            let qc = valid_wire_qc(&ctx, [9u8; 32], 5);
+            let locked = make_locked_qc(&ctx, [9u8; 32], 5, qc, None).unwrap();
+            // Install a deterministic hook that fires at the EXACT point after the
+            // atomic synced publication has returned its durability acknowledgement
+            // but BEFORE the component's in-memory effectiveness transition
+            // (`mark_effective`). It verifies the operation + revision reached and
+            // terminates there, so termination strictly precedes the transition.
+            // Any path that fails to reach this exact boundary (panic, wrong phase,
+            // setup failure) yields a different exit status and fails the parent.
+            backend.set_pre_effective_hook(std::sync::Arc::new(|op: &str, rev: u64| {
+                assert_eq!(op, "O4", "pre-effective hook fired for the wrong operation");
+                assert_eq!(rev, 1, "pre-effective hook fired at the wrong revision");
+                std::process::exit(18);
+            }));
+            let _ = owner.publish_locked(locked, 0, None::<&FixtureCommittedHistory>);
+            // Unreachable: the hook exits before `publish_locked` returns. Reaching
+            // here means the boundary was NOT hit — fail with a distinct status.
+            std::process::exit(118);
         }
         "write_error_before_commit" => {
             owner.initialize(true).expect("O1");
@@ -2448,8 +2472,13 @@ fn pd_uncertain_after_write_successor_survives() {
     assert_eq!(v.decoded().publication_revision, 1);
 }
 
-/// Boundary: death AFTER durability acknowledgement but before in-memory
-/// installation → the acknowledged publication survives; O3/O5 proceed.
+/// Boundary (post-effectiveness): the child aborts AFTER `publish_locked` has
+/// returned `DurableAcknowledged`, i.e. AFTER the in-memory effectiveness
+/// transition (`mark_effective`) already ran in that process. This is
+/// post-acknowledgement **and** post-effectiveness evidence: the acknowledged
+/// publication survives and O3/O5 proceed on reopen. The pre-effectiveness
+/// boundary (termination strictly before the transition) is exercised separately
+/// by `pd_ack_before_effective_terminates_before_transition`.
 #[test]
 fn pd_ack_then_abort_survives_locked() {
     let dir = tempfile::tempdir().unwrap();
@@ -2470,6 +2499,69 @@ fn pd_ack_then_abort_survives_locked() {
     assert!(
         matches!(res, PublishResult::DurableAcknowledged { .. }),
         "got {res:?}"
+    );
+}
+
+/// Boundary (pre-effectiveness): the child drives a real O4 lock publication and
+/// a deterministic hook terminates it at the EXACT point after the atomic synced
+/// publication returned its durability acknowledgement but BEFORE the component's
+/// in-memory effectiveness transition (`mark_effective`). This is the missing
+/// deterministic boundary (§ 13.5), distinct from `pd_ack_then_abort` (which
+/// terminates post-effectiveness): the acknowledged bytes survive, the former
+/// process never completed its transition, and the reopened process starts with
+/// NO inherited effectiveness — so dependent O4 is blocked until a fresh O3/O5
+/// recovery re-establishes the permitted state. An exit at any other point
+/// yields a different status and fails this test.
+#[test]
+fn pd_ack_before_effective_terminates_before_transition() {
+    let dir = tempfile::tempdir().unwrap();
+    let status = spawn_child(dir.path(), "ack_before_effective");
+    assert_eq!(
+        status.code(),
+        Some(18),
+        "child must terminate at the post-ack / pre-effective boundary: {status:?}"
+    );
+    let ctx = ctx_n(4);
+    let owner = SafetyRecordOwner::attach(open_enabled(dir.path()), ctx.clone()).unwrap();
+    // The acknowledged lock bytes survived at revision 1 (the durable write
+    // completed before the hook fired).
+    let v = owner
+        .read_validate(None::<&FixtureCommittedHistory>)
+        .unwrap();
+    assert!(v.decoded().is_locked());
+    assert_eq!(v.decoded().publication_revision, 1);
+    // Reopening starts without inherited effectiveness knowledge: dependent O4 is
+    // refused until recovery, proving the pre-effective termination is not masked
+    // as a completed transition.
+    assert!(
+        owner.recovery_required(),
+        "reopen after pre-effective termination must require fresh recovery"
+    );
+    let next_qc = valid_wire_qc(&ctx, [7u8; 32], 9);
+    let next = make_locked_qc(&ctx, [7u8; 32], 9, next_qc, None).unwrap();
+    let blocked = owner.publish_locked(next, 1, None::<&FixtureCommittedHistory>);
+    assert!(
+        matches!(
+            blocked,
+            PublishResult::RefusedPreWrite(SafetyStoreError::RecoveryRequired(_))
+        ),
+        "dependent O4 must be blocked before O5 recovery: got {blocked:?}"
+    );
+    // A fresh O3 + O5 over the surviving publication re-establishes the permitted
+    // effective state; only then is dependent O4 admitted.
+    let tok = owner
+        .read_validate(None::<&FixtureCommittedHistory>)
+        .unwrap();
+    assert!(
+        matches!(
+            owner.reacknowledge(&tok),
+            PublishResult::DurableAcknowledged { .. }
+        ),
+        "fresh O5 recovery over the surviving bytes must re-acknowledge"
+    );
+    assert!(
+        !owner.recovery_required(),
+        "successful O5 recovery must clear the recovery requirement"
     );
 }
 
