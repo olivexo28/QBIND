@@ -130,7 +130,7 @@ impl DecodedRecord {
 /// Unrelated bytes can therefore never acquire validated status through a
 /// semantic-only constructor, and an apparent proof cannot be retargeted at a
 /// foreign-context owner.
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct ValidatedRecord {
     decoded: DecodedRecord,
     evidence_status: EvidenceStatus,
@@ -154,6 +154,18 @@ pub struct ValidatedRecord {
     /// `b != a`) even when context, revision, and bytes are identical, and a
     /// reopened backend (a fresh incarnation) requires a fresh O3.
     recovery_backend_incarnation: Option<u64>,
+    /// The retained-holder allocation reservation (§ 13.7 / § 13.7B), present only
+    /// when this proof was minted by an O3 read against a backend's shared
+    /// accountant. It charges this proof's genuinely application-owned retained
+    /// bytes (the `encoded` buffer plus its decoded generation) against the shared
+    /// aggregate ceiling for the **lifetime of the proof**, releasing on drop.
+    /// Standalone semantic/codec proofs (the public `validate_decoded`) and the
+    /// bootstrap builder carry `None` — they do not retain against any backend
+    /// budget. `ValidatedRecord` is therefore deliberately not `Clone`: a copy
+    /// owns a separate record-sized buffer and must take its own holder
+    /// reservation via [`ValidatedRecord::try_clone`], so repeated cloning cannot
+    /// produce unbounded uncharged holders.
+    holder: Option<super::accounting::Reservation>,
 }
 
 impl ValidatedRecord {
@@ -176,7 +188,42 @@ impl ValidatedRecord {
             // an O3 read on an established backend grants it (see
             // `grant_recovery_capability`).
             recovery_backend_incarnation: None,
+            // Standalone/codec sealing retains against no backend budget.
+            holder: None,
         }
+    }
+
+    /// Embed a pre-taken retained-holder reservation into this proof (§ 13.7 /
+    /// § 13.7B), charging this proof's genuinely application-owned retained bytes
+    /// (the retained `encoded` buffer plus its decoded generation) against the
+    /// shared aggregate accountant for the **lifetime of the proof** (released on
+    /// drop). Crate-internal: reachable only from the O3 read-validate path, which
+    /// takes the reservation **before** the backend copies the stored payload into
+    /// a component-owned buffer.
+    pub(crate) fn with_holder(mut self, reservation: super::accounting::Reservation) -> Self {
+        self.holder = Some(reservation);
+        self
+    }
+
+    /// Duplicate this proof, taking a **separate** holder reservation for the
+    /// copy's own record-sized buffer (§ 13.7B). Fallible by construction: a copy
+    /// is a genuinely distinct retained allocation, so when the shared budget is
+    /// exhausted the duplication is refused rather than silently producing an
+    /// uncharged holder. Unlike a derived `Clone`, this cannot bypass the
+    /// aggregate ceiling.
+    pub fn try_clone(&self) -> Result<Self, super::error::SafetyStoreError> {
+        let holder = match &self.holder {
+            Some(r) => Some(r.try_duplicate()?),
+            None => None,
+        };
+        Ok(ValidatedRecord {
+            decoded: self.decoded.clone(),
+            evidence_status: self.evidence_status,
+            encoded: self.encoded.clone(),
+            origin_context_digest: self.origin_context_digest,
+            recovery_backend_incarnation: self.recovery_backend_incarnation,
+            holder,
+        })
     }
 
     /// Grant this proof the backend-bound O5 **recovery capability**. Crate-

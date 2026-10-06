@@ -3269,3 +3269,41 @@ SECURITY_POSTURE=RS1-OPEN / PUBLIC-DEVNET-NO-GO
 C4/C5 remain OPEN. No production signing enablement, anchor selection, readiness
 promotion, D15 implementation, or Run 423 work is authorized or implied by this
 section.
+
+### 13.7C Operational enforcement wiring (final revision, D7-D14)
+
+This subsection records that the §13.7 / §13.7A / §13.7B accounting — previously a **defined model**
+exercised only by standalone arithmetic helpers (`AllocationAccountant`, `generation_charge`) — is now
+**enforced through the real O1–O5 operations** of the isolated `safety_record_store` component. **No
+bound, ownership requirement, recovery semantic, or evidence level defined above is weakened**; this is
+an implementation note, not a contract change.
+
+- **Shared, cross-handle budget.** A single `SharedAccountant` is owned by each `SafetyBackend`; every
+  attached handle / clone shares it (the inner `Arc` is cloned, never re-created), so attaching another
+  handle cannot open an independent budget that bypasses `MAX_AGGREGATE_RETAINED_BYTES`. The ceiling is
+  **bound** from the pinned context at `attach`; a divergent/foreign-context ceiling is refused.
+- **Reservation precedes allocation.** O1 (bootstrap buffer), O3 (retained holder + validation
+  read-back scratch), O4 (the §13.7B working set `2·gen + 3·rec`), and O5 (stored read-back) each admit
+  their conservative charge **before** the matching allocation/copy, via an RAII reservation that
+  releases on **every** exit (success, refusal, error, uncertainty, drop). A capacity refusal is a
+  **pre-write** refusal that preserves established evidence and admitted holders.
+- **Charged once per ownership scope; distinct live allocations charged separately.** The retained O3
+  proof owns its holder charge for the proof's lifetime; a copy must take a **separate** charge
+  (`try_clone`), so repeated cloning / repeated O3 cannot mint unbounded uncharged holders. The O5
+  complete-content comparison adds **no** uncharged fourth record-sized buffer (the retained operand is
+  charged once by its O3 holder; O5 reserves only the single read-back).
+- **Measured confirmation.** For the reference pinned context (N=4, S_sig=8) the measured values are
+  `rec = 811`, `gen = 1104`, retained-holder `rec+gen = 1915`, O4 working set `2·gen + 3·rec = 4641`,
+  and `MAX_AGGREGATE_RETAINED_BYTES = 7772`; regressions assert the **post-allocation** `current` / peak
+  against the ceiling, confirming the admitted charge (not merely a pre-check). Serialized record size,
+  retained-generation charge, aggregate simultaneous application-owned charge, and process RSS remain
+  distinct statements; backend-internal and allocator exclusions are unchanged and do not exclude
+  component-owned vectors, copies, or retained buffers.
+
+The authoritative row-by-row H-subset mapping, crash-boundary table, and literal validation outcomes for
+this revision are recorded in `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_422_D7.md` (final-revision section).
+Recovered evidence remains **`Unverified`**: durability neither authenticates signatures nor establishes
+anti-rollback. `DURABLE_ANTI_ROLLBACK=NOT-ESTABLISHED`, `GENESIS_AUTHORITY_ACTIVATION=DISABLED`,
+`PRODUCTION_WIRE_CHAIN_ID_BEHAVIOR=UNCHANGED`, and the open C4/C5 / RS1 posture are all unchanged; this
+subsection authorizes no production integration, signing, verifier wiring, anti-rollback, activation,
+D15, or Run 423 work.

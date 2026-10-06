@@ -13,9 +13,10 @@ use sha3::{Digest, Sha3_256};
 use super::backend::{PublishOutcome, SafetyBackend};
 use super::codec::{compute_evidence_lock_binding, decode_record, encode_record};
 use super::error::SafetyStoreError;
-use super::profile::PinnedSafetyContext;
+use super::profile::{max_retained_generation_bytes, max_safety_record_bytes, PinnedSafetyContext};
 use super::record::{
-    DecodedRecord, EvidenceStatus, LockedRecord, SafetyRecord, SupportingEvidence, ValidatedRecord,
+    size_of_timeout_msg, DecodedRecord, EvidenceStatus, LockedRecord, SafetyRecord,
+    SupportingEvidence, ValidatedRecord,
 };
 use super::validate::{validate_decoded, CommittedHistory};
 
@@ -116,12 +117,40 @@ impl SafetyRecordOwner {
         ctx: PinnedSafetyContext,
     ) -> Result<Self, SafetyStoreError> {
         ctx.validate()?;
+        // Bind the shared aggregate accounting ceiling for this store's pinned
+        // context (§ 13.7 / § 13.7B). The first handle establishes it; every
+        // later handle on the same backend shares it and a divergent (foreign)
+        // context ceiling is refused rather than silently widening the budget.
+        // The validation re-encode scratch (one record-sized buffer) is included
+        // in the aggregate so the complete-content comparison does not add an
+        // uncharged record-sized buffer.
+        let validation_scratch = max_safety_record_bytes(&ctx)?;
+        backend.accounting().bind(&ctx, validation_scratch)?;
         Ok(SafetyRecordOwner { backend, ctx })
+    }
+
+    /// The conservative retained-holder charge for a single O3-minted proof: the
+    /// retained record-sized `encoded` buffer plus one decoded-generation bound
+    /// (§ 13.7A / § 13.7B). Charged against the shared aggregate accountant for
+    /// the lifetime of the returned proof.
+    fn retained_holder_charge(&self) -> Result<u128, SafetyStoreError> {
+        let rec = max_safety_record_bytes(&self.ctx)?;
+        let gen = max_retained_generation_bytes(&self.ctx, size_of_timeout_msg())?;
+        rec.checked_add(gen)
+            .ok_or_else(|| SafetyStoreError::ArithmeticOverflow("retained holder charge".into()))
     }
 
     /// The pinned context.
     pub fn context(&self) -> &PinnedSafetyContext {
         &self.ctx
+    }
+
+    /// Source/test-only: the shared backend handle, so accounting regressions can
+    /// observe the real shared accountant (peak / current / cap) this owner's
+    /// operations reserve against. Gated behind `test-utils`.
+    #[cfg(any(test, feature = "test-utils"))]
+    pub fn backend_for_test(&self) -> &SafetyBackend {
+        &self.backend
     }
 
     /// Whether the shared backend is currently in a recovery-required state
@@ -241,7 +270,19 @@ impl SafetyRecordOwner {
                 predecessor_ref: None,
             },
         };
+        // Reserve the bootstrap publication buffer against the shared aggregate
+        // accountant BEFORE encoding it (§ 13.7: reservations precede the
+        // protected allocation). The reservation releases on every exit (success,
+        // refusal, error, uncertainty) via its drop at end of scope.
+        let _pub_res = self
+            .backend
+            .accounting()
+            .reserve(max_safety_record_bytes(&self.ctx)?)?;
         let encoded = encode_record(&decoded, &self.ctx)?;
+        debug_assert!(
+            encoded.capacity() as u128 <= _pub_res.charge(),
+            "O1 bootstrap encoding exceeded its reserved charge"
+        );
         let meta = SafetyMeta {
             meta_format_version: META_FORMAT_VERSION,
             context_digest: context_digest(&self.ctx),
@@ -294,6 +335,20 @@ impl SafetyRecordOwner {
         history: Option<&H>,
     ) -> Result<ValidatedRecord, SafetyStoreError> {
         let _guard = self.backend.lock_domain();
+        // Reserve this proof's retained-holder charge (the retained `encoded`
+        // buffer + its decoded generation) BEFORE `load_established` copies the
+        // stored payload into a component-owned buffer, plus a transient
+        // validation re-encode scratch (§ 13.7: reservations precede the
+        // allocation/copy). The holder reservation is moved into the returned
+        // proof and lives for its lifetime; the scratch releases at O3 return.
+        let holder_res = self
+            .backend
+            .accounting()
+            .reserve(self.retained_holder_charge()?)?;
+        let _scratch_res = self
+            .backend
+            .accounting()
+            .reserve(max_safety_record_bytes(&self.ctx)?)?;
         // Enforce the established-state + pinned-context + revision-consistency
         // prerequisites centrally (do not rely on the caller having invoked
         // `open`). Reject missing/partial, foreign-context, or revision-
@@ -305,7 +360,9 @@ impl SafetyRecordOwner {
         // successful O3 on an established backend mints an O5-usable token — the
         // public `validate_decoded` and the bootstrap builder never do.
         let validated = validate_decoded(decoded, record_bytes, &self.ctx, history)?;
-        Ok(validated.grant_recovery_capability(self.backend.incarnation()))
+        Ok(validated
+            .with_holder(holder_res)
+            .grant_recovery_capability(self.backend.incarnation()))
     }
 
     // -----------------------------------------------------------------------
@@ -335,6 +392,41 @@ impl SafetyRecordOwner {
                 "a fresh durability acknowledgement (O5/O1) is required before O4".into(),
             ));
         }
+
+        // Reserve the O4 working-set peak against the shared aggregate accountant
+        // BEFORE any O4 allocation/copy (§ 13.7 / § 13.7B). It bounds the
+        // simultaneous coexistence of: the validated authoritative predecessor
+        // (one decoded generation) and the admitted candidate (one decoded
+        // generation) — two generations — plus the three record-sized buffers
+        // that peak together across the operation (the predecessor read-back, the
+        // candidate publication buffer, and the validation re-encode scratch).
+        // A capacity refusal here is a pre-write refusal that leaves the
+        // established evidence and any admitted retained holders untouched; the
+        // reservation releases on every exit (refusal, error, uncertainty,
+        // success) via its drop at end of scope.
+        let gen = match max_retained_generation_bytes(&self.ctx, size_of_timeout_msg()) {
+            Ok(v) => v,
+            Err(e) => return PublishResult::RefusedPreWrite(e),
+        };
+        let rec = match max_safety_record_bytes(&self.ctx) {
+            Ok(v) => v,
+            Err(e) => return PublishResult::RefusedPreWrite(e),
+        };
+        let o4_charge = gen
+            .checked_mul(2)
+            .and_then(|g| rec.checked_mul(3).and_then(|r| g.checked_add(r)));
+        let o4_charge = match o4_charge {
+            Some(v) => v,
+            None => {
+                return PublishResult::RefusedPreWrite(SafetyStoreError::ArithmeticOverflow(
+                    "O4 working-set charge".into(),
+                ))
+            }
+        };
+        let _o4_res = match self.backend.accounting().reserve(o4_charge) {
+            Ok(r) => r,
+            Err(e) => return PublishResult::RefusedPreWrite(e),
+        };
 
         // Re-read and establish authoritative state under the ownership boundary:
         // presence, structure, metadata↔record revision consistency, and
@@ -455,6 +547,24 @@ impl SafetyRecordOwner {
     /// original) refuses without overwriting newer state.
     pub fn reacknowledge(&self, retained: &ValidatedRecord) -> PublishResult {
         let guard = self.backend.lock_domain();
+
+        // Reserve the O5 stored read-back buffer against the shared aggregate
+        // accountant BEFORE `load_established` copies the stored payload into a
+        // component-owned buffer (§ 13.7: reservations precede the copy). The
+        // retained operand is already charged by the holder reservation carried
+        // in `retained`, so O5 does not add an uncharged fourth record-sized
+        // buffer; this single read-back reservation plus the pre-charged retained
+        // holder bound the O5 complete-content comparison. Releases on every exit
+        // via drop at end of scope.
+        let _o5_res = match self.backend.accounting().reserve(
+            match max_safety_record_bytes(&self.ctx) {
+                Ok(v) => v,
+                Err(e) => return PublishResult::RefusedPreWrite(e),
+            },
+        ) {
+            Ok(r) => r,
+            Err(e) => return PublishResult::RefusedPreWrite(e),
+        };
 
         // O5 is the recovery operation; it is permitted to run while the shared
         // recovery requirement is set, and a successful fresh acknowledgement is

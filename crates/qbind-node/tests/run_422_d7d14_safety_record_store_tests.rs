@@ -874,6 +874,68 @@ fn h26_both_evidence_variants_and_nested_bounds() {
     assert!((etc.len() as u128) <= max_tc_bytes(&ctx).unwrap());
 }
 
+/// H26 (adversarial, through actual storage operations) — an over-bound nested
+/// record-level high-QC signer list inside a TC-derived publication is refused by
+/// O4's single admission path BEFORE any evidence-binding allocation, and the
+/// established predecessor is left intact. Helper-only refusal and valid
+/// round-trips are not a substitute: this drives the real `publish_locked`.
+#[test]
+fn h26_adversarial_nested_tc_high_qc_signers_refused_through_o4() {
+    use qbind_node::safety_record_store::codec::{
+        evidence_payload_encode_count, reset_evidence_payload_encode_count,
+    };
+    let dir = tempfile::tempdir().unwrap();
+    let ctx = ctx_n(4); // N = 4
+    let owner = init_owner(dir.path(), &ctx);
+
+    // Start from a valid TC-derived record, then inflate the nested record-level
+    // high-QC signer list to N + 1 (boundary-plus-one). The stored binding stays
+    // the original valid digest, so O4 cannot rely on a binding mismatch: its
+    // bound-admission must catch the over-bound nested signer list directly.
+    let mut ltc = valid_tc_record(&ctx, 5, 6);
+    if let SupportingEvidence::TcDerived { high_qc, .. } = &mut ltc.evidence {
+        high_qc.signers = (0..=ctx.n() as u64).map(ValidatorId::new).collect();
+    }
+
+    reset_evidence_payload_encode_count();
+    let res = owner.publish_locked(ltc, 0, None::<&FixtureCommittedHistory>);
+    assert!(
+        matches!(
+            res,
+            PublishResult::RefusedPreWrite(SafetyStoreError::DeclaredBoundExceeded(_))
+        ),
+        "over-bound nested high-QC signer list must be refused pre-write, got {res:?}"
+    );
+    assert_eq!(
+        evidence_payload_encode_count(),
+        0,
+        "O4 must refuse the over-bound nested evidence BEFORE the binding allocation"
+    );
+
+    // The established predecessor (bootstrap rev 0) is untouched.
+    let v = owner
+        .read_validate(None::<&FixtureCommittedHistory>)
+        .unwrap();
+    assert_eq!(v.decoded().publication_revision, 0);
+    assert!(!v.decoded().is_locked());
+
+    // A VALID TC-derived publication of the same shape IS admitted and round-trips
+    // through storage (positive control: the refusal is bound-specific, not a
+    // blanket TC rejection).
+    let good = valid_tc_record(&ctx, 5, 6);
+    assert_eq!(
+        owner.publish_locked(good, 0, None::<&FixtureCommittedHistory>),
+        PublishResult::DurableAcknowledged { new_revision: 1 }
+    );
+    let rv = owner
+        .read_validate(None::<&FixtureCommittedHistory>)
+        .unwrap();
+    assert!(matches!(
+        &rv.decoded().record,
+        SafetyRecord::Locked(l) if matches!(l.evidence, SupportingEvidence::TcDerived { .. })
+    ));
+}
+
 // ---------------------------------------------------------------------------
 // H27 — persistence + handling of an unverified TC-derived restriction
 //       (does NOT prove live safe-vote enforcement) (real-storage)
@@ -1897,6 +1959,257 @@ fn corr_recovery_token_usable_across_shared_handles() {
 }
 
 // ---------------------------------------------------------------------------
+// Operational allocation accounting through real O1–O5 (§ 13.7 / § 13.7B)
+//
+// These regressions observe the SHARED backend accountant that O1/O3/O4/O5 now
+// reserve against (not a synthetic counter): the peak / current / cap exposed by
+// `backend_for_test()` move only because a real operation took a real
+// reservation BEFORE its protected allocation or copy, and release it on every
+// exit (success, refusal, error, uncertainty, drop).
+// ---------------------------------------------------------------------------
+
+#[test]
+fn acct_valid_qc_publish_readback_recover_within_ceiling() {
+    let dir = tempfile::tempdir().unwrap();
+    let ctx = ctx_n(4);
+    let owner = init_owner(dir.path(), &ctx);
+    let backend = owner.backend_for_test();
+    let cap = backend.accounting_cap().expect("ceiling bound at attach");
+
+    // O1 already reserved + released its bootstrap publication buffer: a real
+    // peak was set, and after O1 returns nothing stays charged.
+    assert!(backend.accounting_peak() > 0, "O1 reserves a real buffer");
+    assert!(backend.accounting_peak() <= cap, "O1 peak within ceiling");
+    assert_eq!(backend.accounting_current(), 0, "O1 reservation released");
+
+    // O4 QC publication peaks within the ceiling and fully releases.
+    let qc = valid_wire_qc(&ctx, [9u8; 32], 5);
+    let locked = make_locked_qc(&ctx, [9u8; 32], 5, qc, None).unwrap();
+    assert_eq!(
+        owner.publish_locked(locked, 0, None::<&FixtureCommittedHistory>),
+        PublishResult::DurableAcknowledged { new_revision: 1 }
+    );
+    assert_eq!(backend.accounting_current(), 0, "O4 working set released");
+    assert!(backend.accounting_peak() <= cap, "O4 peak within ceiling");
+
+    // O3 read-back holds a retained holder for the proof's lifetime.
+    let tok = owner
+        .read_validate(None::<&FixtureCommittedHistory>)
+        .unwrap();
+    assert!(
+        backend.accounting_current() > 0,
+        "O3 proof holds a retained holder while live"
+    );
+    assert!(backend.accounting_current() <= cap);
+
+    // O5 recovery over the surviving complete state, within the ceiling. O5
+    // republishes the retained bytes verbatim; the metadata revision is unchanged.
+    assert!(matches!(
+        owner.reacknowledge(&tok),
+        PublishResult::DurableAcknowledged { new_revision: 1 }
+    ));
+    assert!(backend.accounting_peak() <= cap, "O5 peak within ceiling");
+
+    // Dropping the proof releases its retained holder.
+    drop(tok);
+    assert_eq!(
+        backend.accounting_current(),
+        0,
+        "holder released on proof drop"
+    );
+}
+
+#[test]
+fn acct_tc_publication_charges_nested_signers() {
+    let dir = tempfile::tempdir().unwrap();
+    let ctx = ctx_n(4);
+    let owner = init_owner(dir.path(), &ctx);
+    let backend = owner.backend_for_test();
+    let cap = backend.accounting_cap().unwrap();
+
+    // The TC-derived generation (nested logical high-QC signer lists + per-signer
+    // signature buffers) is the larger variant; its O4 working set must still
+    // peak within the admitted ceiling and fully release.
+    let ltc = valid_tc_record(&ctx, 5, 6);
+    assert_eq!(
+        owner.publish_locked(ltc, 0, None::<&FixtureCommittedHistory>),
+        PublishResult::DurableAcknowledged { new_revision: 1 }
+    );
+    let tc_peak = backend.accounting_peak();
+    assert!(tc_peak > 0 && tc_peak <= cap, "TC O4 peak within ceiling");
+    assert_eq!(backend.accounting_current(), 0, "released after O4");
+
+    // The O3 holder for the TC proof stays within the ceiling while live.
+    let tok = owner
+        .read_validate(None::<&FixtureCommittedHistory>)
+        .unwrap();
+    let live = backend.accounting_current();
+    assert!(live > 0 && live <= cap, "TC proof holder within ceiling");
+    drop(tok);
+    assert_eq!(backend.accounting_current(), 0);
+}
+
+#[test]
+fn acct_shared_budget_refusal_preserves_evidence_then_readmits() {
+    let dir = tempfile::tempdir().unwrap();
+    let ctx = ctx_n(4);
+    let owner = init_owner(dir.path(), &ctx);
+
+    // Establish durable evidence (revision 1) first.
+    let qc = valid_wire_qc(&ctx, [9u8; 32], 5);
+    let locked = make_locked_qc(&ctx, [9u8; 32], 5, qc, None).unwrap();
+    assert_eq!(
+        owner.publish_locked(locked, 0, None::<&FixtureCommittedHistory>),
+        PublishResult::DurableAcknowledged { new_revision: 1 }
+    );
+
+    // A SECOND handle on the SAME backend shares the single aggregate budget:
+    // attaching it does not open an independent budget. A standing reservation it
+    // takes consumes the entire shared ceiling.
+    let sibling = owner.clone();
+    let cap = sibling.backend_for_test().accounting_cap().unwrap();
+    let standing = sibling
+        .backend_for_test()
+        .reserve_standing_for_test(cap)
+        .expect("standing reservation up to the ceiling");
+    assert_eq!(sibling.backend_for_test().accounting_current(), cap);
+
+    // A fresh O4 on the first handle is now refused for capacity BEFORE any
+    // write — the shared budget is exhausted — without evicting the established
+    // evidence or releasing the recovery restriction.
+    let qc2 = valid_wire_qc(&ctx, [7u8; 32], 6);
+    let locked2 = make_locked_qc(&ctx, [7u8; 32], 6, qc2, None).unwrap();
+    match owner.publish_locked(locked2, 1, None::<&FixtureCommittedHistory>) {
+        PublishResult::RefusedPreWrite(SafetyStoreError::CapacityRefusal(_)) => {}
+        other => panic!("expected capacity RefusedPreWrite, got {other:?}"),
+    }
+    assert!(!owner.recovery_required(), "capacity refusal is pre-write");
+
+    // Release the shared pressure; the established evidence is intact and a fresh
+    // admission now succeeds against the freed budget.
+    standing.release_now();
+    assert_eq!(owner.backend_for_test().accounting_current(), 0);
+    let readback = owner
+        .read_validate(None::<&FixtureCommittedHistory>)
+        .unwrap();
+    assert_eq!(readback.decoded().publication_revision, 1);
+    drop(readback);
+    let qc3 = valid_wire_qc(&ctx, [7u8; 32], 6);
+    let locked3 = make_locked_qc(&ctx, [7u8; 32], 6, qc3, None).unwrap();
+    assert_eq!(
+        owner.publish_locked(locked3, 1, None::<&FixtureCommittedHistory>),
+        PublishResult::DurableAcknowledged { new_revision: 2 }
+    );
+}
+
+#[test]
+fn acct_retained_holder_multiplicity_is_bounded() {
+    let dir = tempfile::tempdir().unwrap();
+    let ctx = ctx_n(4);
+    let owner = init_owner(dir.path(), &ctx);
+    let qc = valid_wire_qc(&ctx, [9u8; 32], 5);
+    let locked = make_locked_qc(&ctx, [9u8; 32], 5, qc, None).unwrap();
+    owner.publish_locked(locked, 0, None::<&FixtureCommittedHistory>);
+
+    // One real O3 holder.
+    let tok = owner
+        .read_validate(None::<&FixtureCommittedHistory>)
+        .unwrap();
+    let backend = owner.backend_for_test();
+    let cap = backend.accounting_cap().unwrap();
+
+    // Each duplicate owns a genuinely separate record-sized buffer and must take
+    // its own holder reservation; cloning cannot mint unbounded uncharged
+    // holders, so duplication is eventually refused for capacity. The number of
+    // live holders is therefore bounded by the shared ceiling.
+    let mut clones = Vec::new();
+    let mut refused = false;
+    for _ in 0..1024 {
+        match tok.try_clone() {
+            Ok(c) => {
+                assert!(backend.accounting_current() <= cap, "holders stay within cap");
+                clones.push(c);
+            }
+            Err(SafetyStoreError::CapacityRefusal(_)) => {
+                refused = true;
+                break;
+            }
+            Err(e) => panic!("unexpected duplication error: {e:?}"),
+        }
+    }
+    assert!(refused, "retained-holder multiplicity must be bounded");
+    assert!(backend.accounting_current() <= cap);
+
+    // Dropping every holder returns the shared budget to zero.
+    drop(clones);
+    drop(tok);
+    assert_eq!(backend.accounting_current(), 0, "all holders released");
+}
+
+#[test]
+fn acct_cleanup_after_success_refusal_error_uncertainty() {
+    let dir = tempfile::tempdir().unwrap();
+    let ctx = ctx_n(4);
+    let owner = init_owner(dir.path(), &ctx);
+    let backend = owner.backend_for_test();
+
+    // Success: establish revision 1, charge fully released.
+    let qc = valid_wire_qc(&ctx, [9u8; 32], 5);
+    let locked = make_locked_qc(&ctx, [9u8; 32], 5, qc, None).unwrap();
+    assert_eq!(
+        owner.publish_locked(locked, 0, None::<&FixtureCommittedHistory>),
+        PublishResult::DurableAcknowledged { new_revision: 1 }
+    );
+    assert_eq!(backend.accounting_current(), 0, "released after success");
+
+    // Semantic refusal (stale expected revision): pre-write, charge released.
+    let qc_s = valid_wire_qc(&ctx, [7u8; 32], 6);
+    let locked_s = make_locked_qc(&ctx, [7u8; 32], 6, qc_s, None).unwrap();
+    assert!(matches!(
+        owner.publish_locked(locked_s, 0, None::<&FixtureCommittedHistory>),
+        PublishResult::RefusedPreWrite(_)
+    ));
+    assert_eq!(backend.accounting_current(), 0, "released after refusal");
+    assert!(!owner.recovery_required());
+
+    // Backend write error (ambiguous): charge released, recovery restriction set.
+    backend.set_inject(InjectFault::WriteErrors);
+    let qc_e = valid_wire_qc(&ctx, [7u8; 32], 6);
+    let locked_e = make_locked_qc(&ctx, [7u8; 32], 6, qc_e, None).unwrap();
+    assert!(matches!(
+        owner.publish_locked(locked_e, 1, None::<&FixtureCommittedHistory>),
+        PublishResult::WriteFailedAmbiguous(_)
+    ));
+    assert_eq!(backend.accounting_current(), 0, "released after write error");
+    assert!(owner.recovery_required(), "write error sets recovery restriction");
+    backend.set_inject(InjectFault::None);
+
+    // Uncertain durable on a FRESH store (a prior error/uncertainty leaves the
+    // recovery restriction set, which would refuse a later O4 pre-write): charge
+    // released, and the recovery restriction is preserved after the uncertainty.
+    let dir_u = tempfile::tempdir().unwrap();
+    let owner_u = init_owner(dir_u.path(), &ctx);
+    let backend_u = owner_u.backend_for_test();
+    backend_u.set_inject(InjectFault::UncertainAfterWrite);
+    let qc_u = valid_wire_qc(&ctx, [9u8; 32], 5);
+    let locked_u = make_locked_qc(&ctx, [9u8; 32], 5, qc_u, None).unwrap();
+    assert!(matches!(
+        owner_u.publish_locked(locked_u, 0, None::<&FixtureCommittedHistory>),
+        PublishResult::UncertainDurable
+    ));
+    assert_eq!(
+        backend_u.accounting_current(),
+        0,
+        "released after uncertainty"
+    );
+    assert!(
+        owner_u.recovery_required(),
+        "uncertain outcome preserves the recovery restriction"
+    );
+    backend_u.set_inject(InjectFault::None);
+}
+
+// ---------------------------------------------------------------------------
 // Process-death harness (deterministic child-process boundaries)
 // ---------------------------------------------------------------------------
 //
@@ -1984,6 +2297,70 @@ fn child_process_entry() {
             // Exit cleanly AFTER an acknowledged publication; the next process
             // must still require fresh recovery (O5) before dependent O4.
             std::process::exit(14);
+        }
+        "init_uncertain" => {
+            // O1 whose meta+bootstrap durable write COMPLETES but whose success
+            // acknowledgement is lost: the caller observes UncertainPublication,
+            // never a success. Live, before any restart, confirm the in-process
+            // effectiveness transition did NOT happen (recovery is required), so a
+            // later reopen into a recovery-required state cannot be mistaken for a
+            // masked successful transition.
+            backend.set_inject(InjectFault::UncertainAfterWrite);
+            let r = owner.initialize(true);
+            assert!(
+                matches!(r, Err(SafetyStoreError::UncertainPublication(_))),
+                "got {r:?}"
+            );
+            assert!(
+                owner.recovery_required(),
+                "uncertain O1 must not transition effectiveness"
+            );
+            std::process::exit(15);
+        }
+        "o5_uncertain" => {
+            owner.initialize(true).expect("O1");
+            let qc = valid_wire_qc(&ctx, [9u8; 32], 5);
+            let locked = make_locked_qc(&ctx, [9u8; 32], 5, qc, None).unwrap();
+            assert!(matches!(
+                owner.publish_locked(locked, 0, None::<&FixtureCommittedHistory>),
+                PublishResult::DurableAcknowledged { .. }
+            ));
+            let tok = owner
+                .read_validate(None::<&FixtureCommittedHistory>)
+                .unwrap();
+            backend.set_inject(InjectFault::UncertainAfterWrite);
+            let r = owner.reacknowledge(&tok);
+            assert!(matches!(r, PublishResult::UncertainDurable), "got {r:?}");
+            // An uncertain O5 must NOT release the recovery restriction.
+            assert!(
+                owner.recovery_required(),
+                "uncertain O5 must preserve the recovery restriction"
+            );
+            std::process::exit(16);
+        }
+        "o5_write_error" => {
+            owner.initialize(true).expect("O1");
+            let qc = valid_wire_qc(&ctx, [9u8; 32], 5);
+            let locked = make_locked_qc(&ctx, [9u8; 32], 5, qc, None).unwrap();
+            assert!(matches!(
+                owner.publish_locked(locked, 0, None::<&FixtureCommittedHistory>),
+                PublishResult::DurableAcknowledged { .. }
+            ));
+            let tok = owner
+                .read_validate(None::<&FixtureCommittedHistory>)
+                .unwrap();
+            backend.set_inject(InjectFault::WriteErrors);
+            let r = owner.reacknowledge(&tok);
+            assert!(
+                matches!(r, PublishResult::WriteFailedAmbiguous(_)),
+                "got {r:?}"
+            );
+            // A failed O5 must NOT release the recovery restriction.
+            assert!(
+                owner.recovery_required(),
+                "failed O5 must preserve the recovery restriction"
+            );
+            std::process::exit(17);
         }
         other => panic!("unknown child phase {other}"),
     }
@@ -2114,4 +2491,106 @@ fn pd_reopen_after_clean_exit_requires_o5_before_o4() {
         owner.publish_locked(l2, 1, None::<&FixtureCommittedHistory>),
         PublishResult::DurableAcknowledged { new_revision: 2 }
     );
+}
+/// Boundary: an O1 whose durable init write COMPLETED but whose success was never
+/// observed (the caller saw `UncertainPublication`). The surviving metadata +
+/// bootstrap are readable, yet the next process still requires recovery and a
+/// duplicate O1 over the surviving established state is refused — the surviving
+/// bytes are NOT mistaken for a masked successful initialization.
+#[test]
+fn pd_init_uncertain_bytes_survive_without_observed_success() {
+    let dir = tempfile::tempdir().unwrap();
+    let status = spawn_child(dir.path(), "init_uncertain");
+    assert_eq!(status.code(), Some(15), "child reached the uncertain-O1 boundary");
+    let ctx = ctx_n(4);
+    let owner = SafetyRecordOwner::attach(open_enabled(dir.path()), ctx).unwrap();
+    // The durable bootstrap survived and is a valid complete publication.
+    let v = owner
+        .read_validate(None::<&FixtureCommittedHistory>)
+        .unwrap();
+    assert!(!v.decoded().is_locked());
+    assert_eq!(v.decoded().publication_revision, 0);
+    // The reopened process requires fresh recovery (effectiveness never persisted).
+    assert!(owner.recovery_required());
+    // Duplicate O1 over the surviving established state is refused (no
+    // auto-reinitialization of a store that already has metadata).
+    assert!(matches!(
+        owner.initialize(true),
+        Err(SafetyStoreError::AlreadyEstablished(_))
+    ));
+}
+
+/// Boundary: a child establishes + acknowledges a lock then exits cleanly; the
+/// parent reopens and a duplicate O1 over the surviving established state is
+/// refused. Distinct from the uncertain-init case: here the child DID observe
+/// success, yet the fresh process still refuses to re-initialize established
+/// bytes.
+#[test]
+fn pd_duplicate_o1_after_surviving_init_refused() {
+    let dir = tempfile::tempdir().unwrap();
+    let status = spawn_child(dir.path(), "ack_locked_clean_exit");
+    assert_eq!(status.code(), Some(14));
+    let ctx = ctx_n(4);
+    let owner = SafetyRecordOwner::attach(open_enabled(dir.path()), ctx).unwrap();
+    assert!(matches!(
+        owner.initialize(true),
+        Err(SafetyStoreError::AlreadyEstablished(_))
+    ));
+}
+
+/// Boundary: a child drives an UNCERTAIN O5 over surviving complete state (the
+/// recovery write completes but the acknowledgement is lost). The child confirms
+/// LIVE, before exit, that the uncertain O5 did not release the recovery
+/// restriction. The parent then reopens: the successor survives, recovery is
+/// still required (the earlier uncertain transition is not masked), dependent O4
+/// stays blocked, and a clean O5 finally re-establishes effectiveness.
+#[test]
+fn pd_uncertain_o5_does_not_release_recovery_then_clean_o5_recovers() {
+    let dir = tempfile::tempdir().unwrap();
+    let status = spawn_child(dir.path(), "o5_uncertain");
+    assert_eq!(status.code(), Some(16), "child reached the uncertain-O5 boundary");
+    let ctx = ctx_n(4);
+    let owner = SafetyRecordOwner::attach(open_enabled(dir.path()), ctx.clone()).unwrap();
+    assert_eq!(owner.open().unwrap().current_revision, 1);
+    assert!(owner.recovery_required(), "reopen still requires recovery");
+    // Dependent O4 remains blocked until a successful O5.
+    let qc2 = valid_wire_qc(&ctx, [0x11u8; 32], 7);
+    let l2 = make_locked_qc(&ctx, [0x11u8; 32], 7, qc2, None).unwrap();
+    assert!(matches!(
+        owner.publish_locked(l2.clone(), 1, None::<&FixtureCommittedHistory>),
+        PublishResult::RefusedPreWrite(SafetyStoreError::RecoveryRequired(_))
+    ));
+    // A fresh clean O5 over the surviving complete publication recovers.
+    let surviving = owner
+        .read_validate(None::<&FixtureCommittedHistory>)
+        .unwrap();
+    assert!(matches!(
+        owner.reacknowledge(&surviving),
+        PublishResult::DurableAcknowledged { new_revision: 1 }
+    ));
+    assert!(!owner.recovery_required());
+    assert_eq!(
+        owner.publish_locked(l2, 1, None::<&FixtureCommittedHistory>),
+        PublishResult::DurableAcknowledged { new_revision: 2 }
+    );
+}
+
+/// Boundary: a child drives a FAILED (ambiguous) O5 over surviving complete
+/// state. The child confirms LIVE that the failed O5 did not release the recovery
+/// restriction; the parent reopens and confirms recovery is still required and
+/// the surviving publication is unchanged.
+#[test]
+fn pd_failed_o5_does_not_release_recovery() {
+    let dir = tempfile::tempdir().unwrap();
+    let status = spawn_child(dir.path(), "o5_write_error");
+    assert_eq!(status.code(), Some(17), "child reached the failed-O5 boundary");
+    let ctx = ctx_n(4);
+    let owner = SafetyRecordOwner::attach(open_enabled(dir.path()), ctx).unwrap();
+    assert_eq!(owner.open().unwrap().current_revision, 1);
+    assert!(owner.recovery_required(), "failed O5 does not release recovery");
+    let v = owner
+        .read_validate(None::<&FixtureCommittedHistory>)
+        .unwrap();
+    assert!(v.decoded().is_locked());
+    assert_eq!(v.decoded().publication_revision, 1);
 }
