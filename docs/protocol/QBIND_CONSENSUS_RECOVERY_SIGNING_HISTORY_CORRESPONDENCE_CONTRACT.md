@@ -3272,6 +3272,24 @@ section.
 
 ### 13.7C Operational enforcement wiring (final revision, D7-D14)
 
+> **OPERATIVE CORRECTION (D7-D14, supersedes the claims in this subsection).** The statements below
+> that the §13.7/§13.7A/§13.7B accounting is *"enforced through the real O1–O5 operations"*, that
+> *"reservation precedes allocation"* for O1/O3/O4/O5, and that the `rec=811` / `gen=1104` /
+> `2·gen+3·rec=4641` / `cap=7772` figures are *"measured"* confirmation, are **withdrawn as
+> unsupported** and preserved only as historical text. Actual allocations remain outside the
+> reservations (O1 existing-state/refusal reads, O2 `load_established`, O3 simultaneously-live
+> decoded/re-encode/binding scratch, O4 live predecessor+candidate clones, O5 `load_established`
+> decoded generation + envelopes); `AllocationAccountant::current`/`peak` sum admitted charges and do
+> **not** inspect real `Vec` capacities, so those figures are **calculated profile/reservation
+> quantities, not measured operational memory**; and the operational retained proof is
+> `ValidatedRecord`, not the synthetic `RetainedGeneration` the layout assertion measures. The one
+> correction landed this pass is sharing the pinned context behind `Arc` so cloning an owner handle no
+> longer copies the validator vector into an unaccounted buffer (task §4). The operative verdict is
+> restored to `D7D14_STORAGE_COMPONENT=PARTIAL-IMPLEMENTATION` /
+> `D7D14_STORAGE_ACCEPTANCE=INCOMPLETE`; see the operative correction section of
+> `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_422_D7.md` for the full withdrawn-claim list and remaining
+> blockers.
+
 This subsection records that the §13.7 / §13.7A / §13.7B accounting — previously a **defined model**
 exercised only by standalone arithmetic helpers (`AllocationAccountant`, `generation_charge`) — is now
 **enforced through the real O1–O5 operations** of the isolated `safety_record_store` component. **No

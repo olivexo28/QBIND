@@ -14614,3 +14614,160 @@ cryptographic domain-separation bytes are unchanged. Changed paths this pass:
 `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_422_D7.md`,
 `docs/protocol/QBIND_CONSENSUS_RECOVERY_SIGNING_HISTORY_CORRESPONDENCE_CONTRACT.md`, and
 `docs/whitepaper/contradiction.md`.
+
+## RUN 422 D7-D14 — Correct operational accounting coverage and WITHDRAW the unsupported acceptance claims (operative correction)
+
+This section is the **operative** Run 422 D7-D14 statement and **supersedes** the immediately
+preceding "final revision" entry that reported `D7D14_STORAGE_COMPONENT=IMPLEMENTED-ISOLATED` /
+`D7D14_STORAGE_ACCEPTANCE=PASS-ACCEPTED-SUBSET`. Every prior D7-D14 entry above — including that
+withdrawn "final revision" and all earlier checkpoints — is **preserved verbatim as historical
+evidence** and is **not** deleted; where a prior statement conflicts with this one, **this section
+governs**. The earlier `IMPLEMENTED-ISOLATED` / `PASS-ACCEPTED-SUBSET` promotion was **not supported**
+by the implementation and is **withdrawn** here.
+
+### 1. Baseline and reviewed-object correspondence
+
+- Actual working branch (as supplied): `copilot/copilotcopilotcopilotcopilotcopilotrun-422-d7-d14`.
+  The reported branch name in the task (`copilot/copilotcopilotcopilotcopilotrun-422-d7-d14-correct`)
+  differs; per instruction the **actual supplied branch** was used and **not** switched.
+- Reviewed object `eb4236d815c4f12181dd2da1e941e9de9966889d` was fetched
+  (`git fetch origin eb4236d… --depth=1`; `git cat-file -t` → `commit`). It is **not** an ancestor of
+  the starting HEAD (`git merge-base --is-ancestor` → not ancestor); `git diff eb4236d HEAD` shows the
+  starting worktree differs from the reviewed object **only** by a missing final newline in
+  `tests/run_422_d7d14_safety_record_store_tests.rs`, `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_422_D7.md`,
+  and `docs/protocol/QBIND_CONSENSUS_RECOVERY_SIGNING_HISTORY_CORRESPONDENCE_CONTRACT.md`
+  (`\ No newline at end of file` on the HEAD side). `docs/whitepaper/contradiction.md` is **byte-identical**
+  (not in the diff). This matches the task's statement exactly: contradiction.md matched; the other two
+  documents plus the test file differed only by a trailing-newline/CRLF boundary. No claim of
+  three-way byte identity is made.
+- Worktree was clean at start; unrelated work preserved (edits are confined to the authorized component,
+  its test file, and the authorized documents).
+
+### 2. Why the earlier promotion is withdrawn — the specific unsupported claims
+
+The following claims from the superseded "final revision" are **withdrawn** because the implementation
+does not support them:
+
+1. **"All actual O1–O5 allocations are covered."** NOT established. Reservations still cover selected
+   calculated quantities, but real allocations remain outside them: O1 metadata/record reads on the
+   existing-state and refusal paths precede the bootstrap reservation; O2 `open()` calls
+   `load_established()` (which copies metadata + record bytes and decodes a generation) with **no**
+   reservation; O3 does not separately charge the retained publication, decoded representation,
+   validation re-encode, and evidence-binding scratch as simultaneously-live objects; O4's `2·gen+3·rec`
+   charge does not by itself cover the live predecessor + candidate + the additional decoded/encoded
+   clones produced during candidate validation; O5 reserves one record-sized read-back but does not
+   charge `load_established`'s decoded generation, the metadata encoding, or the publication envelopes
+   created by `publish_atomic`.
+2. **"The synthetic layout assertion measures the operational proof."** NOT true. The compile-time
+   assertion in `safety_record_store/mod.rs` measures `RetainedGeneration`, whose own doc-comment states
+   it is "Used for in-memory accounting and (in the synthetic-holder accounting tests) for `Arc`-pinned
+   retention." The **operational** O3 retained proof is `ValidatedRecord` (containing `DecodedRecord`,
+   the verbatim `encoded` bytes, context/capability fields, and a `Reservation`). `generation_charge`
+   likewise does not govern operational construction. The accepted layout/capacity proof does **not**
+   yet measure the actual operational types.
+3. **"Reservation-counter peaks demonstrate actual capacity coverage."** NOT true.
+   `AllocationAccountant::current`/`peak` sum the quantities passed to `admit`; they do not inspect any
+   real `Vec` capacity. `accounting_peak() <= accounting_cap()` therefore verifies the admission rule,
+   not independent allocation coverage. `rec=811`, `gen=1104`, `2·gen+3·rec=4641`, and `cap=7772` remain
+   **calculated profile/reservation quantities**, not measured operational memory.
+4. **"The existing abort test establishes a pre-effectiveness crash."** NOT true. `pd_ack_then_abort`'s
+   child calls `publish_locked`, receives `DurableAcknowledged`, and only then aborts — by which point
+   the owner has **already** completed `mark_effective`. That is a post-acknowledgement termination, not
+   the claimed acknowledged-publication-**before**-component-completion boundary. The genuine
+   pre-effectiveness hook (terminate after durable acknowledgement and before the owner's effectiveness
+   transition, absent from production builds) is **not** yet implemented.
+5. **"The accepted subset is complete."** NOT true. H18/H22 remain genuinely PARTIAL (type/consumer
+   boundary only); H19 lacks the required process-death recovery portion with a fresh backend-bound O3
+   capability; H24 lacks malformed anchor-presence rejection cases; H26 lacks adversarial
+   `tc.signed_timeouts[i].high_qc` signer-list bounds distinguishing record-/TC-/timeout-entry logical
+   high-QCs through real operations. The required independent-review / CodeQL security gate is **open**.
+
+### 3. Implementation correction landed this pass (task §4 — owner-clone context escape)
+
+`SafetyRecordOwner` derived `Clone` while owning a `PinnedSafetyContext` **by value**, so cloning a
+handle (e.g. the H12 competing-handle path, and any future multi-handle use) copied the validator vector
+into a second, **unaccounted** buffer. This pass closes that specific escape:
+
+- `owner.rs` now holds the context as `Arc<PinnedSafetyContext>`. Cloning an owner shares the **one**
+  immutable context allocation and counts it once; it never mints a per-handle copy of the validator
+  vector. `attach` wraps the validated context into the `Arc` after `ctx.validate()` and the accountant
+  `bind`; `context()` returns `self.ctx.as_ref()`. All existing call sites deref-coerce unchanged.
+- A test-only `context_ptr_for_test()` (`cfg(any(test, feature = "test-utils"))`) exposes the shared
+  allocation address.
+- Regression `corr_owner_clone_shares_one_context_allocation` asserts a clone (and eight further clones)
+  share the **same** context pointer and the same validator set — a by-value copy (the closed escape)
+  would return distinct pointers. The H12 competing-handle test (`owner.clone()`) continues to pass.
+
+This is a **single, genuinely closed** sub-finding. It does **not** by itself discharge task §3/§5/§6/§8
+or the remaining §9 H-rows, which stay open (see §2 above and the remaining-blockers list below). The
+shared-accountant / RAII reservation approach and all preserved working behavior (default-disabled
+backend, MainNet refusal, no production construction, explicit init/refusal, recovery-required fencing,
+shared ownership + expected-revision fencing, opaque validated publications, backend-incarnation-bound
+O5, complete-content O5 comparison and verbatim republication, H12's competing-handle regression, the
+uncertain-init and failed/uncertain-O5 tests) are retained; nothing was discarded.
+
+### 4. Validation (literal commands and outcomes)
+
+- `cargo build -p qbind-node` (default features) → **Finished `dev`, exit 0**.
+- `cargo build -p qbind-node --features test-utils` → **Finished `dev`, exit 0**.
+- `cargo test -p qbind-node --test run_422_d7d14_safety_record_store_tests --no-run` (default features)
+  → **error: target … requires the features: `test-utils`** — confirms the gated target is refused
+  without its feature (reported separately from the successful default-feature library build).
+- `cargo test -p qbind-node --features test-utils --test run_422_d7d14_safety_record_store_tests` →
+  **61 passed, 0 failed, 1 ignored** (`child_process_entry`). Delta vs the prior 60: the one new
+  owner-clone context-sharing regression.
+- `cargo clippy -p qbind-node --features test-utils --lib` → **exit 0**; **no** `safety_record_store`
+  warnings introduced (pre-existing unrelated lib warnings remain).
+- `cargo build -p qbind-node --release --bin qbind-node` → **Finished `release`, exit 0**, binary
+  present (`target/release/qbind-node`). Establishes compile/isolation only, **not** running-node
+  recovery acceptance.
+- Formatting: component/test files remain **CRLF with no final newline** (pre-existing repo convention);
+  inserted lines were written CRLF to match (`sed -n … | cat -A` shows `^M$`). The crate is not
+  rustfmt-clean at baseline, so `rustfmt` was **not** run to rewrite tracked files; `git diff --check`
+  reports only the CR of the existing CRLF convention on added lines. **Not** claimed as a clean rustfmt
+  run.
+- Production non-wiring audit: `grep -rn "safety_record_store\|SafetyRecordOwner\|SafetyBackend"` over
+  `crates/qbind-node/src` outside the component finds only `pub mod safety_record_store;` and one comment
+  in `lib.rs`; **no** production startup / consensus / decision / signing reference.
+- Independent review model / CodeQL security scan: **not executed** in this environment at this revision.
+  "No review comments" is **not** recorded as a passing review and a skipped CodeQL is **not** recorded as
+  zero alerts; the required review/security gate remains **explicitly OPEN**.
+
+### 5. Operative verdicts (corrected) and remaining blockers
+
+```
+D7D14_STORAGE_COMPONENT=PARTIAL-IMPLEMENTATION
+D7D14_STORAGE_ACCEPTANCE=INCOMPLETE
+DURABLE_ANTI_ROLLBACK=NOT-ESTABLISHED
+GENESIS_AUTHORITY_ACTIVATION=DISABLED
+PRODUCTION_WIRE_CHAIN_ID_BEHAVIOR=UNCHANGED
+CONFIGURED_AUTHORITY_RELEASE_BINARY_EVIDENCE=NOT-YET-CAPTURED
+SECURITY_POSTURE=RS1-OPEN / PUBLIC-DEVNET-NO-GO
+```
+
+C4/C5 remain **OPEN**; fail-closed `CurrentEpochUnavailable` is unchanged. The operative verdict is
+restored to `PARTIAL-IMPLEMENTATION` / `INCOMPLETE` and must **not** be promoted until the accepted
+subset and its required evidence/gates are actually satisfied.
+
+**Concrete remaining blockers (all open; none discharged by this pass):**
+
+1. O1–O5 reservation coverage across the actual allocations enumerated in §2(1), with each allocation
+   traced to its real owner/admission/capacity/lifetime/release (task §3/§6).
+2. Make the layout/capacity proof measure the **operational** `ValidatedRecord`/`DecodedRecord` types,
+   not synthetic `RetainedGeneration`; make `generation_charge` govern operational construction (task §5).
+3. Check **actual object capacities** against admitted charges (not counter-sum tautologies); bound
+   validation `HashSet` scratch and re-encode/binding scratch by simultaneous lifetime (task §6/§7).
+4. Implement the genuine pre-effectiveness crash hook (durable-ack → terminate **before** effectiveness
+   transition; absent from production builds) and verify exact child exit + surviving-byte recovery
+   (task §8).
+5. H18/H22 (type/consumer-boundary PARTIAL — retain the precise gap), H19 (process-death recovery with a
+   fresh backend-bound O3 capability), H24 (malformed anchor-presence), H26
+   (`tc.signed_timeouts[i].high_qc` adversarial signer bounds through real operations) (task §9).
+6. Independent-review / CodeQL security gate is **unexecuted** and remains a required open gate.
+
+No production integration, engine/decision/signing integration, verifier wiring, anti-rollback
+establishment, activation, D15, Run 423, or project rename is performed or claimed; QBIND naming and all
+cryptographic domain-separation bytes are unchanged. Changed paths this pass:
+`crates/qbind-node/src/safety_record_store/owner.rs`,
+`crates/qbind-node/tests/run_422_d7d14_safety_record_store_tests.rs`, and
+`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_422_D7.md`.
