@@ -371,11 +371,14 @@ fn h11_success_is_unverified() {
 }
 
 // ---------------------------------------------------------------------------
-// H12 — checked serialized caps match measured encodings (unit/model)
+// H26 (model support) — checked serialized caps match measured encodings.
+// NOTE: previously mislabeled `h12_*`; the real H12 competing-handle stale
+// O4/O5 obligation is exercised by `h12_competing_handles_stale_o4_o5_*` below.
+// This case is model/unit support for the H26 serialized-bound obligation.
 // ---------------------------------------------------------------------------
 
 #[test]
-fn h12_serialized_caps_bound_actual_encodings() {
+fn h26_serialized_caps_bound_actual_encodings() {
     for n in [1u64, 4, 8, 16] {
         let ctx = ctx_n(n);
         let qc = valid_wire_qc(&ctx, [9u8; 32], 5);
@@ -390,6 +393,92 @@ fn h12_serialized_caps_bound_actual_encodings() {
         assert!((enc.len() as u128) <= max_qc_bytes(&ctx).unwrap());
         assert!((enc.len() as u128) <= max_safety_record_bytes(&ctx).unwrap());
     }
+}
+
+// ---------------------------------------------------------------------------
+// H12 — competing handles over ONE shared backend: deterministically
+// interleaved stale O4 and stale O5 attempts are refused and the newer
+// publication bytes remain byte-for-byte unchanged (real-storage).
+// ---------------------------------------------------------------------------
+
+#[test]
+fn h12_competing_handles_stale_o4_o5_leave_newer_bytes_unchanged() {
+    let dir = tempfile::tempdir().unwrap();
+    let ctx = ctx_n(4);
+    // Two handles A and B share the SAME backend incarnation (clone shares the
+    // Arc-held DB + serialization domain), so this is a genuine competing-handle
+    // scenario, not a sequential reopen.
+    let backend = open_enabled(dir.path());
+    let owner_a = SafetyRecordOwner::attach(backend.clone(), ctx.clone()).unwrap();
+    owner_a.initialize(true).expect("O1 initialize");
+    let owner_b = SafetyRecordOwner::attach(backend.clone(), ctx.clone()).unwrap();
+
+    // A publishes v5 (rev 0 -> 1). B captures a retained O3 token for v5 BEFORE
+    // A advances, so B now holds a soon-to-be-stale O5 capability.
+    let qc5 = valid_wire_qc(&ctx, [9u8; 32], 5);
+    let l5 = make_locked_qc(&ctx, [9u8; 32], 5, qc5, None).unwrap();
+    assert_eq!(
+        owner_a.publish_locked(l5, 0, None::<&FixtureCommittedHistory>),
+        PublishResult::DurableAcknowledged { new_revision: 1 }
+    );
+    let stale_b_token = owner_b
+        .read_validate(None::<&FixtureCommittedHistory>)
+        .expect("B observes v5 via its own O3");
+
+    // A advances to the newer v9 (rev 1 -> 2). Capture the authoritative newer
+    // bytes to prove no competing stale attempt disturbs them.
+    let qc9 = valid_wire_qc(&ctx, [0x11u8; 32], 9);
+    let l9 = make_locked_qc(&ctx, [0x11u8; 32], 9, qc9, None).unwrap();
+    assert_eq!(
+        owner_a.publish_locked(l9, 1, None::<&FixtureCommittedHistory>),
+        PublishResult::DurableAcknowledged { new_revision: 2 }
+    );
+    let newer_bytes = owner_a
+        .read_validate(None::<&FixtureCommittedHistory>)
+        .unwrap()
+        .encoded()
+        .to_vec();
+
+    // Interleave step 1: B issues a STALE O4 (expected revision 1, actual is 2).
+    // It must be refused by revision fencing before any write.
+    let qc_stale = valid_wire_qc(&ctx, [0x22u8; 32], 7);
+    let l_stale = make_locked_qc(&ctx, [0x22u8; 32], 7, qc_stale, None).unwrap();
+    assert!(
+        matches!(
+            owner_b.publish_locked(l_stale, 1, None::<&FixtureCommittedHistory>),
+            PublishResult::RefusedPreWrite(SafetyStoreError::StaleRevision { .. })
+        ),
+        "B's stale O4 must be refused by the shared revision fence"
+    );
+    assert_eq!(
+        owner_a
+            .read_validate(None::<&FixtureCommittedHistory>)
+            .unwrap()
+            .encoded(),
+        newer_bytes.as_slice(),
+        "newer bytes unchanged after B's stale O4"
+    );
+
+    // Interleave step 2: B issues a STALE O5 (reacknowledge of the v5 token it
+    // captured earlier). It must refuse and NOT overwrite the newer v9 bytes.
+    assert!(
+        matches!(
+            owner_b.reacknowledge(&stale_b_token),
+            PublishResult::RefusedPreWrite(_)
+        ),
+        "B's stale O5 must be refused"
+    );
+    let after = owner_a.read_validate(None::<&FixtureCommittedHistory>).unwrap();
+    assert_eq!(
+        after.decoded().publication_revision,
+        2,
+        "revision still 2 after competing stale O4/O5"
+    );
+    assert_eq!(
+        after.encoded(),
+        newer_bytes.as_slice(),
+        "newer publication bytes remain byte-for-byte unchanged"
+    );
 }
 
 // ---------------------------------------------------------------------------
