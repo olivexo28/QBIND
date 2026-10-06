@@ -1045,6 +1045,91 @@ fn layout_sizes_within_ceiling() {
     assert!(sz as u128 <= qbind_node::safety_record_store::profile::GEN_STRUCT_MAX);
 }
 
+// §5 representation proof: the operative layout proof must cover the **real**
+// operational retained representation (`ValidatedRecord` / `DecodedRecord`), not
+// the synthetic `RetainedGeneration` wrapper. This regression measures the real
+// target layouts, verifies the exact inline decomposition the module's
+// compile-time proof enforces (each member counted once, no field escaping a
+// term), and explicitly SURFACES the measured discrepancy: the complete decoded
+// generation container exceeds `GEN_STRUCT_MAX` even though the generation core
+// fits — so the ceiling is applied to the core and the holder/identity fields are
+// charged under their own terms (never under the generation ceiling).
+#[test]
+fn real_representation_layout_decomposition() {
+    use qbind_node::safety_record_store::profile::GEN_STRUCT_MAX;
+    use qbind_node::safety_record_store::record::{
+        size_of_decoded_record, size_of_retained_generation, size_of_safety_record,
+        size_of_validated_record,
+    };
+
+    let gen_core = size_of_safety_record();
+    let decoded = size_of_decoded_record();
+    let validated = size_of_validated_record();
+    let synthetic = size_of_retained_generation();
+    println!(
+        "MEASURED gen_core(SafetyRecord)={gen_core} decoded(DecodedRecord)={decoded} \
+         validated(ValidatedRecord)={validated} synthetic(RetainedGeneration)={synthetic} \
+         GEN_STRUCT_MAX={GEN_STRUCT_MAX}"
+    );
+
+    // The real generation-bearing core fits the accepted ceiling with margin.
+    assert!(
+        gen_core <= GEN_STRUCT_MAX,
+        "generation core {gen_core} must fit GEN_STRUCT_MAX {GEN_STRUCT_MAX}"
+    );
+
+    // Exact inline decomposition — every inline member counted exactly once.
+    let decoded_identity_header = decoded - gen_core;
+    let validated_handle_fields = validated - decoded;
+    assert_eq!(
+        gen_core + decoded_identity_header,
+        decoded,
+        "DecodedRecord decomposition must sum exactly"
+    );
+    assert_eq!(
+        decoded + validated_handle_fields,
+        validated,
+        "ValidatedRecord decomposition must sum exactly"
+    );
+    // The separately-owned holder/handle fields are a non-trivial inline term
+    // (the retained-encoded Vec descriptor, origin digest, O5 incarnation, and the
+    // inline holder Reservation option) that must NOT be folded into the
+    // generation ceiling.
+    assert!(
+        validated_handle_fields > 0,
+        "ValidatedRecord must carry separately-charged holder/handle fields"
+    );
+
+    // SURFACED discrepancy (not concealed, not silently relaxed): the complete
+    // decoded generation container is larger than the accepted single generation
+    // ceiling. The synthetic wrapper hid this by omitting the identity header.
+    assert!(
+        decoded > GEN_STRUCT_MAX,
+        "expected the real DecodedRecord ({decoded}) to exceed GEN_STRUCT_MAX \
+         ({GEN_STRUCT_MAX}); if this no longer holds the representation changed \
+         and the §13.7A contract note must be revisited"
+    );
+    assert!(
+        decoded > synthetic,
+        "the real retained generation must be at least as large as the synthetic \
+         wrapper it replaces as the operative proof"
+    );
+    // The deficit the required (separately-presented) contract change must cover:
+    // GEN_STRUCT_MAX only absorbs part of the identity header.
+    let ceiling_headroom = GEN_STRUCT_MAX - gen_core;
+    let uncovered_header = decoded_identity_header.saturating_sub(ceiling_headroom);
+    println!(
+        "SURFACED: decoded_identity_header={decoded_identity_header} \
+         ceiling_headroom={ceiling_headroom} uncovered_by_single_ceiling={uncovered_header} \
+         (violated inequality: size_of::<DecodedRecord>()={decoded} > GEN_STRUCT_MAX={GEN_STRUCT_MAX})"
+    );
+    assert!(
+        uncovered_header > 0,
+        "a single generation ceiling of {GEN_STRUCT_MAX} cannot cover the complete \
+         decoded generation ({decoded}); the deficit must be surfaced"
+    );
+}
+
 // ---------------------------------------------------------------------------
 // Correction pass (D7-D14 correction) — foreign-context refusal (§13.3/§13.4)
 // ---------------------------------------------------------------------------

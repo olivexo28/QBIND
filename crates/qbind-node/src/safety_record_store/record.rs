@@ -320,6 +320,50 @@ pub fn size_of_validator_id() -> u128 {
 
 /// The measured whole-enum wrapper size on the supported target
 /// (`size_of::<RetainedGeneration>()`, § 13.7A(c)).
+///
+/// NOTE: `RetainedGeneration` is a **synthetic** wrapper retained only for the
+/// Arc-pinned synthetic-holder accounting tests. It is **not** the object
+/// operations actually retain — that is [`DecodedRecord`] inside
+/// [`ValidatedRecord`] (see [`size_of_decoded_record`] /
+/// [`size_of_validated_record`]). The operative layout proof lives in
+/// [`super`] and is driven by the real operational types, not by this synthetic
+/// wrapper (§ 13.7A, representation-proof correction).
 pub fn size_of_retained_generation() -> u128 {
     std::mem::size_of::<RetainedGeneration>() as u128
+}
+
+/// The measured inline size of the **generation-bearing core** actually retained
+/// by operations: the `SafetyRecord` enum held inside every [`DecodedRecord`]
+/// (§ 13.7A(c)). This is the real logical generation (`BootstrapNoLock` /
+/// `Locked`) whose whole-enum inline layout the accepted `GEN_STRUCT_MAX` ceiling
+/// bounds. Its heap backings (signer bitmaps, signatures, timeout backing) are
+/// charged separately by the generation term.
+pub fn size_of_safety_record() -> u128 {
+    std::mem::size_of::<SafetyRecord>() as u128
+}
+
+/// The measured inline size of the **complete decoded generation representation**
+/// operations actually retain: [`DecodedRecord`] = the generation-bearing
+/// `SafetyRecord` core plus the always-retained identity header
+/// (`persistence_format_version`, `network_genesis_id`, `publication_revision`)
+/// and its required alignment padding (§ 13.7A(c)).
+///
+/// This — not the synthetic [`RetainedGeneration`] — is the object the O3/O4/O5
+/// paths hold inside a [`ValidatedRecord`]. On the supported 64-bit target it is
+/// strictly larger than both the synthetic wrapper and the accepted
+/// `GEN_STRUCT_MAX` ceiling; the difference is surfaced, not concealed (see the
+/// decomposition proof in [`super`]).
+pub fn size_of_decoded_record() -> u128 {
+    std::mem::size_of::<DecodedRecord>() as u128
+}
+
+/// The measured inline size of the complete opaque retained proof
+/// [`ValidatedRecord`] (§ 13.7A / § 13.7B): the [`DecodedRecord`] generation plus
+/// the separately-owned holder/handle fields — the retained `encoded` buffer's
+/// `Vec` descriptor handle, the originating-context digest, the O5 recovery
+/// incarnation discriminant, and the inline holder [`Reservation`] option. These
+/// handle fields are charged under their own terms, never under the generation
+/// ceiling.
+pub fn size_of_validated_record() -> u128 {
+    std::mem::size_of::<ValidatedRecord>() as u128
 }
