@@ -1897,6 +1897,257 @@ fn corr_recovery_token_usable_across_shared_handles() {
 }
 
 // ---------------------------------------------------------------------------
+// Operational allocation accounting through real O1–O5 (§ 13.7 / § 13.7B)
+//
+// These regressions observe the SHARED backend accountant that O1/O3/O4/O5 now
+// reserve against (not a synthetic counter): the peak / current / cap exposed by
+// `backend_for_test()` move only because a real operation took a real
+// reservation BEFORE its protected allocation or copy, and release it on every
+// exit (success, refusal, error, uncertainty, drop).
+// ---------------------------------------------------------------------------
+
+#[test]
+fn acct_valid_qc_publish_readback_recover_within_ceiling() {
+    let dir = tempfile::tempdir().unwrap();
+    let ctx = ctx_n(4);
+    let owner = init_owner(dir.path(), &ctx);
+    let backend = owner.backend_for_test();
+    let cap = backend.accounting_cap().expect("ceiling bound at attach");
+
+    // O1 already reserved + released its bootstrap publication buffer: a real
+    // peak was set, and after O1 returns nothing stays charged.
+    assert!(backend.accounting_peak() > 0, "O1 reserves a real buffer");
+    assert!(backend.accounting_peak() <= cap, "O1 peak within ceiling");
+    assert_eq!(backend.accounting_current(), 0, "O1 reservation released");
+
+    // O4 QC publication peaks within the ceiling and fully releases.
+    let qc = valid_wire_qc(&ctx, [9u8; 32], 5);
+    let locked = make_locked_qc(&ctx, [9u8; 32], 5, qc, None).unwrap();
+    assert_eq!(
+        owner.publish_locked(locked, 0, None::<&FixtureCommittedHistory>),
+        PublishResult::DurableAcknowledged { new_revision: 1 }
+    );
+    assert_eq!(backend.accounting_current(), 0, "O4 working set released");
+    assert!(backend.accounting_peak() <= cap, "O4 peak within ceiling");
+
+    // O3 read-back holds a retained holder for the proof's lifetime.
+    let tok = owner
+        .read_validate(None::<&FixtureCommittedHistory>)
+        .unwrap();
+    assert!(
+        backend.accounting_current() > 0,
+        "O3 proof holds a retained holder while live"
+    );
+    assert!(backend.accounting_current() <= cap);
+
+    // O5 recovery over the surviving complete state, within the ceiling. O5
+    // republishes the retained bytes verbatim; the metadata revision is unchanged.
+    assert!(matches!(
+        owner.reacknowledge(&tok),
+        PublishResult::DurableAcknowledged { new_revision: 1 }
+    ));
+    assert!(backend.accounting_peak() <= cap, "O5 peak within ceiling");
+
+    // Dropping the proof releases its retained holder.
+    drop(tok);
+    assert_eq!(
+        backend.accounting_current(),
+        0,
+        "holder released on proof drop"
+    );
+}
+
+#[test]
+fn acct_tc_publication_charges_nested_signers() {
+    let dir = tempfile::tempdir().unwrap();
+    let ctx = ctx_n(4);
+    let owner = init_owner(dir.path(), &ctx);
+    let backend = owner.backend_for_test();
+    let cap = backend.accounting_cap().unwrap();
+
+    // The TC-derived generation (nested logical high-QC signer lists + per-signer
+    // signature buffers) is the larger variant; its O4 working set must still
+    // peak within the admitted ceiling and fully release.
+    let ltc = valid_tc_record(&ctx, 5, 6);
+    assert_eq!(
+        owner.publish_locked(ltc, 0, None::<&FixtureCommittedHistory>),
+        PublishResult::DurableAcknowledged { new_revision: 1 }
+    );
+    let tc_peak = backend.accounting_peak();
+    assert!(tc_peak > 0 && tc_peak <= cap, "TC O4 peak within ceiling");
+    assert_eq!(backend.accounting_current(), 0, "released after O4");
+
+    // The O3 holder for the TC proof stays within the ceiling while live.
+    let tok = owner
+        .read_validate(None::<&FixtureCommittedHistory>)
+        .unwrap();
+    let live = backend.accounting_current();
+    assert!(live > 0 && live <= cap, "TC proof holder within ceiling");
+    drop(tok);
+    assert_eq!(backend.accounting_current(), 0);
+}
+
+#[test]
+fn acct_shared_budget_refusal_preserves_evidence_then_readmits() {
+    let dir = tempfile::tempdir().unwrap();
+    let ctx = ctx_n(4);
+    let owner = init_owner(dir.path(), &ctx);
+
+    // Establish durable evidence (revision 1) first.
+    let qc = valid_wire_qc(&ctx, [9u8; 32], 5);
+    let locked = make_locked_qc(&ctx, [9u8; 32], 5, qc, None).unwrap();
+    assert_eq!(
+        owner.publish_locked(locked, 0, None::<&FixtureCommittedHistory>),
+        PublishResult::DurableAcknowledged { new_revision: 1 }
+    );
+
+    // A SECOND handle on the SAME backend shares the single aggregate budget:
+    // attaching it does not open an independent budget. A standing reservation it
+    // takes consumes the entire shared ceiling.
+    let sibling = owner.clone();
+    let cap = sibling.backend_for_test().accounting_cap().unwrap();
+    let standing = sibling
+        .backend_for_test()
+        .reserve_standing_for_test(cap)
+        .expect("standing reservation up to the ceiling");
+    assert_eq!(sibling.backend_for_test().accounting_current(), cap);
+
+    // A fresh O4 on the first handle is now refused for capacity BEFORE any
+    // write — the shared budget is exhausted — without evicting the established
+    // evidence or releasing the recovery restriction.
+    let qc2 = valid_wire_qc(&ctx, [7u8; 32], 6);
+    let locked2 = make_locked_qc(&ctx, [7u8; 32], 6, qc2, None).unwrap();
+    match owner.publish_locked(locked2, 1, None::<&FixtureCommittedHistory>) {
+        PublishResult::RefusedPreWrite(SafetyStoreError::CapacityRefusal(_)) => {}
+        other => panic!("expected capacity RefusedPreWrite, got {other:?}"),
+    }
+    assert!(!owner.recovery_required(), "capacity refusal is pre-write");
+
+    // Release the shared pressure; the established evidence is intact and a fresh
+    // admission now succeeds against the freed budget.
+    standing.release_now();
+    assert_eq!(owner.backend_for_test().accounting_current(), 0);
+    let readback = owner
+        .read_validate(None::<&FixtureCommittedHistory>)
+        .unwrap();
+    assert_eq!(readback.decoded().publication_revision, 1);
+    drop(readback);
+    let qc3 = valid_wire_qc(&ctx, [7u8; 32], 6);
+    let locked3 = make_locked_qc(&ctx, [7u8; 32], 6, qc3, None).unwrap();
+    assert_eq!(
+        owner.publish_locked(locked3, 1, None::<&FixtureCommittedHistory>),
+        PublishResult::DurableAcknowledged { new_revision: 2 }
+    );
+}
+
+#[test]
+fn acct_retained_holder_multiplicity_is_bounded() {
+    let dir = tempfile::tempdir().unwrap();
+    let ctx = ctx_n(4);
+    let owner = init_owner(dir.path(), &ctx);
+    let qc = valid_wire_qc(&ctx, [9u8; 32], 5);
+    let locked = make_locked_qc(&ctx, [9u8; 32], 5, qc, None).unwrap();
+    owner.publish_locked(locked, 0, None::<&FixtureCommittedHistory>);
+
+    // One real O3 holder.
+    let tok = owner
+        .read_validate(None::<&FixtureCommittedHistory>)
+        .unwrap();
+    let backend = owner.backend_for_test();
+    let cap = backend.accounting_cap().unwrap();
+
+    // Each duplicate owns a genuinely separate record-sized buffer and must take
+    // its own holder reservation; cloning cannot mint unbounded uncharged
+    // holders, so duplication is eventually refused for capacity. The number of
+    // live holders is therefore bounded by the shared ceiling.
+    let mut clones = Vec::new();
+    let mut refused = false;
+    for _ in 0..1024 {
+        match tok.try_clone() {
+            Ok(c) => {
+                assert!(backend.accounting_current() <= cap, "holders stay within cap");
+                clones.push(c);
+            }
+            Err(SafetyStoreError::CapacityRefusal(_)) => {
+                refused = true;
+                break;
+            }
+            Err(e) => panic!("unexpected duplication error: {e:?}"),
+        }
+    }
+    assert!(refused, "retained-holder multiplicity must be bounded");
+    assert!(backend.accounting_current() <= cap);
+
+    // Dropping every holder returns the shared budget to zero.
+    drop(clones);
+    drop(tok);
+    assert_eq!(backend.accounting_current(), 0, "all holders released");
+}
+
+#[test]
+fn acct_cleanup_after_success_refusal_error_uncertainty() {
+    let dir = tempfile::tempdir().unwrap();
+    let ctx = ctx_n(4);
+    let owner = init_owner(dir.path(), &ctx);
+    let backend = owner.backend_for_test();
+
+    // Success: establish revision 1, charge fully released.
+    let qc = valid_wire_qc(&ctx, [9u8; 32], 5);
+    let locked = make_locked_qc(&ctx, [9u8; 32], 5, qc, None).unwrap();
+    assert_eq!(
+        owner.publish_locked(locked, 0, None::<&FixtureCommittedHistory>),
+        PublishResult::DurableAcknowledged { new_revision: 1 }
+    );
+    assert_eq!(backend.accounting_current(), 0, "released after success");
+
+    // Semantic refusal (stale expected revision): pre-write, charge released.
+    let qc_s = valid_wire_qc(&ctx, [7u8; 32], 6);
+    let locked_s = make_locked_qc(&ctx, [7u8; 32], 6, qc_s, None).unwrap();
+    assert!(matches!(
+        owner.publish_locked(locked_s, 0, None::<&FixtureCommittedHistory>),
+        PublishResult::RefusedPreWrite(_)
+    ));
+    assert_eq!(backend.accounting_current(), 0, "released after refusal");
+    assert!(!owner.recovery_required());
+
+    // Backend write error (ambiguous): charge released, recovery restriction set.
+    backend.set_inject(InjectFault::WriteErrors);
+    let qc_e = valid_wire_qc(&ctx, [7u8; 32], 6);
+    let locked_e = make_locked_qc(&ctx, [7u8; 32], 6, qc_e, None).unwrap();
+    assert!(matches!(
+        owner.publish_locked(locked_e, 1, None::<&FixtureCommittedHistory>),
+        PublishResult::WriteFailedAmbiguous(_)
+    ));
+    assert_eq!(backend.accounting_current(), 0, "released after write error");
+    assert!(owner.recovery_required(), "write error sets recovery restriction");
+    backend.set_inject(InjectFault::None);
+
+    // Uncertain durable on a FRESH store (a prior error/uncertainty leaves the
+    // recovery restriction set, which would refuse a later O4 pre-write): charge
+    // released, and the recovery restriction is preserved after the uncertainty.
+    let dir_u = tempfile::tempdir().unwrap();
+    let owner_u = init_owner(dir_u.path(), &ctx);
+    let backend_u = owner_u.backend_for_test();
+    backend_u.set_inject(InjectFault::UncertainAfterWrite);
+    let qc_u = valid_wire_qc(&ctx, [9u8; 32], 5);
+    let locked_u = make_locked_qc(&ctx, [9u8; 32], 5, qc_u, None).unwrap();
+    assert!(matches!(
+        owner_u.publish_locked(locked_u, 0, None::<&FixtureCommittedHistory>),
+        PublishResult::UncertainDurable
+    ));
+    assert_eq!(
+        backend_u.accounting_current(),
+        0,
+        "released after uncertainty"
+    );
+    assert!(
+        owner_u.recovery_required(),
+        "uncertain outcome preserves the recovery restriction"
+    );
+    backend_u.set_inject(InjectFault::None);
+}
+
+// ---------------------------------------------------------------------------
 // Process-death harness (deterministic child-process boundaries)
 // ---------------------------------------------------------------------------
 //

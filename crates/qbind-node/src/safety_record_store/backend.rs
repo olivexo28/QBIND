@@ -13,6 +13,7 @@
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicU8, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 
+use super::accounting::SharedAccountant;
 use super::error::SafetyStoreError;
 use crate::pqc_trust_bundle::TrustBundleEnvironment;
 use crate::storage::signing_journal_crc32;
@@ -94,6 +95,12 @@ pub struct SafetyBackend {
     /// backend incarnation that produced it; O5 refuses a token whose incarnation
     /// differs from the backend it is presented to.
     incarnation: u64,
+    /// The shared aggregate allocation accountant (§ 13.7 / § 13.7B). Shared by
+    /// every attached handle / clone of this instance (the inner `Arc` is cloned,
+    /// never re-created), so attaching a second handle cannot open an independent
+    /// budget that bypasses the aggregate ceiling. Bound to the per-context
+    /// ceiling the first attached handle supplies.
+    accounting: SharedAccountant,
 }
 
 impl std::fmt::Debug for SafetyBackend {
@@ -135,6 +142,9 @@ impl SafetyBackend {
             effective: Arc::new(AtomicBool::new(false)),
             // Draw a fresh ownership incarnation for this open (and reopen).
             incarnation: OWNERSHIP_INCARNATION.fetch_add(1, Ordering::SeqCst),
+            // A fresh, unbound shared accountant; the first attached handle binds
+            // its per-context aggregate ceiling.
+            accounting: SharedAccountant::new(),
         })
     }
 
@@ -143,6 +153,42 @@ impl SafetyBackend {
     /// to refuse a capability drawn under a different backend incarnation.
     pub(crate) fn incarnation(&self) -> u64 {
         self.incarnation
+    }
+
+    /// The shared aggregate allocation accountant (§ 13.7 / § 13.7B), observed by
+    /// every attached handle. Crate-internal: reservations are taken only by the
+    /// enforced O1/O3/O4/O5 operations.
+    pub(crate) fn accounting(&self) -> &SharedAccountant {
+        &self.accounting
+    }
+
+    /// Source/test-only: the shared accountant's observed peak, so a regression
+    /// can assert that a real operation actually reserved against the shared
+    /// budget (not a synthetic counter). Gated behind `test-utils`.
+    #[cfg(any(test, feature = "test-utils"))]
+    pub fn accounting_peak(&self) -> u128 {
+        self.accounting.peak()
+    }
+    /// Source/test-only: the shared accountant's current charged total.
+    #[cfg(any(test, feature = "test-utils"))]
+    pub fn accounting_current(&self) -> u128 {
+        self.accounting.current()
+    }
+    /// Source/test-only: the shared accountant's bound ceiling (if bound).
+    #[cfg(any(test, feature = "test-utils"))]
+    pub fn accounting_cap(&self) -> Option<u128> {
+        self.accounting.cap()
+    }
+    /// Source/test-only: take a standing reservation against the shared budget to
+    /// model concurrent peers / retained holders consuming the aggregate ceiling,
+    /// so capacity-refusal regressions exercise the real shared accountant rather
+    /// than a mock. Gated behind `test-utils`.
+    #[cfg(any(test, feature = "test-utils"))]
+    pub fn reserve_standing_for_test(
+        &self,
+        charge: u128,
+    ) -> Result<super::accounting::Reservation, SafetyStoreError> {
+        self.accounting.reserve(charge)
     }
 
     /// Acquire the single shared serialization domain for a check-then-write
