@@ -14261,3 +14261,139 @@ unchanged. Changed paths this pass:
 `crates/qbind-node/tests/run_422_d7d14_safety_record_store_tests.rs`,
 `docs/protocol/QBIND_CONSENSUS_RECOVERY_SIGNING_HISTORY_CORRESPONDENCE_CONTRACT.md`,
 `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_422_D7.md`, and `docs/whitepaper/contradiction.md`.
+
+## RUN 422 D7-D14 — Complete allocation admission at the binding/read/namespace boundaries (code + test, reviewed object `92d95e4c6448e592b1eca6714bbd288aa825f127`)
+
+This is a **clearly-identified correction** appended to the Run 422 D7-D14 evidence. Every prior
+D7-D14 entry above — including the withdrawn `IMPLEMENTED-ISOLATED` verdict, the preceding
+`PARTIAL-IMPLEMENTATION` corrections, and the "admission before allocation; backend-bound recovery
+tokens" entry — is **preserved as historical evidence** and is **not** deleted. The operative verdict
+**remains** `PARTIAL-IMPLEMENTATION` / `INCOMPLETE`.
+
+### Baseline (verified, not assumed)
+
+Supplied branch `copilot/copilotcopilotcopilotrun-422-d7-d14-correct-safety`, starting HEAD
+`a619c27`. The reviewed object `92d95e4` was fetched (`git fetch origin <sha>`); it is **not** an
+ancestor of HEAD (`git merge-base --is-ancestor` → false), but HEAD is **byte-identical** to `92d95e4`
+across **all** files (`git diff --stat 92d95e4 HEAD` empty), verified independently of `git diff -w`.
+The established CRLF / no-final-newline convention of the component and doc files is preserved; EOF
+bytes are reported literally (final line unterminated — not a bare-LF newline).
+
+### Review findings → correction → regression (this pass)
+
+These close the §3 "finish admission before protected allocations" items that the prior pass left at
+the database-write boundary rather than the allocation/copy boundary. The operational accountant
+wiring (§4/§5), process-death crash coverage (§6), and the full §7 H-matrix mapping corrections remain
+**outstanding** (see blockers).
+
+1. **Public `compute_evidence_lock_binding` allocated/encoded evidence without pinned-context
+   admission.** A direct caller could serialize the supporting certificate into a component-owned
+   `cert` `Vec` before any bound was enforced. *Correction:* the helper now **requires** the pinned
+   context and runs the single authoritative `admit_supporting_evidence(evidence, ctx)` **before**
+   allocating/encoding the `cert` scratch — a **context-checking entry point**, so the public helper
+   can no longer bypass admission. Internal callers (O4 `publish_locked`, `make_locked_qc`, and
+   `validate_locked`) thread the context through. *Regression:*
+   `corr_binding_helper_enforces_admission_before_allocation` (over-bound 9-byte signature under
+   `S_sig = 8` → `DeclaredBoundExceeded` with the thread-local evidence-encode counter still **0**;
+   positive control: a valid call drives it **≥ 1**).
+
+2. **Backend `read_checksummed` copied the whole payload before enforcing the record-size bound.** It
+   used `db.get(key)` (an owned `Vec`) and `payload.to_vec()` with no size ceiling. *Correction:* it
+   now uses `db.get_pinned(key)` — a **borrowed view into backend-internal (RocksDB-owned) memory** —
+   checks the CRC envelope and enforces the applicable record-size bound (`max_safety_record_bytes` for
+   the record, the fixed `META_ENCODED_LEN = 42` for metadata) on that borrowed view, and only takes
+   the single component-owned copy once the payload is known to be within bound. `read_meta`/
+   `read_record` take the bound as a parameter supplied by the owner from its pinned context.
+   *Regression:* `corr_backend_read_bounds_before_component_copy` (a planted `max + 1` record payload
+   is refused with `Oversize { len, max }` before any copy; a `max`-sized payload is still returned; an
+   over-bound metadata payload is refused against the 42-byte bound).
+
+3. **Namespace classification could materialize values and copy an unknown key with no byte bound.**
+   `first_unrecognized_safety_key` iterated with the default `db.iterator` (which materializes both key
+   and value) and returned `key.to_vec()`. *Correction:* it now uses a `db.raw_iterator()` that exposes
+   **borrowed** key slices and only ever reads `.key()` (never `.value()`), and returns **only the
+   offending key's byte length** (`Option<usize>`) — zero application-owned key/value bytes. It stays
+   bounded by **work performed** (`MAX_SCAN = 64` keys, stops at the first out-of-prefix key) and by
+   **application-owned bytes** (nothing copied to decide existence), and surfaces iterator errors via
+   `iter.status()`. O1's refusal message now reports the length without the key bytes. *Regression:*
+   `corr_namespace_classification_reports_length_without_value_copy` (a `safetyrec:legacy:v0` key with a
+   64 KiB value → classification returns `Some(key.len())` without materializing the value; O1 refuses
+   without repair/deletion/migration; the key is still present afterward).
+
+4. **Instrumentation scope stated precisely.** The `EVIDENCE_PAYLOAD_ENCODES` thread-local counter's
+   comment now states it measures exactly one thing — the count of supporting-certificate payload
+   serializations into a component-owned `Vec` via `encode_evidence_payload` (two call sites: the
+   binding `cert` scratch and `encode_record`) — and is **not** a total-allocation meter, an
+   operational memory-peak gauge, or an admission counter. No behaviour change.
+
+### Validation (literal outcomes, this pass)
+
+- Formatting of edited Rust files: `cargo fmt -p qbind-node -- --check` reports **no** diffs in the
+  edited regions of the five changed files; the only remaining diffs are the **pre-existing**
+  no-final-newline EOF condition that is uniform across the whole component (including untouched files
+  such as `accounting.rs`, `error.rs`, `mod.rs`, `profile.rs`, `record.rs`, and even
+  `run_422_d7d2_*`). Per the standing caveat, this is **not** a clean formatting check; it is nonzero
+  and pre-existing, and this pass introduces no new formatting divergence. CRLF line endings were
+  restored on the test file after an editing tool normalized them to LF, so the committed diff is
+  minimal.
+- `cargo build -p qbind-node --lib` (default features) → **Finished (exit 0)**.
+- `cargo test -p qbind-node --features test-utils --test run_422_d7d14_safety_record_store_tests` →
+  **49 passed, 0 failed, 1 ignored** (`child_process_entry`, spawned out-of-band; +3 regressions over
+  the prior 46).
+- Deterministic child-process cases (`pd_*`) → **5 passed, 0 failed**.
+- `cargo clippy -p qbind-node --features test-utils` (lib + the component test target) → **no**
+  `safety_record_store` warnings; the two warnings this pass introduced (a `&ctx` double-reference and a
+  `vec!`-in-slice) were fixed. Four pre-existing `manual div_ceil` warnings remain in untouched test
+  helpers (`valid_wire_qc`, `need` computations) and are left unchanged (out of scope, minimal-change).
+- Default release node build: `cargo build -p qbind-node --release --bin qbind-node` →
+  **Finished `release` profile (exit 0)** in 7m13s. Disk was at 100% (link of an unrelated test target
+  `t172_p2p_smoke_tests` crashed with `ld ... signal 7 [Bus error]`); the disposable `target/debug`
+  tree (84G, task-owned build output only) was removed to free space before the release build —
+  repository content, source, tests, and evidence were preserved. A successful release build
+  establishes build compatibility, **not** running-node recovery acceptance.
+- Production non-wiring audit at this revision → the only tracked reference to the component is the
+  single `pub mod safety_record_store;` registration in `lib.rs`; grep finds **no**
+  `SafetyBackend::open_or_initialize` / `SafetyRecordOwner::attach` construction on any production
+  startup/consensus/signing path. Isolation preserved.
+- Secret scanning on the five edited files → **no secrets detected**.
+- Independent security tooling → the Code Review model and CodeQL analysis were **not** run as part of
+  this pass's recorded evidence; an unavailable review model has **not** completed an independent
+  review and a skipped CodeQL is **not** a zero-alert analysis. This remains an open gate (blocker (d)).
+
+### Concrete remaining blockers (plural; operative verdict stays PARTIAL/INCOMPLETE)
+
+(a) **§4/§5 operational allocation-admission wiring** driven from the real O1–O5 objects/lifetimes with
+the complete retained-field inventory, charged vector/Arc/holder ownership, reserve-before-allocate,
+capacity-normalization overlap, and release on success/refusal/error/uncertainty/drop. The
+`AllocationAccountant` and `generation_charge` remain standalone/arithmetic helpers and are **not** yet
+driven by the component's real operations.
+(b) **§6 deterministic crash coverage** for surviving-initialization-without-success, duplicate O1 after
+survival, publication-before-effectiveness (a test-only hook at the actual effectiveness transition,
+not after `publish_locked` already returned success), failed/uncertain O5, complete-content divergence
+during recovery, and locked-with-no-commit recovery — each with parent-verified boundary arrival and
+specific termination-outcome checks.
+(c) **§7 authoritative H-matrix mapping corrections** — in particular H12 (two handles sharing one
+backend with interleaved stale O4/O5), H21 (credit `h8_p1_p2_binding_enforced`'s certificate/lock
+mismatch), H26 real-storage adversarial TC through actual operations, and the H3/H10 crediting /
+requirement removals. These are **not** claimed as reconciled by this pass.
+(d) **Independent security/review gate** (CodeQL + Code Review) at this revision — still open.
+
+### Component verdict and preserved status
+
+```text
+D7D14_STORAGE_COMPONENT=PARTIAL-IMPLEMENTATION
+D7D14_STORAGE_ACCEPTANCE=INCOMPLETE
+DURABLE_ANTI_ROLLBACK=NOT-ESTABLISHED
+GENESIS_AUTHORITY_ACTIVATION=DISABLED
+PRODUCTION_WIRE_CHAIN_ID_BEHAVIOR=UNCHANGED
+CONFIGURED_AUTHORITY_RELEASE_BINARY_EVIDENCE=NOT-YET-CAPTURED
+SECURITY_POSTURE=RS1-OPEN / PUBLIC-DEVNET-NO-GO
+```
+
+C4/C5 remain **OPEN**. Fail-closed `CurrentEpochUnavailable` is preserved. No production integration,
+signing, recovery-time verifier wiring, anti-rollback establishment, activation, D15, Run 423, or any
+project rename is performed or claimed; QBIND naming and all cryptographic domain-separation bytes are
+unchanged. Changed paths this pass:
+`crates/qbind-node/src/safety_record_store/{backend.rs,codec.rs,owner.rs,validate.rs}`,
+`crates/qbind-node/tests/run_422_d7d14_safety_record_store_tests.rs`,
+`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_422_D7.md`, `docs/protocol/QBIND_CONSENSUS_RECOVERY_SIGNING_HISTORY_CORRESPONDENCE_CONTRACT.md`, and `docs/whitepaper/contradiction.md`.
