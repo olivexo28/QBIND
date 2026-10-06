@@ -169,11 +169,15 @@ pub fn size_of_reservation() -> u128 {
 /// The two partitions keep their own sub-ledgers (so the operational peak /
 /// holder numbers are unchanged and the bounded context multiplicity is still
 /// refused on its own sub-cap), but **every** reservation — operational or
-/// context — must also be admitted here first. Because the aggregate ceiling is
-/// bound to `operational_sub_cap + context_sub_cap`, the live operational and
-/// context charges can never *jointly* exceed the accepted aggregate, and a
-/// concurrent operation + attachment cannot admit against two independent
-/// ceilings whose sum would exceed the permitted coexistence budget.
+/// context — must also be admitted here first. The aggregate ceiling is the
+/// accepted **profile-derived** aggregate (`max_aggregate_retained_bytes`); it is
+/// **not** enlarged by the context sub-cap. The per-class sub-caps therefore sum
+/// to *more* than this aggregate, and that surplus is deliberately unreachable:
+/// live operational and context charges can never *jointly* exceed the accepted
+/// aggregate, so a live context genuinely reduces the capacity available to
+/// operations and vice-versa, and a concurrent operation + attachment cannot
+/// admit against two independent ceilings whose sum would exceed the permitted
+/// coexistence budget.
 #[derive(Debug)]
 struct AggregateGuard {
     cap: u128,
@@ -295,7 +299,9 @@ impl AggregateAuthority {
 /// Each `SharedAccountant` is one **partition** sub-ledger (operational or
 /// context); both partitions of one backend share a single
 /// [`AggregateAuthority`], so every reservation is admitted against the accepted
-/// aggregate ceiling as well as its own sub-cap (§ 13.7, finding #4).
+/// profile-derived aggregate ceiling as well as its own (subordinate) sub-cap
+/// (§ 13.7, finding #4 correction — the aggregate is not the sum of the
+/// sub-caps).
 #[derive(Clone, Debug)]
 pub struct SharedAccountant {
     inner: Arc<Mutex<Option<AllocationAccountant>>>,

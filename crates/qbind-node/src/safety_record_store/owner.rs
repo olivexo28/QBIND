@@ -177,13 +177,16 @@ impl SafetyRecordOwner {
         // it does NOT reserve context ownership. Here we:
         //   1. bind the dedicated context-ownership accountant's sub-ceiling (a
         //      bounded multiplicity of the per-owner context term, stable across
-        //      every same-profile handle) AND the shared aggregate ceiling that
-        //      bounds the operational + context partitions jointly (§ 13.7,
-        //      finding #4),
+        //      every same-profile handle) AND the shared aggregate ceiling, which
+        //      is the accepted **profile-derived aggregate** that bounds the
+        //      operational + context partitions *jointly* — the aggregate is NOT
+        //      enlarged by the context sub-cap (§ 13.7, finding #4 correction),
         //   2. refuse an over-capacity validator vector (actual capacity beyond
         //      the normalized per-owner term) before charging it, and
         //   3. admit (reserve) the actual context charge BEFORE the `Arc<OwnedContext>`
-        //      retains the context — so the charge precedes the retained allocation.
+        //      retains the context — so the charge precedes the retained allocation
+        //      and is admitted against the *shared* aggregate, consuming capacity
+        //      operations must then compete for.
         // The charge measures the COMPLETE `OwnedContext` wrapper value (the
         // inline pinned context + the inline reservation + layout padding), not a
         // partial inner type, so the reservation field is never uncharged.
@@ -201,7 +204,6 @@ impl SafetyRecordOwner {
                 &ctx,
                 size_of_timeout_msg(),
                 validation_scratch,
-                wrapper_size,
             )?)?;
         let charge = context_ownership_charge(&ctx, wrapper_size)?;
         if charge > context_owner_ceiling_term(&ctx, wrapper_size)? {

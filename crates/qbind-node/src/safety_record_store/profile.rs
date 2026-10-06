@@ -391,22 +391,29 @@ pub fn max_context_ownership_bytes(
     )
 }
 
-/// The accepted **component aggregate ceiling** (§ 13.7, finding #4): the
-/// operational working-set ceiling (`max_aggregate_retained_bytes`) **plus** the
-/// context-ownership ceiling (`max_context_ownership_bytes`). This is the single
-/// combined coexistence budget both partitions are admitted against, so a
-/// concurrent operation and attachment can never jointly exceed it even though
-/// each partition also enforces its own sub-ceiling. The sub-ceilings sum to
-/// exactly this aggregate, which both demonstrates the combined bound and keeps
-/// the operational sub-numbers unchanged.
+/// The accepted **component aggregate ceiling** (§ 13.7, finding #4 correction):
+/// the single combined coexistence budget is the accepted **profile-derived
+/// aggregate** `max_aggregate_retained_bytes` — it is **not** enlarged by adding a
+/// separate context allowance. Context-ownership allocations and operational
+/// O1–O5 allocations are both admitted against this one budget, so live context
+/// ownership genuinely reduces the capacity available to operations and live
+/// operations reduce the capacity available to new attachments.
+///
+/// The per-class sub-ceilings (`max_aggregate_retained_bytes` for the operational
+/// partition and `max_context_ownership_bytes` for the context partition) are
+/// retained only as **subordinate** upper bounds: a dynamically shared budget may
+/// keep per-class bounds that cannot all be reached simultaneously, because the
+/// shared [`super::accounting::AggregateAuthority`] enforces the permitted
+/// combined total (this value). The sub-ceilings therefore sum to **more** than
+/// this aggregate (`op + ctx > aggregate`); that surplus is deliberately
+/// unreachable, never an enlargement of the accepted coexistence budget.
+///
+/// `MAX_CONCURRENT_CONTEXT_OWNERS` bounds the context partition's own sub-cap; it
+/// is **not** permission to add memory outside this accepted aggregate.
 pub fn max_component_aggregate_bytes(
     ctx: &PinnedSafetyContext,
     size_of_timeout_msg: u128,
     validation_scratch: u128,
-    wrapper_struct_size: u128,
 ) -> Result<u128, SafetyStoreError> {
-    add(
-        max_aggregate_retained_bytes(ctx, size_of_timeout_msg, validation_scratch)?,
-        max_context_ownership_bytes(ctx, wrapper_struct_size)?,
-    )
+    max_aggregate_retained_bytes(ctx, size_of_timeout_msg, validation_scratch)
 }
