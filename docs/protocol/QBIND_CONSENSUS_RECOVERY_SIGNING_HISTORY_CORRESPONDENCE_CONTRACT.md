@@ -1617,6 +1617,43 @@ D7D14_STORAGE_COMPONENT=PARTIAL-IMPLEMENTATION
 D7D14_STORAGE_ACCEPTANCE=INCOMPLETE
 ```
 
+**Correction (Run 422 D7-D14 — admission-before-allocation / backend-bound
+recovery tokens pass, supersedes the "named blocker" framing of the prior D7-D14
+entry below).** This pass implements a further part of the accepted subset and does
+**not** weaken any obligation; all prior closures below remain in force. Closed this
+pass (with regressions): **(a) structural admission is moved ahead of every dependent
+component-owned variable-size allocation/copy** — O4 (`publish_locked`) and
+`make_locked_qc` now call the single `admit_supporting_evidence` path **before**
+`compute_evidence_lock_binding` allocates its evidence `Vec`/encodes the certificate,
+so an oversize field (e.g. a 9-byte signature under `S_sig = 8`, or oversized nested
+TC signer/timeout/timeout-signature counts) is refused **before** the binding/encode
+allocation, not merely before the database write; a test-only thread-local
+instrumentation counter incremented at the exact evidence-encode/copy site proves the
+counter is still **zero** after a refused operation and non-zero after a valid
+publication; **(b) recovery tokens are bound to their originating backend** — the
+opaque `ValidatedRecord` now additionally carries a process-local
+`recovery_backend_incarnation`; only a successful **O3** (`read_validate`) on an
+established backend grants it, O5 (`reacknowledge`) refuses a token whose incarnation
+does not match the backend being recovered, and public standalone `validate_decoded`
+and the `bootstrap_validated` helper mint **no** O5 recovery capability — so a token
+from store A is refused by store B even when pinned context, revision, and publication
+bytes are byte-identical, a reopened backend requires a fresh O3 token, and handles
+sharing the same backend incarnation may use it. The earlier claim that **operational
+allocation-admission wiring was the *sole* remaining blocker is withdrawn.** Partial
+§13.7A progress: `RetainedGeneration` now carries `evidence_lock_binding` (charged via
+the existing retained-size bound), but the accountant is **still standalone/synthetic**
+and is **not** yet driven from the real O1–O5 objects/lifetimes. **Concrete remaining
+blockers (not a single blocker):** (1) §13.7A operational allocation-admission wiring
+into the real O1–O5 objects/lifetimes with measured peak/lifetime enforcement and the
+complete retained-field inventory; (2) §7 deterministic crash coverage for
+uncertain-initialization and failed/uncertain-O5 child phases with a pre-install hook
+at the actual effectiveness transition and specific termination-outcome verification;
+(3) full §6 original-H-matrix reconciliation in the evidence attachment; and (4) the
+blocked release build, production non-wiring audit, and security tooling (CodeQL /
+independent review) evidence at this revision. The operative component status therefore
+**remains** `D7D14_STORAGE_COMPONENT=PARTIAL-IMPLEMENTATION` /
+`D7D14_STORAGE_ACCEPTANCE=INCOMPLETE`.
+
 **Correction (Run 422 D7-D14 — recovery lifecycle / opaque publication / unified
 admission / TC+namespace pass, corrects `0f258734f1466488c41be814bc76162021c8a948`).**
 This pass implements a further tranche of the accepted subset and **tightens** the
@@ -1650,6 +1687,8 @@ is not yet enforced through actual operations. The operative component status th
 D7D14_STORAGE_COMPONENT=PARTIAL-IMPLEMENTATION
 D7D14_STORAGE_ACCEPTANCE=INCOMPLETE
 ```
+
+**What D14 adds beyond D13.** §12 fixed the frontier **rule** (when the restriction
 must be durable, which dependent operations block, how recovery decides from
 observable inputs). §13 fixes the **record and its operations** at component level:
 exactly one supported storage/publication arrangement, the bounded field set with a

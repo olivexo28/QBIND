@@ -216,7 +216,10 @@ fn h6_empty_signer_certificate_refused() {
     let mut qc = valid_wire_qc(&ctx, [9u8; 32], 5);
     qc.signatures.clear();
     qc.signer_bitmap = vec![0u8; 1];
-    let locked = make_locked_qc(&ctx, [9u8; 32], 5, qc, None).unwrap();
+    // Build the record directly: the public builder now admits evidence and would
+    // refuse the empty-signer certificate up front; here we want to assert that
+    // `encode_record`'s own admission refuses it at the structural threshold.
+    let locked = locked_qc_unadmitted(&ctx, [9u8; 32], 5, qc);
     let dec = DecodedRecord {
         persistence_format_version: 1,
         network_genesis_id: ctx.network_genesis_id,
@@ -1194,15 +1197,59 @@ fn corr_missing_committed_history_for_anchored_refused() {
 // carrying a 9-byte signature must be refused BEFORE publication by the unified
 // structural-admission path, even when the whole record is below the total cap.
 // ---------------------------------------------------------------------------
+/// Construct a QC-derived `LockedRecord` DIRECTLY (bypassing `make_locked_qc`'s
+/// admission) so O4's own admission-before-allocation ordering can be exercised
+/// with an over-bound candidate. The binding digest computed here is test-setup
+/// only; the counter used by the regressions is reset AFTER this helper runs.
+fn locked_qc_unadmitted(
+    ctx: &PinnedSafetyContext,
+    block: [u8; 32],
+    view: u64,
+    qc: WireQc,
+) -> LockedRecord {
+    let evidence = SupportingEvidence::QcDerived(qc);
+    let binding = qbind_node::safety_record_store::codec::compute_evidence_lock_binding(
+        &block,
+        view,
+        &evidence,
+        &ctx.authority_context_ref,
+    )
+    .unwrap();
+    LockedRecord {
+        lock_block_id: block,
+        lock_view: view,
+        evidence_lock_binding: binding,
+        authority_context_ref: ctx.authority_context_ref,
+        committed_anchor: None,
+        predecessor_ref: None,
+        evidence,
+    }
+}
+
 #[test]
 fn corr_oversized_signature_refused_before_publication() {
+    use qbind_node::safety_record_store::codec::{
+        evidence_payload_encode_count, reset_evidence_payload_encode_count,
+    };
     let dir = tempfile::tempdir().unwrap();
     let ctx = ctx_n(4); // s_sig = 8
     let owner = init_owner(dir.path(), &ctx);
     let mut qc = valid_wire_qc(&ctx, [9u8; 32], 5);
     // Replace one 8-byte signature with a 9-byte one.
     qc.signatures[0] = vec![0xABu8; 9];
-    let locked = make_locked_qc(&ctx, [9u8; 32], 5, qc, None).unwrap();
+
+    // A public builder refuses the over-bound evidence BEFORE owning any
+    // variable-size binding buffer (admission ahead of allocation).
+    assert!(matches!(
+        make_locked_qc(&ctx, [9u8; 32], 5, qc.clone(), None),
+        Err(SafetyStoreError::DeclaredBoundExceeded(_))
+    ));
+
+    // Build the candidate directly (bypassing the builder's admission) to drive
+    // O4's own admission-before-allocation ordering, then measure: after a reset,
+    // a refused O4 must NOT have reached the evidence-binding encode/allocation.
+    let locked = locked_qc_unadmitted(&ctx, [9u8; 32], 5, qc);
+    reset_evidence_payload_encode_count();
     let res = owner.publish_locked(locked, 0, None::<&FixtureCommittedHistory>);
     assert!(
         matches!(
@@ -1211,12 +1258,103 @@ fn corr_oversized_signature_refused_before_publication() {
         ),
         "9-byte signature must be refused pre-publication, got {res:?}"
     );
+    assert_eq!(
+        evidence_payload_encode_count(),
+        0,
+        "O4 must refuse BEFORE the evidence-binding allocation/copy, not after"
+    );
     // The predecessor (bootstrap rev 0) is unchanged.
     let v = owner
         .read_validate(None::<&FixtureCommittedHistory>)
         .unwrap();
     assert_eq!(v.decoded().publication_revision, 0);
     assert!(!v.decoded().is_locked());
+}
+
+/// §3 — a VALID O4 publication DOES reach the evidence-binding allocation: the
+/// instrumentation increments (positive control for the refusal measurement).
+#[test]
+fn corr_valid_publication_reaches_evidence_allocation() {
+    use qbind_node::safety_record_store::codec::{
+        evidence_payload_encode_count, reset_evidence_payload_encode_count,
+    };
+    let dir = tempfile::tempdir().unwrap();
+    let ctx = ctx_n(4);
+    let owner = init_owner(dir.path(), &ctx);
+    let qc = valid_wire_qc(&ctx, [9u8; 32], 5);
+    let locked = make_locked_qc(&ctx, [9u8; 32], 5, qc, None).unwrap();
+    reset_evidence_payload_encode_count();
+    assert_eq!(
+        owner.publish_locked(locked, 0, None::<&FixtureCommittedHistory>),
+        PublishResult::DurableAcknowledged { new_revision: 1 }
+    );
+    assert!(
+        evidence_payload_encode_count() >= 1,
+        "a valid publication must exercise the evidence-binding allocation path"
+    );
+}
+
+/// §3 — nested TC over-bound fields (signer list, timeout count, timeout
+/// signature) and the S_sig boundary / boundary-plus-one are all refused by the
+/// one admission path BEFORE the evidence-binding allocation.
+#[test]
+fn corr_nested_tc_and_boundary_admission_before_allocation() {
+    use qbind_node::safety_record_store::codec::{
+        admit_supporting_evidence, evidence_payload_encode_count,
+        reset_evidence_payload_encode_count,
+    };
+    let ctx = ctx_n(4); // N = 4, s_sig = 8
+    let n = ctx.n() as u64;
+
+    // Baseline valid TC evidence.
+    let base = valid_tc_record(&ctx, 5, 6);
+    reset_evidence_payload_encode_count();
+    assert!(admit_supporting_evidence(&base.evidence, &ctx).is_ok());
+    assert_eq!(
+        evidence_payload_encode_count(),
+        0,
+        "admission itself performs no evidence-binding allocation"
+    );
+
+    // Over-bound tc.signers (N + 1 signers).
+    let mut ev = base.evidence.clone();
+    if let SupportingEvidence::TcDerived { tc, .. } = &mut ev {
+        tc.signers = (0..=n).map(ValidatorId::new).collect();
+    }
+    assert!(matches!(
+        admit_supporting_evidence(&ev, &ctx),
+        Err(SafetyStoreError::DeclaredBoundExceeded(_))
+    ));
+
+    // Over-bound signed_timeouts count (N + 1 entries).
+    let mut ev = base.evidence.clone();
+    if let SupportingEvidence::TcDerived { tc, .. } = &mut ev {
+        let extra = tc.signed_timeouts[0].clone();
+        while tc.signed_timeouts.len() as u64 <= n {
+            tc.signed_timeouts.push(extra.clone());
+        }
+    }
+    assert!(matches!(
+        admit_supporting_evidence(&ev, &ctx),
+        Err(SafetyStoreError::DeclaredBoundExceeded(_))
+    ));
+
+    // Over-bound nested timeout signature (S_sig + 1 bytes = boundary-plus-one).
+    let mut ev = base.evidence.clone();
+    if let SupportingEvidence::TcDerived { tc, .. } = &mut ev {
+        tc.signed_timeouts[0].set_signature(vec![0u8; S_SIG + 1]);
+    }
+    assert!(matches!(
+        admit_supporting_evidence(&ev, &ctx),
+        Err(SafetyStoreError::DeclaredBoundExceeded(_))
+    ));
+
+    // Boundary: exactly S_sig bytes is admitted.
+    let mut ev = base.evidence.clone();
+    if let SupportingEvidence::TcDerived { tc, .. } = &mut ev {
+        tc.signed_timeouts[0].set_signature(vec![0u8; S_SIG]);
+    }
+    assert!(admit_supporting_evidence(&ev, &ctx).is_ok());
 }
 
 // ---------------------------------------------------------------------------
@@ -1330,6 +1468,231 @@ fn corr_unknown_namespace_key_refuses_o1_without_repair() {
     ));
     // The unknown key is still present — nothing was repaired or deleted.
     assert!(backend.first_unrecognized_safety_key().unwrap().is_some());
+}
+
+// ---------------------------------------------------------------------------
+// §5 — recovery tokens are bound to their ORIGINATING backend incarnation.
+// Identical pinned contexts are shared by different stores, so the context
+// digest alone is not backend identity. Only a successful O3 on an established
+// backend mints an O5-usable capability; it is honoured only by that backend's
+// own incarnation (and the handles sharing it), never by an unrelated store or a
+// reopened incarnation, and public/bootstrap proofs mint no capability at all.
+// ---------------------------------------------------------------------------
+
+/// Two stores with IDENTICAL pinned context and IDENTICAL publication bytes: a
+/// recovery token minted by O3 on store A is refused by store B's O5.
+#[test]
+fn corr_recovery_token_does_not_transfer_across_stores() {
+    let dir_a = tempfile::tempdir().unwrap();
+    let dir_b = tempfile::tempdir().unwrap();
+    let ctx = ctx_n(4);
+
+    // Establish an identical lock publication in BOTH stores (same ctx/bytes).
+    let owner_a = init_owner(dir_a.path(), &ctx);
+    let owner_b = init_owner(dir_b.path(), &ctx);
+    let qc_a = valid_wire_qc(&ctx, [9u8; 32], 5);
+    let qc_b = valid_wire_qc(&ctx, [9u8; 32], 5);
+    let la = make_locked_qc(&ctx, [9u8; 32], 5, qc_a, None).unwrap();
+    let lb = make_locked_qc(&ctx, [9u8; 32], 5, qc_b, None).unwrap();
+    assert_eq!(
+        owner_a.publish_locked(la, 0, None::<&FixtureCommittedHistory>),
+        PublishResult::DurableAcknowledged { new_revision: 1 }
+    );
+    assert_eq!(
+        owner_b.publish_locked(lb, 0, None::<&FixtureCommittedHistory>),
+        PublishResult::DurableAcknowledged { new_revision: 1 }
+    );
+
+    // O3 tokens from each store; confirm the publication bytes are byte-identical.
+    let tok_a = owner_a
+        .read_validate(None::<&FixtureCommittedHistory>)
+        .unwrap();
+    let tok_b = owner_b
+        .read_validate(None::<&FixtureCommittedHistory>)
+        .unwrap();
+    assert_eq!(
+        tok_a.encoded(),
+        tok_b.encoded(),
+        "identical publication bytes"
+    );
+    assert_eq!(
+        tok_a.origin_context_digest(),
+        tok_b.origin_context_digest(),
+        "identical pinned-context digests"
+    );
+    // Distinct ownership incarnations despite identical context/bytes.
+    assert_ne!(
+        tok_a.recovery_backend_incarnation(),
+        tok_b.recovery_backend_incarnation()
+    );
+
+    // Store B refuses A's token (no cross-store transfer of recovery authority),
+    // leaving B's bytes and recovery-required state unchanged.
+    let before = owner_b
+        .read_validate(None::<&FixtureCommittedHistory>)
+        .unwrap()
+        .encoded()
+        .to_vec();
+    let rr_before = owner_b.recovery_required();
+    let res = owner_b.reacknowledge(&tok_a);
+    assert!(
+        matches!(
+            res,
+            PublishResult::RefusedPreWrite(SafetyStoreError::SemanticRefusal(_))
+        ),
+        "cross-store token must be refused, got {res:?}"
+    );
+    let after = owner_b
+        .read_validate(None::<&FixtureCommittedHistory>)
+        .unwrap()
+        .encoded()
+        .to_vec();
+    assert_eq!(before, after, "rejected token left bytes unchanged");
+    assert_eq!(
+        owner_b.recovery_required(),
+        rr_before,
+        "rejected token must leave recovery-required state unchanged"
+    );
+    // B's OWN token is honoured.
+    assert!(matches!(
+        owner_b.reacknowledge(&tok_b),
+        PublishResult::DurableAcknowledged { new_revision: 1 }
+    ));
+}
+
+/// Anchored records with INDEPENDENTLY supplied committed histories: A's O3
+/// validation authority does not transfer to B even though the publication bytes
+/// are identical (B validates against its own supplied history).
+#[test]
+fn corr_recovery_token_anchored_no_authority_transfer() {
+    let dir_a = tempfile::tempdir().unwrap();
+    let dir_b = tempfile::tempdir().unwrap();
+    let ctx = ctx_n(4);
+    let anchor = CommittedAnchor {
+        block_id: [7u8; 32],
+        height: 3,
+    };
+    let hist = FixtureCommittedHistory::new().with([7u8; 32], 3);
+
+    let owner_a = init_owner(dir_a.path(), &ctx);
+    let owner_b = init_owner(dir_b.path(), &ctx);
+    let qc_a = valid_wire_qc(&ctx, [9u8; 32], 5);
+    let qc_b = valid_wire_qc(&ctx, [9u8; 32], 5);
+    let la = make_locked_qc(&ctx, [9u8; 32], 5, qc_a, Some(anchor.clone())).unwrap();
+    let lb = make_locked_qc(&ctx, [9u8; 32], 5, qc_b, Some(anchor.clone())).unwrap();
+    assert_eq!(
+        owner_a.publish_locked(la, 0, Some(&hist)),
+        PublishResult::DurableAcknowledged { new_revision: 1 }
+    );
+    assert_eq!(
+        owner_b.publish_locked(lb, 0, Some(&hist)),
+        PublishResult::DurableAcknowledged { new_revision: 1 }
+    );
+
+    let tok_a = owner_a.read_validate(Some(&hist)).unwrap();
+    // B refuses A's anchored token: recovery validation must use the history
+    // associated with the store being recovered, not A's validation authority.
+    assert!(matches!(
+        owner_b.reacknowledge(&tok_a),
+        PublishResult::RefusedPreWrite(SafetyStoreError::SemanticRefusal(_))
+    ));
+}
+
+/// Public standalone validation and the bootstrap builder produce proofs with NO
+/// O5 recovery capability; O5 refuses them even on the same backend.
+#[test]
+fn corr_standalone_and_bootstrap_proofs_mint_no_recovery_capability() {
+    use qbind_node::safety_record_store::owner::bootstrap_validated;
+    let dir = tempfile::tempdir().unwrap();
+    let ctx = ctx_n(4);
+    let owner = init_owner(dir.path(), &ctx);
+    let qc = valid_wire_qc(&ctx, [9u8; 32], 5);
+    let locked = make_locked_qc(&ctx, [9u8; 32], 5, qc, None).unwrap();
+    owner.publish_locked(locked, 0, None::<&FixtureCommittedHistory>);
+
+    // A standalone semantic/codec proof over the SAME stored bytes carries no
+    // capability (incarnation is None), so O5 refuses it.
+    let record_bytes = owner
+        .read_validate(None::<&FixtureCommittedHistory>)
+        .unwrap()
+        .encoded()
+        .to_vec();
+    let decoded = decode_record(&record_bytes, &ctx).unwrap();
+    let standalone = validate_decoded(
+        decoded,
+        record_bytes,
+        &ctx,
+        None::<&FixtureCommittedHistory>,
+    )
+    .unwrap();
+    assert_eq!(standalone.recovery_backend_incarnation(), None);
+    assert!(matches!(
+        owner.reacknowledge(&standalone),
+        PublishResult::RefusedPreWrite(SafetyStoreError::SemanticRefusal(_))
+    ));
+
+    // The bootstrap builder likewise mints no capability.
+    let boot = bootstrap_validated(&ctx, 0).unwrap();
+    assert_eq!(boot.recovery_backend_incarnation(), None);
+}
+
+/// A reopened backend is a FRESH incarnation: a token minted before the reopen
+/// is refused; a fresh O3 after reopen yields an honoured capability.
+#[test]
+fn corr_recovery_token_requires_fresh_o3_after_reopen() {
+    let dir = tempfile::tempdir().unwrap();
+    let ctx = ctx_n(4);
+    let owner1 = init_owner(dir.path(), &ctx);
+    let qc = valid_wire_qc(&ctx, [9u8; 32], 5);
+    let locked = make_locked_qc(&ctx, [9u8; 32], 5, qc, None).unwrap();
+    owner1.publish_locked(locked, 0, None::<&FixtureCommittedHistory>);
+    let stale = owner1
+        .read_validate(None::<&FixtureCommittedHistory>)
+        .unwrap();
+    drop(owner1);
+
+    // Reopen a fresh backend incarnation over the surviving bytes.
+    let owner2 = SafetyRecordOwner::attach(open_enabled(dir.path()), ctx.clone()).unwrap();
+    // The pre-reopen token is refused (different incarnation).
+    assert!(matches!(
+        owner2.reacknowledge(&stale),
+        PublishResult::RefusedPreWrite(SafetyStoreError::SemanticRefusal(_))
+    ));
+    // A fresh O3 on the reopened incarnation yields an honoured capability.
+    let fresh = owner2
+        .read_validate(None::<&FixtureCommittedHistory>)
+        .unwrap();
+    assert_ne!(
+        stale.recovery_backend_incarnation(),
+        fresh.recovery_backend_incarnation()
+    );
+    assert!(matches!(
+        owner2.reacknowledge(&fresh),
+        PublishResult::DurableAcknowledged { new_revision: 1 }
+    ));
+}
+
+/// Handles SHARING one backend instance share its incarnation: a token minted by
+/// one handle is honoured through a sibling handle's O5.
+#[test]
+fn corr_recovery_token_usable_across_shared_handles() {
+    let dir = tempfile::tempdir().unwrap();
+    let ctx = ctx_n(4);
+    let backend = open_enabled(dir.path());
+    let owner = SafetyRecordOwner::attach(backend.clone(), ctx.clone()).unwrap();
+    owner.initialize(true).unwrap();
+    let sibling = owner.clone();
+    let qc = valid_wire_qc(&ctx, [9u8; 32], 5);
+    let locked = make_locked_qc(&ctx, [9u8; 32], 5, qc, None).unwrap();
+    owner.publish_locked(locked, 0, None::<&FixtureCommittedHistory>);
+    let tok = owner
+        .read_validate(None::<&FixtureCommittedHistory>)
+        .unwrap();
+    // The sibling handle (same backend incarnation) honours the token.
+    assert!(matches!(
+        sibling.reacknowledge(&tok),
+        PublishResult::DurableAcknowledged { new_revision: 1 }
+    ));
 }
 
 // ---------------------------------------------------------------------------
