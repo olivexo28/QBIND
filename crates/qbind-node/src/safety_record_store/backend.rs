@@ -101,7 +101,27 @@ pub struct SafetyBackend {
     /// budget that bypasses the aggregate ceiling. Bound to the per-context
     /// ceiling the first attached handle supplies.
     accounting: SharedAccountant,
+    /// Source/test-only: a deterministic hook fired by the owner at the exact
+    /// point **after** an atomic publication has returned its durability
+    /// acknowledgement but **before** the component performs its in-memory
+    /// effectiveness transition (`mark_effective`). It exists to coordinate the
+    /// post-acknowledgement / pre-effectiveness crash boundary (§ 13.5): a child
+    /// process installs a hook that terminates there, proving termination precedes
+    /// the effectiveness transition. It is compiled only under `test`/`test-utils`
+    /// and is therefore unreachable in a default/release production build.
+    #[cfg(any(test, feature = "test-utils"))]
+    pre_effective_hook: PreEffectiveHook,
 }
+
+/// Source/test-only: the shared, cloneable slot holding the optional
+/// pre-effectiveness crash-boundary hook (see [`SafetyBackend`]).
+#[cfg(any(test, feature = "test-utils"))]
+type PreEffectiveHook = Arc<Mutex<Option<PreEffectiveHookFn>>>;
+
+/// Source/test-only: the pre-effectiveness crash-boundary callback, invoked with
+/// the operation label and the acknowledged revision reached.
+#[cfg(any(test, feature = "test-utils"))]
+type PreEffectiveHookFn = Arc<dyn Fn(&str, u64) + Send + Sync>;
 
 impl std::fmt::Debug for SafetyBackend {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -145,6 +165,9 @@ impl SafetyBackend {
             // A fresh, unbound shared accountant; the first attached handle binds
             // its per-context aggregate ceiling.
             accounting: SharedAccountant::new(),
+            // No crash-boundary hook installed unless a test installs one.
+            #[cfg(any(test, feature = "test-utils"))]
+            pre_effective_hook: Arc::new(Mutex::new(None)),
         })
     }
 
@@ -394,6 +417,33 @@ impl SafetyBackend {
     /// Clear the shared effectiveness latch (ambiguous/uncertain outcome).
     fn mark_not_effective(&self) {
         self.effective.store(false, Ordering::SeqCst);
+    }
+
+    /// Source/test-only: install the deterministic post-acknowledgement /
+    /// pre-effectiveness crash-boundary hook (§ 13.5). The owner invokes it from
+    /// [`crate::safety_record_store::owner`] at the exact point after an atomic
+    /// publication has returned its durability acknowledgement but before
+    /// `mark_effective`. Gated behind `test-utils`; the production binary never
+    /// constructs this backend and so never installs or runs a hook.
+    #[cfg(any(test, feature = "test-utils"))]
+    pub fn set_pre_effective_hook(&self, hook: PreEffectiveHookFn) {
+        *self.pre_effective_hook.lock().expect("hook slot poisoned") = Some(hook);
+    }
+
+    /// Crate/test-only: run the installed pre-effectiveness hook (if any) at the
+    /// post-acknowledgement / pre-effectiveness boundary, passing the operation
+    /// label and the acknowledged revision so a parent can verify the exact phase
+    /// reached. A no-op when no hook is installed.
+    #[cfg(any(test, feature = "test-utils"))]
+    pub(crate) fn run_pre_effective_hook(&self, op: &str, revision: u64) {
+        let hook = self
+            .pre_effective_hook
+            .lock()
+            .expect("hook slot poisoned")
+            .clone();
+        if let Some(hook) = hook {
+            hook(op, revision);
+        }
     }
 
     fn injected(&self) -> InjectFault {
