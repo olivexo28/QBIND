@@ -14217,8 +14217,17 @@ Excluded and **not** claimed: H1, H13–H15, H17, H25e, H26l, H28, H29.
 - `cargo clippy -p qbind-node --lib --features test-utils` → exit 0, **no** `safety_record_store`
   warnings (the one introduced `unused_doc_comments` warning on the `thread_local!` instrumentation was
   fixed by using a line comment).
-- Default **release** node build, production non-wiring audit at this revision, and security tooling
-  (CodeQL / independent review) → **NOT captured this pass** (named remaining blocker (d)).
+- `cargo build -p qbind-node --release --bin qbind-node` → **Finished `release` profile (exit 0)** in
+  7m29s (disk space was available this pass; the prior pass's `No space left on device` no longer
+  applies). A release build establishes only build compatibility, not running-node recovery/acceptance.
+- Production non-wiring audit at this revision → the component is **not** referenced from
+  `crates/qbind-node/src/main.rs` or `crates/qbind-node/src/binary_consensus_loop.rs` (grep: no hits);
+  the only tracked wiring is the single `pub mod safety_record_store;` registration in `lib.rs`. It is
+  never constructed on any production startup/consensus/signing path.
+- Security tooling → `parallel_validation` CodeQL **skipped** ("database size is too large") — this is
+  **not** a zero-alert analysis; the Code Review model was **unavailable** in this environment
+  ("model ... not found in registry") so "no comments" is **not** a completed independent review. Both
+  are reported literally as unavailable/skipped (remaining blocker (d)).
 
 ### Concrete remaining blockers (plural)
 
@@ -14227,8 +14236,10 @@ the complete retained-field inventory and measured peak/lifetime enforcement (ac
 standalone/synthetic). (b) §7 deterministic crash coverage for uncertain-initialization and
 failed/uncertain-O5 child phases, with a pre-install hook at the actual effectiveness transition and
 specific termination-outcome verification. (c) Full §6 authoritative H-matrix reconciliation for the
-rows marked PARTIAL/NOT-RECONCILED above. (d) The blocked default release node build, production
-non-wiring audit, and security tooling evidence at this revision.
+rows marked PARTIAL/NOT-RECONCILED above. (d) Independent security tooling evidence at this
+revision — CodeQL ran but was **skipped** for database size (not a zero-alert result) and the Code
+Review model was unavailable (not an independent review); the default release node build (exit 0) and
+the production non-wiring audit **are** captured this pass.
 
 ### Component verdict and preserved status
 
