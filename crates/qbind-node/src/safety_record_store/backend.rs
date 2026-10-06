@@ -30,6 +30,11 @@ static OWNERSHIP_INCARNATION: AtomicU64 = AtomicU64::new(1);
 const META_KEY: &[u8] = b"safetyrec:meta:v1";
 /// The authoritative-record key (record + embedded supporting material).
 const RECORD_KEY: &[u8] = b"safetyrec:record:v1";
+/// Exact encoded length of the fixed metadata payload (`2 + 32 + 8`). The
+/// metadata envelope payload can never legitimately exceed this; it is the
+/// applicable read bound enforced on the backend-internal view before any
+/// component-owned copy of the metadata is created.
+pub(crate) const META_ENCODED_LEN: u128 = 2 + 32 + 8;
 
 /// Component gating (§ 13.1). `Disabled` is the default and refuses to open;
 /// `EnabledForTesting` is a **non-default**, test/isolation-only policy.
@@ -150,48 +155,71 @@ impl SafetyBackend {
             .expect("safety serialization domain poisoned")
     }
 
-    /// Read the raw (CRC-verified) metadata bytes, if present.
-    pub fn read_meta(&self) -> Result<Option<Vec<u8>>, SafetyStoreError> {
-        self.read_checksummed(META_KEY, "meta")
+    /// Read the raw (CRC-verified) metadata bytes, if present. `max_payload` is
+    /// the applicable record-size bound enforced on the backend-internal view
+    /// **before** any component-owned copy is made.
+    pub fn read_meta(&self, max_payload: u128) -> Result<Option<Vec<u8>>, SafetyStoreError> {
+        self.read_checksummed(META_KEY, "meta", max_payload)
     }
 
-    /// Read the raw (CRC-verified) record bytes, if present.
-    pub fn read_record(&self) -> Result<Option<Vec<u8>>, SafetyStoreError> {
-        self.read_checksummed(RECORD_KEY, "record")
+    /// Read the raw (CRC-verified) record bytes, if present. `max_payload` is the
+    /// applicable record-size bound enforced on the backend-internal view
+    /// **before** any component-owned copy is made.
+    pub fn read_record(&self, max_payload: u128) -> Result<Option<Vec<u8>>, SafetyStoreError> {
+        self.read_checksummed(RECORD_KEY, "record", max_payload)
     }
 
     /// Bounded classification of the component-owned `safetyrec:` namespace for
-    /// O1 (§ 13.3A). Returns the first key found within the namespace that is
-    /// **not** one of the two recognized current-format keys (metadata/record).
-    /// Such a key denotes established-but-unknown, legacy, partial, or malformed
-    /// safety state that O1 must refuse over — **without** migration, deletion,
-    /// repair, or initialization. The scan is bounded to the `safetyrec:` prefix
-    /// (an ordered iterator that stops at the first out-of-prefix key) and to a
-    /// hard cap, so it never scans unrelated database contents unboundedly.
-    pub fn first_unrecognized_safety_key(&self) -> Result<Option<Vec<u8>>, SafetyStoreError> {
+    /// O1 (§ 13.3A). Returns the **byte length** of the first key found within
+    /// the namespace that is **not** one of the two recognized current-format
+    /// keys (metadata/record). Such a key denotes established-but-unknown,
+    /// legacy, partial, or malformed safety state that O1 must refuse over —
+    /// **without** migration, deletion, repair, or initialization. Returning only
+    /// the length (never the key bytes, and never any value bytes) keeps the
+    /// classification's application-owned allocation bounded to zero: it answers
+    /// *whether* an unknown safety key exists without copying it.
+    ///
+    /// The scan is bounded two ways (§ 13.3A): by **work performed** — an ordered
+    /// raw iterator seeked to the `safetyrec:` prefix that stops at the first
+    /// out-of-prefix key and at a hard `MAX_SCAN` key cap — and by
+    /// **application-owned bytes** — it inspects only borrowed key slices and
+    /// never materializes a value, so no value copy is ever taken merely to
+    /// decide existence.
+    pub fn first_unrecognized_safety_key(&self) -> Result<Option<usize>, SafetyStoreError> {
         const SAFETY_PREFIX: &[u8] = b"safetyrec:";
         // Hard cap on inspected keys: the component only ever owns a small fixed
         // set of current-format keys, so any growth beyond this bound is itself
         // treated as unknown safety state rather than scanned without limit.
         const MAX_SCAN: usize = 64;
-        let mode = rocksdb::IteratorMode::From(SAFETY_PREFIX, rocksdb::Direction::Forward);
+        // A raw iterator exposes borrowed key/value slices without forcing a
+        // value copy; we only ever read `.key()`, never `.value()`.
+        let mut iter = self.db.raw_iterator();
+        iter.seek(SAFETY_PREFIX);
         let mut seen = 0usize;
-        for item in self.db.iterator(mode) {
-            let (key, _value) =
-                item.map_err(|e| SafetyStoreError::ReadFailed(format!("namespace scan: {e}")))?;
+        while iter.valid() {
+            let key = match iter.key() {
+                Some(k) => k,
+                None => break,
+            };
             if !key.starts_with(SAFETY_PREFIX) {
                 break; // left the component namespace: nothing unrelated is scanned.
             }
             seen += 1;
             if seen > MAX_SCAN {
                 // More keys than the component could legitimately own: treat the
-                // excess as unknown safety state (bounded refusal).
-                return Ok(Some(key.to_vec()));
+                // excess as unknown safety state (bounded refusal). Report the
+                // length of the offending key without copying it.
+                return Ok(Some(key.len()));
             }
-            if key.as_ref() != META_KEY && key.as_ref() != RECORD_KEY {
-                return Ok(Some(key.to_vec()));
+            if key != META_KEY && key != RECORD_KEY {
+                return Ok(Some(key.len()));
             }
+            iter.next();
         }
+        // Surface a storage-layer iteration error rather than silently treating
+        // it as "namespace clean".
+        iter.status()
+            .map_err(|e| SafetyStoreError::ReadFailed(format!("namespace scan: {e}")))?;
         Ok(None)
     }
 
@@ -199,14 +227,30 @@ impl SafetyBackend {
         &self,
         key: &[u8],
         what: &str,
+        max_payload: u128,
     ) -> Result<Option<Vec<u8>>, SafetyStoreError> {
-        match self.db.get(key) {
+        // `get_pinned` returns a borrowed view into backend-internal (RocksDB-
+        // owned) memory, NOT a component-owned `Vec`. We enforce the CRC envelope
+        // and the applicable record-size bound against this borrowed view and
+        // only copy the payload into a component-owned buffer once it is known to
+        // be within bound — so an over-bound stored value never forces an
+        // unbounded application-owned allocation.
+        match self.db.get_pinned(key) {
             Ok(None) => Ok(None),
             Ok(Some(raw)) => {
+                let raw: &[u8] = raw.as_ref();
                 if raw.len() < 4 {
                     return Err(SafetyStoreError::ReadFailed(format!(
                         "{what}: envelope too short"
                     )));
+                }
+                // Bound the payload length BEFORE copying it out of backend memory.
+                let payload_len = (raw.len() - 4) as u128;
+                if payload_len > max_payload {
+                    return Err(SafetyStoreError::Oversize {
+                        len: payload_len,
+                        max: max_payload,
+                    });
                 }
                 let (crc_bytes, payload) = raw.split_at(4);
                 let stored =
@@ -216,6 +260,7 @@ impl SafetyBackend {
                         "{what}: CRC envelope mismatch"
                     )));
                 }
+                // Now within bound and CRC-valid: take the single component-owned copy.
                 Ok(Some(payload.to_vec()))
             }
             Err(e) => Err(SafetyStoreError::ReadFailed(format!("{what}: {e}"))),

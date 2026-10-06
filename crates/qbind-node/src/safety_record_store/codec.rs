@@ -329,12 +329,25 @@ fn decode_timeout_cert(
 /// Compute `evidence_lock_binding` = SHA3-256 over
 /// {`lock_block_id`, `lock_view`, `supporting_certificate`, `authority_context_ref`}
 /// using the encoded supporting-certificate bytes (§ 13.2).
+///
+/// This is a **context-checking entry point**: the pinned context is required so
+/// that the single authoritative structural admission ([`admit_supporting_evidence`])
+/// runs **before** the component-owned `cert` scratch is allocated or any
+/// evidence byte is copied into it. A public caller therefore cannot bypass
+/// admission by invoking the binding helper directly with over-bound evidence —
+/// an over-bound count/length/width (e.g. `S_sig = 8` with a 9-byte signature,
+/// or a nested logical high-QC signer list exceeding `N`) is refused here before
+/// the allocation, not after the buffer is already owned.
 pub fn compute_evidence_lock_binding(
     lock_block_id: &[u8; 32],
     lock_view: u64,
     evidence: &SupportingEvidence,
     authority_context_ref: &[u8; 32],
+    ctx: &PinnedSafetyContext,
 ) -> Result<[u8; 32], SafetyStoreError> {
+    // Admit the evidence structure against the pinned context BEFORE allocating
+    // the `cert` buffer or copying any variable-size evidence bytes into it.
+    admit_supporting_evidence(evidence, ctx)?;
     let mut cert = Vec::new();
     encode_evidence_payload(&mut cert, evidence)?;
     let mut h = Sha3_256::new();
@@ -350,14 +363,19 @@ pub fn compute_evidence_lock_binding(
     Ok(out)
 }
 
-// Test-only instrumentation counter for the component-owned variable-size
-// evidence allocation/copy path. It is incremented at the exact point where
-// supporting-certificate bytes are serialized into a component-owned buffer
-// (the evidence-binding `cert` scratch and the record encode). A regression can
-// therefore prove that a refusal happened before this allocation/copy — not
-// merely that the database was unchanged afterward — by asserting the counter
-// is still zero after a refused operation. Absent from default production
-// builds (gated behind `test-utils`/`test`).
+// Test-only instrumentation counter. It measures **one specific thing**: the
+// number of times a supporting-certificate payload is serialized into a
+// component-owned `Vec<u8>` on the current thread via [`encode_evidence_payload`].
+// That covers exactly two call sites — the evidence-binding `cert` scratch in
+// [`compute_evidence_lock_binding`] and the evidence segment of
+// [`encode_record`]. It is a boundary marker for *that* allocation/copy path
+// only; it is deliberately NOT a total-allocation meter, an operational
+// memory-peak gauge, or an admission counter (those live in
+// [`super::accounting`] and the admission helpers). A regression can therefore
+// prove that a refusal happened before this evidence serialization — not merely
+// that the database was unchanged afterward — by asserting the counter is still
+// zero after a refused operation. Absent from default production builds (gated
+// behind `test-utils`/`test`).
 #[cfg(any(test, feature = "test-utils"))]
 thread_local! {
     static EVIDENCE_PAYLOAD_ENCODES: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };

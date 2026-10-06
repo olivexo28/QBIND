@@ -149,11 +149,11 @@ impl SafetyRecordOwner {
     fn load_established(&self) -> Result<(SafetyMeta, Vec<u8>, DecodedRecord), SafetyStoreError> {
         let meta_bytes = self
             .backend
-            .read_meta()?
+            .read_meta(super::backend::META_ENCODED_LEN)?
             .ok_or_else(|| SafetyStoreError::MissingEstablishedState("no metadata".into()))?;
         let record_bytes = self
             .backend
-            .read_record()?
+            .read_record(super::profile::max_safety_record_bytes(&self.ctx)?)?
             .ok_or_else(|| SafetyStoreError::StructuralRefusal("metadata without record".into()))?;
         let meta = SafetyMeta::decode(&meta_bytes)?;
         if meta.context_digest != context_digest(&self.ctx) {
@@ -201,8 +201,10 @@ impl SafetyRecordOwner {
             ));
         }
         let guard = self.backend.lock_domain();
-        let meta = self.backend.read_meta()?;
-        let record = self.backend.read_record()?;
+        let meta = self.backend.read_meta(super::backend::META_ENCODED_LEN)?;
+        let record = self
+            .backend
+            .read_record(super::profile::max_safety_record_bytes(&self.ctx)?)?;
         match (meta.is_some(), record.is_some()) {
             (true, _) => {
                 return Err(SafetyStoreError::AlreadyEstablished(
@@ -223,11 +225,10 @@ impl SafetyRecordOwner {
         // namespace other than the two recognized current-format keys causes the
         // contract-prescribed refusal — with NO migration, deletion, repair, or
         // initialization over it.
-        if let Some(unknown) = self.backend.first_unrecognized_safety_key()? {
+        if let Some(unknown_len) = self.backend.first_unrecognized_safety_key()? {
             return Err(SafetyStoreError::StructuralRefusal(format!(
-                "unknown/legacy safety-namespace key present ({} bytes); refusing O1 without \
-                 migration or repair",
-                unknown.len()
+                "unknown/legacy safety-namespace key present ({unknown_len} bytes); refusing O1 \
+                 without migration or repair",
             )));
         }
 
@@ -386,6 +387,7 @@ impl SafetyRecordOwner {
             candidate.lock_view,
             &candidate.evidence,
             &candidate.authority_context_ref,
+            &self.ctx,
         ) {
             Ok(b) => b,
             Err(e) => return PublishResult::RefusedPreWrite(e),
@@ -573,6 +575,7 @@ pub fn make_locked_qc(
         lock_view,
         &evidence,
         &ctx.authority_context_ref,
+        ctx,
     )?;
     Ok(LockedRecord {
         lock_block_id,
