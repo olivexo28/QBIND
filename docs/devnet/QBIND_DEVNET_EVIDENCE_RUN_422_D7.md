@@ -15398,3 +15398,140 @@ pass: `crates/qbind-node/src/safety_record_store/profile.rs`,
 `crates/qbind-node/tests/run_422_d7d14_safety_record_store_tests.rs`,
 `docs/protocol/QBIND_CONSENSUS_RECOVERY_SIGNING_HISTORY_CORRESPONDENCE_CONTRACT.md`,
 `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_422_D7.md`, and `docs/whitepaper/contradiction.md`.
+
+## RUN 422 D7-D14 — Real-operation combined-budget refusal + aggregate-accessor doc correction (code-comment + test + docs)
+
+This section is a **continuation** of the operative Run 422 D7-D14 statement above (finding #4, the single
+combined-admission budget, and finding #7, operation-level versus reservation-level coverage). It **adds**
+real-operation evidence and a source-comment correction; it **supersedes nothing** and **preserves every**
+prior section verbatim as historical evidence. The operative verdict is and stays
+`PARTIAL-IMPLEMENTATION` / `INCOMPLETE`.
+
+### 1. Baseline and reviewed-object correspondence (this pass)
+
+- Actual working branch: `copilot/copilotcopilotcopilotcopilotcopilotcopilotcopilotc-75d9e2c8-6ec3-46c1-8ffe-49db8365c002`
+  (the task's reported `…c-968bf2a9…` differs; the actual supplied branch was used and **not** switched to
+  match the reported name).
+- Full starting HEAD: `7c31631e740ffd92beda397989ef25b35a9832a3`; worktree clean at start.
+- Reviewed object `7788be5db14f2175726f8a627c9bd18eaa9e3f4f` was **fetched** (shallow single-branch clone;
+  the object was not present until `git fetch origin <sha>`). It is **not** an ancestor of the starting HEAD
+  but a **sibling** sharing parent `0a548f666ad6b01f0d5df0a246aecb65bff3d2c3` (the starting HEAD's parent).
+- Scoped content correspondence (starting HEAD vs reviewed object): `backend.rs`, `codec.rs`, `record.rs`,
+  `validate.rs`, `mod.rs`, `error.rs`, the D7-D14 test target, `Cargo.toml`, `lib.rs`, and the correspondence
+  contract are **byte-identical** (absent from `git diff --name-only`); `accounting.rs`, `owner.rs`, and
+  `profile.rs` differ by **exactly a final-newline byte** (reviewed side carries `\ No newline at end of
+  file`); the two documents differ only by **CRLF/LF + final-newline** normalization. `git diff -w` over the
+  whole range is **empty** (whitespace/line-ending only). EOL-normalized text correspondence does **not** by
+  itself establish attachment byte identity; correspondence is stated only for the objects actually compared.
+
+### 2. Findings corrected this pass
+
+- **Finding #4 (source comment):** the `test-utils` accessor doc on
+  `SafetyBackend::accounting_aggregate_current` (`backend.rs`) still described the aggregate as *"equals the
+  sum of the two sub-ceilings"* — the **rejected** `8732 = 7772 + 960` model. Corrected to state the enforced
+  relation `agg_cap == op_cap` (the accepted profile operational aggregate) with `op_cap + ctx_cap > agg_cap`
+  (the sub-caps sum to **more** than the aggregate; that surplus is deliberately unreachable). Code behaviour
+  is unchanged (`max_component_aggregate_bytes` already returns `max_aggregate_retained_bytes`); only the
+  stale comment is brought into agreement with the authoritative regression
+  `agg_ceiling_is_profile_operational_not_sum`.
+
+- **Finding #7 (real-operation versus synthetic-reservation coverage):** the two synthetic-pressure
+  `agg_*` tests are relabelled so their names/comments distinguish **reservation-level admission-boundary
+  evidence** from execution of an **O1–O5 operation**, and a decisive real-operation regression is added.
+
+### 3. Real-operation combined-budget regression (added)
+
+`agg_real_o4_refused_by_combined_though_op_class_permits` executes a **genuine O4** `publish_locked` (not a
+`reserve_standing_for_test` synthetic charge) that is refused by the **combined** `AggregateAuthority` even
+though the **operational** sub-cap would admit the identical charge:
+
+- The real O4 working-set charge is **measured** on an isolated backend as the shared accountant's observed
+  peak after a real publish (in a publish-only flow the O4 reservation `2×generation + 3×record` is the
+  largest operational peak). Measured (4-validator fixture, `-- --nocapture`):
+  `o4_charge = 4641`, `op_cap = agg_cap = 7772`, `ctx_live = 480` (two live context owners × `240`),
+  `standing_op = 3131` (a clearly-labelled **synthetic** standing operational reservation).
+- Decisive inequality: the **operational** sub-cap would admit the charge
+  (`op_current 3131 + o4_charge 4641 = 7772 = op_cap`), while the **combined** budget cannot
+  (`agg_current 3611 + o4_charge 4641 = 8252 > agg_cap 7772`, short by exactly `ctx_live = 480`).
+  `SharedAccountant::reserve` admits against the aggregate **first**, so the real O4 is refused **pre-write**
+  with `CapacityRefusal` (`RefusedPreWrite`); `recovery_required()` stays false, and a read-back confirms the
+  established revision-1 evidence is intact.
+- Releasing the synthetic pressure readmits a **real** O4 that advances the revision (`1 → 2`): admission is
+  restored with **no loss** of durable evidence. The live context pressure comes from a **real**
+  `SafetyRecordOwner::attach` consuming the context partition; the operational partition is never widened.
+
+Relabelled companions:
+- `agg_operation_refused_by_combined_even_though_class_permits` →
+  `agg_synthetic_reservation_refused_by_combined_even_though_op_class_permits`. Its comment now states both
+  the pressure **and** the refused charge are test-only reservations constructing the admission boundary
+  (reservation-level evidence, **not** an O1–O5 operation), cross-referencing the real-operation test above.
+- `agg_attachment_refused_when_operations_consume_capacity` keeps its name (the operation under test — a real
+  `attach` — **is** a genuine operation); its comment now labels the occupancy as a **synthetic** standing
+  reservation rather than implying a real operation produced it.
+
+### 4. Validation (literal commands and outcomes, this pass)
+
+- `cargo build -p qbind-node --lib` (default features) → **Finished `dev`, exit 0**.
+- `cargo test -p qbind-node --features test-utils --test run_422_d7d14_safety_record_store_tests` →
+  **72 passed, 0 failed, 1 ignored** (`child_process_entry`, spawned out-of-band). Delta vs the prior 71:
+  **+1** for the added real-operation regression; the two relabelled tests retain their assertions. Crash
+  topology unchanged (no `pd_*` parent added).
+- `cargo test … --test run_422_d7d14_safety_record_store_tests --no-run` **without** `--features test-utils`
+  → **error: target … requires the features: `test-utils`** — expected `required-features` **gating**,
+  reported **separately** from the clean default-feature library build (not successful default-feature test
+  compilation).
+- `cargo clippy -p qbind-node --features test-utils --tests` → **Finished, exit 0**; the test target emits
+  the **4 pre-existing** warnings (lines 58/59/802/~2229 after the insertion shift); **no** new warning in the
+  inserted/relabelled region.
+- `cargo build -p qbind-node --release --bin qbind-node` → **Finished `release`, exit 0** (compile/isolation
+  compatibility only — **not** running-node recovery acceptance, configured-authority evidence, rollback
+  resistance, or production readiness; prior release-build evidence preserved with its scope).
+- Formatting: `rustfmt --edition 2021 --check` reports the backend.rs diff **only** at the pre-existing
+  trailing-newline EOF (line 576, far from the edited accessor comment at ~251), and test-file diffs **only**
+  at the pre-existing EOF/wide-line baseline (line 468 and the prior baseline shifted by the insertion); the
+  **inserted/edited regions are clean**. **Not** claimed as a clean whole-crate run.
+- Production non-wiring audit: outside the component only `pub mod safety_record_store;` in `lib.rs` is
+  present; `AggregateAuthority`, `bind_aggregate`, `max_component_aggregate_bytes`, and the new test have
+  **no** reference outside the component.
+- Secret scan over the edited files: **no secrets detected**.
+- External analysis gates (literal — not rerun with actual analysis this pass):
+  `INDEPENDENT_CODE_REVIEW=UNAVAILABLE`; `CODEQL=SKIPPED — database too large`. An unavailable model's
+  "no comments" is **not** a completed review; a skipped CodeQL run is **not** "0 alerts". These gates remain
+  **OPEN**.
+
+### 5. Operative verdicts (unchanged — not promoted) and remaining blockers (this pass)
+
+```
+D7D14_STORAGE_COMPONENT=PARTIAL-IMPLEMENTATION
+D7D14_STORAGE_ACCEPTANCE=INCOMPLETE
+DURABLE_ANTI_ROLLBACK=NOT-ESTABLISHED
+GENESIS_AUTHORITY_ACTIVATION=DISABLED
+PRODUCTION_WIRE_CHAIN_ID_BEHAVIOR=UNCHANGED
+CONFIGURED_AUTHORITY_RELEASE_BINARY_EVIDENCE=NOT-YET-CAPTURED
+SECURITY_POSTURE=RS1-OPEN / PUBLIC-DEVNET-NO-GO
+```
+
+C4/C5 remain **OPEN**; fail-closed `CurrentEpochUnavailable` unchanged; QBIND naming and all cryptographic
+domain-separation bytes unchanged. This pass adds decisive **real-operation** combined-budget evidence and
+corrects a stale aggregate-accessor comment; it does **not** promote acceptance. The following remain **open**
+and prevent promotion (unfinished implementation distinguished from unavailable external evidence):
+
+1. *(Unfinished implementation)* §5/§6 full per-object operational O1–O5 inventory driven from the real
+   traced allocations/owners/capacities/lifetimes, and a layout/capacity proof measuring the operational
+   `ValidatedRecord`/`DecodedRecord` rather than the synthetic `RetainedGeneration`. The combined-budget
+   enforcement and admission mechanism are correct and now exercised by a real operation, but the complete
+   operational inventory and representation-layout proof are **not** completed this pass.
+2. *(Unfinished implementation)* §8 remaining H evidence: H18/H22 (type/consumer-boundary PARTIAL), H19
+   (process-death recovery with a fresh backend-bound O3 over complete-content divergence outside the
+   binding), H24 (malformed committed-anchor presence/payload), H26 (`tc.signed_timeouts[i].high_qc`
+   adversarial signer bounds through real operations).
+3. *(Unavailable external evidence)* Independent-review / CodeQL security gate — `UNAVAILABLE` /
+   `SKIPPED — database too large` this pass; remains a required open gate, not a passed one.
+
+No production/engine/decision/signing integration, verifier wiring, anti-rollback establishment, activation,
+D15, Run 423, or project rename is performed or claimed. Changed paths this pass:
+`crates/qbind-node/src/safety_record_store/backend.rs`,
+`crates/qbind-node/tests/run_422_d7d14_safety_record_store_tests.rs`,
+`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_422_D7.md`,
+`docs/protocol/QBIND_CONSENSUS_RECOVERY_SIGNING_HISTORY_CORRESPONDENCE_CONTRACT.md`, and
+`docs/whitepaper/contradiction.md`.

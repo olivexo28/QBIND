@@ -3387,3 +3387,20 @@ existing profile-derived aggregate (`= MAX_AGGREGATE_RETAINED_BYTES`, `7772` for
 partitions are charged; the complete-wrapper charge correction (first bullet) is preserved unchanged. The
 literal commands, measured values, regressions, and open blockers for this revision are
 recorded in the latest RUN 422 D7-D14 section of `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_422_D7.md`.
+**Real-operation confirmation (finding #4 / finding #7 continuation).** The combined-limit identity above
+(`enforced aggregate = MAX_AGGREGATE_RETAINED_BYTES`, `7772` for N=4, **not** `8732`) is now exercised by a
+**genuine O4 `publish_locked`** — not only by synthetic standing reservations. The regression
+`agg_real_o4_refused_by_combined_though_op_class_permits` measures the real O4 working-set charge as the
+shared accountant's observed peak (`o4_charge = 4641` for N=4) and shows the operational sub-cap would admit
+it (`3131 + 4641 = 7772 = op_cap`) while the combined budget refuses it **pre-write**
+(`3611 + 4641 = 8252 > 7772`, short by exactly the live context charge `480`), after which releasing the
+pressure readmits a real O4 without losing the established durable evidence. The two synthetic-pressure
+companions are relabelled so their names/comments distinguish **reservation-level** admission-boundary
+evidence from execution of an **O1–O5 operation**. A stale `test-utils` accessor comment that still
+described the aggregate as the **sum** of the sub-caps was corrected to the enforced
+`agg_cap == op_cap` / `op_cap + ctx_cap > aggregate` relation; no enforced bound changed. The operative
+verdict is and remains `D7D14_STORAGE_COMPONENT=PARTIAL-IMPLEMENTATION` / `D7D14_STORAGE_ACCEPTANCE=INCOMPLETE`
+with `DURABLE_ANTI_ROLLBACK=NOT-ESTABLISHED`; the §5/§6 full operational inventory + representation-layout
+proof and the §8 H18/H19/H22/H24/H26 obligations remain open, as does the independent CodeQL/Code-Review
+security gate. See the latest RUN 422 D7-D14 continuation section of
+`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_422_D7.md`.

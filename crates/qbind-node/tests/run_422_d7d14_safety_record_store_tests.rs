@@ -1519,13 +1519,17 @@ fn agg_live_context_consumes_operational_budget() {
     );
 }
 
-// An operation is refused because COMBINED occupancy would exceed the accepted
-// aggregate, even though its OWN class (operational) sub-cap still permits it —
-// decisive proof the sub-caps are not independent budgets. This refusal is only
-// possible because live context ownership (the other partition) consumed shared
-// capacity. Freeing a live context owner then restores the operational capacity.
+// RESERVATION-LEVEL admission-boundary evidence (NOT an O1–O5 operation). Both
+// the standing pressure AND the refused charge here are test-only
+// `reserve_standing_for_test` reservations, used to construct the combined-budget
+// boundary directly. It proves the shared authority refuses a charge the
+// OPERATIONAL sub-cap would still permit, because live context ownership (the
+// other partition) consumed shared capacity; freeing a live context owner
+// restores the operational capacity. The REAL-operation counterpart — a genuine
+// O4 `publish_locked` refused by the same combined budget while its operational
+// sub-cap permits its charge — is `agg_real_o4_refused_by_combined_though_op_class_permits`.
 #[test]
-fn agg_operation_refused_by_combined_even_though_class_permits() {
+fn agg_synthetic_reservation_refused_by_combined_even_though_op_class_permits() {
     let dir = tempfile::tempdir().unwrap();
     let ctx = ctx_n(4);
     let owner = init_owner(dir.path(), &ctx);
@@ -1576,10 +1580,15 @@ fn agg_operation_refused_by_combined_even_though_class_permits() {
     drop(extra);
 }
 
-// An attachment is refused because live OPERATIONS consume the shared aggregate
-// capacity it needs, even though the context class sub-cap plainly permits
-// another owner. Durable state and existing reservations are preserved; freeing
-// the operations readmits the attachment.
+// An attachment (the REAL operation under test) is refused because live
+// occupancy of the shared aggregate leaves less than one context charge of
+// headroom, even though the context class sub-cap plainly permits another owner.
+// The occupancy here is supplied by a clearly-labelled SYNTHETIC standing
+// operational reservation (`reserve_standing_for_test`) that constructs the
+// admission boundary — it is reservation-level pressure, not a real O1–O5
+// operation — but the operation being refused and rolled back is a genuine
+// `SafetyRecordOwner::attach`. Durable state and existing reservations are
+// preserved; freeing the pressure readmits the attachment.
 #[test]
 fn agg_attachment_refused_when_operations_consume_capacity() {
     let dir = tempfile::tempdir().unwrap();
@@ -1612,6 +1621,137 @@ fn agg_attachment_refused_when_operations_consume_capacity() {
     drop(standing);
     let _readmitted = SafetyRecordOwner::attach(backend.clone(), ctx.clone())
         .expect("freeing operations restores combined capacity for the attachment");
+}
+
+// REAL-OPERATION aggregate competition (§ 13.7, finding #4 / finding #7): a
+// genuine O4 `publish_locked` — not a synthetic reservation — is refused by the
+// COMBINED aggregate authority even though its OWN operational sub-cap would
+// still admit the identical charge. This is the real-operation counterpart to
+// `agg_synthetic_reservation_refused_by_combined_even_though_op_class_permits`.
+//
+// The refusal is decisively the shared authority, not the operational sub-cap:
+// the test asserts `operational_current + o4_charge <= op_cap` (the op class
+// permits it) while `aggregate_current + o4_charge > agg_cap` (the combined
+// budget cannot). `SharedAccountant::reserve` admits against the aggregate
+// first, so the real O4 is refused pre-write with `CapacityRefusal`, leaving the
+// established evidence and recovery state untouched. Releasing the synthetic
+// standing pressure readmits a real O4 that advances the revision — admission is
+// restored without any loss of durable evidence.
+#[test]
+fn agg_real_o4_refused_by_combined_though_op_class_permits() {
+    let ctx = ctx_n(4);
+
+    // Measure the real O4 working-set charge on an ISOLATED backend by executing
+    // a real publish and reading the shared accountant's observed peak. In a
+    // publish-only flow the O4 reservation (2×generation + 3×record) is the
+    // largest operational peak, so the peak IS the real O4 charge.
+    let probe_dir = tempfile::tempdir().unwrap();
+    let probe = init_owner(probe_dir.path(), &ctx);
+    let probe_backend = probe.backend_for_test();
+    let pqc = valid_wire_qc(&ctx, [3u8; 32], 5);
+    let plocked = make_locked_qc(&ctx, [3u8; 32], 5, pqc, None).unwrap();
+    assert_eq!(
+        probe.publish_locked(plocked, 0, None::<&FixtureCommittedHistory>),
+        PublishResult::DurableAcknowledged { new_revision: 1 }
+    );
+    let o4_charge = probe_backend.accounting_peak();
+    assert!(
+        o4_charge > 0,
+        "a real O4 reserves a real working-set buffer"
+    );
+
+    // Fresh store under test. Establish durable evidence (revision 1) first so a
+    // later pre-write refusal is demonstrably non-destructive.
+    let dir = tempfile::tempdir().unwrap();
+    let owner = init_owner(dir.path(), &ctx);
+    let backend = owner.backend_for_test();
+    let agg_cap = backend.accounting_aggregate_cap().unwrap();
+    let op_cap = backend.accounting_cap().unwrap();
+    assert_eq!(
+        agg_cap, op_cap,
+        "combined budget IS the profile operational aggregate"
+    );
+    assert!(
+        o4_charge <= op_cap,
+        "a single real O4 fits within the operational sub-cap ({o4_charge} <= {op_cap})"
+    );
+
+    let qc0 = valid_wire_qc(&ctx, [9u8; 32], 5);
+    let l0 = make_locked_qc(&ctx, [9u8; 32], 5, qc0, None).unwrap();
+    assert_eq!(
+        owner.publish_locked(l0, 0, None::<&FixtureCommittedHistory>),
+        PublishResult::DurableAcknowledged { new_revision: 1 }
+    );
+    assert_eq!(backend.accounting_current(), 0, "O4 working set released");
+
+    // Live context pressure from a REAL independent attachment consumes shared
+    // budget in the CONTEXT partition (the operational partition stays at 0).
+    let attached = SafetyRecordOwner::attach(backend.clone(), ctx.clone()).unwrap();
+    let ctx_live = backend.context_accounting_current();
+    assert!(ctx_live > 0, "a live context owner consumes shared budget");
+
+    // A clearly-labelled SYNTHETIC standing operational reservation constructs
+    // the admission boundary so the operational sub-cap would STILL admit one
+    // more real O4 exactly (`op_current + o4_charge == op_cap`), while the
+    // combined budget falls short by exactly the live context charge.
+    let standing_op = op_cap - o4_charge;
+    let standing = backend
+        .reserve_standing_for_test(standing_op)
+        .expect("synthetic standing operational pressure within the op sub-cap");
+    println!(
+        "MEASURED o4_charge={o4_charge} op_cap={op_cap} agg_cap={agg_cap} ctx_live={ctx_live} standing_op={standing_op}"
+    );
+
+    // The operational class sub-cap WOULD permit the real O4 charge...
+    assert!(
+        backend.accounting_current() + o4_charge <= op_cap,
+        "operational class sub-cap permits the real O4 charge ({} + {o4_charge} <= {op_cap})",
+        backend.accounting_current()
+    );
+    // ...but the COMBINED budget cannot: context + operational leave < o4_charge.
+    assert!(
+        backend.accounting_aggregate_current() + o4_charge > agg_cap,
+        "combined aggregate cannot admit the real O4 charge ({} + {o4_charge} > {agg_cap})",
+        backend.accounting_aggregate_current()
+    );
+
+    // The REAL O4 is refused pre-write by the combined authority, preserving the
+    // established evidence and the recovery state (no durable write, no eviction).
+    let qc1 = valid_wire_qc(&ctx, [7u8; 32], 6);
+    let l1 = make_locked_qc(&ctx, [7u8; 32], 6, qc1, None).unwrap();
+    match owner.publish_locked(l1, 1, None::<&FixtureCommittedHistory>) {
+        PublishResult::RefusedPreWrite(SafetyStoreError::CapacityRefusal(_)) => {}
+        other => panic!("expected combined CapacityRefusal RefusedPreWrite, got {other:?}"),
+    }
+    assert!(
+        !owner.recovery_required(),
+        "a combined capacity refusal is pre-write and does not arm recovery"
+    );
+    let rb = owner
+        .read_validate(None::<&FixtureCommittedHistory>)
+        .unwrap();
+    assert_eq!(
+        rb.decoded().publication_revision,
+        1,
+        "established evidence intact after the refused real O4"
+    );
+    drop(rb);
+
+    // Releasing the synthetic pressure restores admission for a real O4 that
+    // advances the revision — no durable evidence was lost by the refusal.
+    drop(standing);
+    assert_eq!(
+        backend.accounting_current(),
+        0,
+        "operational partition clear after releasing synthetic pressure"
+    );
+    let qc2 = valid_wire_qc(&ctx, [7u8; 32], 6);
+    let l2 = make_locked_qc(&ctx, [7u8; 32], 6, qc2, None).unwrap();
+    assert_eq!(
+        owner.publish_locked(l2, 1, None::<&FixtureCommittedHistory>),
+        PublishResult::DurableAcknowledged { new_revision: 2 }
+    );
+    drop(attached);
 }
 
 // Concurrent admission across threads can never exceed the accepted aggregate:
