@@ -2236,6 +2236,70 @@ fn child_process_entry() {
             // must still require fresh recovery (O5) before dependent O4.
             std::process::exit(14);
         }
+        "init_uncertain" => {
+            // O1 whose meta+bootstrap durable write COMPLETES but whose success
+            // acknowledgement is lost: the caller observes UncertainPublication,
+            // never a success. Live, before any restart, confirm the in-process
+            // effectiveness transition did NOT happen (recovery is required), so a
+            // later reopen into a recovery-required state cannot be mistaken for a
+            // masked successful transition.
+            backend.set_inject(InjectFault::UncertainAfterWrite);
+            let r = owner.initialize(true);
+            assert!(
+                matches!(r, Err(SafetyStoreError::UncertainPublication(_))),
+                "got {r:?}"
+            );
+            assert!(
+                owner.recovery_required(),
+                "uncertain O1 must not transition effectiveness"
+            );
+            std::process::exit(15);
+        }
+        "o5_uncertain" => {
+            owner.initialize(true).expect("O1");
+            let qc = valid_wire_qc(&ctx, [9u8; 32], 5);
+            let locked = make_locked_qc(&ctx, [9u8; 32], 5, qc, None).unwrap();
+            assert!(matches!(
+                owner.publish_locked(locked, 0, None::<&FixtureCommittedHistory>),
+                PublishResult::DurableAcknowledged { .. }
+            ));
+            let tok = owner
+                .read_validate(None::<&FixtureCommittedHistory>)
+                .unwrap();
+            backend.set_inject(InjectFault::UncertainAfterWrite);
+            let r = owner.reacknowledge(&tok);
+            assert!(matches!(r, PublishResult::UncertainDurable), "got {r:?}");
+            // An uncertain O5 must NOT release the recovery restriction.
+            assert!(
+                owner.recovery_required(),
+                "uncertain O5 must preserve the recovery restriction"
+            );
+            std::process::exit(16);
+        }
+        "o5_write_error" => {
+            owner.initialize(true).expect("O1");
+            let qc = valid_wire_qc(&ctx, [9u8; 32], 5);
+            let locked = make_locked_qc(&ctx, [9u8; 32], 5, qc, None).unwrap();
+            assert!(matches!(
+                owner.publish_locked(locked, 0, None::<&FixtureCommittedHistory>),
+                PublishResult::DurableAcknowledged { .. }
+            ));
+            let tok = owner
+                .read_validate(None::<&FixtureCommittedHistory>)
+                .unwrap();
+            backend.set_inject(InjectFault::WriteErrors);
+            let r = owner.reacknowledge(&tok);
+            assert!(
+                matches!(r, PublishResult::WriteFailedAmbiguous(_)),
+                "got {r:?}"
+            );
+            // A failed O5 must NOT release the recovery restriction.
+            assert!(
+                owner.recovery_required(),
+                "failed O5 must preserve the recovery restriction"
+            );
+            std::process::exit(17);
+        }
         other => panic!("unknown child phase {other}"),
     }
 }
@@ -2365,4 +2429,106 @@ fn pd_reopen_after_clean_exit_requires_o5_before_o4() {
         owner.publish_locked(l2, 1, None::<&FixtureCommittedHistory>),
         PublishResult::DurableAcknowledged { new_revision: 2 }
     );
+}
+/// Boundary: an O1 whose durable init write COMPLETED but whose success was never
+/// observed (the caller saw `UncertainPublication`). The surviving metadata +
+/// bootstrap are readable, yet the next process still requires recovery and a
+/// duplicate O1 over the surviving established state is refused — the surviving
+/// bytes are NOT mistaken for a masked successful initialization.
+#[test]
+fn pd_init_uncertain_bytes_survive_without_observed_success() {
+    let dir = tempfile::tempdir().unwrap();
+    let status = spawn_child(dir.path(), "init_uncertain");
+    assert_eq!(status.code(), Some(15), "child reached the uncertain-O1 boundary");
+    let ctx = ctx_n(4);
+    let owner = SafetyRecordOwner::attach(open_enabled(dir.path()), ctx).unwrap();
+    // The durable bootstrap survived and is a valid complete publication.
+    let v = owner
+        .read_validate(None::<&FixtureCommittedHistory>)
+        .unwrap();
+    assert!(!v.decoded().is_locked());
+    assert_eq!(v.decoded().publication_revision, 0);
+    // The reopened process requires fresh recovery (effectiveness never persisted).
+    assert!(owner.recovery_required());
+    // Duplicate O1 over the surviving established state is refused (no
+    // auto-reinitialization of a store that already has metadata).
+    assert!(matches!(
+        owner.initialize(true),
+        Err(SafetyStoreError::AlreadyEstablished(_))
+    ));
+}
+
+/// Boundary: a child establishes + acknowledges a lock then exits cleanly; the
+/// parent reopens and a duplicate O1 over the surviving established state is
+/// refused. Distinct from the uncertain-init case: here the child DID observe
+/// success, yet the fresh process still refuses to re-initialize established
+/// bytes.
+#[test]
+fn pd_duplicate_o1_after_surviving_init_refused() {
+    let dir = tempfile::tempdir().unwrap();
+    let status = spawn_child(dir.path(), "ack_locked_clean_exit");
+    assert_eq!(status.code(), Some(14));
+    let ctx = ctx_n(4);
+    let owner = SafetyRecordOwner::attach(open_enabled(dir.path()), ctx).unwrap();
+    assert!(matches!(
+        owner.initialize(true),
+        Err(SafetyStoreError::AlreadyEstablished(_))
+    ));
+}
+
+/// Boundary: a child drives an UNCERTAIN O5 over surviving complete state (the
+/// recovery write completes but the acknowledgement is lost). The child confirms
+/// LIVE, before exit, that the uncertain O5 did not release the recovery
+/// restriction. The parent then reopens: the successor survives, recovery is
+/// still required (the earlier uncertain transition is not masked), dependent O4
+/// stays blocked, and a clean O5 finally re-establishes effectiveness.
+#[test]
+fn pd_uncertain_o5_does_not_release_recovery_then_clean_o5_recovers() {
+    let dir = tempfile::tempdir().unwrap();
+    let status = spawn_child(dir.path(), "o5_uncertain");
+    assert_eq!(status.code(), Some(16), "child reached the uncertain-O5 boundary");
+    let ctx = ctx_n(4);
+    let owner = SafetyRecordOwner::attach(open_enabled(dir.path()), ctx.clone()).unwrap();
+    assert_eq!(owner.open().unwrap().current_revision, 1);
+    assert!(owner.recovery_required(), "reopen still requires recovery");
+    // Dependent O4 remains blocked until a successful O5.
+    let qc2 = valid_wire_qc(&ctx, [0x11u8; 32], 7);
+    let l2 = make_locked_qc(&ctx, [0x11u8; 32], 7, qc2, None).unwrap();
+    assert!(matches!(
+        owner.publish_locked(l2.clone(), 1, None::<&FixtureCommittedHistory>),
+        PublishResult::RefusedPreWrite(SafetyStoreError::RecoveryRequired(_))
+    ));
+    // A fresh clean O5 over the surviving complete publication recovers.
+    let surviving = owner
+        .read_validate(None::<&FixtureCommittedHistory>)
+        .unwrap();
+    assert!(matches!(
+        owner.reacknowledge(&surviving),
+        PublishResult::DurableAcknowledged { new_revision: 1 }
+    ));
+    assert!(!owner.recovery_required());
+    assert_eq!(
+        owner.publish_locked(l2, 1, None::<&FixtureCommittedHistory>),
+        PublishResult::DurableAcknowledged { new_revision: 2 }
+    );
+}
+
+/// Boundary: a child drives a FAILED (ambiguous) O5 over surviving complete
+/// state. The child confirms LIVE that the failed O5 did not release the recovery
+/// restriction; the parent reopens and confirms recovery is still required and
+/// the surviving publication is unchanged.
+#[test]
+fn pd_failed_o5_does_not_release_recovery() {
+    let dir = tempfile::tempdir().unwrap();
+    let status = spawn_child(dir.path(), "o5_write_error");
+    assert_eq!(status.code(), Some(17), "child reached the failed-O5 boundary");
+    let ctx = ctx_n(4);
+    let owner = SafetyRecordOwner::attach(open_enabled(dir.path()), ctx).unwrap();
+    assert_eq!(owner.open().unwrap().current_revision, 1);
+    assert!(owner.recovery_required(), "failed O5 does not release recovery");
+    let v = owner
+        .read_validate(None::<&FixtureCommittedHistory>)
+        .unwrap();
+    assert!(v.decoded().is_locked());
+    assert_eq!(v.decoded().publication_revision, 1);
 }
