@@ -14098,3 +14098,155 @@ unchanged. Changed paths this pass:
 `crates/qbind-node/Cargo.toml`,
 `docs/protocol/QBIND_CONSENSUS_RECOVERY_SIGNING_HISTORY_CORRESPONDENCE_CONTRACT.md`,
 `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_422_D7.md`, and `docs/whitepaper/contradiction.md`.
+## RUN 422 D7-D14 — Admission before allocation; backend-bound recovery tokens (code + test, reviewed object `77984e98e6c7110db44e54f35ef69ed4fc5bbc9b`)
+
+This is a **clearly-identified correction** appended to the Run 422 D7-D14 evidence. Every prior
+entry is preserved; this entry supersedes the prior "single named blocker" framing only.
+
+### Baseline (verified, not assumed)
+
+Supplied branch HEAD and the reviewed object `77984e98e6c7110db44e54f35ef69ed4fc5bbc9b` are
+**siblings** sharing base `80491e7`; the reviewed object is **not** an ancestor of HEAD. On the nine
+differing component/doc files the two revisions are **byte-identical modulo CRLF↔LF line endings and a
+trailing final newline only** — verified explicitly by normalizing CR and diffing (each remaining
+difference is "No newline at end of file"), **not** inferred from `git diff -w`. The repository
+content at HEAD is used as the editing baseline; the established CRLF / no-final-newline convention of
+the component files is preserved.
+
+### Review findings → correction → regression (this pass)
+
+1. **Admission ran after a variable-size allocation.** The reviewed O4 called
+   `compute_evidence_lock_binding` — which allocates an evidence `Vec` and encodes the supporting
+   certificate via `encode_evidence_payload` **without** the pinned-context bounds — *before*
+   `encode_record` reached `admit_record_structure`. So the oversized-signature regression only proved
+   refusal **before the database write**, not before the allocation/copy.
+   *Correction:* a single `admit_supporting_evidence(evidence, ctx)` path (covering QC and TC evidence,
+   nested TC signer/timeout counts, signature lengths, bitmap spans, discriminants, and total encoded
+   size) is now invoked by O4 (`publish_locked`) and by `make_locked_qc` **before** the binding
+   `Vec`/encode allocation; `admit_record_structure` delegates to the same path (no second, weaker
+   admission). *Regressions:* `corr_oversized_signature_refused_before_publication` (now asserts the
+   test-only thread-local evidence-encode/copy counter is **0** after the refused O4 and that
+   `make_locked_qc` itself refuses the 9-byte signature under `S_sig = 8`);
+   `corr_valid_publication_reaches_evidence_allocation` (positive control: counter ≥ 1 on a valid
+   publication); `corr_nested_tc_and_boundary_admission_before_allocation` (oversized nested TC signer
+   list, `signed_timeouts` count, and nested timeout-signature `S_sig+1`; the `S_sig` boundary value is
+   admitted while boundary-plus-one is refused before the allocation).
+
+2. **Recovery tokens were not bound to their backend.** The reviewed opaque `ValidatedRecord` stored
+   only `origin_context_digest`, which identical pinned contexts share across distinct stores; public
+   standalone `validate_decoded` and the `bootstrap_validated` helper could also produce it. A token
+   from store A was therefore acceptable to store B when bytes and revision matched, and standalone
+   validation could mint an O5 capability.
+   *Correction:* `ValidatedRecord` now additionally carries a process-local
+   `recovery_backend_incarnation` (a monotonic per-`open_or_initialize` ownership counter, shared by
+   handles that clone the same backend). Only a successful **O3** (`read_validate`) on an established
+   backend grants it (`grant_recovery_capability`); **O5** (`reacknowledge`) refuses a token whose
+   incarnation does not match `self.backend.incarnation()`; public `validate_decoded` and
+   `bootstrap_validated` leave it `None` (no O5 capability). This is a simple internal ownership
+   mechanism — **no** new cryptographic identity, persistent identifier, protocol domain, or schema
+   migration. O5 retains complete-byte comparison, expected-revision fencing, verbatim republication,
+   and fresh durability acknowledgement. *Regressions:*
+   `corr_recovery_token_does_not_transfer_across_stores` (two stores, identical context + bytes →
+   cross-store token refused, bytes/recovery-required state unchanged);
+   `corr_recovery_token_anchored_no_authority_transfer` (anchored records with independently supplied
+   histories → A's validation authority does not transfer to B);
+   `corr_standalone_and_bootstrap_proofs_mint_no_recovery_capability`;
+   `corr_recovery_token_requires_fresh_o3_after_reopen`; `corr_recovery_token_usable_across_shared_handles`.
+
+3. **Retained representation (partial §13.7A).** `RetainedGeneration` now carries
+   `evidence_lock_binding` (the 32-byte binding retained for O5), charged through the existing
+   retained-size bound (`size_of::<RetainedGeneration>() ≤ GEN_STRUCT_MAX = 384`). The accountant
+   remains standalone/synthetic and is **not** yet driven from the real O1–O5 objects/lifetimes.
+
+### Proof of admission before the variable-size allocation/copy
+
+`EVIDENCE_PAYLOAD_ENCODES` is a `#[cfg(any(test, feature = "test-utils"))]` **thread-local** counter
+incremented at the top of `encode_evidence_payload` — the exact point where supporting-certificate
+bytes are serialized into a component-owned buffer (the evidence-binding `cert` scratch and the record
+encode). Thread-local (not a global atomic) because the component operation and the encode it drives run
+on the same thread, keeping the measurement accurate under the parallel test harness. A refused oversize
+operation leaves the counter at **0**; a valid publication drives it **≥ 1**. This is allocation-path
+instrumentation, not a counter disconnected from the allocation.
+
+### Authoritative H-matrix reconciliation status (honest; not promoted by test count)
+
+The original §13 contract obligations are authoritative. The prior evidence table substituted several
+*test* meanings for the *contract* meaning; those substitutions are **not** promoted here. The rows
+below use the original obligations; `RECONCILED` means a concrete test exercises the contract meaning at
+the required evidence level, `NOT-RECONCILED` means only a substitute test exists and the row's
+authoritative evidence is **still outstanding** (a named remaining blocker — see below).
+
+| Row | Original obligation | Required level | Concrete test(s) | Status |
+|---|---|---|---|---|
+| H2 | First init on genuine absence w/ explicit intent + pinned context | unit/model + real storage | `h2_encode_decode_roundtrip_bootstrap_and_locked`, `h16_real_rocksdb_publish_and_reopen` | RECONCILED |
+| H3 | Open missing-but-expected without auto-initialization | unit/model | `h23_o2_refuses_absent_state_o3_no_write` (open-missing portion) | PARTIAL — not claimed from the unsupported-version test |
+| H4 | Duplicate-init AND uncertain-init survival | process death | `h18_o1_refuses_duplicate_initialization` (duplicate only); uncertain-init child phase **absent** | NOT-RECONCILED (process-death uncertain-init missing) |
+| H5 | Valid lock/evidence/context association | unit/model + real storage | `h8_p1_p2_binding_enforced`, `h16_real_rocksdb_publish_and_reopen` | RECONCILED |
+| H6 | Invalid association/context, empty-signer QC, unverified evidence | unit/model | `h6_empty_signer_certificate_refused`, `h9_p4_context_mismatch_refused`, `h11_success_is_unverified` | RECONCILED |
+| H7 | Size limits, checked arithmetic, unsupported version, corruption | unit/model | `h5_oversize_refused_pre_allocation`, `h7_declared_count_over_bound_refused`, `h3_unsupported_version_refused`, `h4_crc_and_truncation_refused` | RECONCILED |
+| H8 | Atomic publication: partial vs complete-unacked successor | real storage + process death | `h16_real_rocksdb_publish_and_reopen`, `pd_uncertain_after_write_successor_survives`, `pd_write_error_before_commit_predecessor_unchanged` | RECONCILED |
+| H9 | Crash before ack or in-memory install | process death | `pd_ack_then_abort_survives_locked` (pre-install hook at the true effectiveness transition **absent**) | NOT-RECONCILED (pre-install boundary) |
+| H10 | Successful O5 recovery establishes effectiveness | process death | `pd_reopen_after_clean_exit_requires_o5_before_o4` | PARTIAL — successful-O5 child phase not isolated |
+| H11 | Failed/uncertain O5 remains fail-closed | process death | `corr_uncertain_publish_blocks_dependent_o4_until_o5_recovers` (model); failed/uncertain-O5 **child phase absent** | NOT-RECONCILED (process-death O5 phases) |
+| H12 | Competing handles + stale O4/O5 attempts | unit/model + real storage | `corr_reopen_established_store_blocks_o4_until_o5`, `pd_reopen_after_clean_exit_requires_o5_before_o4` | RECONCILED |
+| H16 | Capacity/replacement/uncertain-successor/disabled pruning | unit/model + real storage | `h16_real_rocksdb_publish_and_reopen`, `h20_stale_o5_does_not_overwrite_newer` | PARTIAL — capacity/pruning coverage incomplete |
+| H18 | Unsupported non-co-located record/evidence arrangement | unit/model | type-boundary refusal (the arrangement is non-constructible); **not** claimed from duplicate-init | PARTIAL — explicit refusal/type-boundary test outstanding |
+| H19 | Complete-content divergence outside the evidence binding | unit/model + process death | `h19_o5_refuses_divergence_outside_binding_digest`; process-death divergence phase **absent** | NOT-RECONCILED (process-death portion) |
+| H20 | Stale O5 cannot overwrite newer publication | unit/model + real storage | `h20_stale_o5_does_not_overwrite_newer` | RECONCILED |
+| H21 | Certificate/lock mismatch despite valid CRC + recomputed binding | unit/model | `corr_invalid_lock_evidence_binding_refused`, `corr_record_meta_revision_disagreement_refused` | RECONCILED |
+| H22 | Unverified evidence cannot satisfy a verified-evidence prerequisite | unit/model | **none** — `h22_o4_rejects_non_increasing_view` is lock-view enforcement, not this obligation | NOT-RECONCILED (not claimed from lock-view) |
+| H23 | Missing/inconsistent committed-history association | unit/model + real storage | `corr_missing_committed_history_for_anchored_refused` | PARTIAL — not claimed from opening an absent store |
+| H24 | Locked-with-no-commit recovery + malformed anchor-presence | unit/model + process death | `h24_bootstrap_nocommit_committed_distinctions`; process-death no-commit recovery **absent** | NOT-RECONCILED (process-death portion) |
+| H25 | Storage-level bootstrap→first-lock using supplied evidence | unit/model + real storage | `h25_first_lock_evidence_storage_layer_only` (H25e engine integration **not** claimed) | RECONCILED |
+| H26 | Adversarial serialized bounds for both evidence variants, **before allocation/copy** | unit/model + real storage | `h26_both_evidence_variants_and_nested_bounds`, `corr_oversized_signature_refused_before_publication`, `corr_nested_tc_and_boundary_admission_before_allocation` | RECONCILED (before-allocation now proven by instrumentation) |
+| H27 | Persist/enforce TC-derived restriction, retain unverified status | unit/model | `h27_tc_derived_restriction_persisted_unverified` | RECONCILED |
+| H30 | QC height/round distinction | unit/model | `h30_height_vs_round_distinction` | RECONCILED |
+
+Excluded and **not** claimed: H1, H13–H15, H17, H25e, H26l, H28, H29.
+
+### Validation (literal outcomes, this pass)
+
+- `rustfmt --edition 2021 --check` on each edited file → clean on the edited regions; the only
+  remaining diff is the pre-existing no-final-newline EOF of these CRLF files (unchanged convention,
+  unrelated to this change; the crate is not rustfmt-clean at baseline either).
+- `cargo build -p qbind-node --lib` → Finished (exit 0); the `RetainedGeneration` compile-time size
+  assertion (`≤ 384`) holds with the added `evidence_lock_binding` field.
+- `cargo test -p qbind-node --features test-utils --test run_422_d7d14_safety_record_store_tests` →
+  **46 passed, 0 failed, 1 ignored** (`child_process_entry`, spawned out-of-band; +7 regressions over
+  the prior 39).
+- `cargo clippy -p qbind-node --lib --features test-utils` → exit 0, **no** `safety_record_store`
+  warnings (the one introduced `unused_doc_comments` warning on the `thread_local!` instrumentation was
+  fixed by using a line comment).
+- Default **release** node build, production non-wiring audit at this revision, and security tooling
+  (CodeQL / independent review) → **NOT captured this pass** (named remaining blocker (d)).
+
+### Concrete remaining blockers (plural)
+
+(a) §13.7A operational allocation-admission wiring driven from the real O1–O5 objects/lifetimes with
+the complete retained-field inventory and measured peak/lifetime enforcement (accountant still
+standalone/synthetic). (b) §7 deterministic crash coverage for uncertain-initialization and
+failed/uncertain-O5 child phases, with a pre-install hook at the actual effectiveness transition and
+specific termination-outcome verification. (c) Full §6 authoritative H-matrix reconciliation for the
+rows marked PARTIAL/NOT-RECONCILED above. (d) The blocked default release node build, production
+non-wiring audit, and security tooling evidence at this revision.
+
+### Component verdict and preserved status
+
+```text
+D7D14_STORAGE_COMPONENT=PARTIAL-IMPLEMENTATION
+D7D14_STORAGE_ACCEPTANCE=INCOMPLETE
+DURABLE_ANTI_ROLLBACK=NOT-ESTABLISHED
+GENESIS_AUTHORITY_ACTIVATION=DISABLED
+PRODUCTION_WIRE_CHAIN_ID_BEHAVIOR=UNCHANGED
+CONFIGURED_AUTHORITY_RELEASE_BINARY_EVIDENCE=NOT-YET-CAPTURED
+SECURITY_POSTURE=RS1-OPEN / PUBLIC-DEVNET-NO-GO
+```
+
+C4/C5 remain **OPEN**. Fail-closed `CurrentEpochUnavailable` is preserved. No production integration,
+signing, recovery-time verifier wiring, anti-rollback establishment, activation, D15, Run 423, or any
+project rename is performed or claimed; QBIND naming and all cryptographic domain-separation bytes are
+unchanged. Changed paths this pass:
+`crates/qbind-node/src/safety_record_store/{backend.rs,codec.rs,owner.rs,record.rs}`,
+`crates/qbind-node/tests/run_422_d7d14_safety_record_store_tests.rs`,
+`docs/protocol/QBIND_CONSENSUS_RECOVERY_SIGNING_HISTORY_CORRESPONDENCE_CONTRACT.md`,
+`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_422_D7.md`, and `docs/whitepaper/contradiction.md`.

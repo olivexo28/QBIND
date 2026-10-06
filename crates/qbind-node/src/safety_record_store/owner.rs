@@ -298,7 +298,13 @@ impl SafetyRecordOwner {
         // `open`). Reject missing/partial, foreign-context, or revision-
         // inconsistent metadata before validating the record.
         let (_meta, record_bytes, decoded) = self.load_established()?;
-        validate_decoded(decoded, record_bytes, &self.ctx, history)
+        // Semantic/codec validation produces a proof WITHOUT an O5 capability;
+        // O3 on this established backend then grants the backend-bound recovery
+        // capability, stamped with THIS backend's ownership incarnation. Only a
+        // successful O3 on an established backend mints an O5-usable token — the
+        // public `validate_decoded` and the bootstrap builder never do.
+        let validated = validate_decoded(decoded, record_bytes, &self.ctx, history)?;
+        Ok(validated.grant_recovery_capability(self.backend.incarnation()))
     }
 
     // -----------------------------------------------------------------------
@@ -361,6 +367,16 @@ impl SafetyRecordOwner {
                     ),
                 ));
             }
+        }
+
+        // Structural admission of the candidate evidence BEFORE any component-owned
+        // variable-size allocation or copy (§ 13.2A / § 13.7): the evidence-binding
+        // `cert` scratch in `compute_evidence_lock_binding`, the candidate clone, and
+        // `encode_record`'s buffer all follow. Refuse an over-bound count/length/width
+        // (e.g. `S_sig=8` with a 9-byte signature) here, before allocating the binding
+        // buffer — not after encoding.
+        if let Err(e) = super::codec::admit_supporting_evidence(&candidate.evidence, &self.ctx) {
+            return PublishResult::RefusedPreWrite(e);
         }
 
         // Recompute the evidence binding so the stored record is self-consistent,
@@ -456,6 +472,26 @@ impl SafetyRecordOwner {
             ));
         }
 
+        // The retained proof must carry an O5 recovery capability bound to THIS
+        // backend's ownership incarnation (§ 13.4 / § 13.5). Identical pinned
+        // contexts are shared by different stores, so the context digest alone is
+        // NOT backend identity. A token minted by O3 on a DIFFERENT backend
+        // instance (another store, or a reopened incarnation of the same DB) is
+        // refused even when context, revision, and publication bytes are
+        // identical; a semantic/codec-only proof (public `validate_decoded`) or a
+        // bootstrap-builder proof carries no capability and is refused here. Only
+        // a fresh O3 on this exact backend incarnation yields an O5-usable token.
+        match retained.recovery_backend_incarnation() {
+            Some(inc) if inc == self.backend.incarnation() => {}
+            _ => {
+                return PublishResult::RefusedPreWrite(SafetyStoreError::SemanticRefusal(
+                    "retained publication is not an O5 recovery capability for this backend \
+                     incarnation (no cross-store / cross-reopen transfer of recovery authority)"
+                        .into(),
+                ))
+            }
+        }
+
         // Complete byte-for-byte equality — NOT a digest, NOT a re-encode, NOT a
         // normalization. Divergence anywhere (even outside the binding digest's
         // coverage) refuses.
@@ -528,6 +564,10 @@ pub fn make_locked_qc(
     committed_anchor: Option<super::record::CommittedAnchor>,
 ) -> Result<LockedRecord, SafetyStoreError> {
     let evidence = SupportingEvidence::QcDerived(qc);
+    // Public builder: admit the evidence structure BEFORE the evidence-binding
+    // allocation (same discipline as O4). An over-bound signature/count/width is
+    // refused before `compute_evidence_lock_binding` owns any variable-size buffer.
+    super::codec::admit_supporting_evidence(&evidence, ctx)?;
     let binding = compute_evidence_lock_binding(
         &lock_block_id,
         lock_view,

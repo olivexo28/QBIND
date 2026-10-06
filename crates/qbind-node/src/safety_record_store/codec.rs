@@ -350,10 +350,40 @@ pub fn compute_evidence_lock_binding(
     Ok(out)
 }
 
+// Test-only instrumentation counter for the component-owned variable-size
+// evidence allocation/copy path. It is incremented at the exact point where
+// supporting-certificate bytes are serialized into a component-owned buffer
+// (the evidence-binding `cert` scratch and the record encode). A regression can
+// therefore prove that a refusal happened before this allocation/copy — not
+// merely that the database was unchanged afterward — by asserting the counter
+// is still zero after a refused operation. Absent from default production
+// builds (gated behind `test-utils`/`test`).
+#[cfg(any(test, feature = "test-utils"))]
+thread_local! {
+    static EVIDENCE_PAYLOAD_ENCODES: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
+
+/// Test-only: read the current thread's evidence-payload encode counter. It is
+/// thread-local because a component operation and the evidence-binding/encode it
+/// drives run on the same thread; this keeps the measurement accurate even when
+/// the test harness runs many tests in parallel.
+#[cfg(any(test, feature = "test-utils"))]
+pub fn evidence_payload_encode_count() -> u64 {
+    EVIDENCE_PAYLOAD_ENCODES.with(|c| c.get())
+}
+
+/// Test-only: reset the current thread's evidence-payload encode counter.
+#[cfg(any(test, feature = "test-utils"))]
+pub fn reset_evidence_payload_encode_count() {
+    EVIDENCE_PAYLOAD_ENCODES.with(|c| c.set(0));
+}
+
 fn encode_evidence_payload(
     out: &mut Vec<u8>,
     evidence: &SupportingEvidence,
 ) -> Result<(), SafetyStoreError> {
+    #[cfg(any(test, feature = "test-utils"))]
+    EVIDENCE_PAYLOAD_ENCODES.with(|c| c.set(c.get().saturating_add(1)));
     match evidence {
         SupportingEvidence::QcDerived(qc) => encode_wire_qc(out, qc),
         SupportingEvidence::TcDerived { high_qc, tc } => {
@@ -389,18 +419,36 @@ pub fn admit_record_structure(
     rec: &DecodedRecord,
     ctx: &PinnedSafetyContext,
 ) -> Result<(), SafetyStoreError> {
-    let n = ctx.n();
     match &rec.record {
-        SafetyRecord::BootstrapNoLock { .. } => {}
-        SafetyRecord::Locked(l) => match &l.evidence {
-            SupportingEvidence::QcDerived(qc) => admit_wire_qc(qc, ctx)?,
-            SupportingEvidence::TcDerived { high_qc, tc } => {
-                admit_logical_qc_signers(high_qc.signers.len(), n, "record-level high_qc")?;
-                admit_timeout_cert(tc, ctx)?;
-            }
-        },
+        SafetyRecord::BootstrapNoLock { .. } => Ok(()),
+        SafetyRecord::Locked(l) => admit_supporting_evidence(&l.evidence, ctx),
     }
-    Ok(())
+}
+
+/// Structural admission of a `Locked` record's supporting evidence against the
+/// pinned context, applied **before** any component-owned variable-size
+/// allocation or copy that depends on those fields — in particular before the
+/// evidence-binding `cert` scratch in [`compute_evidence_lock_binding`], before
+/// candidate cloning, and before [`encode_record`]'s buffer growth. This is the
+/// single admission path reused by every public builder/helper and by O4; there
+/// is no second, weaker admission. It covers QC and TC evidence, all nested
+/// counts, signature lengths, bitmap spans, the record-level high-QC signer
+/// count, and (via the per-field checks) every length prefix and discriminant,
+/// all with checked arithmetic. The concrete prior failure case — with
+/// `S_sig = 8`, a QC carrying a 9-byte signature — is refused here even when the
+/// whole record is below the total serialized cap.
+pub fn admit_supporting_evidence(
+    evidence: &SupportingEvidence,
+    ctx: &PinnedSafetyContext,
+) -> Result<(), SafetyStoreError> {
+    let n = ctx.n();
+    match evidence {
+        SupportingEvidence::QcDerived(qc) => admit_wire_qc(qc, ctx),
+        SupportingEvidence::TcDerived { high_qc, tc } => {
+            admit_logical_qc_signers(high_qc.signers.len(), n, "record-level high_qc")?;
+            admit_timeout_cert(tc, ctx)
+        }
+    }
 }
 
 fn admit_count_fits_prefix(count: usize, what: &str) -> Result<(), SafetyStoreError> {

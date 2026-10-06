@@ -141,6 +141,19 @@ pub struct ValidatedRecord {
     /// uses it to refuse a retained proof produced under a different ownership
     /// context.
     origin_context_digest: [u8; 32],
+    /// The **recovery capability** binding, present only when this proof was
+    /// minted by a successful O3 read on an established backend. It records the
+    /// originating backend's ownership-incarnation nonce (§ 13.4 / § 13.5). O5
+    /// accepts a retained publication as a recovery capability **only** if this is
+    /// `Some(incarnation)` equal to the backend O5 is presented to.
+    ///
+    /// Semantic/codec validation (the public `validate_decoded`) and the explicit
+    /// bootstrap builder leave this `None`: they establish byte/codec/semantic
+    /// correspondence but do **not** mint an O5 recovery capability. A token from
+    /// store A (incarnation `a`) is therefore refused by store B (incarnation
+    /// `b != a`) even when context, revision, and bytes are identical, and a
+    /// reopened backend (a fresh incarnation) requires a fresh O3.
+    recovery_backend_incarnation: Option<u64>,
 }
 
 impl ValidatedRecord {
@@ -159,7 +172,29 @@ impl ValidatedRecord {
             evidence_status,
             encoded,
             origin_context_digest,
+            // Semantic/codec sealing never mints an O5 recovery capability; only
+            // an O3 read on an established backend grants it (see
+            // `grant_recovery_capability`).
+            recovery_backend_incarnation: None,
         }
+    }
+
+    /// Grant this proof the backend-bound O5 **recovery capability**. Crate-
+    /// internal: reachable only from the O3 read-validate path on an established
+    /// backend, which stamps the originating backend's ownership-incarnation
+    /// nonce. A proof produced by public standalone validation or the bootstrap
+    /// builder never passes through here and so can never authorize an O5
+    /// republication.
+    pub(crate) fn grant_recovery_capability(mut self, backend_incarnation: u64) -> Self {
+        self.recovery_backend_incarnation = Some(backend_incarnation);
+        self
+    }
+
+    /// The backend ownership-incarnation this proof's O5 recovery capability is
+    /// bound to, or `None` when the proof is a semantic/codec result that does
+    /// not authorize an O5 republication.
+    pub fn recovery_backend_incarnation(&self) -> Option<u64> {
+        self.recovery_backend_incarnation
     }
 
     /// The decoded authoritative record (read-only).
@@ -198,6 +233,10 @@ pub struct RetainedGeneration {
     pub lock_view: u64,
     pub publication_revision: u64,
     pub authority_context_ref: [u8; 32],
+    /// The retained `evidence_lock_binding` digest (§ 13.2). Carried in the real
+    /// retained representation so the accounted wrapper reflects the actual
+    /// retained fields rather than a synthetic subset that omits it.
+    pub evidence_lock_binding: [u8; 32],
     pub committed_anchor: Option<CommittedAnchor>,
     pub predecessor_ref: Option<u64>,
     pub evidence: SupportingEvidence,
@@ -211,6 +250,7 @@ impl RetainedGeneration {
             lock_view: locked.lock_view,
             publication_revision: revision,
             authority_context_ref: locked.authority_context_ref,
+            evidence_lock_binding: locked.evidence_lock_binding,
             committed_anchor: locked.committed_anchor.clone(),
             predecessor_ref: locked.predecessor_ref,
             evidence: locked.evidence.clone(),

@@ -10,12 +10,21 @@
 //! write-serialization domain (`Arc<Mutex<..>>`), so there is exactly one
 //! serialization domain per backend instance — not a per-handle advisory mutex.
 
-use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicU8, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use super::error::SafetyStoreError;
 use crate::pqc_trust_bundle::TrustBundleEnvironment;
 use crate::storage::signing_journal_crc32;
+
+/// Process-local **ownership-incarnation** source. Each successful backend open
+/// draws a fresh, strictly increasing value. It is an in-process ownership nonce
+/// — NOT a persistent identifier, cryptographic identity, protocol domain, or
+/// stored schema field — used only to bind an O3-minted recovery capability to
+/// the exact backend/ownership incarnation that produced it (§ 13.4 / § 13.5).
+/// Two distinct opens (including a reopen of the same DB) get distinct values,
+/// so a recovery token from one incarnation is never honoured by another.
+static OWNERSHIP_INCARNATION: AtomicU64 = AtomicU64::new(1);
 
 /// The metadata key (one per backend DB).
 const META_KEY: &[u8] = b"safetyrec:meta:v1";
@@ -73,6 +82,13 @@ pub struct SafetyBackend {
     /// effective from readable bytes, and a reopen cannot bypass it. Observed by
     /// **every** attached handle.
     effective: Arc<AtomicBool>,
+    /// The ownership-incarnation nonce drawn at this backend's open. Shared by
+    /// every attached handle / clone of this instance (a `Copy` value, identical
+    /// across clones), and distinct from any other open — including a reopen of
+    /// the same DB path. It binds an O3-minted recovery capability to the exact
+    /// backend incarnation that produced it; O5 refuses a token whose incarnation
+    /// differs from the backend it is presented to.
+    incarnation: u64,
 }
 
 impl std::fmt::Debug for SafetyBackend {
@@ -112,7 +128,16 @@ impl SafetyBackend {
             // until an acknowledged O1 or a successful O5 establishes a fresh
             // durability acknowledgement (§ 13.4 / § 13.5).
             effective: Arc::new(AtomicBool::new(false)),
+            // Draw a fresh ownership incarnation for this open (and reopen).
+            incarnation: OWNERSHIP_INCARNATION.fetch_add(1, Ordering::SeqCst),
         })
+    }
+
+    /// This backend instance's ownership-incarnation nonce (§ 13.4 / § 13.5).
+    /// Crate-internal: used by O3 to stamp a minted recovery capability and by O5
+    /// to refuse a capability drawn under a different backend incarnation.
+    pub(crate) fn incarnation(&self) -> u64 {
+        self.incarnation
     }
 
     /// Acquire the single shared serialization domain for a check-then-write
