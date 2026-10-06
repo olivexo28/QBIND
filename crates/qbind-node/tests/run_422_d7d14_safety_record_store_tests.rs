@@ -1409,14 +1409,16 @@ fn ctxacct_charge_includes_reservation_field_and_layout_padding() {
     );
 }
 
-// Finding #4 — one accepted component aggregate ceiling bounds BOTH the
-// operational working set and the context-ownership allocations. The aggregate
-// equals the sum of the two partition sub-ceilings (demonstrated combined
-// bound), and the live combined charge — observed on the real shared aggregate
-// authority — never exceeds it across real operations, while a surviving context
-// owner keeps a standing charge after operational cleanup.
+// Finding #4 CORRECTION — the accepted component aggregate ceiling is the
+// profile-derived OPERATIONAL aggregate (`max_aggregate_retained_bytes`), NOT
+// that aggregate PLUS a separate context allowance. The prior regression asserted
+// `agg_cap == op_cap + ctx_cap` (an enlargement); it is replaced below. The two
+// per-class sub-caps are retained only as SUBORDINATE upper bounds whose sum
+// exceeds the accepted aggregate, and that surplus is deliberately unreachable:
+// the shared authority enforces the combined total, so context and operations
+// genuinely compete for one budget.
 #[test]
-fn agg_combined_context_and_operational_bounded() {
+fn agg_ceiling_is_profile_operational_not_sum() {
     let dir = tempfile::tempdir().unwrap();
     let ctx = ctx_n(4);
     let owner = init_owner(dir.path(), &ctx);
@@ -1431,19 +1433,41 @@ fn agg_combined_context_and_operational_bounded() {
     let ctx_cap = backend
         .context_accounting_cap()
         .expect("context sub-ceiling bound at attach");
-    // Demonstrated combined bound: the aggregate is exactly the two partitions.
+    // The combined budget IS the profile operational aggregate — never enlarged.
     assert_eq!(
-        agg_cap,
-        op_cap + ctx_cap,
-        "aggregate ceiling == operational sub-ceiling + context sub-ceiling"
+        agg_cap, op_cap,
+        "aggregate ceiling == profile operational aggregate (not op + context)"
+    );
+    // The context sub-cap is a subordinate per-class bound; the sub-caps sum to
+    // MORE than the aggregate, proving the aggregate was not widened by adding it.
+    assert!(
+        ctx_cap > 0,
+        "context sub-cap is a real, non-zero per-class bound"
+    );
+    assert!(
+        op_cap + ctx_cap > agg_cap,
+        "sub-caps sum to more than the aggregate (surplus unreachable, not an enlargement)"
     );
     println!(
         "MEASURED agg_cap={agg_cap} op_cap={op_cap} ctx_cap={ctx_cap} per_owner_charge={}",
         backend.context_accounting_current()
     );
+}
+
+// Live context ownership consumes the SAME budget real operations use: the live
+// aggregate equals operational_partition + context_partition throughout real
+// O1/O4/O3, never exceeds the accepted ceiling, and operational cleanup returns
+// to the surviving context-owner charge (not zero while an owner remains live).
+#[test]
+fn agg_live_context_consumes_operational_budget() {
+    let dir = tempfile::tempdir().unwrap();
+    let ctx = ctx_n(4);
+    let owner = init_owner(dir.path(), &ctx);
+    let backend = owner.backend_for_test();
+    let agg_cap = backend.accounting_aggregate_cap().unwrap();
 
     // The attached owner holds a live standing context charge, reflected in the
-    // aggregate authority (= operational partition + context partition).
+    // one shared aggregate authority (= operational partition + context partition).
     let ctx_standing = backend.context_accounting_current();
     assert!(
         ctx_standing > 0,
@@ -1460,7 +1484,8 @@ fn agg_combined_context_and_operational_bounded() {
     );
 
     // A real O4 publication then a live O3 holder: the aggregate stays within the
-    // ceiling and tracks the sum of both partitions throughout.
+    // ceiling and tracks the sum of both partitions throughout — the live context
+    // charge is part of the same budget the operation is admitted against.
     let qc = valid_wire_qc(&ctx, [9u8; 32], 5);
     let locked = make_locked_qc(&ctx, [9u8; 32], 5, qc, None).unwrap();
     assert_eq!(
@@ -1484,15 +1509,148 @@ fn agg_combined_context_and_operational_bounded() {
         "aggregate peak within the accepted ceiling"
     );
 
-    // Operational cleanup returns to the surviving owner (and any holder) charge,
-    // not zero: the live context owner's standing charge remains after the holder
-    // drops.
+    // Operational cleanup returns to the surviving owner charge, not zero: the
+    // live context owner's standing charge remains after the holder drops.
     drop(proof);
     assert_eq!(
         backend.accounting_aggregate_current(),
         ctx_standing,
         "after the operational holder drops, the live context-owner charge remains"
     );
+}
+
+// An operation is refused because COMBINED occupancy would exceed the accepted
+// aggregate, even though its OWN class (operational) sub-cap still permits it —
+// decisive proof the sub-caps are not independent budgets. This refusal is only
+// possible because live context ownership (the other partition) consumed shared
+// capacity. Freeing a live context owner then restores the operational capacity.
+#[test]
+fn agg_operation_refused_by_combined_even_though_class_permits() {
+    let dir = tempfile::tempdir().unwrap();
+    let ctx = ctx_n(4);
+    let owner = init_owner(dir.path(), &ctx);
+    let backend = owner.backend_for_test();
+    let agg_cap = backend.accounting_aggregate_cap().unwrap();
+    let op_cap = backend.accounting_cap().unwrap();
+    let ctx_cap = backend.context_accounting_cap().unwrap();
+    let per_owner = backend.context_accounting_current();
+
+    // Fill the context partition to its own sub-cap with INDEPENDENT attachments
+    // (init_owner already holds one). Context alone stays within its sub-cap.
+    let mut extra = Vec::new();
+    while backend.context_accounting_current() + per_owner <= ctx_cap {
+        extra.push(SafetyRecordOwner::attach(backend.clone(), ctx.clone()).unwrap());
+    }
+    let ctx_live = backend.context_accounting_current();
+    assert!(ctx_live > 0 && ctx_live <= ctx_cap);
+
+    // Standing operational pressure that, with the live context, sits just under
+    // the aggregate while leaving operational-class headroom.
+    let aggregate_headroom = agg_cap - ctx_live;
+    let standing = backend
+        .reserve_standing_for_test(aggregate_headroom - 100)
+        .expect("standing operational reservation under the combined budget");
+    // The operational class sub-cap plainly still permits a further small charge.
+    let charge = 200u128;
+    assert!(
+        backend.accounting_current() + charge <= op_cap,
+        "operational class sub-cap permits this charge ({} + {charge} <= {op_cap})",
+        backend.accounting_current()
+    );
+    // ...but the COMBINED budget refuses it: 100 aggregate bytes remain, < 200.
+    match backend.reserve_standing_for_test(charge) {
+        Err(SafetyStoreError::CapacityRefusal(_)) => {}
+        other => panic!("expected combined CapacityRefusal, got {other:?}"),
+    }
+    // Refusal preserved the standing reservation and durable state.
+    assert_eq!(backend.accounting_aggregate_current(), agg_cap - 100);
+
+    // Releasing a live context owner restores aggregate capacity for the op, even
+    // though the operational partition never moved.
+    drop(extra.pop().expect("a context owner to release"));
+    let readmit = backend
+        .reserve_standing_for_test(charge)
+        .expect("freeing a context owner restores combined capacity for the operation");
+    drop(readmit);
+    drop(standing);
+    drop(extra);
+}
+
+// An attachment is refused because live OPERATIONS consume the shared aggregate
+// capacity it needs, even though the context class sub-cap plainly permits
+// another owner. Durable state and existing reservations are preserved; freeing
+// the operations readmits the attachment.
+#[test]
+fn agg_attachment_refused_when_operations_consume_capacity() {
+    let dir = tempfile::tempdir().unwrap();
+    let ctx = ctx_n(4);
+    let owner = init_owner(dir.path(), &ctx);
+    let backend = owner.backend_for_test();
+    let agg_cap = backend.accounting_aggregate_cap().unwrap();
+    let ctx_cap = backend.context_accounting_cap().unwrap();
+    let ctx_live = backend.context_accounting_current();
+
+    // Live operational pressure consumes nearly the whole shared budget, leaving
+    // less than one context charge of aggregate headroom.
+    let standing = backend
+        .reserve_standing_for_test(agg_cap - ctx_live - 10)
+        .expect("standing operational reservation under the combined budget");
+    // The context class sub-cap plainly permits another independent attachment.
+    assert!(
+        backend.context_accounting_current() + ctx_live <= ctx_cap,
+        "context class sub-cap still permits another attachment"
+    );
+    // ...but the combined budget refuses it: live operations consumed the capacity.
+    match SafetyRecordOwner::attach(backend.clone(), ctx.clone()) {
+        Err(SafetyStoreError::CapacityRefusal(_)) => {}
+        other => panic!("expected combined CapacityRefusal on attach, got {other:?}"),
+    }
+    // The refusal rolled back cleanly: the context partition is untouched.
+    assert_eq!(backend.context_accounting_current(), ctx_live);
+
+    // Freeing the operations restores combined capacity for the attachment.
+    drop(standing);
+    let _readmitted = SafetyRecordOwner::attach(backend.clone(), ctx.clone())
+        .expect("freeing operations restores combined capacity for the attachment");
+}
+
+// Concurrent admission across threads can never exceed the accepted aggregate:
+// the single shared authority serializes every admit, so the observed peak and
+// the sum of concurrently-held chunks both stay within the combined budget
+// regardless of interleaving.
+#[test]
+fn agg_concurrent_admission_cannot_exceed() {
+    use std::sync::Arc;
+    use std::thread;
+    let dir = tempfile::tempdir().unwrap();
+    let ctx = ctx_n(4);
+    let owner = init_owner(dir.path(), &ctx);
+    let backend = Arc::new(owner.backend_for_test().clone());
+    let agg_cap = backend.accounting_aggregate_cap().unwrap();
+    let ctx_live = backend.context_accounting_current();
+    let budget = agg_cap - ctx_live;
+    // Chunk sized so at most two of the eight threads can coexist.
+    let chunk = budget / 3 + 1;
+
+    let handles: Vec<_> = (0..8)
+        .map(|_| {
+            let b = Arc::clone(&backend);
+            thread::spawn(move || b.reserve_standing_for_test(chunk).ok())
+        })
+        .collect();
+    // Hold every successful reservation simultaneously.
+    let reservations: Vec<_> = handles.into_iter().map(|h| h.join().unwrap()).collect();
+    let live = reservations.iter().filter(|r| r.is_some()).count() as u128;
+
+    assert!(
+        backend.accounting_aggregate_peak() <= agg_cap,
+        "concurrent admission peak within the accepted aggregate ceiling"
+    );
+    assert!(
+        ctx_live + live * chunk <= agg_cap,
+        "concurrently admitted chunks ({live}×{chunk}) + context never exceed the budget"
+    );
+    assert!(live >= 1, "at least one concurrent admission succeeded");
 }
 
 #[test]
@@ -2372,14 +2530,29 @@ fn acct_shared_budget_refusal_preserves_evidence_then_readmits() {
 
     // A SECOND handle on the SAME backend shares the single aggregate budget:
     // attaching it does not open an independent budget. A standing reservation it
-    // takes consumes the entire shared ceiling.
+    // takes consumes the entire shared aggregate ceiling that remains after the
+    // live context-owner charge (the aggregate is the profile operational
+    // aggregate, charged jointly by context + operations — not enlarged by the
+    // context sub-cap).
     let sibling = owner.clone();
-    let cap = sibling.backend_for_test().accounting_cap().unwrap();
+    let agg_cap = sibling
+        .backend_for_test()
+        .accounting_aggregate_cap()
+        .unwrap();
+    let ctx_live = sibling.backend_for_test().context_accounting_current();
     let standing = sibling
         .backend_for_test()
-        .reserve_standing_for_test(cap)
-        .expect("standing reservation up to the ceiling");
-    assert_eq!(sibling.backend_for_test().accounting_current(), cap);
+        .reserve_standing_for_test(agg_cap - ctx_live)
+        .expect("standing reservation up to the remaining shared ceiling");
+    assert_eq!(
+        sibling.backend_for_test().accounting_current(),
+        agg_cap - ctx_live
+    );
+    assert_eq!(
+        sibling.backend_for_test().accounting_aggregate_current(),
+        agg_cap,
+        "context + standing operational charge fill the shared aggregate exactly"
+    );
 
     // A fresh O4 on the first handle is now refused for capacity BEFORE any
     // write — the shared budget is exhausted — without evicting the established

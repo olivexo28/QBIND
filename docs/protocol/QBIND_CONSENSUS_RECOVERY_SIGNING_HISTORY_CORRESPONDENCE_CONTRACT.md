@@ -3352,22 +3352,38 @@ contract changes, and the operative verdict stays `PARTIAL-IMPLEMENTATION` / `IN
   allocator size-class rounding of the `Arc` allocation is **excluded** (it is not part of the required
   layout). Measured (64-bit): `size_of::<OwnedContext>() = 160`, `size_of::<PinnedSafetyContext>() = 112`,
   `size_of::<Reservation>() = 48`; per-owner charge for N=4 is `160 + 64 + 16 = 240` (previously `192`).
-- **One accepted component aggregate budget (§ 13.7).** The operational working-set ceiling and the
-  context-ownership ceiling are now the **two partitions of a single accepted aggregate ceiling**
-  `MAX_COMPONENT_AGGREGATE_BYTES = MAX_AGGREGATE_RETAINED_BYTES + MAX_CONTEXT_OWNERSHIP_BYTES`, enforced by
-  **one shared aggregate admission authority** per backend that every reservation (operational **and**
-  context) is admitted against **in addition to** its own partition sub-ledger. The two sub-ceilings sum
-  to exactly the aggregate (the demonstrated combined bound), so concurrent operations and attachments can
-  never **jointly** exceed the permitted coexistence budget, while the operational sub-numbers and the
-  bounded context multiplicity (`MAX_CONCURRENT_CONTEXT_OWNERS = 4`, still refused on its own sub-cap) are
-  unchanged. Separate ledgers are retained **only** with this demonstrated combined bound and shared
-  admission mechanism; the count limit authorizes **no** aggregate memory outside the accepted cap.
-  Measured (N=4): `op = 7772`, `ctx = 960`, aggregate `8732 = 7772 + 960`.
+- **One accepted component aggregate budget (§ 13.7, finding #4 correction).** The operational
+  working-set ceiling and the context-ownership allocations are the **two partitions of a single accepted
+  combined budget**, and that combined budget is the accepted **profile-derived operational aggregate**
+  `MAX_COMPONENT_AGGREGATE_BYTES = MAX_AGGREGATE_RETAINED_BYTES` — it is **not** the operational aggregate
+  **plus** a separate context allowance. One shared aggregate admission authority per backend admits every
+  reservation (operational **and** context) against this one combined ceiling in addition to its own
+  partition sub-ledger, so live context ownership genuinely **reduces** the capacity available to
+  operations and live operations reduce the capacity available to new attachments. The per-class sub-caps
+  (`MAX_AGGREGATE_RETAINED_BYTES` operational, `MAX_CONTEXT_OWNERSHIP_BYTES` context) are retained **only**
+  as **subordinate** upper bounds: a dynamically shared budget may keep per-class bounds that cannot all be
+  reached simultaneously, because the shared authority enforces the permitted combined total. The sub-caps
+  therefore sum to **more** than the aggregate (`op + ctx > aggregate`); that surplus is deliberately
+  **unreachable**, never an enlargement of the accepted coexistence budget. `MAX_CONCURRENT_CONTEXT_OWNERS
+  = 4` bounds the context partition's own sub-cap and is **not** permission to add memory outside the
+  accepted aggregate. Measured (N=4): `op = 7772`, `ctx = 960`, enforced combined aggregate `= 7772`
+  (**not** `8732`); the decisive regressions show a context owner consuming the operational budget, an
+  operation refused by the combined budget while its own class sub-cap still permits it, an attachment
+  refused while live operations consume capacity, release restoring capacity, and concurrent admission
+  never exceeding the ceiling.
 - **Accountant counters sum reservations; they do not independently measure memory.** A counter staying
   below its own ceiling is **not**, by itself, sufficient evidence; the layout/charge regression derives
   its expected omission-detecting bound from `size_of::<Reservation>()` independently of the charge helper.
 
 The prior note's claim that the context-ownership item was **discharged** is **withdrawn**: the reviewed
 wrapper charge (reservation-omitting) and the independent-budget arrangement did not establish that
-closure. The literal commands, measured values, regressions, and open blockers for this revision are
+closure. **Superseding correction (finding #4):** the immediately-preceding D7-D14 pass **enlarged** the
+enforced coexistence total to `MAX_AGGREGATE_RETAINED_BYTES + MAX_CONTEXT_OWNERSHIP_BYTES` (`8732 = 7772 +
+960` for N=4) and characterised that enlargement as an already-accepted implementation-only correction that
+weakened no bound. That characterisation is **withdrawn**: adding a context allowance on top of the
+accepted operational aggregate **did** widen the enforced coexistence budget and did **not** establish the
+requested *combined* admission within the existing aggregate. The enforced combined limit is now the
+existing profile-derived aggregate (`= MAX_AGGREGATE_RETAINED_BYTES`, `7772` for N=4), against which both
+partitions are charged; the complete-wrapper charge correction (first bullet) is preserved unchanged. The
+literal commands, measured values, regressions, and open blockers for this revision are
 recorded in the latest RUN 422 D7-D14 section of `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_422_D7.md`.
