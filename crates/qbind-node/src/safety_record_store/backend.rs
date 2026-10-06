@@ -13,7 +13,7 @@
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicU8, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 
-use super::accounting::SharedAccountant;
+use super::accounting::{AggregateAuthority, SharedAccountant};
 use super::error::SafetyStoreError;
 use crate::pqc_trust_bundle::TrustBundleEnvironment;
 use crate::storage::signing_journal_crc32;
@@ -162,6 +162,11 @@ impl SafetyBackend {
         opts.create_if_missing(true);
         let db = rocksdb::DB::open(&opts, path)
             .map_err(|e| SafetyStoreError::WriteFailed(format!("open: {e}")))?;
+        // One aggregate admission authority per backend open, shared by both the
+        // operational and the context-ownership partitions so their combined live
+        // charge is bounded by the accepted component aggregate ceiling (§ 13.7,
+        // finding #4). Cloning the handle below shares the single inner guard.
+        let aggregate = AggregateAuthority::new();
         Ok(SafetyBackend {
             db: Arc::new(db),
             domain: Arc::new(Mutex::new(SerializationDomain(()))),
@@ -172,12 +177,15 @@ impl SafetyBackend {
             effective: Arc::new(AtomicBool::new(false)),
             // Draw a fresh ownership incarnation for this open (and reopen).
             incarnation: OWNERSHIP_INCARNATION.fetch_add(1, Ordering::SeqCst),
-            // A fresh, unbound shared accountant; the first attached handle binds
-            // its per-context aggregate ceiling.
-            accounting: SharedAccountant::new(),
-            // A fresh, unbound dedicated context-ownership accountant; the first
-            // attached handle binds its per-profile context ceiling (§ 13.7B).
-            context_accounting: SharedAccountant::new(),
+            // A fresh, unbound operational accountant partition; the first
+            // attached handle binds its per-context operational sub-ceiling.
+            accounting: SharedAccountant::new(aggregate.clone()),
+            // A fresh, unbound dedicated context-ownership accountant partition;
+            // the first attached handle binds its per-profile context sub-ceiling
+            // (§ 13.7B). It shares the SAME aggregate authority as the operational
+            // partition, so neither partition can admit beyond the accepted
+            // combined coexistence budget.
+            context_accounting: SharedAccountant::new(aggregate),
             // No crash-boundary hook installed unless a test installs one.
             #[cfg(any(test, feature = "test-utils"))]
             pre_effective_hook: Arc::new(Mutex::new(None)),
@@ -239,6 +247,25 @@ impl SafetyBackend {
     #[cfg(any(test, feature = "test-utils"))]
     pub fn context_accounting_cap(&self) -> Option<u128> {
         self.context_accounting.cap()
+    }
+    /// Source/test-only: the shared **aggregate** admission authority's current
+    /// combined charge / observed peak / bound ceiling across BOTH the
+    /// operational and context partitions (§ 13.7, finding #4). The combined
+    /// regression asserts the aggregate ceiling equals the sum of the two
+    /// sub-ceilings and that the live combined charge never exceeds it.
+    #[cfg(any(test, feature = "test-utils"))]
+    pub fn accounting_aggregate_current(&self) -> u128 {
+        self.accounting.aggregate().current()
+    }
+    /// Source/test-only: see [`SafetyBackend::accounting_aggregate_current`].
+    #[cfg(any(test, feature = "test-utils"))]
+    pub fn accounting_aggregate_peak(&self) -> u128 {
+        self.accounting.aggregate().peak()
+    }
+    /// Source/test-only: see [`SafetyBackend::accounting_aggregate_current`].
+    #[cfg(any(test, feature = "test-utils"))]
+    pub fn accounting_aggregate_cap(&self) -> Option<u128> {
+        self.accounting.aggregate().cap()
     }
 
     /// Source/test-only: take a standing reservation against the shared budget to
