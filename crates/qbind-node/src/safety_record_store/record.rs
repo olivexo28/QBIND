@@ -117,16 +117,75 @@ impl DecodedRecord {
     }
 }
 
-/// The complete O3 result: the decoded record, the explicit (always
-/// `Unverified`) evidence status, and the **retained original validated encoded
-/// publication** (`ENC_INPUT`, § 13.7A(c.5)) kept live for O5's byte-for-byte
-/// comparison.
+/// The complete O3 result: an **opaque** validated publication. Callers cannot
+/// assemble or mutate an apparent validation proof — the fields are private and
+/// construction is restricted to the sealing constructor used by O3 validation
+/// (and the explicit bootstrap builder), which binds together:
+///
+/// * the exact bytes actually validated (`encoded`, operand 1 for O5),
+/// * their decoded content and publication revision,
+/// * the explicit (always `Unverified`) evidence status, and
+/// * the originating storage/ownership context digest needed for safe O5 use.
+///
+/// Unrelated bytes can therefore never acquire validated status through a
+/// semantic-only constructor, and an apparent proof cannot be retargeted at a
+/// foreign-context owner.
 #[derive(Debug, Clone)]
 pub struct ValidatedRecord {
-    pub decoded: DecodedRecord,
-    pub evidence_status: EvidenceStatus,
-    /// The exact validated bytes O3 decoded (operand 1 for O5).
-    pub encoded: Vec<u8>,
+    decoded: DecodedRecord,
+    evidence_status: EvidenceStatus,
+    /// The exact validated bytes O3 decoded (operand 1 for O5), retained
+    /// verbatim (`ENC_INPUT`, § 13.7A(c.5)).
+    encoded: Vec<u8>,
+    /// Digest of the pinned context under which this record was validated; O5
+    /// uses it to refuse a retained proof produced under a different ownership
+    /// context.
+    origin_context_digest: [u8; 32],
+}
+
+impl ValidatedRecord {
+    /// Seal a validated publication. **Crate-internal**: only the O3 validation
+    /// path and the explicit bootstrap builder may construct a validated proof,
+    /// after they have established the decoded↔encoded correspondence and the
+    /// originating context. External callers cannot reach this.
+    pub(crate) fn seal(
+        decoded: DecodedRecord,
+        evidence_status: EvidenceStatus,
+        encoded: Vec<u8>,
+        origin_context_digest: [u8; 32],
+    ) -> Self {
+        ValidatedRecord {
+            decoded,
+            evidence_status,
+            encoded,
+            origin_context_digest,
+        }
+    }
+
+    /// The decoded authoritative record (read-only).
+    pub fn decoded(&self) -> &DecodedRecord {
+        &self.decoded
+    }
+
+    /// The explicit evidence status (always `Unverified` — stage 2 is unwired).
+    pub fn evidence_status(&self) -> EvidenceStatus {
+        self.evidence_status
+    }
+
+    /// The exact retained validated bytes (operand 1 for O5), read-only.
+    pub fn encoded(&self) -> &[u8] {
+        &self.encoded
+    }
+
+    /// The publication revision of the validated record.
+    pub fn publication_revision(&self) -> u64 {
+        self.decoded.publication_revision
+    }
+
+    /// The originating pinned-context digest this proof was sealed under.
+    pub fn origin_context_digest(&self) -> &[u8; 32] {
+        &self.origin_context_digest
+    }
 }
 
 /// The single decoded-generation wrapper whose `size_of` is the whole-enum

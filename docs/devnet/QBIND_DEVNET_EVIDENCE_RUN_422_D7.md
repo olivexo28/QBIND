@@ -13865,3 +13865,236 @@ performed or claimed. Changed paths this pass:
 `crates/qbind-node/tests/run_422_d7d14_safety_record_store_tests.rs`,
 `docs/protocol/QBIND_CONSENSUS_RECOVERY_SIGNING_HISTORY_CORRESPONDENCE_CONTRACT.md`,
 `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_422_D7.md`, and `docs/whitepaper/contradiction.md`.
+
+## RUN 422 D7-D14 — Complete recovery lifecycle, opaque publication, unified admission, TC/namespace corrections (code + test, corrects `0f258734f1466488c41be814bc76162021c8a948`)
+
+This is a **clearly-identified correction** appended to the Run 422 D7-D14 evidence. Every prior
+D7-D14 entry above — including the withdrawn `IMPLEMENTED-ISOLATED` verdict and the preceding
+`PARTIAL-IMPLEMENTATION` correction — is **preserved as historical evidence** and is **not** deleted.
+This pass implements the next tranche of the accepted storage subset and records the executed
+evidence. The operative verdict **remains** `PARTIAL-IMPLEMENTATION` / `INCOMPLETE`; the single
+remaining blocker (operational allocation-admission wiring, §9) is named explicitly below.
+
+### Baseline (reported, not assumed)
+
+* **Branch:** `copilot/copilotrun-422-d7-d14-correct-safety-record-storag` (the branch actually
+  supplied to this task; it was **not** switched to match the reported
+  `copilot/run-422-d7-d14-correct-safety-record-storage`).
+* **Starting HEAD:** `80491e763c36a1b7979457ee62b213230a19b2e5`, worktree clean at start.
+* **Reviewed object:** `0f258734f1466488c41be814bc76162021c8a948` was **not** present in the shallow
+  clone; it was fetched (`git fetch origin 0f258734…`). It is **not** an ancestor of the starting
+  HEAD. Scoped content correspondence: over
+  `crates/qbind-node/src/safety_record_store/`, the integration test, and `Cargo.toml`, the only
+  `git diff 0f258734 HEAD` differences were **final-newline / EOF and CRLF↔LF** formatting; the
+  component text was byte-equivalent modulo line endings. The reviewed attachment had the **same text
+  but different line-ending / final-newline formatting** than the repository — byte identity of the
+  attachment is **not** claimed. The reviewed implementation is therefore what was corrected here.
+* **Pre-correction test run:** `cargo test -p qbind-node --features test-utils --test
+  run_422_d7d14_safety_record_store_tests` → **31 passed, 0 failed, 1 ignored**
+  (`child_process_entry`).
+
+### Review findings → correction → regression (this pass)
+
+1. **`recovery_required` initialized `false` on open, so a reopened established store admitted O4
+   without O5 (§3).** The shared latch inferred effectiveness from readable bytes. **Correction:**
+   replaced the `recovery_required` latch with a single shared `effective: Arc<AtomicBool>`
+   (`backend.rs`) initialized **`false`** on every open. A newly opened established store therefore
+   carries **no inherited acknowledgement**; dependent O4 is blocked until an acknowledged O1 or a
+   successful O5 marks it effective. O2/O3 inspect/validate without making state effective; an
+   ambiguous write error or uncertain-but-durable outcome clears it; reopening cannot bypass it.
+   `recovery_required()` is now `!effective`. **Withdrawn claim:** the prior entry's statement that "a
+   reopened backend starts clear … consistent with the accepted in-process model" is **withdrawn** —
+   reopening now starts **not-effective** and requires fresh O5/O1. **Regressions:**
+   `corr_reopen_established_store_blocks_o4_until_o5` (drop + reopen fresh backend → O4 refused with
+   `RecoveryRequired`, surviving bytes unchanged, O5 recovers, O4 then proceeds) and the process-death
+   boundary `pd_reopen_after_clean_exit_requires_o5_before_o4` (child acknowledges a lock then exits
+   `14`; parent reopens, verifies the acknowledged boundary was reached, O4 blocked until O5).
+
+2. **Raw publication / recovery-clearing bypasses were public (§4).** `clear_recovery_requirement()`
+   cleared the latch without proving recovery; `publish_atomic()` accepted a guard of a publicly
+   constructible `SerializationDomain`. **Correction:** `SerializationDomain` is now a
+   non-constructible newtype (`pub struct SerializationDomain(())`); `publish_atomic` and `lock_domain`
+   are `pub(crate)`; `clear_recovery_requirement` is **removed**; effectiveness transitions are
+   reachable only through the enforced O1/O4/O5 owner paths (`mark_effective` is `pub(crate)`,
+   `mark_not_effective` is private). Out-of-band mutation / fault injection (`set_inject`,
+   `debug_overwrite_record`, the new `debug_put_raw`) stay behind `#[cfg(any(test, feature =
+   "test-utils"))]`. A guard from another mutex/backend can no longer be presented to forge ownership.
+
+3. **Established-state prerequisites were not centrally enforced; O4 used an unvalidated predecessor
+   (§5).** `load_established()` checked only presence + metadata context digest. **Correction:**
+   `load_established()` now decodes once and enforces structure, **record-revision == metadata-revision**,
+   and pinned-context correspondence, returning the decoded predecessor; O2/O3/O4/O5 consume it. O4
+   additionally **validates its authoritative predecessor** (`validate_decoded`) before using its lock
+   view, and validates the candidate separately. **Regressions:**
+   `corr_record_meta_revision_disagreement_refused`, `corr_invalid_lock_evidence_binding_refused`,
+   `corr_missing_committed_history_for_anchored_refused` (valid-checksum records refused without
+   rewriting the predecessor); foreign-context O3/O4 remain covered by
+   `corr_foreign_context_handle_refuses_o3_and_o4`.
+
+4. **`ValidatedRecord` exposed mutable public fields; `validate_decoded` stapled unrelated bytes (§6).**
+   **Correction:** `ValidatedRecord` is now opaque (private fields, `pub(crate) seal`, read-only
+   accessors) binding the exact validated bytes, decoded content + publication revision, and the
+   **origin pinned-context digest**. `validate_decoded` re-encodes the decoded record and requires it
+   **equal** the supplied encoded bytes before sealing, so unrelated bytes cannot acquire validated
+   status through a semantic-only constructor. O5 compares the complete retained original bytes to a
+   fresh stored read **byte-for-byte** under the ownership/revision boundary, refuses a proof sealed
+   under a foreign context, and republishes the original bytes verbatim. **Regressions:**
+   `h19_o5_refuses_divergence_outside_binding_digest`, `h20_stale_o5_does_not_overwrite_newer`.
+
+5. **No single structural-admission path; oversize fields were only caught after encoding (§7).**
+   **Correction:** `admit_record_structure` (+ helpers) in `codec.rs` performs checked
+   length/count/arithmetic admission over all profile fields **before** buffer allocation, and is
+   invoked at the top of `encode_record`. **Concrete prior case:** with `S_sig = 8`, a QC carrying a
+   9-byte signature is refused **before publication** (`DeclaredBoundExceeded`) even though the whole
+   record is below the total cap. **Regression:** `corr_oversized_signature_refused_before_publication`
+   (predecessor unchanged); `h5`/`h6`/`h7` continue to pass (empty-signer certificate is now refused
+   at the admission threshold on encode rather than only on read-back — same obligation, enforced
+   earlier).
+
+6. **TC encoding/association defects (§8).** **Correction:** the record-level high-QC **presence
+   discriminant** is now encoded and decoded (`encode_evidence_payload` / decode TcDerived arm),
+   charged once; `validate_tc` is reconciled to the §13.3A TA meanings — **TA1** requires the
+   record-level high-QC byte-identical (block_id, view **and** signers) to `tc.high_qc` and binds it to
+   the lock; **TA2** compares `select_max_high_qc(signed_timeouts)` to `tc.high_qc` by **view + block_id
+   only** (no signer-array equality, strict-`>` first-encountered selection preserved); TA3–TA7
+   (uniqueness, authorized membership, signer-set correspondence, timeout-view consistency, voting-power
+   quorum) are enforced; **TA8** per-entry signature cryptography is **not** run (evidence stays
+   `Unverified`). **Regression:** `corr_tc_ta2_permits_signer_diff_ta1_requires_exact_copy` (a selected
+   timeout-entry high-QC with a **different signer list** but equal view+block_id is **permitted** by
+   TA2; a record-level high-QC differing in signers from `tc.high_qc` is **refused** by TA1).
+
+7. **O1 namespace classification checked only the two current keys (§10).** **Correction:**
+   `first_unrecognized_safety_key()` performs a **bounded** forward scan of the component-owned
+   `safetyrec:` prefix (stops at the first out-of-prefix key, hard-capped), and O1 refuses with
+   `StructuralRefusal` on any unknown/legacy/partial key **without** migration, deletion, repair, or
+   initialization over it; unrelated DB contents are never scanned unboundedly. **Regression:**
+   `corr_unknown_namespace_key_refuses_o1_without_repair` (planted `safetyrec:legacy:v0` → O1 refused;
+   the key is still present afterward — nothing repaired/deleted).
+
+8. **Test feature gating (§11).** The integration test's debug helpers require `test-utils` but its
+   callers were unconditional. **Correction:** a `[[test]]` target with
+   `required-features = ["test-utils"]` was declared in `Cargo.toml`, so the default `cargo test` build
+   **skips** the target (no default-build access to mutation helpers is restored) and
+   `cargo test --features test-utils` builds and runs the full suite.
+
+### H-matrix reconciliation (accepted subset H2–H12, H16, H18–H25, H26, H27, H30)
+
+| H row | actual contract obligation | test(s) | evidence level | outcome |
+|------|-----------------------------|---------|----------------|---------|
+| H2 | versioned encode / bounded decode round-trip (bootstrap + locked) | `h2_encode_decode_roundtrip_bootstrap_and_locked` | unit/model | pass |
+| H3 | unsupported persistence version refused | `h3_unsupported_version_refused` | unit | pass |
+| H4 | corruption/truncation refused (initialization uncertainty/survival boundary) | `h4_crc_and_truncation_refused`, `pd_before_publish_survives_bootstrap` | unit + process-death | pass |
+| H5 | oversize refused pre-allocation | `h5_oversize_refused_pre_allocation` | unit | pass |
+| H6 | empty-signer certificate refused at the structural threshold (now at admission/encode) | `h6_empty_signer_certificate_refused` | unit | pass |
+| H7 | declared count/length over pinned bound refused (bounded decode) | `h7_declared_count_over_bound_refused` | unit | pass |
+| H8 | P1/P2 lock↔evidence binding enforced | `h8_p1_p2_binding_enforced`, `corr_invalid_lock_evidence_binding_refused` | unit + real-storage | pass |
+| H9 | P4 pinned-context mismatch refused | `h9_p4_context_mismatch_refused` | unit | pass |
+| H10 | atomic publication + crash boundary (durable write before caller ack) | `pd_uncertain_after_write_successor_survives` | process-death | pass |
+| H11 | successful vs failed/uncertain O5 (durability boundaries) | `pd_ack_then_abort_survives_locked`, `corr_uncertain_publish_blocks_dependent_o4_until_o5_recovers`, `pd_write_error_before_commit_predecessor_unchanged` | process-death + real-storage | pass |
+| H12 | competing handles + stale publication fencing | `corr_uncertain_publish_blocks_dependent_o4_until_o5_recovers`, `corr_reopen_established_store_blocks_o4_until_o5`, `pd_reopen_after_clean_exit_requires_o5_before_o4` | real-storage + process-death | pass |
+| H16 | real RocksDB atomic publication + reopen | `h16_real_rocksdb_publish_and_reopen` | real-storage | pass |
+| H18 | O1 refuses duplicate initialization / established / unknown state | `h18_o1_refuses_duplicate_initialization`, `corr_unknown_namespace_key_refuses_o1_without_repair` | real-storage | pass |
+| H19 | complete-content divergence refused by O5 (outside binding digest) | `h19_o5_refuses_divergence_outside_binding_digest` | real-storage | pass |
+| H20 | stale O5 refused without overwriting newer state | `h20_stale_o5_does_not_overwrite_newer` | real-storage | pass |
+| H21 | semantic association / expected-revision fence | `h21_revision_fence_refuses_stale_publish`, `corr_record_meta_revision_disagreement_refused` | real-storage | pass |
+| H22 | transition eligibility (non-increasing lock view refused) | `h22_o4_rejects_non_increasing_view` | real-storage | pass |
+| H23 | O2 refuses absent/partial state; O3 reads without writing | `h23_o2_refuses_absent_state_o3_no_write` | real-storage | pass |
+| H24 | bootstrap vs no-commit vs committed-anchor (independent history) | `h24_bootstrap_nocommit_committed_distinctions`, `corr_missing_committed_history_for_anchored_refused` | unit + real-storage | pass |
+| H25 | supplied first-lock evidence at the **storage layer only** (not engine voting) | `h25_first_lock_evidence_storage_layer_only` | real-storage | pass (H25e engine-consumer evidence kept separate / not claimed) |
+| H26 | adversarial serialized bounds for **both** evidence variants | `h26_both_evidence_variants_and_nested_bounds`, `corr_oversized_signature_refused_before_publication`, `corr_tc_ta2_permits_signer_diff_ta1_requires_exact_copy` | unit + real-storage | pass |
+| H27 | unverified TC-derived restriction persisted/handled (not live safe-vote) | `h27_tc_derived_restriction_persisted_unverified` | real-storage | pass |
+| H30 | logical view vs round distinction | `h30_height_vs_round_distinction` | unit | pass |
+
+Excluded and **not** claimed: H1, H13–H15, H17, H25e, H26l, H28, H29.
+
+### Process-death evidence
+
+The child re-executes the test binary at `child_process_entry` and drives the real component +
+RocksDB to an explicit, test-coordinated boundary, then exits/aborts with a distinguished status; the
+parent asserts the **intended boundary was reached** (exit codes 10/11/13/14 or a non-success abort),
+then decides purely from surviving bytes and subsequent admission behaviour. Covered cases:
+initialization (`before_publish` → `pd_before_publish_survives_bootstrap`), publication
+(`uncertain_after_write` → `pd_uncertain_after_write_successor_survives`; `write_error_before_commit`
+→ `pd_write_error_before_commit_predecessor_unchanged`), and recovery
+(`ack_then_abort` → `pd_ack_then_abort_survives_locked`; `ack_locked_clean_exit` →
+`pd_reopen_after_clean_exit_requires_o5_before_o4`). Process termination is **not** claimed as machine
+power-loss testing, and we never fabricate knowledge of whether the dead process observed an
+acknowledgement.
+
+### Validation (literal outcomes, this pass)
+
+* **Toolchain:** `cargo`/`rustc` `1.98.x`, `x86_64-unknown-linux-gnu`, edition 2021.
+* **Formatting:** `rustfmt --edition 2021 --check` on the five edited component Rust files
+  (`backend.rs`, `codec.rs`, `owner.rs`, `record.rs`, `validate.rs`) and the integration test →
+  clean (exit 0). `cargo fmt` was **not** applied crate-wide (it reformats hundreds of unrelated
+  files); only the edited files are touched.
+* **Default-feature lib build:** `cargo build -p qbind-node --lib` → **Finished** (exit 0).
+* **Default-feature test compilation:** a plain `cargo test -p qbind-node --no-run` **skips** the
+  `run_422_d7d14_safety_record_store_tests` target (its `required-features = ["test-utils"]` are not
+  enabled), so the suite no longer breaks the default test build. *(Note: the unrelated
+  `m16_epoch_transition_hardening_tests` target is independently ungated and, together with transient
+  `cc`/disk-space link failures in other large test targets, still prevents a full default
+  `--no-run` of the whole crate; this is pre-existing and outside the authorized scope.)*
+* **Feature-enabled component tests:** `cargo test -p qbind-node --features test-utils --test
+  run_422_d7d14_safety_record_store_tests` → **39 passed, 0 failed, 1 ignored**
+  (`child_process_entry`, which is spawned out-of-band by the `pd_*` parents). The five `pd_*`
+  child-process boundary tests pass.
+* **Clippy:** `cargo clippy -p qbind-node --lib --features test-utils` → **exit 0**; **no** warnings
+  attributable to `safety_record_store` (remaining warnings are pre-existing and belong to other
+  modules/crates).
+* **Default release node build:** attempted via `cargo build -p qbind-node --release --bin qbind-node`;
+  in this environment the sandbox disk reached 100% during a fresh `librocksdb-sys` C++ rebuild
+  (`No space left on device`), so a clean release-build exit code was **not** captured this pass. This
+  is an **environmental limitation**, not a source error; the default-feature lib build and the
+  feature-enabled suite both succeed, and a release build would in any case only establish build
+  compatibility — **not** running-node recovery, configured-authority evidence, anti-rollback, or
+  production readiness.
+* **Production non-wiring audit:** `grep -rn "safety_record_store\|SafetyRecordOwner\|SafetyBackend::open_or_initialize"`
+  over `crates/qbind-node/src` returns **only** the two `lib.rs` registration lines (`pub mod
+  safety_record_store;` and its comment); **no** production startup / consensus / decision / signing
+  path constructs the component. The test-gated bypasses are absent from the default/release build.
+* **Secret scan:** the secret-scanning tool was run over the changed files → **no secrets**; no
+  databases or large binaries are committed.
+* **Independent review / CodeQL:** `parallel_validation` was invoked for this change. The **Code
+  Review model was unavailable** in this environment (`model claude-sonnet-4.6 not found in
+  registry`); its "no review comments" result is therefore **not** counted as an independently
+  completed review. **CodeQL** reported **0 alerts but the analysis was *skipped*** ("database size is
+  too large"); a skipped scan is **not** asserted as zero real alerts. Both limitations are reported
+  explicitly rather than claimed as clean passes.
+
+### Why the verdict remains INCOMPLETE — the concrete remaining blocker
+
+The following accepted-subset requirement is **not** established and is the named blocker:
+
+* **§9 Operational allocation-admission wiring into the real O1–O5 objects/lifetimes.** The
+  allocation accountant remains a standalone/synthetic facility and `RetainedGeneration` still omits
+  `evidence_lock_binding` and the other complete-wrapper retained fields; admission/release is **not**
+  yet charged against the real retained representation, holder/candidate multiplicities, nested
+  signer/signature buffers, owned-context data, shared-allocation overhead, or capacity-normalization
+  overlap at peak, exercised through actual operations. Until the complete retained wrapper is measured
+  on the target and the accepted ceiling is enforced through O1–O5 (with correct release on success,
+  refusal, ambiguous failure, and drop), the operational allocation bound is unproven. No fourth
+  full-sized encoded buffer is introduced, and original-byte retention through O5 is preserved, but
+  the full operational enforcement is outstanding.
+
+### Component verdict and preserved status
+
+```text
+D7D14_STORAGE_COMPONENT=PARTIAL-IMPLEMENTATION
+D7D14_STORAGE_ACCEPTANCE=INCOMPLETE
+DURABLE_ANTI_ROLLBACK=NOT-ESTABLISHED
+GENESIS_AUTHORITY_ACTIVATION=DISABLED
+PRODUCTION_WIRE_CHAIN_ID_BEHAVIOR=UNCHANGED
+CONFIGURED_AUTHORITY_RELEASE_BINARY_EVIDENCE=NOT-YET-CAPTURED
+SECURITY_POSTURE=RS1-OPEN / PUBLIC-DEVNET-NO-GO
+```
+
+C4/C5 remain **OPEN**. Fail-closed `CurrentEpochUnavailable` is preserved. No production integration,
+signing, recovery-time verifier wiring, anti-rollback establishment, activation, D15, Run 423, or any
+project rename is performed or claimed; QBIND naming and all cryptographic domain-separation bytes are
+unchanged. Changed paths this pass:
+`crates/qbind-node/src/safety_record_store/{backend.rs,codec.rs,owner.rs,record.rs,validate.rs}`,
+`crates/qbind-node/tests/run_422_d7d14_safety_record_store_tests.rs`,
+`crates/qbind-node/Cargo.toml`,
+`docs/protocol/QBIND_CONSENSUS_RECOVERY_SIGNING_HISTORY_CORRESPONDENCE_CONTRACT.md`,
+`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_422_D7.md`, and `docs/whitepaper/contradiction.md`.

@@ -1617,7 +1617,39 @@ D7D14_STORAGE_COMPONENT=PARTIAL-IMPLEMENTATION
 D7D14_STORAGE_ACCEPTANCE=INCOMPLETE
 ```
 
-**What D14 adds beyond D13.** §12 fixed the frontier **rule** (when the restriction
+**Correction (Run 422 D7-D14 — recovery lifecycle / opaque publication / unified
+admission / TC+namespace pass, corrects `0f258734f1466488c41be814bc76162021c8a948`).**
+This pass implements a further tranche of the accepted subset and **tightens** the
+implementation to match this contract's §13.4/§13.5 obligations; it does **not**
+weaken any obligation. Closed this pass (with regressions): the effectiveness latch
+now initializes **not-effective on every open** (a reopened established store carries
+**no inherited acknowledgement**; dependent O4 is blocked until an acknowledged O1 or a
+successful O5 per §12.3 SW-3→SW-5 / INV-R7) — the earlier evidence-log claim that "a
+reopened backend starts clear" satisfies recovery is **withdrawn**; raw
+publication/recovery-clearing bypasses are removed (`SerializationDomain` is
+non-constructible, `publish_atomic`/`lock_domain` are crate-internal,
+`clear_recovery_requirement` is deleted, effectiveness transitions only through the
+enforced O1/O4/O5 paths); established-state prerequisites (presence, structure,
+**record-revision == metadata-revision**, pinned context) are enforced centrally and
+O4 validates its authoritative predecessor; `ValidatedRecord` is **opaque** with a
+decoded↔encoded correspondence check and an origin-context binding, so unrelated bytes
+cannot acquire validated status and O5 compares the complete original bytes
+byte-for-byte; one **structural-admission** path refuses oversize fields (e.g. a 9-byte
+signature under `S_sig = 8`) **before** publication; the record-level high-QC presence
+discriminant is encoded/charged and the TA1–TA8 identifiers are reconciled (TA2 by
+view+block_id only; TA1 byte-identical copy; TA8 unrun); and O1 performs **bounded**
+`safetyrec:` namespace classification refusing unknown/legacy/partial keys without
+migration/repair. **Still outstanding (the named blocker):** §13.7A **operational
+allocation-admission wiring into the real O1–O5 objects/lifetimes** — the accountant
+remains standalone/synthetic and `RetainedGeneration` still omits `evidence_lock_binding`
+and the other complete-wrapper retained fields, so the operational peak-memory ceiling
+is not yet enforced through actual operations. The operative component status therefore
+**remains**:
+
+```
+D7D14_STORAGE_COMPONENT=PARTIAL-IMPLEMENTATION
+D7D14_STORAGE_ACCEPTANCE=INCOMPLETE
+```
 must be durable, which dependent operations block, how recovery decides from
 observable inputs). §13 fixes the **record and its operations** at component level:
 exactly one supported storage/publication arrangement, the bounded field set with a

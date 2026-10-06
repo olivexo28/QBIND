@@ -60,3 +60,15 @@ qbind-ledger = { path = "../qbind-ledger", features = ["test-helpers"] }
 tempfile    = "3.10"
 proptest    = "1"
 parking_lot = "0.12"
+# Run 422 D7-D14 — the isolated safety-record storage acceptance suite exercises
+# the component's test-only fault-injection / out-of-band mutation helpers
+# (`SafetyBackend::set_inject`, `debug_overwrite_record_for_test`), which are
+# gated behind `test-utils` so they are never reachable from a default build.
+# Declaring the integration-test target's `required-features` keeps the default
+# `cargo test` build compiling (the target is skipped) while
+# `cargo test --features test-utils` builds and runs the full suite. This does
+# NOT restore default-build access to the mutation helpers.
+[[test]]
+name = "run_422_d7d14_safety_record_store_tests"
+path = "tests/run_422_d7d14_safety_record_store_tests.rs"
+required-features = ["test-utils"]

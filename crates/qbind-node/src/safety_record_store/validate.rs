@@ -51,15 +51,31 @@ impl CommittedHistory for FixtureCommittedHistory {
 /// Validate an already structurally-decoded record against the pinned context
 /// and (for anchored records) the independently-supplied committed history.
 ///
-/// Returns a [`ValidatedRecord`] carrying the retained original `encoded`
-/// publication bytes (operand 1 for O5) and the explicit, always-`Unverified`
-/// evidence status.
+/// Returns an opaque [`ValidatedRecord`] carrying the retained original
+/// `encoded` publication bytes (operand 1 for O5) and the explicit,
+/// always-`Unverified` evidence status.
+///
+/// Correspondence is **established, not assumed**: the supplied `decoded` and
+/// `encoded` must round-trip (`encode_record(decoded) == encoded` under this
+/// canonical profile), so a caller cannot staple an unrelated byte buffer onto
+/// a semantically-valid decoded record to manufacture a validation proof. The
+/// sealed proof is also bound to the originating pinned-context digest.
 pub fn validate_decoded<H: CommittedHistory + ?Sized>(
     decoded: DecodedRecord,
     encoded: Vec<u8>,
     ctx: &PinnedSafetyContext,
     history: Option<&H>,
 ) -> Result<ValidatedRecord, SafetyStoreError> {
+    // Establish decoded↔encoded correspondence before anything else: the bytes
+    // that will be retained for O5 must be exactly those that re-encode from the
+    // decoded content under this canonical profile. Divergence → refuse.
+    let reencoded = super::codec::encode_record(&decoded, ctx)?;
+    if reencoded != encoded {
+        return Err(SafetyStoreError::SemanticRefusal(
+            "decoded content does not correspond to the supplied encoded bytes".into(),
+        ));
+    }
+
     // Common identity binding to the pinned context (P4 prelude).
     if decoded.network_genesis_id != ctx.network_genesis_id {
         return Err(SafetyStoreError::SemanticRefusal(
@@ -84,11 +100,12 @@ pub fn validate_decoded<H: CommittedHistory + ?Sized>(
         }
     }
 
-    Ok(ValidatedRecord {
+    Ok(ValidatedRecord::seal(
         decoded,
-        evidence_status: EvidenceStatus::Unverified,
+        EvidenceStatus::Unverified,
         encoded,
-    })
+        super::owner::context_digest(ctx),
+    ))
 }
 
 fn validate_locked<H: CommittedHistory + ?Sized>(
@@ -238,31 +255,43 @@ fn validate_tc(
     tc: &super::record::TimeoutCert,
     l: &LockedRecord,
 ) -> Result<(), SafetyStoreError> {
-    // TA1: timeout signer membership.
+    // NOTE on TA identifiers: these are reconciled to the §13.3A contract
+    // meanings (the earlier in-code numbering did not match the contract rows):
+    //   TA1 = lock ↔ TC high_qc identity + record-level/TC high_qc byte-identity
+    //   TA2 = TC high_qc ↔ derived max over signed_timeouts (view+block_id only)
+    //   TA3 = signer uniqueness
+    //   TA4 = authorized signer membership
+    //   TA5 = signer-set correspondence (permutation of tc.signers)
+    //   TA6 = timeout-view consistency
+    //   TA7 = voting-power quorum (power, not count)
+    //   TA8 = per-entry timeout-signature cryptography — NOT run here (unverified)
+
+    // TA4: authorized signer membership of the claimed timeout signer set.
     for s in &tc.signers {
         if !ctx.is_member(*s) {
             return Err(SafetyStoreError::SemanticRefusal(format!(
-                "tc signer {} not an authorized member (TA1)",
+                "tc signer {} not an authorized member (TA4)",
                 s.as_u64()
             )));
         }
     }
-    // TA2: signer uniqueness.
+    // TA3: signer uniqueness over tc.signers.
     let mut seen = std::collections::HashSet::new();
     for s in &tc.signers {
         if !seen.insert(s.as_u64()) {
             return Err(SafetyStoreError::SemanticRefusal(format!(
-                "tc duplicate signer {} (TA2)",
+                "tc duplicate signer {} (TA3)",
                 s.as_u64()
             )));
         }
     }
-    // TA3: signer-set correspondence between tc.signers and signed_timeouts.
+    // TA4/TA5: each signed_timeout validator is an authorized member, unique,
+    // and (below) the evidence set corresponds to tc.signers.
     let mut st_ids = std::collections::HashSet::new();
     for t in &tc.signed_timeouts {
         if !ctx.is_member(t.validator_id) {
             return Err(SafetyStoreError::SemanticRefusal(format!(
-                "signed_timeout validator {} not a member (TA3)",
+                "signed_timeout validator {} not a member (TA4)",
                 t.validator_id.as_u64()
             )));
         }
@@ -273,51 +302,57 @@ fn validate_tc(
             )));
         }
     }
+    // TA5: signer-set correspondence — the evidence set is a permutation of
+    // tc.signers (no extras, no missing, equal cardinality).
     if st_ids != seen {
         return Err(SafetyStoreError::SemanticRefusal(
-            "tc.signers set does not correspond to signed_timeouts set (TA3)".into(),
+            "tc.signers set does not correspond to signed_timeouts set (TA5)".into(),
         ));
     }
-    // TA4: view consistency — every signed timeout is for tc.timeout_view.
+    // TA6: timeout-view consistency — every signed timeout is for tc.timeout_view.
     for t in &tc.signed_timeouts {
         if t.view != tc.timeout_view {
             return Err(SafetyStoreError::SemanticRefusal(format!(
-                "signed_timeout view {} != tc.timeout_view {} (TA4)",
+                "signed_timeout view {} != tc.timeout_view {} (TA6)",
                 t.view, tc.timeout_view
             )));
         }
     }
-    // TA5: voting-power quorum over the timeout signer set.
+    // TA7: voting-power quorum over the claimed timeout signer set (power, not
+    // count; kept distinct from the signer count and from TA8 authentication).
     let mut acc: u128 = 0;
     for s in &tc.signers {
         acc += ctx.voting_power(*s).unwrap_or(0) as u128;
     }
     if acc < ctx.two_thirds_vp() {
         return Err(SafetyStoreError::SemanticRefusal(
-            "tc timeout voting power below ceil(2W/3) (TA5)".into(),
+            "tc timeout voting power below ceil(2W/3) (TA7)".into(),
         ));
     }
-    // TA6: equal-view high-QC selection preserved — the derived max high-QC from
-    // the signed timeouts must correspond to the TC's carried high_qc. No
-    // tie-break is invented; `select_max_high_qc` keeps first-encountered.
+    // TA2: the derived max high-QC from the signed timeouts must correspond to
+    // the TC's carried high_qc by the contract's `high_qc_eq` rule —
+    // `None == None`, else **view AND block_id** equal. The strict-`>`
+    // first-encountered selection is preserved; NO signer-array equality is
+    // required here (TA2 does not compare signers), and no tie-break is invented.
     let derived = select_max_high_qc(tc.signed_timeouts.iter());
     match (&derived, &tc.high_qc) {
         (None, None) => {}
         (Some(d), Some(c)) => {
-            if d.block_id != c.block_id || d.view != c.view || d.signers != c.signers {
+            if d.block_id != c.block_id || d.view != c.view {
                 return Err(SafetyStoreError::SemanticRefusal(
-                    "tc.high_qc does not correspond to select_max_high_qc(signed_timeouts) (TA6)"
+                    "tc.high_qc does not correspond to select_max_high_qc(signed_timeouts) (TA2)"
                         .into(),
                 ));
             }
         }
         _ => {
             return Err(SafetyStoreError::SemanticRefusal(
-                "tc.high_qc presence disagrees with derived max high-QC (TA6)".into(),
+                "tc.high_qc presence disagrees with derived max high-QC (TA2)".into(),
             ))
         }
     }
-    // TA7: both retained high-QC copies correspond (record-level vs TC-level).
+    // TA1: the record-level high_qc copy must be **byte-identical** to the TC's
+    // own high_qc (exact copy correspondence — block_id, view AND signers).
     match &tc.high_qc {
         Some(c) => {
             if record_high_qc.block_id != c.block_id
@@ -325,25 +360,25 @@ fn validate_tc(
                 || record_high_qc.signers != c.signers
             {
                 return Err(SafetyStoreError::SemanticRefusal(
-                    "record high_qc does not correspond to tc.high_qc (TA7)".into(),
+                    "record high_qc is not byte-identical to tc.high_qc (TA1)".into(),
                 ));
             }
         }
         None => {
             return Err(SafetyStoreError::SemanticRefusal(
-                "tc-derived lock requires a carried high_qc (TA7)".into(),
+                "tc-derived lock requires a carried high_qc (TA1)".into(),
             ))
         }
     }
-    // TA8: the lock binds to the retained high-QC (block + view binding).
+    // TA1: the lock binds to the retained high-QC (block + view identity).
     if record_high_qc.block_id != l.lock_block_id {
         return Err(SafetyStoreError::SemanticRefusal(
-            "tc record high_qc block_id != lock_block_id (TA8/P1)".into(),
+            "tc record high_qc block_id != lock_block_id (TA1/P1)".into(),
         ));
     }
     if record_high_qc.view != l.lock_view {
         return Err(SafetyStoreError::SemanticRefusal(
-            "tc record high_qc view != lock_view (TA8/P2 view-binding)".into(),
+            "tc record high_qc view != lock_view (TA1/P2 view-binding)".into(),
         ));
     }
     Ok(())

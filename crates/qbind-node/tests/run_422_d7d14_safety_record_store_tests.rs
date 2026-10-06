@@ -223,11 +223,12 @@ fn h6_empty_signer_certificate_refused() {
         publication_revision: 1,
         record: SafetyRecord::Locked(locked),
     };
-    let enc = encode_record(&dec, &ctx).unwrap();
-    assert!(matches!(
-        decode_record(&enc, &ctx),
-        Err(SafetyStoreError::StructuralRefusal(_))
-    ));
+    // The unified structural-admission path (§13 §7) refuses an empty-signer
+    // certificate BEFORE publication — i.e. at encode/admission — rather than
+    // only on read-back. The obligation (empty-signer certificate refused at the
+    // structural threshold) is unchanged; the refusal is now enforced earlier.
+    let enc = encode_record(&dec, &ctx);
+    assert!(matches!(enc, Err(SafetyStoreError::StructuralRefusal(_))));
 }
 
 // ---------------------------------------------------------------------------
@@ -363,7 +364,7 @@ fn h11_success_is_unverified() {
         None::<&FixtureCommittedHistory>,
     )
     .unwrap();
-    assert_eq!(v.evidence_status, EvidenceStatus::Unverified);
+    assert_eq!(v.evidence_status(), EvidenceStatus::Unverified);
 }
 
 // ---------------------------------------------------------------------------
@@ -413,8 +414,8 @@ fn h16_real_rocksdb_publish_and_reopen() {
     let v = owner2
         .read_validate(None::<&FixtureCommittedHistory>)
         .unwrap();
-    assert!(v.decoded.is_locked());
-    assert_eq!(v.decoded.publication_revision, 1);
+    assert!(v.decoded().is_locked());
+    assert_eq!(v.decoded().publication_revision, 1);
 }
 
 // ---------------------------------------------------------------------------
@@ -471,7 +472,8 @@ fn h19_o5_refuses_divergence_outside_binding_digest() {
     let stored = owner
         .read_validate(None::<&FixtureCommittedHistory>)
         .unwrap()
-        .encoded;
+        .encoded()
+        .to_vec();
     let mut forged = stored.clone();
     // Flip D_pred (offset 2+32+32+1+1 = 68) from 0→1 and append a predecessor u64
     // before the CRC, then re-CRC. The binding digest does not cover D_pred.
@@ -501,7 +503,7 @@ fn h19_o5_refuses_divergence_outside_binding_digest() {
     let after = owner.read_validate(None::<&FixtureCommittedHistory>);
     // The forged bytes may now fail semantic validation (genesis mismatch), which
     // is itself a refusal; the key point is O5 did not republish the retained.
-    assert!(after.is_err() || after.unwrap().encoded == forged);
+    assert!(after.is_err() || after.unwrap().encoded() == forged.as_slice());
 }
 
 // ---------------------------------------------------------------------------
@@ -539,7 +541,7 @@ fn h20_stale_o5_does_not_overwrite_newer() {
     let now = owner
         .read_validate(None::<&FixtureCommittedHistory>)
         .unwrap();
-    assert_eq!(now.decoded.publication_revision, 2);
+    assert_eq!(now.decoded().publication_revision, 2);
 }
 
 // ---------------------------------------------------------------------------
@@ -563,8 +565,8 @@ fn h21_revision_fence_refuses_stale_publish() {
     let v = owner
         .read_validate(None::<&FixtureCommittedHistory>)
         .unwrap();
-    assert_eq!(v.decoded.publication_revision, 0);
-    assert!(!v.decoded.is_locked());
+    assert_eq!(v.decoded().publication_revision, 0);
+    assert!(!v.decoded().is_locked());
 }
 
 // ---------------------------------------------------------------------------
@@ -612,7 +614,7 @@ fn h23_o2_refuses_absent_state_o3_no_write() {
     let after = owner
         .read_validate(None::<&FixtureCommittedHistory>)
         .unwrap();
-    assert_eq!(before.decoded, after.decoded);
+    assert_eq!(before.decoded(), after.decoded());
 }
 
 // ---------------------------------------------------------------------------
@@ -673,7 +675,7 @@ fn h24_bootstrap_nocommit_committed_distinctions() {
     // Supplied fixture history that affirms the anchor → accept.
     let hist = FixtureCommittedHistory::new().with([3u8; 32], 4);
     let v = validate_decoded(decode_record(&enc, &ctx).unwrap(), enc, &ctx, Some(&hist)).unwrap();
-    assert_eq!(v.evidence_status, EvidenceStatus::Unverified);
+    assert_eq!(v.evidence_status(), EvidenceStatus::Unverified);
 }
 
 // ---------------------------------------------------------------------------
@@ -697,7 +699,7 @@ fn h25_first_lock_evidence_storage_layer_only() {
     let v = owner
         .read_validate(None::<&FixtureCommittedHistory>)
         .unwrap();
-    assert_eq!(v.evidence_status, EvidenceStatus::Unverified);
+    assert_eq!(v.evidence_status(), EvidenceStatus::Unverified);
 }
 
 // ---------------------------------------------------------------------------
@@ -774,7 +776,7 @@ fn h26_both_evidence_variants_and_nested_bounds() {
     let etc = encode_record(&dtc, &ctx).unwrap();
     assert_eq!(decode_record(&etc, &ctx).unwrap(), dtc);
     let v = validate_decoded(dtc, etc.clone(), &ctx, None::<&FixtureCommittedHistory>).unwrap();
-    assert_eq!(v.evidence_status, EvidenceStatus::Unverified);
+    assert_eq!(v.evidence_status(), EvidenceStatus::Unverified);
     // Nested bound: actual TC encoding is within MAX_TC_BYTES.
     assert!((etc.len() as u128) <= max_tc_bytes(&ctx).unwrap());
 }
@@ -799,8 +801,8 @@ fn h27_tc_derived_restriction_persisted_unverified() {
     let v = owner2
         .read_validate(None::<&FixtureCommittedHistory>)
         .unwrap();
-    assert_eq!(v.evidence_status, EvidenceStatus::Unverified);
-    match &v.decoded.record {
+    assert_eq!(v.evidence_status(), EvidenceStatus::Unverified);
+    match &v.decoded().record {
         SafetyRecord::Locked(l) => {
             assert!(matches!(l.evidence, SupportingEvidence::TcDerived { .. }));
         }
@@ -940,8 +942,8 @@ fn corr_foreign_context_handle_refuses_o3_and_o4() {
     let v = owner_a
         .read_validate(None::<&FixtureCommittedHistory>)
         .unwrap();
-    assert!(!v.decoded.is_locked());
-    assert_eq!(v.decoded.publication_revision, 0);
+    assert!(!v.decoded().is_locked());
+    assert_eq!(v.decoded().publication_revision, 0);
 }
 
 // ---------------------------------------------------------------------------
@@ -1007,7 +1009,7 @@ fn corr_uncertain_publish_blocks_dependent_o4_until_o5_recovers() {
     let surviving = owner
         .read_validate(None::<&FixtureCommittedHistory>)
         .unwrap();
-    assert_eq!(surviving.decoded.publication_revision, 2);
+    assert_eq!(surviving.decoded().publication_revision, 2);
     assert!(owner.recovery_required(), "O3 does not clear the latch");
 
     // Only the successful recovery operation (O5 re-acknowledge of the surviving
@@ -1024,6 +1026,310 @@ fn corr_uncertain_publish_blocks_dependent_o4_until_o5_recovers() {
         owner.publish_locked(l3, 2, None::<&FixtureCommittedHistory>),
         PublishResult::DurableAcknowledged { new_revision: 3 }
     );
+}
+
+// ---------------------------------------------------------------------------
+// Correction pass (§3) — a freshly REOPENED established store carries no
+// inherited acknowledgement: dependent O4 is blocked until a successful O5 (or
+// an acknowledged O1). Reopening must not bypass the restriction.
+// ---------------------------------------------------------------------------
+#[test]
+fn corr_reopen_established_store_blocks_o4_until_o5() {
+    let dir = tempfile::tempdir().unwrap();
+    let ctx = ctx_n(4);
+    // Establish + publish a lock (rev 1) under the first backend instance.
+    let owner = init_owner(dir.path(), &ctx);
+    let qc = valid_wire_qc(&ctx, [9u8; 32], 5);
+    let l1 = make_locked_qc(&ctx, [9u8; 32], 5, qc, None).unwrap();
+    assert_eq!(
+        owner.publish_locked(l1, 0, None::<&FixtureCommittedHistory>),
+        PublishResult::DurableAcknowledged { new_revision: 1 }
+    );
+    drop(owner);
+
+    // Reopen a FRESH backend instance over the surviving bytes: no inherited
+    // acknowledgement knowledge, so dependent O4 must be refused before any write.
+    let owner2 = SafetyRecordOwner::attach(open_enabled(dir.path()), ctx.clone()).unwrap();
+    assert!(
+        owner2.recovery_required(),
+        "a freshly reopened established store starts not-effective"
+    );
+    let qc2 = valid_wire_qc(&ctx, [0x11u8; 32], 6);
+    let l2 = make_locked_qc(&ctx, [0x11u8; 32], 6, qc2, None).unwrap();
+    let blocked = owner2.publish_locked(l2.clone(), 1, None::<&FixtureCommittedHistory>);
+    assert!(
+        matches!(
+            blocked,
+            PublishResult::RefusedPreWrite(SafetyStoreError::RecoveryRequired(_))
+        ),
+        "O4 after reopen must be blocked until O5, got {blocked:?}"
+    );
+    // Refusal left the surviving state (lock rev 1) unchanged.
+    let surviving = owner2
+        .read_validate(None::<&FixtureCommittedHistory>)
+        .unwrap();
+    assert_eq!(surviving.decoded().publication_revision, 1);
+    assert!(
+        owner2.recovery_required(),
+        "O3 inspection does not make the surviving state effective"
+    );
+
+    // A successful O5 over the surviving publication re-establishes effectiveness.
+    assert!(matches!(
+        owner2.reacknowledge(&surviving),
+        PublishResult::DurableAcknowledged { new_revision: 1 }
+    ));
+    assert!(!owner2.recovery_required());
+
+    // The next eligible O4 now proceeds (rev 1 -> 2).
+    assert_eq!(
+        owner2.publish_locked(l2, 1, None::<&FixtureCommittedHistory>),
+        PublishResult::DurableAcknowledged { new_revision: 2 }
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Correction pass (§5) — established-state prerequisites are enforced centrally:
+// a record whose revision disagrees with metadata, an invalid lock/evidence
+// association, or missing committed history for an anchored record are all
+// refused under the ownership boundary without rewriting the predecessor.
+// ---------------------------------------------------------------------------
+#[test]
+fn corr_record_meta_revision_disagreement_refused() {
+    let dir = tempfile::tempdir().unwrap();
+    let ctx = ctx_n(4);
+    let owner = init_owner(dir.path(), &ctx); // meta rev 0, bootstrap rev 0
+                                              // Plant a record decoding to revision 5 while metadata still says revision 0.
+    let qc = valid_wire_qc(&ctx, [9u8; 32], 5);
+    let locked = make_locked_qc(&ctx, [9u8; 32], 5, qc, None).unwrap();
+    let mismatched = DecodedRecord {
+        persistence_format_version: 1,
+        network_genesis_id: ctx.network_genesis_id,
+        publication_revision: 5,
+        record: SafetyRecord::Locked(locked),
+    };
+    let enc = encode_record(&mismatched, &ctx).unwrap();
+    owner.debug_overwrite_record_for_test(&enc).unwrap();
+    // O3 refuses on the centralized revision-consistency check.
+    assert!(matches!(
+        owner.read_validate(None::<&FixtureCommittedHistory>),
+        Err(SafetyStoreError::SemanticRefusal(_))
+    ));
+    // O4 also refuses pre-write (predecessor not usable).
+    let qc2 = valid_wire_qc(&ctx, [0x11u8; 32], 9);
+    let l2 = make_locked_qc(&ctx, [0x11u8; 32], 9, qc2, None).unwrap();
+    assert!(matches!(
+        owner.publish_locked(l2, 0, None::<&FixtureCommittedHistory>),
+        PublishResult::RefusedPreWrite(SafetyStoreError::SemanticRefusal(_))
+    ));
+}
+
+#[test]
+fn corr_invalid_lock_evidence_binding_refused() {
+    let dir = tempfile::tempdir().unwrap();
+    let ctx = ctx_n(4);
+    let owner = init_owner(dir.path(), &ctx);
+    // A locked record at the correct revision (0) but with a WRONG
+    // evidence_lock_binding — structurally admissible, semantically invalid.
+    let qc = valid_wire_qc(&ctx, [9u8; 32], 5);
+    let mut locked = make_locked_qc(&ctx, [9u8; 32], 5, qc, None).unwrap();
+    locked.evidence_lock_binding = [0u8; 32]; // not the computed binding
+    let dec = DecodedRecord {
+        persistence_format_version: 1,
+        network_genesis_id: ctx.network_genesis_id,
+        publication_revision: 0,
+        record: SafetyRecord::Locked(locked),
+    };
+    let enc = encode_record(&dec, &ctx).unwrap();
+    owner.debug_overwrite_record_for_test(&enc).unwrap();
+    assert!(matches!(
+        owner.read_validate(None::<&FixtureCommittedHistory>),
+        Err(SafetyStoreError::SemanticRefusal(_))
+    ));
+}
+
+#[test]
+fn corr_missing_committed_history_for_anchored_refused() {
+    let dir = tempfile::tempdir().unwrap();
+    let ctx = ctx_n(4);
+    let owner = init_owner(dir.path(), &ctx);
+    // An anchored locked record at revision 0 requires independent committed
+    // history for its anchor (P3).
+    let qc = valid_wire_qc(&ctx, [9u8; 32], 5);
+    let locked = make_locked_qc(
+        &ctx,
+        [9u8; 32],
+        5,
+        qc,
+        Some(CommittedAnchor {
+            block_id: [3u8; 32],
+            height: 4,
+        }),
+    )
+    .unwrap();
+    let dec = DecodedRecord {
+        persistence_format_version: 1,
+        network_genesis_id: ctx.network_genesis_id,
+        publication_revision: 0,
+        record: SafetyRecord::Locked(locked),
+    };
+    let enc = encode_record(&dec, &ctx).unwrap();
+    owner.debug_overwrite_record_for_test(&enc).unwrap();
+    // No history supplied → refuse.
+    assert!(matches!(
+        owner.read_validate(None::<&FixtureCommittedHistory>),
+        Err(SafetyStoreError::MissingIndependentInput(_))
+    ));
+    // Wrong history (does not affirm the anchor) → refuse.
+    let wrong = FixtureCommittedHistory::new().with([0xAAu8; 32], 4);
+    assert!(owner.read_validate(Some(&wrong)).is_err());
+    // Correct independent history → accept.
+    let hist = FixtureCommittedHistory::new().with([3u8; 32], 4);
+    let v = owner.read_validate(Some(&hist)).unwrap();
+    assert_eq!(v.evidence_status(), EvidenceStatus::Unverified);
+}
+
+// ---------------------------------------------------------------------------
+// Correction pass (§8) — the concrete prior failure case: with S_sig = 8, a QC
+// carrying a 9-byte signature must be refused BEFORE publication by the unified
+// structural-admission path, even when the whole record is below the total cap.
+// ---------------------------------------------------------------------------
+#[test]
+fn corr_oversized_signature_refused_before_publication() {
+    let dir = tempfile::tempdir().unwrap();
+    let ctx = ctx_n(4); // s_sig = 8
+    let owner = init_owner(dir.path(), &ctx);
+    let mut qc = valid_wire_qc(&ctx, [9u8; 32], 5);
+    // Replace one 8-byte signature with a 9-byte one.
+    qc.signatures[0] = vec![0xABu8; 9];
+    let locked = make_locked_qc(&ctx, [9u8; 32], 5, qc, None).unwrap();
+    let res = owner.publish_locked(locked, 0, None::<&FixtureCommittedHistory>);
+    assert!(
+        matches!(
+            res,
+            PublishResult::RefusedPreWrite(SafetyStoreError::DeclaredBoundExceeded(_))
+        ),
+        "9-byte signature must be refused pre-publication, got {res:?}"
+    );
+    // The predecessor (bootstrap rev 0) is unchanged.
+    let v = owner
+        .read_validate(None::<&FixtureCommittedHistory>)
+        .unwrap();
+    assert_eq!(v.decoded().publication_revision, 0);
+    assert!(!v.decoded().is_locked());
+}
+
+// ---------------------------------------------------------------------------
+// Correction pass (§8 / TA2 vs TA1) — the SELECTED timeout-entry high-QC may
+// differ in its SIGNER LIST from tc.high_qc (TA2 compares view+block_id only),
+// while the record-level high_qc must remain byte-identical to tc.high_qc (TA1).
+// ---------------------------------------------------------------------------
+#[test]
+fn corr_tc_ta2_permits_signer_diff_ta1_requires_exact_copy() {
+    use qbind_node::safety_record_store::codec::compute_evidence_lock_binding;
+    let ctx = ctx_n(4);
+    let need = ((2 * ctx.n()) + 2) / 3;
+    let block = [9u8; 32];
+    let lock_view = 5u64;
+    let timeout_view = 6u64;
+
+    // record-level + tc.high_qc: byte-identical to each other (signer set A).
+    let signers_a: Vec<ValidatorId> = (0..need as u64).map(ValidatorId::new).collect();
+    let high_a = LogicalQc::new(block, lock_view, signers_a.clone());
+    // nested timeout-entry high_qc: SAME (block_id, view), DIFFERENT signers.
+    let signers_b: Vec<ValidatorId> = (0..(need as u64 - 1)).map(ValidatorId::new).collect();
+    let high_b = LogicalQc::new(block, lock_view, signers_b);
+
+    let build = |rec_high: LogicalQc<[u8; 32]>,
+                 tc_high: LogicalQc<[u8; 32]>,
+                 nested: LogicalQc<[u8; 32]>,
+                 rev: u64| {
+        let mut signed = Vec::new();
+        for i in 0..need as u64 {
+            let mut t = TimeoutMsg::new(timeout_view, Some(nested.clone()), ValidatorId::new(i));
+            t.set_signature(vec![0xCD; S_SIG]);
+            signed.push(t);
+        }
+        let tc = TimeoutCertificate {
+            view: timeout_view + 1,
+            high_qc: Some(tc_high),
+            signers: (0..need as u64).map(ValidatorId::new).collect(),
+            signed_timeouts: signed,
+            timeout_view,
+        };
+        let evidence = SupportingEvidence::TcDerived {
+            high_qc: rec_high,
+            tc,
+        };
+        let binding =
+            compute_evidence_lock_binding(&block, lock_view, &evidence, &ctx.authority_context_ref)
+                .unwrap();
+        let l = LockedRecord {
+            lock_block_id: block,
+            lock_view,
+            evidence_lock_binding: binding,
+            authority_context_ref: ctx.authority_context_ref,
+            committed_anchor: None,
+            predecessor_ref: None,
+            evidence,
+        };
+        DecodedRecord {
+            persistence_format_version: 1,
+            network_genesis_id: ctx.network_genesis_id,
+            publication_revision: rev,
+            record: SafetyRecord::Locked(l),
+        }
+    };
+
+    // TA2-permitted: nested selected high_qc uses signer set B; record + tc use A.
+    let permitted = build(high_a.clone(), high_a.clone(), high_b.clone(), 1);
+    let enc = encode_record(&permitted, &ctx).unwrap();
+    let v = validate_decoded(
+        decode_record(&enc, &ctx).unwrap(),
+        enc,
+        &ctx,
+        None::<&FixtureCommittedHistory>,
+    )
+    .unwrap();
+    assert_eq!(v.evidence_status(), EvidenceStatus::Unverified);
+
+    // TA1-violating: record-level high_qc (A) differs in signers from tc.high_qc
+    // (B) — exact copy correspondence is required, so this is refused.
+    let violating = build(high_a.clone(), high_b.clone(), high_b.clone(), 1);
+    let enc2 = encode_record(&violating, &ctx).unwrap();
+    assert!(matches!(
+        validate_decoded(
+            decode_record(&enc2, &ctx).unwrap(),
+            enc2,
+            &ctx,
+            None::<&FixtureCommittedHistory>
+        ),
+        Err(SafetyStoreError::SemanticRefusal(_))
+    ));
+}
+
+// ---------------------------------------------------------------------------
+// Correction pass (§10) — bounded namespace classification: an unknown/legacy
+// safety-namespace key causes the contract-prescribed O1 refusal WITHOUT
+// migration, deletion, or repair over it.
+// ---------------------------------------------------------------------------
+#[test]
+fn corr_unknown_namespace_key_refuses_o1_without_repair() {
+    let dir = tempfile::tempdir().unwrap();
+    let ctx = ctx_n(4);
+    let backend = open_enabled(dir.path());
+    // Plant an unknown/legacy key inside the component-owned namespace.
+    backend
+        .debug_put_raw(b"safetyrec:legacy:v0", b"opaque-legacy-state")
+        .unwrap();
+    let owner = SafetyRecordOwner::attach(backend.clone(), ctx.clone()).unwrap();
+    // O1 is refused (no migration / deletion / initialization over it).
+    assert!(matches!(
+        owner.initialize(true),
+        Err(SafetyStoreError::StructuralRefusal(_))
+    ));
+    // The unknown key is still present — nothing was repaired or deleted.
+    assert!(backend.first_unrecognized_safety_key().unwrap().is_some());
 }
 
 // ---------------------------------------------------------------------------
@@ -1102,6 +1408,19 @@ fn child_process_entry() {
             );
             std::process::exit(13);
         }
+        "ack_locked_clean_exit" => {
+            owner.initialize(true).expect("O1");
+            let qc = valid_wire_qc(&ctx, [9u8; 32], 5);
+            let locked = make_locked_qc(&ctx, [9u8; 32], 5, qc, None).unwrap();
+            let r = owner.publish_locked(locked, 0, None::<&FixtureCommittedHistory>);
+            assert!(
+                matches!(r, PublishResult::DurableAcknowledged { .. }),
+                "got {r:?}"
+            );
+            // Exit cleanly AFTER an acknowledged publication; the next process
+            // must still require fresh recovery (O5) before dependent O4.
+            std::process::exit(14);
+        }
         other => panic!("unknown child phase {other}"),
     }
 }
@@ -1128,8 +1447,8 @@ fn pd_before_publish_survives_bootstrap() {
     let v = owner
         .read_validate(None::<&FixtureCommittedHistory>)
         .unwrap();
-    assert!(!v.decoded.is_locked());
-    assert_eq!(v.decoded.publication_revision, 0);
+    assert!(!v.decoded().is_locked());
+    assert_eq!(v.decoded().publication_revision, 0);
 }
 
 /// Boundary: a completed storage write BEFORE success is delivered to the caller
@@ -1146,8 +1465,8 @@ fn pd_uncertain_after_write_successor_survives() {
         .unwrap();
     // The successor (locked rev 1) survived; we do NOT claim the dead process
     // observed an acknowledgement.
-    assert!(v.decoded.is_locked());
-    assert_eq!(v.decoded.publication_revision, 1);
+    assert!(v.decoded().is_locked());
+    assert_eq!(v.decoded().publication_revision, 1);
 }
 
 /// Boundary: death AFTER durability acknowledgement but before in-memory
@@ -1165,8 +1484,8 @@ fn pd_ack_then_abort_survives_locked() {
     let v = owner
         .read_validate(None::<&FixtureCommittedHistory>)
         .unwrap();
-    assert!(v.decoded.is_locked());
-    assert_eq!(v.decoded.publication_revision, 1);
+    assert!(v.decoded().is_locked());
+    assert_eq!(v.decoded().publication_revision, 1);
     // O5 can re-acknowledge the surviving publication (byte-for-byte equal).
     let res = owner.reacknowledge(&v);
     assert!(
@@ -1188,6 +1507,47 @@ fn pd_write_error_before_commit_predecessor_unchanged() {
     let v = owner
         .read_validate(None::<&FixtureCommittedHistory>)
         .unwrap();
-    assert!(!v.decoded.is_locked());
-    assert_eq!(v.decoded.publication_revision, 0);
+    assert!(!v.decoded().is_locked());
+    assert_eq!(v.decoded().publication_revision, 0);
+}
+
+/// Boundary: a child process establishes + acknowledges a lock, then exits
+/// cleanly. The NEXT process (the parent's reopen) carries no inherited
+/// acknowledgement, so dependent O4 is blocked until a successful O5 recovery
+/// over the surviving publication. Distinguishes orderly process termination
+/// from machine power loss: the acknowledged bytes survive, but effectiveness
+/// is re-established only by O5.
+#[test]
+fn pd_reopen_after_clean_exit_requires_o5_before_o4() {
+    let dir = tempfile::tempdir().unwrap();
+    let status = spawn_child(dir.path(), "ack_locked_clean_exit");
+    assert_eq!(
+        status.code(),
+        Some(14),
+        "child reached the acknowledged-exit boundary"
+    );
+    let ctx = ctx_n(4);
+    let owner = SafetyRecordOwner::attach(open_enabled(dir.path()), ctx.clone()).unwrap();
+    assert_eq!(owner.open().unwrap().current_revision, 1);
+    assert!(
+        owner.recovery_required(),
+        "reopened process requires fresh O5"
+    );
+    let qc2 = valid_wire_qc(&ctx, [0x11u8; 32], 7);
+    let l2 = make_locked_qc(&ctx, [0x11u8; 32], 7, qc2, None).unwrap();
+    assert!(matches!(
+        owner.publish_locked(l2.clone(), 1, None::<&FixtureCommittedHistory>),
+        PublishResult::RefusedPreWrite(SafetyStoreError::RecoveryRequired(_))
+    ));
+    let surviving = owner
+        .read_validate(None::<&FixtureCommittedHistory>)
+        .unwrap();
+    assert!(matches!(
+        owner.reacknowledge(&surviving),
+        PublishResult::DurableAcknowledged { new_revision: 1 }
+    ));
+    assert_eq!(
+        owner.publish_locked(l2, 1, None::<&FixtureCommittedHistory>),
+        PublishResult::DurableAcknowledged { new_revision: 2 }
+    );
 }

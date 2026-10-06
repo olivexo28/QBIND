@@ -50,9 +50,11 @@ pub enum InjectFault {
 }
 
 /// A shared serialization domain. The owned guard proves the single-writer
-/// boundary is held for a check-then-write sequence.
-#[derive(Debug, Default)]
-pub struct SerializationDomain;
+/// boundary is held for a check-then-write sequence. The inner field is private
+/// so this type is **not** publicly constructible: a caller cannot fabricate a
+/// `SerializationDomain` (or a guard over one) to forge ownership of a backend.
+#[derive(Debug)]
+pub struct SerializationDomain(());
 
 /// The safety backend: an `Arc`-shared RocksDB handle plus the single
 /// serialization domain shared by every attached handle.
@@ -61,14 +63,16 @@ pub struct SafetyBackend {
     db: Arc<rocksdb::DB>,
     domain: Arc<Mutex<SerializationDomain>>,
     inject: Arc<AtomicU8>,
-    /// Shared, in-process recovery-required latch (§ 13.5). Set when an
-    /// ambiguous write error or an uncertain-but-durable outcome is produced
-    /// under this backend instance; observed by **every** attached handle so
-    /// dependent publication is blocked until the required successful recovery
-    /// operation clears it. This is in-process shared state by construction: a
-    /// reopened backend starts clear and cannot infer an earlier acknowledgement
-    /// from readable bytes.
-    recovery_required: Arc<AtomicBool>,
+    /// Shared, in-process **effectiveness / acknowledgement** latch (§ 13.4 /
+    /// § 13.5). A freshly opened backend starts **not effective** (`false`): a
+    /// newly opened established store carries **no inherited acknowledgement
+    /// knowledge**, so dependent O4 publication is blocked until a fresh
+    /// durability acknowledgement is established by an acknowledged O1
+    /// initialization or a successful O5 recovery. An ambiguous write error or
+    /// an uncertain-but-durable outcome also clears it. It can never be inferred
+    /// effective from readable bytes, and a reopen cannot bypass it. Observed by
+    /// **every** attached handle.
+    effective: Arc<AtomicBool>,
 }
 
 impl std::fmt::Debug for SafetyBackend {
@@ -102,15 +106,20 @@ impl SafetyBackend {
             .map_err(|e| SafetyStoreError::WriteFailed(format!("open: {e}")))?;
         Ok(SafetyBackend {
             db: Arc::new(db),
-            domain: Arc::new(Mutex::new(SerializationDomain)),
+            domain: Arc::new(Mutex::new(SerializationDomain(()))),
             inject: Arc::new(AtomicU8::new(InjectFault::None as u8)),
-            recovery_required: Arc::new(AtomicBool::new(false)),
+            // A freshly opened backend is NOT effective: dependent O4 is blocked
+            // until an acknowledged O1 or a successful O5 establishes a fresh
+            // durability acknowledgement (§ 13.4 / § 13.5).
+            effective: Arc::new(AtomicBool::new(false)),
         })
     }
 
     /// Acquire the single shared serialization domain for a check-then-write
-    /// sequence. Every attached handle contends on the same lock.
-    pub fn lock_domain(&self) -> MutexGuard<'_, SerializationDomain> {
+    /// sequence. Every attached handle contends on the same lock. Crate-internal:
+    /// the guard is only ever produced for, and consumed by, this backend's own
+    /// enforced operations.
+    pub(crate) fn lock_domain(&self) -> MutexGuard<'_, SerializationDomain> {
         self.domain
             .lock()
             .expect("safety serialization domain poisoned")
@@ -124,6 +133,41 @@ impl SafetyBackend {
     /// Read the raw (CRC-verified) record bytes, if present.
     pub fn read_record(&self) -> Result<Option<Vec<u8>>, SafetyStoreError> {
         self.read_checksummed(RECORD_KEY, "record")
+    }
+
+    /// Bounded classification of the component-owned `safetyrec:` namespace for
+    /// O1 (§ 13.3A). Returns the first key found within the namespace that is
+    /// **not** one of the two recognized current-format keys (metadata/record).
+    /// Such a key denotes established-but-unknown, legacy, partial, or malformed
+    /// safety state that O1 must refuse over — **without** migration, deletion,
+    /// repair, or initialization. The scan is bounded to the `safetyrec:` prefix
+    /// (an ordered iterator that stops at the first out-of-prefix key) and to a
+    /// hard cap, so it never scans unrelated database contents unboundedly.
+    pub fn first_unrecognized_safety_key(&self) -> Result<Option<Vec<u8>>, SafetyStoreError> {
+        const SAFETY_PREFIX: &[u8] = b"safetyrec:";
+        // Hard cap on inspected keys: the component only ever owns a small fixed
+        // set of current-format keys, so any growth beyond this bound is itself
+        // treated as unknown safety state rather than scanned without limit.
+        const MAX_SCAN: usize = 64;
+        let mode = rocksdb::IteratorMode::From(SAFETY_PREFIX, rocksdb::Direction::Forward);
+        let mut seen = 0usize;
+        for item in self.db.iterator(mode) {
+            let (key, _value) =
+                item.map_err(|e| SafetyStoreError::ReadFailed(format!("namespace scan: {e}")))?;
+            if !key.starts_with(SAFETY_PREFIX) {
+                break; // left the component namespace: nothing unrelated is scanned.
+            }
+            seen += 1;
+            if seen > MAX_SCAN {
+                // More keys than the component could legitimately own: treat the
+                // excess as unknown safety state (bounded refusal).
+                return Ok(Some(key.to_vec()));
+            }
+            if key.as_ref() != META_KEY && key.as_ref() != RECORD_KEY {
+                return Ok(Some(key.to_vec()));
+            }
+        }
+        Ok(None)
     }
 
     fn read_checksummed(
@@ -169,7 +213,12 @@ impl SafetyBackend {
     /// serialization domain. Returns the outcome distinguishing a pre-write
     /// refusal, an ambiguous write error, an uncertain-but-durable outcome, and
     /// an acknowledged durable success.
-    pub fn publish_atomic(
+    ///
+    /// **Crate-internal**: raw mutation is reachable only through the enforced
+    /// O1/O4/O5 owner paths. There is no public raw-publication entry point, and
+    /// the guard type is not publicly constructible, so a caller cannot submit a
+    /// raw batch or present a guard from another mutex/backend to forge ownership.
+    pub(crate) fn publish_atomic(
         &self,
         _guard: &MutexGuard<'_, SerializationDomain>,
         meta: &[u8],
@@ -186,7 +235,7 @@ impl SafetyBackend {
         write_opts.set_sync(true);
 
         if self.injected() == InjectFault::WriteErrors {
-            self.recovery_required.store(true, Ordering::SeqCst);
+            self.mark_not_effective();
             return PublishOutcome::WriteError("injected write error (ambiguous)".into());
         }
 
@@ -195,33 +244,40 @@ impl SafetyBackend {
                 if self.injected() == InjectFault::UncertainAfterWrite {
                     // Durable write happened, but the success acknowledgement is
                     // lost: the caller must treat the outcome as uncertain and
-                    // must NOT assume the predecessor remained stored. Latch the
-                    // shared recovery requirement so every handle blocks further
-                    // dependent publication until recovery clears it.
-                    self.recovery_required.store(true, Ordering::SeqCst);
+                    // must NOT assume the predecessor remained stored. Clear the
+                    // shared effectiveness latch so every handle blocks further
+                    // dependent publication until recovery (O5) re-establishes it.
+                    self.mark_not_effective();
                     PublishOutcome::UncertainDurable
                 } else {
                     PublishOutcome::DurableAcknowledged
                 }
             }
             Err(e) => {
-                self.recovery_required.store(true, Ordering::SeqCst);
+                self.mark_not_effective();
                 PublishOutcome::WriteError(e.to_string())
             }
         }
     }
 
-    /// Whether a prior ambiguous/uncertain publication left this shared backend
-    /// in a recovery-required state. Observed by every attached handle.
+    /// Whether a fresh durability acknowledgement is required before dependent
+    /// publication: either the shared state has never been acknowledged in this
+    /// process (a freshly opened established store) or a prior ambiguous/uncertain
+    /// publication cleared it. Observed by every attached handle.
     pub fn recovery_required(&self) -> bool {
-        self.recovery_required.load(Ordering::SeqCst)
+        !self.effective.load(Ordering::SeqCst)
     }
 
-    /// Clear the shared recovery requirement. Intended to be called only by the
-    /// successful recovery operation (O5) after a fresh durable acknowledgement;
-    /// a normal O4 success never clears it.
-    pub fn clear_recovery_requirement(&self) {
-        self.recovery_required.store(false, Ordering::SeqCst);
+    /// Mark the shared state **effective**. Crate-internal: reachable only from
+    /// the enforced acknowledged O1 initialization and successful O5 recovery
+    /// paths (and an acknowledged O4 success), never from a raw public call.
+    pub(crate) fn mark_effective(&self) {
+        self.effective.store(true, Ordering::SeqCst);
+    }
+
+    /// Clear the shared effectiveness latch (ambiguous/uncertain outcome).
+    fn mark_not_effective(&self) {
+        self.effective.store(false, Ordering::SeqCst);
     }
 
     fn injected(&self) -> InjectFault {
@@ -252,6 +308,19 @@ impl SafetyBackend {
         write_opts.set_sync(true);
         self.db
             .put_opt(RECORD_KEY, Self::wrap(record_bytes), &write_opts)
+            .map_err(|e| SafetyStoreError::WriteFailed(e.to_string()))
+    }
+
+    /// Source/test-only: write an arbitrary raw key/value into the backing
+    /// database, used to plant an unknown/legacy/partial key in the `safetyrec:`
+    /// namespace for the bounded-classification regressions (§ 13.3A). Never
+    /// called by production; gated behind `test-utils`.
+    #[cfg(any(test, feature = "test-utils"))]
+    pub fn debug_put_raw(&self, key: &[u8], value: &[u8]) -> Result<(), SafetyStoreError> {
+        let mut write_opts = rocksdb::WriteOptions::default();
+        write_opts.set_sync(true);
+        self.db
+            .put_opt(key, value, &write_opts)
             .map_err(|e| SafetyStoreError::WriteFailed(e.to_string()))
     }
 }
