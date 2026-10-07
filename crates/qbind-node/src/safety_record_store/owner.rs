@@ -423,12 +423,19 @@ impl SafetyRecordOwner {
         };
         // Reserve the bootstrap publication buffer against the shared aggregate
         // accountant BEFORE encoding it (§ 13.7: reservations precede the
-        // protected allocation). The reservation releases on every exit (success,
-        // refusal, error, uncertainty) via its drop at end of scope.
-        let _pub_res = self
-            .backend
-            .accounting()
-            .reserve(max_safety_record_bytes(self.pinned())?)?;
+        // protected allocation), plus the component-owned CRC-framing envelopes
+        // `publish_atomic` wraps over the record + metadata payloads (§ 13.5,
+        // D7-D14 item-5 correction — previously uncharged). The reservation releases
+        // on every exit (success, refusal, error, uncertainty) via its drop at end
+        // of scope.
+        let o1_pub_charge = max_safety_record_bytes(self.pinned())?
+            .checked_add(super::accounting::publication_staging_charge(
+                self.pinned(),
+            )?)
+            .ok_or_else(|| {
+                SafetyStoreError::ArithmeticOverflow("O1 bootstrap publication charge".into())
+            })?;
+        let _pub_res = self.backend.accounting().reserve(o1_pub_charge)?;
         let encoded = encode_record(&decoded, self.pinned())?;
         debug_assert!(
             encoded.capacity() as u128 <= _pub_res.charge(),
@@ -605,6 +612,16 @@ impl SafetyRecordOwner {
             Ok(v) => v,
             Err(e) => return PublishResult::RefusedPreWrite(e),
         };
+        // NOTE: unlike O1/O5, the O4 reservation already conservatively covers the
+        // publish-time CRC-framing envelopes: it reserves THREE record-sized buffers
+        // (predecessor read-back, candidate publication, validation re-encode
+        // scratch) as a whole-operation peak, but the predecessor decoded + its
+        // read-back are dropped and the validation operands consumed before
+        // `publish_atomic` runs, so at the write boundary the live set
+        // (candidate publication + its `wrap` envelope + metadata + its `wrap`
+        // envelope) fits within the already-reserved three-record peak. Adding a
+        // separate staging term here would double-count and make a valid O4 that
+        // coexists with a live O3 holder unadmittable within the unchanged aggregate.
         let o4_charge = transient
             .checked_mul(2)
             .and_then(|g| rec.checked_mul(3).and_then(|r| g.checked_add(r)))
@@ -769,7 +786,15 @@ impl SafetyRecordOwner {
         // carried in `retained`, so O5 does not add an uncharged record-sized buffer
         // for it; this read-back + metadata + transient-decode reservation plus the
         // pre-charged retained holder bound the O5 complete-content comparison.
-        // Releases on every exit via drop at end of scope.
+        //
+        // PUBLICATION-ENVELOPE COEXISTENCE (§ 13.5, D7-D14 item-5 correction): the
+        // retained `stored` read-back and `_stored_decoded` transient remain live
+        // when `publish_atomic` wraps the republished bytes, so the two CRC-wrapped
+        // staging envelopes (`SafetyBackend::wrap` over the record and over the
+        // metadata) coexist with them. Those component-owned framing buffers were
+        // previously uncharged; `publication_staging_charge` now reserves them here
+        // too, BEFORE `wrap` allocates them. Releases on every exit via drop at end
+        // of scope.
         let o5_readback = match max_safety_record_bytes(self.pinned()) {
             Ok(v) => v,
             Err(e) => return PublishResult::RefusedPreWrite(e),
@@ -779,9 +804,14 @@ impl SafetyRecordOwner {
             Ok(v) => v,
             Err(e) => return PublishResult::RefusedPreWrite(e),
         };
+        let o5_staging = match super::accounting::publication_staging_charge(self.pinned()) {
+            Ok(v) => v,
+            Err(e) => return PublishResult::RefusedPreWrite(e),
+        };
         let o5_charge = o5_readback
             .checked_add(super::backend::META_ENCODED_LEN)
-            .and_then(|b| b.checked_add(o5_transient));
+            .and_then(|b| b.checked_add(o5_transient))
+            .and_then(|b| b.checked_add(o5_staging));
         let o5_charge = match o5_charge {
             Some(v) => v,
             None => {

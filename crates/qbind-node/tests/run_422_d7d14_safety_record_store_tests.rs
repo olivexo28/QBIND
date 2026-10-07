@@ -27,6 +27,60 @@ use qbind_node::safety_record_store::record::{
 use qbind_node::safety_record_store::validate::{validate_decoded, FixtureCommittedHistory};
 
 // ---------------------------------------------------------------------------
+// Direct allocation observation harness (test-only; NOT a production path)
+// ---------------------------------------------------------------------------
+//
+// A `#[global_allocator]` that delegates every operation to the system allocator
+// and, *only while explicitly armed on the current thread*, counts the number of
+// `alloc`/`realloc` calls. The arm flag and counter are `const`-initialized
+// thread-locals, so reading them inside the allocator never itself allocates and
+// never recurses. Default is disarmed, so this changes no behaviour for any other
+// test; it merely lets a measured region assert that a success path allocated
+// *nothing component-owned* — the direct observation §4/§9 require, which the
+// `evidence_payload_encode_count` encode counter alone cannot establish (zero
+// encodes is not zero allocations). The harness never clones the observed data.
+struct CountingAllocator;
+
+thread_local! {
+    static ALLOC_ARMED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    static ALLOC_COUNT: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+unsafe impl std::alloc::GlobalAlloc for CountingAllocator {
+    unsafe fn alloc(&self, layout: std::alloc::Layout) -> *mut u8 {
+        if ALLOC_ARMED.with(|a| a.get()) {
+            ALLOC_COUNT.with(|c| c.set(c.get() + 1));
+        }
+        std::alloc::System.alloc(layout)
+    }
+    unsafe fn dealloc(&self, ptr: *mut u8, layout: std::alloc::Layout) {
+        std::alloc::System.dealloc(ptr, layout)
+    }
+    unsafe fn realloc(&self, ptr: *mut u8, layout: std::alloc::Layout, new_size: usize) -> *mut u8 {
+        if ALLOC_ARMED.with(|a| a.get()) {
+            ALLOC_COUNT.with(|c| c.set(c.get() + 1));
+        }
+        std::alloc::System.realloc(ptr, layout, new_size)
+    }
+}
+
+#[global_allocator]
+static COUNTING_ALLOCATOR: CountingAllocator = CountingAllocator;
+
+/// Run `f` on the current thread with allocation counting armed, returning
+/// `(result, number_of_alloc/realloc_calls_during_f)`. Arming/disarming and the
+/// returned count observe only the current thread; nothing inside the measured
+/// closure may spawn work on another thread if the count is to be meaningful.
+fn measure_allocs<T>(f: impl FnOnce() -> T) -> (T, usize) {
+    ALLOC_COUNT.with(|c| c.set(0));
+    ALLOC_ARMED.with(|a| a.set(true));
+    let out = f();
+    ALLOC_ARMED.with(|a| a.set(false));
+    let count = ALLOC_COUNT.with(|c| c.get());
+    (out, count)
+}
+
+// ---------------------------------------------------------------------------
 // Fixtures (clearly labelled; NOT production history recovery)
 // ---------------------------------------------------------------------------
 
@@ -2980,6 +3034,80 @@ fn corr_nested_tc_and_boundary_admission_before_allocation() {
 }
 
 // ---------------------------------------------------------------------------
+// §4 — the structural/capacity PREFLIGHT (`admit_supporting_evidence`, the exact
+// call O4 performs before its reservation and before any predecessor read) is
+// GENUINELY allocation-free on the success path. Observed directly with the
+// counting allocator, not inferred from the zero-encode counter: the earlier
+// implementation built `format!("…[{i}]")` per per-vector check, so the success
+// path allocated one `String` per backing even though the diagnostic is only
+// rendered on refusal. The typed `CapnormSite` diagnostic removes that; here we
+// prove zero `alloc`/`realloc` calls for both a maximum QC and a maximum TC.
+// ---------------------------------------------------------------------------
+#[test]
+fn corr_preflight_success_is_allocation_free_qc_and_tc() {
+    use qbind_node::safety_record_store::codec::admit_supporting_evidence;
+    let ctx = ctx_n(4); // N = 4, s_sig = 8 — the maximum fixture dimensions.
+
+    // QC-derived candidate: structurally valid, capacity-normalized evidence.
+    let qc_locked = make_locked_qc(&ctx, [9u8; 32], 5, valid_wire_qc(&ctx, [9u8; 32], 5), None)
+        .expect("valid QC candidate");
+    // Warm up any one-time lazy state (thread-local key storage, etc.) OUTSIDE the
+    // measured region so the measurement observes only the admission path itself.
+    assert!(admit_supporting_evidence(&qc_locked.evidence, &ctx).is_ok());
+    let (res, allocs) = measure_allocs(|| admit_supporting_evidence(&qc_locked.evidence, &ctx));
+    assert!(res.is_ok(), "the valid QC preflight must admit");
+    assert_eq!(
+        allocs, 0,
+        "QC structural/capacity preflight must perform no component-owned allocation on success"
+    );
+
+    // TC-derived candidate: the fully populated maximum-TC evidence (nested
+    // high_qc signers, per-entry signatures, descriptor arrays).
+    let tc_locked = valid_tc_record(&ctx, 5, 6);
+    assert!(admit_supporting_evidence(&tc_locked.evidence, &ctx).is_ok());
+    let (res, allocs) = measure_allocs(|| admit_supporting_evidence(&tc_locked.evidence, &ctx));
+    assert!(res.is_ok(), "the valid TC preflight must admit");
+    assert_eq!(
+        allocs, 0,
+        "TC structural/capacity preflight must perform no component-owned allocation on success"
+    );
+}
+
+/// §4 — the smallest-over-bound per-vector capacity violation is still refused by
+/// the preflight (behaviour preserved across the typed-diagnostic correction),
+/// and the diagnostic `String` the refusal carries is produced ONLY on that
+/// failure path — the success path above proved zero allocations. The refusal
+/// still names the offending backing (`QC signature buffer [..]`).
+#[test]
+fn corr_preflight_smallest_over_bound_capacity_still_refused() {
+    use qbind_node::safety_record_store::codec::admit_supporting_evidence;
+    let ctx = ctx_n(4);
+    // A structurally valid QC whose first signature backing has exactly one byte
+    // of spare capacity over the per-class maximum (S_sig = 8): len() fits, but
+    // capacity() = 9 is over the CAPNORM bound (slack 0).
+    let mut locked = make_locked_qc(&ctx, [9u8; 32], 5, valid_wire_qc(&ctx, [9u8; 32], 5), None)
+        .expect("valid QC candidate");
+    if let SupportingEvidence::QcDerived(qc) = &mut locked.evidence {
+        let mut over = Vec::with_capacity(S_SIG + 1);
+        over.extend_from_slice(&[0xABu8; S_SIG]);
+        assert_eq!(over.len(), S_SIG);
+        assert_eq!(over.capacity(), S_SIG + 1);
+        qc.signatures[0] = over;
+    } else {
+        panic!("QC candidate must be QcDerived");
+    }
+    match admit_supporting_evidence(&locked.evidence, &ctx) {
+        Err(SafetyStoreError::CapacityRefusal(msg)) => {
+            assert!(
+                msg.contains("QC signature buffer"),
+                "refusal must name the offending backing site, got: {msg}"
+            );
+        }
+        other => panic!("expected smallest-over-bound CapacityRefusal, got {other:?}"),
+    }
+}
+
+// ---------------------------------------------------------------------------
 // §3.1 — the PUBLIC `compute_evidence_lock_binding` helper is a context-checking
 // entry point: it refuses over-bound evidence BEFORE allocating/encoding the
 // `cert` scratch, so a direct caller cannot bypass admission. The evidence-encode
@@ -5321,4 +5449,141 @@ fn d7d14_o4_candidate_preflight_precedes_locked_predecessor_read() {
         evidence_payload_encode_count() > 0,
         "an admitted O4 does read/validate/encode (predecessor + candidate)"
     );
+}
+
+/// §5 — O5 publication-envelope coexistence regression. `publish_atomic` wraps
+/// the republished record + metadata in two CRC-framing envelopes
+/// (`SafetyBackend::wrap`) while the O5 read-back buffer, the transient decoded
+/// object, the encoded metadata, and the retained O3 holder are all still live.
+/// The O5 reservation now charges that `publication_staging_charge` up front, so
+/// the observed coexistence peak reflects it and still fits the UNCHANGED
+/// aggregate. Were the staging term absent, the O5 peak would be
+/// `holder + readback + META + transient` (= 4016 for the maximum TC) — strictly
+/// below the lower bound asserted here — so this regression fails closed if the
+/// envelope charge is dropped.
+#[test]
+fn d7d14_o5_publication_envelope_coexistence_reserved_within_aggregate() {
+    use qbind_node::safety_record_store::accounting::{
+        max_transient_decoded_working_set, publication_staging_charge,
+    };
+    use qbind_node::safety_record_store::profile::max_safety_record_bytes;
+
+    let dir = tempfile::tempdir().unwrap();
+    let ctx = ctx_n(4);
+    let owner = init_owner(dir.path(), &ctx);
+
+    // Establish the maximum-TC publication under the first backend instance, then
+    // drop it so the O4 operation's own working-set peak does NOT pollute the
+    // measurement.
+    let ltc = valid_tc_record_max(&ctx, 5, 6);
+    assert_eq!(
+        owner.publish_locked(ltc, 0, None::<&FixtureCommittedHistory>),
+        PublishResult::DurableAcknowledged { new_revision: 1 }
+    );
+    drop(owner);
+
+    // Reopen a FRESH backend over the surviving bytes: its accountant peak starts
+    // at zero, so the peak observed below reflects ONLY the O3 holder + O5
+    // working-set coexistence (including the publication-staging envelopes), not
+    // the earlier O4 peak. A reopened established store is not-effective, which is
+    // exactly the state O5 recovers.
+    let owner = SafetyRecordOwner::attach(open_enabled(dir.path()), ctx.clone()).unwrap();
+    let backend = owner.backend_for_test();
+    let agg_cap = backend.accounting_aggregate_cap().unwrap();
+    assert!(owner.recovery_required(), "reopened store starts not-effective");
+
+    // Retain a live O3 proof/holder bound to THIS reopened incarnation (required
+    // for the O5 recovery capability), then measure O5 coexistence.
+    let proof = owner
+        .read_validate(None::<&FixtureCommittedHistory>)
+        .unwrap();
+    let holder = backend.accounting_current();
+    assert!(holder > 0, "a live O3 holder must coexist with O5");
+
+    let staging = publication_staging_charge(&ctx).unwrap();
+    assert!(staging > 0, "the CRC-framing envelopes are a real charge");
+    let readback = max_safety_record_bytes(&ctx).unwrap();
+    let transient = max_transient_decoded_working_set(&ctx).unwrap();
+    // Strict lower bound on the O5 coexistence peak WITH the staging term (META
+    // omitted to keep it a conservative lower bound). WITHOUT the staging charge
+    // the O5 peak would be `holder + readback + META + transient` — strictly below
+    // this bound — so the assertion fails closed if the envelope charge is dropped.
+    let o5_peak_lower_bound = holder + readback + transient + staging;
+
+    assert_eq!(
+        owner.reacknowledge(&proof),
+        PublishResult::DurableAcknowledged { new_revision: 1 }
+    );
+    let peak = backend.accounting_aggregate_peak();
+    assert!(
+        peak >= o5_peak_lower_bound,
+        "O5 peak {peak} must include the publication-staging envelopes \
+         (lower bound {o5_peak_lower_bound} = holder {holder} + readback {readback} \
+         + transient {transient} + staging {staging})"
+    );
+    assert!(
+        peak <= agg_cap,
+        "O5 + live holder + staging peak {peak} must still fit the unchanged aggregate {agg_cap}"
+    );
+    drop(proof);
+    assert_eq!(
+        backend.accounting_current(),
+        0,
+        "all operational charges (incl. O5 staging) released"
+    );
+}
+
+/// §6 — bounded encoding backing. `encode_record` pre-sizes its output to the
+/// variant's admitted serialized cap and writes into it, so the backing is a
+/// SINGLE admitted allocation that never grows by implicit `Vec` doubling (which
+/// a `Vec::new()` + `extend_from_slice` path would do, producing several
+/// reallocations). Observed directly with the counting allocator: exactly one
+/// alloc for the maximum QC and maximum TC encodings, and the returned backing
+/// capacity equals the admitted cap — not a post-hoc `len() <= cap` check.
+#[test]
+fn d7d14_encode_record_backing_is_bounded_single_allocation() {
+    let ctx = ctx_n(4);
+
+    // Maximum QC record.
+    let qc_locked =
+        make_locked_qc(&ctx, [9u8; 32], 5, valid_wire_qc(&ctx, [9u8; 32], 5), None).unwrap();
+    let qc_dec = DecodedRecord {
+        persistence_format_version: 1,
+        network_genesis_id: ctx.network_genesis_id,
+        publication_revision: 1,
+        record: SafetyRecord::Locked(qc_locked),
+    };
+    let _ = encode_record(&qc_dec, &ctx).unwrap(); // warm up lazy state
+    let (enc, allocs) = measure_allocs(|| encode_record(&qc_dec, &ctx).unwrap());
+    assert_eq!(
+        allocs, 1,
+        "max-QC encode must perform exactly one (pre-sized) allocation, no implicit growth"
+    );
+    assert_eq!(
+        enc.capacity() as u128,
+        max_qc_bytes(&ctx).unwrap(),
+        "max-QC encode backing capacity must equal the admitted serialized cap"
+    );
+    assert!(enc.len() as u128 <= max_qc_bytes(&ctx).unwrap());
+
+    // Maximum TC record (fully populated nested evidence).
+    let tc_locked = valid_tc_record_max(&ctx, 5, 6);
+    let tc_dec = DecodedRecord {
+        persistence_format_version: 1,
+        network_genesis_id: ctx.network_genesis_id,
+        publication_revision: 1,
+        record: SafetyRecord::Locked(tc_locked),
+    };
+    let _ = encode_record(&tc_dec, &ctx).unwrap();
+    let (enc, allocs) = measure_allocs(|| encode_record(&tc_dec, &ctx).unwrap());
+    assert_eq!(
+        allocs, 1,
+        "max-TC encode must perform exactly one (pre-sized) allocation, no implicit growth"
+    );
+    assert_eq!(
+        enc.capacity() as u128,
+        max_tc_bytes(&ctx).unwrap(),
+        "max-TC encode backing capacity must equal the admitted serialized cap"
+    );
+    assert!(enc.len() as u128 <= max_tc_bytes(&ctx).unwrap());
 }

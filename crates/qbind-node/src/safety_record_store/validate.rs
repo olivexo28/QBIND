@@ -223,6 +223,23 @@ fn validate_locked<H: CommittedHistory + ?Sized>(
     Ok(())
 }
 
+/// `UNIQ_SET` (§ 13.7 `VALIDATION_SCRATCH`): a **bounded, no-hashing**
+/// uniqueness/membership set, held as a **sorted `Vec<u64>`** whose backing is
+/// pre-reserved to its `≤ N` term and never grows. Returns `true` when `id` is
+/// newly inserted, `false` when it is already present (the present case does
+/// **not** allocate). Because callers only insert authorized members and refuse
+/// duplicates before growth, the live length never exceeds the reserved `N`, so
+/// the backing stays a single admitted allocation (no rehash / no reallocation).
+fn uniq_set_insert(set: &mut Vec<u64>, id: u64) -> bool {
+    match set.binary_search(&id) {
+        Ok(_) => false,
+        Err(pos) => {
+            set.insert(pos, id);
+            true
+        }
+    }
+}
+
 /// Structural QC signer-set and voting-power quorum checks (no cryptographic
 /// verification). Bitmap bits map to dense validator indices; the signature
 /// count must correspond to the set-bit count; accumulated voting power must
@@ -231,10 +248,19 @@ fn validate_qc_signers(
     ctx: &PinnedSafetyContext,
     qc: &super::record::WireQc,
 ) -> Result<(), SafetyStoreError> {
-    let mut signer_indices = Vec::new();
+    // `UNIQ_SET` backing for the signer indices: pre-reserved to `N` and bounded
+    // so it never grows. Set bits in excess of the authorized member count are a
+    // bounded-scratch refusal (a valid QC has `≤ N` set bits, all members).
+    let n = ctx.n();
+    let mut signer_indices: Vec<u64> = Vec::with_capacity(n);
     for (byte_idx, byte) in qc.signer_bitmap.iter().enumerate() {
         for bit in 0..8u32 {
             if byte & (1 << bit) != 0 {
+                if signer_indices.len() >= n {
+                    return Err(SafetyStoreError::CapacityRefusal(
+                        "qc signer bits exceed authorized member count (UNIQ_SET bound)".into(),
+                    ));
+                }
                 let idx = (byte_idx as u64) * 8 + bit as u64;
                 signer_indices.push(idx);
             }
@@ -296,10 +322,11 @@ fn validate_tc(
             )));
         }
     }
-    // TA3: signer uniqueness over tc.signers.
-    let mut seen = std::collections::HashSet::new();
+    // TA3: signer uniqueness over tc.signers, held in a bounded no-hashing
+    // `UNIQ_SET` (sorted `Vec`, capacity ≤ N).
+    let mut seen: Vec<u64> = Vec::with_capacity(ctx.n());
     for s in &tc.signers {
-        if !seen.insert(s.as_u64()) {
+        if !uniq_set_insert(&mut seen, s.as_u64()) {
             return Err(SafetyStoreError::SemanticRefusal(format!(
                 "tc duplicate signer {} (TA3)",
                 s.as_u64()
@@ -307,8 +334,9 @@ fn validate_tc(
         }
     }
     // TA4/TA5: each signed_timeout validator is an authorized member, unique,
-    // and (below) the evidence set corresponds to tc.signers.
-    let mut st_ids = std::collections::HashSet::new();
+    // and (below) the evidence set corresponds to tc.signers. The evidence set
+    // is the same bounded no-hashing `UNIQ_SET` representation.
+    let mut st_ids: Vec<u64> = Vec::with_capacity(ctx.n());
     for t in &tc.signed_timeouts {
         if !ctx.is_member(t.validator_id) {
             return Err(SafetyStoreError::SemanticRefusal(format!(
@@ -316,7 +344,7 @@ fn validate_tc(
                 t.validator_id.as_u64()
             )));
         }
-        if !st_ids.insert(t.validator_id.as_u64()) {
+        if !uniq_set_insert(&mut st_ids, t.validator_id.as_u64()) {
             return Err(SafetyStoreError::SemanticRefusal(format!(
                 "duplicate signed_timeout validator {} (TA3)",
                 t.validator_id.as_u64()
@@ -324,7 +352,8 @@ fn validate_tc(
         }
     }
     // TA5: signer-set correspondence — the evidence set is a permutation of
-    // tc.signers (no extras, no missing, equal cardinality).
+    // tc.signers (no extras, no missing, equal cardinality). Both sides are
+    // sorted unique `UNIQ_SET` vectors, so set equality is a direct comparison.
     if st_ids != seen {
         return Err(SafetyStoreError::SemanticRefusal(
             "tc.signers set does not correspond to signed_timeouts set (TA5)".into(),

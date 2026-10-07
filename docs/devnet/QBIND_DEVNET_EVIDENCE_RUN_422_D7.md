@@ -16047,3 +16047,60 @@ SECURITY_POSTURE=RS1-OPEN / PUBLIC-DEVNET-NO-GO
 ```
 
 C4/C5 remain OPEN.
+
+## RUN 422 D7-D14 — Genuinely allocation-free preflight, O5 publication-envelope staging, bounded encode backings, no-hashing UNIQ_SET scratch (code + test + docs, this continuation pass)
+
+Baseline for this pass: branch `copilot/copilotcopilotcopilotcopilotcopilotcopilotd99d2827` (the actual supplied branch; the reported name `…d99d28277ecfff4` differs — the actual branch was used, not switched to match the reported name), starting HEAD `784bc093`, worktree clean. Reviewed object `97c420fb46892b5dbaf700847b531469736de97e` is not an ancestor of HEAD (divergent shallow histories, no merge-base) but its tree is **byte-identical** to the starting HEAD tree (both tree `430073bef867f56702a8502d8023f86fee021838`; scoped diff over the component source/tests/Cargo config/authorized docs = 0 lines, verified by exact object SHAs, not `git diff -w`). The reviewed revision therefore corresponds exactly to the worktree; the inherited `[profile.dev]`/`[profile.test]` disk-mitigation profiles were preserved.
+
+### 1. Findings → runtime corrections → executed evidence
+
+* **Finding (item 4): the preflight still allocated.** `accounting.rs::admit_evidence_capnorm` passed `&format!("QC signature buffer [{i}]")` / `format!("tc.signed_timeouts[{i}].signature")` / `format!("….high_qc.signers")` as the diagnostic `what` on **every** success iteration, so the O4 candidate preflight — documented "allocation-free" and now ordered before the O4 reservation — heap-allocated a `String` per checked backing. **Correction:** the label is a `Copy` typed `CapnormSite` enum with a `Display` impl; `check_capnorm` builds the `String` **only** on the refusal branch. **Evidence:** a test-gated counting `#[global_allocator]` (armed per-thread, const-init thread-locals so reading the counters inside `alloc` does not itself allocate) observes `corr_preflight_success_is_allocation_free_qc_and_tc` = **0** allocations / 0 reallocations across the maximum QC and maximum TC preflight; `corr_preflight_smallest_over_bound_capacity_still_refused` confirms the smallest-over-bound backing is still refused (pre-read, stored bytes / metadata-revision / recovery latch untouched).
+* **Finding (item 5): O5 publication envelopes were uncharged.** `backend::publish_atomic` wraps the metadata and the serialized record in `4 + payload`-byte CRC envelopes **while** O5's record-sized read-back (`stored`) and the fresh transient decode (`_stored_decoded`) are still owned; O5 reserved only `rec + META + transient`. **Correction:** `accounting::publication_staging_charge(ctx) = (4 + max_safety_record_bytes) + (4 + META_ENCODED_LEN)` (`CRC_PREFIX = 4`), reserved by O5 `reacknowledge` and the O1 bootstrap publish **before** the envelopes allocate. O4 is deliberately **not** charged staging (its conservative `2·transient + 3·rec + META` peak already absorbs the write-boundary envelopes because the predecessor decode + read-back drop before `publish_atomic`; charging it made a valid O4-under-live-O3-holder unadmittable — 7 observed failures — which is forbidden). **Evidence:** reopen-isolated regression `d7d14_o5_publication_envelope_coexistence_reserved_within_aggregate` **fails** without staging (peak `4256` < derived lower bound `4835`) and **passes** with it (peak `5117`), both `≤ 7772`.
+* **Finding (item 6): encode backings could grow past the admitted cap.** `encode_record` and the evidence-binding `cert` used `Vec::new()` + `extend_from_slice`; the final `len() <= cap` bounded only length, not `Vec::capacity()` / intermediate growth. **Correction:** both pre-size to the variant's admitted serialized cap (`encoded_record_cap()`; `max_qc_bytes` / `max_tc_bytes`) so the backing is a single admitted allocation with no implicit doubling; the capacity equality is kept as confirmation only. **Evidence:** `d7d14_encode_record_backing_is_bounded_single_allocation` observes exactly **one** allocation and `capacity() == admitted cap` for the maximum QC and maximum TC encode. Serialization bytes, CRC behaviour, binding bytes, and the three encoded-buffer roles are unchanged.
+* **Finding (item 7): validation uniqueness scratch used hashing, diverging from §13.7 `UNIQ_SET`.** `validate_qc_signers` / `validate_tc` used `std::collections::HashSet`; the contract defines `UNIQ_SET` as a bounded **sorted `Vec`, no hashing, capacity ≤ N**. **Correction:** bounded sorted-`Vec` sets pre-reserved to `N` that never grow (duplicates / non-members refused before insertion; excess signer bits → bounded-scratch `CapacityRefusal`); TA5 correspondence is a direct sorted-vector comparison. TA3/TA4/TA5/TA6/TA7, the TA2 derived-max selection, and TA1 byte-identity are preserved; evidence stays `Unverified`. **Evidence:** the preserved TA3/TA4/TA5/TA7 malformed-relationship and maximum-content regressions and the real max-TC O3/O4/O5 operation test all pass unchanged (103 total).
+
+### 2. Literal validation outcomes (this pass, reviewed/HEAD revision, no PR)
+
+* `cargo build -p qbind-node --lib` → **exit 0** (`Finished dev` in 10.19s).
+* `cargo test -p qbind-node --no-run` → **exit 0** (all default-feature test binaries compiled).
+* `cargo test -p qbind-node --features test-utils --no-run` → **exit 0**.
+* `cargo test -p qbind-node --features test-utils --test run_422_d7d14_safety_record_store_tests` → **ok. 103 passed; 0 failed; 1 ignored** (`child_process_entry` ignored; 99 baseline + 4 this pass: the two preflight allocation observations, the O5 publication-envelope coexistence regression, and the bounded single-allocation encode observation).
+* `cargo test -p qbind-node --features test-utils --test m16_epoch_transition_hardening_tests` → **ok. 14 passed; 0 failed**.
+* `cargo clippy -p qbind-node --lib --features test-utils` and `--tests` → **no findings** in `safety_record_store/{validate,accounting,owner,codec}.rs` or the added test regions; the only lints are pre-existing baseline warnings in other crates and untouched test fixtures (`run_055`, `run_307`).
+* `rustfmt --check` on the edited source files → the **added/edited regions are clean** (the long `check_capnorm` / `publication_staging_charge` call lines were reflowed to rustfmt's form); the remaining whole-file diffs are the **pre-existing** CRLF + no-final-newline baseline drift of these files (the whole crate was never rustfmt-clean), separated as unrelated baseline. The CRLF/no-final-newline convention of the edited docs was preserved.
+* `cargo build --release -p qbind-node` → **exit 0** (`Finished release` in 4m25s; rerun after this pass's final runtime change — prior release builds are historical).
+* Secret scanning over the edited `.rs` files → **no secrets**. Non-wiring audit: `CapnormSite`, `publication_staging_charge`, `encoded_record_cap`, and `uniq_set_insert` are referenced only within the component and its test; `safety_record_store` is still referenced outside only by `lib.rs` `pub mod` (unchanged); default `Disabled` policy, MainNet refusal, and `test-utils` gating unchanged; no production construction added.
+
+### 3. Superseded prior claims (history preserved)
+
+Originals retained above as history; corrected this pass:
+* that the candidate structural/capacity preflight is *allocation-free* — **superseded**; it allocated a diagnostic `String` per success iteration until the `CapnormSite` typed-label correction, now directly observed at 0 allocations.
+* that O5 coverage is fully attributed to `rec + META + transient` — **superseded**; the CRC publication envelopes that coexist with `stored` + `_stored_decoded` are now charged by `publication_staging_charge`, proven by the reopen-isolated O5 boundary regression.
+* that a final `len() <= cap` check bounds the encode backing — **superseded**; it bounded only length, so the backing is now pre-sized to the admitted cap and observed as a single allocation.
+* that the step-7 validation uniqueness scratch is bounded only *in practice* — **superseded**; it is now the §13.7 bounded no-hashing sorted-`Vec` `UNIQ_SET`, capacity ≤ N, refusing before growth.
+* that no-read / zero-allocation could be inferred solely from zero evidence encodes, and that actual-memory coverage could be inferred solely from accountant peaks — **limited**; the new counting-allocator observations establish allocation/no-allocation directly at the call sites, while `accounting_aggregate_peak() <= accounting_aggregate_cap()` is retained only as proof that admitted charges stayed within the accountant, not as independent proof that every allocation was charged.
+
+### 4. Still open (unchanged disposition; not promoted)
+
+The exhaustive object-by-object O1–O5 step-8 inventory across **every** success / structural-refusal / semantic-refusal / excess-capacity / malformed / pre-submit-failure / ambiguous-write / uncertain-durability / drop path (with owned contexts, shared-allocation overhead, holder handles, retained publications, and all multiplicities) remains an **unfinished implementation** item: this pass closed the preflight-allocation, O5-envelope, bounded-encode, and UNIQ_SET-scratch defects with direct evidence, but did not author the full single-table trace. The H22 verified-prerequisite consumer boundary remains a test-authored model (not fabricated closed); no production wiring or unused helper was added. H25 storage evidence stays separate from H25e engine evidence, process termination separate from power loss, and local durability separate from anti-rollback.
+
+### 5. Literal review/security-tool outcomes (this pass, this revision, no PR)
+
+Both gates remain **required and OPEN**; neither is carried forward from a prior pass as a new execution, and neither is claimed as assurance for this pass's runtime changes.
+
+* **Independent Code Review — UNAVAILABLE (gate OPEN).** `parallel_validation` reported `Reviewed 8 file(s). No review comments found`, **but** with the explicit environment error `Code review tool is not available in this environment: … model claude-sonnet-4.6 not found in registry` (the `autofind` binary could not load its model). An unavailable tool's "no comments" is **not** a completed review → `INDEPENDENT_CODE_REVIEW=UNAVAILABLE`.
+* **CodeQL (rust) — SKIPPED (gate OPEN).** Reported `Analysis Result for 'rust'. Found 0 alerts:` with the literal reason `Analysis was skipped because the database size is too large.` A skipped analysis is **not** a zero-alert result → `CODEQL=SKIPPED — database too large`. CodeQL triviality was declared **false** for this pass (runtime allocation-admission arithmetic, retyped preflight diagnostic path, pre-sized encode/binding buffers, and the rewritten validation-scratch representation), so no prior disposition covers these changes.
+
+### 6. Verdicts retained (NOT promoted)
+
+```
+D7D14_STORAGE_COMPONENT=PARTIAL-IMPLEMENTATION
+D7D14_STORAGE_ACCEPTANCE=INCOMPLETE
+DURABLE_ANTI_ROLLBACK=NOT-ESTABLISHED
+GENESIS_AUTHORITY_ACTIVATION=DISABLED
+PRODUCTION_WIRE_CHAIN_ID_BEHAVIOR=UNCHANGED
+CONFIGURED_AUTHORITY_RELEASE_BINARY_EVIDENCE=NOT-YET-CAPTURED
+SECURITY_POSTURE=RS1-OPEN / PUBLIC-DEVNET-NO-GO
+```
+
+C4/C5 remain OPEN.
