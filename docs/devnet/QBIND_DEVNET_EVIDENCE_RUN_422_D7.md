@@ -15956,3 +15956,94 @@ PRODUCTION_WIRE_CHAIN_ID_BEHAVIOR=UNCHANGED
 CONFIGURED_AUTHORITY_RELEASE_BINARY_EVIDENCE=NOT-YET-CAPTURED
 SECURITY_POSTURE=RS1-OPEN / PUBLIC-DEVNET-NO-GO
 ```
+
+## RUN 422 D7-D14 — Correct transient decoded accounting; O2/O4/O5 reserve the transient-decode ceiling; O4 candidate preflight ordering (code + test + docs, reviewed object `3bd28341e5f32cb8f1a0a4615e3963eee7721912`)
+
+### 1. Baseline and reviewed-object correspondence (this pass)
+
+Actual supplied working branch `copilot/copilotcopilotcopilotcopilotcopilotd99d28277ecfff4` (used as supplied; **not** switched to the reported name `copilot/copilotcopilotcopilotcopilotd99d28277ecfff4871c634`). Full starting HEAD `8f1a73fc3f10b4f190911054a72470ab8ac53868`; worktree clean; shallow single-branch clone.
+
+The reviewed object `3bd28341e5f32cb8f1a0a4615e3963eee7721912` was fetched (`git fetch origin 3bd28341…`). It is **not** an ancestor of the starting HEAD; `git diff 3bd28341 8f1a73fc` over the component scope shows the two differ only by a trailing-EOF newline on the D7-D14 test file, so the starting HEAD **corresponds** to the reviewed implementation and the prior corrections are present. The obsolete `0f258734…` baseline was **not** restored. The prior `d654878e…/49b5ef1c…` shared tree `389a6f78…` was **not** assumed to fix this pass's starting HEAD; correspondence was checked independently.
+
+Final HEAD after this pass's runtime/test commit: `4f7eaf8ecd41c28d2decacbe1df733d2b241c25e` (docs commit follows).
+
+### 2. Finding → runtime correction → executed regression
+
+**Finding (the transient decoded object is under-reserved).** O2/O4/O5 held a live **transient** `DecodedRecord` (the object `load_established`/`decode_record` produce and operations keep across decode→validation) but reserved `max_retained_generation_bytes` for it. The retained-generation ceiling uses the retained inline ceiling `GEN_STRUCT_MAX = 384`; a live `DecodedRecord` instead carries the two validated-then-discarded identity-header fields, so its measured inline footprint is `size_of::<DecodedRecord>() = 408`. For the **maximum** N=4 TC the live decoded footprint is `408 (inline) + 704 (evidence backings) = 1112`, which **exceeds** the retained-generation reservation `1104` by 8 bytes. The retained inline ceiling is not the transient decoder's size.
+
+**Maximum-TC reproduction (previously derived but NOT executed).** The reviewed tests measured TC accounting with the quorum-sized `valid_tc_record`, which builds only `ceil(2N/3) = 3` members for N=4 — it does **not** exercise the maximum nested contents. This pass adds a separate maximum fixture `valid_tc_record_max` (N timeout entries, N unique authorized TC signers, N record-level/TC/nested-per-entry high-QC signers with exact correspondence, maximum signature lengths; the quorum fixture is preserved). The counterexample is now **executed**, not arithmetic-only: `d7d14_transient_decoded_max_tc_exceeds_retained_gen_but_fits_transient_ceiling` round-trips the maximum TC through `encode_record`→`decode_record`, measures the borrowed, non-cloning `decoded_working_set_charge`, and asserts — against an independent field/capacity inventory — `backing = 704`, `inline = 408`, `live = 1112`; `retained_gen = 1104`; `live > retained_gen` (the pre-correction gap); `live ≤ max_transient_decoded_working_set = 1112` (the correction); and that the accepted N=4 aggregate is **unchanged at 7772**.
+
+**Runtime correction.** Added a distinct transient-decode ceiling rather than widening any accepted limit:
+* `profile::max_decoded_evidence_backing_bytes` — cross-variant maximum heap backing of a decoded `SupportingEvidence` at the pinned per-class maxima (the same maxima `admit_evidence_capnorm` enforces), i.e. the backing portion of the generation caps with the `GEN_STRUCT_MAX` inline wrapper and `ARC_CTRL` removed.
+* `profile::max_transient_decoded_bytes` and `accounting::max_transient_decoded_working_set` — `size_of::<DecodedRecord>()` inline + that maximum backing. This is a proven upper bound on `decoded_working_set_charge` for every admitted decoded object and is strictly larger than (and **not** substituted by) `max_retained_generation_bytes`.
+* O2 (`open`) reserves `rec + META + transient` (was `rec + META + gen`).
+* O4 (`publish_locked`) reserves `2·transient + 3·rec + META` (was `2·gen + 3·rec`); the two transient terms cover the predecessor decoded + its validation copy (phase A) and the candidate decoded (phase B), which do not coexist (see §2 O4-ordering below).
+* O5 (`reacknowledge`) reserves `rec + META + transient` (was `rec` only) — `load_established` builds a metadata buffer and a fresh transient decoded object in addition to the record-sized read-back, which O5 previously did not reserve. The retained original operand remains charged by the holder reservation carried in the `ValidatedRecord`, so no fourth uncharged full-record buffer is introduced.
+
+All corrected per-operation reservations remain within the single unchanged aggregate authority (7772): O2 = 811+42+1112 = 1965; O4 = 2·1112+3·811+42 = 4699; O5 = 1965.
+
+**O4 admission-order and clone correction (§6).** At the reviewed revision `publish_locked` reserved, loaded established state, validated the predecessor via `current.clone()`, and only then admitted candidate capacities. This pass:
+* moves the **allocation-free** candidate structural/capacity preflight (`admit_supporting_evidence(&candidate.evidence, …)`) to immediately after the recovery-required refusal and **before** the O4 reservation, `load_established`, the predecessor `validate_decoded`, and every candidate clone/binding-`cert`/`encode_record` buffer — a candidate that must be refused for an over-bound count/length/width now pays no avoidable predecessor read or encode;
+* captures the predecessor `lock_view` scalar first, then validates the predecessor **by value** (removing `current.clone()`); the predecessor decoded object is dropped before the candidate decoded object is built, so the two transient decoded objects never coexist;
+* consumes (no longer clones) the candidate `decoded` + `encoded` operands in the final `validate_decoded`, and reuses `validated.encoded()` for `publish_atomic` instead of a second publication copy.
+The preflight does **not** substitute for predecessor validation, which still runs for an admissible candidate. Executed ordering regression `d7d14_o4_candidate_preflight_precedes_locked_predecessor_read`: with an established **locked** predecessor (whose validation would re-encode its evidence payload), an over-bound candidate is `RefusedPreWrite(CapacityRefusal)` with `evidence_payload_encode_count() == 0` (no predecessor read/validate/encode occurred first) and the locked predecessor left intact; a positive control then publishes an admissible successor with a non-zero encode count (predecessor + candidate ARE validated).
+
+**Real-operation coexistence (§8, partial).** `d7d14_max_tc_o4_o3_o5_real_operations_within_aggregate` drives the maximum TC through real `publish_locked` (O4), `read_validate` (O3, retained holder held live), and `reacknowledge` (O5) and asserts `accounting_aggregate_peak() ≤ accounting_aggregate_cap()` throughout, including the O5 working set coexisting with the live retained O3 proof, and full release (`accounting_current() == 0`) after drop.
+
+### 3. Exact changed paths
+
+* `crates/qbind-node/src/safety_record_store/profile.rs` (added `max_decoded_evidence_backing_bytes`, `max_transient_decoded_bytes`)
+* `crates/qbind-node/src/safety_record_store/accounting.rs` (added `max_transient_decoded_working_set`)
+* `crates/qbind-node/src/safety_record_store/owner.rs` (O2/O4/O5 reservations; O4 preflight ordering and clone reduction)
+* `crates/qbind-node/tests/run_422_d7d14_safety_record_store_tests.rs` (`valid_tc_record_max` fixture + 3 regressions)
+* this evidence file; `docs/protocol/QBIND_CONSENSUS_RECOVERY_SIGNING_HISTORY_CORRESPONDENCE_CONTRACT.md` (§13.7A transient term); `docs/whitepaper/contradiction.md` (posture line)
+
+### 4. Target layouts (remeasured) and unchanged accepted limits
+
+Remeasured via `real_representation_layout_decomposition` (`--nocapture`): `RetainedRecord = 368`, transient `DecodedRecord = 408`, `ValidatedRecord = 496`, holder handle charge `136`, `GEN_STRUCT_MAX = 384`. Retained representation, transient representation, backing capacity, reservation charge, and aggregate ceiling are kept **distinct**. Unchanged and neither increased nor weakened: `GEN_STRUCT_MAX = 384`, `CAPNORM_SLACK = 0`, the three encoded-buffer roles, holder/operation multiplicities, `max_component_aggregate_bytes = max_aggregate_retained_bytes`, and the accepted N=4 aggregate `7772`. Maximum TC evidence backings `704`; transient decoded inline `408`; total decoded footprint `1112`; retained-generation ceiling `1104`.
+
+### 5. Validation (this pass, rerun after the final runtime change)
+
+* `cargo build -p qbind-node --lib` → **exit 0**.
+* `cargo test -p qbind-node --no-run` (default features) → **exit 0** (links all default-feature test binaries).
+* `cargo test -p qbind-node --features test-utils --no-run` → **exit 0**.
+* `cargo test -p qbind-node --features test-utils --test run_422_d7d14_safety_record_store_tests` → **ok. 99 passed; 0 failed; 1 ignored** (`child_process_entry` ignored; was 96, +3 this pass: the transient-max counterexample, the max-TC real-operation coexistence, and the O4 preflight-ordering regression).
+* `cargo test -p qbind-node --features test-utils --test m16_epoch_transition_hardening_tests` → **ok. 14 passed; 0 failed**.
+* `cargo clippy -p qbind-node --lib --features test-utils` and `--tests` → **no new warnings** in the changed `profile.rs`/`accounting.rs`/`owner.rs` or in the added test regions; the only test-file lints are the pre-existing `manual_div_ceil` fixtures at lines 58/59/1085/3101/4785/4911 (untouched baseline).
+* `rustfmt --check` on the three edited source files → the **edited/added regions are clean** (one `o5_transient` match reflowed to rustfmt's form); the remaining whole-file diffs are the **pre-existing** CRLF + no-final-newline baseline of these files, separated from the edited code. The CRLF, no-final-newline convention of the D7-D14 test file was preserved.
+* `cargo build --release -p qbind-node` → **exit 0** (rerun after this pass's final runtime change; the prior release build is historical for the prior implementation).
+* Secret scanning over the edited `.rs` files → **no secrets**. Non-wiring audit: `max_transient_decoded_working_set`/`max_transient_decoded_bytes`/`max_decoded_evidence_backing_bytes` are referenced only within the component and its test; `safety_record_store` is still referenced outside only by `lib.rs` `pub mod` (unchanged); default `Disabled` policy, MainNet refusal, and `test-utils` gating unchanged; no production construction added.
+
+### 6. Superseded prior claims (history preserved)
+
+Originals retained above as history; corrected this pass:
+* that the quorum-sized `valid_tc_record` exercises the maximum supported nested TC contents — **superseded**; it builds only `ceil(2N/3)=3` members, and the maximum case is now a separate `valid_tc_record_max` with N members.
+* that the transient decoded maximum fits the retained-generation reservation without further proof — **superseded**; the executed counterexample shows `1112 > 1104`, and O2/O4/O5 now reserve the distinct transient-decode ceiling.
+* that the borrowed `decoded_working_set_charge` alone establishes complete operational O2 coverage — **superseded**; it measures the live decoded object in place, but complete O2 coverage is bounded by the O2 reservation (`rec + META + transient`) admitted at the real `open`/`load_established` boundary, exercised through real QC and maximum-TC operations.
+* that candidate admission already preceded every component-owned clone/encode — **superseded**; the allocation-free candidate preflight is now ordered before the predecessor read/validate/encode and before candidate clones/encodes, proven by the zero-encode ordering regression over a locked predecessor.
+* that the remaining work is only a coexistence table / that all authorized feasible work is complete — **withdrawn**; see Still open.
+
+### 7. Still open (unchanged disposition; not promoted)
+
+The full object-by-object O1–O5 allocation/coexistence inventory traced across every success/structural-refusal/semantic-refusal/excess-capacity/malformed/pre-submit/ambiguous-write/uncertain-durability/drop path (the complete step-8 table with owned contexts, shared-allocation overhead, holder handles, retained publications, and all candidate/generation/publication/prepared-operation multiplicities) remains an **unfinished implementation** item. The step-7 growing validation-scratch structures — `validate_qc_signers`' signer-index vector and TC validation's hash sets, and `validate_decoded`'s re-encode while other objects are live — are **not** yet brought under an explicit bounded-scratch model (they are bounded in practice by the per-class maxima but not charged as named scratch terms). The H22 verified-prerequisite consumer boundary remains a test-authored model (not fabricated closed); no production wiring or unused helper was added. H25 storage evidence remains separate from H25e engine evidence, process termination separate from power loss, and durability separate from anti-rollback.
+
+### 8. Literal review/security-tool outcomes (this pass, this revision, no PR)
+
+An unavailable review is not a completed review and a skipped CodeQL is not a zero-alert result. Both gates remain required and **OPEN**; neither is carried forward from a prior pass as a new execution.
+
+* **Independent Code Review — UNAVAILABLE (gate OPEN).** `parallel_validation` returned `No review comments found`, **but** with the explicit environment error `Code review tool is not available in this environment … autofind binary not found at …` (the `autofind` binary is absent from every searched path). An unavailable tool's "no comments" is **not** a completed review → `INDEPENDENT_CODE_REVIEW=UNAVAILABLE`; no code-review assurance is claimed for the transient-accounting / O4-ordering changes.
+* **CodeQL (rust) — SKIPPED (gate OPEN).** Reported `Analysis Result for 'rust'. Found 0 alerts:` with the literal reason `rust: Analysis was skipped because the database size is too large.` A skipped analysis is **not** a zero-alert result → `CODEQL=SKIPPED — database too large`. CodeQL triviality was declared **false** for this pass (new operational reservation arithmetic in `profile.rs`/`accounting.rs` and reordered admission in `owner.rs`), so a prior disposition does not cover these runtime changes.
+
+### 9. Verdicts retained (NOT promoted)
+
+```
+D7D14_STORAGE_COMPONENT=PARTIAL-IMPLEMENTATION
+D7D14_STORAGE_ACCEPTANCE=INCOMPLETE
+DURABLE_ANTI_ROLLBACK=NOT-ESTABLISHED
+GENESIS_AUTHORITY_ACTIVATION=DISABLED
+PRODUCTION_WIRE_CHAIN_ID_BEHAVIOR=UNCHANGED
+CONFIGURED_AUTHORITY_RELEASE_BINARY_EVIDENCE=NOT-YET-CAPTURED
+SECURITY_POSTURE=RS1-OPEN / PUBLIC-DEVNET-NO-GO
+```
+
+C4/C5 remain OPEN.
