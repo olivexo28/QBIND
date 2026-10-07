@@ -348,8 +348,26 @@ pub fn compute_evidence_lock_binding(
     // Admit the evidence structure against the pinned context BEFORE allocating
     // the `cert` buffer or copying any variable-size evidence bytes into it.
     admit_supporting_evidence(evidence, ctx)?;
-    let mut cert = Vec::new();
+    // Bounded allocation/write path (§ 13.7A, D7-D14 item-6 correction): pre-size
+    // the `cert` scratch to the evidence variant's admitted serialized cap (a safe
+    // upper bound on the evidence payload, which is strictly smaller than a full
+    // record). Admission above has bounded every count/length/width, so the
+    // payload fits and the backing never grows by implicit doubling past the bound
+    // the way `Vec::new()` + `extend_from_slice` would.
+    let cert_cap = match evidence {
+        SupportingEvidence::QcDerived(_) => max_qc_bytes(ctx)?,
+        SupportingEvidence::TcDerived { .. } => max_tc_bytes(ctx)?,
+    };
+    let cert_cap = usize::try_from(cert_cap).map_err(|_| {
+        SafetyStoreError::DeclaredBoundExceeded("evidence cert cap exceeds usize".into())
+    })?;
+    let mut cert = Vec::with_capacity(cert_cap);
     encode_evidence_payload(&mut cert, evidence)?;
+    debug_assert!(
+        cert.capacity() == cert_cap,
+        "evidence cert backing capacity {} diverged from the admitted cap {cert_cap}",
+        cert.capacity()
+    );
     let mut h = Sha3_256::new();
     h.update(DOMAIN_BINDING);
     h.update(lock_block_id);
@@ -573,7 +591,19 @@ pub fn encode_record(
     // (§ 13.2A / § 13.7): refuse an over-bound count/length/width here rather
     // than after encoding.
     admit_record_structure(rec, ctx)?;
-    let mut out = Vec::new();
+    // Bounded allocation/write path (§ 13.7A, D7-D14 item-6 correction): pre-size
+    // the output backing to the variant's admitted serialized cap and write into
+    // it. Because `admit_record_structure` has already bounded every count/length/
+    // width to its profile maximum, the encoded content is guaranteed `<= cap`, so
+    // `Vec::with_capacity(cap)` never reallocates and the backing stays at the one
+    // admitted allocation — it cannot grow by implicit doubling past the bound the
+    // way `Vec::new()` + `extend_from_slice` would. The final `len() > cap` check
+    // below remains the content bound; the capacity confirmation is a secondary
+    // check, NOT the prevention mechanism.
+    let cap = encoded_record_cap(rec, ctx)?;
+    let cap_usize = usize::try_from(cap)
+        .map_err(|_| SafetyStoreError::DeclaredBoundExceeded("record cap exceeds usize".into()))?;
+    let mut out = Vec::with_capacity(cap_usize);
     put_u16(&mut out, rec.persistence_format_version);
     out.extend_from_slice(&rec.network_genesis_id);
 
@@ -620,20 +650,38 @@ pub fn encode_record(
 
     // Enforce the variant-specific serialized cap on the final actual length.
     let actual = out.len() as u128;
-    let cap = match &rec.record {
-        SafetyRecord::BootstrapNoLock { .. } => max_safety_record_bytes(ctx)?,
-        SafetyRecord::Locked(l) => match &l.evidence {
-            SupportingEvidence::QcDerived(_) => max_qc_bytes(ctx)?,
-            SupportingEvidence::TcDerived { .. } => max_tc_bytes(ctx)?,
-        },
-    };
     if actual > cap {
         return Err(SafetyStoreError::Oversize {
             len: actual,
             max: cap,
         });
     }
+    // Confirmation (NOT the prevention mechanism): the pre-sized backing never
+    // grew past the admitted cap. `Vec::with_capacity(cap)` may round the request
+    // up, so we confirm against the requested `cap_usize`, below which no implicit
+    // doubling occurred.
+    debug_assert!(
+        out.capacity() == cap_usize,
+        "encode backing capacity {} diverged from the admitted cap {cap_usize}",
+        out.capacity()
+    );
     Ok(out)
+}
+
+/// The variant-specific admitted serialized cap for a record (§ 13.2A): the same
+/// bound the final `encode_record` length check enforces, hoisted so the output
+/// backing can be pre-sized to it for the bounded allocation/write path.
+fn encoded_record_cap(
+    rec: &DecodedRecord,
+    ctx: &PinnedSafetyContext,
+) -> Result<u128, SafetyStoreError> {
+    match &rec.record {
+        SafetyRecord::BootstrapNoLock { .. } => max_safety_record_bytes(ctx),
+        SafetyRecord::Locked(l) => match &l.evidence {
+            SupportingEvidence::QcDerived(_) => max_qc_bytes(ctx),
+            SupportingEvidence::TcDerived { .. } => max_tc_bytes(ctx),
+        },
+    }
 }
 
 /// Decode and structurally validate (stage 1) a persistence buffer into a

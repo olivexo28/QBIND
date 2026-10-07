@@ -5532,3 +5532,58 @@ fn d7d14_o5_publication_envelope_coexistence_reserved_within_aggregate() {
         "all operational charges (incl. O5 staging) released"
     );
 }
+
+/// §6 — bounded encoding backing. `encode_record` pre-sizes its output to the
+/// variant's admitted serialized cap and writes into it, so the backing is a
+/// SINGLE admitted allocation that never grows by implicit `Vec` doubling (which
+/// a `Vec::new()` + `extend_from_slice` path would do, producing several
+/// reallocations). Observed directly with the counting allocator: exactly one
+/// alloc for the maximum QC and maximum TC encodings, and the returned backing
+/// capacity equals the admitted cap — not a post-hoc `len() <= cap` check.
+#[test]
+fn d7d14_encode_record_backing_is_bounded_single_allocation() {
+    let ctx = ctx_n(4);
+
+    // Maximum QC record.
+    let qc_locked =
+        make_locked_qc(&ctx, [9u8; 32], 5, valid_wire_qc(&ctx, [9u8; 32], 5), None).unwrap();
+    let qc_dec = DecodedRecord {
+        persistence_format_version: 1,
+        network_genesis_id: ctx.network_genesis_id,
+        publication_revision: 1,
+        record: SafetyRecord::Locked(qc_locked),
+    };
+    let _ = encode_record(&qc_dec, &ctx).unwrap(); // warm up lazy state
+    let (enc, allocs) = measure_allocs(|| encode_record(&qc_dec, &ctx).unwrap());
+    assert_eq!(
+        allocs, 1,
+        "max-QC encode must perform exactly one (pre-sized) allocation, no implicit growth"
+    );
+    assert_eq!(
+        enc.capacity() as u128,
+        max_qc_bytes(&ctx).unwrap(),
+        "max-QC encode backing capacity must equal the admitted serialized cap"
+    );
+    assert!(enc.len() as u128 <= max_qc_bytes(&ctx).unwrap());
+
+    // Maximum TC record (fully populated nested evidence).
+    let tc_locked = valid_tc_record_max(&ctx, 5, 6);
+    let tc_dec = DecodedRecord {
+        persistence_format_version: 1,
+        network_genesis_id: ctx.network_genesis_id,
+        publication_revision: 1,
+        record: SafetyRecord::Locked(tc_locked),
+    };
+    let _ = encode_record(&tc_dec, &ctx).unwrap();
+    let (enc, allocs) = measure_allocs(|| encode_record(&tc_dec, &ctx).unwrap());
+    assert_eq!(
+        allocs, 1,
+        "max-TC encode must perform exactly one (pre-sized) allocation, no implicit growth"
+    );
+    assert_eq!(
+        enc.capacity() as u128,
+        max_tc_bytes(&ctx).unwrap(),
+        "max-TC encode backing capacity must equal the admitted serialized cap"
+    );
+    assert!(enc.len() as u128 <= max_tc_bytes(&ctx).unwrap());
+}
