@@ -16086,7 +16086,10 @@ The exhaustive object-by-object O1–O5 step-8 inventory across **every** succes
 
 ### 5. Literal review/security-tool outcomes (this pass, this revision, no PR)
 
-Recorded directly below from the `parallel_validation` run of this pass (an unavailable review is not a completed review; a skipped CodeQL is not a zero-alert result).
+Both gates remain **required and OPEN**; neither is carried forward from a prior pass as a new execution, and neither is claimed as assurance for this pass's runtime changes.
+
+* **Independent Code Review — UNAVAILABLE (gate OPEN).** `parallel_validation` reported `Reviewed 8 file(s). No review comments found`, **but** with the explicit environment error `Code review tool is not available in this environment: … model claude-sonnet-4.6 not found in registry` (the `autofind` binary could not load its model). An unavailable tool's "no comments" is **not** a completed review → `INDEPENDENT_CODE_REVIEW=UNAVAILABLE`.
+* **CodeQL (rust) — SKIPPED (gate OPEN).** Reported `Analysis Result for 'rust'. Found 0 alerts:` with the literal reason `Analysis was skipped because the database size is too large.` A skipped analysis is **not** a zero-alert result → `CODEQL=SKIPPED — database too large`. CodeQL triviality was declared **false** for this pass (runtime allocation-admission arithmetic, retyped preflight diagnostic path, pre-sized encode/binding buffers, and the rewritten validation-scratch representation), so no prior disposition covers these changes.
 
 ### 6. Verdicts retained (NOT promoted)
 
