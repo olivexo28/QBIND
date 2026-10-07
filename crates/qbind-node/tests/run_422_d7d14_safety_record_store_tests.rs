@@ -1731,6 +1731,248 @@ fn agg_live_context_consumes_operational_budget() {
     );
 }
 
+// ---------------------------------------------------------------------------
+// §4 — O1/O2 INSPECTION allocation admission (real-operation regressions).
+//
+// The inherited O1/O2 correction (5640dae) admits each inspection path's
+// read/decode working set against the shared aggregate budget BEFORE the
+// component-owned read-back / decode allocations occur, so an established /
+// partial / malformed inspection cannot escape the aggregate ceiling. These
+// regressions drive the REAL `initialize()` / `open()` operations against the
+// REAL shared accountant (constructed boundary via `reserve_standing_for_test`),
+// proving: (a) refusal happens at admission, BEFORE the existing-state read /
+// decode; (b) the refusal preserves stored bytes and recovery/effectiveness
+// state; (c) the reservation releases on every exit; (d) releasing competing
+// pressure lets the same otherwise-valid operation proceed; and (e) the real
+// working set fits within exactly the reserved charge (admission boundary).
+//
+// Mirror of the source constant `backend::META_ENCODED_LEN` (private); the
+// fixed metadata buffer is `2 + 32 + 8` bytes.
+const META_ENCODED_LEN_MIRROR: u128 = 2 + 32 + 8;
+
+// (a)+(b)+(c)+(d): O1 on ESTABLISHED state is refused at admission — BEFORE the
+// existing-state read that would otherwise report `AlreadyEstablished` — when the
+// shared aggregate cannot admit O1's inspection working set. The refusal leaves
+// the stored record bytes and the recovery latch untouched, and releasing the
+// competing pressure lets the SAME O1 proceed to its real established-state
+// detection.
+#[test]
+fn o1_established_inspection_refused_before_read_under_aggregate_pressure() {
+    let dir = tempfile::tempdir().unwrap();
+    let ctx = ctx_n(4);
+    let owner = init_owner(dir.path(), &ctx); // established at revision 0, effective
+    let backend = owner.backend_for_test();
+    let agg_cap = backend.accounting_aggregate_cap().unwrap();
+    let ctx_live = backend.context_accounting_current();
+    assert!(ctx_live > 0, "init_owner holds one live context charge");
+
+    // O1's inspection working set = record-sized read-back buffer + fixed metadata
+    // buffer (exactly the source's `inspect_charge`).
+    let rec = max_safety_record_bytes(&ctx).unwrap();
+    let o1_inspect = rec + META_ENCODED_LEN_MIRROR;
+
+    // Record the pre-refusal raw stored bytes and recovery state.
+    let record_before = backend.read_record(rec).unwrap();
+    assert!(record_before.is_some(), "established store has a record");
+    assert!(!owner.recovery_required(), "O1 left the store effective");
+
+    // Leave exactly `o1_inspect - 1` of aggregate headroom: the inspection charge
+    // cannot be admitted. The operational sub-cap WOULD still permit it; the
+    // refusal comes from the shared aggregate authority (the other partition's
+    // live context charge consumed the shared budget).
+    let standing_amt = agg_cap - ctx_live - (o1_inspect - 1);
+    let standing = backend
+        .reserve_standing_for_test(standing_amt)
+        .expect("standing operational pressure within the combined budget");
+    assert_eq!(
+        backend.accounting_aggregate_current(),
+        ctx_live + standing_amt
+    );
+
+    // The REAL O1 is refused at admission (CapacityRefusal), NOT AlreadyEstablished
+    // — proving the refusal precedes the existing-state read.
+    match owner.initialize(true) {
+        Err(SafetyStoreError::CapacityRefusal(_)) => {}
+        other => panic!("expected pre-read CapacityRefusal, got {other:?}"),
+    }
+    // No leak: the refusal reserved/released nothing beyond the standing pressure.
+    assert_eq!(
+        backend.accounting_aggregate_current(),
+        ctx_live + standing_amt,
+        "a refused O1 inspection leaves the aggregate charge unchanged"
+    );
+    // Stored bytes and recovery/effectiveness state preserved.
+    assert_eq!(
+        backend.read_record(rec).unwrap(),
+        record_before,
+        "refused O1 did not mutate stored record bytes"
+    );
+    assert!(
+        !owner.recovery_required(),
+        "refused O1 did not disturb the effectiveness latch"
+    );
+
+    // (d) Releasing the competing pressure lets the SAME O1 proceed to its real
+    // established-state detection (now the read runs) — AlreadyEstablished, not a
+    // capacity error. This proves the earlier refusal was pre-read.
+    drop(standing);
+    match owner.initialize(true) {
+        Err(SafetyStoreError::AlreadyEstablished(_)) => {}
+        other => panic!("expected AlreadyEstablished after releasing pressure, got {other:?}"),
+    }
+    assert_eq!(
+        backend.accounting_current(),
+        0,
+        "O1 inspection reservation released on the AlreadyEstablished exit"
+    );
+}
+
+// (a): O1 over a PARTIAL (record-present / metadata-absent) namespace is likewise
+// refused at admission BEFORE the inspection read that would classify it as a
+// structural partial, since the inspection charge is reserved before `read_meta`
+// / `read_record` on the SAME code path. Releasing the pressure surfaces the real
+// StructuralRefusal.
+#[test]
+fn o1_partial_state_inspection_refused_before_read_under_aggregate_pressure() {
+    let dir = tempfile::tempdir().unwrap();
+    let ctx = ctx_n(4);
+    // Construct a partial namespace directly: a CRC-wrapped record key with NO
+    // metadata key. (Not a production path; test-only out-of-band writer.)
+    let backend = open_enabled(dir.path());
+    backend
+        .debug_overwrite_record(&[0xAAu8, 0xBB, 0xCC])
+        .expect("stage a partial record-without-metadata namespace");
+    let owner = SafetyRecordOwner::attach(backend, ctx.clone()).unwrap();
+    let backend = owner.backend_for_test();
+    let agg_cap = backend.accounting_aggregate_cap().unwrap();
+    let ctx_live = backend.context_accounting_current();
+    let rec = max_safety_record_bytes(&ctx).unwrap();
+    let o1_inspect = rec + META_ENCODED_LEN_MIRROR;
+
+    let standing_amt = agg_cap - ctx_live - (o1_inspect - 1);
+    let standing = backend
+        .reserve_standing_for_test(standing_amt)
+        .expect("standing pressure within the combined budget");
+    // Refused at admission — before the partial-state read/classification.
+    match owner.initialize(true) {
+        Err(SafetyStoreError::CapacityRefusal(_)) => {}
+        other => panic!("expected pre-read CapacityRefusal over partial state, got {other:?}"),
+    }
+    // Releasing pressure surfaces the genuine structural refusal (record present
+    // without metadata) — the inspection read now runs.
+    drop(standing);
+    match owner.initialize(true) {
+        Err(SafetyStoreError::StructuralRefusal(_)) => {}
+        other => panic!("expected StructuralRefusal over partial state, got {other:?}"),
+    }
+    assert_eq!(
+        backend.accounting_current(),
+        0,
+        "O1 partial-state inspection reservation released on exit"
+    );
+}
+
+// (e)+(b)+(c): O2 `open()` admits its read/decode working set (record read-back
+// buffer + fixed metadata buffer + one transient decoded generation + validation
+// scratch) against the shared aggregate budget BEFORE the `load_established`
+// allocations/decode. The real operation fits within EXACTLY the reserved charge
+// `rec + META + gen` (succeeds with exactly that headroom) and is refused ONE byte
+// short (before any decode), preserving stored bytes and recovery state, and the
+// reservation releases on every exit.
+#[test]
+fn o2_open_working_set_admitted_and_bounded_by_reservation() {
+    let dir = tempfile::tempdir().unwrap();
+    let ctx = ctx_n(4);
+    let owner = init_owner(dir.path(), &ctx);
+    // Establish a real locked (QC-derived) publication so O2 decodes a non-trivial
+    // generation. The o2 charge is the max over QC/TC generations, so the reserved
+    // bound covers the actual decoded working set either way.
+    let qc = valid_wire_qc(&ctx, [9u8; 32], 5);
+    let locked = make_locked_qc(&ctx, [9u8; 32], 5, qc, None).unwrap();
+    assert_eq!(
+        owner.publish_locked(locked, 0, None::<&FixtureCommittedHistory>),
+        PublishResult::DurableAcknowledged { new_revision: 1 }
+    );
+    let backend = owner.backend_for_test();
+    let agg_cap = backend.accounting_aggregate_cap().unwrap();
+    let ctx_live = backend.context_accounting_current();
+
+    let rec = max_safety_record_bytes(&ctx).unwrap();
+    let gen = qbind_node::safety_record_store::profile::max_retained_generation_bytes(
+        &ctx,
+        qbind_node::safety_record_store::record::size_of_timeout_msg(),
+    )
+    .unwrap();
+    let o2_charge = rec + META_ENCODED_LEN_MIRROR + gen;
+
+    // Directly bound the actual decoded transient against its reserved term `gen`:
+    // the real stored record decodes to a generation whose complete retained
+    // representation fits the retained-generation ceiling (the inherited O2 charge
+    // reserves `gen` for exactly this transient).
+    let stored = backend.read_record(rec).unwrap().expect("record present");
+    assert!(
+        (stored.len() as u128) <= rec,
+        "actual stored record buffer {} fits the record bound {rec}",
+        stored.len()
+    );
+    let decoded = decode_record(&stored, &ctx).unwrap();
+    let decoded_core = qbind_node::safety_record_store::record::size_of_decoded_record();
+    assert!(
+        decoded_core <= gen,
+        "the transient DecodedRecord core {decoded_core} fits its reserved generation term {gen}"
+    );
+    assert!(decoded.publication_revision == 1);
+
+    // Leave EXACTLY `o2_charge` of aggregate headroom: the real O2 working set fits.
+    let standing_fits = agg_cap - ctx_live - o2_charge;
+    let standing = backend
+        .reserve_standing_for_test(standing_fits)
+        .expect("standing pressure leaving exactly the O2 working set");
+    let peak_before = backend.accounting_aggregate_peak();
+    let meta = owner.open().expect("O2 open fits within exactly its reserved charge");
+    assert_eq!(meta.current_revision, 1);
+    assert!(
+        backend.accounting_aggregate_peak() <= agg_cap,
+        "O2 open never exceeded the aggregate ceiling"
+    );
+    assert!(
+        backend.accounting_aggregate_peak() >= peak_before,
+        "O2 open reserved a real charge against the shared accountant"
+    );
+    assert_eq!(
+        backend.accounting_aggregate_current(),
+        ctx_live + standing_fits,
+        "O2 read/decode reservation released on the success exit (only standing remains)"
+    );
+    drop(standing);
+
+    // Now leave ONE byte less: the real O2 is refused at admission, BEFORE decode.
+    let record_before = backend.read_record(rec).unwrap();
+    let standing_short = agg_cap - ctx_live - (o2_charge - 1);
+    let standing = backend
+        .reserve_standing_for_test(standing_short)
+        .expect("standing pressure one byte short of the O2 working set");
+    match owner.open() {
+        Err(SafetyStoreError::CapacityRefusal(_)) => {}
+        other => panic!("expected pre-decode CapacityRefusal, got {other:?}"),
+    }
+    assert_eq!(
+        backend.read_record(rec).unwrap(),
+        record_before,
+        "refused O2 did not mutate stored record bytes"
+    );
+    assert!(
+        !owner.recovery_required(),
+        "refused O2 did not disturb the effectiveness latch"
+    );
+    assert_eq!(
+        backend.accounting_aggregate_current(),
+        ctx_live + standing_short,
+        "refused O2 released its (rolled-back) admission attempt cleanly"
+    );
+    drop(standing);
+}
+
 // RESERVATION-LEVEL admission-boundary evidence (NOT an O1–O5 operation). Both
 // the standing pressure AND the refused charge here are test-only
 // `reserve_standing_for_test` reservations, used to construct the combined-budget
