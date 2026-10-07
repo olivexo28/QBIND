@@ -3424,17 +3424,28 @@ core) `= 360`, `size_of::<RetainedRecord>()` (**the real retained generation**) 
 The proof is a representation-and-charge proof over the real types: the complete retained generation
 (`RetainedRecord = 368`) is bounded by `GEN_STRUCT_MAX`; the `128`-byte `ValidatedRecord` holder/handle fields
 (retained-`encoded` `Vec` descriptor, origin-context digest, O5 recovery-incarnation discriminant, inline
-holder `Reservation` option) are a separate term charged under the holder/encoded-buffer terms, never folded
-into the generation ceiling. `RetainedGeneration` remains only for the synthetic-holder test and is no longer
+holder `Reservation` option) are a separate term, and — per the **finding-#2 correction** — that term is now
+**enforced-charged**, not merely asserted: `record::validated_holder_handle_bytes()` defines it independently
+from the handle field inventory (plus one alignment allowance), a compile-time inequality
+`size_of::<ValidatedRecord>() ≤ size_of::<RetainedRecord>() + handle_inventory` (`496 ≤ 368 + 128`) proves it
+covers the real inline layout, and `retained_holder_charge()` reserves `rec + gen + handle` once per retained
+proof against the shared aggregate authority for the proof's lifetime (released on drop; duplicated identically
+by `try_clone`), never folded into the generation ceiling. The prior documentation that the handle bytes were
+"separately charged" while `retained_holder_charge()` reserved only `rec + gen`, and the size-subtraction
+"decomposition" that checked the tautology `retained + (validated − retained) == validated`, are **superseded**
+by this enforced charge and the independent inequality. `RetainedGeneration` remains only for the synthetic-holder test and is no longer
 the operative proof. The earlier **surfaced incompatibility** (`408 > 384`, requiring a ceiling raise or a
 `48`-byte decoded-identity-header addend) is **withdrawn** — it measured the pre-correction representation, not
 a lower bound on every conforming one. The accepted aggregate arithmetic (`max_component_aggregate_bytes =
 max_aggregate_retained_bytes`, enforced aggregate `7772` for N=4) and all fixture quantities are left
 **unchanged**; no accepted bound is relaxed or raised. The regression
-`real_representation_layout_decomposition` now records the measured sizes, the exact decomposition, and that
-the retained generation fits the ceiling (the `DecodedRecord > GEN_STRUCT_MAX` acceptance assertion that
-described the old defect is removed). The operative verdict is unchanged
-(`D7D14_STORAGE_COMPONENT=PARTIAL-IMPLEMENTATION` / `D7D14_STORAGE_ACCEPTANCE=INCOMPLETE`); the §5/§6 full
-per-object operational inventory and the §8 H18/H19/H22/H24/H26 obligations remain open, as does the
-independent CodeQL/Code-Review security gate. See the latest RUN 422 D7-D14 continuation section of
-`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_422_D7.md`.
+`real_representation_layout_decomposition` now records the measured sizes, the **independent coverage
+inequality** (not a subtraction identity), and that the retained generation fits the ceiling (the
+`DecodedRecord > GEN_STRUCT_MAX` acceptance assertion that described the old defect is removed), and
+`acct_o3_holder_charge_includes_enforced_handle_term` proves a live O3 proof holds exactly `rec + gen + handle`
+against the real shared accountant. The operative verdict is unchanged
+(`D7D14_STORAGE_COMPONENT=PARTIAL-IMPLEMENTATION` / `D7D14_STORAGE_ACCEPTANCE=INCOMPLETE`): the finding-#2
+holder-charge gap is now closed (the complete operational representation of a retained proof is enforced-charged
+once, without enlarging the accepted aggregate), but the §4/§5 full per-object operational inventory and the §8
+H18/H19/H22/H24/H26 obligations remain open, as does the independent CodeQL/Code-Review security gate. See the
+latest RUN 422 D7-D14 continuation section of `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_422_D7.md`.

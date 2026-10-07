@@ -21,8 +21,8 @@ use super::profile::{
     PinnedSafetyContext,
 };
 use super::record::{
-    size_of_timeout_msg, DecodedRecord, EvidenceStatus, LockedRecord, SafetyRecord,
-    SupportingEvidence, ValidatedRecord,
+    size_of_timeout_msg, validated_holder_handle_bytes, DecodedRecord, EvidenceStatus,
+    LockedRecord, SafetyRecord, SupportingEvidence, ValidatedRecord,
 };
 use super::validate::{validate_decoded, CommittedHistory};
 
@@ -223,13 +223,37 @@ impl SafetyRecordOwner {
     }
 
     /// The conservative retained-holder charge for a single O3-minted proof: the
-    /// retained record-sized `encoded` buffer plus one decoded-generation bound
-    /// (§ 13.7A / § 13.7B). Charged against the shared aggregate accountant for
-    /// the lifetime of the returned proof.
+    /// **complete operational representation** of one retained [`ValidatedRecord`]
+    /// (§ 13.7A / § 13.7B), charged once against the shared aggregate accountant
+    /// for the lifetime of the returned proof. Three distinct terms, each counted
+    /// exactly once and never double-counting a generation or backing:
+    ///
+    /// * `rec` — the retained record-sized `encoded` publication **buffer backing**
+    ///   (`MAX_SAFETY_RECORD_BYTES`), the heap allocation behind the inline `Vec`
+    ///   descriptor;
+    /// * `gen` — the one decoded **generation** (`MAX_RETAINED_GENERATION_BYTES`),
+    ///   covering the inline `RetainedRecord` struct and its heap backings
+    ///   (signer bitmaps, signature buffers, timeout backing); and
+    /// * `handle` — the inline holder/accounting **metadata** the proof carries
+    ///   beyond its generation (`validated_holder_handle_bytes`: the evidence-status
+    ///   discriminant, the `encoded` `Vec` descriptor handle, the origin-context
+    ///   digest, the O5 recovery incarnation discriminant, and the inline holder
+    ///   [`super::accounting::Reservation`] option). This is the finding-#2
+    ///   correction: the handle fields are now an **enforced** reserved term, not
+    ///   merely an asserted size-ordering. The compile-time inequality in
+    ///   [`super`] independently proves `handle` covers the real inline layout.
+    ///
+    /// The same charge is taken by [`ValidatedRecord::try_clone`] (via
+    /// [`super::accounting::Reservation::try_duplicate`]), so a cloned proof —
+    /// which owns its own separate buffer, generation, and inline handle — is
+    /// charged identically and cannot mint an uncharged holder. The reservation is
+    /// released when the proof (or clone) drops, on the correct lifetime boundary.
     fn retained_holder_charge(&self) -> Result<u128, SafetyStoreError> {
         let rec = max_safety_record_bytes(self.pinned())?;
         let gen = max_retained_generation_bytes(self.pinned(), size_of_timeout_msg())?;
+        let handle = validated_holder_handle_bytes();
         rec.checked_add(gen)
+            .and_then(|t| t.checked_add(handle))
             .ok_or_else(|| SafetyStoreError::ArithmeticOverflow("retained holder charge".into()))
     }
 

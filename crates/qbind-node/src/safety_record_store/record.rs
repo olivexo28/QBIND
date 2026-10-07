@@ -442,3 +442,36 @@ pub fn size_of_decoded_record() -> u128 {
 pub fn size_of_validated_record() -> u128 {
     std::mem::size_of::<ValidatedRecord>() as u128
 }
+
+/// The **independently inventoried** charge for the inline holder/accounting
+/// metadata a [`ValidatedRecord`] carries *beyond* its [`RetainedRecord`]
+/// generation (§ 13.7B — the finding-#2 operational-accounting correction).
+///
+/// This is summed from the first-principles field inventory — the always-
+/// `Unverified` evidence-status discriminant, the retained `encoded` buffer's
+/// `Vec` descriptor handle, the originating-context digest, the O5 recovery
+/// incarnation discriminant, and the inline holder [`Reservation`] option — plus
+/// one struct-alignment allowance that bounds the inline padding the compiler may
+/// insert between those fields and the generation core. It is **not** derived by
+/// subtracting [`size_of_retained_record`] from [`size_of_validated_record`]: the
+/// charge stands on its own basis, and the compile-time inequality in [`super`]
+/// (`size_of::<ValidatedRecord>() <= size_of::<RetainedRecord>() +
+/// VALIDATED_HOLDER_HANDLE_BYTES`) independently proves it *covers* the real
+/// inline layout. A future field or padding change that outgrows this inventory
+/// therefore fails that assertion at compile time rather than silently escaping
+/// the enforced holder charge.
+///
+/// These bytes are charged **once per retained proof** by
+/// `SafetyRecordOwner::retained_holder_charge` (O3 and `try_clone`), against the
+/// shared aggregate authority, for the proof's lifetime — distinct from, and in
+/// addition to, the `encoded`-buffer backing and the decoded-generation backing.
+pub fn validated_holder_handle_bytes() -> u128 {
+    let field_inventory = std::mem::size_of::<EvidenceStatus>()
+        + std::mem::size_of::<Vec<u8>>()
+        + std::mem::size_of::<[u8; 32]>()
+        + std::mem::size_of::<Option<u64>>()
+        + std::mem::size_of::<Option<super::accounting::Reservation>>();
+    // One alignment allowance bounds the inline padding between the handle fields
+    // and the generation core; the `super` inequality verifies total coverage.
+    (field_inventory + std::mem::align_of::<ValidatedRecord>()) as u128
+}
