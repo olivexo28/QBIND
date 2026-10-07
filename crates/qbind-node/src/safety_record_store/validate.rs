@@ -6,7 +6,7 @@
 //! durability never manufacture a verified-evidence result.
 
 use super::codec::compute_evidence_lock_binding;
-use super::error::SafetyStoreError;
+use super::error::{CapacityRefusalDetail, SafetyStoreError};
 use super::profile::PinnedSafetyContext;
 use super::record::{
     DecodedRecord, EvidenceStatus, LockedRecord, RetainedRecord, SafetyRecord, SupportingEvidence,
@@ -269,7 +269,7 @@ fn validate_qc_signers(
             if byte & (1 << bit) != 0 {
                 if signer_indices.len() >= n {
                     return Err(SafetyStoreError::CapacityRefusal(
-                        "qc signer bits exceed authorized member count (UNIQ_SET bound)".into(),
+                        CapacityRefusalDetail::UniqSetExceeded { bound: n as u128 },
                     ));
                 }
                 let idx = (byte_idx as u64) * 8 + bit as u64;

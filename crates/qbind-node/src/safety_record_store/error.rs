@@ -23,8 +23,12 @@ pub enum SafetyStoreError {
     UnsupportedVersion(u16),
     /// Oversize encoded record exceeding the checked serialized cap.
     Oversize { len: u128, max: u128 },
-    /// A declared length/count exceeds its pinned bound (over-read guard).
-    DeclaredBoundExceeded(String),
+    /// A declared length/count exceeds its pinned bound (over-read guard). The
+    /// payload is a typed, `Copy` [`DeclaredBoundDetail`]: the structural
+    /// admission / decode preflight — which runs BEFORE any operation reservation
+    /// — constructs this refusal from stack-only numeric data, so no owned
+    /// diagnostic `String` is allocated on the protected over-read refusal path.
+    DeclaredBoundExceeded(DeclaredBoundDetail),
     /// Semantic / association refusal (stage 3): P1–P4 or TA1–TA8 failed, or a
     /// required independent input was not supplied.
     SemanticRefusal(String),
@@ -32,8 +36,11 @@ pub enum SafetyStoreError {
     /// supplied, so the dependent predicate cannot be established.
     MissingIndependentInput(String),
     /// O1 refused: established / partial / malformed / legacy / unsupported state
-    /// already present, or duplicate initialization.
-    AlreadyEstablished(String),
+    /// already present, or duplicate initialization. The payload is a typed,
+    /// `Copy` [`AlreadyEstablishedKind`] so the O1 established-state refusal —
+    /// reached **after** its covering inspection reservation has been released —
+    /// allocates no owned diagnostic `String` (the inventory's zero-heap claim).
+    AlreadyEstablished(AlreadyEstablishedKind),
     /// O2/O3 refused: expected established state is genuinely absent.
     MissingEstablishedState(String),
     /// Stale fencing refusal: the expected revision no longer matches the stored
@@ -61,7 +68,10 @@ pub enum SafetyStoreError {
     /// A prior ambiguous/uncertain publication left the shared serialization
     /// domain in a recovery-required state; dependent publication is refused for
     /// every handle until the required successful recovery operation clears it.
-    RecoveryRequired(String),
+    /// The payload is a typed, `Copy` [`RecoveryRequiredReason`]; the O4
+    /// recovery-required refusal runs before any read/write and allocates no
+    /// owned diagnostic `String`.
+    RecoveryRequired(RecoveryRequiredReason),
 }
 
 impl std::fmt::Display for SafetyStoreError {
@@ -76,14 +86,14 @@ impl std::fmt::Display for SafetyStoreError {
             Self::Oversize { len, max } => {
                 write!(f, "safety store: oversize record {len} > {max}")
             }
-            Self::DeclaredBoundExceeded(s) => {
-                write!(f, "safety store: declared bound exceeded: {s}")
+            Self::DeclaredBoundExceeded(d) => {
+                write!(f, "safety store: declared bound exceeded: {d}")
             }
             Self::SemanticRefusal(s) => write!(f, "safety store: semantic refusal: {s}"),
             Self::MissingIndependentInput(s) => {
                 write!(f, "safety store: missing independent input: {s}")
             }
-            Self::AlreadyEstablished(s) => write!(f, "safety store: already established: {s}"),
+            Self::AlreadyEstablished(k) => write!(f, "safety store: already established: {k}"),
             Self::MissingEstablishedState(s) => {
                 write!(f, "safety store: missing established state: {s}")
             }
@@ -97,7 +107,7 @@ impl std::fmt::Display for SafetyStoreError {
             Self::WriteFailed(s) => write!(f, "safety store: write failed: {s}"),
             Self::UncertainPublication(s) => write!(f, "safety store: uncertain publication: {s}"),
             Self::ReadFailed(s) => write!(f, "safety store: read failed: {s}"),
-            Self::RecoveryRequired(s) => write!(f, "safety store: recovery required: {s}"),
+            Self::RecoveryRequired(r) => write!(f, "safety store: recovery required: {r}"),
         }
     }
 }
@@ -166,6 +176,35 @@ pub enum CapacityRefusalDetail {
         profile_max: u128,
         slack: u128,
     },
+    /// A reservation/admission charge would raise a running ledger total over its
+    /// ceiling. Built from stack-only `Copy` numeric data on the protected
+    /// pre-allocation admission path (`AllocationAccountant` / `AggregateAuthority`).
+    AdmissionOverflow {
+        scope: LedgerScope,
+        charge: u128,
+        current: u128,
+        next: u128,
+        cap: u128,
+    },
+    /// A reservation was attempted against an accountant/authority that was never
+    /// bound. `Copy`, allocation-free.
+    Unbound(LedgerScope),
+    /// A second bind attempted a ceiling divergent from the one already pinned
+    /// (a foreign profile can never widen the budget). `Copy`, allocation-free.
+    RebindMismatch {
+        scope: LedgerScope,
+        bound: u128,
+        attempted: u128,
+    },
+    /// The per-owner context validator vector capacity exceeds the normalized
+    /// per-owner ceiling term. `Copy`, allocation-free.
+    ContextOwnerExceeded { capacity: u128, limit: u128 },
+    /// QC signer bits exceeded the authorized member count during the bounded
+    /// `UNIQ_SET` scratch scan. `Copy`, allocation-free.
+    UniqSetExceeded { bound: u128 },
+    /// A supporting-evidence backing-capacity charge exceeded
+    /// `MAX_RETAINED_GENERATION_BYTES` (excess spare capacity). `Copy`.
+    EvidenceBackingExceeds { charge: u128, cap: u128 },
 }
 
 impl std::fmt::Display for CapacityRefusalDetail {
@@ -182,6 +221,39 @@ impl std::fmt::Display for CapacityRefusalDetail {
                 "{site} capacity {capacity} exceeds profile maximum {profile_max} + \
                  CAPNORM_SLACK {slack} (per-vector capacity bound)"
             ),
+            Self::AdmissionOverflow {
+                scope,
+                charge,
+                current,
+                next,
+                cap,
+            } => write!(
+                f,
+                "{scope} admission of {charge} would raise {current}→{next} over cap {cap}"
+            ),
+            Self::Unbound(scope) => write!(f, "{scope} not bound"),
+            Self::RebindMismatch {
+                scope,
+                bound,
+                attempted,
+            } => write!(
+                f,
+                "{scope} already bound to cap {bound} (attempted {attempted})"
+            ),
+            Self::ContextOwnerExceeded { capacity, limit } => write!(
+                f,
+                "context validator vector capacity {capacity} exceeds the \
+                 normalized per-owner term {limit}"
+            ),
+            Self::UniqSetExceeded { bound } => write!(
+                f,
+                "qc signer bits exceed authorized member count {bound} (UNIQ_SET bound)"
+            ),
+            Self::EvidenceBackingExceeds { charge, cap } => write!(
+                f,
+                "supporting-evidence backing capacity charge {charge} exceeds \
+                 MAX_RETAINED_GENERATION_BYTES {cap} (excess spare capacity)"
+            ),
         }
     }
 }
@@ -195,5 +267,183 @@ impl From<String> for CapacityRefusalDetail {
 impl From<&str> for CapacityRefusalDetail {
     fn from(s: &str) -> Self {
         Self::Message(s.to_string())
+    }
+}
+
+/// Which ledger partition an admission/bind refusal concerns. `Copy`, so a
+/// reservation-admission refusal names its partition with no heap allocation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LedgerScope {
+    /// The shared aggregate coexistence authority (§ 13.7, finding #4).
+    Aggregate,
+    /// A generic partition sub-ledger admission (operational or context).
+    Partition,
+    /// The shared operational partition accountant (bind / unbound diagnostics).
+    SharedOperational,
+    /// The shared context-ownership partition accountant (bind diagnostics).
+    SharedContext,
+}
+
+impl std::fmt::Display for LedgerScope {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Aggregate => f.write_str("aggregate authority"),
+            Self::Partition => f.write_str("accountant"),
+            Self::SharedOperational => f.write_str("shared accountant"),
+            Self::SharedContext => f.write_str("shared context accountant"),
+        }
+    }
+}
+
+/// Typed, `Copy` identity of a declared count/length/width over-read refusal
+/// site (§ 13.2A / § 13.7, D7-D14 allocation-free refusal correction). Each
+/// variant carries only stack numeric data, so the structural admission / decode
+/// preflight — reached BEFORE any operation reservation — constructs a
+/// [`SafetyStoreError::DeclaredBoundExceeded`] without allocating an owned
+/// diagnostic `String`; the text is materialised only when rendered via
+/// `Display`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DeclaredBoundDetail {
+    /// A logical-QC signer count exceeded the authorized member count `N`.
+    LogicalQcSignerCount { count: u128, n: u128 },
+    /// A record-level / TC-level / nested high-QC signer count exceeded `N`.
+    HighQcSignerCount { count: u128, n: u128 },
+    /// A wire-QC signer bitmap length exceeded its span bound.
+    SignerBitmapSpan { len: u128, bound: u128 },
+    /// A wire-QC signature count exceeded `N`.
+    SignatureCount { count: u128, n: u128 },
+    /// A wire-QC signature length exceeded the per-signature bound `s_sig`.
+    SignatureLength { len: u128, s_sig: u128 },
+    /// A timeout-message signature length exceeded `s_sig`.
+    TimeoutSignatureLength { len: u128, s_sig: u128 },
+    /// A TC signer count exceeded `N`.
+    TcSignerCount { count: u128, n: u128 },
+    /// A TC `signed_timeouts` count exceeded `N`.
+    SignedTimeoutsCount { count: u128, n: u128 },
+    /// A count does not fit the `u16` serialization prefix.
+    PrefixOverflow { field: PrefixField },
+    /// A derived cap value does not fit `usize` on the target.
+    CapExceedsUsize { field: CapField },
+    /// A computed retained-generation charge exceeded `MAX_RETAINED_GENERATION_BYTES`.
+    GenerationChargeExceeds { charge: u128, cap: u128 },
+}
+
+/// Typed, `Copy` identity of a `u16`-prefix-overflow field (sub-site of
+/// [`DeclaredBoundDetail::PrefixOverflow`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PrefixField {
+    LogicalQcSignerCount,
+    RecordHighQcSignerCount,
+    SignerBitmapLength,
+    SignatureCount,
+    SignatureLength,
+    TimeoutSignatureLength,
+    TcSignerCount,
+    TcHighQcSignerCount,
+    SignedTimeoutHighQcSignerCount,
+    SignedTimeoutsCount,
+}
+
+impl std::fmt::Display for PrefixField {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let s = match self {
+            Self::LogicalQcSignerCount => "logical qc signer count",
+            Self::RecordHighQcSignerCount => "record-level high_qc signer count",
+            Self::SignerBitmapLength => "signer bitmap length",
+            Self::SignatureCount => "signature count",
+            Self::SignatureLength => "signature length",
+            Self::TimeoutSignatureLength => "timeout signature length",
+            Self::TcSignerCount => "tc signer count",
+            Self::TcHighQcSignerCount => "tc.high_qc signer count",
+            Self::SignedTimeoutHighQcSignerCount => "signed_timeout high_qc signer count",
+            Self::SignedTimeoutsCount => "signed_timeouts count",
+        };
+        f.write_str(s)
+    }
+}
+
+/// Typed, `Copy` identity of a `usize`-overflow cap field (sub-site of
+/// [`DeclaredBoundDetail::CapExceedsUsize`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CapField {
+    RecordCap,
+    EvidenceCertCap,
+}
+
+impl std::fmt::Display for CapField {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::RecordCap => f.write_str("record cap"),
+            Self::EvidenceCertCap => f.write_str("evidence cert cap"),
+        }
+    }
+}
+
+impl std::fmt::Display for DeclaredBoundDetail {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::LogicalQcSignerCount { count, n } => {
+                write!(f, "logical qc signer count {count} > N={n}")
+            }
+            Self::HighQcSignerCount { count, n } => {
+                write!(f, "high_qc signer count {count} > N={n}")
+            }
+            Self::SignerBitmapSpan { len, bound } => {
+                write!(f, "signer bitmap len {len} exceeds span bound {bound}")
+            }
+            Self::SignatureCount { count, n } => write!(f, "signature count {count} > N={n}"),
+            Self::SignatureLength { len, s_sig } => {
+                write!(f, "signature length {len} > s_sig={s_sig}")
+            }
+            Self::TimeoutSignatureLength { len, s_sig } => {
+                write!(f, "timeout signature length {len} > s_sig={s_sig}")
+            }
+            Self::TcSignerCount { count, n } => write!(f, "tc signer count {count} > N={n}"),
+            Self::SignedTimeoutsCount { count, n } => {
+                write!(f, "signed_timeouts count {count} > N={n}")
+            }
+            Self::PrefixOverflow { field } => write!(f, "{field} exceeds u16 prefix"),
+            Self::CapExceedsUsize { field } => write!(f, "{field} exceeds usize"),
+            Self::GenerationChargeExceeds { charge, cap } => write!(
+                f,
+                "generation charge {charge} exceeds MAX_RETAINED_GENERATION_BYTES {cap}"
+            ),
+        }
+    }
+}
+
+/// Typed, `Copy` kind of an O1 established/partial-state refusal
+/// ([`SafetyStoreError::AlreadyEstablished`]). Allocation-free: the O1 refusal,
+/// reached after its covering inspection reservation has been released, builds no
+/// owned diagnostic `String`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AlreadyEstablishedKind {
+    /// Metadata is already present (an established safety state).
+    MetadataPresent,
+}
+
+impl std::fmt::Display for AlreadyEstablishedKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::MetadataPresent => f.write_str("metadata already present"),
+        }
+    }
+}
+
+/// Typed, `Copy` reason for an O4 recovery-required refusal
+/// ([`SafetyStoreError::RecoveryRequired`]). Allocation-free.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RecoveryRequiredReason {
+    /// A fresh durability acknowledgement (O5/O1) is required before O4.
+    FreshAcknowledgementRequired,
+}
+
+impl std::fmt::Display for RecoveryRequiredReason {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::FreshAcknowledgementRequired => {
+                f.write_str("a fresh durability acknowledgement (O5/O1) is required before O4")
+            }
+        }
     }
 }

@@ -8,7 +8,9 @@
 
 use std::sync::{Arc, Mutex};
 
-use super::error::{CapacityRefusalDetail, CapnormSiteKind, SafetyStoreError};
+use super::error::{
+    CapacityRefusalDetail, CapnormSiteKind, DeclaredBoundDetail, LedgerScope, SafetyStoreError,
+};
 use super::profile::{
     max_aggregate_retained_bytes, max_retained_generation_bytes, PinnedSafetyContext, ARC_CTRL,
     CAPNORM_SLACK, VALIDATOR_ID_WIDTH,
@@ -44,9 +46,9 @@ pub fn generation_charge(
 
     let cap = max_retained_generation_bytes(ctx, size_of_timeout_msg())?;
     if total > cap {
-        return Err(SafetyStoreError::DeclaredBoundExceeded(format!(
-            "generation charge {total} exceeds MAX_RETAINED_GENERATION_BYTES {cap}"
-        )));
+        return Err(SafetyStoreError::DeclaredBoundExceeded(
+            DeclaredBoundDetail::GenerationChargeExceeds { charge: total, cap },
+        ));
     }
     Ok(total)
 }
@@ -126,11 +128,7 @@ pub fn admit_evidence_capacity(
     let cap = max_retained_generation_bytes(ctx, size_of_timeout_msg())?;
     if total > cap {
         return Err(SafetyStoreError::CapacityRefusal(
-            format!(
-                "supporting-evidence backing capacity charge {total} exceeds \
-             MAX_RETAINED_GENERATION_BYTES {cap} (excess spare capacity)"
-            )
-            .into(),
+            CapacityRefusalDetail::EvidenceBackingExceeds { charge: total, cap },
         ));
     }
     Ok(())
@@ -385,11 +383,13 @@ impl AllocationAccountant {
         let next = add(self.current, charge)?;
         if next > self.cap {
             return Err(SafetyStoreError::CapacityRefusal(
-                format!(
-                    "admitting {charge} would raise {}→{} over cap {}",
-                    self.current, next, self.cap
-                )
-                .into(),
+                CapacityRefusalDetail::AdmissionOverflow {
+                    scope: LedgerScope::Partition,
+                    charge,
+                    current: self.current,
+                    next,
+                    cap: self.cap,
+                },
             ));
         }
         self.current = next;
@@ -486,11 +486,11 @@ impl AggregateAuthority {
             Some(existing) => {
                 if existing.cap != cap {
                     return Err(SafetyStoreError::CapacityRefusal(
-                        format!(
-                            "aggregate authority already bound to cap {} (attempted {})",
-                            existing.cap, cap
-                        )
-                        .into(),
+                        CapacityRefusalDetail::RebindMismatch {
+                            scope: LedgerScope::Aggregate,
+                            bound: existing.cap,
+                            attempted: cap,
+                        },
                     ));
                 }
                 Ok(())
@@ -504,16 +504,20 @@ impl AggregateAuthority {
     fn admit(&self, charge: u128) -> Result<(), SafetyStoreError> {
         let mut g = self.lock();
         let guard = g.as_mut().ok_or_else(|| {
-            SafetyStoreError::CapacityRefusal("aggregate authority not bound".into())
+            SafetyStoreError::CapacityRefusal(CapacityRefusalDetail::Unbound(
+                LedgerScope::Aggregate,
+            ))
         })?;
         let next = add(guard.current, charge)?;
         if next > guard.cap {
             return Err(SafetyStoreError::CapacityRefusal(
-                format!(
-                    "aggregate admission of {charge} would raise {}→{next} over aggregate cap {}",
-                    guard.current, guard.cap
-                )
-                .into(),
+                CapacityRefusalDetail::AdmissionOverflow {
+                    scope: LedgerScope::Aggregate,
+                    charge,
+                    current: guard.current,
+                    next,
+                    cap: guard.cap,
+                },
             ));
         }
         guard.current = next;
@@ -612,12 +616,11 @@ impl SharedAccountant {
             Some(existing) => {
                 if existing.cap() != acct.cap() {
                     return Err(SafetyStoreError::CapacityRefusal(
-                        format!(
-                            "shared accountant already bound to cap {} (attempted {})",
-                            existing.cap(),
-                            acct.cap()
-                        )
-                        .into(),
+                        CapacityRefusalDetail::RebindMismatch {
+                            scope: LedgerScope::SharedOperational,
+                            bound: existing.cap(),
+                            attempted: acct.cap(),
+                        },
                     ));
                 }
                 Ok(())
@@ -640,12 +643,11 @@ impl SharedAccountant {
             Some(existing) => {
                 if existing.cap() != cap {
                     return Err(SafetyStoreError::CapacityRefusal(
-                        format!(
-                            "shared context accountant already bound to cap {} (attempted {})",
-                            existing.cap(),
-                            cap
-                        )
-                        .into(),
+                        CapacityRefusalDetail::RebindMismatch {
+                            scope: LedgerScope::SharedContext,
+                            bound: existing.cap(),
+                            attempted: cap,
+                        },
                     ));
                 }
                 Ok(())
@@ -692,7 +694,7 @@ impl SharedAccountant {
                     drop(g);
                     self.aggregate.release(charge);
                     return Err(SafetyStoreError::CapacityRefusal(
-                        "shared accountant not bound".into(),
+                        CapacityRefusalDetail::Unbound(LedgerScope::SharedOperational),
                     ));
                 }
             };
@@ -750,7 +752,7 @@ impl Reservation {
                     drop(g);
                     self.aggregate.release(self.charge);
                     return Err(SafetyStoreError::CapacityRefusal(
-                        "shared accountant not bound".into(),
+                        CapacityRefusalDetail::Unbound(LedgerScope::SharedOperational),
                     ));
                 }
             };

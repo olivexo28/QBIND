@@ -5873,3 +5873,141 @@ fn d7d14_o4_preflight_refusal_leaves_state_and_readmits() {
         "baseline after the eligible successor"
     );
 }
+// ---------------------------------------------------------------------------
+// RUN 422 D7-D14 §3 — allocation-free refusal regressions (D7-D14 continuation).
+//
+// The protected pre-reservation refusal paths now carry typed, `Copy` diagnostic
+// data (`DeclaredBoundDetail`, the typed `CapacityRefusalDetail` variants,
+// `AlreadyEstablishedKind`, `RecoveryRequiredReason`) instead of an owned
+// `format!`/`.into()` `String`. Each test below constructs its fixture OUTSIDE
+// the measured interval, arms the counting allocator across ONLY the protected
+// operation, and asserts zero component-owned allocations on the refusal while
+// the typed `Display` still renders the full numeric diagnostic on demand.
+// ---------------------------------------------------------------------------
+
+/// Named finding: `admit_wire_qc` with a 9-byte signature and `S_sig = 8`
+/// previously built `DeclaredBoundExceeded(format!(..))`. The structural excess
+/// is now refused with typed `DeclaredBoundDetail::SignatureLength`, allocating
+/// nothing on the protected preflight.
+#[test]
+fn corr_refusal_structural_sig_len_9_over_s_sig_8_is_allocation_free() {
+    use qbind_node::safety_record_store::codec::admit_supporting_evidence;
+    let ctx = ctx_n(4); // s_sig = 8
+    let mut qc = valid_wire_qc(&ctx, [9u8; 32], 5);
+    qc.signatures[0] = vec![0xABu8; 9]; // structural excess: length 9 > S_sig 8
+    let evidence = SupportingEvidence::QcDerived(qc);
+
+    let (res, allocs) = measure_allocs(|| admit_supporting_evidence(&evidence, &ctx));
+    assert!(
+        matches!(res, Err(SafetyStoreError::DeclaredBoundExceeded(_))),
+        "structural sig-length excess must refuse, got {res:?}"
+    );
+    assert_eq!(
+        allocs, 0,
+        "the structural over-bound refusal must allocate no owned diagnostic String"
+    );
+    let msg = res.unwrap_err().to_string();
+    assert!(
+        msg.contains("signature length 9 > s_sig=8"),
+        "typed Display must still render the numeric bounds, got: {msg}"
+    );
+}
+
+/// A representative QC signer/signature count refusal (count 5 > N=4) is refused
+/// with typed `DeclaredBoundDetail::SignatureCount`, allocation-free.
+#[test]
+fn corr_refusal_qc_signature_count_over_n_is_allocation_free() {
+    use qbind_node::safety_record_store::codec::admit_supporting_evidence;
+    let ctx = ctx_n(4); // N = 4
+    let mut qc = valid_wire_qc(&ctx, [7u8; 32], 3);
+    qc.signatures = vec![vec![0xABu8; S_SIG]; 5]; // 5 > N = 4
+    let evidence = SupportingEvidence::QcDerived(qc);
+
+    let (res, allocs) = measure_allocs(|| admit_supporting_evidence(&evidence, &ctx));
+    assert!(
+        matches!(res, Err(SafetyStoreError::DeclaredBoundExceeded(_))),
+        "signature-count over-N must refuse, got {res:?}"
+    );
+    assert_eq!(allocs, 0, "signature-count over-N refusal must be allocation-free");
+    assert!(res.unwrap_err().to_string().contains("signature count 5 > N=4"));
+}
+
+/// Named finding: aggregate and partition admission failures previously built
+/// `format!` strings while refusing the requested reservation. The admission
+/// overflow is now typed (`CapacityRefusalDetail::AdmissionOverflow`) and the
+/// refusal — reached through the real reservation path — allocates nothing.
+/// After releasing the holder the next reservation of the same size succeeds.
+#[test]
+fn corr_refusal_admission_overflow_through_reservation_is_allocation_free() {
+    use qbind_node::safety_record_store::accounting::{AggregateAuthority, SharedAccountant};
+    use qbind_node::safety_record_store::error::CapacityRefusalDetail;
+
+    let agg = AggregateAuthority::new();
+    agg.bind(100).unwrap();
+    let acct = SharedAccountant::new(agg.clone());
+    acct.bind_cap(100).unwrap();
+    // Hold 60 (constructed OUTSIDE the measured interval). A second 60-byte
+    // reservation exhausts the ceiling; measure only that refusing call.
+    let held = acct.reserve(60).unwrap();
+
+    let (res, allocs) = measure_allocs(|| acct.reserve(60));
+    match &res {
+        Err(SafetyStoreError::CapacityRefusal(CapacityRefusalDetail::AdmissionOverflow {
+            ..
+        })) => {}
+        other => panic!("expected typed AdmissionOverflow, got {other:?}"),
+    }
+    assert_eq!(
+        allocs, 0,
+        "the admission-overflow refusal must allocate no owned diagnostic String"
+    );
+    assert!(res.unwrap_err().to_string().contains("over cap 100"));
+
+    // Exhausted headroom: dropping the holder releases the charge, so the
+    // previously-refused reservation is now eligible.
+    drop(held);
+    assert!(
+        acct.reserve(60).is_ok(),
+        "subsequent reservation is eligible after releasing the constraint"
+    );
+}
+
+/// The typed refusal payloads for the remaining converted classes
+/// (`AlreadyEstablished`, `RecoveryRequired`, the typed `CapacityRefusalDetail`
+/// variants, `DeclaredBoundDetail`) are `Copy` stack data: constructing them
+/// performs no heap allocation, and each still renders its full diagnostic text
+/// through `Display` on demand.
+#[test]
+fn corr_typed_refusal_payloads_construct_without_allocation() {
+    use qbind_node::safety_record_store::error::{
+        AlreadyEstablishedKind, CapacityRefusalDetail, DeclaredBoundDetail, LedgerScope,
+        RecoveryRequiredReason,
+    };
+    let (errs, allocs) = measure_allocs(|| {
+        [
+            SafetyStoreError::AlreadyEstablished(AlreadyEstablishedKind::MetadataPresent),
+            SafetyStoreError::RecoveryRequired(RecoveryRequiredReason::FreshAcknowledgementRequired),
+            SafetyStoreError::DeclaredBoundExceeded(DeclaredBoundDetail::SignatureLength {
+                len: 9,
+                s_sig: 8,
+            }),
+            SafetyStoreError::CapacityRefusal(CapacityRefusalDetail::Unbound(LedgerScope::Aggregate)),
+            SafetyStoreError::CapacityRefusal(CapacityRefusalDetail::AdmissionOverflow {
+                scope: LedgerScope::Partition,
+                charge: 1,
+                current: 2,
+                next: 3,
+                cap: 2,
+            }),
+        ]
+    });
+    assert_eq!(
+        allocs, 0,
+        "typed `Copy` refusal payloads must construct without heap allocation"
+    );
+    assert!(errs[0].to_string().contains("metadata already present"));
+    assert!(errs[1].to_string().contains("fresh durability acknowledgement"));
+    assert!(errs[2].to_string().contains("signature length 9 > s_sig=8"));
+    assert!(errs[3].to_string().contains("aggregate authority not bound"));
+    assert!(errs[4].to_string().contains("over cap 2"));
+}

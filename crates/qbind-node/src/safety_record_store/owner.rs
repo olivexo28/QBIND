@@ -14,7 +14,9 @@ use sha3::{Digest, Sha3_256};
 
 use super::backend::{PublishOutcome, SafetyBackend};
 use super::codec::{compute_evidence_lock_binding, decode_record, encode_record};
-use super::error::SafetyStoreError;
+use super::error::{
+    AlreadyEstablishedKind, CapacityRefusalDetail, RecoveryRequiredReason, SafetyStoreError,
+};
 use super::profile::{
     context_owner_ceiling_term, context_ownership_charge, max_component_aggregate_bytes,
     max_context_ownership_bytes, max_retained_generation_bytes, max_safety_record_bytes,
@@ -208,11 +210,10 @@ impl SafetyRecordOwner {
         let charge = context_ownership_charge(&ctx, wrapper_size)?;
         if charge > context_owner_ceiling_term(&ctx, wrapper_size)? {
             return Err(SafetyStoreError::CapacityRefusal(
-                format!(
-                    "context validator vector capacity {} exceeds the normalized per-owner term",
-                    ctx.validators.capacity()
-                )
-                .into(),
+                CapacityRefusalDetail::ContextOwnerExceeded {
+                    capacity: ctx.validators.capacity() as u128,
+                    limit: context_owner_ceiling_term(&ctx, wrapper_size)?,
+                },
             ));
         }
         let context_reservation = backend.context_accounting().reserve(charge)?;
@@ -391,7 +392,7 @@ impl SafetyRecordOwner {
         match (meta_present, record_present) {
             (true, _) => {
                 return Err(SafetyStoreError::AlreadyEstablished(
-                    "metadata already present".into(),
+                    AlreadyEstablishedKind::MetadataPresent,
                 ))
             }
             (false, true) => {
@@ -602,7 +603,7 @@ impl SafetyRecordOwner {
         // read/write. Reopening does not bypass this.
         if self.backend.recovery_required() {
             return PublishResult::RefusedPreWrite(SafetyStoreError::RecoveryRequired(
-                "a fresh durability acknowledgement (O5/O1) is required before O4".into(),
+                RecoveryRequiredReason::FreshAcknowledgementRequired,
             ));
         }
 
