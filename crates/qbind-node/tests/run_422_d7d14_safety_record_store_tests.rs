@@ -1095,6 +1095,34 @@ fn real_representation_layout_decomposition() {
     // own basis, and the inequality below (mirroring the compile-time assertion in
     // the component root) verifies it actually covers the measured layout.
     let handle_charge = validated_holder_handle_bytes();
+    // MEASURED field inventory behind `validated_holder_handle_bytes()` (§3 defect
+    // #1): print every term so the helper's reserved charge is recorded from the
+    // executed target rather than inferred from the `validated − retained`
+    // subtraction. The helper adds a separate alignment allowance, so the helper
+    // return is NOT required to equal the subtraction — it must only *cover* it.
+    let ev = std::mem::size_of::<qbind_node::safety_record_store::record::EvidenceStatus>();
+    let vecdesc = std::mem::size_of::<Vec<u8>>();
+    let digest = std::mem::size_of::<[u8; 32]>();
+    let opt_u64 = std::mem::size_of::<Option<u64>>();
+    let opt_res =
+        std::mem::size_of::<Option<qbind_node::safety_record_store::accounting::Reservation>>();
+    let align_vr = std::mem::align_of::<qbind_node::safety_record_store::record::ValidatedRecord>();
+    let field_inventory = ev + vecdesc + digest + opt_u64 + opt_res;
+    println!(
+        "MEASURED handle inventory: EvidenceStatus={ev} Vec<u8>={vecdesc} [u8;32]={digest} \
+         Option<u64>={opt_u64} Option<Reservation>={opt_res} align<ValidatedRecord>={align_vr} \
+         field_inventory={field_inventory} helper_return={handle_charge} \
+         (validated−retained subtraction={})",
+        validated - retained
+    );
+    // The helper return is exactly the inventory plus one alignment allowance, and
+    // it covers (is ≥) the real inline handle fields — it is a reserved charge on
+    // its own basis, not the subtraction.
+    assert_eq!(
+        handle_charge as usize,
+        field_inventory + align_vr,
+        "helper return must equal its field inventory plus one alignment allowance"
+    );
     assert!(
         validated <= retained + handle_charge,
         "retained generation ({retained}) + independently-inventoried handle charge \
@@ -2821,7 +2849,7 @@ fn acct_valid_qc_publish_readback_recover_within_ceiling() {
 fn acct_o3_holder_charge_includes_enforced_handle_term() {
     use qbind_node::safety_record_store::profile::max_retained_generation_bytes;
     use qbind_node::safety_record_store::record::{
-        size_of_timeout_msg, validated_holder_handle_bytes,
+        size_of_timeout_msg, validated_holder_handle_bytes, EvidenceDiscriminant, EvidenceStatus,
     };
 
     let dir = tempfile::tempdir().unwrap();
@@ -2831,24 +2859,61 @@ fn acct_o3_holder_charge_includes_enforced_handle_term() {
     let cap = backend.accounting_cap().unwrap();
 
     // Independently derive the complete per-proof charge from the public bounds.
+    // This is RESERVATION-WIRING and LIFETIME evidence: the expected value comes
+    // from the same public bound helpers the component charges against; it does
+    // NOT independently prove all allocation capacities or peak coexistence.
     let rec = max_safety_record_bytes(&ctx).unwrap();
     let gen = max_retained_generation_bytes(&ctx, size_of_timeout_msg()).unwrap();
     let handle = validated_holder_handle_bytes();
     let complete_charge = rec + gen + handle;
+    println!(
+        "MEASURED O3 holder charge terms: rec={rec} gen={gen} handle={handle} \
+         complete_charge(rec+gen+handle)={complete_charge}"
+    );
     assert!(
         handle > 0,
         "the handle term must be a genuinely non-zero enforced charge"
     );
 
-    // Publish, then take a real O3 proof and observe the real partition delta.
+    // Publish the intended LOCKED (QC-derived) record and PROVE it durably
+    // acknowledged at the expected new revision before proceeding to O3. The prior
+    // revision ignored `publish_locked`'s result and could reach O3 without having
+    // established that the intended locked publication succeeded.
     let qc = valid_wire_qc(&ctx, [9u8; 32], 5);
     let locked = make_locked_qc(&ctx, [9u8; 32], 5, qc, None).unwrap();
-    owner.publish_locked(locked, 0, None::<&FixtureCommittedHistory>);
+    assert_eq!(
+        owner.publish_locked(locked, 0, None::<&FixtureCommittedHistory>),
+        PublishResult::DurableAcknowledged { new_revision: 1 },
+        "the intended locked publication must durably acknowledge at revision 1 \
+         before O3 reads it back"
+    );
     assert_eq!(backend.accounting_current(), 0, "clean before O3");
 
     let tok = owner
         .read_validate(None::<&FixtureCommittedHistory>)
         .unwrap();
+    // The O3 proof must be the intended locked, QC-derived evidence at the
+    // expected revision, carried Unverified — the charge below is wired to THIS
+    // proof, not to some other published state.
+    assert_eq!(
+        tok.publication_revision(),
+        1,
+        "O3 proof must carry the expected published revision"
+    );
+    assert!(
+        tok.retained().is_locked(),
+        "O3 proof must be the locked variant"
+    );
+    assert_eq!(
+        tok.retained().evidence_discriminant(),
+        EvidenceDiscriminant::QcDerived,
+        "O3 proof must carry the intended QC-derived evidence identity"
+    );
+    assert_eq!(
+        tok.evidence_status(),
+        EvidenceStatus::Unverified,
+        "every O3 proof is carried Unverified (stage-2 is unwired)"
+    );
     let one_holder = backend.accounting_current();
     assert_eq!(
         one_holder, complete_charge,
