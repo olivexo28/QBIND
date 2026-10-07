@@ -180,7 +180,11 @@ pub fn admit_evidence_capnorm(
                 CapnormSite::QcSignaturesDescriptor,
             )?;
             for (i, sig) in qc.signatures.iter().enumerate() {
-                check_capnorm(sig.capacity() as u128, s_sig, CapnormSite::QcSignatureBuffer(i))?;
+                check_capnorm(
+                    sig.capacity() as u128,
+                    s_sig,
+                    CapnormSite::QcSignatureBuffer(i),
+                )?;
             }
         }
         SupportingEvidence::TcDerived { high_qc, tc } => {
@@ -191,7 +195,11 @@ pub fn admit_evidence_capnorm(
             )?;
             check_capnorm(tc.signers.capacity() as u128, n, CapnormSite::TcSigners)?;
             if let Some(h) = &tc.high_qc {
-                check_capnorm(h.signers.capacity() as u128, n, CapnormSite::TcHighQcSigners)?;
+                check_capnorm(
+                    h.signers.capacity() as u128,
+                    n,
+                    CapnormSite::TcHighQcSigners,
+                )?;
             }
             check_capnorm(
                 tc.signed_timeouts.capacity() as u128,

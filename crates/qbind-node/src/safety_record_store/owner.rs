@@ -429,7 +429,9 @@ impl SafetyRecordOwner {
         // on every exit (success, refusal, error, uncertainty) via its drop at end
         // of scope.
         let o1_pub_charge = max_safety_record_bytes(self.pinned())?
-            .checked_add(super::accounting::publication_staging_charge(self.pinned())?)
+            .checked_add(super::accounting::publication_staging_charge(
+                self.pinned(),
+            )?)
             .ok_or_else(|| {
                 SafetyStoreError::ArithmeticOverflow("O1 bootstrap publication charge".into())
             })?;
