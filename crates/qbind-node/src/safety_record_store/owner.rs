@@ -470,17 +470,21 @@ impl SafetyRecordOwner {
     pub fn open(&self) -> Result<SafetyMeta, SafetyStoreError> {
         let _guard = self.backend.lock_domain();
         // Admit O2's read/decode working set (the record-sized read-back buffer,
-        // the fixed metadata buffer, and the one transient decoded generation
-        // produced by `load_established`) against the shared aggregate budget
-        // BEFORE those component-owned allocations/copies occur (§ 13.7). O2 is an
-        // inspection path and, unlike O3/O4/O5, previously invoked
-        // `load_established` without any operation reservation, so an established
-        // read-back and decode could escape aggregate admission. The reservation
-        // releases on every exit (success or refusal) via its drop.
-        let gen = max_retained_generation_bytes(self.pinned(), size_of_timeout_msg())?;
+        // the fixed metadata buffer, and the one TRANSIENT decoded object produced
+        // by `load_established`) against the shared aggregate budget BEFORE those
+        // component-owned allocations/copies occur (§ 13.7). The decoded object is
+        // reserved at the TRANSIENT decoded ceiling (`max_transient_decoded_working_set`),
+        // NOT the retained-generation ceiling: a `DecodedRecord` carries the two
+        // validated-then-discarded identity-header fields and so is strictly larger
+        // than the retained generation, and the retained inline ceiling is not the
+        // transient decoder's size. O2 is an inspection path and, unlike O3/O4/O5,
+        // previously invoked `load_established` without any operation reservation,
+        // so an established read-back and decode could escape aggregate admission.
+        // The reservation releases on every exit (success or refusal) via its drop.
+        let transient = super::accounting::max_transient_decoded_working_set(self.pinned())?;
         let o2_charge = super::profile::max_safety_record_bytes(self.pinned())?
             .checked_add(super::backend::META_ENCODED_LEN)
-            .and_then(|b| b.checked_add(gen))
+            .and_then(|b| b.checked_add(transient))
             .ok_or_else(|| {
                 SafetyStoreError::ArithmeticOverflow("O2 read/decode working set".into())
             })?;
@@ -560,18 +564,40 @@ impl SafetyRecordOwner {
             ));
         }
 
+        // Allocation-free structural/capacity PREFLIGHT of the by-value candidate
+        // (§ 13.2A / § 13.7, D7-D14 O4 admission-order correction): the candidate is
+        // owned at by-value entry, so its evidence counts/lengths/widths can be refused
+        // here — before the O4 reservation, the authoritative predecessor read/decode/
+        // validation (`load_established` + predecessor `validate_decoded`), and every
+        // component-owned candidate clone, binding `cert` scratch, or `encode_record`
+        // buffer. A candidate that must be refused for an over-bound count/length/width
+        // (e.g. `S_sig=8` with a 9-byte signature) therefore pays no avoidable
+        // predecessor read or encode. This preflight performs no allocation and does NOT
+        // substitute for the authoritative predecessor validation enforced below.
+        if let Err(e) = super::codec::admit_supporting_evidence(&candidate.evidence, self.pinned())
+        {
+            return PublishResult::RefusedPreWrite(e);
+        }
+
         // Reserve the O4 working-set peak against the shared aggregate accountant
         // BEFORE any O4 allocation/copy (§ 13.7 / § 13.7B). It bounds the
-        // simultaneous coexistence of: the validated authoritative predecessor
-        // (one decoded generation) and the admitted candidate (one decoded
-        // generation) — two generations — plus the three record-sized buffers
-        // that peak together across the operation (the predecessor read-back, the
-        // candidate publication buffer, and the validation re-encode scratch).
-        // A capacity refusal here is a pre-write refusal that leaves the
-        // established evidence and any admitted retained holders untouched; the
-        // reservation releases on every exit (refusal, error, uncertainty,
-        // success) via its drop at end of scope.
-        let gen = match max_retained_generation_bytes(self.pinned(), size_of_timeout_msg()) {
+        // simultaneous coexistence of the live TRANSIENT decoded objects and the
+        // record-sized buffers that peak together across the operation. The two
+        // decoded terms are reserved at the TRANSIENT decoded ceiling
+        // (`max_transient_decoded_working_set`) — a `DecodedRecord` is larger than
+        // the retained generation, so the retained-generation ceiling under-reserves
+        // it — covering: (phase A) the authoritative predecessor decoded + its
+        // validation copy, then (phase B) the candidate decoded; plus the three
+        // record-sized buffers (predecessor read-back, candidate publication, and
+        // the validation re-encode scratch) and the fixed metadata buffer. The
+        // predecessor decoded is dropped before the candidate is built and the final
+        // candidate validation consumes (does not clone) the decoded + encoded
+        // operands, so no more than two transient decoded objects and three
+        // record-sized buffers are ever simultaneously live. A capacity refusal here
+        // is a pre-write refusal that leaves the established evidence and any admitted
+        // retained holders untouched; the reservation releases on every exit (refusal,
+        // error, uncertainty, success) via its drop at end of scope.
+        let transient = match super::accounting::max_transient_decoded_working_set(self.pinned()) {
             Ok(v) => v,
             Err(e) => return PublishResult::RefusedPreWrite(e),
         };
@@ -579,9 +605,10 @@ impl SafetyRecordOwner {
             Ok(v) => v,
             Err(e) => return PublishResult::RefusedPreWrite(e),
         };
-        let o4_charge = gen
+        let o4_charge = transient
             .checked_mul(2)
-            .and_then(|g| rec.checked_mul(3).and_then(|r| g.checked_add(r)));
+            .and_then(|g| rec.checked_mul(3).and_then(|r| g.checked_add(r)))
+            .and_then(|s| s.checked_add(super::backend::META_ENCODED_LEN));
         let o4_charge = match o4_charge {
             Some(v) => v,
             None => {
@@ -598,7 +625,7 @@ impl SafetyRecordOwner {
         // Re-read and establish authoritative state under the ownership boundary:
         // presence, structure, metadata↔record revision consistency, and
         // pinned-context correspondence are all enforced centrally.
-        let (meta, _current_bytes, current) = match self.load_established() {
+        let (meta, current_bytes, current) = match self.load_established() {
             Ok(triple) => triple,
             Err(e) => return PublishResult::RefusedPreWrite(e),
         };
@@ -610,34 +637,35 @@ impl SafetyRecordOwner {
             });
         }
 
+        // Capture the predecessor lock view for the eligibility check BEFORE the
+        // predecessor decoded object is consumed by validation, so the authoritative
+        // predecessor can be validated by VALUE (no retained clone) while its one
+        // cheap scalar field remains available afterwards.
+        let predecessor_lock_view = match &current.record {
+            SafetyRecord::Locked(cur) => Some(cur.lock_view),
+            _ => None,
+        };
+
         // Validate the authoritative PREDECESSOR itself (structural + semantic)
         // before relying on it as the eligibility base; O4 must not act on an
-        // unvalidated predecessor. The candidate is validated separately below.
-        if let Err(e) = validate_decoded(current.clone(), _current_bytes, self.pinned(), history) {
+        // unvalidated predecessor. The predecessor decoded object and its read-back
+        // bytes are CONSUMED here (not cloned): the predecessor is dropped before the
+        // candidate decoded object is built, so the two transient decoded objects do
+        // not coexist. The candidate is validated separately below.
+        if let Err(e) = validate_decoded(current, current_bytes, self.pinned(), history) {
             return PublishResult::RefusedPreWrite(e);
         }
 
         // Transition eligibility: strictly-increasing lock view.
-        if let SafetyRecord::Locked(cur) = &current.record {
-            if candidate.lock_view <= cur.lock_view {
+        if let Some(cur_lock_view) = predecessor_lock_view {
+            if candidate.lock_view <= cur_lock_view {
                 return PublishResult::RefusedPreWrite(SafetyStoreError::TransitionIneligible(
                     format!(
                         "candidate lock_view {} not strictly greater than current {}",
-                        candidate.lock_view, cur.lock_view
+                        candidate.lock_view, cur_lock_view
                     ),
                 ));
             }
-        }
-
-        // Structural admission of the candidate evidence BEFORE any component-owned
-        // variable-size allocation or copy (§ 13.2A / § 13.7): the evidence-binding
-        // `cert` scratch in `compute_evidence_lock_binding`, the candidate clone, and
-        // `encode_record`'s buffer all follow. Refuse an over-bound count/length/width
-        // (e.g. `S_sig=8` with a 9-byte signature) here, before allocating the binding
-        // buffer — not after encoding.
-        if let Err(e) = super::codec::admit_supporting_evidence(&candidate.evidence, self.pinned())
-        {
-            return PublishResult::RefusedPreWrite(e);
         }
 
         // Recompute the evidence binding so the stored record is self-consistent,
@@ -671,14 +699,20 @@ impl SafetyRecordOwner {
             publication_revision: new_revision,
             record: SafetyRecord::Locked(candidate),
         };
-        // Full semantic validation of the candidate before any write.
+        // Full semantic validation of the candidate before any write. The decoded
+        // candidate and its encoded bytes are CONSUMED (not cloned) by validation,
+        // which re-encodes the decoded content and establishes decoded↔encoded
+        // correspondence; the validated proof RETAINS those exact encoded bytes, so
+        // the subsequent atomic publish reuses `validated.encoded()` rather than a
+        // second copy of the publication buffer.
         let encoded = match encode_record(&decoded, self.pinned()) {
             Ok(b) => b,
             Err(e) => return PublishResult::RefusedPreWrite(e),
         };
-        if let Err(e) = validate_decoded(decoded.clone(), encoded.clone(), self.pinned(), history) {
-            return PublishResult::RefusedPreWrite(e);
-        }
+        let validated = match validate_decoded(decoded, encoded, self.pinned(), history) {
+            Ok(v) => v,
+            Err(e) => return PublishResult::RefusedPreWrite(e),
+        };
 
         let new_meta = SafetyMeta {
             meta_format_version: META_FORMAT_VERSION,
@@ -687,7 +721,7 @@ impl SafetyRecordOwner {
         };
         match self
             .backend
-            .publish_atomic(&guard, &new_meta.encode(), &encoded)
+            .publish_atomic(&guard, &new_meta.encode(), validated.encoded())
         {
             PublishOutcome::DurableAcknowledged => {
                 // Deterministic post-acknowledgement / pre-effectiveness crash
@@ -725,19 +759,38 @@ impl SafetyRecordOwner {
     pub fn reacknowledge(&self, retained: &ValidatedRecord) -> PublishResult {
         let guard = self.backend.lock_domain();
 
-        // Reserve the O5 stored read-back buffer against the shared aggregate
-        // accountant BEFORE `load_established` copies the stored payload into a
-        // component-owned buffer (§ 13.7: reservations precede the copy). The
-        // retained operand is already charged by the holder reservation carried
-        // in `retained`, so O5 does not add an uncharged fourth record-sized
-        // buffer; this single read-back reservation plus the pre-charged retained
-        // holder bound the O5 complete-content comparison. Releases on every exit
-        // via drop at end of scope.
+        // Reserve the O5 working set against the shared aggregate accountant BEFORE
+        // `load_established` copies the stored payload into a component-owned buffer
+        // (§ 13.7: reservations precede the copy). `load_established` builds THREE
+        // live objects O5 must cover: the record-sized read-back buffer, the fixed
+        // metadata buffer, and one TRANSIENT decoded object (reserved at the
+        // transient decoded ceiling, NOT the smaller retained-generation ceiling).
+        // The retained original operand is already charged by the holder reservation
+        // carried in `retained`, so O5 does not add an uncharged record-sized buffer
+        // for it; this read-back + metadata + transient-decode reservation plus the
+        // pre-charged retained holder bound the O5 complete-content comparison.
+        // Releases on every exit via drop at end of scope.
         let o5_readback = match max_safety_record_bytes(self.pinned()) {
             Ok(v) => v,
             Err(e) => return PublishResult::RefusedPreWrite(e),
         };
-        let _o5_res = match self.backend.accounting().reserve(o5_readback) {
+        let o5_transient = match super::accounting::max_transient_decoded_working_set(self.pinned())
+        {
+            Ok(v) => v,
+            Err(e) => return PublishResult::RefusedPreWrite(e),
+        };
+        let o5_charge = o5_readback
+            .checked_add(super::backend::META_ENCODED_LEN)
+            .and_then(|b| b.checked_add(o5_transient));
+        let o5_charge = match o5_charge {
+            Some(v) => v,
+            None => {
+                return PublishResult::RefusedPreWrite(SafetyStoreError::ArithmeticOverflow(
+                    "O5 read-back working set".into(),
+                ))
+            }
+        };
+        let _o5_res = match self.backend.accounting().reserve(o5_charge) {
             Ok(r) => r,
             Err(e) => return PublishResult::RefusedPreWrite(e),
         };

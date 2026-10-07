@@ -2292,7 +2292,17 @@ fn o2_open_working_set_admitted_and_bounded_by_reservation() {
         qbind_node::safety_record_store::record::size_of_timeout_msg(),
     )
     .unwrap();
-    let o2_charge = rec + META_ENCODED_LEN_MIRROR + gen;
+    let transient =
+        qbind_node::safety_record_store::accounting::max_transient_decoded_working_set(&ctx)
+            .unwrap();
+    // The transient decoded ceiling EXCEEDS the retained-generation ceiling: a
+    // `DecodedRecord` carries the validated-then-discarded identity header, so O2
+    // reserves the TRANSIENT ceiling, not the retained-generation ceiling.
+    assert!(
+        transient > gen,
+        "transient decoded ceiling {transient} must exceed retained generation ceiling {gen}"
+    );
+    let o2_charge = rec + META_ENCODED_LEN_MIRROR + transient;
 
     // Directly bound the actual decoded **working set** measured IN PLACE on the
     // borrowed `DecodedRecord` — its inline representation PLUS the `Vec::capacity()`
@@ -2322,9 +2332,9 @@ fn o2_open_working_set_admitted_and_bounded_by_reservation() {
         "the inline core {decoded_core} is only part of the full backed working set {decoded_full}"
     );
     assert!(
-        decoded_full <= gen,
+        decoded_full <= transient,
         "the full decoded working set (inline + capacity-measured backings) {decoded_full} \
-         fits its reserved generation term {gen}"
+         fits its reserved transient decoded term {transient}"
     );
     assert!(decoded.publication_revision == 1);
 
@@ -5031,5 +5041,284 @@ fn d7d14_o2_decoded_working_set_measured_in_place_tc() {
     assert!(
         live <= gen,
         "the live TC decoded working set {live} fits its reserved generation term {gen}"
+    );
+}
+
+// ===========================================================================
+// RUN 422 D7-D14 — MAXIMUM fully-populated TC fixture and the transient
+// decoded accounting correction.
+//
+// The quorum-sized `valid_tc_record` creates only `ceil(2N/3)` members (3 for
+// N=4) — it does NOT exercise the maximum supported nested contents. This
+// fixture populates every TC backing at the profile maximum (N timeout entries,
+// N unique signers, N record-level/TC/nested high-QC signers, maximum signature
+// lengths) so the transient decoded working set is measured at its true peak.
+// ===========================================================================
+
+/// A VALID, MAXIMALLY-populated TC-derived locked record: N timeout entries with
+/// N unique authorized signers, N record-level high-QC signers, N TC high-QC
+/// signers (exact correspondence), N signers in every timeout entry's nested
+/// high-QC, and maximum-length signatures. Distinct from the quorum-sized
+/// `valid_tc_record` (which is preserved); this adds the maximum case separately.
+fn valid_tc_record_max(
+    ctx: &PinnedSafetyContext,
+    lock_view: u64,
+    timeout_view: u64,
+) -> LockedRecord {
+    let need = ctx.n(); // N — the supported maximum, not ceil(2N/3)
+    let high = LogicalQc::new(
+        [9u8; 32],
+        lock_view,
+        (0..need as u64).map(ValidatorId::new).collect(),
+    );
+    let mut signed = Vec::new();
+    for i in 0..need as u64 {
+        let mut t = TimeoutMsg::new(timeout_view, Some(high.clone()), ValidatorId::new(i));
+        t.set_signature(vec![0xCD; S_SIG]);
+        signed.push(t);
+    }
+    signed.shrink_to_fit();
+    let tc = TimeoutCertificate {
+        view: timeout_view + 1,
+        high_qc: Some(high.clone()),
+        signers: (0..need as u64).map(ValidatorId::new).collect(),
+        signed_timeouts: signed,
+        timeout_view,
+    };
+    let evidence = SupportingEvidence::TcDerived {
+        high_qc: high.clone(),
+        tc,
+    };
+    let binding = qbind_node::safety_record_store::codec::compute_evidence_lock_binding(
+        &[9u8; 32],
+        lock_view,
+        &evidence,
+        &ctx.authority_context_ref,
+        ctx,
+    )
+    .unwrap();
+    LockedRecord {
+        lock_block_id: [9u8; 32],
+        lock_view,
+        evidence_lock_binding: binding,
+        authority_context_ref: ctx.authority_context_ref,
+        committed_anchor: None,
+        predecessor_ref: None,
+        evidence,
+    }
+}
+
+/// Executed counterexample + correction (task §4/§5): the maximum TC's live
+/// transient decoded working set EXCEEDS the retained-generation ceiling the O2
+/// reservation previously reused, and is covered only by the corrected transient
+/// decoded ceiling — all within the UNCHANGED accepted aggregate.
+#[test]
+fn d7d14_transient_decoded_max_tc_exceeds_retained_gen_but_fits_transient_ceiling() {
+    use qbind_node::safety_record_store::accounting::{
+        decoded_working_set_charge, max_transient_decoded_working_set,
+    };
+    use qbind_node::safety_record_store::profile::{
+        max_aggregate_retained_bytes, max_retained_generation_bytes,
+    };
+    use qbind_node::safety_record_store::record::{size_of_decoded_record, size_of_timeout_msg};
+    let ctx = ctx_n(4);
+
+    // Build and round-trip the MAXIMUM TC so the measured object is the real
+    // decoder output (exact-capacity backings), exactly as O2/O4/O5 would decode.
+    let ltc = valid_tc_record_max(&ctx, 5, 6);
+    let decoded = DecodedRecord {
+        persistence_format_version: 1,
+        network_genesis_id: ctx.network_genesis_id,
+        publication_revision: 1,
+        record: SafetyRecord::Locked(ltc),
+    };
+    let enc = encode_record(&decoded, &ctx).unwrap();
+    let decoded = decode_record(&enc, &ctx).unwrap();
+
+    // Independent field/capacity inventory of the live decoded object's backings.
+    let (inline, backing) = match &decoded.record {
+        SafetyRecord::Locked(l) => match &l.evidence {
+            SupportingEvidence::TcDerived { high_qc, tc } => {
+                let mut b = high_qc.signers.capacity() * 8;
+                b += tc.signers.capacity() * 8;
+                b += tc.high_qc.as_ref().unwrap().signers.capacity() * 8;
+                b += tc.signed_timeouts.capacity() * size_of_timeout_msg() as usize;
+                for t in &tc.signed_timeouts {
+                    b += t.signature.capacity();
+                    b += t.high_qc.as_ref().unwrap().signers.capacity() * 8;
+                }
+                (size_of_decoded_record() as usize, b)
+            }
+            other => panic!("expected TC evidence, got {other:?}"),
+        },
+        other => panic!("expected Locked, got {other:?}"),
+    };
+    let live = decoded_working_set_charge(&decoded).unwrap();
+    assert_eq!(
+        live,
+        (inline + backing) as u128,
+        "borrowed in-place charge equals the manual field/capacity inventory"
+    );
+    // Executed derivation on the ACTUAL target: inline 408 + backing 704 = 1112.
+    assert_eq!(backing as u128, 704, "maximum TC evidence backings");
+    assert_eq!(inline as u128, 408, "transient decoded inline object");
+    assert_eq!(live, 1112, "total transient decoded footprint");
+
+    // The COUNTEREXAMPLE the O2/O4/O5 reservations previously reused: the
+    // retained-generation ceiling is 1104 and is EXCEEDED by the live transient
+    // decoded object (1112) — an executed regression, not a derived figure.
+    let retained_gen = max_retained_generation_bytes(&ctx, size_of_timeout_msg()).unwrap();
+    assert_eq!(retained_gen, 1104, "retained-generation ceiling");
+    assert!(
+        live > retained_gen,
+        "the maximum transient decoded object {live} EXCEEDS the retained-generation \
+         reservation {retained_gen} it was previously charged against (pre-correction gap)"
+    );
+
+    // The CORRECTION: the transient decoded ceiling covers the live object, and is
+    // strictly larger than (not substituted by) the retained-generation ceiling.
+    let transient = max_transient_decoded_working_set(&ctx).unwrap();
+    assert_eq!(transient, 1112, "transient decoded ceiling = inline + max backing");
+    assert!(live <= transient, "the live transient decoded object fits its corrected term");
+    assert!(transient > retained_gen, "transient ceiling strictly exceeds retained ceiling");
+
+    // The accepted aggregate is UNCHANGED by the correction (still 7772 for N=4).
+    let agg = max_aggregate_retained_bytes(
+        &ctx,
+        size_of_timeout_msg(),
+        max_safety_record_bytes(&ctx).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(agg, 7772, "accepted N=4 aggregate unchanged");
+    // The corrected per-operation transient reservations remain within the aggregate.
+    let o4_charge = 2 * transient + 3 * max_safety_record_bytes(&ctx).unwrap() + (2 + 32 + 8);
+    assert!(o4_charge <= agg, "corrected O4 reservation fits the unchanged aggregate");
+}
+
+/// The maximum TC drives REAL O4 publish, O3 read-validate, and O5 reacknowledge
+/// operations: each admits and its observed peak stays within the unchanged
+/// accepted aggregate, and the retained O3 proof coexists with O5.
+#[test]
+fn d7d14_max_tc_o4_o3_o5_real_operations_within_aggregate() {
+    let dir = tempfile::tempdir().unwrap();
+    let ctx = ctx_n(4);
+    let owner = init_owner(dir.path(), &ctx);
+    let backend = owner.backend_for_test();
+    let agg_cap = backend.accounting_aggregate_cap().unwrap();
+
+    // O4: publish the MAXIMUM TC. The corrected transient reservation admits it and
+    // the observed peak stays within the accepted aggregate; it fully releases.
+    let ltc = valid_tc_record_max(&ctx, 5, 6);
+    assert_eq!(
+        owner.publish_locked(ltc, 0, None::<&FixtureCommittedHistory>),
+        PublishResult::DurableAcknowledged { new_revision: 1 }
+    );
+    assert!(
+        backend.accounting_aggregate_peak() <= agg_cap,
+        "maximum-TC O4 peak within the unchanged aggregate"
+    );
+    assert_eq!(backend.accounting_current(), 0, "O4 released after publish");
+
+    // O3: retain a proof (holder charge held live) over the maximum TC.
+    let proof = owner
+        .read_validate(None::<&FixtureCommittedHistory>)
+        .unwrap();
+    assert!(proof.retained().is_locked());
+    let with_holder = backend.accounting_current();
+    assert!(with_holder > 0 && with_holder <= agg_cap, "O3 holder within aggregate");
+
+    // O5: reacknowledge the surviving maximum-TC publication while the O3 proof is
+    // still live — peak coexistence of the retained holder and the O5 working set
+    // stays within the unchanged aggregate.
+    assert_eq!(
+        owner.reacknowledge(&proof),
+        PublishResult::DurableAcknowledged { new_revision: 1 }
+    );
+    assert!(
+        backend.accounting_aggregate_peak() <= agg_cap,
+        "O5 + live O3 holder peak within the unchanged aggregate"
+    );
+    drop(proof);
+    assert_eq!(backend.accounting_current(), 0, "all operational charges released");
+}
+
+/// O4 admission-order correction (task §6): the allocation-free candidate
+/// structural/capacity preflight runs BEFORE the authoritative predecessor is
+/// read, decoded, validated, or re-encoded. With an ESTABLISHED LOCKED predecessor
+/// (whose validation re-encodes its evidence payload and so would bump the evidence
+/// encode counter), an over-bound candidate is refused with the evidence encode
+/// counter still at zero — proving no predecessor evidence read/validate/encode
+/// occurred before the candidate refusal — and the locked predecessor is left
+/// intact. The candidate preflight does NOT replace predecessor validation, which
+/// still runs for an admissible candidate (positive control at the end).
+#[test]
+fn d7d14_o4_candidate_preflight_precedes_locked_predecessor_read() {
+    use qbind_node::safety_record_store::codec::{
+        evidence_payload_encode_count, reset_evidence_payload_encode_count,
+    };
+    let dir = tempfile::tempdir().unwrap();
+    let ctx = ctx_n(4);
+    let owner = init_owner(dir.path(), &ctx);
+
+    // Establish a LOCKED predecessor (rev 1) — it carries evidence, so a genuine
+    // predecessor validation would re-encode that evidence payload.
+    let base = make_locked_qc(&ctx, [9u8; 32], 5, valid_wire_qc(&ctx, [9u8; 32], 5), None).unwrap();
+    assert_eq!(
+        owner.publish_locked(base, 0, None::<&FixtureCommittedHistory>),
+        PublishResult::DurableAcknowledged { new_revision: 1 }
+    );
+    let before = owner
+        .read_validate(None::<&FixtureCommittedHistory>)
+        .unwrap();
+    assert!(before.retained().is_locked());
+    assert_eq!(before.retained().publication_revision, 1);
+
+    // Over-bound candidate at the current expected revision.
+    let mut candidate =
+        make_locked_qc(&ctx, [9u8; 32], 9, valid_wire_qc(&ctx, [9u8; 32], 9), None).unwrap();
+    if let SupportingEvidence::QcDerived(qc) = &mut candidate.evidence {
+        let mut inflated: Vec<Vec<u8>> = Vec::with_capacity(100_000);
+        inflated.append(&mut qc.signatures);
+        qc.signatures = inflated;
+    }
+
+    reset_evidence_payload_encode_count();
+    match owner.publish_locked(candidate, 1, None::<&FixtureCommittedHistory>) {
+        PublishResult::RefusedPreWrite(SafetyStoreError::CapacityRefusal(_)) => {}
+        other => panic!("expected pre-write CapacityRefusal, got {other:?}"),
+    }
+    // Zero evidence encodes ⇒ the LOCKED predecessor was not validated/re-encoded
+    // before the candidate refusal: the allocation-free candidate preflight fired
+    // first. (The predecessor is locked, so a predecessor validation WOULD have
+    // produced a non-zero count.)
+    assert_eq!(
+        evidence_payload_encode_count(),
+        0,
+        "candidate preflight must precede the locked predecessor read/validate/encode"
+    );
+
+    // The locked predecessor is untouched by the refusal.
+    let after = owner
+        .read_validate(None::<&FixtureCommittedHistory>)
+        .unwrap();
+    assert_eq!(after.retained(), before.retained());
+    assert!(!owner.recovery_required());
+    // Release the retained O3 holders so the positive control runs against the
+    // same aggregate headroom as a normal successor publication.
+    drop(before);
+    drop(after);
+
+    // Positive control: an admissible successor IS validated (predecessor + candidate)
+    // and published — the preflight is bound-specific, not a blanket refusal, and does
+    // not bypass the authoritative predecessor validation.
+    reset_evidence_payload_encode_count();
+    let good = make_locked_qc(&ctx, [9u8; 32], 9, valid_wire_qc(&ctx, [9u8; 32], 9), None).unwrap();
+    assert_eq!(
+        owner.publish_locked(good, 1, None::<&FixtureCommittedHistory>),
+        PublishResult::DurableAcknowledged { new_revision: 2 }
+    );
+    assert!(
+        evidence_payload_encode_count() > 0,
+        "an admitted O4 does read/validate/encode (predecessor + candidate)"
     );
 }
