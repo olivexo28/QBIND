@@ -33,39 +33,12 @@ pub fn generation_charge(
     ctx: &PinnedSafetyContext,
     gen: &RetainedGeneration,
 ) -> Result<u128, SafetyStoreError> {
-    let mut total = size_of_retained_generation();
-    // Heap backings depend on the evidence variant.
-    match &gen.evidence {
-        SupportingEvidence::QcDerived(qc) => {
-            // signer_bitmap backing + signatures outer descriptor + per-sig bytes.
-            total = add(total, qc.signer_bitmap.capacity() as u128)?;
-            total = add(total, mul(qc.signatures.len() as u128, 24)?)?; // Vec<u8> descriptor
-            for sig in &qc.signatures {
-                total = add(total, sig.capacity() as u128)?;
-            }
-        }
-        SupportingEvidence::TcDerived { high_qc, tc } => {
-            total = add(
-                total,
-                mul(high_qc.signers.len() as u128, VALIDATOR_ID_WIDTH)?,
-            )?;
-            total = add(total, mul(tc.signers.len() as u128, VALIDATOR_ID_WIDTH)?)?;
-            if let Some(h) = &tc.high_qc {
-                total = add(total, mul(h.signers.len() as u128, VALIDATOR_ID_WIDTH)?)?;
-            }
-            total = add(
-                total,
-                mul(tc.signed_timeouts.len() as u128, size_of_timeout_msg())?,
-            )?;
-            for t in &tc.signed_timeouts {
-                total = add(total, t.signature.capacity() as u128)?;
-                if let Some(h) = &t.high_qc {
-                    total = add(total, mul(h.signers.len() as u128, VALIDATOR_ID_WIDTH)?)?;
-                }
-            }
-        }
-    }
-    // Shared allocation overhead charged once per retained generation.
+    // Inline wrapper + the actual **capacity**-measured heap backings + the
+    // shared-allocation overhead charged once per retained generation.
+    let mut total = add(
+        size_of_retained_generation(),
+        evidence_backing_capacity(&gen.evidence)?,
+    )?;
     total = add(total, ARC_CTRL)?;
 
     let cap = max_retained_generation_bytes(ctx, size_of_timeout_msg())?;
@@ -75,6 +48,88 @@ pub fn generation_charge(
         )));
     }
     Ok(total)
+}
+
+/// The **capacity-measured** heap-backing charge for a supporting-evidence value
+/// (§ 13.7A(b), D7-D14 capacity-aware correction).
+///
+/// Every variable-size backing is charged by its actual `Vec::capacity()`, not
+/// its `len()`: a structurally valid evidence value whose length fits the pinned
+/// bounds can still own a backing allocation whose **requested capacity** exceeds
+/// those bounds (e.g. a caller-supplied `Vec::with_capacity(huge)` holding only a
+/// few elements). Length admission alone therefore does **not** establish a
+/// retained-memory bound; the capacity charge does. This includes the *outer*
+/// descriptor arrays (`signatures`, `signers`, `signed_timeouts`) whose spare
+/// capacity is genuine allocated memory, not just the per-element buffers.
+pub fn evidence_backing_capacity(evidence: &SupportingEvidence) -> Result<u128, SafetyStoreError> {
+    let mut total: u128 = 0;
+    match evidence {
+        SupportingEvidence::QcDerived(qc) => {
+            // signer_bitmap backing + signatures outer descriptor capacity + per-sig bytes.
+            total = add(total, qc.signer_bitmap.capacity() as u128)?;
+            total = add(total, mul(qc.signatures.capacity() as u128, 24)?)?; // Vec<u8> descriptor array
+            for sig in &qc.signatures {
+                total = add(total, sig.capacity() as u128)?;
+            }
+        }
+        SupportingEvidence::TcDerived { high_qc, tc } => {
+            total = add(
+                total,
+                mul(high_qc.signers.capacity() as u128, VALIDATOR_ID_WIDTH)?,
+            )?;
+            total = add(
+                total,
+                mul(tc.signers.capacity() as u128, VALIDATOR_ID_WIDTH)?,
+            )?;
+            if let Some(h) = &tc.high_qc {
+                total = add(
+                    total,
+                    mul(h.signers.capacity() as u128, VALIDATOR_ID_WIDTH)?,
+                )?;
+            }
+            total = add(
+                total,
+                mul(tc.signed_timeouts.capacity() as u128, size_of_timeout_msg())?,
+            )?;
+            for t in &tc.signed_timeouts {
+                total = add(total, t.signature.capacity() as u128)?;
+                if let Some(h) = &t.high_qc {
+                    total = add(
+                        total,
+                        mul(h.signers.capacity() as u128, VALIDATOR_ID_WIDTH)?,
+                    )?;
+                }
+            }
+        }
+    }
+    Ok(total)
+}
+
+/// Capacity-aware **admission** of a supporting-evidence value against the
+/// per-generation retained ceiling (§ 13.7A(c.3), D7-D14 capacity-aware
+/// correction). Reuses [`evidence_backing_capacity`] so the *actual* owned
+/// backing capacity of caller-supplied evidence — not merely its structurally
+/// admitted length — is proven to fit `MAX_RETAINED_GENERATION_BYTES` **before**
+/// the component takes ownership, clones, or re-encodes it (the O4 candidate path
+/// and every builder/helper). A value whose spare capacity pushes the real
+/// footprint past the ceiling is refused with [`SafetyStoreError::CapacityRefusal`]
+/// — a pre-allocation refusal that leaves stored state and admitted evidence
+/// untouched — rather than admitted on its length and discovered too large only
+/// after the owning allocation already exists.
+pub fn admit_evidence_capacity(
+    evidence: &SupportingEvidence,
+    ctx: &PinnedSafetyContext,
+) -> Result<(), SafetyStoreError> {
+    let backing = evidence_backing_capacity(evidence)?;
+    let total = add(add(size_of_retained_generation(), backing)?, ARC_CTRL)?;
+    let cap = max_retained_generation_bytes(ctx, size_of_timeout_msg())?;
+    if total > cap {
+        return Err(SafetyStoreError::CapacityRefusal(format!(
+            "supporting-evidence backing capacity charge {total} exceeds \
+             MAX_RETAINED_GENERATION_BYTES {cap} (excess spare capacity)"
+        )));
+    }
+    Ok(())
 }
 
 /// The component-level aggregate accountant. Enforces the checked aggregate

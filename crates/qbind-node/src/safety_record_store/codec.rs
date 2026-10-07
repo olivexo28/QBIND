@@ -466,7 +466,13 @@ pub fn admit_supporting_evidence(
             admit_logical_qc_signers(high_qc.signers.len(), n, "record-level high_qc")?;
             admit_timeout_cert(tc, ctx)
         }
-    }
+    }?;
+    // Capacity-aware bound (§ 13.7A, D7-D14): the structural checks above bound the
+    // declared **lengths**/counts, but a valid-length backing can still own spare
+    // capacity. Prove the actual owned backing capacity of this (possibly
+    // caller-supplied) evidence fits the per-generation retained ceiling BEFORE any
+    // component-owned clone / binding-scratch / re-encode allocation depends on it.
+    super::accounting::admit_evidence_capacity(evidence, ctx)
 }
 
 fn admit_count_fits_prefix(count: usize, what: &str) -> Result<(), SafetyStoreError> {
