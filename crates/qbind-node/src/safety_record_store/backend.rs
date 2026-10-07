@@ -251,8 +251,11 @@ impl SafetyBackend {
     /// Source/test-only: the shared **aggregate** admission authority's current
     /// combined charge / observed peak / bound ceiling across BOTH the
     /// operational and context partitions (§ 13.7, finding #4). The combined
-    /// regression asserts the aggregate ceiling equals the sum of the two
-    /// sub-ceilings and that the live combined charge never exceeds it.
+    /// regression asserts the aggregate ceiling equals the accepted
+    /// profile-derived operational aggregate (`agg_cap == op_cap`), **not** the
+    /// sum of the two sub-ceilings (`op_cap + ctx_cap > agg_cap`; that surplus is
+    /// deliberately unreachable), and that the live combined charge never exceeds
+    /// it.
     #[cfg(any(test, feature = "test-utils"))]
     pub fn accounting_aggregate_current(&self) -> u128 {
         self.accounting.aggregate().current()

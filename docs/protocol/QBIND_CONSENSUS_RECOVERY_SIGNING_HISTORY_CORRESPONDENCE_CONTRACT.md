@@ -3387,3 +3387,46 @@ existing profile-derived aggregate (`= MAX_AGGREGATE_RETAINED_BYTES`, `7772` for
 partitions are charged; the complete-wrapper charge correction (first bullet) is preserved unchanged. The
 literal commands, measured values, regressions, and open blockers for this revision are
 recorded in the latest RUN 422 D7-D14 section of `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_422_D7.md`.
+**Real-operation confirmation (finding #4 / finding #7 continuation).** The combined-limit identity above
+(`enforced aggregate = MAX_AGGREGATE_RETAINED_BYTES`, `7772` for N=4, **not** `8732`) is now exercised by a
+**genuine O4 `publish_locked`** — not only by synthetic standing reservations. The regression
+`agg_real_o4_refused_by_combined_though_op_class_permits` measures the real O4 working-set charge as the
+shared accountant's observed peak (`o4_charge = 4641` for N=4) and shows the operational sub-cap would admit
+it (`3131 + 4641 = 7772 = op_cap`) while the combined budget refuses it **pre-write**
+(`3611 + 4641 = 8252 > 7772`, short by exactly the live context charge `480`), after which releasing the
+pressure readmits a real O4 without losing the established durable evidence. The two synthetic-pressure
+companions are relabelled so their names/comments distinguish **reservation-level** admission-boundary
+evidence from execution of an **O1–O5 operation**. A stale `test-utils` accessor comment that still
+described the aggregate as the **sum** of the sub-caps was corrected to the enforced
+`agg_cap == op_cap` / `op_cap + ctx_cap > aggregate` relation; no enforced bound changed. The operative
+verdict is and remains `D7D14_STORAGE_COMPONENT=PARTIAL-IMPLEMENTATION` / `D7D14_STORAGE_ACCEPTANCE=INCOMPLETE`
+with `DURABLE_ANTI_ROLLBACK=NOT-ESTABLISHED`; the §5/§6 full operational inventory + representation-layout
+proof and the §8 H18/H19/H22/H24/H26 obligations remain open, as does the independent CodeQL/Code-Review
+security gate. See the latest RUN 422 D7-D14 continuation section of
+`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_422_D7.md`.
+
+**Representation-proof correction (§ 13.7A(c), finding #5 — layout proof on the real retained object).** The
+operative compile-time layout proof previously measured the *synthetic* `RetainedGeneration` wrapper
+(`size_of = 368 ≤ GEN_STRUCT_MAX = 384`), which concealed that the object operations actually retain —
+`DecodedRecord` inside `ValidatedRecord` — is larger. Measured on the supported 64-bit target:
+`size_of::<SafetyRecord>()` (generation core) `= 360`, `size_of::<DecodedRecord>()` (complete inline retained
+generation) `= 408`, `size_of::<ValidatedRecord>()` (opaque proof) `= 528`. The proof is now driven by the
+real types and decomposes the retained proof into named inline terms counted once: the generation **core**
+(`SafetyRecord` = `360`) is bounded by `GEN_STRUCT_MAX` (`384`); the `48`-byte decoded-identity header
+(`persistence_format_version` + `network_genesis_id` + `publication_revision` + padding) and the `120`-byte
+`ValidatedRecord` holder/handle fields (retained-`encoded` `Vec` descriptor, origin-context digest, O5
+recovery-incarnation discriminant, inline holder `Reservation` option) are separate terms, never folded into
+the generation ceiling. `RetainedGeneration` remains only for the synthetic-holder test and is no longer the
+operative proof. **Surfaced incompatibility (presented, NOT enacted):** `size_of::<DecodedRecord>() = 408 >
+GEN_STRUCT_MAX = 384`; the ceiling absorbs only `384 − 360 = 24` of the `48`-byte identity header, leaving
+`24` bytes uncovered per retained generation. The required single-generation-ceiling adjustment (raise to
+`≥ 408`, or add an explicit `48`-byte decoded-identity-header accounting term) is **presented separately and
+not silently enacted**: the accepted aggregate arithmetic (`max_component_aggregate_bytes =
+max_aggregate_retained_bytes`, enforced aggregate `7772` for N=4) and all fixture quantities are left
+**unchanged** this pass, so no accepted bound is relaxed. The regression
+`real_representation_layout_decomposition` records the measured sizes, the exact decomposition, and the
+surfaced `408 > 384` inequality. The operative verdict is unchanged
+(`D7D14_STORAGE_COMPONENT=PARTIAL-IMPLEMENTATION` / `D7D14_STORAGE_ACCEPTANCE=INCOMPLETE`); the §5/§6 full
+per-object operational inventory (enacting this ceiling change in the profile accounting) and the §8
+H18/H19/H22/H24/H26 obligations remain open, as does the independent CodeQL/Code-Review security gate. See the
+latest RUN 422 D7-D14 continuation section of `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_422_D7.md`.
