@@ -3427,7 +3427,7 @@ The proof is a representation-and-charge proof over the real types: the complete
 holder `Reservation` option) are a separate term, and — per the **finding-#2 correction** — that term is now
 **enforced-charged**, not merely asserted: `record::validated_holder_handle_bytes()` defines it independently
 from the handle field inventory (plus one alignment allowance), a compile-time inequality
-`size_of::<ValidatedRecord>() ≤ size_of::<RetainedRecord>() + handle_inventory` (`496 ≤ 368 + 128`) proves it
+`size_of::<ValidatedRecord>() ≤ size_of::<RetainedRecord>() + handle_inventory` (`496 ≤ 368 + 136 = 504`, where `handle_inventory = 136` is the helper's reserved charge — the `120`-byte field inventory plus one `16`-byte `align_of::<ValidatedRecord>()` allowance — and is deliberately **distinct from** the `496 − 368 = 128` inline-overhead subtraction) proves it
 covers the real inline layout, and `retained_holder_charge()` reserves `rec + gen + handle` once per retained
 proof against the shared aggregate authority for the proof's lifetime (released on drop; duplicated identically
 by `try_clone`), never folded into the generation ceiling. The prior documentation that the handle bytes were

@@ -1106,8 +1106,7 @@ fn real_representation_layout_decomposition() {
     let opt_u64 = std::mem::size_of::<Option<u64>>();
     let opt_res =
         std::mem::size_of::<Option<qbind_node::safety_record_store::accounting::Reservation>>();
-    let align_vr =
-        std::mem::align_of::<qbind_node::safety_record_store::record::ValidatedRecord>();
+    let align_vr = std::mem::align_of::<qbind_node::safety_record_store::record::ValidatedRecord>();
     let field_inventory = ev + vecdesc + digest + opt_u64 + opt_res;
     println!(
         "MEASURED handle inventory: EvidenceStatus={ev} Vec<u8>={vecdesc} [u8;32]={digest} \
@@ -2901,7 +2900,10 @@ fn acct_o3_holder_charge_includes_enforced_handle_term() {
         1,
         "O3 proof must carry the expected published revision"
     );
-    assert!(tok.retained().is_locked(), "O3 proof must be the locked variant");
+    assert!(
+        tok.retained().is_locked(),
+        "O3 proof must be the locked variant"
+    );
     assert_eq!(
         tok.retained().evidence_discriminant(),
         EvidenceDiscriminant::QcDerived,
