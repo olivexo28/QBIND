@@ -15611,3 +15611,66 @@ C4/C5 remain **OPEN**; fail-closed `CurrentEpochUnavailable` unchanged; QBIND na
 4. *(Unavailable external evidence)* Independent-review / CodeQL security gate — remains a required open gate; a skip/unavailability is not a pass.
 
 No production/engine/decision/signing integration, verifier wiring, anti-rollback establishment, activation, D15, Run 423, or project rename is performed or claimed. Changed paths this pass: `crates/qbind-node/src/safety_record_store/mod.rs`, `crates/qbind-node/src/safety_record_store/record.rs`, `crates/qbind-node/tests/run_422_d7d14_safety_record_store_tests.rs`, `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_422_D7.md`, `docs/protocol/QBIND_CONSENSUS_RECOVERY_SIGNING_HISTORY_CORRESPONDENCE_CONTRACT.md`, and `docs/whitepaper/contradiction.md`.
+## RUN 422 D7-D14 — Contract-compliant retained representation implemented; ceiling-increase claim withdrawn (code + test + docs)
+
+### 1. Baseline and reviewed-object correspondence (this pass)
+
+Actual supplied working branch `copilot/copilotcopilotcopilotcopilotcopilotcopilotcopilotc-919d1b0b-c881-4ba4-94d1-461bb5680f4a` (used as supplied; not switched to the reported name). Full starting HEAD `203101708cc5b4bc123793118e07c4ff53626a20`. The reviewed object named by the task, `472d962cbe8bdd09b2fd80bba1c0b4728ea5f44b`, was absent from the shallow single-branch clone until `git fetch origin 472d962…`; it shares the common ancestor `7c31631…` with HEAD and its **tree is byte-identical** to the starting HEAD tree (`3d1aafd2403fbbd7f1b1dd8528165c170a9b495b` for both), so the scoped content under review corresponds exactly to the worktree edited here (no fast-forward needed; prior work preserved). Worktree clean at start; scoped edits only (listed in §6). Baseline suite before edits: **73 passed, 0 failed, 1 ignored** (`cargo test -p qbind-node --features test-utils --test run_422_d7d14_safety_record_store_tests`).
+
+### 2. Interpretation corrected (task §2) — the measured mismatch did not require a ceiling increase
+
+The prior pass measured `SafetyRecord = 360`, `DecodedRecord = 408`, `ValidatedRecord = 528`, synthetic `RetainedGeneration = 368`, ceiling `GEN_STRUCT_MAX = 384`, and concluded the single generation ceiling had to rise to `≥ 408` (or gain a `48`-byte identity-header addend). That conclusion is **withdrawn**. The `408` figure measured a representation that still retained the two fields the §13.7A(c.4) inventory requires be **discarded after validation** (`persistence_format_version`, `network_genesis_id`). It was therefore a property of the un-corrected implementation, not a lower bound on every conforming retained generation. The measurements are preserved above as historical diagnostic evidence; the operative claim that a ceiling increase / new identity-header allowance is *necessarily required* is superseded.
+
+### 3. Real post-validation representation implemented (task §3) — `RetainedRecord`
+
+A new `record::RetainedRecord { publication_revision: u64, record: SafetyRecord }` is the object operations now retain inside `ValidatedRecord` (replacing the retained `DecodedRecord`). The transient `DecodedRecord` carries the header fields only across decode→validation: `persistence_format_version` is validated at decode (`codec::decode_record`, selects the decoder) and `network_genesis_id` is compared to the pinned context in `validate::validate_decoded`; **after** those checks succeed the retained generation is constructed by moving the `SafetyRecord` core + `publication_revision` out of the consumed `DecodedRecord` and dropping the two header fields. Their exact bytes survive **verbatim** only in the retained `encoded` publication (operand 1 for O5, §13.7A(c.5)). The `BootstrapNoLock` / `Locked`-with-no-commit / anchored-`Locked` / TC-derived distinctions are preserved by the `SafetyRecord` enum and its `Option` discriminants — no absent QC/anchor/predecessor is manufactured. `RetainedRecord` is the object actually used by O3 results, retained-holder reservations, `try_clone`, O4 predecessor handling (via `read_validate`), and O5 (`reacknowledge`). The opaque construction, read-only accessors, backend-incarnation-bound O5 recovery capability, and context binding are all preserved; the public accessor is renamed `ValidatedRecord::decoded()` → `retained()` returning `&RetainedRecord`.
+
+### 4. Representation-and-charge proof (task §4) — the retained generation fits the ceiling
+
+Measured on the supported 64-bit target (`-- --nocapture`):
+
+```
+size_of::<SafetyRecord>()        (generation core)              = 360
+size_of::<RetainedRecord>()      (REAL retained generation)     = 368
+size_of::<DecodedRecord>()       (transient decode/val scratch) = 408
+size_of::<ValidatedRecord>()     (opaque proof)                 = 496
+size_of::<RetainedGeneration>()  (synthetic wrapper)            = 368
+GEN_STRUCT_MAX                   (accepted ceiling)             = 384
+```
+
+The compile-time proof in `safety_record_store/mod.rs` now asserts, on the **real** retained object: `size_of::<RetainedRecord>() ≤ GEN_STRUCT_MAX` (`368 ≤ 384`, **16 bytes headroom** — no increase required), that `RetainedRecord` contains its `SafetyRecord` core inline, and that `ValidatedRecord > RetainedRecord` (the `128`-byte holder/handle term — retained-`encoded` `Vec` descriptor, origin-context digest, O5 recovery-incarnation discriminant, inline holder `Reservation` option — charged under the holder/encoded-buffer terms, never under the generation ceiling). The size-subtraction "decomposition proof" and the `DecodedRecord > GEN_STRUCT_MAX` acceptance assertion that described the old defect are **removed**. The regression `real_representation_layout_decomposition` now measures the real layouts and asserts the retained generation fits the ceiling; observed: `MEASURED gen_core(SafetyRecord)=360 retained(RetainedRecord)=368 transient(DecodedRecord)=408 validated(ValidatedRecord)=496 synthetic(RetainedGeneration)=368 GEN_STRUCT_MAX=384` / `SURFACED: retained_generation=368 fits GEN_STRUCT_MAX=384 (headroom=16) ...`. The accepted aggregate arithmetic (`max_component_aggregate_bytes = max_aggregate_retained_bytes`, enforced aggregate `7772` for N=4) and all fixture quantities are **unchanged**; `GEN_STRUCT_MAX` stays `384`. The `max_retained_generation_bytes` formula already uses `GEN_STRUCT_MAX` as its `gen_struct` term, which the real retained generation now honestly fits.
+
+### 5. Operation-level regressions added (task §7, partial)
+
+- `o3_retained_generation_discards_header_but_encoded_preserves_bytes`: a real O3 after a QC-derived O4 publish retains only `{publication_revision, SafetyRecord}`; the retained `encoded()` still contains the version bytes `[0,2)` and the genesis id `[2,34)` verbatim; and the header-less retained proof successfully drives O5 `reacknowledge` (proving O5 compares the original bytes, not a reconstruction).
+- `retained_generation_fits_ceiling_all_variants`: the single whole-enum `RetainedRecord` fits `GEN_STRUCT_MAX` (bounding every variant), and a real bootstrap O3 preserves the no-lock variant with its absent predecessor left absent.
+
+Suite after edits: **75 passed, 0 failed, 1 ignored** (the two new regressions; all prior rows preserved, including the accepted real-O4 combined-budget refusal regression and the synthetic-pressure companions).
+
+### 6. Validation/tooling and operative verdicts (unchanged — not promoted)
+
+Literal outcomes this pass:
+- `cargo fmt -- --check` on edited Rust files → **exit 0** (no diff).
+- `cargo build -p qbind-node` (default features) → **Finished, exit 0** (the compile-time representation-and-charge proof compiled, i.e. `RetainedRecord ≤ GEN_STRUCT_MAX`).
+- `cargo test -p qbind-node --features test-utils --test run_422_d7d14_safety_record_store_tests` → **75 passed; 0 failed; 1 ignored**.
+- `cargo clippy -p qbind-node --features test-utils --tests` → recorded below (§ companion run).
+- Direct no-feature invocation of the gated test target remains **expected-refused** (`required-features = ["test-utils"]` preserved); that refusal is gating evidence, not a compile of the gated target.
+- Independent review / CodeQL: **not** claimed as passed — an unavailable review model is not a completed review and a skipped CodeQL is not zero alerts (gates remain **OPEN**).
+
+```
+D7D14_STORAGE_COMPONENT=PARTIAL-IMPLEMENTATION
+D7D14_STORAGE_ACCEPTANCE=INCOMPLETE
+DURABLE_ANTI_ROLLBACK=NOT-ESTABLISHED
+GENESIS_AUTHORITY_ACTIVATION=DISABLED
+PRODUCTION_WIRE_CHAIN_ID_BEHAVIOR=UNCHANGED
+CONFIGURED_AUTHORITY_RELEASE_BINARY_EVIDENCE=NOT-YET-CAPTURED
+SECURITY_POSTURE=RS1-OPEN / PUBLIC-DEVNET-NO-GO
+```
+
+C4/C5 remain **OPEN**; fail-closed `CurrentEpochUnavailable` unchanged; QBIND naming and all cryptographic domain-separation bytes unchanged. This pass implements the real retained representation and withdraws the ceiling-increase claim; it does **not** promote acceptance. Remaining open work (concrete, distinguished from unavailable external evidence):
+
+1. *(Unfinished implementation)* §5/§6 full per-object operational O1–O5 inventory from real traced allocations/owners/capacities/lifetimes (dynamic-capacity charging for outer vectors, nested logical-QC signer arrays, timeout-entry backing, owned contexts), beyond the representation correction landed here. The retained-generation term is now honest against the real object, but the complete per-phase coexistence inventory is not yet reconciled object-by-object.
+2. *(Unfinished implementation)* §8 remaining H evidence: H18/H22 (type/consumer-boundary PARTIAL), H19, H24, H26 adversarial signer bounds through real operations.
+3. *(Unavailable external evidence)* Independent-review / CodeQL security gate — required open gate; a skip/unavailability is not a pass.
+
+Changed paths this pass: `crates/qbind-node/src/safety_record_store/mod.rs`, `crates/qbind-node/src/safety_record_store/record.rs`, `crates/qbind-node/src/safety_record_store/validate.rs`, `crates/qbind-node/src/safety_record_store/owner.rs`, `crates/qbind-node/src/safety_record_store/profile.rs`, `crates/qbind-node/tests/run_422_d7d14_safety_record_store_tests.rs`, `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_422_D7.md`, `docs/protocol/QBIND_CONSENSUS_RECOVERY_SIGNING_HISTORY_CORRESPONDENCE_CONTRACT.md`, `docs/whitepaper/contradiction.md`.
