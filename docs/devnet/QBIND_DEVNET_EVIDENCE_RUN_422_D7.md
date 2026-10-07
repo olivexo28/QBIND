@@ -15894,3 +15894,65 @@ SECURITY_POSTURE=RS1-OPEN / PUBLIC-DEVNET-NO-GO
 ```
 
 C4/C5 remain **OPEN**; fail-closed `CurrentEpochUnavailable` unchanged; QBIND naming and all cryptographic domain-separation bytes unchanged. This pass added no production integration, signing/recovery wiring, verifier wiring, anti-rollback establishment, activation, transport, epoch/authority mutation, project rename, D15, or Run 423 work. Changed paths this pass: `crates/qbind-node/src/safety_record_store/accounting.rs`, `crates/qbind-node/src/safety_record_store/codec.rs`, `crates/qbind-node/tests/run_422_d7d14_safety_record_store_tests.rs`, `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_422_D7.md`, `docs/protocol/QBIND_CONSENSUS_RECOVERY_SIGNING_HISTORY_CORRESPONDENCE_CONTRACT.md`, and `docs/whitepaper/contradiction.md`. No PR, no force-push, no history rewrite.
+
+### 11. D7-D14 continuation (this pass) — PER-VECTOR capacity limits ENFORCED (`admit_evidence_capnorm`, distinct from the aggregate sum), O2 working set re-measured on the BORROWED decoded object, gates rerun post-change
+
+**Baseline (actual, supplied).** Working branch `copilot/copilotcopilotcopilotcopilotd99d28277ecfff4871c634` (used exactly as supplied; not switched to match the reported `copilot/copilotcopilotcopilotd99d28277ecfff4871c634d725430`). Full starting HEAD `49b5ef1cdacdfaa2d979adf12bcc387b787fca74`, worktree clean at start. The inherited `[profile.dev]`/`[profile.test]` disk-mitigation profiles (`debug=0`, `strip="debuginfo"`, `incremental=false`) and the prior O1–O5 admission/aggregate-capacity work are **preserved** — neither reverted nor re-authored.
+
+**Reviewed-object availability, ancestry, scoped correspondence.** The task-named reviewed object `d654878e004005d7e9df6d285c72197ce7eee3e1` was absent from the shallow single-branch clone until `git fetch origin d654878…`. It is **not** an ancestor of HEAD (`git merge-base --is-ancestor d654878 HEAD` → exit 1). Its tree is **byte-identical** to the starting HEAD tree (same tree SHA `389a6f78fbf7efef50c59b17989f6c075a78e886`): the starting worktree **is** the reviewed content. `git diff d654878 <starting HEAD>` is empty; an empty whitespace-insensitive diff is **not** relied on for identity — the tree-hash equality establishes byte identity directly. The obsolete `0f258734…` baseline was **not** restored. After this pass the scoped component diff `git diff d654878 HEAD -- crates/qbind-node/src/safety_record_store/` is exactly this pass's change: `accounting.rs` +132, `codec.rs` +14 (the per-vector enforcement and borrowed O2 charge below), confirming the reviewed runtime genuinely lacked per-vector capacity enforcement.
+
+**§4 — PER-VECTOR capacity limits ENFORCED (runtime correction).** The reviewed `admit_evidence_capacity` sums every backing's `Vec::capacity()` and compares the aggregate against the cross-variant generation maximum. That useful **aggregate** check is preserved, but it does **not** by itself enforce the contract's **individual** per-object capacity bounds or the initial `CAPNORM_SLACK = 0` policy: a single buffer can carry excess capacity that the aggregate still absorbs (headroom below `MAX_RETAINED_GENERATION_BYTES`). This pass adds `admit_evidence_capnorm(evidence, ctx)` in `accounting.rs` and wires it into the single `admit_supporting_evidence` admission path in `codec.rs`, **before** the aggregate check and before any component-owned clone/encode. For each backing it enforces `capacity() <= profile_max + CAPNORM_SLACK`, where `profile_max` is the accepted per-class profile maximum — **not** the value's own `len()` (the requirement is a profile-derived bound, not "capacity must equal length"):
+* outer signature descriptor array → `N`;
+* every individual signature buffer → `S_sig`;
+* signer bitmap → `B_span`;
+* record-level logical-QC signer vector, `tc.signers`, record-level/`tc` nested `high_qc.signers` → `N`;
+* `tc.signed_timeouts` descriptor array → `N`;
+* each timeout entry's signature buffer → `S_sig`;
+* each timeout entry's optional nested `high_qc.signers` → `N`.
+Over-bound → `SafetyStoreError::CapacityRefusal`, a **pre-allocation** refusal (stored record bytes, metadata/revision, and the recovery latch untouched). `CAPNORM_SLACK` stays `0` (initial policy); no normalization/replacement allocation was introduced, so no old/new overlap accounting is needed.
+
+**§4 — smallest-over-bound regressions (through the genuine admission path).** The pre-existing huge-capacity tests establish only gross violations; these new executing regressions establish the **smallest practical** per-class violations with a valid length and a total footprint that still fits the aggregate generation maximum:
+* QC signature buffer: concrete `S_sig = 8`, signature length `8`, capacity `9` (`S_sig + 1`) → refused by capnorm while the aggregate still accepts;
+* QC `signatures` descriptor array capacity `N + 1` and QC signer bitmap capacity `B_span + 1` → refused;
+* TC backings (`tc.signers`, `tc.signed_timeouts`, each timeout signature, each timeout nested `high_qc.signers`) at boundary+1 → refused; at the exact accepted boundary → admitted;
+* O4-path QC-derived and TC-derived candidates (including the **nested timeout-entry high-QC** signer vector) with a single over-bound backing → refused pre-write through `publish_locked`.
+Both evidence variants and the maximum supported nested TC contents are exercised. Where N=4 makes the aggregate ceiling tight for TC, both the aggregate and the capnorm check may fire; the "aggregate still accepts" assertion is kept only for the QC cases where element sizes leave genuine headroom.
+
+**§6 — O2 working set re-measured on the BORROWED decoded object.** The reviewed O2 test charged `generation_charge(&ctx, &RetainedGeneration::from_locked(1, l))` — but `RetainedGeneration::from_locked` **clones** the evidence into a second representation whose capacities are the clone's (normalized by `Vec::clone`), so it measured a synthetic object, not the live `DecodedRecord`. This pass adds `decoded_working_set_charge(&DecodedRecord)` — a **borrowed, non-cloning** field inventory that sums the decoded object's inline size plus the actual `Vec::capacity()` of every backing it owns (outer descriptor arrays, each nested signer backing, each signature backing, the bitmap) **in place**, introducing no clone of its own. The two corrected O2 tests (QC and TC variants) decode the stored record and measure the real decoded transient with this helper, asserting it fits the reserved generation term; the inline core is shown to be only a part of that backed working set. `AllocationAccountant::current()`/`peak()` are described as admitted-charge counters, not process-RSS or allocated-memory measurements.
+
+**§9 — gates rerun after the final runtime change (literal).**
+* `cargo build -p qbind-node --lib` → **exit 0** (Finished dev in ~15s).
+* `cargo test -p qbind-node --no-run` (default-feature link gate) → **exit 0** (recorded earlier this pass; separate from the feature link).
+* `cargo test -p qbind-node --features test-utils --no-run` → **exit 0**.
+* `cargo test -p qbind-node --features test-utils --test run_422_d7d14_safety_record_store_tests` → **96 passed; 0 failed; 1 ignored** (`child_process_entry`), ~0.57s. (Reviewed baseline 89; +7 per-vector/O2 regressions this pass.)
+* `cargo test -p qbind-node --features test-utils --test m16_epoch_transition_hardening_tests` → **14 passed; 0 failed** (recorded this pass).
+* `cargo build --release -p qbind-node` → **exit 0**, Finished release in 6m55s, **rerun after the final runtime change** (a prior revision's release build does not establish compatibility of this implementation; build compatibility only — not running-node recovery, anti-rollback, or DevNet readiness).
+* `cargo clippy -p qbind-node --lib` → **exit 0**; no new warnings in `accounting.rs`/`codec.rs` (the pre-existing `manual_div_ceil` fixture lints are untouched baseline).
+* `cargo fmt -p qbind-node -- --check` → the **edited/added regions** in `accounting.rs`, `codec.rs`, and the D7-D14 test are **clean** this pass (my 6+3 added-region diffs were formatted; CRLF preserved, verified CR-count == line-count). The remaining whole-crate diffs are the **pre-existing** untouched baseline deviations (17 in the test file at lines ≤ 4620, the `accounting.rs`/`codec.rs` no-final-newline EOF state, and `build.rs`/`examples/*`), separated from the edited code.
+* Secret scanning over the three edited `.rs` files → **no secrets**.
+* Non-wiring audit: `admit_evidence_capnorm`/`check_capnorm`/`decoded_working_set_charge` are referenced only inside the component and its test; `safety_record_store` is still referenced outside only by `lib.rs` `pub mod` (unchanged); default `SafetyBackendPolicy::Disabled`, MainNet refusal, and `test-utils` gating of mutation helpers unchanged; no production construction added.
+
+**§10 — superseded prior claims (history preserved).** Explicitly superseded this pass, originals retained above as history:
+* that the aggregate capacity **sum** enforces every **individual** per-object capacity rule — superseded; the aggregate sum is preserved but per-vector limits are now enforced separately by `admit_evidence_capnorm` with `CAPNORM_SLACK = 0`;
+* that charging a cloned `RetainedGeneration` (`from_locked`) measured the original O2 decoded working set — superseded; the live decoded object is now measured in place via the borrowed `decoded_working_set_charge`, not via a clone;
+* that the previous release build covered subsequent runtime changes — superseded; the release build was **rerun** after this pass's final runtime change (exit 0).
+
+**Still open (unchanged disposition; not promoted).** The complete per-object O1–O5 allocation/coexistence inventory traced object-by-object across success/refusal/malformed/write-failure/uncertain-durability/drop (predecessor/candidate clones, evidence-binding/re-encode buffers, publication envelopes and CRC-wrapped staging, O5 read-back + fresh decode + comparison + republication, validation scratch, shared contexts and separate holder handles) remains an **unfinished implementation** item: this pass closes evidence **admission** per-vector enforcement and the O2 measurement, but does not claim the full per-phase coexistence table reconciled object-by-object. The H22 verified-prerequisite consumer boundary remains a test-authored model (not fabricated closed). Independent Code Review and CodeQL outcomes for this pass are recorded from the session validation path below; an unavailable review is **not** a completed review and a skipped CodeQL is **not** zero alerts.
+
+**§9 — literal review/security-tool outcomes (this pass, this revision, no PR).**
+* **Independent Code Review — UNAVAILABLE (gate OPEN).** `parallel_validation` returned `No review comments found`, **but** with the explicit error `Code review tool is not available in this environment: … model claude-sonnet-4.6 not found in registry. Ensure the Copilot /models endpoint includes it` (`autofind … command_failed`). An unavailable model's "no comments" is **not** a completed review → `INDEPENDENT_CODE_REVIEW=UNAVAILABLE`; no code-review assurance is claimed for the per-vector capnorm / borrowed-O2 changes.
+* **CodeQL (rust) — SKIPPED (gate OPEN).** Reported `Analysis Result for 'rust'. Found 0 alerts:` with the literal reason `rust: Analysis was skipped because the database size is too large.` A skipped analysis is **not** a zero-alert result → `CODEQL=SKIPPED — database too large`. CodeQL triviality was declared **false** for this pass (new operational admission/arithmetic in `admit_evidence_capnorm`/`check_capnorm` plus the borrowed `decoded_working_set_charge`), so a prior test/docs-only disposition does not cover these runtime changes.
+
+Both gates remain required and **OPEN**; neither is carried forward from a prior pass as a new execution.
+
+**Verdicts retained (NOT promoted).**
+
+```
+D7D14_STORAGE_COMPONENT=PARTIAL-IMPLEMENTATION
+D7D14_STORAGE_ACCEPTANCE=INCOMPLETE
+DURABLE_ANTI_ROLLBACK=NOT-ESTABLISHED
+GENESIS_AUTHORITY_ACTIVATION=DISABLED
+PRODUCTION_WIRE_CHAIN_ID_BEHAVIOR=UNCHANGED
+CONFIGURED_AUTHORITY_RELEASE_BINARY_EVIDENCE=NOT-YET-CAPTURED
+SECURITY_POSTURE=RS1-OPEN / PUBLIC-DEVNET-NO-GO
+```
