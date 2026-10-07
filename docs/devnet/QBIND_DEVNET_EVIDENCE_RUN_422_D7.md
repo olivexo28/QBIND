@@ -15939,6 +15939,12 @@ Both evidence variants and the maximum supported nested TC contents are exercise
 
 **Still open (unchanged disposition; not promoted).** The complete per-object O1–O5 allocation/coexistence inventory traced object-by-object across success/refusal/malformed/write-failure/uncertain-durability/drop (predecessor/candidate clones, evidence-binding/re-encode buffers, publication envelopes and CRC-wrapped staging, O5 read-back + fresh decode + comparison + republication, validation scratch, shared contexts and separate holder handles) remains an **unfinished implementation** item: this pass closes evidence **admission** per-vector enforcement and the O2 measurement, but does not claim the full per-phase coexistence table reconciled object-by-object. The H22 verified-prerequisite consumer boundary remains a test-authored model (not fabricated closed). Independent Code Review and CodeQL outcomes for this pass are recorded from the session validation path below; an unavailable review is **not** a completed review and a skipped CodeQL is **not** zero alerts.
 
+**§9 — literal review/security-tool outcomes (this pass, this revision, no PR).**
+* **Independent Code Review — UNAVAILABLE (gate OPEN).** `parallel_validation` returned `No review comments found`, **but** with the explicit error `Code review tool is not available in this environment: … model claude-sonnet-4.6 not found in registry. Ensure the Copilot /models endpoint includes it` (`autofind … command_failed`). An unavailable model's "no comments" is **not** a completed review → `INDEPENDENT_CODE_REVIEW=UNAVAILABLE`; no code-review assurance is claimed for the per-vector capnorm / borrowed-O2 changes.
+* **CodeQL (rust) — SKIPPED (gate OPEN).** Reported `Analysis Result for 'rust'. Found 0 alerts:` with the literal reason `rust: Analysis was skipped because the database size is too large.` A skipped analysis is **not** a zero-alert result → `CODEQL=SKIPPED — database too large`. CodeQL triviality was declared **false** for this pass (new operational admission/arithmetic in `admit_evidence_capnorm`/`check_capnorm` plus the borrowed `decoded_working_set_charge`), so a prior test/docs-only disposition does not cover these runtime changes.
+
+Both gates remain required and **OPEN**; neither is carried forward from a prior pass as a new execution.
+
 **Verdicts retained (NOT promoted).**
 
 ```
