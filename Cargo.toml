@@ -16,3 +16,25 @@ members = [
     "crates/qbind-remote-signer",
     "crates/qbind-gov",
 ]
+
+# Disk-space controls for dev/test builds.
+#
+# This workspace has hundreds of integration-test files and example binaries
+# (479 `tests/*.rs` and 117 `examples/*.rs` at time of writing), each of which
+# Cargo compiles into its own separate binary. With Cargo's default `debug = 2`
+# the accumulated DWARF debug info in `target/` reaches tens of GB and exhausts
+# the available disk on CI runners ("insufficient disk space").
+#
+# Disabling debug info (`debug = 0`) and enabling symbol stripping keeps each
+# binary small without changing any runtime behavior, dramatically reducing the
+# size of `target/`. `incremental = false` avoids retaining large per-crate
+# incremental caches that compound the problem during full workspace builds.
+[profile.dev]
+debug = 0
+strip = "debuginfo"
+incremental = false
+
+[profile.test]
+debug = 0
+strip = "debuginfo"
+incremental = false
