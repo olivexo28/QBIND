@@ -72,3 +72,16 @@ parking_lot = "0.12"
 name = "run_422_d7d14_safety_record_store_tests"
 path = "tests/run_422_d7d14_safety_record_store_tests.rs"
 required-features = ["test-utils"]
+
+# `m16_epoch_transition_hardening_tests` likewise drives the `test-utils`-gated
+# `RocksDbConsensusStorage::set_inject_write_failure` / `clear_epoch_transition_marker`
+# fault-injection helpers. Without an explicit `required-features` declaration the
+# auto-discovered target is compiled under the default feature set — where those
+# methods do not exist — which breaks the plain `cargo test -p qbind-node --no-run`
+# default-feature test-compilation gate. Declaring the requirement skips the target
+# on a default build (restoring that gate) while `--features test-utils` still
+# builds and runs it; it does NOT restore default-build access to the helpers.
+[[test]]
+name = "m16_epoch_transition_hardening_tests"
+path = "tests/m16_epoch_transition_hardening_tests.rs"
+required-features = ["test-utils"]
