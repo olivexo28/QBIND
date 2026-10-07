@@ -16104,3 +16104,139 @@ SECURITY_POSTURE=RS1-OPEN / PUBLIC-DEVNET-NO-GO
 ```
 
 C4/C5 remain OPEN.
+
+## RUN 422 D7-D14 — O3 validation-coexistence reservation corrected, refusal-path preflight made allocation-free, exhaustive O1–O5 inventory authored (code + test + docs, this continuation pass)
+
+Baseline for this pass: supplied branch `copilot/copilotcopilotcopilotcopilotcopilotcopilotcopilotd` (the actual branch; not switched/renamed to any reported name), starting HEAD `1096012cf4e90d015c0a9277fe39f6a90097a872`, upstream `origin/copilot/copilotcopilotcopilotcopilotcopilotcopilotcopilotd`, worktree clean. The shallow clone's `.git/shallow` boundary is `784bc093`; only two commits were visible (`1096012` → `784bc09`). The reviewed object `1eb3164978806d4a71b88ef0a7693eaf3735609b` was **absent** until `git fetch --depth=50 origin 1eb3164…`; it is **not** an ancestor of HEAD (`git merge-base --is-ancestor` → exit 1) and its merge-base with HEAD is the shallow boundary `784bc09` — a divergent sibling in shallow history, **not** a demonstrated absence of common ancestry. Exact-tree comparison: the only object difference between reviewed `1eb3164` and the starting HEAD is the D7-D14 test file, and that difference is **CRLF-only** (`git diff --ignore-cr-at-eol` empty; HEAD CRLF, reviewed LF) — byte-identical modulo CR-at-EOL, so the starting HEAD already carries all prior D7-D14 corrections. The obsolete `0f258734…` baseline was **not** restored.
+
+### 1. Findings → runtime corrections → executed evidence
+
+* **Finding (item 3): the O3 validation reservation did not cover the live validation-phase coexistence.** `read_validate` reserved `retained_holder_charge + max_safety_record_bytes = 2051 + 811 = 2862`. But `validate_decoded` retained its `reencoded` correspondence buffer across the correspondence comparison and then called `validate_locked`, which allocated the certificate-binding `cert` scratch — so **two** record-sized buffers (each ≤ `MAX_SAFETY_RECORD_BYTES = 811`) were live at once, alongside the **live transient decoded** object (`1112`, which exceeds the retained-generation ceiling `1104` the holder reserved) and the retained original bytes (`763` for the maximum TC without optional anchor/predecessor). The reviewed live subtotal `763 + 1112 + 811 + 811 = 3497` exceeds the entire `2862` reservation by exactly **635** bytes. **Correction (two parts):** (a) *lifetime* — `validate_decoded` now `drop(reencoded)`s the correspondence re-encode immediately after the byte comparison and **before** `validate_locked`/`compute_evidence_lock_binding` allocates `cert`, so only **one** record-sized validation buffer is ever live (the two time-share a single buffer role); (b) *reservation* — `read_validate` now reserves, atop the retained-holder charge, `o3_scratch = (max_transient_decoded_working_set − max_retained_generation_bytes) + max_safety_record_bytes = (1112 − 1104) + 811 = 819`. The transient's first `retained_gen` bytes are covered by the holder's generation term (the transient *converts into* the retained generation and is never simultaneously live with it), the transient's excess (`+8`) and the single live validation buffer (`+811`) by `o3_scratch`. Corrected O3 proof reservation `2051 + 819 = 2870`; it covers the post-correction single-buffer live peak `enc 763 + transient 1112 + rec 811 + handle 136 = 2822` and still fits the **unchanged** aggregate `7772`. **Evidence:** `d7d14_o3_validation_reservation_covers_live_coexistence_max_tc` derives `enc=763`, `transient=1112`, `rec=811`, `holder=2051` from the **live** encoded/decoded objects (independently of the reservation formula under test), reproduces the `3497 − 2862 = 635` under-reservation, and shows the corrected `2870 ≤ 7772`; `d7d14_o3_real_read_validate_with_live_holder_within_aggregate` drives the **real** `read_validate` on a reopened (fresh-accountant) backend, observes `accounting_current == 2051` and an O3 validation **peak strictly above** the holder (the transient + validation buffer were actually reserved and live), two live holders coexisting `≤ 7772`, and full release on drop.
+* **Finding (item 4): the preflight refusal path still allocated.** The prior pass's `CapnormSite` typed label removed the per-iteration `String` on the **success** path, but `check_capnorm` still built the diagnostic via `format!` on the **refusal** branch — so a pre-admission, pre-reservation O4 capacity refusal (which runs before O4 obtains its operation reservation) heap-allocated an owned `String`. "Allocation-free preflight" was therefore established only for successful admission. **Correction:** `SafetyStoreError::CapacityRefusal` now carries a typed `CapacityRefusalDetail` — either `Message(String)` (non-protected aggregate/admission diagnostics) or a `Copy`, allocation-free `PerVector { site: CapnormSiteKind, capacity, profile_max, slack }`. `check_capnorm` returns the `PerVector` form with **no** `format!`; the equivalent diagnostic text is materialised only if/when the error is rendered via `Display`, a separate step outside the protected interval. `From<String>`/`From<&str>` keep every pre-existing message site unchanged. **Evidence:** `d7d14_o4_preflight_refusal_is_allocation_free` measures the protected refusal interval (after fixture construction + warm-up) with the counting `#[global_allocator]` for the smallest over-bound backing (`S_sig=8`, len 8, capacity 9, slack 0) at **0** allocations, then renders the diagnostic separately; `d7d14_o4_preflight_refusal_leaves_state_and_readmits` drives the **real** `publish_locked` refusal over an established LOCKED predecessor: pre-write `CapacityRefusal`, **0** evidence encodes (no predecessor read/encode before the refusal), recovery latch untouched, retained revision unchanged, reservations returned to baseline (`accounting_current == 0`), and a subsequent eligible successor admitted (`new_revision: 2`).
+
+### 2. Exhaustive object-by-object O1–O5 allocation / coexistence inventory (item 6)
+
+Figures are the executed `x86_64-unknown-linux-gnu` / rustc 1.98 N=4 values (`S_sig=8`): `CRC_PREFIX=4`, `META_ENCODED_LEN=2+32+8=42`, `max_qc_bytes=310`, `max_tc_bytes = max_safety_record_bytes = rec = 811`, retained-generation ceiling `1104`, transient-decoded ceiling `1112` (`decoded_working_set_charge`), holder handle `136`, retained-holder reservation `rec+gen+handle = 2051`, corrected O3 proof reservation `2051 + 819 = 2870`, `publication_staging_charge = (4+811)+(4+42) = 861`, O4 whole-operation reservation `2·transient + 3·rec + META = 2·1112 + 3·811 + 42 = 4699`, aggregate (N=4) **`7772`**. Layouts: `RetainedRecord 368`, `DecodedRecord 408`, `ValidatedRecord 496`, `GEN_STRUCT_MAX 384`, `ARC_CTRL 16`. Backend-internal (RocksDB/file) allocations and allocator overhead are **outside** the component accounting boundary and are not charged against the aggregate; **no** process-RSS bound is claimed.
+
+**Three encoded-buffer roles (preserved).** R1 = read / read-back buffer; R2 = validation buffer (time-shared between the correspondence re-encode `reencoded` and the certificate-binding `cert`, never both live after the item-3 drop); R3 = output / publication encode buffer. The complete-content comparison span `CMP_SPAN` **borrows** R1's read-back — it does **not** introduce a fourth full-size buffer.
+
+#### O1 — namespace inspection / bootstrap publish
+
+| phase/object | owner | size / cap bound | covering reservation | admission order | coexisting | release | evidence |
+|---|---|---|---|---:|---|---|---|
+| namespace/existing-state probe (meta + record read) | O1 | ≤ `42` + `rec 811` | O1 bootstrap reservation | reserve before read | — | end of probe | existing-state-refusal test |
+| existing-state refusal object | — | 0 heap (typed `AlreadyEstablished`/`ProfileInvalid`) | n/a (pre-reservation) | before any allocation | — | immediate | duplicate-O1-refused test |
+| bootstrap record encode (R3) | O1 | `rec 811` pre-sized to `encoded_record_cap()` | O1 publish (`rec + META + staging`) | reserve before encode | meta buffer, staging | after `publish_atomic` | bounded single-alloc encode test |
+| metadata encode | O1 | `42` | O1 publish | reserve before encode | record buffer, staging | after publish | — |
+| publication staging (2 CRC envelopes) | O1 | `publication_staging_charge 861` | O1 publish incl. staging | reserve before `wrap` | record+meta buffers | after `publish_atomic` | O5 envelope regression (shared `publish_atomic`) |
+
+Phase inequality: live `≤ rec + META + staging` `≤` O1 reservation `≤ 7772`.
+
+#### O2 — metadata / record read, structural decode
+
+| phase/object | owner | size / cap bound | covering reservation | admission order | coexisting | release | evidence |
+|---|---|---|---|---:|---|---|---|
+| metadata read | O2 | `42` | O2 read reservation | reserve before read | record buffer | end of O2 | — |
+| record read (R1) | O2 | `rec 811` | O2 read reservation | reserve before read | meta, transient | end of O2 | — |
+| structural decode (transient `DecodedRecord` + backings) | O2 | `1112` via `decoded_working_set_charge` (borrowed, non-cloning) | O2 transient reservation | reserve before decode | read buffer | end of O2 | transient-decoded test (`inline 408 + backing 704`) |
+
+Phase inequality: live `≤ rec + transient` `≤` O2 reservation `≤ 7772`.
+
+#### O3 — retained bytes, transient decode, correspondence, binding, semantic, proof
+
+| phase/object | owner | size / cap bound | covering reservation | admission order | coexisting | release | evidence |
+|---|---|---|---|---:|---|---|---|
+| retained original bytes (R1, `holder.encoded`) | O3 proof | actual `763` ≤ `rec 811` | retained-holder `rec` term | reserve before `load_established` copy | transient, R2, handle | proof drop | holder=2051 test |
+| transient decoded | O3 | `1112` | holder gen `1104` + `o3_scratch` excess `8` | reserve before decode | retained bytes, R2 | converts into retained gen; end of validate | coexistence test |
+| correspondence re-encode `reencoded` (R2) | O3 | `rec 811` | `o3_scratch` (+`811`) | reserve before encode; **dropped** after compare | transient (not `cert`) | explicit `drop` before `validate_locked` | 635-gap test; `validate.rs` drop |
+| certificate-binding `cert` (R2, reused role) | O3 | `rec 811` | `o3_scratch` (+`811`) | allocated **after** `reencoded` drop | transient | end of `validate_locked` | preflight/encode tests |
+| bounded `UNIQ_SET` sorted-vec | O3 | ≤ `N` entries, no grow | bounded validation scratch (within `o3_scratch`) | reserve ≤ N before insert | transient | end of validate | UNIQ_SET / TA5 tests |
+| holder handle (inline `ValidatedRecord`) | O3 proof | `136` | retained-holder handle term | with holder | retained bytes | proof drop | holder-term test |
+
+Phase inequality: live single-buffer peak `enc 763 + transient 1112 + R2 811 + handle 136 = 2822` `≤` O3 reservation `2870` `≤ 7772`. (Pre-correction two-buffer live `3497 > 2862` reservation — the closed 635-byte gap.)
+
+#### O4 — candidate ownership, predecessor validation, candidate binding/encode, publish
+
+| phase/object | owner | size / cap bound | covering reservation | admission order | coexisting | release | evidence |
+|---|---|---|---|---:|---|---|---|
+| incoming candidate | O4 | caller-owned, **consumed by value** (no clone) | — | moved in | — | end of O4 | candidate-consumption test |
+| candidate structural/capacity preflight | O4 | **0 heap** on success **and** refusal (typed `PerVector`) | n/a (pre-reservation) | **before** O4 reservation, predecessor read, clones/encodes | — | immediate | alloc-free refusal test (0 allocs); preflight-precedes test (0 encodes) |
+| O4 whole-operation reservation | O4 | `2·transient + 3·rec + META = 4699` | the O4 reservation itself | reserve before predecessor read | all O4 buffers | end of O4 | max-TC O4 test |
+| predecessor read+decode+validate (R1+transient+R2) | O4 | `rec + transient + rec` | within O4 reservation | after reservation | candidate buffers | before `publish_atomic` | preflight-precedes test |
+| candidate binding `cert` + record encode (R2+R3) | O4 | `rec + rec` | within O4 reservation | after predecessor validate | predecessor buffers (dropped before publish) | after `publish_atomic` | — |
+| publication staging | O4 | absorbed by the conservative O4 peak (predecessor decode + read-back drop before the write boundary) | O4 reservation (not separately charged) | at write boundary | record+meta | after `publish_atomic` | O4-under-live-O3 admit test (charging staging caused 7 forbidden failures) |
+
+Phase inequality: live `≤` O4 reservation `4699` `≤ 7772`; a legitimate O4 under a live O3 proof (`4699 + 2051 = 6750`) still `≤ 7772`.
+
+#### O5 — retained proof, fresh read-back, fresh decode, complete-content compare, republish
+
+| phase/object | owner | size / cap bound | covering reservation | admission order | coexisting | release | evidence |
+|---|---|---|---|---:|---|---|---|
+| retained O3 proof (holder) | O5 | `2051` (live from O3) | O3 holder reservation (still held) | pre-existing | O5 working set | proof drop | O5 envelope test (reopen-isolated) |
+| fresh read-back (R1) | O5 | `rec 811` | O5 reservation (`rec`) | reserve before read | holder, transient, staging | end of O5 | envelope test |
+| fresh decode (transient) | O5 | `1112` | O5 reservation (transient) | reserve before decode | read-back, holder | end of O5 | envelope test |
+| complete-content comparison `CMP_SPAN` | O5 | **0** (borrows R1 read-back) | — | compare in place | read-back | — | complete-content test |
+| metadata | O5 | `42` | O5 reservation | reserve before read/encode | — | end of O5 | — |
+| republication staging (2 CRC envelopes) | O5 | `publication_staging_charge 861` | O5 reservation incl. staging | reserve before `wrap` | holder, read-back, transient | after `publish_atomic` | envelope regression (fails w/o staging) |
+
+Phase inequality: live lower bound `holder 2051 + read-back 811 + transient 1112 + staging 861 = 4835`; observed peak `5117` `≤ 7772`.
+
+#### Context ownership, multiplicities, diagnostics
+
+| object | owner | size / cap bound | covering reservation | notes / evidence |
+|---|---|---|---|---|
+| owned context `Arc<OwnedContext>` (shared across owner clones) | attach | `context_ownership_charge` (sub-cap `max_context_ownership_bytes`) | **separate** context partition (not the operational aggregate) | one charge for all clones that share the `Arc`; owner-clone context-sharing test |
+| holder handles (per live proof) | per proof | `136` each | aggregate, admitted multiplicity | two-holders test (`2 × 2051 ≤ 7772`) |
+| QC signer-index / TC uniqueness scratch | O3/O4 | ≤ `N`, bounded sorted-vec, no hashing | bounded validation scratch | UNIQ_SET tests |
+| `CapacityRefusal::PerVector` | error | **0 heap** | within component boundary | alloc-free refusal test |
+| `CapacityRefusal::Message` / `Display` render | error | heap only off the protected pre-reservation path / only when rendered | outside protected interval | alloc-free refusal test (render is a separate step) |
+
+No inventory row is marked "unaccounted". Every phase satisfies `live component-owned charge ≤ active covering reservations ≤ unchanged aggregate authority 7772`, and no single reservation is counted twice as coverage for two simultaneously-live objects (the holder gen term and `o3_scratch` cover **disjoint** portions of the transient).
+
+### 3. Maximum-fixture reconciliation (item 5)
+
+The quorum fixtures `valid_wire_qc` / `valid_tc_record` (three signers at N=4) are retained for their existing structural-admission purposes but are **not** maximum fixtures and are no longer cited as such. The distinct maximum fixtures `valid_tc_record_max` (N timeout entries, N unique authorized signers, maximum record-level / TC-level / nested high-QC signer arrays, maximum signature lengths) drive the maximum-coverage observations; `d7d14_*` max tests assert fixture dimensions before the measured interval. `d7d14_encode_record_backing_is_bounded_single_allocation` observes exactly one (pre-sized) allocation and `capacity() == admitted cap` for both `encode_record` and the maximum QC/TC path, and `compute_evidence_lock_binding` is exercised by `valid_tc_record_max`'s construction. The release-path mechanism that prevents growth beyond admitted bounds is the **pre-sized backing** (`encoded_record_cap()` / `max_qc_bytes` / `max_tc_bytes`), observed at the capacity, not a debug assertion.
+
+### 4. Publication-staging independent observation (item 7)
+
+The O5 reservation-counter regression is retained as an **admission** regression only. The reopen-isolated `d7d14_o5_publication_envelope_coexistence_reserved_within_aggregate` independently observes the live publication footprint (holder + read-back + transient + staging envelopes) at the real `publish_atomic` boundary, derived from those objects separately from the reservation helper, and **fails closed** if the staging coverage is removed. O4's existing whole-operation reservation is shown to already cover publication staging and the preceding validation phases (no duplicate staging reservation is added to O4), and a legitimate O4 with a live O3 proof remains admissible.
+
+### 5. Superseded prior claims (history preserved)
+
+* that the candidate preflight is *allocation-free* — **superseded/limited**: it was allocation-free only on **success**; the **refusal** branch of `check_capnorm` allocated a `String` via `format!` until this pass's typed `PerVector` correction, now observed at **0** allocations on the protected refusal interval.
+* that O3's existing reservation (`holder + rec = 2862`) covers the full validation lifetime — **superseded**: it under-reserved the live validation coexistence by **635** bytes (reviewed `3497`); corrected to `2870` with the `reencoded` drop and the transient-excess + single-buffer scratch.
+* that quorum fixtures establish maximum QC/TC coverage — **superseded**: maximum coverage is attributed to the distinct `*_max` fixtures with asserted dimensions.
+* that reservation-counter peaks independently measure live allocation peaks — **limited**: counter arithmetic is an admission check; the counting-allocator and object-derived observations measure live allocation directly.
+* that the only remaining D7-D14 work is authoring a table — **superseded**: the inventory is authored **and** the two runtime discrepancies it would have revealed (O3 coexistence, refusal-path allocation) are corrected with regressions.
+
+### 6. Literal validation outcomes (this pass, this revision, no PR)
+
+* `cargo build -p qbind-node --lib` → **exit 0** (`Finished dev`, 17.23s).
+* `cargo test -p qbind-node --no-run` (default-feature link gate) → **exit 0** (all default-feature binaries compiled; gated D7-D14/m16 correctly skipped by `required-features`).
+* `cargo test -p qbind-node --features test-utils --no-run` → **exit 0**.
+* `cargo test -p qbind-node --features test-utils --test run_422_d7d14_safety_record_store_tests` → **ok. 107 passed; 0 failed; 1 ignored** (`child_process_entry` ignored; 103 baseline + 4 this pass: the two O3 coexistence regressions and the two allocation-free refusal regressions).
+* `cargo test -p qbind-node --features test-utils --test m16_epoch_transition_hardening_tests` → **ok. 14 passed; 0 failed**.
+* `cargo clippy -p qbind-node --lib --features test-utils` → **exit 0**; **0** findings in `safety_record_store/{accounting,owner,error,validate}.rs` or the added test regions (the 103 warnings are pre-existing baseline lints in other modules).
+* `rustfmt --check` on the four edited source files → the **edited/added regions are clean**; the only residual diff is the pre-existing module-wide no-final-newline EOF convention (preserved, not rewritten). The D7-D14 test file's CRLF / no-final-newline convention was preserved; the appended tests are rustfmt-clean (spliced from a canonical format, pre-existing drift in untouched regions left intact).
+* `cargo build --release -p qbind-node` → recorded below.
+* Secret scanning over the five edited `.rs` files → **no secrets**. Non-wiring audit: `CapnormSiteKind` / `CapacityRefusalDetail` are referenced only within the component and its test; `safety_record_store` is referenced outside only by `lib.rs` `pub mod` (unchanged); default `Disabled` policy, MainNet refusal, and `test-utils` gating unchanged; no production construction, startup, consensus, signing, verifier, transport, authority, activation, or anti-rollback wiring added.
+
+### 7. Original H-subset mapping and H22 limitation (item 8)
+
+The original acceptance subset is preserved — Accepted: `H2–H12, H16, H18–H25, H26, H27, H30`; Excluded: `H1, H13–H15, H17, H25e, H26l, H28, H29`. No contract row was reinterpreted to fit available tests; deterministic process-death coordination remains distinct from power loss, and storage durability remains distinct from signature authentication and anti-rollback. **H22 remains separately limited:** O3 yields `Unverified`, and the verified-prerequisite consumer boundary is a test-authored model — not manufactured closure through an unused helper or unauthorized production wiring.
+
+### 8. Literal review/security-tool outcomes (recorded below after the final change)
+
+Both gates remain **required and OPEN** and are recorded literally in the final validation run; an unavailable review model is **not** a completed review, and a database-size CodeQL skip is **not** a zero-alert result.
+
+### 9. Verdicts retained (NOT promoted)
+
+```
+D7D14_STORAGE_COMPONENT=PARTIAL-IMPLEMENTATION
+D7D14_STORAGE_ACCEPTANCE=INCOMPLETE
+DURABLE_ANTI_ROLLBACK=NOT-ESTABLISHED
+GENESIS_AUTHORITY_ACTIVATION=DISABLED
+PRODUCTION_WIRE_CHAIN_ID_BEHAVIOR=UNCHANGED
+CONFIGURED_AUTHORITY_RELEASE_BINARY_EVIDENCE=NOT-YET-CAPTURED
+SECURITY_POSTURE=RS1-OPEN / PUBLIC-DEVNET-NO-GO
+```

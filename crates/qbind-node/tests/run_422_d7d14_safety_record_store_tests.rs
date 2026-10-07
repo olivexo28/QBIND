@@ -3097,7 +3097,8 @@ fn corr_preflight_smallest_over_bound_capacity_still_refused() {
         panic!("QC candidate must be QcDerived");
     }
     match admit_supporting_evidence(&locked.evidence, &ctx) {
-        Err(SafetyStoreError::CapacityRefusal(msg)) => {
+        Err(e @ SafetyStoreError::CapacityRefusal(_)) => {
+            let msg = e.to_string();
             assert!(
                 msg.contains("QC signature buffer"),
                 "refusal must name the offending backing site, got: {msg}"
@@ -5586,4 +5587,289 @@ fn d7d14_encode_record_backing_is_bounded_single_allocation() {
         "max-TC encode backing capacity must equal the admitted serialized cap"
     );
     assert!(enc.len() as u128 <= max_tc_bytes(&ctx).unwrap());
+}
+
+/// §3 — O3 validation-reservation coexistence regression (D7-D14). Reproduces the
+/// reviewed under-reservation: during O3 `validate_decoded`→`validate_locked` the
+/// correspondence re-encode buffer and the certificate-binding buffer — each
+/// pre-sized to `MAX_SAFETY_RECORD_BYTES` — would coexist with the live transient
+/// decoded object and the retained original bytes. The pre-correction O3
+/// reservation (`retained_holder_charge + MAX_SAFETY_RECORD_BYTES`) does NOT cover
+/// that live peak; the corrected reservation does, and still fits the UNCHANGED
+/// aggregate. Every object size here is derived from the real encoded/decoded
+/// objects, independently of the reservation formula under test.
+#[test]
+fn d7d14_o3_validation_reservation_covers_live_coexistence_max_tc() {
+    use qbind_node::safety_record_store::accounting::{
+        decoded_working_set_charge, max_transient_decoded_working_set,
+    };
+    use qbind_node::safety_record_store::profile::{
+        max_aggregate_retained_bytes, max_retained_generation_bytes,
+    };
+    use qbind_node::safety_record_store::record::{
+        size_of_timeout_msg, validated_holder_handle_bytes,
+    };
+    let ctx = ctx_n(4);
+
+    // Real maximum-TC objects: encode the retained original, then decode the live
+    // transient working set — the two objects O3 holds alongside its validation
+    // buffers. Sizes come from these live objects, not the reservation formula.
+    let ltc = valid_tc_record_max(&ctx, 5, 6);
+    let decoded = DecodedRecord {
+        persistence_format_version: 1,
+        network_genesis_id: ctx.network_genesis_id,
+        publication_revision: 1,
+        record: SafetyRecord::Locked(ltc),
+    };
+    let enc = encode_record(&decoded, &ctx).unwrap();
+    let enc_len = enc.len() as u128; // retained original (no optional anchor/predecessor)
+    let decoded = decode_record(&enc, &ctx).unwrap();
+    let transient = decoded_working_set_charge(&decoded).unwrap();
+
+    let rec = max_safety_record_bytes(&ctx).unwrap(); // pre-sized validation buffer
+    let retained_gen = max_retained_generation_bytes(&ctx, size_of_timeout_msg()).unwrap();
+    let handle = validated_holder_handle_bytes();
+    let holder = rec + retained_gen + handle; // retained-holder charge
+
+    // Executed derivations on the actual target.
+    assert_eq!(enc_len, 763, "retained original max-TC encoded bytes");
+    assert_eq!(transient, 1112, "live transient decoded working set");
+    assert_eq!(rec, 811, "pre-sized record-level validation buffer");
+    assert_eq!(holder, 2051, "retained-holder charge (rec + gen + handle)");
+
+    // PRE-correction reservation and the live coexistence it fails to cover. With
+    // BOTH record-sized validation buffers alive (the reviewed overlap), the live
+    // data objects total strictly exceeds the pre-correction reservation.
+    let pre_reservation = holder + rec; // 2862
+    let two_buffer_live = enc_len + transient + 2 * rec; // 3497 (reviewed subtotal)
+    assert_eq!(pre_reservation, 2862, "pre-correction O3 reservation");
+    assert_eq!(
+        two_buffer_live, 3497,
+        "reviewed two-buffer live coexistence subtotal"
+    );
+    assert!(
+        two_buffer_live > pre_reservation,
+        "reviewed overlap: live coexistence {two_buffer_live} exceeds pre-correction \
+         reservation {pre_reservation}"
+    );
+    assert_eq!(
+        two_buffer_live - pre_reservation,
+        635,
+        "exact reviewed under-reservation (bytes)"
+    );
+
+    // CORRECTION 1 (lifetime): `validate_decoded` drops `reencoded` before the
+    // certificate-binding buffer is allocated, so only ONE record-sized validation
+    // buffer is ever live. CORRECTION 2 (reservation): O3 reserves the transient's
+    // excess over the retained ceiling PLUS one record-sized buffer, atop the holder.
+    let transient_ceiling = max_transient_decoded_working_set(&ctx).unwrap();
+    let transient_excess = transient_ceiling - retained_gen;
+    let o3_scratch = transient_excess + rec;
+    let corrected_reservation = holder + o3_scratch; // 2870
+    assert_eq!(corrected_reservation, 2870, "corrected O3 reservation");
+
+    // The single-buffer live coexistence (incl. the inline handle) fits the
+    // corrected reservation; the two-buffer overlap no longer occurs.
+    let single_buffer_live = enc_len + transient + rec + handle; // 2822
+    assert!(
+        single_buffer_live <= corrected_reservation,
+        "post-correction single-buffer live peak {single_buffer_live} fits corrected \
+         reservation {corrected_reservation}"
+    );
+
+    // The accepted aggregate is UNCHANGED and still covers the corrected O3
+    // reservation — the gap was closed WITHOUT inflating the aggregate.
+    let agg = max_aggregate_retained_bytes(&ctx, size_of_timeout_msg(), rec).unwrap();
+    assert_eq!(agg, 7772, "accepted N=4 aggregate unchanged");
+    assert!(
+        corrected_reservation <= agg,
+        "corrected O3 reservation fits the unchanged aggregate"
+    );
+}
+
+/// §3 — the REAL O3 `read_validate` over a maximum-TC publication. Observed on a
+/// reopened (fresh-accountant) backend so the measured peak reflects ONLY O3: the
+/// retained-holder charge is exactly the derived 2051, the validation peak strictly
+/// exceeds the holder (the transient decode + single validation buffer were
+/// actually reserved and live), two live holders coexist within the UNCHANGED
+/// aggregate, and every charge releases on drop.
+#[test]
+fn d7d14_o3_real_read_validate_with_live_holder_within_aggregate() {
+    let dir = tempfile::tempdir().unwrap();
+    let ctx = ctx_n(4);
+    let owner = init_owner(dir.path(), &ctx);
+
+    let ltc = valid_tc_record_max(&ctx, 5, 6);
+    assert_eq!(
+        owner.publish_locked(ltc, 0, None::<&FixtureCommittedHistory>),
+        PublishResult::DurableAcknowledged { new_revision: 1 }
+    );
+    // Reopen a FRESH backend so the observed peak reflects ONLY O3, not the earlier
+    // O4 publish peak.
+    drop(owner);
+    let owner = SafetyRecordOwner::attach(open_enabled(dir.path()), ctx.clone()).unwrap();
+    let backend = owner.backend_for_test();
+    let agg_cap = backend.accounting_aggregate_cap().unwrap();
+    assert!(
+        owner.recovery_required(),
+        "reopened store starts not-effective"
+    );
+
+    let proof = owner
+        .read_validate(None::<&FixtureCommittedHistory>)
+        .unwrap();
+    assert!(proof.retained().is_locked());
+    let holder = backend.accounting_current();
+    assert_eq!(holder, 2051, "retained-holder charge for the max-TC proof");
+    let peak = backend.accounting_aggregate_peak();
+    assert!(
+        peak > holder,
+        "O3 validation peak {peak} must exceed the retained holder {holder} \
+         (the transient decode + validation buffer were reserved and live)"
+    );
+    assert!(
+        peak <= agg_cap,
+        "O3 validation peak within the unchanged aggregate"
+    );
+
+    // A SECOND live O3 holder coexists with the first within the aggregate.
+    let proof2 = owner
+        .read_validate(None::<&FixtureCommittedHistory>)
+        .unwrap();
+    assert_eq!(
+        backend.accounting_current(),
+        2 * holder,
+        "two live O3 holders"
+    );
+    assert!(
+        backend.accounting_aggregate_peak() <= agg_cap,
+        "two live holders + O3 validation within the unchanged aggregate"
+    );
+
+    drop(proof2);
+    drop(proof);
+    assert_eq!(
+        backend.accounting_current(),
+        0,
+        "all O3 holders released on drop"
+    );
+}
+
+/// §4 — the protected O4 structural/capacity preflight REFUSAL path is
+/// allocation-free. The smallest per-vector over-bound (S_sig=8, len 8, capacity 9,
+/// slack 0) is refused, and the measured refusal interval (after fixture
+/// construction and warm-up) performs ZERO component-owned allocations: the refusal
+/// carries typed `Copy` `PerVector` bound data, so no owned diagnostic `String` is
+/// built on the refusal path. Rendering the diagnostic is a SEPARATE post-refusal
+/// step, outside the measured interval.
+#[test]
+fn d7d14_o4_preflight_refusal_is_allocation_free() {
+    use qbind_node::safety_record_store::codec::admit_supporting_evidence;
+    let ctx = ctx_n(4);
+    let mut locked = make_locked_qc(&ctx, [9u8; 32], 5, valid_wire_qc(&ctx, [9u8; 32], 5), None)
+        .expect("valid QC candidate");
+    if let SupportingEvidence::QcDerived(qc) = &mut locked.evidence {
+        let mut over = Vec::with_capacity(S_SIG + 1);
+        over.extend_from_slice(&[0xABu8; S_SIG]);
+        assert_eq!(over.len(), 8);
+        assert_eq!(over.capacity(), 9);
+        qc.signatures[0] = over;
+    } else {
+        panic!("QC candidate must be QcDerived");
+    }
+    // Warm up lazy state OUTSIDE the measured interval, then measure ONLY the
+    // protected preflight refusal.
+    let _ = admit_supporting_evidence(&locked.evidence, &ctx);
+    let (res, allocs) = measure_allocs(|| admit_supporting_evidence(&locked.evidence, &ctx));
+    assert!(
+        matches!(res, Err(SafetyStoreError::CapacityRefusal(_))),
+        "the over-bound preflight must refuse"
+    );
+    assert_eq!(
+        allocs, 0,
+        "the protected O4 preflight refusal path must allocate nothing \
+         (typed PerVector refusal, no owned diagnostic String)"
+    );
+    // The diagnostic is materialised only on demand, as a separate step.
+    let rendered = res.unwrap_err().to_string();
+    assert!(
+        rendered.contains("QC signature buffer"),
+        "rendered diagnostic names the offending site"
+    );
+}
+
+/// §4 — the real O4 publish refusal leaves durable state and reservations intact
+/// and re-admits. With an ESTABLISHED LOCKED predecessor, an over-bound candidate
+/// (smallest per-vector violation) is refused pre-write; no predecessor evidence is
+/// read/encoded before the refusal, the recovery latch is untouched, the retained
+/// revision is unchanged, reservations return to baseline, and a subsequent
+/// ELIGIBLE successor succeeds.
+#[test]
+fn d7d14_o4_preflight_refusal_leaves_state_and_readmits() {
+    use qbind_node::safety_record_store::codec::{
+        evidence_payload_encode_count, reset_evidence_payload_encode_count,
+    };
+    let dir = tempfile::tempdir().unwrap();
+    let ctx = ctx_n(4);
+    let owner = init_owner(dir.path(), &ctx);
+    let backend = owner.backend_for_test();
+
+    let base = make_locked_qc(&ctx, [9u8; 32], 5, valid_wire_qc(&ctx, [9u8; 32], 5), None).unwrap();
+    assert_eq!(
+        owner.publish_locked(base, 0, None::<&FixtureCommittedHistory>),
+        PublishResult::DurableAcknowledged { new_revision: 1 }
+    );
+    assert_eq!(backend.accounting_current(), 0, "baseline after O4 publish");
+
+    let mut candidate =
+        make_locked_qc(&ctx, [9u8; 32], 9, valid_wire_qc(&ctx, [9u8; 32], 9), None).unwrap();
+    if let SupportingEvidence::QcDerived(qc) = &mut candidate.evidence {
+        let mut over = Vec::with_capacity(S_SIG + 1);
+        over.extend_from_slice(&[0xABu8; S_SIG]);
+        qc.signatures[0] = over;
+    } else {
+        panic!("candidate must be QcDerived");
+    }
+
+    reset_evidence_payload_encode_count();
+    match owner.publish_locked(candidate, 1, None::<&FixtureCommittedHistory>) {
+        PublishResult::RefusedPreWrite(SafetyStoreError::CapacityRefusal(_)) => {}
+        other => panic!("expected pre-write CapacityRefusal, got {other:?}"),
+    }
+    assert_eq!(
+        evidence_payload_encode_count(),
+        0,
+        "no predecessor evidence read/encode before the candidate refusal"
+    );
+    assert!(
+        !owner.recovery_required(),
+        "refusal must not set the recovery latch"
+    );
+    assert_eq!(
+        backend.accounting_current(),
+        0,
+        "reservations return to baseline after refusal"
+    );
+
+    let proof = owner
+        .read_validate(None::<&FixtureCommittedHistory>)
+        .unwrap();
+    assert_eq!(
+        proof.retained().publication_revision,
+        1,
+        "predecessor revision unchanged by the refusal"
+    );
+    assert!(proof.retained().is_locked());
+    drop(proof);
+
+    let good = make_locked_qc(&ctx, [9u8; 32], 9, valid_wire_qc(&ctx, [9u8; 32], 9), None).unwrap();
+    assert_eq!(
+        owner.publish_locked(good, 1, None::<&FixtureCommittedHistory>),
+        PublishResult::DurableAcknowledged { new_revision: 2 }
+    );
+    assert_eq!(
+        backend.accounting_current(),
+        0,
+        "baseline after the eligible successor"
+    );
 }

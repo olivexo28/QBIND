@@ -76,6 +76,17 @@ pub fn validate_decoded<H: CommittedHistory + ?Sized>(
             "decoded content does not correspond to the supplied encoded bytes".into(),
         ));
     }
+    // The correspondence re-encode has served its ONLY purpose. Drop its
+    // record-sized backing explicitly **before** `validate_locked` /
+    // `compute_evidence_lock_binding` allocates the certificate-binding scratch
+    // (§ 13.7, D7-D14 O3 validation-coexistence correction). Without this drop
+    // the re-encode buffer and the certificate-binding buffer — each up to
+    // `MAX_SAFETY_RECORD_BYTES` — coexist, so the O3 phase holds TWO record-sized
+    // validation buffers at once; dropping it here keeps the live validation
+    // scratch to a single record-sized buffer, which is what the O3 reservation in
+    // `read_validate` admits. This is a lifetime correction only: it never changes
+    // which bytes are retained for O5 (the caller's `encoded` is untouched).
+    drop(reencoded);
 
     // Common identity binding to the pinned context (P4 prelude).
     if decoded.network_genesis_id != ctx.network_genesis_id {

@@ -8,7 +8,7 @@
 
 use std::sync::{Arc, Mutex};
 
-use super::error::SafetyStoreError;
+use super::error::{CapacityRefusalDetail, CapnormSiteKind, SafetyStoreError};
 use super::profile::{
     max_aggregate_retained_bytes, max_retained_generation_bytes, PinnedSafetyContext, ARC_CTRL,
     CAPNORM_SLACK, VALIDATOR_ID_WIDTH,
@@ -125,10 +125,13 @@ pub fn admit_evidence_capacity(
     let total = add(add(size_of_retained_generation(), backing)?, ARC_CTRL)?;
     let cap = max_retained_generation_bytes(ctx, size_of_timeout_msg())?;
     if total > cap {
-        return Err(SafetyStoreError::CapacityRefusal(format!(
-            "supporting-evidence backing capacity charge {total} exceeds \
+        return Err(SafetyStoreError::CapacityRefusal(
+            format!(
+                "supporting-evidence backing capacity charge {total} exceeds \
              MAX_RETAINED_GENERATION_BYTES {cap} (excess spare capacity)"
-        )));
+            )
+            .into(),
+        ));
     }
     Ok(())
 }
@@ -172,18 +175,18 @@ pub fn admit_evidence_capnorm(
             check_capnorm(
                 qc.signer_bitmap.capacity() as u128,
                 b_span,
-                CapnormSite::QcSignerBitmap,
+                CapnormSiteKind::QcSignerBitmap,
             )?;
             check_capnorm(
                 qc.signatures.capacity() as u128,
                 n,
-                CapnormSite::QcSignaturesDescriptor,
+                CapnormSiteKind::QcSignaturesDescriptor,
             )?;
             for (i, sig) in qc.signatures.iter().enumerate() {
                 check_capnorm(
                     sig.capacity() as u128,
                     s_sig,
-                    CapnormSite::QcSignatureBuffer(i),
+                    CapnormSiteKind::QcSignatureBuffer(i),
                 )?;
             }
         }
@@ -191,32 +194,32 @@ pub fn admit_evidence_capnorm(
             check_capnorm(
                 high_qc.signers.capacity() as u128,
                 n,
-                CapnormSite::RecordHighQcSigners,
+                CapnormSiteKind::RecordHighQcSigners,
             )?;
-            check_capnorm(tc.signers.capacity() as u128, n, CapnormSite::TcSigners)?;
+            check_capnorm(tc.signers.capacity() as u128, n, CapnormSiteKind::TcSigners)?;
             if let Some(h) = &tc.high_qc {
                 check_capnorm(
                     h.signers.capacity() as u128,
                     n,
-                    CapnormSite::TcHighQcSigners,
+                    CapnormSiteKind::TcHighQcSigners,
                 )?;
             }
             check_capnorm(
                 tc.signed_timeouts.capacity() as u128,
                 n,
-                CapnormSite::TcSignedTimeoutsDescriptor,
+                CapnormSiteKind::TcSignedTimeoutsDescriptor,
             )?;
             for (i, t) in tc.signed_timeouts.iter().enumerate() {
                 check_capnorm(
                     t.signature.capacity() as u128,
                     s_sig,
-                    CapnormSite::TcSignedTimeoutSignature(i),
+                    CapnormSiteKind::TcSignedTimeoutSignature(i),
                 )?;
                 if let Some(h) = &t.high_qc {
                     check_capnorm(
                         h.signers.capacity() as u128,
                         n,
-                        CapnormSite::TcSignedTimeoutNestedHighQcSigners(i),
+                        CapnormSiteKind::TcSignedTimeoutNestedHighQcSigners(i),
                     )?;
                 }
             }
@@ -225,71 +228,32 @@ pub fn admit_evidence_capnorm(
     Ok(())
 }
 
-/// Typed, **allocation-free** diagnostic identifier for a per-vector capacity
-/// bound site (§ 13.7A, D7-D14 allocation-free preflight correction).
-///
-/// The earlier implementation passed `&format!("…[{i}]")` as the diagnostic
-/// string, which allocated a `String` on **every** loop iteration of
-/// [`admit_evidence_capnorm`] — i.e. on the success path of the O4 preflight —
-/// even though the string is only ever rendered on the refusal path. Carrying a
-/// `Copy` enum (with an inline `usize` index for the array sites) instead means
-/// the success path performs no heap allocation at all; the single `String` is
-/// built by `Display`/`format!` **only** when a backing is refused, and its
-/// lifetime is exactly the returned [`SafetyStoreError`]. Moving the `format!`
-/// into a helper would not have fixed this — the fix is to not construct it at
-/// all unless a refusal is actually produced.
-#[derive(Clone, Copy)]
-enum CapnormSite {
-    QcSignerBitmap,
-    QcSignaturesDescriptor,
-    QcSignatureBuffer(usize),
-    RecordHighQcSigners,
-    TcSigners,
-    TcHighQcSigners,
-    TcSignedTimeoutsDescriptor,
-    TcSignedTimeoutSignature(usize),
-    TcSignedTimeoutNestedHighQcSigners(usize),
-}
-
-impl std::fmt::Display for CapnormSite {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            CapnormSite::QcSignerBitmap => f.write_str("QC signer_bitmap"),
-            CapnormSite::QcSignaturesDescriptor => f.write_str("QC signatures descriptor array"),
-            CapnormSite::QcSignatureBuffer(i) => write!(f, "QC signature buffer [{i}]"),
-            CapnormSite::RecordHighQcSigners => f.write_str("record-level high_qc.signers"),
-            CapnormSite::TcSigners => f.write_str("tc.signers"),
-            CapnormSite::TcHighQcSigners => f.write_str("tc.high_qc.signers"),
-            CapnormSite::TcSignedTimeoutsDescriptor => {
-                f.write_str("tc.signed_timeouts descriptor array")
-            }
-            CapnormSite::TcSignedTimeoutSignature(i) => {
-                write!(f, "tc.signed_timeouts[{i}].signature")
-            }
-            CapnormSite::TcSignedTimeoutNestedHighQcSigners(i) => {
-                write!(f, "tc.signed_timeouts[{i}].high_qc.signers")
-            }
-        }
-    }
-}
-
 /// A single decoded growable backing passes the capacity bound iff its
 /// `capacity()` is within `profile_max + CAPNORM_SLACK` elements/bytes for its
 /// class. Over-bound → refuse (no silent over-capacity retention), naming the
-/// offending backing and its class maximum. The `site` identifier is a `Copy`
-/// enum so the success path allocates nothing; the diagnostic `String` is built
-/// only on the refusal branch.
+/// offending backing and its class maximum. The `site` identifier is the `Copy`
+/// [`CapnormSiteKind`] (an inline `usize` index for the array sites), so BOTH
+/// the success path AND the refusal path allocate nothing: the refusal carries
+/// typed [`CapacityRefusalDetail::PerVector`] `Copy` bound data, and the
+/// diagnostic `String` is materialised only if/when the error is rendered via
+/// `Display`. This keeps the O4 structural/capacity preflight — which runs
+/// BEFORE the O4 operation reservation — allocation-free on the refusal path as
+/// well as on success (§ 13.7A, D7-D14 allocation-free preflight correction).
 fn check_capnorm(
     capacity: u128,
     profile_max: u128,
-    site: CapnormSite,
+    site: CapnormSiteKind,
 ) -> Result<(), SafetyStoreError> {
     let permitted = add(profile_max, CAPNORM_SLACK)?;
     if capacity > permitted {
-        return Err(SafetyStoreError::CapacityRefusal(format!(
-            "{site} capacity {capacity} exceeds profile maximum {profile_max} + \
-             CAPNORM_SLACK {CAPNORM_SLACK} (per-vector capacity bound)"
-        )));
+        return Err(SafetyStoreError::CapacityRefusal(
+            CapacityRefusalDetail::PerVector {
+                site,
+                capacity,
+                profile_max,
+                slack: CAPNORM_SLACK,
+            },
+        ));
     }
     Ok(())
 }
@@ -420,10 +384,13 @@ impl AllocationAccountant {
     pub fn admit(&mut self, charge: u128) -> Result<(), SafetyStoreError> {
         let next = add(self.current, charge)?;
         if next > self.cap {
-            return Err(SafetyStoreError::CapacityRefusal(format!(
-                "admitting {charge} would raise {}→{} over cap {}",
-                self.current, next, self.cap
-            )));
+            return Err(SafetyStoreError::CapacityRefusal(
+                format!(
+                    "admitting {charge} would raise {}→{} over cap {}",
+                    self.current, next, self.cap
+                )
+                .into(),
+            ));
         }
         self.current = next;
         if next > self.peak {
@@ -518,10 +485,13 @@ impl AggregateAuthority {
             }
             Some(existing) => {
                 if existing.cap != cap {
-                    return Err(SafetyStoreError::CapacityRefusal(format!(
-                        "aggregate authority already bound to cap {} (attempted {})",
-                        existing.cap, cap
-                    )));
+                    return Err(SafetyStoreError::CapacityRefusal(
+                        format!(
+                            "aggregate authority already bound to cap {} (attempted {})",
+                            existing.cap, cap
+                        )
+                        .into(),
+                    ));
                 }
                 Ok(())
             }
@@ -538,10 +508,13 @@ impl AggregateAuthority {
         })?;
         let next = add(guard.current, charge)?;
         if next > guard.cap {
-            return Err(SafetyStoreError::CapacityRefusal(format!(
-                "aggregate admission of {charge} would raise {}→{next} over aggregate cap {}",
-                guard.current, guard.cap
-            )));
+            return Err(SafetyStoreError::CapacityRefusal(
+                format!(
+                    "aggregate admission of {charge} would raise {}→{next} over aggregate cap {}",
+                    guard.current, guard.cap
+                )
+                .into(),
+            ));
         }
         guard.current = next;
         if next > guard.peak {
@@ -638,11 +611,14 @@ impl SharedAccountant {
             }
             Some(existing) => {
                 if existing.cap() != acct.cap() {
-                    return Err(SafetyStoreError::CapacityRefusal(format!(
-                        "shared accountant already bound to cap {} (attempted {})",
-                        existing.cap(),
-                        acct.cap()
-                    )));
+                    return Err(SafetyStoreError::CapacityRefusal(
+                        format!(
+                            "shared accountant already bound to cap {} (attempted {})",
+                            existing.cap(),
+                            acct.cap()
+                        )
+                        .into(),
+                    ));
                 }
                 Ok(())
             }
@@ -663,11 +639,14 @@ impl SharedAccountant {
             }
             Some(existing) => {
                 if existing.cap() != cap {
-                    return Err(SafetyStoreError::CapacityRefusal(format!(
-                        "shared context accountant already bound to cap {} (attempted {})",
-                        existing.cap(),
-                        cap
-                    )));
+                    return Err(SafetyStoreError::CapacityRefusal(
+                        format!(
+                            "shared context accountant already bound to cap {} (attempted {})",
+                            existing.cap(),
+                            cap
+                        )
+                        .into(),
+                    ));
                 }
                 Ok(())
             }
