@@ -331,6 +331,31 @@ pub fn max_transient_decoded_working_set(
     )
 }
 
+/// The fixed CRC prefix (§ 13.4 framing) each component-owned publication
+/// envelope carries ahead of its payload.
+pub const CRC_PREFIX: u128 = 4;
+
+/// The component-owned **publication-staging** charge (§ 13.5 / § 13.7, D7-D14 O5
+/// publication-envelope coexistence correction).
+///
+/// `backend::publish_atomic` constructs two CRC-wrapped envelopes
+/// (`SafetyBackend::wrap`) — one over the record payload, one over the metadata
+/// payload — each a fresh `Vec::with_capacity(4 + payload.len())`. These are
+/// genuinely **component-owned** allocations: being handed to a RocksDB
+/// `WriteBatch` does not make them uncharged, and they coexist with the already
+/// live publication-input buffer, the read-back buffer, the transient decoded
+/// object, the encoded metadata payload, and (at O5) the retained holder. The
+/// earlier O1/O4/O5 reservations charged the payload buffers but **not** these
+/// framing envelopes, so a publication peaked above its reservation. This
+/// conservative charge covers both envelopes at their worst case (`record` at the
+/// maximum serialized record size, `meta` at `META_ENCODED_LEN`), so a
+/// publication's component-owned staging is admitted before `wrap` allocates it.
+pub fn publication_staging_charge(ctx: &PinnedSafetyContext) -> Result<u128, SafetyStoreError> {
+    let record_envelope = add(CRC_PREFIX, super::profile::max_safety_record_bytes(ctx)?)?;
+    let meta_envelope = add(CRC_PREFIX, super::backend::META_ENCODED_LEN)?;
+    add(record_envelope, meta_envelope)
+}
+
 /// The component-level aggregate accountant. Enforces the checked aggregate
 /// coexistence ceiling across every charged allocation; tracks the observed
 /// peak for evidence.

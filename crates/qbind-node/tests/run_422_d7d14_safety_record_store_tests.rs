@@ -5450,3 +5450,85 @@ fn d7d14_o4_candidate_preflight_precedes_locked_predecessor_read() {
         "an admitted O4 does read/validate/encode (predecessor + candidate)"
     );
 }
+
+/// §5 — O5 publication-envelope coexistence regression. `publish_atomic` wraps
+/// the republished record + metadata in two CRC-framing envelopes
+/// (`SafetyBackend::wrap`) while the O5 read-back buffer, the transient decoded
+/// object, the encoded metadata, and the retained O3 holder are all still live.
+/// The O5 reservation now charges that `publication_staging_charge` up front, so
+/// the observed coexistence peak reflects it and still fits the UNCHANGED
+/// aggregate. Were the staging term absent, the O5 peak would be
+/// `holder + readback + META + transient` (= 4016 for the maximum TC) — strictly
+/// below the lower bound asserted here — so this regression fails closed if the
+/// envelope charge is dropped.
+#[test]
+fn d7d14_o5_publication_envelope_coexistence_reserved_within_aggregate() {
+    use qbind_node::safety_record_store::accounting::{
+        max_transient_decoded_working_set, publication_staging_charge,
+    };
+    use qbind_node::safety_record_store::profile::max_safety_record_bytes;
+
+    let dir = tempfile::tempdir().unwrap();
+    let ctx = ctx_n(4);
+    let owner = init_owner(dir.path(), &ctx);
+
+    // Establish the maximum-TC publication under the first backend instance, then
+    // drop it so the O4 operation's own working-set peak does NOT pollute the
+    // measurement.
+    let ltc = valid_tc_record_max(&ctx, 5, 6);
+    assert_eq!(
+        owner.publish_locked(ltc, 0, None::<&FixtureCommittedHistory>),
+        PublishResult::DurableAcknowledged { new_revision: 1 }
+    );
+    drop(owner);
+
+    // Reopen a FRESH backend over the surviving bytes: its accountant peak starts
+    // at zero, so the peak observed below reflects ONLY the O3 holder + O5
+    // working-set coexistence (including the publication-staging envelopes), not
+    // the earlier O4 peak. A reopened established store is not-effective, which is
+    // exactly the state O5 recovers.
+    let owner = SafetyRecordOwner::attach(open_enabled(dir.path()), ctx.clone()).unwrap();
+    let backend = owner.backend_for_test();
+    let agg_cap = backend.accounting_aggregate_cap().unwrap();
+    assert!(owner.recovery_required(), "reopened store starts not-effective");
+
+    // Retain a live O3 proof/holder bound to THIS reopened incarnation (required
+    // for the O5 recovery capability), then measure O5 coexistence.
+    let proof = owner
+        .read_validate(None::<&FixtureCommittedHistory>)
+        .unwrap();
+    let holder = backend.accounting_current();
+    assert!(holder > 0, "a live O3 holder must coexist with O5");
+
+    let staging = publication_staging_charge(&ctx).unwrap();
+    assert!(staging > 0, "the CRC-framing envelopes are a real charge");
+    let readback = max_safety_record_bytes(&ctx).unwrap();
+    let transient = max_transient_decoded_working_set(&ctx).unwrap();
+    // Strict lower bound on the O5 coexistence peak WITH the staging term (META
+    // omitted to keep it a conservative lower bound). WITHOUT the staging charge
+    // the O5 peak would be `holder + readback + META + transient` — strictly below
+    // this bound — so the assertion fails closed if the envelope charge is dropped.
+    let o5_peak_lower_bound = holder + readback + transient + staging;
+
+    assert_eq!(
+        owner.reacknowledge(&proof),
+        PublishResult::DurableAcknowledged { new_revision: 1 }
+    );
+    let peak = backend.accounting_aggregate_peak();
+    assert!(
+        peak >= o5_peak_lower_bound,
+        "O5 peak {peak} must include the publication-staging envelopes \
+         (lower bound {o5_peak_lower_bound} = holder {holder} + readback {readback} \
+         + transient {transient} + staging {staging})"
+    );
+    assert!(
+        peak <= agg_cap,
+        "O5 + live holder + staging peak {peak} must still fit the unchanged aggregate {agg_cap}"
+    );
+    drop(proof);
+    assert_eq!(
+        backend.accounting_current(),
+        0,
+        "all operational charges (incl. O5 staging) released"
+    );
+}
