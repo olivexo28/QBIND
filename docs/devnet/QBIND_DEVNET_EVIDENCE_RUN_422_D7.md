@@ -16240,3 +16240,76 @@ PRODUCTION_WIRE_CHAIN_ID_BEHAVIOR=UNCHANGED
 CONFIGURED_AUTHORITY_RELEASE_BINARY_EVIDENCE=NOT-YET-CAPTURED
 SECURITY_POSTURE=RS1-OPEN / PUBLIC-DEVNET-NO-GO
 ```
+
+## RUN 422 D7-D14 — remaining protected refusal paths made allocation-free (typed `DeclaredBoundExceeded` / `CapacityRefusal` admission family / `AlreadyEstablished` / `RecoveryRequired`); inventory discrepancies reconciled (code + test + docs, this continuation pass)
+
+**Baseline for this pass (actual, not reported).** Supplied branch `copilot/run-422-complete-refusal-accounting` (used as-supplied; **not** renamed/switched to the previously reported `copilot/copilotcopilotcopilotcopilotcopilotcopilotcopilotd`). Starting HEAD `7aee59b660e5241c51c4e1feeeb8e095b222f095`, upstream `origin/copilot/run-422-complete-refusal-accounting`, worktree clean at start. Reviewed object `ef1432526558be895c165eaef42a057435418bf8` was fetched (`git fetch --depth=1 origin ef143252…`); it is a standalone shallow commit whose **tree `72bb1c2c…` is byte-identical to the starting HEAD tree** (`git diff --stat ef143252 HEAD` empty), so the working branch already carries every prior D7-D14 correction at exact byte fidelity (no CRLF/LF or final-newline difference against the reviewed tree). The earlier "CRLF-only" characterisation of the `1096012…`↔`1eb3164…` delta was inaccurate (it was CRLF conversion **and** removal of the test file's final newline); that correction is recorded and **not** repeated here. The three latest reviewed attachments matched the committed document blobs at `ef143252…`. The obsolete `0f258734…` baseline was **not** restored.
+
+### 1. Findings → runtime corrections → executed regressions (item 3)
+
+The prior pass converted exactly one refusal class (`CapacityRefusalDetail::PerVector`, the per-vector capnorm diagnostic) and the O3 re-encode/binding overlap. Those corrections are **preserved**. This pass audited **all** component-owned error construction reachable before a successful reservation (or after a covering reservation is released) and converted the remaining allocating refusals to typed, `Copy`, non-allocating payloads whose diagnostic text is materialised only on demand via `Display` (outside the protected interval):
+
+* **Finding — `DeclaredBoundExceeded(String)` allocated on every structural/count/prefix refusal.** `admit_wire_qc` (e.g. a 9-byte signature with `S_sig=8`), `admit_timeout_cert`, `admit_logical_qc_signers` (record- and TC-level high-QC signer arrays), `admit_count_fits_prefix`, and the `decode_*`/`encode_*` prefix-bound checks each built a `format!(…)` owned string **before** admission. **Correction:** `SafetyStoreError::DeclaredBoundExceeded` now carries a `Copy` `DeclaredBoundDetail` (variants: `LogicalQcSignerCount`, `HighQcSignerCount`, `SignerBitmapSpan`, `SignatureCount`, `SignatureLength`, `TimeoutSignatureLength`, `TcSignerCount`, `SignedTimeoutsCount`, `PrefixOverflow{field}`, `CapExceedsUsize{field}`, `GenerationChargeExceeds`), with a typed `PrefixField`/`CapField`. The admit helpers were refactored to pass the typed field/closure; no `format!` runs on the refusal branch.
+* **Finding — the aggregate/partition `CapacityRefusal` admission family allocated.** Aggregate and partition admission overflow, aggregate (re)bind mismatch, unbound-ledger refusal, the context-owner ceiling refusal (`owner.rs`), the QC `UNIQ_SET` signer-bits refusal (`validate.rs`), and the per-generation / evidence-backing charge refusals (`accounting.rs`) each constructed owned strings while refusing the requested reservation. **Correction:** `CapacityRefusalDetail` gained `Copy` variants `AdmissionOverflow{scope,…}`, `Unbound{scope}`, `RebindMismatch{…}`, `ContextOwnerExceeded{…}`, `UniqSetExceeded{bound}`, `EvidenceBackingExceeds{…}` (keeping `Message(String)` and `PerVector`), with a typed `LedgerScope` (Aggregate / Partition / SharedOperational / SharedContext).
+* **Finding — O4 `RecoveryRequired(String)` and O1 `AlreadyEstablished(String)` allocated on refusal.** The O4 recovery-required refusal and the O1 established/duplicate refusal (reached **after** the inspection reservation `_inspect_res` is released) each built an owned string, directly contradicting the inventory's zero-heap claim for the O1 established-state refusal. **Correction:** `RecoveryRequired(RecoveryRequiredReason::FreshAcknowledgementRequired)` and `AlreadyEstablished(AlreadyEstablishedKind::MetadataPresent)` are now `Copy`; the O1 zero-heap inventory claim is now **actually true** rather than aspirational.
+
+All error variants retain full numeric/semantic rendering through their `Display` impls; `From<String>`/`From<&str>` keep the remaining non-protected message sites unchanged. Component consumers and tests match these variants with wildcard payloads, so no match arm or public contract changed.
+
+**Executed regressions (appended to `run_422_d7d14_safety_record_store_tests.rs`, new "§3 allocation-free refusal regressions" section; measured with the counting `#[global_allocator]` harness, fixtures built outside the measured interval):**
+
+* `corr_refusal_structural_sig_len_9_over_s_sig_8_is_allocation_free` — smallest structural excess (signature length 9 with `S_sig=8`): **0** allocations on the protected refusal interval; diagnostic rendered separately afterward.
+* `corr_refusal_qc_signature_count_over_n_is_allocation_free` — QC signature-count-over-N structural refusal: **0** allocations.
+* `corr_refusal_admission_overflow_through_reservation_is_allocation_free` — aggregate admission overflow reached through a real reservation request: **0** allocations on the refusal.
+* `corr_typed_refusal_payloads_construct_without_allocation` — direct construction of each typed payload family (`DeclaredBoundDetail`, `CapacityRefusalDetail` admission variants, `AlreadyEstablished`, `RecoveryRequired`) is `Copy` and allocation-free; rendering is the only allocating step.
+
+D7-D14 suite after this pass: **111 passed; 0 failed; 1 ignored** (`child_process_entry` ignored; 107 prior + 4 this pass).
+
+### 2. Inventory discrepancies reconciled against the reviewed source (item 7)
+
+Traced to the actual reservation expressions and wiring at `ef143252…`:
+
+| Previously claimed | Reviewed source (this pass) | Resolution |
+|---|---|---|
+| O1 bootstrap publish reserves `rec + META + staging` | `owner.rs` `o1_pub_charge = max_safety_record_bytes + publication_staging_charge` = **`rec + staging`** (owner.rs:435–442). `publication_staging_charge` already includes the `(4+META)` envelope; there is no separate `+ META` term. | Prose corrected to `rec + staging`. The separate 42-byte metadata **encode** buffer's coexistence under this reservation is flagged as an open inventory item (below), not asserted covered. |
+| O1 established-state refusal has zero heap allocation | Previously built `AlreadyEstablished(String)`; **now** `AlreadyEstablished(AlreadyEstablishedKind::MetadataPresent)` (`Copy`). | Claim now **true** by construction this pass. |
+| Context partition is outside the operational aggregate | `backend.rs:182/188` constructs **both** `accounting` and `context_accounting` as `SharedAccountant::new(aggregate.clone())`; `accounting.rs:709/767` clone the same `AggregateAuthority`. Both partitions charge the **shared** aggregate. | Prose corrected: context ownership is admitted against the shared aggregate authority (sub-cap `max_context_ownership_bytes` is subordinate), consistent with `max_component_aggregate_bytes = max_aggregate_retained_bytes = 7772` (N=4). |
+| All preflight refusals allocate nothing | The typed-refusal families above are now allocation-free; **however** the decode/validate `StructuralRefusal`/`SemanticRefusal` `format!` diagnostics still allocate. | Those paths run **within** an already-admitted operation reservation (O2/O3 decode/validate), not before admission; they are documented as covered-lifetime allocations, **not** claimed allocation-free. |
+| O5 has independent publication-boundary observation | The existing O5 test observes **reservation counters**, not `publish_atomic` envelopes. | **Not** corrected this pass; retained honestly as an open item (below). |
+
+### 3. Work NOT completed this pass (honest scope boundary)
+
+The following authorized items remain **unfinished** and are **not** claimed complete; the verdicts below are retained accordingly:
+
+* **Item 4 (O3 real-lifetime observation).** The source correction (`drop(reencoded)` before certificate-binding allocation) is preserved, but no new test yet observes the actual original/transient/correspondence/binding buffer lifetimes through the real O3 path, and no regression-sensitivity demonstration (reintroduce-the-overlap) was executed. The existing arithmetic/counter tests remain as supporting (not lifetime-observing) evidence.
+* **Item 5 (maximum fixtures).** The preflight/encoder tests still use quorum-sized `valid_wire_qc`/`valid_tc_record`; distinct maximum-dimension QC/TC fixtures and separately measured `encode_record` / `compute_evidence_lock_binding` intervals are not yet implemented.
+* **Item 6 (O5 publication-boundary observation).** No independent observation of component-owned record/metadata envelopes at `publish_atomic`, and no staging-reservation regression-sensitivity demonstration.
+* **Full inventory re-derivation (item 7).** The specific discrepancies above are reconciled, but a complete object-by-object re-trace (including whether the 42-byte metadata encode buffer coexists with the record buffer under the `rec + staging` O1 reservation) is not finished. Any remaining unaccounted object is unfinished implementation.
+
+### 4. Literal validation outcomes (this pass, this revision, no PR)
+
+* `cargo build -p qbind-node --lib` → **exit 0** (`Finished dev`, 14.96s).
+* `cargo test -p qbind-node --no-run` → **exit 0** (default-feature binaries compiled; gated D7-D14/m16 skipped by `required-features`).
+* `cargo test -p qbind-node --features test-utils --no-run` → **exit 0**.
+* `cargo test -p qbind-node --features test-utils --test run_422_d7d14_safety_record_store_tests` → **ok. 111 passed; 0 failed; 1 ignored**.
+* `cargo test -p qbind-node --features test-utils --test m16_epoch_transition_hardening_tests` → **ok. 14 passed; 0 failed**.
+* `cargo clippy -p qbind-node --features test-utils --tests` → **exit 0**; **0** findings in `safety_record_store/*` or the added test regions (residual warnings are pre-existing baseline lints in unrelated `run_295`/`run_211` tests).
+* `cargo build --release -p qbind-node` → **exit 0** (recorded in the session validation log).
+* Line-ending/EOF fidelity: the five edited `safety_record_store/*.rs` source files were restored to their module CRLF / no-final-newline convention after rustfmt (which defaults to LF+final-newline); the D7-D14 test file's CRLF / no-final-newline convention was preserved; the appended tests are rustfmt-clean.
+* Secret scanning over the six edited files → **no secrets**. Non-wiring audit: the new typed payloads are referenced only within the component and its test; `safety_record_store` is referenced outside only by `lib.rs` `pub mod` (unchanged); default `Disabled` policy, MainNet refusal, and `test-utils` gating unchanged; no production/startup/consensus/signing/verifier/transport/authority/activation/anti-rollback wiring added.
+* Independent review / CodeQL security gates: run via the session's `parallel_validation` gate; outcomes recorded in the session validation log. An unavailable review model is **not** a completed review and a database-size CodeQL skip is **not** a zero-alert result.
+
+### 5. H-subset mapping and verdicts (items 8, 10 — unchanged)
+
+Original acceptance subset preserved — Accepted: `H2–H12, H16, H18–H25, H26, H27, H30`; Excluded: `H1, H13–H15, H17, H25e, H26l, H28, H29`. No obligation reinterpreted to fit a test; process death remains distinct from power loss; storage durability remains distinct from signature authentication and anti-rollback. **H22 remains separately limited** (O3 yields `Unverified`; the verified-prerequisite consumer boundary is a test-authored model, not manufactured closure). Scope unchanged: `GEN_STRUCT_MAX = 384`, `CAPNORM_SLACK = 0`, `max_component_aggregate_bytes = max_aggregate_retained_bytes`, N=4 aggregate `7772`, three encoded-buffer roles — all preserved. Verdicts retained (NOT promoted):
+
+```
+D7D14_STORAGE_COMPONENT=PARTIAL-IMPLEMENTATION
+D7D14_STORAGE_ACCEPTANCE=INCOMPLETE
+DURABLE_ANTI_ROLLBACK=NOT-ESTABLISHED
+GENESIS_AUTHORITY_ACTIVATION=DISABLED
+PRODUCTION_WIRE_CHAIN_ID_BEHAVIOR=UNCHANGED
+CONFIGURED_AUTHORITY_RELEASE_BINARY_EVIDENCE=NOT-YET-CAPTURED
+SECURITY_POSTURE=RS1-OPEN / PUBLIC-DEVNET-NO-GO
+```
+
+C4/C5 remain OPEN; fail-closed `CurrentEpochUnavailable` remains unchanged.
