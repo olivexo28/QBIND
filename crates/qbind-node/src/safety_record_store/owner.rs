@@ -363,11 +363,29 @@ impl SafetyRecordOwner {
             ));
         }
         let guard = self.backend.lock_domain();
-        let meta = self.backend.read_meta(super::backend::META_ENCODED_LEN)?;
-        let record = self
-            .backend
-            .read_record(super::profile::max_safety_record_bytes(self.pinned())?)?;
-        match (meta.is_some(), record.is_some()) {
+        // Admit O1's existing/partial/malformed-state inspection working set (the
+        // record-sized read-back buffer plus the fixed-size metadata buffer)
+        // against the shared aggregate budget BEFORE reading any existing bytes
+        // out of the backend into component-owned buffers (§ 13.7). The per-record
+        // length bound enforced in `read_checksummed` is necessary but does not
+        // prove the inspection copies fit the aggregate budget; the established /
+        // partial / malformed refusal paths allocate those copies and must be
+        // admitted too. This reservation is scoped so it releases BEFORE the
+        // bootstrap publication reservation below (which it must not coexist
+        // with), and it releases on every exit via its drop.
+        let rec_bound = super::profile::max_safety_record_bytes(self.pinned())?;
+        let inspect_charge = rec_bound
+            .checked_add(super::backend::META_ENCODED_LEN)
+            .ok_or_else(|| {
+                SafetyStoreError::ArithmeticOverflow("O1 inspection working set".into())
+            })?;
+        let (meta_present, record_present) = {
+            let _inspect_res = self.backend.accounting().reserve(inspect_charge)?;
+            let meta = self.backend.read_meta(super::backend::META_ENCODED_LEN)?;
+            let record = self.backend.read_record(rec_bound)?;
+            (meta.is_some(), record.is_some())
+        };
+        match (meta_present, record_present) {
             (true, _) => {
                 return Err(SafetyStoreError::AlreadyEstablished(
                     "metadata already present".into(),
@@ -451,6 +469,22 @@ impl SafetyRecordOwner {
     /// the recovery requirement.
     pub fn open(&self) -> Result<SafetyMeta, SafetyStoreError> {
         let _guard = self.backend.lock_domain();
+        // Admit O2's read/decode working set (the record-sized read-back buffer,
+        // the fixed metadata buffer, and the one transient decoded generation
+        // produced by `load_established`) against the shared aggregate budget
+        // BEFORE those component-owned allocations/copies occur (§ 13.7). O2 is an
+        // inspection path and, unlike O3/O4/O5, previously invoked
+        // `load_established` without any operation reservation, so an established
+        // read-back and decode could escape aggregate admission. The reservation
+        // releases on every exit (success or refusal) via its drop.
+        let gen = max_retained_generation_bytes(self.pinned(), size_of_timeout_msg())?;
+        let o2_charge = super::profile::max_safety_record_bytes(self.pinned())?
+            .checked_add(super::backend::META_ENCODED_LEN)
+            .and_then(|b| b.checked_add(gen))
+            .ok_or_else(|| {
+                SafetyStoreError::ArithmeticOverflow("O2 read/decode working set".into())
+            })?;
+        let _o2_res = self.backend.accounting().reserve(o2_charge)?;
         let (meta, _record_bytes, _decoded) = self.load_established()?;
         Ok(meta)
     }
