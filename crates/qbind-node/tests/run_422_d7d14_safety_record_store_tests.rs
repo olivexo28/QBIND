@@ -27,6 +27,60 @@ use qbind_node::safety_record_store::record::{
 use qbind_node::safety_record_store::validate::{validate_decoded, FixtureCommittedHistory};
 
 // ---------------------------------------------------------------------------
+// Direct allocation observation harness (test-only; NOT a production path)
+// ---------------------------------------------------------------------------
+//
+// A `#[global_allocator]` that delegates every operation to the system allocator
+// and, *only while explicitly armed on the current thread*, counts the number of
+// `alloc`/`realloc` calls. The arm flag and counter are `const`-initialized
+// thread-locals, so reading them inside the allocator never itself allocates and
+// never recurses. Default is disarmed, so this changes no behaviour for any other
+// test; it merely lets a measured region assert that a success path allocated
+// *nothing component-owned* — the direct observation §4/§9 require, which the
+// `evidence_payload_encode_count` encode counter alone cannot establish (zero
+// encodes is not zero allocations). The harness never clones the observed data.
+struct CountingAllocator;
+
+thread_local! {
+    static ALLOC_ARMED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    static ALLOC_COUNT: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+unsafe impl std::alloc::GlobalAlloc for CountingAllocator {
+    unsafe fn alloc(&self, layout: std::alloc::Layout) -> *mut u8 {
+        if ALLOC_ARMED.with(|a| a.get()) {
+            ALLOC_COUNT.with(|c| c.set(c.get() + 1));
+        }
+        std::alloc::System.alloc(layout)
+    }
+    unsafe fn dealloc(&self, ptr: *mut u8, layout: std::alloc::Layout) {
+        std::alloc::System.dealloc(ptr, layout)
+    }
+    unsafe fn realloc(&self, ptr: *mut u8, layout: std::alloc::Layout, new_size: usize) -> *mut u8 {
+        if ALLOC_ARMED.with(|a| a.get()) {
+            ALLOC_COUNT.with(|c| c.set(c.get() + 1));
+        }
+        std::alloc::System.realloc(ptr, layout, new_size)
+    }
+}
+
+#[global_allocator]
+static COUNTING_ALLOCATOR: CountingAllocator = CountingAllocator;
+
+/// Run `f` on the current thread with allocation counting armed, returning
+/// `(result, number_of_alloc/realloc_calls_during_f)`. Arming/disarming and the
+/// returned count observe only the current thread; nothing inside the measured
+/// closure may spawn work on another thread if the count is to be meaningful.
+fn measure_allocs<T>(f: impl FnOnce() -> T) -> (T, usize) {
+    ALLOC_COUNT.with(|c| c.set(0));
+    ALLOC_ARMED.with(|a| a.set(true));
+    let out = f();
+    ALLOC_ARMED.with(|a| a.set(false));
+    let count = ALLOC_COUNT.with(|c| c.get());
+    (out, count)
+}
+
+// ---------------------------------------------------------------------------
 // Fixtures (clearly labelled; NOT production history recovery)
 // ---------------------------------------------------------------------------
 
@@ -2977,6 +3031,80 @@ fn corr_nested_tc_and_boundary_admission_before_allocation() {
         tc.signed_timeouts[0].set_signature(vec![0u8; S_SIG]);
     }
     assert!(admit_supporting_evidence(&ev, &ctx).is_ok());
+}
+
+// ---------------------------------------------------------------------------
+// §4 — the structural/capacity PREFLIGHT (`admit_supporting_evidence`, the exact
+// call O4 performs before its reservation and before any predecessor read) is
+// GENUINELY allocation-free on the success path. Observed directly with the
+// counting allocator, not inferred from the zero-encode counter: the earlier
+// implementation built `format!("…[{i}]")` per per-vector check, so the success
+// path allocated one `String` per backing even though the diagnostic is only
+// rendered on refusal. The typed `CapnormSite` diagnostic removes that; here we
+// prove zero `alloc`/`realloc` calls for both a maximum QC and a maximum TC.
+// ---------------------------------------------------------------------------
+#[test]
+fn corr_preflight_success_is_allocation_free_qc_and_tc() {
+    use qbind_node::safety_record_store::codec::admit_supporting_evidence;
+    let ctx = ctx_n(4); // N = 4, s_sig = 8 — the maximum fixture dimensions.
+
+    // QC-derived candidate: structurally valid, capacity-normalized evidence.
+    let qc_locked = make_locked_qc(&ctx, [9u8; 32], 5, valid_wire_qc(&ctx, [9u8; 32], 5), None)
+        .expect("valid QC candidate");
+    // Warm up any one-time lazy state (thread-local key storage, etc.) OUTSIDE the
+    // measured region so the measurement observes only the admission path itself.
+    assert!(admit_supporting_evidence(&qc_locked.evidence, &ctx).is_ok());
+    let (res, allocs) = measure_allocs(|| admit_supporting_evidence(&qc_locked.evidence, &ctx));
+    assert!(res.is_ok(), "the valid QC preflight must admit");
+    assert_eq!(
+        allocs, 0,
+        "QC structural/capacity preflight must perform no component-owned allocation on success"
+    );
+
+    // TC-derived candidate: the fully populated maximum-TC evidence (nested
+    // high_qc signers, per-entry signatures, descriptor arrays).
+    let tc_locked = valid_tc_record(&ctx, 5, 6);
+    assert!(admit_supporting_evidence(&tc_locked.evidence, &ctx).is_ok());
+    let (res, allocs) = measure_allocs(|| admit_supporting_evidence(&tc_locked.evidence, &ctx));
+    assert!(res.is_ok(), "the valid TC preflight must admit");
+    assert_eq!(
+        allocs, 0,
+        "TC structural/capacity preflight must perform no component-owned allocation on success"
+    );
+}
+
+/// §4 — the smallest-over-bound per-vector capacity violation is still refused by
+/// the preflight (behaviour preserved across the typed-diagnostic correction),
+/// and the diagnostic `String` the refusal carries is produced ONLY on that
+/// failure path — the success path above proved zero allocations. The refusal
+/// still names the offending backing (`QC signature buffer [..]`).
+#[test]
+fn corr_preflight_smallest_over_bound_capacity_still_refused() {
+    use qbind_node::safety_record_store::codec::admit_supporting_evidence;
+    let ctx = ctx_n(4);
+    // A structurally valid QC whose first signature backing has exactly one byte
+    // of spare capacity over the per-class maximum (S_sig = 8): len() fits, but
+    // capacity() = 9 is over the CAPNORM bound (slack 0).
+    let mut locked = make_locked_qc(&ctx, [9u8; 32], 5, valid_wire_qc(&ctx, [9u8; 32], 5), None)
+        .expect("valid QC candidate");
+    if let SupportingEvidence::QcDerived(qc) = &mut locked.evidence {
+        let mut over = Vec::with_capacity(S_SIG + 1);
+        over.extend_from_slice(&[0xABu8; S_SIG]);
+        assert_eq!(over.len(), S_SIG);
+        assert_eq!(over.capacity(), S_SIG + 1);
+        qc.signatures[0] = over;
+    } else {
+        panic!("QC candidate must be QcDerived");
+    }
+    match admit_supporting_evidence(&locked.evidence, &ctx) {
+        Err(SafetyStoreError::CapacityRefusal(msg)) => {
+            assert!(
+                msg.contains("QC signature buffer"),
+                "refusal must name the offending backing site, got: {msg}"
+            );
+        }
+        other => panic!("expected smallest-over-bound CapacityRefusal, got {other:?}"),
+    }
 }
 
 // ---------------------------------------------------------------------------

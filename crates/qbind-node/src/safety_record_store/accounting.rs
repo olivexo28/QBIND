@@ -172,47 +172,43 @@ pub fn admit_evidence_capnorm(
             check_capnorm(
                 qc.signer_bitmap.capacity() as u128,
                 b_span,
-                "QC signer_bitmap",
+                CapnormSite::QcSignerBitmap,
             )?;
             check_capnorm(
                 qc.signatures.capacity() as u128,
                 n,
-                "QC signatures descriptor array",
+                CapnormSite::QcSignaturesDescriptor,
             )?;
             for (i, sig) in qc.signatures.iter().enumerate() {
-                check_capnorm(
-                    sig.capacity() as u128,
-                    s_sig,
-                    &format!("QC signature buffer [{i}]"),
-                )?;
+                check_capnorm(sig.capacity() as u128, s_sig, CapnormSite::QcSignatureBuffer(i))?;
             }
         }
         SupportingEvidence::TcDerived { high_qc, tc } => {
             check_capnorm(
                 high_qc.signers.capacity() as u128,
                 n,
-                "record-level high_qc.signers",
+                CapnormSite::RecordHighQcSigners,
             )?;
-            check_capnorm(tc.signers.capacity() as u128, n, "tc.signers")?;
+            check_capnorm(tc.signers.capacity() as u128, n, CapnormSite::TcSigners)?;
             if let Some(h) = &tc.high_qc {
-                check_capnorm(h.signers.capacity() as u128, n, "tc.high_qc.signers")?;
+                check_capnorm(h.signers.capacity() as u128, n, CapnormSite::TcHighQcSigners)?;
             }
             check_capnorm(
                 tc.signed_timeouts.capacity() as u128,
                 n,
-                "tc.signed_timeouts descriptor array",
+                CapnormSite::TcSignedTimeoutsDescriptor,
             )?;
             for (i, t) in tc.signed_timeouts.iter().enumerate() {
                 check_capnorm(
                     t.signature.capacity() as u128,
                     s_sig,
-                    &format!("tc.signed_timeouts[{i}].signature"),
+                    CapnormSite::TcSignedTimeoutSignature(i),
                 )?;
                 if let Some(h) = &t.high_qc {
                     check_capnorm(
                         h.signers.capacity() as u128,
                         n,
-                        &format!("tc.signed_timeouts[{i}].high_qc.signers"),
+                        CapnormSite::TcSignedTimeoutNestedHighQcSigners(i),
                     )?;
                 }
             }
@@ -221,15 +217,69 @@ pub fn admit_evidence_capnorm(
     Ok(())
 }
 
+/// Typed, **allocation-free** diagnostic identifier for a per-vector capacity
+/// bound site (§ 13.7A, D7-D14 allocation-free preflight correction).
+///
+/// The earlier implementation passed `&format!("…[{i}]")` as the diagnostic
+/// string, which allocated a `String` on **every** loop iteration of
+/// [`admit_evidence_capnorm`] — i.e. on the success path of the O4 preflight —
+/// even though the string is only ever rendered on the refusal path. Carrying a
+/// `Copy` enum (with an inline `usize` index for the array sites) instead means
+/// the success path performs no heap allocation at all; the single `String` is
+/// built by `Display`/`format!` **only** when a backing is refused, and its
+/// lifetime is exactly the returned [`SafetyStoreError`]. Moving the `format!`
+/// into a helper would not have fixed this — the fix is to not construct it at
+/// all unless a refusal is actually produced.
+#[derive(Clone, Copy)]
+enum CapnormSite {
+    QcSignerBitmap,
+    QcSignaturesDescriptor,
+    QcSignatureBuffer(usize),
+    RecordHighQcSigners,
+    TcSigners,
+    TcHighQcSigners,
+    TcSignedTimeoutsDescriptor,
+    TcSignedTimeoutSignature(usize),
+    TcSignedTimeoutNestedHighQcSigners(usize),
+}
+
+impl std::fmt::Display for CapnormSite {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            CapnormSite::QcSignerBitmap => f.write_str("QC signer_bitmap"),
+            CapnormSite::QcSignaturesDescriptor => f.write_str("QC signatures descriptor array"),
+            CapnormSite::QcSignatureBuffer(i) => write!(f, "QC signature buffer [{i}]"),
+            CapnormSite::RecordHighQcSigners => f.write_str("record-level high_qc.signers"),
+            CapnormSite::TcSigners => f.write_str("tc.signers"),
+            CapnormSite::TcHighQcSigners => f.write_str("tc.high_qc.signers"),
+            CapnormSite::TcSignedTimeoutsDescriptor => {
+                f.write_str("tc.signed_timeouts descriptor array")
+            }
+            CapnormSite::TcSignedTimeoutSignature(i) => {
+                write!(f, "tc.signed_timeouts[{i}].signature")
+            }
+            CapnormSite::TcSignedTimeoutNestedHighQcSigners(i) => {
+                write!(f, "tc.signed_timeouts[{i}].high_qc.signers")
+            }
+        }
+    }
+}
+
 /// A single decoded growable backing passes the capacity bound iff its
 /// `capacity()` is within `profile_max + CAPNORM_SLACK` elements/bytes for its
 /// class. Over-bound → refuse (no silent over-capacity retention), naming the
-/// offending backing and its class maximum.
-fn check_capnorm(capacity: u128, profile_max: u128, what: &str) -> Result<(), SafetyStoreError> {
+/// offending backing and its class maximum. The `site` identifier is a `Copy`
+/// enum so the success path allocates nothing; the diagnostic `String` is built
+/// only on the refusal branch.
+fn check_capnorm(
+    capacity: u128,
+    profile_max: u128,
+    site: CapnormSite,
+) -> Result<(), SafetyStoreError> {
     let permitted = add(profile_max, CAPNORM_SLACK)?;
     if capacity > permitted {
         return Err(SafetyStoreError::CapacityRefusal(format!(
-            "{what} capacity {capacity} exceeds profile maximum {profile_max} + \
+            "{site} capacity {capacity} exceeds profile maximum {profile_max} + \
              CAPNORM_SLACK {CAPNORM_SLACK} (per-vector capacity bound)"
         )));
     }
