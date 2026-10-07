@@ -511,11 +511,14 @@ fn h16_real_rocksdb_publish_and_reopen() {
 }
 
 // ---------------------------------------------------------------------------
-// H18 — O1 refuses duplicate initialization / established state (real-storage)
+// O1 duplicate-initialization / missing-intent regression (PRESERVED under an
+// accurate name — this is NOT H18). It establishes that O1 refuses established
+// state and a missing first-use intent; it does not exercise the H18 split-store
+// arrangement restriction (covered by `h18_record_and_evidence_co_located_...`).
 // ---------------------------------------------------------------------------
 
 #[test]
-fn h18_o1_refuses_duplicate_initialization() {
+fn o1_refuses_duplicate_initialization_and_missing_intent() {
     let dir = tempfile::tempdir().unwrap();
     let ctx = ctx_n(4);
     let owner = init_owner(dir.path(), &ctx);
@@ -532,6 +535,70 @@ fn h18_o1_refuses_duplicate_initialization() {
         owner2.initialize(false),
         Err(SafetyStoreError::MissingIndependentInput(_))
     ));
+}
+
+// ---------------------------------------------------------------------------
+// H18 — non-co-located record/evidence arrangement is UNREPRESENTABLE by
+// construction, so partial cross-store publication cannot occur.
+//
+// The accepted D14 component (a) embeds the supporting evidence AS A FIELD of the
+// stored record (`SupportingEvidence` inside `LockedRecord`), encoded into the one
+// `RECORD_KEY` value, and (b) commits the metadata key and the record key in a
+// single atomic backend batch under one `SafetyBackend`. There is NO separate
+// evidence store handle, key, or write path — the split-store arrangement the H18
+// obligation concerns is unrepresentable here. This regression establishes that
+// restriction at the component's genuine storage boundary via a real publication,
+// rather than introducing a new split-store architecture to create a negative
+// test. (Limitation: there is no cross-store code path to fault-inject; the
+// guarantee is structural, demonstrated by co-location + single-batch atomicity.)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn h18_record_and_evidence_co_located_single_store_no_partial_cross_store() {
+    let dir = tempfile::tempdir().unwrap();
+    let ctx = ctx_n(4);
+    let owner = init_owner(dir.path(), &ctx);
+
+    // A real TC-derived publication: its evidence is non-trivial.
+    let ltc = valid_tc_record(&ctx, 5, 6);
+    assert_eq!(
+        owner.publish_locked(ltc, 0, None::<&FixtureCommittedHistory>),
+        PublishResult::DurableAcknowledged { new_revision: 1 }
+    );
+    let backend = owner.backend_for_test();
+
+    // (a) Record and evidence are CO-LOCATED in the single `RECORD_KEY` value:
+    // decoding the one stored record buffer yields the embedded supporting
+    // evidence — there is no second store/key the evidence could live in.
+    let rec = max_safety_record_bytes(&ctx).unwrap();
+    let stored = backend.read_record(rec).unwrap().expect("record present");
+    let decoded = decode_record(&stored, &ctx).unwrap();
+    match &decoded.record {
+        SafetyRecord::Locked(l) => assert!(
+            matches!(l.evidence, SupportingEvidence::TcDerived { .. }),
+            "supporting evidence is embedded in the single stored record, not a separate store"
+        ),
+        other => panic!("expected a Locked record carrying embedded evidence, got {other:?}"),
+    }
+
+    // (b) The component-owned namespace contains ONLY the two recognized
+    // co-located keys (metadata + record). `first_unrecognized_safety_key`
+    // returning `None` proves there is no third/evidence-store key — a split
+    // arrangement is not representable. Both keys are present together (the atomic
+    // batch committed them as one unit; no partial cross-store state exists).
+    assert!(
+        backend.read_meta(crate_meta_bound()).unwrap().is_some(),
+        "metadata key present (co-located with the record)"
+    );
+    assert!(
+        backend.first_unrecognized_safety_key().unwrap().is_none(),
+        "no unrecognized/separate-evidence-store key exists in the safety namespace"
+    );
+}
+
+// Mirror of `backend::META_ENCODED_LEN` for test reads.
+fn crate_meta_bound() -> u128 {
+    META_ENCODED_LEN_MIRROR
 }
 
 // ---------------------------------------------------------------------------
@@ -662,11 +729,14 @@ fn h21_revision_fence_refuses_stale_publish() {
 }
 
 // ---------------------------------------------------------------------------
-// H22 — O4 rejects non-increasing lock view (real-storage)
+// O4 non-increasing lock-view transition-eligibility regression (PRESERVED under
+// an accurate name — this is NOT H22). It establishes transition eligibility
+// (a same-view relock is ineligible); it does not establish the H22 verified-
+// prerequisite restriction (covered by `h22_unverified_evidence_cannot_...`).
 // ---------------------------------------------------------------------------
 
 #[test]
-fn h22_o4_rejects_non_increasing_view() {
+fn o4_rejects_non_increasing_lock_view_transition_ineligible() {
     let dir = tempfile::tempdir().unwrap();
     let ctx = ctx_n(4);
     let owner = init_owner(dir.path(), &ctx);
@@ -681,6 +751,69 @@ fn h22_o4_rejects_non_increasing_view() {
         res,
         PublishResult::RefusedPreWrite(SafetyStoreError::TransitionIneligible(_))
     ));
+}
+
+// ---------------------------------------------------------------------------
+// H22 — unverified evidence cannot satisfy a verified prerequisite.
+//
+// Stage-2 verification is unwired, so every record the component produces carries
+// its evidence `Unverified`. The restriction that such evidence can NEVER be used
+// as a verified prerequisite is enforced at the TYPE boundary: `EvidenceStatus`
+// is an exhaustive enum whose ONLY variant is `Unverified` — the component has no
+// way to mint a `Verified` discriminant, so no consumer requiring verified
+// evidence can be satisfied by this component's output. This regression
+// demonstrates the actual `Unverified` outcome from a real O3 and the exhaustive
+// type restriction.
+//
+// Limitation (recorded, not substituted): there is no in-scope production
+// consumer that consumes a verified-evidence prerequisite, and this pass adds no
+// verifier/engine wiring. The guarantee established here is the type-level
+// impossibility of presenting verified evidence, not enforcement inside an
+// existing production verified-prerequisite consumer.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn h22_unverified_evidence_cannot_satisfy_verified_prerequisite() {
+    let dir = tempfile::tempdir().unwrap();
+    let ctx = ctx_n(4);
+    let owner = init_owner(dir.path(), &ctx);
+
+    // A real O4 publication, then a real O3 read: the resulting evidence status is
+    // the actual `Unverified` outcome.
+    let qc = valid_wire_qc(&ctx, [9u8; 32], 5);
+    let locked = make_locked_qc(&ctx, [9u8; 32], 5, qc, None).unwrap();
+    assert_eq!(
+        owner.publish_locked(locked, 0, None::<&FixtureCommittedHistory>),
+        PublishResult::DurableAcknowledged { new_revision: 1 }
+    );
+    let v = owner
+        .read_validate(None::<&FixtureCommittedHistory>)
+        .unwrap();
+
+    // The actual outcome is `Unverified`. The match is EXHAUSTIVE with a single arm
+    // — it compiles only because `EvidenceStatus` has no `Verified` variant. A
+    // future `Verified` variant would break this compile, which is the intended
+    // guard: the component cannot present verified evidence.
+    match v.evidence_status() {
+        EvidenceStatus::Unverified => {}
+    }
+    assert_eq!(v.evidence_status(), EvidenceStatus::Unverified);
+
+    // Model the prerequisite boundary at the unit level: a consumer that requires
+    // verified evidence can accept ONLY a `Verified` token; because no such token
+    // can be constructed from this component's output, the unverified record is
+    // rejected by construction (there is no conversion from `Unverified`).
+    fn requires_verified_prerequisite(status: EvidenceStatus) -> Result<(), &'static str> {
+        match status {
+            // The sole constructible variant cannot satisfy a verified prerequisite.
+            EvidenceStatus::Unverified => Err("unverified evidence rejected: verification unwired"),
+        }
+    }
+    assert_eq!(
+        requires_verified_prerequisite(v.evidence_status()),
+        Err("unverified evidence rejected: verification unwired"),
+        "a verified-prerequisite consumer rejects the component's unverified evidence"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -874,13 +1007,17 @@ fn h26_both_evidence_variants_and_nested_bounds() {
     assert!((etc.len() as u128) <= max_tc_bytes(&ctx).unwrap());
 }
 
-/// H26 (adversarial, through actual storage operations) — an over-bound nested
-/// record-level high-QC signer list inside a TC-derived publication is refused by
-/// O4's single admission path BEFORE any evidence-binding allocation, and the
-/// established predecessor is left intact. Helper-only refusal and valid
-/// round-trips are not a substitute: this drives the real `publish_locked`.
+/// H26 (adversarial, through actual storage operations) — an over-bound
+/// **record-level** high-QC signer list (`TcDerived.high_qc.signers`) inside a
+/// TC-derived publication is refused by O4's single admission path BEFORE any
+/// evidence-binding allocation, and the established predecessor is left intact.
+/// This exercises the record-level nested high-QC ONLY; the per-timeout-entry
+/// nested high-QC (`tc.signed_timeouts[i].high_qc.signers`) is covered separately
+/// by `h26_adversarial_timeout_entry_nested_high_qc_signers_refused_through_o4`.
+/// Helper-only refusal and valid round-trips are not a substitute: this drives
+/// the real `publish_locked`.
 #[test]
-fn h26_adversarial_nested_tc_high_qc_signers_refused_through_o4() {
+fn h26_adversarial_record_level_tc_high_qc_signers_refused_through_o4() {
     use qbind_node::safety_record_store::codec::{
         evidence_payload_encode_count, reset_evidence_payload_encode_count,
     };
@@ -934,6 +1071,102 @@ fn h26_adversarial_nested_tc_high_qc_signers_refused_through_o4() {
         &rv.retained().record,
         SafetyRecord::Locked(l) if matches!(l.evidence, SupportingEvidence::TcDerived { .. })
     ));
+}
+
+// (new H26 timeout-entry test inserted above)
+
+// H26 (adversarial, through actual storage operations) — the per-timeout-entry
+// nested high-QC signer list `tc.signed_timeouts[i].high_qc.signers` is a DISTINCT
+// nested vector from the record-level `TcDerived.high_qc.signers`. Inflating ONE
+// timeout entry's nested high-QC to N+1 (boundary-plus-one), with every other
+// field valid and the stored binding left as the original valid digest, is
+// refused by O4's single admission path BEFORE any evidence-binding allocation
+// (so O4 cannot rely on a binding mismatch), and the established predecessor bytes
+// are preserved. The exact-bound (N) positive case is admitted.
+#[test]
+fn h26_adversarial_timeout_entry_nested_high_qc_signers_refused_through_o4() {
+    use qbind_node::safety_record_store::codec::{
+        evidence_payload_encode_count, reset_evidence_payload_encode_count,
+    };
+    let dir = tempfile::tempdir().unwrap();
+    let ctx = ctx_n(4); // N = 4
+    let owner = init_owner(dir.path(), &ctx);
+
+    // Start from a valid TC-derived record, then inflate exactly ONE timeout
+    // entry's OPTIONAL nested high-QC signer list to N + 1. This is the vector the
+    // reviewed record-level test never touched.
+    let mut ltc = valid_tc_record(&ctx, 5, 6);
+    if let SupportingEvidence::TcDerived { tc, .. } = &mut ltc.evidence {
+        let entry = tc
+            .signed_timeouts
+            .first_mut()
+            .expect("valid TC fixture has timeout entries");
+        let nested = entry
+            .high_qc
+            .as_mut()
+            .expect("each timeout entry carries an optional high_qc");
+        nested.signers = (0..=ctx.n() as u64).map(ValidatorId::new).collect();
+        assert_eq!(
+            nested.signers.len(),
+            ctx.n() + 1,
+            "the nested timeout-entry high_qc is boundary-plus-one"
+        );
+    } else {
+        panic!("valid_tc_record must be TcDerived");
+    }
+
+    reset_evidence_payload_encode_count();
+    let res = owner.publish_locked(ltc, 0, None::<&FixtureCommittedHistory>);
+    assert!(
+        matches!(
+            res,
+            PublishResult::RefusedPreWrite(SafetyStoreError::DeclaredBoundExceeded(_))
+        ),
+        "over-bound timeout-entry nested high-QC signer list must be refused pre-write, got {res:?}"
+    );
+    assert_eq!(
+        evidence_payload_encode_count(),
+        0,
+        "O4 must refuse the over-bound timeout-entry nested evidence BEFORE the binding allocation"
+    );
+
+    // The established predecessor (bootstrap rev 0) is untouched.
+    let v = owner
+        .read_validate(None::<&FixtureCommittedHistory>)
+        .unwrap();
+    assert_eq!(v.retained().publication_revision, 0);
+    assert!(!v.retained().is_locked());
+    drop(v);
+
+    // Exact-bound positive control: a timeout entry whose nested high-QC carries
+    // EXACTLY N signers is admitted and round-trips (the refusal is bound-specific,
+    // targeting the nested timeout-entry vector, not a blanket TC rejection).
+    let mut good = valid_tc_record(&ctx, 5, 6);
+    if let SupportingEvidence::TcDerived { tc, .. } = &mut good.evidence {
+        let entry = tc.signed_timeouts.first_mut().unwrap();
+        let nested = entry.high_qc.as_mut().unwrap();
+        nested.signers = (0..ctx.n() as u64).map(ValidatorId::new).collect();
+        assert_eq!(nested.signers.len(), ctx.n(), "exact-bound nested high_qc");
+    }
+    // Rebuild the binding so the exact-bound mutation stays internally consistent.
+    let good = {
+        let binding = qbind_node::safety_record_store::codec::compute_evidence_lock_binding(
+            &good.lock_block_id,
+            good.lock_view,
+            &good.evidence,
+            &good.authority_context_ref,
+            &ctx,
+        )
+        .unwrap();
+        LockedRecord {
+            evidence_lock_binding: binding,
+            ..good
+        }
+    };
+    assert_eq!(
+        owner.publish_locked(good, 0, None::<&FixtureCommittedHistory>),
+        PublishResult::DurableAcknowledged { new_revision: 1 }
+    );
 }
 
 // ---------------------------------------------------------------------------
