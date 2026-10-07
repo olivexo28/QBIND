@@ -260,6 +260,27 @@ fn size_of_decoded_record_inline() -> u128 {
     std::mem::size_of::<DecodedRecord>() as u128
 }
 
+/// The transient decoded working-set **ceiling** for the pinned context
+/// (§ 13.7A(c.4), D7-D14 transient-accounting correction): the measured
+/// `size_of::<DecodedRecord>()` inline footprint plus the cross-variant maximum
+/// evidence backing. It is a proven upper bound on [`decoded_working_set_charge`]
+/// for **every** admitted decoded object (each backing passes
+/// [`admit_evidence_capnorm`], so its `capacity()` is within the per-class
+/// profile maximum, and the inline size is fixed), and — because the inline
+/// `DecodedRecord` size exceeds the retained generation's `GEN_STRUCT_MAX`
+/// ceiling — it is strictly larger than, and is **not** substituted by,
+/// [`max_retained_generation_bytes`]. Operations that hold a live transient
+/// decoded object reserve this term, not the retained-generation ceiling.
+pub fn max_transient_decoded_working_set(
+    ctx: &PinnedSafetyContext,
+) -> Result<u128, SafetyStoreError> {
+    super::profile::max_transient_decoded_bytes(
+        ctx,
+        size_of_decoded_record_inline(),
+        size_of_timeout_msg(),
+    )
+}
+
 /// The component-level aggregate accountant. Enforces the checked aggregate
 /// coexistence ceiling across every charged allocation; tracks the observed
 /// peak for evidence.

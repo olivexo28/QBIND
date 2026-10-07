@@ -291,6 +291,59 @@ pub fn max_retained_generation_bytes(
     Ok(max_qc_generation_bytes(ctx)?.max(max_tc_generation_bytes(ctx, size_of_timeout_msg)?))
 }
 
+/// The maximum **evidence-backing capacity** of a single decoded generation
+/// (§ 13.7A(c.4), D7-D14 transient-accounting correction): the cross-variant
+/// maximum of the heap backings a decoded `SupportingEvidence` owns, measured at
+/// the pinned per-class maxima (the same maxima `admit_evidence_capnorm` refuses
+/// an over-bound backing against). This is exactly the backing portion of the
+/// generation caps with the inline `GEN_STRUCT_MAX` wrapper and the `ARC_CTRL`
+/// shared-control overhead removed, so it bounds `evidence_backing_capacity` of
+/// any admitted value.
+pub fn max_decoded_evidence_backing_bytes(
+    ctx: &PinnedSafetyContext,
+    size_of_timeout_msg: u128,
+) -> Result<u128, SafetyStoreError> {
+    let n = ctx.n() as u128;
+    let s = ctx.s_sig as u128;
+    // QC backing = signer_bitmap(B_span) + signatures descriptor(N×24) + per-sig(N×S_sig).
+    let qc_backing = add(add(ctx.b_span(), mul(n, 24)?)?, mul(n, s)?)?;
+    // TC backing = rec_high_qc(N×8) + tc.signers(N×8) + tc.high_qc(N×8)
+    //   + signed_timeouts descriptor(N×T_msg) + per-entry sig(N×S_sig)
+    //   + nested per-entry high_qc(8N²).
+    let mut tc_backing = mul(n, 8)?;
+    tc_backing = add(tc_backing, mul(n, 8)?)?;
+    tc_backing = add(tc_backing, mul(n, 8)?)?;
+    tc_backing = add(tc_backing, mul(n, size_of_timeout_msg)?)?;
+    tc_backing = add(tc_backing, mul(n, s)?)?;
+    tc_backing = add(tc_backing, mul(n, mul(n, 8)?)?)?;
+    Ok(qc_backing.max(tc_backing))
+}
+
+/// `MAX_TRANSIENT_DECODED_BYTES` — the true live working-set ceiling of a
+/// **transient** [`super::record::DecodedRecord`] (§ 13.7A(c.4), D7-D14
+/// transient-accounting correction).
+///
+/// A decoded record is the object `load_established` / `decode_record` produce
+/// and operations hold across decode→validation; it is **not** the post-validation
+/// retained generation ([`super::record::RetainedRecord`]). Its inline footprint
+/// is the measured `size_of::<DecodedRecord>()` — which carries the two
+/// validated-then-discarded identity-header fields and so is strictly **larger**
+/// than the retained generation's `GEN_STRUCT_MAX` inline ceiling — plus the
+/// cross-variant maximum evidence backing. Charging the retained-generation
+/// ceiling (`max_retained_generation_bytes`) for this transient object therefore
+/// under-reserves it (the retained inline ceiling is not the transient decoder's
+/// size); operations that hold a live decoded object reserve this term instead.
+pub fn max_transient_decoded_bytes(
+    ctx: &PinnedSafetyContext,
+    size_of_decoded_record: u128,
+    size_of_timeout_msg: u128,
+) -> Result<u128, SafetyStoreError> {
+    add(
+        size_of_decoded_record,
+        max_decoded_evidence_backing_bytes(ctx, size_of_timeout_msg)?,
+    )
+}
+
 /// `MAX_AGGREGATE_RETAINED_BYTES` — the conservative checked peak over the
 /// bounded multiplicities of § 13.7 / § 13.7B.
 pub fn max_aggregate_retained_bytes(
