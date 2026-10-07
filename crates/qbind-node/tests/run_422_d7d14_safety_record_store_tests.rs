@@ -4681,7 +4681,10 @@ fn d7d14_capnorm_signature_buffer_boundary_plus_one_refused_aggregate_accepts() 
     let mut qc = valid_wire_qc(&ctx, [9u8; 32], 5);
     let over = u8_vec_with_cap(S_SIG, S_SIG + 1);
     assert_eq!(over.len(), S_SIG, "signature length within S_sig");
-    assert!(over.capacity() > S_SIG, "signature capacity past the backing bound");
+    assert!(
+        over.capacity() > S_SIG,
+        "signature capacity past the backing bound"
+    );
     qc.signatures[0] = over;
     let ev = SupportingEvidence::QcDerived(qc);
 
@@ -4727,7 +4730,10 @@ fn d7d14_capnorm_qc_descriptor_and_bitmap_boundary_plus_one_refused() {
     assert!(outer.capacity() > n, "descriptor capacity past N");
     qc.signatures = outer;
     let ev = SupportingEvidence::QcDerived(qc);
-    assert!(admit_evidence_capacity(&ev, &ctx).is_ok(), "aggregate accepts small excess");
+    assert!(
+        admit_evidence_capacity(&ev, &ctx).is_ok(),
+        "aggregate accepts small excess"
+    );
     assert!(matches!(
         admit_evidence_capnorm(&ev, &ctx),
         Err(SafetyStoreError::CapacityRefusal(_))
@@ -4867,7 +4873,10 @@ fn d7d14_capnorm_o4_qc_signature_over_bound_refused_prewrite_then_readmit() {
         record_before,
         "refused O4 did not mutate stored record bytes"
     );
-    assert!(!owner.recovery_required(), "refused O4 did not disturb recovery");
+    assert!(
+        !owner.recovery_required(),
+        "refused O4 did not disturb recovery"
+    );
 
     let normal =
         make_locked_qc(&ctx, [9u8; 32], 5, valid_wire_qc(&ctx, [9u8; 32], 5), None).unwrap();
@@ -4937,16 +4946,23 @@ fn d7d14_o2_decoded_working_set_measured_in_place_qc() {
     let dir = tempfile::tempdir().unwrap();
     let ctx = ctx_n(4);
     let owner = init_owner(dir.path(), &ctx);
-    let locked = make_locked_qc(&ctx, [9u8; 32], 5, valid_wire_qc(&ctx, [9u8; 32], 5), None).unwrap();
+    let locked =
+        make_locked_qc(&ctx, [9u8; 32], 5, valid_wire_qc(&ctx, [9u8; 32], 5), None).unwrap();
     assert_eq!(
         owner.publish_locked(locked, 0, None::<&FixtureCommittedHistory>),
         PublishResult::DurableAcknowledged { new_revision: 1 }
     );
     let rec = max_safety_record_bytes(&ctx).unwrap();
-    let gen =
-        qbind_node::safety_record_store::profile::max_retained_generation_bytes(&ctx, size_of_timeout_msg())
-            .unwrap();
-    let stored = owner.backend_for_test().read_record(rec).unwrap().expect("record present");
+    let gen = qbind_node::safety_record_store::profile::max_retained_generation_bytes(
+        &ctx,
+        size_of_timeout_msg(),
+    )
+    .unwrap();
+    let stored = owner
+        .backend_for_test()
+        .read_record(rec)
+        .unwrap()
+        .expect("record present");
     let decoded = decode_record(&stored, &ctx).unwrap();
 
     // Borrowed, non-cloning measurement of the ACTUAL decoded object.
@@ -4996,10 +5012,16 @@ fn d7d14_o2_decoded_working_set_measured_in_place_tc() {
         PublishResult::DurableAcknowledged { new_revision: 1 }
     );
     let rec = max_safety_record_bytes(&ctx).unwrap();
-    let gen =
-        qbind_node::safety_record_store::profile::max_retained_generation_bytes(&ctx, size_of_timeout_msg())
-            .unwrap();
-    let stored = owner.backend_for_test().read_record(rec).unwrap().expect("record present");
+    let gen = qbind_node::safety_record_store::profile::max_retained_generation_bytes(
+        &ctx,
+        size_of_timeout_msg(),
+    )
+    .unwrap();
+    let stored = owner
+        .backend_for_test()
+        .read_record(rec)
+        .unwrap()
+        .expect("record present");
     let decoded = decode_record(&stored, &ctx).unwrap();
     assert!(matches!(
         &decoded.record,

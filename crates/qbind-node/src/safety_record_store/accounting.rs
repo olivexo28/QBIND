@@ -169,14 +169,22 @@ pub fn admit_evidence_capnorm(
     let b_span = ctx.b_span();
     match evidence {
         SupportingEvidence::QcDerived(qc) => {
-            check_capnorm(qc.signer_bitmap.capacity() as u128, b_span, "QC signer_bitmap")?;
+            check_capnorm(
+                qc.signer_bitmap.capacity() as u128,
+                b_span,
+                "QC signer_bitmap",
+            )?;
             check_capnorm(
                 qc.signatures.capacity() as u128,
                 n,
                 "QC signatures descriptor array",
             )?;
             for (i, sig) in qc.signatures.iter().enumerate() {
-                check_capnorm(sig.capacity() as u128, s_sig, &format!("QC signature buffer [{i}]"))?;
+                check_capnorm(
+                    sig.capacity() as u128,
+                    s_sig,
+                    &format!("QC signature buffer [{i}]"),
+                )?;
             }
         }
         SupportingEvidence::TcDerived { high_qc, tc } => {
@@ -240,9 +248,7 @@ fn check_capnorm(capacity: u128, profile_max: u128, what: &str) -> Result<(), Sa
 /// the earlier O2 check did) measures a *second*, freshly-allocated representation
 /// whose capacities are the clone's, not the live decoded object's; this borrowed
 /// inventory measures the object itself.
-pub fn decoded_working_set_charge(
-    decoded: &DecodedRecord,
-) -> Result<u128, SafetyStoreError> {
+pub fn decoded_working_set_charge(decoded: &DecodedRecord) -> Result<u128, SafetyStoreError> {
     let mut total = size_of_decoded_record_inline();
     if let SafetyRecord::Locked(l) = &decoded.record {
         total = add(total, evidence_backing_capacity(&l.evidence)?)?;
