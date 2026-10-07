@@ -603,7 +603,13 @@ fn crate_meta_bound() -> u128 {
 
 // ---------------------------------------------------------------------------
 // H19 — O5 refuses divergence OUTSIDE the binding digest's coverage
-//       while CRC + binding still pass (real-storage)
+//       while CRC + binding still pass (real-storage).
+//
+// Byte preservation is asserted DIRECTLY: after the refusal the raw stored
+// publication bytes are read back and compared to the forged content (and shown
+// NOT to equal the retained original), rather than relying on an arbitrary later
+// O3 error. The refusal is also shown to leave metadata/revision and the recovery
+// latch unchanged and to not authorize a dependent O4.
 // ---------------------------------------------------------------------------
 
 #[test]
@@ -650,6 +656,12 @@ fn h19_o5_refuses_divergence_outside_binding_digest() {
     // Overwrite stored record bytes out-of-band to simulate a surviving divergent
     // publication, then O5 must refuse (byte-for-byte inequality), NOT overwrite.
     owner.debug_overwrite_record_for_test(&forged).unwrap();
+    // Capture the authoritative state immediately BEFORE the refused O5 so the
+    // refusal can be shown to have mutated nothing.
+    let rec_bound = max_safety_record_bytes(&ctx).unwrap();
+    let backend = owner.backend_for_test();
+    let meta_before = backend.read_meta(META_ENCODED_LEN_MIRROR).unwrap();
+    let recovery_before = owner.recovery_required();
     let res = owner.reacknowledge(&retained);
     assert!(
         matches!(
@@ -658,11 +670,45 @@ fn h19_o5_refuses_divergence_outside_binding_digest() {
         ),
         "got {res:?}"
     );
-    // The divergent bytes are untouched (no overwrite of newer/foreign state).
-    let after = owner.read_validate(None::<&FixtureCommittedHistory>);
-    // The forged bytes may now fail semantic validation (genesis mismatch), which
-    // is itself a refusal; the key point is O5 did not republish the retained.
-    assert!(after.is_err() || after.unwrap().encoded() == forged.as_slice());
+    // DIRECT byte preservation: the stored publication bytes are still EXACTLY the
+    // forged bytes — O5 did not republish the retained original over the divergent
+    // surviving content. (An arbitrary later O3 error cannot stand in for this.)
+    let stored_after = backend
+        .read_record(rec_bound)
+        .unwrap()
+        .expect("record present");
+    assert_eq!(
+        stored_after, forged,
+        "refused O5 left the divergent stored publication byte-for-byte unchanged"
+    );
+    assert_ne!(
+        stored_after,
+        retained.encoded(),
+        "refused O5 must NOT have republished the retained original bytes"
+    );
+    // Metadata / revision unchanged by the refusal.
+    assert_eq!(
+        backend.read_meta(META_ENCODED_LEN_MIRROR).unwrap(),
+        meta_before,
+        "refused O5 did not mutate stored metadata/revision"
+    );
+    // The effectiveness/recovery latch is unchanged by the refused O5.
+    assert_eq!(
+        owner.recovery_required(),
+        recovery_before,
+        "refused O5 did not disturb the recovery latch"
+    );
+    // A refused O5 does not authorize a dependent O4: the forged predecessor is no
+    // longer a valid base, so O4 is refused pre-write (no effectiveness granted).
+    let next_qc = valid_wire_qc(&ctx, [7u8; 32], 9);
+    let next = make_locked_qc(&ctx, [7u8; 32], 9, next_qc, None).unwrap();
+    assert!(
+        matches!(
+            owner.publish_locked(next, 1, None::<&FixtureCommittedHistory>),
+            PublishResult::RefusedPreWrite(_)
+        ),
+        "a refused O5 must not enable a dependent O4"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -2211,6 +2257,11 @@ fn o1_partial_state_inspection_refused_before_read_under_aggregate_pressure() {
 // `rec + META + gen` (succeeds with exactly that headroom) and is refused ONE byte
 // short (before any decode), preserving stored bytes and recovery state, and the
 // reservation releases on every exit.
+//
+// The decoded transient is bounded by measuring its FULL capacity-backed charge
+// (`generation_charge`, which sums every `Vec::capacity()` backing), NOT merely
+// the inline `size_of` of the container — the earlier inline-only check did not
+// account for the signer bitmap / signatures / per-signature heap backings.
 #[test]
 fn o2_open_working_set_admitted_and_bounded_by_reservation() {
     let dir = tempfile::tempdir().unwrap();
@@ -2237,10 +2288,13 @@ fn o2_open_working_set_admitted_and_bounded_by_reservation() {
     .unwrap();
     let o2_charge = rec + META_ENCODED_LEN_MIRROR + gen;
 
-    // Directly bound the actual decoded transient against its reserved term `gen`:
-    // the real stored record decodes to a generation whose complete retained
-    // representation fits the retained-generation ceiling (the inherited O2 charge
-    // reserves `gen` for exactly this transient).
+    // Directly bound the actual decoded **working set** (inline generation PLUS all
+    // of its capacity-measured heap backings — signer bitmap, the signatures outer
+    // descriptor array and each signature buffer) against its reserved term `gen`.
+    // This measures the real owned allocations, not merely `size_of` of the inline
+    // container: `generation_charge` sums `Vec::capacity()` for every backing and
+    // itself enforces `<= MAX_RETAINED_GENERATION_BYTES`.
+    use qbind_node::safety_record_store::accounting::generation_charge;
     let stored = backend.read_record(rec).unwrap().expect("record present");
     assert!(
         (stored.len() as u128) <= rec,
@@ -2249,9 +2303,20 @@ fn o2_open_working_set_admitted_and_bounded_by_reservation() {
     );
     let decoded = decode_record(&stored, &ctx).unwrap();
     let decoded_core = qbind_node::safety_record_store::record::size_of_decoded_record();
+    let decoded_full = match &decoded.record {
+        SafetyRecord::Locked(l) => {
+            generation_charge(&ctx, &RetainedGeneration::from_locked(1, l)).unwrap()
+        }
+        other => panic!("expected a Locked decoded generation, got {other:?}"),
+    };
     assert!(
-        decoded_core <= gen,
-        "the transient DecodedRecord core {decoded_core} fits its reserved generation term {gen}"
+        decoded_core as u128 <= decoded_full,
+        "the inline core {decoded_core} is only part of the full backed working set {decoded_full}"
+    );
+    assert!(
+        decoded_full <= gen,
+        "the full decoded working set (inline + capacity-measured backings) {decoded_full} \
+         fits its reserved generation term {gen}"
     );
     assert!(decoded.publication_revision == 1);
 
@@ -4304,6 +4369,20 @@ fn h19_pd_fresh_o3_then_o5_refuses_divergent_surviving_content() {
     forged[body_len..].copy_from_slice(&crc.to_be_bytes());
     owner.debug_overwrite_record_for_test(&forged).unwrap();
 
+    // Capture authoritative state immediately before the refused O5.
+    let rec_bound = max_safety_record_bytes(&ctx).unwrap();
+    let backend = owner.backend_for_test();
+    let meta_before = backend.read_meta(META_ENCODED_LEN_MIRROR).unwrap();
+    // The freshly-derived capability was minted entirely in-process (it carries an
+    // O5 recovery capability) — no process-local token crossed the death boundary;
+    // the child produced only durable bytes. That it reaches a byte-for-byte
+    // comparison below (PublicationMismatch, not an incarnation SemanticRefusal)
+    // independently proves the capability is bound to THIS reopened incarnation.
+    assert!(
+        fresh.recovery_backend_incarnation().is_some(),
+        "the O5 capability was re-derived in THIS process, not transferred across death"
+    );
+
     // O5 against the freshly-derived capability refuses: the stored content is not
     // byte-for-byte identical to the retained publication, so it is NOT republished.
     let res = owner.reacknowledge(&fresh);
@@ -4314,9 +4393,41 @@ fn h19_pd_fresh_o3_then_o5_refuses_divergent_surviving_content() {
         ),
         "got {res:?}"
     );
-    // The divergent surviving bytes are left untouched (no overwrite of foreign state).
-    let after = owner.read_validate(None::<&FixtureCommittedHistory>);
-    assert!(after.is_err() || after.unwrap().encoded() == forged.as_slice());
+    // DIRECT byte preservation: the raw stored publication is still EXACTLY the
+    // forged content and is NOT the retained original — O5 overwrote nothing.
+    let stored_after = backend
+        .read_record(rec_bound)
+        .unwrap()
+        .expect("record present");
+    assert_eq!(
+        stored_after, forged,
+        "refused O5 left the divergent surviving bytes byte-for-byte unchanged"
+    );
+    assert_ne!(
+        stored_after,
+        fresh.encoded(),
+        "refused O5 must NOT have republished the retained original bytes"
+    );
+    // Metadata/revision unchanged, recovery still required after the refusal, and a
+    // dependent O4 is still refused (recovery was never cleared by the failed O5).
+    assert_eq!(
+        backend.read_meta(META_ENCODED_LEN_MIRROR).unwrap(),
+        meta_before,
+        "refused O5 did not mutate stored metadata/revision"
+    );
+    assert!(
+        owner.recovery_required(),
+        "a refused O5 does not clear the recovery requirement"
+    );
+    let next_qc = valid_wire_qc(&ctx, [7u8; 32], 9);
+    let next = make_locked_qc(&ctx, [7u8; 32], 9, next_qc, None).unwrap();
+    assert!(
+        matches!(
+            owner.publish_locked(next, 1, None::<&FixtureCommittedHistory>),
+            PublishResult::RefusedPreWrite(SafetyStoreError::RecoveryRequired(_))
+        ),
+        "a refused O5 leaves recovery required, so a dependent O4 stays refused"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -4345,4 +4456,167 @@ fn h24_pd_nocommit_recovery_does_not_manufacture_anchor() {
         ),
         other => panic!("expected a Locked no-commit record, got {other:?}"),
     }
+}
+// ===========================================================================
+// RUN 422 D7-D14 §4/§5/§6 — capacity-aware evidence admission and charging.
+//
+// A structurally valid-LENGTH backing can still own spare `Vec::capacity()` that
+// is genuine allocated memory. Length admission alone therefore does NOT bound
+// retained/working memory; these regressions exercise the capacity-aware
+// admission (`admit_evidence_capacity`, wired into the single
+// `admit_supporting_evidence` path) and the capacity-measured `generation_charge`
+// over REAL operations, distinguishing them from length checks.
+// ===========================================================================
+
+/// Inflate the outer `signatures` descriptor array's capacity far beyond the
+/// pinned bound while keeping every length valid. The structural length/count
+/// checks pass; the capacity-aware admission refuses — BEFORE any binding
+/// allocation (the evidence-encode instrumentation stays at 0).
+#[test]
+fn d7d14_cap_excess_descriptor_capacity_refused_before_allocation() {
+    use qbind_node::safety_record_store::codec::{
+        admit_supporting_evidence, compute_evidence_lock_binding, evidence_payload_encode_count,
+        reset_evidence_payload_encode_count,
+    };
+    let ctx = ctx_n(4);
+    let mut qc = valid_wire_qc(&ctx, [9u8; 32], 5);
+    // Move the valid signatures into a hugely over-capacity backing: len unchanged,
+    // capacity >> N, so `signatures.capacity() * 24` dwarfs the generation ceiling.
+    let orig_len = qc.signatures.len();
+    let mut inflated: Vec<Vec<u8>> = Vec::with_capacity(100_000);
+    inflated.append(&mut qc.signatures);
+    assert_eq!(inflated.len(), orig_len, "length preserved");
+    assert!(inflated.capacity() >= 100_000, "capacity inflated");
+    qc.signatures = inflated;
+    let ev = SupportingEvidence::QcDerived(qc);
+
+    reset_evidence_payload_encode_count();
+    assert!(
+        matches!(
+            admit_supporting_evidence(&ev, &ctx),
+            Err(SafetyStoreError::CapacityRefusal(_))
+        ),
+        "valid-length but excess-capacity evidence is refused by capacity admission"
+    );
+    // Refused before any binding/encode allocation.
+    let res = compute_evidence_lock_binding(&[9u8; 32], 5, &ev, &ctx.authority_context_ref, &ctx);
+    assert!(matches!(res, Err(SafetyStoreError::CapacityRefusal(_))));
+    assert_eq!(
+        evidence_payload_encode_count(),
+        0,
+        "capacity refusal precedes the evidence-binding allocation"
+    );
+}
+
+/// A per-signature buffer with valid length (S_sig bytes) but inflated capacity
+/// is likewise refused by capacity admission, not by the length check.
+#[test]
+fn d7d14_cap_excess_signature_buffer_capacity_refused() {
+    use qbind_node::safety_record_store::codec::admit_supporting_evidence;
+    let ctx = ctx_n(4);
+    let mut qc = valid_wire_qc(&ctx, [9u8; 32], 5);
+    let mut big = Vec::with_capacity(200_000);
+    big.extend_from_slice(&[0xABu8; S_SIG]);
+    assert_eq!(big.len() as u128, S_SIG as u128, "length within s_sig");
+    assert!(big.capacity() >= 200_000, "capacity inflated");
+    qc.signatures[0] = big;
+    let ev = SupportingEvidence::QcDerived(qc);
+    assert!(matches!(
+        admit_supporting_evidence(&ev, &ctx),
+        Err(SafetyStoreError::CapacityRefusal(_))
+    ));
+}
+
+/// O4 with a caller-supplied candidate whose evidence owns excess backing
+/// capacity is refused PRE-WRITE (capacity refusal), leaving stored bytes,
+/// revision, and the recovery latch untouched; a normal-capacity candidate is
+/// then admitted (readmission once the oversized input is withdrawn).
+#[test]
+fn d7d14_cap_o4_excess_capacity_candidate_refused_prewrite_then_readmit() {
+    let dir = tempfile::tempdir().unwrap();
+    let ctx = ctx_n(4);
+    let owner = init_owner(dir.path(), &ctx);
+    let rec = max_safety_record_bytes(&ctx).unwrap();
+    let backend = owner.backend_for_test();
+    let meta_before = backend.read_meta(META_ENCODED_LEN_MIRROR).unwrap();
+    let record_before = backend.read_record(rec).unwrap();
+
+    // Build a valid candidate, then inflate its evidence backing capacity.
+    let mut candidate =
+        make_locked_qc(&ctx, [9u8; 32], 5, valid_wire_qc(&ctx, [9u8; 32], 5), None).unwrap();
+    if let SupportingEvidence::QcDerived(qc) = &mut candidate.evidence {
+        let mut inflated: Vec<Vec<u8>> = Vec::with_capacity(100_000);
+        inflated.append(&mut qc.signatures);
+        qc.signatures = inflated;
+    }
+    match owner.publish_locked(candidate, 0, None::<&FixtureCommittedHistory>) {
+        PublishResult::RefusedPreWrite(SafetyStoreError::CapacityRefusal(_)) => {}
+        other => panic!("expected pre-write CapacityRefusal, got {other:?}"),
+    }
+    // Nothing mutated by the refusal.
+    assert_eq!(
+        backend.read_meta(META_ENCODED_LEN_MIRROR).unwrap(),
+        meta_before,
+        "refused O4 did not mutate metadata/revision"
+    );
+    assert_eq!(
+        backend.read_record(rec).unwrap(),
+        record_before,
+        "refused O4 did not mutate stored record bytes"
+    );
+    assert!(
+        !owner.recovery_required(),
+        "refused O4 did not disturb recovery"
+    );
+
+    // Readmission: a normal-capacity candidate at the same expected revision is
+    // accepted (the refusal was not a sticky failure).
+    let normal =
+        make_locked_qc(&ctx, [9u8; 32], 5, valid_wire_qc(&ctx, [9u8; 32], 5), None).unwrap();
+    assert_eq!(
+        owner.publish_locked(normal, 0, None::<&FixtureCommittedHistory>),
+        PublishResult::DurableAcknowledged { new_revision: 1 }
+    );
+}
+
+/// The full capacity-measured decoded working set for the TC variant — including
+/// the nested record-level `high_qc` signers, `tc.signers`, each signed-timeout's
+/// nested `high_qc` signers, and the signed-timeout signature buffers — fits the
+/// reserved generation term. This measures the real owned backings (via
+/// `generation_charge`'s `Vec::capacity()` accounting), not an inline `size_of`.
+#[test]
+fn d7d14_cap_full_decoded_working_set_tc_variant_bounded() {
+    use qbind_node::safety_record_store::accounting::generation_charge;
+    use qbind_node::safety_record_store::record::size_of_timeout_msg;
+    let dir = tempfile::tempdir().unwrap();
+    let ctx = ctx_n(4);
+    let owner = init_owner(dir.path(), &ctx);
+    let tc = valid_tc_record(&ctx, 5, 6);
+    assert_eq!(
+        owner.publish_locked(tc, 0, None::<&FixtureCommittedHistory>),
+        PublishResult::DurableAcknowledged { new_revision: 1 }
+    );
+    let rec = max_safety_record_bytes(&ctx).unwrap();
+    let gen = qbind_node::safety_record_store::profile::max_retained_generation_bytes(
+        &ctx,
+        size_of_timeout_msg(),
+    )
+    .unwrap();
+    let stored = owner
+        .backend_for_test()
+        .read_record(rec)
+        .unwrap()
+        .expect("record present");
+    let decoded = decode_record(&stored, &ctx).unwrap();
+    let full = match &decoded.record {
+        SafetyRecord::Locked(l) => {
+            assert!(matches!(l.evidence, SupportingEvidence::TcDerived { .. }));
+            generation_charge(&ctx, &RetainedGeneration::from_locked(1, l)).unwrap()
+        }
+        other => panic!("expected a Locked TC generation, got {other:?}"),
+    };
+    assert!(
+        full <= gen,
+        "the full capacity-measured TC decoded working set {full} fits its reserved term {gen}"
+    );
 }
