@@ -903,6 +903,105 @@ fn h24_bootstrap_nocommit_committed_distinctions() {
     assert_eq!(v.evidence_status(), EvidenceStatus::Unverified);
 }
 
+// H24 (malformed anchor-presence, unit/model) — the two missing structural cases:
+// (A) a NO-COMMIT discriminant (`D_ca = 0`) whose buffer still carries anchor
+// content, and (B) a COMMITTED-ANCHOR discriminant (`D_ca = 1`) missing the
+// required anchor content. Each is built from a VALID encoding and re-sealed with
+// a fresh record CRC so decoding reaches the intended STRUCTURAL rejection rather
+// than failing incidentally on the CRC envelope. Also asserts that legitimate
+// no-commit recovery does not manufacture a height-zero anchor or block id.
+#[test]
+fn h24_malformed_anchor_presence_structural_rejections() {
+    use qbind_node::safety_record_store::codec::record_crc32_for_test;
+    let ctx = ctx_n(4);
+    // `D_ca` sits at a fixed offset: version(2) + genesis(32) + authctx(32) = 66
+    // is `D_ev`, so byte 67 is `D_ca` (see codec `evidence_discriminant_of`).
+    const D_CA_OFFSET: usize = 2 + 32 + 32 + 1;
+
+    // A valid committed-anchor record with NO predecessor, so the anchor bytes are
+    // the final 40 body bytes (block_id[32] + height u64).
+    let qc = valid_wire_qc(&ctx, [9u8; 32], 5);
+    let l_commit = make_locked_qc(
+        &ctx,
+        [9u8; 32],
+        5,
+        qc,
+        Some(CommittedAnchor {
+            block_id: [3u8; 32],
+            height: 4,
+        }),
+    )
+    .unwrap();
+    let dec = DecodedRecord {
+        persistence_format_version: 1,
+        network_genesis_id: ctx.network_genesis_id,
+        publication_revision: 1,
+        record: SafetyRecord::Locked(l_commit),
+    };
+    let enc = encode_record(&dec, &ctx).unwrap();
+    assert_eq!(enc[D_CA_OFFSET], 1, "fixture encodes D_ca = 1 (committed anchor)");
+
+    // Case A — no-commit discriminant carrying anchor content: flip D_ca to 0 and
+    // re-seal. The 40 anchor bytes are now unconsumed → structural trailing-bytes
+    // rejection (NOT a CRC mismatch, NOT silently accepted).
+    let mut a = enc.clone();
+    let a_body = a.len() - 4;
+    a[D_CA_OFFSET] = 0;
+    let crc = record_crc32_for_test(&a[..a_body]).to_be_bytes();
+    a[a_body..].copy_from_slice(&crc);
+    match decode_record(&a, &ctx) {
+        Err(SafetyStoreError::StructuralRefusal(m)) => {
+            assert!(m != "CRC32 mismatch", "must not fail on the CRC envelope: {m}");
+            assert!(
+                m.contains("trailing"),
+                "no-commit discriminant carrying anchor content is a trailing-bytes structural refusal, got: {m}"
+            );
+        }
+        other => panic!("expected structural trailing-bytes refusal, got {other:?}"),
+    }
+
+    // Case B — committed-anchor discriminant missing anchor content: drop the final
+    // 40 anchor bytes and re-seal. D_ca stays 1 → the anchor read underflows →
+    // structural rejection (NOT a CRC mismatch).
+    let mut b_body = enc[..enc.len() - 4].to_vec();
+    let blen = b_body.len();
+    b_body.truncate(blen - 40);
+    assert_eq!(b_body[D_CA_OFFSET], 1, "still claims a committed anchor");
+    let crc = record_crc32_for_test(&b_body).to_be_bytes();
+    let mut b = b_body;
+    b.extend_from_slice(&crc);
+    match decode_record(&b, &ctx) {
+        Err(SafetyStoreError::StructuralRefusal(m)) => {
+            assert!(m != "CRC32 mismatch", "must not fail on the CRC envelope: {m}");
+        }
+        other => panic!("expected structural anchor-underflow refusal, got {other:?}"),
+    }
+
+    // Legitimate no-commit recovery does NOT manufacture a height-zero anchor or a
+    // zero block identifier: a real no-commit locked publication reopens with an
+    // ABSENT committed anchor, never a synthesized `CommittedAnchor { height: 0 }`.
+    let dir = tempfile::tempdir().unwrap();
+    let owner = init_owner(dir.path(), &ctx);
+    let qc2 = valid_wire_qc(&ctx, [9u8; 32], 5);
+    let l_nocommit = make_locked_qc(&ctx, [9u8; 32], 5, qc2, None).unwrap();
+    assert_eq!(
+        owner.publish_locked(l_nocommit, 0, None::<&FixtureCommittedHistory>),
+        PublishResult::DurableAcknowledged { new_revision: 1 }
+    );
+    drop(owner);
+    let owner2 = SafetyRecordOwner::attach(open_enabled(dir.path()), ctx.clone()).unwrap();
+    let v = owner2
+        .read_validate(None::<&FixtureCommittedHistory>)
+        .unwrap();
+    match &v.retained().record {
+        SafetyRecord::Locked(l) => assert!(
+            l.committed_anchor.is_none(),
+            "no-commit recovery must not manufacture a committed anchor"
+        ),
+        other => panic!("expected a Locked no-commit record, got {other:?}"),
+    }
+}
+
 // ---------------------------------------------------------------------------
 // H25 — supplied first-lock evidence at the storage layer (unit)
 //       (does NOT prove engine voting or first-QC formation)
@@ -4168,4 +4267,82 @@ fn pd_failed_o5_does_not_release_recovery() {
         .unwrap();
     assert!(v.retained().is_locked());
     assert_eq!(v.retained().publication_revision, 1);
+}
+// ---------------------------------------------------------------------------
+// H19 (process-death) — after a REAL process death, a fresh process re-derives
+// its O3 recovery capability (never transferring a process-local token across
+// the boundary) and O5 refuses non-identical surviving content. Complements the
+// in-process `h19_o5_refuses_divergence_outside_binding_digest` unit test.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn h19_pd_fresh_o3_then_o5_refuses_divergent_surviving_content() {
+    let dir = tempfile::tempdir().unwrap();
+    // A child establishes + acknowledges a lock (revision 1), then exits cleanly.
+    let status = spawn_child(dir.path(), "ack_locked_clean_exit");
+    assert_eq!(status.code(), Some(14), "child reached the acknowledged-exit boundary");
+
+    let ctx = ctx_n(4);
+    // Fresh process: a NEW backend-bound owner. No recovery token crosses the
+    // process boundary — the capability below is derived entirely in-process.
+    let owner = SafetyRecordOwner::attach(open_enabled(dir.path()), ctx.clone()).unwrap();
+    assert_eq!(owner.open().unwrap().current_revision, 1);
+    assert!(owner.recovery_required(), "reopen requires fresh recovery");
+
+    // Re-derive the O3 recovery capability in THIS process over the surviving bytes.
+    let fresh = owner
+        .read_validate(None::<&FixtureCommittedHistory>)
+        .unwrap();
+    let stored = fresh.encoded().to_vec();
+
+    // Out-of-band, make the surviving record non-identical at the SAME revision
+    // (a byte the binding digest does not cover), re-sealed so stage-1 CRC passes.
+    let mut forged = stored.clone();
+    forged[2] ^= 0x01; // part of network_genesis_id — not an input to the binding digest
+    let body_len = forged.len() - 4;
+    let crc = qbind_node::safety_record_store::codec_crc_for_test(&forged[..body_len]);
+    forged[body_len..].copy_from_slice(&crc.to_be_bytes());
+    owner.debug_overwrite_record_for_test(&forged).unwrap();
+
+    // O5 against the freshly-derived capability refuses: the stored content is not
+    // byte-for-byte identical to the retained publication, so it is NOT republished.
+    let res = owner.reacknowledge(&fresh);
+    assert!(
+        matches!(
+            res,
+            PublishResult::RefusedPreWrite(SafetyStoreError::PublicationMismatch(_))
+        ),
+        "got {res:?}"
+    );
+    // The divergent surviving bytes are left untouched (no overwrite of foreign state).
+    let after = owner.read_validate(None::<&FixtureCommittedHistory>);
+    assert!(after.is_err() || after.unwrap().encoded() == forged.as_slice());
+}
+
+// ---------------------------------------------------------------------------
+// H24 (process-death) — legitimate no-commit recovery across a REAL process
+// death does NOT manufacture a height-zero committed anchor or a zero block id.
+// Complements the unit malformed-anchor cases.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn h24_pd_nocommit_recovery_does_not_manufacture_anchor() {
+    let dir = tempfile::tempdir().unwrap();
+    // The reused phase publishes a NO-COMMIT locked record (committed_anchor None).
+    let status = spawn_child(dir.path(), "ack_locked_clean_exit");
+    assert_eq!(status.code(), Some(14), "child reached the acknowledged-exit boundary");
+
+    let ctx = ctx_n(4);
+    let owner = SafetyRecordOwner::attach(open_enabled(dir.path()), ctx).unwrap();
+    assert_eq!(owner.open().unwrap().current_revision, 1);
+    let v = owner
+        .read_validate(None::<&FixtureCommittedHistory>)
+        .unwrap();
+    match &v.retained().record {
+        SafetyRecord::Locked(l) => assert!(
+            l.committed_anchor.is_none(),
+            "no-commit recovery across process death must not manufacture a committed anchor"
+        ),
+        other => panic!("expected a Locked no-commit record, got {other:?}"),
+    }
 }
