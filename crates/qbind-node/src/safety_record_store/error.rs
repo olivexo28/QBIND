@@ -44,8 +44,12 @@ pub enum SafetyStoreError {
     /// O5 content mismatch: the recovered publication differs byte-for-byte from
     /// the currently stored publication.
     PublicationMismatch(String),
-    /// An allocation/admission charge would exceed a component cap.
-    CapacityRefusal(String),
+    /// An allocation/admission charge would exceed a component cap, or a single
+    /// decoded backing exceeded its pinned per-vector class maximum. The payload
+    /// is a [`CapacityRefusalDetail`]: a free-form message, or typed, `Copy`
+    /// per-vector bound data that the protected O4 preflight can construct
+    /// **without** allocating an owned diagnostic `String` on the refusal path.
+    CapacityRefusal(CapacityRefusalDetail),
     /// A storage write failed outright (before any uncertain barrier).
     WriteFailed(String),
     /// A storage write may or may not have become durable; the caller observed no
@@ -89,7 +93,7 @@ impl std::fmt::Display for SafetyStoreError {
             ),
             Self::TransitionIneligible(s) => write!(f, "safety store: transition ineligible: {s}"),
             Self::PublicationMismatch(s) => write!(f, "safety store: publication mismatch: {s}"),
-            Self::CapacityRefusal(s) => write!(f, "safety store: capacity refusal: {s}"),
+            Self::CapacityRefusal(d) => write!(f, "safety store: capacity refusal: {d}"),
             Self::WriteFailed(s) => write!(f, "safety store: write failed: {s}"),
             Self::UncertainPublication(s) => write!(f, "safety store: uncertain publication: {s}"),
             Self::ReadFailed(s) => write!(f, "safety store: read failed: {s}"),
@@ -99,3 +103,97 @@ impl std::fmt::Display for SafetyStoreError {
 }
 
 impl std::error::Error for SafetyStoreError {}
+
+/// Typed, `Copy` identifier of a single per-vector decoded-backing capacity site
+/// (§ 13.7A, D7-D14 allocation-free refusal correction). Carried by
+/// [`CapacityRefusalDetail::PerVector`] so a per-vector capacity refusal is built
+/// from stack-only `Copy` data — the array sites keep an inline index — and no
+/// owned diagnostic `String` is allocated unless/until the refusal is actually
+/// rendered through `Display`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CapnormSiteKind {
+    QcSignerBitmap,
+    QcSignaturesDescriptor,
+    QcSignatureBuffer(usize),
+    RecordHighQcSigners,
+    TcSigners,
+    TcHighQcSigners,
+    TcSignedTimeoutsDescriptor,
+    TcSignedTimeoutSignature(usize),
+    TcSignedTimeoutNestedHighQcSigners(usize),
+}
+
+impl std::fmt::Display for CapnormSiteKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::QcSignerBitmap => f.write_str("QC signer_bitmap"),
+            Self::QcSignaturesDescriptor => f.write_str("QC signatures descriptor array"),
+            Self::QcSignatureBuffer(i) => write!(f, "QC signature buffer [{i}]"),
+            Self::RecordHighQcSigners => f.write_str("record-level high_qc.signers"),
+            Self::TcSigners => f.write_str("tc.signers"),
+            Self::TcHighQcSigners => f.write_str("tc.high_qc.signers"),
+            Self::TcSignedTimeoutsDescriptor => f.write_str("tc.signed_timeouts descriptor array"),
+            Self::TcSignedTimeoutSignature(i) => write!(f, "tc.signed_timeouts[{i}].signature"),
+            Self::TcSignedTimeoutNestedHighQcSigners(i) => {
+                write!(f, "tc.signed_timeouts[{i}].high_qc.signers")
+            }
+        }
+    }
+}
+
+/// The payload of [`SafetyStoreError::CapacityRefusal`]. A capacity refusal is
+/// either a free-form diagnostic `Message` (aggregate/admission refusals that are
+/// not on the protected pre-reservation path) or a typed, **allocation-free**
+/// `PerVector` per-vector bound violation.
+///
+/// The `PerVector` form carries only `Copy` data (`CapnormSiteKind` + three
+/// `u128` bounds), so the O4 structural/capacity preflight — which runs BEFORE
+/// the O4 operation reservation — constructs its refusal without allocating an
+/// owned `String`; the equivalent diagnostic text is materialised only when the
+/// error is rendered via `Display`. `Message` round-trips from `String`/`&str`
+/// via `From`, so existing diagnostic sites are unchanged.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CapacityRefusalDetail {
+    /// A free-form capacity/admission diagnostic (not on the protected
+    /// pre-reservation refusal path).
+    Message(String),
+    /// A single decoded backing exceeded its pinned per-vector class maximum,
+    /// identified by a `Copy` site and the numeric bounds — built without any
+    /// heap allocation.
+    PerVector {
+        site: CapnormSiteKind,
+        capacity: u128,
+        profile_max: u128,
+        slack: u128,
+    },
+}
+
+impl std::fmt::Display for CapacityRefusalDetail {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Message(s) => f.write_str(s),
+            Self::PerVector {
+                site,
+                capacity,
+                profile_max,
+                slack,
+            } => write!(
+                f,
+                "{site} capacity {capacity} exceeds profile maximum {profile_max} + \
+                 CAPNORM_SLACK {slack} (per-vector capacity bound)"
+            ),
+        }
+    }
+}
+
+impl From<String> for CapacityRefusalDetail {
+    fn from(s: String) -> Self {
+        Self::Message(s)
+    }
+}
+
+impl From<&str> for CapacityRefusalDetail {
+    fn from(s: &str) -> Self {
+        Self::Message(s.to_string())
+    }
+}

@@ -207,10 +207,13 @@ impl SafetyRecordOwner {
             )?)?;
         let charge = context_ownership_charge(&ctx, wrapper_size)?;
         if charge > context_owner_ceiling_term(&ctx, wrapper_size)? {
-            return Err(SafetyStoreError::CapacityRefusal(format!(
-                "context validator vector capacity {} exceeds the normalized per-owner term",
-                ctx.validators.capacity()
-            )));
+            return Err(SafetyStoreError::CapacityRefusal(
+                format!(
+                    "context validator vector capacity {} exceeds the normalized per-owner term",
+                    ctx.validators.capacity()
+                )
+                .into(),
+            ));
         }
         let context_reservation = backend.context_accounting().reserve(charge)?;
         Ok(SafetyRecordOwner {
@@ -514,19 +517,51 @@ impl SafetyRecordOwner {
     ) -> Result<ValidatedRecord, SafetyStoreError> {
         let _guard = self.backend.lock_domain();
         // Reserve this proof's retained-holder charge (the retained `encoded`
-        // buffer + its decoded generation) BEFORE `load_established` copies the
-        // stored payload into a component-owned buffer, plus a transient
-        // validation re-encode scratch (§ 13.7: reservations precede the
-        // allocation/copy). The holder reservation is moved into the returned
-        // proof and lives for its lifetime; the scratch releases at O3 return.
+        // buffer + its decoded generation + inline handle) BEFORE `load_established`
+        // copies the stored payload into a component-owned buffer (§ 13.7:
+        // reservations precede the allocation/copy). The holder reservation is moved
+        // into the returned proof and lives for its lifetime; the O3 validation
+        // scratch reserved just below releases at O3 return.
         let holder_res = self
             .backend
             .accounting()
             .reserve(self.retained_holder_charge()?)?;
-        let _scratch_res = self
-            .backend
-            .accounting()
-            .reserve(max_safety_record_bytes(self.pinned())?)?;
+        // O3 transient validation scratch (§ 13.7, D7-D14 O3 validation-coexistence
+        // correction). Beyond the long-lived retained-holder reservation above,
+        // O3's decode→validation phase additionally holds a LIVE TRANSIENT decoded
+        // object and, at its peak, exactly ONE record-sized validation buffer (the
+        // correspondence re-encode, which `validate_decoded` now drops before the
+        // certificate-binding scratch is allocated, so the two never coexist). Two
+        // facts make the earlier single record-sized scratch an under-reservation:
+        //
+        //   1. The retained holder's generation term reserves the RETAINED
+        //      generation ceiling (`max_retained_generation_bytes`), which is
+        //      strictly SMALLER than the live transient decoded object
+        //      (`max_transient_decoded_working_set`): the transient carries the
+        //      two validated-then-discarded identity-header fields. Charging only
+        //      the retained ceiling for the transient under-reserves it by exactly
+        //      that delta.
+        //   2. Before the drop correction, the re-encode and certificate-binding
+        //      buffers coexisted, so TWO record-sized buffers were live while only
+        //      one was reserved.
+        //
+        // Reserve the transient's excess over the retained ceiling PLUS one
+        // record-sized validation buffer. The O3 phase maximum is then fully
+        // admitted before any O3 allocation/copy: the retained holder covers the
+        // retained `encoded` buffer and the transient's first `retained_gen` bytes
+        // (the transient converts INTO the retained generation, so they are never
+        // simultaneously live), and this term covers the transient's excess plus
+        // the single live validation buffer. The scratch releases at O3 return; the
+        // holder reservation is moved into the returned proof.
+        let transient = super::accounting::max_transient_decoded_working_set(self.pinned())?;
+        let retained_gen = max_retained_generation_bytes(self.pinned(), size_of_timeout_msg())?;
+        let transient_excess = transient.saturating_sub(retained_gen);
+        let o3_scratch = transient_excess
+            .checked_add(max_safety_record_bytes(self.pinned())?)
+            .ok_or_else(|| {
+                SafetyStoreError::ArithmeticOverflow("O3 validation scratch charge".into())
+            })?;
+        let _scratch_res = self.backend.accounting().reserve(o3_scratch)?;
         // Enforce the established-state + pinned-context + revision-consistency
         // prerequisites centrally (do not rely on the caller having invoked
         // `open`). Reject missing/partial, foreign-context, or revision-
