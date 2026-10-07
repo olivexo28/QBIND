@@ -120,4 +120,26 @@ const _: () = {
             > std::mem::size_of::<record::RetainedRecord>(),
         "ValidatedRecord must carry separately-charged holder/handle fields"
     );
+    // INDEPENDENT COVERAGE INEQUALITY (§ 13.7B finding-#2 correction): the
+    // complete inline `ValidatedRecord` representation is covered by the retained
+    // generation core PLUS the independently-inventoried holder-handle charge
+    // (`validated_holder_handle_bytes`, summed from the field inventory + one
+    // alignment allowance — NOT by subtracting the two sizes). This is a real
+    // inequality, not a `retained + (validated − retained) == validated`
+    // tautology: if a future field or padding change outgrows the inventory the
+    // charge no longer covers the layout and this assertion fails at compile
+    // time, surfacing the discrepancy rather than letting handle bytes escape the
+    // enforced per-proof holder charge.
+    let handle_inventory = std::mem::size_of::<record::EvidenceStatus>()
+        + std::mem::size_of::<Vec<u8>>()
+        + std::mem::size_of::<[u8; 32]>()
+        + std::mem::size_of::<Option<u64>>()
+        + std::mem::size_of::<Option<accounting::Reservation>>()
+        + std::mem::align_of::<record::ValidatedRecord>();
+    assert!(
+        std::mem::size_of::<record::ValidatedRecord>()
+            <= std::mem::size_of::<record::RetainedRecord>() + handle_inventory,
+        "the independently-inventoried holder-handle charge must cover the real \
+         inline ValidatedRecord layout beyond its RetainedRecord generation"
+    );
 };

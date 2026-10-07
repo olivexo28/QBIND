@@ -1059,7 +1059,7 @@ fn real_representation_layout_decomposition() {
     use qbind_node::safety_record_store::profile::GEN_STRUCT_MAX;
     use qbind_node::safety_record_store::record::{
         size_of_decoded_record, size_of_retained_generation, size_of_retained_record,
-        size_of_safety_record, size_of_validated_record,
+        size_of_safety_record, size_of_validated_record, validated_holder_handle_bytes,
     };
 
     let gen_core = size_of_safety_record();
@@ -1086,20 +1086,33 @@ fn real_representation_layout_decomposition() {
         "RetainedRecord {retained} must contain its SafetyRecord core {gen_core} inline"
     );
 
-    // Exact inline decomposition of the complete retained proof — every inline
-    // member counted exactly once, no field escaping a term.
-    let validated_handle_fields = validated - retained;
-    assert_eq!(
-        retained + validated_handle_fields,
-        validated,
-        "ValidatedRecord decomposition must sum exactly"
-    );
-    // The separately-owned holder/handle fields (retained-encoded Vec descriptor,
-    // origin digest, O5 incarnation option, inline holder Reservation option) are
-    // a non-trivial term charged under their own terms, NOT the generation ceiling.
+    // INDEPENDENT ACCOUNTING INEQUALITY (finding-#2 correction): the complete
+    // inline retained proof is COVERED by its retained generation core plus the
+    // independently-inventoried holder-handle charge — NOT proven by the old
+    // `validated_handle_fields = validated − retained` subtraction followed by the
+    // tautological `retained + handle == validated`. `validated_holder_handle_bytes`
+    // is summed from the handle field inventory (+ one alignment allowance), on its
+    // own basis, and the inequality below (mirroring the compile-time assertion in
+    // the component root) verifies it actually covers the measured layout.
+    let handle_charge = validated_holder_handle_bytes();
     assert!(
-        validated_handle_fields > 0,
+        validated <= retained + handle_charge,
+        "retained generation ({retained}) + independently-inventoried handle charge \
+         ({handle_charge}) must cover the complete inline ValidatedRecord ({validated})"
+    );
+    // The handle charge is a genuinely non-trivial separately-reserved term (the
+    // retained-encoded Vec descriptor, origin digest, O5 incarnation option, and
+    // the inline holder Reservation option), charged under its own term — NOT the
+    // generation ceiling.
+    assert!(
+        handle_charge > 0 && validated > retained,
         "ValidatedRecord must carry separately-charged holder/handle fields"
+    );
+    let validated_handle_fields = validated - retained;
+    assert!(
+        handle_charge >= validated_handle_fields,
+        "the enforced handle charge ({handle_charge}) must cover the real inline \
+         handle fields ({validated_handle_fields})"
     );
 
     // The transient decode/validation container still carries the two header
@@ -2793,6 +2806,76 @@ fn acct_valid_qc_publish_readback_recover_within_ceiling() {
         0,
         "holder released on proof drop"
     );
+}
+
+// §3/§7 finding-#2 regression: the ENFORCED O3 retained-holder charge covers the
+// COMPLETE operational representation — the `encoded` buffer backing (rec), the
+// decoded generation (gen), AND the inline holder/accounting handle metadata
+// (the `validated_holder_handle_bytes` term that was previously only asserted as
+// a size-ordering, never reserved). The charge is independently derived here from
+// the public profile/record bounds and compared against the real shared-accountant
+// partition delta a live O3 proof actually holds — not against the accountant's
+// own counter alone. A clone takes an identical complete charge (it owns its own
+// buffer, generation, and inline handle), and every holder releases on drop.
+#[test]
+fn acct_o3_holder_charge_includes_enforced_handle_term() {
+    use qbind_node::safety_record_store::profile::max_retained_generation_bytes;
+    use qbind_node::safety_record_store::record::{
+        size_of_timeout_msg, validated_holder_handle_bytes,
+    };
+
+    let dir = tempfile::tempdir().unwrap();
+    let ctx = ctx_n(4);
+    let owner = init_owner(dir.path(), &ctx);
+    let backend = owner.backend_for_test();
+    let cap = backend.accounting_cap().unwrap();
+
+    // Independently derive the complete per-proof charge from the public bounds.
+    let rec = max_safety_record_bytes(&ctx).unwrap();
+    let gen = max_retained_generation_bytes(&ctx, size_of_timeout_msg()).unwrap();
+    let handle = validated_holder_handle_bytes();
+    let complete_charge = rec + gen + handle;
+    assert!(
+        handle > 0,
+        "the handle term must be a genuinely non-zero enforced charge"
+    );
+
+    // Publish, then take a real O3 proof and observe the real partition delta.
+    let qc = valid_wire_qc(&ctx, [9u8; 32], 5);
+    let locked = make_locked_qc(&ctx, [9u8; 32], 5, qc, None).unwrap();
+    owner.publish_locked(locked, 0, None::<&FixtureCommittedHistory>);
+    assert_eq!(backend.accounting_current(), 0, "clean before O3");
+
+    let tok = owner
+        .read_validate(None::<&FixtureCommittedHistory>)
+        .unwrap();
+    let one_holder = backend.accounting_current();
+    assert_eq!(
+        one_holder, complete_charge,
+        "a live O3 proof holds EXACTLY the complete operational representation \
+         (rec {rec} + gen {gen} + enforced handle {handle} = {complete_charge}); \
+         the handle term is reserved, not merely asserted"
+    );
+    assert!(one_holder <= cap, "single holder within ceiling");
+
+    // A clone owns its own buffer + generation + inline handle and takes the same
+    // complete charge again — handle bytes are charged per holder, not once.
+    let clone = tok.try_clone().unwrap();
+    assert_eq!(
+        backend.accounting_current(),
+        complete_charge * 2,
+        "a cloned proof is charged the identical complete representation again"
+    );
+    assert!(backend.accounting_current() <= cap, "two holders within ceiling");
+
+    drop(clone);
+    assert_eq!(
+        backend.accounting_current(),
+        complete_charge,
+        "dropping the clone releases exactly one complete charge"
+    );
+    drop(tok);
+    assert_eq!(backend.accounting_current(), 0, "all holders released on drop");
 }
 
 #[test]
