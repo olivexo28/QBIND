@@ -9,7 +9,8 @@ use super::codec::compute_evidence_lock_binding;
 use super::error::SafetyStoreError;
 use super::profile::PinnedSafetyContext;
 use super::record::{
-    DecodedRecord, EvidenceStatus, LockedRecord, SafetyRecord, SupportingEvidence, ValidatedRecord,
+    DecodedRecord, EvidenceStatus, LockedRecord, RetainedRecord, SafetyRecord, SupportingEvidence,
+    ValidatedRecord,
 };
 use qbind_consensus::ids::ValidatorId;
 use qbind_consensus::timeout::select_max_high_qc;
@@ -100,8 +101,27 @@ pub fn validate_decoded<H: CommittedHistory + ?Sized>(
         }
     }
 
+    // Construct the contract-compliant retained generation (§ 13.7A(c.4)): keep
+    // `publication_revision` + the `SafetyRecord` generation core and **discard**
+    // the now-validated identity-header fields (`persistence_format_version` was
+    // validated at decode and selects the decoder; `network_genesis_id` was just
+    // compared to the pinned context above). Their exact bytes survive only in the
+    // retained `encoded` publication (operand 1 for O5, § 13.7A(c.5)); they are
+    // not retained as truth in the generation. The `DecodedRecord` is consumed by
+    // value, so moving its `record` out leaves no second decoded copy alive.
+    let DecodedRecord {
+        persistence_format_version: _,
+        network_genesis_id: _,
+        publication_revision,
+        record,
+    } = decoded;
+    let retained = RetainedRecord {
+        publication_revision,
+        record,
+    };
+
     Ok(ValidatedRecord::seal(
-        decoded,
+        retained,
         EvidenceStatus::Unverified,
         encoded,
         super::owner::context_digest(ctx),

@@ -45,7 +45,8 @@ pub use error::SafetyStoreError;
 pub use owner::{PublishResult, SafetyMeta, SafetyRecordOwner};
 pub use profile::PinnedSafetyContext;
 pub use record::{
-    DecodedRecord, EvidenceStatus, LockedRecord, SafetyRecord, SupportingEvidence, ValidatedRecord,
+    DecodedRecord, EvidenceStatus, LockedRecord, RetainedRecord, SafetyRecord, SupportingEvidence,
+    ValidatedRecord,
 };
 pub use validate::{CommittedHistory, FixtureCommittedHistory};
 
@@ -55,56 +56,68 @@ pub fn codec_crc_for_test(body: &[u8]) -> u32 {
     codec::record_crc32_for_test(body)
 }
 
-/// Compile-time layout proof over the **real operational retained
-/// representation** (§ 13.7A(c), representation-proof correction).
+/// Compile-time **representation-and-charge** proof over the **real operational
+/// retained representation** (§ 13.7A(c.4), D7-D14 representation correction).
 ///
 /// The prior proof measured the *synthetic* [`record::RetainedGeneration`]
-/// wrapper (used only by the Arc-pinned synthetic-holder tests), which fits the
-/// ceiling and therefore concealed that the object operations actually retain —
-/// [`record::DecodedRecord`] inside [`record::ValidatedRecord`] — is larger. The
-/// operative proof below is driven by the real types and decomposes the retained
-/// proof into named inline terms, each counted **once**, with required alignment
-/// padding and the inline holder reservation included:
+/// wrapper (used only by the Arc-pinned synthetic-holder tests) and, in its
+/// corrected form, surfaced that the then-retained [`record::DecodedRecord`]
+/// exceeded the ceiling — concluding a ceiling increase was required. That
+/// conclusion is **withdrawn**: `DecodedRecord` was only over the ceiling because
+/// it still retained the two header fields the § 13.7A(c.4) inventory requires be
+/// **discarded** after validation (`persistence_format_version`,
+/// `network_genesis_id`). The operative retained object is now
+/// [`record::RetainedRecord`] (post-validation fields only) held inside
+/// [`record::ValidatedRecord`], and it **fits** the accepted `GEN_STRUCT_MAX`
+/// with margin — no ceiling increase is necessary.
 ///
-/// * `GEN_CORE` — the generation-bearing `SafetyRecord` enum (the real logical
-///   generation). The accepted `GEN_STRUCT_MAX` ceiling is applied to **this**
-///   core, not to the whole container.
-/// * `DECODED_IDENTITY_HEADER` = `size_of::<DecodedRecord>() − GEN_CORE` — the
-///   always-retained identity header (`persistence_format_version`,
-///   `network_genesis_id`, `publication_revision`) + padding.
+/// The proof connects complete objects to enforced charges rather than relying on
+/// size-subtraction identities:
+///
+/// * `RETAINED_GEN` = `size_of::<RetainedRecord>()` — the real retained
+///   generation (publication revision + the `SafetyRecord` core). The accepted
+///   `GEN_STRUCT_MAX` ceiling is applied to **this complete object**, not to a
+///   partial core, and it holds.
 /// * `VALIDATED_HANDLE_FIELDS` = `size_of::<ValidatedRecord>() −
-///   size_of::<DecodedRecord>()` — the separately-owned holder/handle fields (the
+///   size_of::<RetainedRecord>()` — the separately-owned holder/handle fields (the
 ///   retained `encoded` `Vec` descriptor, the originating-context digest, the O5
-///   recovery-incarnation discriminant, and the inline holder [`accounting::
-///   Reservation`] option). These are charged under their own terms, never under
-///   the generation ceiling.
+///   recovery-incarnation discriminant, and the inline holder
+///   [`accounting::Reservation`] option). These are charged under their own terms
+///   (the holder reservation and the encoded-buffer term), never under the
+///   generation ceiling.
 ///
 /// The decomposition sums **exactly** to `size_of::<ValidatedRecord>()`, so a
-/// future field or layout change surfaces here rather than silently escaping the
-/// accounting.
-///
-/// Surfaced, NOT concealed (see the `real_representation_layout_decomposition`
-/// regression and the §13.7A evidence document): on the supported 64-bit target
-/// `size_of::<DecodedRecord>()` (the complete inline retained generation) exceeds
-/// `GEN_STRUCT_MAX`. The generation **core** (`SafetyRecord`) fits with margin,
-/// but the full decoded container does not — a required single-ceiling contract
-/// adjustment is presented separately and is **not** silently enacted here (the
-/// accepted aggregate arithmetic and fixture quantities are left unchanged).
+/// future field or layout change surfaces here (and in the
+/// `real_representation_layout_decomposition` regression) rather than silently
+/// escaping the accounting. The transient [`record::DecodedRecord`] is **not**
+/// part of the retained representation — it exists only across decode→validation
+/// and is charged as transient validation scratch — so its size is deliberately
+/// not folded into the retained generation.
 const _: () = {
-    // The generation-bearing core actually retained by operations fits the
-    // accepted generation ceiling (the operative proof, on the real type).
+    // The complete retained generation actually held by operations fits the
+    // accepted generation ceiling (the operative proof, on the real retained
+    // object — not a partial core, and not the transient decoded container).
     assert!(
-        std::mem::size_of::<record::SafetyRecord>() as u128 <= profile::GEN_STRUCT_MAX,
-        "SafetyRecord generation core exceeds GEN_STRUCT_MAX; surface the measured discrepancy"
+        std::mem::size_of::<record::RetainedRecord>() as u128 <= profile::GEN_STRUCT_MAX,
+        "RetainedRecord retained generation exceeds GEN_STRUCT_MAX; surface the discrepancy"
     );
-    // Exact inline decomposition: every member counted once, no underflow.
+    // The retained generation contains its SafetyRecord generation core inline.
     assert!(
-        std::mem::size_of::<record::DecodedRecord>() >= std::mem::size_of::<record::SafetyRecord>(),
-        "DecodedRecord must contain its SafetyRecord generation core inline"
+        std::mem::size_of::<record::RetainedRecord>()
+            >= std::mem::size_of::<record::SafetyRecord>(),
+        "RetainedRecord must contain its SafetyRecord generation core inline"
     );
+    // ValidatedRecord = the retained generation inline + separately-charged
+    // holder/handle fields; the decomposition must not underflow.
     assert!(
         std::mem::size_of::<record::ValidatedRecord>()
-            >= std::mem::size_of::<record::DecodedRecord>(),
-        "ValidatedRecord must contain its DecodedRecord generation inline"
+            >= std::mem::size_of::<record::RetainedRecord>(),
+        "ValidatedRecord must contain its RetainedRecord generation inline"
+    );
+    // The handle/holder fields are a genuinely non-empty separately-charged term.
+    assert!(
+        std::mem::size_of::<record::ValidatedRecord>()
+            > std::mem::size_of::<record::RetainedRecord>(),
+        "ValidatedRecord must carry separately-charged holder/handle fields"
     );
 };

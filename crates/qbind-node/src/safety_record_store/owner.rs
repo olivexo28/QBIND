@@ -776,8 +776,14 @@ pub fn bootstrap_validated(
         },
     };
     let encoded = encode_record(&decoded, ctx)?;
+    // Discard the validated identity-header fields from the retained generation
+    // (§ 13.7A(c.4)); their bytes remain only in `encoded`.
+    let retained = super::record::RetainedRecord {
+        publication_revision: decoded.publication_revision,
+        record: decoded.record,
+    };
     Ok(ValidatedRecord::seal(
-        decoded,
+        retained,
         EvidenceStatus::Unverified,
         encoded,
         context_digest(ctx),

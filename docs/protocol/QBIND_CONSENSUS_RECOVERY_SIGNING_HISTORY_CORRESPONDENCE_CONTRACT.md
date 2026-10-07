@@ -3405,28 +3405,36 @@ proof and the §8 H18/H19/H22/H24/H26 obligations remain open, as does the indep
 security gate. See the latest RUN 422 D7-D14 continuation section of
 `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_422_D7.md`.
 
-**Representation-proof correction (§ 13.7A(c), finding #5 — layout proof on the real retained object).** The
+**Representation-proof correction (§ 13.7A(c.4), finding #5 — retained object implemented to the inventory).** The
 operative compile-time layout proof previously measured the *synthetic* `RetainedGeneration` wrapper
-(`size_of = 368 ≤ GEN_STRUCT_MAX = 384`), which concealed that the object operations actually retain —
-`DecodedRecord` inside `ValidatedRecord` — is larger. Measured on the supported 64-bit target:
-`size_of::<SafetyRecord>()` (generation core) `= 360`, `size_of::<DecodedRecord>()` (complete inline retained
-generation) `= 408`, `size_of::<ValidatedRecord>()` (opaque proof) `= 528`. The proof is now driven by the
-real types and decomposes the retained proof into named inline terms counted once: the generation **core**
-(`SafetyRecord` = `360`) is bounded by `GEN_STRUCT_MAX` (`384`); the `48`-byte decoded-identity header
-(`persistence_format_version` + `network_genesis_id` + `publication_revision` + padding) and the `120`-byte
-`ValidatedRecord` holder/handle fields (retained-`encoded` `Vec` descriptor, origin-context digest, O5
-recovery-incarnation discriminant, inline holder `Reservation` option) are separate terms, never folded into
-the generation ceiling. `RetainedGeneration` remains only for the synthetic-holder test and is no longer the
-operative proof. **Surfaced incompatibility (presented, NOT enacted):** `size_of::<DecodedRecord>() = 408 >
-GEN_STRUCT_MAX = 384`; the ceiling absorbs only `384 − 360 = 24` of the `48`-byte identity header, leaving
-`24` bytes uncovered per retained generation. The required single-generation-ceiling adjustment (raise to
-`≥ 408`, or add an explicit `48`-byte decoded-identity-header accounting term) is **presented separately and
-not silently enacted**: the accepted aggregate arithmetic (`max_component_aggregate_bytes =
+(`size_of = 368 ≤ GEN_STRUCT_MAX = 384`), then (finding #5 first pass) was re-pointed at the object operations
+actually retained — `DecodedRecord` inside `ValidatedRecord` — and **concluded a ceiling increase to `≥ 408`
+was required** because `size_of::<DecodedRecord>() = 408 > 384`. **That conclusion is withdrawn and superseded
+(D7-D14 implementation pass).** `DecodedRecord` exceeded the ceiling only because it still retained the two
+identity-header fields the § 13.7A(c.4) inventory requires be **discarded after validation**
+(`persistence_format_version`, `network_genesis_id`). The retained representation has now been **implemented to
+the inventory**: operations retain `RetainedRecord` (publication revision + the `SafetyRecord` generation core)
+inside `ValidatedRecord`; the version is validated at decode and the genesis id is compared to the pinned
+context, then both are dropped from the retained generation — their exact bytes survive only in the retained
+`encoded` publication (c.5). Measured on the supported 64-bit target: `size_of::<SafetyRecord>()` (generation
+core) `= 360`, `size_of::<RetainedRecord>()` (**the real retained generation**) `= 368`,
+`size_of::<DecodedRecord>()` (now only **transient** decode/validation scratch) `= 408`,
+`size_of::<ValidatedRecord>()` (opaque proof) `= 496`. **The real retained generation `368` fits
+`GEN_STRUCT_MAX = 384` with `16` bytes of headroom, so NO ceiling increase is required** and none is enacted.
+The proof is a representation-and-charge proof over the real types: the complete retained generation
+(`RetainedRecord = 368`) is bounded by `GEN_STRUCT_MAX`; the `128`-byte `ValidatedRecord` holder/handle fields
+(retained-`encoded` `Vec` descriptor, origin-context digest, O5 recovery-incarnation discriminant, inline
+holder `Reservation` option) are a separate term charged under the holder/encoded-buffer terms, never folded
+into the generation ceiling. `RetainedGeneration` remains only for the synthetic-holder test and is no longer
+the operative proof. The earlier **surfaced incompatibility** (`408 > 384`, requiring a ceiling raise or a
+`48`-byte decoded-identity-header addend) is **withdrawn** — it measured the pre-correction representation, not
+a lower bound on every conforming one. The accepted aggregate arithmetic (`max_component_aggregate_bytes =
 max_aggregate_retained_bytes`, enforced aggregate `7772` for N=4) and all fixture quantities are left
-**unchanged** this pass, so no accepted bound is relaxed. The regression
-`real_representation_layout_decomposition` records the measured sizes, the exact decomposition, and the
-surfaced `408 > 384` inequality. The operative verdict is unchanged
+**unchanged**; no accepted bound is relaxed or raised. The regression
+`real_representation_layout_decomposition` now records the measured sizes, the exact decomposition, and that
+the retained generation fits the ceiling (the `DecodedRecord > GEN_STRUCT_MAX` acceptance assertion that
+described the old defect is removed). The operative verdict is unchanged
 (`D7D14_STORAGE_COMPONENT=PARTIAL-IMPLEMENTATION` / `D7D14_STORAGE_ACCEPTANCE=INCOMPLETE`); the §5/§6 full
-per-object operational inventory (enacting this ceiling change in the profile accounting) and the §8
-H18/H19/H22/H24/H26 obligations remain open, as does the independent CodeQL/Code-Review security gate. See the
-latest RUN 422 D7-D14 continuation section of `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_422_D7.md`.
+per-object operational inventory and the §8 H18/H19/H22/H24/H26 obligations remain open, as does the
+independent CodeQL/Code-Review security gate. See the latest RUN 422 D7-D14 continuation section of
+`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_422_D7.md`.

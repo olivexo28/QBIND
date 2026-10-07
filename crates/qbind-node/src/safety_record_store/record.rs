@@ -117,13 +117,70 @@ impl DecodedRecord {
     }
 }
 
+/// The **contract-compliant post-validation retained generation** (§ 13.7A(c.4),
+/// D7-D14 representation correction).
+///
+/// This is the object operations actually retain after a successful decode +
+/// validation. It carries **only** the post-validation retained fields of the
+/// § 13.7A(c.4) inventory:
+///
+/// * `publication_revision` — retained inline (local ordering bookkeeping), and
+/// * the `SafetyRecord` generation core — restriction identity (`lock_block_id`/
+///   `lock_view`), `evidence_lock_binding`, the `authority_context_ref`
+///   descriptor, the applicable committed anchor (present only in the anchored
+///   sub-case), the predecessor reference, the supporting evidence, and the
+///   required presence/evidence discriminants.
+///
+/// The validated-then-**discarded** identity-header fields
+/// (`persistence_format_version`, `network_genesis_id`) of the transient
+/// [`DecodedRecord`] are **not** members here: the version is validated at decode
+/// (it selects the decoder and has no post-decode consumer) and the genesis id is
+/// *compared* to the independently pinned context (the authority) — neither is
+/// retained as truth in the generation. Their exact bytes nonetheless survive
+/// verbatim in the retained `encoded` publication carried by [`ValidatedRecord`]
+/// (§ 13.7A(c.5)), which supplies O5's whole-publication comparison.
+///
+/// The `BootstrapNoLock`, `Locked`-with-no-commit, and anchored-`Locked`
+/// distinctions are preserved exactly by the `SafetyRecord` enum / its `Option`
+/// discriminants — no absent QC, committed block, or height-zero anchor is ever
+/// manufactured.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RetainedRecord {
+    /// Retained inline — the monotonic publication revision (ownership
+    /// stale-work fencing and open's authoritative-record selection, § 13.5).
+    pub publication_revision: u64,
+    /// The generation-bearing core actually retained (both variants), charged
+    /// under the single whole-enum generation ceiling (`GEN_STRUCT_MAX`).
+    pub record: SafetyRecord,
+}
+
+impl RetainedRecord {
+    /// The record's evidence discriminant tag.
+    pub fn evidence_discriminant(&self) -> EvidenceDiscriminant {
+        match &self.record {
+            SafetyRecord::BootstrapNoLock { .. } => EvidenceDiscriminant::Bootstrap,
+            SafetyRecord::Locked(l) => match &l.evidence {
+                SupportingEvidence::QcDerived(_) => EvidenceDiscriminant::QcDerived,
+                SupportingEvidence::TcDerived { .. } => EvidenceDiscriminant::TcDerived,
+            },
+        }
+    }
+
+    /// Is this an established `Locked` record?
+    pub fn is_locked(&self) -> bool {
+        matches!(self.record, SafetyRecord::Locked(_))
+    }
+}
+
 /// The complete O3 result: an **opaque** validated publication. Callers cannot
 /// assemble or mutate an apparent validation proof — the fields are private and
 /// construction is restricted to the sealing constructor used by O3 validation
 /// (and the explicit bootstrap builder), which binds together:
 ///
 /// * the exact bytes actually validated (`encoded`, operand 1 for O5),
-/// * their decoded content and publication revision,
+/// * the **retained generation** ([`RetainedRecord`] — the post-validation
+///   fields only; the validated-then-discarded version/genesis header is **not**
+///   retained here, only in `encoded`) and its publication revision,
 /// * the explicit (always `Unverified`) evidence status, and
 /// * the originating storage/ownership context digest needed for safe O5 use.
 ///
@@ -132,7 +189,7 @@ impl DecodedRecord {
 /// foreign-context owner.
 #[derive(Debug)]
 pub struct ValidatedRecord {
-    decoded: DecodedRecord,
+    retained: RetainedRecord,
     evidence_status: EvidenceStatus,
     /// The exact validated bytes O3 decoded (operand 1 for O5), retained
     /// verbatim (`ENC_INPUT`, § 13.7A(c.5)).
@@ -171,16 +228,17 @@ pub struct ValidatedRecord {
 impl ValidatedRecord {
     /// Seal a validated publication. **Crate-internal**: only the O3 validation
     /// path and the explicit bootstrap builder may construct a validated proof,
-    /// after they have established the decoded↔encoded correspondence and the
+    /// after they have established the decoded↔encoded correspondence, validated
+    /// (and then discarded) the identity-header fields, and established the
     /// originating context. External callers cannot reach this.
     pub(crate) fn seal(
-        decoded: DecodedRecord,
+        retained: RetainedRecord,
         evidence_status: EvidenceStatus,
         encoded: Vec<u8>,
         origin_context_digest: [u8; 32],
     ) -> Self {
         ValidatedRecord {
-            decoded,
+            retained,
             evidence_status,
             encoded,
             origin_context_digest,
@@ -217,7 +275,7 @@ impl ValidatedRecord {
             None => None,
         };
         Ok(ValidatedRecord {
-            decoded: self.decoded.clone(),
+            retained: self.retained.clone(),
             evidence_status: self.evidence_status,
             encoded: self.encoded.clone(),
             origin_context_digest: self.origin_context_digest,
@@ -244,9 +302,13 @@ impl ValidatedRecord {
         self.recovery_backend_incarnation
     }
 
-    /// The decoded authoritative record (read-only).
-    pub fn decoded(&self) -> &DecodedRecord {
-        &self.decoded
+    /// The retained post-validation generation (read-only). This is the
+    /// contract-compliant [`RetainedRecord`] — the post-validation fields only;
+    /// the validated-then-discarded `persistence_format_version` /
+    /// `network_genesis_id` header is **not** carried here (only verbatim inside
+    /// `encoded`, § 13.7A(c.4)/(c.5)).
+    pub fn retained(&self) -> &RetainedRecord {
+        &self.retained
     }
 
     /// The explicit evidence status (always `Unverified` — stage 2 is unwired).
@@ -261,7 +323,7 @@ impl ValidatedRecord {
 
     /// The publication revision of the validated record.
     pub fn publication_revision(&self) -> u64 {
-        self.decoded.publication_revision
+        self.retained.publication_revision
     }
 
     /// The originating pinned-context digest this proof was sealed under.
@@ -342,23 +404,36 @@ pub fn size_of_safety_record() -> u128 {
     std::mem::size_of::<SafetyRecord>() as u128
 }
 
-/// The measured inline size of the **complete decoded generation representation**
-/// operations actually retain: [`DecodedRecord`] = the generation-bearing
-/// `SafetyRecord` core plus the always-retained identity header
-/// (`persistence_format_version`, `network_genesis_id`, `publication_revision`)
-/// and its required alignment padding (§ 13.7A(c)).
+/// The measured inline size of the **contract-compliant retained generation**
+/// operations actually hold inside a [`ValidatedRecord`]: [`RetainedRecord`] =
+/// the `publication_revision` plus the `SafetyRecord` generation core, with the
+/// validated-then-discarded identity header (`persistence_format_version`,
+/// `network_genesis_id`) **absent** (§ 13.7A(c.4), D7-D14 representation
+/// correction).
 ///
-/// This — not the synthetic [`RetainedGeneration`] — is the object the O3/O4/O5
-/// paths hold inside a [`ValidatedRecord`]. On the supported 64-bit target it is
-/// strictly larger than both the synthetic wrapper and the accepted
-/// `GEN_STRUCT_MAX` ceiling; the difference is surfaced, not concealed (see the
-/// decomposition proof in [`super`]).
+/// This — not the transient [`DecodedRecord`] and not the synthetic
+/// [`RetainedGeneration`] — is the object the O3/O4-predecessor/O5 paths retain.
+/// On the supported 64-bit target it fits the accepted `GEN_STRUCT_MAX` ceiling
+/// (the operative representation-and-charge proof in [`super`] enforces this), so
+/// **no** generation-ceiling increase is required.
+pub fn size_of_retained_record() -> u128 {
+    std::mem::size_of::<RetainedRecord>() as u128
+}
+
+/// The measured inline size of the **transient** decode/validation representation
+/// [`DecodedRecord`] (§ 13.7A(c.4)): the generation core plus the identity header
+/// (`persistence_format_version`, `network_genesis_id`, `publication_revision`)
+/// and alignment padding. This object exists only across decode→validation; its
+/// version/genesis header is validated and then **discarded** — it is **not** the
+/// retained operational representation (that is [`RetainedRecord`]). It is charged
+/// only as transient decode/validation scratch, never under the retained
+/// generation ceiling.
 pub fn size_of_decoded_record() -> u128 {
     std::mem::size_of::<DecodedRecord>() as u128
 }
 
 /// The measured inline size of the complete opaque retained proof
-/// [`ValidatedRecord`] (§ 13.7A / § 13.7B): the [`DecodedRecord`] generation plus
+/// [`ValidatedRecord`] (§ 13.7A / § 13.7B): the [`RetainedRecord`] generation plus
 /// the separately-owned holder/handle fields — the retained `encoded` buffer's
 /// `Vec` descriptor handle, the originating-context digest, the O5 recovery
 /// incarnation discriminant, and the inline holder [`Reservation`] option. These

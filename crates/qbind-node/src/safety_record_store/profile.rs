@@ -41,10 +41,14 @@ pub const FIXED_OVERHEAD: u128 = 153;
 /// `QC_FIXED` subtotal (§ 13.2A(d)): `1+4+8+8+8+1+32+2 = 64`.
 pub const QC_FIXED: u128 = 64;
 
-/// Proposed ceiling for the single whole-enum decoded wrapper (§ 13.7A(c),
-/// Rust-layout correction). Measured and enforced by a compile-time assertion in
-/// [`super::record`]; if the measured size exceeds this ceiling the discrepancy
-/// is surfaced, never concealed.
+/// Ceiling for the single whole-enum retained decoded generation (§ 13.7A(c)).
+/// Measured and enforced by the compile-time representation-and-charge proof in
+/// [`super::mod`] against the **real** retained object
+/// [`super::record::RetainedRecord`] (the post-validation fields only — the
+/// validated-then-discarded `persistence_format_version` / `network_genesis_id`
+/// header is **not** retained in the generation). On the supported 64-bit target
+/// the retained generation fits this ceiling with margin, so **no** increase to
+/// the ceiling is required by the D7-D14 representation correction.
 pub const GEN_STRUCT_MAX: u128 = 384;
 
 /// `ARC_CTRL` shared-allocation overhead on the 64-bit profile (§ 13.7A(c.6)):

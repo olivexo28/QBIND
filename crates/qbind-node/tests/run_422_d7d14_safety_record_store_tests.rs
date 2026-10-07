@@ -470,7 +470,7 @@ fn h12_competing_handles_stale_o4_o5_leave_newer_bytes_unchanged() {
     );
     let after = owner_a.read_validate(None::<&FixtureCommittedHistory>).unwrap();
     assert_eq!(
-        after.decoded().publication_revision,
+        after.retained().publication_revision,
         2,
         "revision still 2 after competing stale O4/O5"
     );
@@ -506,8 +506,8 @@ fn h16_real_rocksdb_publish_and_reopen() {
     let v = owner2
         .read_validate(None::<&FixtureCommittedHistory>)
         .unwrap();
-    assert!(v.decoded().is_locked());
-    assert_eq!(v.decoded().publication_revision, 1);
+    assert!(v.retained().is_locked());
+    assert_eq!(v.retained().publication_revision, 1);
 }
 
 // ---------------------------------------------------------------------------
@@ -633,7 +633,7 @@ fn h20_stale_o5_does_not_overwrite_newer() {
     let now = owner
         .read_validate(None::<&FixtureCommittedHistory>)
         .unwrap();
-    assert_eq!(now.decoded().publication_revision, 2);
+    assert_eq!(now.retained().publication_revision, 2);
 }
 
 // ---------------------------------------------------------------------------
@@ -657,8 +657,8 @@ fn h21_revision_fence_refuses_stale_publish() {
     let v = owner
         .read_validate(None::<&FixtureCommittedHistory>)
         .unwrap();
-    assert_eq!(v.decoded().publication_revision, 0);
-    assert!(!v.decoded().is_locked());
+    assert_eq!(v.retained().publication_revision, 0);
+    assert!(!v.retained().is_locked());
 }
 
 // ---------------------------------------------------------------------------
@@ -706,7 +706,7 @@ fn h23_o2_refuses_absent_state_o3_no_write() {
     let after = owner
         .read_validate(None::<&FixtureCommittedHistory>)
         .unwrap();
-    assert_eq!(before.decoded(), after.decoded());
+    assert_eq!(before.retained(), after.retained());
 }
 
 // ---------------------------------------------------------------------------
@@ -916,8 +916,8 @@ fn h26_adversarial_nested_tc_high_qc_signers_refused_through_o4() {
     let v = owner
         .read_validate(None::<&FixtureCommittedHistory>)
         .unwrap();
-    assert_eq!(v.decoded().publication_revision, 0);
-    assert!(!v.decoded().is_locked());
+    assert_eq!(v.retained().publication_revision, 0);
+    assert!(!v.retained().is_locked());
 
     // A VALID TC-derived publication of the same shape IS admitted and round-trips
     // through storage (positive control: the refusal is bound-specific, not a
@@ -931,7 +931,7 @@ fn h26_adversarial_nested_tc_high_qc_signers_refused_through_o4() {
         .read_validate(None::<&FixtureCommittedHistory>)
         .unwrap();
     assert!(matches!(
-        &rv.decoded().record,
+        &rv.retained().record,
         SafetyRecord::Locked(l) if matches!(l.evidence, SupportingEvidence::TcDerived { .. })
     ));
 }
@@ -957,7 +957,7 @@ fn h27_tc_derived_restriction_persisted_unverified() {
         .read_validate(None::<&FixtureCommittedHistory>)
         .unwrap();
     assert_eq!(v.evidence_status(), EvidenceStatus::Unverified);
-    match &v.decoded().record {
+    match &v.retained().record {
         SafetyRecord::Locked(l) => {
             assert!(matches!(l.evidence, SupportingEvidence::TcDerived { .. }));
         }
@@ -1045,89 +1045,175 @@ fn layout_sizes_within_ceiling() {
     assert!(sz as u128 <= qbind_node::safety_record_store::profile::GEN_STRUCT_MAX);
 }
 
-// §5 representation proof: the operative layout proof must cover the **real**
-// operational retained representation (`ValidatedRecord` / `DecodedRecord`), not
-// the synthetic `RetainedGeneration` wrapper. This regression measures the real
-// target layouts, verifies the exact inline decomposition the module's
-// compile-time proof enforces (each member counted once, no field escaping a
-// term), and explicitly SURFACES the measured discrepancy: the complete decoded
-// generation container exceeds `GEN_STRUCT_MAX` even though the generation core
-// fits — so the ceiling is applied to the core and the holder/identity fields are
-// charged under their own terms (never under the generation ceiling).
+// §4 representation-and-charge proof: the operative proof covers the **real**
+// retained representation (`ValidatedRecord` holding the contract-compliant
+// `RetainedRecord`), connecting complete objects to enforced charges. The
+// corrected representation (§13.7A(c.4)) discards the validated `version`/
+// `genesis` header from the retained generation, so the retained generation now
+// FITS `GEN_STRUCT_MAX` — the previously-reported "DecodedRecord (408) exceeds
+// GEN_STRUCT_MAX, so the ceiling must grow" defect is corrected, not reasserted.
+// The old `DecodedRecord > GEN_STRUCT_MAX` acceptance assertion is deliberately
+// NOT present; `DecodedRecord` is now only transient decode/validation scratch.
 #[test]
 fn real_representation_layout_decomposition() {
     use qbind_node::safety_record_store::profile::GEN_STRUCT_MAX;
     use qbind_node::safety_record_store::record::{
-        size_of_decoded_record, size_of_retained_generation, size_of_safety_record,
-        size_of_validated_record,
+        size_of_decoded_record, size_of_retained_generation, size_of_retained_record,
+        size_of_safety_record, size_of_validated_record,
     };
 
     let gen_core = size_of_safety_record();
-    let decoded = size_of_decoded_record();
+    let retained = size_of_retained_record();
+    let decoded_transient = size_of_decoded_record();
     let validated = size_of_validated_record();
     let synthetic = size_of_retained_generation();
     println!(
-        "MEASURED gen_core(SafetyRecord)={gen_core} decoded(DecodedRecord)={decoded} \
-         validated(ValidatedRecord)={validated} synthetic(RetainedGeneration)={synthetic} \
-         GEN_STRUCT_MAX={GEN_STRUCT_MAX}"
+        "MEASURED gen_core(SafetyRecord)={gen_core} retained(RetainedRecord)={retained} \
+         transient(DecodedRecord)={decoded_transient} validated(ValidatedRecord)={validated} \
+         synthetic(RetainedGeneration)={synthetic} GEN_STRUCT_MAX={GEN_STRUCT_MAX}"
     );
 
-    // The real generation-bearing core fits the accepted ceiling with margin.
+    // CORRECTED PROOF: the complete retained generation actually held by
+    // operations fits the accepted ceiling — NO ceiling increase is required.
     assert!(
-        gen_core <= GEN_STRUCT_MAX,
-        "generation core {gen_core} must fit GEN_STRUCT_MAX {GEN_STRUCT_MAX}"
+        retained <= GEN_STRUCT_MAX,
+        "retained generation {retained} must fit GEN_STRUCT_MAX {GEN_STRUCT_MAX} \
+         (the D7-D14 representation correction discards the validated header)"
+    );
+    // It genuinely contains the SafetyRecord generation core inline.
+    assert!(
+        retained >= gen_core,
+        "RetainedRecord {retained} must contain its SafetyRecord core {gen_core} inline"
     );
 
-    // Exact inline decomposition — every inline member counted exactly once.
-    let decoded_identity_header = decoded - gen_core;
-    let validated_handle_fields = validated - decoded;
+    // Exact inline decomposition of the complete retained proof — every inline
+    // member counted exactly once, no field escaping a term.
+    let validated_handle_fields = validated - retained;
     assert_eq!(
-        gen_core + decoded_identity_header,
-        decoded,
-        "DecodedRecord decomposition must sum exactly"
-    );
-    assert_eq!(
-        decoded + validated_handle_fields,
+        retained + validated_handle_fields,
         validated,
         "ValidatedRecord decomposition must sum exactly"
     );
-    // The separately-owned holder/handle fields are a non-trivial inline term
-    // (the retained-encoded Vec descriptor, origin digest, O5 incarnation, and the
-    // inline holder Reservation option) that must NOT be folded into the
-    // generation ceiling.
+    // The separately-owned holder/handle fields (retained-encoded Vec descriptor,
+    // origin digest, O5 incarnation option, inline holder Reservation option) are
+    // a non-trivial term charged under their own terms, NOT the generation ceiling.
     assert!(
         validated_handle_fields > 0,
         "ValidatedRecord must carry separately-charged holder/handle fields"
     );
 
-    // SURFACED discrepancy (not concealed, not silently relaxed): the complete
-    // decoded generation container is larger than the accepted single generation
-    // ceiling. The synthetic wrapper hid this by omitting the identity header.
+    // The transient decode/validation container still carries the two header
+    // fields and so is larger than the retained generation — demonstrating the
+    // fields that were dropped. It is charged only as transient validation
+    // scratch (bounded by MAX_SAFETY_RECORD_BYTES), never retained.
     assert!(
-        decoded > GEN_STRUCT_MAX,
-        "expected the real DecodedRecord ({decoded}) to exceed GEN_STRUCT_MAX \
-         ({GEN_STRUCT_MAX}); if this no longer holds the representation changed \
-         and the §13.7A contract note must be revisited"
+        decoded_transient > retained,
+        "transient DecodedRecord ({decoded_transient}) must be larger than the \
+         retained generation ({retained}); the validated header is discarded from \
+         the retained generation"
     );
-    assert!(
-        decoded > synthetic,
-        "the real retained generation must be at least as large as the synthetic \
-         wrapper it replaces as the operative proof"
-    );
-    // The deficit the required (separately-presented) contract change must cover:
-    // GEN_STRUCT_MAX only absorbs part of the identity header.
-    let ceiling_headroom = GEN_STRUCT_MAX - gen_core;
-    let uncovered_header = decoded_identity_header.saturating_sub(ceiling_headroom);
+    // Margin surfaced for the evidence document (the retained generation sits
+    // under the ceiling rather than over it).
+    let ceiling_headroom = GEN_STRUCT_MAX - retained;
     println!(
-        "SURFACED: decoded_identity_header={decoded_identity_header} \
-         ceiling_headroom={ceiling_headroom} uncovered_by_single_ceiling={uncovered_header} \
-         (violated inequality: size_of::<DecodedRecord>()={decoded} > GEN_STRUCT_MAX={GEN_STRUCT_MAX})"
+        "SURFACED: retained_generation={retained} fits GEN_STRUCT_MAX={GEN_STRUCT_MAX} \
+         (headroom={ceiling_headroom}); transient_decoded={decoded_transient} \
+         handle_fields={validated_handle_fields}"
     );
+}
+
+// §3/§7 operation-level regression: the validated-then-discarded identity header
+// (`persistence_format_version`, `network_genesis_id`) is NOT retained in the
+// generation after a real O3, yet its exact bytes survive verbatim in the
+// retained `encoded` publication (§13.7A(c.4)/(c.5)). The retained proof is the
+// object O5 actually re-acknowledges with.
+#[test]
+fn o3_retained_generation_discards_header_but_encoded_preserves_bytes() {
+    let dir = tempfile::tempdir().unwrap();
+    let ctx = ctx_n(4);
+    let owner = init_owner(dir.path(), &ctx);
+    // Publish a QC-derived locked record so the retained generation is non-trivial.
+    let block = [9u8; 32];
+    let locked = make_locked_qc(&ctx, block, 5, valid_wire_qc(&ctx, block, 5), None).unwrap();
+    assert_eq!(
+        owner.publish_locked(locked, 0, None::<&FixtureCommittedHistory>),
+        PublishResult::DurableAcknowledged { new_revision: 1 }
+    );
+
+    let v = owner
+        .read_validate(None::<&FixtureCommittedHistory>)
+        .unwrap();
+
+    // The retained generation carries ONLY the post-validation fields: the
+    // publication revision + the SafetyRecord core. There is no genesis/version
+    // field on `RetainedRecord` at all (enforced at the type level); confirm the
+    // generation is the locked core and the revision is retained inline.
+    assert_eq!(v.retained().publication_revision, 1);
+    assert!(v.retained().is_locked());
+
+    // The discarded header bytes nonetheless survive VERBATIM in the retained
+    // encoded publication: version at bytes [0,2), genesis id at bytes [2,34).
+    let enc = v.encoded();
+    assert_eq!(
+        &enc[0..2],
+        &qbind_node::safety_record_store::profile::SAFETY_PERSISTENCE_FORMAT_VERSION.to_be_bytes(),
+        "persistence_format_version bytes must survive in the retained encoded publication"
+    );
+    assert_eq!(
+        &enc[2..34],
+        &ctx.network_genesis_id,
+        "network_genesis_id bytes must survive verbatim in the retained encoded publication"
+    );
+
+    // The retained proof (which holds NO header in its generation) is exactly
+    // what O5 re-acknowledges with, proving the retained representation is the one
+    // actually used by O5 and that O5 compares the ORIGINAL bytes, not a
+    // reconstruction from the header-less generation.
+    assert_eq!(
+        owner.reacknowledge(&v),
+        PublishResult::DurableAcknowledged { new_revision: 1 }
+    );
+}
+
+// §3/§7 regression: the retained generation for every supported variant
+// (BootstrapNoLock, Locked-with-no-commit, anchored Locked, TC-derived) fits the
+// accepted generation ceiling WITHOUT manufacturing any absent value — the
+// corrected representation needs no ceiling increase.
+#[test]
+fn retained_generation_fits_ceiling_all_variants() {
+    use qbind_node::safety_record_store::profile::GEN_STRUCT_MAX;
+    use qbind_node::safety_record_store::record::size_of_retained_record;
+    // RetainedRecord is a single whole-enum generation; its measured size bounds
+    // every variant (BootstrapNoLock / Locked / anchored / TC-derived) because the
+    // enum occupies the whole layout regardless of the active arm.
     assert!(
-        uncovered_header > 0,
-        "a single generation ceiling of {GEN_STRUCT_MAX} cannot cover the complete \
-         decoded generation ({decoded}); the deficit must be surfaced"
+        size_of_retained_record() <= GEN_STRUCT_MAX,
+        "retained generation {} must fit GEN_STRUCT_MAX {GEN_STRUCT_MAX}",
+        size_of_retained_record()
     );
+
+    // Exercise a real O3 for a bootstrap (no-lock) and an anchored locked record,
+    // confirming the retained generation preserves the bootstrap/anchored
+    // distinction (absent values stay absent, never coerced).
+    let dir = tempfile::tempdir().unwrap();
+    let ctx = ctx_n(4);
+    let owner = init_owner(dir.path(), &ctx);
+    let boot = owner
+        .read_validate(None::<&FixtureCommittedHistory>)
+        .unwrap();
+    assert!(
+        !boot.retained().is_locked(),
+        "bootstrap retained generation preserves the no-lock variant"
+    );
+    match &boot.retained().record {
+        SafetyRecord::BootstrapNoLock {
+            predecessor_ref, ..
+        } => assert!(
+            predecessor_ref.is_none(),
+            "absent predecessor stays absent (no manufactured value)"
+        ),
+        _ => panic!("expected bootstrap no-lock retained generation"),
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1182,8 +1268,8 @@ fn corr_foreign_context_handle_refuses_o3_and_o4() {
     let v = owner_a
         .read_validate(None::<&FixtureCommittedHistory>)
         .unwrap();
-    assert!(!v.decoded().is_locked());
-    assert_eq!(v.decoded().publication_revision, 0);
+    assert!(!v.retained().is_locked());
+    assert_eq!(v.retained().publication_revision, 0);
 }
 
 // ---------------------------------------------------------------------------
@@ -1249,7 +1335,7 @@ fn corr_uncertain_publish_blocks_dependent_o4_until_o5_recovers() {
     let surviving = owner
         .read_validate(None::<&FixtureCommittedHistory>)
         .unwrap();
-    assert_eq!(surviving.decoded().publication_revision, 2);
+    assert_eq!(surviving.retained().publication_revision, 2);
     assert!(owner.recovery_required(), "O3 does not clear the latch");
 
     // Only the successful recovery operation (O5 re-acknowledge of the surviving
@@ -1816,7 +1902,7 @@ fn agg_real_o4_refused_by_combined_though_op_class_permits() {
         .read_validate(None::<&FixtureCommittedHistory>)
         .unwrap();
     assert_eq!(
-        rb.decoded().publication_revision,
+        rb.retained().publication_revision,
         1,
         "established evidence intact after the refused real O4"
     );
@@ -1913,7 +1999,7 @@ fn corr_reopen_established_store_blocks_o4_until_o5() {
     let surviving = owner2
         .read_validate(None::<&FixtureCommittedHistory>)
         .unwrap();
-    assert_eq!(surviving.decoded().publication_revision, 1);
+    assert_eq!(surviving.retained().publication_revision, 1);
     assert!(
         owner2.recovery_required(),
         "O3 inspection does not make the surviving state effective"
@@ -2105,8 +2191,8 @@ fn corr_oversized_signature_refused_before_publication() {
     let v = owner
         .read_validate(None::<&FixtureCommittedHistory>)
         .unwrap();
-    assert_eq!(v.decoded().publication_revision, 0);
-    assert!(!v.decoded().is_locked());
+    assert_eq!(v.retained().publication_revision, 0);
+    assert!(!v.retained().is_locked());
 }
 
 /// §3 — a VALID O4 publication DOES reach the evidence-binding allocation: the
@@ -2797,7 +2883,7 @@ fn acct_shared_budget_refusal_preserves_evidence_then_readmits() {
     let readback = owner
         .read_validate(None::<&FixtureCommittedHistory>)
         .unwrap();
-    assert_eq!(readback.decoded().publication_revision, 1);
+    assert_eq!(readback.retained().publication_revision, 1);
     drop(readback);
     let qc3 = valid_wire_qc(&ctx, [7u8; 32], 6);
     let locked3 = make_locked_qc(&ctx, [7u8; 32], 6, qc3, None).unwrap();
@@ -3146,8 +3232,8 @@ fn pd_before_publish_survives_bootstrap() {
     let v = owner
         .read_validate(None::<&FixtureCommittedHistory>)
         .unwrap();
-    assert!(!v.decoded().is_locked());
-    assert_eq!(v.decoded().publication_revision, 0);
+    assert!(!v.retained().is_locked());
+    assert_eq!(v.retained().publication_revision, 0);
 }
 
 /// Boundary: a completed storage write BEFORE success is delivered to the caller
@@ -3164,8 +3250,8 @@ fn pd_uncertain_after_write_successor_survives() {
         .unwrap();
     // The successor (locked rev 1) survived; we do NOT claim the dead process
     // observed an acknowledgement.
-    assert!(v.decoded().is_locked());
-    assert_eq!(v.decoded().publication_revision, 1);
+    assert!(v.retained().is_locked());
+    assert_eq!(v.retained().publication_revision, 1);
 }
 
 /// Boundary (post-effectiveness): the child aborts AFTER `publish_locked` has
@@ -3221,8 +3307,8 @@ fn pd_ack_then_abort_survives_locked() {
     let v = owner
         .read_validate(None::<&FixtureCommittedHistory>)
         .unwrap();
-    assert!(v.decoded().is_locked());
-    assert_eq!(v.decoded().publication_revision, 1);
+    assert!(v.retained().is_locked());
+    assert_eq!(v.retained().publication_revision, 1);
     // O5 can re-acknowledge the surviving publication (byte-for-byte equal).
     let res = owner.reacknowledge(&v);
     assert!(
@@ -3264,8 +3350,8 @@ fn pd_ack_before_effective_terminates_before_transition() {
     let v = owner
         .read_validate(None::<&FixtureCommittedHistory>)
         .unwrap();
-    assert!(v.decoded().is_locked());
-    assert_eq!(v.decoded().publication_revision, 1);
+    assert!(v.retained().is_locked());
+    assert_eq!(v.retained().publication_revision, 1);
     // Reopening starts without inherited effectiveness knowledge: dependent O4 is
     // refused until recovery, proving the pre-effective termination is not masked
     // as a completed transition.
@@ -3314,8 +3400,8 @@ fn pd_write_error_before_commit_predecessor_unchanged() {
     let v = owner
         .read_validate(None::<&FixtureCommittedHistory>)
         .unwrap();
-    assert!(!v.decoded().is_locked());
-    assert_eq!(v.decoded().publication_revision, 0);
+    assert!(!v.retained().is_locked());
+    assert_eq!(v.retained().publication_revision, 0);
 }
 
 /// Boundary: a child process establishes + acknowledges a lock, then exits
@@ -3374,8 +3460,8 @@ fn pd_init_uncertain_bytes_survive_without_observed_success() {
     let v = owner
         .read_validate(None::<&FixtureCommittedHistory>)
         .unwrap();
-    assert!(!v.decoded().is_locked());
-    assert_eq!(v.decoded().publication_revision, 0);
+    assert!(!v.retained().is_locked());
+    assert_eq!(v.retained().publication_revision, 0);
     // The reopened process requires fresh recovery (effectiveness never persisted).
     assert!(owner.recovery_required());
     // Duplicate O1 over the surviving established state is refused (no
@@ -3457,6 +3543,6 @@ fn pd_failed_o5_does_not_release_recovery() {
     let v = owner
         .read_validate(None::<&FixtureCommittedHistory>)
         .unwrap();
-    assert!(v.decoded().is_locked());
-    assert_eq!(v.decoded().publication_revision, 1);
+    assert!(v.retained().is_locked());
+    assert_eq!(v.retained().publication_revision, 1);
 }
