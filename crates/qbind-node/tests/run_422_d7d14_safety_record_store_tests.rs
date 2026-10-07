@@ -62,6 +62,11 @@ fn valid_wire_qc(ctx: &PinnedSafetyContext, block_id: [u8; 32], view: u64) -> Wi
         bitmap[i / 8] |= 1 << (i % 8);
         signatures.push(vec![0xABu8; S_SIG]);
     }
+    // Capacity-normalize the push-built outer descriptor so the fixture represents
+    // a properly capacity-normalized candidate (the real decode path builds this
+    // with `Vec::with_capacity`, i.e. exact); `Vec`'s minimum push allocation
+    // would otherwise leave spare capacity the per-vector capacity bound refuses.
+    signatures.shrink_to_fit();
     WireQc {
         version: 1,
         chain_id: CHAIN_ID,
@@ -1089,6 +1094,7 @@ fn valid_tc_record(ctx: &PinnedSafetyContext, lock_view: u64, timeout_view: u64)
         t.set_signature(vec![0xCD; S_SIG]);
         signed.push(t);
     }
+    signed.shrink_to_fit();
     let tc = TimeoutCertificate {
         view: timeout_view + 1,
         high_qc: Some(high.clone()),
@@ -2288,13 +2294,15 @@ fn o2_open_working_set_admitted_and_bounded_by_reservation() {
     .unwrap();
     let o2_charge = rec + META_ENCODED_LEN_MIRROR + gen;
 
-    // Directly bound the actual decoded **working set** (inline generation PLUS all
-    // of its capacity-measured heap backings — signer bitmap, the signatures outer
-    // descriptor array and each signature buffer) against its reserved term `gen`.
-    // This measures the real owned allocations, not merely `size_of` of the inline
-    // container: `generation_charge` sums `Vec::capacity()` for every backing and
-    // itself enforces `<= MAX_RETAINED_GENERATION_BYTES`.
-    use qbind_node::safety_record_store::accounting::generation_charge;
+    // Directly bound the actual decoded **working set** measured IN PLACE on the
+    // borrowed `DecodedRecord` — its inline representation PLUS the `Vec::capacity()`
+    // of every backing it actually owns (signer bitmap, the signatures outer
+    // descriptor array, each signature buffer) — against its reserved term `gen`.
+    // This observes the ORIGINAL decoded object, NOT a cloned `RetainedGeneration`
+    // (whose capacities would be the clone's, not the live object's); the earlier
+    // check charged such a clone and therefore did not measure the real O2 working
+    // set. `decoded_working_set_charge` borrows the object without cloning it.
+    use qbind_node::safety_record_store::accounting::decoded_working_set_charge;
     let stored = backend.read_record(rec).unwrap().expect("record present");
     assert!(
         (stored.len() as u128) <= rec,
@@ -2303,12 +2311,12 @@ fn o2_open_working_set_admitted_and_bounded_by_reservation() {
     );
     let decoded = decode_record(&stored, &ctx).unwrap();
     let decoded_core = qbind_node::safety_record_store::record::size_of_decoded_record();
-    let decoded_full = match &decoded.record {
-        SafetyRecord::Locked(l) => {
-            generation_charge(&ctx, &RetainedGeneration::from_locked(1, l)).unwrap()
-        }
-        other => panic!("expected a Locked decoded generation, got {other:?}"),
-    };
+    let decoded_full = decoded_working_set_charge(&decoded).unwrap();
+    assert!(
+        matches!(&decoded.record, SafetyRecord::Locked(_)),
+        "expected a Locked decoded generation, got {:?}",
+        decoded.record
+    );
     assert!(
         decoded_core as u128 <= decoded_full,
         "the inline core {decoded_core} is only part of the full backed working set {decoded_full}"
@@ -3102,6 +3110,7 @@ fn corr_tc_ta2_permits_signer_diff_ta1_requires_exact_copy() {
             t.set_signature(vec![0xCD; S_SIG]);
             signed.push(t);
         }
+        signed.shrink_to_fit();
         let tc = TimeoutCertificate {
             view: timeout_view + 1,
             high_qc: Some(tc_high),
@@ -4582,11 +4591,13 @@ fn d7d14_cap_o4_excess_capacity_candidate_refused_prewrite_then_readmit() {
 /// The full capacity-measured decoded working set for the TC variant — including
 /// the nested record-level `high_qc` signers, `tc.signers`, each signed-timeout's
 /// nested `high_qc` signers, and the signed-timeout signature buffers — fits the
-/// reserved generation term. This measures the real owned backings (via
-/// `generation_charge`'s `Vec::capacity()` accounting), not an inline `size_of`.
+/// reserved generation term. This measures the real owned backings of the
+/// BORROWED decoded object in place (via `decoded_working_set_charge`'s
+/// `Vec::capacity()` accounting), not an inline `size_of` and not a cloned
+/// `RetainedGeneration`.
 #[test]
 fn d7d14_cap_full_decoded_working_set_tc_variant_bounded() {
-    use qbind_node::safety_record_store::accounting::generation_charge;
+    use qbind_node::safety_record_store::accounting::decoded_working_set_charge;
     use qbind_node::safety_record_store::record::size_of_timeout_msg;
     let dir = tempfile::tempdir().unwrap();
     let ctx = ctx_n(4);
@@ -4608,15 +4619,395 @@ fn d7d14_cap_full_decoded_working_set_tc_variant_bounded() {
         .unwrap()
         .expect("record present");
     let decoded = decode_record(&stored, &ctx).unwrap();
-    let full = match &decoded.record {
-        SafetyRecord::Locked(l) => {
-            assert!(matches!(l.evidence, SupportingEvidence::TcDerived { .. }));
-            generation_charge(&ctx, &RetainedGeneration::from_locked(1, l)).unwrap()
-        }
-        other => panic!("expected a Locked TC generation, got {other:?}"),
-    };
+    assert!(
+        matches!(&decoded.record, SafetyRecord::Locked(l) if matches!(l.evidence, SupportingEvidence::TcDerived { .. })),
+        "expected a Locked TC generation, got {:?}",
+        decoded.record
+    );
+    let full = decoded_working_set_charge(&decoded).unwrap();
     assert!(
         full <= gen,
         "the full capacity-measured TC decoded working set {full} fits its reserved term {gen}"
+    );
+}
+// ===========================================================================
+// RUN 422 D7-D14 §4 — per-vector capacity bound (smallest-over-bound cases).
+//
+// The aggregate `admit_evidence_capacity` check (sum of backing capacities vs the
+// cross-variant generation maximum) does NOT, by itself, enforce the contract's
+// individual per-object capacity limits and initial `CAPNORM_SLACK = 0` policy.
+// `admit_evidence_capnorm` refuses a SINGLE backing whose `capacity()` exceeds its
+// per-class profile maximum (`S_sig`, `N`, `B_span`) + `CAPNORM_SLACK` — even when
+// the TOTAL footprint still fits the aggregate generation maximum, so the
+// aggregate check accepts it. These are the smaller violations the existing
+// huge-capacity (100_000 / 200_000) tests cannot establish. For each class we
+// exercise the accepted boundary and boundary-plus-one through the single
+// `admit_supporting_evidence` path, and the concrete classes through the genuine
+// O4 admission path, for BOTH QC-derived and TC-derived evidence (including the
+// timeout-entry nested high-QC signers).
+// ===========================================================================
+
+/// Build a `Vec<u8>` of `len` bytes whose allocated `capacity()` is at least `cap`.
+fn u8_vec_with_cap(len: usize, cap: usize) -> Vec<u8> {
+    let mut v = Vec::with_capacity(cap);
+    v.extend(std::iter::repeat_n(0xABu8, len));
+    v
+}
+
+/// Build a `Vec<ValidatorId>` of `len` dense signers whose `capacity()` ≥ `cap`.
+fn vid_vec_with_cap(len: usize, cap: usize) -> Vec<ValidatorId> {
+    let mut v = Vec::with_capacity(cap);
+    for i in 0..len {
+        v.push(ValidatorId::new(i as u64));
+    }
+    v
+}
+
+/// The concrete signature case from the task: `S_sig = 8`, signature length `8`
+/// (valid), capacity `9` (one past the permitted per-signature backing bound).
+/// The aggregate check ACCEPTS the tiny excess; the per-vector bound REFUSES it;
+/// the unified admission path therefore refuses; the exact-bound control (cap 8)
+/// is admitted.
+#[test]
+fn d7d14_capnorm_signature_buffer_boundary_plus_one_refused_aggregate_accepts() {
+    use qbind_node::safety_record_store::accounting::{
+        admit_evidence_capacity, admit_evidence_capnorm,
+    };
+    use qbind_node::safety_record_store::codec::admit_supporting_evidence;
+    let ctx = ctx_n(4);
+    assert_eq!(ctx.s_sig, 8, "concrete case uses S_sig = 8");
+
+    // Boundary-plus-one: length 8 (valid), capacity 9 (> S_sig + CAPNORM_SLACK).
+    let mut qc = valid_wire_qc(&ctx, [9u8; 32], 5);
+    let over = u8_vec_with_cap(S_SIG, S_SIG + 1);
+    assert_eq!(over.len(), S_SIG, "signature length within S_sig");
+    assert!(over.capacity() > S_SIG, "signature capacity past the backing bound");
+    qc.signatures[0] = over;
+    let ev = SupportingEvidence::QcDerived(qc);
+
+    // The AGGREGATE check accepts the tiny spare capacity (footprint still fits the
+    // generation maximum) — proving it does not, alone, enforce the per-object rule.
+    assert!(
+        admit_evidence_capacity(&ev, &ctx).is_ok(),
+        "aggregate generation check accepts the one-byte spare capacity"
+    );
+    // The PER-VECTOR bound refuses it, and so does the unified admission path.
+    assert!(matches!(
+        admit_evidence_capnorm(&ev, &ctx),
+        Err(SafetyStoreError::CapacityRefusal(_))
+    ));
+    assert!(matches!(
+        admit_supporting_evidence(&ev, &ctx),
+        Err(SafetyStoreError::CapacityRefusal(_))
+    ));
+
+    // Exact-bound control: capacity == S_sig is admitted.
+    let mut qc = valid_wire_qc(&ctx, [9u8; 32], 5);
+    qc.signatures[0] = u8_vec_with_cap(S_SIG, S_SIG);
+    let ev = SupportingEvidence::QcDerived(qc);
+    assert!(admit_supporting_evidence(&ev, &ctx).is_ok());
+}
+
+/// QC outer `signatures` descriptor array and `signer_bitmap`: capacity one past
+/// their class maxima (`N` elements, `B_span` bytes) is refused per-vector while
+/// the aggregate check accepts the small excess; the exact bound is admitted.
+#[test]
+fn d7d14_capnorm_qc_descriptor_and_bitmap_boundary_plus_one_refused() {
+    use qbind_node::safety_record_store::accounting::{
+        admit_evidence_capacity, admit_evidence_capnorm,
+    };
+    use qbind_node::safety_record_store::codec::admit_supporting_evidence;
+    let ctx = ctx_n(4);
+    let n = ctx.n();
+
+    // Outer signatures descriptor: len = need (valid), capacity = N + 1.
+    let mut qc = valid_wire_qc(&ctx, [9u8; 32], 5);
+    let mut outer: Vec<Vec<u8>> = Vec::with_capacity(n + 1);
+    outer.append(&mut qc.signatures);
+    assert!(outer.capacity() > n, "descriptor capacity past N");
+    qc.signatures = outer;
+    let ev = SupportingEvidence::QcDerived(qc);
+    assert!(admit_evidence_capacity(&ev, &ctx).is_ok(), "aggregate accepts small excess");
+    assert!(matches!(
+        admit_evidence_capnorm(&ev, &ctx),
+        Err(SafetyStoreError::CapacityRefusal(_))
+    ));
+    assert!(matches!(
+        admit_supporting_evidence(&ev, &ctx),
+        Err(SafetyStoreError::CapacityRefusal(_))
+    ));
+
+    // Bitmap: len = B_span (valid), capacity = B_span + 1.
+    let mut qc = valid_wire_qc(&ctx, [9u8; 32], 5);
+    let bspan = qc.signer_bitmap.len();
+    let mut bm = Vec::with_capacity(bspan + 1);
+    bm.extend_from_slice(&qc.signer_bitmap);
+    assert!(bm.capacity() > bspan, "bitmap capacity past B_span");
+    qc.signer_bitmap = bm;
+    let ev = SupportingEvidence::QcDerived(qc);
+    assert!(matches!(
+        admit_evidence_capnorm(&ev, &ctx),
+        Err(SafetyStoreError::CapacityRefusal(_))
+    ));
+    assert!(matches!(
+        admit_supporting_evidence(&ev, &ctx),
+        Err(SafetyStoreError::CapacityRefusal(_))
+    ));
+}
+
+/// Every TC-derived signer/descriptor/buffer backing, one past its class maximum,
+/// is refused per-vector: record-level `high_qc.signers`, `tc.signers`, the
+/// optional `tc.high_qc.signers`, the `signed_timeouts` descriptor array, a
+/// per-entry `signature` buffer, and a per-entry nested `high_qc.signers` backing.
+/// The aggregate check accepts each small excess; the exact-bound baseline passes.
+#[test]
+fn d7d14_capnorm_tc_backings_boundary_plus_one_refused() {
+    use qbind_node::safety_record_store::accounting::admit_evidence_capnorm;
+    use qbind_node::safety_record_store::codec::admit_supporting_evidence;
+    let ctx = ctx_n(4);
+    let n = ctx.n();
+    let need = ((2 * n) + 2) / 3;
+
+    // Exact-bound baseline is admitted.
+    let base = valid_tc_record(&ctx, 5, 6);
+    assert!(admit_supporting_evidence(&base.evidence, &ctx).is_ok());
+
+    // Helper: run one mutated-evidence case and assert the per-vector bound
+    // refuses it through the unified admission path. (Unlike the QC cases, the TC
+    // generation ceiling is tight, so a small per-vector excess may also trip the
+    // aggregate check; the QC tests above demonstrate the aggregate-accepts /
+    // capnorm-refuses distinction with the smaller QC element sizes.)
+    let assert_capnorm_refused = |ev: &SupportingEvidence| {
+        assert!(matches!(
+            admit_evidence_capnorm(ev, &ctx),
+            Err(SafetyStoreError::CapacityRefusal(_))
+        ));
+        assert!(matches!(
+            admit_supporting_evidence(ev, &ctx),
+            Err(SafetyStoreError::CapacityRefusal(_))
+        ));
+    };
+
+    // record-level high_qc.signers: capacity N + 1.
+    let mut ev = base.evidence.clone();
+    if let SupportingEvidence::TcDerived { high_qc, .. } = &mut ev {
+        high_qc.signers = vid_vec_with_cap(need, n + 1);
+    }
+    assert_capnorm_refused(&ev);
+
+    // tc.signers: capacity N + 1.
+    let mut ev = base.evidence.clone();
+    if let SupportingEvidence::TcDerived { tc, .. } = &mut ev {
+        tc.signers = vid_vec_with_cap(need, n + 1);
+    }
+    assert_capnorm_refused(&ev);
+
+    // tc.high_qc.signers (optional record): capacity N + 1.
+    let mut ev = base.evidence.clone();
+    if let SupportingEvidence::TcDerived { tc, .. } = &mut ev {
+        tc.high_qc.as_mut().unwrap().signers = vid_vec_with_cap(need, n + 1);
+    }
+    assert_capnorm_refused(&ev);
+
+    // signed_timeouts descriptor array: capacity N + 1.
+    let mut ev = base.evidence.clone();
+    if let SupportingEvidence::TcDerived { tc, .. } = &mut ev {
+        let mut outer = Vec::with_capacity(n + 1);
+        outer.append(&mut tc.signed_timeouts);
+        assert!(outer.capacity() > n);
+        tc.signed_timeouts = outer;
+    }
+    assert_capnorm_refused(&ev);
+
+    // per-entry signature buffer: length S_sig (valid), capacity S_sig + 1.
+    let mut ev = base.evidence.clone();
+    if let SupportingEvidence::TcDerived { tc, .. } = &mut ev {
+        tc.signed_timeouts[0].set_signature(u8_vec_with_cap(S_SIG, S_SIG + 1));
+    }
+    assert_capnorm_refused(&ev);
+
+    // per-entry nested high_qc.signers: capacity N + 1.
+    let mut ev = base.evidence.clone();
+    if let SupportingEvidence::TcDerived { tc, .. } = &mut ev {
+        tc.signed_timeouts[0].high_qc.as_mut().unwrap().signers = vid_vec_with_cap(need, n + 1);
+    }
+    assert_capnorm_refused(&ev);
+}
+
+/// O4 genuine admission path: a caller-supplied QC candidate whose single
+/// signature buffer carries one byte of spare capacity past `S_sig` is refused
+/// PRE-WRITE (`CapacityRefusal`), leaving stored bytes/revision/recovery intact;
+/// an exact-capacity candidate at the same expected revision is then admitted.
+#[test]
+fn d7d14_capnorm_o4_qc_signature_over_bound_refused_prewrite_then_readmit() {
+    let dir = tempfile::tempdir().unwrap();
+    let ctx = ctx_n(4);
+    let owner = init_owner(dir.path(), &ctx);
+    let rec = max_safety_record_bytes(&ctx).unwrap();
+    let backend = owner.backend_for_test();
+    let meta_before = backend.read_meta(META_ENCODED_LEN_MIRROR).unwrap();
+    let record_before = backend.read_record(rec).unwrap();
+
+    let mut candidate =
+        make_locked_qc(&ctx, [9u8; 32], 5, valid_wire_qc(&ctx, [9u8; 32], 5), None).unwrap();
+    if let SupportingEvidence::QcDerived(qc) = &mut candidate.evidence {
+        qc.signatures[0] = u8_vec_with_cap(S_SIG, S_SIG + 1);
+    }
+    match owner.publish_locked(candidate, 0, None::<&FixtureCommittedHistory>) {
+        PublishResult::RefusedPreWrite(SafetyStoreError::CapacityRefusal(_)) => {}
+        other => panic!("expected pre-write CapacityRefusal, got {other:?}"),
+    }
+    assert_eq!(
+        backend.read_meta(META_ENCODED_LEN_MIRROR).unwrap(),
+        meta_before,
+        "refused O4 did not mutate metadata/revision"
+    );
+    assert_eq!(
+        backend.read_record(rec).unwrap(),
+        record_before,
+        "refused O4 did not mutate stored record bytes"
+    );
+    assert!(!owner.recovery_required(), "refused O4 did not disturb recovery");
+
+    let normal =
+        make_locked_qc(&ctx, [9u8; 32], 5, valid_wire_qc(&ctx, [9u8; 32], 5), None).unwrap();
+    assert_eq!(
+        owner.publish_locked(normal, 0, None::<&FixtureCommittedHistory>),
+        PublishResult::DurableAcknowledged { new_revision: 1 }
+    );
+}
+
+/// O4 genuine admission path, TC-derived: a timeout-entry's nested
+/// `high_qc.signers` backing with one spare slot past `N` is refused PRE-WRITE,
+/// leaving stored state intact; the exact-capacity TC candidate is then admitted.
+#[test]
+fn d7d14_capnorm_o4_tc_nested_high_qc_over_bound_refused_prewrite_then_readmit() {
+    let dir = tempfile::tempdir().unwrap();
+    let ctx = ctx_n(4);
+    let owner = init_owner(dir.path(), &ctx);
+    let rec = max_safety_record_bytes(&ctx).unwrap();
+    let backend = owner.backend_for_test();
+    let record_before = backend.read_record(rec).unwrap();
+    let n = ctx.n();
+    let need = ((2 * n) + 2) / 3;
+
+    let mut candidate = valid_tc_record(&ctx, 5, 6);
+    if let SupportingEvidence::TcDerived { tc, .. } = &mut candidate.evidence {
+        tc.signed_timeouts[0].high_qc.as_mut().unwrap().signers = vid_vec_with_cap(need, n + 1);
+    }
+    match owner.publish_locked(candidate, 0, None::<&FixtureCommittedHistory>) {
+        PublishResult::RefusedPreWrite(SafetyStoreError::CapacityRefusal(_)) => {}
+        other => panic!("expected pre-write CapacityRefusal (nested high_qc), got {other:?}"),
+    }
+    assert_eq!(
+        backend.read_record(rec).unwrap(),
+        record_before,
+        "refused TC O4 did not mutate stored record bytes"
+    );
+    assert!(!owner.recovery_required());
+
+    let normal = valid_tc_record(&ctx, 5, 6);
+    assert_eq!(
+        owner.publish_locked(normal, 0, None::<&FixtureCommittedHistory>),
+        PublishResult::DurableAcknowledged { new_revision: 1 }
+    );
+}
+
+// ===========================================================================
+// RUN 422 D7-D14 §6 — O2 decoded working-set measured on the ACTUAL decoded
+// object (not a cloned RetainedGeneration).
+//
+// `RetainedGeneration::from_locked` CLONES the evidence into a second, freshly
+// allocated representation whose vector capacities are the clone's (exact), not
+// the live decoded object's. Charging that clone does not measure the original
+// `DecodedRecord`. `decoded_working_set_charge` observes the BORROWED decoded
+// object in place — its inline representation plus the `Vec::capacity()` of every
+// backing it actually owns — without cloning, and that borrowed inventory is what
+// is compared against the reserved generation term.
+// ===========================================================================
+
+/// The live decoded QC working set, measured in place on the borrowed
+/// `DecodedRecord`, fits its reserved generation term; the borrowed measurement
+/// does not clone the object (the decoded value remains usable afterwards and the
+/// measured backings are the object's own, matching a manual field inventory).
+#[test]
+fn d7d14_o2_decoded_working_set_measured_in_place_qc() {
+    use qbind_node::safety_record_store::accounting::decoded_working_set_charge;
+    use qbind_node::safety_record_store::record::size_of_timeout_msg;
+    let dir = tempfile::tempdir().unwrap();
+    let ctx = ctx_n(4);
+    let owner = init_owner(dir.path(), &ctx);
+    let locked = make_locked_qc(&ctx, [9u8; 32], 5, valid_wire_qc(&ctx, [9u8; 32], 5), None).unwrap();
+    assert_eq!(
+        owner.publish_locked(locked, 0, None::<&FixtureCommittedHistory>),
+        PublishResult::DurableAcknowledged { new_revision: 1 }
+    );
+    let rec = max_safety_record_bytes(&ctx).unwrap();
+    let gen =
+        qbind_node::safety_record_store::profile::max_retained_generation_bytes(&ctx, size_of_timeout_msg())
+            .unwrap();
+    let stored = owner.backend_for_test().read_record(rec).unwrap().expect("record present");
+    let decoded = decode_record(&stored, &ctx).unwrap();
+
+    // Borrowed, non-cloning measurement of the ACTUAL decoded object.
+    let live = decoded_working_set_charge(&decoded).unwrap();
+
+    // Independent manual field inventory of the SAME borrowed object's backings.
+    let manual = match &decoded.record {
+        SafetyRecord::Locked(l) => match &l.evidence {
+            SupportingEvidence::QcDerived(qc) => {
+                let mut t = std::mem::size_of::<DecodedRecord>();
+                t += qc.signer_bitmap.capacity();
+                t += qc.signatures.capacity() * std::mem::size_of::<Vec<u8>>();
+                for s in &qc.signatures {
+                    t += s.capacity();
+                }
+                t as u128
+            }
+            other => panic!("expected QC evidence, got {other:?}"),
+        },
+        other => panic!("expected Locked, got {other:?}"),
+    };
+    assert_eq!(
+        live, manual,
+        "borrowed in-place charge equals a manual field inventory of the live object"
+    );
+    assert!(
+        live <= gen,
+        "the live decoded working set {live} fits its reserved generation term {gen}"
+    );
+    // The decoded object was only borrowed, not consumed: it is still usable.
+    assert!(decoded.is_locked());
+}
+
+/// The TC variant (including the record-level and nested timeout-entry high-QC
+/// signer backings and the per-entry signature buffers) measured in place on the
+/// borrowed decoded object fits its reserved generation term.
+#[test]
+fn d7d14_o2_decoded_working_set_measured_in_place_tc() {
+    use qbind_node::safety_record_store::accounting::decoded_working_set_charge;
+    use qbind_node::safety_record_store::record::size_of_timeout_msg;
+    let dir = tempfile::tempdir().unwrap();
+    let ctx = ctx_n(4);
+    let owner = init_owner(dir.path(), &ctx);
+    let tc = valid_tc_record(&ctx, 5, 6);
+    assert_eq!(
+        owner.publish_locked(tc, 0, None::<&FixtureCommittedHistory>),
+        PublishResult::DurableAcknowledged { new_revision: 1 }
+    );
+    let rec = max_safety_record_bytes(&ctx).unwrap();
+    let gen =
+        qbind_node::safety_record_store::profile::max_retained_generation_bytes(&ctx, size_of_timeout_msg())
+            .unwrap();
+    let stored = owner.backend_for_test().read_record(rec).unwrap().expect("record present");
+    let decoded = decode_record(&stored, &ctx).unwrap();
+    assert!(matches!(
+        &decoded.record,
+        SafetyRecord::Locked(l) if matches!(l.evidence, SupportingEvidence::TcDerived { .. })
+    ));
+    let live = decoded_working_set_charge(&decoded).unwrap();
+    assert!(
+        live <= gen,
+        "the live TC decoded working set {live} fits its reserved generation term {gen}"
     );
 }

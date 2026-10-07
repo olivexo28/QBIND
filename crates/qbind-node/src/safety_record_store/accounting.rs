@@ -133,69 +133,77 @@ pub fn admit_evidence_capacity(
     Ok(())
 }
 
-/// Per-vector capacity-normalization bound (§ 13.7, capacity policy): the
-/// individual **per-object** restriction the aggregate [`admit_evidence_capacity`]
-/// check does *not*, by itself, enforce.
+/// Per-vector capacity bound (§ 13.7 capacity policy / § 13.7A generation caps):
+/// the individual **per-object** restriction the aggregate
+/// [`admit_evidence_capacity`] check does *not*, by itself, enforce.
 ///
-/// The contract's capacity-normalization rule bounds **each** decoded growable
-/// backing a generation owns by `capacity() <= len() + CAPNORM_SLACK` (elements),
-/// refusing any value whose spare capacity exceeds the pinned normalization slack
-/// — not an invented "capacity must equal length" rule, but the profile-derived
-/// `len() + CAPNORM_SLACK` bound, which under the **initial profile**
-/// (`CAPNORM_SLACK = 0`) does reduce to an exact-capacity backing and under a
-/// documented non-zero deployment admits exactly that many spare slots. A single
-/// over-bound buffer is refused here with [`SafetyStoreError::CapacityRefusal`]
-/// even when the *total* footprint still fits the cross-variant generation
-/// maximum — precisely the smaller violation the huge-capacity aggregate tests
-/// cannot establish.
+/// Each decoded growable backing a generation owns is bounded by the **pinned
+/// profile maximum** for its class plus the normalization slack:
 ///
-/// It covers every § 13.7 backing class: the `signer_bitmap`, the `signatures`
-/// outer descriptor array and each per-signature buffer (QC); the record-level
-/// `high_qc.signers`, the `TimeoutCertificate.signers`, the optional TC
-/// `high_qc.signers`, the `signed_timeouts` outer descriptor array, and every
-/// timeout entry's `signature` buffer and optional nested `high_qc.signers`
-/// backing (TC).
+/// * `signer_bitmap` ≤ `B_span + CAPNORM_SLACK` bytes,
+/// * the `signatures` outer descriptor array ≤ `N + CAPNORM_SLACK` elements,
+/// * every per-signature buffer ≤ `S_sig + CAPNORM_SLACK` bytes,
+/// * every logical-QC signer vector (record-level `high_qc`, `tc.signers`, the
+///   optional TC `high_qc`, and every timeout entry's optional nested `high_qc`)
+///   ≤ `N + CAPNORM_SLACK` elements,
+/// * the `signed_timeouts` outer descriptor array ≤ `N + CAPNORM_SLACK` elements,
+/// * every timeout entry's `signature` buffer ≤ `S_sig + CAPNORM_SLACK` bytes.
+///
+/// The bound is derived from the accepted profile (`N`, `S_sig`, `B_span`) — the
+/// same maxima the § 13.7A generation caps and the aggregate budget reserve — not
+/// from the individual vector's own `len()`: a legitimately pre-sized backing
+/// (e.g. one grown to the profile maximum) is admitted, so this is **not** an
+/// invented "capacity must equal length" rule. Under the initial profile
+/// (`CAPNORM_SLACK = 0`) the bound is exactly the profile maximum. A single
+/// backing whose `capacity()` exceeds its class maximum by even the smallest
+/// amount is refused here with [`SafetyStoreError::CapacityRefusal`] — **before**
+/// the component clones, binds, or re-encodes the evidence — even when the *total*
+/// footprint still fits the cross-variant generation maximum (precisely the
+/// smaller violation the huge-capacity aggregate tests cannot establish).
 pub fn admit_evidence_capnorm(
     evidence: &SupportingEvidence,
-    _ctx: &PinnedSafetyContext,
+    ctx: &PinnedSafetyContext,
 ) -> Result<(), SafetyStoreError> {
+    let n = ctx.n() as u128;
+    let s_sig = ctx.s_sig as u128;
+    let b_span = ctx.b_span();
     match evidence {
         SupportingEvidence::QcDerived(qc) => {
-            check_capnorm(qc.signer_bitmap.capacity(), qc.signer_bitmap.len(), "QC signer_bitmap")?;
+            check_capnorm(qc.signer_bitmap.capacity() as u128, b_span, "QC signer_bitmap")?;
             check_capnorm(
-                qc.signatures.capacity(),
-                qc.signatures.len(),
+                qc.signatures.capacity() as u128,
+                n,
                 "QC signatures descriptor array",
             )?;
             for (i, sig) in qc.signatures.iter().enumerate() {
-                check_capnorm(sig.capacity(), sig.len(), &format!("QC signature buffer [{i}]"))?;
+                check_capnorm(sig.capacity() as u128, s_sig, &format!("QC signature buffer [{i}]"))?;
             }
         }
         SupportingEvidence::TcDerived { high_qc, tc } => {
             check_capnorm(
-                high_qc.signers.capacity(),
-                high_qc.signers.len(),
+                high_qc.signers.capacity() as u128,
+                n,
                 "record-level high_qc.signers",
             )?;
-            check_capnorm(tc.signers.capacity(), tc.signers.len(), "tc.signers")?;
+            check_capnorm(tc.signers.capacity() as u128, n, "tc.signers")?;
             if let Some(h) = &tc.high_qc {
-                check_capnorm(h.signers.capacity(), h.signers.len(), "tc.high_qc.signers")?;
+                check_capnorm(h.signers.capacity() as u128, n, "tc.high_qc.signers")?;
             }
             check_capnorm(
-                tc.signed_timeouts.capacity(),
-                tc.signed_timeouts.len(),
+                tc.signed_timeouts.capacity() as u128,
+                n,
                 "tc.signed_timeouts descriptor array",
             )?;
             for (i, t) in tc.signed_timeouts.iter().enumerate() {
                 check_capnorm(
-                    t.signature.capacity(),
-                    t.signature.len(),
+                    t.signature.capacity() as u128,
+                    s_sig,
                     &format!("tc.signed_timeouts[{i}].signature"),
                 )?;
                 if let Some(h) = &t.high_qc {
                     check_capnorm(
-                        h.signers.capacity(),
-                        h.signers.len(),
+                        h.signers.capacity() as u128,
+                        n,
                         &format!("tc.signed_timeouts[{i}].high_qc.signers"),
                     )?;
                 }
@@ -205,15 +213,16 @@ pub fn admit_evidence_capnorm(
     Ok(())
 }
 
-/// A single decoded growable backing passes the capacity-normalization bound iff
-/// its `capacity()` is within `len() + CAPNORM_SLACK` elements. Over-bound →
-/// refuse (no silent over-capacity retention), naming the offending backing.
-fn check_capnorm(capacity: usize, len: usize, what: &str) -> Result<(), SafetyStoreError> {
-    let permitted = add(len as u128, CAPNORM_SLACK)?;
-    if capacity as u128 > permitted {
+/// A single decoded growable backing passes the capacity bound iff its
+/// `capacity()` is within `profile_max + CAPNORM_SLACK` elements/bytes for its
+/// class. Over-bound → refuse (no silent over-capacity retention), naming the
+/// offending backing and its class maximum.
+fn check_capnorm(capacity: u128, profile_max: u128, what: &str) -> Result<(), SafetyStoreError> {
+    let permitted = add(profile_max, CAPNORM_SLACK)?;
+    if capacity > permitted {
         return Err(SafetyStoreError::CapacityRefusal(format!(
-            "{what} capacity {capacity} exceeds len {len} + CAPNORM_SLACK {CAPNORM_SLACK} \
-             (per-vector capacity-normalization bound)"
+            "{what} capacity {capacity} exceeds profile maximum {profile_max} + \
+             CAPNORM_SLACK {CAPNORM_SLACK} (per-vector capacity bound)"
         )));
     }
     Ok(())
