@@ -467,11 +467,15 @@ pub fn admit_supporting_evidence(
             admit_timeout_cert(tc, ctx)
         }
     }?;
-    // Capacity-aware bound (§ 13.7A, D7-D14): the structural checks above bound the
-    // declared **lengths**/counts, but a valid-length backing can still own spare
-    // capacity. Prove the actual owned backing capacity of this (possibly
-    // caller-supplied) evidence fits the per-generation retained ceiling BEFORE any
-    // component-owned clone / binding-scratch / re-encode allocation depends on it.
+    // Capacity-aware bounds (§ 13.7 / § 13.7A, D7-D14): the structural checks above
+    // bound the declared **lengths**/counts, but a valid-length backing can still
+    // own spare capacity. Enforce BOTH the per-vector capacity-normalization bound
+    // (`capacity() <= len() + CAPNORM_SLACK` on every individual backing — the
+    // smaller per-object violation the aggregate check alone does not catch) AND
+    // the aggregate retained-generation ceiling, BEFORE any component-owned clone /
+    // binding-scratch / re-encode allocation depends on this (possibly
+    // caller-supplied) evidence.
+    super::accounting::admit_evidence_capnorm(evidence, ctx)?;
     super::accounting::admit_evidence_capacity(evidence, ctx)
 }
 

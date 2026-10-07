@@ -11,10 +11,11 @@ use std::sync::{Arc, Mutex};
 use super::error::SafetyStoreError;
 use super::profile::{
     max_aggregate_retained_bytes, max_retained_generation_bytes, PinnedSafetyContext, ARC_CTRL,
-    VALIDATOR_ID_WIDTH,
+    CAPNORM_SLACK, VALIDATOR_ID_WIDTH,
 };
 use super::record::{
-    size_of_retained_generation, size_of_timeout_msg, RetainedGeneration, SupportingEvidence,
+    size_of_retained_generation, size_of_timeout_msg, DecodedRecord, RetainedGeneration,
+    SafetyRecord, SupportingEvidence,
 };
 
 fn add(a: u128, b: u128) -> Result<u128, SafetyStoreError> {
@@ -130,6 +131,118 @@ pub fn admit_evidence_capacity(
         )));
     }
     Ok(())
+}
+
+/// Per-vector capacity-normalization bound (§ 13.7, capacity policy): the
+/// individual **per-object** restriction the aggregate [`admit_evidence_capacity`]
+/// check does *not*, by itself, enforce.
+///
+/// The contract's capacity-normalization rule bounds **each** decoded growable
+/// backing a generation owns by `capacity() <= len() + CAPNORM_SLACK` (elements),
+/// refusing any value whose spare capacity exceeds the pinned normalization slack
+/// — not an invented "capacity must equal length" rule, but the profile-derived
+/// `len() + CAPNORM_SLACK` bound, which under the **initial profile**
+/// (`CAPNORM_SLACK = 0`) does reduce to an exact-capacity backing and under a
+/// documented non-zero deployment admits exactly that many spare slots. A single
+/// over-bound buffer is refused here with [`SafetyStoreError::CapacityRefusal`]
+/// even when the *total* footprint still fits the cross-variant generation
+/// maximum — precisely the smaller violation the huge-capacity aggregate tests
+/// cannot establish.
+///
+/// It covers every § 13.7 backing class: the `signer_bitmap`, the `signatures`
+/// outer descriptor array and each per-signature buffer (QC); the record-level
+/// `high_qc.signers`, the `TimeoutCertificate.signers`, the optional TC
+/// `high_qc.signers`, the `signed_timeouts` outer descriptor array, and every
+/// timeout entry's `signature` buffer and optional nested `high_qc.signers`
+/// backing (TC).
+pub fn admit_evidence_capnorm(
+    evidence: &SupportingEvidence,
+    _ctx: &PinnedSafetyContext,
+) -> Result<(), SafetyStoreError> {
+    match evidence {
+        SupportingEvidence::QcDerived(qc) => {
+            check_capnorm(qc.signer_bitmap.capacity(), qc.signer_bitmap.len(), "QC signer_bitmap")?;
+            check_capnorm(
+                qc.signatures.capacity(),
+                qc.signatures.len(),
+                "QC signatures descriptor array",
+            )?;
+            for (i, sig) in qc.signatures.iter().enumerate() {
+                check_capnorm(sig.capacity(), sig.len(), &format!("QC signature buffer [{i}]"))?;
+            }
+        }
+        SupportingEvidence::TcDerived { high_qc, tc } => {
+            check_capnorm(
+                high_qc.signers.capacity(),
+                high_qc.signers.len(),
+                "record-level high_qc.signers",
+            )?;
+            check_capnorm(tc.signers.capacity(), tc.signers.len(), "tc.signers")?;
+            if let Some(h) = &tc.high_qc {
+                check_capnorm(h.signers.capacity(), h.signers.len(), "tc.high_qc.signers")?;
+            }
+            check_capnorm(
+                tc.signed_timeouts.capacity(),
+                tc.signed_timeouts.len(),
+                "tc.signed_timeouts descriptor array",
+            )?;
+            for (i, t) in tc.signed_timeouts.iter().enumerate() {
+                check_capnorm(
+                    t.signature.capacity(),
+                    t.signature.len(),
+                    &format!("tc.signed_timeouts[{i}].signature"),
+                )?;
+                if let Some(h) = &t.high_qc {
+                    check_capnorm(
+                        h.signers.capacity(),
+                        h.signers.len(),
+                        &format!("tc.signed_timeouts[{i}].high_qc.signers"),
+                    )?;
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+/// A single decoded growable backing passes the capacity-normalization bound iff
+/// its `capacity()` is within `len() + CAPNORM_SLACK` elements. Over-bound →
+/// refuse (no silent over-capacity retention), naming the offending backing.
+fn check_capnorm(capacity: usize, len: usize, what: &str) -> Result<(), SafetyStoreError> {
+    let permitted = add(len as u128, CAPNORM_SLACK)?;
+    if capacity as u128 > permitted {
+        return Err(SafetyStoreError::CapacityRefusal(format!(
+            "{what} capacity {capacity} exceeds len {len} + CAPNORM_SLACK {CAPNORM_SLACK} \
+             (per-vector capacity-normalization bound)"
+        )));
+    }
+    Ok(())
+}
+
+/// The actual **live** decoded working-set charge of a transient
+/// [`DecodedRecord`], measured on the borrowed object *in place* (§ 13.7A(c.4),
+/// D7-D14 O2 measurement correction).
+///
+/// This observes the real decoded object operations hold across decode→validation
+/// — its inline representation plus the `Vec::capacity()` of every backing it
+/// actually owns (outer descriptor arrays, each nested signer backing, every
+/// signature backing, the bitmap) — **without** cloning it into a synthetic
+/// [`RetainedGeneration`]. Charging a `RetainedGeneration::from_locked` clone (as
+/// the earlier O2 check did) measures a *second*, freshly-allocated representation
+/// whose capacities are the clone's, not the live decoded object's; this borrowed
+/// inventory measures the object itself.
+pub fn decoded_working_set_charge(
+    decoded: &DecodedRecord,
+) -> Result<u128, SafetyStoreError> {
+    let mut total = size_of_decoded_record_inline();
+    if let SafetyRecord::Locked(l) = &decoded.record {
+        total = add(total, evidence_backing_capacity(&l.evidence)?)?;
+    }
+    Ok(total)
+}
+
+fn size_of_decoded_record_inline() -> u128 {
+    std::mem::size_of::<DecodedRecord>() as u128
 }
 
 /// The component-level aggregate accountant. Enforces the checked aggregate
