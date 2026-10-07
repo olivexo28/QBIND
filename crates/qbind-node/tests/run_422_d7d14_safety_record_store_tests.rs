@@ -511,11 +511,14 @@ fn h16_real_rocksdb_publish_and_reopen() {
 }
 
 // ---------------------------------------------------------------------------
-// H18 — O1 refuses duplicate initialization / established state (real-storage)
+// O1 duplicate-initialization / missing-intent regression (PRESERVED under an
+// accurate name — this is NOT H18). It establishes that O1 refuses established
+// state and a missing first-use intent; it does not exercise the H18 split-store
+// arrangement restriction (covered by `h18_record_and_evidence_co_located_...`).
 // ---------------------------------------------------------------------------
 
 #[test]
-fn h18_o1_refuses_duplicate_initialization() {
+fn o1_refuses_duplicate_initialization_and_missing_intent() {
     let dir = tempfile::tempdir().unwrap();
     let ctx = ctx_n(4);
     let owner = init_owner(dir.path(), &ctx);
@@ -532,6 +535,70 @@ fn h18_o1_refuses_duplicate_initialization() {
         owner2.initialize(false),
         Err(SafetyStoreError::MissingIndependentInput(_))
     ));
+}
+
+// ---------------------------------------------------------------------------
+// H18 — non-co-located record/evidence arrangement is UNREPRESENTABLE by
+// construction, so partial cross-store publication cannot occur.
+//
+// The accepted D14 component (a) embeds the supporting evidence AS A FIELD of the
+// stored record (`SupportingEvidence` inside `LockedRecord`), encoded into the one
+// `RECORD_KEY` value, and (b) commits the metadata key and the record key in a
+// single atomic backend batch under one `SafetyBackend`. There is NO separate
+// evidence store handle, key, or write path — the split-store arrangement the H18
+// obligation concerns is unrepresentable here. This regression establishes that
+// restriction at the component's genuine storage boundary via a real publication,
+// rather than introducing a new split-store architecture to create a negative
+// test. (Limitation: there is no cross-store code path to fault-inject; the
+// guarantee is structural, demonstrated by co-location + single-batch atomicity.)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn h18_record_and_evidence_co_located_single_store_no_partial_cross_store() {
+    let dir = tempfile::tempdir().unwrap();
+    let ctx = ctx_n(4);
+    let owner = init_owner(dir.path(), &ctx);
+
+    // A real TC-derived publication: its evidence is non-trivial.
+    let ltc = valid_tc_record(&ctx, 5, 6);
+    assert_eq!(
+        owner.publish_locked(ltc, 0, None::<&FixtureCommittedHistory>),
+        PublishResult::DurableAcknowledged { new_revision: 1 }
+    );
+    let backend = owner.backend_for_test();
+
+    // (a) Record and evidence are CO-LOCATED in the single `RECORD_KEY` value:
+    // decoding the one stored record buffer yields the embedded supporting
+    // evidence — there is no second store/key the evidence could live in.
+    let rec = max_safety_record_bytes(&ctx).unwrap();
+    let stored = backend.read_record(rec).unwrap().expect("record present");
+    let decoded = decode_record(&stored, &ctx).unwrap();
+    match &decoded.record {
+        SafetyRecord::Locked(l) => assert!(
+            matches!(l.evidence, SupportingEvidence::TcDerived { .. }),
+            "supporting evidence is embedded in the single stored record, not a separate store"
+        ),
+        other => panic!("expected a Locked record carrying embedded evidence, got {other:?}"),
+    }
+
+    // (b) The component-owned namespace contains ONLY the two recognized
+    // co-located keys (metadata + record). `first_unrecognized_safety_key`
+    // returning `None` proves there is no third/evidence-store key — a split
+    // arrangement is not representable. Both keys are present together (the atomic
+    // batch committed them as one unit; no partial cross-store state exists).
+    assert!(
+        backend.read_meta(crate_meta_bound()).unwrap().is_some(),
+        "metadata key present (co-located with the record)"
+    );
+    assert!(
+        backend.first_unrecognized_safety_key().unwrap().is_none(),
+        "no unrecognized/separate-evidence-store key exists in the safety namespace"
+    );
+}
+
+// Mirror of `backend::META_ENCODED_LEN` for test reads.
+fn crate_meta_bound() -> u128 {
+    META_ENCODED_LEN_MIRROR
 }
 
 // ---------------------------------------------------------------------------
@@ -662,11 +729,14 @@ fn h21_revision_fence_refuses_stale_publish() {
 }
 
 // ---------------------------------------------------------------------------
-// H22 — O4 rejects non-increasing lock view (real-storage)
+// O4 non-increasing lock-view transition-eligibility regression (PRESERVED under
+// an accurate name — this is NOT H22). It establishes transition eligibility
+// (a same-view relock is ineligible); it does not establish the H22 verified-
+// prerequisite restriction (covered by `h22_unverified_evidence_cannot_...`).
 // ---------------------------------------------------------------------------
 
 #[test]
-fn h22_o4_rejects_non_increasing_view() {
+fn o4_rejects_non_increasing_lock_view_transition_ineligible() {
     let dir = tempfile::tempdir().unwrap();
     let ctx = ctx_n(4);
     let owner = init_owner(dir.path(), &ctx);
@@ -681,6 +751,69 @@ fn h22_o4_rejects_non_increasing_view() {
         res,
         PublishResult::RefusedPreWrite(SafetyStoreError::TransitionIneligible(_))
     ));
+}
+
+// ---------------------------------------------------------------------------
+// H22 — unverified evidence cannot satisfy a verified prerequisite.
+//
+// Stage-2 verification is unwired, so every record the component produces carries
+// its evidence `Unverified`. The restriction that such evidence can NEVER be used
+// as a verified prerequisite is enforced at the TYPE boundary: `EvidenceStatus`
+// is an exhaustive enum whose ONLY variant is `Unverified` — the component has no
+// way to mint a `Verified` discriminant, so no consumer requiring verified
+// evidence can be satisfied by this component's output. This regression
+// demonstrates the actual `Unverified` outcome from a real O3 and the exhaustive
+// type restriction.
+//
+// Limitation (recorded, not substituted): there is no in-scope production
+// consumer that consumes a verified-evidence prerequisite, and this pass adds no
+// verifier/engine wiring. The guarantee established here is the type-level
+// impossibility of presenting verified evidence, not enforcement inside an
+// existing production verified-prerequisite consumer.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn h22_unverified_evidence_cannot_satisfy_verified_prerequisite() {
+    let dir = tempfile::tempdir().unwrap();
+    let ctx = ctx_n(4);
+    let owner = init_owner(dir.path(), &ctx);
+
+    // A real O4 publication, then a real O3 read: the resulting evidence status is
+    // the actual `Unverified` outcome.
+    let qc = valid_wire_qc(&ctx, [9u8; 32], 5);
+    let locked = make_locked_qc(&ctx, [9u8; 32], 5, qc, None).unwrap();
+    assert_eq!(
+        owner.publish_locked(locked, 0, None::<&FixtureCommittedHistory>),
+        PublishResult::DurableAcknowledged { new_revision: 1 }
+    );
+    let v = owner
+        .read_validate(None::<&FixtureCommittedHistory>)
+        .unwrap();
+
+    // The actual outcome is `Unverified`. The match is EXHAUSTIVE with a single arm
+    // — it compiles only because `EvidenceStatus` has no `Verified` variant. A
+    // future `Verified` variant would break this compile, which is the intended
+    // guard: the component cannot present verified evidence.
+    match v.evidence_status() {
+        EvidenceStatus::Unverified => {}
+    }
+    assert_eq!(v.evidence_status(), EvidenceStatus::Unverified);
+
+    // Model the prerequisite boundary at the unit level: a consumer that requires
+    // verified evidence can accept ONLY a `Verified` token; because no such token
+    // can be constructed from this component's output, the unverified record is
+    // rejected by construction (there is no conversion from `Unverified`).
+    fn requires_verified_prerequisite(status: EvidenceStatus) -> Result<(), &'static str> {
+        match status {
+            // The sole constructible variant cannot satisfy a verified prerequisite.
+            EvidenceStatus::Unverified => Err("unverified evidence rejected: verification unwired"),
+        }
+    }
+    assert_eq!(
+        requires_verified_prerequisite(v.evidence_status()),
+        Err("unverified evidence rejected: verification unwired"),
+        "a verified-prerequisite consumer rejects the component's unverified evidence"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -768,6 +901,105 @@ fn h24_bootstrap_nocommit_committed_distinctions() {
     let hist = FixtureCommittedHistory::new().with([3u8; 32], 4);
     let v = validate_decoded(decode_record(&enc, &ctx).unwrap(), enc, &ctx, Some(&hist)).unwrap();
     assert_eq!(v.evidence_status(), EvidenceStatus::Unverified);
+}
+
+// H24 (malformed anchor-presence, unit/model) — the two missing structural cases:
+// (A) a NO-COMMIT discriminant (`D_ca = 0`) whose buffer still carries anchor
+// content, and (B) a COMMITTED-ANCHOR discriminant (`D_ca = 1`) missing the
+// required anchor content. Each is built from a VALID encoding and re-sealed with
+// a fresh record CRC so decoding reaches the intended STRUCTURAL rejection rather
+// than failing incidentally on the CRC envelope. Also asserts that legitimate
+// no-commit recovery does not manufacture a height-zero anchor or block id.
+#[test]
+fn h24_malformed_anchor_presence_structural_rejections() {
+    use qbind_node::safety_record_store::codec::record_crc32_for_test;
+    let ctx = ctx_n(4);
+    // `D_ca` sits at a fixed offset: version(2) + genesis(32) + authctx(32) = 66
+    // is `D_ev`, so byte 67 is `D_ca` (see codec `evidence_discriminant_of`).
+    const D_CA_OFFSET: usize = 2 + 32 + 32 + 1;
+
+    // A valid committed-anchor record with NO predecessor, so the anchor bytes are
+    // the final 40 body bytes (block_id[32] + height u64).
+    let qc = valid_wire_qc(&ctx, [9u8; 32], 5);
+    let l_commit = make_locked_qc(
+        &ctx,
+        [9u8; 32],
+        5,
+        qc,
+        Some(CommittedAnchor {
+            block_id: [3u8; 32],
+            height: 4,
+        }),
+    )
+    .unwrap();
+    let dec = DecodedRecord {
+        persistence_format_version: 1,
+        network_genesis_id: ctx.network_genesis_id,
+        publication_revision: 1,
+        record: SafetyRecord::Locked(l_commit),
+    };
+    let enc = encode_record(&dec, &ctx).unwrap();
+    assert_eq!(enc[D_CA_OFFSET], 1, "fixture encodes D_ca = 1 (committed anchor)");
+
+    // Case A — no-commit discriminant carrying anchor content: flip D_ca to 0 and
+    // re-seal. The 40 anchor bytes are now unconsumed → structural trailing-bytes
+    // rejection (NOT a CRC mismatch, NOT silently accepted).
+    let mut a = enc.clone();
+    let a_body = a.len() - 4;
+    a[D_CA_OFFSET] = 0;
+    let crc = record_crc32_for_test(&a[..a_body]).to_be_bytes();
+    a[a_body..].copy_from_slice(&crc);
+    match decode_record(&a, &ctx) {
+        Err(SafetyStoreError::StructuralRefusal(m)) => {
+            assert!(m != "CRC32 mismatch", "must not fail on the CRC envelope: {m}");
+            assert!(
+                m.contains("trailing"),
+                "no-commit discriminant carrying anchor content is a trailing-bytes structural refusal, got: {m}"
+            );
+        }
+        other => panic!("expected structural trailing-bytes refusal, got {other:?}"),
+    }
+
+    // Case B — committed-anchor discriminant missing anchor content: drop the final
+    // 40 anchor bytes and re-seal. D_ca stays 1 → the anchor read underflows →
+    // structural rejection (NOT a CRC mismatch).
+    let mut b_body = enc[..enc.len() - 4].to_vec();
+    let blen = b_body.len();
+    b_body.truncate(blen - 40);
+    assert_eq!(b_body[D_CA_OFFSET], 1, "still claims a committed anchor");
+    let crc = record_crc32_for_test(&b_body).to_be_bytes();
+    let mut b = b_body;
+    b.extend_from_slice(&crc);
+    match decode_record(&b, &ctx) {
+        Err(SafetyStoreError::StructuralRefusal(m)) => {
+            assert!(m != "CRC32 mismatch", "must not fail on the CRC envelope: {m}");
+        }
+        other => panic!("expected structural anchor-underflow refusal, got {other:?}"),
+    }
+
+    // Legitimate no-commit recovery does NOT manufacture a height-zero anchor or a
+    // zero block identifier: a real no-commit locked publication reopens with an
+    // ABSENT committed anchor, never a synthesized `CommittedAnchor { height: 0 }`.
+    let dir = tempfile::tempdir().unwrap();
+    let owner = init_owner(dir.path(), &ctx);
+    let qc2 = valid_wire_qc(&ctx, [9u8; 32], 5);
+    let l_nocommit = make_locked_qc(&ctx, [9u8; 32], 5, qc2, None).unwrap();
+    assert_eq!(
+        owner.publish_locked(l_nocommit, 0, None::<&FixtureCommittedHistory>),
+        PublishResult::DurableAcknowledged { new_revision: 1 }
+    );
+    drop(owner);
+    let owner2 = SafetyRecordOwner::attach(open_enabled(dir.path()), ctx.clone()).unwrap();
+    let v = owner2
+        .read_validate(None::<&FixtureCommittedHistory>)
+        .unwrap();
+    match &v.retained().record {
+        SafetyRecord::Locked(l) => assert!(
+            l.committed_anchor.is_none(),
+            "no-commit recovery must not manufacture a committed anchor"
+        ),
+        other => panic!("expected a Locked no-commit record, got {other:?}"),
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -874,13 +1106,17 @@ fn h26_both_evidence_variants_and_nested_bounds() {
     assert!((etc.len() as u128) <= max_tc_bytes(&ctx).unwrap());
 }
 
-/// H26 (adversarial, through actual storage operations) — an over-bound nested
-/// record-level high-QC signer list inside a TC-derived publication is refused by
-/// O4's single admission path BEFORE any evidence-binding allocation, and the
-/// established predecessor is left intact. Helper-only refusal and valid
-/// round-trips are not a substitute: this drives the real `publish_locked`.
+/// H26 (adversarial, through actual storage operations) — an over-bound
+/// **record-level** high-QC signer list (`TcDerived.high_qc.signers`) inside a
+/// TC-derived publication is refused by O4's single admission path BEFORE any
+/// evidence-binding allocation, and the established predecessor is left intact.
+/// This exercises the record-level nested high-QC ONLY; the per-timeout-entry
+/// nested high-QC (`tc.signed_timeouts[i].high_qc.signers`) is covered separately
+/// by `h26_adversarial_timeout_entry_nested_high_qc_signers_refused_through_o4`.
+/// Helper-only refusal and valid round-trips are not a substitute: this drives
+/// the real `publish_locked`.
 #[test]
-fn h26_adversarial_nested_tc_high_qc_signers_refused_through_o4() {
+fn h26_adversarial_record_level_tc_high_qc_signers_refused_through_o4() {
     use qbind_node::safety_record_store::codec::{
         evidence_payload_encode_count, reset_evidence_payload_encode_count,
     };
@@ -934,6 +1170,102 @@ fn h26_adversarial_nested_tc_high_qc_signers_refused_through_o4() {
         &rv.retained().record,
         SafetyRecord::Locked(l) if matches!(l.evidence, SupportingEvidence::TcDerived { .. })
     ));
+}
+
+// (new H26 timeout-entry test inserted above)
+
+// H26 (adversarial, through actual storage operations) — the per-timeout-entry
+// nested high-QC signer list `tc.signed_timeouts[i].high_qc.signers` is a DISTINCT
+// nested vector from the record-level `TcDerived.high_qc.signers`. Inflating ONE
+// timeout entry's nested high-QC to N+1 (boundary-plus-one), with every other
+// field valid and the stored binding left as the original valid digest, is
+// refused by O4's single admission path BEFORE any evidence-binding allocation
+// (so O4 cannot rely on a binding mismatch), and the established predecessor bytes
+// are preserved. The exact-bound (N) positive case is admitted.
+#[test]
+fn h26_adversarial_timeout_entry_nested_high_qc_signers_refused_through_o4() {
+    use qbind_node::safety_record_store::codec::{
+        evidence_payload_encode_count, reset_evidence_payload_encode_count,
+    };
+    let dir = tempfile::tempdir().unwrap();
+    let ctx = ctx_n(4); // N = 4
+    let owner = init_owner(dir.path(), &ctx);
+
+    // Start from a valid TC-derived record, then inflate exactly ONE timeout
+    // entry's OPTIONAL nested high-QC signer list to N + 1. This is the vector the
+    // reviewed record-level test never touched.
+    let mut ltc = valid_tc_record(&ctx, 5, 6);
+    if let SupportingEvidence::TcDerived { tc, .. } = &mut ltc.evidence {
+        let entry = tc
+            .signed_timeouts
+            .first_mut()
+            .expect("valid TC fixture has timeout entries");
+        let nested = entry
+            .high_qc
+            .as_mut()
+            .expect("each timeout entry carries an optional high_qc");
+        nested.signers = (0..=ctx.n() as u64).map(ValidatorId::new).collect();
+        assert_eq!(
+            nested.signers.len(),
+            ctx.n() + 1,
+            "the nested timeout-entry high_qc is boundary-plus-one"
+        );
+    } else {
+        panic!("valid_tc_record must be TcDerived");
+    }
+
+    reset_evidence_payload_encode_count();
+    let res = owner.publish_locked(ltc, 0, None::<&FixtureCommittedHistory>);
+    assert!(
+        matches!(
+            res,
+            PublishResult::RefusedPreWrite(SafetyStoreError::DeclaredBoundExceeded(_))
+        ),
+        "over-bound timeout-entry nested high-QC signer list must be refused pre-write, got {res:?}"
+    );
+    assert_eq!(
+        evidence_payload_encode_count(),
+        0,
+        "O4 must refuse the over-bound timeout-entry nested evidence BEFORE the binding allocation"
+    );
+
+    // The established predecessor (bootstrap rev 0) is untouched.
+    let v = owner
+        .read_validate(None::<&FixtureCommittedHistory>)
+        .unwrap();
+    assert_eq!(v.retained().publication_revision, 0);
+    assert!(!v.retained().is_locked());
+    drop(v);
+
+    // Exact-bound positive control: a timeout entry whose nested high-QC carries
+    // EXACTLY N signers is admitted and round-trips (the refusal is bound-specific,
+    // targeting the nested timeout-entry vector, not a blanket TC rejection).
+    let mut good = valid_tc_record(&ctx, 5, 6);
+    if let SupportingEvidence::TcDerived { tc, .. } = &mut good.evidence {
+        let entry = tc.signed_timeouts.first_mut().unwrap();
+        let nested = entry.high_qc.as_mut().unwrap();
+        nested.signers = (0..ctx.n() as u64).map(ValidatorId::new).collect();
+        assert_eq!(nested.signers.len(), ctx.n(), "exact-bound nested high_qc");
+    }
+    // Rebuild the binding so the exact-bound mutation stays internally consistent.
+    let good = {
+        let binding = qbind_node::safety_record_store::codec::compute_evidence_lock_binding(
+            &good.lock_block_id,
+            good.lock_view,
+            &good.evidence,
+            &good.authority_context_ref,
+            &ctx,
+        )
+        .unwrap();
+        LockedRecord {
+            evidence_lock_binding: binding,
+            ..good
+        }
+    };
+    assert_eq!(
+        owner.publish_locked(good, 0, None::<&FixtureCommittedHistory>),
+        PublishResult::DurableAcknowledged { new_revision: 1 }
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -1729,6 +2061,248 @@ fn agg_live_context_consumes_operational_budget() {
         ctx_standing,
         "after the operational holder drops, the live context-owner charge remains"
     );
+}
+
+// ---------------------------------------------------------------------------
+// §4 — O1/O2 INSPECTION allocation admission (real-operation regressions).
+//
+// The inherited O1/O2 correction (5640dae) admits each inspection path's
+// read/decode working set against the shared aggregate budget BEFORE the
+// component-owned read-back / decode allocations occur, so an established /
+// partial / malformed inspection cannot escape the aggregate ceiling. These
+// regressions drive the REAL `initialize()` / `open()` operations against the
+// REAL shared accountant (constructed boundary via `reserve_standing_for_test`),
+// proving: (a) refusal happens at admission, BEFORE the existing-state read /
+// decode; (b) the refusal preserves stored bytes and recovery/effectiveness
+// state; (c) the reservation releases on every exit; (d) releasing competing
+// pressure lets the same otherwise-valid operation proceed; and (e) the real
+// working set fits within exactly the reserved charge (admission boundary).
+//
+// Mirror of the source constant `backend::META_ENCODED_LEN` (private); the
+// fixed metadata buffer is `2 + 32 + 8` bytes.
+const META_ENCODED_LEN_MIRROR: u128 = 2 + 32 + 8;
+
+// (a)+(b)+(c)+(d): O1 on ESTABLISHED state is refused at admission — BEFORE the
+// existing-state read that would otherwise report `AlreadyEstablished` — when the
+// shared aggregate cannot admit O1's inspection working set. The refusal leaves
+// the stored record bytes and the recovery latch untouched, and releasing the
+// competing pressure lets the SAME O1 proceed to its real established-state
+// detection.
+#[test]
+fn o1_established_inspection_refused_before_read_under_aggregate_pressure() {
+    let dir = tempfile::tempdir().unwrap();
+    let ctx = ctx_n(4);
+    let owner = init_owner(dir.path(), &ctx); // established at revision 0, effective
+    let backend = owner.backend_for_test();
+    let agg_cap = backend.accounting_aggregate_cap().unwrap();
+    let ctx_live = backend.context_accounting_current();
+    assert!(ctx_live > 0, "init_owner holds one live context charge");
+
+    // O1's inspection working set = record-sized read-back buffer + fixed metadata
+    // buffer (exactly the source's `inspect_charge`).
+    let rec = max_safety_record_bytes(&ctx).unwrap();
+    let o1_inspect = rec + META_ENCODED_LEN_MIRROR;
+
+    // Record the pre-refusal raw stored bytes and recovery state.
+    let record_before = backend.read_record(rec).unwrap();
+    assert!(record_before.is_some(), "established store has a record");
+    assert!(!owner.recovery_required(), "O1 left the store effective");
+
+    // Leave exactly `o1_inspect - 1` of aggregate headroom: the inspection charge
+    // cannot be admitted. The operational sub-cap WOULD still permit it; the
+    // refusal comes from the shared aggregate authority (the other partition's
+    // live context charge consumed the shared budget).
+    let standing_amt = agg_cap - ctx_live - (o1_inspect - 1);
+    let standing = backend
+        .reserve_standing_for_test(standing_amt)
+        .expect("standing operational pressure within the combined budget");
+    assert_eq!(
+        backend.accounting_aggregate_current(),
+        ctx_live + standing_amt
+    );
+
+    // The REAL O1 is refused at admission (CapacityRefusal), NOT AlreadyEstablished
+    // — proving the refusal precedes the existing-state read.
+    match owner.initialize(true) {
+        Err(SafetyStoreError::CapacityRefusal(_)) => {}
+        other => panic!("expected pre-read CapacityRefusal, got {other:?}"),
+    }
+    // No leak: the refusal reserved/released nothing beyond the standing pressure.
+    assert_eq!(
+        backend.accounting_aggregate_current(),
+        ctx_live + standing_amt,
+        "a refused O1 inspection leaves the aggregate charge unchanged"
+    );
+    // Stored bytes and recovery/effectiveness state preserved.
+    assert_eq!(
+        backend.read_record(rec).unwrap(),
+        record_before,
+        "refused O1 did not mutate stored record bytes"
+    );
+    assert!(
+        !owner.recovery_required(),
+        "refused O1 did not disturb the effectiveness latch"
+    );
+
+    // (d) Releasing the competing pressure lets the SAME O1 proceed to its real
+    // established-state detection (now the read runs) — AlreadyEstablished, not a
+    // capacity error. This proves the earlier refusal was pre-read.
+    drop(standing);
+    match owner.initialize(true) {
+        Err(SafetyStoreError::AlreadyEstablished(_)) => {}
+        other => panic!("expected AlreadyEstablished after releasing pressure, got {other:?}"),
+    }
+    assert_eq!(
+        backend.accounting_current(),
+        0,
+        "O1 inspection reservation released on the AlreadyEstablished exit"
+    );
+}
+
+// (a): O1 over a PARTIAL (record-present / metadata-absent) namespace is likewise
+// refused at admission BEFORE the inspection read that would classify it as a
+// structural partial, since the inspection charge is reserved before `read_meta`
+// / `read_record` on the SAME code path. Releasing the pressure surfaces the real
+// StructuralRefusal.
+#[test]
+fn o1_partial_state_inspection_refused_before_read_under_aggregate_pressure() {
+    let dir = tempfile::tempdir().unwrap();
+    let ctx = ctx_n(4);
+    // Construct a partial namespace directly: a CRC-wrapped record key with NO
+    // metadata key. (Not a production path; test-only out-of-band writer.)
+    let backend = open_enabled(dir.path());
+    backend
+        .debug_overwrite_record(&[0xAAu8, 0xBB, 0xCC])
+        .expect("stage a partial record-without-metadata namespace");
+    let owner = SafetyRecordOwner::attach(backend, ctx.clone()).unwrap();
+    let backend = owner.backend_for_test();
+    let agg_cap = backend.accounting_aggregate_cap().unwrap();
+    let ctx_live = backend.context_accounting_current();
+    let rec = max_safety_record_bytes(&ctx).unwrap();
+    let o1_inspect = rec + META_ENCODED_LEN_MIRROR;
+
+    let standing_amt = agg_cap - ctx_live - (o1_inspect - 1);
+    let standing = backend
+        .reserve_standing_for_test(standing_amt)
+        .expect("standing pressure within the combined budget");
+    // Refused at admission — before the partial-state read/classification.
+    match owner.initialize(true) {
+        Err(SafetyStoreError::CapacityRefusal(_)) => {}
+        other => panic!("expected pre-read CapacityRefusal over partial state, got {other:?}"),
+    }
+    // Releasing pressure surfaces the genuine structural refusal (record present
+    // without metadata) — the inspection read now runs.
+    drop(standing);
+    match owner.initialize(true) {
+        Err(SafetyStoreError::StructuralRefusal(_)) => {}
+        other => panic!("expected StructuralRefusal over partial state, got {other:?}"),
+    }
+    assert_eq!(
+        backend.accounting_current(),
+        0,
+        "O1 partial-state inspection reservation released on exit"
+    );
+}
+
+// (e)+(b)+(c): O2 `open()` admits its read/decode working set (record read-back
+// buffer + fixed metadata buffer + one transient decoded generation + validation
+// scratch) against the shared aggregate budget BEFORE the `load_established`
+// allocations/decode. The real operation fits within EXACTLY the reserved charge
+// `rec + META + gen` (succeeds with exactly that headroom) and is refused ONE byte
+// short (before any decode), preserving stored bytes and recovery state, and the
+// reservation releases on every exit.
+#[test]
+fn o2_open_working_set_admitted_and_bounded_by_reservation() {
+    let dir = tempfile::tempdir().unwrap();
+    let ctx = ctx_n(4);
+    let owner = init_owner(dir.path(), &ctx);
+    // Establish a real locked (QC-derived) publication so O2 decodes a non-trivial
+    // generation. The o2 charge is the max over QC/TC generations, so the reserved
+    // bound covers the actual decoded working set either way.
+    let qc = valid_wire_qc(&ctx, [9u8; 32], 5);
+    let locked = make_locked_qc(&ctx, [9u8; 32], 5, qc, None).unwrap();
+    assert_eq!(
+        owner.publish_locked(locked, 0, None::<&FixtureCommittedHistory>),
+        PublishResult::DurableAcknowledged { new_revision: 1 }
+    );
+    let backend = owner.backend_for_test();
+    let agg_cap = backend.accounting_aggregate_cap().unwrap();
+    let ctx_live = backend.context_accounting_current();
+
+    let rec = max_safety_record_bytes(&ctx).unwrap();
+    let gen = qbind_node::safety_record_store::profile::max_retained_generation_bytes(
+        &ctx,
+        qbind_node::safety_record_store::record::size_of_timeout_msg(),
+    )
+    .unwrap();
+    let o2_charge = rec + META_ENCODED_LEN_MIRROR + gen;
+
+    // Directly bound the actual decoded transient against its reserved term `gen`:
+    // the real stored record decodes to a generation whose complete retained
+    // representation fits the retained-generation ceiling (the inherited O2 charge
+    // reserves `gen` for exactly this transient).
+    let stored = backend.read_record(rec).unwrap().expect("record present");
+    assert!(
+        (stored.len() as u128) <= rec,
+        "actual stored record buffer {} fits the record bound {rec}",
+        stored.len()
+    );
+    let decoded = decode_record(&stored, &ctx).unwrap();
+    let decoded_core = qbind_node::safety_record_store::record::size_of_decoded_record();
+    assert!(
+        decoded_core <= gen,
+        "the transient DecodedRecord core {decoded_core} fits its reserved generation term {gen}"
+    );
+    assert!(decoded.publication_revision == 1);
+
+    // Leave EXACTLY `o2_charge` of aggregate headroom: the real O2 working set fits.
+    let standing_fits = agg_cap - ctx_live - o2_charge;
+    let standing = backend
+        .reserve_standing_for_test(standing_fits)
+        .expect("standing pressure leaving exactly the O2 working set");
+    let peak_before = backend.accounting_aggregate_peak();
+    let meta = owner.open().expect("O2 open fits within exactly its reserved charge");
+    assert_eq!(meta.current_revision, 1);
+    assert!(
+        backend.accounting_aggregate_peak() <= agg_cap,
+        "O2 open never exceeded the aggregate ceiling"
+    );
+    assert!(
+        backend.accounting_aggregate_peak() >= peak_before,
+        "O2 open reserved a real charge against the shared accountant"
+    );
+    assert_eq!(
+        backend.accounting_aggregate_current(),
+        ctx_live + standing_fits,
+        "O2 read/decode reservation released on the success exit (only standing remains)"
+    );
+    drop(standing);
+
+    // Now leave ONE byte less: the real O2 is refused at admission, BEFORE decode.
+    let record_before = backend.read_record(rec).unwrap();
+    let standing_short = agg_cap - ctx_live - (o2_charge - 1);
+    let standing = backend
+        .reserve_standing_for_test(standing_short)
+        .expect("standing pressure one byte short of the O2 working set");
+    match owner.open() {
+        Err(SafetyStoreError::CapacityRefusal(_)) => {}
+        other => panic!("expected pre-decode CapacityRefusal, got {other:?}"),
+    }
+    assert_eq!(
+        backend.read_record(rec).unwrap(),
+        record_before,
+        "refused O2 did not mutate stored record bytes"
+    );
+    assert!(
+        !owner.recovery_required(),
+        "refused O2 did not disturb the effectiveness latch"
+    );
+    assert_eq!(
+        backend.accounting_aggregate_current(),
+        ctx_live + standing_short,
+        "refused O2 released its (rolled-back) admission attempt cleanly"
+    );
+    drop(standing);
 }
 
 // RESERVATION-LEVEL admission-boundary evidence (NOT an O1–O5 operation). Both
@@ -3693,4 +4267,82 @@ fn pd_failed_o5_does_not_release_recovery() {
         .unwrap();
     assert!(v.retained().is_locked());
     assert_eq!(v.retained().publication_revision, 1);
+}
+// ---------------------------------------------------------------------------
+// H19 (process-death) — after a REAL process death, a fresh process re-derives
+// its O3 recovery capability (never transferring a process-local token across
+// the boundary) and O5 refuses non-identical surviving content. Complements the
+// in-process `h19_o5_refuses_divergence_outside_binding_digest` unit test.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn h19_pd_fresh_o3_then_o5_refuses_divergent_surviving_content() {
+    let dir = tempfile::tempdir().unwrap();
+    // A child establishes + acknowledges a lock (revision 1), then exits cleanly.
+    let status = spawn_child(dir.path(), "ack_locked_clean_exit");
+    assert_eq!(status.code(), Some(14), "child reached the acknowledged-exit boundary");
+
+    let ctx = ctx_n(4);
+    // Fresh process: a NEW backend-bound owner. No recovery token crosses the
+    // process boundary — the capability below is derived entirely in-process.
+    let owner = SafetyRecordOwner::attach(open_enabled(dir.path()), ctx.clone()).unwrap();
+    assert_eq!(owner.open().unwrap().current_revision, 1);
+    assert!(owner.recovery_required(), "reopen requires fresh recovery");
+
+    // Re-derive the O3 recovery capability in THIS process over the surviving bytes.
+    let fresh = owner
+        .read_validate(None::<&FixtureCommittedHistory>)
+        .unwrap();
+    let stored = fresh.encoded().to_vec();
+
+    // Out-of-band, make the surviving record non-identical at the SAME revision
+    // (a byte the binding digest does not cover), re-sealed so stage-1 CRC passes.
+    let mut forged = stored.clone();
+    forged[2] ^= 0x01; // part of network_genesis_id — not an input to the binding digest
+    let body_len = forged.len() - 4;
+    let crc = qbind_node::safety_record_store::codec_crc_for_test(&forged[..body_len]);
+    forged[body_len..].copy_from_slice(&crc.to_be_bytes());
+    owner.debug_overwrite_record_for_test(&forged).unwrap();
+
+    // O5 against the freshly-derived capability refuses: the stored content is not
+    // byte-for-byte identical to the retained publication, so it is NOT republished.
+    let res = owner.reacknowledge(&fresh);
+    assert!(
+        matches!(
+            res,
+            PublishResult::RefusedPreWrite(SafetyStoreError::PublicationMismatch(_))
+        ),
+        "got {res:?}"
+    );
+    // The divergent surviving bytes are left untouched (no overwrite of foreign state).
+    let after = owner.read_validate(None::<&FixtureCommittedHistory>);
+    assert!(after.is_err() || after.unwrap().encoded() == forged.as_slice());
+}
+
+// ---------------------------------------------------------------------------
+// H24 (process-death) — legitimate no-commit recovery across a REAL process
+// death does NOT manufacture a height-zero committed anchor or a zero block id.
+// Complements the unit malformed-anchor cases.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn h24_pd_nocommit_recovery_does_not_manufacture_anchor() {
+    let dir = tempfile::tempdir().unwrap();
+    // The reused phase publishes a NO-COMMIT locked record (committed_anchor None).
+    let status = spawn_child(dir.path(), "ack_locked_clean_exit");
+    assert_eq!(status.code(), Some(14), "child reached the acknowledged-exit boundary");
+
+    let ctx = ctx_n(4);
+    let owner = SafetyRecordOwner::attach(open_enabled(dir.path()), ctx).unwrap();
+    assert_eq!(owner.open().unwrap().current_revision, 1);
+    let v = owner
+        .read_validate(None::<&FixtureCommittedHistory>)
+        .unwrap();
+    match &v.retained().record {
+        SafetyRecord::Locked(l) => assert!(
+            l.committed_anchor.is_none(),
+            "no-commit recovery across process death must not manufacture a committed anchor"
+        ),
+        other => panic!("expected a Locked no-commit record, got {other:?}"),
+    }
 }
