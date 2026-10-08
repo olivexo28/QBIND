@@ -6656,9 +6656,7 @@ fn valid_wire_qc_max(ctx: &PinnedSafetyContext, block_id: [u8; 32], view: u64) -
     let mut signatures = Vec::with_capacity(n);
     for i in 0..n {
         bitmap[i / 8] |= 1 << (i % 8);
-        let mut s = Vec::with_capacity(ctx.s_sig);
-        s.extend(std::iter::repeat(0xABu8).take(ctx.s_sig));
-        signatures.push(s);
+        signatures.push(vec![0xABu8; ctx.s_sig]);
     }
     WireQc {
         version: 1,
