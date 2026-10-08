@@ -7587,6 +7587,111 @@ fn corr_o1_namespace_scan_failure_is_typed_through_real_o1_path() {
     );
 }
 
+/// (F2) The typed, allocation-free `ReadFailedDetail::Envelope` checksum/backend
+/// read-failure diagnostics are reached through the REAL O1 read path — the
+/// component's `read_checksummed` mapping — NOT by constructing the enum directly in
+/// the test (the payload-level `corr_profile_invalid_and_namespace_scan_payloads_…`
+/// construction test is retained separately as payload evidence). Each branch is a
+/// component-created diagnostic constructed INSIDE O1's active inspection reservation
+/// and carries no backend-owned text:
+///   * `EnvelopeTooShort` — a planted record envelope shorter than the 4-byte CRC
+///     prefix (component-owned refusal; backend owns only the raw bytes).
+///   * `CrcMismatch` — a planted record envelope whose CRC does not match its payload.
+///   * `BackendGet` — the backend `get_pinned` storage-layer error branch, driven by
+///     the narrowly test-gated `FailBackendGet` fault since a real point read cannot
+///     be forced to fail deterministically.
+/// Each refusal writes nothing, leaves the recovery latch untouched, and releases the
+/// O1 inspection reservation to baseline `0`; clearing the condition lets a clean O1
+/// initialize, proving the refusal was the read-failure under test.
+#[test]
+fn d7d14_f2_o1_read_failure_mapping_reached_operationally() {
+    use qbind_node::safety_record_store::backend::InjectFault;
+    use qbind_node::safety_record_store::error::{
+        EnvelopeFailureKind as K, ReadFailedDetail as R, ReadWhat as W,
+    };
+    let ctx = ctx_n(4);
+
+    // --- EnvelopeTooShort via a planted 3-byte record (shorter than the CRC prefix).
+    {
+        let dir = tempfile::tempdir().unwrap();
+        let owner = SafetyRecordOwner::attach(open_enabled(dir.path()), ctx.clone()).unwrap();
+        let backend = owner.backend_for_test();
+        backend
+            .debug_put_raw(b"safetyrec:record:v1", &[0u8; 3])
+            .unwrap();
+        let latch_before = backend.recovery_required();
+        match owner.initialize(true) {
+            Err(SafetyStoreError::ReadFailed(R::Envelope {
+                what: W::Record,
+                kind: K::EnvelopeTooShort,
+            })) => {}
+            other => panic!("expected typed Envelope{{Record, EnvelopeTooShort}}, got {other:?}"),
+        }
+        assert_eq!(backend.read_meta(META_ENCODED_LEN_MIRROR).unwrap(), None);
+        assert_eq!(backend.recovery_required(), latch_before);
+        assert_eq!(
+            backend.accounting_current(),
+            0,
+            "O1 inspection reservation released on the read-failure refusal"
+        );
+    }
+
+    // --- CrcMismatch via a planted envelope whose CRC does not cover its payload.
+    {
+        let dir = tempfile::tempdir().unwrap();
+        let owner = SafetyRecordOwner::attach(open_enabled(dir.path()), ctx.clone()).unwrap();
+        let backend = owner.backend_for_test();
+        // 4 wrong CRC bytes + a nonempty payload (length within the record bound).
+        backend
+            .debug_put_raw(b"safetyrec:record:v1", &[0xFF, 0xFF, 0xFF, 0xFF, 1, 2, 3, 4])
+            .unwrap();
+        match owner.initialize(true) {
+            Err(SafetyStoreError::ReadFailed(R::Envelope {
+                what: W::Record,
+                kind: K::CrcMismatch,
+            })) => {}
+            other => panic!("expected typed Envelope{{Record, CrcMismatch}}, got {other:?}"),
+        }
+        assert_eq!(
+            backend.accounting_current(),
+            0,
+            "O1 inspection reservation released on the CRC-mismatch refusal"
+        );
+    }
+
+    // --- BackendGet via the narrowly test-gated fault. O1 reads metadata first, so
+    // the metadata `get_pinned` surfaces the typed backend-get refusal.
+    {
+        let dir = tempfile::tempdir().unwrap();
+        let owner = SafetyRecordOwner::attach(open_enabled(dir.path()), ctx.clone()).unwrap();
+        let backend = owner.backend_for_test();
+        backend.set_inject(InjectFault::FailBackendGet);
+        match owner.initialize(true) {
+            Err(SafetyStoreError::ReadFailed(R::Envelope {
+                what: W::Metadata,
+                kind: K::BackendGet,
+            })) => {}
+            other => panic!("expected typed Envelope{{Metadata, BackendGet}}, got {other:?}"),
+        }
+        assert_eq!(
+            backend.accounting_current(),
+            0,
+            "O1 inspection reservation released on the backend-get refusal"
+        );
+        // Clearing the fault lets the clean namespace initialize.
+        backend.set_inject(InjectFault::None);
+        assert_eq!(
+            owner.initialize(true).unwrap(),
+            0,
+            "O1 succeeds once the backend-get fault clears"
+        );
+        assert!(
+            !backend.recovery_required(),
+            "the successful O1 established the fresh acknowledgement"
+        );
+    }
+}
+
 // ===========================================================================
 // RUN 422 D7-D14 Item C (this pass) — distinct MAXIMUM QC/TC fixtures with
 // asserted dimensions, and the three admitted paths (successful structural/

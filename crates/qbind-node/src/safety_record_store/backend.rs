@@ -378,6 +378,13 @@ pub enum InjectFault {
     /// [`SafetyBackend::first_unrecognized_safety_key`] (the typed, allocation-free
     /// `ReadFailedDetail::NamespaceScan` refusal) through the real O1 path.
     FailNamespaceScan = 4,
+    /// Test-only: the component-owned record/metadata read's backend `get_pinned`
+    /// returns a storage-layer error. A real RocksDB point read cannot be forced to
+    /// fail deterministically, so this narrowly test-gated fault drives the exact
+    /// `Err(_e)` arm of [`SafetyBackend::read_checksummed`] (the typed,
+    /// allocation-free `ReadFailedDetail::Envelope { kind: BackendGet }` refusal,
+    /// which copies NO backend error text) through the real O1–O5 read path.
+    FailBackendGet = 5,
 }
 
 /// A shared serialization domain. The owned guard proves the single-writer
@@ -706,6 +713,20 @@ impl SafetyBackend {
         // `Display` (the previous `format!("{what}: {e}")`) or even a bounded-but-
         // allocating `format!` would peak a component-owned `String` above the
         // admitted charge. The typed `Copy` payload copies no backend text.
+        //
+        // Test-only (RUN 422 D7-D14 F2): a real RocksDB point read cannot be forced
+        // to fail deterministically, so the narrowly test-gated `FailBackendGet`
+        // fault drives the exact `Err(_e)` arm below — the typed, allocation-free
+        // `BackendGet` refusal that copies no backend text — through the real read
+        // path, so an operational test reaches the actual read-failure mapping
+        // rather than constructing the enum directly.
+        #[cfg(any(test, feature = "test-utils"))]
+        if self.injected() == InjectFault::FailBackendGet {
+            return Err(SafetyStoreError::ReadFailed(ReadFailedDetail::Envelope {
+                what,
+                kind: EnvelopeFailureKind::BackendGet,
+            }));
+        }
         match self.db.get_pinned(key) {
             Ok(None) => Ok(None),
             Ok(Some(raw)) => {
@@ -934,6 +955,7 @@ impl SafetyBackend {
             2 => InjectFault::WriteErrors,
             3 => InjectFault::UncertainAfterWrite,
             4 => InjectFault::FailNamespaceScan,
+            5 => InjectFault::FailBackendGet,
             _ => InjectFault::None,
         }
     }
