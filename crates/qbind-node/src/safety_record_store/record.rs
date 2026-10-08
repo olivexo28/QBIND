@@ -321,6 +321,15 @@ impl ValidatedRecord {
         &self.encoded
     }
 
+    /// Test-only: the actual `Vec::capacity()` of the retained `encoded` buffer —
+    /// the component-owned original publication backing (RUN 422 D7-D14 M2). Read
+    /// to measure the retained proof's real buffer charge at the O5 publication
+    /// boundary, rather than substituting its `len()` or a profile maximum.
+    #[cfg(any(test, feature = "test-utils"))]
+    pub fn encoded_capacity(&self) -> usize {
+        self.encoded.capacity()
+    }
+
     /// The publication revision of the validated record.
     pub fn publication_revision(&self) -> u64 {
         self.retained.publication_revision

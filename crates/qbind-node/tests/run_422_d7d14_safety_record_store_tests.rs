@@ -8225,3 +8225,411 @@ fn d7d14_e_o1_bootstrap_boundary_covers_metadata_encode_buffer() {
         "reservation residual {residual_after_others} covers the 42-byte metadata encode buffer"
     );
 }
+/// M1 (RUN 422 D7-D14) — ACTUAL O3 live-object charges through real
+/// `owner.read_validate` on the reopened-backend path, for the MAXIMUM COMPLETE
+/// QC. This produces the two QC phase rows (re-encode, binding) of the four M1 O3
+/// rows. Unlike the reservation samples (`o3_phase_reservation_sample` /
+/// `o3_in_validation_reservation_sample`, which read `acct.current()` — a
+/// RESERVATION amount), this measures the ACTUAL simultaneously component-owned
+/// objects alive at each phase by walking the real objects' capacities:
+///   * original backend-read encoded record buffer capacity (the SAME buffer the
+///     proof retains, measured, not a fixture),
+///   * the live transient decoded object (inline + every nested backing, measured
+///     in place via `decoded_working_set_charge`, no clone),
+///   * the single live validation scratch (correspondence re-encode buffer at the
+///     re-encode phase; certificate-binding `cert` buffer at the binding phase).
+///
+/// Each phase's actual total is asserted `<= 2870` (the active covering O3
+/// operational reservation `holder 2051 + o3_scratch 819`). The components are
+/// cross-checked against the SAME objects measured independently of the operation
+/// (NOT from the reservation formula, NOT from a profile maximum substitute).
+#[test]
+fn d7d14_m1_o3_actual_object_charges_max_complete_qc() {
+    use qbind_node::safety_record_store::accounting::{
+        decoded_working_set_charge, max_transient_decoded_working_set,
+    };
+    use qbind_node::safety_record_store::owner::{
+        o3_binding_object_charge, o3_reencode_object_charge,
+    };
+    use qbind_node::safety_record_store::profile::{
+        max_qc_bytes, max_retained_generation_bytes, max_safety_record_bytes,
+    };
+    use qbind_node::safety_record_store::record::{
+        size_of_timeout_msg, validated_holder_handle_bytes,
+    };
+
+    let dir = tempfile::tempdir().unwrap();
+    let ctx = ctx_n(4);
+
+    // Active covering O3 operational reservation, derived from the profile (NOT the
+    // operation under test): holder + o3_scratch = 2051 + 819 = 2870.
+    let rec = max_safety_record_bytes(&ctx).unwrap();
+    let retained_gen = max_retained_generation_bytes(&ctx, size_of_timeout_msg()).unwrap();
+    let holder = rec + retained_gen + validated_holder_handle_bytes();
+    let transient_ceiling = max_transient_decoded_working_set(&ctx).unwrap();
+    let o3_scratch = (transient_ceiling - retained_gen) + rec;
+    let o3_reservation = holder + o3_scratch;
+    assert_eq!(holder, 2051, "retained-holder charge (profile maximum)");
+    assert_eq!(
+        o3_scratch, 819,
+        "O3 transient-excess + one record-sized buffer"
+    );
+    assert_eq!(
+        o3_reservation, 2870,
+        "active covering O3 operational reservation"
+    );
+
+    // MAXIMUM COMPLETE QC (anchor + predecessor populated) + valid committed history.
+    let complete = max_qc_locked(&ctx, 5, true);
+    let history = FixtureCommittedHistory::new().with([7u8; 32], 3);
+    {
+        let owner = init_owner(dir.path(), &ctx);
+        assert_eq!(
+            owner.publish_locked(complete, 0, Some(&history)),
+            PublishResult::DurableAcknowledged { new_revision: 1 }
+        );
+    }
+
+    // Real O3 on a FRESH reopened backend; the observation records both phases.
+    let owner = SafetyRecordOwner::attach(open_enabled(dir.path()), ctx.clone()).unwrap();
+    let proof = owner.read_validate(Some(&history)).unwrap();
+    assert!(proof.retained().is_locked());
+
+    let reencode = o3_reencode_object_charge().expect("O3 re-encode phase was observed");
+    let binding = o3_binding_object_charge().expect("O3 binding phase was observed");
+
+    // Independently measure the SAME live objects (not via the reservation formula):
+    //  * the transient decoded object is exactly the stored record re-decoded;
+    //  * the single validation scratch is the variant's serialized cap (re-encode via
+    //    `encode_record` and the `cert` buffer both pre-size to `max_qc_bytes`).
+    let redecoded = decode_record(proof.encoded(), &ctx).unwrap();
+    let exp_transient = decoded_working_set_charge(&redecoded).unwrap();
+    let exp_scratch = max_qc_bytes(&ctx).unwrap();
+    let exp_original = proof.encoded().len() as u128; // the component-owned read copy is exactly payload-sized
+
+    for (tag, obs) in [("re-encode", reencode), ("binding", binding)] {
+        assert_eq!(
+            obs.original_encoded_cap, exp_original,
+            "QC {tag}: original backend-read encoded buffer capacity"
+        );
+        assert_eq!(
+            obs.transient_decoded_charge, exp_transient,
+            "QC {tag}: live transient decoded object charge (measured in place)"
+        );
+        assert_eq!(
+            obs.validation_scratch_cap, exp_scratch,
+            "QC {tag}: single live validation scratch capacity (variant serialized cap)"
+        );
+        assert!(
+            obs.total() <= o3_reservation,
+            "QC {tag}: actual simultaneous component-owned charge {} must be covered by the \
+             active O3 operational reservation {o3_reservation}",
+            obs.total()
+        );
+    }
+    // Pin the ACTUAL measured totals (reported in the evidence document); these are
+    // object-charge measurements, strictly below the 2870 reservation ceiling.
+    eprintln!(
+        "M1-QC original={} transient={} scratch={} reencode_total={} binding_total={}",
+        exp_original,
+        exp_transient,
+        exp_scratch,
+        reencode.total(),
+        binding.total()
+    );
+    assert_eq!(
+        reencode.total(),
+        1157,
+        "QC re-encode actual live charge (310+537+310)"
+    );
+    assert_eq!(
+        binding.total(),
+        1157,
+        "QC binding actual live charge (310+537+310)"
+    );
+    drop(proof);
+}
+
+/// M1 (RUN 422 D7-D14) — ACTUAL O3 live-object charges through real
+/// `owner.read_validate` for the MAXIMUM COMPLETE TC (811 serialized bytes). This
+/// produces the two TC phase rows (re-encode, binding) of the four M1 O3 rows.
+/// Same method and ceiling as the QC counterpart.
+#[test]
+fn d7d14_m1_o3_actual_object_charges_max_complete_tc() {
+    use qbind_node::safety_record_store::accounting::{
+        decoded_working_set_charge, max_transient_decoded_working_set,
+    };
+    use qbind_node::safety_record_store::owner::{
+        o3_binding_object_charge, o3_reencode_object_charge,
+    };
+    use qbind_node::safety_record_store::profile::{
+        max_retained_generation_bytes, max_safety_record_bytes, max_tc_bytes,
+    };
+    use qbind_node::safety_record_store::record::{
+        size_of_timeout_msg, validated_holder_handle_bytes,
+    };
+
+    let dir = tempfile::tempdir().unwrap();
+    let ctx = ctx_n(4);
+
+    let rec = max_safety_record_bytes(&ctx).unwrap();
+    let retained_gen = max_retained_generation_bytes(&ctx, size_of_timeout_msg()).unwrap();
+    let holder = rec + retained_gen + validated_holder_handle_bytes();
+    let transient_ceiling = max_transient_decoded_working_set(&ctx).unwrap();
+    let o3_scratch = (transient_ceiling - retained_gen) + rec;
+    let o3_reservation = holder + o3_scratch;
+    assert_eq!(holder, 2051, "retained-holder charge (profile maximum)");
+    assert_eq!(
+        o3_scratch, 819,
+        "O3 transient-excess + one record-sized buffer"
+    );
+    assert_eq!(
+        o3_reservation, 2870,
+        "active covering O3 operational reservation"
+    );
+
+    let complete = max_tc_locked_anchored(&ctx, 5, 6);
+    let history = FixtureCommittedHistory::new().with([7u8; 32], 3);
+    {
+        let owner = init_owner(dir.path(), &ctx);
+        assert_eq!(
+            owner.publish_locked(complete, 0, Some(&history)),
+            PublishResult::DurableAcknowledged { new_revision: 1 }
+        );
+    }
+
+    let owner = SafetyRecordOwner::attach(open_enabled(dir.path()), ctx.clone()).unwrap();
+    let proof = owner.read_validate(Some(&history)).unwrap();
+    assert_eq!(
+        proof.encoded().len(),
+        811,
+        "retained proof is the complete 811-byte TC"
+    );
+
+    let reencode = o3_reencode_object_charge().expect("O3 re-encode phase was observed");
+    let binding = o3_binding_object_charge().expect("O3 binding phase was observed");
+
+    let redecoded = decode_record(proof.encoded(), &ctx).unwrap();
+    let exp_transient = decoded_working_set_charge(&redecoded).unwrap();
+    let exp_scratch = max_tc_bytes(&ctx).unwrap();
+    let exp_original = proof.encoded().len() as u128;
+
+    for (tag, obs) in [("re-encode", reencode), ("binding", binding)] {
+        assert_eq!(
+            obs.original_encoded_cap, exp_original,
+            "TC {tag}: original backend-read encoded buffer capacity"
+        );
+        assert_eq!(
+            obs.transient_decoded_charge, exp_transient,
+            "TC {tag}: live transient decoded object charge (measured in place)"
+        );
+        assert_eq!(
+            obs.validation_scratch_cap, exp_scratch,
+            "TC {tag}: single live validation scratch capacity (variant serialized cap)"
+        );
+        assert!(
+            obs.total() <= o3_reservation,
+            "TC {tag}: actual simultaneous component-owned charge {} must be covered by the \
+             active O3 operational reservation {o3_reservation}",
+            obs.total()
+        );
+    }
+    eprintln!(
+        "M1-TC original={} transient={} scratch={} reencode_total={} binding_total={}",
+        exp_original,
+        exp_transient,
+        exp_scratch,
+        reencode.total(),
+        binding.total()
+    );
+    assert_eq!(
+        reencode.total(),
+        2734,
+        "TC re-encode actual live charge (811+1112+811)"
+    );
+    assert_eq!(
+        binding.total(),
+        2734,
+        "TC binding actual live charge (811+1112+811)"
+    );
+    drop(proof);
+}
+
+/// M2 (RUN 422 D7-D14) — ACTUAL simultaneous O5 live-object charge at the real
+/// `publish_atomic` publication boundary, for the complete maximum-TC flow
+/// (`O4 → drop/reopen → O3 → O5`). This is the single O5 publication-boundary row.
+///
+/// Unlike the L2 reservation boundary observation
+/// (`observed_publish_reservations`, which reads the RESERVATION amount 4877) and
+/// the Item-D envelope observation (815/46), this measures the ACTUAL
+/// simultaneously component-owned OBJECTS alive when both CRC envelopes coexist:
+/// the retained O3 proof (original encoded buffer + retained representation +
+/// nested backings + holder handle), O5's fresh read-back buffer, the fresh
+/// transient decoded object (inline + nested backings), the metadata payload
+/// buffer, and the two actual CRC staging envelopes. The owner supplies a bounded
+/// scalar snapshot of its live objects immediately before `publish_atomic`; the
+/// backend adds the two envelopes it is about to allocate. The combined actual
+/// live charge is asserted `<= 4877` (the active covering O5 operational
+/// reservation `holder 2051 + O5 operation 2826`). Borrowed `CMP_SPAN` adds no
+/// owned buffer and is not counted; the retained content is counted once (inside
+/// the proof's measured charge, never again).
+#[test]
+fn d7d14_m2_o5_actual_simultaneous_object_charge_at_publication() {
+    use qbind_node::safety_record_store::accounting::{
+        decoded_working_set_charge, evidence_backing_capacity, max_transient_decoded_working_set,
+        publication_staging_charge,
+    };
+    use qbind_node::safety_record_store::backend::{
+        arm_o5_live_object_observation, observed_o5_live_object_charge,
+        observed_publish_reservations,
+    };
+    use qbind_node::safety_record_store::profile::{
+        max_retained_generation_bytes, max_safety_record_bytes,
+    };
+    use qbind_node::safety_record_store::record::{
+        size_of_retained_record, size_of_timeout_msg, validated_holder_handle_bytes, SafetyRecord,
+    };
+
+    let dir = tempfile::tempdir().unwrap();
+    let ctx = ctx_n(4);
+
+    // Active covering O5 operational reservation, derived from the profile: the live
+    // O3 holder stays live across O5, plus O5's operation charge (read-back +
+    // metadata + transient + publication staging) = 2051 + 2826 = 4877.
+    let rec = max_safety_record_bytes(&ctx).unwrap();
+    let retained_gen = max_retained_generation_bytes(&ctx, size_of_timeout_msg()).unwrap();
+    let holder = rec + retained_gen + validated_holder_handle_bytes();
+    let transient = max_transient_decoded_working_set(&ctx).unwrap();
+    let staging = publication_staging_charge(&ctx).unwrap();
+    let o5_charge = rec + META_ENCODED_LEN_MIRROR + transient + staging;
+    let o5_reservation = holder + o5_charge;
+    assert_eq!(holder, 2051, "retained-holder charge (profile maximum)");
+    assert_eq!(o5_charge, 2826, "O5 operation charge");
+    assert_eq!(
+        o5_reservation, 4877,
+        "active covering O5 operational reservation"
+    );
+
+    // Complete maximum-TC flow: O4 publish, drop, reopen (fresh accountant).
+    let complete = max_tc_locked_anchored(&ctx, 5, 6);
+    let history = FixtureCommittedHistory::new().with([7u8; 32], 3);
+    {
+        let owner = init_owner(dir.path(), &ctx);
+        assert_eq!(
+            owner.publish_locked(complete, 0, Some(&history)),
+            PublishResult::DurableAcknowledged { new_revision: 1 }
+        );
+    }
+    let owner = SafetyRecordOwner::attach(open_enabled(dir.path()), ctx.clone()).unwrap();
+    assert!(
+        owner.recovery_required(),
+        "reopened store starts not-effective"
+    );
+    let backend = owner.backend_for_test();
+    let agg_cap = backend.accounting_aggregate_cap().unwrap();
+
+    // O3 mints the retained proof bound to this incarnation; it stays live across O5.
+    let proof = owner.read_validate(Some(&history)).unwrap();
+    assert_eq!(
+        proof.encoded().len(),
+        811,
+        "retained proof is the complete 811-byte TC"
+    );
+
+    // Observe the ACTUAL simultaneous live objects at the real publish boundary.
+    arm_o5_live_object_observation();
+    assert_eq!(
+        owner.reacknowledge(&proof),
+        PublishResult::DurableAcknowledged { new_revision: 1 }
+    );
+    let obs = observed_o5_live_object_charge()
+        .expect("the O5 republication reached the publish_atomic boundary");
+
+    // Independently measure the SAME objects (NOT via the reservation formula): the
+    // retained proof (encoded buffer + retained representation + nested backings +
+    // holder handle), and — since O5 republishes the retained bytes verbatim — the
+    // fresh read-back and transient decode of those same bytes.
+    let redecoded = decode_record(proof.encoded(), &ctx).unwrap();
+    let exp_transient = decoded_working_set_charge(&redecoded).unwrap();
+    let exp_retained_gen = match &proof.retained().record {
+        SafetyRecord::Locked(l) => {
+            size_of_retained_record() + evidence_backing_capacity(&l.evidence).unwrap()
+        }
+        SafetyRecord::BootstrapNoLock { .. } => size_of_retained_record(),
+    };
+    assert_eq!(
+        obs.retained_encoded_cap,
+        proof.encoded_capacity() as u128,
+        "retained proof encoded buffer capacity"
+    );
+    assert_eq!(
+        obs.retained_generation_charge, exp_retained_gen,
+        "retained representation + nested backings"
+    );
+    assert_eq!(
+        obs.holder_handle,
+        validated_holder_handle_bytes(),
+        "contract-charged holder handle"
+    );
+    assert_eq!(
+        obs.transient_decoded_charge, exp_transient,
+        "fresh transient decoded object (measured in place)"
+    );
+    // The two CRC staging envelopes are the ACTUAL 815 / 46 observed at Item D.
+    assert_eq!(
+        obs.record_envelope_cap, 815,
+        "actual record staging envelope (4 + 811)"
+    );
+    assert_eq!(
+        obs.metadata_envelope_cap, 46,
+        "actual metadata staging envelope (4 + 42)"
+    );
+    assert_eq!(
+        obs.metadata_payload_cap, META_ENCODED_LEN_MIRROR,
+        "metadata payload buffer capacity"
+    );
+
+    // PHASE INEQUALITY: actual simultaneous O5 live charge <= active covering
+    // operational reservation. Reported even though it is strictly below 4877 (the
+    // reservation is a conservative ceiling, NOT a measured object total).
+    assert!(
+        obs.total() <= o5_reservation,
+        "actual simultaneous O5 live charge {} must be covered by the active O5 operational \
+         reservation {o5_reservation}",
+        obs.total()
+    );
+
+    // Separately, the reservation-lifetime assertion is preserved: the active
+    // operational reservation at the SAME boundary is exactly 4877 (holder 2051 +
+    // O5 operation 2826), and the aggregate stays within the unchanged ceiling.
+    let (op_boundary, agg_boundary) = observed_publish_reservations()
+        .expect("the O5 republication reached the publish_atomic reservation boundary");
+    assert_eq!(
+        op_boundary, 4877,
+        "active operational reservation at the O5 publish boundary"
+    );
+    assert!(
+        agg_boundary <= agg_cap,
+        "aggregate reservation within the unchanged ceiling"
+    );
+
+    eprintln!(
+        "M2-O5 retained_enc={} retained_gen={} handle={} readback={} transient={} meta_payload={} \
+         rec_env={} meta_env={} total={}",
+        obs.retained_encoded_cap,
+        obs.retained_generation_charge,
+        obs.holder_handle,
+        obs.readback_cap,
+        obs.transient_decoded_charge,
+        obs.metadata_payload_cap,
+        obs.record_envelope_cap,
+        obs.metadata_envelope_cap,
+        obs.total()
+    );
+    assert_eq!(
+        obs.total(),
+        4845,
+        "O5 actual simultaneous live charge (811+1072+136+811+1112+42+815+46)"
+    );
+    drop(proof);
+}

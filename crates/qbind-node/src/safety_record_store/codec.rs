@@ -407,6 +407,15 @@ pub fn compute_evidence_lock_binding(
         "evidence cert backing capacity {} diverged from the admitted cap {cert_cap}",
         cert.capacity()
     );
+    // Test-only (RUN 422 D7-D14 M1): record the ACTUAL certificate-binding-phase
+    // live object charge while the `cert` scratch is live. Combined with the
+    // phase-invariant original-encoded + transient-decoded terms established in
+    // `validate_decoded`, this captures the real simultaneously component-owned set
+    // at the binding phase (after the re-encode buffer was released). A no-op unless
+    // the O3 `read_validate` armed the observation, so O4/public-builder callers of
+    // this function never record; never affects production behaviour.
+    #[cfg(any(test, feature = "test-utils"))]
+    super::owner::observe_o3_binding_object(cert.capacity() as u128);
     let mut h = Sha3_256::new();
     h.update(DOMAIN_BINDING);
     h.update(lock_block_id);
