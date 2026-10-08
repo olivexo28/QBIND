@@ -6496,6 +6496,233 @@ fn d7d14_o3_real_read_validate_with_live_holder_within_aggregate() {
     );
 }
 
+/// §5 — R4 (RUN 422 D7-D14): maximum complete O5 + publication-boundary coverage.
+/// Drives the full `O4 publication → drop/reopen → O3 validation → O5
+/// reacknowledgement` sequence over a MAXIMUM COMPLETE TC (anchor + predecessor,
+/// 811 serialized bytes) with valid independent committed history. It observes the
+/// real O5 operational peak and asserts it reaches `holder + o5_charge` where the
+/// O5 charge INCLUDES the publication-staging envelopes (record + metadata CRC
+/// frames). A mutation that leaves `publication_staging_charge()` unchanged but
+/// drops the staging term from the actual O5 reservation collapses this peak by the
+/// staging bytes and FAILS the assertion. A tight-headroom admission probe then
+/// establishes the staging-inclusive O5 reservation is ACTUALLY admitted through
+/// the shared aggregate authority. Successful original-byte republication, the
+/// unchanged revision, the recovery-state transition, and reservation cleanup are
+/// all verified.
+#[test]
+fn d7d14_r4_o5_reacknowledge_max_complete_tc_publication_boundary_coverage() {
+    use qbind_node::safety_record_store::accounting::{
+        max_transient_decoded_working_set, publication_staging_charge, CRC_PREFIX,
+    };
+    use qbind_node::safety_record_store::profile::max_retained_generation_bytes;
+    use qbind_node::safety_record_store::record::{
+        size_of_timeout_msg, validated_holder_handle_bytes,
+    };
+
+    let dir = tempfile::tempdir().unwrap();
+    let ctx = ctx_n(4);
+
+    // Independently derive the O5 reservation terms from the profile.
+    let rec = max_safety_record_bytes(&ctx).unwrap();
+    let retained_gen = max_retained_generation_bytes(&ctx, size_of_timeout_msg()).unwrap();
+    let handle = validated_holder_handle_bytes();
+    let holder = rec + retained_gen + handle;
+    let transient = max_transient_decoded_working_set(&ctx).unwrap();
+    let staging = publication_staging_charge(&ctx).unwrap();
+    let meta_len = META_ENCODED_LEN_MIRROR;
+    let o5_charge = rec + meta_len + transient + staging;
+    assert_eq!(rec, 811, "max record-level read-back buffer");
+    assert_eq!(holder, 2051, "retained-holder charge");
+    assert_eq!(transient, 1112, "transient decoded working set");
+    assert_eq!(meta_len, 42, "metadata payload length");
+    assert_eq!(
+        staging, 861,
+        "publication staging = record envelope (4+811) + metadata envelope (4+42)"
+    );
+    assert_eq!(
+        o5_charge, 2826,
+        "O5 charge = read-back + metadata + transient + staging"
+    );
+
+    // The MAXIMUM COMPLETE TC and its ACTUAL serialized size (811, not the 763-byte
+    // evidence-only fixture).
+    let complete = max_tc_locked_anchored(&ctx, 5, 6);
+    assert!(complete.committed_anchor.is_some() && complete.predecessor_ref.is_some());
+    let complete_dec = DecodedRecord {
+        persistence_format_version: 1,
+        network_genesis_id: ctx.network_genesis_id,
+        publication_revision: 1,
+        record: SafetyRecord::Locked(complete.clone()),
+    };
+    let complete_enc = encode_record(&complete_dec, &ctx).unwrap();
+    assert_eq!(
+        complete_enc.len(),
+        811,
+        "maximum complete serialized TC is 811 bytes for the N=4 profile"
+    );
+
+    // Independently verify the publication-envelope capacities for the COMPLETE
+    // record (not the earlier 767 + 46 evidence-only observation): a CRC-framed
+    // envelope is `Vec::with_capacity(CRC_PREFIX + payload.len())`.
+    let record_env: Vec<u8> = Vec::with_capacity(CRC_PREFIX as usize + complete_enc.len());
+    assert_eq!(
+        record_env.capacity() as u128,
+        CRC_PREFIX + 811,
+        "full complete-record envelope capacity (4 + 811)"
+    );
+    let meta_env: Vec<u8> = Vec::with_capacity(CRC_PREFIX as usize + meta_len as usize);
+    assert_eq!(
+        meta_env.capacity() as u128,
+        CRC_PREFIX + 42,
+        "metadata envelope capacity (4 + 42)"
+    );
+    assert_eq!(
+        (record_env.capacity() + meta_env.capacity()) as u128,
+        staging,
+        "the two envelope capacities sum to the publication-staging charge"
+    );
+
+    let history = FixtureCommittedHistory::new().with([7u8; 32], 3);
+
+    // O4: publish the complete TC durably (dropped before any reopen).
+    {
+        let owner = init_owner(dir.path(), &ctx);
+        assert_eq!(
+            owner.publish_locked(complete, 0, Some(&history)),
+            PublishResult::DurableAcknowledged { new_revision: 1 }
+        );
+    }
+
+    // ----- Drive drop/reopen → O3 validation → O5 reacknowledgement on a FRESH
+    // backend, observing the real O5 operational peak. -----
+    let agg_cap;
+    {
+        let owner = SafetyRecordOwner::attach(open_enabled(dir.path()), ctx.clone()).unwrap();
+        let backend = owner.backend_for_test();
+        agg_cap = backend.accounting_aggregate_cap().unwrap();
+        assert!(
+            owner.recovery_required(),
+            "reopened store starts not-effective"
+        );
+
+        // O3: mint the backend-bound O5 capability; its holder reservation stays live.
+        let proof = owner.read_validate(Some(&history)).unwrap();
+        assert!(proof.retained().is_locked());
+        assert_eq!(
+            backend.accounting_current(),
+            holder,
+            "only the retained holder is live before O5"
+        );
+        let rev_before = proof.retained().publication_revision;
+
+        // O5: reacknowledge the surviving complete-TC publication while the O3 proof
+        // is live. Republishes the ORIGINAL bytes verbatim; revision is unchanged.
+        assert_eq!(
+            owner.reacknowledge(&proof),
+            PublishResult::DurableAcknowledged { new_revision: 1 }
+        );
+
+        // DISCRIMINATING OBSERVATION: the operational peak reached holder + o5_charge,
+        // which INCLUDES the publication-staging envelopes. Dropping the staging term
+        // from the O5 reservation collapses this peak by `staging` bytes.
+        assert_eq!(
+            backend.accounting_peak(),
+            holder + o5_charge,
+            "O5 operational peak must reach holder + o5_charge (incl. publication staging); \
+             a lower peak means staging was removed from the O5 reservation"
+        );
+        assert!(
+            backend.accounting_aggregate_peak() <= agg_cap,
+            "O5 + live O3 holder peak within the unchanged aggregate"
+        );
+
+        // Recovery-state transition: a successful O5 clears the fresh-acknowledgement
+        // requirement; the revision is unchanged.
+        assert!(
+            !owner.recovery_required(),
+            "successful O5 reacknowledgement clears the recovery requirement"
+        );
+        assert_eq!(
+            proof.retained().publication_revision,
+            rev_before,
+            "O5 republishes at the unchanged revision"
+        );
+
+        // Successful ORIGINAL-byte republication: a fresh O3 read-back equals the
+        // retained original bytes verbatim.
+        let reproof = owner.read_validate(Some(&history)).unwrap();
+        assert_eq!(
+            reproof.encoded(),
+            proof.encoded(),
+            "O5 republished the original bytes verbatim"
+        );
+        assert_eq!(
+            reproof.encoded().len(),
+            811,
+            "republished complete record is 811 bytes"
+        );
+
+        drop(reproof);
+        drop(proof);
+        assert_eq!(
+            backend.accounting_current(),
+            0,
+            "every O5/holder reservation releases (clean cleanup)"
+        );
+    }
+
+    // ----- Admission sensitivity: the staging-inclusive O5 reservation is ACTUALLY
+    // admitted through the shared aggregate authority. Leave EXACTLY o5_charge of
+    // operational headroom beyond the live holder: reacknowledge SUCCEEDS. -----
+    {
+        let owner = SafetyRecordOwner::attach(open_enabled(dir.path()), ctx.clone()).unwrap();
+        let backend = owner.backend_for_test();
+        let proof = owner.read_validate(Some(&history)).unwrap();
+        let ctx_live = backend.context_accounting_current();
+        // operational during O5 peak = holder (live) + standing + o5_charge; keep the
+        // aggregate (operational + context) at exactly agg_cap.
+        let standing = agg_cap - ctx_live - holder - o5_charge;
+        let standing_res = backend.reserve_standing_for_test(standing).unwrap();
+        assert_eq!(
+            owner.reacknowledge(&proof),
+            PublishResult::DurableAcknowledged { new_revision: 1 },
+            "O5 fits when exactly o5_charge headroom remains beyond the holder"
+        );
+        drop(standing_res);
+        drop(proof);
+    }
+
+    // ----- One byte tighter: the staging-inclusive O5 reservation no longer fits,
+    // so reacknowledge REFUSES. If staging were removed from the O5 reservation,
+    // this would wrongly SUCCEED. -----
+    {
+        let owner = SafetyRecordOwner::attach(open_enabled(dir.path()), ctx.clone()).unwrap();
+        let backend = owner.backend_for_test();
+        let proof = owner.read_validate(Some(&history)).unwrap();
+        let ctx_live = backend.context_accounting_current();
+        let standing = agg_cap - ctx_live - holder - o5_charge + 1;
+        let _standing_res = backend.reserve_standing_for_test(standing).unwrap();
+        match owner.reacknowledge(&proof) {
+            PublishResult::RefusedPreWrite(SafetyStoreError::CapacityRefusal(_)) => {}
+            other => panic!(
+                "one byte short of o5_charge must refuse the O5 reservation \
+                 (CapacityRefusal), got {other:?}"
+            ),
+        }
+        // The refusal left the durable publication and the retained holder intact.
+        assert!(
+            owner.recovery_required(),
+            "a refused O5 does not clear the recovery requirement"
+        );
+        assert_eq!(
+            proof.retained().publication_revision,
+            1,
+            "a refused O5 leaves the retained revision unchanged"
+        );
+        drop(proof);
+    }
+}
+
 /// §4 — the protected O4 structural/capacity preflight REFUSAL path is
 /// allocation-free. The smallest per-vector over-bound (S_sig=8, len 8, capacity 9,
 /// slack 0) is refused, and the measured refusal interval (after fixture
