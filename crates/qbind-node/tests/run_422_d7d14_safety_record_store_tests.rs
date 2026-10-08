@@ -6987,3 +6987,87 @@ fn d7d14_b_o3_live_bytes_reencode_released_before_binding_max_tc() {
     let cap = max_tc_bytes(&ctx).unwrap() as usize;
     observe_o3_validation_live_bytes(valid_tc_record_max(&ctx, 5, 6), cap, "max-TC O3");
 }
+
+/// Item D — INDEPENDENT publication-staging boundary observation. Complementary
+/// to the accountant-counter regression
+/// `d7d14_o5_publication_envelope_coexistence_reserved_within_aggregate` (which
+/// is retained): this drives the REAL `publish_atomic` submit boundary and reads
+/// the ACTUAL component-owned CRC-envelope backing capacities observed there,
+/// then checks they are covered by `publication_staging_charge` WITHOUT deriving
+/// the observed footprint from that charge. A reopened backend guarantees an
+/// earlier O4 peak cannot mask O5.
+///
+/// Sensitivity: removing the record-envelope term from `publication_staging_charge`
+/// (i.e. dropping required staging coverage while the real envelopes are still
+/// allocated) makes the coverage assertion below FAIL. See the evidence document
+/// (Run 422 D7-D14 Item D) for the captured failure; the reservation is restored
+/// before final validation.
+#[test]
+fn d7d14_d_publication_staging_boundary_observed_independently() {
+    use qbind_node::safety_record_store::accounting::{publication_staging_charge, CRC_PREFIX};
+    use qbind_node::safety_record_store::backend::{
+        arm_publish_staging_observation, observed_publish_staging,
+    };
+
+    let dir = tempfile::tempdir().unwrap();
+    let ctx = ctx_n(4);
+    let owner = init_owner(dir.path(), &ctx);
+
+    // O4: publish the maximum-TC record (worst-case record envelope), then drop
+    // the owner so the O4 peak does not pollute the reopened accountant.
+    let ltc = valid_tc_record_max(&ctx, 5, 6);
+    assert_eq!(
+        owner.publish_locked(ltc, 0, None::<&FixtureCommittedHistory>),
+        PublishResult::DurableAcknowledged { new_revision: 1 }
+    );
+    drop(owner);
+
+    // Reopen a fresh backend (zeroed accountant peak; not-effective → O5 recovers).
+    let owner = SafetyRecordOwner::attach(open_enabled(dir.path()), ctx.clone()).unwrap();
+    assert!(owner.recovery_required(), "reopened store starts not-effective");
+    // A live O3 proof bound to THIS incarnation authorizes the O5 republication.
+    let proof = owner
+        .read_validate(None::<&FixtureCommittedHistory>)
+        .unwrap();
+
+    // Observe the REAL envelope capacities at the actual publish_atomic boundary.
+    arm_publish_staging_observation();
+    assert_eq!(
+        owner.reacknowledge(&proof),
+        PublishResult::DurableAcknowledged { new_revision: 1 }
+    );
+    let (record_env_cap, meta_env_cap) =
+        observed_publish_staging().expect("the O5 republication reached the publish_atomic boundary");
+
+    // The observed envelopes are the genuine `4 + payload.len()` CRC framings over
+    // the republished ORIGINAL bytes and the fixed metadata payload — observed
+    // capacity, never a `len()` substitute.
+    let crc = CRC_PREFIX as usize;
+    assert_eq!(
+        record_env_cap,
+        crc + proof.encoded().len(),
+        "record staging envelope wraps the retained original bytes (observed capacity)"
+    );
+    assert_eq!(
+        meta_env_cap, 46,
+        "metadata staging envelope == CRC_PREFIX(4) + META_ENCODED_LEN(42)"
+    );
+
+    // INDEPENDENT coverage check: the two actually-observed component-owned
+    // envelopes fit the `publication_staging_charge` reservation taken up front.
+    // Removing the record term from that charge makes this FAIL (sensitivity).
+    let staging = publication_staging_charge(&ctx).unwrap();
+    assert!(
+        (record_env_cap + meta_env_cap) as u128 <= staging,
+        "observed staging envelopes ({record_env_cap}+{meta_env_cap}) must be covered by the \
+         publication_staging_charge reservation ({staging})"
+    );
+    // And the record envelope sits at the worst case the charge provisions for:
+    // the charge's record term is CRC_PREFIX + max_safety_record_bytes.
+    let max_rec = qbind_node::safety_record_store::profile::max_safety_record_bytes(&ctx).unwrap();
+    assert!(
+        record_env_cap as u128 <= crc as u128 + max_rec,
+        "observed record envelope within the provisioned worst case"
+    );
+    drop(proof);
+}

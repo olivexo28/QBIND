@@ -27,6 +27,35 @@ use crate::storage::signing_journal_crc32;
 /// so a recovery token from one incarnation is never honoured by another.
 static OWNERSHIP_INCARNATION: AtomicU64 = AtomicU64::new(1);
 
+// Test-only publication-staging observation (Run 422 D7-D14 Item D). At the
+// real `publish_atomic` boundary the two CRC-wrapped staging envelopes
+// (`wrap(record)`, `wrap(meta)`) are genuinely component-owned allocations that
+// coexist with the read-back, transient decode, metadata payload, and retained
+// proof. This records their ACTUAL backing capacities so a focused test can
+// verify the `publication_staging_charge` reservation covers them INDEPENDENTLY
+// of that charge function. It is a boundary marker only — not a total-allocation
+// meter — and is absent from default production builds.
+#[cfg(any(test, feature = "test-utils"))]
+thread_local! {
+    static PUBLISH_STAGING_OBS: std::cell::Cell<Option<(usize, usize)>> =
+        const { std::cell::Cell::new(None) };
+}
+
+/// Test-only: arm/reset the publication-staging envelope observation for the
+/// current thread. Call immediately before the O4/O5 operation to observe.
+#[cfg(any(test, feature = "test-utils"))]
+pub fn arm_publish_staging_observation() {
+    PUBLISH_STAGING_OBS.with(|c| c.set(None));
+}
+
+/// Test-only: read the `(record_envelope_capacity, meta_envelope_capacity)`
+/// observed at the most recent `publish_atomic` submit boundary on this thread,
+/// or `None` if no publish reached the boundary since arming.
+#[cfg(any(test, feature = "test-utils"))]
+pub fn observed_publish_staging() -> Option<(usize, usize)> {
+    PUBLISH_STAGING_OBS.with(|c| c.get())
+}
+
 /// The metadata key (one per backend DB).
 const META_KEY: &[u8] = b"safetyrec:meta:v1";
 /// The authoritative-record key (record + embedded supporting material).
@@ -452,8 +481,20 @@ impl SafetyBackend {
         }
 
         let mut batch = rocksdb::WriteBatch::default();
-        batch.put(META_KEY, Self::wrap(meta));
-        batch.put(RECORD_KEY, Self::wrap(record));
+        // Materialize the two CRC-wrapped staging envelopes as named locals so
+        // the real component-owned backing capacities can be observed at this
+        // boundary (Item D). Behaviour is unchanged: they are `put` into the
+        // same batch exactly as before. The observation call is cfg-gated and
+        // absent from production builds.
+        let meta_envelope = Self::wrap(meta);
+        let record_envelope = Self::wrap(record);
+        #[cfg(any(test, feature = "test-utils"))]
+        {
+            let caps = (record_envelope.capacity(), meta_envelope.capacity());
+            PUBLISH_STAGING_OBS.with(|c| c.set(Some(caps)));
+        }
+        batch.put(META_KEY, meta_envelope);
+        batch.put(RECORD_KEY, record_envelope);
         let mut write_opts = rocksdb::WriteOptions::default();
         write_opts.set_sync(true);
 
