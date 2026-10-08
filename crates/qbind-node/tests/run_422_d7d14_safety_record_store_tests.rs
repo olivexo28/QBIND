@@ -6352,6 +6352,19 @@ fn d7d14_r3_o3_real_read_validate_max_complete_qc_operational_coverage() {
         "the O3 scratch reservation must remain live THROUGH the allocation phase \
          (sampled before validate_decoded) for the QC record"
     );
+    // L1 (RUN 422 D7-D14): the SAME operational reservation observed from INSIDE
+    // `validate_decoded`, while the record-sized correspondence re-encode buffer is
+    // live, also equals the full O3 phase reservation for the QC record. Unlike the
+    // pre-validation sample above, this establishes the O3 scratch stays active
+    // THROUGH the validation allocation phase; releasing it after the pre-validation
+    // sample but before `validate_decoded` collapses THIS sample (not the one above)
+    // to the bare holder.
+    assert_eq!(
+        qbind_node::safety_record_store::owner::o3_in_validation_reservation_sample(),
+        holder + o3_scratch,
+        "the O3 scratch reservation must remain live INSIDE validate_decoded (QC), \
+         observed while the record-sized validation buffer is live"
+    );
     assert_eq!(
         backend.accounting_current(),
         holder,
@@ -6478,6 +6491,17 @@ fn d7d14_r3_o3_real_read_validate_max_complete_tc_operational_coverage() {
             holder + o3_scratch,
             "the O3 scratch reservation must remain live THROUGH the allocation phase \
              (sampled before validate_decoded), not merely be reserved then released early"
+        );
+        // L1 (RUN 422 D7-D14): the SAME operational reservation observed from INSIDE
+        // `validate_decoded`, while the record-sized correspondence re-encode buffer
+        // is live, also equals the full O3 phase reservation for the complete TC. This
+        // establishes the O3 scratch stays active THROUGH the validation allocation
+        // phase, not merely up to the sample just before `validate_decoded`.
+        assert_eq!(
+            qbind_node::safety_record_store::owner::o3_in_validation_reservation_sample(),
+            holder + o3_scratch,
+            "the O3 scratch reservation must remain live INSIDE validate_decoded (TC), \
+             observed while the record-sized validation buffer is live"
         );
         assert_eq!(
             backend.accounting_current(),
@@ -7992,9 +8016,17 @@ fn d7d14_b_o3_live_bytes_reencode_released_before_binding_max_tc() {
 /// before final validation.
 #[test]
 fn d7d14_d_publication_staging_boundary_observed_independently() {
-    use qbind_node::safety_record_store::accounting::{publication_staging_charge, CRC_PREFIX};
+    use qbind_node::safety_record_store::accounting::{
+        max_transient_decoded_working_set, publication_staging_charge, CRC_PREFIX,
+    };
     use qbind_node::safety_record_store::backend::{
-        arm_publish_staging_observation, observed_publish_staging,
+        arm_publish_staging_observation, observed_publish_reservations, observed_publish_staging,
+    };
+    use qbind_node::safety_record_store::profile::{
+        max_retained_generation_bytes, max_safety_record_bytes,
+    };
+    use qbind_node::safety_record_store::record::{
+        size_of_timeout_msg, validated_holder_handle_bytes,
     };
 
     let dir = tempfile::tempdir().unwrap();
@@ -8023,6 +8055,23 @@ fn d7d14_d_publication_staging_boundary_observed_independently() {
         owner.recovery_required(),
         "reopened store starts not-effective"
     );
+    let backend = owner.backend_for_test();
+    let agg_cap = backend.accounting_aggregate_cap().unwrap();
+
+    // Independently derive the live-set reservations from the profile (NOT from the
+    // operation under test): the O3 holder stays live across O5, and O5 reserves its
+    // read-back + metadata + transient + publication-staging operation charge.
+    let rec = max_safety_record_bytes(&ctx).unwrap();
+    let retained_gen = max_retained_generation_bytes(&ctx, size_of_timeout_msg()).unwrap();
+    let holder = rec + retained_gen + validated_holder_handle_bytes();
+    let transient = max_transient_decoded_working_set(&ctx).unwrap();
+    let staging = publication_staging_charge(&ctx).unwrap();
+    let o5_charge = rec + (META_ENCODED_LEN_MIRROR) + transient + staging;
+    assert_eq!(holder, 2051, "retained-holder charge (profile maximum)");
+    assert_eq!(
+        o5_charge, 2826,
+        "O5 operation charge = read-back + metadata + transient + staging"
+    );
     // A live O3 proof bound to THIS incarnation authorizes the O5 republication.
     let proof = owner.read_validate(Some(&history)).unwrap();
     assert_eq!(
@@ -8040,6 +8089,31 @@ fn d7d14_d_publication_staging_boundary_observed_independently() {
     );
     let (record_env_cap, meta_env_cap) = observed_publish_staging()
         .expect("the O5 republication reached the publish_atomic boundary");
+
+    // L2 (RUN 422 D7-D14): the ACTIVE operational reservation observed at this SAME
+    // publish boundary — a point-in-time BOUNDARY measurement, NOT a historical peak —
+    // equals the live O3 holder (2051) plus the O5 operation charge (2826) = 4877. The
+    // O5 reservation is therefore still active WHILE the two CRC envelopes coexist with
+    // the read-back, transient decode, metadata payload, and retained proof. Releasing
+    // `_o5_res` before `publish_atomic` collapses this observed value to the bare holder.
+    let (op_boundary, agg_boundary) = observed_publish_reservations()
+        .expect("the O5 republication reached the publish_atomic reservation boundary");
+    assert_eq!(
+        op_boundary,
+        holder + o5_charge,
+        "active operational reservation at the O5 publish boundary must be the live holder \
+         plus the O5 operation charge (holder {holder} + o5 {o5_charge}); a lower value means \
+         the O5 reservation was not active while the envelopes coexist",
+    );
+    assert_eq!(
+        op_boundary, 4877,
+        "O5 publication-boundary operational reservation == holder 2051 + O5 operation 2826"
+    );
+    assert!(
+        agg_boundary <= agg_cap,
+        "aggregate reservation at the O5 publish boundary ({agg_boundary}) within the unchanged \
+         aggregate ({agg_cap})",
+    );
 
     // The observed envelopes are the genuine `4 + payload.len()` CRC framings over
     // the republished ORIGINAL bytes and the fixed metadata payload — observed
