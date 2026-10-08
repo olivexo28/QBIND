@@ -143,11 +143,31 @@ impl O5LiveObjectCharge {
 #[cfg(any(test, feature = "test-utils"))]
 type O5OwnerSnapshot = (u128, u128, u128, u128, u128, u128);
 
+/// Test-only (RUN 422 D7-D14 S2): a bounded typed marker that the O5
+/// live-object observation could NOT be constructed because one of its
+/// component measurements failed. It is NOT a production refusal and never
+/// changes storage behaviour: the real `publish_atomic` proceeds exactly as
+/// before. Its only effect is that the consuming test observes an invalid
+/// observation (no valid partial total, no stale successful snapshot) instead of
+/// a silently zero-substituted one.
+#[cfg(any(test, feature = "test-utils"))]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum O5ObservationError {
+    /// `evidence_backing_capacity` of the retained proof's evidence failed, so the
+    /// retained-generation charge could not be measured.
+    RetainedBackingMeasurementFailed,
+    /// `decoded_working_set_charge` of the fresh read-back decode failed, so the
+    /// transient decoded charge could not be measured.
+    TransientDecodeMeasurementFailed,
+}
+
 #[cfg(any(test, feature = "test-utils"))]
 thread_local! {
     static O5_OWNER_SNAPSHOT: std::cell::Cell<Option<O5OwnerSnapshot>> =
         const { std::cell::Cell::new(None) };
     static O5_LIVE_OBJECT_OBS: std::cell::Cell<Option<O5LiveObjectCharge>> =
+        const { std::cell::Cell::new(None) };
+    static O5_OBS_INVALID: std::cell::Cell<Option<O5ObservationError>> =
         const { std::cell::Cell::new(None) };
 }
 
@@ -157,6 +177,7 @@ thread_local! {
 pub fn arm_o5_live_object_observation() {
     O5_OWNER_SNAPSHOT.with(|c| c.set(None));
     O5_LIVE_OBJECT_OBS.with(|c| c.set(None));
+    O5_OBS_INVALID.with(|c| c.set(None));
 }
 
 /// Crate/test-only: the owner records its live-object scalar snapshot here, while
@@ -182,11 +203,32 @@ pub(crate) fn set_o5_owner_live_snapshot(
     });
 }
 
+/// Crate/test-only (RUN 422 D7-D14 S2): the owner records that it could NOT build
+/// a live-object snapshot because a component measurement failed. This FAIL-CLOSES
+/// the observation: it suppresses any owner snapshot the boundary would combine
+/// (so no valid partial total is published), clears any earlier successful
+/// observation (so a failed measurement can never reuse a preceding success), and
+/// records the typed failure for the consuming test. No zero is substituted.
+#[cfg(any(test, feature = "test-utils"))]
+pub(crate) fn invalidate_o5_live_object_observation(err: O5ObservationError) {
+    O5_OWNER_SNAPSHOT.with(|c| c.set(None));
+    O5_LIVE_OBJECT_OBS.with(|c| c.set(None));
+    O5_OBS_INVALID.with(|c| c.set(Some(err)));
+}
+
 /// Test-only: the ACTUAL combined O5 live-object charge observed at the most recent
-/// `publish_atomic` boundary where an owner snapshot was supplied, or `None`.
+/// `publish_atomic` boundary where a VALID owner snapshot was supplied, or `None`
+/// (not reached, or the observation was invalidated by a failed measurement).
 #[cfg(any(test, feature = "test-utils"))]
 pub fn observed_o5_live_object_charge() -> Option<O5LiveObjectCharge> {
     O5_LIVE_OBJECT_OBS.with(|c| c.get())
+}
+
+/// Test-only (RUN 422 D7-D14 S2): the typed O5 observation failure recorded at the
+/// most recent `reacknowledge`, or `None` if the observation was not invalidated.
+#[cfg(any(test, feature = "test-utils"))]
+pub fn observed_o5_observation_error() -> Option<O5ObservationError> {
+    O5_OBS_INVALID.with(|c| c.get())
 }
 
 /// The metadata key (one per backend DB).

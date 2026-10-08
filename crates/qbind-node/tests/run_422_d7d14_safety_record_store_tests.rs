@@ -8249,7 +8249,7 @@ fn d7d14_m1_o3_actual_object_charges_max_complete_qc() {
         decoded_working_set_charge, max_transient_decoded_working_set,
     };
     use qbind_node::safety_record_store::owner::{
-        o3_binding_object_charge, o3_reencode_object_charge,
+        o3_binding_object_charge, o3_reencode_object_charge, O3Phase,
     };
     use qbind_node::safety_record_store::profile::{
         max_qc_bytes, max_retained_generation_bytes, max_safety_record_bytes,
@@ -8292,11 +8292,16 @@ fn d7d14_m1_o3_actual_object_charges_max_complete_qc() {
 
     // Real O3 on a FRESH reopened backend; the observation records both phases.
     let owner = SafetyRecordOwner::attach(open_enabled(dir.path()), ctx.clone()).unwrap();
+    let agg_cap = owner.backend_for_test().accounting_aggregate_cap().unwrap();
+    assert_eq!(agg_cap, 7772, "accepted N=4 aggregate cap");
     let proof = owner.read_validate(Some(&history)).unwrap();
     assert!(proof.retained().is_locked());
 
     let reencode = o3_reencode_object_charge().expect("O3 re-encode phase was observed");
     let binding = o3_binding_object_charge().expect("O3 binding phase was observed");
+    // Each record self-identifies its phase (explicit phase information).
+    assert_eq!(reencode.phase, O3Phase::Reencode, "re-encode record phase");
+    assert_eq!(binding.phase, O3Phase::Binding, "binding record phase");
 
     // Independently measure the SAME live objects (not via the reservation formula):
     //  * the transient decoded object is exactly the stored record re-decoded;
@@ -8320,22 +8325,40 @@ fn d7d14_m1_o3_actual_object_charges_max_complete_qc() {
             obs.validation_scratch_cap, exp_scratch,
             "QC {tag}: single live validation scratch capacity (variant serialized cap)"
         );
+        // S1: the ACTUAL object charge is covered by the operational reservation
+        // OBSERVED AT THIS PHASE (not a profile-derived expected value).
         assert!(
-            obs.total() <= o3_reservation,
+            obs.total() <= obs.observed_active_operational_reservation,
             "QC {tag}: actual simultaneous component-owned charge {} must be covered by the \
-             active O3 operational reservation {o3_reservation}",
-            obs.total()
+             operational reservation {} observed at this phase",
+            obs.total(),
+            obs.observed_active_operational_reservation
+        );
+        // S1: the observed operational reservation equals the expected O3 reservation
+        // (cross-check, 2870), and the observed aggregate reservation stays within the
+        // accepted aggregate cap (7772).
+        assert_eq!(
+            obs.observed_active_operational_reservation, o3_reservation,
+            "QC {tag}: observed operational reservation == expected O3 reservation"
+        );
+        assert!(
+            obs.observed_active_aggregate_reservation <= agg_cap,
+            "QC {tag}: observed aggregate reservation {} within accepted cap {agg_cap}",
+            obs.observed_active_aggregate_reservation
         );
     }
     // Pin the ACTUAL measured totals (reported in the evidence document); these are
     // object-charge measurements, strictly below the 2870 reservation ceiling.
     eprintln!(
-        "M1-QC original={} transient={} scratch={} reencode_total={} binding_total={}",
+        "M1-QC original={} transient={} scratch={} reencode_total={} binding_total={} \
+         op_res={} agg_res={}",
         exp_original,
         exp_transient,
         exp_scratch,
         reencode.total(),
-        binding.total()
+        binding.total(),
+        reencode.observed_active_operational_reservation,
+        reencode.observed_active_aggregate_reservation
     );
     assert_eq!(
         reencode.total(),
@@ -8360,7 +8383,7 @@ fn d7d14_m1_o3_actual_object_charges_max_complete_tc() {
         decoded_working_set_charge, max_transient_decoded_working_set,
     };
     use qbind_node::safety_record_store::owner::{
-        o3_binding_object_charge, o3_reencode_object_charge,
+        o3_binding_object_charge, o3_reencode_object_charge, O3Phase,
     };
     use qbind_node::safety_record_store::profile::{
         max_retained_generation_bytes, max_safety_record_bytes, max_tc_bytes,
@@ -8399,6 +8422,8 @@ fn d7d14_m1_o3_actual_object_charges_max_complete_tc() {
     }
 
     let owner = SafetyRecordOwner::attach(open_enabled(dir.path()), ctx.clone()).unwrap();
+    let agg_cap = owner.backend_for_test().accounting_aggregate_cap().unwrap();
+    assert_eq!(agg_cap, 7772, "accepted N=4 aggregate cap");
     let proof = owner.read_validate(Some(&history)).unwrap();
     assert_eq!(
         proof.encoded().len(),
@@ -8408,6 +8433,8 @@ fn d7d14_m1_o3_actual_object_charges_max_complete_tc() {
 
     let reencode = o3_reencode_object_charge().expect("O3 re-encode phase was observed");
     let binding = o3_binding_object_charge().expect("O3 binding phase was observed");
+    assert_eq!(reencode.phase, O3Phase::Reencode, "re-encode record phase");
+    assert_eq!(binding.phase, O3Phase::Binding, "binding record phase");
 
     let redecoded = decode_record(proof.encoded(), &ctx).unwrap();
     let exp_transient = decoded_working_set_charge(&redecoded).unwrap();
@@ -8428,19 +8455,32 @@ fn d7d14_m1_o3_actual_object_charges_max_complete_tc() {
             "TC {tag}: single live validation scratch capacity (variant serialized cap)"
         );
         assert!(
-            obs.total() <= o3_reservation,
+            obs.total() <= obs.observed_active_operational_reservation,
             "TC {tag}: actual simultaneous component-owned charge {} must be covered by the \
-             active O3 operational reservation {o3_reservation}",
-            obs.total()
+             operational reservation {} observed at this phase",
+            obs.total(),
+            obs.observed_active_operational_reservation
+        );
+        assert_eq!(
+            obs.observed_active_operational_reservation, o3_reservation,
+            "TC {tag}: observed operational reservation == expected O3 reservation"
+        );
+        assert!(
+            obs.observed_active_aggregate_reservation <= agg_cap,
+            "TC {tag}: observed aggregate reservation {} within accepted cap {agg_cap}",
+            obs.observed_active_aggregate_reservation
         );
     }
     eprintln!(
-        "M1-TC original={} transient={} scratch={} reencode_total={} binding_total={}",
+        "M1-TC original={} transient={} scratch={} reencode_total={} binding_total={} \
+         op_res={} agg_res={}",
         exp_original,
         exp_transient,
         exp_scratch,
         reencode.total(),
-        binding.total()
+        binding.total(),
+        reencode.observed_active_operational_reservation,
+        reencode.observed_active_aggregate_reservation
     );
     assert_eq!(
         reencode.total(),
@@ -8630,6 +8670,181 @@ fn d7d14_m2_o5_actual_simultaneous_object_charge_at_publication() {
         obs.total(),
         4845,
         "O5 actual simultaneous live charge (811+1072+136+811+1112+42+815+46)"
+    );
+    drop(proof);
+}
+
+/// S2 (RUN 422 D7-D14) — a FAILED O5 retained-backing measurement FAIL-CLOSES the
+/// observation instead of silently contributing zero. The complete maximum-TC
+/// `O4 → drop/reopen → O3 → O5` flow is driven exactly as the M2 real-operation
+/// test, but a bounded test seam forces `evidence_backing_capacity` (the retained
+/// proof's evidence backing) to its error branch. The outcome must be: the real
+/// `publish_atomic` still succeeds (storage behaviour unchanged, no new production
+/// refusal), BUT the live-object observation is invalid — no zero-substituted
+/// partial total is published, `observed_o5_live_object_charge()` is `None`, and
+/// the typed `RetainedBackingMeasurementFailed` error is recorded.
+#[test]
+fn d7d14_s2_o5_retained_backing_measurement_failure_fails_closed() {
+    use qbind_node::safety_record_store::backend::{
+        arm_o5_live_object_observation, observed_o5_live_object_charge,
+        observed_o5_observation_error, O5ObservationError,
+    };
+    use qbind_node::safety_record_store::owner::{inject_o5_measurement_fault, O5MeasurementFault};
+
+    let dir = tempfile::tempdir().unwrap();
+    let ctx = ctx_n(4);
+
+    let complete = max_tc_locked_anchored(&ctx, 5, 6);
+    let history = FixtureCommittedHistory::new().with([7u8; 32], 3);
+    {
+        let owner = init_owner(dir.path(), &ctx);
+        assert_eq!(
+            owner.publish_locked(complete, 0, Some(&history)),
+            PublishResult::DurableAcknowledged { new_revision: 1 }
+        );
+    }
+    let owner = SafetyRecordOwner::attach(open_enabled(dir.path()), ctx.clone()).unwrap();
+    let proof = owner.read_validate(Some(&history)).unwrap();
+
+    arm_o5_live_object_observation();
+    inject_o5_measurement_fault(O5MeasurementFault::RetainedBacking);
+    // The real publication is UNAFFECTED by the observation failure: it still
+    // durably acknowledges (no new production refusal, storage behaviour unchanged).
+    let result = owner.reacknowledge(&proof);
+    inject_o5_measurement_fault(O5MeasurementFault::None);
+    assert_eq!(
+        result,
+        PublishResult::DurableAcknowledged { new_revision: 1 },
+        "a failed observation measurement must NOT change the real publication outcome"
+    );
+    // The observation is invalid: NO valid partial total, NO zero substitution.
+    assert_eq!(
+        observed_o5_live_object_charge(),
+        None,
+        "a failed backing measurement must not publish a valid (zero-substituted) total"
+    );
+    assert_eq!(
+        observed_o5_observation_error(),
+        Some(O5ObservationError::RetainedBackingMeasurementFailed),
+        "the typed retained-backing measurement failure is recorded"
+    );
+    drop(proof);
+}
+
+/// S2 (RUN 422 D7-D14) — a FAILED O5 transient-decode measurement FAIL-CLOSES the
+/// observation. Same flow and guarantees as the retained-backing test, but the
+/// seam forces `decoded_working_set_charge` (the fresh read-back decode) to its
+/// error branch.
+#[test]
+fn d7d14_s2_o5_transient_decode_measurement_failure_fails_closed() {
+    use qbind_node::safety_record_store::backend::{
+        arm_o5_live_object_observation, observed_o5_live_object_charge,
+        observed_o5_observation_error, O5ObservationError,
+    };
+    use qbind_node::safety_record_store::owner::{inject_o5_measurement_fault, O5MeasurementFault};
+
+    let dir = tempfile::tempdir().unwrap();
+    let ctx = ctx_n(4);
+
+    let complete = max_tc_locked_anchored(&ctx, 5, 6);
+    let history = FixtureCommittedHistory::new().with([7u8; 32], 3);
+    {
+        let owner = init_owner(dir.path(), &ctx);
+        assert_eq!(
+            owner.publish_locked(complete, 0, Some(&history)),
+            PublishResult::DurableAcknowledged { new_revision: 1 }
+        );
+    }
+    let owner = SafetyRecordOwner::attach(open_enabled(dir.path()), ctx.clone()).unwrap();
+    let proof = owner.read_validate(Some(&history)).unwrap();
+
+    arm_o5_live_object_observation();
+    inject_o5_measurement_fault(O5MeasurementFault::TransientDecode);
+    let result = owner.reacknowledge(&proof);
+    inject_o5_measurement_fault(O5MeasurementFault::None);
+    assert_eq!(
+        result,
+        PublishResult::DurableAcknowledged { new_revision: 1 },
+        "a failed observation measurement must NOT change the real publication outcome"
+    );
+    assert_eq!(
+        observed_o5_live_object_charge(),
+        None,
+        "a failed transient decode must not publish a valid (zero-substituted) total"
+    );
+    assert_eq!(
+        observed_o5_observation_error(),
+        Some(O5ObservationError::TransientDecodeMeasurementFailed),
+        "the typed transient-decode measurement failure is recorded"
+    );
+    drop(proof);
+}
+
+/// S2 (RUN 422 D7-D14) — a failed O5 measurement cannot reuse a preceding
+/// SUCCESSFUL snapshot. A first `reacknowledge` records a valid observation; a
+/// second `reacknowledge` with the measurement seam armed (and WITHOUT re-arming
+/// the observation) must invalidate the stale success — `observed_o5_live_object_charge()`
+/// becomes `None` and the typed error is recorded — rather than leaving the earlier
+/// successful result available as the current one.
+#[test]
+fn d7d14_s2_o5_failed_measurement_does_not_reuse_prior_success() {
+    use qbind_node::safety_record_store::backend::{
+        arm_o5_live_object_observation, observed_o5_live_object_charge,
+        observed_o5_observation_error, O5ObservationError,
+    };
+    use qbind_node::safety_record_store::owner::{inject_o5_measurement_fault, O5MeasurementFault};
+
+    let dir = tempfile::tempdir().unwrap();
+    let ctx = ctx_n(4);
+
+    let complete = max_tc_locked_anchored(&ctx, 5, 6);
+    let history = FixtureCommittedHistory::new().with([7u8; 32], 3);
+    {
+        let owner = init_owner(dir.path(), &ctx);
+        assert_eq!(
+            owner.publish_locked(complete, 0, Some(&history)),
+            PublishResult::DurableAcknowledged { new_revision: 1 }
+        );
+    }
+    let owner = SafetyRecordOwner::attach(open_enabled(dir.path()), ctx.clone()).unwrap();
+    let proof = owner.read_validate(Some(&history)).unwrap();
+
+    // First O5: a valid observation is recorded (the real 4845 live charge).
+    arm_o5_live_object_observation();
+    inject_o5_measurement_fault(O5MeasurementFault::None);
+    assert_eq!(
+        owner.reacknowledge(&proof),
+        PublishResult::DurableAcknowledged { new_revision: 1 }
+    );
+    let prior = observed_o5_live_object_charge().expect("first O5 recorded a valid observation");
+    assert_eq!(
+        prior.total(),
+        4845,
+        "the prior successful observation total"
+    );
+    assert_eq!(
+        observed_o5_observation_error(),
+        None,
+        "no error after success"
+    );
+
+    // Second O5 WITHOUT re-arming, with the backing measurement forced to fail: the
+    // stale success must be cleared, not reused.
+    inject_o5_measurement_fault(O5MeasurementFault::RetainedBacking);
+    assert_eq!(
+        owner.reacknowledge(&proof),
+        PublishResult::DurableAcknowledged { new_revision: 1 }
+    );
+    inject_o5_measurement_fault(O5MeasurementFault::None);
+    assert_eq!(
+        observed_o5_live_object_charge(),
+        None,
+        "a failed measurement must not reuse the preceding successful snapshot"
+    );
+    assert_eq!(
+        observed_o5_observation_error(),
+        Some(O5ObservationError::RetainedBackingMeasurementFailed),
+        "the typed failure replaces the stale success"
     );
     drop(proof);
 }

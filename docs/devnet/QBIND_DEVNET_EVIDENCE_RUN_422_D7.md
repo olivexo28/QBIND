@@ -16763,3 +16763,80 @@ SECURITY_POSTURE=RS1-OPEN / PUBLIC-DEVNET-NO-GO
 ```
 
 C4/C5 remain OPEN; fail-closed `CurrentEpochUnavailable` unchanged. This pass authorizes no production construction, startup/consensus/signing integration, verifier wiring, authority/epoch mutation, transport change, peer-driven apply, anti-rollback establishment, activation, renaming, D15, or Run 423 work. Stop after this bounded continuation.
+
+## RUN 422 D7-D14 — S1/S2: contemporaneous O3 phase reservations and fail-closed O5 observation errors
+
+This bounded continuation completes two items left open by the M1/M2 pass above: (S1) pairing each O3 phase object charge with reservations **observed at that phase**, and (S2) making O5 measurement errors explicitly invalidate the observation instead of silently contributing zero. The completed object measurements, the O5 publication-boundary pairing, and the earlier L1/L2 reservation-lifetime evidence are **preserved, not withdrawn**. No new mutation campaign was run.
+
+### Baseline and scoped correspondence
+
+* **Actual supplied working branch:** `copilot/copilotcopilotcopilotcopilotcopilotcopilotcopilotc-bc6bbe75-a756-4aff-951f-b5338c1db05e`. The task report named `copilot/copilotcopilotcopilotcopilotcopilotcopilotcopilotr-another-one`; the **actual supplied branch** was used and was **not** switched or renamed to match the report.
+* **Full starting HEAD:** `a3e49c6a1f5ddb1bdb3efa6ff4ed5312b331755f`; upstream `origin/copilot/copilotcopilotcopilotcopilotcopilotcopilotcopilotc-bc6bbe75-a756-4aff-951f-b5338c1db05e`; worktree clean at start.
+* **Reviewed object availability / ancestry:** `3bb8efac2bcc2fb12ea97348a35acbff8070fe38` was **absent** in the shallow single-branch clone and had to be fetched (`git fetch origin 3bb8efac…`). It is **not** an ancestor of the starting HEAD but a **sibling** sharing parent `039e3aad828e2c47c7c8c5d509374c2e27ed85ab`.
+* **Scoped content correspondence (exact bytes):** the starting HEAD tree (`69d9057a85cf3a82acf9095f0ae8c8d29b874a1f`) is **blob-identical** to the reviewed object's tree (`git diff 3bb8efac HEAD` empty over the whole tree and over the authorized `safety_record_store` sources and the `run_422_d7d14_safety_record_store_tests.rs` test). The starting HEAD therefore already carried the complete reviewed implementation; tree equality establishes repository correspondence, not attachment byte identity.
+
+### Correction to §13.7N's M1 reservation column
+
+§13.7N's M1 table asserted each O3 phase charge was covered by `holder 2051 + o3_scratch 819 = 2870`. That value was **profile-derived**, not a reservation **observed at the phase**: the binding-phase hook captured neither the active operational nor the active aggregate reservation. The implication that every O3 row already paired its charge with a contemporaneously observed reservation is corrected here (see §13.7O of the correspondence contract). The valid object measurements (`1157`/`2734`) and the L1/L2 reservation-lifetime evidence are preserved.
+
+### S1 — four O3 rows with reservations sampled at their phases (N=4)
+
+Where each phase samples the backend's accountant: `read_validate` arms the observation with a clone of the **operational accountant of the backend whose `read_validate` is executing**; the re-encode hook samples it before `drop(reencoded)`, the binding hook samples it inside `compute_evidence_lock_binding` while `cert` is live. Both the operational (`acct.current()`) and aggregate (`acct.aggregate().current()`) reservations are read **separately at each phase**. Armed/reset/invalidated/disarmed: the cloned accountant handle is the armed marker, set only by `read_validate` and cleared immediately after `validate_decoded`; `O3LiveObjectCharge` carries an explicit `phase` discriminant; a standalone `validate_decoded` or later binding call finds no armed handle and records nothing; each operation resets its records and a missing phase fails explicitly (`expect(...)`).
+
+`variant | phase | measured components | measured total | observed operational reservation | observed aggregate reservation | expected reservation | assertions | outcome`
+
+| variant | phase | measured components (bytes) | measured total | observed operational reservation | observed aggregate reservation | expected reservation | assertions | outcome |
+|---|---|---|---|---|---|---|---|---|
+| max COMPLETE QC | re-encode | `310 + 537 + 310` | `1157` | `2870` | `3110` | `2870` | `total ≤ obs_op`; `obs_op == 2870`; `obs_agg ≤ 7772` | PASS |
+| max COMPLETE QC | binding | `310 + 537 + 310` | `1157` | `2870` | `3110` | `2870` | same | PASS |
+| max COMPLETE TC | re-encode | `811 + 1112 + 811` | `2734` | `2870` | `3110` | `2870` | `total ≤ obs_op`; `obs_op == 2870`; `obs_agg ≤ 7772` | PASS |
+| max COMPLETE TC | binding | `811 + 1112 + 811` | `2734` | `2870` | `3110` | `2870` | same | PASS |
+
+The observed aggregate reservation is the **actual** value `3110` (operational `2870` + context ownership `240`), asserted `≤` the unchanged accepted aggregate cap `7772` (cap kept as a separate ceiling). The `observed_object_charge ≤ observed_active_operational_reservation` inequality uses the reservation observed at the phase; `observed_active_operational_reservation == 2870` is a separate cross-check against the expected formula; the expected value is a cross-check, not the observed value. Tests: `d7d14_m1_o3_actual_object_charges_max_complete_{qc,tc}` (each now also asserts the two reservation fields and the phase discriminant).
+
+### S2 — O5 measurement errors fail explicitly
+
+Both silent-zero fallbacks in `owner::reacknowledge` (`evidence_backing_capacity(...).unwrap_or(0)`, `decoded_working_set_charge(...).unwrap_or(0)`) are replaced with explicit handling. If either measurement fails: no zero is substituted; the owner snapshot is suppressed so `publish_atomic` publishes no valid partial total; any earlier successful observation is cleared so a failed measurement cannot reuse a preceding success; and a typed `O5ObservationError` is recorded for the consuming test. Diagnostics are rendered outside the protected interval. This is a test-observation correction only — the real `publish_atomic` is unaffected (storage behaviour and production semantics unchanged, no new production refusal). Both error branches are driven through the observation-construction path via a bounded test seam (`inject_o5_measurement_fault`), not by fabricating enormous vectors. The normal real-operation O5 result is preserved with its two separate assertions: measured object charge `4845` is covered, and the expected operational reservation `4877` is active at publication (independently confirmed this pass). Tests (3, all PASS): `d7d14_s2_o5_retained_backing_measurement_failure_fails_closed`, `d7d14_s2_o5_transient_decode_measurement_failure_fails_closed`, `d7d14_s2_o5_failed_measurement_does_not_reuse_prior_success`.
+
+### Changed paths and line-ending/EOF effects
+
+Source: `crates/qbind-node/src/safety_record_store/owner.rs`, `crates/qbind-node/src/safety_record_store/backend.rs`. Test: `crates/qbind-node/tests/run_422_d7d14_safety_record_store_tests.rs`. Docs: this file, `docs/protocol/QBIND_CONSENSUS_RECOVERY_SIGNING_HISTORY_CORRESPONDENCE_CONTRACT.md` (§13.7O), `docs/whitepaper/contradiction.md`. All edited files retain their existing **CRLF** line endings and no-trailing-newline EOF convention; no line-ending normalization was introduced (the residual `rustfmt --check` EOF diffs are the pre-existing repo-wide missing-final-newline convention, present in unrelated files too, not a change from this pass).
+
+### Literal validation outcomes (this pass, this revision, no PR)
+
+* `rustfmt --edition 2021 --check` on the edited Rust regions → inserted/edited regions **clean**; residual diffs only in the pre-existing EOF (missing-final-newline) baseline, not in the inserted code.
+* `cargo build -p qbind-node --lib` (default features) → **exit 0**.
+* `cargo test -p qbind-node --no-run` → **exit 0** (gated D7-D14/m16 skipped by `required-features: test-utils`, reported separately from the clean default build).
+* `cargo test -p qbind-node --features test-utils --no-run` → **exit 0**.
+* `cargo test -p qbind-node --features test-utils --test run_422_d7d14_safety_record_store_tests` → **ok. 138 passed; 0 failed; 1 ignored** (`child_process_entry`, spawned out-of-band; +3 S2 regressions over the prior 135, the three M1/M2 tests extended in place for S1).
+* `cargo test -p qbind-node --features test-utils --test m16_epoch_transition_hardening_tests` → **ok. 14 passed; 0 failed; 0 ignored**.
+* `cargo clippy -p qbind-node --features test-utils --tests` → **exit 0**; no new `safety_record_store` warnings (pre-existing warnings in the D7-D14 target and in unrelated `t234_pqc_end_to_end_perf_tests` unchanged).
+* `cargo build --release -p qbind-node` → **exit 0** (build compatibility only — NOT running-node recovery acceptance).
+* Secret scanning over the changed files → **no secrets**. Non-wiring audit: the changed source hooks are referenced only from within the component and its gated tests; no production call site added.
+
+### Persisted literal prior-session security-tool outcomes (unchanged, retained)
+
+* **Independent Code Review — UNAVAILABLE (prior session):** `autofind` binary not found.
+* **CodeQL Rust — SKIPPED (prior session):** "Analysis was skipped because the database size is too large."
+
+These remain **OPEN** external gates: a skipped CodeQL is not zero alerts, and an unavailable review model is not a passing review. Any current-session review/security tooling is recorded separately and literally; it does not replace or promote the prior-session outcomes.
+
+### Executed vs. retained historical evidence
+
+Executed this session: the four S1 O3 rows (with contemporaneous reservations) and the three S2 O5 observation-error tests, plus the preserved real-operation O5 result. Retained historical evidence, not re-run this session: the §13.7M L1/L2 reservation-lifetime samples and their two sensitivity mutations (after-sample O3 scratch release; pre-publish `_o5_res` release). A release build establishes build compatibility, not running-node recovery acceptance.
+
+### Scope and verdicts (retained, NOT promoted)
+
+S1/S2 complete only the contemporaneous-reservation pairing and the fail-closed observation-error handling. The exhaustive O1–O5 inventory remains **unfinished**, H22 remains separately limited, and independent Code-Review / CodeQL remain **open** external assurance gaps. `GEN_STRUCT_MAX=384`, `CAPNORM_SLACK=0`, `max_component_aggregate_bytes=max_aggregate_retained_bytes`, N=4 aggregate `7772`, the three encoded-buffer roles, `CMP_SPAN`, multiplicities, persistence formats, and cryptographic identifiers are unchanged.
+
+```
+D7D14_STORAGE_COMPONENT=PARTIAL-IMPLEMENTATION
+D7D14_STORAGE_ACCEPTANCE=INCOMPLETE
+DURABLE_ANTI_ROLLBACK=NOT-ESTABLISHED
+GENESIS_AUTHORITY_ACTIVATION=DISABLED
+PRODUCTION_WIRE_CHAIN_ID_BEHAVIOR=UNCHANGED
+CONFIGURED_AUTHORITY_RELEASE_BINARY_EVIDENCE=NOT-YET-CAPTURED
+SECURITY_POSTURE=RS1-OPEN / PUBLIC-DEVNET-NO-GO
+```
+
+C4/C5 remain OPEN; fail-closed `CurrentEpochUnavailable` unchanged. This pass authorizes no production construction, startup/consensus/signing integration, verifier wiring, authority/epoch mutation, transport change, peer-driven apply, anti-rollback establishment, activation, renaming, D15, or Run 423 work. Stop after this bounded continuation.
