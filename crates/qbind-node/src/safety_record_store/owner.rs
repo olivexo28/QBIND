@@ -327,7 +327,7 @@ impl SafetyRecordOwner {
         let meta = SafetyMeta::decode(&meta_bytes)?;
         if meta.context_digest != context_digest(self.pinned()) {
             return Err(SafetyStoreError::SemanticRefusal(
-                "stored context digest does not match this handle's pinned context".into(),
+                super::error::SemanticRefusalDetail::PinnedContextDisagreement,
             ));
         }
         // Structural decode (bounds-checked) and metadata↔record revision
@@ -335,7 +335,10 @@ impl SafetyRecordOwner {
         let decoded = decode_record(&record_bytes, self.pinned())?;
         if decoded.publication_revision != meta.current_revision {
             return Err(SafetyStoreError::SemanticRefusal(
-                "record revision disagrees with metadata revision".into(),
+                super::error::SemanticRefusalDetail::RecordMetaRevisionDisagreement {
+                    record_revision: decoded.publication_revision,
+                    meta_revision: meta.current_revision,
+                },
             ));
         }
         Ok((meta, record_bytes, decoded))

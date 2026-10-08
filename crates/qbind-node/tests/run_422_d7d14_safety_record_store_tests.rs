@@ -2923,6 +2923,210 @@ fn corr_record_meta_revision_disagreement_refused() {
     ));
 }
 
+// ---------------------------------------------------------------------------
+// RUN 422 D7-D14 R1 — the O2 revision-disagreement refusal diagnostic is
+// allocation-free and fits the already-reserved O2 read/decode working set even
+// for a MAXIMUM COMPLETE (811-byte) TC record.
+//
+// AUDITED DEFECT (reproduced below as newly executed evidence): the previous
+// `load_established` revision-disagreement diagnostic built an owned 48-byte
+// `String` INSIDE the O2 read/decode reservation. For a maximum N=4 profile the
+// O2 reservation is `811 (record read-back) + 42 (metadata) + 1112 (transient
+// decoded) = 1965`. The 48-byte diagnostic pushed the simultaneous charge to
+// 2013, exceeding the active reservation by 48 — a breach of the implemented
+// accounting contract (NOT an OOM, unsafe write, or consensus failure). The
+// 763-byte evidence-only TC fixture masked this: its 48-byte unused record-sized
+// allowance absorbed the diagnostic. A maximum COMPLETE TC (anchor + predecessor
+// populated) serializes to the full 811 bytes, leaving no headroom and exposing
+// the breach. The correction replaces the `String` with a typed, `Copy`,
+// allocation-free `SemanticRefusalDetail` whose text is materialised only on
+// `Display`, so the diagnostic contributes zero live heap bytes and the
+// simultaneous charge equals exactly the reservation.
+// ---------------------------------------------------------------------------
+#[test]
+fn d7d14_r1_o2_revision_disagreement_diagnostic_allocation_free_max_complete_tc() {
+    use qbind_node::safety_record_store::accounting::max_transient_decoded_working_set;
+    use qbind_node::safety_record_store::error::SemanticRefusalDetail;
+
+    let dir = tempfile::tempdir().unwrap();
+    let ctx = ctx_n(4);
+    let owner = init_owner(dir.path(), &ctx); // metadata current_revision == 0
+
+    // ----- Plant a MAXIMUM COMPLETE TC (anchor + predecessor populated) that
+    //       decodes to revision 1, disagreeing with metadata revision 0. -----
+    let complete = max_tc_locked_anchored(&ctx, 5, 6);
+    assert!(
+        complete.committed_anchor.is_some() && complete.predecessor_ref.is_some(),
+        "the fixture is the maximum COMPLETE record, not the evidence-only form"
+    );
+    let mismatched = DecodedRecord {
+        persistence_format_version: 1,
+        network_genesis_id: ctx.network_genesis_id,
+        publication_revision: 1, // != metadata current_revision (0)
+        record: SafetyRecord::Locked(complete),
+    };
+    let enc = encode_record(&mismatched, &ctx).unwrap();
+
+    // The complete serialized record is the full 811-byte maximum — it exactly
+    // fills the record-sized read-back buffer, leaving no slack to absorb a heap
+    // diagnostic (unlike the 763-byte evidence-only form).
+    let rec = max_safety_record_bytes(&ctx).unwrap();
+    assert_eq!(rec, 811, "record-sized read-back buffer bound");
+    assert_eq!(
+        enc.len() as u128,
+        rec,
+        "maximum COMPLETE serialized TC == full record cap (811), not the 763-byte evidence-only form"
+    );
+    owner.debug_overwrite_record_for_test(&enc).unwrap();
+
+    // ----- O2 reservation arithmetic: the exact already-reserved working set. -----
+    let transient = max_transient_decoded_working_set(&ctx).unwrap();
+    assert_eq!(
+        transient, 1112,
+        "contract-defined transient decoded charge (inline 408 + backing 704)"
+    );
+    assert_eq!(META_ENCODED_LEN_MIRROR, 42, "metadata backing buffer");
+    let o2_reservation = rec + META_ENCODED_LEN_MIRROR + transient;
+    assert_eq!(
+        o2_reservation, 1965,
+        "O2 read/decode reservation (811 + 42 + 1112)"
+    );
+
+    // ----- BASELINE DEFECT (newly executed): the OLD String diagnostic adds a
+    //       48-byte heap buffer, so the simultaneous charge reaches 2013 and
+    //       exceeds the active reservation by 48. -----
+    let old_diag = "record revision disagrees with metadata revision";
+    assert_eq!(
+        old_diag.len() as u128,
+        48,
+        "audited 48-byte diagnostic length"
+    );
+    let (old_owned, old_allocs) = measure_allocs(|| String::from(old_diag));
+    assert_eq!(
+        old_allocs, 1,
+        "the OLD String diagnostic allocates one owned heap buffer inside the reservation"
+    );
+    let (old_owned, old_obs) = measure_live_bytes(move || old_owned);
+    old_obs.assert_sound("old String diagnostic live bytes");
+    assert!(
+        old_obs.peak == 0 && old_obs.end == 0,
+        "no NEW allocation when merely moving the pre-built String"
+    );
+    assert!(
+        old_owned.capacity() >= 48,
+        "the OLD diagnostic owns >=48 heap bytes"
+    );
+    drop(old_owned);
+    let baseline_simultaneous = o2_reservation + 48;
+    assert_eq!(baseline_simultaneous, 2013, "baseline simultaneous charge");
+    assert!(
+        baseline_simultaneous > o2_reservation,
+        "BASELINE DEFECT: simultaneous charge {baseline_simultaneous} exceeds O2 reservation \
+         {o2_reservation} by {}",
+        baseline_simultaneous - o2_reservation
+    );
+
+    // ----- CORRECTION: the typed diagnostic is allocation-free; rendering is
+    //       deferred to Display (performed OUTSIDE the protected interval). -----
+    let (typed, typed_allocs) =
+        measure_allocs(|| SemanticRefusalDetail::RecordMetaRevisionDisagreement {
+            record_revision: 1,
+            meta_revision: 0,
+        });
+    assert_eq!(
+        typed_allocs, 0,
+        "the typed diagnostic allocates NO heap buffer on the protected refusal path"
+    );
+    let (typed, typed_obs) = measure_live_bytes(move || typed);
+    typed_obs.assert_sound("typed diagnostic live bytes");
+    assert_eq!(
+        typed_obs.peak, 0,
+        "the typed diagnostic adds zero live heap bytes"
+    );
+    let rendered = typed.to_string();
+    assert!(
+        rendered.contains("record revision disagrees with metadata revision"),
+        "Display preserves the diagnostic meaning: {rendered}"
+    );
+    let corrected_simultaneous = o2_reservation; // + 0 diagnostic bytes
+    assert!(
+        corrected_simultaneous <= o2_reservation,
+        "corrected simultaneous charge {corrected_simultaneous} fits the O2 reservation {o2_reservation}"
+    );
+
+    // ----- Real open(): reach the refusal branch under pressure leaving EXACTLY
+    //       the O2 allowance through the shared admission authority. -----
+    let backend = owner.backend_for_test();
+    let agg_cap = backend.accounting_aggregate_cap().unwrap();
+    let ctx_live = backend.context_accounting_current();
+    let record_before = backend.read_record(rec).unwrap();
+    let meta_before = backend.read_meta(META_ENCODED_LEN_MIRROR).unwrap();
+    let recovery_before = owner.recovery_required();
+    let current_before = backend.accounting_aggregate_current();
+
+    let standing_fits = agg_cap - ctx_live - o2_reservation;
+    let standing = backend
+        .reserve_standing_for_test(standing_fits)
+        .expect("standing pressure leaving EXACTLY the O2 working set free");
+    let peak_before = backend.accounting_aggregate_peak();
+
+    match owner.open() {
+        Err(SafetyStoreError::SemanticRefusal(
+            SemanticRefusalDetail::RecordMetaRevisionDisagreement {
+                record_revision,
+                meta_revision,
+            },
+        )) => {
+            assert_eq!(
+                (record_revision, meta_revision),
+                (1, 0),
+                "the refusal carries the two disagreeing revisions as Copy data"
+            );
+        }
+        other => panic!("expected revision-disagreement SemanticRefusal, got {other:?}"),
+    }
+
+    // The O2 reservation was admitted and the whole read/decode working set plus
+    // the (now allocation-free) diagnostic stayed within the aggregate ceiling.
+    assert!(
+        backend.accounting_aggregate_peak() <= agg_cap,
+        "O2 open with the COMPLETE record never exceeded the aggregate ceiling"
+    );
+    assert!(
+        backend.accounting_aggregate_peak() >= peak_before,
+        "O2 open reserved a real charge against the shared accountant"
+    );
+
+    // Raw record bytes, metadata, recovery state, and the standing reservation
+    // are all preserved; the temporary O2 reservation released on the refusal.
+    assert_eq!(
+        backend.read_record(rec).unwrap(),
+        record_before,
+        "refused O2 did not mutate stored record bytes"
+    );
+    assert_eq!(
+        backend.read_meta(META_ENCODED_LEN_MIRROR).unwrap(),
+        meta_before,
+        "refused O2 did not mutate metadata"
+    );
+    assert_eq!(
+        owner.recovery_required(),
+        recovery_before,
+        "refused O2 did not disturb the recovery/effectiveness latch"
+    );
+    assert_eq!(
+        backend.accounting_aggregate_current(),
+        ctx_live + standing_fits,
+        "temporary O2 read/decode reservation released on the refusal exit (only standing remains)"
+    );
+    drop(standing);
+    assert_eq!(
+        backend.accounting_aggregate_current(),
+        current_before,
+        "all temporary reservations released; only the baseline charge remains"
+    );
+}
+
 #[test]
 fn corr_invalid_lock_evidence_binding_refused() {
     let dir = tempfile::tempdir().unwrap();

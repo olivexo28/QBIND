@@ -45,8 +45,16 @@ pub enum SafetyStoreError {
     /// diagnostic `String` is allocated on the protected over-read refusal path.
     DeclaredBoundExceeded(DeclaredBoundDetail),
     /// Semantic / association refusal (stage 3): P1–P4 or TA1–TA8 failed, or a
-    /// required independent input was not supplied.
-    SemanticRefusal(String),
+    /// required independent input was not supplied. The payload is a
+    /// [`SemanticRefusalDetail`]: a free-form `Message` for the stage-3
+    /// diagnostics that run while inspecting an already-admitted / covered
+    /// value, or one of the typed, `Copy` forms used by the protected
+    /// `load_established` established-state disagreements (metadata↔record
+    /// revision disagreement, pinned-context digest disagreement) that run
+    /// INSIDE an O2/O3/O5 read/decode reservation and must therefore allocate
+    /// no owned diagnostic `String` — the equivalent text is materialised only
+    /// when rendered through `Display`.
+    SemanticRefusal(SemanticRefusalDetail),
     /// A required independent input (pinned context / committed history) was not
     /// supplied, so the dependent predicate cannot be established. The payload is a
     /// typed, `Copy` [`MissingIndependentInputSite`]: the O1 first-use-intent
@@ -608,6 +616,75 @@ impl From<String> for StructuralRefusalDetail {
 }
 
 impl From<&str> for StructuralRefusalDetail {
+    fn from(s: &str) -> Self {
+        Self::Message(s.to_string())
+    }
+}
+
+/// The payload of [`SafetyStoreError::SemanticRefusal`]. A semantic refusal is
+/// either a free-form stage-3 diagnostic `Message` (the P1–P4 / TA1–TA8
+/// association diagnostics that run while inspecting an already-admitted or
+/// otherwise covered value) or one of the typed, **allocation-free** `Copy`
+/// forms used by the protected `load_established` established-state
+/// disagreements.
+///
+/// The typed forms carry only `Copy` data, so the two `load_established`
+/// disagreement sites — which run INSIDE an O2/O3/O5 read/decode reservation,
+/// after the record-sized read-back buffer, the fixed metadata buffer, and the
+/// transient decoded object are already live — construct their refusal without
+/// allocating an owned diagnostic `String`. The audited defect was precisely
+/// that the previous `"record revision disagrees with metadata revision"`
+/// (48-byte) `String` allocated here breached the already-reserved O2 working
+/// set whenever the read-back buffer was a maximum COMPLETE record and no
+/// unused record-sized headroom remained to absorb it. The equivalent text is
+/// materialised only when the error is rendered through `Display`. `Message`
+/// round-trips from `String`/`&str` via `From`, so existing free-form
+/// diagnostic sites are unchanged.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SemanticRefusalDetail {
+    /// A free-form stage-3 semantic diagnostic (constructed while inspecting an
+    /// already-admitted / covered value; not on a protected pre-reservation or
+    /// no-headroom path).
+    Message(String),
+    /// The structurally decoded record's publication revision disagrees with the
+    /// metadata's current revision. Built on the protected `load_established`
+    /// path without allocating; carries only the two `Copy` revisions.
+    RecordMetaRevisionDisagreement {
+        record_revision: u64,
+        meta_revision: u64,
+    },
+    /// The stored metadata's context digest does not match this handle's pinned
+    /// context. Built on the protected `load_established` path without
+    /// allocating.
+    PinnedContextDisagreement,
+}
+
+impl std::fmt::Display for SemanticRefusalDetail {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Message(s) => f.write_str(s),
+            Self::RecordMetaRevisionDisagreement {
+                record_revision,
+                meta_revision,
+            } => write!(
+                f,
+                "record revision disagrees with metadata revision \
+                 (record {record_revision}, metadata {meta_revision})"
+            ),
+            Self::PinnedContextDisagreement => {
+                f.write_str("stored context digest does not match this handle's pinned context")
+            }
+        }
+    }
+}
+
+impl From<String> for SemanticRefusalDetail {
+    fn from(s: String) -> Self {
+        Self::Message(s)
+    }
+}
+
+impl From<&str> for SemanticRefusalDetail {
     fn from(s: &str) -> Self {
         Self::Message(s.to_string())
     }
