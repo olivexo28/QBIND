@@ -9142,7 +9142,7 @@ fn d7d14_fc_tc_borrowed_selection_discriminates_distinct_views_through_o3_o4() {
         signed
     };
 
-    let make_locked = |top_view: u64, rev: u64| {
+    let make_locked = |top_view: u64| {
         let tc = TimeoutCertificate {
             view: timeout_view + 1,
             high_qc: Some(high_top.clone()),
@@ -9176,7 +9176,7 @@ fn d7d14_fc_tc_borrowed_selection_discriminates_distinct_views_through_o3_o4() {
     // (positive) Max nested high-QC view == lock_view == tc.high_qc.view: the
     // borrowed selection picks `high_top`, TA2/TA1 hold, O4 publishes and O3
     // re-validates the durable record as `Unverified` recovered evidence.
-    let ok = make_locked(lock_view, 0);
+    let ok = make_locked(lock_view);
     assert_eq!(
         owner.publish_locked(ok, 0, None::<&FixtureCommittedHistory>),
         PublishResult::DurableAcknowledged { new_revision: 1 },
@@ -9199,7 +9199,7 @@ fn d7d14_fc_tc_borrowed_selection_discriminates_distinct_views_through_o3_o4() {
     // `validate_tc`) does not mask the TA2 refusal under test.
     let dir2 = tempfile::tempdir().unwrap();
     let owner2 = init_owner(dir2.path(), &ctx);
-    let bad = make_locked(lock_view + 1, 0);
+    let bad = make_locked(lock_view + 1);
     let got = owner2.publish_locked(bad, 0, None::<&FixtureCommittedHistory>);
     assert!(
         matches!(
