@@ -6,7 +6,7 @@
 
 use sha3::{Digest, Sha3_256};
 
-use super::error::SafetyStoreError;
+use super::error::{CapField, DeclaredBoundDetail, PrefixField, SafetyStoreError};
 use super::profile::{
     max_qc_bytes, max_safety_record_bytes, max_tc_bytes, PinnedSafetyContext, MAX_BITMAP_LEN,
     MAX_SIGNATURE_LEN,
@@ -91,8 +91,11 @@ fn put_u64(out: &mut Vec<u8>, v: u64) {
 fn encode_logical_qc(out: &mut Vec<u8>, qc: &LogicalQc) -> Result<(), SafetyStoreError> {
     out.extend_from_slice(&qc.block_id);
     put_u64(out, qc.view);
-    let count = u16::try_from(qc.signers.len())
-        .map_err(|_| SafetyStoreError::DeclaredBoundExceeded("logical qc signer count".into()))?;
+    let count = u16::try_from(qc.signers.len()).map_err(|_| {
+        SafetyStoreError::DeclaredBoundExceeded(DeclaredBoundDetail::PrefixOverflow {
+            field: PrefixField::LogicalQcSignerCount,
+        })
+    })?;
     put_u16(out, count);
     for s in &qc.signers {
         put_u64(out, s.as_u64());
@@ -108,10 +111,12 @@ fn decode_logical_qc(
     let view = r.u64()?;
     let count = r.u16()? as usize;
     if count > ctx.n() {
-        return Err(SafetyStoreError::DeclaredBoundExceeded(format!(
-            "logical qc signer count {count} > N={}",
-            ctx.n()
-        )));
+        return Err(SafetyStoreError::DeclaredBoundExceeded(
+            DeclaredBoundDetail::LogicalQcSignerCount {
+                count: count as u128,
+                n: ctx.n() as u128,
+            },
+        ));
     }
     // Bound checked above before allocation.
     let mut signers = Vec::with_capacity(count);
@@ -130,16 +135,25 @@ fn encode_wire_qc(out: &mut Vec<u8>, qc: &WireQc) -> Result<(), SafetyStoreError
     out.push(qc.step);
     out.extend_from_slice(&qc.block_id);
     put_u16(out, qc.suite_id);
-    let bitmap_len = u16::try_from(qc.signer_bitmap.len())
-        .map_err(|_| SafetyStoreError::DeclaredBoundExceeded("bitmap len".into()))?;
+    let bitmap_len = u16::try_from(qc.signer_bitmap.len()).map_err(|_| {
+        SafetyStoreError::DeclaredBoundExceeded(DeclaredBoundDetail::PrefixOverflow {
+            field: PrefixField::SignerBitmapLength,
+        })
+    })?;
     put_u16(out, bitmap_len);
     out.extend_from_slice(&qc.signer_bitmap);
-    let sig_count = u16::try_from(qc.signatures.len())
-        .map_err(|_| SafetyStoreError::DeclaredBoundExceeded("signature count".into()))?;
+    let sig_count = u16::try_from(qc.signatures.len()).map_err(|_| {
+        SafetyStoreError::DeclaredBoundExceeded(DeclaredBoundDetail::PrefixOverflow {
+            field: PrefixField::SignatureCount,
+        })
+    })?;
     put_u16(out, sig_count);
     for sig in &qc.signatures {
-        let sl = u16::try_from(sig.len())
-            .map_err(|_| SafetyStoreError::DeclaredBoundExceeded("signature len".into()))?;
+        let sl = u16::try_from(sig.len()).map_err(|_| {
+            SafetyStoreError::DeclaredBoundExceeded(DeclaredBoundDetail::PrefixOverflow {
+                field: PrefixField::SignatureLength,
+            })
+        })?;
         put_u16(out, sl);
         out.extend_from_slice(sig);
     }
@@ -157,9 +171,12 @@ fn decode_wire_qc(r: &mut Reader, ctx: &PinnedSafetyContext) -> Result<WireQc, S
     let suite_id = r.u16()?;
     let bitmap_len = r.u16()? as u128;
     if bitmap_len > MAX_BITMAP_LEN || bitmap_len > ctx.b_span() {
-        return Err(SafetyStoreError::DeclaredBoundExceeded(format!(
-            "signer bitmap len {bitmap_len} exceeds span bound"
-        )));
+        return Err(SafetyStoreError::DeclaredBoundExceeded(
+            DeclaredBoundDetail::SignerBitmapSpan {
+                len: bitmap_len,
+                bound: MAX_BITMAP_LEN.min(ctx.b_span()),
+            },
+        ));
     }
     let signer_bitmap = r.take(bitmap_len as usize)?.to_vec();
     let sig_count = r.u16()? as usize;
@@ -170,19 +187,23 @@ fn decode_wire_qc(r: &mut Reader, ctx: &PinnedSafetyContext) -> Result<WireQc, S
         ));
     }
     if sig_count > ctx.n() {
-        return Err(SafetyStoreError::DeclaredBoundExceeded(format!(
-            "signature count {sig_count} > N={}",
-            ctx.n()
-        )));
+        return Err(SafetyStoreError::DeclaredBoundExceeded(
+            DeclaredBoundDetail::SignatureCount {
+                count: sig_count as u128,
+                n: ctx.n() as u128,
+            },
+        ));
     }
     let mut signatures = Vec::with_capacity(sig_count);
     for _ in 0..sig_count {
         let sl = r.u16()? as u128;
         if sl > MAX_SIGNATURE_LEN || sl > ctx.s_sig as u128 {
-            return Err(SafetyStoreError::DeclaredBoundExceeded(format!(
-                "signature length {sl} > s_sig={}",
-                ctx.s_sig
-            )));
+            return Err(SafetyStoreError::DeclaredBoundExceeded(
+                DeclaredBoundDetail::SignatureLength {
+                    len: sl,
+                    s_sig: ctx.s_sig as u128,
+                },
+            ));
         }
         signatures.push(r.take(sl as usize)?.to_vec());
     }
@@ -211,8 +232,11 @@ fn encode_timeout_msg(out: &mut Vec<u8>, t: &TimeoutMessage) -> Result<(), Safet
     }
     put_u64(out, t.validator_id.as_u64());
     out.push(t.suite_id);
-    let sl = u16::try_from(t.signature.len())
-        .map_err(|_| SafetyStoreError::DeclaredBoundExceeded("timeout sig len".into()))?;
+    let sl = u16::try_from(t.signature.len()).map_err(|_| {
+        SafetyStoreError::DeclaredBoundExceeded(DeclaredBoundDetail::PrefixOverflow {
+            field: PrefixField::TimeoutSignatureLength,
+        })
+    })?;
     put_u16(out, sl);
     out.extend_from_slice(&t.signature);
     Ok(())
@@ -236,10 +260,12 @@ fn decode_timeout_msg(
     let suite_id = r.u8()?;
     let sl = r.u16()? as u128;
     if sl > MAX_SIGNATURE_LEN || sl > ctx.s_sig as u128 {
-        return Err(SafetyStoreError::DeclaredBoundExceeded(format!(
-            "timeout signature length {sl} > s_sig={}",
-            ctx.s_sig
-        )));
+        return Err(SafetyStoreError::DeclaredBoundExceeded(
+            DeclaredBoundDetail::TimeoutSignatureLength {
+                len: sl,
+                s_sig: ctx.s_sig as u128,
+            },
+        ));
     }
     let signature = r.take(sl as usize)?.to_vec();
     Ok(TimeoutMessage {
@@ -261,14 +287,20 @@ fn encode_timeout_cert(out: &mut Vec<u8>, tc: &TimeoutCert) -> Result<(), Safety
             encode_logical_qc(out, qc)?;
         }
     }
-    let signer_count = u16::try_from(tc.signers.len())
-        .map_err(|_| SafetyStoreError::DeclaredBoundExceeded("tc signer count".into()))?;
+    let signer_count = u16::try_from(tc.signers.len()).map_err(|_| {
+        SafetyStoreError::DeclaredBoundExceeded(DeclaredBoundDetail::PrefixOverflow {
+            field: PrefixField::TcSignerCount,
+        })
+    })?;
     put_u16(out, signer_count);
     for s in &tc.signers {
         put_u64(out, s.as_u64());
     }
-    let st_count = u16::try_from(tc.signed_timeouts.len())
-        .map_err(|_| SafetyStoreError::DeclaredBoundExceeded("signed_timeouts count".into()))?;
+    let st_count = u16::try_from(tc.signed_timeouts.len()).map_err(|_| {
+        SafetyStoreError::DeclaredBoundExceeded(DeclaredBoundDetail::PrefixOverflow {
+            field: PrefixField::SignedTimeoutsCount,
+        })
+    })?;
     put_u16(out, st_count);
     for t in &tc.signed_timeouts {
         encode_timeout_msg(out, t)?;
@@ -293,10 +325,12 @@ fn decode_timeout_cert(
     };
     let signer_count = r.u16()? as usize;
     if signer_count > ctx.n() {
-        return Err(SafetyStoreError::DeclaredBoundExceeded(format!(
-            "tc signer count {signer_count} > N={}",
-            ctx.n()
-        )));
+        return Err(SafetyStoreError::DeclaredBoundExceeded(
+            DeclaredBoundDetail::TcSignerCount {
+                count: signer_count as u128,
+                n: ctx.n() as u128,
+            },
+        ));
     }
     let mut signers = Vec::with_capacity(signer_count);
     for _ in 0..signer_count {
@@ -304,10 +338,12 @@ fn decode_timeout_cert(
     }
     let st_count = r.u16()? as usize;
     if st_count > ctx.n() {
-        return Err(SafetyStoreError::DeclaredBoundExceeded(format!(
-            "signed_timeouts count {st_count} > N={}",
-            ctx.n()
-        )));
+        return Err(SafetyStoreError::DeclaredBoundExceeded(
+            DeclaredBoundDetail::SignedTimeoutsCount {
+                count: st_count as u128,
+                n: ctx.n() as u128,
+            },
+        ));
     }
     let mut signed_timeouts = Vec::with_capacity(st_count);
     for _ in 0..st_count {
@@ -359,7 +395,9 @@ pub fn compute_evidence_lock_binding(
         SupportingEvidence::TcDerived { .. } => max_tc_bytes(ctx)?,
     };
     let cert_cap = usize::try_from(cert_cap).map_err(|_| {
-        SafetyStoreError::DeclaredBoundExceeded("evidence cert cap exceeds usize".into())
+        SafetyStoreError::DeclaredBoundExceeded(DeclaredBoundDetail::CapExceedsUsize {
+            field: CapField::EvidenceCertCap,
+        })
     })?;
     let mut cert = Vec::with_capacity(cert_cap);
     encode_evidence_payload(&mut cert, evidence)?;
@@ -481,7 +519,12 @@ pub fn admit_supporting_evidence(
     match evidence {
         SupportingEvidence::QcDerived(qc) => admit_wire_qc(qc, ctx),
         SupportingEvidence::TcDerived { high_qc, tc } => {
-            admit_logical_qc_signers(high_qc.signers.len(), n, "record-level high_qc")?;
+            admit_logical_qc_signers(
+                high_qc.signers.len(),
+                n,
+                PrefixField::RecordHighQcSignerCount,
+                |count, n| DeclaredBoundDetail::HighQcSignerCount { count, n },
+            )?;
             admit_timeout_cert(tc, ctx)
         }
     }?;
@@ -497,17 +540,23 @@ pub fn admit_supporting_evidence(
     super::accounting::admit_evidence_capacity(evidence, ctx)
 }
 
-fn admit_count_fits_prefix(count: usize, what: &str) -> Result<(), SafetyStoreError> {
-    u16::try_from(count)
-        .map(|_| ())
-        .map_err(|_| SafetyStoreError::DeclaredBoundExceeded(format!("{what} exceeds u16 prefix")))
+fn admit_count_fits_prefix(count: usize, field: PrefixField) -> Result<(), SafetyStoreError> {
+    u16::try_from(count).map(|_| ()).map_err(|_| {
+        SafetyStoreError::DeclaredBoundExceeded(DeclaredBoundDetail::PrefixOverflow { field })
+    })
 }
 
-fn admit_logical_qc_signers(count: usize, n: usize, what: &str) -> Result<(), SafetyStoreError> {
-    admit_count_fits_prefix(count, what)?;
+fn admit_logical_qc_signers(
+    count: usize,
+    n: usize,
+    prefix: PrefixField,
+    mk: impl Fn(u128, u128) -> DeclaredBoundDetail,
+) -> Result<(), SafetyStoreError> {
+    admit_count_fits_prefix(count, prefix)?;
     if count > n {
-        return Err(SafetyStoreError::DeclaredBoundExceeded(format!(
-            "{what} signer count {count} > N={n}"
+        return Err(SafetyStoreError::DeclaredBoundExceeded(mk(
+            count as u128,
+            n as u128,
         )));
     }
     Ok(())
@@ -515,11 +564,14 @@ fn admit_logical_qc_signers(count: usize, n: usize, what: &str) -> Result<(), Sa
 
 fn admit_wire_qc(qc: &WireQc, ctx: &PinnedSafetyContext) -> Result<(), SafetyStoreError> {
     let bitmap_len = qc.signer_bitmap.len() as u128;
-    admit_count_fits_prefix(qc.signer_bitmap.len(), "signer bitmap length")?;
+    admit_count_fits_prefix(qc.signer_bitmap.len(), PrefixField::SignerBitmapLength)?;
     if bitmap_len > MAX_BITMAP_LEN || bitmap_len > ctx.b_span() {
-        return Err(SafetyStoreError::DeclaredBoundExceeded(format!(
-            "signer bitmap len {bitmap_len} exceeds span bound"
-        )));
+        return Err(SafetyStoreError::DeclaredBoundExceeded(
+            DeclaredBoundDetail::SignerBitmapSpan {
+                len: bitmap_len,
+                bound: MAX_BITMAP_LEN.min(ctx.b_span()),
+            },
+        ));
     }
     // Structural threshold: an empty-signer certificate cannot meet ceil(2W/3)≥1.
     if qc.signatures.is_empty() {
@@ -527,22 +579,25 @@ fn admit_wire_qc(qc: &WireQc, ctx: &PinnedSafetyContext) -> Result<(), SafetySto
             "empty-signer certificate refused at structural threshold".into(),
         ));
     }
-    admit_count_fits_prefix(qc.signatures.len(), "signature count")?;
+    admit_count_fits_prefix(qc.signatures.len(), PrefixField::SignatureCount)?;
     if qc.signatures.len() > ctx.n() {
-        return Err(SafetyStoreError::DeclaredBoundExceeded(format!(
-            "signature count {} > N={}",
-            qc.signatures.len(),
-            ctx.n()
-        )));
+        return Err(SafetyStoreError::DeclaredBoundExceeded(
+            DeclaredBoundDetail::SignatureCount {
+                count: qc.signatures.len() as u128,
+                n: ctx.n() as u128,
+            },
+        ));
     }
     for sig in &qc.signatures {
         let sl = sig.len() as u128;
-        admit_count_fits_prefix(sig.len(), "signature length")?;
+        admit_count_fits_prefix(sig.len(), PrefixField::SignatureLength)?;
         if sl > MAX_SIGNATURE_LEN || sl > ctx.s_sig as u128 {
-            return Err(SafetyStoreError::DeclaredBoundExceeded(format!(
-                "signature length {sl} > s_sig={}",
-                ctx.s_sig
-            )));
+            return Err(SafetyStoreError::DeclaredBoundExceeded(
+                DeclaredBoundDetail::SignatureLength {
+                    len: sl,
+                    s_sig: ctx.s_sig as u128,
+                },
+            ));
         }
     }
     Ok(())
@@ -550,28 +605,47 @@ fn admit_wire_qc(qc: &WireQc, ctx: &PinnedSafetyContext) -> Result<(), SafetySto
 
 fn admit_timeout_cert(tc: &TimeoutCert, ctx: &PinnedSafetyContext) -> Result<(), SafetyStoreError> {
     let n = ctx.n();
-    admit_logical_qc_signers(tc.signers.len(), n, "tc.signers")?;
+    admit_logical_qc_signers(
+        tc.signers.len(),
+        n,
+        PrefixField::TcSignerCount,
+        |count, n| DeclaredBoundDetail::TcSignerCount { count, n },
+    )?;
     if let Some(h) = &tc.high_qc {
-        admit_logical_qc_signers(h.signers.len(), n, "tc.high_qc")?;
+        admit_logical_qc_signers(
+            h.signers.len(),
+            n,
+            PrefixField::TcHighQcSignerCount,
+            |count, n| DeclaredBoundDetail::HighQcSignerCount { count, n },
+        )?;
     }
-    admit_count_fits_prefix(tc.signed_timeouts.len(), "signed_timeouts count")?;
+    admit_count_fits_prefix(tc.signed_timeouts.len(), PrefixField::SignedTimeoutsCount)?;
     if tc.signed_timeouts.len() > n {
-        return Err(SafetyStoreError::DeclaredBoundExceeded(format!(
-            "signed_timeouts count {} > N={n}",
-            tc.signed_timeouts.len()
-        )));
+        return Err(SafetyStoreError::DeclaredBoundExceeded(
+            DeclaredBoundDetail::SignedTimeoutsCount {
+                count: tc.signed_timeouts.len() as u128,
+                n: n as u128,
+            },
+        ));
     }
     for t in &tc.signed_timeouts {
         if let Some(h) = &t.high_qc {
-            admit_logical_qc_signers(h.signers.len(), n, "signed_timeout high_qc")?;
+            admit_logical_qc_signers(
+                h.signers.len(),
+                n,
+                PrefixField::SignedTimeoutHighQcSignerCount,
+                |count, n| DeclaredBoundDetail::HighQcSignerCount { count, n },
+            )?;
         }
         let sl = t.signature.len() as u128;
-        admit_count_fits_prefix(t.signature.len(), "timeout signature length")?;
+        admit_count_fits_prefix(t.signature.len(), PrefixField::TimeoutSignatureLength)?;
         if sl > MAX_SIGNATURE_LEN || sl > ctx.s_sig as u128 {
-            return Err(SafetyStoreError::DeclaredBoundExceeded(format!(
-                "timeout signature length {sl} > s_sig={}",
-                ctx.s_sig
-            )));
+            return Err(SafetyStoreError::DeclaredBoundExceeded(
+                DeclaredBoundDetail::TimeoutSignatureLength {
+                    len: sl,
+                    s_sig: ctx.s_sig as u128,
+                },
+            ));
         }
     }
     Ok(())
@@ -601,8 +675,11 @@ pub fn encode_record(
     // below remains the content bound; the capacity confirmation is a secondary
     // check, NOT the prevention mechanism.
     let cap = encoded_record_cap(rec, ctx)?;
-    let cap_usize = usize::try_from(cap)
-        .map_err(|_| SafetyStoreError::DeclaredBoundExceeded("record cap exceeds usize".into()))?;
+    let cap_usize = usize::try_from(cap).map_err(|_| {
+        SafetyStoreError::DeclaredBoundExceeded(DeclaredBoundDetail::CapExceedsUsize {
+            field: CapField::RecordCap,
+        })
+    })?;
     let mut out = Vec::with_capacity(cap_usize);
     put_u16(&mut out, rec.persistence_format_version);
     out.extend_from_slice(&rec.network_genesis_id);
