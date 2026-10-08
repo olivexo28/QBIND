@@ -16882,10 +16882,10 @@ Columns: `row ID | operation/phase/branch | object and owner | charged size/capa
 | INV-O1-2 | inspection: existing/partial/malformed read-back | record-sized read-back `Vec`, owned by `initialize` scope | `rec_bound = max_safety_record_bytes = 811` | `_inspect_res = reserve(rec_bound + META_ENCODED_LEN)` **before** `read_record`; releases at end of the scoped block (before the bootstrap reservation) | the fixed metadata buffer (INV-O1-3) | dropped at the end of the scoped inspection block — **before** the bootstrap publication reservation (they must not coexist) | `o1_established_inspection_refused_before_read_under_aggregate_pressure`, `o1_partial_state_inspection_refused_before_read_under_aggregate_pressure` | [O] admitted before read; refused under pressure |
 | INV-O1-3 | inspection: metadata read-back | fixed metadata buffer (`META_ENCODED_LEN = 42`), `initialize` scope | `42` | same `_inspect_res` | the record read-back (INV-O1-2) | dropped with the scoped block | same tests | [S] fixed-term, covered by `_inspect_res` |
 | INV-O1-4 | refusal: established / record-without-metadata / unknown-legacy-namespace | typed `AlreadyEstablished(MetadataPresent)` / `StructuralRefusal(RecordPresentWithoutMetadata)` / `StructuralRefusal(UnknownLegacySafetyNamespaceKey{len})`, caller-owned | allocation-free (`Copy` details; namespace reports **length only**, no value copy) | reached **after** `_inspect_res` has already released; no covering reservation needed because no allocation occurs | none | returned to caller; raw record/metadata/recovery latch and the unknown key left in place (no migration/deletion/repair) | `corr_o1_record_without_metadata_refusal_is_typed_and_preserves_state`, `corr_o1_unknown_namespace_refusal_is_typed_with_len_and_preserves_key`, `corr_namespace_classification_reports_length_without_value_copy`, `o1_refuses_duplicate_initialization_and_missing_intent` | [O] 0 allocations; state preserved |
-| INV-O1-5 | bootstrap build | transient `DecodedRecord` (`BootstrapNoLock`), `initialize` scope | ≤ transient decoded ceiling `1112` (bootstrap is far smaller) | `_pub_res = reserve(max_safety_record_bytes + publication_staging_charge)` **before** `encode_record` | the encode buffer (INV-O1-6) it converts into | consumed by `encode_record` | `pd_before_publish_survives_bootstrap` | [S] covered by `_pub_res` |
-| INV-O1-6 | bootstrap encode (R3) | record-sized `encoded` `Vec`, `initialize` scope | `encoded.capacity() ≤ max_safety_record_bytes = 811` (pre-sized; `debug_assert ≤ _pub_res.charge()`) | same `_pub_res` | the metadata encode buffer (INV-O1-7) + the two publish envelopes (INV-O1-8) | moved into `publish_atomic`; dropped at return | `d7d14_e_o1_bootstrap_boundary_covers_metadata_encode_buffer`, `d7d14_encode_record_backing_is_bounded_single_allocation` | [O] single pre-sized allocation at the cap |
-| INV-O1-7 | bootstrap metadata encode | `SafetyMeta::encode()` buffer (`META_ENCODED_LEN = 42`), `initialize` scope | `42` | same `_pub_res` (its `max_safety_record_bytes + staging` conservatively covers the 42-byte metadata encode buffer's coexistence — the §13.7I open item, closed here) | the record encode buffer + publish envelopes | dropped at return | `d7d14_e_o1_bootstrap_boundary_covers_metadata_encode_buffer` | [O] coexistence covered |
-| INV-O1-8 | bootstrap publish envelopes | two CRC-framing staging buffers (`wrap` over record + over metadata), `publish_atomic` | `publication_staging_charge = 861 = (4 + 811) + (4 + 42)` | same `_pub_res` reserves staging **before** `wrap` allocates | the record + metadata encode buffers | dropped inside `publish_atomic` | `d7d14_e_o1_bootstrap_boundary_covers_metadata_encode_buffer` | [O] envelopes charged pre-allocation |
+| INV-O1-5 | bootstrap build | transient `DecodedRecord` (`BootstrapNoLock`), `initialize` scope | inline decoded footprint `D = size_of::<DecodedRecord>() = 408`, charged explicitly (Finding A); the bootstrap owns no evidence backing | `_pub_res = reserve(D + max_safety_record_bytes + META_ENCODED_LEN + publication_staging_charge)` **before** `encode_record` (the corrected O1 reservation: N=1 `1318`, N=4 `2122`) | the encode buffer (INV-O1-6) it is **borrowed by** | **borrowed** by `encode_record(&decoded, …)` (NOT consumed — INV-O1-5 corrected); the live decoded local coexists through `publish_atomic` and is dropped at `initialize` return | `pd_before_publish_survives_bootstrap`, `d7d14_f1_o1_live_set_observed_at_publication_boundary` | [O] borrowed decoded local charged + observed live |
+| INV-O1-6 | bootstrap encode (R3) | record-sized `encoded` `Vec`, `initialize` scope | `encoded.capacity() = max_safety_record_bytes` (N=1 `409`, N=4 `811`; pre-sized; `debug_assert ≤ _pub_res.charge()`) | same corrected `_pub_res` | the live borrowed decoded local (INV-O1-5) + the metadata encode buffer (INV-O1-7) + the two publish envelopes (INV-O1-8) | **borrowed** by `publish_atomic(&guard, &meta_encoded, &encoded)` (passed by `&[u8]`, NOT moved/consumed); dropped at `initialize` return | `d7d14_f1_o1_live_set_observed_at_publication_boundary`, `d7d14_e_o1_bootstrap_boundary_covers_metadata_encode_buffer`, `d7d14_encode_record_backing_is_bounded_single_allocation` | [O] single pre-sized allocation at the cap; observed live |
+| INV-O1-7 | bootstrap metadata encode | `SafetyMeta::encode()` buffer (`META_ENCODED_LEN = 42`), `initialize` scope | `42` (capacity exactly `42`; `Vec::with_capacity(2+32+8)`) | same corrected `_pub_res`, which now charges `M = META_ENCODED_LEN = 42` **explicitly** (Finding A) rather than relying on staging headroom | the record encode buffer + publish envelopes | **borrowed** by `publish_atomic` (passed by `&[u8]`); dropped at return | `d7d14_f1_o1_live_set_observed_at_publication_boundary`, `d7d14_e_o1_bootstrap_boundary_covers_metadata_encode_buffer` | [O] coexistence covered + observed live |
+| INV-O1-8 | bootstrap publish envelopes | two CRC-framing staging buffers (`wrap` over record + over metadata), `publish_atomic` | reservation reserves `publication_staging_charge` at the **profile** maximum (N=1 `459 = (4+409)+(4+42)`, N=4 `861 = (4+811)+(4+42)`) **before** `wrap` allocates; the **live** bootstrap envelopes wrap the 81-byte serialization + 42-byte metadata, so their observed backings are `85` and `46` (F1) | same corrected `_pub_res` | the live borrowed decoded local + the record + metadata encode buffers | dropped inside `publish_atomic` | `d7d14_f1_o1_live_set_observed_at_publication_boundary`, `d7d14_e_o1_bootstrap_boundary_covers_metadata_encode_buffer` | [O] envelopes charged pre-allocation; live `85`/`46` observed |
 | INV-O1-9 | outcome: uncertain durability | `UncertainPublication(String)` diagnostic, caller-owned | small bounded `String`, allocated inside the already-admitted `_pub_res` lifetime | covered-lifetime (inside `_pub_res`) | the publish buffers | **ownership transfers to the caller** via the returned error; `_pub_res` releases at scope end (the diagnostic outlives it as caller-owned, contract-excluded from component-retained charge) | `pd_init_uncertain_bytes_survive_without_observed_success` | [O] uncertain mapped; no effectiveness |
 | INV-O1-10 | outcome: durable acknowledged | revision `0` return value (scalar) | none | — | — | `mark_effective`; `Ok(0)` returned | `pd_reopen_after_clean_exit_requires_o5_before_o4`, `pd_duplicate_o1_after_surviving_init_refused` | [O] fresh bootstrap effectiveness |
 
@@ -16919,7 +16919,7 @@ Columns: `row ID | operation/phase/branch | object and owner | charged size/capa
 | INV-O4-3 | predecessor read + decode (phase A) | record-sized read-back + one transient `DecodedRecord`, `publish_locked` scope | read-back `≤ 811`; decoded at transient ceiling `1112` | `_o4_res = reserve(2·transient + 3·rec + META)` **before** `load_established` | the predecessor validation re-encode | **consumed by value** by predecessor `validate_decoded`; dropped **before** the candidate decoded is built (phase A and phase B transients never coexist) | `d7d14_max_tc_o4_o3_o5_real_operations_within_aggregate`, `o4_rejects_non_increasing_lock_view_transition_ineligible` | [O] phase A consumed before phase B |
 | INV-O4-4 | predecessor validation re-encode | one record-sized re-encode `Vec` | `≤ 811` (one of the three record-sized buffers in `_o4_res`) | `_o4_res` | predecessor decoded | dropped after predecessor validation | `d7d14_max_tc_o4_o3_o5_real_operations_within_aggregate` | [S] within the 3-record peak |
 | INV-O4-5 | candidate build (phase B) + binding | candidate `DecodedRecord` (`Locked`) + one `cert` binding `Vec` | decoded at `1112`; `cert ≤ 811` | `_o4_res` (2nd transient term + a record-sized term) | candidate encode buffer | decoded consumed by `validate_decoded`; `cert` dropped after binding | `corr_binding_helper_enforces_admission_before_allocation`, `corr_nested_tc_and_boundary_admission_before_allocation` | [O] admission precedes allocation |
-| INV-O4-6 | candidate encode (R3) | record-sized `encoded` `Vec` | `≤ 811` (3rd record-sized buffer; pre-sized at the cap) | `_o4_res` | retained by `validated` and **reused** by `publish_atomic` (no 2nd publication copy) | moved into `publish_atomic`; dropped at return | `d7d14_encode_record_backing_is_bounded_single_allocation`, `corr_valid_publication_reaches_evidence_allocation` | [O] encode reused, not re-copied |
+| INV-O4-6 | candidate encode (R3) | record-sized `encoded` `Vec` | `≤ 811` (3rd record-sized buffer; pre-sized at the cap) | `_o4_res` | retained by `validated` and **reused** by `publish_atomic` (no 2nd publication copy) | **borrowed** by `publish_atomic` (passed by `&[u8]`, not moved); dropped at return | `d7d14_encode_record_backing_is_bounded_single_allocation`, `corr_valid_publication_reaches_evidence_allocation` | [O] encode reused, not re-copied |
 | INV-O4-7 | publish envelopes | two CRC staging buffers, `publish_atomic` | staging; at the write boundary the live set (candidate publication + its wrap + metadata + its wrap) fits within the already-reserved 3-record peak (adding a separate staging term would double-count and break O3↔O4 coexistence) | `_o4_res` (conservatively covers the envelopes) | metadata encode buffer | dropped in `publish_atomic` | `d7d14_max_tc_o4_o3_o5_real_operations_within_aggregate`, `acct_tc_publication_charges_nested_signers` | [S] envelopes within 3-record peak |
 | INV-O4-8 | refusals: structural / capacity / arithmetic / stale-revision / transition-ineligible | typed `SafetyStoreError`; `StaleRevision` is a scalar struct variant; `TransitionIneligible(String)` allocates **inside** `_o4_res` | capnorm/declared-bound refusals are allocation-free; the `TransitionIneligible`/decode diagnostics are covered-lifetime inside `_o4_res` | one diagnostic buffer | transfers to caller; `_o4_res` releases on every exit | `d7d14_cap_o4_excess_capacity_candidate_refused_prewrite_then_readmit`, `d7d14_capnorm_o4_qc_signature_over_bound_refused_prewrite_then_readmit`, `d7d14_capnorm_o4_tc_nested_high_qc_over_bound_refused_prewrite_then_readmit`, `h21_revision_fence_refuses_stale_publish`, `h7_declared_count_over_bound_refused`, `h26_adversarial_*`, `corr_oversized_signature_refused_before_publication` | [O] pre-write refusal; state preserved + readmits |
 | INV-O4-9 | outcome: durable / ambiguous-write / uncertain | `PublishResult` variant (scalars + optional `WriteFailed`/ambiguous message) | — | — | — | `DurableAcknowledged → mark_effective`; `WriteError → WriteFailedAmbiguous`; `UncertainDurable → UncertainDurable` (dependent O4 blocked until O5) | `pd_ack_before_effective_terminates_before_transition`, `pd_ack_then_abort_survives_locked`, `pd_write_error_before_commit_predecessor_unchanged`, `pd_uncertain_after_write_successor_survives` | [O] post-ack/pre-effective boundary enforced |
@@ -16932,7 +16932,7 @@ Columns: `row ID | operation/phase/branch | object and owner | charged size/capa
 | INV-O5-2 | fresh read-back | record-sized read-back `Vec`, `reacknowledge` scope | `max_safety_record_bytes = 811` | `_o5_res = reserve(811 + 42 + 1112 + 861 = 2826)` **before** `load_established` | metadata + transient + envelopes | lives through `publish_atomic` (complete-content comparison operand); dropped at return | `d7d14_o5_publication_envelope_coexistence_reserved_within_aggregate` | [O] admitted before read |
 | INV-O5-3 | metadata read-back | fixed metadata buffer (`42`), `reacknowledge` scope | `42` | `_o5_res` | read-back + transient | dropped at return | same | [S] fixed-term |
 | INV-O5-4 | fresh transient decode | one transient `DecodedRecord`, `reacknowledge` scope | transient ceiling `1112` | `_o5_res` | read-back + metadata + envelopes | lives through `publish_atomic`; dropped at return | `d7d14_m2_o5_actual_simultaneous_object_charge_at_publication` | [M] live at boundary |
-| INV-O5-5 | metadata re-encode | `meta_encoded` buffer (`42`), republished verbatim | `42` | `_o5_res` | read-back + transient + record envelope | moved into `publish_atomic`; dropped at return | `d7d14_m2_*` (meta payload component) | [M] named buffer measured |
+| INV-O5-5 | metadata re-encode | `meta_encoded` buffer (`42`), republished verbatim | `42` | `_o5_res` | read-back + transient + record envelope | **borrowed** by `publish_atomic` (passed by `&[u8]`, not moved); dropped at return | `d7d14_m2_*` (meta payload component) | [M] named buffer measured |
 | INV-O5-6 | complete-content comparison (`CMP_SPAN`) | byte-for-byte slice compare `stored.as_slice()` vs `retained.encoded()` | **borrows** the two already-charged operands — **no fourth full-sized buffer** | no new reservation | the two operands | borrows end at the comparison | `h19_o5_refuses_divergence_outside_binding_digest`, `h19_pd_fresh_o3_then_o5_refuses_divergent_surviving_content` | [O] borrowed span, no extra buffer |
 | INV-O5-7 | publish envelopes | two CRC staging buffers, `publish_atomic` | `publication_staging_charge = 861` | `_o5_res` reserves staging **before** `wrap` allocates (the §13.5 item-5 correction) | read-back + transient + meta buffer | dropped in `publish_atomic` | `d7d14_o5_publication_envelope_coexistence_reserved_within_aggregate`, `d7d14_d_publication_staging_boundary_observed_independently` | [O] envelopes charged pre-allocation |
 | INV-O5-8 | refusals: foreign-context / foreign-incarnation / byte-mismatch / stale-revision | `SemanticRefusal`/`PublicationMismatch` (`String`) or scalar `StaleRevision`; caller-owned | the `String` diagnostics allocate **inside** the already-admitted `_o5_res` | covered-lifetime | the read-back/transient operands | **ownership transfers to the caller** via the returned error; `_o5_res` releases at scope end (the diagnostic outlives it as caller-owned, contract-excluded from component-retained charge) | `corr_recovery_token_does_not_transfer_across_stores`, `corr_recovery_token_anchored_no_authority_transfer`, `h9_p4_context_mismatch_refused`, `h20_stale_o5_does_not_overwrite_newer`, `h12_competing_handles_stale_o4_o5_leave_newer_bytes_unchanged` | [O] fail-closed; newer bytes untouched |
@@ -17096,8 +17096,179 @@ Superseded row: **INV-O3-5** (one set → **two** sets `seen` + `st_ids`; the fo
 
 ### Adjacent ownership statements reconciled
 
-Borrowed `encode`/read-back buffers are not *moved into* `publish_atomic` beyond the single record encode buffer (INV-O1-6's "moved into `publish_atomic`" is the record encode buffer only); the metadata read-back buffers do not survive `load_established` merely because decoded metadata does. The accepted S1/S2 measurement scope and earlier sensitivity evidence are preserved.
+Borrowed `encode`/read-back buffers are **not** *moved into* `publish_atomic` at all: `publish_atomic(_guard, meta: &[u8], record: &[u8])` takes both the record encode buffer and the metadata payload **by shared reference**, so each is **borrowed** and the live local is dropped at the owner's scope return — exactly as the metadata payload is borrowed. (This corrects the earlier INV-O1-6/INV-O4-6/INV-O5-5 "moved into `publish_atomic`" wording.) The metadata read-back buffers do not survive `load_established` merely because decoded metadata does. The accepted S1/S2 measurement scope and earlier sensitivity evidence are preserved.
 
 ### Inventory completion status after this pass
 
 The three superseded rows (INV-O1-5..8, INV-O3-5, INV-O3-7 / the diagnostic ownership paragraph) now carry supported admission-precedes-construction, coexistence, and release/transfer arguments with executed regressions. The component remains `D7D14_STORAGE_COMPONENT=PARTIAL-IMPLEMENTATION` / `D7D14_STORAGE_ACCEPTANCE=INCOMPLETE`: the independent publication-boundary observation and the maximum-fixture encode/binding intervals (prior §13.7P Items C/D residuals) are unchanged and remain the named accounting-evidence gaps — H22 and external assurance are **not** described as the only remaining work. `DURABLE_ANTI_ROLLBACK=NOT-ESTABLISHED`; `GENESIS_AUTHORITY_ACTIVATION=DISABLED`; `PRODUCTION_WIRE_CHAIN_ID_BEHAVIOR=UNCHANGED`; `CONFIGURED_AUTHORITY_RELEASE_BINARY_EVIDENCE=NOT-YET-CAPTURED`; `SECURITY_POSTURE=RS1-OPEN / PUBLIC-DEVNET-NO-GO`; C4/C5 OPEN; fail-closed `CurrentEpochUnavailable` unchanged. This pass authorizes no production construction, startup/consensus/signing integration, verifier wiring, authority/epoch mutation, transport change, peer-driven apply, anti-rollback establishment, activation, renaming, D15, or Run 423 work.
+
+## RUN 422 D7-D14 F1–F4 finishing pass (operative)
+
+This section is the **operative** reconciliation for the F1–F4 finishing pass and
+**supersedes** any earlier contradictory current claim distributed above or in the
+appendices. Where an earlier row/paragraph conflicts, the statements here govern.
+
+### F1 — O1 live set observed at the real publication boundary
+
+`initialize` reserves the corrected O1 publication phase `D + E + M + staging` and
+sets a bounded test-only owner snapshot (`backend::set_o1_owner_live_snapshot`) of
+the three live objects it holds immediately before `publish_atomic`; the
+`publish_atomic` boundary (reused, not a new framework) adds the two CRC envelope
+capacities and samples the **active** operational + aggregate reservations. The
+observation (`backend::O1LiveObjectCharge`, `cfg(test)`/`test-utils` only, absent
+from production) measures the real objects **without cloning** them, is reset per
+operation (`arm_o1_live_object_observation`), and fails explicitly (`None`) when
+missing/stale. Evidence:
+`d7d14_f1_o1_live_set_observed_at_publication_boundary` (both profiles, executed).
+
+| profile | D (inline decoded) | E (encoded cap) | M (meta payload) | record env (4+81) | meta env (4+42) | **live charge** | **active O1 reservation** | coverage |
+|---|---:|---:|---:|---:|---:|---:|---:|---|
+| N=1, S_sig=8 | 408 | 409 | 42 | 85 | 46 | **990** | **1318** | 990 ≤ 1318 ✓ |
+| N=4, S_sig=8 | 408 | 811 | 42 | 85 | 46 | **1392** | **2122** | 1392 ≤ 2122 ✓ |
+
+The 81-byte bootstrap serialization differs from its profile-sized encoded capacity
+(`E`); the record envelope wraps those 81 bytes, so its backing is 85 bytes. Each
+measured object term equals its source-derived reference value — no profile maximum
+is substituted for an observed capacity, and the reservation sampled is the one
+active **at the boundary**, not an earlier peak.
+
+* **The corrected conservative reservation increases by exactly 450 bytes** =
+  `D + M = 408 + 42`, from the pre-correction `E + staging` to `D + E + M + staging`.
+* **The original N=1 boundary shortfall was 122 bytes**: the observed live charge
+  `990 > 868` (the pre-correction `E + staging`). These are **distinct** quantities
+  (450 ≠ 122) and must not be conflated.
+* **N=4 was not breached:** the original N=4 reservation `1672` covered the
+  source-derived `1392`-byte boundary; no 450-byte live-charge breach is claimed for
+  N=4.
+* **Sensitivity (instrumented old-reservation reproduction, not an unmodified
+  historical checkout):** `d7d14_f1_o1_sensitivity_old_reservation_undercovers_n1_then_restores`
+  arms a per-operation test seam (`owner::set_force_o1_old_reservation`) that forces
+  only the pre-correction reservation `868` while **retaining** the corrected
+  observer; the observed live charge `990 > 868` (shortfall `122`), i.e. the
+  live-coverage inequality fails. Clearing the seam on a fresh store restores
+  `990 ≤ 1318`. The correction is restored and verified before final validation.
+* **Refusal/readmission extended to N=1:**
+  `d7d14_f1_o1_refused_and_readmits_n1` leaves `complete − 1` headroom → corrected N=1
+  O1 refuses `CapacityRefusal` before any durable write (no record, no metadata),
+  recovery remains required, aggregate charge unchanged; releasing pressure readmits
+  the same O1 to success and establishes the acknowledgement.
+* **Aggregate:** the observed boundary aggregate equals the operational reservation
+  plus the separate context partition and fits each profile's **actual
+  profile-derived** aggregate cap (read from `accounting_aggregate_cap`). `7772` is
+  the **N=4** value only — not a universal cap for every N.
+
+### F2 — construction-time diagnostic bounds and coexistence (finite table)
+
+Component-created diagnostics reachable through O1–O5, including partial-decode and
+early-return paths. Backend-owned errors, component-created copies, and post-return
+caller ownership are kept distinct. The operational read-failure mapping is now
+reached through the real component path by
+`d7d14_f2_o1_read_failure_mapping_reached_operationally` (not by constructing the
+enum in the test); the payload-level construction test
+`corr_profile_invalid_and_namespace_scan_payloads_construct_without_allocation` is
+retained as payload evidence.
+
+| diagnostic class/site | representation | capacity/peak bound | simultaneous objects | active covering reservation | release/transfer | evidence |
+|---|---|---|---|---|---|---|
+| Fixed-literal `String` (uncertain/ambiguous-write) | bounded fixed literal | fixed compile-time length (≤ ~64 B), no interpolation | the live publish buffers | inside `_pub_res`/`_o4_res`/`_o5_res` | ownership transfers to caller at return; reservation releases at scope end | `pd_init_uncertain_bytes_survive_without_observed_success`, ambiguous-write `d7d14_*` write-error tests |
+| Numeric `format!` (decode: version/discriminant/truncation/trailing/CRC; `TransitionIneligible`) | `Message(String)` via bounded numerics (`u8`/`u64`/`usize`) | bounded render length (fixed decimal widths); single `String`, formatting overlap ≤ one grow of a sub-64B buffer | the admitted O2/O3/O4 decoded/record buffer | inside the active O2/O3/O4 reservation (admitted buffer) | transfers to caller; reservation releases at return | `h3_unsupported_version_refused`, `h4_crc_and_truncation_refused`, `d7d14_r1_o2_revision_disagreement_diagnostic_allocation_free_max_complete_tc` |
+| Decode failure after some evidence backings allocated (partial decode) | typed `SafetyStoreError` / `Message` | bounded by the already-admitted transient decoded ceiling; partial backings are the admitted operands, not new charge | the partially decoded object's admitted backings | inside the O2/O3 decode reservation | partial object dropped on the `?`-return; reservation releases | `h4_crc_and_truncation_refused`, capnorm per-vector over-bound tests |
+| Semantic/history/transition/capability/publication refusals | `SemanticRefusal`/`PublicationMismatch`(`String`) or scalar `StaleRevision` | single bounded `String` or `Copy` scalar | the read-back/transient operands | inside `holder_res`+`_scratch_res` / `_o4_res` / `_o5_res` | transfers to caller; reservations release at return | `corr_invalid_lock_evidence_binding_refused`, `h20_stale_o5_does_not_overwrite_newer`, `h21_revision_fence_refuses_stale_publish` |
+| Fixed ambiguous-write / uncertainty messages | bounded fixed literal | fixed length; **no** backend text embedded | the live publish reservation operands | inside the live publication reservation | transfers to caller | ambiguous-write/uncertain `d7d14_*` tests |
+| Typed allocation-free read failures (`ReadFailedDetail::{NamespaceScan, Envelope{EnvelopeTooShort,CrcMismatch,BackendGet}}`) | `Copy` typed payload | **0** heap allocation; copies no backend text | the O1 inspection read-back buffers | inside `_inspect_res` (constructed before it releases) | transfers to caller; `_inspect_res` releases at block exit | `d7d14_f2_o1_read_failure_mapping_reached_operationally`, `corr_o1_namespace_scan_failure_is_typed_through_real_o1_path`, `corr_profile_invalid_and_namespace_scan_payloads_construct_without_allocation` |
+
+For every allocating diagnostic the bound is on **backing capacity** (not only
+rendered length), includes any single formatting grow where reachable, is accounted
+**while the component constructs it** under the active reservation, and the
+inequality is derived against the reservation active at that phase; eventual caller
+ownership does **not** exempt the construction-time allocation. Bounded numeric
+inputs alone do not establish coverage — the covering reservation is named per row.
+The concrete remaining correction applied this pass is the backend-get read-failure
+branch: it is a typed allocation-free `Envelope{BackendGet}` (no unbounded String
+allocated-then-truncated), reached operationally via the bounded `FailBackendGet`
+seam.
+
+### F3 — QC/TC validation scratch charges and phase inequalities (source-derived)
+
+The borrowed TC selection (`select_max_high_qc_ref`, storage-local, aliases the
+winning entry — no cloned signer backing, no replacement overlap) and its
+equivalence/borrow regressions are **preserved**; no rewrite. Explicit scratch
+charges:
+
+| scratch | representation | bounded backing | charge |
+|---|---|---|---|
+| QC signer-index scratch | one `Vec` descriptor | signer indices at ≤ N | `24 + 8N` (one descriptor + bounded backing) |
+| TC `seen` (`UNIQ_SET`) | one `Vec` descriptor | ≤ N entries | `24 + 8N` |
+| TC `st_ids` (`UNIQ_SET`) | one `Vec` descriptor | ≤ N entries | `24 + 8N` |
+| borrowed selected high-QC | aliased reference | — | **no new owned signer backing** |
+| coexisting F2 diagnostic | see F2 table | per F2 bound | added only when reachable |
+
+The two TC sets charge `2 × (24 + 8N)` = **112 bytes at N=4**, before any coexisting
+diagnostic. Phase inequalities (distinct re-encode, binding, and
+semantic-validation lifetimes; the already-owned O4 candidate is included when it
+coexists with predecessor validation):
+
+* **O3 (`read_validate`)**: `holder + transient + validation-scratch (seen+st_ids+QC
+  index) + [coexisting diagnostic] ≤ holder_res + _scratch_res`. The re-encode buffer
+  and the `cert` binding scratch are **not** simultaneously live (re-encode dropped
+  before binding), so only one record-sized validation buffer coexists at a time.
+* **O4 (`publish_locked`)**: the already-owned O4 candidate + predecessor
+  validation scratch `2 × (24 + 8N)` + QC-index scratch `+ [diagnostic] ≤ _o4_res`.
+
+The concrete scratch representation fits the accepted bounds across supported
+profiles because every `UNIQ_SET`/index backing is `≤ N` entries (bounded by the
+admitted signer count) and the two descriptors are fixed 24-byte stacks; this is a
+source-derived proof and does **not** use `admit_evidence_capnorm` as admission for
+independently constructed scratch. The borrowed selection is exercised through both
+O3 and O4 by `d7d14_fc_tc_borrowed_selection_discriminates_distinct_views_through_o3_o4`;
+TA1/TA2, strict-`>`, first-encountered-for-equal-views, quorum semantics, and
+`Unverified` evidence are preserved.
+
+### F4 — withdrawals and supersessions
+
+* The earlier statement that **independent publication-boundary observation remains
+  unimplemented** and that **maximum-fixture encode/binding measurements and
+  independent O5 publication observations** are reopened/incomplete is **withdrawn**.
+  Those results are completed (O5: `d7d14_m2_*`, Item D; maximum QC/TC fixtures:
+  `d7d14_c_*`), and F1 adds the O1 publication-boundary observation. Their accurately
+  limited scope (bounded scalar snapshots at a reused hook; not a general
+  memory-monitoring framework) is preserved.
+* The O1 reservation is **`D + E + M + staging`** (Finding A), not the earlier
+  `rec + staging`; the 42-byte metadata encode buffer and the 408-byte inline decoded
+  local are **explicitly** charged, closing the former open coexistence item.
+* The record buffer is **borrowed** by `publish_atomic` (by `&[u8]`), just as the
+  metadata payload is borrowed — not moved/consumed (INV-O1-6/INV-O4-6/INV-O5-5
+  corrected above).
+* The N=4 aggregate cap `7772` is the **N=4** value; the cap is profile-derived and
+  is not universal across N.
+* This finding is an omitted inventory argument now supplied with observation — **not**
+  a runtime overflow. The F1 arithmetic references are **verified** against executed
+  observations, not presented as the operation itself; `d7d14_fa_o1_charge_under_count_is_exactly_decoded_plus_meta`
+  remains supporting arithmetic (labelled as such), while the executed reproduction is
+  `d7d14_f1_*`.
+
+### This pass's literal validation / security-tool outcomes
+
+Recorded separately from historical results (this finishing pass, executed in the
+supplied environment):
+
+- **Focused F1/F2 regressions (corrected, post-experiment):** `cargo test -p qbind-node --features test-utils --test run_422_d7d14_safety_record_store_tests -- d7d14_f1 d7d14_f2` → **4 passed, 0 failed, 0 ignored** (143 filtered out): `d7d14_f1_o1_live_set_observed_at_publication_boundary`, `d7d14_f1_o1_sensitivity_old_reservation_undercovers_n1_then_restores` (restored), `d7d14_f1_o1_refused_and_readmits_n1`, `d7d14_f2_o1_read_failure_mapping_reached_operationally`.
+- **Full D7-D14 suite with `test-utils`:** `cargo test -p qbind-node --features test-utils --test run_422_d7d14_safety_record_store_tests` → **146 passed, 0 failed, 1 ignored**.
+- **Borrowed-selection unit tests (exact filter):** `cargo test -p qbind-node --features test-utils --lib fc_borrowed_selection` → **2 passed, 0 failed** (1839 filtered out — this is a two-test filter, **not** the whole library suite): `…::validate::fc_borrowed_selection_tests::borrowed_selection_returns_input_borrow_not_a_clone`, `…::borrowed_selection_matches_consensus_helper_by_value`.
+- **Relevant m16 tests:** `cargo test -p qbind-node --features test-utils --test m16_epoch_transition_hardening_tests` → **14 passed, 0 failed, 0 ignored**.
+- **Default library build:** `cargo build -p qbind-node --lib` → Finished (ok).
+- **Test compilation `--no-run`:** both `cargo test -p qbind-node --no-run` and `… --features test-utils --no-run` → Finished (ok).
+- **Release node build:** `cargo build -p qbind-node --release --bin qbind-node` → Finished (ok).
+- **Clippy:** `cargo clippy -p qbind-node --features test-utils --lib` → **0** warnings in the edited `safety_record_store/{backend,owner}.rs` regions; the 104 lib warnings are pre-existing project-wide (e.g. `p2p_node_builder.rs` `dead_code`), not introduced by this pass.
+- **Edited-region formatting / EOL:** the two Rust files and the integration test retain the established CRLF/no-final-newline convention; the evidence and contract documents retain CRLF/no-final-newline; `contradiction.md` retains LF/no-final-newline.
+- **Secret scan:** no secrets detected in the six changed files.
+- **Non-wiring audit:** all observation/seam machinery is `#[cfg(any(test, feature = "test-utils"))]`-gated and absent from the default/release build; no production construction, startup/consensus/signing integration, verifier wiring, authority/epoch mutation, transport, or peer-apply change.
+- **Independent review/security tooling:** Code Review completed with **no** comments. CodeQL (rust) returned **0 alerts** but reported *"Analysis was skipped because the database size is too large"* — recorded literally as a **skipped** scan, not a clean full analysis. One review sub-model was reported unavailable in-environment; recorded literally.
+
+Rust changes are not documentation-only triviality. The component remains `D7D14_STORAGE_COMPONENT=PARTIAL-IMPLEMENTATION` /
+`D7D14_STORAGE_ACCEPTANCE=INCOMPLETE`; `DURABLE_ANTI_ROLLBACK=NOT-ESTABLISHED`;
+`GENESIS_AUTHORITY_ACTIVATION=DISABLED`;
+`PRODUCTION_WIRE_CHAIN_ID_BEHAVIOR=UNCHANGED`;
+`CONFIGURED_AUTHORITY_RELEASE_BINARY_EVIDENCE=NOT-YET-CAPTURED`;
+`SECURITY_POSTURE=RS1-OPEN / PUBLIC-DEVNET-NO-GO`; C4/C5 OPEN; H22 separately limited;
+fail-closed `CurrentEpochUnavailable` unchanged.

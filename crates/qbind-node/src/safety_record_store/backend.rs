@@ -231,6 +231,111 @@ pub fn observed_o5_observation_error() -> Option<O5ObservationError> {
     O5_OBS_INVALID.with(|c| c.get())
 }
 
+// Test-only ACTUAL O1 bootstrap-publication-boundary live-object-charge observation
+// (RUN 422 D7-D14 F1). Distinct from the O5 observation above: the O1 `initialize`
+// path holds a DIFFERENT live set at the `publish_atomic` boundary. Because
+// `encode_record(&decoded, …)` BORROWS the bootstrap `DecodedRecord` (it does not
+// consume it — INV-O1-5 is corrected), that decoded local is still in scope and
+// coexists, through `publish_atomic`, with: the profile-sized encoded record
+// backing (`encode_record`'s `Vec`), the metadata payload buffer (`meta.encode()`),
+// and — allocated here at the boundary — the two CRC staging envelopes. This records
+// the ACTUAL simultaneously component-owned OBJECTS alive at that boundary, measured
+// object-by-object: the owner supplies a BOUNDED SCALAR snapshot of the three objects
+// it holds live (decoded charge measured in place via `decoded_working_set_charge`,
+// encoded backing capacity, metadata payload capacity), and this boundary adds the
+// two envelope capacities plus the ACTIVE operational and aggregate reservations
+// sampled AT the boundary. Scalars only — no measured object graph is cloned. Absent
+// from production builds.
+#[cfg(any(test, feature = "test-utils"))]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct O1LiveObjectCharge {
+    /// Live bootstrap decoded object charge, measured IN PLACE via
+    /// `decoded_working_set_charge` (borrowed, non-cloning): the inline
+    /// `DecodedRecord` footprint plus any nested backing it owns. For the
+    /// `BootstrapNoLock` bootstrap this is the bare inline footprint (no evidence).
+    pub decoded_charge: u128,
+    /// The live encoded record buffer backing capacity (`encode_record`'s output
+    /// `Vec`), profile-sized — larger than the 81-byte bootstrap serialization.
+    pub encoded_record_cap: u128,
+    /// The live metadata payload buffer (`meta.encode()`) capacity.
+    pub metadata_payload_cap: u128,
+    /// Actual record envelope capacity (`wrap` over the serialized record bytes).
+    pub record_envelope_cap: u128,
+    /// Actual metadata envelope capacity (`wrap` over the metadata payload).
+    pub metadata_envelope_cap: u128,
+    /// The ACTIVE OPERATIONAL reservation sampled from the executing backend's
+    /// operational accountant AT THIS BOUNDARY (not a profile maximum, not a
+    /// historical peak): the live `acct.current()` while both CRC envelopes coexist
+    /// with the rest of the live set.
+    pub observed_active_operational_reservation: u128,
+    /// The ACTIVE AGGREGATE reservation sampled from the executing backend's shared
+    /// aggregate authority AT THIS BOUNDARY (operational + context partitions
+    /// combined).
+    pub observed_active_aggregate_reservation: u128,
+}
+
+#[cfg(any(test, feature = "test-utils"))]
+impl O1LiveObjectCharge {
+    /// The total simultaneously component-owned live object charge at the O1
+    /// publication boundary (the five measured object terms; the reservation samples
+    /// are NOT objects and are never summed into the object charge).
+    pub fn total(&self) -> u128 {
+        [
+            self.decoded_charge,
+            self.encoded_record_cap,
+            self.metadata_payload_cap,
+            self.record_envelope_cap,
+            self.metadata_envelope_cap,
+        ]
+        .into_iter()
+        .fold(0u128, |a, b| a.saturating_add(b))
+    }
+}
+
+// Owner-supplied bounded scalar snapshot of the live O1 objects, set by
+// `initialize` immediately before `publish_atomic`:
+// (decoded_charge, encoded_record_cap, metadata_payload_cap).
+#[cfg(any(test, feature = "test-utils"))]
+type O1OwnerSnapshot = (u128, u128, u128);
+
+#[cfg(any(test, feature = "test-utils"))]
+thread_local! {
+    static O1_OWNER_SNAPSHOT: std::cell::Cell<Option<O1OwnerSnapshot>> =
+        const { std::cell::Cell::new(None) };
+    static O1_LIVE_OBJECT_OBS: std::cell::Cell<Option<O1LiveObjectCharge>> =
+        const { std::cell::Cell::new(None) };
+}
+
+/// Test-only: arm/reset the O1 publication-boundary live-object-charge observation
+/// for the current thread. Call immediately before the O1 `initialize(true)`.
+/// Resetting both cells is what makes a missing or stale observation fail
+/// explicitly: a later `observed_o1_live_object_charge()` returns `None` unless the
+/// armed operation reached its publication boundary and supplied a snapshot.
+#[cfg(any(test, feature = "test-utils"))]
+pub fn arm_o1_live_object_observation() {
+    O1_OWNER_SNAPSHOT.with(|c| c.set(None));
+    O1_LIVE_OBJECT_OBS.with(|c| c.set(None));
+}
+
+/// Crate/test-only: the owner records its live-object scalar snapshot here, while
+/// those objects are all alive, immediately before `publish_atomic`.
+#[cfg(any(test, feature = "test-utils"))]
+pub(crate) fn set_o1_owner_live_snapshot(
+    decoded_charge: u128,
+    encoded_record_cap: u128,
+    metadata_payload_cap: u128,
+) {
+    O1_OWNER_SNAPSHOT.with(|c| c.set(Some((decoded_charge, encoded_record_cap, metadata_payload_cap))));
+}
+
+/// Test-only: the ACTUAL combined O1 live-object charge observed at the most recent
+/// `publish_atomic` boundary where a VALID owner snapshot was supplied, or `None`
+/// (not reached since arming).
+#[cfg(any(test, feature = "test-utils"))]
+pub fn observed_o1_live_object_charge() -> Option<O1LiveObjectCharge> {
+    O1_LIVE_OBJECT_OBS.with(|c| c.get())
+}
+
 /// The metadata key (one per backend DB).
 const META_KEY: &[u8] = b"safetyrec:meta:v1";
 /// The authoritative-record key (record + embedded supporting material).
@@ -273,6 +378,13 @@ pub enum InjectFault {
     /// [`SafetyBackend::first_unrecognized_safety_key`] (the typed, allocation-free
     /// `ReadFailedDetail::NamespaceScan` refusal) through the real O1 path.
     FailNamespaceScan = 4,
+    /// Test-only: the component-owned record/metadata read's backend `get_pinned`
+    /// returns a storage-layer error. A real RocksDB point read cannot be forced to
+    /// fail deterministically, so this narrowly test-gated fault drives the exact
+    /// `Err(_e)` arm of [`SafetyBackend::read_checksummed`] (the typed,
+    /// allocation-free `ReadFailedDetail::Envelope { kind: BackendGet }` refusal,
+    /// which copies NO backend error text) through the real O1–O5 read path.
+    FailBackendGet = 5,
 }
 
 /// A shared serialization domain. The owned guard proves the single-writer
@@ -601,6 +713,20 @@ impl SafetyBackend {
         // `Display` (the previous `format!("{what}: {e}")`) or even a bounded-but-
         // allocating `format!` would peak a component-owned `String` above the
         // admitted charge. The typed `Copy` payload copies no backend text.
+        //
+        // Test-only (RUN 422 D7-D14 F2): a real RocksDB point read cannot be forced
+        // to fail deterministically, so the narrowly test-gated `FailBackendGet`
+        // fault drives the exact `Err(_e)` arm below — the typed, allocation-free
+        // `BackendGet` refusal that copies no backend text — through the real read
+        // path, so an operational test reaches the actual read-failure mapping
+        // rather than constructing the enum directly.
+        #[cfg(any(test, feature = "test-utils"))]
+        if self.injected() == InjectFault::FailBackendGet {
+            return Err(SafetyStoreError::ReadFailed(ReadFailedDetail::Envelope {
+                what,
+                kind: EnvelopeFailureKind::BackendGet,
+            }));
+        }
         match self.db.get_pinned(key) {
             Ok(None) => Ok(None),
             Ok(Some(raw)) => {
@@ -715,6 +841,27 @@ impl SafetyBackend {
                 };
                 O5_LIVE_OBJECT_OBS.with(|c| c.set(Some(obs)));
             }
+            // F1: if the owner supplied its O1 live-object snapshot (`initialize`),
+            // combine it with the two CRC staging envelope capacities measured here —
+            // while both envelopes coexist with the borrowed bootstrap decoded local,
+            // the encoded record backing, and the metadata payload — and pair it with
+            // the active operational + aggregate reservations sampled at this same
+            // boundary, to record the ACTUAL combined O1 live-object charge. No-op for
+            // O4/O5 (no O1 snapshot supplied).
+            if let Some((decoded_charge, encoded_record_cap, metadata_payload_cap)) =
+                O1_OWNER_SNAPSHOT.with(|c| c.get())
+            {
+                let obs = O1LiveObjectCharge {
+                    decoded_charge,
+                    encoded_record_cap,
+                    metadata_payload_cap,
+                    record_envelope_cap: record_envelope.capacity() as u128,
+                    metadata_envelope_cap: meta_envelope.capacity() as u128,
+                    observed_active_operational_reservation: reservations.0,
+                    observed_active_aggregate_reservation: reservations.1,
+                };
+                O1_LIVE_OBJECT_OBS.with(|c| c.set(Some(obs)));
+            }
         }
         batch.put(META_KEY, meta_envelope);
         batch.put(RECORD_KEY, record_envelope);
@@ -808,6 +955,7 @@ impl SafetyBackend {
             2 => InjectFault::WriteErrors,
             3 => InjectFault::UncertainAfterWrite,
             4 => InjectFault::FailNamespaceScan,
+            5 => InjectFault::FailBackendGet,
             _ => InjectFault::None,
         }
     }

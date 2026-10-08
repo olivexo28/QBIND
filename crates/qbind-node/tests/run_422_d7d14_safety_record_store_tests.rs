@@ -7587,6 +7587,111 @@ fn corr_o1_namespace_scan_failure_is_typed_through_real_o1_path() {
     );
 }
 
+/// (F2) The typed, allocation-free `ReadFailedDetail::Envelope` checksum/backend
+/// read-failure diagnostics are reached through the REAL O1 read path — the
+/// component's `read_checksummed` mapping — NOT by constructing the enum directly in
+/// the test (the payload-level `corr_profile_invalid_and_namespace_scan_payloads_…`
+/// construction test is retained separately as payload evidence). Each branch is a
+/// component-created diagnostic constructed INSIDE O1's active inspection reservation
+/// and carries no backend-owned text:
+///   * `EnvelopeTooShort` — a planted record envelope shorter than the 4-byte CRC
+///     prefix (component-owned refusal; backend owns only the raw bytes).
+///   * `CrcMismatch` — a planted record envelope whose CRC does not match its payload.
+///   * `BackendGet` — the backend `get_pinned` storage-layer error branch, driven by
+///     the narrowly test-gated `FailBackendGet` fault since a real point read cannot
+///     be forced to fail deterministically.
+/// Each refusal writes nothing, leaves the recovery latch untouched, and releases the
+/// O1 inspection reservation to baseline `0`; clearing the condition lets a clean O1
+/// initialize, proving the refusal was the read-failure under test.
+#[test]
+fn d7d14_f2_o1_read_failure_mapping_reached_operationally() {
+    use qbind_node::safety_record_store::backend::InjectFault;
+    use qbind_node::safety_record_store::error::{
+        EnvelopeFailureKind as K, ReadFailedDetail as R, ReadWhat as W,
+    };
+    let ctx = ctx_n(4);
+
+    // --- EnvelopeTooShort via a planted 3-byte record (shorter than the CRC prefix).
+    {
+        let dir = tempfile::tempdir().unwrap();
+        let owner = SafetyRecordOwner::attach(open_enabled(dir.path()), ctx.clone()).unwrap();
+        let backend = owner.backend_for_test();
+        backend
+            .debug_put_raw(b"safetyrec:record:v1", &[0u8; 3])
+            .unwrap();
+        let latch_before = backend.recovery_required();
+        match owner.initialize(true) {
+            Err(SafetyStoreError::ReadFailed(R::Envelope {
+                what: W::Record,
+                kind: K::EnvelopeTooShort,
+            })) => {}
+            other => panic!("expected typed Envelope{{Record, EnvelopeTooShort}}, got {other:?}"),
+        }
+        assert_eq!(backend.read_meta(META_ENCODED_LEN_MIRROR).unwrap(), None);
+        assert_eq!(backend.recovery_required(), latch_before);
+        assert_eq!(
+            backend.accounting_current(),
+            0,
+            "O1 inspection reservation released on the read-failure refusal"
+        );
+    }
+
+    // --- CrcMismatch via a planted envelope whose CRC does not cover its payload.
+    {
+        let dir = tempfile::tempdir().unwrap();
+        let owner = SafetyRecordOwner::attach(open_enabled(dir.path()), ctx.clone()).unwrap();
+        let backend = owner.backend_for_test();
+        // 4 wrong CRC bytes + a nonempty payload (length within the record bound).
+        backend
+            .debug_put_raw(b"safetyrec:record:v1", &[0xFF, 0xFF, 0xFF, 0xFF, 1, 2, 3, 4])
+            .unwrap();
+        match owner.initialize(true) {
+            Err(SafetyStoreError::ReadFailed(R::Envelope {
+                what: W::Record,
+                kind: K::CrcMismatch,
+            })) => {}
+            other => panic!("expected typed Envelope{{Record, CrcMismatch}}, got {other:?}"),
+        }
+        assert_eq!(
+            backend.accounting_current(),
+            0,
+            "O1 inspection reservation released on the CRC-mismatch refusal"
+        );
+    }
+
+    // --- BackendGet via the narrowly test-gated fault. O1 reads metadata first, so
+    // the metadata `get_pinned` surfaces the typed backend-get refusal.
+    {
+        let dir = tempfile::tempdir().unwrap();
+        let owner = SafetyRecordOwner::attach(open_enabled(dir.path()), ctx.clone()).unwrap();
+        let backend = owner.backend_for_test();
+        backend.set_inject(InjectFault::FailBackendGet);
+        match owner.initialize(true) {
+            Err(SafetyStoreError::ReadFailed(R::Envelope {
+                what: W::Metadata,
+                kind: K::BackendGet,
+            })) => {}
+            other => panic!("expected typed Envelope{{Metadata, BackendGet}}, got {other:?}"),
+        }
+        assert_eq!(
+            backend.accounting_current(),
+            0,
+            "O1 inspection reservation released on the backend-get refusal"
+        );
+        // Clearing the fault lets the clean namespace initialize.
+        backend.set_inject(InjectFault::None);
+        assert_eq!(
+            owner.initialize(true).unwrap(),
+            0,
+            "O1 succeeds once the backend-get fault clears"
+        );
+        assert!(
+            !backend.recovery_required(),
+            "the successful O1 established the fresh acknowledgement"
+        );
+    }
+}
+
 // ===========================================================================
 // RUN 422 D7-D14 Item C (this pass) — distinct MAXIMUM QC/TC fixtures with
 // asserted dimensions, and the three admitted paths (successful structural/
@@ -9082,6 +9187,278 @@ fn d7d14_fa_o1_refused_when_decoded_charge_unavailable_and_readmits_on_release()
     assert!(
         backend.read_record(e).unwrap().is_some(),
         "readmitted O1 established the durable record"
+    );
+}
+
+// ===========================================================================
+// Run 422 D7-D14 Finding F1 — O1 live-set observation at the publication boundary
+//
+// The `d7d14_fa_*` tests above observe `accounting_peak()` — the RESERVATION amount
+// — through a real `initialize(true)`. They prove the corrected reservation is
+// taken and that refusal/readmission behave, but they do NOT observe the ACTUAL
+// simultaneously live objects measured against the reservation active at the
+// publication boundary. These F1 tests close that gap: through a real
+// `initialize(true)`, armed with the O1 live-object observer, they observe at the
+// `publish_atomic` boundary the SAME live bootstrap `DecodedRecord` (charged with
+// the inline/working-set model), the actual encoded record backing capacity, the
+// actual metadata payload capacity, BOTH actual CRC-envelope capacities while they
+// coexist, and the executing backend's active operational + aggregate reservations
+// at that phase. Nothing is cloned; no profile maximum is substituted for an
+// observed capacity; no earlier peak is substituted for the boundary reservation.
+//
+// Source-derived reference live charges (verified, not fabricated):
+//   N=1,S_sig=8: 408 + 409 + 42 + 85 + 46 = 990 ; corrected reservation 1318
+//   N=4,S_sig=8: 408 + 811 + 42 + 85 + 46 = 1392; corrected reservation 2122
+// The 81-byte bootstrap serialization differs from its profile-sized encoded
+// capacity; the record envelope wraps those 81 bytes, so its backing is 85 bytes.
+// ===========================================================================
+
+#[test]
+fn d7d14_f1_o1_live_set_observed_at_publication_boundary() {
+    use qbind_node::safety_record_store::accounting::{
+        publication_staging_charge, size_of_decoded_record_inline,
+    };
+    use qbind_node::safety_record_store::backend::{
+        arm_o1_live_object_observation, observed_o1_live_object_charge,
+    };
+    use qbind_node::safety_record_store::profile::max_safety_record_bytes;
+
+    // (profile, expected encoded cap, expected live charge, expected corrected reservation)
+    for (n, exp_encoded, exp_live, exp_reservation) in
+        [(1u64, 409u128, 990u128, 1318u128), (4u64, 811u128, 1392u128, 2122u128)]
+    {
+        let dir = tempfile::tempdir().unwrap();
+        let ctx = ctx_n(n);
+        let backend = open_enabled(dir.path());
+        let owner =
+            SafetyRecordOwner::attach(backend, ctx.clone()).expect("attach (uninitialized)");
+        let backend = owner.backend_for_test();
+        let agg_cap = backend.accounting_aggregate_cap().unwrap();
+        let ctx_live = backend.context_accounting_current();
+
+        // Source-derived reference terms (verified below against the observation).
+        let d = size_of_decoded_record_inline();
+        let e = max_safety_record_bytes(&ctx).unwrap();
+        let staging = publication_staging_charge(&ctx).unwrap();
+        assert_eq!(d, 408, "n={n}: inline decoded footprint");
+        assert_eq!(e, exp_encoded, "n={n}: profile-sized encoded capacity");
+
+        // Observe the ACTUAL simultaneous live objects at the real publish boundary.
+        arm_o1_live_object_observation();
+        assert_eq!(owner.initialize(true).unwrap(), 0, "n={n}: fresh O1 succeeds");
+        let obs = observed_o1_live_object_charge()
+            .expect("the O1 bootstrap reached the publish_atomic boundary");
+
+        // Each measured object term equals its source-derived reference value —
+        // measured, not substituted from a profile maximum.
+        assert_eq!(obs.decoded_charge, d, "n={n}: live bootstrap decoded charge");
+        assert_eq!(obs.encoded_record_cap, e, "n={n}: actual encoded backing capacity");
+        assert_eq!(
+            obs.metadata_payload_cap, META_ENCODED_LEN_MIRROR,
+            "n={n}: actual metadata payload capacity (42)"
+        );
+        assert_eq!(
+            obs.record_envelope_cap, 85,
+            "n={n}: record envelope wraps the 81-byte bootstrap serialization (4 + 81)"
+        );
+        assert_eq!(
+            obs.metadata_envelope_cap, 46,
+            "n={n}: metadata envelope wraps the 42-byte payload (4 + 42)"
+        );
+        assert_eq!(
+            obs.total(),
+            exp_live,
+            "n={n}: observed combined O1 live charge equals the source-derived reference"
+        );
+
+        // The reservation active AT the boundary is the corrected O1 reservation —
+        // NOT an earlier peak, NOT a profile-substituted value.
+        assert_eq!(
+            obs.observed_active_operational_reservation, exp_reservation,
+            "n={n}: operational reservation active at the publication boundary"
+        );
+        assert_eq!(
+            exp_reservation,
+            d + e + META_ENCODED_LEN_MIRROR + staging,
+            "n={n}: corrected reservation = D + E + M + staging"
+        );
+
+        // CORE F1 ASSERTION: the observed live charge is covered by the operational
+        // reservation active at that phase.
+        assert!(
+            obs.total() <= obs.observed_active_operational_reservation,
+            "n={n}: live charge {} must be covered by the active reservation {}",
+            obs.total(),
+            obs.observed_active_operational_reservation
+        );
+
+        // Aggregate assertion: the observed aggregate reservation at the boundary is
+        // the operational reservation plus the separate context partition, and it
+        // fits this profile's ACTUAL (profile-derived) aggregate cap — not a
+        // universal constant.
+        assert_eq!(
+            obs.observed_active_aggregate_reservation,
+            exp_reservation + ctx_live,
+            "n={n}: aggregate reservation = operational + context partition"
+        );
+        assert!(
+            obs.observed_active_aggregate_reservation <= agg_cap,
+            "n={n}: observed aggregate {} must fit the profile aggregate cap {}",
+            obs.observed_active_aggregate_reservation,
+            agg_cap
+        );
+
+        // The durable record was established and the operational reservation released.
+        assert!(backend.read_record(e).unwrap().is_some(), "n={n}: durable record");
+        assert_eq!(backend.accounting_current(), 0, "n={n}: reservation released");
+    }
+}
+
+/// (F1 sensitivity — INSTRUMENTED old-reservation reproduction, NOT an unmodified
+/// historical checkout) On a FRESH N=1 store, the corrected live-object observer is
+/// retained while the O1 reservation is forced back to the PRE-CORRECTION amount
+/// (`E + publication_staging_charge = 868`). The observed live charge (990) then
+/// EXCEEDS that reservation by exactly the source-derived 122-byte N=1 boundary
+/// shortfall — so the live-coverage inequality the correction restores would FAIL.
+/// Clearing the instrument restores the correction on a second fresh store: the SAME
+/// 990-byte live charge is once again covered by the corrected 1318-byte reservation.
+#[test]
+fn d7d14_f1_o1_sensitivity_old_reservation_undercovers_n1_then_restores() {
+    use qbind_node::safety_record_store::backend::{
+        arm_o1_live_object_observation, observed_o1_live_object_charge,
+    };
+    use qbind_node::safety_record_store::owner::set_force_o1_old_reservation;
+
+    let ctx = ctx_n(1);
+
+    // (1) Instrumented old-reservation reproduction on a fresh store.
+    let dir = tempfile::tempdir().unwrap();
+    let owner = SafetyRecordOwner::attach(open_enabled(dir.path()), ctx.clone()).unwrap();
+
+    arm_o1_live_object_observation();
+    set_force_o1_old_reservation(true);
+    assert_eq!(
+        owner.initialize(true).unwrap(),
+        0,
+        "the instrumented old-reservation O1 still succeeds on a fresh store"
+    );
+    let bad = observed_o1_live_object_charge()
+        .expect("the instrumented O1 reached the publish_atomic boundary");
+
+    assert_eq!(bad.total(), 990, "the live charge is unchanged by the instrument");
+    assert_eq!(
+        bad.observed_active_operational_reservation, 868,
+        "the instrument restored the pre-correction reservation (E + staging)"
+    );
+    // The live-coverage inequality FAILS under the old reservation: 990 > 868.
+    assert!(
+        bad.total() > bad.observed_active_operational_reservation,
+        "the old reservation under-covers the observed live charge"
+    );
+    assert_eq!(
+        bad.total() - bad.observed_active_operational_reservation,
+        122,
+        "the source-derived N=1 boundary shortfall is exactly 122 bytes (990 > 868)"
+    );
+
+    // (2) Restore the correction on a second fresh store and verify coverage holds.
+    let dir2 = tempfile::tempdir().unwrap();
+    let owner2 = SafetyRecordOwner::attach(open_enabled(dir2.path()), ctx.clone()).unwrap();
+    arm_o1_live_object_observation();
+    // No `set_force_o1_old_reservation(true)` here: the seam is consumed per
+    // operation, so this `initialize` uses the corrected reservation.
+    assert_eq!(owner2.initialize(true).unwrap(), 0, "restored O1 succeeds");
+    let good = observed_o1_live_object_charge()
+        .expect("the restored O1 reached the publish_atomic boundary");
+    assert_eq!(good.total(), 990, "the live charge is unchanged");
+    assert_eq!(
+        good.observed_active_operational_reservation, 1318,
+        "the corrected reservation is restored (D + E + M + staging)"
+    );
+    assert!(
+        good.total() <= good.observed_active_operational_reservation,
+        "the corrected reservation covers the observed live charge after restoration"
+    );
+}
+
+/// (F1 refusal/readmission extended to N=1) Mirrors the N=4 refusal/readmission
+/// regression at the smaller profile: with `complete - 1` aggregate headroom the
+/// corrected N=1 O1 refuses with a `CapacityRefusal` before any durable write
+/// (no record, no metadata), leaves recovery required and the aggregate charge
+/// unchanged; releasing the pressure readmits the SAME O1 to success.
+#[test]
+fn d7d14_f1_o1_refused_and_readmits_n1() {
+    use qbind_node::safety_record_store::accounting::{
+        publication_staging_charge, size_of_decoded_record_inline,
+    };
+    use qbind_node::safety_record_store::profile::max_safety_record_bytes;
+
+    let dir = tempfile::tempdir().unwrap();
+    let ctx = ctx_n(1);
+    let backend = open_enabled(dir.path());
+    let owner = SafetyRecordOwner::attach(backend, ctx.clone()).expect("attach (uninitialized)");
+    let backend = owner.backend_for_test();
+    let agg_cap = backend.accounting_aggregate_cap().unwrap();
+    let ctx_live = backend.context_accounting_current();
+
+    let d = size_of_decoded_record_inline();
+    let e = max_safety_record_bytes(&ctx).unwrap();
+    let m = META_ENCODED_LEN_MIRROR;
+    let staging = publication_staging_charge(&ctx).unwrap();
+    let complete = d + e + m + staging;
+    assert_eq!(complete, 1318, "N=1 corrected O1 reservation");
+
+    // Leave `complete - 1` aggregate headroom → corrected N=1 O1 refuses at the
+    // publication reservation.
+    let standing_amt = agg_cap - ctx_live - (complete - 1);
+    let standing = backend
+        .reserve_standing_for_test(standing_amt)
+        .expect("standing pressure within the combined budget");
+    assert!(
+        owner.recovery_required(),
+        "fresh uninitialized N=1 store starts not-effective"
+    );
+    match owner.initialize(true) {
+        Err(SafetyStoreError::CapacityRefusal(_)) => {}
+        other => panic!("expected CapacityRefusal at `complete - 1` headroom, got {other:?}"),
+    }
+    assert!(
+        backend.read_record(e).unwrap().is_none(),
+        "refused N=1 O1 wrote no record (admission precedes the durable write)"
+    );
+    assert!(
+        backend.read_meta(m).unwrap().is_none(),
+        "refused N=1 O1 wrote no metadata"
+    );
+    assert!(
+        owner.recovery_required(),
+        "a refused O1 leaves recovery required (no acknowledgement established)"
+    );
+    assert_eq!(
+        backend.accounting_aggregate_current(),
+        ctx_live + standing_amt,
+        "refused N=1 O1 released its reservation; aggregate charge unchanged"
+    );
+    drop(standing);
+
+    // Releasing all pressure readmits the SAME O1 to success.
+    assert_eq!(
+        owner.initialize(true).unwrap(),
+        0,
+        "N=1 O1 succeeds once the decoded-phase headroom is available"
+    );
+    assert!(
+        backend.read_record(e).unwrap().is_some(),
+        "readmitted N=1 O1 established the durable record"
+    );
+    assert!(
+        !owner.recovery_required(),
+        "a successful O1 establishes the fresh acknowledgement"
+    );
+    assert_eq!(
+        backend.accounting_current(),
+        0,
+        "the successful O1 publication reservation released"
     );
 }
 
