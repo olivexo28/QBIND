@@ -16427,3 +16427,127 @@ SECURITY_POSTURE=RS1-OPEN / PUBLIC-DEVNET-NO-GO
 ```
 
 C4/C5 remain OPEN; fail-closed `CurrentEpochUnavailable` remains unchanged.
+
+---
+
+## RUN 422 D7-D14 — F1–F4 finishing pass: real-operation O3 coverage for max QC + max complete TC, live `publish_atomic` O5 publication-boundary observation (815/46), source-reconciled O1–O5 account, and corrected evidence provenance (test + docs, this continuation pass)
+
+**Baseline for this pass (actual, not reported).** Supplied branch `copilot/copilotcopilotcopilotcopilotcopilotrun-422-complet` (used as-supplied; **not** renamed/switched to the report's `copilot/copilotcopilotcopilotcopilotrun-422-complete-refus`). Starting HEAD `5ac0ae5b9fa64e182bbe31edb7f8515d2bc1c130`, upstream `origin/copilot/copilotcopilotcopilotcopilotcopilotrun-422-complet`, worktree clean at start. The reviewed object `5d0d1138be6d35dd4ee2c9c56614a42269c7dc19` (R4) was **not** initially present (shallow single-branch clone) and was fetched (`git fetch --depth=50 origin 5d0d1138…`). It is **not** an ancestor of the starting HEAD: both share parent `1c5859e…`; `5ac0ae5` is a squash of the R1–R4 chain (`5d0d113`←`42e7713`←`3ad50ae`←`2fec0dc`) onto `1c5859e`. Scoped content correspondence: `git diff 5d0d1138 HEAD` reports exactly **one** differing hunk — the D7-D14 test file's final byte: the reviewed object terminates the file with a final newline, the starting HEAD does not (`\ No newline at end of file`). Every other byte, including all `safety_record_store/*.rs` sources, is identical, so the starting working tree already carries the complete R1–R4 implementation. The obsolete `31dacdbc…` / `0f258734…` revisions were **not** restored. Line endings: the D7-D14 test file is CRLF with no final newline; that convention is preserved (every added line is CRLF; the file still terminates at `}` with no trailing newline). Only `crates/qbind-node/tests/run_422_d7d14_safety_record_store_tests.rs` is changed by this pass; the five `safety_record_store/*.rs` sources are byte-identical to the starting HEAD (confirmed by hash before/after the temporary mutation experiments below).
+
+### F1–F4 completion matrix
+
+| Item | Required result | Status this pass |
+|---|---|---|
+| F1 | Actual O3 object/reservation observations for maximum QC and complete TC | **Completed.** The TC `read_validate` coverage (`d7d14_r3_…_tc`) is retained; a **max-QC** counterpart (`d7d14_r3_…_max_complete_qc_operational_coverage`) was added: real `SafetyRecordOwner::read_validate()` over a maximum COMPLETE QC on a reopened (fresh-accountant) backend, asserting the operational peak and the mid-phase `o3_phase_reservation_sample()` both reach `holder + o3_scratch = 2870`. The discriminating lifetime experiment was executed (below). |
+| F2 | Actual complete-record O5 publication-boundary observations | **Completed.** `d7d14_d_publication_staging_boundary_observed_independently` now drives the **maximum COMPLETE 811-byte TC** through real `O4 → drop/reopen → O3 → O5` and reads the ACTUAL `publish_atomic` envelope capacities **815 / 46** via the `arm_publish_staging_observation` / `observed_publish_staging` hook. The `d7d14_r4` test-side `Vec::with_capacity` block was relabelled as arithmetic cross-check (not a boundary observation) pointing at `d7d14_d`. The staging-removal experiment was executed (below). |
+| F3 | Three-document reconciliation + corrected provenance | **Completed** (this section + the contract §13.7 continuation + the `contradiction.md` entry). |
+| F4 | Remaining validation gates + final scoped commit/push | **Completed** (literal results below). |
+
+### Source-reconciled O1–O5 account (this pass)
+
+`Operation/phase | actual object/owner | capacity or inline charge | admission | active covering reservation | coexistence | release/transfer | evidence`
+
+| Operation/phase | actual object / owner | capacity or inline charge | admission | active covering reservation | coexistence | release/transfer | evidence |
+|---|---|---|---|---|---|---|---|
+| O3 metadata+record read / structural decode | `load_established` read-back (R1) + meta buffer + transient `DecodedRecord` | R1 `rec 811`; meta `42`; transient `1112` | reserved before the backend copy | holder (`rec` term) + `o3_scratch` | all three live together before validate | transient converts into retained gen | `d7d14_r3_…_tc`/`…_qc` real `read_validate` |
+| O3 correspondence re-encode (R2) | `reencoded` in `validate_decoded` | `rec 811` | `o3_scratch` (+`811`) | holder + `o3_scratch` | with transient, **not** with `cert` | explicit `drop` before cert | `observe_o3_validation_live_bytes` (peak < 2×cap) |
+| O3 certificate-binding scratch (R2 reused) | `cert` | `rec 811` | `o3_scratch` | holder + `o3_scratch` | with transient | end of `validate_locked` | same |
+| O3 mid-phase reservation sample | operational accountant | `holder + o3_scratch = 2870` | — | both reservations live | — | sampled immediately before `validate_decoded` | `o3_phase_reservation_sample()` == 2870 (QC and TC) |
+| O3 transfer into retained proof | `ValidatedRecord` holder | `holder 2051` | holder reservation moved into proof | holder | retained after scratch release | `o3_scratch` released at O3 return | post-O3 `accounting_current()==holder`; `==0` on proof drop |
+| O5 fresh read-back (R1) | reopened read-back | `rec 811` | O5 reservation (`rec`) | holder + o5 charge | with holder, transient, staging | end of O5 | `d7d14_r4` |
+| O5 republication staging — **record envelope** | `record_envelope` built inside `publish_atomic::wrap` | observed capacity **815** = CRC(4)+811 | `publication_staging_charge` | O5 reservation incl. staging | with meta envelope, holder, read-back | after `publish_atomic` submit | `d7d14_d` observed 815 via the real hook |
+| O5 republication staging — **metadata envelope** | `meta_envelope` built inside `publish_atomic::wrap` | observed capacity **46** = CRC(4)+42 | `publication_staging_charge` | O5 reservation incl. staging | with record envelope | after submit | `d7d14_d` observed 46 via the real hook |
+
+Phase inequalities hold: live component-owned charge ≤ active covering reservation, and combined context+operation+holder ≤ aggregate `7772`. The historical "exhaustive O1–O5 inventory" rows above are preserved; this account supersedes the earlier publication-boundary rows that were derived from test-side buffers rather than the live `publish_atomic` envelopes.
+
+### R1 baseline evidence provenance (distinct levels, not conflated)
+
+The R1 regression `d7d14_r1_o2_revision_disagreement_diagnostic_allocation_free_max_complete_tc` keeps three distinct evidence levels separate:
+
+1. **Audit-reported old real-`open()` failure (attributed to the audit, not newly executed).** The audited defect: the old `load_established` `"record revision disagrees with metadata revision"` (48-byte) `String` allocated INSIDE the O2 read/decode reservation; for a maximum COMPLETE 811-byte TC the simultaneous charge reached `2013` against the O2 reservation `1965` (`811 + 42 + 1112`), a `+48` breach. This operational reproduction is attributed to the audit; **no** operational baseline log was produced from this session's old-path `open()` for it.
+2. **Supporting arithmetic / allocation evidence (newly executed, labelled as such).** The test measures the standalone `String::from("record revision disagrees with metadata revision")` as **one** heap allocation of length `48`, and computes `baseline_simultaneous = o2_reservation + 48 = 2013 > 1965`. This is a standalone `String` allocation plus a `reservation + 48` calculation — it is **supporting arithmetic**, explicitly **not** a newly executed old-path `open()` failure.
+3. **Current real `open()` regression (newly executed).** The corrected typed `SemanticRefusalDetail::RecordMetaRevisionDisagreement { record_revision, meta_revision }` allocates **zero** heap bytes on the protected path; the test then drives the REAL `owner.open()` under aggregate pressure leaving exactly the `1965` O2 allowance, observes the typed refusal carrying `(1, 0)` as `Copy` data, and verifies stored record bytes, metadata, recovery state, and the standing reservation are all preserved while the temporary O2 reservation releases. This establishes typed refusal, pressure behaviour, state preservation, and cleanup through the real path.
+
+### `SemanticRefusalDetail` — accurate description
+
+`SemanticRefusalDetail` (`error.rs`) has three variants: `Message(String)` (free-form, for already-admitted/covered inspection sites), and the two protected variants `RecordMetaRevisionDisagreement { record_revision: u64, meta_revision: u64 }` and `PinnedContextDisagreement`, which carry only allocation-free scalar data and are built on the protected `load_established` path without allocating. Because of the `Message(String)` variant the enum derives `Clone` but is **not** `Copy`; the protected-variant payloads are themselves `Copy` scalars. The equivalent text is materialised only through `Display`.
+
+### Mutation / lifetime experiments (newly executed failure messages + exact restoration)
+
+Each experiment temporarily mutated one source file; the working suite was then restored and re-verified byte-identical by SHA-256.
+
+**F1 lifetime experiment** — in `owner::read_validate`, the O3 scratch reservation was early-released (`let _scratch_res = …reserve(o3_scratch)?; drop(_scratch_res);`) immediately after it was taken, i.e. after the reserved PEAK was momentarily reached but before `validate_decoded` allocates. The reserved peak still recorded the full reservation, yet the mid-phase coverage sample collapsed to the bare holder and both R3 tests failed for the intended reason:
+
+```
+---- d7d14_r3_o3_real_read_validate_max_complete_qc_operational_coverage ----
+assertion `left == right` failed: the O3 scratch reservation must remain live THROUGH the
+allocation phase (sampled before validate_decoded) for the QC record
+  left: 2051
+ right: 2870
+
+---- d7d14_r3_o3_real_read_validate_max_complete_tc_operational_coverage ----
+assertion `left == right` failed: the O3 scratch reservation must remain live THROUGH the
+allocation phase (sampled before validate_decoded), not merely be reserved then released early
+  left: 2051
+ right: 2870
+```
+
+`owner.rs` was then restored and hashed: `sha256 = 4954e285f3d7aa60bab5403b8c7db108ca17694c67dcb0fbd745f9a7c671bd36` (matches the pre-experiment hash; `git diff --stat` empty).
+
+**F2 staging experiment** — in `accounting::publication_staging_charge`, the record-envelope term was dropped (`Ok(meta_envelope)`), leaving the real 815/46 envelopes allocated but the reservation reduced to 46. The live publication-boundary observation failed, and the `d7d14_r4` arithmetic cross-check also failed, both for the intended reason:
+
+```
+---- d7d14_d_publication_staging_boundary_observed_independently ----
+observed staging envelopes (815+46) must be covered by the publication_staging_charge
+reservation (46)
+
+---- d7d14_r4_o5_reacknowledge_max_complete_tc_publication_boundary_coverage ----
+assertion `left == right` failed: publication staging = record envelope (4+811) +
+metadata envelope (4+42)
+  left: 46
+ right: 861
+```
+
+`accounting.rs` was then restored and hashed: `sha256 = c9dfbfa8020851c5f391068843ae07e484241dccbf27548b294595b02fbf9489` (matches the pre-experiment hash; `git diff --stat` empty). After both restorations the full D7-D14 suite passes (132 passed / 0 failed / 1 ignored).
+
+### Corrected / superseded claims (F3)
+
+The following claims are corrected or superseded, with the distinct reasoning kept separate (source reasoning vs supporting arithmetic vs allocation observation vs reservation observation vs mutation sensitivity):
+
+* **"Being inside an admitted operation automatically establishes diagnostic coverage."** Superseded: the R1 defect shows a diagnostic `String` allocated inside an admitted O2 reservation can still breach that reservation (`2013 > 1965`); admission of the operation does not by itself cover an unreserved allocation.
+* **"Stack placement exempts the contract-defined decoded inline charge."** Superseded: the transient decoded inline representation is charged by the contract (`1112`, inline 408 + backing 704) regardless of stack placement; it is covered by `holder gen + o3_scratch`, not exempted.
+* **"An unreserved allocation cannot violate accounting coverage."** Superseded: the 48-byte unreserved `String` is exactly such a violation.
+* **"Direct `validate_decoded` scratch tests observe backend-read bytes."** Corrected: `observe_o3_validation_live_bytes` (`d7d14_b_*`) re-decodes an in-test encoding and calls `validate_decoded` directly — it observes the real O3 validation-scratch lifetimes (re-encode vs cert overlap), **not** backend-read bytes. The backend-read observation is the separate real `read_validate` path (`d7d14_r3_*`).
+* **"The old net-only observer detects every unmatched free."** Superseded: a net-only live-byte counter cannot detect an unmatched free that is balanced by an unrelated allocation; the retained `measure_live_bytes` observer additionally tracks missed-tracking and overflow and rejects incomplete tracking.
+* **"Aggregate peak exceeding operational holder charge proves O3 scratch admission."** Superseded: `aggregate_peak > holder` holds even with the scratch reservation absent because the aggregate peak includes context ownership; the discriminating evidence is the OPERATIONAL partition peak and the mid-phase `o3_phase_reservation_sample()` (`= holder + o3_scratch`).
+* **"A 763-byte evidence-only TC is the maximum complete serialized record."** Corrected: the 763-byte fixture is the evidence-only form (`committed_anchor = None`, `predecessor_ref = None`); the maximum COMPLETE serialized record for the N=4 profile is **811** bytes (anchor + predecessor populated), with a 815-byte publication envelope.
+* **"Test-side envelope allocations are actual publication-boundary observations."** Corrected: the `d7d14_r4` `Vec::with_capacity(CRC_PREFIX + …)` locals are test-side arithmetic cross-checks; the actual publication-boundary observation is `d7d14_d`, which reads the capacities of the envelopes created INSIDE `publish_atomic` (observed 815 / 46).
+
+### F4 — literal validation outcomes (this pass)
+
+* `rustfmt --edition 2021` on the edited test file → edited/added regions **clean** (the only residual diff is the module-wide no-final-newline EOF convention, preserved; CRLF line endings preserved).
+* `cargo build -p qbind-node --lib` → **exit 0**.
+* `cargo test -p qbind-node --no-run` (default-feature link gate) → **exit 0** (gated D7-D14/m16 skipped by `required-features`).
+* `cargo test -p qbind-node --features test-utils --no-run` → **exit 0**.
+* `cargo test -p qbind-node --features test-utils --test run_422_d7d14_safety_record_store_tests` → **ok. 132 passed; 0 failed; 1 ignored** (131 prior + 1 new max-QC `read_validate` coverage test; `child_process_entry` ignored).
+* `cargo test -p qbind-node --features test-utils --test m16_epoch_transition_hardening_tests` → **ok. 14 passed; 0 failed; 0 ignored**.
+* `cargo clippy -p qbind-node --features test-utils --tests` → **exit 0**. The D7-D14 target emits 8 `manual_div_ceil` warnings, all on PRE-EXISTING `(n + 7) / 8` bitmap/B_span lines (405, 7562, 7637); the lines added this pass introduce **zero** new clippy findings. Other pre-existing stylistic warnings in unrelated test files are unchanged.
+* `cargo build --release -p qbind-node` → **exit 0** (proves build compatibility only — NOT running-node recovery acceptance or production readiness).
+* Secret scanning over the edited file → **no secrets**. Non-wiring audit: only the D7-D14 test file changed; the five `safety_record_store/*.rs` sources are byte-identical to the starting HEAD; `safety_record_store` remains referenced only by the unchanged `lib.rs` `pub mod`; default `Disabled` policy, MainNet refusal, and `test-utils` gating unchanged; no production/startup/consensus/decision/signing/verifier/transport/authority/epoch/activation/anti-rollback wiring was added.
+* Independent Code Review / CodeQL: run via the environment's validation entry point this pass; any unavailable review or skipped CodeQL remains an OPEN external gate and acceptance is **not** promoted on its basis.
+
+### H-subset and verdicts (unchanged)
+
+Original acceptance subset preserved — Accepted: `H2–H12, H16, H18–H25, H26, H27, H30`; Excluded: `H1, H13–H15, H17, H25e, H26l, H28, H29`. **H22 remains separately limited** (O3 yields `Unverified`; the verified-prerequisite consumer boundary is a test-authored model, not manufactured closure — no production consumer evidence was manufactured). Unfinished implementation (a full object-by-object re-trace of every path), missing acceptance evidence, and external assurance blockers are kept distinct. Scope unchanged: `GEN_STRUCT_MAX = 384`, `CAPNORM_SLACK = 0`, `max_component_aggregate_bytes = max_aggregate_retained_bytes`, N=4 aggregate `7772`, the three encoded-buffer roles, `CMP_SPAN` borrow, and all multiplicities. F1–F4 completion is reported SEPARATELY from broader acceptance. Verdicts retained (NOT promoted):
+
+```
+D7D14_STORAGE_COMPONENT=PARTIAL-IMPLEMENTATION
+D7D14_STORAGE_ACCEPTANCE=INCOMPLETE
+DURABLE_ANTI_ROLLBACK=NOT-ESTABLISHED
+GENESIS_AUTHORITY_ACTIVATION=DISABLED
+PRODUCTION_WIRE_CHAIN_ID_BEHAVIOR=UNCHANGED
+CONFIGURED_AUTHORITY_RELEASE_BINARY_EVIDENCE=NOT-YET-CAPTURED
+SECURITY_POSTURE=RS1-OPEN / PUBLIC-DEVNET-NO-GO
+```
+
+C4/C5 remain OPEN; fail-closed `CurrentEpochUnavailable` unchanged. No production construction, startup/consensus/signing integration, verifier wiring, authority/epoch mutation, transport change, peer-driven apply, anti-rollback establishment, activation, renaming, D15, or Run 423 work was performed.

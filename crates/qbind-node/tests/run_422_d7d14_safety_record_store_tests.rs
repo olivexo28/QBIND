@@ -6257,6 +6257,118 @@ fn d7d14_o3_validation_reservation_covers_live_coexistence_max_tc() {
     );
 }
 
+/// §3 (F1) — the MAXIMUM QC counterpart of the R3 TC coverage below: the same
+/// discriminating O3 observation through REAL `read_validate` on a reopened
+/// (fresh-accountant) backend, over a MAXIMUM COMPLETE QC (anchor + predecessor
+/// populated) with valid independent committed history. The O3 phase reservation
+/// terms (`holder`, `o3_scratch`) are PROFILE maxima, so they are identical for
+/// the QC and TC records; this test proves the full O3 phase reservation
+/// (`holder + o3_scratch`) is live THROUGH the allocation phase — sampled by
+/// `o3_phase_reservation_sample()` immediately before `validate_decoded` — for the
+/// QC record as well, not just the TC record. An early-released scratch collapses
+/// this mid-phase sample to the bare holder (see the captured F1 lifetime
+/// experiment in the evidence document).
+#[test]
+fn d7d14_r3_o3_real_read_validate_max_complete_qc_operational_coverage() {
+    use qbind_node::safety_record_store::accounting::max_transient_decoded_working_set;
+    use qbind_node::safety_record_store::profile::max_retained_generation_bytes;
+    use qbind_node::safety_record_store::record::{
+        size_of_timeout_msg, validated_holder_handle_bytes,
+    };
+
+    let dir = tempfile::tempdir().unwrap();
+    let ctx = ctx_n(4);
+
+    // O3 phase reservation terms — PROFILE maxima, identical for QC and TC.
+    let rec = max_safety_record_bytes(&ctx).unwrap();
+    let retained_gen = max_retained_generation_bytes(&ctx, size_of_timeout_msg()).unwrap();
+    let handle = validated_holder_handle_bytes();
+    let holder = rec + retained_gen + handle;
+    let transient_ceiling = max_transient_decoded_working_set(&ctx).unwrap();
+    let o3_scratch = (transient_ceiling - retained_gen) + rec;
+    assert_eq!(holder, 2051, "retained-holder charge (profile maximum)");
+    assert_eq!(
+        o3_scratch, 819,
+        "O3 transient-excess + one record-sized buffer"
+    );
+
+    // The MAXIMUM COMPLETE QC: anchor + predecessor populated.
+    let complete = max_qc_locked(&ctx, 5, true);
+    assert!(
+        complete.committed_anchor.is_some() && complete.predecessor_ref.is_some(),
+        "the complete QC populates the anchor and predecessor fields"
+    );
+    let complete_dec = DecodedRecord {
+        persistence_format_version: 1,
+        network_genesis_id: ctx.network_genesis_id,
+        publication_revision: 1,
+        record: SafetyRecord::Locked(complete.clone()),
+    };
+    let complete_enc = encode_record(&complete_dec, &ctx).unwrap();
+    assert!(
+        complete_enc.len() < 811,
+        "the complete QC record ({} bytes) is smaller than the complete TC (811); \
+         the O3 reservation is the PROFILE maximum regardless",
+        complete_enc.len()
+    );
+
+    // Valid independent committed history for the anchored record.
+    let history = FixtureCommittedHistory::new().with([7u8; 32], 3);
+
+    // O4: publish the complete QC durably (dropped before any reopen).
+    {
+        let owner = init_owner(dir.path(), &ctx);
+        assert_eq!(
+            owner.publish_locked(complete, 0, Some(&history)),
+            PublishResult::DurableAcknowledged { new_revision: 1 }
+        );
+    }
+
+    // Observe the real O3 operational peak + mid-phase sample on a FRESH backend.
+    let owner = SafetyRecordOwner::attach(open_enabled(dir.path()), ctx.clone()).unwrap();
+    let backend = owner.backend_for_test();
+    let agg_cap = backend.accounting_aggregate_cap().unwrap();
+    assert!(
+        owner.recovery_required(),
+        "reopened store starts not-effective"
+    );
+    assert_eq!(backend.accounting_peak(), 0, "fresh operational accountant");
+
+    let proof = owner.read_validate(Some(&history)).unwrap();
+    assert!(proof.retained().is_locked());
+
+    // OPERATIONAL partition peak (excludes context) reaches the full O3 phase
+    // reservation — sensitive to the O3 scratch reservation.
+    assert_eq!(
+        backend.accounting_peak(),
+        holder + o3_scratch,
+        "operational peak must reach the full O3 phase reservation (holder + o3_scratch) \
+         for the complete QC as well"
+    );
+    // Mid-phase sample: both reservations live THROUGH the allocation phase.
+    assert_eq!(
+        qbind_node::safety_record_store::owner::o3_phase_reservation_sample(),
+        holder + o3_scratch,
+        "the O3 scratch reservation must remain live THROUGH the allocation phase \
+         (sampled before validate_decoded) for the QC record"
+    );
+    assert_eq!(
+        backend.accounting_current(),
+        holder,
+        "post-O3 operational charge is exactly the retained holder (scratch released)"
+    );
+    assert!(
+        backend.accounting_aggregate_peak() <= agg_cap,
+        "O3 peak within the unchanged aggregate"
+    );
+    drop(proof);
+    assert_eq!(
+        backend.accounting_current(),
+        0,
+        "the retained holder's reservation releases on proof drop"
+    );
+}
+
 /// §3 — R3 (RUN 422 D7-D14): discriminating O3 coverage through REAL
 /// `read_validate` over a MAXIMUM COMPLETE TC (anchor + predecessor populated,
 /// 811 serialized bytes) with valid independent committed history. This
@@ -6561,25 +6673,30 @@ fn d7d14_r4_o5_reacknowledge_max_complete_tc_publication_boundary_coverage() {
         "maximum complete serialized TC is 811 bytes for the N=4 profile"
     );
 
-    // Independently verify the publication-envelope capacities for the COMPLETE
-    // record (not the earlier 767 + 46 evidence-only observation): a CRC-framed
-    // envelope is `Vec::with_capacity(CRC_PREFIX + payload.len())`.
-    let record_env: Vec<u8> = Vec::with_capacity(CRC_PREFIX as usize + complete_enc.len());
+    // ARITHMETIC cross-check only (NOT a publication-boundary observation): these
+    // are test-side buffers sized the same way `publish_atomic::wrap` sizes its
+    // envelopes (`Vec::with_capacity(CRC_PREFIX + payload.len())`), confirming the
+    // staging charge matches the `(4+811)+(4+42)` arithmetic. The ACTUAL
+    // component-owned envelopes created INSIDE `publish_atomic` for this same
+    // complete record (observed 815 / 46 capacities) are measured independently in
+    // `d7d14_d_publication_staging_boundary_observed_independently`; do not read the
+    // two locals below as live backend-boundary evidence.
+    let record_env_sized: Vec<u8> = Vec::with_capacity(CRC_PREFIX as usize + complete_enc.len());
     assert_eq!(
-        record_env.capacity() as u128,
+        record_env_sized.capacity() as u128,
         CRC_PREFIX + 811,
-        "full complete-record envelope capacity (4 + 811)"
+        "test-side record envelope arithmetic (4 + 811); real boundary observed in d7d14_d"
     );
-    let meta_env: Vec<u8> = Vec::with_capacity(CRC_PREFIX as usize + meta_len as usize);
+    let meta_env_sized: Vec<u8> = Vec::with_capacity(CRC_PREFIX as usize + meta_len as usize);
     assert_eq!(
-        meta_env.capacity() as u128,
+        meta_env_sized.capacity() as u128,
         CRC_PREFIX + 42,
-        "metadata envelope capacity (4 + 42)"
+        "test-side metadata envelope arithmetic (4 + 42); real boundary observed in d7d14_d"
     );
     assert_eq!(
-        (record_env.capacity() + meta_env.capacity()) as u128,
+        (record_env_sized.capacity() + meta_env_sized.capacity()) as u128,
         staging,
-        "the two envelope capacities sum to the publication-staging charge"
+        "the two envelope capacities sum to the publication-staging charge (arithmetic)"
     );
 
     let history = FixtureCommittedHistory::new().with([7u8; 32], 3);
@@ -7859,11 +7976,14 @@ fn d7d14_b_o3_live_bytes_reencode_released_before_binding_max_tc() {
 /// Item D — INDEPENDENT publication-staging boundary observation. Complementary
 /// to the accountant-counter regression
 /// `d7d14_o5_publication_envelope_coexistence_reserved_within_aggregate` (which
-/// is retained): this drives the REAL `publish_atomic` submit boundary and reads
-/// the ACTUAL component-owned CRC-envelope backing capacities observed there,
-/// then checks they are covered by `publication_staging_charge` WITHOUT deriving
-/// the observed footprint from that charge. A reopened backend guarantees an
-/// earlier O4 peak cannot mask O5.
+/// is retained): this drives the REAL `publish_atomic` submit boundary over the
+/// MAXIMUM COMPLETE 811-byte TC and reads the ACTUAL component-owned CRC-envelope
+/// backing capacities observed there (815 record / 46 metadata), then checks they
+/// are covered by `publication_staging_charge` WITHOUT deriving the observed
+/// footprint from that charge. A reopened backend guarantees an earlier O4 peak
+/// cannot mask O5. This is the live publication-boundary evidence that the
+/// arithmetic cross-check in `d7d14_r4_...` points to; the `r4` locals are NOT
+/// boundary observations.
 ///
 /// Sensitivity: removing the record-envelope term from `publication_staging_charge`
 /// (i.e. dropping required staging coverage while the real envelopes are still
@@ -7881,11 +8001,18 @@ fn d7d14_d_publication_staging_boundary_observed_independently() {
     let ctx = ctx_n(4);
     let owner = init_owner(dir.path(), &ctx);
 
-    // O4: publish the maximum-TC record (worst-case record envelope), then drop
-    // the owner so the O4 peak does not pollute the reopened accountant.
-    let ltc = valid_tc_record_max(&ctx, 5, 6);
+    // O4: publish the MAXIMUM COMPLETE TC (anchor + predecessor populated — 811
+    // serialized bytes, the worst-case complete record envelope), with valid
+    // independent committed history for its anchor, then drop the owner so the O4
+    // peak does not pollute the reopened accountant.
+    let complete = max_tc_locked_anchored(&ctx, 5, 6);
+    assert!(
+        complete.committed_anchor.is_some() && complete.predecessor_ref.is_some(),
+        "the complete TC populates the anchor and predecessor fields"
+    );
+    let history = FixtureCommittedHistory::new().with([7u8; 32], 3);
     assert_eq!(
-        owner.publish_locked(ltc, 0, None::<&FixtureCommittedHistory>),
+        owner.publish_locked(complete, 0, Some(&history)),
         PublishResult::DurableAcknowledged { new_revision: 1 }
     );
     drop(owner);
@@ -7897,9 +8024,13 @@ fn d7d14_d_publication_staging_boundary_observed_independently() {
         "reopened store starts not-effective"
     );
     // A live O3 proof bound to THIS incarnation authorizes the O5 republication.
-    let proof = owner
-        .read_validate(None::<&FixtureCommittedHistory>)
-        .unwrap();
+    let proof = owner.read_validate(Some(&history)).unwrap();
+    assert_eq!(
+        proof.encoded().len(),
+        811,
+        "the retained proof is the maximum COMPLETE 811-byte TC (not the 763-byte \
+         evidence-only fixture)"
+    );
 
     // Observe the REAL envelope capacities at the actual publish_atomic boundary.
     arm_publish_staging_observation();
@@ -7912,12 +8043,17 @@ fn d7d14_d_publication_staging_boundary_observed_independently() {
 
     // The observed envelopes are the genuine `4 + payload.len()` CRC framings over
     // the republished ORIGINAL bytes and the fixed metadata payload — observed
-    // capacity, never a `len()` substitute.
+    // capacity, never a `len()` substitute. For the complete-record profile these
+    // are the ACTUAL 815 / 46 publication-boundary envelopes.
     let crc = CRC_PREFIX as usize;
     assert_eq!(
         record_env_cap,
         crc + proof.encoded().len(),
         "record staging envelope wraps the retained original bytes (observed capacity)"
+    );
+    assert_eq!(
+        record_env_cap, 815,
+        "observed record staging envelope == CRC_PREFIX(4) + complete TC payload(811)"
     );
     assert_eq!(
         meta_env_cap, 46,
