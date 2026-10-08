@@ -16313,3 +16313,68 @@ SECURITY_POSTURE=RS1-OPEN / PUBLIC-DEVNET-NO-GO
 ```
 
 C4/C5 remain OPEN; fail-closed `CurrentEpochUnavailable` remains unchanged.
+
+## RUN 422 D7-D14 — Residual protected-refusal classes made allocation-free (`ArithmeticOverflow` / `MissingIndependentInput` / protected `StructuralRefusal`); §13.7I “all remaining string diagnostics are inside admitted O2/O3” claim superseded (code + test + docs, this continuation pass)
+
+**Baseline for this pass (actual, not reported).** Supplied branch `copilot/copilotrun-422-complete-refusal-accounting` (used as-supplied; **not** renamed/switched to the previously reported `copilot/run-422-complete-refusal-accounting`). Starting HEAD `0b6ba1a44fe9e9a37760d8848443353e3b6295f7`, upstream `origin/copilot/copilotrun-422-complete-refusal-accounting`, worktree clean at start. Reviewed object `7744219a27a2a58cf78b23ab4aa6446c4162f479` was fetched (`git fetch --depth=50 origin 7744219a…`); it is a commit whose **tree is byte-identical to the starting HEAD tree** (`git diff --stat 7744219a HEAD` empty; `HEAD:crates/qbind-node/src/safety_record_store` and `7744219a:…` both resolve to tree `774351a518df37879cb5753ccf5e20cee5f6e2cb`), so the working branch already carries every prior D7-D14 correction at exact byte fidelity (no CRLF/LF or final-newline difference against the reviewed tree). The obsolete `0f258734…` baseline was **not** restored; prior completed corrections are preserved.
+
+### 1. Findings → runtime corrections → executed regressions (Item A)
+
+The prior pass (§13.7I) converted the `DeclaredBoundExceeded` / `CapacityRefusal` admission family / `AlreadyEstablished` / `RecoveryRequired` refusal classes and characterised the *remaining* `StructuralRefusal`/`SemanticRefusal` `format!` diagnostics as allocating only **within an already-admitted O2/O3 operation**. That characterisation was **over-generalised**. This pass audited the remaining reachable protected refusal branches (profile validation, arithmetic, structural admission, namespace classification, recovery requirements, ledger admission) and converted the residual pre-reservation / post-release allocations to typed, `Copy` (or `Copy`-plus-`Message`) payloads whose text is materialised only on `Display`:
+
+* **`ArithmeticOverflow(String)` → `ArithmeticOverflow(ArithmeticOverflowSite)`** (`error.rs`): a `Copy` 12-variant site enum replaces the per-site `format!`/`.into()` across `accounting::{add,mul}` (admission arithmetic that runs **while admission is failing**), `profile` size `add`/`mul`, the live retained-holder charge, and every O1–O5 working-set / revision-exhausted charge (`owner.rs`).
+* **`MissingIndependentInput(String)` → `MissingIndependentInput(MissingIndependentInputSite)`**: `O1FirstUseIntent` (the **first statement** of `initialize`, before the domain lock / inspection reservation / any backend read) and `P3CommittedAnchorNoHistory` (`validate.rs`).
+* **Protected `StructuralRefusal` sites → typed `StructuralRefusalDetail`**: the payload is now `StructuralRefusalDetail { Message(String) | EmptySignerCertificate | RecordPresentWithoutMetadata | UnknownLegacySafetyNamespaceKey { len } }`. `admit_wire_qc` / `decode_supporting_evidence` empty-signer threshold (on the `encode_record` admission path **before** the O4 reservation), the O1 record-present-without-metadata refusal (reached **after** the O1 inspection reservation releases via its scoped `drop`), and the O1 unknown/legacy namespace-classification refusal now construct with no owned `String`. The remaining `format!` decode diagnostics (invalid version/discriminant, truncation, trailing bytes, CRC mismatch) round-trip through `Message` via `From<String>`/`From<&str>` and are **unchanged** — they run inside an admitted O2/O3 decode of an admitted metadata/record buffer (covered-lifetime, not pre-admission).
+
+**§13.7I item (c) superseded.** The claim that *all* remaining string diagnostics occur inside admitted O2/O3 operations is **withdrawn**: the empty-signer, record-without-metadata, and unknown/legacy-namespace `StructuralRefusal` sites, both `MissingIndependentInput` sites, and the `accounting`/size/working-set `ArithmeticOverflow` sites were pre-reservation or post-release protected allocations and are now typed allocation-free. The residual `Message(String)` diagnostics that remain are only the structural **decode** diagnostics, which genuinely run under an admitted O2/O3 reservation. All error variants retain full rendering through `Display`; component consumers/tests match with wildcard payloads, so no public match arm changed. Changed files: `error.rs`, `accounting.rs`, `profile.rs`, `owner.rs`, `codec.rs`, `validate.rs`, and the test file (module CRLF / no-final-newline preserved throughout).
+
+**Executed regressions (appended to `run_422_d7d14_safety_record_store_tests.rs`; measured with the counting `#[global_allocator]` harness, fixtures built outside the measured interval):**
+
+* `corr_residual_typed_refusal_payloads_construct_without_allocation` — constructs every new typed payload (all 12 `ArithmeticOverflowSite`, both `MissingIndependentInputSite`, and the typed `StructuralRefusalDetail` forms) at **0** alloc/realloc; full diagnostic text still renders on demand.
+* `corr_initialize_false_refusal_is_typed_and_allocation_free_and_preserves_state` — the **real** `initialize(false)` owner call measured at **0** allocations; asserts the typed `O1FirstUseIntent` variant; verifies the untouched backend's raw metadata, raw record, recovery latch, and reservation baseline are unchanged; then confirms subsequent eligibility once first-use intent is asserted.
+* `corr_empty_signer_refusal_is_typed_through_encode_admission` — the real `encode_record` admission path emits the typed `EmptySignerCertificate`.
+* `corr_o1_record_without_metadata_refusal_is_typed_and_preserves_state` — the real O1 refusal emits the typed `RecordPresentWithoutMetadata`; raw record/metadata bytes and recovery latch unchanged; the O1 inspection reservation releases to baseline `0`. The **whole** O1 operation is intentionally **not** asserted allocation-free (it legitimately reads the admitted record/metadata buffers); only the refusal value is allocation-free.
+* `corr_o1_unknown_namespace_refusal_is_typed_with_len_and_preserves_key` — the real O1 refusal emits `UnknownLegacySafetyNamespaceKey { len }` with `len` equal to the planted key length; the unknown key remains present (no migration, deletion, or repair).
+
+The `accounting::{add,mul}` sites are private helpers, so their `AccountingSum`/`AccountingProduct` payloads are covered at the **value level** (labelled helper-only) rather than via a manufactured invalid production profile. D7-D14 suite after this pass: **116 passed; 0 failed; 1 ignored** (111 prior + 5 this pass).
+
+### 2. A–E completion matrix (item 4 of the final report)
+
+| Item | Status this pass | Concrete evidence / specific remaining work |
+|---|---|---|
+| A — Protected refusals | **Completed** | All named residual allocations (empty-signer QC, `initialize(false)`, O1 record-without-metadata, O1 unknown/legacy namespace, accounting `add`/`mul`) plus the full audited set (profile size arithmetic, all O1–O5 working-set charges, P3 missing-history) converted to typed `Copy` payloads; real-operation + state-preservation tests above. |
+| B — O3 lifetimes | **Not completed** | Source `drop(reencoded)`-before-binding correction preserved. Remaining: an operational regression through the real `read_validate` path observing the original-read / transient-decoded / correspondence re-encode / certificate-binding buffer lifetimes without cloning, plus the mutation-sensitivity demonstration (temporarily restore the overlap; the regression must fail; restore before commit). |
+| C — Maximum fixtures | **Not completed** | Remaining: distinct maximum QC/TC fixtures with asserted N / signature-length / bitmap / descriptor dimensions, and separately measured preflight / `encode_record` / `compute_evidence_lock_binding` allocation intervals. |
+| D — Publication staging | **Not completed** | Existing O5 accountant-counter test retained. Remaining: independent `publish_atomic` publication-boundary observation on a reopened backend, with the staging-coverage-removal sensitivity regression. |
+| E — Complete inventory | **Not completed** | §13.7I open items persist: the 42-byte metadata **encode** buffer coexistence under the O1 `rec + staging` reservation, and the independent publication-boundary derivation. A full object-by-object O1–O5 re-trace remains open. |
+
+B–E are **not** claimed complete; the verdicts below are retained accordingly. Items B, C, D each require temporary source/test mutations with sensitivity demonstrations that were not executed this pass.
+
+### 3. Literal validation outcomes (this pass, this revision, no PR)
+
+* `cargo build -p qbind-node --lib` → **exit 0** (`Finished dev`, 16.67s).
+* `cargo test -p qbind-node --no-run` → **exit 0** (default-feature binaries compiled; gated D7-D14/m16 skipped by `required-features`; 2m37s).
+* `cargo test -p qbind-node --features test-utils --no-run` → **exit 0** (2m40s; pre-existing unrelated `warning: unused import: ConsensusNetMsg`).
+* `cargo test -p qbind-node --features test-utils --test run_422_d7d14_safety_record_store_tests` → **ok. 116 passed; 0 failed; 1 ignored**.
+* `cargo test -p qbind-node --features test-utils --test m16_epoch_transition_hardening_tests` → **ok. 14 passed; 0 failed**.
+* `cargo clippy -p qbind-node --lib --features test-utils` → **exit 0**; **no new** findings introduced by this pass (the `ok_or_else`→`ok_or` conversions this pass **reduce** the lazy-evaluation lint; the single remaining `accounting.rs` `or_fun_call`-class warning at the `Unbound` site is **pre-existing** and untouched).
+* `cargo build --release -p qbind-node` → **exit 0** (`Finished release`, 6m49s). A successful release build proves build compatibility, **not** running-node recovery acceptance, configured-authority evidence, anti-rollback, or readiness.
+* Formatting: rustfmt over the edited Rust is content-clean; the module CRLF / no-final-newline convention was preserved (rustfmt defaults to LF + final newline, which would have rewritten every line, so the edited files were re-normalised to CRLF / no-final-newline). Unrelated files reformatted by an initial crate-wide `cargo fmt` were reverted; no unrelated line-ending/EOF change remains.
+* Secret scanning over the seven edited files → **no secrets**. Non-wiring audit: only the component and its test file changed; `safety_record_store` is referenced outside only by the unchanged `lib.rs` `pub mod`; default `Disabled` policy, MainNet refusal, and `test-utils` gating unchanged; no production/startup/consensus/decision/signing/verifier/transport/authority/epoch/activation/anti-rollback wiring added.
+* Independent review / CodeQL security gates: attempted via the current session `parallel_validation` gate this revision. **Current-session literal outcomes:** Code Review → **UNAVAILABLE** (“code review tool is not available in this environment”; `autofind` binary not found at any searched path) — reported “Reviewed 10 file(s); no review comments” is **not** a completed review because the model is unavailable; CodeQL (`rust`) → **SKIPPED / 0 alerts because “analysis was skipped because the database size is too large”** — a size-skip is **not** a zero-alert result. These current outcomes coincide with the **previous-session** reported outcomes (**Code Review: UNAVAILABLE (autofind not found)**; **CodeQL: SKIPPED (database too large)**), which are preserved as previous-session outcomes and recorded separately; prior unavailability was **not** treated as proof of current unavailability — the current gate was independently attempted. An unavailable review is **not** completed assurance and a skipped CodeQL is **not** zero alerts.
+
+### 4. H-subset mapping and verdicts (items 9, 10 — unchanged)
+
+Original acceptance subset preserved — Accepted: `H2–H12, H16, H18–H25, H26, H27, H30`; Excluded: `H1, H13–H15, H17, H25e, H26l, H28, H29`. No obligation reinterpreted to fit a test; process death remains distinct from power loss; storage durability remains distinct from signature authentication and anti-rollback. **H22 remains separately limited** (O3 yields `Unverified`; the verified-prerequisite consumer boundary is a test-authored model, not manufactured closure). Scope unchanged: `GEN_STRUCT_MAX = 384`, `CAPNORM_SLACK = 0`, `max_component_aggregate_bytes = max_aggregate_retained_bytes`, N=4 aggregate `7772`, the three encoded-buffer roles, and all existing multiplicities — all preserved; only the refusal **payload representation** changed (owned `String` → typed `Copy` data on the protected sites), with no change to which errors are produced or to any accounting charge. Verdicts retained (NOT promoted):
+
+```
+D7D14_STORAGE_COMPONENT=PARTIAL-IMPLEMENTATION
+D7D14_STORAGE_ACCEPTANCE=INCOMPLETE
+DURABLE_ANTI_ROLLBACK=NOT-ESTABLISHED
+GENESIS_AUTHORITY_ACTIVATION=DISABLED
+PRODUCTION_WIRE_CHAIN_ID_BEHAVIOR=UNCHANGED
+CONFIGURED_AUTHORITY_RELEASE_BINARY_EVIDENCE=NOT-YET-CAPTURED
+SECURITY_POSTURE=RS1-OPEN / PUBLIC-DEVNET-NO-GO
+```
+
+C4/C5 remain **OPEN**; fail-closed `CurrentEpochUnavailable` unchanged. This section authorizes no production integration, signing, verifier wiring, anti-rollback establishment, activation, identifier renaming, D15, or Run 423 work.
