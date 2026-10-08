@@ -15,7 +15,8 @@ use sha3::{Digest, Sha3_256};
 use super::backend::{PublishOutcome, SafetyBackend};
 use super::codec::{compute_evidence_lock_binding, decode_record, encode_record};
 use super::error::{
-    AlreadyEstablishedKind, CapacityRefusalDetail, RecoveryRequiredReason, SafetyStoreError,
+    AlreadyEstablishedKind, ArithmeticOverflowSite, CapacityRefusalDetail,
+    MissingIndependentInputSite, RecoveryRequiredReason, SafetyStoreError, StructuralRefusalDetail,
 };
 use super::profile::{
     context_owner_ceiling_term, context_ownership_charge, max_component_aggregate_bytes,
@@ -258,7 +259,9 @@ impl SafetyRecordOwner {
         let handle = validated_holder_handle_bytes();
         rec.checked_add(gen)
             .and_then(|t| t.checked_add(handle))
-            .ok_or_else(|| SafetyStoreError::ArithmeticOverflow("retained holder charge".into()))
+            .ok_or(SafetyStoreError::ArithmeticOverflow(
+                ArithmeticOverflowSite::RetainedHolderCharge,
+            ))
     }
 
     /// The pinned context (immutable), reached through the shared `Arc<OwnedContext>`.
@@ -363,7 +366,7 @@ impl SafetyRecordOwner {
     pub fn initialize(&self, first_use_intent: bool) -> Result<u64, SafetyStoreError> {
         if !first_use_intent {
             return Err(SafetyStoreError::MissingIndependentInput(
-                "O1 requires an explicit first-use intent assertion".into(),
+                MissingIndependentInputSite::O1FirstUseIntent,
             ));
         }
         let guard = self.backend.lock_domain();
@@ -380,9 +383,9 @@ impl SafetyRecordOwner {
         let rec_bound = super::profile::max_safety_record_bytes(self.pinned())?;
         let inspect_charge = rec_bound
             .checked_add(super::backend::META_ENCODED_LEN)
-            .ok_or_else(|| {
-                SafetyStoreError::ArithmeticOverflow("O1 inspection working set".into())
-            })?;
+            .ok_or(SafetyStoreError::ArithmeticOverflow(
+                ArithmeticOverflowSite::O1InspectionWorkingSet,
+            ))?;
         let (meta_present, record_present) = {
             let _inspect_res = self.backend.accounting().reserve(inspect_charge)?;
             let meta = self.backend.read_meta(super::backend::META_ENCODED_LEN)?;
@@ -397,7 +400,7 @@ impl SafetyRecordOwner {
             }
             (false, true) => {
                 return Err(SafetyStoreError::StructuralRefusal(
-                    "record present without metadata (partial/malformed safety state)".into(),
+                    StructuralRefusalDetail::RecordPresentWithoutMetadata,
                 ))
             }
             (false, false) => {}
@@ -410,10 +413,11 @@ impl SafetyRecordOwner {
         // contract-prescribed refusal — with NO migration, deletion, repair, or
         // initialization over it.
         if let Some(unknown_len) = self.backend.first_unrecognized_safety_key()? {
-            return Err(SafetyStoreError::StructuralRefusal(format!(
-                "unknown/legacy safety-namespace key present ({unknown_len} bytes); refusing O1 \
-                 without migration or repair",
-            )));
+            return Err(SafetyStoreError::StructuralRefusal(
+                StructuralRefusalDetail::UnknownLegacySafetyNamespaceKey {
+                    len: unknown_len as u128,
+                },
+            ));
         }
 
         let decoded = DecodedRecord {
@@ -436,9 +440,9 @@ impl SafetyRecordOwner {
             .checked_add(super::accounting::publication_staging_charge(
                 self.pinned(),
             )?)
-            .ok_or_else(|| {
-                SafetyStoreError::ArithmeticOverflow("O1 bootstrap publication charge".into())
-            })?;
+            .ok_or(SafetyStoreError::ArithmeticOverflow(
+                ArithmeticOverflowSite::O1BootstrapPublicationCharge,
+            ))?;
         let _pub_res = self.backend.accounting().reserve(o1_pub_charge)?;
         let encoded = encode_record(&decoded, self.pinned())?;
         debug_assert!(
@@ -496,9 +500,9 @@ impl SafetyRecordOwner {
         let o2_charge = super::profile::max_safety_record_bytes(self.pinned())?
             .checked_add(super::backend::META_ENCODED_LEN)
             .and_then(|b| b.checked_add(transient))
-            .ok_or_else(|| {
-                SafetyStoreError::ArithmeticOverflow("O2 read/decode working set".into())
-            })?;
+            .ok_or(SafetyStoreError::ArithmeticOverflow(
+                ArithmeticOverflowSite::O2ReadDecodeWorkingSet,
+            ))?;
         let _o2_res = self.backend.accounting().reserve(o2_charge)?;
         let (meta, _record_bytes, _decoded) = self.load_established()?;
         Ok(meta)
@@ -559,9 +563,9 @@ impl SafetyRecordOwner {
         let transient_excess = transient.saturating_sub(retained_gen);
         let o3_scratch = transient_excess
             .checked_add(max_safety_record_bytes(self.pinned())?)
-            .ok_or_else(|| {
-                SafetyStoreError::ArithmeticOverflow("O3 validation scratch charge".into())
-            })?;
+            .ok_or(SafetyStoreError::ArithmeticOverflow(
+                ArithmeticOverflowSite::O3ValidationScratchCharge,
+            ))?;
         let _scratch_res = self.backend.accounting().reserve(o3_scratch)?;
         // Enforce the established-state + pinned-context + revision-consistency
         // prerequisites centrally (do not rely on the caller having invoked
@@ -666,7 +670,7 @@ impl SafetyRecordOwner {
             Some(v) => v,
             None => {
                 return PublishResult::RefusedPreWrite(SafetyStoreError::ArithmeticOverflow(
-                    "O4 working-set charge".into(),
+                    ArithmeticOverflowSite::O4WorkingSetCharge,
                 ))
             }
         };
@@ -741,7 +745,7 @@ impl SafetyRecordOwner {
             Some(v) => v,
             None => {
                 return PublishResult::RefusedPreWrite(SafetyStoreError::ArithmeticOverflow(
-                    "publication revision exhausted".into(),
+                    ArithmeticOverflowSite::PublicationRevisionExhausted,
                 ))
             }
         };
@@ -852,7 +856,7 @@ impl SafetyRecordOwner {
             Some(v) => v,
             None => {
                 return PublishResult::RefusedPreWrite(SafetyStoreError::ArithmeticOverflow(
-                    "O5 read-back working set".into(),
+                    ArithmeticOverflowSite::O5ReadBackWorkingSet,
                 ))
             }
         };

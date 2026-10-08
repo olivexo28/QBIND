@@ -9,7 +9,8 @@
 use std::sync::{Arc, Mutex};
 
 use super::error::{
-    CapacityRefusalDetail, CapnormSiteKind, DeclaredBoundDetail, LedgerScope, SafetyStoreError,
+    ArithmeticOverflowSite, CapacityRefusalDetail, CapnormSiteKind, DeclaredBoundDetail,
+    LedgerScope, SafetyStoreError,
 };
 use super::profile::{
     max_aggregate_retained_bytes, max_retained_generation_bytes, PinnedSafetyContext, ARC_CTRL,
@@ -21,12 +22,14 @@ use super::record::{
 };
 
 fn add(a: u128, b: u128) -> Result<u128, SafetyStoreError> {
-    a.checked_add(b)
-        .ok_or_else(|| SafetyStoreError::ArithmeticOverflow("accounting sum".into()))
+    a.checked_add(b).ok_or(SafetyStoreError::ArithmeticOverflow(
+        ArithmeticOverflowSite::AccountingSum,
+    ))
 }
 fn mul(a: u128, b: u128) -> Result<u128, SafetyStoreError> {
-    a.checked_mul(b)
-        .ok_or_else(|| SafetyStoreError::ArithmeticOverflow("accounting product".into()))
+    a.checked_mul(b).ok_or(SafetyStoreError::ArithmeticOverflow(
+        ArithmeticOverflowSite::AccountingProduct,
+    ))
 }
 
 /// The actual per-generation retained-memory charge (§ 13.7A(c)): the whole-enum

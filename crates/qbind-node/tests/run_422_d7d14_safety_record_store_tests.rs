@@ -527,7 +527,9 @@ fn h12_competing_handles_stale_o4_o5_leave_newer_bytes_unchanged() {
         ),
         "B's stale O5 must be refused"
     );
-    let after = owner_a.read_validate(None::<&FixtureCommittedHistory>).unwrap();
+    let after = owner_a
+        .read_validate(None::<&FixtureCommittedHistory>)
+        .unwrap();
     assert_eq!(
         after.retained().publication_revision,
         2,
@@ -1044,7 +1046,10 @@ fn h24_malformed_anchor_presence_structural_rejections() {
         record: SafetyRecord::Locked(l_commit),
     };
     let enc = encode_record(&dec, &ctx).unwrap();
-    assert_eq!(enc[D_CA_OFFSET], 1, "fixture encodes D_ca = 1 (committed anchor)");
+    assert_eq!(
+        enc[D_CA_OFFSET], 1,
+        "fixture encodes D_ca = 1 (committed anchor)"
+    );
 
     // Case A — no-commit discriminant carrying anchor content: flip D_ca to 0 and
     // re-seal. The 40 anchor bytes are now unconsumed → structural trailing-bytes
@@ -1056,7 +1061,11 @@ fn h24_malformed_anchor_presence_structural_rejections() {
     a[a_body..].copy_from_slice(&crc);
     match decode_record(&a, &ctx) {
         Err(SafetyStoreError::StructuralRefusal(m)) => {
-            assert!(m != "CRC32 mismatch", "must not fail on the CRC envelope: {m}");
+            let m = m.to_string();
+            assert!(
+                m != "CRC32 mismatch",
+                "must not fail on the CRC envelope: {m}"
+            );
             assert!(
                 m.contains("trailing"),
                 "no-commit discriminant carrying anchor content is a trailing-bytes structural refusal, got: {m}"
@@ -1077,7 +1086,11 @@ fn h24_malformed_anchor_presence_structural_rejections() {
     b.extend_from_slice(&crc);
     match decode_record(&b, &ctx) {
         Err(SafetyStoreError::StructuralRefusal(m)) => {
-            assert!(m != "CRC32 mismatch", "must not fail on the CRC envelope: {m}");
+            let m = m.to_string();
+            assert!(
+                m != "CRC32 mismatch",
+                "must not fail on the CRC envelope: {m}"
+            );
         }
         other => panic!("expected structural anchor-underflow refusal, got {other:?}"),
     }
@@ -2398,7 +2411,9 @@ fn o2_open_working_set_admitted_and_bounded_by_reservation() {
         .reserve_standing_for_test(standing_fits)
         .expect("standing pressure leaving exactly the O2 working set");
     let peak_before = backend.accounting_aggregate_peak();
-    let meta = owner.open().expect("O2 open fits within exactly its reserved charge");
+    let meta = owner
+        .open()
+        .expect("O2 open fits within exactly its reserved charge");
     assert_eq!(meta.current_revision, 1);
     assert!(
         backend.accounting_aggregate_peak() <= agg_cap,
@@ -3718,7 +3733,10 @@ fn acct_o3_holder_charge_includes_enforced_handle_term() {
         complete_charge * 2,
         "a cloned proof is charged the identical complete representation again"
     );
-    assert!(backend.accounting_current() <= cap, "two holders within ceiling");
+    assert!(
+        backend.accounting_current() <= cap,
+        "two holders within ceiling"
+    );
 
     drop(clone);
     assert_eq!(
@@ -3727,7 +3745,11 @@ fn acct_o3_holder_charge_includes_enforced_handle_term() {
         "dropping the clone releases exactly one complete charge"
     );
     drop(tok);
-    assert_eq!(backend.accounting_current(), 0, "all holders released on drop");
+    assert_eq!(
+        backend.accounting_current(),
+        0,
+        "all holders released on drop"
+    );
 }
 
 #[test]
@@ -3853,7 +3875,10 @@ fn acct_retained_holder_multiplicity_is_bounded() {
     for _ in 0..1024 {
         match tok.try_clone() {
             Ok(c) => {
-                assert!(backend.accounting_current() <= cap, "holders stay within cap");
+                assert!(
+                    backend.accounting_current() <= cap,
+                    "holders stay within cap"
+                );
                 clones.push(c);
             }
             Err(SafetyStoreError::CapacityRefusal(_)) => {
@@ -3906,8 +3931,15 @@ fn acct_cleanup_after_success_refusal_error_uncertainty() {
         owner.publish_locked(locked_e, 1, None::<&FixtureCommittedHistory>),
         PublishResult::WriteFailedAmbiguous(_)
     ));
-    assert_eq!(backend.accounting_current(), 0, "released after write error");
-    assert!(owner.recovery_required(), "write error sets recovery restriction");
+    assert_eq!(
+        backend.accounting_current(),
+        0,
+        "released after write error"
+    );
+    assert!(
+        owner.recovery_required(),
+        "write error sets recovery restriction"
+    );
     backend.set_inject(InjectFault::None);
 
     // Uncertain durable on a FRESH store (a prior error/uncertainty leaves the
@@ -4003,10 +4035,7 @@ fn child_process_entry() {
             // effectiveness transition (`mark_effective`) ALSO already ran in this
             // process: confirm we are genuinely POST-acknowledgement AND
             // POST-effectiveness before recording phase evidence.
-            assert!(
-                !owner.recovery_required(),
-                "post-ack must be effective"
-            );
+            assert!(!owner.recovery_required(), "post-ack must be effective");
             // Record phase evidence (a sentinel the parent requires) ONLY once the
             // intended phase is proven reached. A setup failure or an assertion
             // panic above unwinds the harness and exits WITHOUT writing this
@@ -4388,7 +4417,11 @@ fn pd_reopen_after_clean_exit_requires_o5_before_o4() {
 fn pd_init_uncertain_bytes_survive_without_observed_success() {
     let dir = tempfile::tempdir().unwrap();
     let status = spawn_child(dir.path(), "init_uncertain");
-    assert_eq!(status.code(), Some(15), "child reached the uncertain-O1 boundary");
+    assert_eq!(
+        status.code(),
+        Some(15),
+        "child reached the uncertain-O1 boundary"
+    );
     let ctx = ctx_n(4);
     let owner = SafetyRecordOwner::attach(open_enabled(dir.path()), ctx).unwrap();
     // The durable bootstrap survived and is a valid complete publication.
@@ -4435,7 +4468,11 @@ fn pd_duplicate_o1_after_surviving_init_refused() {
 fn pd_uncertain_o5_does_not_release_recovery_then_clean_o5_recovers() {
     let dir = tempfile::tempdir().unwrap();
     let status = spawn_child(dir.path(), "o5_uncertain");
-    assert_eq!(status.code(), Some(16), "child reached the uncertain-O5 boundary");
+    assert_eq!(
+        status.code(),
+        Some(16),
+        "child reached the uncertain-O5 boundary"
+    );
     let ctx = ctx_n(4);
     let owner = SafetyRecordOwner::attach(open_enabled(dir.path()), ctx.clone()).unwrap();
     assert_eq!(owner.open().unwrap().current_revision, 1);
@@ -4470,11 +4507,18 @@ fn pd_uncertain_o5_does_not_release_recovery_then_clean_o5_recovers() {
 fn pd_failed_o5_does_not_release_recovery() {
     let dir = tempfile::tempdir().unwrap();
     let status = spawn_child(dir.path(), "o5_write_error");
-    assert_eq!(status.code(), Some(17), "child reached the failed-O5 boundary");
+    assert_eq!(
+        status.code(),
+        Some(17),
+        "child reached the failed-O5 boundary"
+    );
     let ctx = ctx_n(4);
     let owner = SafetyRecordOwner::attach(open_enabled(dir.path()), ctx).unwrap();
     assert_eq!(owner.open().unwrap().current_revision, 1);
-    assert!(owner.recovery_required(), "failed O5 does not release recovery");
+    assert!(
+        owner.recovery_required(),
+        "failed O5 does not release recovery"
+    );
     let v = owner
         .read_validate(None::<&FixtureCommittedHistory>)
         .unwrap();
@@ -4493,7 +4537,11 @@ fn h19_pd_fresh_o3_then_o5_refuses_divergent_surviving_content() {
     let dir = tempfile::tempdir().unwrap();
     // A child establishes + acknowledges a lock (revision 1), then exits cleanly.
     let status = spawn_child(dir.path(), "ack_locked_clean_exit");
-    assert_eq!(status.code(), Some(14), "child reached the acknowledged-exit boundary");
+    assert_eq!(
+        status.code(),
+        Some(14),
+        "child reached the acknowledged-exit boundary"
+    );
 
     let ctx = ctx_n(4);
     // Fresh process: a NEW backend-bound owner. No recovery token crosses the
@@ -4589,7 +4637,11 @@ fn h24_pd_nocommit_recovery_does_not_manufacture_anchor() {
     let dir = tempfile::tempdir().unwrap();
     // The reused phase publishes a NO-COMMIT locked record (committed_anchor None).
     let status = spawn_child(dir.path(), "ack_locked_clean_exit");
-    assert_eq!(status.code(), Some(14), "child reached the acknowledged-exit boundary");
+    assert_eq!(
+        status.code(),
+        Some(14),
+        "child reached the acknowledged-exit boundary"
+    );
 
     let ctx = ctx_n(4);
     let owner = SafetyRecordOwner::attach(open_enabled(dir.path()), ctx).unwrap();
@@ -5307,9 +5359,18 @@ fn d7d14_transient_decoded_max_tc_exceeds_retained_gen_but_fits_transient_ceilin
     // The CORRECTION: the transient decoded ceiling covers the live object, and is
     // strictly larger than (not substituted by) the retained-generation ceiling.
     let transient = max_transient_decoded_working_set(&ctx).unwrap();
-    assert_eq!(transient, 1112, "transient decoded ceiling = inline + max backing");
-    assert!(live <= transient, "the live transient decoded object fits its corrected term");
-    assert!(transient > retained_gen, "transient ceiling strictly exceeds retained ceiling");
+    assert_eq!(
+        transient, 1112,
+        "transient decoded ceiling = inline + max backing"
+    );
+    assert!(
+        live <= transient,
+        "the live transient decoded object fits its corrected term"
+    );
+    assert!(
+        transient > retained_gen,
+        "transient ceiling strictly exceeds retained ceiling"
+    );
 
     // The accepted aggregate is UNCHANGED by the correction (still 7772 for N=4).
     let agg = max_aggregate_retained_bytes(
@@ -5321,7 +5382,10 @@ fn d7d14_transient_decoded_max_tc_exceeds_retained_gen_but_fits_transient_ceilin
     assert_eq!(agg, 7772, "accepted N=4 aggregate unchanged");
     // The corrected per-operation transient reservations remain within the aggregate.
     let o4_charge = 2 * transient + 3 * max_safety_record_bytes(&ctx).unwrap() + (2 + 32 + 8);
-    assert!(o4_charge <= agg, "corrected O4 reservation fits the unchanged aggregate");
+    assert!(
+        o4_charge <= agg,
+        "corrected O4 reservation fits the unchanged aggregate"
+    );
 }
 
 /// The maximum TC drives REAL O4 publish, O3 read-validate, and O5 reacknowledge
@@ -5354,7 +5418,10 @@ fn d7d14_max_tc_o4_o3_o5_real_operations_within_aggregate() {
         .unwrap();
     assert!(proof.retained().is_locked());
     let with_holder = backend.accounting_current();
-    assert!(with_holder > 0 && with_holder <= agg_cap, "O3 holder within aggregate");
+    assert!(
+        with_holder > 0 && with_holder <= agg_cap,
+        "O3 holder within aggregate"
+    );
 
     // O5: reacknowledge the surviving maximum-TC publication while the O3 proof is
     // still live — peak coexistence of the retained holder and the O5 working set
@@ -5368,7 +5435,11 @@ fn d7d14_max_tc_o4_o3_o5_real_operations_within_aggregate() {
         "O5 + live O3 holder peak within the unchanged aggregate"
     );
     drop(proof);
-    assert_eq!(backend.accounting_current(), 0, "all operational charges released");
+    assert_eq!(
+        backend.accounting_current(),
+        0,
+        "all operational charges released"
+    );
 }
 
 /// O4 admission-order correction (task §6): the allocation-free candidate
@@ -5491,7 +5562,10 @@ fn d7d14_o5_publication_envelope_coexistence_reserved_within_aggregate() {
     let owner = SafetyRecordOwner::attach(open_enabled(dir.path()), ctx.clone()).unwrap();
     let backend = owner.backend_for_test();
     let agg_cap = backend.accounting_aggregate_cap().unwrap();
-    assert!(owner.recovery_required(), "reopened store starts not-effective");
+    assert!(
+        owner.recovery_required(),
+        "reopened store starts not-effective"
+    );
 
     // Retain a live O3 proof/holder bound to THIS reopened incarnation (required
     // for the O5 recovery capability), then measure O5 coexistence.
@@ -5928,8 +6002,14 @@ fn corr_refusal_qc_signature_count_over_n_is_allocation_free() {
         matches!(res, Err(SafetyStoreError::DeclaredBoundExceeded(_))),
         "signature-count over-N must refuse, got {res:?}"
     );
-    assert_eq!(allocs, 0, "signature-count over-N refusal must be allocation-free");
-    assert!(res.unwrap_err().to_string().contains("signature count 5 > N=4"));
+    assert_eq!(
+        allocs, 0,
+        "signature-count over-N refusal must be allocation-free"
+    );
+    assert!(res
+        .unwrap_err()
+        .to_string()
+        .contains("signature count 5 > N=4"));
 }
 
 /// Named finding: aggregate and partition admission failures previously built
@@ -5986,12 +6066,16 @@ fn corr_typed_refusal_payloads_construct_without_allocation() {
     let (errs, allocs) = measure_allocs(|| {
         [
             SafetyStoreError::AlreadyEstablished(AlreadyEstablishedKind::MetadataPresent),
-            SafetyStoreError::RecoveryRequired(RecoveryRequiredReason::FreshAcknowledgementRequired),
+            SafetyStoreError::RecoveryRequired(
+                RecoveryRequiredReason::FreshAcknowledgementRequired,
+            ),
             SafetyStoreError::DeclaredBoundExceeded(DeclaredBoundDetail::SignatureLength {
                 len: 9,
                 s_sig: 8,
             }),
-            SafetyStoreError::CapacityRefusal(CapacityRefusalDetail::Unbound(LedgerScope::Aggregate)),
+            SafetyStoreError::CapacityRefusal(CapacityRefusalDetail::Unbound(
+                LedgerScope::Aggregate,
+            )),
             SafetyStoreError::CapacityRefusal(CapacityRefusalDetail::AdmissionOverflow {
                 scope: LedgerScope::Partition,
                 charge: 1,
@@ -6006,8 +6090,246 @@ fn corr_typed_refusal_payloads_construct_without_allocation() {
         "typed `Copy` refusal payloads must construct without heap allocation"
     );
     assert!(errs[0].to_string().contains("metadata already present"));
-    assert!(errs[1].to_string().contains("fresh durability acknowledgement"));
+    assert!(errs[1]
+        .to_string()
+        .contains("fresh durability acknowledgement"));
     assert!(errs[2].to_string().contains("signature length 9 > s_sig=8"));
-    assert!(errs[3].to_string().contains("aggregate authority not bound"));
+    assert!(errs[3]
+        .to_string()
+        .contains("aggregate authority not bound"));
     assert!(errs[4].to_string().contains("over cap 2"));
+}
+
+// ===========================================================================
+// RUN 422 D7-D14 Item A continuation — residual protected-refusal allocation
+// corrections. The previously-string-carrying protected refusals
+// (`ArithmeticOverflow`, `MissingIndependentInput`, and the protected
+// `StructuralRefusal` sites) now carry typed, `Copy` (or `Copy`-plus-`Message`)
+// payloads, so the pre-reservation refusal branches construct no owned
+// diagnostic `String`. These tests assert (a) construction is allocation-free
+// for every newly-typed payload, (b) the real operational paths emit the typed
+// variant, and (c) a refused real operation preserves raw record/metadata bytes,
+// the recovery latch, and the reservation baseline.
+// ===========================================================================
+
+/// (a) Every newly-converted typed refusal payload — all `ArithmeticOverflowSite`
+/// discriminants, both `MissingIndependentInputSite` discriminants, and the typed
+/// `StructuralRefusalDetail` forms — is `Copy`/stack data and constructs with no
+/// heap allocation, while still rendering its full diagnostic text on demand.
+///
+/// This is the *helper-level* allocation-free guarantee for the residual sites
+/// (labelled as such): it proves the refusal VALUE allocates nothing. The
+/// real-operation tests below prove the protected branches actually emit these
+/// values and preserve state; the accounting `add`/`mul` overflow sites are
+/// private helpers, so their typed `AccountingSum`/`AccountingProduct` payloads
+/// are covered here at the value level rather than via a manufactured invalid
+/// production profile.
+#[test]
+fn corr_residual_typed_refusal_payloads_construct_without_allocation() {
+    use qbind_node::safety_record_store::error::{
+        ArithmeticOverflowSite as A, MissingIndependentInputSite as M, StructuralRefusalDetail as S,
+    };
+    let (errs, allocs) = measure_allocs(|| {
+        [
+            SafetyStoreError::ArithmeticOverflow(A::AccountingSum),
+            SafetyStoreError::ArithmeticOverflow(A::AccountingProduct),
+            SafetyStoreError::ArithmeticOverflow(A::SizeSum),
+            SafetyStoreError::ArithmeticOverflow(A::SizeProduct),
+            SafetyStoreError::ArithmeticOverflow(A::RetainedHolderCharge),
+            SafetyStoreError::ArithmeticOverflow(A::O1InspectionWorkingSet),
+            SafetyStoreError::ArithmeticOverflow(A::O1BootstrapPublicationCharge),
+            SafetyStoreError::ArithmeticOverflow(A::O2ReadDecodeWorkingSet),
+            SafetyStoreError::ArithmeticOverflow(A::O3ValidationScratchCharge),
+            SafetyStoreError::ArithmeticOverflow(A::O4WorkingSetCharge),
+            SafetyStoreError::ArithmeticOverflow(A::PublicationRevisionExhausted),
+            SafetyStoreError::ArithmeticOverflow(A::O5ReadBackWorkingSet),
+            SafetyStoreError::MissingIndependentInput(M::O1FirstUseIntent),
+            SafetyStoreError::MissingIndependentInput(M::P3CommittedAnchorNoHistory),
+            SafetyStoreError::StructuralRefusal(S::EmptySignerCertificate),
+            SafetyStoreError::StructuralRefusal(S::RecordPresentWithoutMetadata),
+            SafetyStoreError::StructuralRefusal(S::UnknownLegacySafetyNamespaceKey { len: 19 }),
+        ]
+    });
+    assert_eq!(
+        allocs, 0,
+        "every residual typed `Copy` refusal payload must construct without heap allocation"
+    );
+    // Diagnostic text is preserved (materialised only on demand via `Display`).
+    assert!(errs[0].to_string().contains("accounting sum"));
+    assert!(errs[1].to_string().contains("accounting product"));
+    assert!(errs[9].to_string().contains("O4 working-set charge"));
+    assert!(errs[10]
+        .to_string()
+        .contains("publication revision exhausted"));
+    assert!(errs[12]
+        .to_string()
+        .contains("explicit first-use intent assertion"));
+    assert!(errs[13].to_string().contains("(P3)"));
+    assert!(errs[14]
+        .to_string()
+        .contains("empty-signer certificate refused at structural threshold"));
+    assert!(errs[15]
+        .to_string()
+        .contains("record present without metadata"));
+    assert!(errs[16]
+        .to_string()
+        .contains("unknown/legacy safety-namespace key present (19 bytes)"));
+}
+
+/// (b)+(c) O1 `initialize(false)` is refused with the typed, allocation-free
+/// `MissingIndependentInputSite::O1FirstUseIntent` BEFORE any domain lock,
+/// reservation, or backend read. Measured through the real owner call the whole
+/// refusal allocates nothing, and the untouched backend's raw record/metadata,
+/// recovery latch, and reservation baseline are unchanged.
+#[test]
+fn corr_initialize_false_refusal_is_typed_and_allocation_free_and_preserves_state() {
+    use qbind_node::safety_record_store::error::MissingIndependentInputSite;
+    let dir = tempfile::tempdir().unwrap();
+    let ctx = ctx_n(4);
+    let backend = open_enabled(dir.path());
+    let owner = SafetyRecordOwner::attach(backend, ctx.clone()).unwrap();
+    let backend = owner.backend_for_test();
+    let rec_bound = max_safety_record_bytes(&ctx).unwrap();
+
+    let meta_before = backend.read_meta(META_ENCODED_LEN_MIRROR).unwrap();
+    let record_before = backend.read_record(rec_bound).unwrap();
+    let latch_before = backend.recovery_required();
+    let acct_before = backend.accounting_current();
+
+    // The refusal runs as the first statement of `initialize`, before the domain
+    // lock / inspection reservation, so the whole real call allocates nothing.
+    let (res, allocs) = measure_allocs(|| owner.initialize(false));
+    match &res {
+        Err(SafetyStoreError::MissingIndependentInput(
+            MissingIndependentInputSite::O1FirstUseIntent,
+        )) => {}
+        other => panic!("expected typed O1FirstUseIntent refusal, got {other:?}"),
+    }
+    assert_eq!(
+        allocs, 0,
+        "the pre-reservation first-use-intent refusal must allocate no owned String"
+    );
+
+    // State preservation: nothing read, written, reserved, or latched.
+    assert_eq!(
+        backend.read_meta(META_ENCODED_LEN_MIRROR).unwrap(),
+        meta_before
+    );
+    assert_eq!(backend.read_record(rec_bound).unwrap(), record_before);
+    assert_eq!(backend.recovery_required(), latch_before);
+    assert_eq!(backend.accounting_current(), acct_before);
+
+    // Subsequent eligibility once the independent assertion is supplied.
+    assert!(
+        owner.initialize(true).is_ok(),
+        "O1 succeeds once the first-use intent is asserted"
+    );
+}
+
+/// (b) The empty-signer certificate structural threshold refusal is emitted as the
+/// typed, allocation-free `StructuralRefusalDetail::EmptySignerCertificate` through
+/// the real `encode_record` admission path (which runs `admit_wire_qc` before any
+/// O4 reservation).
+#[test]
+fn corr_empty_signer_refusal_is_typed_through_encode_admission() {
+    use qbind_node::safety_record_store::error::StructuralRefusalDetail;
+    let ctx = ctx_n(4);
+    let mut qc = valid_wire_qc(&ctx, [9u8; 32], 5);
+    qc.signatures.clear();
+    qc.signer_bitmap = vec![0u8; 1];
+    let locked = locked_qc_unadmitted(&ctx, [9u8; 32], 5, qc);
+    let dec = DecodedRecord {
+        persistence_format_version: 1,
+        network_genesis_id: ctx.network_genesis_id,
+        publication_revision: 1,
+        record: SafetyRecord::Locked(locked),
+    };
+    match encode_record(&dec, &ctx) {
+        Err(SafetyStoreError::StructuralRefusal(
+            StructuralRefusalDetail::EmptySignerCertificate,
+        )) => {}
+        other => panic!("expected typed EmptySignerCertificate refusal, got {other:?}"),
+    }
+}
+
+/// (b)+(c) A partial record-without-metadata namespace is refused by O1 with the
+/// typed `StructuralRefusalDetail::RecordPresentWithoutMetadata`. The whole
+/// operation legitimately reads the admitted record/metadata buffers (so it is NOT
+/// asserted allocation-free), but the refused operation leaves the raw record
+/// bytes, metadata, recovery latch, and reservation baseline exactly as they were.
+#[test]
+fn corr_o1_record_without_metadata_refusal_is_typed_and_preserves_state() {
+    use qbind_node::safety_record_store::error::StructuralRefusalDetail;
+    let dir = tempfile::tempdir().unwrap();
+    let ctx = ctx_n(4);
+    let backend = open_enabled(dir.path());
+    backend
+        .debug_overwrite_record(&[0xAAu8, 0xBB, 0xCC, 0xDD])
+        .expect("stage a partial record-without-metadata namespace");
+    let owner = SafetyRecordOwner::attach(backend, ctx.clone()).unwrap();
+    let backend = owner.backend_for_test();
+    let rec_bound = max_safety_record_bytes(&ctx).unwrap();
+
+    let meta_before = backend.read_meta(META_ENCODED_LEN_MIRROR).unwrap();
+    let record_before = backend.read_record(rec_bound).unwrap();
+    let latch_before = backend.recovery_required();
+    assert_eq!(
+        record_before.as_deref(),
+        Some(&[0xAAu8, 0xBB, 0xCC, 0xDD][..])
+    );
+    assert_eq!(meta_before, None);
+
+    match owner.initialize(true) {
+        Err(SafetyStoreError::StructuralRefusal(
+            StructuralRefusalDetail::RecordPresentWithoutMetadata,
+        )) => {}
+        other => panic!("expected typed RecordPresentWithoutMetadata refusal, got {other:?}"),
+    }
+
+    // Pre-write refusal: raw record/metadata unchanged, latch untouched, the
+    // inspection reservation released on exit.
+    assert_eq!(backend.read_record(rec_bound).unwrap(), record_before);
+    assert_eq!(
+        backend.read_meta(META_ENCODED_LEN_MIRROR).unwrap(),
+        meta_before
+    );
+    assert_eq!(backend.recovery_required(), latch_before);
+    assert_eq!(
+        backend.accounting_current(),
+        0,
+        "O1 partial-state inspection reservation released on the refusal exit"
+    );
+}
+
+/// (b)+(c) An unknown/legacy key in the component-owned safety namespace is refused
+/// by O1 with the typed `StructuralRefusalDetail::UnknownLegacySafetyNamespaceKey`
+/// carrying the `Copy` key length, and nothing is migrated, repaired, or deleted:
+/// the unknown key is still present afterward.
+#[test]
+fn corr_o1_unknown_namespace_refusal_is_typed_with_len_and_preserves_key() {
+    use qbind_node::safety_record_store::error::StructuralRefusalDetail;
+    let dir = tempfile::tempdir().unwrap();
+    let ctx = ctx_n(4);
+    let backend = open_enabled(dir.path());
+    let key = b"safetyrec:legacy:v0";
+    backend.debug_put_raw(key, b"opaque-legacy-state").unwrap();
+    let expected_len = key.len();
+    let owner = SafetyRecordOwner::attach(backend.clone(), ctx.clone()).unwrap();
+
+    match owner.initialize(true) {
+        Err(SafetyStoreError::StructuralRefusal(
+            StructuralRefusalDetail::UnknownLegacySafetyNamespaceKey { len },
+        )) => {
+            assert_eq!(
+                len, expected_len as u128,
+                "the refusal carries the unknown key's byte length"
+            );
+        }
+        other => panic!("expected typed UnknownLegacySafetyNamespaceKey refusal, got {other:?}"),
+    }
+    // Nothing repaired or deleted: the unknown key remains present.
+    assert_eq!(
+        backend.first_unrecognized_safety_key().unwrap(),
+        Some(expected_len)
+    );
 }

@@ -6,7 +6,7 @@
 //! durability never manufacture a verified-evidence result.
 
 use super::codec::compute_evidence_lock_binding;
-use super::error::{CapacityRefusalDetail, SafetyStoreError};
+use super::error::{CapacityRefusalDetail, MissingIndependentInputSite, SafetyStoreError};
 use super::profile::PinnedSafetyContext;
 use super::record::{
     DecodedRecord, EvidenceStatus, LockedRecord, RetainedRecord, SafetyRecord, SupportingEvidence,
@@ -217,8 +217,7 @@ fn validate_locked<H: CommittedHistory + ?Sized>(
         match history {
             None => {
                 return Err(SafetyStoreError::MissingIndependentInput(
-                    "committed anchor present but no committed-history relation supplied (P3)"
-                        .into(),
+                    MissingIndependentInputSite::P3CommittedAnchorNoHistory,
                 ))
             }
             Some(h) => {

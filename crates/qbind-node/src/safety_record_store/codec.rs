@@ -6,7 +6,9 @@
 
 use sha3::{Digest, Sha3_256};
 
-use super::error::{CapField, DeclaredBoundDetail, PrefixField, SafetyStoreError};
+use super::error::{
+    CapField, DeclaredBoundDetail, PrefixField, SafetyStoreError, StructuralRefusalDetail,
+};
 use super::profile::{
     max_qc_bytes, max_safety_record_bytes, max_tc_bytes, PinnedSafetyContext, MAX_BITMAP_LEN,
     MAX_SIGNATURE_LEN,
@@ -38,10 +40,9 @@ impl<'a> Reader<'a> {
     }
     fn take(&mut self, n: usize) -> Result<&'a [u8], SafetyStoreError> {
         if self.remaining() < n {
-            return Err(SafetyStoreError::StructuralRefusal(format!(
-                "truncated: need {n}, have {}",
-                self.remaining()
-            )));
+            return Err(SafetyStoreError::StructuralRefusal(
+                format!("truncated: need {n}, have {}", self.remaining()).into(),
+            ));
         }
         let s = &self.buf[self.pos..self.pos + n];
         self.pos += n;
@@ -183,7 +184,7 @@ fn decode_wire_qc(r: &mut Reader, ctx: &PinnedSafetyContext) -> Result<WireQc, S
     // Structural threshold: an empty-signer certificate cannot meet ceil(2W/3)≥1.
     if sig_count == 0 {
         return Err(SafetyStoreError::StructuralRefusal(
-            "empty-signer certificate refused at structural threshold".into(),
+            StructuralRefusalDetail::EmptySignerCertificate,
         ));
     }
     if sig_count > ctx.n() {
@@ -251,9 +252,9 @@ fn decode_timeout_msg(
         0 => None,
         1 => Some(decode_logical_qc(r, ctx)?),
         other => {
-            return Err(SafetyStoreError::StructuralRefusal(format!(
-                "invalid timeout high_qc discriminant {other}"
-            )))
+            return Err(SafetyStoreError::StructuralRefusal(
+                format!("invalid timeout high_qc discriminant {other}").into(),
+            ))
         }
     };
     let validator_id = ValidatorId::new(r.u64()?);
@@ -318,9 +319,9 @@ fn decode_timeout_cert(
         0 => None,
         1 => Some(decode_logical_qc(r, ctx)?),
         other => {
-            return Err(SafetyStoreError::StructuralRefusal(format!(
-                "invalid tc high_qc discriminant {other}"
-            )))
+            return Err(SafetyStoreError::StructuralRefusal(
+                format!("invalid tc high_qc discriminant {other}").into(),
+            ))
         }
     };
     let signer_count = r.u16()? as usize;
@@ -576,7 +577,7 @@ fn admit_wire_qc(qc: &WireQc, ctx: &PinnedSafetyContext) -> Result<(), SafetySto
     // Structural threshold: an empty-signer certificate cannot meet ceil(2W/3)≥1.
     if qc.signatures.is_empty() {
         return Err(SafetyStoreError::StructuralRefusal(
-            "empty-signer certificate refused at structural threshold".into(),
+            StructuralRefusalDetail::EmptySignerCertificate,
         ));
     }
     admit_count_fits_prefix(qc.signatures.len(), PrefixField::SignatureCount)?;
@@ -845,9 +846,9 @@ pub fn decode_record(
                     ))
                 }
                 other => {
-                    return Err(SafetyStoreError::StructuralRefusal(format!(
-                        "invalid record-level high_qc discriminant {other}"
-                    )))
+                    return Err(SafetyStoreError::StructuralRefusal(
+                        format!("invalid record-level high_qc discriminant {other}").into(),
+                    ))
                 }
             };
             let tc = decode_timeout_cert(&mut r, ctx)?;
@@ -864,17 +865,16 @@ pub fn decode_record(
             })
         }
         other => {
-            return Err(SafetyStoreError::StructuralRefusal(format!(
-                "unknown evidence discriminant {other}"
-            )))
+            return Err(SafetyStoreError::StructuralRefusal(
+                format!("unknown evidence discriminant {other}").into(),
+            ))
         }
     };
 
     if r.remaining() != 0 {
-        return Err(SafetyStoreError::StructuralRefusal(format!(
-            "trailing bytes after record: {}",
-            r.remaining()
-        )));
+        return Err(SafetyStoreError::StructuralRefusal(
+            format!("trailing bytes after record: {}", r.remaining()).into(),
+        ));
     }
 
     Ok(DecodedRecord {
@@ -896,9 +896,9 @@ fn read_optional_anchor(
             let height = r.u64()?;
             Ok(Some(CommittedAnchor { block_id, height }))
         }
-        other => Err(SafetyStoreError::StructuralRefusal(format!(
-            "invalid committed-anchor discriminant {other}"
-        ))),
+        other => Err(SafetyStoreError::StructuralRefusal(
+            format!("invalid committed-anchor discriminant {other}").into(),
+        )),
     }
 }
 
@@ -906,9 +906,9 @@ fn read_optional_predecessor(r: &mut Reader, d_pred: u8) -> Result<Option<u64>, 
     match d_pred {
         0 => Ok(None),
         1 => Ok(Some(r.u64()?)),
-        other => Err(SafetyStoreError::StructuralRefusal(format!(
-            "invalid predecessor discriminant {other}"
-        ))),
+        other => Err(SafetyStoreError::StructuralRefusal(
+            format!("invalid predecessor discriminant {other}").into(),
+        )),
     }
 }
 
