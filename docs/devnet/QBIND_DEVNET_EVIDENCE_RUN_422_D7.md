@@ -17249,10 +17249,23 @@ TA1/TA2, strict-`>`, first-encountered-for-equal-views, quorum semantics, and
 
 ### This pass's literal validation / security-tool outcomes
 
-Recorded separately from historical results; see the F1–F4 validation subsection of
-the devnet verification log for the exact commands, filters, and passed/failed/ignored
-counts captured during this finishing pass. Rust changes are not documentation-only
-triviality. The component remains `D7D14_STORAGE_COMPONENT=PARTIAL-IMPLEMENTATION` /
+Recorded separately from historical results (this finishing pass, executed in the
+supplied environment):
+
+- **Focused F1/F2 regressions (corrected, post-experiment):** `cargo test -p qbind-node --features test-utils --test run_422_d7d14_safety_record_store_tests -- d7d14_f1 d7d14_f2` → **4 passed, 0 failed, 0 ignored** (143 filtered out): `d7d14_f1_o1_live_set_observed_at_publication_boundary`, `d7d14_f1_o1_sensitivity_old_reservation_undercovers_n1_then_restores` (restored), `d7d14_f1_o1_refused_and_readmits_n1`, `d7d14_f2_o1_read_failure_mapping_reached_operationally`.
+- **Full D7-D14 suite with `test-utils`:** `cargo test -p qbind-node --features test-utils --test run_422_d7d14_safety_record_store_tests` → **146 passed, 0 failed, 1 ignored**.
+- **Borrowed-selection unit tests (exact filter):** `cargo test -p qbind-node --features test-utils --lib fc_borrowed_selection` → **2 passed, 0 failed** (1839 filtered out — this is a two-test filter, **not** the whole library suite): `…::validate::fc_borrowed_selection_tests::borrowed_selection_returns_input_borrow_not_a_clone`, `…::borrowed_selection_matches_consensus_helper_by_value`.
+- **Relevant m16 tests:** `cargo test -p qbind-node --features test-utils --test m16_epoch_transition_hardening_tests` → **14 passed, 0 failed, 0 ignored**.
+- **Default library build:** `cargo build -p qbind-node --lib` → Finished (ok).
+- **Test compilation `--no-run`:** both `cargo test -p qbind-node --no-run` and `… --features test-utils --no-run` → Finished (ok).
+- **Release node build:** `cargo build -p qbind-node --release --bin qbind-node` → Finished (ok).
+- **Clippy:** `cargo clippy -p qbind-node --features test-utils --lib` → **0** warnings in the edited `safety_record_store/{backend,owner}.rs` regions; the 104 lib warnings are pre-existing project-wide (e.g. `p2p_node_builder.rs` `dead_code`), not introduced by this pass.
+- **Edited-region formatting / EOL:** the two Rust files and the integration test retain the established CRLF/no-final-newline convention; the evidence and contract documents retain CRLF/no-final-newline; `contradiction.md` retains LF/no-final-newline.
+- **Secret scan:** no secrets detected in the six changed files.
+- **Non-wiring audit:** all observation/seam machinery is `#[cfg(any(test, feature = "test-utils"))]`-gated and absent from the default/release build; no production construction, startup/consensus/signing integration, verifier wiring, authority/epoch mutation, transport, or peer-apply change.
+- **Independent review/security tooling:** Code Review completed with **no** comments. CodeQL (rust) returned **0 alerts** but reported *"Analysis was skipped because the database size is too large"* — recorded literally as a **skipped** scan, not a clean full analysis. One review sub-model was reported unavailable in-environment; recorded literally.
+
+Rust changes are not documentation-only triviality. The component remains `D7D14_STORAGE_COMPONENT=PARTIAL-IMPLEMENTATION` /
 `D7D14_STORAGE_ACCEPTANCE=INCOMPLETE`; `DURABLE_ANTI_ROLLBACK=NOT-ESTABLISHED`;
 `GENESIS_AUTHORITY_ACTIVATION=DISABLED`;
 `PRODUCTION_WIRE_CHAIN_ID_BEHAVIOR=UNCHANGED`;
