@@ -44,22 +44,96 @@ struct CountingAllocator;
 thread_local! {
     static ALLOC_ARMED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
     static ALLOC_COUNT: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
-    // Live-byte observation (Item B/D): the net live heap bytes allocated while
-    // armed, and the peak the net reached. `LIVE_MISSED` latches true if an
-    // instrumentation invariant is violated (a dealloc frees more than the
-    // tracked live total, i.e. a pre-arm allocation was freed inside the armed
-    // interval) so observers FAIL LOUDLY rather than silently truncating a
-    // peak. `LIVE_OVERFLOW` latches on an arithmetic overflow of the counters.
+    // Live-byte observation (Items B/D; RUN 422 D7-D14 R2 soundness correction).
+    //
+    // The earlier observer tracked only a NET byte total and flagged a dealloc
+    // ONLY when its size exceeded that running total. A pre-arm allocation freed
+    // inside the armed interval whose size was <= the current net total therefore
+    // silently reduced the counter and under-counted the peak WITHOUT latching
+    // `missed`. This observer instead tracks the IDENTITY (pointer -> size) of
+    // every allocation made WHILE ARMED in a fixed-capacity, `const`-initialized
+    // table (`LIVE_SLOTS`): the table lives for the thread, never on the heap, so
+    // the observer storage introduces NO unaccounted allocation into the measured
+    // interval. A dealloc is matched against that table:
+    //   * matched (an in-interval allocation) -> subtract its RECORDED size;
+    //   * unmatched (a pre-arm allocation freed inside the interval, or a double
+    //     free) -> `LIVE_UNMATCHED` latches and the net total is left UNCHANGED
+    //     (never corrupted), regardless of the freed size.
+    // `LIVE_EXHAUSTED` latches if more allocations are concurrently live than the
+    // table holds; `LIVE_OVERFLOW` latches on counter overflow. Any of the three
+    // makes the observation unsound and `assert_sound` fails loudly.
+    //
+    // This is deliberately a NARROW observer: it measures the live bytes of
+    // allocations made DURING the interval only, and REQUIRES pre-arm fixtures to
+    // outlive the interval (freeing one inside is now detected, not silently
+    // absorbed). It records actual allocation sizes (a `Vec` backing's size is its
+    // capacity) and ownership transitions via realloc; it makes no process-RSS
+    // claim and preserves the contract's backend-allocation boundary.
     static LIVE_ARMED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
     static LIVE_CUR: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
     static LIVE_PEAK: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
-    static LIVE_MISSED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    static LIVE_UNMATCHED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    static LIVE_EXHAUSTED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
     static LIVE_OVERFLOW: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    static LIVE_SLOTS: std::cell::RefCell<[(usize, usize); LIVE_TRACK_CAP]> =
+        const { std::cell::RefCell::new([(0usize, 0usize); LIVE_TRACK_CAP]) };
+    static LIVE_SLOTS_USED: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// Fixed capacity of the live-allocation identity table. A measured interval (a
+/// single `validate_decoded` / `publish_atomic` object graph with NO backend
+/// I/O) holds only a handful of component-owned allocations live at once, far
+/// under this bound; exceeding it latches `LIVE_EXHAUSTED` so the observation is
+/// rejected rather than silently truncated. All table operations use only this
+/// const-initialized storage and the stack — they never allocate.
+const LIVE_TRACK_CAP: usize = 4096;
+
+/// Record an in-interval allocation's identity. Latches `LIVE_EXHAUSTED` if the
+/// fixed table is full (never grows — growth would allocate inside the interval).
+#[inline]
+fn live_track_insert(ptr: usize, size: usize) {
+    LIVE_SLOTS_USED.with(|u| {
+        let used = u.get();
+        if used >= LIVE_TRACK_CAP {
+            LIVE_EXHAUSTED.with(|e| e.set(true));
+            return;
+        }
+        LIVE_SLOTS.with(|s| s.borrow_mut()[used] = (ptr, size));
+        u.set(used + 1);
+    });
+}
+
+/// Remove a tracked allocation by pointer, returning its recorded size if it was
+/// an in-interval allocation. `None` means the pointer was not tracked (a pre-arm
+/// allocation or a double free).
+#[inline]
+fn live_track_remove(ptr: usize) -> Option<usize> {
+    LIVE_SLOTS_USED.with(|u| {
+        let used = u.get();
+        LIVE_SLOTS.with(|s| {
+            let mut slots = s.borrow_mut();
+            let mut i = 0;
+            while i < used {
+                if slots[i].0 == ptr {
+                    let size = slots[i].1;
+                    slots[i] = slots[used - 1]; // swap-remove; preserves the set
+                    u.set(used - 1);
+                    return Some(size);
+                }
+                i += 1;
+            }
+            None
+        })
+    })
 }
 
 #[inline]
-fn live_on_alloc(size: usize) {
+fn live_on_alloc(ptr: usize, size: usize) {
+    if size == 0 {
+        return; // zero-size (dangling) allocations carry no live bytes
+    }
     if LIVE_ARMED.with(|a| a.get()) {
+        live_track_insert(ptr, size);
         LIVE_CUR.with(|c| match c.get().checked_add(size) {
             Some(v) => {
                 c.set(v);
@@ -75,19 +149,19 @@ fn live_on_alloc(size: usize) {
 }
 
 #[inline]
-fn live_on_dealloc(size: usize) {
+fn live_on_dealloc(ptr: usize, size: usize) {
+    if size == 0 {
+        return;
+    }
     if LIVE_ARMED.with(|a| a.get()) {
-        LIVE_CUR.with(|c| {
-            let cur = c.get();
-            if size > cur {
-                // Freeing more than we tracked: a pre-arm allocation was released
-                // inside the interval. Flag it; do not let the counter wrap.
-                LIVE_MISSED.with(|m| m.set(true));
-                c.set(0);
-            } else {
-                c.set(cur - size);
-            }
-        });
+        match live_track_remove(ptr) {
+            // A matched in-interval allocation: subtract its recorded size.
+            Some(tracked) => LIVE_CUR.with(|c| c.set(c.get().saturating_sub(tracked))),
+            // A pre-arm allocation freed inside the interval (or a double free):
+            // DETECTED regardless of the freed size; the net total is never
+            // corrupted. This is the R2 soundness fix.
+            None => LIVE_UNMATCHED.with(|m| m.set(true)),
+        }
     }
 }
 
@@ -96,70 +170,90 @@ unsafe impl std::alloc::GlobalAlloc for CountingAllocator {
         if ALLOC_ARMED.with(|a| a.get()) {
             ALLOC_COUNT.with(|c| c.set(c.get() + 1));
         }
-        live_on_alloc(layout.size());
-        std::alloc::System.alloc(layout)
+        let ptr = std::alloc::System.alloc(layout);
+        if !ptr.is_null() {
+            live_on_alloc(ptr as usize, layout.size());
+        }
+        ptr
     }
     unsafe fn dealloc(&self, ptr: *mut u8, layout: std::alloc::Layout) {
-        live_on_dealloc(layout.size());
+        live_on_dealloc(ptr as usize, layout.size());
         std::alloc::System.dealloc(ptr, layout)
     }
     unsafe fn realloc(&self, ptr: *mut u8, layout: std::alloc::Layout, new_size: usize) -> *mut u8 {
         if ALLOC_ARMED.with(|a| a.get()) {
             ALLOC_COUNT.with(|c| c.set(c.get() + 1));
         }
-        // A realloc frees `layout.size()` and allocates `new_size`.
-        live_on_dealloc(layout.size());
-        live_on_alloc(new_size);
-        std::alloc::System.realloc(ptr, layout, new_size)
+        let new_ptr = std::alloc::System.realloc(ptr, layout, new_size);
+        // On success a realloc frees the old block (`layout.size()` at `ptr`) and
+        // allocates `new_size` at `new_ptr`; on failure the old block is untouched.
+        if !new_ptr.is_null() {
+            live_on_dealloc(ptr as usize, layout.size());
+            live_on_alloc(new_ptr as usize, new_size);
+        }
+        new_ptr
     }
 }
 
 /// Outcome of a live-byte observation interval.
 #[derive(Debug, Clone, Copy)]
 struct LiveObservation {
-    /// Peak net live heap bytes reached during the interval.
+    /// Peak live heap bytes of IN-INTERVAL allocations reached during the interval.
     peak: usize,
-    /// Net live heap bytes still outstanding at the end of the interval.
+    /// Live heap bytes of in-interval allocations still outstanding at the end.
     end: usize,
-    /// True if a dealloc released more than the tracked live total (a pre-arm
-    /// allocation freed inside the interval) — the peak may be under-counted.
+    /// True if a dealloc released a pointer that was NOT tracked as an in-interval
+    /// allocation (a pre-arm allocation freed inside the interval, or a double
+    /// free) — detected regardless of the freed size (R2 soundness fix).
     missed: bool,
+    /// True if more allocations were concurrently live than the fixed identity
+    /// table holds; the observation is then incomplete and must be rejected.
+    exhausted: bool,
     /// True if the byte counters overflowed.
     overflow: bool,
 }
 
 impl LiveObservation {
-    /// Assert the instrumentation stayed sound: no missed tracking, no overflow.
+    /// Assert the instrumentation stayed sound: no unmatched free, no capacity
+    /// exhaustion, no overflow.
     fn assert_sound(&self, ctx: &str) {
         assert!(
             !self.missed,
-            "{ctx}: live-byte instrumentation missed tracking (pre-arm free inside interval)"
+            "{ctx}: live-byte observer detected an unmatched free (pre-arm allocation freed \
+             inside the interval, or a double free)"
+        );
+        assert!(
+            !self.exhausted,
+            "{ctx}: live-byte observer exhausted its fixed identity table ({} slots)",
+            LIVE_TRACK_CAP
         );
         assert!(
             !self.overflow,
-            "{ctx}: live-byte instrumentation overflowed"
+            "{ctx}: live-byte observer counters overflowed"
         );
     }
 }
 
 /// Run `f` with live-byte observation armed on the current thread, returning
-/// `(result, observation)`. The caller must ensure every object it wants
-/// excluded from the measurement (fixtures, backends) is constructed OUTSIDE
-/// `f`, and that any object owned *outside* `f` survives the interval (is not
-/// freed inside it) so the peak is a faithful component-owned figure. No
-/// cloning of the observed objects occurs here.
+/// `(result, observation)`. The observer tracks only allocations made DURING
+/// `f`; every fixture/backend must be constructed OUTSIDE `f` and must survive
+/// the interval (freeing one inside is now DETECTED as an unmatched free rather
+/// than silently absorbed). No cloning of the observed objects occurs here.
 fn measure_live_bytes<T>(f: impl FnOnce() -> T) -> (T, LiveObservation) {
     LIVE_CUR.with(|c| c.set(0));
     LIVE_PEAK.with(|p| p.set(0));
-    LIVE_MISSED.with(|m| m.set(false));
+    LIVE_UNMATCHED.with(|m| m.set(false));
+    LIVE_EXHAUSTED.with(|e| e.set(false));
     LIVE_OVERFLOW.with(|o| o.set(false));
+    LIVE_SLOTS_USED.with(|u| u.set(0));
     LIVE_ARMED.with(|a| a.set(true));
     let out = f();
     LIVE_ARMED.with(|a| a.set(false));
     let obs = LiveObservation {
         peak: LIVE_PEAK.with(|p| p.get()),
         end: LIVE_CUR.with(|c| c.get()),
-        missed: LIVE_MISSED.with(|m| m.get()),
+        missed: LIVE_UNMATCHED.with(|m| m.get()),
+        exhausted: LIVE_EXHAUSTED.with(|e| e.get()),
         overflow: LIVE_OVERFLOW.with(|o| o.get()),
     };
     (out, obs)
@@ -179,6 +273,103 @@ fn measure_allocs<T>(f: impl FnOnce() -> T) -> (T, usize) {
     ALLOC_ARMED.with(|a| a.set(false));
     let count = ALLOC_COUNT.with(|c| c.get());
     (out, count)
+}
+
+// ---------------------------------------------------------------------------
+// R2 (RUN 422 D7-D14): live-byte observer soundness validation.
+//
+// These tests validate the OBSERVER itself — the specific failure modes its
+// soundness claim covers — independently of any O3/O5 reservation reasoning.
+// They establish that the identity-tracking observer DETECTS a pre-interval
+// allocation freed inside the interval (the exact case the earlier net-only
+// observer silently absorbed), tracks in-interval alloc/free to a faithful peak
+// with no residue, and rejects (rather than truncates) capacity exhaustion.
+// ---------------------------------------------------------------------------
+
+/// The headline R2 soundness fix: a pre-arm allocation freed INSIDE the measured
+/// interval whose size is <= the current in-interval total is now DETECTED as an
+/// unmatched free. The earlier net-only observer flagged a dealloc only when its
+/// size exceeded the running total, so this free silently reduced the counter
+/// and under-counted the peak WITHOUT latching `missed`.
+#[test]
+fn d7d14_r2_observer_detects_pre_arm_free_inside_interval() {
+    // A pre-arm allocation (constructed BEFORE arming). 64 bytes of backing.
+    let pre_arm: Vec<u8> = Vec::with_capacity(64);
+    let pre_arm_cap = pre_arm.capacity();
+    assert!(pre_arm_cap >= 64);
+
+    // Inside the interval: first allocate a LARGER in-interval buffer so the
+    // in-interval total exceeds the pre-arm size, then free the pre-arm buffer.
+    // Under the old net-only logic `size (64) <= cur (>=256)` => NO flag; under
+    // identity tracking the pre-arm pointer is untracked => `missed` latches.
+    let (_r, obs) = measure_live_bytes(move || {
+        let big: Vec<u8> = Vec::with_capacity(256);
+        assert!(big.capacity() >= 256);
+        // Free the pre-arm allocation inside the interval.
+        drop(pre_arm);
+        // Keep `big` alive to the end so its free does not hide the signal.
+        big.capacity()
+    });
+    assert!(
+        obs.missed,
+        "observer must DETECT a pre-arm allocation freed inside the interval"
+    );
+    assert!(!obs.overflow && !obs.exhausted);
+}
+
+/// An in-interval allocation freed inside the interval nets to zero with a peak
+/// that reached at least the buffer size, and the observation is sound.
+#[test]
+fn d7d14_r2_observer_tracks_in_interval_alloc_free_net_zero() {
+    let (_r, obs) = measure_live_bytes(|| {
+        let v: Vec<u8> = Vec::with_capacity(512);
+        let cap = v.capacity();
+        drop(v);
+        cap
+    });
+    obs.assert_sound("in-interval alloc/free");
+    assert!(
+        obs.peak >= 512,
+        "peak must reach the in-interval buffer size (got {})",
+        obs.peak
+    );
+    assert_eq!(
+        obs.end, 0,
+        "an in-interval allocation freed inside the interval leaves no residue"
+    );
+}
+
+/// Exhausting the fixed identity table is REJECTED (latched `exhausted`), not
+/// silently truncated. The outer holder is pre-sized OUTSIDE the interval so its
+/// own growth does not perturb the measurement.
+#[test]
+fn d7d14_r2_observer_rejects_capacity_exhaustion() {
+    // Pre-size the holder OUTSIDE the interval: capacity for CAP+16 pointers so
+    // pushing inside the interval never reallocates the holder itself.
+    let mut holder: Vec<Vec<u8>> = Vec::with_capacity(LIVE_TRACK_CAP + 16);
+    assert!(holder.capacity() >= LIVE_TRACK_CAP + 16);
+
+    let (holder, obs) = measure_live_bytes(move || {
+        // Each 1-byte Vec is one distinct live allocation. Pushing more than the
+        // table capacity must latch `exhausted`.
+        for _ in 0..(LIVE_TRACK_CAP + 8) {
+            holder.push(Vec::with_capacity(1));
+        }
+        holder
+    });
+    assert!(
+        obs.exhausted,
+        "observer must latch `exhausted` when more allocations are live than the table holds"
+    );
+    // `assert_sound` must FAIL on an exhausted observation.
+    let caught = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        obs.assert_sound("exhausted observation");
+    }));
+    assert!(
+        caught.is_err(),
+        "assert_sound must reject an exhausted (incomplete) observation"
+    );
+    drop(holder);
 }
 
 // ---------------------------------------------------------------------------
