@@ -14,7 +14,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, AtomicU8, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use super::accounting::{AggregateAuthority, SharedAccountant};
-use super::error::SafetyStoreError;
+use super::error::{ReadFailedDetail, SafetyStoreError};
 use crate::pqc_trust_bundle::TrustBundleEnvironment;
 use crate::storage::signing_journal_crc32;
 
@@ -26,6 +26,35 @@ use crate::storage::signing_journal_crc32;
 /// Two distinct opens (including a reopen of the same DB) get distinct values,
 /// so a recovery token from one incarnation is never honoured by another.
 static OWNERSHIP_INCARNATION: AtomicU64 = AtomicU64::new(1);
+
+// Test-only publication-staging observation (Run 422 D7-D14 Item D). At the
+// real `publish_atomic` boundary the two CRC-wrapped staging envelopes
+// (`wrap(record)`, `wrap(meta)`) are genuinely component-owned allocations that
+// coexist with the read-back, transient decode, metadata payload, and retained
+// proof. This records their ACTUAL backing capacities so a focused test can
+// verify the `publication_staging_charge` reservation covers them INDEPENDENTLY
+// of that charge function. It is a boundary marker only — not a total-allocation
+// meter — and is absent from default production builds.
+#[cfg(any(test, feature = "test-utils"))]
+thread_local! {
+    static PUBLISH_STAGING_OBS: std::cell::Cell<Option<(usize, usize)>> =
+        const { std::cell::Cell::new(None) };
+}
+
+/// Test-only: arm/reset the publication-staging envelope observation for the
+/// current thread. Call immediately before the O4/O5 operation to observe.
+#[cfg(any(test, feature = "test-utils"))]
+pub fn arm_publish_staging_observation() {
+    PUBLISH_STAGING_OBS.with(|c| c.set(None));
+}
+
+/// Test-only: read the `(record_envelope_capacity, meta_envelope_capacity)`
+/// observed at the most recent `publish_atomic` submit boundary on this thread,
+/// or `None` if no publish reached the boundary since arming.
+#[cfg(any(test, feature = "test-utils"))]
+pub fn observed_publish_staging() -> Option<(usize, usize)> {
+    PUBLISH_STAGING_OBS.with(|c| c.get())
+}
 
 /// The metadata key (one per backend DB).
 const META_KEY: &[u8] = b"safetyrec:meta:v1";
@@ -62,6 +91,13 @@ pub enum InjectFault {
     /// The batch write durably succeeds, but the caller is told the outcome is
     /// uncertain (success acknowledgement is lost after the durable write).
     UncertainAfterWrite = 3,
+    /// Test-only: the O1 legacy-namespace scan's raw-iterator status reports a
+    /// storage-layer iteration error. A real RocksDB raw iterator cannot be forced
+    /// to fail its status deterministically, so this narrowly test-gated fault
+    /// drives the exact post-scan error branch of
+    /// [`SafetyBackend::first_unrecognized_safety_key`] (the typed, allocation-free
+    /// `ReadFailedDetail::NamespaceScan` refusal) through the real O1 path.
+    FailNamespaceScan = 4,
 }
 
 /// A shared serialization domain. The owned guard proves the single-writer
@@ -356,8 +392,18 @@ impl SafetyBackend {
         }
         // Surface a storage-layer iteration error rather than silently treating
         // it as "namespace clean".
-        iter.status()
-            .map_err(|e| SafetyStoreError::ReadFailed(format!("namespace scan: {e}")))?;
+        let status = iter.status();
+        // Test-only: a real raw-iterator status cannot be forced to fail
+        // deterministically, so the narrowly test-gated `FailNamespaceScan` fault
+        // drives this exact post-scan error branch — the typed, allocation-free
+        // `NamespaceScan` refusal the real status-failure path constructs — through
+        // the live O1 operation.
+        if self.injected() == InjectFault::FailNamespaceScan {
+            return Err(SafetyStoreError::ReadFailed(
+                ReadFailedDetail::NamespaceScan,
+            ));
+        }
+        status.map_err(|_e| SafetyStoreError::ReadFailed(ReadFailedDetail::NamespaceScan))?;
         Ok(None)
     }
 
@@ -378,9 +424,9 @@ impl SafetyBackend {
             Ok(Some(raw)) => {
                 let raw: &[u8] = raw.as_ref();
                 if raw.len() < 4 {
-                    return Err(SafetyStoreError::ReadFailed(format!(
-                        "{what}: envelope too short"
-                    )));
+                    return Err(SafetyStoreError::ReadFailed(
+                        format!("{what}: envelope too short").into(),
+                    ));
                 }
                 // Bound the payload length BEFORE copying it out of backend memory.
                 let payload_len = (raw.len() - 4) as u128;
@@ -394,14 +440,14 @@ impl SafetyBackend {
                 let stored =
                     u32::from_be_bytes([crc_bytes[0], crc_bytes[1], crc_bytes[2], crc_bytes[3]]);
                 if signing_journal_crc32(payload) != stored {
-                    return Err(SafetyStoreError::ReadFailed(format!(
-                        "{what}: CRC envelope mismatch"
-                    )));
+                    return Err(SafetyStoreError::ReadFailed(
+                        format!("{what}: CRC envelope mismatch").into(),
+                    ));
                 }
                 // Now within bound and CRC-valid: take the single component-owned copy.
                 Ok(Some(payload.to_vec()))
             }
-            Err(e) => Err(SafetyStoreError::ReadFailed(format!("{what}: {e}"))),
+            Err(e) => Err(SafetyStoreError::ReadFailed(format!("{what}: {e}").into())),
         }
     }
 
@@ -437,8 +483,20 @@ impl SafetyBackend {
         }
 
         let mut batch = rocksdb::WriteBatch::default();
-        batch.put(META_KEY, Self::wrap(meta));
-        batch.put(RECORD_KEY, Self::wrap(record));
+        // Materialize the two CRC-wrapped staging envelopes as named locals so
+        // the real component-owned backing capacities can be observed at this
+        // boundary (Item D). Behaviour is unchanged: they are `put` into the
+        // same batch exactly as before. The observation call is cfg-gated and
+        // absent from production builds.
+        let meta_envelope = Self::wrap(meta);
+        let record_envelope = Self::wrap(record);
+        #[cfg(any(test, feature = "test-utils"))]
+        {
+            let caps = (record_envelope.capacity(), meta_envelope.capacity());
+            PUBLISH_STAGING_OBS.with(|c| c.set(Some(caps)));
+        }
+        batch.put(META_KEY, meta_envelope);
+        batch.put(RECORD_KEY, record_envelope);
         let mut write_opts = rocksdb::WriteOptions::default();
         write_opts.set_sync(true);
 
@@ -520,6 +578,7 @@ impl SafetyBackend {
             1 => InjectFault::FailBeforeSubmit,
             2 => InjectFault::WriteErrors,
             3 => InjectFault::UncertainAfterWrite,
+            4 => InjectFault::FailNamespaceScan,
             _ => InjectFault::None,
         }
     }

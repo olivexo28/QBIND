@@ -12,7 +12,7 @@
 
 use qbind_consensus::ids::ValidatorId;
 
-use super::error::{ArithmeticOverflowSite, SafetyStoreError};
+use super::error::{ArithmeticOverflowSite, ProfileInvalidDetail, SafetyStoreError};
 
 /// Supported persistence-format version (§ 13.2, `persistence_format_version`).
 ///
@@ -139,28 +139,36 @@ impl PinnedSafetyContext {
     pub fn validate(&self) -> Result<(), SafetyStoreError> {
         let n = self.n() as u128;
         if n == 0 || n > MAX_SIGNATURE_COUNT {
-            return Err(SafetyStoreError::ProfileInvalid(format!(
-                "validator count {n} out of range 1..={MAX_SIGNATURE_COUNT}"
-            )));
+            return Err(SafetyStoreError::ProfileInvalid(
+                ProfileInvalidDetail::ValidatorCountOutOfRange {
+                    n,
+                    max: MAX_SIGNATURE_COUNT,
+                },
+            ));
         }
         let s = self.s_sig as u128;
         if s == 0 || s > MAX_SIGNATURE_LEN {
-            return Err(SafetyStoreError::ProfileInvalid(format!(
-                "s_sig {s} out of range 1..={MAX_SIGNATURE_LEN}"
-            )));
+            return Err(SafetyStoreError::ProfileInvalid(
+                ProfileInvalidDetail::SignatureLenOutOfRange {
+                    s,
+                    max: MAX_SIGNATURE_LEN,
+                },
+            ));
         }
         // Dense-index profile: ids must be contiguous 0..N-1.
         for (idx, (id, _)) in self.validators.iter().enumerate() {
             if id.as_u64() != idx as u64 {
-                return Err(SafetyStoreError::ProfileInvalid(format!(
-                    "non-dense validator index at slot {idx}: id={}",
-                    id.as_u64()
-                )));
+                return Err(SafetyStoreError::ProfileInvalid(
+                    ProfileInvalidDetail::NonDenseValidatorIndex {
+                        slot: idx as u128,
+                        id: id.as_u64(),
+                    },
+                ));
             }
         }
         if self.total_voting_power() == 0 {
             return Err(SafetyStoreError::ProfileInvalid(
-                "total voting power is zero".to_string(),
+                ProfileInvalidDetail::ZeroTotalVotingPower,
             ));
         }
         Ok(())

@@ -12,8 +12,13 @@ pub enum SafetyStoreError {
     BackendDisabled,
     /// The pinned context is bound to MainNet; the backend is refused.
     MainNetRefused,
-    /// A pinned profile parameter is invalid / self-inconsistent.
-    ProfileInvalid(String),
+    /// A pinned profile parameter is invalid / self-inconsistent. The payload is
+    /// a typed, `Copy` [`ProfileInvalidDetail`]: `SafetyRecordOwner::attach` runs
+    /// `ctx.validate()` **before** binding the aggregate authority / admitting the
+    /// context partition, so this protected pre-admission refusal is constructed
+    /// from stack-only data and allocates no owned diagnostic `String`; the
+    /// equivalent text is materialised only when rendered through `Display`.
+    ProfileInvalid(ProfileInvalidDetail),
     /// Checked arithmetic overflowed (size / revision); refuse, never wrap. The
     /// payload is a typed, `Copy` [`ArithmeticOverflowSite`]: every accounting /
     /// size / revision overflow refusal — several of which run on the protected
@@ -76,8 +81,14 @@ pub enum SafetyStoreError {
     /// acknowledgement. Dependent work stays blocked until O2/O3/O5 re-establish
     /// state. Never assume the predecessor remained stored.
     UncertainPublication(String),
-    /// A read failed at the storage layer.
-    ReadFailed(String),
+    /// A read failed at the storage layer. The payload is a
+    /// [`ReadFailedDetail`]: a free-form `Message` for the checksum-envelope
+    /// diagnostics that run while inspecting an **already-admitted** stored value
+    /// (covered lifetime), or the typed, `Copy` `NamespaceScan` form for the O1
+    /// legacy-namespace scan iterator-status failure, which O1 reaches **after**
+    /// its covering inspection reservation has been released and must therefore
+    /// allocate no owned diagnostic `String`.
+    ReadFailed(ReadFailedDetail),
     /// A prior ambiguous/uncertain publication left the shared serialization
     /// domain in a recovery-required state; dependent publication is refused for
     /// every handle until the required successful recovery operation clears it.
@@ -597,6 +608,87 @@ impl From<String> for StructuralRefusalDetail {
 }
 
 impl From<&str> for StructuralRefusalDetail {
+    fn from(s: &str) -> Self {
+        Self::Message(s.to_string())
+    }
+}
+
+/// Typed, `Copy` reason an attached [`super::profile::PinnedSafetyContext`] failed
+/// `validate()` ([`SafetyStoreError::ProfileInvalid`], D7-D14 allocation-free
+/// refusal correction). `SafetyRecordOwner::attach` runs `ctx.validate()` as its
+/// first step — **before** `bind_aggregate` admits the context partition — so this
+/// protected pre-admission refusal carries only stack-only `Copy` numeric data and
+/// allocates no owned diagnostic `String`; the equivalent text is materialised only
+/// when rendered through `Display`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProfileInvalidDetail {
+    /// The validator count `n` is outside the admitted `1..=max` range.
+    ValidatorCountOutOfRange { n: u128, max: u128 },
+    /// The per-signature length `s_sig` is outside the admitted `1..=max` range.
+    SignatureLenOutOfRange { s: u128, max: u128 },
+    /// The validator ids are not the dense `0..N-1` sequence this profile pins:
+    /// slot `slot` holds id `id`.
+    NonDenseValidatorIndex { slot: u128, id: u64 },
+    /// The total voting power is zero (no admissible quorum).
+    ZeroTotalVotingPower,
+}
+
+impl std::fmt::Display for ProfileInvalidDetail {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::ValidatorCountOutOfRange { n, max } => {
+                write!(f, "validator count {n} out of range 1..={max}")
+            }
+            Self::SignatureLenOutOfRange { s, max } => {
+                write!(f, "s_sig {s} out of range 1..={max}")
+            }
+            Self::NonDenseValidatorIndex { slot, id } => {
+                write!(f, "non-dense validator index at slot {slot}: id={id}")
+            }
+            Self::ZeroTotalVotingPower => f.write_str("total voting power is zero"),
+        }
+    }
+}
+
+/// The payload of [`SafetyStoreError::ReadFailed`]. A read failure is either a
+/// free-form diagnostic `Message` (the checksum-envelope diagnostics that run
+/// while inspecting an **already-admitted** stored value — a covered lifetime) or
+/// the typed, **allocation-free** `Copy` `NamespaceScan` form used by the O1
+/// legacy-namespace scan: O1 reaches its iterator-status failure **after** its
+/// covering inspection reservation has been released, so that protected
+/// post-release refusal must construct without allocating an owned `String`. The
+/// underlying backend error's variable-length text is deliberately **not** copied
+/// into the component-owned refusal; the fail-closed storage-layer distinction is
+/// preserved as a typed discriminant. `Message` round-trips from `String`/`&str`
+/// via `From`, so the covered-lifetime diagnostic sites are unchanged.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ReadFailedDetail {
+    /// A free-form storage-layer diagnostic constructed while inspecting an
+    /// already-admitted stored value (checksum envelope too short / CRC mismatch /
+    /// backend get error during an admitted O2–O5 read).
+    Message(String),
+    /// The O1 legacy-namespace scan's raw-iterator status reported a storage-layer
+    /// iteration error. Reached after the O1 inspection reservation releases;
+    /// allocation-free.
+    NamespaceScan,
+}
+
+impl std::fmt::Display for ReadFailedDetail {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Message(s) => f.write_str(s),
+            Self::NamespaceScan => f.write_str("namespace scan: storage-layer iteration error"),
+        }
+    }
+}
+
+impl From<String> for ReadFailedDetail {
+    fn from(s: String) -> Self {
+        Self::Message(s)
+    }
+}
+
+impl From<&str> for ReadFailedDetail {
     fn from(s: &str) -> Self {
         Self::Message(s.to_string())
     }
