@@ -83,6 +83,112 @@ pub fn observed_publish_reservations() -> Option<(u128, u128)> {
     PUBLISH_RESERVATION_OBS.with(|c| c.get())
 }
 
+// Test-only ACTUAL O5 publication-boundary live-object-charge observation (RUN 422
+// D7-D14 M2). Distinct from the reservation observation above — which reads the
+// RESERVATION amounts `(operational_current, aggregate_current)` — this records the
+// ACTUAL simultaneously component-owned OBJECTS alive at the `publish_atomic`
+// boundary. The owner (`reacknowledge`) supplies a BOUNDED SCALAR snapshot of the
+// objects it holds live through the boundary (the retained proof's encoded buffer,
+// retained representation + nested backings, holder handle, the fresh read-back
+// buffer, the transient decoded object, and the metadata payload buffer); this
+// backend boundary adds the two CRC staging envelopes it is about to allocate. The
+// result is the real combined O5 live charge, measured object-by-object. Scalars
+// only — no measured object graph is cloned here. Absent from production builds.
+#[cfg(any(test, feature = "test-utils"))]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct O5LiveObjectCharge {
+    /// Retained O3 proof's original encoded publication buffer capacity.
+    pub retained_encoded_cap: u128,
+    /// Retained representation (inline `RetainedRecord`) + its nested evidence
+    /// backings (`Vec::capacity()` of each owned backing).
+    pub retained_generation_charge: u128,
+    /// Contract-charged inline holder/handle representation of the proof.
+    pub holder_handle: u128,
+    /// O5's fresh stored-record read-back buffer capacity.
+    pub readback_cap: u128,
+    /// Fresh transient decoded object: inline + every nested backing, measured in
+    /// place (no clone).
+    pub transient_decoded_charge: u128,
+    /// Metadata payload buffer (`meta.encode()`) capacity.
+    pub metadata_payload_cap: u128,
+    /// Actual record envelope capacity (`wrap` over the republished record bytes).
+    pub record_envelope_cap: u128,
+    /// Actual metadata envelope capacity (`wrap` over the metadata payload).
+    pub metadata_envelope_cap: u128,
+}
+
+#[cfg(any(test, feature = "test-utils"))]
+impl O5LiveObjectCharge {
+    /// The total simultaneously component-owned live charge at the O5 boundary.
+    pub fn total(&self) -> u128 {
+        [
+            self.retained_encoded_cap,
+            self.retained_generation_charge,
+            self.holder_handle,
+            self.readback_cap,
+            self.transient_decoded_charge,
+            self.metadata_payload_cap,
+            self.record_envelope_cap,
+            self.metadata_envelope_cap,
+        ]
+        .into_iter()
+        .fold(0u128, |a, b| a.saturating_add(b))
+    }
+}
+
+// Owner-supplied bounded scalar snapshot of the live O5 objects, set by
+// `reacknowledge` immediately before `publish_atomic`:
+// (retained_encoded_cap, retained_generation_charge, holder_handle,
+//  readback_cap, transient_decoded_charge, metadata_payload_cap).
+#[cfg(any(test, feature = "test-utils"))]
+type O5OwnerSnapshot = (u128, u128, u128, u128, u128, u128);
+
+#[cfg(any(test, feature = "test-utils"))]
+thread_local! {
+    static O5_OWNER_SNAPSHOT: std::cell::Cell<Option<O5OwnerSnapshot>> =
+        const { std::cell::Cell::new(None) };
+    static O5_LIVE_OBJECT_OBS: std::cell::Cell<Option<O5LiveObjectCharge>> =
+        const { std::cell::Cell::new(None) };
+}
+
+/// Test-only: arm/reset the O5 publication-boundary live-object-charge observation
+/// for the current thread. Call immediately before the O5 `reacknowledge`.
+#[cfg(any(test, feature = "test-utils"))]
+pub fn arm_o5_live_object_observation() {
+    O5_OWNER_SNAPSHOT.with(|c| c.set(None));
+    O5_LIVE_OBJECT_OBS.with(|c| c.set(None));
+}
+
+/// Crate/test-only: the owner records its live-object scalar snapshot here, while
+/// those objects are all alive, immediately before `publish_atomic`.
+#[cfg(any(test, feature = "test-utils"))]
+pub(crate) fn set_o5_owner_live_snapshot(
+    retained_encoded_cap: u128,
+    retained_generation_charge: u128,
+    holder_handle: u128,
+    readback_cap: u128,
+    transient_decoded_charge: u128,
+    metadata_payload_cap: u128,
+) {
+    O5_OWNER_SNAPSHOT.with(|c| {
+        c.set(Some((
+            retained_encoded_cap,
+            retained_generation_charge,
+            holder_handle,
+            readback_cap,
+            transient_decoded_charge,
+            metadata_payload_cap,
+        )))
+    });
+}
+
+/// Test-only: the ACTUAL combined O5 live-object charge observed at the most recent
+/// `publish_atomic` boundary where an owner snapshot was supplied, or `None`.
+#[cfg(any(test, feature = "test-utils"))]
+pub fn observed_o5_live_object_charge() -> Option<O5LiveObjectCharge> {
+    O5_LIVE_OBJECT_OBS.with(|c| c.get())
+}
+
 /// The metadata key (one per backend DB).
 const META_KEY: &[u8] = b"safetyrec:meta:v1";
 /// The authoritative-record key (record + embedded supporting material).
@@ -529,6 +635,32 @@ impl SafetyBackend {
                 self.accounting_aggregate_current(),
             );
             PUBLISH_RESERVATION_OBS.with(|c| c.set(Some(reservations)));
+            // M2: if the owner supplied its live-object snapshot (O5 `reacknowledge`),
+            // combine it with the two CRC staging envelope capacities measured here —
+            // while both envelopes coexist with the read-back, transient decode,
+            // metadata payload, and retained proof — to record the ACTUAL combined O5
+            // live-object charge. No-op for O1/O4 (no snapshot supplied).
+            if let Some((
+                retained_encoded_cap,
+                retained_generation_charge,
+                holder_handle,
+                readback_cap,
+                transient_decoded_charge,
+                metadata_payload_cap,
+            )) = O5_OWNER_SNAPSHOT.with(|c| c.get())
+            {
+                let obs = O5LiveObjectCharge {
+                    retained_encoded_cap,
+                    retained_generation_charge,
+                    holder_handle,
+                    readback_cap,
+                    transient_decoded_charge,
+                    metadata_payload_cap,
+                    record_envelope_cap: record_envelope.capacity() as u128,
+                    metadata_envelope_cap: meta_envelope.capacity() as u128,
+                };
+                O5_LIVE_OBJECT_OBS.with(|c| c.set(Some(obs)));
+            }
         }
         batch.put(META_KEY, meta_envelope);
         batch.put(RECORD_KEY, record_envelope);

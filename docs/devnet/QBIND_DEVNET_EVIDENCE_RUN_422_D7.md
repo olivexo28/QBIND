@@ -16671,3 +16671,95 @@ SECURITY_POSTURE=RS1-OPEN / PUBLIC-DEVNET-NO-GO
 ```
 
 C4/C5 remain OPEN; fail-closed `CurrentEpochUnavailable` unchanged. Stop after this bounded continuation.
+## RUN 422 D7-D14 — M1/M2: actual O3/O5 live OBJECT-CHARGE measurements paired with active reservations
+
+This section completes the **object-charge** side of the D7-D14 evidence. The immediately preceding L1/L2 pass established the **reservation-lifetime** result (the covering reservation stays active *through* the allocation it must cover: `2870` in-`validate_decoded`, `4877` at the `publish_atomic` boundary). This pass adds the complementary **actual object-charge** measurement — the simultaneously component-owned objects walked by their real capacities — and pairs each with the active reservation. The L1/L2 reservation-lifetime results and their two executed sensitivity mutations are **preserved, not withdrawn** (see §13.7M of the correspondence contract and the L1/L2 section above).
+
+### Baseline and scoped correspondence
+
+* **Actual supplied working branch:** `copilot/copilotcopilotcopilotcopilotcopilotcopilotcopilotr-another-one`. The task report named `copilot/copilotcopilotcopilotcopilotcopilotcopilotrun-422-yet-again`; the actual supplied branch was used and **not** switched or renamed to match the report.
+* **Full starting HEAD:** `039e3aad828e2c47c7c8c5d509374c2e27ed85ab`; upstream `origin/copilot/copilotcopilotcopilotcopilotcopilotcopilotcopilotr-another-one`; worktree clean at start.
+* **Reviewed object availability / ancestry:** `a09a8b9b8e94541572130e040e00907eda535b39` was **absent** in the shallow single-branch clone and had to be fetched (`git fetch origin a09a8b9b…`). It is **not** an ancestor of the starting HEAD but a **sibling** sharing merge-base `6c2634eb5e8af5d9777da2dd0d806a978012c42e`.
+* **Scoped content correspondence (exact bytes):** `git diff a09a8b9b HEAD` over the authorized `safety_record_store` sources and the `run_422_d7d14_safety_record_store_tests.rs` test is **empty**, and the whole-tree diff is empty as well — **exact blob identity** of every tracked file (not a whitespace-ignoring diff). The starting HEAD therefore already carried the complete reviewed implementation. Repository tree equality establishes **repository correspondence**; it does not by itself establish attachment byte identity.
+
+### Observation method, ownership and lifetime justification
+
+All machinery is `#[cfg(feature = "test-utils")]`-gated and absent from the default build. The five changed `safety_record_store` source/test files add only **bounded scalar observation hooks** — no accounting charge, bound, ownership rule, or control-flow change — and were byte-identical to the reviewed object before this pass.
+
+* `owner::read_validate` arms a bounded observation around its own `validate_decoded` and disarms it after. The observation records are small fixed-size scalar structs (`O3LiveObjectCharge`, `O5LiveObjectCharge`); no measured object graph is cloned, no diagnostic string is allocated inside a protected interval, and no allocation lifetime is extended to manufacture coexistence.
+* Inside `validate_decoded`, the two **phase-invariant** live terms are measured in place: the original backend-read `encoded` buffer capacity (`ENC_INPUT` — the same component-owned read copy the proof retains) and the live transient `decoded` object charge via `accounting::decoded_working_set_charge(&decoded)`, which walks the inline `DecodedRecord` plus every nested `Vec::capacity()` **without cloning**. The single live validation scratch is then added per phase: the record-sized correspondence re-encode buffer `reencoded.capacity()` at the **re-encode** phase, and the certificate-binding `cert.capacity()` at the **binding** phase (recorded from inside `compute_evidence_lock_binding` while `cert` is live, after `reencoded` has been dropped). Only one record-sized validation buffer is ever live at once (Item B's `peak < 2·cap`), so each phase total is `original + transient + one scratch`, measured at **distinct lifetime points**.
+* For O5, `owner::reacknowledge` computes a bounded scalar snapshot of its live objects (retained proof encoded buffer + retained representation + nested backings + holder handle; fresh read-back buffer; fresh transient decode; metadata payload buffer) immediately before `publish_atomic`, and `backend::publish_atomic` adds the two CRC staging envelope capacities it is about to allocate. The snapshotted owner objects (`stored`, `_stored_decoded`, `retained`, `meta_encoded`) are all in scope and unchanged through the boundary — **source-derived lifetime reasoning**, labelled as such and distinct from the measurements.
+* Each observation resets per operation and **fails explicitly** (`expect(...)`) if an expected phase was not recorded; a missing or stale observation fails the test.
+* **Not** derived from `accounting.current()`, a historical peak, the reservation formula, a profile maximum, a separately constructed fixture object, or a test-side replacement allocation. Each measured object term is cross-checked against the same object measured independently (`decode_record(proof.encoded())` → `decoded_working_set_charge`; the variant serialized cap). Backend-internal allocations and allocator overhead are excluded per the contract; no process-RSS bound is claimed.
+
+### M1 — four O3 phase rows (actual object charges through real `read_validate`, N=4)
+
+`operation/variant | phase | actual objects and measured charge components | total live charge | active operational reservation | active aggregate reservation | assertion/test | outcome`
+
+| operation/variant | phase | actual objects and measured charge components (bytes) | total live charge | active operational reservation | active aggregate reservation | assertion / test | outcome |
+|---|---|---|---|---|---|---|---|
+| O3 / max COMPLETE QC | correspondence re-encode live | original encoded `310` + transient decoded `537` + re-encode buffer `310` | **`1157`** | `holder 2051 + o3_scratch 819 = 2870` | ≤ `7772` (unchanged) | `total() ≤ 2870`; `d7d14_m1_o3_actual_object_charges_max_complete_qc` | PASS (`1157 ≤ 2870`) |
+| O3 / max COMPLETE QC | certificate-binding live | original encoded `310` + transient decoded `537` + cert buffer `310` | **`1157`** | `2870` | ≤ `7772` | same test (binding record) | PASS (`1157 ≤ 2870`) |
+| O3 / max COMPLETE TC | correspondence re-encode live | original encoded `811` + transient decoded `1112` + re-encode buffer `811` | **`2734`** | `2870` | ≤ `7772` | `total() ≤ 2870`; `d7d14_m1_o3_actual_object_charges_max_complete_tc` | PASS (`2734 ≤ 2870`) |
+| O3 / max COMPLETE TC | certificate-binding live | original encoded `811` + transient decoded `1112` + cert buffer `811` | **`2734`** | `2870` | ≤ `7772` | same test (binding record) | PASS (`2734 ≤ 2870`) |
+
+The re-encode and cert buffers are each the variant serialized cap (`max_qc_bytes` / `max_tc_bytes`), so the two per-operation phase totals coincide numerically; they are nonetheless **separately recorded at distinct lifetimes** (re-encode buffer live vs. cert buffer live, the former dropped before the latter is allocated). One pre-validation sample is **not** reused for all four rows. A retained generation and its transient predecessor are not counted as two simultaneous generations: conversion transfers the same ownership, and the holder reservation does not imply a fully constructed retained proof at the O3 validation phase. Post-O3 holder retention and release-on-proof-drop checks are preserved; the actual retained-object charge is distinguished from the holder's reservation ceiling in M2 below.
+
+### M2 — O5 publication-boundary row (actual simultaneous live charge, complete max-TC flow `O4 → drop/reopen → O3 → O5`)
+
+| operation/variant | phase | actual objects and measured charge components (bytes) | total live charge | active operational reservation | active aggregate reservation | assertion / test | outcome |
+|---|---|---|---|---|---|---|---|
+| O5 / complete max TC | `publish_atomic` boundary, both CRC envelopes live | retained proof encoded buffer `811` + retained representation + nested backings `1072` + holder handle `136` + fresh read-back `811` + fresh transient decoded `1112` + metadata payload `42` + record envelope `815` + metadata envelope `46` | **`4845`** | `holder 2051 + O5 operation 2826 = 4877` | ≤ `7772` (unchanged) | object coverage `total() ≤ 4877` **and** reservation lifetime `observed_publish_reservations().0 == 4877`; `d7d14_m2_o5_actual_simultaneous_object_charge_at_publication` | PASS (`4845 ≤ 4877`) |
+
+Object coverage and reservation lifetime are kept as **two separate assertions**. Borrowed `CMP_SPAN` adds no owned buffer and is not counted; retained content is counted **once** (inside the proof's measured `811 + 1072 + 136` charge) and never again. The actual live-charge total `4845` is **reported as measured**, strictly below the conservative `4877` reservation ceiling — the measured object charge is not forced to equal the reservation. The actual complete-record envelope observations `815` / `46`, original-byte republication, revision/recovery behaviour, and cleanup checks are preserved.
+
+### Discrepancy (§6): none exposed
+
+Every measured live set is strictly covered by its active covering operational reservation (`1157`/`2734 ≤ 2870`; `4845 ≤ 4877`), so **no component correction was required**; no accepted limit was increased, no contract-charged inline data omitted, and no accounting boundary weakened. The prior corrections were therefore correctly sized.
+
+### Distinctions (explicit)
+
+* **Borrowed object/capacity measurements:** the original encoded buffer and the live decoded object (`decoded_working_set_charge`, in-place capacity walk).
+* **Allocation-identity observations:** the direct live-byte tracker and Item B `peak < 2·cap` remain the **separate** lifetime evidence that only one validation buffer is live; they are **not** relabelled as the object-charge measurement.
+* **Contract-fixed charge terms:** holder handle `136` (`validated_holder_handle_bytes`), metadata payload `42` (`META_ENCODED_LEN`).
+* **Source-derived lifetime reasoning:** owner objects alive/unchanged through `publish_atomic` (established from `reacknowledge` scope), labelled separately from observations.
+* **Profile ceilings:** `2870` / `4877` reservations and the `≤ 7772` aggregate.
+* **Active reservation observations:** the L1/L2 samples (`2870`, `4877`), retained.
+* **Previously executed mutation sensitivity:** the two L1/L2 mutations (after-sample O3 scratch release; pre-publish `_o5_res` release) are retained and not re-run; no new mutation campaign was required.
+
+### Literal validation outcomes (this pass, this revision, no PR)
+
+* `rustfmt --edition 2021 --check` on the edited Rust regions → inserted/edited regions **clean**; residual diffs only in pre-existing EOF/wide-line baseline regions, not in the inserted hooks (not a clean whole-crate run; no new divergence).
+* `cargo build -p qbind-node --lib` (default features) → **exit 0**.
+* `cargo test -p qbind-node --no-run` → **exit 0** (gated D7-D14/m16 skipped by `required-features: test-utils`, reported separately from the clean default build).
+* `cargo test -p qbind-node --features test-utils --no-run` → **exit 0**.
+* `cargo test -p qbind-node --features test-utils --test run_422_d7d14_safety_record_store_tests` → **ok. 135 passed; 0 failed; 1 ignored** (`child_process_entry`, spawned out-of-band; +3 M1/M2 regressions over the prior 132: `d7d14_m1_o3_actual_object_charges_max_complete_qc`, `d7d14_m1_o3_actual_object_charges_max_complete_tc`, `d7d14_m2_o5_actual_simultaneous_object_charge_at_publication`).
+* `cargo test -p qbind-node --features test-utils --test m16_epoch_transition_hardening_tests` → **ok. 14 passed; 0 failed; 0 ignored**.
+* `cargo clippy -p qbind-node --features test-utils --tests` → **exit 0**; no new `safety_record_store` warnings (pre-existing warnings in the D7-D14 target unchanged).
+* `cargo build --release -p qbind-node` → **exit 0** (build compatibility only — NOT running-node recovery acceptance).
+* Secret scanning over the changed files → **no secrets**. Non-wiring audit: the changed source hooks are referenced only from within the component and its gated tests; no production call site added.
+
+### Persisted literal security-tool outcomes (prior session, with revision/session attribution)
+
+The prior session's reported independent-security outcomes are persisted here **literally** (not "recorded in the final report", not conditional skip wording):
+
+* **Independent Code Review — UNAVAILABLE:** `autofind` binary not found.
+* **CodeQL Rust — SKIPPED:** "Analysis was skipped because the database size is too large."
+
+These remain **OPEN** external gates: a skipped CodeQL is not zero alerts, and an unavailable review model is not a passing review. Any tools re-run this session are recorded separately and literally in the final report; they do not replace the above prior-session outcomes.
+
+### Scope and verdicts (retained, NOT promoted)
+
+This bounded pass completes **only** the specified O3/O5 phase object-charge observations. The exhaustive object-by-object inventory across every O1–O5 success / refusal / failure / drop path remains an **unfinished** item, kept separate; H22 remains separately limited (O3 yields `Unverified`; no production consumer boundary manufactured); independent Code-Review / CodeQL remain **open** external assurance gaps. `GEN_STRUCT_MAX=384`, `CAPNORM_SLACK=0`, `max_component_aggregate_bytes=max_aggregate_retained_bytes`, N=4 aggregate `7772`, the three encoded-buffer roles, `CMP_SPAN`, multiplicities, persistence formats, and cryptographic identifiers are unchanged.
+
+```
+D7D14_STORAGE_COMPONENT=PARTIAL-IMPLEMENTATION
+D7D14_STORAGE_ACCEPTANCE=INCOMPLETE
+DURABLE_ANTI_ROLLBACK=NOT-ESTABLISHED
+GENESIS_AUTHORITY_ACTIVATION=DISABLED
+PRODUCTION_WIRE_CHAIN_ID_BEHAVIOR=UNCHANGED
+CONFIGURED_AUTHORITY_RELEASE_BINARY_EVIDENCE=NOT-YET-CAPTURED
+SECURITY_POSTURE=RS1-OPEN / PUBLIC-DEVNET-NO-GO
+```
+
+C4/C5 remain OPEN; fail-closed `CurrentEpochUnavailable` unchanged. This pass authorizes no production construction, startup/consensus/signing integration, verifier wiring, authority/epoch mutation, transport change, peer-driven apply, anti-rollback establishment, activation, renaming, D15, or Run 423 work. Stop after this bounded continuation.

@@ -94,6 +94,22 @@ pub fn validate_decoded<H: CommittedHistory + ?Sized>(
     #[cfg(any(test, feature = "test-utils"))]
     super::owner::observe_in_validation_reservation();
 
+    // Test-only (RUN 422 D7-D14 M1): record the ACTUAL re-encode-phase live object
+    // charge. The two phase-invariant terms — the original backend-read `encoded`
+    // buffer capacity and the live transient `decoded` object's measured charge
+    // (walked in place, no clone) — are established here while BOTH are alive, then
+    // the record-sized correspondence re-encode buffer (`reencoded`), which is still
+    // live at this point, is added as the single live validation scratch. The stable
+    // terms are retained for the certificate-binding phase below. No-op unless
+    // `read_validate` armed the observation; never affects production behaviour.
+    #[cfg(any(test, feature = "test-utils"))]
+    {
+        let original_encoded_cap = encoded.capacity() as u128;
+        let transient_decoded_charge = super::accounting::decoded_working_set_charge(&decoded)?;
+        super::owner::set_o3_object_stable(original_encoded_cap, transient_decoded_charge);
+        super::owner::observe_o3_reencode_object(reencoded.capacity() as u128);
+    }
+
     drop(reencoded);
 
     // Common identity binding to the pinned context (P4 prelude).
