@@ -677,9 +677,7 @@ impl std::fmt::Display for ReadFailedDetail {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Message(s) => f.write_str(s),
-            Self::NamespaceScan => {
-                f.write_str("namespace scan: storage-layer iteration error")
-            }
+            Self::NamespaceScan => f.write_str("namespace scan: storage-layer iteration error"),
         }
     }
 }

@@ -399,7 +399,9 @@ impl SafetyBackend {
         // `NamespaceScan` refusal the real status-failure path constructs — through
         // the live O1 operation.
         if self.injected() == InjectFault::FailNamespaceScan {
-            return Err(SafetyStoreError::ReadFailed(ReadFailedDetail::NamespaceScan));
+            return Err(SafetyStoreError::ReadFailed(
+                ReadFailedDetail::NamespaceScan,
+            ));
         }
         status.map_err(|_e| SafetyStoreError::ReadFailed(ReadFailedDetail::NamespaceScan))?;
         Ok(None)
