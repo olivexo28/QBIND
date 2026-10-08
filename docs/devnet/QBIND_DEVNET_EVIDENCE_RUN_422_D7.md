@@ -17512,6 +17512,8 @@ supplied environment; literal commands, exit codes, and counts):
 
 **Non-wiring audit (manual).** The three edited source files remain in the disabled-by-default `safety_record_store` component; all fault-injection and O1 observation machinery stays behind `cfg(test)`/`feature="test-utils"`; no production call site, startup, consensus, signing, recovery-verifier, transport, or peer-apply path was added or changed. No new dependency was introduced.
 
+**Independent review / CodeQL provenance (this pass).** `parallel_validation` executed both engines. **Code Review:** completed over the 7 changed files with **no review comments**; one secondary sub-model (`claude-sonnet-4.6`) was reported **unavailable** in this environment, but the primary review engine completed — the single unavailable sub-model does not invalidate the completed review. **CodeQL (rust):** returned **0 alerts** but with the literal note *“Analysis was skipped because the database size is too large”*; this skip supplies **no** full-analysis security assurance and is recorded as skipped (not clean).
+
 This continuation does **not** close H22, cryptographic verification, rollback
 resistance, or production acceptance. Preserved verdicts (unchanged):
 `D7D14_STORAGE_COMPONENT=PARTIAL-IMPLEMENTATION`; `D7D14_STORAGE_ACCEPTANCE=INCOMPLETE`;
