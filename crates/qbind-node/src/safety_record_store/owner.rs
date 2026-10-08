@@ -32,6 +32,26 @@ use super::validate::{validate_decoded, CommittedHistory};
 const META_FORMAT_VERSION: u16 = 1;
 const DOMAIN_META: &[u8] = b"QBIND-D7D14-SAFETY-META-v1";
 
+// Test-only observation of the OPERATIONAL reservation held at the O3
+// allocation phase (RUN 422 D7-D14 R3). `read_validate` samples the operational
+// accountant's live charge immediately before `validate_decoded` — the point at
+// which the retained-holder AND the O3 transient/validation scratch reservations
+// must BOTH be active to cover the live transient decoded object and the
+// record-sized validation buffer. A regression reads this sample to detect an O3
+// scratch reservation that is missing (never taken) OR released before the phase
+// it must cover: in either case the sampled charge collapses to the bare holder.
+// Gated behind `cfg(test)`/`test-utils`; it never affects production behaviour.
+#[cfg(any(test, feature = "test-utils"))]
+thread_local! {
+    static O3_PHASE_RESERVATION_SAMPLE: std::cell::Cell<u128> = const { std::cell::Cell::new(0) };
+}
+
+/// Test-only: the operational reservation sampled at the last O3 allocation phase.
+#[cfg(any(test, feature = "test-utils"))]
+pub fn o3_phase_reservation_sample() -> u128 {
+    O3_PHASE_RESERVATION_SAMPLE.with(|c| c.get())
+}
+
 /// Decoded initialization metadata (one per backend DB).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SafetyMeta {
@@ -575,6 +595,12 @@ impl SafetyRecordOwner {
         // `open`). Reject missing/partial, foreign-context, or revision-
         // inconsistent metadata before validating the record.
         let (_meta, record_bytes, decoded) = self.load_established()?;
+        // R3 (test-only): sample the operational reservation entering the O3
+        // heaviest allocation phase. Both the retained-holder and the O3 scratch
+        // reservations must be live here to cover the transient decoded object and
+        // the record-sized validation buffer `validate_decoded` is about to build.
+        #[cfg(any(test, feature = "test-utils"))]
+        O3_PHASE_RESERVATION_SAMPLE.with(|c| c.set(self.backend.accounting_current()));
         // Semantic/codec validation produces a proof WITHOUT an O5 capability;
         // O3 on this established backend then grants the backend-bound recovery
         // capability, stamped with THIS backend's ownership incarnation. Only a

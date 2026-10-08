@@ -6257,6 +6257,177 @@ fn d7d14_o3_validation_reservation_covers_live_coexistence_max_tc() {
     );
 }
 
+/// §3 — R3 (RUN 422 D7-D14): discriminating O3 coverage through REAL
+/// `read_validate` over a MAXIMUM COMPLETE TC (anchor + predecessor populated,
+/// 811 serialized bytes) with valid independent committed history. This
+/// REPLACES reliance on the weak `aggregate_peak > operational_holder_charge`
+/// inequality: the aggregate peak includes context ownership, so that inequality
+/// holds even when the O3 scratch reservation is absent. Instead it observes the
+/// OPERATIONAL partition peak (`accounting_peak()`, which excludes context) and
+/// asserts it equals the full O3 phase reservation `holder + o3_scratch`. Removing
+/// the O3 scratch reservation (or releasing it before `load_established`) drops the
+/// operational peak to the bare holder and FAILS this assertion. A tight-headroom
+/// admission probe then establishes the scratch is ACTUALLY admitted through the
+/// shared aggregate authority, and the one-byte-tighter refusal proves the scratch
+/// must remain live for the operation to fit.
+#[test]
+fn d7d14_r3_o3_real_read_validate_max_complete_tc_operational_coverage() {
+    use qbind_node::safety_record_store::accounting::max_transient_decoded_working_set;
+    use qbind_node::safety_record_store::profile::max_retained_generation_bytes;
+    use qbind_node::safety_record_store::record::{
+        size_of_timeout_msg, validated_holder_handle_bytes,
+    };
+
+    let dir = tempfile::tempdir().unwrap();
+    let ctx = ctx_n(4);
+
+    // Independently derive the O3 phase reservation terms from the profile (NOT
+    // from the operation under test).
+    let rec = max_safety_record_bytes(&ctx).unwrap();
+    let retained_gen = max_retained_generation_bytes(&ctx, size_of_timeout_msg()).unwrap();
+    let handle = validated_holder_handle_bytes();
+    let holder = rec + retained_gen + handle;
+    let transient_ceiling = max_transient_decoded_working_set(&ctx).unwrap();
+    let o3_scratch = (transient_ceiling - retained_gen) + rec;
+    assert_eq!(
+        rec, 811,
+        "max record-level validation buffer (complete TC profile)"
+    );
+    assert_eq!(holder, 2051, "retained-holder charge");
+    assert_eq!(
+        o3_scratch, 819,
+        "O3 transient-excess + one record-sized buffer"
+    );
+
+    // The MAXIMUM COMPLETE TC: anchor + predecessor populated. Assert its ACTUAL
+    // complete serialized size is 811 bytes (the 763-byte evidence-only fixture is
+    // NOT the maximum complete serialized record).
+    let complete = max_tc_locked_anchored(&ctx, 5, 6);
+    assert!(
+        complete.committed_anchor.is_some() && complete.predecessor_ref.is_some(),
+        "the complete TC populates the anchor and predecessor fields"
+    );
+    let complete_dec = DecodedRecord {
+        persistence_format_version: 1,
+        network_genesis_id: ctx.network_genesis_id,
+        publication_revision: 1,
+        record: SafetyRecord::Locked(complete.clone()),
+    };
+    let complete_enc = encode_record(&complete_dec, &ctx).unwrap();
+    assert_eq!(
+        complete_enc.len(),
+        811,
+        "maximum complete serialized TC is 811 bytes for the N=4 profile"
+    );
+
+    // Valid independent committed history for the anchored record.
+    let history = FixtureCommittedHistory::new().with([7u8; 32], 3);
+
+    // O4: publish the complete TC durably (dropped before any reopen).
+    {
+        let owner = init_owner(dir.path(), &ctx);
+        assert_eq!(
+            owner.publish_locked(complete, 0, Some(&history)),
+            PublishResult::DurableAcknowledged { new_revision: 1 }
+        );
+    }
+
+    // ----- Phase 1: observe the real O3 operational peak on a FRESH backend. -----
+    {
+        let owner = SafetyRecordOwner::attach(open_enabled(dir.path()), ctx.clone()).unwrap();
+        let backend = owner.backend_for_test();
+        let agg_cap = backend.accounting_aggregate_cap().unwrap();
+        assert!(
+            owner.recovery_required(),
+            "reopened store starts not-effective"
+        );
+        assert_eq!(backend.accounting_peak(), 0, "fresh operational accountant");
+
+        let proof = owner.read_validate(Some(&history)).unwrap();
+        assert!(proof.retained().is_locked());
+
+        // DISCRIMINATING OBSERVATION: the OPERATIONAL partition peak equals the
+        // full O3 phase reservation (holder + o3_scratch). This excludes context
+        // ownership, so — unlike `aggregate_peak > holder` — it is sensitive to the
+        // O3 scratch reservation. Removing/early-releasing it drops this to `holder`.
+        assert_eq!(
+            backend.accounting_peak(),
+            holder + o3_scratch,
+            "operational peak must reach the full O3 phase reservation (holder + o3_scratch); \
+             a lower peak means the O3 scratch reservation is missing"
+        );
+        // STRONGER (detects BOTH removal AND early release): the operational
+        // reservation sampled INSIDE the operation, entering the O3 allocation
+        // phase, equals holder + o3_scratch. An early-released scratch (dropped
+        // before `load_established`) leaves the reserved PEAK unchanged but
+        // collapses this mid-phase sample to the bare holder.
+        assert_eq!(
+            qbind_node::safety_record_store::owner::o3_phase_reservation_sample(),
+            holder + o3_scratch,
+            "the O3 scratch reservation must remain live THROUGH the allocation phase \
+             (sampled before validate_decoded), not merely be reserved then released early"
+        );
+        assert_eq!(
+            backend.accounting_current(),
+            holder,
+            "post-O3 operational charge is exactly the retained holder (scratch released)"
+        );
+        assert!(
+            backend.accounting_aggregate_peak() <= agg_cap,
+            "O3 peak within the unchanged aggregate"
+        );
+        drop(proof);
+        assert_eq!(
+            backend.accounting_current(),
+            0,
+            "the retained holder's reservation releases on proof drop"
+        );
+    }
+
+    // ----- Phase 2: the O3 scratch is ACTUALLY admitted through the shared
+    // aggregate authority. Leave EXACTLY holder + o3_scratch of operational
+    // headroom: read_validate SUCCEEDS. -----
+    let agg_cap = {
+        let owner = SafetyRecordOwner::attach(open_enabled(dir.path()), ctx.clone()).unwrap();
+        let backend = owner.backend_for_test();
+        let agg_cap = backend.accounting_aggregate_cap().unwrap();
+        let ctx_live = backend.context_accounting_current();
+        let op_headroom = agg_cap - ctx_live;
+        let standing = op_headroom - (holder + o3_scratch);
+        let standing_res = backend.reserve_standing_for_test(standing).unwrap();
+        let proof = owner
+            .read_validate(Some(&history))
+            .expect("O3 fits when exactly holder + o3_scratch headroom remains");
+        drop(proof);
+        drop(standing_res);
+        agg_cap
+    };
+
+    // ----- Phase 3: one byte tighter — the O3 scratch no longer fits, so
+    // read_validate REFUSES. If the scratch reservation were removed, this would
+    // wrongly SUCCEED. -----
+    {
+        let owner = SafetyRecordOwner::attach(open_enabled(dir.path()), ctx.clone()).unwrap();
+        let backend = owner.backend_for_test();
+        let ctx_live = backend.context_accounting_current();
+        let op_headroom = agg_cap - ctx_live;
+        let standing = op_headroom - (holder + o3_scratch) + 1;
+        let _standing_res = backend.reserve_standing_for_test(standing).unwrap();
+        match owner.read_validate(Some(&history)) {
+            Err(SafetyStoreError::CapacityRefusal(_)) => {}
+            other => panic!(
+                "one byte short of holder + o3_scratch must refuse the O3 scratch \
+                 (CapacityRefusal), got {other:?}"
+            ),
+        }
+        assert_eq!(
+            backend.accounting_current(),
+            standing,
+            "O3 refusal leaves only the standing reservation; its own reservations released"
+        );
+    }
+}
+
 /// §3 — the REAL O3 `read_validate` over a maximum-TC publication. Observed on a
 /// reopened (fresh-accountant) backend so the measured peak reflects ONLY O3: the
 /// retained-holder charge is exactly the derived 2051, the validation peak strictly
