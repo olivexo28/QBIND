@@ -9463,6 +9463,152 @@ fn d7d14_f1_o1_refused_and_readmits_n1() {
 }
 
 // ===========================================================================
+// RUN 422 D7-D14 G1 — the transition-eligibility refusal is a TYPED, allocation-free
+// diagnostic (no `format!` String whose backing-capacity growth could exceed the
+// admitted O4 reservation). The refusal is reached through the REAL `publish_locked`
+// operation, carries the two `u64` lock views as `Copy` scalars, leaves prior state
+// intact, and releases the operational reservation to baseline `0`.
+// ===========================================================================
+
+/// G1: a same-view O4 transition refuses with the typed, allocation-free
+/// `TransitionIneligible(TransitionIneligibleDetail{ .. })` (not a rendered `String`),
+/// preserves the established predecessor, and releases the O4 reservation.
+#[test]
+fn d7d14_g1_transition_ineligible_is_typed_and_preserves_state() {
+    use qbind_node::safety_record_store::error::TransitionIneligibleDetail;
+
+    let dir = tempfile::tempdir().unwrap();
+    let ctx = ctx_n(4);
+    let owner = init_owner(dir.path(), &ctx);
+
+    // Establish a predecessor at lock_view 9.
+    let qc9 = valid_wire_qc(&ctx, [9u8; 32], 9);
+    let l9 = make_locked_qc(&ctx, [9u8; 32], 9, qc9, None).unwrap();
+    assert!(matches!(
+        owner.publish_locked(l9, 0, None::<&FixtureCommittedHistory>),
+        PublishResult::DurableAcknowledged { .. }
+    ));
+    let backend = owner.backend_for_test();
+    let rev_before = backend.read_meta(META_ENCODED_LEN_MIRROR).unwrap();
+
+    // Attempt a candidate at the SAME lock_view 9 -> ineligible (not strictly greater).
+    let qc9b = valid_wire_qc(&ctx, [0x22u8; 32], 9);
+    let l9b = make_locked_qc(&ctx, [0x22u8; 32], 9, qc9b, None).unwrap();
+    match owner.publish_locked(l9b, 1, None::<&FixtureCommittedHistory>) {
+        PublishResult::RefusedPreWrite(SafetyStoreError::TransitionIneligible(detail)) => {
+            // Typed `Copy` payload carries the two views verbatim — no rendered String.
+            assert_eq!(
+                detail,
+                TransitionIneligibleDetail {
+                    candidate_lock_view: 9,
+                    current_lock_view: 9,
+                },
+                "typed transition detail carries the two lock views as scalars"
+            );
+        }
+        other => panic!("expected typed TransitionIneligible, got {other:?}"),
+    }
+
+    // State preserved: the predecessor metadata is unchanged, and the O4 reservation
+    // released to baseline on the refusal path.
+    assert_eq!(
+        backend.read_meta(META_ENCODED_LEN_MIRROR).unwrap(),
+        rev_before,
+        "the ineligible transition left the stored predecessor unchanged"
+    );
+    assert_eq!(
+        backend.accounting_current(),
+        0,
+        "the O4 reservation released on the typed transition refusal"
+    );
+}
+
+// ===========================================================================
+// RUN 422 D7-D14 G4 — the O1 publication snapshot is scoped to ONE O1 operation.
+// The owner-supplied snapshot is consumed (taken) at the `publish_atomic` boundary,
+// so a later non-O1 (O4/O5) publication on the same thread cannot recombine the
+// stale bootstrap snapshot with a different operation's envelopes/reservations, and
+// a newly armed O1 that refuses before publication reports NO observation (never an
+// earlier success). The accessor exposes the COMPLETED HISTORICAL O1 result.
+// ===========================================================================
+
+/// G4(a): a successful O1, then a non-O1 (`publish_locked`, O4) publication on the
+/// SAME thread WITHOUT re-arming. The O1 observation must be UNCHANGED — the O4
+/// publish must not reuse the (now consumed) O1 snapshot to overwrite or recombine it.
+#[test]
+fn d7d14_g4_o1_snapshot_not_reused_by_later_non_o1_publication() {
+    use qbind_node::safety_record_store::backend::{
+        arm_o1_live_object_observation, observed_o1_live_object_charge,
+    };
+
+    let dir = tempfile::tempdir().unwrap();
+    let ctx = ctx_n(4);
+    let owner =
+        SafetyRecordOwner::attach(open_enabled(dir.path()), ctx.clone()).expect("attach");
+
+    // Successful O1: arm, initialize, capture the completed O1 observation.
+    arm_o1_live_object_observation();
+    assert_eq!(owner.initialize(true).unwrap(), 0, "fresh O1 succeeds");
+    let o1 = observed_o1_live_object_charge().expect("O1 reached its publication boundary");
+
+    // A NON-O1 publication on the SAME thread, WITHOUT re-arming the O1 observation.
+    let qc = valid_wire_qc(&ctx, [7u8; 32], 7);
+    let locked = make_locked_qc(&ctx, [7u8; 32], 7, qc, None).unwrap();
+    assert!(
+        matches!(
+            owner.publish_locked(locked, 0, None::<&FixtureCommittedHistory>),
+            PublishResult::DurableAcknowledged { .. }
+        ),
+        "the O4 publication itself succeeds"
+    );
+
+    // The O1 observation is UNCHANGED: the O4 publish did not reuse the consumed O1
+    // snapshot (under the pre-fix `.get()` peek it would have been recombined with the
+    // O4 operation's envelopes/reservations).
+    let after = observed_o1_live_object_charge()
+        .expect("the completed historical O1 result is retained");
+    assert_eq!(
+        after, o1,
+        "a later non-O1 publication must not recombine or overwrite the O1 observation"
+    );
+}
+
+/// G4(b): after a successful O1, a newly ARMED O1 attempt that REFUSES before its
+/// publication boundary (duplicate initialization is rejected during inspection)
+/// reports NO observation — it cannot reuse the earlier successful O1 evidence.
+#[test]
+fn d7d14_g4_newly_armed_refused_o1_reports_no_observation() {
+    use qbind_node::safety_record_store::backend::{
+        arm_o1_live_object_observation, observed_o1_live_object_charge,
+    };
+
+    let dir = tempfile::tempdir().unwrap();
+    let ctx = ctx_n(4);
+    let owner =
+        SafetyRecordOwner::attach(open_enabled(dir.path()), ctx.clone()).expect("attach");
+
+    // First O1 succeeds and records a completed observation.
+    arm_o1_live_object_observation();
+    assert_eq!(owner.initialize(true).unwrap(), 0, "fresh O1 succeeds");
+    assert!(
+        observed_o1_live_object_charge().is_some(),
+        "the successful O1 recorded an observation"
+    );
+
+    // Arm a NEW O1 attempt; the duplicate initialization refuses during inspection,
+    // BEFORE reaching the snapshot/publication boundary.
+    arm_o1_live_object_observation();
+    assert!(
+        owner.initialize(true).is_err(),
+        "a duplicate O1 initialization is refused before publication"
+    );
+    assert!(
+        observed_o1_live_object_charge().is_none(),
+        "a newly armed O1 that refuses before publication reports no observation (not the earlier success)"
+    );
+}
+
+// ===========================================================================
 // Run 422 D7-D14 Finding C — complete TC validation-scratch accounting
 //
 // `validate_tc` holds two bounded `UNIQ_SET` vectors (`seen`, `st_ids`) and

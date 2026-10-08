@@ -1178,11 +1178,16 @@ impl SafetyRecordOwner {
         // Transition eligibility: strictly-increasing lock view.
         if let Some(cur_lock_view) = predecessor_lock_view {
             if candidate.lock_view <= cur_lock_view {
+                // G1: typed, allocation-free transition-eligibility refusal. The two
+                // `u64` lock views are carried as `Copy` scalars, so this diagnostic
+                // is constructed with ZERO heap allocation inside the active O4
+                // reservation (no `format!` String whose backing-capacity growth could
+                // exceed the admitted charge).
                 return PublishResult::RefusedPreWrite(SafetyStoreError::TransitionIneligible(
-                    format!(
-                        "candidate lock_view {} not strictly greater than current {}",
-                        candidate.lock_view, cur_lock_view
-                    ),
+                    super::error::TransitionIneligibleDetail {
+                        candidate_lock_view: candidate.lock_view,
+                        current_lock_view: cur_lock_view,
+                    },
                 ));
             }
         }

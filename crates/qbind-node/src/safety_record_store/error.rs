@@ -72,8 +72,15 @@ pub enum SafetyStoreError {
     /// Stale fencing refusal: the expected revision no longer matches the stored
     /// current revision (a newer publication exists).
     StaleRevision { expected: u64, stored: u64 },
-    /// Transition ineligible (not strictly higher view, or evidence/context fail).
-    TransitionIneligible(String),
+    /// Transition ineligible: the candidate lock view is not strictly higher than
+    /// the current one. The payload is a typed, `Copy` [`TransitionIneligibleDetail`]
+    /// carrying the two `u64` lock views as scalars, so the O4 transition-eligibility
+    /// refusal is constructed with **zero** heap allocation (§ 13.7P, RUN 422 D7-D14
+    /// G1). The previous `format!("… {} … {}", candidate, current)` could render up to
+    /// 95 bytes (two 20-digit `u64`s) whose `String` backing-capacity growth could not
+    /// be bounded reliably within the accepted model; the typed form removes the
+    /// allocation entirely rather than allocating unbounded text and truncating it.
+    TransitionIneligible(TransitionIneligibleDetail),
     /// O5 content mismatch: the recovered publication differs byte-for-byte from
     /// the currently stored publication.
     PublicationMismatch(String),
@@ -106,6 +113,29 @@ pub enum SafetyStoreError {
     RecoveryRequired(RecoveryRequiredReason),
 }
 
+/// Typed, allocation-free payload for a strictly-increasing-lock-view transition
+/// refusal (§ 13.7P / RUN 422 D7-D14 G1). The two lock views are carried as `Copy`
+/// `u64` scalars so [`SafetyStoreError::TransitionIneligible`] is constructed with
+/// **zero** heap allocation; `Display` renders the identical message the former
+/// `format!` produced.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TransitionIneligibleDetail {
+    /// The candidate publication's lock view (the rejected, not-strictly-greater one).
+    pub candidate_lock_view: u64,
+    /// The current stored lock view the candidate failed to strictly exceed.
+    pub current_lock_view: u64,
+}
+
+impl std::fmt::Display for TransitionIneligibleDetail {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "candidate lock_view {} not strictly greater than current {}",
+            self.candidate_lock_view, self.current_lock_view
+        )
+    }
+}
+
 impl std::fmt::Display for SafetyStoreError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -133,7 +163,7 @@ impl std::fmt::Display for SafetyStoreError {
                 f,
                 "safety store: stale revision (expected {expected}, stored {stored})"
             ),
-            Self::TransitionIneligible(s) => write!(f, "safety store: transition ineligible: {s}"),
+            Self::TransitionIneligible(d) => write!(f, "safety store: transition ineligible: {d}"),
             Self::PublicationMismatch(s) => write!(f, "safety store: publication mismatch: {s}"),
             Self::CapacityRefusal(d) => write!(f, "safety store: capacity refusal: {d}"),
             Self::WriteFailed(s) => write!(f, "safety store: write failed: {s}"),
