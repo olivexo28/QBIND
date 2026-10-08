@@ -7385,16 +7385,20 @@ fn corr_o1_unknown_namespace_refusal_is_typed_with_len_and_preserves_key() {
 // state.
 // ===========================================================================
 
-/// (a) Both newly-typed payloads — all four `ProfileInvalidDetail` forms and the
-/// `ReadFailedDetail::NamespaceScan` form — are `Copy`/stack data (or carry no
-/// owned diagnostic `String`) and construct with no heap allocation, while still
-/// rendering their full diagnostic text on demand. The `ReadFailedDetail::Message`
-/// covered-lifetime form is deliberately NOT asserted allocation-free (it carries
-/// an owned `String` for the admitted checksum-envelope diagnostics).
+/// (a) All newly-typed payloads — the four `ProfileInvalidDetail` forms, the
+/// `ReadFailedDetail::NamespaceScan` form, and (Run 422 D7-D14 Finding B) the
+/// `ReadFailedDetail::Envelope` checksum/backend read-failure forms — are
+/// `Copy`/stack data and construct with no heap allocation, while still rendering
+/// their full diagnostic text on demand. Finding B converted the former
+/// `ReadFailedDetail::Message` checksum-envelope diagnostics (which embedded an
+/// unbounded backend `Display` string into a component-owned `String` DURING the
+/// admitted O2–O5 read reservation) into the typed, allocation-free `Envelope`
+/// variant. `ReadFailedDetail::Message` survives only for unrelated covered
+/// callers and is still not asserted allocation-free here.
 #[test]
 fn corr_profile_invalid_and_namespace_scan_payloads_construct_without_allocation() {
     use qbind_node::safety_record_store::error::{
-        ProfileInvalidDetail as P, ReadFailedDetail as R,
+        EnvelopeFailureKind as K, ProfileInvalidDetail as P, ReadFailedDetail as R, ReadWhat as W,
     };
     let (errs, allocs) = measure_allocs(|| {
         [
@@ -7403,12 +7407,24 @@ fn corr_profile_invalid_and_namespace_scan_payloads_construct_without_allocation
             SafetyStoreError::ProfileInvalid(P::NonDenseValidatorIndex { slot: 1, id: 2 }),
             SafetyStoreError::ProfileInvalid(P::ZeroTotalVotingPower),
             SafetyStoreError::ReadFailed(R::NamespaceScan),
+            SafetyStoreError::ReadFailed(R::Envelope {
+                what: W::Metadata,
+                kind: K::EnvelopeTooShort,
+            }),
+            SafetyStoreError::ReadFailed(R::Envelope {
+                what: W::Record,
+                kind: K::CrcMismatch,
+            }),
+            SafetyStoreError::ReadFailed(R::Envelope {
+                what: W::Record,
+                kind: K::BackendGet,
+            }),
         ]
     });
     assert_eq!(
         allocs, 0,
-        "typed `ProfileInvalid`/`ReadFailed::NamespaceScan` payloads must construct \
-         without heap allocation"
+        "typed `ProfileInvalid`/`ReadFailed::{{NamespaceScan,Envelope}}` payloads must \
+         construct without heap allocation"
     );
     assert!(errs[0]
         .to_string()
@@ -7423,6 +7439,11 @@ fn corr_profile_invalid_and_namespace_scan_payloads_construct_without_allocation
     assert!(errs[4]
         .to_string()
         .contains("namespace scan: storage-layer iteration error"));
+    assert!(errs[5].to_string().contains("meta: envelope too short"));
+    assert!(errs[6]
+        .to_string()
+        .contains("record: CRC envelope mismatch"));
+    assert!(errs[7].to_string().contains("record: backend get error"));
 }
 
 /// (b) Each of the four invalid-profile `attach` refusals is emitted as its typed,
@@ -8847,4 +8868,358 @@ fn d7d14_s2_o5_failed_measurement_does_not_reuse_prior_success() {
         "the typed failure replaces the stale success"
     );
     drop(proof);
+}
+// ===========================================================================
+// Run 422 D7-D14 Finding A — O1 bootstrap decoded-object lifetime & reservation
+//
+// The canonical inventory's `INV-O1-5` claimed `encode_record` *consumes* the
+// bootstrap `DecodedRecord`. The implementation calls `encode_record(&decoded,
+// …)`, which BORROWS it, so the decoded local stays live and coexists with
+// every publication buffer through `publish_atomic`. The pre-correction O1
+// publication reservation (`E + publication_staging_charge`, i.e. `2E + M + 8`)
+// omitted both the inline decoded footprint (`D = size_of::<DecodedRecord>()`)
+// and the metadata payload (`M`). The corrected reservation is
+// `D + E + M + publication_staging_charge` and is taken BEFORE the decoded local
+// is constructed, so admission precedes the allocation it protects.
+//
+// These are EXECUTED operational regressions through the real `initialize(true)`
+// owner operation, measuring the SAME live reservation that operation takes
+// (sampled at the publication phase via the operational accountant peak), paired
+// against profile-derived charges. The inline decoded footprint is a stack
+// object a heap allocation counter cannot see, so it is asserted through the
+// source-derived reservation value, not a heap measurement.
+// ===========================================================================
+
+/// (A-arith) Standalone supporting arithmetic (NOT a live measurement): the
+/// pre-correction O1 publication charge under-counts the complete phase by
+/// exactly `D + M` for both the smallest accepted profile (N=1, S_sig=8) and the
+/// N=4 fixture, and the complete charge still fits within the unchanged aggregate
+/// authority. This mirrors the audit's counterexample against the actual target
+/// `size_of::<DecodedRecord>()` and the real `publication_staging_charge`.
+#[test]
+fn d7d14_fa_o1_charge_under_count_is_exactly_decoded_plus_meta() {
+    use qbind_node::safety_record_store::accounting::{
+        publication_staging_charge, size_of_decoded_record_inline,
+    };
+    use qbind_node::safety_record_store::record::DecodedRecord;
+
+    let d = size_of_decoded_record_inline();
+    assert_eq!(
+        d,
+        std::mem::size_of::<DecodedRecord>() as u128,
+        "exposed inline charge must equal the contract-charged decoded footprint"
+    );
+
+    for n in [1u64, 4] {
+        let ctx = ctx_n(n);
+        let e = max_safety_record_bytes(&ctx).unwrap();
+        let m = META_ENCODED_LEN_MIRROR;
+        let staging = publication_staging_charge(&ctx).unwrap();
+
+        let old_formula = e + staging; // pre-correction O1 publication charge (= 2E + M + 8)
+        let complete = d + e + m + staging; // corrected phase charge
+
+        assert_eq!(
+            complete,
+            old_formula + d + m,
+            "n={n}: corrected O1 phase adds exactly the inline decoded object + meta payload"
+        );
+        // The complete charge fits within the unchanged aggregate authority.
+        let dir = tempfile::tempdir().unwrap();
+        let backend = open_enabled(dir.path());
+        let _owner = SafetyRecordOwner::attach(backend, ctx.clone()).unwrap();
+        let agg = _owner
+            .backend_for_test()
+            .accounting_aggregate_cap()
+            .unwrap();
+        assert!(
+            complete <= agg,
+            "n={n}: corrected O1 phase charge {complete} must fit the aggregate {agg}"
+        );
+    }
+}
+
+/// (A-exec) EXECUTED operational reproduction + corrected regression: a clean
+/// `initialize(true)` on a FRESH (attached, uninitialized) N=4 owner drives the
+/// operational accountant peak to exactly the corrected publication phase charge
+/// `D + E + M + publication_staging_charge`, which exceeds the pre-correction
+/// `E + publication_staging_charge` by exactly `D + M`. A peak at the old value
+/// would prove the borrowed decoded local escaped admission.
+#[test]
+fn d7d14_fa_o1_real_initialize_peak_reserves_borrowed_decoded_local() {
+    use qbind_node::safety_record_store::accounting::{
+        publication_staging_charge, size_of_decoded_record_inline,
+    };
+
+    let dir = tempfile::tempdir().unwrap();
+    let ctx = ctx_n(4);
+    let backend = open_enabled(dir.path());
+    let owner = SafetyRecordOwner::attach(backend, ctx.clone()).expect("attach (uninitialized)");
+    let backend = owner.backend_for_test();
+
+    let d = size_of_decoded_record_inline();
+    let e = max_safety_record_bytes(&ctx).unwrap();
+    let m = META_ENCODED_LEN_MIRROR;
+    let staging = publication_staging_charge(&ctx).unwrap();
+    let complete = d + e + m + staging;
+    let old_formula = e + staging;
+
+    assert_eq!(
+        owner.initialize(true).unwrap(),
+        0,
+        "fresh O1 bootstrap succeeds"
+    );
+    assert_eq!(
+        backend.accounting_peak(),
+        complete,
+        "O1 operational peak must reserve the full publication phase including the \
+         borrowed inline decoded footprint ({d}); a peak of {old_formula} (the \
+         pre-correction charge) would mean the decoded local escaped admission"
+    );
+    assert_eq!(
+        backend.accounting_peak() - old_formula,
+        d + m,
+        "corrected peak exceeds the pre-correction charge by exactly D + M"
+    );
+    // Operational cleanup after O1 returns to zero (the context charge lives in a
+    // separate partition and is untouched by the operational accountant here).
+    assert_eq!(
+        backend.accounting_current(),
+        0,
+        "the O1 publication reservation released on success"
+    );
+    assert!(
+        backend.read_record(e).unwrap().is_some(),
+        "O1 established the durable record"
+    );
+}
+
+/// (A-boundary) EXECUTED corrected refusal/readmission regression. Two contrasts:
+///   (1) With `complete - 1` aggregate headroom the corrected O1 refuses with a
+///       `CapacityRefusal` and leaves the store uninitialized (no record, no
+///       metadata) and the aggregate charge unchanged — admission precedes any
+///       durable write.
+///   (2) With headroom equal to the PRE-CORRECTION charge (`E +
+///       publication_staging_charge`, which the old under-count WOULD have
+///       admitted) but strictly below `complete`, the corrected O1 STILL refuses
+///       — demonstrating the baseline failure the correction closes.
+/// Releasing all pressure readmits the SAME O1 to success.
+#[test]
+fn d7d14_fa_o1_refused_when_decoded_charge_unavailable_and_readmits_on_release() {
+    use qbind_node::safety_record_store::accounting::{
+        publication_staging_charge, size_of_decoded_record_inline,
+    };
+
+    let dir = tempfile::tempdir().unwrap();
+    let ctx = ctx_n(4);
+    let backend = open_enabled(dir.path());
+    let owner = SafetyRecordOwner::attach(backend, ctx.clone()).expect("attach (uninitialized)");
+    let backend = owner.backend_for_test();
+    let agg_cap = backend.accounting_aggregate_cap().unwrap();
+    let ctx_live = backend.context_accounting_current();
+
+    let d = size_of_decoded_record_inline();
+    let e = max_safety_record_bytes(&ctx).unwrap();
+    let m = META_ENCODED_LEN_MIRROR;
+    let staging = publication_staging_charge(&ctx).unwrap();
+    let complete = d + e + m + staging;
+    let old_formula = e + staging;
+    assert!(
+        old_formula < complete,
+        "pre-correction charge under-counts by D + M"
+    );
+
+    // (1) Leave `complete - 1` aggregate headroom → corrected O1 refuses at the
+    // publication reservation.
+    let standing_amt = agg_cap - ctx_live - (complete - 1);
+    let standing = backend
+        .reserve_standing_for_test(standing_amt)
+        .expect("standing pressure within the combined budget");
+    match owner.initialize(true) {
+        Err(SafetyStoreError::CapacityRefusal(_)) => {}
+        other => panic!("expected CapacityRefusal at `complete - 1` headroom, got {other:?}"),
+    }
+    assert!(
+        backend.read_record(e).unwrap().is_none(),
+        "refused O1 wrote no record (admission precedes the durable write)"
+    );
+    assert!(
+        backend.read_meta(m).unwrap().is_none(),
+        "refused O1 wrote no metadata"
+    );
+    assert_eq!(
+        backend.accounting_aggregate_current(),
+        ctx_live + standing_amt,
+        "refused O1 released its reservation; aggregate charge unchanged"
+    );
+    drop(standing);
+
+    // (2) Baseline contrast: headroom == the PRE-CORRECTION charge (what the old
+    // under-count would have admitted) but < `complete` → the corrected O1 still
+    // refuses. This is the baseline failure the correction closes.
+    let standing2_amt = agg_cap - ctx_live - old_formula;
+    let standing2 = backend
+        .reserve_standing_for_test(standing2_amt)
+        .expect("standing pressure leaving exactly the pre-correction headroom");
+    match owner.initialize(true) {
+        Err(SafetyStoreError::CapacityRefusal(_)) => {}
+        other => panic!(
+            "corrected O1 must refuse where the pre-correction under-count would admit, got {other:?}"
+        ),
+    }
+    assert!(
+        backend.read_record(e).unwrap().is_none(),
+        "the baseline-contrast refusal also wrote no record"
+    );
+    drop(standing2);
+
+    // Releasing all pressure readmits the SAME O1 to success.
+    assert_eq!(
+        owner.initialize(true).unwrap(),
+        0,
+        "O1 succeeds once the decoded-phase headroom is available"
+    );
+    assert!(
+        backend.read_record(e).unwrap().is_some(),
+        "readmitted O1 established the durable record"
+    );
+}
+
+// ===========================================================================
+// Run 422 D7-D14 Finding C — complete TC validation-scratch accounting
+//
+// `validate_tc` holds two bounded `UNIQ_SET` vectors (`seen`, `st_ids`) and
+// previously called the GENERAL consensus helper `select_max_high_qc`, which
+// returns an OWNED clone of the winning QC (cloning its signer backing) and
+// momentarily overlaps a previous clone with its replacement. The D7-D14
+// correction swaps in a storage-local BORROWED selection (`select_max_high_qc_ref`)
+// that aliases the input entry — no cloned signer backing, no replacement overlap
+// — while preserving strict-`>` selection, first-encountered-for-equal-views,
+// TA2 (view+block correspondence, no signer-array equality), and TA1 (exact-copy).
+//
+// The unit equivalence/borrow regressions live in `validate.rs`
+// (`fc_borrowed_selection_tests`). This EXECUTED operational regression drives the
+// corrected selection through BOTH owner entrypoints that reach `validate_tc`:
+// O4 (`publish_locked`) and O3 (`read_validate`), using DISTINCT nested high-QC
+// views so the strict-`>` selection actually discriminates (a non-discriminating
+// all-equal input could pass with a broken comparator).
+// ===========================================================================
+
+#[test]
+fn d7d14_fc_tc_borrowed_selection_discriminates_distinct_views_through_o3_o4() {
+    use qbind_node::safety_record_store::codec::compute_evidence_lock_binding;
+
+    let dir = tempfile::tempdir().unwrap();
+    let ctx = ctx_n(4);
+    let owner = init_owner(dir.path(), &ctx);
+
+    let need = ((2 * ctx.n()) + 2) / 3;
+    let block = [9u8; 32];
+    let lock_view = 5u64;
+    let timeout_view = 6u64;
+
+    // The carried/record high-QC the selection must correspond to (view == lock_view).
+    let signers_full: Vec<ValidatorId> = (0..need as u64).map(ValidatorId::new).collect();
+    let high_top = LogicalQc::new(block, lock_view, signers_full.clone());
+
+    // Build signed timeouts whose nested high-QCs span DISTINCT, strictly lower
+    // views, EXCEPT the first entry which carries the maximum (view == lock_view).
+    // A correct strict-`>` selection returns `high_top`; first-encountered wins.
+    let build_signed = |top_view: u64| {
+        let mut signed = Vec::new();
+        for i in 0..need as u64 {
+            // entry 0 carries the max; the rest carry strictly lower, distinct views.
+            let nested = if i == 0 {
+                LogicalQc::new(block, top_view, signers_full.clone())
+            } else {
+                LogicalQc::new([7u8; 32], lock_view.saturating_sub(i), signers_full.clone())
+            };
+            let mut t = TimeoutMsg::new(timeout_view, Some(nested), ValidatorId::new(i));
+            t.set_signature(vec![0xCD; S_SIG]);
+            signed.push(t);
+        }
+        signed.shrink_to_fit();
+        signed
+    };
+
+    let make_locked = |top_view: u64| {
+        let tc = TimeoutCertificate {
+            view: timeout_view + 1,
+            high_qc: Some(high_top.clone()),
+            signers: signers_full.clone(),
+            signed_timeouts: build_signed(top_view),
+            timeout_view,
+        };
+        let evidence = SupportingEvidence::TcDerived {
+            high_qc: high_top.clone(),
+            tc,
+        };
+        let binding = compute_evidence_lock_binding(
+            &block,
+            lock_view,
+            &evidence,
+            &ctx.authority_context_ref,
+            &ctx,
+        )
+        .unwrap();
+        LockedRecord {
+            lock_block_id: block,
+            lock_view,
+            evidence_lock_binding: binding,
+            authority_context_ref: ctx.authority_context_ref,
+            committed_anchor: None,
+            predecessor_ref: None,
+            evidence,
+        }
+    };
+
+    // (positive) Max nested high-QC view == lock_view == tc.high_qc.view: the
+    // borrowed selection picks `high_top`, TA2/TA1 hold, O4 publishes and O3
+    // re-validates the durable record as `Unverified` recovered evidence.
+    let ok = make_locked(lock_view);
+    assert_eq!(
+        owner.publish_locked(ok, 0, None::<&FixtureCommittedHistory>),
+        PublishResult::DurableAcknowledged { new_revision: 1 },
+        "O4 accepts the TC-derived lock under the borrowed strict-`>` selection"
+    );
+    let v = owner
+        .read_validate(None::<&FixtureCommittedHistory>)
+        .unwrap();
+    assert_eq!(
+        v.evidence_status(),
+        EvidenceStatus::Unverified,
+        "O3 re-validates the recovered TC evidence as explicitly Unverified"
+    );
+
+    // (negative) One nested high-QC view EXCEEDS tc.high_qc.view: the borrowed
+    // selection's strict-`>` comparator must surface the higher max, so TA2
+    // correspondence FAILS (view mismatch) and O4 refuses pre-write. A broken
+    // comparator that ignored the higher view would wrongly ACCEPT here. A FRESH
+    // store is used so the strict lock-view transition check (which fires before
+    // `validate_tc`) does not mask the TA2 refusal under test.
+    let dir2 = tempfile::tempdir().unwrap();
+    let owner2 = init_owner(dir2.path(), &ctx);
+    let bad = make_locked(lock_view + 1);
+    let got = owner2.publish_locked(bad, 0, None::<&FixtureCommittedHistory>);
+    assert!(
+        matches!(
+            got,
+            PublishResult::RefusedPreWrite(SafetyStoreError::SemanticRefusal(_))
+        ),
+        "O4 refuses when the derived max high-QC view exceeds tc.high_qc (TA2); got {got:?}"
+    );
+    // Durable state preserved on the fresh store: still at bootstrap revision 0
+    // (the refused TC-derived publication wrote nothing).
+    assert!(
+        owner2
+            .read_validate(None::<&FixtureCommittedHistory>)
+            .is_ok(),
+        "the refused negative left the fresh store readable at its bootstrap baseline"
+    );
+
+    // The positive store is unchanged: O3 still reads the revision-1 record.
+    let v2 = owner
+        .read_validate(None::<&FixtureCommittedHistory>)
+        .unwrap();
+    assert_eq!(v2.evidence_status(), EvidenceStatus::Unverified);
 }

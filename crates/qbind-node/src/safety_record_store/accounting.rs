@@ -279,7 +279,16 @@ pub fn decoded_working_set_charge(decoded: &DecodedRecord) -> Result<u128, Safet
     Ok(total)
 }
 
-fn size_of_decoded_record_inline() -> u128 {
+/// The contract-charged **inline** footprint of one live [`DecodedRecord`]
+/// (§ 13.7A(c.4)): the measured `size_of::<DecodedRecord>()`, independent of any
+/// heap evidence backing. This is the charge the O1 bootstrap publication phase
+/// must reserve for its live decoded local — the object `encode_record` *borrows*
+/// (it does not consume it) and which therefore remains in scope, coexisting with
+/// every publication buffer, through `publish_atomic`. A heap-only allocation
+/// counter cannot observe this stack-resident inline footprint, so it must be
+/// charged explicitly against the shared aggregate rather than inferred from
+/// another reservation's headroom (§ 13.7, D7-D14 Finding A correction).
+pub fn size_of_decoded_record_inline() -> u128 {
     std::mem::size_of::<DecodedRecord>() as u128
 }
 

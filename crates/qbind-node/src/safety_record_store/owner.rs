@@ -764,6 +764,43 @@ impl SafetyRecordOwner {
             ));
         }
 
+        // Reserve the bootstrap publication phase against the shared aggregate
+        // accountant BEFORE constructing the decoded local or encoding it (§ 13.7:
+        // admission precedes the construction/allocation it protects). The
+        // canonical inventory's `INV-O1-5` claimed `encode_record` *consumes* the
+        // bootstrap `DecodedRecord`; the implementation calls
+        // `encode_record(&decoded, …)`, which **borrows** it, so the decoded local
+        // remains in scope and coexists with every publication buffer through
+        // `publish_atomic`. The phase charge therefore sums every object that is
+        // simultaneously live from the decoded construction through publication
+        // (D7-D14 Finding A correction):
+        //
+        //   * the inline decoded bootstrap object (`size_of::<DecodedRecord>()`) —
+        //     a stack-resident footprint a heap allocation counter cannot see, so
+        //     it is charged explicitly rather than inferred from headroom;
+        //   * the encoded record buffer at its profile-sized capacity
+        //     (`max_safety_record_bytes`; the bootstrap serializes to only 81
+        //     bytes, but the backing is pre-sized to the profile cap);
+        //   * the metadata payload buffer (`META_ENCODED_LEN`); and
+        //   * the two CRC-framing envelopes `publish_atomic` wraps
+        //     (`publication_staging_charge`).
+        //
+        // The reservation releases on every exit (success, refusal, error,
+        // uncertainty) via its drop at end of scope.
+        let decoded_inline = super::accounting::size_of_decoded_record_inline();
+        let o1_pub_charge = decoded_inline
+            .checked_add(max_safety_record_bytes(self.pinned())?)
+            .and_then(|s| s.checked_add(super::backend::META_ENCODED_LEN))
+            .and_then(|s| {
+                super::accounting::publication_staging_charge(self.pinned())
+                    .ok()
+                    .and_then(|staging| s.checked_add(staging))
+            })
+            .ok_or(SafetyStoreError::ArithmeticOverflow(
+                ArithmeticOverflowSite::O1BootstrapPublicationCharge,
+            ))?;
+        let _pub_res = self.backend.accounting().reserve(o1_pub_charge)?;
+
         let decoded = DecodedRecord {
             persistence_format_version: super::profile::SAFETY_PERSISTENCE_FORMAT_VERSION,
             network_genesis_id: self.pinned().network_genesis_id,
@@ -773,21 +810,12 @@ impl SafetyRecordOwner {
                 predecessor_ref: None,
             },
         };
-        // Reserve the bootstrap publication buffer against the shared aggregate
-        // accountant BEFORE encoding it (§ 13.7: reservations precede the
-        // protected allocation), plus the component-owned CRC-framing envelopes
-        // `publish_atomic` wraps over the record + metadata payloads (§ 13.5,
-        // D7-D14 item-5 correction — previously uncharged). The reservation releases
-        // on every exit (success, refusal, error, uncertainty) via its drop at end
-        // of scope.
-        let o1_pub_charge = max_safety_record_bytes(self.pinned())?
-            .checked_add(super::accounting::publication_staging_charge(
-                self.pinned(),
-            )?)
-            .ok_or(SafetyStoreError::ArithmeticOverflow(
-                ArithmeticOverflowSite::O1BootstrapPublicationCharge,
-            ))?;
-        let _pub_res = self.backend.accounting().reserve(o1_pub_charge)?;
+        debug_assert!(
+            super::accounting::decoded_working_set_charge(&decoded)
+                .map(|c| c <= decoded_inline)
+                .unwrap_or(false),
+            "O1 bootstrap decoded working set exceeded its reserved inline charge"
+        );
         let encoded = encode_record(&decoded, self.pinned())?;
         debug_assert!(
             encoded.capacity() as u128 <= _pub_res.charge(),

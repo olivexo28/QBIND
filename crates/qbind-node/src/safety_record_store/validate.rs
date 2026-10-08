@@ -13,7 +13,42 @@ use super::record::{
     ValidatedRecord,
 };
 use qbind_consensus::ids::ValidatorId;
-use qbind_consensus::timeout::select_max_high_qc;
+use qbind_consensus::qc::QuorumCertificate;
+use qbind_consensus::timeout::TimeoutMsg;
+
+/// Storage-local **borrowed** maximum-high-QC selection (§ 13.7A TC-scratch
+/// correction, D7-D14 Finding C).
+///
+/// The general consensus helper `qbind_consensus::timeout::select_max_high_qc`
+/// returns an **owned clone** (`qc.clone()`), including the QC's signer / signature
+/// / bitmap backings, and its `max_qc = Some(qc.clone())` replacement momentarily
+/// holds the previous clone **and** its replacement simultaneously. Inside
+/// `validate_tc` the only use of the selection is TA2, which compares **view and
+/// block_id only** (never the signer array), so the clone and its replacement
+/// overlap are pure, uncharged validation scratch with no semantic purpose.
+///
+/// This borrowed form returns a `&QuorumCertificate` into the already-admitted
+/// decoded TC evidence, allocating nothing and never holding two selections at
+/// once. Its selection behaviour is **byte-for-byte identical** to the consensus
+/// helper: strict-`>` on view, first-encountered-wins for equal views (the
+/// `max.is_none()` seed and the strict comparison reproduce the same choice,
+/// including the `view == 0` seed case). It does **not** alter the general
+/// consensus helper and introduces no new tie-break.
+fn select_max_high_qc_ref<'a>(
+    timeouts: impl Iterator<Item = &'a TimeoutMsg<[u8; 32]>>,
+) -> Option<&'a QuorumCertificate<[u8; 32]>> {
+    let mut max_qc: Option<&'a QuorumCertificate<[u8; 32]>> = None;
+    let mut max_view: u64 = 0;
+    for timeout in timeouts {
+        if let Some(qc) = &timeout.high_qc {
+            if max_qc.is_none() || qc.view > max_view {
+                max_qc = Some(qc);
+                max_view = qc.view;
+            }
+        }
+    }
+    max_qc
+}
 
 /// An **independently supplied** committed-history relation (§ 13.3A P3). A
 /// committed anchor is accepted only if this relation independently affirms it;
@@ -425,7 +460,10 @@ fn validate_tc(
     // `None == None`, else **view AND block_id** equal. The strict-`>`
     // first-encountered selection is preserved; NO signer-array equality is
     // required here (TA2 does not compare signers), and no tie-break is invented.
-    let derived = select_max_high_qc(tc.signed_timeouts.iter());
+    // A **borrowed** selection is used (D7-D14 Finding C): it allocates no cloned
+    // signer backing and never overlaps a previous selection with its replacement,
+    // so TC validation scratch is exactly the two bounded `UNIQ_SET` vectors above.
+    let derived = select_max_high_qc_ref(tc.signed_timeouts.iter());
     match (&derived, &tc.high_qc) {
         (None, None) => {}
         (Some(d), Some(c)) => {
@@ -473,4 +511,75 @@ fn validate_tc(
         ));
     }
     Ok(())
+}
+#[cfg(test)]
+mod fc_borrowed_selection_tests {
+    //! Run 422 D7-D14 Finding C — the storage-local **borrowed** high-QC selection
+    //! must choose exactly what the general consensus helper chooses (strict-`>`
+    //! on view, first-encountered-wins for equal views) while allocating no cloned
+    //! signer backing and never overlapping a previous selection with its
+    //! replacement. These unit regressions detect a behavioural divergence from
+    //! `qbind_consensus::timeout::select_max_high_qc` and a reintroduced clone.
+    use super::select_max_high_qc_ref;
+    use qbind_consensus::ids::ValidatorId;
+    use qbind_consensus::qc::QuorumCertificate;
+    use qbind_consensus::timeout::{select_max_high_qc, TimeoutMsg};
+
+    fn qc(block: u8, view: u64) -> QuorumCertificate<[u8; 32]> {
+        QuorumCertificate::new([block; 32], view, vec![ValidatorId::new(0)])
+    }
+
+    fn tmsg(view: u64, high: Option<QuorumCertificate<[u8; 32]>>) -> TimeoutMsg<[u8; 32]> {
+        TimeoutMsg::new(view, high, ValidatorId::new(0))
+    }
+
+    /// Across representative sets (all-None, single, increasing, decreasing,
+    /// equal-view ties, and a zero-view seed), the borrowed selection returns the
+    /// SAME QC the owning-clone consensus helper returns — by value. Equal-view
+    /// ties resolve to the first-encountered QC in both.
+    #[test]
+    fn borrowed_selection_matches_consensus_helper_by_value() {
+        let cases: Vec<Vec<TimeoutMsg<[u8; 32]>>> = vec![
+            vec![tmsg(1, None), tmsg(2, None)],
+            vec![tmsg(1, Some(qc(1, 5)))],
+            vec![
+                tmsg(1, Some(qc(1, 3))),
+                tmsg(1, Some(qc(2, 7))),
+                tmsg(1, Some(qc(3, 4))),
+            ],
+            vec![tmsg(1, Some(qc(1, 9))), tmsg(1, Some(qc(2, 2)))],
+            // Equal top view: first-encountered (block 1) must win in BOTH.
+            vec![tmsg(1, Some(qc(1, 8))), tmsg(1, Some(qc(2, 8)))],
+            // Zero-view seed interacting with the `max.is_none()` seed.
+            vec![tmsg(1, Some(qc(1, 0))), tmsg(1, Some(qc(2, 0)))],
+            vec![tmsg(1, None), tmsg(1, Some(qc(4, 6))), tmsg(1, None)],
+        ];
+        for (i, set) in cases.iter().enumerate() {
+            let owned = select_max_high_qc(set.iter());
+            let borrowed = select_max_high_qc_ref(set.iter());
+            assert_eq!(
+                borrowed.cloned(),
+                owned,
+                "case {i}: borrowed selection diverged from the consensus helper"
+            );
+        }
+    }
+
+    /// The borrowed selection returns a reference INTO the input (not a copy): the
+    /// returned pointer is the address of the winning entry's `high_qc`, proving no
+    /// clone and no replacement-overlap allocation.
+    #[test]
+    fn borrowed_selection_returns_input_borrow_not_a_clone() {
+        let set = vec![
+            tmsg(1, Some(qc(1, 3))),
+            tmsg(1, Some(qc(2, 7))), // winner (highest view)
+            tmsg(1, Some(qc(3, 4))),
+        ];
+        let winner = select_max_high_qc_ref(set.iter()).expect("a high-QC is selected");
+        let expected = set[1].high_qc.as_ref().unwrap();
+        assert!(
+            std::ptr::eq(winner, expected),
+            "borrowed selection must alias the input entry, not a cloned QC"
+        );
+    }
 }

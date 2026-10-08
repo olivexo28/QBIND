@@ -17039,3 +17039,65 @@ SECURITY_POSTURE=RS1-OPEN / PUBLIC-DEVNET-NO-GO
 ```
 
 C4/C5 remain OPEN; H22 remains separately limited; fail-closed `CurrentEpochUnavailable` unchanged. This pass authorizes no production construction, startup/consensus/signing integration, verifier wiring, authority/epoch mutation, transport change, peer-driven apply, anti-rollback establishment, activation, renaming, D15, or Run 423 work. Stop before any production integration or later run.
+
+## RUN 422 D7-D14 — O1 bootstrap accounting (Finding A), construction-time diagnostic ownership (Finding B), and complete TC validation-scratch (Finding C): three canonical-inventory rows corrected and superseded
+
+This bounded correction pass re-traced three canonical-inventory rows against the reviewed source (`9c5e09de`; tree identical to HEAD) and exposed three concrete accounting defects that the prior "one canonical inventory / no new concrete discrepancy exposed" pass (§13.7P) had not. The stable row IDs are preserved; the affected rows are **superseded** below. All accepted limits, the N=4 aggregate `7772`, the three encoded-buffer roles, borrowed `CMP_SPAN`, the S1/S2 measurement scope, and every status string are unchanged. Reservations are corrected within the unchanged aggregate authority.
+
+### Finding A — INV-O1-5..8 superseded: borrowed bootstrap decoded object + metadata payload were uncharged; admission now precedes construction
+
+INV-O1-5 stated the bootstrap `DecodedRecord` is **consumed by** `encode_record`. Source: `owner.rs::initialize` calls `encode_record(&decoded, self.pinned())`, which **borrows** the decoded local; it remains in scope and coexists with the encode buffer, the metadata encode buffer, and both CRC envelopes through `publish_atomic`. The prior O1 reservation `rec + publication_staging_charge` (and the §13.7I "42-byte metadata encode buffer is covered by record-side slack, no runtime correction required" conclusion) therefore **omitted** the inline decoded object and the metadata payload. The N=4 inventory inequality `811 + 42 + 861 = 1714 > 1672 = 811 + 861` is **false**: it omits the `size_of::<DecodedRecord>() = 408` object.
+
+Corrected phase derivation (actual target `size_of::<DecodedRecord>() = 408`, N-independent inline struct; bootstrap `BootstrapNoLock` has no evidence so `decoded_working_set_charge == inline 408`):
+
+| Phase object (simultaneously live from decoded construction through publish) | N=1, S_sig=8 | N=4 |
+|---|---:|---:|
+| Inline decoded bootstrap object `D = size_of::<DecodedRecord>()` | 408 | 408 |
+| Encoded record buffer `E = max_safety_record_bytes` (profile cap) | 409 | 811 |
+| Metadata payload `M = META_ENCODED_LEN` | 42 | 42 |
+| Publish CRC envelopes `publication_staging_charge = (4+E)+(4+M)` | 459 | 861 |
+| **Corrected `o1_pub_charge = D + E + M + staging`** | **1318** | **2122** |
+| Pre-correction charge `E + staging` (= `2E + M + 8`) | 868 | 1672 |
+| Under-count `= D + M` | 450 | 450 |
+
+Both accepted profiles (N=1 and N=4) remain admissible within the unchanged aggregate `7772`. The 81-byte bootstrap serialized length vs the profile-sized `409`/`811` encoded capacity distinction is preserved (the record CRC envelope wraps `payload.len() = 81`, so the actual record envelope is `4 + 81 = 85`; `publication_staging_charge` conservatively over-charges it at the cap).
+
+**Correction (`owner.rs`, `accounting.rs`):** `o1_pub_charge = size_of_decoded_record_inline() + max_safety_record_bytes + META_ENCODED_LEN + publication_staging_charge` is reserved **before** the decoded local is constructed (checked arithmetic, site `O1BootstrapPublicationCharge`). `size_of_decoded_record_inline()` is exposed `pub` so the inline charge is explicit, not inferred from aggregate headroom (a heap-only allocation counter cannot see this stack footprint). A `debug_assert` confirms `decoded_working_set_charge(&decoded) ≤ decoded_inline`.
+
+Superseded rows: **INV-O1-5** (consumed → **borrowed**; reservation now precedes construction and includes `D`), **INV-O1-6/7/8** (covered by the corrected `o1_pub_charge`, which now explicitly carries `D + M` in addition to `E + staging`).
+
+**Evidence (evidence-levels kept distinct):**
+- `d7d14_fa_o1_charge_under_count_is_exactly_decoded_plus_meta` — **[S] source-derived / standalone arithmetic**: the pre-correction `E + staging` under-counts the complete `D + E + M + staging` by exactly `D + M` for N=1 and N=4, and the complete charge fits the aggregate.
+- `d7d14_fa_o1_real_initialize_peak_reserves_borrowed_decoded_local` — **[O] executed operational reproduction + corrected regression**: a real `initialize(true)` on a fresh attached N=4 owner drives the operational accountant peak to exactly `D + E + M + staging`, exceeding the pre-correction charge by `D + M`.
+- `d7d14_fa_o1_refused_when_decoded_charge_unavailable_and_readmits_on_release` — **[O] executed corrected regression**: at `complete − 1` aggregate headroom the corrected O1 refuses `CapacityRefusal`, writes no record/metadata, releases its reservation; at headroom equal to the pre-correction charge (which the old under-count *would* have admitted) it still refuses; releasing pressure readmits the same O1 to success. (A baseline old-path reproduction is attributed to the source-derived counterexample; the corrected regressions above are the executed ones.)
+
+### Finding B — construction-time diagnostic ownership: INV-O1-9 / INV-O3-7 and the blanket returned-error exclusion corrected
+
+§13.7P classified every component-owned diagnostic as a covered-lifetime allocation that transfers ownership to the caller, treating the eventual caller ownership as establishing coverage. That blanket exclusion was wrong at one concrete site: `backend::read_checksummed` constructed `format!("{what}: {e}")`, embedding the **unbounded** `rocksdb::Error` `Display` into a **component-created** `String` *while the component is still constructing the error* and *inside* the active O2–O5 read reservation. A backend-owned error and a new `String` built by component code have different ownership; the latter is not backend-internal.
+
+**Correction (`error.rs`, `backend.rs`):** the three checksum/backend read diagnostics now return a typed, allocation-free `ReadFailedDetail::Envelope { what: ReadWhat, kind: EnvelopeFailureKind }` (`Copy`; `what ∈ {Metadata, Record}`, `kind ∈ {EnvelopeTooShort, CrcMismatch, BackendGet}`), following the existing allocation-free `NamespaceScan` precedent — fail-closed distinction preserved, no backend text embedded, no unbounded message allocated-then-truncated. The ambiguous publish-write path (`e.to_string()`, constructed while the publication reservation is live) is replaced with a bounded fixed string; fail-closed/uncertain-durability semantics unchanged. The remaining `format!` diagnostics in `codec.rs`/`validate.rs` interpolate only bounded numerics (`u8`/`u64`/`usize`) within an already-admitted O2/O3 reservation and are genuinely covered-lifetime (retained, now accurately labelled); `backend.rs` open-time and test-only `debug_overwrite` sites run with no active operational reservation (documented, unchanged).
+
+Superseded rows: **INV-O3-7** and the §13.7P "ownership transfer out of the component boundary" paragraph (the construction-time component-owned String is now distinguished from post-return caller ownership and from a backend-owned error). **INV-O1-9** uncertain-durability remains a bounded caller-owned diagnostic (unchanged).
+
+**Evidence:** `corr_profile_invalid_and_namespace_scan_payloads_construct_without_allocation` extended — **[O]** the three `Envelope` forms construct with **0** heap allocations (measured through `measure_allocs`) and render `"meta: envelope too short"` / `"record: CRC envelope mismatch"` / `"record: backend get error"`. The stale comment that the checksum-envelope `Message(String)` form is "deliberately NOT asserted allocation-free" is corrected.
+
+### Finding C — INV-O3-5 superseded: both TC uniqueness sets and the high-QC selection clone accounted; selection corrected to borrowed
+
+INV-O3-5 described **one** uniqueness set. `validate_tc` holds **two** bounded sorted `Vec<u64>` — `seen` and `st_ids` (each capacity ≤ N via `uniq_set_insert`, binary-search sorted, no rehash) — and previously called the general consensus helper `qbind_consensus::timeout::select_max_high_qc`, which returns an **owned clone** of the winning QC (cloning its signer backing); replacing an earlier selection momentarily overlaps the previous clone with its replacement. QC signer-index scratch is separate from this TC scratch. `validate_tc` is reached via `validate_locked → validate_decoded` from both **O3** (`read_validate`) and **O4** (`publish_locked`). The correspondence re-encode buffer is dropped **before** certificate binding and TC validation, so re-encode and binding buffers never coexist and are not summed across their disjoint lifetimes.
+
+**Correction (`validate.rs`, storage-local only):** a borrowed `select_max_high_qc_ref` aliases the winning input entry — **no cloned signer backing, no replacement overlap** — reducing TC validation scratch to exactly the two bounded `UNIQ_SET` vectors plus bounded semantic-refusal diagnostics (bounded numerics). It preserves strict-`>` selection, first-encountered-for-equal-views (view==0 seed included), TA2 (view+block correspondence, **no** signer-array equality), TA1 (separate exact-copy requirement incl. signers), membership/uniqueness/correspondence/quorum semantics, and explicitly `Unverified` recovered evidence. The general consensus selection helper is **unchanged** and no new tie-break is introduced; `admit_evidence_capnorm` continues to bound the evidence backings (it does not admit this separately constructed scratch — now explicitly accounted). This representation satisfies the accepted bounded-scratch model: `seen`/`st_ids` are the only non-trivial scratch, each ≤ N descriptors, within the existing `o3_scratch` reservation (which already subsumed them; the borrowed selection strictly reduces live scratch).
+
+Superseded row: **INV-O3-5** (one set → **two** sets `seen` + `st_ids`; the former owned-clone selection → **borrowed** selection with no replacement overlap).
+
+**Evidence:**
+- `validate.rs::fc_borrowed_selection_tests` — **[O]** `borrowed_selection_matches_consensus_helper_by_value` (borrowed selection equals the consensus helper by value across all-None / single / increasing / decreasing / equal-view-tie / zero-view-seed / mixed inputs) and `borrowed_selection_returns_input_borrow_not_a_clone` (the returned reference aliases the input entry, proving no clone/overlap allocation).
+- `d7d14_fc_tc_borrowed_selection_discriminates_distinct_views_through_o3_o4` — **[O]** distinct nested high-QC views through O4 `publish_locked` and O3 `read_validate`: the correct strict-`>` maximum is accepted as `Unverified`; a nested high-QC view exceeding `tc.high_qc` is refused `SemanticRefusal` at TA2 (a comparator that ignored the higher view would wrongly accept), with durable state preserved on the refused fresh store.
+- Existing `corr_tc_ta2_permits_signer_diff_ta1_requires_exact_copy` and `h26_both_evidence_variants_and_nested_bounds` now exercise the borrowed selection and still pass (TA2 signer-diff permitted, TA1 exact-copy required).
+
+### Adjacent ownership statements reconciled
+
+Borrowed `encode`/read-back buffers are not *moved into* `publish_atomic` beyond the single record encode buffer (INV-O1-6's "moved into `publish_atomic`" is the record encode buffer only); the metadata read-back buffers do not survive `load_established` merely because decoded metadata does. The accepted S1/S2 measurement scope and earlier sensitivity evidence are preserved.
+
+### Inventory completion status after this pass
+
+The three superseded rows (INV-O1-5..8, INV-O3-5, INV-O3-7 / the diagnostic ownership paragraph) now carry supported admission-precedes-construction, coexistence, and release/transfer arguments with executed regressions. The component remains `D7D14_STORAGE_COMPONENT=PARTIAL-IMPLEMENTATION` / `D7D14_STORAGE_ACCEPTANCE=INCOMPLETE`: the independent publication-boundary observation and the maximum-fixture encode/binding intervals (prior §13.7P Items C/D residuals) are unchanged and remain the named accounting-evidence gaps — H22 and external assurance are **not** described as the only remaining work. `DURABLE_ANTI_ROLLBACK=NOT-ESTABLISHED`; `GENESIS_AUTHORITY_ACTIVATION=DISABLED`; `PRODUCTION_WIRE_CHAIN_ID_BEHAVIOR=UNCHANGED`; `CONFIGURED_AUTHORITY_RELEASE_BINARY_EVIDENCE=NOT-YET-CAPTURED`; `SECURITY_POSTURE=RS1-OPEN / PUBLIC-DEVNET-NO-GO`; C4/C5 OPEN; fail-closed `CurrentEpochUnavailable` unchanged. This pass authorizes no production construction, startup/consensus/signing integration, verifier wiring, authority/epoch mutation, transport change, peer-driven apply, anti-rollback establishment, activation, renaming, D15, or Run 423 work.

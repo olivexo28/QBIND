@@ -748,6 +748,52 @@ pub enum ReadFailedDetail {
     /// iteration error. Reached after the O1 inspection reservation releases;
     /// allocation-free.
     NamespaceScan,
+    /// A typed, **allocation-free** checksum-envelope / backend-get read failure
+    /// (§ 13.7P, D7-D14 Finding B correction). The earlier `format!("{what}: {e}")`
+    /// site embedded the backend error's **unbounded** `Display` text into a
+    /// component-owned `String` constructed *inside* the active O2–O5 read
+    /// reservation, so its length was neither bounded nor admitted. This typed
+    /// `Copy` form preserves the fail-closed read-failure distinction (which read,
+    /// and which envelope/backend failure class) as discriminants and copies no
+    /// variable-length backend text — exactly the `NamespaceScan` treatment applied
+    /// to every admitted-read diagnostic.
+    Envelope {
+        what: ReadWhat,
+        kind: EnvelopeFailureKind,
+    },
+}
+
+/// Which admitted read the envelope failure occurred on (typed, `Copy`; replaces
+/// the free-form `what: &str` previously interpolated into a diagnostic `String`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReadWhat {
+    /// The fixed-size metadata record.
+    Metadata,
+    /// The authoritative safety record.
+    Record,
+}
+
+impl ReadWhat {
+    /// The fixed, bounded label for this read (rendered only through `Display`).
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Metadata => "meta",
+            Self::Record => "record",
+        }
+    }
+}
+
+/// The typed envelope/backend read-failure class (`Copy`, allocation-free).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EnvelopeFailureKind {
+    /// The stored value was shorter than the 4-byte CRC envelope prefix.
+    EnvelopeTooShort,
+    /// The CRC envelope did not recompute over the stored payload.
+    CrcMismatch,
+    /// The backend `get` reported a storage-layer error. The backend error's
+    /// variable-length text is deliberately **not** copied into the refusal; the
+    /// fail-closed distinction is preserved as this typed discriminant.
+    BackendGet,
 }
 
 impl std::fmt::Display for ReadFailedDetail {
@@ -755,6 +801,14 @@ impl std::fmt::Display for ReadFailedDetail {
         match self {
             Self::Message(s) => f.write_str(s),
             Self::NamespaceScan => f.write_str("namespace scan: storage-layer iteration error"),
+            Self::Envelope { what, kind } => {
+                let detail = match kind {
+                    EnvelopeFailureKind::EnvelopeTooShort => "envelope too short",
+                    EnvelopeFailureKind::CrcMismatch => "CRC envelope mismatch",
+                    EnvelopeFailureKind::BackendGet => "backend get error",
+                };
+                write!(f, "{}: {detail}", what.as_str())
+            }
         }
     }
 }

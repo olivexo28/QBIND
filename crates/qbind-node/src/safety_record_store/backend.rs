@@ -14,7 +14,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, AtomicU8, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use super::accounting::{AggregateAuthority, SharedAccountant};
-use super::error::{ReadFailedDetail, SafetyStoreError};
+use super::error::{EnvelopeFailureKind, ReadFailedDetail, ReadWhat, SafetyStoreError};
 use crate::pqc_trust_bundle::TrustBundleEnvironment;
 use crate::storage::signing_journal_crc32;
 
@@ -508,14 +508,14 @@ impl SafetyBackend {
     /// the applicable record-size bound enforced on the backend-internal view
     /// **before** any component-owned copy is made.
     pub fn read_meta(&self, max_payload: u128) -> Result<Option<Vec<u8>>, SafetyStoreError> {
-        self.read_checksummed(META_KEY, "meta", max_payload)
+        self.read_checksummed(META_KEY, ReadWhat::Metadata, max_payload)
     }
 
     /// Read the raw (CRC-verified) record bytes, if present. `max_payload` is the
     /// applicable record-size bound enforced on the backend-internal view
     /// **before** any component-owned copy is made.
     pub fn read_record(&self, max_payload: u128) -> Result<Option<Vec<u8>>, SafetyStoreError> {
-        self.read_checksummed(RECORD_KEY, "record", max_payload)
+        self.read_checksummed(RECORD_KEY, ReadWhat::Record, max_payload)
     }
 
     /// Bounded classification of the component-owned `safetyrec:` namespace for
@@ -585,7 +585,7 @@ impl SafetyBackend {
     fn read_checksummed(
         &self,
         key: &[u8],
-        what: &str,
+        what: ReadWhat,
         max_payload: u128,
     ) -> Result<Option<Vec<u8>>, SafetyStoreError> {
         // `get_pinned` returns a borrowed view into backend-internal (RocksDB-
@@ -594,14 +594,22 @@ impl SafetyBackend {
         // only copy the payload into a component-owned buffer once it is known to
         // be within bound — so an over-bound stored value never forces an
         // unbounded application-owned allocation.
+        //
+        // Every refusal below is a typed, **allocation-free** `ReadFailedDetail`
+        // (§ 13.7P, D7-D14 Finding B): these diagnostics are constructed *inside*
+        // the active O2–O5 read reservation, so embedding an unbounded backend
+        // `Display` (the previous `format!("{what}: {e}")`) or even a bounded-but-
+        // allocating `format!` would peak a component-owned `String` above the
+        // admitted charge. The typed `Copy` payload copies no backend text.
         match self.db.get_pinned(key) {
             Ok(None) => Ok(None),
             Ok(Some(raw)) => {
                 let raw: &[u8] = raw.as_ref();
                 if raw.len() < 4 {
-                    return Err(SafetyStoreError::ReadFailed(
-                        format!("{what}: envelope too short").into(),
-                    ));
+                    return Err(SafetyStoreError::ReadFailed(ReadFailedDetail::Envelope {
+                        what,
+                        kind: EnvelopeFailureKind::EnvelopeTooShort,
+                    }));
                 }
                 // Bound the payload length BEFORE copying it out of backend memory.
                 let payload_len = (raw.len() - 4) as u128;
@@ -615,14 +623,18 @@ impl SafetyBackend {
                 let stored =
                     u32::from_be_bytes([crc_bytes[0], crc_bytes[1], crc_bytes[2], crc_bytes[3]]);
                 if signing_journal_crc32(payload) != stored {
-                    return Err(SafetyStoreError::ReadFailed(
-                        format!("{what}: CRC envelope mismatch").into(),
-                    ));
+                    return Err(SafetyStoreError::ReadFailed(ReadFailedDetail::Envelope {
+                        what,
+                        kind: EnvelopeFailureKind::CrcMismatch,
+                    }));
                 }
                 // Now within bound and CRC-valid: take the single component-owned copy.
                 Ok(Some(payload.to_vec()))
             }
-            Err(e) => Err(SafetyStoreError::ReadFailed(format!("{what}: {e}").into())),
+            Err(_e) => Err(SafetyStoreError::ReadFailed(ReadFailedDetail::Envelope {
+                what,
+                kind: EnvelopeFailureKind::BackendGet,
+            })),
         }
     }
 
@@ -728,9 +740,17 @@ impl SafetyBackend {
                     PublishOutcome::DurableAcknowledged
                 }
             }
-            Err(e) => {
+            Err(_e) => {
                 self.mark_not_effective();
-                PublishOutcome::WriteError(e.to_string())
+                // The write's durable outcome is ambiguous. The backend error's
+                // variable-length `Display` text is deliberately NOT copied into the
+                // outcome: this `WriteError` is constructed while the O1/O4/O5
+                // publication reservation is still live, so embedding an unbounded
+                // backend string would peak a component-owned allocation above the
+                // admitted charge (§ 13.7P, D7-D14 Finding B). The fail-closed
+                // ambiguous-write distinction is preserved as this bounded,
+                // fixed-length outcome.
+                PublishOutcome::WriteError("backend write error (ambiguous durable outcome)".into())
             }
         }
     }
