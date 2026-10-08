@@ -14,11 +14,21 @@ pub enum SafetyStoreError {
     MainNetRefused,
     /// A pinned profile parameter is invalid / self-inconsistent.
     ProfileInvalid(String),
-    /// Checked arithmetic overflowed (size / revision); refuse, never wrap.
-    ArithmeticOverflow(String),
-    /// Structural decode failure (stage 1): bad version, magic, bounds, CRC,
-    /// truncation, oversize, empty-signer certificate, or variant inconsistency.
-    StructuralRefusal(String),
+    /// Checked arithmetic overflowed (size / revision); refuse, never wrap. The
+    /// payload is a typed, `Copy` [`ArithmeticOverflowSite`]: every accounting /
+    /// size / revision overflow refusal — several of which run on the protected
+    /// pre-allocation admission path — names its site from stack-only data, so no
+    /// owned diagnostic `String` is allocated while admission is failing.
+    ArithmeticOverflow(ArithmeticOverflowSite),
+    /// Structural decode / admission failure (stage 1): bad version, magic,
+    /// bounds, CRC, truncation, oversize, empty-signer certificate, partial state,
+    /// or variant inconsistency. The payload is a [`StructuralRefusalDetail`]:
+    /// free-form `Message` for the decode-site diagnostics that run inside an
+    /// already-admitted inspection copy, or a typed, `Copy` form for the protected
+    /// pre-reservation structural refusals (empty-signer certificate, record
+    /// present without metadata, unknown/legacy namespace key) that must allocate
+    /// no owned diagnostic `String`.
+    StructuralRefusal(StructuralRefusalDetail),
     /// Unsupported persistence-format version (no migration).
     UnsupportedVersion(u16),
     /// Oversize encoded record exceeding the checked serialized cap.
@@ -33,8 +43,11 @@ pub enum SafetyStoreError {
     /// required independent input was not supplied.
     SemanticRefusal(String),
     /// A required independent input (pinned context / committed history) was not
-    /// supplied, so the dependent predicate cannot be established.
-    MissingIndependentInput(String),
+    /// supplied, so the dependent predicate cannot be established. The payload is a
+    /// typed, `Copy` [`MissingIndependentInputSite`]: the O1 first-use-intent
+    /// refusal runs BEFORE any reservation and allocates no owned diagnostic
+    /// `String`.
+    MissingIndependentInput(MissingIndependentInputSite),
     /// O1 refused: established / partial / malformed / legacy / unsupported state
     /// already present, or duplicate initialization. The payload is a typed,
     /// `Copy` [`AlreadyEstablishedKind`] so the O1 established-state refusal —
@@ -445,5 +458,146 @@ impl std::fmt::Display for RecoveryRequiredReason {
                 f.write_str("a fresh durability acknowledgement (O5/O1) is required before O4")
             }
         }
+    }
+}
+
+/// Typed, `Copy` identity of a checked-arithmetic overflow refusal site
+/// ([`SafetyStoreError::ArithmeticOverflow`], § 13.7 / D7-D14 allocation-free
+/// refusal correction). Several of these sites (the `AllocationAccountant`
+/// `add`/`mul` helpers and the per-operation working-set charge computations) run
+/// on the protected pre-allocation admission path; carrying only a `Copy`
+/// discriminant means the refusal is constructed while admission is failing
+/// without allocating an owned diagnostic `String`. The equivalent text is
+/// materialised only when the error is rendered through `Display`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ArithmeticOverflowSite {
+    /// `accounting::add` checked-sum overflow (admission arithmetic).
+    AccountingSum,
+    /// `accounting::mul` checked-product overflow (admission arithmetic).
+    AccountingProduct,
+    /// A pinned-profile size checked-sum overflow.
+    SizeSum,
+    /// A pinned-profile size checked-product overflow.
+    SizeProduct,
+    /// The live retained-holder charge checked-add overflow.
+    RetainedHolderCharge,
+    /// The O1 existing/partial/malformed inspection working-set charge overflow.
+    O1InspectionWorkingSet,
+    /// The O1 bootstrap publication charge overflow.
+    O1BootstrapPublicationCharge,
+    /// The O2 read/decode working-set charge overflow.
+    O2ReadDecodeWorkingSet,
+    /// The O3 validation-scratch charge overflow.
+    O3ValidationScratchCharge,
+    /// The O4 working-set charge overflow.
+    O4WorkingSetCharge,
+    /// The publication revision counter is exhausted (`u64` successor overflow).
+    PublicationRevisionExhausted,
+    /// The O5 read-back working-set charge overflow.
+    O5ReadBackWorkingSet,
+}
+
+impl std::fmt::Display for ArithmeticOverflowSite {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let s = match self {
+            Self::AccountingSum => "accounting sum",
+            Self::AccountingProduct => "accounting product",
+            Self::SizeSum => "size sum",
+            Self::SizeProduct => "size product",
+            Self::RetainedHolderCharge => "retained holder charge",
+            Self::O1InspectionWorkingSet => "O1 inspection working set",
+            Self::O1BootstrapPublicationCharge => "O1 bootstrap publication charge",
+            Self::O2ReadDecodeWorkingSet => "O2 read/decode working set",
+            Self::O3ValidationScratchCharge => "O3 validation scratch charge",
+            Self::O4WorkingSetCharge => "O4 working-set charge",
+            Self::PublicationRevisionExhausted => "publication revision exhausted",
+            Self::O5ReadBackWorkingSet => "O5 read-back working set",
+        };
+        f.write_str(s)
+    }
+}
+
+/// Typed, `Copy` identity of a missing-independent-input refusal site
+/// ([`SafetyStoreError::MissingIndependentInput`], D7-D14 allocation-free refusal
+/// correction). The O1 first-use-intent refusal runs BEFORE any reservation, so a
+/// `Copy` discriminant keeps that protected path allocation-free.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MissingIndependentInputSite {
+    /// O1 was invoked without the explicit first-use intent assertion.
+    O1FirstUseIntent,
+    /// P3: a committed anchor is present but no committed-history relation was
+    /// supplied, so the dependent predicate cannot be established.
+    P3CommittedAnchorNoHistory,
+}
+
+impl std::fmt::Display for MissingIndependentInputSite {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let s = match self {
+            Self::O1FirstUseIntent => "O1 requires an explicit first-use intent assertion",
+            Self::P3CommittedAnchorNoHistory => {
+                "committed anchor present but no committed-history relation supplied (P3)"
+            }
+        };
+        f.write_str(s)
+    }
+}
+
+/// The payload of [`SafetyStoreError::StructuralRefusal`]. A structural refusal is
+/// either a free-form diagnostic `Message` (the stage-1 decode-site diagnostics
+/// that run while inspecting an already-admitted metadata/record buffer) or one of
+/// the typed, **allocation-free** `Copy` forms used by the protected
+/// pre-reservation structural refusals.
+///
+/// The typed forms carry only `Copy` data, so the protected sites
+/// (`admit_wire_qc` / `encode_record` empty-signer threshold, O1 record-present-
+/// without-metadata, O1 unknown/legacy namespace classification) construct their
+/// refusal without allocating an owned `String`; the equivalent text is
+/// materialised only when the error is rendered through `Display`. `Message`
+/// round-trips from `String`/`&str` via `From`, so existing free-form diagnostic
+/// sites are unchanged.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum StructuralRefusalDetail {
+    /// A free-form stage-1 structural diagnostic (constructed while inspecting an
+    /// already-admitted buffer; not on the protected pre-reservation path).
+    Message(String),
+    /// An empty-signer certificate cannot meet the `ceil(2W/3) >= 1` structural
+    /// threshold. Built on the protected admission path without allocating.
+    EmptySignerCertificate,
+    /// A record is present without its metadata (a partial / malformed safety
+    /// state). Built on the O1 protected path without allocating.
+    RecordPresentWithoutMetadata,
+    /// An unknown/legacy key is present in the component-owned safety namespace;
+    /// O1 refuses without migration or repair. Carries only the `Copy` key length.
+    UnknownLegacySafetyNamespaceKey { len: u128 },
+}
+
+impl std::fmt::Display for StructuralRefusalDetail {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Message(s) => f.write_str(s),
+            Self::EmptySignerCertificate => {
+                f.write_str("empty-signer certificate refused at structural threshold")
+            }
+            Self::RecordPresentWithoutMetadata => {
+                f.write_str("record present without metadata (partial/malformed safety state)")
+            }
+            Self::UnknownLegacySafetyNamespaceKey { len } => write!(
+                f,
+                "unknown/legacy safety-namespace key present ({len} bytes); refusing O1 \
+                 without migration or repair"
+            ),
+        }
+    }
+}
+
+impl From<String> for StructuralRefusalDetail {
+    fn from(s: String) -> Self {
+        Self::Message(s)
+    }
+}
+
+impl From<&str> for StructuralRefusalDetail {
+    fn from(s: &str) -> Self {
+        Self::Message(s.to_string())
     }
 }

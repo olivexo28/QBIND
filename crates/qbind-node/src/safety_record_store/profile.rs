@@ -12,7 +12,7 @@
 
 use qbind_consensus::ids::ValidatorId;
 
-use super::error::SafetyStoreError;
+use super::error::{ArithmeticOverflowSite, SafetyStoreError};
 
 /// Supported persistence-format version (§ 13.2, `persistence_format_version`).
 ///
@@ -175,14 +175,16 @@ impl PinnedSafetyContext {
 
 /// Checked addition helper (overflow → refuse).
 fn add(a: u128, b: u128) -> Result<u128, SafetyStoreError> {
-    a.checked_add(b)
-        .ok_or_else(|| SafetyStoreError::ArithmeticOverflow("size sum".to_string()))
+    a.checked_add(b).ok_or(SafetyStoreError::ArithmeticOverflow(
+        ArithmeticOverflowSite::SizeSum,
+    ))
 }
 
 /// Checked multiplication helper (overflow → refuse).
 fn mul(a: u128, b: u128) -> Result<u128, SafetyStoreError> {
-    a.checked_mul(b)
-        .ok_or_else(|| SafetyStoreError::ArithmeticOverflow("size product".to_string()))
+    a.checked_mul(b).ok_or(SafetyStoreError::ArithmeticOverflow(
+        ArithmeticOverflowSite::SizeProduct,
+    ))
 }
 
 /// `MAX_QC_BYTES = 269 + B_span + N × (2 + S_sig)` at `C = 2` (§ 13.2A(f)).
