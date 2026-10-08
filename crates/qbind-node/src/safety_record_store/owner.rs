@@ -341,6 +341,27 @@ thread_local! {
         const { std::cell::Cell::new(O5MeasurementFault::None) };
 }
 
+// Test-only O1 sensitivity-experiment seam (RUN 422 D7-D14 F1). When armed, the
+// NEXT `initialize` on this thread reserves the PRE-CORRECTION O1 publication charge
+// (`E + publication_staging_charge`, omitting the inline decoded footprint D and the
+// metadata payload M) instead of the corrected `D + E + M + staging`. This is an
+// INSTRUMENTED reproduction of the historical under-count — the corrected live-object
+// observer is retained — NOT an unmodified historical checkout. The flag is consumed
+// (reset to `false`) by the operation that reads it, so it affects exactly one
+// `initialize`. Absent from production builds.
+#[cfg(any(test, feature = "test-utils"))]
+thread_local! {
+    static O1_FORCE_OLD_RESERVATION: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Test-only (RUN 422 D7-D14 F1 sensitivity experiment): arm the instrumented
+/// old-reservation reproduction for the next `initialize` on this thread. See
+/// [`O1_FORCE_OLD_RESERVATION`].
+#[cfg(any(test, feature = "test-utils"))]
+pub fn set_force_o1_old_reservation(on: bool) {
+    O1_FORCE_OLD_RESERVATION.with(|c| c.set(on));
+}
+
 /// Test-only: arm (or clear) the O5 measurement-fault seam for the current thread.
 /// The fault applies to the next `reacknowledge` snapshot construction.
 #[cfg(any(test, feature = "test-utils"))]
@@ -799,6 +820,25 @@ impl SafetyRecordOwner {
             .ok_or(SafetyStoreError::ArithmeticOverflow(
                 ArithmeticOverflowSite::O1BootstrapPublicationCharge,
             ))?;
+        // F1 sensitivity experiment (test-only, RUN 422 D7-D14): when armed, reserve
+        // the PRE-CORRECTION amount (`E + publication_staging_charge`, omitting the
+        // inline decoded footprint D and the metadata payload M) for THIS operation
+        // only — an INSTRUMENTED reproduction of the historical under-count, NOT an
+        // unmodified historical checkout. The corrected live-object observer below is
+        // retained, so a test can demonstrate the observed live charge exceeds this
+        // old reservation. The flag is consumed by the operation that reads it. In
+        // production builds this block is absent and `o1_pub_charge` is the corrected
+        // value unconditionally.
+        #[cfg(any(test, feature = "test-utils"))]
+        let o1_pub_charge = if O1_FORCE_OLD_RESERVATION.with(|c| c.replace(false)) {
+            max_safety_record_bytes(self.pinned())?
+                .checked_add(super::accounting::publication_staging_charge(self.pinned())?)
+                .ok_or(SafetyStoreError::ArithmeticOverflow(
+                    ArithmeticOverflowSite::O1BootstrapPublicationCharge,
+                ))?
+        } else {
+            o1_pub_charge
+        };
         let _pub_res = self.backend.accounting().reserve(o1_pub_charge)?;
 
         let decoded = DecodedRecord {
@@ -826,9 +866,32 @@ impl SafetyRecordOwner {
             context_digest: context_digest(self.pinned()),
             current_revision: 0,
         };
+        // Name the metadata encode buffer as a local so its capacity can be measured
+        // and so the SAME object is the one passed to `publish_atomic` (behaviour is
+        // unchanged — the bytes are identical to `meta.encode()` inline).
+        let meta_encoded = meta.encode();
+        // F1 (test-only, RUN 422 D7-D14): record the owner-held live-object scalar
+        // snapshot while ALL of these O1 objects are alive, immediately before
+        // `publish_atomic`: the borrowed bootstrap decoded local (measured IN PLACE
+        // via `decoded_working_set_charge` — no clone), the profile-sized encoded
+        // record backing, and the metadata payload buffer. `decoded`, `encoded`, and
+        // `meta_encoded` all remain in scope through the `publish_atomic` call below,
+        // which itself borrows `&encoded`/`&meta_encoded`, so every snapshotted object
+        // is live and unchanged at the boundary. The backend boundary adds the two CRC
+        // staging envelopes and the active reservations. No-op in production builds.
+        #[cfg(any(test, feature = "test-utils"))]
+        {
+            if let Ok(decoded_charge) = super::accounting::decoded_working_set_charge(&decoded) {
+                super::backend::set_o1_owner_live_snapshot(
+                    decoded_charge,
+                    encoded.capacity() as u128,
+                    meta_encoded.capacity() as u128,
+                );
+            }
+        }
         match self
             .backend
-            .publish_atomic(&guard, &meta.encode(), &encoded)
+            .publish_atomic(&guard, &meta_encoded, &encoded)
         {
             PublishOutcome::DurableAcknowledged => {
                 // An acknowledged explicit O1 initialization establishes fresh
