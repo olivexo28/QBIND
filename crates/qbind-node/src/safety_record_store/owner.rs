@@ -125,9 +125,26 @@ pub(crate) fn observe_in_validation_reservation() {
 // extends no allocation's lifetime. Each is a no-op unless `read_validate` armed
 // the observation around its own `validate_decoded`. Gated behind
 // `cfg(test)`/`test-utils`; never affects production behaviour.
+/// Test-only (RUN 422 D7-D14 S1): which O3 validation phase an
+/// [`O3LiveObjectCharge`] record was sampled at. Carried in the record so a
+/// consumer can distinguish the re-encode row from the binding row and reject a
+/// record that is absent or sampled at the wrong phase.
+#[cfg(any(test, feature = "test-utils"))]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum O3Phase {
+    /// The correspondence re-encode phase (re-encode buffer live).
+    #[default]
+    Reencode,
+    /// The certificate-binding phase (`cert` scratch live, re-encode released).
+    Binding,
+}
+
 #[cfg(any(test, feature = "test-utils"))]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct O3LiveObjectCharge {
+    /// The O3 validation phase this record was sampled at (explicit phase
+    /// identity, so a consumer can reject a record sampled at the wrong phase).
+    pub phase: O3Phase,
     /// Original backend-read encoded record buffer capacity (`ENC_INPUT` backing,
     /// the bytes `load_established` copied out of the backend — the SAME buffer the
     /// proof retains, not a fixture clone).
@@ -144,11 +161,24 @@ pub struct O3LiveObjectCharge {
     /// ever live at a time (the re-encode is dropped before the cert is allocated),
     /// so this is a single measured capacity, not a sum of two.
     pub validation_scratch_cap: u128,
+    /// The ACTIVE OPERATIONAL reservation sampled from the executing backend's
+    /// operational accountant AT THIS PHASE, while the phase's scratch allocation
+    /// is live. Sampled separately at each phase (not carried over from the
+    /// re-encode phase, not a profile-derived expected value): it is the live
+    /// `acct.current()` of the same backend whose `read_validate` is executing.
+    pub observed_active_operational_reservation: u128,
+    /// The ACTIVE AGGREGATE reservation sampled from the executing backend's shared
+    /// aggregate authority AT THIS PHASE (operational + context partitions
+    /// combined), while the phase's scratch allocation is live. Sampled separately
+    /// at each phase.
+    pub observed_active_aggregate_reservation: u128,
 }
 
 #[cfg(any(test, feature = "test-utils"))]
 impl O3LiveObjectCharge {
-    /// The total simultaneously component-owned live charge at this O3 phase.
+    /// The total simultaneously component-owned live object charge at this O3 phase
+    /// (the three measured object terms; the reservation samples are NOT objects
+    /// and are never summed into the object charge).
     pub fn total(&self) -> u128 {
         self.original_encoded_cap
             .saturating_add(self.transient_decoded_charge)
@@ -163,6 +193,15 @@ thread_local! {
     // (original encoded capacity, transient decoded charge); the per-phase scratch
     // capacity is combined with these when each phase records its object charge.
     static O3_OBJ_STABLE: std::cell::Cell<Option<(u128, u128)>> = const { std::cell::Cell::new(None) };
+    // The executing backend's cloned operational accountant handle, armed by
+    // `read_validate` around its `validate_decoded`. Presence (Some) is the ARMED
+    // marker: a standalone `validate_decoded` or a later binding call finds it None
+    // and records nothing. Each phase hook samples the active operational and
+    // aggregate reservations from THIS handle, separately, while that phase's
+    // scratch allocation is live.
+    static O3_OBJ_ACCT: std::cell::RefCell<
+        Option<super::accounting::SharedAccountant>,
+    > = const { std::cell::RefCell::new(None) };
     static O3_REENCODE_OBJ: std::cell::Cell<Option<O3LiveObjectCharge>> =
         const { std::cell::Cell::new(None) };
     static O3_BINDING_OBJ: std::cell::Cell<Option<O3LiveObjectCharge>> =
@@ -170,20 +209,30 @@ thread_local! {
 }
 
 /// Test-only: arm/reset the O3 live-object-charge observation for the current
-/// thread. Called by `read_validate` immediately before `validate_decoded`.
+/// thread with the executing backend's operational accountant handle. Called by
+/// `read_validate` immediately before `validate_decoded`. Arming the accountant
+/// handle is what RESTRICTS recording to this operation: a standalone
+/// `validate_decoded` (or a later binding call) never arms it, so its hooks are
+/// no-ops and cannot populate an apparently valid observation for another
+/// operation.
 #[cfg(any(test, feature = "test-utils"))]
-fn arm_o3_object_observation() {
+fn arm_o3_object_observation(acct: super::accounting::SharedAccountant) {
     O3_OBJ_STABLE.with(|c| c.set(None));
+    O3_OBJ_ACCT.with(|s| *s.borrow_mut() = Some(acct));
     O3_REENCODE_OBJ.with(|c| c.set(None));
     O3_BINDING_OBJ.with(|c| c.set(None));
 }
 
 /// Test-only: mark the observation armed and record the two phase-invariant live
-/// terms. Called by `validate_decoded` once, while the original encoded buffer and
-/// the transient decoded object are both live. Arms the per-phase recorders.
+/// terms. Called by `validate_decoded` while the original encoded buffer and the
+/// transient decoded object are both live. A no-op unless `read_validate` armed
+/// the observation (the accountant handle is present), so a standalone
+/// `validate_decoded` records nothing.
 #[cfg(any(test, feature = "test-utils"))]
 pub(crate) fn set_o3_object_stable(original_encoded_cap: u128, transient_decoded_charge: u128) {
-    O3_OBJ_STABLE.with(|c| c.set(Some((original_encoded_cap, transient_decoded_charge))));
+    if O3_OBJ_ACCT.with(|s| s.borrow().is_some()) {
+        O3_OBJ_STABLE.with(|c| c.set(Some((original_encoded_cap, transient_decoded_charge))));
+    }
 }
 
 /// Test-only: disarm the O3 live-object observation. Called by `read_validate`
@@ -193,35 +242,60 @@ pub(crate) fn set_o3_object_stable(original_encoded_cap: u128, transient_decoded
 #[cfg(any(test, feature = "test-utils"))]
 fn disarm_o3_object_observation() {
     O3_OBJ_STABLE.with(|c| c.set(None));
+    O3_OBJ_ACCT.with(|s| *s.borrow_mut() = None);
+}
+
+/// Test-only: sample the active `(operational, aggregate)` reservations from the
+/// armed backend accountant handle. Returns `None` when not armed. A bounded
+/// read of two live charges — no allocation, no object cloning.
+#[cfg(any(test, feature = "test-utils"))]
+fn sample_o3_reservations() -> Option<(u128, u128)> {
+    O3_OBJ_ACCT.with(|s| {
+        s.borrow()
+            .as_ref()
+            .map(|a| (a.current(), a.aggregate().current()))
+    })
 }
 
 /// Crate/test-only: record the ACTUAL re-encode-phase live object charge while the
-/// correspondence re-encode buffer is live. A no-op unless armed via
-/// `set_o3_object_stable`.
+/// correspondence re-encode buffer is live, pairing it with the operational and
+/// aggregate reservations sampled AT THIS PHASE. A no-op unless armed via
+/// `read_validate`.
 #[cfg(any(test, feature = "test-utils"))]
 pub(crate) fn observe_o3_reencode_object(reencode_scratch_cap: u128) {
-    if let Some((original, transient)) = O3_OBJ_STABLE.with(|c| c.get()) {
+    if let (Some((original, transient)), Some((op_res, agg_res))) =
+        (O3_OBJ_STABLE.with(|c| c.get()), sample_o3_reservations())
+    {
         O3_REENCODE_OBJ.with(|c| {
             c.set(Some(O3LiveObjectCharge {
+                phase: O3Phase::Reencode,
                 original_encoded_cap: original,
                 transient_decoded_charge: transient,
                 validation_scratch_cap: reencode_scratch_cap,
+                observed_active_operational_reservation: op_res,
+                observed_active_aggregate_reservation: agg_res,
             }))
         });
     }
 }
 
 /// Crate/test-only: record the ACTUAL certificate-binding-phase live object charge
-/// while the `cert` scratch is live. A no-op unless armed via
-/// `set_o3_object_stable`.
+/// while the `cert` scratch is live, pairing it with the operational and aggregate
+/// reservations sampled AT THIS PHASE (separately from the re-encode phase). A
+/// no-op unless armed via `read_validate`.
 #[cfg(any(test, feature = "test-utils"))]
 pub(crate) fn observe_o3_binding_object(binding_scratch_cap: u128) {
-    if let Some((original, transient)) = O3_OBJ_STABLE.with(|c| c.get()) {
+    if let (Some((original, transient)), Some((op_res, agg_res))) =
+        (O3_OBJ_STABLE.with(|c| c.get()), sample_o3_reservations())
+    {
         O3_BINDING_OBJ.with(|c| {
             c.set(Some(O3LiveObjectCharge {
+                phase: O3Phase::Binding,
                 original_encoded_cap: original,
                 transient_decoded_charge: transient,
                 validation_scratch_cap: binding_scratch_cap,
+                observed_active_operational_reservation: op_res,
+                observed_active_aggregate_reservation: agg_res,
             }))
         });
     }
@@ -239,6 +313,64 @@ pub fn o3_reencode_object_charge() -> Option<O3LiveObjectCharge> {
 #[cfg(any(test, feature = "test-utils"))]
 pub fn o3_binding_object_charge() -> Option<O3LiveObjectCharge> {
     O3_BINDING_OBJ.with(|c| c.get())
+}
+
+// Test-only O5 measurement-fault seam (RUN 422 D7-D14 S2). The O5 live-object
+// observation measures two component charges through fallible accounting
+// helpers: the retained proof's evidence backing (`evidence_backing_capacity`)
+// and the fresh read-back's transient decode (`decoded_working_set_charge`). In
+// the real fixture both succeed; a bounded test seam forces either one to the
+// error branch WITHOUT fabricating enormous vectors or performing unsafe
+// allocations, so the fail-closed observation path can be exercised. It never
+// affects production behaviour (cfg-gated) and never changes storage behaviour.
+#[cfg(any(test, feature = "test-utils"))]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum O5MeasurementFault {
+    /// No injected fault: both measurements run for real.
+    #[default]
+    None,
+    /// Force the retained-backing measurement to the error branch.
+    RetainedBacking,
+    /// Force the transient-decode measurement to the error branch.
+    TransientDecode,
+}
+
+#[cfg(any(test, feature = "test-utils"))]
+thread_local! {
+    static O5_MEASUREMENT_FAULT: std::cell::Cell<O5MeasurementFault> =
+        const { std::cell::Cell::new(O5MeasurementFault::None) };
+}
+
+/// Test-only: arm (or clear) the O5 measurement-fault seam for the current thread.
+/// The fault applies to the next `reacknowledge` snapshot construction.
+#[cfg(any(test, feature = "test-utils"))]
+pub fn inject_o5_measurement_fault(fault: O5MeasurementFault) {
+    O5_MEASUREMENT_FAULT.with(|c| c.set(fault));
+}
+
+/// Test-only: measure the retained proof's evidence backing for the O5 snapshot,
+/// honouring the fault seam. Returns the SAME `SafetyStoreError` the real helper
+/// would raise on arithmetic failure when the fault is armed.
+#[cfg(any(test, feature = "test-utils"))]
+fn measure_o5_evidence_backing(evidence: &SupportingEvidence) -> Result<u128, SafetyStoreError> {
+    if O5_MEASUREMENT_FAULT.with(|c| c.get()) == O5MeasurementFault::RetainedBacking {
+        return Err(SafetyStoreError::ArithmeticOverflow(
+            ArithmeticOverflowSite::AccountingSum,
+        ));
+    }
+    super::accounting::evidence_backing_capacity(evidence)
+}
+
+/// Test-only: measure the fresh read-back's transient decode for the O5 snapshot,
+/// honouring the fault seam.
+#[cfg(any(test, feature = "test-utils"))]
+fn measure_o5_transient_decode(decoded: &DecodedRecord) -> Result<u128, SafetyStoreError> {
+    if O5_MEASUREMENT_FAULT.with(|c| c.get()) == O5MeasurementFault::TransientDecode {
+        return Err(SafetyStoreError::ArithmeticOverflow(
+            ArithmeticOverflowSite::O5ReadBackWorkingSet,
+        ));
+    }
+    super::accounting::decoded_working_set_charge(decoded)
 }
 
 /// Decoded initialization metadata (one per backend DB).
@@ -810,7 +942,7 @@ impl SafetyRecordOwner {
         // measurement of the live objects, distinct from the reservation samples
         // above. Disarmed immediately after the call.
         #[cfg(any(test, feature = "test-utils"))]
-        arm_o3_object_observation();
+        arm_o3_object_observation(self.backend.accounting().clone());
         let validated = validate_decoded(decoded, record_bytes, self.pinned(), history);
         #[cfg(any(test, feature = "test-utils"))]
         disarm_in_validation_sampler();
@@ -1175,25 +1307,39 @@ impl SafetyRecordOwner {
         // unchanged at the boundary. No-op in production builds.
         #[cfg(any(test, feature = "test-utils"))]
         {
+            // RUN 422 D7-D14 S2: measure the two component charges EXPLICITLY. A
+            // failed measurement must NOT silently substitute zero, must NOT yield a
+            // valid partial total, and must NOT leave an earlier successful snapshot
+            // available as the current result. On either failure the observation is
+            // fail-closed (invalidated) and the typed error is recorded for the test;
+            // the real `publish_atomic` below is unaffected (storage behaviour and
+            // production semantics are unchanged).
             let retained_generation_charge = match &retained.retained().record {
-                super::record::SafetyRecord::Locked(l) => {
-                    super::record::size_of_retained_record()
-                        + super::accounting::evidence_backing_capacity(&l.evidence).unwrap_or(0)
-                }
+                super::record::SafetyRecord::Locked(l) => measure_o5_evidence_backing(&l.evidence)
+                    .map(|backing| super::record::size_of_retained_record() + backing),
                 super::record::SafetyRecord::BootstrapNoLock { .. } => {
-                    super::record::size_of_retained_record()
+                    Ok(super::record::size_of_retained_record())
                 }
             };
-            let transient_decoded_charge =
-                super::accounting::decoded_working_set_charge(&_stored_decoded).unwrap_or(0);
-            super::backend::set_o5_owner_live_snapshot(
-                retained.encoded_capacity() as u128,
-                retained_generation_charge,
-                super::record::validated_holder_handle_bytes(),
-                stored.capacity() as u128,
-                transient_decoded_charge,
-                meta_encoded.capacity() as u128,
-            );
+            let transient_decoded_charge = measure_o5_transient_decode(&_stored_decoded);
+            match (retained_generation_charge, transient_decoded_charge) {
+                (Ok(retained_generation_charge), Ok(transient_decoded_charge)) => {
+                    super::backend::set_o5_owner_live_snapshot(
+                        retained.encoded_capacity() as u128,
+                        retained_generation_charge,
+                        super::record::validated_holder_handle_bytes(),
+                        stored.capacity() as u128,
+                        transient_decoded_charge,
+                        meta_encoded.capacity() as u128,
+                    );
+                }
+                (Err(_), _) => super::backend::invalidate_o5_live_object_observation(
+                    super::backend::O5ObservationError::RetainedBackingMeasurementFailed,
+                ),
+                (_, Err(_)) => super::backend::invalidate_o5_live_object_observation(
+                    super::backend::O5ObservationError::TransientDecodeMeasurementFailed,
+                ),
+            }
         }
         match self
             .backend
