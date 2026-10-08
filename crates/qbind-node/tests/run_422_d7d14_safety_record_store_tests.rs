@@ -6333,3 +6333,461 @@ fn corr_o1_unknown_namespace_refusal_is_typed_with_len_and_preserves_key() {
         Some(expected_len)
     );
 }
+// ===========================================================================
+// RUN 422 D7-D14 Item A continuation (this pass) — the two reviewed-source
+// residual protected allocations closed:
+//   * `SafetyRecordOwner::attach` ran `ctx.validate()` BEFORE context admission
+//     and constructed `ProfileInvalid(String)` on four refusal branches.
+//   * `first_unrecognized_safety_key` formatted `ReadFailed("namespace scan: …")`
+//     on iterator-status failure, which O1 reaches AFTER releasing its inspection
+//     reservation.
+// Both now carry typed, allocation-free payloads (`ProfileInvalidDetail`,
+// `ReadFailedDetail::NamespaceScan`). These tests assert (a) the new payloads
+// construct allocation-free while still rendering full text, (b) each real
+// invalid-profile `attach` is refused with its typed variant BEFORE the aggregate
+// authority is bound (context admission), and (c) the namespace-scan failure is
+// emitted through the real O1 path (test-gated fault injection) and preserves
+// state.
+// ===========================================================================
+
+/// (a) Both newly-typed payloads — all four `ProfileInvalidDetail` forms and the
+/// `ReadFailedDetail::NamespaceScan` form — are `Copy`/stack data (or carry no
+/// owned diagnostic `String`) and construct with no heap allocation, while still
+/// rendering their full diagnostic text on demand. The `ReadFailedDetail::Message`
+/// covered-lifetime form is deliberately NOT asserted allocation-free (it carries
+/// an owned `String` for the admitted checksum-envelope diagnostics).
+#[test]
+fn corr_profile_invalid_and_namespace_scan_payloads_construct_without_allocation() {
+    use qbind_node::safety_record_store::error::{ProfileInvalidDetail as P, ReadFailedDetail as R};
+    let (errs, allocs) = measure_allocs(|| {
+        [
+            SafetyStoreError::ProfileInvalid(P::ValidatorCountOutOfRange { n: 0, max: 65535 }),
+            SafetyStoreError::ProfileInvalid(P::SignatureLenOutOfRange { s: 0, max: 65535 }),
+            SafetyStoreError::ProfileInvalid(P::NonDenseValidatorIndex { slot: 1, id: 2 }),
+            SafetyStoreError::ProfileInvalid(P::ZeroTotalVotingPower),
+            SafetyStoreError::ReadFailed(R::NamespaceScan),
+        ]
+    });
+    assert_eq!(
+        allocs, 0,
+        "typed `ProfileInvalid`/`ReadFailed::NamespaceScan` payloads must construct \
+         without heap allocation"
+    );
+    assert!(errs[0]
+        .to_string()
+        .contains("validator count 0 out of range 1..=65535"));
+    assert!(errs[1]
+        .to_string()
+        .contains("s_sig 0 out of range 1..=65535"));
+    assert!(errs[2]
+        .to_string()
+        .contains("non-dense validator index at slot 1: id=2"));
+    assert!(errs[3].to_string().contains("total voting power is zero"));
+    assert!(errs[4]
+        .to_string()
+        .contains("namespace scan: storage-layer iteration error"));
+}
+
+/// (b) Each of the four invalid-profile `attach` refusals is emitted as its typed,
+/// allocation-free `ProfileInvalidDetail` variant, measured through the real owner
+/// `attach` call (the invalid context and the backend clone are built OUTSIDE the
+/// measured interval), and crucially BEFORE context admission: the shared aggregate
+/// authority is never bound, so a refused attach leaves the backend's accounting
+/// completely unbound. A valid profile on the same backend then binds and admits.
+#[test]
+fn corr_invalid_profile_attach_refusals_typed_before_context_admission() {
+    use qbind_node::safety_record_store::error::ProfileInvalidDetail as P;
+    let dir = tempfile::tempdir().unwrap();
+    let backend = open_enabled(dir.path());
+
+    // Four distinct invalid profiles (built outside the measured interval).
+    let mut count_zero = ctx_n(4);
+    count_zero.validators = Vec::new(); // n == 0
+    let mut sig_zero = ctx_n(4);
+    sig_zero.s_sig = 0; // s_sig == 0
+    let mut non_dense = ctx_n(4);
+    non_dense.validators = vec![
+        (ValidatorId::new(0), 1),
+        (ValidatorId::new(2), 1), // slot 1 holds id 2 — non-dense
+        (ValidatorId::new(1), 1),
+        (ValidatorId::new(3), 1),
+    ];
+    let mut zero_vp = ctx_n(4);
+    zero_vp.validators = (0..4).map(|i| (ValidatorId::new(i), 0u64)).collect(); // ΣVP == 0
+
+    // The aggregate authority starts unbound.
+    assert_eq!(
+        backend.accounting_aggregate_cap(),
+        None,
+        "fresh backend has no bound aggregate ceiling"
+    );
+
+    for (ctx, expect) in [
+        (count_zero, "validator count"),
+        (sig_zero, "s_sig"),
+        (non_dense, "non-dense validator index"),
+        (zero_vp, "total voting power is zero"),
+    ] {
+        let b = backend.clone();
+        let (res, allocs) = measure_allocs(|| SafetyRecordOwner::attach(b, ctx));
+        match &res {
+            Err(SafetyStoreError::ProfileInvalid(detail)) => {
+                assert!(
+                    detail.to_string().contains(expect),
+                    "expected {expect:?} in {detail}"
+                );
+                // The payload is `Copy`, so a cross-check that it is exactly one of
+                // the four typed variants (no `String`).
+                assert!(matches!(
+                    detail,
+                    P::ValidatorCountOutOfRange { .. }
+                        | P::SignatureLenOutOfRange { .. }
+                        | P::NonDenseValidatorIndex { .. }
+                        | P::ZeroTotalVotingPower
+                ));
+            }
+            other => panic!("expected typed ProfileInvalid refusal, got {other:?}"),
+        }
+        assert_eq!(
+            allocs, 0,
+            "the pre-admission profile-validation refusal must allocate no owned String"
+        );
+        // Context admission never happened: the aggregate authority is still unbound.
+        assert_eq!(
+            backend.accounting_aggregate_cap(),
+            None,
+            "a refused invalid-profile attach must NOT bind/admit the context"
+        );
+    }
+
+    // A valid profile on the same backend binds the aggregate and admits context.
+    let owner = SafetyRecordOwner::attach(backend.clone(), ctx_n(4)).expect("valid attach");
+    assert!(
+        backend.accounting_aggregate_cap().is_some(),
+        "a valid profile binds the shared aggregate ceiling"
+    );
+    drop(owner);
+}
+
+/// (c) The O1 legacy-namespace scan's storage-layer iteration failure is emitted
+/// through the REAL O1 `initialize` path (driven by the narrowly test-gated
+/// `FailNamespaceScan` fault, since a real RocksDB raw iterator cannot be forced to
+/// fail its status deterministically) as the typed, allocation-free
+/// `ReadFailedDetail::NamespaceScan`. O1 reaches it AFTER releasing its inspection
+/// reservation (a clean, metadata-free, record-free namespace), and the refusal
+/// preserves state: no metadata/record is written, the recovery latch is untouched,
+/// and the inspection reservation is released to baseline `0`. The whole O1
+/// operation legitimately reads the admitted metadata/record buffers, so it is NOT
+/// asserted allocation-free — only the diagnostic branch value is.
+#[test]
+fn corr_o1_namespace_scan_failure_is_typed_through_real_o1_path() {
+    use qbind_node::safety_record_store::backend::InjectFault;
+    use qbind_node::safety_record_store::error::ReadFailedDetail;
+    let dir = tempfile::tempdir().unwrap();
+    let ctx = ctx_n(4);
+    let backend = open_enabled(dir.path());
+    let owner = SafetyRecordOwner::attach(backend, ctx.clone()).unwrap();
+    let backend = owner.backend_for_test();
+    let rec_bound = max_safety_record_bytes(&ctx).unwrap();
+
+    // Clean namespace: no metadata, no record — so O1 reaches the namespace scan
+    // (past the established/partial refusal branches), AFTER the inspection
+    // reservation has released.
+    let meta_before = backend.read_meta(META_ENCODED_LEN_MIRROR).unwrap();
+    let record_before = backend.read_record(rec_bound).unwrap();
+    let latch_before = backend.recovery_required();
+    assert_eq!(meta_before, None);
+    assert_eq!(record_before, None);
+
+    backend.set_inject(InjectFault::FailNamespaceScan);
+    match owner.initialize(true) {
+        Err(SafetyStoreError::ReadFailed(ReadFailedDetail::NamespaceScan)) => {}
+        other => panic!("expected typed ReadFailed(NamespaceScan) refusal, got {other:?}"),
+    }
+
+    // State preservation: nothing written, latch untouched, inspection reservation
+    // released on the refusal exit.
+    assert_eq!(
+        backend.read_meta(META_ENCODED_LEN_MIRROR).unwrap(),
+        meta_before
+    );
+    assert_eq!(backend.read_record(rec_bound).unwrap(), record_before);
+    assert_eq!(backend.recovery_required(), latch_before);
+    assert_eq!(
+        backend.accounting_current(),
+        0,
+        "the O1 inspection reservation released before the post-release namespace-scan refusal"
+    );
+
+    // Clearing the fault lets the same clean namespace initialize — proving the
+    // refusal was the injected scan failure, not an established/partial state.
+    backend.set_inject(InjectFault::None);
+    assert_eq!(owner.initialize(true).unwrap(), 0, "O1 succeeds once the scan clears");
+}
+
+// ===========================================================================
+// RUN 422 D7-D14 Item C (this pass) — distinct MAXIMUM QC/TC fixtures with
+// asserted dimensions, and the three admitted paths (successful structural/
+// capacity admission, `encode_record`, `compute_evidence_lock_binding`) measured
+// SEPARATELY for each variant. Fixture construction occurs entirely OUTSIDE every
+// measured interval; the binding computed during fixture setup is NOT reused as
+// the measured observation (a fresh call is measured). "Maximum evidence" (no
+// anchor/predecessor) is distinguished from "maximum complete serialized record"
+// (both optional fields populated with valid independent history), and the
+// release-path mechanism that prevents unadmitted growth (admission bounding every
+// count/length/width BEFORE the single pre-sized `Vec::with_capacity(cap)`) is
+// observed as exactly one allocation at the admitted cap with no reallocation.
+// ===========================================================================
+
+/// MAXIMUM wire QC: N authorized signer bits, N signatures each of the maximum
+/// admitted length `S_sig`, bitmap span `ceil(N/8)`, every backing capacity exactly
+/// normalized to its length (the decoder's exact-capacity form the per-vector
+/// `admit_evidence_capnorm` bound requires).
+fn valid_wire_qc_max(ctx: &PinnedSafetyContext, block_id: [u8; 32], view: u64) -> WireQc {
+    let n = ctx.n();
+    let mut bitmap = vec![0u8; ((n + 7) / 8).max(1)];
+    let mut signatures = Vec::with_capacity(n);
+    for i in 0..n {
+        bitmap[i / 8] |= 1 << (i % 8);
+        let mut s = Vec::with_capacity(ctx.s_sig);
+        s.extend(std::iter::repeat(0xABu8).take(ctx.s_sig));
+        signatures.push(s);
+    }
+    WireQc {
+        version: 1,
+        chain_id: CHAIN_ID,
+        epoch: EPOCH,
+        height: view,
+        round: view,
+        step: 0,
+        block_id,
+        suite_id: QC_SUITE,
+        signer_bitmap: bitmap,
+        signatures,
+    }
+}
+
+/// A maximum QC `LockedRecord`. `anchored == false` is the maximum EVIDENCE form
+/// (no committed anchor / predecessor); `anchored == true` is the maximum COMPLETE
+/// SERIALIZED record (both optional fields populated — the anchor carries valid
+/// independent committed-history coordinates and the predecessor a prior revision).
+fn max_qc_locked(ctx: &PinnedSafetyContext, lock_view: u64, anchored: bool) -> LockedRecord {
+    let qc = valid_wire_qc_max(ctx, [9u8; 32], lock_view);
+    let evidence = SupportingEvidence::QcDerived(qc);
+    let binding = qbind_node::safety_record_store::codec::compute_evidence_lock_binding(
+        &[9u8; 32],
+        lock_view,
+        &evidence,
+        &ctx.authority_context_ref,
+        ctx,
+    )
+    .unwrap();
+    LockedRecord {
+        lock_block_id: [9u8; 32],
+        lock_view,
+        evidence_lock_binding: binding,
+        authority_context_ref: ctx.authority_context_ref,
+        committed_anchor: anchored.then_some(CommittedAnchor {
+            block_id: [7u8; 32],
+            height: 3,
+        }),
+        predecessor_ref: anchored.then_some(0u64),
+        evidence,
+    }
+}
+
+/// The maximum TC `LockedRecord` with both optional fields populated (maximum
+/// COMPLETE serialized record), built from the maximum-evidence `valid_tc_record_max`.
+fn max_tc_locked_anchored(ctx: &PinnedSafetyContext, lock_view: u64, timeout_view: u64) -> LockedRecord {
+    let mut l = valid_tc_record_max(ctx, lock_view, timeout_view);
+    l.committed_anchor = Some(CommittedAnchor {
+        block_id: [7u8; 32],
+        height: 3,
+    });
+    l.predecessor_ref = Some(0u64);
+    l
+}
+
+/// Item C — maximum QC fixture dimensions asserted, then admission / encode /
+/// binding measured SEPARATELY.
+#[test]
+fn d7d14_c_max_qc_dimensions_and_separately_measured_paths() {
+    use qbind_node::safety_record_store::codec::{
+        admit_supporting_evidence, compute_evidence_lock_binding,
+    };
+    let ctx = ctx_n(4);
+    let n = ctx.n();
+    let s_sig = ctx.s_sig;
+    let b_span = ((n + 7) / 8).max(1);
+
+    // ----- Fixture construction (OUTSIDE every measured interval) -----
+    let evidence_only = max_qc_locked(&ctx, 5, false);
+    let complete = max_qc_locked(&ctx, 5, true);
+
+    // ----- Asserted dimensions (before measurement) -----
+    let qc = match &evidence_only.evidence {
+        SupportingEvidence::QcDerived(q) => q,
+        other => panic!("expected QcDerived, got {other:?}"),
+    };
+    assert_eq!(qc.signatures.len(), n, "N signatures");
+    assert_eq!(qc.signatures.capacity(), n, "signatures outer backing == N (capnorm)");
+    assert_eq!(qc.signer_bitmap.len(), b_span, "bitmap span == ceil(N/8)");
+    assert_eq!(qc.signer_bitmap.capacity(), b_span, "bitmap backing == span (capnorm)");
+    let set_bits: u32 = qc.signer_bitmap.iter().map(|b| b.count_ones()).sum();
+    assert_eq!(set_bits as usize, n, "N authorized signer bits set");
+    for sig in &qc.signatures {
+        assert_eq!(sig.len(), s_sig, "each signature is maximum admitted length");
+        assert_eq!(sig.capacity(), s_sig, "each signature backing == len (capnorm)");
+    }
+    // Distinguish maximum evidence from maximum complete serialized record.
+    assert!(evidence_only.committed_anchor.is_none() && evidence_only.predecessor_ref.is_none());
+    assert!(complete.committed_anchor.is_some() && complete.predecessor_ref.is_some());
+
+    let dec_evidence = DecodedRecord {
+        persistence_format_version: 1,
+        network_genesis_id: ctx.network_genesis_id,
+        publication_revision: 1,
+        record: SafetyRecord::Locked(evidence_only.clone()),
+    };
+    let dec_complete = DecodedRecord {
+        persistence_format_version: 1,
+        network_genesis_id: ctx.network_genesis_id,
+        publication_revision: 1,
+        record: SafetyRecord::Locked(complete.clone()),
+    };
+    let ev = evidence_only.evidence.clone();
+    let max_qc = max_qc_bytes(&ctx).unwrap();
+
+    // ----- (1) Successful structural + capacity admission: allocation-free -----
+    let (_adm, adm_allocs) = measure_allocs(|| admit_supporting_evidence(&ev, &ctx).unwrap());
+    assert_eq!(adm_allocs, 0, "successful QC admission reads only — no allocation");
+
+    // ----- (2) encode_record: one pre-sized allocation at the admitted cap -----
+    let _ = encode_record(&dec_evidence, &ctx).unwrap(); // warm up lazy state
+    let (enc_ev, enc_ev_allocs) = measure_allocs(|| encode_record(&dec_evidence, &ctx).unwrap());
+    assert_eq!(enc_ev_allocs, 1, "max-QC evidence encode: exactly one (pre-sized) allocation");
+    assert_eq!(
+        enc_ev.capacity() as u128,
+        max_qc,
+        "encode backing capacity == admitted serialized cap (release-path pre-size)"
+    );
+    let (enc_cmp, enc_cmp_allocs) = measure_allocs(|| encode_record(&dec_complete, &ctx).unwrap());
+    assert_eq!(enc_cmp_allocs, 1, "max-QC complete encode: exactly one (pre-sized) allocation");
+    assert_eq!(enc_cmp.capacity() as u128, max_qc, "complete encode backing == cap");
+    // The complete serialized record is strictly larger than the maximum-evidence
+    // record by exactly the anchor(32+8) + predecessor(8) payload bytes.
+    assert_eq!(
+        enc_cmp.len(),
+        enc_ev.len() + 48,
+        "maximum complete serialized record exceeds maximum evidence by anchor+predecessor"
+    );
+    assert!(enc_cmp.len() as u128 <= max_qc, "complete serialized record fits the cap");
+
+    // ----- (3) compute_evidence_lock_binding: measured FRESH (not the setup one) -----
+    let _ = compute_evidence_lock_binding(&[9u8; 32], 5, &ev, &ctx.authority_context_ref, &ctx)
+        .unwrap(); // warm up
+    let (fresh_binding, bind_allocs) = measure_allocs(|| {
+        compute_evidence_lock_binding(&[9u8; 32], 5, &ev, &ctx.authority_context_ref, &ctx).unwrap()
+    });
+    assert_eq!(
+        bind_allocs, 1,
+        "binding: exactly one pre-sized cert allocation (admission bounds precede it)"
+    );
+    assert_eq!(
+        fresh_binding, evidence_only.evidence_lock_binding,
+        "the freshly measured binding equals the deterministic setup binding"
+    );
+}
+
+/// Item C — maximum TC fixture dimensions asserted, then admission / encode /
+/// binding measured SEPARATELY.
+#[test]
+fn d7d14_c_max_tc_dimensions_and_separately_measured_paths() {
+    use qbind_node::safety_record_store::codec::{
+        admit_supporting_evidence, compute_evidence_lock_binding,
+    };
+    let ctx = ctx_n(4);
+    let n = ctx.n();
+    let s_sig = ctx.s_sig;
+
+    // ----- Fixture construction (OUTSIDE every measured interval) -----
+    let evidence_only = valid_tc_record_max(&ctx, 5, 6);
+    let complete = max_tc_locked_anchored(&ctx, 5, 6);
+
+    // ----- Asserted dimensions (before measurement) -----
+    let (rec_high_qc, tc) = match &evidence_only.evidence {
+        SupportingEvidence::TcDerived { high_qc, tc } => (high_qc, tc),
+        other => panic!("expected TcDerived, got {other:?}"),
+    };
+    assert_eq!(rec_high_qc.signers.len(), n, "record-level high-QC signer array == N");
+    assert_eq!(tc.signers.len(), n, "TC-level signer array == N");
+    assert_eq!(
+        tc.high_qc.as_ref().unwrap().signers.len(),
+        n,
+        "nested TC high-QC signer array == N"
+    );
+    assert_eq!(tc.signed_timeouts.len(), n, "N timeout entries");
+    // Unique authorized signers 0..N-1.
+    let unique: std::collections::BTreeSet<_> = tc.signers.iter().collect();
+    assert_eq!(unique.len(), n, "N unique authorized signers");
+    for (i, t) in tc.signed_timeouts.iter().enumerate() {
+        assert_eq!(t.signature.len(), s_sig, "each timeout signature is maximum admitted length");
+        assert_eq!(
+            t.high_qc.as_ref().unwrap().signers.len(),
+            n,
+            "each timeout-entry nested high-QC signer array == N"
+        );
+        assert_eq!(t.validator_id.as_u64(), i as u64, "dense unique per-entry signer");
+    }
+    assert!(evidence_only.committed_anchor.is_none() && evidence_only.predecessor_ref.is_none());
+    assert!(complete.committed_anchor.is_some() && complete.predecessor_ref.is_some());
+
+    let dec_evidence = DecodedRecord {
+        persistence_format_version: 1,
+        network_genesis_id: ctx.network_genesis_id,
+        publication_revision: 1,
+        record: SafetyRecord::Locked(evidence_only.clone()),
+    };
+    let dec_complete = DecodedRecord {
+        persistence_format_version: 1,
+        network_genesis_id: ctx.network_genesis_id,
+        publication_revision: 1,
+        record: SafetyRecord::Locked(complete.clone()),
+    };
+    let ev = evidence_only.evidence.clone();
+    let max_tc = max_tc_bytes(&ctx).unwrap();
+
+    // ----- (1) Successful structural + capacity admission: allocation-free -----
+    let (_adm, adm_allocs) = measure_allocs(|| admit_supporting_evidence(&ev, &ctx).unwrap());
+    assert_eq!(adm_allocs, 0, "successful TC admission reads only — no allocation");
+
+    // ----- (2) encode_record: one pre-sized allocation at the admitted cap -----
+    let _ = encode_record(&dec_evidence, &ctx).unwrap(); // warm up
+    let (enc_ev, enc_ev_allocs) = measure_allocs(|| encode_record(&dec_evidence, &ctx).unwrap());
+    assert_eq!(enc_ev_allocs, 1, "max-TC evidence encode: exactly one (pre-sized) allocation");
+    assert_eq!(enc_ev.capacity() as u128, max_tc, "encode backing == admitted TC cap");
+    let (enc_cmp, enc_cmp_allocs) = measure_allocs(|| encode_record(&dec_complete, &ctx).unwrap());
+    assert_eq!(enc_cmp_allocs, 1, "max-TC complete encode: exactly one (pre-sized) allocation");
+    assert_eq!(enc_cmp.capacity() as u128, max_tc, "complete encode backing == TC cap");
+    assert_eq!(
+        enc_cmp.len(),
+        enc_ev.len() + 48,
+        "maximum complete serialized record exceeds maximum evidence by anchor+predecessor"
+    );
+    assert!(enc_cmp.len() as u128 <= max_tc, "complete serialized record fits the TC cap");
+
+    // ----- (3) compute_evidence_lock_binding: measured FRESH (not the setup one) -----
+    let _ = compute_evidence_lock_binding(&[9u8; 32], 5, &ev, &ctx.authority_context_ref, &ctx)
+        .unwrap(); // warm up
+    let (fresh_binding, bind_allocs) = measure_allocs(|| {
+        compute_evidence_lock_binding(&[9u8; 32], 5, &ev, &ctx.authority_context_ref, &ctx).unwrap()
+    });
+    assert_eq!(
+        bind_allocs, 1,
+        "TC binding: exactly one pre-sized cert allocation (admission bounds precede it)"
+    );
+    assert_eq!(
+        fresh_binding, evidence_only.evidence_lock_binding,
+        "the freshly measured TC binding equals the deterministic setup binding"
+    );
+}

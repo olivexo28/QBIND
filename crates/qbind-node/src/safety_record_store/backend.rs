@@ -62,6 +62,13 @@ pub enum InjectFault {
     /// The batch write durably succeeds, but the caller is told the outcome is
     /// uncertain (success acknowledgement is lost after the durable write).
     UncertainAfterWrite = 3,
+    /// Test-only: the O1 legacy-namespace scan's raw-iterator status reports a
+    /// storage-layer iteration error. A real RocksDB raw iterator cannot be forced
+    /// to fail its status deterministically, so this narrowly test-gated fault
+    /// drives the exact post-scan error branch of
+    /// [`SafetyBackend::first_unrecognized_safety_key`] (the typed, allocation-free
+    /// `ReadFailedDetail::NamespaceScan` refusal) through the real O1 path.
+    FailNamespaceScan = 4,
 }
 
 /// A shared serialization domain. The owned guard proves the single-writer
@@ -356,8 +363,16 @@ impl SafetyBackend {
         }
         // Surface a storage-layer iteration error rather than silently treating
         // it as "namespace clean".
-        iter.status()
-            .map_err(|_e| SafetyStoreError::ReadFailed(ReadFailedDetail::NamespaceScan))?;
+        let status = iter.status();
+        // Test-only: a real raw-iterator status cannot be forced to fail
+        // deterministically, so the narrowly test-gated `FailNamespaceScan` fault
+        // drives this exact post-scan error branch — the typed, allocation-free
+        // `NamespaceScan` refusal the real status-failure path constructs — through
+        // the live O1 operation.
+        if self.injected() == InjectFault::FailNamespaceScan {
+            return Err(SafetyStoreError::ReadFailed(ReadFailedDetail::NamespaceScan));
+        }
+        status.map_err(|_e| SafetyStoreError::ReadFailed(ReadFailedDetail::NamespaceScan))?;
         Ok(None)
     }
 
@@ -520,6 +535,7 @@ impl SafetyBackend {
             1 => InjectFault::FailBeforeSubmit,
             2 => InjectFault::WriteErrors,
             3 => InjectFault::UncertainAfterWrite,
+            4 => InjectFault::FailNamespaceScan,
             _ => InjectFault::None,
         }
     }
