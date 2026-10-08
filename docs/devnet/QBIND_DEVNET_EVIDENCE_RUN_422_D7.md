@@ -16551,3 +16551,123 @@ SECURITY_POSTURE=RS1-OPEN / PUBLIC-DEVNET-NO-GO
 ```
 
 C4/C5 remain OPEN; fail-closed `CurrentEpochUnavailable` unchanged. No production construction, startup/consensus/signing integration, verifier wiring, authority/epoch mutation, transport change, peer-driven apply, anti-rollback establishment, activation, renaming, D15, or Run 423 work was performed.
+
+
+## RUN 422 D7-D14 — L1/L2 continuation: reservation-lifetime evidence completed at the ACTUAL allocation boundaries (in-`validate_decoded` O3 observation + point-in-time O5 publish-boundary observation), with the two exact sensitivity mutations executed (code + test + docs, this continuation pass)
+
+**This section supersedes the earlier F1/F2 "Completed" claims above.** The prior F1 evidence sampled the operational reservation *immediately before* `validate_decoded` (`o3_phase_reservation_sample()`), and the prior F2/`d7d14_r4` evidence read the *historical* `accounting_peak()`. Per the D7-D14 continuation requirement, neither a pre-validation sample nor a historical peak establishes that the covering reservation is *still active through the allocation it must cover*. This pass adds the two missing observations at the actual allocation boundaries and executes the two exact mutations specified. The earlier experiments are preserved below as **narrower historical evidence**; they are not withdrawn.
+
+### Baseline for this pass (actual, not the report)
+
+Supplied/worked branch `copilot/copilotcopilotcopilotcopilotcopilotcopilotrun-422-yet-again` (used as-supplied; **not** renamed/switched to the report's `copilot/copilotcopilotcopilotcopilotcopilotrun-422-complet`). Starting HEAD `6c2634eb5e8af5d9777da2dd0d806a978012c42e`, upstream `origin/copilotcopilotcopilotcopilotcopilotcopilotcopilotrun-422-yet-again` (same name), worktree clean at start. The reviewed object `9f17f6051493b791db7eb653157fb87744e6e2da` was **not** initially present (shallow single-branch clone) and was fetched (`git fetch origin 9f17f60…`). It is **not** an ancestor of the starting HEAD: both share parent `5ac0ae5b9fa64e182bbe31edb7f8515d2bc1c130` (the merge-base). Scoped content correspondence: `git diff 9f17f60 6c2634e` over `crates/qbind-node/src/safety_record_store/**` and the D7-D14 test file reports **zero** hunks — every byte of the five `safety_record_store/*.rs` sources and the test file is identical, so the starting working tree already carried the complete reviewed implementation; the only `9f17f60`↔`6c2634e` differences are two docs (`QBIND_DEVNET_EVIDENCE_RUN_422_D7.md`, the contract) that differ **only** by CRLF/LF normalization of otherwise identical text (not byte-identical, explicitly an EOL-normalization difference, not a content change). The obsolete `0f258734…` task text was **not** restored. Line endings: all four edited Rust files and the two edited CRLF docs keep CRLF with no final newline (sources still terminate at `}`); `contradiction.md` keeps LF with no final newline. Changed paths this pass: `crates/qbind-node/src/safety_record_store/{owner,validate,backend}.rs`, `crates/qbind-node/tests/run_422_d7d14_safety_record_store_tests.rs`, and the three authorized docs. The source mutations used by the two experiments were temporary; both were restored and re-verified byte-identical by SHA-256 (hashes below).
+
+All new observation machinery is test-gated (`#[cfg(any(test, feature = "test-utils"))]`) and absent from the default/release build; no accepted bound, fixture, persistence format, cryptographic identifier, ownership rule, recovery semantic, or default-disabled/MainNet-refusal policy changed. `GEN_STRUCT_MAX = 384`, `CAPNORM_SLACK = 0`, `max_component_aggregate_bytes = max_aggregate_retained_bytes`, N=4 aggregate `7772`, the three encoded-buffer roles, borrowed `CMP_SPAN`, and all multiplicities are unchanged.
+
+### L1 — O3 scratch reservation observed ACTIVE inside `validate_decoded` (max QC and complete max TC)
+
+New instrumentation: `owner::observe_in_validation_reservation()` samples the operational accountant via a cloned `SharedAccountant` handle armed by `read_validate` immediately before `validate_decoded` and disarmed immediately after; `validate_decoded` invokes it while its record-sized correspondence re-encode buffer (`reencoded`) is **still live**, i.e. during the O3 validation allocation — not merely up to the point just before it. Read back in the tests via `owner::o3_in_validation_reservation_sample()`. This observes the live component-owned validation allocation against the active O3 reservation at the same phase, for both the maximum QC and the maximum COMPLETE 811-byte TC driven through real `owner.read_validate`.
+
+`operation/phase | actual live objects | observed charge | active covering reservations | assertion | evidence type | outcome`
+
+| operation/phase | actual live objects | observed charge | active covering reservations | assertion | evidence type | outcome |
+|---|---|---|---|---|---|---|
+| O3 `read_validate` entering validation (QC & TC) | retained-holder (`encoded` + retained gen + handle) + live transient `DecodedRecord` + record-sized `reencoded` correspondence buffer | operational `current()` sampled **inside** `validate_decoded` while `reencoded` is live = `2870` | retained-holder `2051` + O3 scratch `819` | `o3_in_validation_reservation_sample() == holder + o3_scratch` (2870) | allocation + active-reservation observation (point-in-time, inside the allocation) | QC `d7d14_r3_…_qc` and TC `d7d14_r3_…_tc` pass |
+| O3 operational peak (QC & TC) | same phase | `accounting_peak() == 2870` | holder + scratch | `accounting_peak() == 2870` | reservation peak (historical) | pass (retained, now complemented by the in-validation sample) |
+| O3 transfer/ release | `ValidatedRecord` holder; scratch dropped at O3 return | post-O3 `current()==holder 2051`; `==0` on proof drop | holder only | `accounting_current()==holder`, then `==0` | reservation observation | pass |
+
+This establishes both required facts: (1) the observed live component-owned charge is covered by its active reservations, and (2) the required O3 scratch reservation remains active **through** the validation allocation phase it covers — not merely up to the pre-validation sample.
+
+### L1 exact after-sample mutation, failure, and restoration
+
+Mutation (exact placement): in `owner::read_validate`, `drop(_scratch_res);` was inserted **after** the existing `O3_PHASE_RESERVATION_SAMPLE` assignment and **before** the call to `validate_decoded`. The reservation amount, the existing pre-validation sample, the earlier recorded peak, and the real validation allocations/behaviour were all left unchanged. The pre-validation sample still read `2870` and the operational peak still read `2870`; only the new in-validation observation detected the released scratch, failing for both QC and TC for exactly that reason:
+
+```
+---- d7d14_r3_o3_real_read_validate_max_complete_qc_operational_coverage (tests:6362) ----
+assertion `left == right` failed: the O3 scratch reservation must remain live INSIDE
+validate_decoded (QC), observed while the record-sized validation buffer is live
+  left: 2051
+ right: 2870
+
+---- d7d14_r3_o3_real_read_validate_max_complete_tc_operational_coverage (tests:6500) ----
+assertion `left == right` failed: the O3 scratch reservation must remain live INSIDE
+validate_decoded (TC), observed while the record-sized validation buffer is live
+  left: 2051
+ right: 2870
+```
+
+The failure is the new in-validation assertion (not the pre-validation sample, not the peak, not a compilation error, not an unrelated assertion). `owner.rs` was then restored and hashed: `sha256 = d531f6d4e45ef1ec3f200e1c2a93b408d14e6dbc21cfdf62640332c8cded1467` (matches the pre-experiment corrected hash; `git diff --stat` empty), and both R3 tests pass again.
+
+### L2 — O5 operation reservation observed ACTIVE at the `publish_atomic` boundary (point-in-time, not a peak)
+
+New instrumentation: at the real `publish_atomic` submit boundary (backend.rs), alongside the retained Item-D envelope-capacity observation, `PUBLISH_RESERVATION_OBS` now records the point-in-time `(operational_current, aggregate_current)` **while both CRC envelopes coexist** with the read-back, transient decode, metadata payload, and retained O3 proof. Read back via `backend::observed_publish_reservations()`. For the N=4 fixture the simultaneously-live component-owned set and its active reservations are:
+
+| operation/phase | actual live objects | observed charge | active covering reservations | assertion | evidence type | outcome |
+|---|---|---|---|---|---|---|
+| O5 `publish_atomic` boundary | retained O3 proof holder (original encoded bytes + retained content) + fresh read-back `stored` + fresh transient `_stored_decoded` + metadata payload + **record CRC envelope (815)** + **metadata CRC envelope (46)** | operational `current()` sampled **inside** `publish_atomic` while both envelopes are live = `4877` | live O3 holder `2051` + O5 operation `2826` (`rec 811 + META 42 + transient 1112 + staging 861`) | `observed_publish_reservations().0 == holder + o5_charge` (4877) | allocation + active-reservation observation (point-in-time, at the boundary) | `d7d14_d` passes |
+| O5 boundary aggregate | same + live context ownership | aggregate `current()` at the boundary | ≤ aggregate `7772` | `observed_publish_reservations().1 <= agg_cap` | reservation observation | pass |
+| O5 envelope capacities (retained Item-D) | record/meta CRC envelopes inside `publish_atomic::wrap` | `815` / `46` observed capacities | `publication_staging_charge` | `== 815`, `== 46`, sum ≤ staging | allocation observation | pass (retained) |
+
+Context, holder, and operation ownership are kept distinguishable: the holder is the retained O3 proof's reservation (counted once, not re-added for the retained operand), the operation charge is the O5 reservation, and context ownership is separate in the aggregate. The expected operational reservation for the N=4 fixture is exactly `holder 2051 + O5 operation 2826 = 4877`, established as a live boundary measurement rather than a helper result or historical peak.
+
+### L2 exact pre-publication reservation-release mutation, failure, and restoration
+
+Mutation (exact placement): in `owner::reacknowledge`, `drop(_o5_res);` was inserted **immediately before** the call to `publish_atomic`, after the read-back and all prerequisite checks (byte-for-byte equality, revision fence, capability/incarnation). `publication_staging_charge()`, the reservation's initial amount, the earlier operational peak, and the real publication/envelope allocations were all left intact. The earlier peak (`accounting_peak() == 4877`, asserted by `d7d14_r4`) was unchanged and that test still PASSED; only the point-in-time boundary observation detected the released reservation and failed for exactly that reason:
+
+```
+---- d7d14_d_publication_staging_boundary_observed_independently (tests:8101) ----
+assertion `left == right` failed: active operational reservation at the O5 publish boundary
+must be the live holder plus the O5 operation charge (holder 2051 + o5 2826); a lower value
+means the O5 reservation was not active while the envelopes coexist
+  left: 2051
+ right: 4877
+
+---- d7d14_r4_o5_reacknowledge_max_complete_tc_publication_boundary_coverage ---- ok
+(historical-peak assertion unaffected: accounting_peak()==4877 still holds)
+```
+
+The failure is the new publication-boundary assertion, caused by the reservation no longer being active while the objects coexist — not by removing the record-envelope term from the helper, omitting admission, or changing expected arithmetic (the r4 peak and staging arithmetic are untouched and still pass). `owner.rs` was then restored and hashed: `sha256 = d531f6d4e45ef1ec3f200e1c2a93b408d14e6dbc21cfdf62640332c8cded1467` (matches the pre-experiment corrected hash; `git diff --stat` empty), and `d7d14_d` passes again.
+
+### Evidence-type separation (this pass)
+
+* **Source-derived reasoning.** The O3 phase terms (`holder 2051`, `o3_scratch 819`) and the O5 terms (`rec 811`, `META 42`, `transient 1112`, `staging 861`, `o5_charge 2826`) are derived from the profile helpers, independent of the operation under test.
+* **Supporting arithmetic.** `holder + o3_scratch = 2870`; `holder + o5_charge = 2051 + 2826 = 4877`; `staging = (4+811)+(4+42) = 861`.
+* **Allocation/object observations.** The live `reencoded` record-sized validation buffer (L1) and the two live CRC envelopes `815`/`46` (L2, retained Item-D).
+* **Active-reservation observations.** The in-`validate_decoded` operational sample `2870` (L1) and the in-`publish_atomic` operational/aggregate boundary sample `4877`/≤`7772` (L2) — both point-in-time, inside the allocation they cover, distinct from the historical peaks.
+* **Executed mutation sensitivity.** The two exact mutations above (L1 after-sample scratch release; L2 pre-publish `_o5_res` release), each failing only the new boundary assertion, then restored byte-identical.
+
+### Earlier experiments preserved as narrower historical evidence
+
+The earlier F1 experiment (O3 scratch released *before the old pre-validation sample*, collapsing that sample and the peak) and the earlier F2 experiment (removing the record-envelope term from `publication_staging_charge`, breaking the envelope-coverage arithmetic) remain valid but narrower: the first probed the reservation only up to the pre-validation sample; the second probed helper arithmetic, not reservation lifetime at the write boundary. They are retained above and not withdrawn; the L1/L2 experiments in this section are the stronger boundary-lifetime evidence that supersedes the F1/F2 *completion* claims.
+
+### Preserved provenance and descriptions (unchanged, re-affirmed)
+
+The corrected R1 provenance is preserved: the old real-`open()` failure (`2013` vs `1965`) is attributed to the earlier audit; the standalone 48-byte `String` measurement plus `reservation + 48 = 2013` is supporting arithmetic (not a newly executed old-path failure); and the current typed-refusal regression drives the real `open()`. `SemanticRefusalDetail` contains `Message(String)` plus the two protected variants `RecordMetaRevisionDisagreement { record_revision: u64, meta_revision: u64 }` and `PinnedContextDisagreement`; it derives `Clone` but is **not** `Copy` (because of `Message(String)`), and the protected variants carry allocation-free scalar data built on the `load_established` path.
+
+### Literal validation outcomes (this pass, this revision, no PR)
+
+* `rustfmt` check on the four edited Rust files → edited/added regions **clean**; the only residual diffs are the module-wide no-final-newline EOF convention (preserved) and unrelated pre-existing diffs in other crates/examples. CRLF line endings preserved on all four edited Rust files.
+* `cargo build -p qbind-node --lib` → **exit 0**.
+* `cargo test -p qbind-node --no-run` → **exit 0** (gated D7-D14/m16 skipped by `required-features`).
+* `cargo test -p qbind-node --features test-utils --no-run` → **exit 0**.
+* `cargo test -p qbind-node --features test-utils --test run_422_d7d14_safety_record_store_tests` → **ok. 132 passed; 0 failed; 1 ignored** (`child_process_entry` ignored). No new tests were added this pass; the L1/L2 assertions extend the existing `d7d14_r3_…_qc`, `d7d14_r3_…_tc`, and `d7d14_d` tests.
+* `cargo test -p qbind-node --features test-utils --test m16_epoch_transition_hardening_tests` → **ok. 14 passed; 0 failed; 0 ignored**.
+* `cargo clippy -p qbind-node --features test-utils --tests` → **exit 0**. The D7-D14 target emits 8 PRE-EXISTING `manual_div_ceil` warnings on unrelated `(n + 7) / 8` lines (404/405/1444/3741/5462/5588/7589/7664); the lines added this pass introduce **zero** new clippy findings.
+* `cargo build --release -p qbind-node` → **exit 0** (build compatibility only — NOT running-node recovery acceptance or production readiness).
+* Secret scanning over the four edited Rust files → **no secrets**. Non-wiring audit: the four changed source/test files touch only test-gated observation hooks inside `safety_record_store`; `safety_record_store` remains referenced only by the unchanged `lib.rs` `pub mod`; default `Disabled` policy, MainNet refusal, and `test-utils` gating unchanged; no production/startup/consensus/decision/signing/verifier/transport/authority/epoch/activation/anti-rollback wiring was added.
+* Independent Code Review / CodeQL: recorded literally in the final report; any unavailable review or skipped CodeQL remains an OPEN external gate and acceptance is **not** promoted on its basis. A "trivial" CodeQL skip, if it occurs, is still a skipped scan, not assurance.
+
+### Scope and verdicts (retained, NOT promoted)
+
+This bounded pass does **not** complete the full object-by-object inventory across every O1–O5 path; that remains an unfinished implementation item, and **H22 remains separately limited** (O3 yields `Unverified`; no production consumer boundary was manufactured). Independent Code Review / CodeQL remain open external gates. No production construction, startup/consensus/signing integration, verifier wiring, authority/epoch mutation, transport change, peer-driven apply, anti-rollback establishment, activation, renaming, D15, or Run 423 work was performed.
+
+```
+D7D14_STORAGE_COMPONENT=PARTIAL-IMPLEMENTATION
+D7D14_STORAGE_ACCEPTANCE=INCOMPLETE
+DURABLE_ANTI_ROLLBACK=NOT-ESTABLISHED
+GENESIS_AUTHORITY_ACTIVATION=DISABLED
+PRODUCTION_WIRE_CHAIN_ID_BEHAVIOR=UNCHANGED
+CONFIGURED_AUTHORITY_RELEASE_BINARY_EVIDENCE=NOT-YET-CAPTURED
+SECURITY_POSTURE=RS1-OPEN / PUBLIC-DEVNET-NO-GO
+```
+
+C4/C5 remain OPEN; fail-closed `CurrentEpochUnavailable` unchanged. Stop after this bounded continuation.

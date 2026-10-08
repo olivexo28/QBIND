@@ -52,6 +52,60 @@ pub fn o3_phase_reservation_sample() -> u128 {
     O3_PHASE_RESERVATION_SAMPLE.with(|c| c.get())
 }
 
+// Test-only in-validation reservation observation (RUN 422 D7-D14 L1). The
+// `O3_PHASE_RESERVATION_SAMPLE` above samples immediately BEFORE
+// `validate_decoded`; this complementary hook samples the SAME operational
+// accountant from INSIDE `validate_decoded`, while its record-sized correspondence
+// re-encode buffer is still live. A regression that releases the O3 scratch
+// reservation after the pre-validation sample but before the validation allocation
+// is therefore still detected: this in-validation sample collapses to the bare
+// holder. A cloned `SharedAccountant` handle is armed around the call by
+// `read_validate`; the hook is a no-op unless armed. Gated behind
+// `cfg(test)`/`test-utils`; it never affects production behaviour.
+#[cfg(any(test, feature = "test-utils"))]
+thread_local! {
+    static O3_IN_VALIDATION_SAMPLE: std::cell::Cell<u128> = const { std::cell::Cell::new(0) };
+    static O3_IN_VALIDATION_SAMPLER: std::cell::RefCell<
+        Option<super::accounting::SharedAccountant>,
+    > = const { std::cell::RefCell::new(None) };
+}
+
+/// Test-only: the operational reservation sampled from INSIDE `validate_decoded`
+/// during the last O3 validation allocation phase, while the record-sized
+/// correspondence re-encode buffer was live.
+#[cfg(any(test, feature = "test-utils"))]
+pub fn o3_in_validation_reservation_sample() -> u128 {
+    O3_IN_VALIDATION_SAMPLE.with(|c| c.get())
+}
+
+/// Test-only: arm the in-validation sampler with a cloned operational accountant
+/// handle. Called by `read_validate` immediately before `validate_decoded`.
+#[cfg(any(test, feature = "test-utils"))]
+fn arm_in_validation_sampler(acct: super::accounting::SharedAccountant) {
+    O3_IN_VALIDATION_SAMPLER.with(|s| *s.borrow_mut() = Some(acct));
+}
+
+/// Test-only: disarm the in-validation sampler. Called by `read_validate`
+/// immediately after `validate_decoded` so no later call resamples a stale handle.
+#[cfg(any(test, feature = "test-utils"))]
+fn disarm_in_validation_sampler() {
+    O3_IN_VALIDATION_SAMPLER.with(|s| *s.borrow_mut() = None);
+}
+
+/// Crate/test-only: invoked by `validate_decoded` while its record-sized
+/// correspondence re-encode buffer is live, to record the active operational
+/// reservation at the validation allocation peak. A no-op unless a sampler was
+/// armed by `read_validate`.
+#[cfg(any(test, feature = "test-utils"))]
+pub(crate) fn observe_in_validation_reservation() {
+    O3_IN_VALIDATION_SAMPLER.with(|s| {
+        if let Some(acct) = s.borrow().as_ref() {
+            let current = acct.current();
+            O3_IN_VALIDATION_SAMPLE.with(|c| c.set(current));
+        }
+    });
+}
+
 /// Decoded initialization metadata (one per backend DB).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SafetyMeta {
@@ -606,7 +660,18 @@ impl SafetyRecordOwner {
         // capability, stamped with THIS backend's ownership incarnation. Only a
         // successful O3 on an established backend mints an O5-usable token — the
         // public `validate_decoded` and the bootstrap builder never do.
-        let validated = validate_decoded(decoded, record_bytes, self.pinned(), history)?;
+        // L1 (test-only): arm the in-validation reservation sampler with a cloned
+        // operational accountant handle so `validate_decoded` can observe the active
+        // reservation WHILE its record-sized correspondence re-encode buffer is live
+        // (RUN 422 D7-D14 L1) — establishing the O3 scratch stays active THROUGH the
+        // validation allocation phase, not merely up to the sample above. Disarmed
+        // immediately after so no later `validate_decoded` resamples a stale handle.
+        #[cfg(any(test, feature = "test-utils"))]
+        arm_in_validation_sampler(self.backend.accounting().clone());
+        let validated = validate_decoded(decoded, record_bytes, self.pinned(), history);
+        #[cfg(any(test, feature = "test-utils"))]
+        disarm_in_validation_sampler();
+        let validated = validated?;
         Ok(validated
             .with_holder(holder_res)
             .grant_recovery_capability(self.backend.incarnation()))

@@ -86,6 +86,14 @@ pub fn validate_decoded<H: CommittedHistory + ?Sized>(
     // scratch to a single record-sized buffer, which is what the O3 reservation in
     // `read_validate` admits. This is a lifetime correction only: it never changes
     // which bytes are retained for O5 (the caller's `encoded` is untouched).
+    // Test-only: observe the active operational reservation at the O3 validation
+    // allocation peak — while the record-sized correspondence re-encode buffer is
+    // still live — so a scratch reservation released after the pre-validation sample
+    // but before this point is detected (RUN 422 D7-D14 L1). No-op unless
+    // `read_validate` armed the sampler; never affects production behaviour.
+    #[cfg(any(test, feature = "test-utils"))]
+    super::owner::observe_in_validation_reservation();
+
     drop(reencoded);
 
     // Common identity binding to the pinned context (P4 prelude).

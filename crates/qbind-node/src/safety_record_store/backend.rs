@@ -46,6 +46,7 @@ thread_local! {
 #[cfg(any(test, feature = "test-utils"))]
 pub fn arm_publish_staging_observation() {
     PUBLISH_STAGING_OBS.with(|c| c.set(None));
+    PUBLISH_RESERVATION_OBS.with(|c| c.set(None));
 }
 
 /// Test-only: read the `(record_envelope_capacity, meta_envelope_capacity)`
@@ -54,6 +55,32 @@ pub fn arm_publish_staging_observation() {
 #[cfg(any(test, feature = "test-utils"))]
 pub fn observed_publish_staging() -> Option<(usize, usize)> {
     PUBLISH_STAGING_OBS.with(|c| c.get())
+}
+
+// Test-only publication-boundary reservation observation (RUN 422 D7-D14 L2).
+// Complementary to `PUBLISH_STAGING_OBS` above: at the SAME `publish_atomic`
+// submit boundary — while the two CRC envelopes coexist with the read-back,
+// transient decode, metadata payload, and retained proof — this records the
+// ACTIVE `(operational_current, aggregate_current)` reservations. It is a
+// point-in-time BOUNDARY measurement, not a historical peak, so a reservation
+// released before the publish (e.g. the O5 `_o5_res` dropped before its
+// `publish_atomic`) collapses the observed operational value. Absent from
+// default production builds.
+#[cfg(any(test, feature = "test-utils"))]
+thread_local! {
+    static PUBLISH_RESERVATION_OBS: std::cell::Cell<Option<(u128, u128)>> =
+        const { std::cell::Cell::new(None) };
+}
+
+/// Test-only: read the `(operational_current, aggregate_current)` active
+/// reservations observed at the most recent `publish_atomic` submit boundary on
+/// this thread — the live component reservations WHILE both CRC envelopes coexist
+/// with the rest of the live set (RUN 422 D7-D14 L2). A point-in-time boundary
+/// measurement, NOT a historical peak. `None` if no publish reached the boundary
+/// since arming.
+#[cfg(any(test, feature = "test-utils"))]
+pub fn observed_publish_reservations() -> Option<(u128, u128)> {
+    PUBLISH_RESERVATION_OBS.with(|c| c.get())
 }
 
 /// The metadata key (one per backend DB).
@@ -494,6 +521,14 @@ impl SafetyBackend {
         {
             let caps = (record_envelope.capacity(), meta_envelope.capacity());
             PUBLISH_STAGING_OBS.with(|c| c.set(Some(caps)));
+            // L2: sample the active operational + aggregate reservations at this
+            // same boundary, while both CRC envelopes coexist with the rest of the
+            // live set, so a reservation released before `publish_atomic` is detected.
+            let reservations = (
+                self.accounting().current(),
+                self.accounting_aggregate_current(),
+            );
+            PUBLISH_RESERVATION_OBS.with(|c| c.set(Some(reservations)));
         }
         batch.put(META_KEY, meta_envelope);
         batch.put(RECORD_KEY, record_envelope);
