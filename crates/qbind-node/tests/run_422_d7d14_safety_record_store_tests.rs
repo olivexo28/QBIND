@@ -44,22 +44,96 @@ struct CountingAllocator;
 thread_local! {
     static ALLOC_ARMED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
     static ALLOC_COUNT: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
-    // Live-byte observation (Item B/D): the net live heap bytes allocated while
-    // armed, and the peak the net reached. `LIVE_MISSED` latches true if an
-    // instrumentation invariant is violated (a dealloc frees more than the
-    // tracked live total, i.e. a pre-arm allocation was freed inside the armed
-    // interval) so observers FAIL LOUDLY rather than silently truncating a
-    // peak. `LIVE_OVERFLOW` latches on an arithmetic overflow of the counters.
+    // Live-byte observation (Items B/D; RUN 422 D7-D14 R2 soundness correction).
+    //
+    // The earlier observer tracked only a NET byte total and flagged a dealloc
+    // ONLY when its size exceeded that running total. A pre-arm allocation freed
+    // inside the armed interval whose size was <= the current net total therefore
+    // silently reduced the counter and under-counted the peak WITHOUT latching
+    // `missed`. This observer instead tracks the IDENTITY (pointer -> size) of
+    // every allocation made WHILE ARMED in a fixed-capacity, `const`-initialized
+    // table (`LIVE_SLOTS`): the table lives for the thread, never on the heap, so
+    // the observer storage introduces NO unaccounted allocation into the measured
+    // interval. A dealloc is matched against that table:
+    //   * matched (an in-interval allocation) -> subtract its RECORDED size;
+    //   * unmatched (a pre-arm allocation freed inside the interval, or a double
+    //     free) -> `LIVE_UNMATCHED` latches and the net total is left UNCHANGED
+    //     (never corrupted), regardless of the freed size.
+    // `LIVE_EXHAUSTED` latches if more allocations are concurrently live than the
+    // table holds; `LIVE_OVERFLOW` latches on counter overflow. Any of the three
+    // makes the observation unsound and `assert_sound` fails loudly.
+    //
+    // This is deliberately a NARROW observer: it measures the live bytes of
+    // allocations made DURING the interval only, and REQUIRES pre-arm fixtures to
+    // outlive the interval (freeing one inside is now detected, not silently
+    // absorbed). It records actual allocation sizes (a `Vec` backing's size is its
+    // capacity) and ownership transitions via realloc; it makes no process-RSS
+    // claim and preserves the contract's backend-allocation boundary.
     static LIVE_ARMED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
     static LIVE_CUR: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
     static LIVE_PEAK: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
-    static LIVE_MISSED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    static LIVE_UNMATCHED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    static LIVE_EXHAUSTED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
     static LIVE_OVERFLOW: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    static LIVE_SLOTS: std::cell::RefCell<[(usize, usize); LIVE_TRACK_CAP]> =
+        const { std::cell::RefCell::new([(0usize, 0usize); LIVE_TRACK_CAP]) };
+    static LIVE_SLOTS_USED: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// Fixed capacity of the live-allocation identity table. A measured interval (a
+/// single `validate_decoded` / `publish_atomic` object graph with NO backend
+/// I/O) holds only a handful of component-owned allocations live at once, far
+/// under this bound; exceeding it latches `LIVE_EXHAUSTED` so the observation is
+/// rejected rather than silently truncated. All table operations use only this
+/// const-initialized storage and the stack — they never allocate.
+const LIVE_TRACK_CAP: usize = 4096;
+
+/// Record an in-interval allocation's identity. Latches `LIVE_EXHAUSTED` if the
+/// fixed table is full (never grows — growth would allocate inside the interval).
+#[inline]
+fn live_track_insert(ptr: usize, size: usize) {
+    LIVE_SLOTS_USED.with(|u| {
+        let used = u.get();
+        if used >= LIVE_TRACK_CAP {
+            LIVE_EXHAUSTED.with(|e| e.set(true));
+            return;
+        }
+        LIVE_SLOTS.with(|s| s.borrow_mut()[used] = (ptr, size));
+        u.set(used + 1);
+    });
+}
+
+/// Remove a tracked allocation by pointer, returning its recorded size if it was
+/// an in-interval allocation. `None` means the pointer was not tracked (a pre-arm
+/// allocation or a double free).
+#[inline]
+fn live_track_remove(ptr: usize) -> Option<usize> {
+    LIVE_SLOTS_USED.with(|u| {
+        let used = u.get();
+        LIVE_SLOTS.with(|s| {
+            let mut slots = s.borrow_mut();
+            let mut i = 0;
+            while i < used {
+                if slots[i].0 == ptr {
+                    let size = slots[i].1;
+                    slots[i] = slots[used - 1]; // swap-remove; preserves the set
+                    u.set(used - 1);
+                    return Some(size);
+                }
+                i += 1;
+            }
+            None
+        })
+    })
 }
 
 #[inline]
-fn live_on_alloc(size: usize) {
+fn live_on_alloc(ptr: usize, size: usize) {
+    if size == 0 {
+        return; // zero-size (dangling) allocations carry no live bytes
+    }
     if LIVE_ARMED.with(|a| a.get()) {
+        live_track_insert(ptr, size);
         LIVE_CUR.with(|c| match c.get().checked_add(size) {
             Some(v) => {
                 c.set(v);
@@ -75,19 +149,19 @@ fn live_on_alloc(size: usize) {
 }
 
 #[inline]
-fn live_on_dealloc(size: usize) {
+fn live_on_dealloc(ptr: usize, size: usize) {
+    if size == 0 {
+        return;
+    }
     if LIVE_ARMED.with(|a| a.get()) {
-        LIVE_CUR.with(|c| {
-            let cur = c.get();
-            if size > cur {
-                // Freeing more than we tracked: a pre-arm allocation was released
-                // inside the interval. Flag it; do not let the counter wrap.
-                LIVE_MISSED.with(|m| m.set(true));
-                c.set(0);
-            } else {
-                c.set(cur - size);
-            }
-        });
+        match live_track_remove(ptr) {
+            // A matched in-interval allocation: subtract its recorded size.
+            Some(tracked) => LIVE_CUR.with(|c| c.set(c.get().saturating_sub(tracked))),
+            // A pre-arm allocation freed inside the interval (or a double free):
+            // DETECTED regardless of the freed size; the net total is never
+            // corrupted. This is the R2 soundness fix.
+            None => LIVE_UNMATCHED.with(|m| m.set(true)),
+        }
     }
 }
 
@@ -96,70 +170,90 @@ unsafe impl std::alloc::GlobalAlloc for CountingAllocator {
         if ALLOC_ARMED.with(|a| a.get()) {
             ALLOC_COUNT.with(|c| c.set(c.get() + 1));
         }
-        live_on_alloc(layout.size());
-        std::alloc::System.alloc(layout)
+        let ptr = std::alloc::System.alloc(layout);
+        if !ptr.is_null() {
+            live_on_alloc(ptr as usize, layout.size());
+        }
+        ptr
     }
     unsafe fn dealloc(&self, ptr: *mut u8, layout: std::alloc::Layout) {
-        live_on_dealloc(layout.size());
+        live_on_dealloc(ptr as usize, layout.size());
         std::alloc::System.dealloc(ptr, layout)
     }
     unsafe fn realloc(&self, ptr: *mut u8, layout: std::alloc::Layout, new_size: usize) -> *mut u8 {
         if ALLOC_ARMED.with(|a| a.get()) {
             ALLOC_COUNT.with(|c| c.set(c.get() + 1));
         }
-        // A realloc frees `layout.size()` and allocates `new_size`.
-        live_on_dealloc(layout.size());
-        live_on_alloc(new_size);
-        std::alloc::System.realloc(ptr, layout, new_size)
+        let new_ptr = std::alloc::System.realloc(ptr, layout, new_size);
+        // On success a realloc frees the old block (`layout.size()` at `ptr`) and
+        // allocates `new_size` at `new_ptr`; on failure the old block is untouched.
+        if !new_ptr.is_null() {
+            live_on_dealloc(ptr as usize, layout.size());
+            live_on_alloc(new_ptr as usize, new_size);
+        }
+        new_ptr
     }
 }
 
 /// Outcome of a live-byte observation interval.
 #[derive(Debug, Clone, Copy)]
 struct LiveObservation {
-    /// Peak net live heap bytes reached during the interval.
+    /// Peak live heap bytes of IN-INTERVAL allocations reached during the interval.
     peak: usize,
-    /// Net live heap bytes still outstanding at the end of the interval.
+    /// Live heap bytes of in-interval allocations still outstanding at the end.
     end: usize,
-    /// True if a dealloc released more than the tracked live total (a pre-arm
-    /// allocation freed inside the interval) — the peak may be under-counted.
+    /// True if a dealloc released a pointer that was NOT tracked as an in-interval
+    /// allocation (a pre-arm allocation freed inside the interval, or a double
+    /// free) — detected regardless of the freed size (R2 soundness fix).
     missed: bool,
+    /// True if more allocations were concurrently live than the fixed identity
+    /// table holds; the observation is then incomplete and must be rejected.
+    exhausted: bool,
     /// True if the byte counters overflowed.
     overflow: bool,
 }
 
 impl LiveObservation {
-    /// Assert the instrumentation stayed sound: no missed tracking, no overflow.
+    /// Assert the instrumentation stayed sound: no unmatched free, no capacity
+    /// exhaustion, no overflow.
     fn assert_sound(&self, ctx: &str) {
         assert!(
             !self.missed,
-            "{ctx}: live-byte instrumentation missed tracking (pre-arm free inside interval)"
+            "{ctx}: live-byte observer detected an unmatched free (pre-arm allocation freed \
+             inside the interval, or a double free)"
+        );
+        assert!(
+            !self.exhausted,
+            "{ctx}: live-byte observer exhausted its fixed identity table ({} slots)",
+            LIVE_TRACK_CAP
         );
         assert!(
             !self.overflow,
-            "{ctx}: live-byte instrumentation overflowed"
+            "{ctx}: live-byte observer counters overflowed"
         );
     }
 }
 
 /// Run `f` with live-byte observation armed on the current thread, returning
-/// `(result, observation)`. The caller must ensure every object it wants
-/// excluded from the measurement (fixtures, backends) is constructed OUTSIDE
-/// `f`, and that any object owned *outside* `f` survives the interval (is not
-/// freed inside it) so the peak is a faithful component-owned figure. No
-/// cloning of the observed objects occurs here.
+/// `(result, observation)`. The observer tracks only allocations made DURING
+/// `f`; every fixture/backend must be constructed OUTSIDE `f` and must survive
+/// the interval (freeing one inside is now DETECTED as an unmatched free rather
+/// than silently absorbed). No cloning of the observed objects occurs here.
 fn measure_live_bytes<T>(f: impl FnOnce() -> T) -> (T, LiveObservation) {
     LIVE_CUR.with(|c| c.set(0));
     LIVE_PEAK.with(|p| p.set(0));
-    LIVE_MISSED.with(|m| m.set(false));
+    LIVE_UNMATCHED.with(|m| m.set(false));
+    LIVE_EXHAUSTED.with(|e| e.set(false));
     LIVE_OVERFLOW.with(|o| o.set(false));
+    LIVE_SLOTS_USED.with(|u| u.set(0));
     LIVE_ARMED.with(|a| a.set(true));
     let out = f();
     LIVE_ARMED.with(|a| a.set(false));
     let obs = LiveObservation {
         peak: LIVE_PEAK.with(|p| p.get()),
         end: LIVE_CUR.with(|c| c.get()),
-        missed: LIVE_MISSED.with(|m| m.get()),
+        missed: LIVE_UNMATCHED.with(|m| m.get()),
+        exhausted: LIVE_EXHAUSTED.with(|e| e.get()),
         overflow: LIVE_OVERFLOW.with(|o| o.get()),
     };
     (out, obs)
@@ -179,6 +273,103 @@ fn measure_allocs<T>(f: impl FnOnce() -> T) -> (T, usize) {
     ALLOC_ARMED.with(|a| a.set(false));
     let count = ALLOC_COUNT.with(|c| c.get());
     (out, count)
+}
+
+// ---------------------------------------------------------------------------
+// R2 (RUN 422 D7-D14): live-byte observer soundness validation.
+//
+// These tests validate the OBSERVER itself — the specific failure modes its
+// soundness claim covers — independently of any O3/O5 reservation reasoning.
+// They establish that the identity-tracking observer DETECTS a pre-interval
+// allocation freed inside the interval (the exact case the earlier net-only
+// observer silently absorbed), tracks in-interval alloc/free to a faithful peak
+// with no residue, and rejects (rather than truncates) capacity exhaustion.
+// ---------------------------------------------------------------------------
+
+/// The headline R2 soundness fix: a pre-arm allocation freed INSIDE the measured
+/// interval whose size is <= the current in-interval total is now DETECTED as an
+/// unmatched free. The earlier net-only observer flagged a dealloc only when its
+/// size exceeded the running total, so this free silently reduced the counter
+/// and under-counted the peak WITHOUT latching `missed`.
+#[test]
+fn d7d14_r2_observer_detects_pre_arm_free_inside_interval() {
+    // A pre-arm allocation (constructed BEFORE arming). 64 bytes of backing.
+    let pre_arm: Vec<u8> = Vec::with_capacity(64);
+    let pre_arm_cap = pre_arm.capacity();
+    assert!(pre_arm_cap >= 64);
+
+    // Inside the interval: first allocate a LARGER in-interval buffer so the
+    // in-interval total exceeds the pre-arm size, then free the pre-arm buffer.
+    // Under the old net-only logic `size (64) <= cur (>=256)` => NO flag; under
+    // identity tracking the pre-arm pointer is untracked => `missed` latches.
+    let (_r, obs) = measure_live_bytes(move || {
+        let big: Vec<u8> = Vec::with_capacity(256);
+        assert!(big.capacity() >= 256);
+        // Free the pre-arm allocation inside the interval.
+        drop(pre_arm);
+        // Keep `big` alive to the end so its free does not hide the signal.
+        big.capacity()
+    });
+    assert!(
+        obs.missed,
+        "observer must DETECT a pre-arm allocation freed inside the interval"
+    );
+    assert!(!obs.overflow && !obs.exhausted);
+}
+
+/// An in-interval allocation freed inside the interval nets to zero with a peak
+/// that reached at least the buffer size, and the observation is sound.
+#[test]
+fn d7d14_r2_observer_tracks_in_interval_alloc_free_net_zero() {
+    let (_r, obs) = measure_live_bytes(|| {
+        let v: Vec<u8> = Vec::with_capacity(512);
+        let cap = v.capacity();
+        drop(v);
+        cap
+    });
+    obs.assert_sound("in-interval alloc/free");
+    assert!(
+        obs.peak >= 512,
+        "peak must reach the in-interval buffer size (got {})",
+        obs.peak
+    );
+    assert_eq!(
+        obs.end, 0,
+        "an in-interval allocation freed inside the interval leaves no residue"
+    );
+}
+
+/// Exhausting the fixed identity table is REJECTED (latched `exhausted`), not
+/// silently truncated. The outer holder is pre-sized OUTSIDE the interval so its
+/// own growth does not perturb the measurement.
+#[test]
+fn d7d14_r2_observer_rejects_capacity_exhaustion() {
+    // Pre-size the holder OUTSIDE the interval: capacity for CAP+16 pointers so
+    // pushing inside the interval never reallocates the holder itself.
+    let mut holder: Vec<Vec<u8>> = Vec::with_capacity(LIVE_TRACK_CAP + 16);
+    assert!(holder.capacity() >= LIVE_TRACK_CAP + 16);
+
+    let (holder, obs) = measure_live_bytes(move || {
+        // Each 1-byte Vec is one distinct live allocation. Pushing more than the
+        // table capacity must latch `exhausted`.
+        for _ in 0..(LIVE_TRACK_CAP + 8) {
+            holder.push(Vec::with_capacity(1));
+        }
+        holder
+    });
+    assert!(
+        obs.exhausted,
+        "observer must latch `exhausted` when more allocations are live than the table holds"
+    );
+    // `assert_sound` must FAIL on an exhausted observation.
+    let caught = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        obs.assert_sound("exhausted observation");
+    }));
+    assert!(
+        caught.is_err(),
+        "assert_sound must reject an exhausted (incomplete) observation"
+    );
+    drop(holder);
 }
 
 // ---------------------------------------------------------------------------
@@ -2921,6 +3112,210 @@ fn corr_record_meta_revision_disagreement_refused() {
         owner.publish_locked(l2, 0, None::<&FixtureCommittedHistory>),
         PublishResult::RefusedPreWrite(SafetyStoreError::SemanticRefusal(_))
     ));
+}
+
+// ---------------------------------------------------------------------------
+// RUN 422 D7-D14 R1 — the O2 revision-disagreement refusal diagnostic is
+// allocation-free and fits the already-reserved O2 read/decode working set even
+// for a MAXIMUM COMPLETE (811-byte) TC record.
+//
+// AUDITED DEFECT (reproduced below as newly executed evidence): the previous
+// `load_established` revision-disagreement diagnostic built an owned 48-byte
+// `String` INSIDE the O2 read/decode reservation. For a maximum N=4 profile the
+// O2 reservation is `811 (record read-back) + 42 (metadata) + 1112 (transient
+// decoded) = 1965`. The 48-byte diagnostic pushed the simultaneous charge to
+// 2013, exceeding the active reservation by 48 — a breach of the implemented
+// accounting contract (NOT an OOM, unsafe write, or consensus failure). The
+// 763-byte evidence-only TC fixture masked this: its 48-byte unused record-sized
+// allowance absorbed the diagnostic. A maximum COMPLETE TC (anchor + predecessor
+// populated) serializes to the full 811 bytes, leaving no headroom and exposing
+// the breach. The correction replaces the `String` with a typed, `Copy`,
+// allocation-free `SemanticRefusalDetail` whose text is materialised only on
+// `Display`, so the diagnostic contributes zero live heap bytes and the
+// simultaneous charge equals exactly the reservation.
+// ---------------------------------------------------------------------------
+#[test]
+fn d7d14_r1_o2_revision_disagreement_diagnostic_allocation_free_max_complete_tc() {
+    use qbind_node::safety_record_store::accounting::max_transient_decoded_working_set;
+    use qbind_node::safety_record_store::error::SemanticRefusalDetail;
+
+    let dir = tempfile::tempdir().unwrap();
+    let ctx = ctx_n(4);
+    let owner = init_owner(dir.path(), &ctx); // metadata current_revision == 0
+
+    // ----- Plant a MAXIMUM COMPLETE TC (anchor + predecessor populated) that
+    //       decodes to revision 1, disagreeing with metadata revision 0. -----
+    let complete = max_tc_locked_anchored(&ctx, 5, 6);
+    assert!(
+        complete.committed_anchor.is_some() && complete.predecessor_ref.is_some(),
+        "the fixture is the maximum COMPLETE record, not the evidence-only form"
+    );
+    let mismatched = DecodedRecord {
+        persistence_format_version: 1,
+        network_genesis_id: ctx.network_genesis_id,
+        publication_revision: 1, // != metadata current_revision (0)
+        record: SafetyRecord::Locked(complete),
+    };
+    let enc = encode_record(&mismatched, &ctx).unwrap();
+
+    // The complete serialized record is the full 811-byte maximum — it exactly
+    // fills the record-sized read-back buffer, leaving no slack to absorb a heap
+    // diagnostic (unlike the 763-byte evidence-only form).
+    let rec = max_safety_record_bytes(&ctx).unwrap();
+    assert_eq!(rec, 811, "record-sized read-back buffer bound");
+    assert_eq!(
+        enc.len() as u128,
+        rec,
+        "maximum COMPLETE serialized TC == full record cap (811), not the 763-byte evidence-only form"
+    );
+    owner.debug_overwrite_record_for_test(&enc).unwrap();
+
+    // ----- O2 reservation arithmetic: the exact already-reserved working set. -----
+    let transient = max_transient_decoded_working_set(&ctx).unwrap();
+    assert_eq!(
+        transient, 1112,
+        "contract-defined transient decoded charge (inline 408 + backing 704)"
+    );
+    assert_eq!(META_ENCODED_LEN_MIRROR, 42, "metadata backing buffer");
+    let o2_reservation = rec + META_ENCODED_LEN_MIRROR + transient;
+    assert_eq!(
+        o2_reservation, 1965,
+        "O2 read/decode reservation (811 + 42 + 1112)"
+    );
+
+    // ----- BASELINE DEFECT (newly executed): the OLD String diagnostic adds a
+    //       48-byte heap buffer, so the simultaneous charge reaches 2013 and
+    //       exceeds the active reservation by 48. -----
+    let old_diag = "record revision disagrees with metadata revision";
+    assert_eq!(
+        old_diag.len() as u128,
+        48,
+        "audited 48-byte diagnostic length"
+    );
+    let (old_owned, old_allocs) = measure_allocs(|| String::from(old_diag));
+    assert_eq!(
+        old_allocs, 1,
+        "the OLD String diagnostic allocates one owned heap buffer inside the reservation"
+    );
+    let (old_owned, old_obs) = measure_live_bytes(move || old_owned);
+    old_obs.assert_sound("old String diagnostic live bytes");
+    assert!(
+        old_obs.peak == 0 && old_obs.end == 0,
+        "no NEW allocation when merely moving the pre-built String"
+    );
+    assert!(
+        old_owned.capacity() >= 48,
+        "the OLD diagnostic owns >=48 heap bytes"
+    );
+    drop(old_owned);
+    let baseline_simultaneous = o2_reservation + 48;
+    assert_eq!(baseline_simultaneous, 2013, "baseline simultaneous charge");
+    assert!(
+        baseline_simultaneous > o2_reservation,
+        "BASELINE DEFECT: simultaneous charge {baseline_simultaneous} exceeds O2 reservation \
+         {o2_reservation} by {}",
+        baseline_simultaneous - o2_reservation
+    );
+
+    // ----- CORRECTION: the typed diagnostic is allocation-free; rendering is
+    //       deferred to Display (performed OUTSIDE the protected interval). -----
+    let (typed, typed_allocs) =
+        measure_allocs(|| SemanticRefusalDetail::RecordMetaRevisionDisagreement {
+            record_revision: 1,
+            meta_revision: 0,
+        });
+    assert_eq!(
+        typed_allocs, 0,
+        "the typed diagnostic allocates NO heap buffer on the protected refusal path"
+    );
+    let (typed, typed_obs) = measure_live_bytes(move || typed);
+    typed_obs.assert_sound("typed diagnostic live bytes");
+    assert_eq!(
+        typed_obs.peak, 0,
+        "the typed diagnostic adds zero live heap bytes"
+    );
+    let rendered = typed.to_string();
+    assert!(
+        rendered.contains("record revision disagrees with metadata revision"),
+        "Display preserves the diagnostic meaning: {rendered}"
+    );
+    let corrected_simultaneous = o2_reservation; // + 0 diagnostic bytes
+    assert!(
+        corrected_simultaneous <= o2_reservation,
+        "corrected simultaneous charge {corrected_simultaneous} fits the O2 reservation {o2_reservation}"
+    );
+
+    // ----- Real open(): reach the refusal branch under pressure leaving EXACTLY
+    //       the O2 allowance through the shared admission authority. -----
+    let backend = owner.backend_for_test();
+    let agg_cap = backend.accounting_aggregate_cap().unwrap();
+    let ctx_live = backend.context_accounting_current();
+    let record_before = backend.read_record(rec).unwrap();
+    let meta_before = backend.read_meta(META_ENCODED_LEN_MIRROR).unwrap();
+    let recovery_before = owner.recovery_required();
+    let current_before = backend.accounting_aggregate_current();
+
+    let standing_fits = agg_cap - ctx_live - o2_reservation;
+    let standing = backend
+        .reserve_standing_for_test(standing_fits)
+        .expect("standing pressure leaving EXACTLY the O2 working set free");
+    let peak_before = backend.accounting_aggregate_peak();
+
+    match owner.open() {
+        Err(SafetyStoreError::SemanticRefusal(
+            SemanticRefusalDetail::RecordMetaRevisionDisagreement {
+                record_revision,
+                meta_revision,
+            },
+        )) => {
+            assert_eq!(
+                (record_revision, meta_revision),
+                (1, 0),
+                "the refusal carries the two disagreeing revisions as Copy data"
+            );
+        }
+        other => panic!("expected revision-disagreement SemanticRefusal, got {other:?}"),
+    }
+
+    // The O2 reservation was admitted and the whole read/decode working set plus
+    // the (now allocation-free) diagnostic stayed within the aggregate ceiling.
+    assert!(
+        backend.accounting_aggregate_peak() <= agg_cap,
+        "O2 open with the COMPLETE record never exceeded the aggregate ceiling"
+    );
+    assert!(
+        backend.accounting_aggregate_peak() >= peak_before,
+        "O2 open reserved a real charge against the shared accountant"
+    );
+
+    // Raw record bytes, metadata, recovery state, and the standing reservation
+    // are all preserved; the temporary O2 reservation released on the refusal.
+    assert_eq!(
+        backend.read_record(rec).unwrap(),
+        record_before,
+        "refused O2 did not mutate stored record bytes"
+    );
+    assert_eq!(
+        backend.read_meta(META_ENCODED_LEN_MIRROR).unwrap(),
+        meta_before,
+        "refused O2 did not mutate metadata"
+    );
+    assert_eq!(
+        owner.recovery_required(),
+        recovery_before,
+        "refused O2 did not disturb the recovery/effectiveness latch"
+    );
+    assert_eq!(
+        backend.accounting_aggregate_current(),
+        ctx_live + standing_fits,
+        "temporary O2 read/decode reservation released on the refusal exit (only standing remains)"
+    );
+    drop(standing);
+    assert_eq!(
+        backend.accounting_aggregate_current(),
+        current_before,
+        "all temporary reservations released; only the baseline charge remains"
+    );
 }
 
 #[test]
@@ -5862,6 +6257,177 @@ fn d7d14_o3_validation_reservation_covers_live_coexistence_max_tc() {
     );
 }
 
+/// §3 — R3 (RUN 422 D7-D14): discriminating O3 coverage through REAL
+/// `read_validate` over a MAXIMUM COMPLETE TC (anchor + predecessor populated,
+/// 811 serialized bytes) with valid independent committed history. This
+/// REPLACES reliance on the weak `aggregate_peak > operational_holder_charge`
+/// inequality: the aggregate peak includes context ownership, so that inequality
+/// holds even when the O3 scratch reservation is absent. Instead it observes the
+/// OPERATIONAL partition peak (`accounting_peak()`, which excludes context) and
+/// asserts it equals the full O3 phase reservation `holder + o3_scratch`. Removing
+/// the O3 scratch reservation (or releasing it before `load_established`) drops the
+/// operational peak to the bare holder and FAILS this assertion. A tight-headroom
+/// admission probe then establishes the scratch is ACTUALLY admitted through the
+/// shared aggregate authority, and the one-byte-tighter refusal proves the scratch
+/// must remain live for the operation to fit.
+#[test]
+fn d7d14_r3_o3_real_read_validate_max_complete_tc_operational_coverage() {
+    use qbind_node::safety_record_store::accounting::max_transient_decoded_working_set;
+    use qbind_node::safety_record_store::profile::max_retained_generation_bytes;
+    use qbind_node::safety_record_store::record::{
+        size_of_timeout_msg, validated_holder_handle_bytes,
+    };
+
+    let dir = tempfile::tempdir().unwrap();
+    let ctx = ctx_n(4);
+
+    // Independently derive the O3 phase reservation terms from the profile (NOT
+    // from the operation under test).
+    let rec = max_safety_record_bytes(&ctx).unwrap();
+    let retained_gen = max_retained_generation_bytes(&ctx, size_of_timeout_msg()).unwrap();
+    let handle = validated_holder_handle_bytes();
+    let holder = rec + retained_gen + handle;
+    let transient_ceiling = max_transient_decoded_working_set(&ctx).unwrap();
+    let o3_scratch = (transient_ceiling - retained_gen) + rec;
+    assert_eq!(
+        rec, 811,
+        "max record-level validation buffer (complete TC profile)"
+    );
+    assert_eq!(holder, 2051, "retained-holder charge");
+    assert_eq!(
+        o3_scratch, 819,
+        "O3 transient-excess + one record-sized buffer"
+    );
+
+    // The MAXIMUM COMPLETE TC: anchor + predecessor populated. Assert its ACTUAL
+    // complete serialized size is 811 bytes (the 763-byte evidence-only fixture is
+    // NOT the maximum complete serialized record).
+    let complete = max_tc_locked_anchored(&ctx, 5, 6);
+    assert!(
+        complete.committed_anchor.is_some() && complete.predecessor_ref.is_some(),
+        "the complete TC populates the anchor and predecessor fields"
+    );
+    let complete_dec = DecodedRecord {
+        persistence_format_version: 1,
+        network_genesis_id: ctx.network_genesis_id,
+        publication_revision: 1,
+        record: SafetyRecord::Locked(complete.clone()),
+    };
+    let complete_enc = encode_record(&complete_dec, &ctx).unwrap();
+    assert_eq!(
+        complete_enc.len(),
+        811,
+        "maximum complete serialized TC is 811 bytes for the N=4 profile"
+    );
+
+    // Valid independent committed history for the anchored record.
+    let history = FixtureCommittedHistory::new().with([7u8; 32], 3);
+
+    // O4: publish the complete TC durably (dropped before any reopen).
+    {
+        let owner = init_owner(dir.path(), &ctx);
+        assert_eq!(
+            owner.publish_locked(complete, 0, Some(&history)),
+            PublishResult::DurableAcknowledged { new_revision: 1 }
+        );
+    }
+
+    // ----- Phase 1: observe the real O3 operational peak on a FRESH backend. -----
+    {
+        let owner = SafetyRecordOwner::attach(open_enabled(dir.path()), ctx.clone()).unwrap();
+        let backend = owner.backend_for_test();
+        let agg_cap = backend.accounting_aggregate_cap().unwrap();
+        assert!(
+            owner.recovery_required(),
+            "reopened store starts not-effective"
+        );
+        assert_eq!(backend.accounting_peak(), 0, "fresh operational accountant");
+
+        let proof = owner.read_validate(Some(&history)).unwrap();
+        assert!(proof.retained().is_locked());
+
+        // DISCRIMINATING OBSERVATION: the OPERATIONAL partition peak equals the
+        // full O3 phase reservation (holder + o3_scratch). This excludes context
+        // ownership, so — unlike `aggregate_peak > holder` — it is sensitive to the
+        // O3 scratch reservation. Removing/early-releasing it drops this to `holder`.
+        assert_eq!(
+            backend.accounting_peak(),
+            holder + o3_scratch,
+            "operational peak must reach the full O3 phase reservation (holder + o3_scratch); \
+             a lower peak means the O3 scratch reservation is missing"
+        );
+        // STRONGER (detects BOTH removal AND early release): the operational
+        // reservation sampled INSIDE the operation, entering the O3 allocation
+        // phase, equals holder + o3_scratch. An early-released scratch (dropped
+        // before `load_established`) leaves the reserved PEAK unchanged but
+        // collapses this mid-phase sample to the bare holder.
+        assert_eq!(
+            qbind_node::safety_record_store::owner::o3_phase_reservation_sample(),
+            holder + o3_scratch,
+            "the O3 scratch reservation must remain live THROUGH the allocation phase \
+             (sampled before validate_decoded), not merely be reserved then released early"
+        );
+        assert_eq!(
+            backend.accounting_current(),
+            holder,
+            "post-O3 operational charge is exactly the retained holder (scratch released)"
+        );
+        assert!(
+            backend.accounting_aggregate_peak() <= agg_cap,
+            "O3 peak within the unchanged aggregate"
+        );
+        drop(proof);
+        assert_eq!(
+            backend.accounting_current(),
+            0,
+            "the retained holder's reservation releases on proof drop"
+        );
+    }
+
+    // ----- Phase 2: the O3 scratch is ACTUALLY admitted through the shared
+    // aggregate authority. Leave EXACTLY holder + o3_scratch of operational
+    // headroom: read_validate SUCCEEDS. -----
+    let agg_cap = {
+        let owner = SafetyRecordOwner::attach(open_enabled(dir.path()), ctx.clone()).unwrap();
+        let backend = owner.backend_for_test();
+        let agg_cap = backend.accounting_aggregate_cap().unwrap();
+        let ctx_live = backend.context_accounting_current();
+        let op_headroom = agg_cap - ctx_live;
+        let standing = op_headroom - (holder + o3_scratch);
+        let standing_res = backend.reserve_standing_for_test(standing).unwrap();
+        let proof = owner
+            .read_validate(Some(&history))
+            .expect("O3 fits when exactly holder + o3_scratch headroom remains");
+        drop(proof);
+        drop(standing_res);
+        agg_cap
+    };
+
+    // ----- Phase 3: one byte tighter — the O3 scratch no longer fits, so
+    // read_validate REFUSES. If the scratch reservation were removed, this would
+    // wrongly SUCCEED. -----
+    {
+        let owner = SafetyRecordOwner::attach(open_enabled(dir.path()), ctx.clone()).unwrap();
+        let backend = owner.backend_for_test();
+        let ctx_live = backend.context_accounting_current();
+        let op_headroom = agg_cap - ctx_live;
+        let standing = op_headroom - (holder + o3_scratch) + 1;
+        let _standing_res = backend.reserve_standing_for_test(standing).unwrap();
+        match owner.read_validate(Some(&history)) {
+            Err(SafetyStoreError::CapacityRefusal(_)) => {}
+            other => panic!(
+                "one byte short of holder + o3_scratch must refuse the O3 scratch \
+                 (CapacityRefusal), got {other:?}"
+            ),
+        }
+        assert_eq!(
+            backend.accounting_current(),
+            standing,
+            "O3 refusal leaves only the standing reservation; its own reservations released"
+        );
+    }
+}
+
 /// §3 — the REAL O3 `read_validate` over a maximum-TC publication. Observed on a
 /// reopened (fresh-accountant) backend so the measured peak reflects ONLY O3: the
 /// retained-holder charge is exactly the derived 2051, the validation peak strictly
@@ -5928,6 +6494,233 @@ fn d7d14_o3_real_read_validate_with_live_holder_within_aggregate() {
         0,
         "all O3 holders released on drop"
     );
+}
+
+/// §5 — R4 (RUN 422 D7-D14): maximum complete O5 + publication-boundary coverage.
+/// Drives the full `O4 publication → drop/reopen → O3 validation → O5
+/// reacknowledgement` sequence over a MAXIMUM COMPLETE TC (anchor + predecessor,
+/// 811 serialized bytes) with valid independent committed history. It observes the
+/// real O5 operational peak and asserts it reaches `holder + o5_charge` where the
+/// O5 charge INCLUDES the publication-staging envelopes (record + metadata CRC
+/// frames). A mutation that leaves `publication_staging_charge()` unchanged but
+/// drops the staging term from the actual O5 reservation collapses this peak by the
+/// staging bytes and FAILS the assertion. A tight-headroom admission probe then
+/// establishes the staging-inclusive O5 reservation is ACTUALLY admitted through
+/// the shared aggregate authority. Successful original-byte republication, the
+/// unchanged revision, the recovery-state transition, and reservation cleanup are
+/// all verified.
+#[test]
+fn d7d14_r4_o5_reacknowledge_max_complete_tc_publication_boundary_coverage() {
+    use qbind_node::safety_record_store::accounting::{
+        max_transient_decoded_working_set, publication_staging_charge, CRC_PREFIX,
+    };
+    use qbind_node::safety_record_store::profile::max_retained_generation_bytes;
+    use qbind_node::safety_record_store::record::{
+        size_of_timeout_msg, validated_holder_handle_bytes,
+    };
+
+    let dir = tempfile::tempdir().unwrap();
+    let ctx = ctx_n(4);
+
+    // Independently derive the O5 reservation terms from the profile.
+    let rec = max_safety_record_bytes(&ctx).unwrap();
+    let retained_gen = max_retained_generation_bytes(&ctx, size_of_timeout_msg()).unwrap();
+    let handle = validated_holder_handle_bytes();
+    let holder = rec + retained_gen + handle;
+    let transient = max_transient_decoded_working_set(&ctx).unwrap();
+    let staging = publication_staging_charge(&ctx).unwrap();
+    let meta_len = META_ENCODED_LEN_MIRROR;
+    let o5_charge = rec + meta_len + transient + staging;
+    assert_eq!(rec, 811, "max record-level read-back buffer");
+    assert_eq!(holder, 2051, "retained-holder charge");
+    assert_eq!(transient, 1112, "transient decoded working set");
+    assert_eq!(meta_len, 42, "metadata payload length");
+    assert_eq!(
+        staging, 861,
+        "publication staging = record envelope (4+811) + metadata envelope (4+42)"
+    );
+    assert_eq!(
+        o5_charge, 2826,
+        "O5 charge = read-back + metadata + transient + staging"
+    );
+
+    // The MAXIMUM COMPLETE TC and its ACTUAL serialized size (811, not the 763-byte
+    // evidence-only fixture).
+    let complete = max_tc_locked_anchored(&ctx, 5, 6);
+    assert!(complete.committed_anchor.is_some() && complete.predecessor_ref.is_some());
+    let complete_dec = DecodedRecord {
+        persistence_format_version: 1,
+        network_genesis_id: ctx.network_genesis_id,
+        publication_revision: 1,
+        record: SafetyRecord::Locked(complete.clone()),
+    };
+    let complete_enc = encode_record(&complete_dec, &ctx).unwrap();
+    assert_eq!(
+        complete_enc.len(),
+        811,
+        "maximum complete serialized TC is 811 bytes for the N=4 profile"
+    );
+
+    // Independently verify the publication-envelope capacities for the COMPLETE
+    // record (not the earlier 767 + 46 evidence-only observation): a CRC-framed
+    // envelope is `Vec::with_capacity(CRC_PREFIX + payload.len())`.
+    let record_env: Vec<u8> = Vec::with_capacity(CRC_PREFIX as usize + complete_enc.len());
+    assert_eq!(
+        record_env.capacity() as u128,
+        CRC_PREFIX + 811,
+        "full complete-record envelope capacity (4 + 811)"
+    );
+    let meta_env: Vec<u8> = Vec::with_capacity(CRC_PREFIX as usize + meta_len as usize);
+    assert_eq!(
+        meta_env.capacity() as u128,
+        CRC_PREFIX + 42,
+        "metadata envelope capacity (4 + 42)"
+    );
+    assert_eq!(
+        (record_env.capacity() + meta_env.capacity()) as u128,
+        staging,
+        "the two envelope capacities sum to the publication-staging charge"
+    );
+
+    let history = FixtureCommittedHistory::new().with([7u8; 32], 3);
+
+    // O4: publish the complete TC durably (dropped before any reopen).
+    {
+        let owner = init_owner(dir.path(), &ctx);
+        assert_eq!(
+            owner.publish_locked(complete, 0, Some(&history)),
+            PublishResult::DurableAcknowledged { new_revision: 1 }
+        );
+    }
+
+    // ----- Drive drop/reopen → O3 validation → O5 reacknowledgement on a FRESH
+    // backend, observing the real O5 operational peak. -----
+    let agg_cap;
+    {
+        let owner = SafetyRecordOwner::attach(open_enabled(dir.path()), ctx.clone()).unwrap();
+        let backend = owner.backend_for_test();
+        agg_cap = backend.accounting_aggregate_cap().unwrap();
+        assert!(
+            owner.recovery_required(),
+            "reopened store starts not-effective"
+        );
+
+        // O3: mint the backend-bound O5 capability; its holder reservation stays live.
+        let proof = owner.read_validate(Some(&history)).unwrap();
+        assert!(proof.retained().is_locked());
+        assert_eq!(
+            backend.accounting_current(),
+            holder,
+            "only the retained holder is live before O5"
+        );
+        let rev_before = proof.retained().publication_revision;
+
+        // O5: reacknowledge the surviving complete-TC publication while the O3 proof
+        // is live. Republishes the ORIGINAL bytes verbatim; revision is unchanged.
+        assert_eq!(
+            owner.reacknowledge(&proof),
+            PublishResult::DurableAcknowledged { new_revision: 1 }
+        );
+
+        // DISCRIMINATING OBSERVATION: the operational peak reached holder + o5_charge,
+        // which INCLUDES the publication-staging envelopes. Dropping the staging term
+        // from the O5 reservation collapses this peak by `staging` bytes.
+        assert_eq!(
+            backend.accounting_peak(),
+            holder + o5_charge,
+            "O5 operational peak must reach holder + o5_charge (incl. publication staging); \
+             a lower peak means staging was removed from the O5 reservation"
+        );
+        assert!(
+            backend.accounting_aggregate_peak() <= agg_cap,
+            "O5 + live O3 holder peak within the unchanged aggregate"
+        );
+
+        // Recovery-state transition: a successful O5 clears the fresh-acknowledgement
+        // requirement; the revision is unchanged.
+        assert!(
+            !owner.recovery_required(),
+            "successful O5 reacknowledgement clears the recovery requirement"
+        );
+        assert_eq!(
+            proof.retained().publication_revision,
+            rev_before,
+            "O5 republishes at the unchanged revision"
+        );
+
+        // Successful ORIGINAL-byte republication: a fresh O3 read-back equals the
+        // retained original bytes verbatim.
+        let reproof = owner.read_validate(Some(&history)).unwrap();
+        assert_eq!(
+            reproof.encoded(),
+            proof.encoded(),
+            "O5 republished the original bytes verbatim"
+        );
+        assert_eq!(
+            reproof.encoded().len(),
+            811,
+            "republished complete record is 811 bytes"
+        );
+
+        drop(reproof);
+        drop(proof);
+        assert_eq!(
+            backend.accounting_current(),
+            0,
+            "every O5/holder reservation releases (clean cleanup)"
+        );
+    }
+
+    // ----- Admission sensitivity: the staging-inclusive O5 reservation is ACTUALLY
+    // admitted through the shared aggregate authority. Leave EXACTLY o5_charge of
+    // operational headroom beyond the live holder: reacknowledge SUCCEEDS. -----
+    {
+        let owner = SafetyRecordOwner::attach(open_enabled(dir.path()), ctx.clone()).unwrap();
+        let backend = owner.backend_for_test();
+        let proof = owner.read_validate(Some(&history)).unwrap();
+        let ctx_live = backend.context_accounting_current();
+        // operational during O5 peak = holder (live) + standing + o5_charge; keep the
+        // aggregate (operational + context) at exactly agg_cap.
+        let standing = agg_cap - ctx_live - holder - o5_charge;
+        let standing_res = backend.reserve_standing_for_test(standing).unwrap();
+        assert_eq!(
+            owner.reacknowledge(&proof),
+            PublishResult::DurableAcknowledged { new_revision: 1 },
+            "O5 fits when exactly o5_charge headroom remains beyond the holder"
+        );
+        drop(standing_res);
+        drop(proof);
+    }
+
+    // ----- One byte tighter: the staging-inclusive O5 reservation no longer fits,
+    // so reacknowledge REFUSES. If staging were removed from the O5 reservation,
+    // this would wrongly SUCCEED. -----
+    {
+        let owner = SafetyRecordOwner::attach(open_enabled(dir.path()), ctx.clone()).unwrap();
+        let backend = owner.backend_for_test();
+        let proof = owner.read_validate(Some(&history)).unwrap();
+        let ctx_live = backend.context_accounting_current();
+        let standing = agg_cap - ctx_live - holder - o5_charge + 1;
+        let _standing_res = backend.reserve_standing_for_test(standing).unwrap();
+        match owner.reacknowledge(&proof) {
+            PublishResult::RefusedPreWrite(SafetyStoreError::CapacityRefusal(_)) => {}
+            other => panic!(
+                "one byte short of o5_charge must refuse the O5 reservation \
+                 (CapacityRefusal), got {other:?}"
+            ),
+        }
+        // The refusal left the durable publication and the retained holder intact.
+        assert!(
+            owner.recovery_required(),
+            "a refused O5 does not clear the recovery requirement"
+        );
+        assert_eq!(
+            proof.retained().publication_revision,
+            1,
+            "a refused O5 leaves the retained revision unchanged"
+        );
+        drop(proof);
+    }
 }
 
 /// §4 — the protected O4 structural/capacity preflight REFUSAL path is

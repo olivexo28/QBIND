@@ -291,9 +291,9 @@ fn validate_qc_signers(
         let id = ValidatorId::new(*idx);
         match ctx.voting_power(id) {
             None => {
-                return Err(SafetyStoreError::SemanticRefusal(format!(
-                    "qc signer index {idx} is not an authorized member"
-                )))
+                return Err(SafetyStoreError::SemanticRefusal(
+                    format!("qc signer index {idx} is not an authorized member").into(),
+                ))
             }
             Some(p) => acc += p as u128,
         }
@@ -326,10 +326,9 @@ fn validate_tc(
     // TA4: authorized signer membership of the claimed timeout signer set.
     for s in &tc.signers {
         if !ctx.is_member(*s) {
-            return Err(SafetyStoreError::SemanticRefusal(format!(
-                "tc signer {} not an authorized member (TA4)",
-                s.as_u64()
-            )));
+            return Err(SafetyStoreError::SemanticRefusal(
+                format!("tc signer {} not an authorized member (TA4)", s.as_u64()).into(),
+            ));
         }
     }
     // TA3: signer uniqueness over tc.signers, held in a bounded no-hashing
@@ -337,10 +336,9 @@ fn validate_tc(
     let mut seen: Vec<u64> = Vec::with_capacity(ctx.n());
     for s in &tc.signers {
         if !uniq_set_insert(&mut seen, s.as_u64()) {
-            return Err(SafetyStoreError::SemanticRefusal(format!(
-                "tc duplicate signer {} (TA3)",
-                s.as_u64()
-            )));
+            return Err(SafetyStoreError::SemanticRefusal(
+                format!("tc duplicate signer {} (TA3)", s.as_u64()).into(),
+            ));
         }
     }
     // TA4/TA5: each signed_timeout validator is an authorized member, unique,
@@ -349,16 +347,22 @@ fn validate_tc(
     let mut st_ids: Vec<u64> = Vec::with_capacity(ctx.n());
     for t in &tc.signed_timeouts {
         if !ctx.is_member(t.validator_id) {
-            return Err(SafetyStoreError::SemanticRefusal(format!(
-                "signed_timeout validator {} not a member (TA4)",
-                t.validator_id.as_u64()
-            )));
+            return Err(SafetyStoreError::SemanticRefusal(
+                format!(
+                    "signed_timeout validator {} not a member (TA4)",
+                    t.validator_id.as_u64()
+                )
+                .into(),
+            ));
         }
         if !uniq_set_insert(&mut st_ids, t.validator_id.as_u64()) {
-            return Err(SafetyStoreError::SemanticRefusal(format!(
-                "duplicate signed_timeout validator {} (TA3)",
-                t.validator_id.as_u64()
-            )));
+            return Err(SafetyStoreError::SemanticRefusal(
+                format!(
+                    "duplicate signed_timeout validator {} (TA3)",
+                    t.validator_id.as_u64()
+                )
+                .into(),
+            ));
         }
     }
     // TA5: signer-set correspondence — the evidence set is a permutation of
@@ -372,10 +376,13 @@ fn validate_tc(
     // TA6: timeout-view consistency — every signed timeout is for tc.timeout_view.
     for t in &tc.signed_timeouts {
         if t.view != tc.timeout_view {
-            return Err(SafetyStoreError::SemanticRefusal(format!(
-                "signed_timeout view {} != tc.timeout_view {} (TA6)",
-                t.view, tc.timeout_view
-            )));
+            return Err(SafetyStoreError::SemanticRefusal(
+                format!(
+                    "signed_timeout view {} != tc.timeout_view {} (TA6)",
+                    t.view, tc.timeout_view
+                )
+                .into(),
+            ));
         }
     }
     // TA7: voting-power quorum over the claimed timeout signer set (power, not
