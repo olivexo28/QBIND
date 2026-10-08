@@ -14,7 +14,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, AtomicU8, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use super::accounting::{AggregateAuthority, SharedAccountant};
-use super::error::SafetyStoreError;
+use super::error::{ReadFailedDetail, SafetyStoreError};
 use crate::pqc_trust_bundle::TrustBundleEnvironment;
 use crate::storage::signing_journal_crc32;
 
@@ -357,7 +357,7 @@ impl SafetyBackend {
         // Surface a storage-layer iteration error rather than silently treating
         // it as "namespace clean".
         iter.status()
-            .map_err(|e| SafetyStoreError::ReadFailed(format!("namespace scan: {e}")))?;
+            .map_err(|_e| SafetyStoreError::ReadFailed(ReadFailedDetail::NamespaceScan))?;
         Ok(None)
     }
 
@@ -378,9 +378,9 @@ impl SafetyBackend {
             Ok(Some(raw)) => {
                 let raw: &[u8] = raw.as_ref();
                 if raw.len() < 4 {
-                    return Err(SafetyStoreError::ReadFailed(format!(
-                        "{what}: envelope too short"
-                    )));
+                    return Err(SafetyStoreError::ReadFailed(
+                        format!("{what}: envelope too short").into(),
+                    ));
                 }
                 // Bound the payload length BEFORE copying it out of backend memory.
                 let payload_len = (raw.len() - 4) as u128;
@@ -394,14 +394,14 @@ impl SafetyBackend {
                 let stored =
                     u32::from_be_bytes([crc_bytes[0], crc_bytes[1], crc_bytes[2], crc_bytes[3]]);
                 if signing_journal_crc32(payload) != stored {
-                    return Err(SafetyStoreError::ReadFailed(format!(
-                        "{what}: CRC envelope mismatch"
-                    )));
+                    return Err(SafetyStoreError::ReadFailed(
+                        format!("{what}: CRC envelope mismatch").into(),
+                    ));
                 }
                 // Now within bound and CRC-valid: take the single component-owned copy.
                 Ok(Some(payload.to_vec()))
             }
-            Err(e) => Err(SafetyStoreError::ReadFailed(format!("{what}: {e}"))),
+            Err(e) => Err(SafetyStoreError::ReadFailed(format!("{what}: {e}").into())),
         }
     }
 
