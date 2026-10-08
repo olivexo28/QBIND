@@ -44,6 +44,51 @@ struct CountingAllocator;
 thread_local! {
     static ALLOC_ARMED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
     static ALLOC_COUNT: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    // Live-byte observation (Item B/D): the net live heap bytes allocated while
+    // armed, and the peak the net reached. `LIVE_MISSED` latches true if an
+    // instrumentation invariant is violated (a dealloc frees more than the
+    // tracked live total, i.e. a pre-arm allocation was freed inside the armed
+    // interval) so observers FAIL LOUDLY rather than silently truncating a
+    // peak. `LIVE_OVERFLOW` latches on an arithmetic overflow of the counters.
+    static LIVE_ARMED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    static LIVE_CUR: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    static LIVE_PEAK: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    static LIVE_MISSED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    static LIVE_OVERFLOW: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+#[inline]
+fn live_on_alloc(size: usize) {
+    if LIVE_ARMED.with(|a| a.get()) {
+        LIVE_CUR.with(|c| match c.get().checked_add(size) {
+            Some(v) => {
+                c.set(v);
+                LIVE_PEAK.with(|p| {
+                    if v > p.get() {
+                        p.set(v);
+                    }
+                });
+            }
+            None => LIVE_OVERFLOW.with(|o| o.set(true)),
+        });
+    }
+}
+
+#[inline]
+fn live_on_dealloc(size: usize) {
+    if LIVE_ARMED.with(|a| a.get()) {
+        LIVE_CUR.with(|c| {
+            let cur = c.get();
+            if size > cur {
+                // Freeing more than we tracked: a pre-arm allocation was released
+                // inside the interval. Flag it; do not let the counter wrap.
+                LIVE_MISSED.with(|m| m.set(true));
+                c.set(0);
+            } else {
+                c.set(cur - size);
+            }
+        });
+    }
 }
 
 unsafe impl std::alloc::GlobalAlloc for CountingAllocator {
@@ -51,17 +96,70 @@ unsafe impl std::alloc::GlobalAlloc for CountingAllocator {
         if ALLOC_ARMED.with(|a| a.get()) {
             ALLOC_COUNT.with(|c| c.set(c.get() + 1));
         }
+        live_on_alloc(layout.size());
         std::alloc::System.alloc(layout)
     }
     unsafe fn dealloc(&self, ptr: *mut u8, layout: std::alloc::Layout) {
+        live_on_dealloc(layout.size());
         std::alloc::System.dealloc(ptr, layout)
     }
     unsafe fn realloc(&self, ptr: *mut u8, layout: std::alloc::Layout, new_size: usize) -> *mut u8 {
         if ALLOC_ARMED.with(|a| a.get()) {
             ALLOC_COUNT.with(|c| c.set(c.get() + 1));
         }
+        // A realloc frees `layout.size()` and allocates `new_size`.
+        live_on_dealloc(layout.size());
+        live_on_alloc(new_size);
         std::alloc::System.realloc(ptr, layout, new_size)
     }
+}
+
+/// Outcome of a live-byte observation interval.
+#[derive(Debug, Clone, Copy)]
+struct LiveObservation {
+    /// Peak net live heap bytes reached during the interval.
+    peak: usize,
+    /// Net live heap bytes still outstanding at the end of the interval.
+    end: usize,
+    /// True if a dealloc released more than the tracked live total (a pre-arm
+    /// allocation freed inside the interval) — the peak may be under-counted.
+    missed: bool,
+    /// True if the byte counters overflowed.
+    overflow: bool,
+}
+
+impl LiveObservation {
+    /// Assert the instrumentation stayed sound: no missed tracking, no overflow.
+    fn assert_sound(&self, ctx: &str) {
+        assert!(
+            !self.missed,
+            "{ctx}: live-byte instrumentation missed tracking (pre-arm free inside interval)"
+        );
+        assert!(!self.overflow, "{ctx}: live-byte instrumentation overflowed");
+    }
+}
+
+/// Run `f` with live-byte observation armed on the current thread, returning
+/// `(result, observation)`. The caller must ensure every object it wants
+/// excluded from the measurement (fixtures, backends) is constructed OUTSIDE
+/// `f`, and that any object owned *outside* `f` survives the interval (is not
+/// freed inside it) so the peak is a faithful component-owned figure. No
+/// cloning of the observed objects occurs here.
+fn measure_live_bytes<T>(f: impl FnOnce() -> T) -> (T, LiveObservation) {
+    LIVE_CUR.with(|c| c.set(0));
+    LIVE_PEAK.with(|p| p.set(0));
+    LIVE_MISSED.with(|m| m.set(false));
+    LIVE_OVERFLOW.with(|o| o.set(false));
+    LIVE_ARMED.with(|a| a.set(true));
+    let out = f();
+    LIVE_ARMED.with(|a| a.set(false));
+    let obs = LiveObservation {
+        peak: LIVE_PEAK.with(|p| p.get()),
+        end: LIVE_CUR.with(|c| c.get()),
+        missed: LIVE_MISSED.with(|m| m.get()),
+        overflow: LIVE_OVERFLOW.with(|o| o.get()),
+    };
+    (out, obs)
 }
 
 #[global_allocator]
@@ -6790,4 +6888,102 @@ fn d7d14_c_max_tc_dimensions_and_separately_measured_paths() {
         fresh_binding, evidence_only.evidence_lock_binding,
         "the freshly measured TC binding equals the deterministic setup binding"
     );
+}
+
+/// Item B — observe the ACTUAL live-byte lifetime of the O3 validation scratch
+/// (`validate_decoded`) over a maximum QC / maximum TC record, proving the
+/// correspondence re-encode buffer is RELEASED before the certificate-binding
+/// buffer is allocated. This is a real live-byte observation (peak net heap
+/// bytes), not a reservation/accountant figure and not a process-RSS gauge: the
+/// measured interval contains NO backend I/O, so every tracked byte is a
+/// component-owned validation allocation (re-encode buffer + cert buffer).
+///
+/// Sensitivity: the headline invariant is `peak < 2 * record_cap` — the two
+/// record-sized buffers must never coexist. Restoring the old overlap (removing
+/// or delaying the real `drop(reencoded)` in `validate::validate_decoded`) makes
+/// `peak` reach `2 * record_cap` and this test FAILS. See the evidence document
+/// (Run 422 D7-D14 Item B) for the literal failure captured with the drop removed.
+fn observe_o3_validation_live_bytes(evidence_only: LockedRecord, cap: usize, label: &str) {
+    let ctx = ctx_n(4);
+
+    // ----- Build the real decoded record + its retained encoded bytes OUTSIDE
+    // the measured interval. Decoding via `decode_record` yields the genuine
+    // decoded backings (not a fixture clone); encoding yields the retained O5
+    // publication bytes the O3 path re-encodes against.
+    let decoded0 = DecodedRecord {
+        persistence_format_version: 1,
+        network_genesis_id: ctx.network_genesis_id,
+        publication_revision: 1,
+        record: SafetyRecord::Locked(evidence_only),
+    };
+    let encoded = encode_record(&decoded0, &ctx).unwrap();
+    // Re-decode so the object we validate owns freshly-allocated backings.
+    let decoded = decode_record(&encoded, &ctx).unwrap();
+
+    // Observe the ACTUAL capacity of the retained original buffer — never
+    // `enc.len()`. The reservation must cover capacity, not length.
+    let orig_cap = encoded.capacity();
+    assert!(
+        orig_cap >= encoded.len(),
+        "{label}: capacity ({orig_cap}) is the charged figure, not len ({})",
+        encoded.len()
+    );
+
+    // ----- Measured interval: the real `validate_decoded` O3 sub-path. The
+    // inputs are moved in; the returned proof keeps them alive, so nothing
+    // allocated outside is freed inside the interval.
+    let (validated, obs) = measure_live_bytes(|| {
+        validate_decoded(decoded, encoded, &ctx, None::<&FixtureCommittedHistory>).unwrap()
+    });
+    obs.assert_sound(label);
+
+    // At least one full record-sized validation buffer was reached.
+    assert!(
+        obs.peak >= cap,
+        "{label}: peak live bytes {} should reach one record-sized buffer ({cap})",
+        obs.peak
+    );
+    // HEADLINE SENSITIVITY INVARIANT: the re-encode buffer and the cert buffer
+    // never coexist. With the real `drop(reencoded)` this holds; restoring the
+    // old overlap pushes the peak to `2 * cap` and fails here.
+    assert!(
+        obs.peak < 2 * cap,
+        "{label}: re-encode and certificate-binding buffers coexist (peak {} >= 2*cap {}); \
+         the O3 drop(reencoded) lifetime correction is not in effect",
+        obs.peak,
+        2 * cap
+    );
+    // Tighter bound: the live validation scratch stays within a single
+    // record-sized buffer plus only incidental bookkeeping.
+    assert!(
+        obs.peak <= cap + 128,
+        "{label}: live O3 validation scratch {} exceeds a single record-sized buffer ({cap}+slack)",
+        obs.peak
+    );
+    // The proof retains exactly the original publication bytes (the re-encode
+    // buffer was scratch, released; the retained buffer is the caller's).
+    assert_eq!(validated.evidence_status(), EvidenceStatus::Unverified);
+    // No net validation scratch survives the O3 validation step: the re-encode
+    // and cert buffers were both released inside the interval (the retained
+    // `encoded` was allocated OUTSIDE the interval and is excluded).
+    assert_eq!(
+        obs.end, 0,
+        "{label}: O3 validation scratch not fully released (net live {} at end)",
+        obs.end
+    );
+    drop(validated);
+}
+
+#[test]
+fn d7d14_b_o3_live_bytes_reencode_released_before_binding_max_qc() {
+    let ctx = ctx_n(4);
+    let cap = max_qc_bytes(&ctx).unwrap() as usize;
+    observe_o3_validation_live_bytes(max_qc_locked(&ctx, 5, false), cap, "max-QC O3");
+}
+
+#[test]
+fn d7d14_b_o3_live_bytes_reencode_released_before_binding_max_tc() {
+    let ctx = ctx_n(4);
+    let cap = max_tc_bytes(&ctx).unwrap() as usize;
+    observe_o3_validation_live_bytes(valid_tc_record_max(&ctx, 5, 6), cap, "max-TC O3");
 }
