@@ -878,6 +878,15 @@ pub fn decode_record(
             };
             let tc = decode_timeout_cert(&mut r, ctx)?;
             let committed_anchor = read_optional_anchor(&mut r, d_ca)?;
+            // CONTEMPORANEOUS late-O2 reservation observation (test-only). At this point
+            // the full TC evidence graph (`high_qc`, `tc`) and the optional committed
+            // anchor are decoded and owned; the next step validates the optional-
+            // predecessor discriminant, which for the malformed maximum-TC fixture
+            // refuses and unwinds them. Sampling the armed backend accountant HERE records
+            // the O2 reservation that is live AT the late decode phase. A no-op unless an
+            // O2 `open()` armed the observation; absent from production builds.
+            #[cfg(any(test, feature = "test-utils"))]
+            super::owner::observe_o2_late_decode_reservation();
             let predecessor_ref = read_optional_predecessor(&mut r, d_pred)?;
             SafetyRecord::Locked(LockedRecord {
                 lock_block_id,
