@@ -10453,8 +10453,13 @@ fn d7d14_h8a_planted_malformed_successor_across_process_death_refused() {
 /// recovery remains required; a valid dependent O4 is refused specifically for
 /// RecoveryRequired; the parent mints a FRESH O3 proof in its own incarnation (no
 /// validation token crosses the boundary) and O5 `reacknowledge` recovers.
-/// Assertions: exact original record bytes, publication revision, acknowledgement
-/// outcome, and the recovery-latch transition; a subsequent eligible O4 succeeds.
+/// Assertions: the surviving record and metadata are snapshotted via the public
+/// read-only inspectors BEFORE O5; O5 re-acknowledges with the acknowledged
+/// revision and the recovery-latch clearance asserted; AFTER O5 and BEFORE any
+/// O4, the stored record and metadata are re-read and compared to the snapshots
+/// (verbatim republish, revision unchanged); retained proofs are dropped before
+/// the reservation-cleanup check against the standing baseline; only then does a
+/// subsequent eligible O4 succeed at revision 2.
 /// Kept separate from the acknowledged clean-exit recovery and the same-process
 /// uncertainty tests.
 #[test]
@@ -10468,7 +10473,16 @@ fn d7d14_h8b_uncertain_successor_restart_then_o5_recovers() {
     );
 
     let ctx = ctx_n(4);
-    let owner = SafetyRecordOwner::attach(open_enabled(dir.path()), ctx.clone()).unwrap();
+    let rec_cap = max_safety_record_bytes(&ctx).unwrap();
+    // A raw backend handle (shares the DB + accountant with the owner) for the
+    // out-of-band byte / metadata / reservation inspection via the PUBLIC
+    // read-only inspectors (`read_record`/`read_meta`/`accounting_current`).
+    let raw = open_enabled(dir.path());
+    let owner = SafetyRecordOwner::attach(raw.clone(), ctx.clone()).unwrap();
+    // Steady-state reservation baseline AFTER attach (the owner's context-ownership
+    // charge is included); no operation proof is live here.
+    let baseline = raw.accounting_current();
+
     // O2 observes the complete successor; recovery still required on reopen.
     assert_eq!(owner.open().unwrap().current_revision, 1);
     assert!(
@@ -10495,6 +10509,17 @@ fn d7d14_h8b_uncertain_successor_restart_then_o5_recovers() {
         PublishResult::RefusedPreWrite(SafetyStoreError::RecoveryRequired(_))
     ));
 
+    // Snapshot the surviving stored record AND metadata BEFORE O5 (these are the
+    // bytes whose preservation across O5 is to be observed).
+    let rec_before_o5 = raw.read_record(rec_cap).unwrap();
+    let meta_before_o5 = raw.read_meta(64).unwrap();
+    assert_eq!(
+        rec_before_o5.as_deref(),
+        Some(original_bytes.as_slice()),
+        "the surviving stored record equals the O3-observed bytes"
+    );
+    assert!(meta_before_o5.is_some(), "the metadata envelope survives");
+
     // Fresh O3 proof in THIS backend incarnation; no validation token crossed the
     // process boundary. O5 re-acknowledges the surviving publication.
     let proof = owner
@@ -10509,11 +10534,39 @@ fn d7d14_h8b_uncertain_successor_restart_then_o5_recovers() {
         owner.reacknowledge(&proof),
         PublishResult::DurableAcknowledged { new_revision: 1 }
     ));
-    // Release the proof's holder reservation before the admitting O4 below.
-    drop(proof);
-    // Recovery-latch transition: cleared only across the successful O5 barrier.
+    // Acknowledged revision + recovery-latch clearance across the O5 barrier.
     assert!(!owner.recovery_required());
-    // A subsequent eligible O4 now succeeds.
+
+    // What O5 ACTUALLY LEFT STORED — observed AFTER O5 and BEFORE any O4 can
+    // overwrite it. O5 republishes the original bytes verbatim with the metadata
+    // revision unchanged, so the stored record and metadata are byte-for-byte the
+    // pre-O5 snapshots and the publication stays at revision 1.
+    let rec_after_o5 = raw.read_record(rec_cap).unwrap();
+    let meta_after_o5 = raw.read_meta(64).unwrap();
+    assert_eq!(
+        rec_after_o5, rec_before_o5,
+        "O5 left the surviving record bytes unchanged (verbatim republish)"
+    );
+    assert_eq!(
+        meta_after_o5, meta_before_o5,
+        "O5 left the metadata bytes unchanged (revision not bumped)"
+    );
+    assert_eq!(
+        owner.open().unwrap().current_revision,
+        1,
+        "the stored publication remains at revision 1 after O5"
+    );
+
+    // Drop the retained proof, THEN check reservation cleanup against the standing
+    // baseline (a live proof legitimately holds a reservation for its lifetime).
+    drop(proof);
+    assert_eq!(
+        raw.accounting_current(),
+        baseline,
+        "no reservation leaked across O3/O5; steady state returns to baseline"
+    );
+
+    // Only now execute the existing eligible O4; it overwrites to revision 2.
     assert_eq!(
         owner.publish_locked(l2, 1, None::<&FixtureCommittedHistory>),
         PublishResult::DurableAcknowledged { new_revision: 2 }
@@ -10539,7 +10592,12 @@ fn d7d14_h23_anchor_height_mismatch_and_later_progress_through_owner() {
     use qbind_node::safety_record_store::error::SemanticRefusalDetail;
     let dir = tempfile::tempdir().unwrap();
     let ctx = ctx_n(4);
-    let owner = init_owner(dir.path(), &ctx);
+    let rec_cap = max_safety_record_bytes(&ctx).unwrap();
+    // Raw handle shares the DB + accountant with the owner for out-of-band
+    // read-only byte / metadata / reservation inspection.
+    let raw = open_enabled(dir.path());
+    let owner = SafetyRecordOwner::attach(raw.clone(), ctx.clone()).unwrap();
+    owner.initialize(true).unwrap();
     // An anchored locked record (lock [9;32] @ view 5, committed anchor [3;32] @
     // height 4), planted at rev 0 via the test-only out-of-band mutation so O3
     // reads an established anchored record. (O4 would impose the transition fence;
@@ -10566,7 +10624,15 @@ fn d7d14_h23_anchor_height_mismatch_and_later_progress_through_owner() {
     let enc = encode_record(&dec, &ctx).unwrap();
     owner.debug_overwrite_record_for_test(&enc).unwrap();
 
-    // (a) Correct anchor BLOCK at the WRONG height → semantic P3 refusal. The
+    // Capture the established anchored fixture: stored record, metadata, revision,
+    // recovery state, and the operation-accounting baseline.
+    let rec_before = raw.read_record(rec_cap).unwrap();
+    let meta_before = raw.read_meta(64).unwrap();
+    let rev_before = owner.open().unwrap().current_revision;
+    let recovery_before = owner.recovery_required();
+    let baseline = raw.accounting_current();
+
+    // (a) Correct anchor BLOCK at the WRONG height -> semantic P3 refusal. The
     // history affirms block [3;32] at height 9 (not the anchor's height 4), and
     // `contains_committed` requires an exact (block, height) match, so this
     // isolates the height comparison (identical block id).
@@ -10581,7 +10647,27 @@ fn d7d14_h23_anchor_height_mismatch_and_later_progress_through_owner() {
         "got {r:?}"
     );
 
-    // (b) Correct anchor at its CORRECT height → admission (an otherwise-identical
+    // Immediately verify the refusal changed NOTHING: record bytes, metadata,
+    // revision, and recovery state are unchanged, and no reservation leaked.
+    assert_eq!(
+        raw.read_record(rec_cap).unwrap(),
+        rec_before,
+        "refused wrong-height O3 left the stored record unchanged"
+    );
+    assert_eq!(
+        raw.read_meta(64).unwrap(),
+        meta_before,
+        "refused wrong-height O3 left the metadata unchanged"
+    );
+    assert_eq!(owner.open().unwrap().current_revision, rev_before);
+    assert_eq!(owner.recovery_required(), recovery_before);
+    assert_eq!(
+        raw.accounting_current(),
+        baseline,
+        "the refused O3 reserved-then-released; no reservation leaked"
+    );
+
+    // (b) Correct anchor at its CORRECT height -> admission (an otherwise-identical
     // history differing only in the affirmed height).
     let correct = FixtureCommittedHistory::new().with([3u8; 32], 4);
     let v = owner.read_validate(Some(&correct)).unwrap();
@@ -10589,7 +10675,7 @@ fn d7d14_h23_anchor_height_mismatch_and_later_progress_through_owner() {
     assert_eq!(v.retained().publication_revision, 0);
 
     // (c) A history retaining the anchor AND carrying later committed entries
-    // (heights 6, 7 beyond the lock's anchor height 4) → admission of the UNCHANGED
+    // (heights 6, 7 beyond the lock's anchor height 4) -> admission of the UNCHANGED
     // lock despite the later progress.
     let with_progress = FixtureCommittedHistory::new()
         .with([3u8; 32], 4)
@@ -10608,11 +10694,21 @@ fn d7d14_h23_anchor_height_mismatch_and_later_progress_through_owner() {
         _ => panic!("expected the unchanged locked record"),
     }
 
-    // State preservation on refusal: the refused (a) left the stored record intact
-    // (the admitting reads in (b)/(c) succeeded on the same bytes), and a fresh
-    // read still admits at rev 0.
+    // A fresh read still admits at rev 0 on the same unchanged bytes.
     let again = owner.read_validate(Some(&correct)).unwrap();
     assert_eq!(again.retained().publication_revision, 0);
+
+    // Release ALL successful O3 proofs before the final reservation-cleanup check;
+    // their legitimate retained reservations are held for the proofs' lifetimes and
+    // must NOT be counted as leaks.
+    drop(v);
+    drop(v2);
+    drop(again);
+    assert_eq!(
+        raw.accounting_current(),
+        baseline,
+        "after releasing every O3 proof the steady state returns to baseline"
+    );
 }
 
 /// H27 (clauses: PERSIST a TC-derived restriction; carry it Unverified; ENFORCE it
@@ -10631,6 +10727,7 @@ fn d7d14_h23_anchor_height_mismatch_and_later_progress_through_owner() {
 fn d7d14_h27_persisted_tc_restriction_enforced_after_o5_barrier() {
     let dir = tempfile::tempdir().unwrap();
     let ctx = ctx_n(4);
+    let rec_cap = max_safety_record_bytes(&ctx).unwrap();
     let owner = init_owner(dir.path(), &ctx);
     // Publish a valid TC-derived lock at lock_view 5.
     let ltc = valid_tc_record(&ctx, 5, 6);
@@ -10639,9 +10736,11 @@ fn d7d14_h27_persisted_tc_restriction_enforced_after_o5_barrier() {
         PublishResult::DurableAcknowledged { new_revision: 1 }
     );
 
-    // Reopen a fresh handle; observe Unverified TC-derived evidence.
+    // Reopen a fresh handle (with a raw sibling for out-of-band read-only
+    // inspection); observe Unverified TC-derived evidence.
     drop(owner);
-    let owner2 = SafetyRecordOwner::attach(open_enabled(dir.path()), ctx.clone()).unwrap();
+    let raw = open_enabled(dir.path());
+    let owner2 = SafetyRecordOwner::attach(raw.clone(), ctx.clone()).unwrap();
     let observed = owner2
         .read_validate(None::<&FixtureCommittedHistory>)
         .unwrap();
@@ -10663,7 +10762,15 @@ fn d7d14_h27_persisted_tc_restriction_enforced_after_o5_barrier() {
     drop(observed);
     assert!(!owner2.recovery_required());
 
-    // Equal lock view (5) → the SPECIFIC transition-eligibility refusal (not
+    // Snapshot what the O5 barrier left stored: record bytes, metadata, revision,
+    // recovery state, and the operation-accounting baseline.
+    let rec_before = raw.read_record(rec_cap).unwrap();
+    let meta_before = raw.read_meta(64).unwrap();
+    let rev_before = owner2.open().unwrap().current_revision;
+    let recovery_before = owner2.recovery_required();
+    let baseline = raw.accounting_current();
+
+    // Equal lock view (5) -> the SPECIFIC transition-eligibility refusal (not
     // RecoveryRequired, which the O5 barrier above cleared).
     let qc_eq = valid_wire_qc(&ctx, [0xAAu8; 32], 5);
     let l_eq = make_locked_qc(&ctx, [0xAAu8; 32], 5, qc_eq, None).unwrap();
@@ -10671,16 +10778,28 @@ fn d7d14_h27_persisted_tc_restriction_enforced_after_o5_barrier() {
         owner2.publish_locked(l_eq, 1, None::<&FixtureCommittedHistory>),
         PublishResult::RefusedPreWrite(SafetyStoreError::TransitionIneligible(_))
     ));
-    // Below the persisted lock view (4) → the same transition-eligibility refusal.
+    // Preservation + cleanup after the equal-view refusal.
+    assert_eq!(raw.read_record(rec_cap).unwrap(), rec_before, "equal-view refusal preserved the record");
+    assert_eq!(raw.read_meta(64).unwrap(), meta_before, "equal-view refusal preserved the metadata");
+    assert_eq!(owner2.open().unwrap().current_revision, rev_before);
+    assert_eq!(owner2.recovery_required(), recovery_before);
+    assert_eq!(raw.accounting_current(), baseline, "equal-view refusal leaked no reservation");
+
+    // Below the persisted lock view (4) -> the same transition-eligibility refusal.
     let qc_lo = valid_wire_qc(&ctx, [0xABu8; 32], 4);
     let l_lo = make_locked_qc(&ctx, [0xABu8; 32], 4, qc_lo, None).unwrap();
     assert!(matches!(
         owner2.publish_locked(l_lo, 1, None::<&FixtureCommittedHistory>),
         PublishResult::RefusedPreWrite(SafetyStoreError::TransitionIneligible(_))
     ));
+    // Preservation + cleanup after the lower-view refusal.
+    assert_eq!(raw.read_record(rec_cap).unwrap(), rec_before, "lower-view refusal preserved the record");
+    assert_eq!(raw.read_meta(64).unwrap(), meta_before, "lower-view refusal preserved the metadata");
+    assert_eq!(owner2.open().unwrap().current_revision, rev_before);
+    assert_eq!(owner2.recovery_required(), recovery_before);
+    assert_eq!(raw.accounting_current(), baseline, "lower-view refusal leaked no reservation");
 
-    // Durable record / metadata / revision preservation across the refusals: still
-    // the TC-derived lock at view 5, revision 1.
+    // Semantic read-back: still the TC-derived lock at view 5, revision 1.
     let preserved = owner2
         .read_validate(None::<&FixtureCommittedHistory>)
         .unwrap();
@@ -10692,10 +10811,11 @@ fn d7d14_h27_persisted_tc_restriction_enforced_after_o5_barrier() {
         }
         _ => panic!("expected the preserved TC-derived lock"),
     }
-    // Release the preservation proof before the admitting O4 below.
+    // Drop the intervening O3 proof before comparing cleanup baselines / admitting.
     drop(preserved);
+    assert_eq!(raw.accounting_current(), baseline, "read-back proof released; back to baseline");
 
-    // A strictly higher candidate (view 9) → admission.
+    // A strictly higher candidate (view 9) -> admission.
     let qc_hi = valid_wire_qc(&ctx, [0xBBu8; 32], 9);
     let l_hi = make_locked_qc(&ctx, [0xBBu8; 32], 9, qc_hi, None).unwrap();
     assert_eq!(
