@@ -318,7 +318,10 @@ pub fn arm_o1_live_object_observation() {
 }
 
 /// Crate/test-only: the owner records its live-object scalar snapshot here, while
-/// those objects are all alive, immediately before `publish_atomic`.
+/// those objects are all alive, immediately before `publish_atomic`. The snapshot
+/// is SINGLE-USE: `publish_atomic` consumes (takes) it at operation entry (G4), so
+/// it is bound to exactly one intended O1 operation and a later O4/O5 publication
+/// on the same thread cannot reuse it.
 #[cfg(any(test, feature = "test-utils"))]
 pub(crate) fn set_o1_owner_live_snapshot(
     decoded_charge: u128,
@@ -328,9 +331,14 @@ pub(crate) fn set_o1_owner_live_snapshot(
     O1_OWNER_SNAPSHOT.with(|c| c.set(Some((decoded_charge, encoded_record_cap, metadata_payload_cap))));
 }
 
-/// Test-only: the ACTUAL combined O1 live-object charge observed at the most recent
-/// `publish_atomic` boundary where a VALID owner snapshot was supplied, or `None`
-/// (not reached since arming).
+/// Test-only: the completed O1 publication-boundary observation — the ACTUAL
+/// combined O1 live-object charge recorded at the most recent `publish_atomic`
+/// boundary that was reached WITH a valid owner snapshot since arming, or `None`
+/// (not reached since arming). It exposes a COMPLETED HISTORICAL O1 result: once a
+/// successful O1 records it, a subsequent non-O1 (O4/O5) publication on the same
+/// thread cannot overwrite or recombine it (the single-use O1 snapshot was already
+/// consumed), and a newly armed O1 that refuses before its boundary leaves this
+/// `None` rather than reporting the earlier success.
 #[cfg(any(test, feature = "test-utils"))]
 pub fn observed_o1_live_object_charge() -> Option<O1LiveObjectCharge> {
     O1_LIVE_OBJECT_OBS.with(|c| c.get())
@@ -714,22 +722,35 @@ impl SafetyBackend {
         // allocating `format!` would peak a component-owned `String` above the
         // admitted charge. The typed `Copy` payload copies no backend text.
         //
-        // Test-only (RUN 422 D7-D14 F2): a real RocksDB point read cannot be forced
-        // to fail deterministically, so the narrowly test-gated `FailBackendGet`
-        // fault drives the exact `Err(_e)` arm below — the typed, allocation-free
-        // `BackendGet` refusal that copies no backend text — through the real read
-        // path, so an operational test reaches the actual read-failure mapping
-        // rather than constructing the enum directly.
+        // Test-only (RUN 422 D7-D14 G2): a real RocksDB point read cannot be forced
+        // to fail deterministically. The narrowly test-gated `FailBackendGet` fault
+        // substitutes a storage-layer get error AT THE BACKEND-RESULT BOUNDARY (the
+        // `got` result below) so the SAME `Err(())` mapping arm processes it, driving
+        // the real read-failure handler rather than constructing the refusal directly.
+        // The error's variable-length `Display` text is dropped here
+        // (`map_err(|_e| ())`), so no backend string is copied; there is exactly ONE
+        // construction site for the `BackendGet` refusal, shared by the real and
+        // injected failures, so a regression in that mapping is observable through the
+        // injected fault.
+        let got: Result<Option<_>, ()> = self.db.get_pinned(key).map_err(|_e| ());
         #[cfg(any(test, feature = "test-utils"))]
-        if self.injected() == InjectFault::FailBackendGet {
-            return Err(SafetyStoreError::ReadFailed(ReadFailedDetail::Envelope {
-                what,
-                kind: EnvelopeFailureKind::BackendGet,
-            }));
-        }
-        match self.db.get_pinned(key) {
-            Ok(None) => Ok(None),
-            Ok(Some(raw)) => {
+        let got: Result<Option<_>, ()> = if self.injected() == InjectFault::FailBackendGet {
+            Err(())
+        } else {
+            got
+        };
+        let pinned = match got {
+            Ok(v) => v,
+            Err(()) => {
+                return Err(SafetyStoreError::ReadFailed(ReadFailedDetail::Envelope {
+                    what,
+                    kind: EnvelopeFailureKind::BackendGet,
+                }));
+            }
+        };
+        match pinned {
+            None => Ok(None),
+            Some(raw) => {
                 let raw: &[u8] = raw.as_ref();
                 if raw.len() < 4 {
                     return Err(SafetyStoreError::ReadFailed(ReadFailedDetail::Envelope {
@@ -757,10 +778,6 @@ impl SafetyBackend {
                 // Now within bound and CRC-valid: take the single component-owned copy.
                 Ok(Some(payload.to_vec()))
             }
-            Err(_e) => Err(SafetyStoreError::ReadFailed(ReadFailedDetail::Envelope {
-                what,
-                kind: EnvelopeFailureKind::BackendGet,
-            })),
         }
     }
 
@@ -791,6 +808,15 @@ impl SafetyBackend {
         meta: &[u8],
         record: &[u8],
     ) -> PublishOutcome {
+        // G4: consume (take, not peek) the owner-supplied O1 live-object snapshot at
+        // operation entry, BEFORE any early refusal return. The snapshot belongs to
+        // exactly one intended O1 operation: taking it here means a later O4/O5
+        // publication on the same thread cannot reuse a stale bootstrap snapshot, and
+        // an O1 attempt that refuses before reaching the observation records nothing
+        // (the armed `O1_LIVE_OBJECT_OBS` stays `None` rather than being combined with a
+        // different operation's envelopes/reservations). No measured object is cloned.
+        #[cfg(any(test, feature = "test-utils"))]
+        let o1_owner_snapshot = O1_OWNER_SNAPSHOT.with(|c| c.take());
         if self.injected() == InjectFault::FailBeforeSubmit {
             return PublishOutcome::PreWriteRefused("injected pre-submit refusal".into());
         }
@@ -849,7 +875,7 @@ impl SafetyBackend {
             // boundary, to record the ACTUAL combined O1 live-object charge. No-op for
             // O4/O5 (no O1 snapshot supplied).
             if let Some((decoded_charge, encoded_record_cap, metadata_payload_cap)) =
-                O1_OWNER_SNAPSHOT.with(|c| c.get())
+                o1_owner_snapshot
             {
                 let obs = O1LiveObjectCharge {
                     decoded_charge,

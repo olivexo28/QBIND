@@ -17272,3 +17272,255 @@ Rust changes are not documentation-only triviality. The component remains `D7D14
 `CONFIGURED_AUTHORITY_RELEASE_BINARY_EVIDENCE=NOT-YET-CAPTURED`;
 `SECURITY_POSTURE=RS1-OPEN / PUBLIC-DEVNET-NO-GO`; C4/C5 OPEN; H22 separately limited;
 fail-closed `CurrentEpochUnavailable` unchanged.
+
+## RUN 422 D7-D14 G1–G5 continuation (operative) — finished diagnostic coverage, validation-scratch proofs, and observation isolation
+
+This section is the **operative** reconciliation for the G1–G5 continuation and
+**supersedes** any earlier contradictory current claim above (including the F1–F4
+finishing pass where it conflicts). It preserves the completed storage corrections
+and operational evidence; it does **not** reopen accepted O1 boundary observations,
+O3/O5 object measurements, maximum QC/TC fixtures, borrowed high-QC selection, the
+recovery lifecycle, or the §13 accounting boundary. No accepted limit is increased
+to obtain a passing result.
+
+### Baseline correspondence (G5 ancestry note)
+
+- Supplied branch: `copilot/run-422-d7-d14-yet-again` (used as supplied; not renamed).
+- Reviewed revision `42de6b80dc5325b0b4d46f093c84f10ee0aaa171` was fetched into this
+  shallow clone (`git fetch origin <rev>`); it is a **commit** object. The starting
+  HEAD `f3efe1fbfcba0d6be9976431ee02d2c2a055aa57` and the reviewed revision have the
+  **identical tree** `4f86b5669ddf490ec500d61c2da36eaf2aaa83f3` — i.e. **exact byte
+  identity** over every authorized source, test, and document (not merely a
+  whitespace-ignoring match). The two commits differ only in commit metadata/history
+  (reviewed is a sibling, not an ancestor; `rev-list --left-right --count` = 1/2).
+- The earlier starting-tree differences from `1ecb0b7` comprised **line-ending
+  normalization (CRLF/LF) and final-newline removal** only; no authorized-source byte
+  content was changed by that normalization. This pass preserves each file's
+  established EOL/EOF convention: the two edited Rust files and the integration test
+  stay CRLF with no final newline; the evidence and contract documents stay CRLF with
+  no final newline; `contradiction.md` stays LF with no final newline.
+
+### G1 — Complete construction-time diagnostic accounting (finite table with derived coverage)
+
+**Concrete correction (code).** The transition-eligibility diagnostic
+(`owner.rs` `publish_locked`) previously rendered
+`format!("candidate lock_view {} not strictly greater than current {}", …)` — up to
+**95 bytes** with two 20-digit `u64`s. The earlier F2 claim that this fit
+“formatting overlap ≤ one grow of a sub-64B buffer” is **withdrawn**: 95 > 64 and
+`String` growth is amortized doubling, not a single sub-64B grow. Because this
+diagnostic fires in O4 (`publish_locked`) where the covering `_o4_res` margin over
+the live candidate+scratch set could **not** be shown to exceed its backing-capacity
+peak, the diagnostic is now a **typed, allocation-free**
+`SafetyStoreError::TransitionIneligible(TransitionIneligibleDetail{ candidate_lock_view,
+current_lock_view })` carrying the two `u64`s as `Copy` scalars. Construction-time
+heap allocation for this diagnostic is therefore **0 bytes** (the actual capacity
+bound), rather than an unbounded-then-truncated text. `Display` renders the identical
+message. Regression: `d7d14_g1_transition_ineligible_is_typed_and_preserves_state`
+(typed payload asserted; predecessor state unchanged; O4 reservation released to 0).
+
+**Backing-capacity model for the remaining `format!` diagnostics.** For a
+`format!` that renders `L` bytes, the `String` backing is grown by amortized
+doubling, so the capacity just before the final grow was `< L` and one grow at most
+doubles it: **peak backing capacity `< 2L`** (a single transient realloc copy is the
+only overlap, itself bounded by the same `< 2L`). `L_max` per site is the literal
+length plus the maximum decimal widths of its arguments (`u8` ≤ 3, `usize`/`u64` ≤ 20).
+The widest such diagnostic is TA6
+`"signed_timeout view {} != tc.timeout_view {} (TA6)"` with two `u64`s:
+`L_max = 86` bytes, so **peak backing `< 172` bytes** for the entire family.
+
+**Covering reservation and inequality.** Every remaining `format!` diagnostic is a
+stage-1 decode (`codec.rs`) or stage-3 validation (`validate.rs`) message constructed
+while the component is inspecting an **already-admitted** record/metadata buffer,
+inside the active transient-decode / validation reservation. That reservation budgets
+`max_transient_decoded_bytes = size_of::<DecodedRecord>() + max_decoded_evidence_backing`
+= **408 + evidence-backing** on the supported target. The `size_of::<DecodedRecord>()`
+= **408-byte inline term is stack-resident**, not a heap allocation, so it is pure
+**heap-budget slack**: at any decode/validation failure the live *heap* backing is
+`≤ max_decoded_evidence_backing`, leaving `≥ 408` bytes of the reservation budget
+unused by heap. Since `peak diagnostic backing < 172 < 408`, the physical heap peak
+(`live_heap_backing + diagnostic`) stays strictly below the reservation budget. This
+is the derived inequality `live_heap + diagnostic_peak ≤ R` — not merely “inside the
+reservation.”
+
+Finite table (component-created diagnostics reachable through O1–O5; backend-owned
+errors and post-return caller ownership kept distinct):
+
+| site(s) | op/phase | representation | max backing / overlap bound | simultaneous charged objects | active covering reservation | inequality | release/transfer | evidence |
+|---|---|---|---|---|---|---|---|---|
+| O1 established/partial/legacy; O1 first-use-intent; O4 recovery-required; empty-signer threshold; record-without-metadata | pre- or post-reservation | typed `Copy` (`AlreadyEstablishedKind` / `MissingIndependentInputSite` / `RecoveryRequiredReason` / `StructuralRefusalDetail::{EmptySignerCertificate,RecordPresentWithoutMetadata,UnknownLegacySafetyNamespaceKey}`) | **0 B heap** | none added | n/a (no covering buffer needed) | `0 ≤ anything` | transfers to caller; no reservation | `corr_*` allocation-free refusal tests |
+| Typed read failures `ReadFailedDetail::{NamespaceScan, Envelope{EnvelopeTooShort,CrcMismatch,BackendGet}}` | O1–O5 read | typed `Copy` payload | **0 B heap**; copies no backend text | O1 inspection read-back buffers | `_inspect_res` | `0 ≤ _inspect_res` | transfers; `_inspect_res` releases at block exit | `d7d14_f2_o1_read_failure_mapping_reached_operationally`, `corr_o1_namespace_scan_failure_is_typed_through_real_o1_path` |
+| **Transition ineligible** (strictly-increasing lock view) | O4 `publish_locked` | **typed `Copy` `TransitionIneligibleDetail{u64,u64}`** | **0 B heap** (was ≤ 95 B render / `< 190` B peak) | O4 candidate + validation scratch | `_o4_res` | `0 ≤ _o4_res` | transfers; `_o4_res` releases | `d7d14_g1_transition_ineligible_is_typed_and_preserves_state` |
+| Numeric decode diagnostics (`truncated need/have`; version/discriminant: timeout/tc/record high_qc, evidence, committed-anchor, predecessor; `trailing bytes after record`) | O2/O3 `decode_record` | `Message(String)` via bounded `u8`/`usize` | `L_max ≤ 63` → peak `< 126 B` | the admitted decode buffer + partial/complete `SafetyRecord` heap backing (≤ `max_decoded_evidence_backing`) | transient-decode reservation (`≥ 408 + backing`) | `backing + <126 ≤ 408 + backing` | partial object dropped on `?`-return; reservation releases | `h3_unsupported_version_refused`, `h4_crc_and_truncation_refused` |
+| Semantic QC/TC validation diagnostics (`qc signer index`; TA3/TA4/TA5/TA6 member/duplicate/correspondence/view) | O3/O4 `validate_decoded`/`validate_tc` | `Message(String)` via bounded `u64` | `L_max ≤ 86` → peak `< 172 B` | the live decoded object heap backing (≤ `max_decoded_evidence_backing`) + `UNIQ_SET` scratch | holder/validation reservation (`≥ 408 + backing + scratch`) | `backing + scratch + <172 ≤ 408 + backing + scratch` | transfers to caller; reservation releases at return | `corr_invalid_lock_evidence_binding_refused`, TC TA-refusal tests |
+| Fixed ambiguous-write / uncertain-publication literals | O1/O4/O5 publish | bounded fixed literal | fixed compile-time length; **no** backend text | the live publish buffers | live publication reservation (`_pub_res`/`_o4_res`/`_o5_res`) | `fixed ≤ reservation` | transfers to caller | ambiguous-write/uncertain `d7d14_*`, `pd_*` tests |
+
+Notes: every bound is on **backing capacity** (incl. the single realloc overlap),
+accounted **while the component constructs it**; eventual caller ownership does not
+exempt the construction-time allocation; bounded numeric inputs alone are **not**
+treated as coverage — the covering reservation and inequality are named per row. The
+typed rows are demonstrably bounded (0-alloc); the two `Message` rows are covered by
+the stack-resident 408-byte inline term of the transient-decode reservation. No
+redundant arithmetic test is added where the source proof is complete.
+
+### G2 — Backend-get error mapping exercised through the real handler
+
+`read_checksummed` previously short-circuited the injected `FailBackendGet` fault
+with a **separately constructed** `Envelope{BackendGet}` *before* `get_pinned` and
+its real `Err(_e)` arm, so the test proved nothing about the production mapping. The
+seam is corrected: the point read is normalized at a single boundary
+(`let got = self.db.get_pinned(key).map_err(|_e| ());`), the `cfg(test)`/`test-utils`
+`FailBackendGet` fault substitutes `Err(())` **at that backend-result boundary**, and
+a single `Err(()) => Envelope{BackendGet}` arm maps both the real and the injected
+failure. There is now exactly **one** construction site for the refusal; the backend
+error's `Display` text is dropped (`map_err(|_e| ())`), preserving allocation-free,
+no-backend-text construction.
+
+- Real-operation evidence: `d7d14_f2_o1_read_failure_mapping_reached_operationally`
+  drives O1 `initialize`, receives the mapped `Envelope{Metadata,BackendGet}`,
+  confirms no write / unchanged latch / `accounting_current()==0` cleanup, and
+  readmits a clean O1 after clearing the fault.
+- **Sensitivity (executed, then restored byte-identical):** mutating the shared arm
+  to `EnvelopeFailureKind::CrcMismatch` made the regression **fail**
+  (`got Err(ReadFailed(Envelope { what: Metadata, kind: CrcMismatch }))`), proving the
+  test is now sensitive to a regression in the exercised production mapping. The arm
+  was restored to `BackendGet` and re-verified before final validation.
+- Direct payload-construction tests remain classified as payload evidence.
+
+### G3 — Complete QC/TC validation-phase inequalities (source-derived)
+
+Terms (ownership): `enc` = original encoded record buffer (`≤ max_safety_record_bytes`,
+owned by the read-back); `dec` = transient decoded object heap backing
+(`≤ max_decoded_evidence_backing`, owned by the operation across decode→validation);
+`holder` = the covering holder **reservation** (not a live constructed holder);
+`reenc` = one record-sized re-encode buffer; `cert` = the binding scratch;
+`seen`,`st_ids` = the two TC `UNIQ_SET` descriptors (`24 + 8N` each); `qcidx` = the QC
+signer-index scratch (`24 + 8N`); `diag` = at most one coexisting G1 diagnostic
+(`< 172 B`, covered as in G1). Borrowed high-QC selection aliases the winning entry
+and adds **no owned signer backing**. Target-layout assumption: the dense-index
+profile measured in F1 (`size_of::<DecodedRecord>() = 408`, `(ValidatorId,u64)` = 8 B,
+`Vec` descriptor = 24 B).
+
+**O3 (`read_validate`)** — distinct, non-coexisting phases:
+
+- *Decode→transfer*: `enc` + transient `dec` coexist; `dec` moves into the retained
+  representation **without** a second copy (moved evidence is not double-counted).
+- *Semantic validation*: `dec` + QC path `qcidx` **or** TC path (`seen`+`st_ids`),
+  never both (QC and TC are mutually exclusive variants — scratch objects are **not**
+  summed across paths); `+ [diag]`.
+- *Re-encode / binding*: `reenc` and `cert` are **not** simultaneously live (`reenc`
+  drops before `cert`), so at most one record-sized validation buffer coexists.
+
+Inequality: `enc + dec + max(qcidx, seen+st_ids) + max(reenc,cert) + [diag] ≤ holder_res
++ _scratch_res`. TC scratch `seen+st_ids = 2×(24+8N)`: **N=1 → 64 B**, **N=4 → 112 B**;
+QC `qcidx = 24+8N`: **N=1 → 32 B**, **N=4 → 56 B**. The TC path dominates, so the
+scratch term is `≤ 112 B` at N=4. Every `UNIQ_SET`/index backing is `≤ N` entries
+(bounded by the admitted signer count); this is a source proof and does **not** use
+`admit_evidence_capnorm` as admission for the independently allocated scratch, nor
+claim `capacity ≤ N` alone proves aggregate coverage — the holder+scratch reservation
+bound is evaluated against the profile operational cap (F1: N=4 operational `2122`,
+aggregate `7772`).
+
+**O4 (`publish_locked`)** — three encoded-buffer roles preserved (candidate encoded,
+predecessor read-back encoded, re-encode), predecessor released before candidate
+construction:
+
+- *Predecessor validation*: the already-owned **candidate** coexists with the
+  predecessor `dec_pred` + predecessor `enc_pred` + predecessor validation scratch
+  (`2×(24+8N)` TC or `24+8N` QC) `+ [diag]`. The predecessor decoded object and its
+  read-back bytes are **consumed** here and dropped **before** the candidate decoded
+  object is validated (the two transient decoded objects never coexist).
+- *Candidate validation / transition*: `candidate_dec` + `candidate` validation
+  scratch + the typed (0-alloc) transition refusal when ineligible; `enc_cand` is the
+  candidate's own encoded buffer; `reenc` is the third role, not simultaneous with the
+  predecessor read-back.
+
+Inequality: `candidate + dec_pred + enc_pred + 2×(24+8N) + [diag] ≤ _o4_res` during
+predecessor validation, and `candidate_dec + 2×(24+8N) + qcidx + [typed 0-B
+transition] ≤ _o4_res` during candidate validation; the transition refusal adds **0**
+heap. N=1/N=4 scratch as above (`64`/`112` B for two TC sets). Borrowed selection
+(`select_max_high_qc_ref`) is exercised through both O3 and O4 by
+`d7d14_fc_tc_borrowed_selection_discriminates_distinct_views_through_o3_o4`; strict-`>`
+first-encountered-for-equal-views, quorum semantics, and `Unverified` evidence are
+preserved. No repeat of the accepted O3/O5 observer/mutation campaign was required.
+
+### G4 — O1 snapshot scoped to its operation
+
+The O1 owner snapshot (`set_o1_owner_live_snapshot`) is now **consumed (taken), not
+peeked**, at `publish_atomic` entry — before any early refusal return — so it belongs
+to exactly one intended O1 operation. Consequences, with coverage:
+
+- A later **non-O1** (O4/O5) publication on the same thread finds `None` and cannot
+  recombine the stale bootstrap snapshot with a different operation's envelopes/
+  reservations. Regression:
+  `d7d14_g4_o1_snapshot_not_reused_by_later_non_o1_publication` asserts the completed
+  O1 observation is **unchanged** after an O4 `publish_locked` on the same thread.
+- **Sensitivity (executed, then restored byte-identical):** reverting `.take()` to
+  the pre-fix `.get()` made that regression **fail** — the O4 operation's record
+  envelope (`256` vs `85`) and reservations (`4699` vs `2122`) leaked into the O1
+  observation. Restored to `.take()` and re-verified.
+- A newly **armed** O1 attempt that refuses before its publication boundary reports
+  **no** observation (never an earlier success). Regression:
+  `d7d14_g4_newly_armed_refused_o1_reports_no_observation` (duplicate init refused
+  during inspection → `observed_o1_live_object_charge() == None`).
+- **Accessor semantics (defined):** `observed_o1_live_object_charge()` exposes the
+  **completed historical** O1 result — a successful O1 records it; a subsequent non-O1
+  publication cannot overwrite it; a missing/failed measurement stays `None` (no zero
+  substitution, no partial total). Observation stays bounded, allocation-free where
+  required, clones no measured object, and is absent from default production builds.
+  The preserved F1 boundary measurements (N=1 `990 ≤ 1318`, N=4 `1392 ≤ 2122`) are
+  unchanged; only the instrumentation lifetime is corrected.
+
+### G5 — Document reconciliation and withdrawals
+
+- The F2 “sub-64B buffer” transition-growth claim is **withdrawn**; replaced by the
+  typed 0-alloc transition diagnostic and the G1 table with derived backing-capacity
+  inequalities (`< 2L` model; 408-byte inline-term slack).
+- The abbreviated F3 O3/O4 expressions are **superseded** by the G3 complete phase
+  inequalities (defined terms, mutually-exclusive QC/TC scratch, three O4 encoded-
+  buffer roles, N=1/N=4 evaluations).
+- The prior claim that the backend-get seam exercised the real `Err(_e)` handler is
+  **corrected** (G2): it previously constructed the refusal separately; it now routes
+  through the single shared mapping, demonstrated by the sensitivity mutation.
+- The prior O1 snapshot isolation description is **corrected** (G4): the snapshot was
+  retained and `get()`-read; it is now consumed per operation. The valid F1
+  explicitly-reset measurements are preserved.
+- Historical results are preserved with explicit supersession; executed observations,
+  source reasoning, arithmetic, and inherited evidence are kept separate.
+- Intentional production-isolation boundaries (default-disabled, no startup/consensus/
+  signing/recovery-verifier/transport/peer-apply wiring) are distinguished from the
+  concrete component work completed here (typed transition diagnostic, real backend-
+  get mapping, consumed O1 snapshot).
+
+### This pass's literal validation / security-tool outcomes
+
+Recorded separately from historical results (G1–G5 continuation, executed in the
+supplied environment; literal commands, exit codes, and counts):
+
+| # | literal command | exit | result |
+|---|---|---|---|
+| 1 | `cargo build -p qbind-node --lib` | 0 | Finished `dev` in 16.51s |
+| 2 | `cargo test -p qbind-node --no-run` | 0 | all test binaries compiled (default features) |
+| 3 | `cargo test -p qbind-node --features test-utils --no-run` | 0 | all test binaries compiled (`test-utils`) |
+| 4 | `cargo test -p qbind-node --features test-utils --test run_422_d7d14_safety_record_store_tests` | 0 | **149 passed; 0 failed; 1 ignored**; 0.79s (includes `d7d14_g1_*`, `d7d14_g4_*`, `d7d14_f2_*`) |
+| 5 | `cargo test -p qbind-node --features test-utils --lib fc_borrowed_selection` | 0 | **2 passed; 0 failed**; 1839 filtered out (borrowed high-QC selection) |
+| 6 | `cargo test -p qbind-node --features test-utils --test m16_epoch_transition_hardening_tests` | 0 | **14 passed; 0 failed; 0 ignored**; 0.07s |
+| 7 | `cargo clippy -p qbind-node --features test-utils --lib` | 0 | 104 pre-existing warnings (unchanged baseline); **none in the edited `safety_record_store` files** |
+| 8 | `cargo clippy -p qbind-node --features test-utils --test run_422_d7d14_safety_record_store_tests` | 0 | 12 warnings, all pre-existing idioms; the lone new-region hit (`manual_div_ceil` at the `ceil(2N/3)` quorum helper) matches 5 identical pre-existing sites in the same file |
+| 9 | `cargo build -p qbind-node --release --bin qbind-node` | 0 | Finished `release` in 6m45s (build compatibility only, **not** running-node recovery acceptance) |
+| 10 | `rustfmt --edition 2021 --check` on `error.rs`, `owner.rs`, `backend.rs` | 0 | **edited regions clean**; residual diffs are pre-existing long lines (owner.rs:832/889, backend.rs:328) and the preserved no-final-newline EOF convention |
+| 11 | secret scanning (`runtime-tools-secret_scanning`) on all 7 changed paths | 0 | **No secrets detected** |
+
+**Non-wiring audit (manual).** The three edited source files remain in the disabled-by-default `safety_record_store` component; all fault-injection and O1 observation machinery stays behind `cfg(test)`/`feature="test-utils"`; no production call site, startup, consensus, signing, recovery-verifier, transport, or peer-apply path was added or changed. No new dependency was introduced.
+
+**Independent review / CodeQL provenance (this pass).** `parallel_validation` executed both engines. **Code Review:** completed over the 7 changed files with **no review comments**; one secondary sub-model (`claude-sonnet-4.6`) was reported **unavailable** in this environment, but the primary review engine completed — the single unavailable sub-model does not invalidate the completed review. **CodeQL (rust):** returned **0 alerts** but with the literal note *“Analysis was skipped because the database size is too large”*; this skip supplies **no** full-analysis security assurance and is recorded as skipped (not clean).
+
+This continuation does **not** close H22, cryptographic verification, rollback
+resistance, or production acceptance. Preserved verdicts (unchanged):
+`D7D14_STORAGE_COMPONENT=PARTIAL-IMPLEMENTATION`; `D7D14_STORAGE_ACCEPTANCE=INCOMPLETE`;
+`DURABLE_ANTI_ROLLBACK=NOT-ESTABLISHED`; `GENESIS_AUTHORITY_ACTIVATION=DISABLED`;
+`PRODUCTION_WIRE_CHAIN_ID_BEHAVIOR=UNCHANGED`;
+`CONFIGURED_AUTHORITY_RELEASE_BINARY_EVIDENCE=NOT-YET-CAPTURED`;
+`SECURITY_POSTURE=RS1-OPEN / PUBLIC-DEVNET-NO-GO`; C4/C5 OPEN; H22 separately limited;
+fail-closed `CurrentEpochUnavailable` unchanged. `GEN_STRUCT_MAX=384`, `CAPNORM_SLACK=0`,
+single aggregate authority, N=4 aggregate `7772`, borrowed `CMP_SPAN`, and the three
+O3→O5 encoded-buffer roles are all preserved.
