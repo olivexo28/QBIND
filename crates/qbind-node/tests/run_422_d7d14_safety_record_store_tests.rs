@@ -10475,12 +10475,16 @@ fn d7d14_h8b_uncertain_successor_restart_then_o5_recovers() {
     let ctx = ctx_n(4);
     let rec_cap = max_safety_record_bytes(&ctx).unwrap();
     // A raw backend handle (shares the DB + accountant with the owner) for the
-    // out-of-band byte / metadata / reservation inspection via the PUBLIC
-    // read-only inspectors (`read_record`/`read_meta`/`accounting_current`).
+    // out-of-band byte / metadata / reservation inspection. `read_record` and
+    // `read_meta` are ungated public read-only inspectors; `accounting_current`
+    // is public but compiled only under `#[cfg(any(test, feature = "test-utils"))]`.
     let raw = open_enabled(dir.path());
     let owner = SafetyRecordOwner::attach(raw.clone(), ctx.clone()).unwrap();
-    // Steady-state reservation baseline AFTER attach (the owner's context-ownership
-    // charge is included); no operation proof is live here.
+    // Operational reservation baseline captured AFTER attach, with no retained
+    // operation proof live here. `accounting_current()` observes the OPERATIONAL
+    // accounting partition only; context ownership is charged to a SEPARATE
+    // partition (the aggregate observation covers the combined authority), so this
+    // baseline is the operational steady state the post-proof comparison returns to.
     let baseline = raw.accounting_current();
 
     // O2 observes the complete successor; recovery still required on reopen.
