@@ -581,7 +581,9 @@ mod d7d14_h7_checked_size_arithmetic {
             qc_suite_id: 1,
             timeout_suite_id: 1,
             s_sig: MAXP as usize,
-            validators: (0..MAXP as u64).map(|i| (ValidatorId::new(i), 1u64)).collect(),
+            validators: (0..MAXP as u64)
+                .map(|i| (ValidatorId::new(i), 1u64))
+                .collect(),
             require_height_equals_round: false,
         };
         // Validated-context precondition (what `attach` enforces before any decode).
@@ -602,6 +604,9 @@ mod d7d14_h7_checked_size_arithmetic {
         // nested product in `max_tc_bytes` at the extreme. Both maxima stay far
         // below the `u128` boundary the helpers guard.
         assert!(qc < tc, "QC maximum is strictly below the TC maximum");
-        assert!(tc < u128::MAX / 2, "serialized cap stays far below u128::MAX");
+        assert!(
+            tc < u128::MAX / 2,
+            "serialized cap stays far below u128::MAX"
+        );
     }
 }
