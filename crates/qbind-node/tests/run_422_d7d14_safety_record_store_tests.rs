@@ -5184,6 +5184,41 @@ fn child_process_entry() {
             );
             std::process::exit(17);
         }
+        "plant_malformed_successor" => {
+            // Establish a VALID store with real component operations: O1 bootstrap
+            // (rev 0) then a real O4 lock publication (rev 1, acknowledged).
+            owner.initialize(true).expect("O1");
+            let qc = valid_wire_qc(&ctx, [9u8; 32], 5);
+            let locked = make_locked_qc(&ctx, [9u8; 32], 5, qc, None).unwrap();
+            assert!(
+                matches!(
+                    owner.publish_locked(locked, 0, None::<&FixtureCommittedHistory>),
+                    PublishResult::DurableAcknowledged { new_revision: 1 }
+                ),
+                "child must establish a valid rev-1 lock before planting"
+            );
+            // Plant a BOUNDED malformed surviving successor via the test-only
+            // out-of-band storage mutation. `debug_overwrite_record_for_test`
+            // re-seals the OUTER storage envelope over these bytes, so the planted
+            // fixture passes the outer-envelope check and reaches the INNER
+            // record-decoding refusal (an inner-CRC failure). This is a TEST-PLANTED
+            // malformed surviving-state fixture across process termination — NOT
+            // evidence of a RocksDB torn atomic write and NOT machine-power-loss
+            // evidence.
+            let malformed = malformed_inner_crc_successor_bytes(&ctx);
+            owner
+                .debug_overwrite_record_for_test(&malformed)
+                .expect("plant malformed successor (synced)");
+            // The synced out-of-band write above has durably persisted the malformed
+            // bytes BEFORE this designated termination boundary. Record the
+            // phase-reached sentinel ONLY now, so its presence (paired with the exact
+            // exit code) proves the intended boundary was reached.
+            if let Ok(marker) = std::env::var(ENV_MARKER) {
+                std::fs::write(&marker, b"plant_malformed_successor reached post-plant\n")
+                    .expect("write phase-reached sentinel");
+            }
+            std::process::exit(21);
+        }
         other => panic!("unknown child phase {other}"),
     }
 }
@@ -10272,4 +10307,479 @@ fn d7d14_fc_tc_borrowed_selection_discriminates_distinct_views_through_o3_o4() {
         .read_validate(None::<&FixtureCommittedHistory>)
         .unwrap();
     assert_eq!(v2.evidence_status(), EvidenceStatus::Unverified);
+}
+// ===========================================================================
+// RUN 422 D7-D14 — targeted acceptance evidence for six partial H rows.
+//
+// H7 helper execution + source-derived decoder-overflow unreachability live in
+// `safety_record_store/profile.rs` (`mod d7d14_h7_checked_size_arithmetic`).
+// H16 is a documented interface-limitation conclusion (no prune/compaction/delete
+// entry point exists on the owner/backend surface; the only out-of-band mutation
+// is the `#[cfg(any(test, feature = "test-utils"))]`-gated
+// `debug_overwrite_record_for_test` / `debug_put_raw`, unreachable from
+// production) — see the evidence document; no prune API is invented to reject it.
+//
+// H8 (A/B), H23, H27, and H30 are the executed tests below.
+// ===========================================================================
+
+/// A would-be rev-2 successor publication that is structurally well-formed except
+/// that one INNER byte is flipped, so the inner record CRC fails on decode. Both
+/// the planting child and the reopening parent build this deterministically from
+/// the same pinned context, so the parent can assert the surviving stored bytes
+/// are byte-for-byte the planted fixture (no repair / no overwrite). The flipped
+/// byte sits in the fixed identity header, far from the trailing 4-byte inner CRC
+/// and from any length prefix, so `decode_record` fails at the inner-CRC check
+/// (not at an envelope / truncation / length-framing error).
+fn malformed_inner_crc_successor_bytes(ctx: &PinnedSafetyContext) -> Vec<u8> {
+    let qc = valid_wire_qc(ctx, [0x77u8; 32], 9);
+    let locked = make_locked_qc(ctx, [0x77u8; 32], 9, qc, None).unwrap();
+    let dec = DecodedRecord {
+        persistence_format_version: 1,
+        network_genesis_id: ctx.network_genesis_id,
+        publication_revision: 2,
+        record: SafetyRecord::Locked(locked),
+    };
+    let mut enc = encode_record(&dec, ctx).unwrap();
+    // Flip a byte in the fixed header (version / genesis region), well before the
+    // trailing inner CRC: the inner checksum fails, while the OUTER envelope
+    // (re-sealed by `debug_overwrite_record`) stays valid.
+    enc[10] ^= 0xFF;
+    enc
+}
+
+/// H8 — scenario A (clause: torn/partial surviving successor → REFUSE, frontier
+/// not reached; the malformed state is never made effective). Real-storage +
+/// process-death.
+///
+/// Starting state / independent inputs: a child establishes a valid store (O1
+/// bootstrap rev 0, real O4 lock rev 1) then PLANTS a bounded malformed successor
+/// across process termination (test-only out-of-band mutation; inner record CRC
+/// broken, outer envelope valid), records a phase sentinel, and exits with a
+/// distinct code. Operation/branch reached: the parent reopens through the real
+/// owner/backend path; O2 `open` and O3 `read_validate` both pass the
+/// outer-envelope check and reach the INNER record-decoding refusal
+/// (`StructuralRefusal`). Assertions: typed structural refusal; surviving
+/// record + metadata bytes unchanged (no repair / overwrite); reservation cleanup
+/// (no net reservation leaked); dependent O4 cannot make the malformed state
+/// effective (fresh-open recovery latch). Positive control: the reconstructed
+/// malformed fixture equals the stored bytes, so the refusal is the planted
+/// inner-CRC break, not an unrelated failure.
+///
+/// Fault-planting limits: this is a TEST-PLANTED malformed surviving-state fixture
+/// across process termination. It is NOT evidence that RocksDB naturally produced
+/// a torn atomic write, and it is NOT machine-power-loss evidence.
+#[test]
+fn d7d14_h8a_planted_malformed_successor_across_process_death_refused() {
+    let dir = tempfile::tempdir().unwrap();
+    let status = spawn_child(dir.path(), "plant_malformed_successor");
+    assert_eq!(
+        status.code(),
+        Some(21),
+        "child must reach the post-plant termination boundary"
+    );
+    let marker = marker_path_for(dir.path());
+    assert!(
+        marker.exists(),
+        "child must record the phase-reached sentinel before terminating"
+    );
+
+    let ctx = ctx_n(4);
+    let rec_cap = max_safety_record_bytes(&ctx).unwrap();
+    // A raw backend handle (shares the DB + accountant with the owner) for
+    // out-of-band byte / metadata / reservation inspection.
+    let raw = open_enabled(dir.path());
+    let meta_before = raw.read_meta(64).unwrap();
+    let rec_before = raw.read_record(rec_cap).unwrap();
+    let expected = malformed_inner_crc_successor_bytes(&ctx);
+    assert_eq!(
+        rec_before.as_deref(),
+        Some(expected.as_slice()),
+        "the surviving stored record is byte-for-byte the planted malformed fixture"
+    );
+    assert!(
+        meta_before.is_some(),
+        "the valid metadata envelope must survive the record-only mutation"
+    );
+
+    let owner = SafetyRecordOwner::attach(raw.clone(), ctx.clone()).unwrap();
+    let baseline = raw.accounting_current();
+
+    // O2 open: passes the outer envelope, reaches the inner record-decoding refusal.
+    assert!(matches!(
+        owner.open(),
+        Err(SafetyStoreError::StructuralRefusal(_))
+    ));
+    // O3 read/validate: the same inner record-decoding refusal; no recovery/repair.
+    assert!(matches!(
+        owner.read_validate(None::<&FixtureCommittedHistory>),
+        Err(SafetyStoreError::StructuralRefusal(_))
+    ));
+    // Dependent O4 cannot make the malformed state effective: a freshly reopened
+    // process carries no acknowledgement, so publication is refused pre-write for
+    // RecoveryRequired (it never reaches the malformed record).
+    let qc = valid_wire_qc(&ctx, [0x55u8; 32], 9);
+    let l = make_locked_qc(&ctx, [0x55u8; 32], 9, qc, None).unwrap();
+    assert!(matches!(
+        owner.publish_locked(l, 1, None::<&FixtureCommittedHistory>),
+        PublishResult::RefusedPreWrite(SafetyStoreError::RecoveryRequired(_))
+    ));
+
+    // State preservation + reservation cleanup: the malformed record and the
+    // metadata are unchanged, and no operation leaked a reservation.
+    let rec_after = raw.read_record(rec_cap).unwrap();
+    let meta_after = raw.read_meta(64).unwrap();
+    assert_eq!(
+        rec_after, rec_before,
+        "malformed record bytes unchanged (no repair / overwrite)"
+    );
+    assert_eq!(meta_after, meta_before, "metadata bytes unchanged");
+    assert_eq!(
+        raw.accounting_current(),
+        baseline,
+        "no reservation leaked across the refused reopen operations"
+    );
+}
+
+/// H8 — scenario B (clauses: a complete-but-unacknowledged successor survives
+/// process death; a live uncertain result fails closed and blocks dependent work;
+/// O5 re-acknowledges the surviving successor). Real-storage + process-death.
+///
+/// This is the specific "uncertain publication → PROCESS DEATH → reopen → O5 of
+/// the surviving successor" sequence (previously only inferred across a clean-exit
+/// boundary and a same-process uncertainty test). Starting state: a child performs
+/// a durable write whose success acknowledgement is lost (`UncertainDurable`) and
+/// terminates at the verified exit-11 boundary. Operations/branches reached: the
+/// parent reopens the SAME store; O2/O3 observe the complete rev-1 successor while
+/// recovery remains required; a valid dependent O4 is refused specifically for
+/// RecoveryRequired; the parent mints a FRESH O3 proof in its own incarnation (no
+/// validation token crosses the boundary) and O5 `reacknowledge` recovers.
+/// Assertions: exact original record bytes, publication revision, acknowledgement
+/// outcome, and the recovery-latch transition; a subsequent eligible O4 succeeds.
+/// Kept separate from the acknowledged clean-exit recovery and the same-process
+/// uncertainty tests.
+#[test]
+fn d7d14_h8b_uncertain_successor_restart_then_o5_recovers() {
+    let dir = tempfile::tempdir().unwrap();
+    let status = spawn_child(dir.path(), "uncertain_after_write");
+    assert_eq!(
+        status.code(),
+        Some(11),
+        "child reached the uncertain-write boundary"
+    );
+
+    let ctx = ctx_n(4);
+    let owner = SafetyRecordOwner::attach(open_enabled(dir.path()), ctx.clone()).unwrap();
+    // O2 observes the complete successor; recovery still required on reopen.
+    assert_eq!(owner.open().unwrap().current_revision, 1);
+    assert!(
+        owner.recovery_required(),
+        "reopened process requires fresh O5"
+    );
+    // O3 observes the same complete successor.
+    let surviving = owner
+        .read_validate(None::<&FixtureCommittedHistory>)
+        .unwrap();
+    assert!(surviving.retained().is_locked());
+    assert_eq!(surviving.retained().publication_revision, 1);
+    let original_bytes = surviving.encoded().to_vec();
+    // Release this O3 proof's retained-holder reservation before the admitting O4
+    // below: a live proof legitimately charges the shared aggregate for its
+    // lifetime, and the later publication must compete for the same budget.
+    drop(surviving);
+
+    // A valid dependent O4 is refused SPECIFICALLY because recovery is required.
+    let qc2 = valid_wire_qc(&ctx, [0x11u8; 32], 7);
+    let l2 = make_locked_qc(&ctx, [0x11u8; 32], 7, qc2, None).unwrap();
+    assert!(matches!(
+        owner.publish_locked(l2.clone(), 1, None::<&FixtureCommittedHistory>),
+        PublishResult::RefusedPreWrite(SafetyStoreError::RecoveryRequired(_))
+    ));
+
+    // Fresh O3 proof in THIS backend incarnation; no validation token crossed the
+    // process boundary. O5 re-acknowledges the surviving publication.
+    let proof = owner
+        .read_validate(None::<&FixtureCommittedHistory>)
+        .unwrap();
+    assert_eq!(
+        proof.encoded(),
+        original_bytes.as_slice(),
+        "exact original record bytes"
+    );
+    assert!(matches!(
+        owner.reacknowledge(&proof),
+        PublishResult::DurableAcknowledged { new_revision: 1 }
+    ));
+    // Release the proof's holder reservation before the admitting O4 below.
+    drop(proof);
+    // Recovery-latch transition: cleared only across the successful O5 barrier.
+    assert!(!owner.recovery_required());
+    // A subsequent eligible O4 now succeeds.
+    assert_eq!(
+        owner.publish_locked(l2, 1, None::<&FixtureCommittedHistory>),
+        PublishResult::DurableAcknowledged { new_revision: 2 }
+    );
+}
+
+/// H23 (clauses: committed-anchor comparison failure on HEIGHT mismatch → REFUSE;
+/// correct anchor at correct height → ADMIT; legitimate later committed progress
+/// since the lock → ADMIT the unchanged lock). Real-owner O3 over a real store.
+///
+/// The independent committed history is constructed SEPARATELY from the candidate
+/// record (a clearly-labelled fixture, never derived from the record). Otherwise
+/// identical fixtures isolate the HEIGHT comparison: the same anchor block id is
+/// affirmed at the wrong height (refuse) vs its correct height (admit). A third
+/// history additionally carries later committed entries beyond the lock and still
+/// admits the unchanged lock. State preservation on the refusal is checked. This
+/// is fixture-based history membership, NOT real consensus execution or canonical
+/// committed-chain recovery. The existing missing-history and absent-anchor cases
+/// (`corr_missing_committed_history_for_anchored_refused`, the H24 distinctions)
+/// are left intact.
+#[test]
+fn d7d14_h23_anchor_height_mismatch_and_later_progress_through_owner() {
+    use qbind_node::safety_record_store::error::SemanticRefusalDetail;
+    let dir = tempfile::tempdir().unwrap();
+    let ctx = ctx_n(4);
+    let owner = init_owner(dir.path(), &ctx);
+    // An anchored locked record (lock [9;32] @ view 5, committed anchor [3;32] @
+    // height 4), planted at rev 0 via the test-only out-of-band mutation so O3
+    // reads an established anchored record. (O4 would impose the transition fence;
+    // this test isolates the P3 committed-anchor comparison, not the transition
+    // rule.)
+    let qc = valid_wire_qc(&ctx, [9u8; 32], 5);
+    let locked = make_locked_qc(
+        &ctx,
+        [9u8; 32],
+        5,
+        qc,
+        Some(CommittedAnchor {
+            block_id: [3u8; 32],
+            height: 4,
+        }),
+    )
+    .unwrap();
+    let dec = DecodedRecord {
+        persistence_format_version: 1,
+        network_genesis_id: ctx.network_genesis_id,
+        publication_revision: 0,
+        record: SafetyRecord::Locked(locked),
+    };
+    let enc = encode_record(&dec, &ctx).unwrap();
+    owner.debug_overwrite_record_for_test(&enc).unwrap();
+
+    // (a) Correct anchor BLOCK at the WRONG height → semantic P3 refusal. The
+    // history affirms block [3;32] at height 9 (not the anchor's height 4), and
+    // `contains_committed` requires an exact (block, height) match, so this
+    // isolates the height comparison (identical block id).
+    let wrong_height = FixtureCommittedHistory::new().with([3u8; 32], 9);
+    let r = owner.read_validate(Some(&wrong_height));
+    assert!(
+        matches!(
+            &r,
+            Err(SafetyStoreError::SemanticRefusal(SemanticRefusalDetail::Static(m)))
+                if m.contains("committed anchor not on supplied committed history")
+        ),
+        "got {r:?}"
+    );
+
+    // (b) Correct anchor at its CORRECT height → admission (an otherwise-identical
+    // history differing only in the affirmed height).
+    let correct = FixtureCommittedHistory::new().with([3u8; 32], 4);
+    let v = owner.read_validate(Some(&correct)).unwrap();
+    assert_eq!(v.evidence_status(), EvidenceStatus::Unverified);
+    assert_eq!(v.retained().publication_revision, 0);
+
+    // (c) A history retaining the anchor AND carrying later committed entries
+    // (heights 6, 7 beyond the lock's anchor height 4) → admission of the UNCHANGED
+    // lock despite the later progress.
+    let with_progress = FixtureCommittedHistory::new()
+        .with([3u8; 32], 4)
+        .with([0xB2u8; 32], 6)
+        .with([0xB3u8; 32], 7);
+    let v2 = owner.read_validate(Some(&with_progress)).unwrap();
+    assert_eq!(v2.evidence_status(), EvidenceStatus::Unverified);
+    match &v2.retained().record {
+        SafetyRecord::Locked(l) => {
+            assert_eq!(
+                l.lock_view, 5,
+                "the lock is unchanged by later committed progress"
+            );
+            assert_eq!(l.committed_anchor.as_ref().map(|a| a.height), Some(4));
+        }
+        _ => panic!("expected the unchanged locked record"),
+    }
+
+    // State preservation on refusal: the refused (a) left the stored record intact
+    // (the admitting reads in (b)/(c) succeeded on the same bytes), and a fresh
+    // read still admits at rev 0.
+    let again = owner.read_validate(Some(&correct)).unwrap();
+    assert_eq!(again.retained().publication_revision, 0);
+}
+
+/// H27 (clauses: PERSIST a TC-derived restriction; carry it Unverified; ENFORCE it
+/// live as a transition restriction after the O5 barrier; admit a strictly higher
+/// candidate). Unit/model + real-storage.
+///
+/// Distinguishes actual restriction ENFORCEMENT from merely reading
+/// `SupportingEvidence::TcDerived`: the persisted TC-derived lock view is enforced
+/// against equal-to and below candidates specifically on a TC-derived lock. The
+/// required O5 barrier is completed FIRST (reacknowledge after reopen) so a
+/// `RecoveryRequired` refusal cannot mask the intended transition-eligibility
+/// refusal. The test-authored verified-prerequisite boundary (H22) is untouched;
+/// no cryptographic verification, fabricated signature, production consumer, or new
+/// `Verified` result is introduced.
+#[test]
+fn d7d14_h27_persisted_tc_restriction_enforced_after_o5_barrier() {
+    let dir = tempfile::tempdir().unwrap();
+    let ctx = ctx_n(4);
+    let owner = init_owner(dir.path(), &ctx);
+    // Publish a valid TC-derived lock at lock_view 5.
+    let ltc = valid_tc_record(&ctx, 5, 6);
+    assert_eq!(
+        owner.publish_locked(ltc, 0, None::<&FixtureCommittedHistory>),
+        PublishResult::DurableAcknowledged { new_revision: 1 }
+    );
+
+    // Reopen a fresh handle; observe Unverified TC-derived evidence.
+    drop(owner);
+    let owner2 = SafetyRecordOwner::attach(open_enabled(dir.path()), ctx.clone()).unwrap();
+    let observed = owner2
+        .read_validate(None::<&FixtureCommittedHistory>)
+        .unwrap();
+    assert_eq!(observed.evidence_status(), EvidenceStatus::Unverified);
+    assert!(matches!(
+        &observed.retained().record,
+        SafetyRecord::Locked(l) if matches!(l.evidence, SupportingEvidence::TcDerived { .. })
+    ));
+    assert!(owner2.recovery_required());
+
+    // Complete the required O5 barrier BEFORE testing transition eligibility, so
+    // RecoveryRequired cannot mask the intended refusal.
+    assert!(matches!(
+        owner2.reacknowledge(&observed),
+        PublishResult::DurableAcknowledged { new_revision: 1 }
+    ));
+    // Release this O3 proof's holder reservation; the transition-eligibility
+    // publications below must compete for the shared aggregate on their own.
+    drop(observed);
+    assert!(!owner2.recovery_required());
+
+    // Equal lock view (5) → the SPECIFIC transition-eligibility refusal (not
+    // RecoveryRequired, which the O5 barrier above cleared).
+    let qc_eq = valid_wire_qc(&ctx, [0xAAu8; 32], 5);
+    let l_eq = make_locked_qc(&ctx, [0xAAu8; 32], 5, qc_eq, None).unwrap();
+    assert!(matches!(
+        owner2.publish_locked(l_eq, 1, None::<&FixtureCommittedHistory>),
+        PublishResult::RefusedPreWrite(SafetyStoreError::TransitionIneligible(_))
+    ));
+    // Below the persisted lock view (4) → the same transition-eligibility refusal.
+    let qc_lo = valid_wire_qc(&ctx, [0xABu8; 32], 4);
+    let l_lo = make_locked_qc(&ctx, [0xABu8; 32], 4, qc_lo, None).unwrap();
+    assert!(matches!(
+        owner2.publish_locked(l_lo, 1, None::<&FixtureCommittedHistory>),
+        PublishResult::RefusedPreWrite(SafetyStoreError::TransitionIneligible(_))
+    ));
+
+    // Durable record / metadata / revision preservation across the refusals: still
+    // the TC-derived lock at view 5, revision 1.
+    let preserved = owner2
+        .read_validate(None::<&FixtureCommittedHistory>)
+        .unwrap();
+    assert_eq!(preserved.retained().publication_revision, 1);
+    match &preserved.retained().record {
+        SafetyRecord::Locked(l) => {
+            assert_eq!(l.lock_view, 5);
+            assert!(matches!(l.evidence, SupportingEvidence::TcDerived { .. }));
+        }
+        _ => panic!("expected the preserved TC-derived lock"),
+    }
+    // Release the preservation proof before the admitting O4 below.
+    drop(preserved);
+
+    // A strictly higher candidate (view 9) → admission.
+    let qc_hi = valid_wire_qc(&ctx, [0xBBu8; 32], 9);
+    let l_hi = make_locked_qc(&ctx, [0xBBu8; 32], 9, qc_hi, None).unwrap();
+    assert_eq!(
+        owner2.publish_locked(l_hi, 1, None::<&FixtureCommittedHistory>),
+        PublishResult::DurableAcknowledged { new_revision: 2 }
+    );
+}
+
+/// H30 (clause: round-only correspondence must be REJECTED — the logical view
+/// binds to wire `height`, not `round`). Unit/model.
+///
+/// Constructs a certificate whose block id matches the lock and whose
+/// `round == lock_view` but `height != lock_view`, with the optional
+/// `require_height_equals_round` rule DISABLED so the mandatory height-to-lock-view
+/// binding is isolated. Structural decoding succeeds (valid CRC, signer/quorum,
+/// recomputed binding); semantic validation refuses the height mismatch at the P2
+/// view-binding check — not a checksum, stale digest, structural bound, foreign
+/// context, or transition fence. Positive controls retain height-based admission
+/// when round differs and the separate strict-profile `height == round` behavior.
+#[test]
+fn d7d14_h30_round_only_correspondence_refused() {
+    use qbind_node::safety_record_store::error::SemanticRefusalDetail;
+    let ctx = ctx_n(4);
+    let lock_view = 5u64;
+    // block_id matches the lock; round == lock_view; height != lock_view.
+    let mut qc = valid_wire_qc(&ctx, [9u8; 32], lock_view);
+    qc.round = lock_view; // round corresponds to the lock view ...
+    qc.height = 7; // ... but height (the binding source) does NOT.
+    let locked = make_locked_qc(&ctx, [9u8; 32], lock_view, qc, None).unwrap();
+    let dec = DecodedRecord {
+        persistence_format_version: 1,
+        network_genesis_id: ctx.network_genesis_id,
+        publication_revision: 1,
+        record: SafetyRecord::Locked(locked),
+    };
+    let enc = encode_record(&dec, &ctx).unwrap();
+    // Structural decoding succeeds (so the refusal below is semantic, not a CRC /
+    // framing / bound failure).
+    assert!(decode_record(&enc, &ctx).is_ok());
+    // Semantic validation refuses the height mismatch at the P2 view-binding check.
+    let r = validate_decoded(dec, enc, &ctx, None::<&FixtureCommittedHistory>);
+    assert!(
+        matches!(
+            &r,
+            Err(SafetyStoreError::SemanticRefusal(SemanticRefusalDetail::Static(m)))
+                if m.contains("qc height does not equal lock_view")
+        ),
+        "got {r:?}"
+    );
+
+    // Positive control 1: height-based ADMISSION when round differs but
+    // height == lock_view (the view binds to height; round is free under the
+    // default profile).
+    let mut qc_ok = valid_wire_qc(&ctx, [9u8; 32], lock_view);
+    qc_ok.round = 999;
+    let locked_ok = make_locked_qc(&ctx, [9u8; 32], lock_view, qc_ok, None).unwrap();
+    let dec_ok = DecodedRecord {
+        persistence_format_version: 1,
+        network_genesis_id: ctx.network_genesis_id,
+        publication_revision: 1,
+        record: SafetyRecord::Locked(locked_ok),
+    };
+    let enc_ok = encode_record(&dec_ok, &ctx).unwrap();
+    assert!(validate_decoded(dec_ok, enc_ok, &ctx, None::<&FixtureCommittedHistory>).is_ok());
+
+    // Positive control 2: the separate strict profile additionally refuses
+    // height != round (a DISTINCT optional rule, kept separate from the mandatory
+    // height-to-lock-view binding above). Here height == lock_view (P2 holds) but
+    // height != round, so the refusal is the strict-profile rule.
+    let mut strict = ctx.clone();
+    strict.require_height_equals_round = true;
+    let mut qc_sr = valid_wire_qc(&strict, [9u8; 32], lock_view); // height==round==lock_view
+    qc_sr.round = 999; // height == lock_view (P2 holds) but height != round
+    let locked_sr = make_locked_qc(&strict, [9u8; 32], lock_view, qc_sr, None).unwrap();
+    let dec_sr = DecodedRecord {
+        persistence_format_version: 1,
+        network_genesis_id: strict.network_genesis_id,
+        publication_revision: 1,
+        record: SafetyRecord::Locked(locked_sr),
+    };
+    let enc_sr = encode_record(&dec_sr, &strict).unwrap();
+    assert!(matches!(
+        validate_decoded(dec_sr, enc_sr, &strict, None::<&FixtureCommittedHistory>),
+        Err(SafetyStoreError::SemanticRefusal(SemanticRefusalDetail::Static(m)))
+            if m.contains("profile requires height == round")
+    ));
 }

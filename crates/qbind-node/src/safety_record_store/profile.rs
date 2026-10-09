@@ -484,3 +484,81 @@ pub fn max_component_aggregate_bytes(
 ) -> Result<u128, SafetyStoreError> {
     max_aggregate_retained_bytes(ctx, size_of_timeout_msg, validation_scratch)
 }
+
+#[cfg(test)]
+mod d7d14_h7_checked_size_arithmetic {
+    //! RUN 422 D7-D14 — H7 executed evidence for the decoder's checked size
+    //! arithmetic, recorded at three distinct levels.
+    //!
+    //! HELPER execution: the private `add`/`mul` helpers (which return
+    //! `ArithmeticOverflowSite::SizeSum` / `SizeProduct`) ARE the decoder's size
+    //! arithmetic; the tests below execute them at their `u128` overflow boundary.
+    //!
+    //! DECODER execution: the bounded decoder/admission boundary cases remain the
+    //! existing structural refusals in the integration suite (oversize, declared
+    //! count/length over the pinned bound, unsupported version, bad CRC).
+    //!
+    //! SOURCE-DERIVED unreachability (NOT execution): every declared count/length
+    //! on the wire is a `u16` (<= 65535) checked against the pinned profile BEFORE
+    //! the size arithmetic runs, so the maximum `max_qc_bytes` / `max_tc_bytes`
+    //! value is ~4.3e9 — far below `u128::MAX`. A decode-path wrap is therefore
+    //! unreachable without weakening the profile or widening the integer, which is
+    //! out of scope; the checked helpers remain as defence in depth. This file
+    //! keeps the three levels separate and does NOT claim an executed decode-path
+    //! wrap.
+    use super::*;
+
+    #[test]
+    fn add_executes_and_refuses_size_sum_at_overflow_boundary() {
+        assert_eq!(add(2, 3).unwrap(), 5);
+        assert_eq!(add(u128::MAX, 0).unwrap(), u128::MAX);
+        assert!(matches!(
+            add(u128::MAX, 1),
+            Err(SafetyStoreError::ArithmeticOverflow(
+                ArithmeticOverflowSite::SizeSum
+            ))
+        ));
+    }
+
+    #[test]
+    fn mul_executes_and_refuses_size_product_at_overflow_boundary() {
+        assert_eq!(mul(3, 4).unwrap(), 12);
+        assert_eq!(mul(u128::MAX, 1).unwrap(), u128::MAX);
+        assert!(matches!(
+            mul(u128::MAX, 2),
+            Err(SafetyStoreError::ArithmeticOverflow(
+                ArithmeticOverflowSite::SizeProduct
+            ))
+        ));
+        // Smallest multiplier that wraps the (MAX/2 + 1) operand.
+        assert!(matches!(
+            mul(u128::MAX / 2 + 1, 2),
+            Err(SafetyStoreError::ArithmeticOverflow(
+                ArithmeticOverflowSite::SizeProduct
+            ))
+        ));
+    }
+
+    #[test]
+    fn admitted_profile_size_bound_is_far_below_overflow() {
+        // Source-derived unreachability witness: at an admitted 4-validator fixture
+        // the decoder's size bound is tiny relative to `u128::MAX`, so the checked
+        // arithmetic above cannot wrap on any admitted decode input.
+        let ctx = PinnedSafetyContext {
+            network_genesis_id: [0u8; 32],
+            authority_context_ref: [0u8; 32],
+            chain_id: 1,
+            epoch: 1,
+            qc_suite_id: 1,
+            timeout_suite_id: 1,
+            s_sig: 8,
+            validators: (0..4u64).map(|i| (ValidatorId::new(i), 1u64)).collect(),
+            require_height_equals_round: false,
+        };
+        let bound = max_safety_record_bytes(&ctx).unwrap();
+        assert!(
+            bound < (1u128 << 40),
+            "admitted decode bound stays far below u128 overflow"
+        );
+    }
+}
