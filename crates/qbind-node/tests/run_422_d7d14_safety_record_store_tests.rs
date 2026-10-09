@@ -3793,12 +3793,40 @@ fn d7d14_late_o2_partial_decode_diagnostic_after_tc_evidence_through_open() {
         Err(SafetyStoreError::CapacityRefusal(_)) => {}
         other => panic!("expected pre-decode CapacityRefusal one byte short, got {other:?}"),
     }
+    // ----- Stale-observation isolation: the admission-refused O2 exposes `None` -----
+    // The one-byte-short `open()` returned from `reserve(o2_charge)?` BEFORE it armed
+    // the late-O2 observer. Because `open()` resets the observation at operation entry,
+    // the PREVIOUS (late-refused) operation's `Some(sample)` must NOT survive here: a
+    // test-observation isolation defect would leak the earlier 1965-byte sample. We do
+    // NOT reset the observer manually — the production-shaped `open()` path performs the
+    // reset.
+    assert_eq!(
+        qbind_node::safety_record_store::owner::observed_o2_late_decode_reservation(),
+        None,
+        "admission-refused O2 exposes no stale late-decode observation from the prior operation"
+    );
     assert_eq!(
         backend.accounting_aggregate_current(),
         ctx_live + standing_short,
         "pre-decode refused O2 released its rolled-back admission cleanly"
     );
     drop(standing);
+
+    // ----- Standalone unarmed decode records nothing -----
+    // Directly decode the malformed fixture WITHOUT an `open()` arming the observer.
+    // The late sampling hook is a no-op when unarmed, so this standalone call neither
+    // creates nor replaces an O2 observation — the slot stays `None`.
+    match decode_record(&enc, &ctx) {
+        Err(SafetyStoreError::StructuralRefusal(StructuralRefusalDetail::Decode(
+            DecodeDiagnostic::InvalidPredecessorDiscriminant(2),
+        ))) => {}
+        other => panic!("expected standalone late InvalidPredecessorDiscriminant(2), got {other:?}"),
+    }
+    assert_eq!(
+        qbind_node::safety_record_store::owner::observed_o2_late_decode_reservation(),
+        None,
+        "a standalone unarmed decode does not populate the late-O2 observation"
+    );
 
     // ----- Subsequent admissible work succeeds once the condition is cleared -----
     backend
@@ -3808,6 +3836,13 @@ fn d7d14_late_o2_partial_decode_diagnostic_after_tc_evidence_through_open() {
         .open()
         .expect("O2 open succeeds once the admissible record is restored");
     assert_eq!(meta.current_revision, 0, "restored admissible O2 reads revision 0");
+    // The admissible bootstrap record is a non-TC record, so its successful `open()`
+    // never reaches the late TC sampling hook; the entry reset leaves the slot `None`.
+    assert_eq!(
+        qbind_node::safety_record_store::owner::observed_o2_late_decode_reservation(),
+        None,
+        "a successful non-TC O2 open exposes no late-TC observation"
+    );
 }
 
 #[test]
