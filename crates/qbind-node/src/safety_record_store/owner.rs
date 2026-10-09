@@ -315,6 +315,86 @@ pub fn o3_binding_object_charge() -> Option<O3LiveObjectCharge> {
     O3_BINDING_OBJ.with(|c| c.get())
 }
 
+// Test-only CONTEMPORANEOUS late-O2 reservation observation (RUN 422 D7-D14, late
+// reservation-lifetime evidence). The existing late-O2 regression established that
+// the malformed maximum-TC record refuses only AFTER the full TC evidence graph and
+// committed anchor are decoded, and bracketed the O2 reservation by headroom and by
+// the historical aggregate PEAK. Neither establishes that the O2 reservation is still
+// active AT the late decode point: a successful initial admission followed by a
+// premature release would still satisfy a historical-peak/headroom assertion. This
+// hook closes that gap by sampling the executing backend's live operational AND
+// aggregate accounting from INSIDE `decode_record`, at the exact late phase — after
+// `decode_timeout_cert` and `read_optional_anchor` have decoded the TC evidence graph
+// and committed anchor, immediately before `read_optional_predecessor` rejects the
+// invalid predecessor discriminant and unwinds them.
+//
+// The observation is RESTRICTED to the armed O2 operation and its accountant: `open()`
+// arms the hook with a cloned handle of the SAME backend operational accountant it
+// reserved against, and disarms immediately after `load_established` returns. A
+// standalone `decode_record`, a later operation, or an O2 that refuses before this
+// phase therefore records NOTHING — the slot stays `None`, and the accessor returns
+// `None` (a missing observation is an explicit failure for the test, never a zero
+// substitution). The hook samples two live scalar charges; it clones no object graph,
+// allocates nothing, and extends no production object's lifetime. Gated behind
+// `cfg(test)`/`test-utils`; absent from production builds.
+#[cfg(any(test, feature = "test-utils"))]
+thread_local! {
+    // The executing backend's cloned operational accountant handle, armed by `open()`
+    // around its `load_established`. Presence (Some) is the ARMED marker; the decode
+    // hook samples `(operational.current(), aggregate.current())` from THIS handle.
+    static O2_LATE_DECODE_ACCT: std::cell::RefCell<
+        Option<super::accounting::SharedAccountant>,
+    > = const { std::cell::RefCell::new(None) };
+    // The `(operational, aggregate)` reservation pair sampled at the late decode phase.
+    // Reset to `None` on each arm, so a missing phase cannot reuse an earlier result.
+    static O2_LATE_DECODE_OBS: std::cell::Cell<Option<(u128, u128)>> =
+        const { std::cell::Cell::new(None) };
+}
+
+/// Test-only: arm/reset the contemporaneous late-O2 reservation observation for the
+/// current thread with the executing backend's operational accountant handle. Called
+/// by `open()` immediately before `load_established`. Arming the accountant handle is
+/// what RESTRICTS recording to this O2 operation: a standalone `decode_record` (or a
+/// later operation) never arms it, so its hook is a no-op. Resetting the slot to
+/// `None` here ensures a missing late phase cannot reuse an earlier successful sample.
+#[cfg(any(test, feature = "test-utils"))]
+fn arm_o2_late_decode_observation(acct: super::accounting::SharedAccountant) {
+    O2_LATE_DECODE_ACCT.with(|s| *s.borrow_mut() = Some(acct));
+    O2_LATE_DECODE_OBS.with(|c| c.set(None));
+}
+
+/// Test-only: disarm the late-O2 observation. Called by `open()` immediately after
+/// `load_established` so no later `decode_record` resamples a stale handle. The
+/// recorded `O2_LATE_DECODE_OBS` value survives for the test to read.
+#[cfg(any(test, feature = "test-utils"))]
+fn disarm_o2_late_decode_observation() {
+    O2_LATE_DECODE_ACCT.with(|s| *s.borrow_mut() = None);
+}
+
+/// Crate/test-only: invoked by `decode_record` at the late decode phase — after the
+/// TC evidence graph and committed anchor are decoded and owned, immediately before
+/// the optional-predecessor discriminant is validated. Records the active
+/// `(operational, aggregate)` reservations of the armed backend accountant. A no-op
+/// unless `open()` armed the observation, so a standalone `decode_record` records
+/// nothing.
+#[cfg(any(test, feature = "test-utils"))]
+pub(crate) fn observe_o2_late_decode_reservation() {
+    O2_LATE_DECODE_ACCT.with(|s| {
+        if let Some(acct) = s.borrow().as_ref() {
+            let sample = (acct.current(), acct.aggregate().current());
+            O2_LATE_DECODE_OBS.with(|c| c.set(Some(sample)));
+        }
+    });
+}
+
+/// Test-only: the `(operational, aggregate)` reservation pair sampled CONTEMPORANEOUSLY
+/// at the last armed O2 late decode phase, or `None` if that phase was not reached
+/// (a missing observation is an explicit failure, never a zero substitution).
+#[cfg(any(test, feature = "test-utils"))]
+pub fn observed_o2_late_decode_reservation() -> Option<(u128, u128)> {
+    O2_LATE_DECODE_OBS.with(|c| c.get())
+}
+
 // Test-only O5 measurement-fault seam (RUN 422 D7-D14 S2). The O5 live-object
 // observation measures two component charges through fallible accounting
 // helpers: the retained proof's evidence backing (`evidence_backing_capacity`)
@@ -949,7 +1029,19 @@ impl SafetyRecordOwner {
                 ArithmeticOverflowSite::O2ReadDecodeWorkingSet,
             ))?;
         let _o2_res = self.backend.accounting().reserve(o2_charge)?;
-        let (meta, _record_bytes, _decoded) = self.load_established()?;
+        // Arm the contemporaneous late-O2 reservation observation (test-only) with a
+        // cloned handle of the SAME operational accountant this O2 reserved against, so
+        // the decode hook can sample the live operational + aggregate charge AT the late
+        // decode phase (after the TC evidence graph and committed anchor are decoded,
+        // immediately before the invalid-predecessor refusal). Disarmed immediately after
+        // `load_established` so no later decode resamples a stale handle. Absent from
+        // production builds.
+        #[cfg(any(test, feature = "test-utils"))]
+        arm_o2_late_decode_observation(self.backend.accounting().clone());
+        let loaded = self.load_established();
+        #[cfg(any(test, feature = "test-utils"))]
+        disarm_o2_late_decode_observation();
+        let (meta, _record_bytes, _decoded) = loaded?;
         Ok(meta)
     }
 

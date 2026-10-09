@@ -3699,12 +3699,61 @@ fn d7d14_late_o2_partial_decode_diagnostic_after_tc_evidence_through_open() {
         .reserve_standing_for_test(standing_fits)
         .expect("standing pressure leaving exactly the O2 working set");
     let peak_before = backend.accounting_aggregate_peak();
+    // Baselines captured WITH the standing pressure live but BEFORE `open()`: these are
+    // the standing/context charges the O2 operation does NOT own, kept independent of the
+    // operation-owned O2 reservation so the contemporaneous sample below is not confused
+    // with aggregate baseline charges.
+    let op_baseline = backend.accounting_current();
+    let agg_baseline = backend.accounting_aggregate_current();
+    assert_eq!(
+        op_baseline, standing_fits,
+        "operational baseline before O2 is exactly the standing pressure (no O2 charge yet)"
+    );
+    assert_eq!(
+        agg_baseline,
+        ctx_live + standing_fits,
+        "aggregate baseline before O2 is the context + standing charges (no O2 charge yet)"
+    );
     match owner.open() {
         Err(SafetyStoreError::StructuralRefusal(StructuralRefusalDetail::Decode(
             DecodeDiagnostic::InvalidPredecessorDiscriminant(2),
         ))) => {}
         other => panic!("expected O2 open to refuse LATE after TC decode, got {other:?}"),
     }
+    // ----- CONTEMPORANEOUS late-decode reservation observation -----
+    // The historical-peak and headroom assertions below are admission/peak evidence:
+    // they are also satisfied by a successful initial admission followed by a premature
+    // release. This observation closes that gap — it was sampled from INSIDE
+    // `decode_record`, after the full TC evidence graph and committed anchor were decoded
+    // and owned, immediately before the invalid-predecessor refusal unwound them, from
+    // the SAME backend operational accountant this O2 reserved against. A missing
+    // observation is an EXPLICIT failure (never a zero substitution).
+    let (op_at_late, agg_at_late) = qbind_node::safety_record_store::owner::
+        observed_o2_late_decode_reservation()
+        .expect("O2 must record a contemporaneous reservation at the late decode phase");
+    // The O2 contribution at the late point equals its full read/decode reservation,
+    // isolated from the standing/context baseline charges captured above.
+    assert_eq!(
+        op_at_late - op_baseline,
+        o2_charge,
+        "O2's operational reservation is still active (= o2_charge) AT the late decode point"
+    );
+    assert_eq!(
+        agg_at_late - agg_baseline,
+        o2_charge,
+        "O2's aggregate contribution is still active (= o2_charge) AT the late decode point"
+    );
+    // Absolute cross-check: operational = standing + O2; aggregate = context + standing + O2
+    // (which fills the ceiling exactly under this headroom bracket).
+    assert_eq!(
+        op_at_late,
+        standing_fits + o2_charge,
+        "late-decode operational charge = standing + O2 reservation"
+    );
+    assert_eq!(
+        agg_at_late, agg_cap,
+        "late-decode aggregate charge fills the ceiling exactly (context + standing + O2)"
+    );
     assert!(
         backend.accounting_aggregate_peak() <= agg_cap,
         "late-refused O2 never exceeded the aggregate ceiling"
