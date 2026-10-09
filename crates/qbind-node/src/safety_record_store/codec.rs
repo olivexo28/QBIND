@@ -7,7 +7,7 @@
 use sha3::{Digest, Sha3_256};
 
 use super::error::{
-    CapField, DecodeDiagnostic, DeclaredBoundDetail, PrefixField, SafetyStoreError,
+    CapField, DeclaredBoundDetail, DecodeDiagnostic, PrefixField, SafetyStoreError,
     StructuralRefusalDetail,
 };
 use super::profile::{
@@ -803,7 +803,9 @@ pub fn decode_record(
     let (body, crc_bytes) = buf.split_at(buf.len() - 4);
     let stored_crc = u32::from_be_bytes([crc_bytes[0], crc_bytes[1], crc_bytes[2], crc_bytes[3]]);
     if signing_journal_crc32(body) != stored_crc {
-        return Err(SafetyStoreError::StructuralRefusal(StructuralRefusalDetail::Static("CRC32 mismatch")));
+        return Err(SafetyStoreError::StructuralRefusal(
+            StructuralRefusalDetail::Static("CRC32 mismatch"),
+        ));
     }
 
     let mut r = Reader::new(body);
@@ -822,7 +824,9 @@ pub fn decode_record(
         x if x == EvidenceDiscriminant::Bootstrap as u8 => {
             if d_ca != 0 {
                 return Err(SafetyStoreError::StructuralRefusal(
-                    StructuralRefusalDetail::Static("bootstrap record must not carry a committed anchor"),
+                    StructuralRefusalDetail::Static(
+                        "bootstrap record must not carry a committed anchor",
+                    ),
                 ));
             }
             let predecessor_ref = read_optional_predecessor(&mut r, d_pred)?;
@@ -860,8 +864,8 @@ pub fn decode_record(
                 0 => {
                     return Err(SafetyStoreError::StructuralRefusal(
                         StructuralRefusalDetail::Static(
-                        "tc-derived record requires a carried record-level high_qc (TA1)",
-                    ),
+                            "tc-derived record requires a carried record-level high_qc (TA1)",
+                        ),
                     ))
                 }
                 other => {

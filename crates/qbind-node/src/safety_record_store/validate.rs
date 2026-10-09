@@ -110,7 +110,9 @@ pub fn validate_decoded<H: CommittedHistory + ?Sized>(
     let reencoded = super::codec::encode_record(&decoded, ctx)?;
     if reencoded != encoded {
         return Err(SafetyStoreError::SemanticRefusal(
-            SemanticRefusalDetail::Static("decoded content does not correspond to the supplied encoded bytes"),
+            SemanticRefusalDetail::Static(
+                "decoded content does not correspond to the supplied encoded bytes",
+            ),
         ));
     }
     // The correspondence re-encode has served its ONLY purpose. Drop its
@@ -254,14 +256,18 @@ fn validate_locked<H: CommittedHistory + ?Sized>(
             // P2: the QC logical view binds to wire `height`, not `round`.
             if qc.height != l.lock_view {
                 return Err(SafetyStoreError::SemanticRefusal(
-                    SemanticRefusalDetail::Static("qc height does not equal lock_view (P2 view-binding)"),
+                    SemanticRefusalDetail::Static(
+                        "qc height does not equal lock_view (P2 view-binding)",
+                    ),
                 ));
             }
             // Optional, explicit profile choice — never silently conflated with
             // the P2 view binding above.
             if ctx.require_height_equals_round && qc.height != qc.round {
                 return Err(SafetyStoreError::SemanticRefusal(
-                    SemanticRefusalDetail::Static("profile requires height == round and it does not hold"),
+                    SemanticRefusalDetail::Static(
+                        "profile requires height == round and it does not hold",
+                    ),
                 ));
             }
             // Structural signer-set / quorum checks (separate from stage-2 crypto).
@@ -284,7 +290,9 @@ fn validate_locked<H: CommittedHistory + ?Sized>(
             Some(h) => {
                 if !h.contains_committed(&anchor.block_id, anchor.height) {
                     return Err(SafetyStoreError::SemanticRefusal(
-                        SemanticRefusalDetail::Static("committed anchor not on supplied committed history (P3)"),
+                        SemanticRefusalDetail::Static(
+                            "committed anchor not on supplied committed history (P3)",
+                        ),
                     ));
                 }
             }
@@ -427,7 +435,9 @@ fn validate_tc(
     // sorted unique `UNIQ_SET` vectors, so set equality is a direct comparison.
     if st_ids != seen {
         return Err(SafetyStoreError::SemanticRefusal(
-            SemanticRefusalDetail::Static("tc.signers set does not correspond to signed_timeouts set (TA5)"),
+            SemanticRefusalDetail::Static(
+                "tc.signers set does not correspond to signed_timeouts set (TA5)",
+            ),
         ));
     }
     // TA6: timeout-view consistency — every signed timeout is for tc.timeout_view.
@@ -474,7 +484,9 @@ fn validate_tc(
         }
         _ => {
             return Err(SafetyStoreError::SemanticRefusal(
-                SemanticRefusalDetail::Static("tc.high_qc presence disagrees with derived max high-QC (TA2)"),
+                SemanticRefusalDetail::Static(
+                    "tc.high_qc presence disagrees with derived max high-QC (TA2)",
+                ),
             ))
         }
     }
@@ -487,7 +499,9 @@ fn validate_tc(
                 || record_high_qc.signers != c.signers
             {
                 return Err(SafetyStoreError::SemanticRefusal(
-                    SemanticRefusalDetail::Static("record high_qc is not byte-identical to tc.high_qc (TA1)"),
+                    SemanticRefusalDetail::Static(
+                        "record high_qc is not byte-identical to tc.high_qc (TA1)",
+                    ),
                 ));
             }
         }
@@ -505,7 +519,9 @@ fn validate_tc(
     }
     if record_high_qc.view != l.lock_view {
         return Err(SafetyStoreError::SemanticRefusal(
-            SemanticRefusalDetail::Static("tc record high_qc view != lock_view (TA1/P2 view-binding)"),
+            SemanticRefusalDetail::Static(
+                "tc record high_qc view != lock_view (TA1/P2 view-binding)",
+            ),
         ));
     }
     Ok(())

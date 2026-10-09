@@ -797,7 +797,10 @@ impl std::fmt::Display for SemanticRefusalDetail {
                 write!(f, "duplicate signed_timeout validator {validator} (TA3)")
             }
             Self::SignedTimeoutViewMismatch { view, timeout_view } => {
-                write!(f, "signed_timeout view {view} != tc.timeout_view {timeout_view} (TA6)")
+                write!(
+                    f,
+                    "signed_timeout view {view} != tc.timeout_view {timeout_view} (TA6)"
+                )
             }
             Self::RecordMetaRevisionDisagreement {
                 record_revision,
