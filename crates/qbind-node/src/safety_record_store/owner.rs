@@ -363,6 +363,21 @@ fn arm_o2_late_decode_observation(acct: super::accounting::SharedAccountant) {
     O2_LATE_DECODE_OBS.with(|c| c.set(None));
 }
 
+/// Test-only: reset the late-O2 observation at the START of each `open()` attempt,
+/// before any fallible charge calculation or reservation admission can return early.
+/// Clears BOTH the recorded sample (`O2_LATE_DECODE_OBS` → `None`) and any lingering
+/// armed handle (`O2_LATE_DECODE_ACCT` → `None`), so an admission-refused O2 that
+/// returns before `arm_o2_late_decode_observation` cannot expose the PREVIOUS
+/// operation's sample, and no stale accountant survives into the next attempt. The
+/// arming performed after admission is what later RESTRICTS recording to the admitted
+/// operation's decode interval; this entry reset is what guarantees a never-armed or
+/// pre-admission-refused operation exposes `None`.
+#[cfg(any(test, feature = "test-utils"))]
+fn reset_o2_late_decode_observation() {
+    O2_LATE_DECODE_ACCT.with(|s| *s.borrow_mut() = None);
+    O2_LATE_DECODE_OBS.with(|c| c.set(None));
+}
+
 /// Test-only: disarm the late-O2 observation. Called by `open()` immediately after
 /// `load_established` so no later `decode_record` resamples a stale handle. The
 /// recorded `O2_LATE_DECODE_OBS` value survives for the test to read.
@@ -1009,6 +1024,16 @@ impl SafetyRecordOwner {
     /// the recovery requirement.
     pub fn open(&self) -> Result<SafetyMeta, SafetyStoreError> {
         let _guard = self.backend.lock_domain();
+        // Reset the contemporaneous late-O2 observation at operation ENTRY — before the
+        // fallible transient/charge arithmetic or the `reserve(o2_charge)?` admission
+        // below can return early. A previous O2 that reached the late decode phase leaves
+        // a `Some(sample)` in the slot; without this reset an admission-refused O2 (which
+        // returns before `arm_o2_late_decode_observation`) would expose that stale sample.
+        // Clearing here guarantees that an O2 which never reaches the late phase exposes
+        // `None`, and that no stale accountant handle survives armed. Absent from
+        // production builds.
+        #[cfg(any(test, feature = "test-utils"))]
+        reset_o2_late_decode_observation();
         // Admit O2's read/decode working set (the record-sized read-back buffer,
         // the fixed metadata buffer, and the one TRANSIENT decoded object produced
         // by `load_established`) against the shared aggregate budget BEFORE those
