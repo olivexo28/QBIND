@@ -67,8 +67,13 @@ pub enum SafetyStoreError {
     /// reached **after** its covering inspection reservation has been released —
     /// allocates no owned diagnostic `String` (the inventory's zero-heap claim).
     AlreadyEstablished(AlreadyEstablishedKind),
-    /// O2/O3 refused: expected established state is genuinely absent.
-    MissingEstablishedState(String),
+    /// O2/O3 refused: expected established state is genuinely absent. The payload
+    /// is a fixed `&'static str` (D7-D14 G1b allocation-free correction): the sole
+    /// `load_established` missing-metadata refusal runs INSIDE the O2/O3 read/decode
+    /// reservation (after the record-sized read-back buffer and the 42-byte metadata
+    /// buffer are already live), so a compile-time static diagnostic allocates no
+    /// owned `String`; `Display` renders the identical text.
+    MissingEstablishedState(&'static str),
     /// Stale fencing refusal: the expected revision no longer matches the stored
     /// current revision (a newer publication exists).
     StaleRevision { expected: u64, stored: u64 },
@@ -82,20 +87,36 @@ pub enum SafetyStoreError {
     /// allocation entirely rather than allocating unbounded text and truncating it.
     TransitionIneligible(TransitionIneligibleDetail),
     /// O5 content mismatch: the recovered publication differs byte-for-byte from
-    /// the currently stored publication.
-    PublicationMismatch(String),
+    /// the currently stored publication. The payload is a fixed `&'static str`
+    /// (D7-D14 G1b allocation-free correction): the O5 byte-for-byte comparison
+    /// refusal runs while the retained proof, its retained original encoded buffer,
+    /// the fresh read-back buffer, and the transient decoded object are all live
+    /// inside the O5 reservation, so a compile-time static diagnostic allocates no
+    /// owned `String`; `Display` renders the identical text.
+    PublicationMismatch(&'static str),
     /// An allocation/admission charge would exceed a component cap, or a single
     /// decoded backing exceeded its pinned per-vector class maximum. The payload
     /// is a [`CapacityRefusalDetail`]: a free-form message, or typed, `Copy`
     /// per-vector bound data that the protected O4 preflight can construct
     /// **without** allocating an owned diagnostic `String` on the refusal path.
     CapacityRefusal(CapacityRefusalDetail),
-    /// A storage write failed outright (before any uncertain barrier).
-    WriteFailed(String),
+    /// A storage write failed outright (before any uncertain barrier). The payload
+    /// is a [`WriteFailedDetail`]: a free-form `Message` for the backend open / read
+    /// failures that are constructed OUTSIDE any O1–O5 publication reservation (where
+    /// a dynamic backend `Display` string is legitimately owned), or the typed
+    /// `Static` form for the O1 pre-write publication refusal, which maps a
+    /// backend-supplied fixed `&'static str` while the O1 publication reservation is
+    /// still live and must therefore allocate no owned diagnostic `String`.
+    WriteFailed(WriteFailedDetail),
     /// A storage write may or may not have become durable; the caller observed no
     /// acknowledgement. Dependent work stays blocked until O2/O3/O5 re-establish
-    /// state. Never assume the predecessor remained stored.
-    UncertainPublication(String),
+    /// state. Never assume the predecessor remained stored. The payload is a fixed
+    /// `&'static str` (D7-D14 G1b allocation-free correction): the sole O1
+    /// uncertain-publication refusal is constructed while the O1 publication
+    /// reservation, the decoded bootstrap object, the encoded record buffer, and the
+    /// metadata buffer are all live, so a compile-time static diagnostic allocates no
+    /// owned `String`; `Display` renders the identical text.
+    UncertainPublication(&'static str),
     /// A read failed at the storage layer. The payload is a
     /// [`ReadFailedDetail`]: a free-form `Message` for the checksum-envelope
     /// diagnostics that run while inspecting an **already-admitted** stored value
@@ -175,6 +196,51 @@ impl std::fmt::Display for SafetyStoreError {
 }
 
 impl std::error::Error for SafetyStoreError {}
+
+/// Payload of [`SafetyStoreError::WriteFailed`] distinguishing a dynamic
+/// out-of-reservation backend diagnostic from the fixed, allocation-free O1
+/// pre-write publication refusal (D7-D14 G1b allocation-free correction).
+///
+/// The backend `open` / low-level read failures (`backend.rs`) are constructed
+/// OUTSIDE any O1–O5 publication reservation — before `reserve()` on `open`, and on
+/// read helpers that are not inside a publication charge — so a dynamic `Message`
+/// there owns a legitimately-charged (or uncharged-by-construction, outside the
+/// protected interval) backend `Display` string; it is not a protected-path
+/// allocation. The O1 `publish_atomic` outcome mapping, by contrast, runs while the
+/// O1 publication reservation is still live, so it carries the backend-supplied
+/// fixed `&'static str` through the `Static` form without allocating an owned
+/// `String`. `Display` renders the identical text for both.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum WriteFailedDetail {
+    /// A free-form backend write/open/read diagnostic constructed outside any
+    /// O1–O5 publication reservation.
+    Message(String),
+    /// A fixed, compile-time write-failure diagnostic carried as a `&'static str`;
+    /// used on the protected O1 pre-write publication path.
+    Static(&'static str),
+}
+
+impl std::fmt::Display for WriteFailedDetail {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Message(s) => f.write_str(s),
+            Self::Static(s) => f.write_str(s),
+        }
+    }
+}
+
+impl From<String> for WriteFailedDetail {
+    fn from(s: String) -> Self {
+        Self::Message(s)
+    }
+}
+
+impl From<&'static str> for WriteFailedDetail {
+    fn from(s: &'static str) -> Self {
+        Self::Static(s)
+    }
+}
+
 
 /// Typed, `Copy` identifier of a single per-vector decoded-backing capacity site
 /// (§ 13.7A, D7-D14 allocation-free refusal correction). Carried by
