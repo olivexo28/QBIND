@@ -3642,10 +3642,10 @@ fn d7d14_late_o2_partial_decode_diagnostic_after_tc_evidence_through_open() {
     // Document the substantial evidence graph that IS decoded before the refusal.
     match &complete_tc.evidence {
         SupportingEvidence::TcDerived { tc, .. } => {
-            assert_eq!(tc.signers.len(), ctx.n() as usize, "N TC signers decoded");
+            assert_eq!(tc.signers.len(), ctx.n(), "N TC signers decoded");
             assert_eq!(
                 tc.signed_timeouts.len(),
-                ctx.n() as usize,
+                ctx.n(),
                 "N signed_timeouts decoded"
             );
         }

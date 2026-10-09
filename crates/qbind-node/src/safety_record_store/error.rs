@@ -241,7 +241,6 @@ impl From<&'static str> for WriteFailedDetail {
     }
 }
 
-
 /// Typed, `Copy` identifier of a single per-vector decoded-backing capacity site
 /// (§ 13.7A, D7-D14 allocation-free refusal correction). Carried by
 /// [`CapacityRefusalDetail::PerVector`] so a per-vector capacity refusal is built
