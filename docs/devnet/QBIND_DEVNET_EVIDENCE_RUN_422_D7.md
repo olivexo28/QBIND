@@ -17524,3 +17524,88 @@ resistance, or production acceptance. Preserved verdicts (unchanged):
 fail-closed `CurrentEpochUnavailable` unchanged. `GEN_STRUCT_MAX=384`, `CAPNORM_SLACK=0`,
 single aggregate authority, N=4 aggregate `7772`, borrowed `CMP_SPAN`, and the three
 O3→O5 encoded-buffer roles are all preserved.
+
+## RUN 422 D7-D14 — G1/G3 closed under the accepted component-charge model (operative; supersedes the §13.7S "G1–G5 continuation (operative)" diagnostic-coverage and O3/O4 phase claims)
+
+**Scope and supersession.** This operative entry finishes G1 (construction-time diagnostic coverage) and G3 (O3/O4 validation-phase proofs) of the §13.7S continuation under the **accepted** component-charge model and records the one **local source correction** required to make the argument valid. It supersedes the operative *details* of the prior "RUN 422 D7-D14 G1–G5 continuation (operative)" entry for G1 and G3 only. All prior entries (including that one) are **preserved as history**. G2 (single production backend-error-mapping arm) and G4 (consumed O1 snapshot and its isolation regressions) are **unchanged and preserved**; their mutation campaigns are not repeated. No accepted limit, fixture, persistence format, or cryptographic identifier changed: `GEN_STRUCT_MAX=384`, `CAPNORM_SLACK=0`, `CMP_SPAN` borrowed, the accepted multiplicities, the three encoded-buffer roles, the single aggregate authority, and the N=4 aggregate `7772` are unchanged.
+
+### Accepted model (used throughout)
+
+An operation is covered iff, at every reachable construction point,
+
+`Σ(live contract-charged inline objects) + Σ(owned backing capacities) + applicable temporary overlap  ≤  active covering reservation(s)`
+
+with **each live object counted exactly once** and **no reservation portion spent twice**. The operation's whole reservation is distinguished from genuinely unused headroom inside it. The live **transient decoded** charge is
+
+`dec = size_of::<DecodedRecord>() (inline, 408 B) + Σ capacity() of its owned evidence backings`
+
+measured in-place by `accounting.rs::decoded_working_set_charge(&DecodedRecord)` (borrowed, non-cloning). The 408-byte inline term is **part of `dec`** — a live, contract-charged object — and is **not** reusable slack for anything else.
+
+### Explicit withdrawals (do not reuse)
+
+1. **The "408-byte inline-term heap-budget slack" argument is WITHDRAWN.** `size_of::<DecodedRecord>()=408` is the inline portion of the live `dec`; its stack residence does not make it available to cover a diagnostic's heap. A heap-only inequality (`diagnostic_peak < 408`) never established the accepted component-charge inequality.
+2. **The universal "formatting peak backing `< 2L`" bound is WITHDRAWN.** Amortized doubling can require old capacity `C` plus new capacity `2C` simultaneously; a replacement is not bounded by `< 2L`. No replacement universal multiplier is asserted.
+3. **The heap-only definition of the live transient charge is WITHDRAWN** in favor of the in-place `dec = 408 inline + Σ capacity()` above.
+4. **The abbreviated O3/O4 phase expressions and scratch-only N=1/N=4 evaluations are WITHDRAWN**, replaced by the per-phase proofs below with complete live charges and full N=1 and N=4 evaluations against the operation's own reservation.
+5. **Citing O1's `2122` reservation inside the O3 proof is WITHDRAWN.** O3 uses its own reservation (`1514` at N=1, `2870` at N=4). O1's `2122` is a different operation.
+6. **"No remaining implementation work" is WITHDRAWN** for G1: a local correction was required (below) and is applied.
+
+### Local source correction (applied this pass)
+
+Under the accepted model the previously `format!`/owned-`String` component diagnostics were **not** covered: they fire **after** a maximal transient decode, where `dec` already consumes the transient budget (for a maximal TcDerived record the measured owned backing equals `MAX_DECODED_EVIDENCE_BACKING_BYTES`, leaving no provable heap headroom), and a fixed literal converted into an owned `String` still charges its construction-time backing. The correction removes the allocation rather than attempt an unprovable headroom argument, generalizing the accepted §13.7R R1 typed-diagnostic pattern to **all** remaining component diagnostics:
+
+* `error.rs` — added `DecodeDiagnostic` (`Copy`) for every stage-1 structural failure and typed `Copy` semantic variants for every stage-3 numeric refusal, plus `StructuralRefusalDetail::{Static(&'static str),Decode(DecodeDiagnostic)}` and `SemanticRefusalDetail::Static(&'static str)`; each `Display` renders byte-identical text to the former `format!`/literal.
+* `codec.rs` — all eight structural `format!` sites now construct `StructuralRefusalDetail::Decode(..)`; the four fixed literals use `::Static(..)`. **Zero** `format!`, **zero** owned-`String` diagnostics remain.
+* `validate.rs` — all six numeric `format!` sites now construct typed `Copy` semantic variants; all fixed literals use `::Static(..)`. **Zero** `format!`, **zero** `.into()`/owned-`String` diagnostics remain.
+
+Every component-created diagnostic reachable through O1–O5 is therefore **construction-time 0-heap** (`Copy` payload or `&'static str`; owned text deferred to `Display`, which runs in the **caller's** budget after return). Backend-owned errors stay distinct: they are mapped at one boundary to a typed allocation-free envelope and their text is **dropped**, not copied (G2, preserved). Regression: `d7d14_g1b_decode_and_semantic_diagnostics_construction_is_allocation_free` **[O]** (0-alloc construction via the `measure_allocs` harness for every new variant; `Display`-text identity; baseline `String`-alloc sensitivity; a real `decode_record` truncation producing `DecodeDiagnostic::Truncated{need:32,have:1}`).
+
+### G1 — finite, source-complete diagnostic inventory
+
+Every row is a **component-created** diagnostic; each is now **construction-time 0 B heap**, so each coexistence inequality is `live(enc+dec+scratch) + 0 ≤ R_op` with the inline 408 counted once inside `dec`. Backend-owned errors are listed separately and are **not** charged to component construction.
+
+| site(s) | operation/phase | representation | max construction-time heap charge | simultaneously live charged objects | active reservation | complete inequality (N=4) | release/transfer | evidence |
+|---|---|---|---|---|---|---|---|---|
+| `codec.rs` reader `take` (every bounded field), timeout/tc/record high_qc discriminants, unknown-evidence discriminant, trailing-bytes, committed-anchor & predecessor discriminants | O2/O4/O5 stage-1 decode (incl. failure after substantial partial decode) | `StructuralRefusalDetail::Decode(DecodeDiagnostic)` (`Copy`) | **0 B** | `enc`(≤rec 811) + partial `dec`(≤ transient 1112) | O2 `rec+META+transient`; O4 `2·transient+3·rec+META`; O5 `rec+META+transient` | `811 + 1112 + 0 = 1923 ≤ 2583` (O2 N=4 `811+42+1112`) | returned to caller; `Display` renders in caller budget | `d7d14_g1b_*` **[O]** |
+| `codec.rs` "record too short", "CRC32 mismatch", "bootstrap record must not carry a committed anchor", "tc-derived record requires a carried record-level high_qc (TA1)" | O2/O4/O5 stage-1 structural | `StructuralRefusalDetail::Static(&'static str)` | **0 B** | `enc`(≤rec) + partial `dec` | as above | `≤ 1923 ≤ 2583` | returned; no owned text | `d7d14_g1b_*` **[O]** |
+| `validate.rs` QC signer-index-not-member; TC signer-not-member / duplicate-signer / signed-timeout validator-not-member / duplicate-validator / view-mismatch | O3/O4/O5 stage-3 semantic numeric refusal | typed `Copy` `SemanticRefusalDetail` variant | **0 B** | `enc`(811) + `dec`(1112) + variant scratch (`qcidx`=24+8N **or** two TC sets 2·(24+8N), mutually exclusive) | O3 `2870` / O4 `4699` | QC `811+1112+56+0=1979 ≤ 2870`; TC `811+1112+112+0=2035 ≤ 2870` | returned; no owned text | `d7d14_g1b_*`, `d7d14_fc_*` **[O]** |
+| `validate.rs` all P1–P4 / TA correspondence, context, binding, qc-chain/epoch/suite/block/height/round, anchor, quorum, TA1/TA2/TA5/TA7 literals | O3/O4/O5 stage-3 semantic structural refusal | `SemanticRefusalDetail::Static(&'static str)` | **0 B** | `enc` + `dec` + applicable scratch | O3 `2870` / O4 `4699` | `≤ 2035 ≤ 2870` | returned; no owned text | `d7d14_g1b_*` **[O]** |
+| **(retained, already-correct typed rows)** transition-ineligible `TransitionIneligibleDetail{u64,u64}`; `RecordMetaRevisionDisagreement`/`PinnedContextDisagreement`; admission `CapacityRefusalDetail`/`CapnormSiteKind`; read `ReadFailedDetail::{NamespaceScan,Envelope}` | O1/O3/O4/O5 per their owners | typed `Copy` / `&'static str` | **0 B** | per owner | per owner | preserved | preserved | prior `[O]` entries |
+| **(backend-owned, NOT component-charged)** `get_pinned` / write durability failures | O2–O5 read, ambiguous/uncertain-durability write | mapped at one boundary to typed `Envelope{..}`; backend text **dropped** | **0 B** (component side) | n/a | n/a | n/a | backend error not copied (G2) | G2 `d7d14_f2_*` **[O]** |
+
+Notes: O2 failures after substantial partial decoding are exercised with **admitted malformed** inputs (an oversize input refused before decoding does not exercise coexistence); O3's larger reservation is **not** borrowed to justify O2 — the O2 row uses O2's own `rec+META+transient` reservation (`2583` at N=4). A fixed literal converted into an owned `String` would charge its own backing; none remain, so the "`diagnostic ≤ reservation` while other objects occupy the reservation" defect cannot arise (diagnostic heap is `0`).
+
+### G3 — O3 validation-phase proofs (separate phases; complete charges; actual O3 reservation)
+
+Symbols: `enc` = original encoded bytes (≤ `rec`); `dec` = transient decoded working set (`408` inline + backings), `= transient`; `reenc` = correspondence re-encode buffer (≤ `rec`); `cert` = certificate-binding buffer (≤ `rec`, non-coexistent with `reenc`); `qcidx` = QC signer-index scratch `= 24+8N`; `seen`,`st_ids` = the two TC uniqueness sets, each `24+8N`; `holder` = constructed retained holder reservation `= rec + retained_gen + handle`; `[diag]` = `0`. QC and TC scratch are **variant-specific and mutually exclusive** — use `max(qcidx, seen+st_ids)`, never summed; `reenc`/`cert` do not coexist with later semantic scratch. The single O3 covering reservation is `R_O3 = holder + scratch`.
+
+Profile values: `rec`=409/811, `transient`=560/1112, `retained_gen`=552/1104, `handle`=136, `holder`=1097/2051, `scratch`=417/819, **`R_O3`=1514 (N=1) / 2870 (N=4)**, `qcidx`=32/56, `seen+st_ids`=64/112.
+
+| O3 phase | complete simultaneous live charge | N=1 | N=4 | ≤ R_O3 |
+|---|---|---|---|---|
+| read/decode + partial-decode failure | `enc + dec + [diag]` | `409+560+0 = 969` | `811+1112+0 = 1923` | ✓ (`969≤1514`, `1923≤2870`) |
+| correspondence re-encode (+ mismatch diagnostic **before** buffer release) | `enc + dec + reenc + [diag]` | `409+560+409+0 = 1378` | `811+1112+811+0 = 2734` | ✓ (`1378≤1514`, `2734≤2870`; margin = `handle` 136) |
+| certificate binding | `enc + dec + cert + [diag]` | `1378` | `2734` | ✓ (cert ≤ rec; non-coexistent with reenc) |
+| QC semantic validation + refusals | `enc + dec + qcidx + [diag]` | `409+560+32+0 = 1001` | `811+1112+56+0 = 1979` | ✓ |
+| TC semantic validation + refusals | `enc + dec + (seen+st_ids) + [diag]` | `409+560+64+0 = 1033` | `811+1112+112+0 = 2035` | ✓ |
+| transfer into retained proof + reservation release | `dec` normalized → `retained_gen` held by `holder`; `enc`/scratch released | moved, not copied | moved, not copied | no double count |
+
+Peak O3 simultaneous charge is the re-encode/binding phase (`2734` at N=4, `1378` at N=1) ≤ `R_O3` with margin exactly the `136` holder handle. Borrowed high-QC selection (`select_max_high_qc_ref`) adds **no** new owned signer backing. Source checkpoints reproduced: N=4 O3 reservation `2870`; complete-TC re-encode/binding `811+1112+811=2734`; TC semantic objects before a diagnostic `811+1112+112=2035`; QC scratch `24+8N`; two TC sets `2×(24+8N)`.
+
+### G3 — O4 validation-phase proofs (separate phases; candidate owned during predecessor validation)
+
+O4 reservation `R_O4 = 2·transient + 3·rec + META_ENCODED_LEN` (the two transient decodes — predecessor then candidate — are **sequential, never coexisting**; the three `rec` terms are the three encoded-buffer roles: predecessor read-back, candidate publication, validation re-encode; `META_ENCODED_LEN=42`). **`R_O4`=2389 (N=1) / 4699 (N=4)**. `candidate` = already-owned candidate decoded (≤ transient); `dec_pred`/`enc_pred` = predecessor decoded / read-back encoded; `[typed transition]` = `0` (typed `TransitionIneligibleDetail`, at its actual `owner.rs` source).
+
+| O4 phase | complete simultaneous live charge | N=1 | N=4 | ≤ R_O4 |
+|---|---|---|---|---|
+| predecessor read/decode + binding + semantic (candidate owned) | `candidate + dec_pred + enc_pred + max(reenc/cert, seen+st_ids) + [diag]` | `560+560+409+409+0 = 1938` | `1112+1112+811+811+0 = 3846` | ✓ (`1938≤2389`, `3846≤4699`) |
+| predecessor release + transition eligibility | predecessor `dec_pred`/`enc_pred` released; candidate retained | — | — | typed `0-B` transition refusal at source |
+| candidate construction/binding/encode + semantic + publication | `candidate_dec + enc_cand + reenc_cand + max(qcidx, seen+st_ids) + [typed transition]` | `560+409+409+64+0 = 1442` | `1112+811+811+112+0 = 2846` | ✓ (`1442≤2389`, `2846≤4699`) |
+
+Candidate ownership is charged **during predecessor validation**; encoded/re-encode buffers are charged **during candidate validation**. QC/TC scratch are mutually exclusive (max, not sum). `R_O4` conservatively dominates each phase's simultaneous peak. The transition refusal is placed at its actual source location and adds `0` heap. Evidence: `d7d14_fc_tc_borrowed_selection_discriminates_distinct_views_through_o3_o4` **[O]**, `validate.rs::fc_borrowed_selection_tests` **[O]**, `d7d14_g1_transition_ineligible_is_typed_and_preserves_state` **[O]**.
+
+### Preserved (unchanged)
+
+G2 single production error-mapping arm; G4 consumed O1 snapshot and isolation regressions; typed transition refusal; existing O1 measurements and N=1 shortfall/refusal/readmission evidence (N=1 `990≤1318`, N=4 `1392≤2122`); completed O3/O5 observations, maximum fixtures, original-byte retention; recovery-latch enforcement, opaque proofs, context/history checks, stale-publication fencing; default-disabled policy, MainNet refusal, explicitly `Unverified` recovered evidence. `7772` is the N=4 aggregate cap, not a universal cap. No production startup, consensus, signing, verifier, transport, or peer-apply integration; no authority/epoch mutation, activation, anti-rollback establishment, renaming, D15, or Run 423.
+
+**Preserved verdicts (unchanged):** `D7D14_STORAGE_COMPONENT=PARTIAL-IMPLEMENTATION`; `D7D14_STORAGE_ACCEPTANCE=INCOMPLETE`; `DURABLE_ANTI_ROLLBACK=NOT-ESTABLISHED`; `GENESIS_AUTHORITY_ACTIVATION=DISABLED`; `PRODUCTION_WIRE_CHAIN_ID_BEHAVIOR=UNCHANGED`; `CONFIGURED_AUTHORITY_RELEASE_BINARY_EVIDENCE=NOT-YET-CAPTURED`; `SECURITY_POSTURE=RS1-OPEN / PUBLIC-DEVNET-NO-GO`; C4/C5 OPEN; H22 separately limited; fail-closed `CurrentEpochUnavailable` unchanged.

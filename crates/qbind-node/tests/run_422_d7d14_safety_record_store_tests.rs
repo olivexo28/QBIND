@@ -3318,6 +3318,157 @@ fn d7d14_r1_o2_revision_disagreement_diagnostic_allocation_free_max_complete_tc(
     );
 }
 
+// ---------------------------------------------------------------------------
+// G1b (RUN 422 D7-D14): the remaining stage-1 (`codec`) and stage-3 (`validate`)
+// diagnostics are now construction-time ALLOCATION-FREE.
+//
+// These diagnostics fire while a partially- or fully-decoded record is already
+// live inside the active transient-decode / validation reservation. Under the
+// accepted charge model the `size_of::<DecodedRecord>()` 408-byte inline term is
+// itself a live contract-charged object (NOT reusable heap slack), and the
+// decoded backing can reach `max_decoded_evidence_backing`, so an owned-`String`
+// diagnostic constructed here has no proven covering headroom (the withdrawn
+// "408-byte slack" / unproven "< 2L" arguments). The correction carries each
+// diagnostic as typed `Copy` scalars or a `&'static str`, so construction
+// allocates zero heap; `Display` renders the identical message OUTSIDE the
+// protected interval. This generalises the accepted D7-D14 R1 revision-
+// disagreement correction to every remaining allocating component diagnostic.
+// ---------------------------------------------------------------------------
+#[test]
+fn d7d14_g1b_decode_and_semantic_diagnostics_construction_is_allocation_free() {
+    use qbind_node::safety_record_store::codec::{decode_record, record_crc32_for_test};
+    use qbind_node::safety_record_store::error::{
+        DecodeDiagnostic, SemanticRefusalDetail, StructuralRefusalDetail,
+    };
+
+    // Construct the diagnostic under the allocation observer, assert it adds zero
+    // heap, then confirm its deferred `Display` is byte-identical to the text the
+    // previous `format!` / `String` form produced.
+    fn zero_alloc_text<T: std::fmt::Display>(make: impl FnOnce() -> T, expect: &str) {
+        let (val, allocs) = measure_allocs(make);
+        assert_eq!(
+            allocs, 0,
+            "typed/static diagnostic must construct with no heap allocation (text: {expect})"
+        );
+        assert_eq!(
+            val.to_string(),
+            expect,
+            "deferred Display preserves the exact diagnostic text"
+        );
+    }
+
+    // --- codec stage-1 DecodeDiagnostic family (fires mid-decode) ---
+    zero_alloc_text(
+        || DecodeDiagnostic::Truncated { need: 32, have: 1 },
+        "truncated: need 32, have 1",
+    );
+    zero_alloc_text(
+        || DecodeDiagnostic::TrailingBytes { have: 40 },
+        "trailing bytes after record: 40",
+    );
+    zero_alloc_text(
+        || DecodeDiagnostic::InvalidTimeoutHighQcDiscriminant(7),
+        "invalid timeout high_qc discriminant 7",
+    );
+    zero_alloc_text(
+        || DecodeDiagnostic::InvalidTcHighQcDiscriminant(7),
+        "invalid tc high_qc discriminant 7",
+    );
+    zero_alloc_text(
+        || DecodeDiagnostic::InvalidRecordHighQcDiscriminant(7),
+        "invalid record-level high_qc discriminant 7",
+    );
+    zero_alloc_text(
+        || DecodeDiagnostic::UnknownEvidenceDiscriminant(238),
+        "unknown evidence discriminant 238",
+    );
+    zero_alloc_text(
+        || DecodeDiagnostic::InvalidCommittedAnchorDiscriminant(9),
+        "invalid committed-anchor discriminant 9",
+    );
+    zero_alloc_text(
+        || DecodeDiagnostic::InvalidPredecessorDiscriminant(9),
+        "invalid predecessor discriminant 9",
+    );
+    // A fixed structural literal carried as `&'static str` (zero heap).
+    zero_alloc_text(
+        || StructuralRefusalDetail::Static("CRC32 mismatch"),
+        "CRC32 mismatch",
+    );
+
+    // --- validate stage-3 semantic family (fires with the FULL decoded object live) ---
+    let widest = format!(
+        "qc signer index {} is not an authorized member",
+        u64::MAX
+    );
+    zero_alloc_text(
+        || SemanticRefusalDetail::QcSignerIndexNotMember { index: u64::MAX },
+        &widest,
+    );
+    zero_alloc_text(
+        || SemanticRefusalDetail::TcSignerNotMember { signer: 3 },
+        "tc signer 3 not an authorized member (TA4)",
+    );
+    zero_alloc_text(
+        || SemanticRefusalDetail::TcDuplicateSigner { signer: 3 },
+        "tc duplicate signer 3 (TA3)",
+    );
+    zero_alloc_text(
+        || SemanticRefusalDetail::SignedTimeoutValidatorNotMember { validator: 3 },
+        "signed_timeout validator 3 not a member (TA4)",
+    );
+    zero_alloc_text(
+        || SemanticRefusalDetail::DuplicateSignedTimeoutValidator { validator: 3 },
+        "duplicate signed_timeout validator 3 (TA3)",
+    );
+    zero_alloc_text(
+        || SemanticRefusalDetail::SignedTimeoutViewMismatch {
+            view: 5,
+            timeout_view: 6,
+        },
+        "signed_timeout view 5 != tc.timeout_view 6 (TA6)",
+    );
+    zero_alloc_text(
+        || SemanticRefusalDetail::Static("qc has no set signer bits"),
+        "qc has no set signer bits",
+    );
+
+    // Baseline sensitivity: the superseded free-form forms DID allocate an owned
+    // String on these same paths (one heap buffer each), inside the reservation.
+    let (_s, old_fmt_allocs) =
+        measure_allocs(|| format!("truncated: need {}, have {}", 32usize, 1usize));
+    assert!(
+        old_fmt_allocs >= 1,
+        "the superseded format! diagnostic allocated an owned String"
+    );
+    let (_s, old_lit_allocs) = measure_allocs(|| String::from("qc has no set signer bits"));
+    assert!(
+        old_lit_allocs >= 1,
+        "the superseded \".into()\" literal allocated an owned String"
+    );
+
+    // --- End-to-end: a real decode reaches the typed `Decode` variant (not a
+    //     String). version=1 (be [0,1]) then a single junk byte; the 32-byte
+    //     network_genesis_id read underflows, so the bounded reader refuses with
+    //     Truncated{need:32,have:1} carried as Copy data.
+    let mut body = vec![0x00u8, 0x01u8, 0xFFu8];
+    let crc = record_crc32_for_test(&body).to_be_bytes();
+    body.extend_from_slice(&crc);
+    let ctx = ctx_n(4);
+    match decode_record(&body, &ctx) {
+        Err(SafetyStoreError::StructuralRefusal(StructuralRefusalDetail::Decode(
+            DecodeDiagnostic::Truncated { need, have },
+        ))) => {
+            assert_eq!(
+                (need, have),
+                (32, 1),
+                "bounded reader reports the exact shortfall as Copy data"
+            );
+        }
+        other => panic!("expected a typed Truncated decode refusal, got {other:?}"),
+    }
+}
+
 #[test]
 fn corr_invalid_lock_evidence_binding_refused() {
     let dir = tempfile::tempdir().unwrap();

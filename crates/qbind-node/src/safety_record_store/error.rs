@@ -609,6 +609,16 @@ pub enum StructuralRefusalDetail {
     /// A free-form stage-1 structural diagnostic (constructed while inspecting an
     /// already-admitted buffer; not on the protected pre-reservation path).
     Message(String),
+    /// A fixed, compile-time stage-1 structural diagnostic carried as a
+    /// `&'static str` (D7-D14 G1 allocation-free correction). The text lives in
+    /// the binary's read-only data, so construction allocates **no** owned
+    /// `String` even though these decode refusals can fire while a partially
+    /// decoded record is already live inside the active decode reservation.
+    Static(&'static str),
+    /// A bounded stage-1 decode diagnostic whose only runtime content is a `Copy`
+    /// count/discriminant (D7-D14 G1 allocation-free correction). Construction
+    /// allocates no owned `String`; `Display` renders the identical message.
+    Decode(DecodeDiagnostic),
     /// An empty-signer certificate cannot meet the `ceil(2W/3) >= 1` structural
     /// threshold. Built on the protected admission path without allocating.
     EmptySignerCertificate,
@@ -624,6 +634,8 @@ impl std::fmt::Display for StructuralRefusalDetail {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Message(s) => f.write_str(s),
+            Self::Static(s) => f.write_str(s),
+            Self::Decode(d) => write!(f, "{d}"),
             Self::EmptySignerCertificate => {
                 f.write_str("empty-signer certificate refused at structural threshold")
             }
@@ -648,6 +660,58 @@ impl From<String> for StructuralRefusalDetail {
 impl From<&str> for StructuralRefusalDetail {
     fn from(s: &str) -> Self {
         Self::Message(s.to_string())
+    }
+}
+
+/// Typed, `Copy` identity of a bounded-decode (`codec`) stage-1 structural
+/// diagnostic (D7-D14 G1 allocation-free correction). Each decode refusal that
+/// previously interpolated a runtime count/discriminant into a `format!` owned
+/// `String` — constructed while a partially- or fully-decoded record is already
+/// live inside the active transient-decode reservation — carries only the `Copy`
+/// value here; the equivalent text is materialised only when rendered through
+/// `Display`, outside the protected interval.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DecodeDiagnostic {
+    /// The bounded reader needed `need` bytes but only `have` remained.
+    Truncated { need: u64, have: u64 },
+    /// `have` bytes remained after a complete record was decoded.
+    TrailingBytes { have: u64 },
+    /// A `TimeoutMessage.high_qc` presence discriminant was neither 0 nor 1.
+    InvalidTimeoutHighQcDiscriminant(u8),
+    /// A `TimeoutCert.high_qc` presence discriminant was neither 0 nor 1.
+    InvalidTcHighQcDiscriminant(u8),
+    /// A record-level `high_qc` presence discriminant was neither 0 nor 1.
+    InvalidRecordHighQcDiscriminant(u8),
+    /// An evidence discriminant did not name a known `SupportingEvidence` kind.
+    UnknownEvidenceDiscriminant(u8),
+    /// A committed-anchor presence discriminant was neither 0 nor 1.
+    InvalidCommittedAnchorDiscriminant(u8),
+    /// A predecessor-ref presence discriminant was neither 0 nor 1.
+    InvalidPredecessorDiscriminant(u8),
+}
+
+impl std::fmt::Display for DecodeDiagnostic {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Truncated { need, have } => write!(f, "truncated: need {need}, have {have}"),
+            Self::TrailingBytes { have } => write!(f, "trailing bytes after record: {have}"),
+            Self::InvalidTimeoutHighQcDiscriminant(d) => {
+                write!(f, "invalid timeout high_qc discriminant {d}")
+            }
+            Self::InvalidTcHighQcDiscriminant(d) => {
+                write!(f, "invalid tc high_qc discriminant {d}")
+            }
+            Self::InvalidRecordHighQcDiscriminant(d) => {
+                write!(f, "invalid record-level high_qc discriminant {d}")
+            }
+            Self::UnknownEvidenceDiscriminant(d) => write!(f, "unknown evidence discriminant {d}"),
+            Self::InvalidCommittedAnchorDiscriminant(d) => {
+                write!(f, "invalid committed-anchor discriminant {d}")
+            }
+            Self::InvalidPredecessorDiscriminant(d) => {
+                write!(f, "invalid predecessor discriminant {d}")
+            }
+        }
     }
 }
 
@@ -676,6 +740,29 @@ pub enum SemanticRefusalDetail {
     /// already-admitted / covered value; not on a protected pre-reservation or
     /// no-headroom path).
     Message(String),
+    /// A fixed, compile-time stage-3 semantic diagnostic carried as a
+    /// `&'static str` (D7-D14 G1 allocation-free correction). The P1–P4 / TA1–TA8
+    /// association diagnostics fire while the **full** transient decoded object is
+    /// live, so an owned-`String` literal here coexists with the maximal decoded
+    /// working set and cannot be absorbed by the inline charge (which is itself a
+    /// live contract-charged object, not reusable slack). A `&'static str`
+    /// allocates no heap at construction; `Display` renders the identical text.
+    Static(&'static str),
+    /// QC structural signer-set membership refusal: `index` is not an authorized
+    /// member (`Copy`, D7-D14 G1 allocation-free correction).
+    QcSignerIndexNotMember { index: u64 },
+    /// TC authorized-member refusal (TA4) for a claimed `tc.signers` entry
+    /// (`Copy`, D7-D14 G1 allocation-free correction).
+    TcSignerNotMember { signer: u64 },
+    /// TC signer-uniqueness refusal (TA3) over `tc.signers` (`Copy`).
+    TcDuplicateSigner { signer: u64 },
+    /// TC `signed_timeouts` authorized-member refusal (TA4) (`Copy`).
+    SignedTimeoutValidatorNotMember { validator: u64 },
+    /// TC `signed_timeouts` uniqueness refusal (TA3) (`Copy`).
+    DuplicateSignedTimeoutValidator { validator: u64 },
+    /// TC timeout-view consistency refusal (TA6): a signed timeout `view` differs
+    /// from the certificate's `timeout_view` (`Copy`).
+    SignedTimeoutViewMismatch { view: u64, timeout_view: u64 },
     /// The structurally decoded record's publication revision disagrees with the
     /// metadata's current revision. Built on the protected `load_established`
     /// path without allocating; carries only the two `Copy` revisions.
@@ -693,6 +780,28 @@ impl std::fmt::Display for SemanticRefusalDetail {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Message(s) => f.write_str(s),
+            Self::Static(s) => f.write_str(s),
+            Self::QcSignerIndexNotMember { index } => {
+                write!(f, "qc signer index {index} is not an authorized member")
+            }
+            Self::TcSignerNotMember { signer } => {
+                write!(f, "tc signer {signer} not an authorized member (TA4)")
+            }
+            Self::TcDuplicateSigner { signer } => {
+                write!(f, "tc duplicate signer {signer} (TA3)")
+            }
+            Self::SignedTimeoutValidatorNotMember { validator } => {
+                write!(f, "signed_timeout validator {validator} not a member (TA4)")
+            }
+            Self::DuplicateSignedTimeoutValidator { validator } => {
+                write!(f, "duplicate signed_timeout validator {validator} (TA3)")
+            }
+            Self::SignedTimeoutViewMismatch { view, timeout_view } => {
+                write!(
+                    f,
+                    "signed_timeout view {view} != tc.timeout_view {timeout_view} (TA6)"
+                )
+            }
             Self::RecordMetaRevisionDisagreement {
                 record_revision,
                 meta_revision,
