@@ -488,24 +488,47 @@ pub fn max_component_aggregate_bytes(
 #[cfg(test)]
 mod d7d14_h7_checked_size_arithmetic {
     //! RUN 422 D7-D14 — H7 executed evidence for the decoder's checked size
-    //! arithmetic, recorded at three distinct levels.
+    //! arithmetic, recorded at three deliberately distinct levels (no level is
+    //! allowed to substitute for another).
     //!
-    //! HELPER execution: the private `add`/`mul` helpers (which return
+    //! Entry-point preconditions (traced from source, not assumed):
+    //!   * `codec::decode_record` calls `max_safety_record_bytes(ctx)` as its
+    //!     FIRST step — before it reads the version, the discriminants, or any
+    //!     wire length/count. The size bound is therefore a pure function of the
+    //!     *pinned* context parameters `N` and `S_sig`, never of a wire-declared
+    //!     count; the wire counts are read and bound-checked *afterwards* against
+    //!     this precomputed cap.
+    //!   * `SafetyRecordOwner::attach` calls `ctx.validate()` before any owner
+    //!     operation, so every owner-mediated decode runs under a validated
+    //!     context (`1 <= N, S_sig <= 65535`, dense indices, non-zero power).
+    //!   * A *standalone* `decode_record(buf, ctx)` does NOT itself re-validate
+    //!     the context; it relies on the caller supplying a validated one. The
+    //!     reachability argument below is stated explicitly under that
+    //!     validated-context precondition.
+    //!
+    //! HELPER execution (EX): the private `add`/`mul` helpers (returning
     //! `ArithmeticOverflowSite::SizeSum` / `SizeProduct`) ARE the decoder's size
-    //! arithmetic; the tests below execute them at their `u128` overflow boundary.
+    //! arithmetic; the first two tests execute them at their `u128` overflow
+    //! boundary.
     //!
-    //! DECODER execution: the bounded decoder/admission boundary cases remain the
-    //! existing structural refusals in the integration suite (oversize, declared
-    //! count/length over the pinned bound, unsupported version, bad CRC).
+    //! DECODER execution (EX, elsewhere): the bounded decoder/admission boundary
+    //! cases are the existing structural refusals in the integration suite
+    //! (oversize, declared count/length over the pinned bound, unsupported
+    //! version, bad CRC). This module does NOT duplicate or restate them as its
+    //! own executed evidence.
     //!
-    //! SOURCE-DERIVED unreachability (NOT execution): every declared count/length
-    //! on the wire is a `u16` (<= 65535) checked against the pinned profile BEFORE
-    //! the size arithmetic runs, so the maximum `max_qc_bytes` / `max_tc_bytes`
-    //! value is ~4.3e9 — far below `u128::MAX`. A decode-path wrap is therefore
-    //! unreachable without weakening the profile or widening the integer, which is
-    //! out of scope; the checked helpers remain as defence in depth. This file
-    //! keeps the three levels separate and does NOT claim an executed decode-path
-    //! wrap.
+    //! SOURCE-DERIVED reachability (SI, NOT execution): under the validated
+    //! context the serialized caps are, from the exact source formulas,
+    //!   `MAX_QC_BYTES = 269 + ceil(N/8) + N*(2 + S_sig)` and
+    //!   `MAX_TC_BYTES = 307 + 86*N + 8*N^2 + N*S_sig`,
+    //! each maximized at `N = S_sig = 65535`, giving `4_294_975_756` (QC) and
+    //! `38_659_162_342` (TC) — two DISTINCT variant maxima (the earlier "~4.3
+    //! billion for both" was wrong: only QC is ~4.29e9; TC is ~3.87e10). Both
+    //! maxima, and every checked intermediate, stay far below `u128::MAX`
+    //! (~3.4e38), so a decode-path wrap is unreachable without weakening the
+    //! profile or widening the integer width — out of scope. The checked helpers
+    //! remain as defence in depth. H7 stays Partially covered: an executed
+    //! decode-path wrap is NOT claimed.
     use super::*;
 
     #[test]
@@ -539,11 +562,17 @@ mod d7d14_h7_checked_size_arithmetic {
         ));
     }
 
+    /// Source-derived reachability (NOT a forced decode wrap): exercise the pure
+    /// serialized-size functions at the *validated parameter extrema*
+    /// `N = S_sig = 65535`. An N=4 point cannot establish the bound for every
+    /// admitted profile, so the extrema are evaluated directly. The context is
+    /// validated first (mirroring the `attach` precondition); only the pinned
+    /// context is built — no maximum QC/TC evidence graph and no maximum
+    /// serialized record are constructed or allocated.
     #[test]
-    fn admitted_profile_size_bound_is_far_below_overflow() {
-        // Source-derived unreachability witness: at an admitted 4-validator fixture
-        // the decoder's size bound is tiny relative to `u128::MAX`, so the checked
-        // arithmetic above cannot wrap on any admitted decode input.
+    fn sizing_functions_do_not_wrap_at_validated_parameter_extrema() {
+        // 65535 is the validated upper bound for both `N` and `S_sig`.
+        const MAXP: u16 = u16::MAX;
         let ctx = PinnedSafetyContext {
             network_genesis_id: [0u8; 32],
             authority_context_ref: [0u8; 32],
@@ -551,14 +580,28 @@ mod d7d14_h7_checked_size_arithmetic {
             epoch: 1,
             qc_suite_id: 1,
             timeout_suite_id: 1,
-            s_sig: 8,
-            validators: (0..4u64).map(|i| (ValidatorId::new(i), 1u64)).collect(),
+            s_sig: MAXP as usize,
+            validators: (0..MAXP as u64).map(|i| (ValidatorId::new(i), 1u64)).collect(),
             require_height_equals_round: false,
         };
-        let bound = max_safety_record_bytes(&ctx).unwrap();
-        assert!(
-            bound < (1u128 << 40),
-            "admitted decode bound stays far below u128 overflow"
-        );
+        // Validated-context precondition (what `attach` enforces before any decode).
+        ctx.validate().unwrap();
+        assert_eq!(ctx.n(), MAXP as usize);
+        assert_eq!(ctx.b_span(), 8192); // ceil(65535 / 8)
+
+        // Final values match the exact source-derived formulas at the extrema.
+        let qc = max_qc_bytes(&ctx).unwrap();
+        let tc = max_tc_bytes(&ctx).unwrap();
+        assert_eq!(qc, 4_294_975_756u128, "MAX_QC_BYTES at N = S_sig = 65535");
+        assert_eq!(tc, 38_659_162_342u128, "MAX_TC_BYTES at N = S_sig = 65535");
+        // The cross-variant cap the decoder actually gates on is the TC maximum.
+        assert_eq!(max_safety_record_bytes(&ctx).unwrap(), tc);
+
+        // Every `add`/`mul` on the path is checked, so an `Ok` result establishes
+        // that no intermediate wrapped either — including the dominant `8*N^2`
+        // nested product in `max_tc_bytes` at the extreme. Both maxima stay far
+        // below the `u128` boundary the helpers guard.
+        assert!(qc < tc, "QC maximum is strictly below the TC maximum");
+        assert!(tc < u128::MAX / 2, "serialized cap stays far below u128::MAX");
     }
 }
