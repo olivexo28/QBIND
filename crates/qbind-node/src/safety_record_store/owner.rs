@@ -415,7 +415,7 @@ impl SafetyMeta {
     fn decode(buf: &[u8]) -> Result<Self, SafetyStoreError> {
         if buf.len() != 2 + 32 + 8 {
             return Err(SafetyStoreError::StructuralRefusal(
-                "metadata length".into(),
+                super::error::StructuralRefusalDetail::Static("metadata length"),
             ));
         }
         let meta_format_version = u16::from_be_bytes([buf[0], buf[1]]);
@@ -509,8 +509,12 @@ pub struct SafetyRecordOwner {
 pub enum PublishResult {
     /// Refused before any write (validation/eligibility/revision). Prior state intact.
     RefusedPreWrite(SafetyStoreError),
-    /// The write errored; durable outcome ambiguous — predecessor NOT assumed stored.
-    WriteFailedAmbiguous(String),
+    /// The write errored; durable outcome ambiguous — predecessor NOT assumed
+    /// stored. Carries a fixed `&'static str` (D7-D14 G1b allocation-free
+    /// correction): the backend supplies only a compile-time ambiguous-write
+    /// diagnostic, so moving it into this outcome allocates no owned `String` while
+    /// the O4/O5 publication reservation is still live.
+    WriteFailedAmbiguous(&'static str),
     /// The write durably succeeded but no success was delivered; a complete
     /// successor may survive. The caller must block dependent use until explicit
     /// recovery re-establishes state.
@@ -681,11 +685,13 @@ impl SafetyRecordOwner {
         let meta_bytes = self
             .backend
             .read_meta(super::backend::META_ENCODED_LEN)?
-            .ok_or_else(|| SafetyStoreError::MissingEstablishedState("no metadata".into()))?;
+            .ok_or(SafetyStoreError::MissingEstablishedState("no metadata"))?;
         let record_bytes = self
             .backend
             .read_record(super::profile::max_safety_record_bytes(self.pinned())?)?
-            .ok_or_else(|| SafetyStoreError::StructuralRefusal("metadata without record".into()))?;
+            .ok_or(SafetyStoreError::StructuralRefusal(
+                super::error::StructuralRefusalDetail::Static("metadata without record"),
+            ))?;
         let meta = SafetyMeta::decode(&meta_bytes)?;
         if meta.context_digest != context_digest(self.pinned()) {
             return Err(SafetyStoreError::SemanticRefusal(
@@ -899,10 +905,14 @@ impl SafetyRecordOwner {
                 self.backend.mark_effective();
                 Ok(0)
             }
-            PublishOutcome::PreWriteRefused(m) => Err(SafetyStoreError::WriteFailed(m)),
-            PublishOutcome::WriteError(m) => Err(SafetyStoreError::WriteFailed(m)),
+            PublishOutcome::PreWriteRefused(m) => Err(SafetyStoreError::WriteFailed(
+                super::error::WriteFailedDetail::Static(m),
+            )),
+            PublishOutcome::WriteError(m) => Err(SafetyStoreError::WriteFailed(
+                super::error::WriteFailedDetail::Static(m),
+            )),
             PublishOutcome::UncertainDurable => Err(SafetyStoreError::UncertainPublication(
-                "O1 metadata+bootstrap publish outcome uncertain".into(),
+                "O1 metadata+bootstrap publish outcome uncertain",
             )),
         }
     }
@@ -1262,9 +1272,9 @@ impl SafetyRecordOwner {
                 self.backend.mark_effective();
                 PublishResult::DurableAcknowledged { new_revision }
             }
-            PublishOutcome::PreWriteRefused(m) => {
-                PublishResult::RefusedPreWrite(SafetyStoreError::WriteFailed(m))
-            }
+            PublishOutcome::PreWriteRefused(m) => PublishResult::RefusedPreWrite(
+                SafetyStoreError::WriteFailed(super::error::WriteFailedDetail::Static(m)),
+            ),
             PublishOutcome::WriteError(m) => PublishResult::WriteFailedAmbiguous(m),
             PublishOutcome::UncertainDurable => PublishResult::UncertainDurable,
         }
@@ -1346,7 +1356,9 @@ impl SafetyRecordOwner {
         // re-publication here.
         if retained.origin_context_digest() != &context_digest(self.pinned()) {
             return PublishResult::RefusedPreWrite(SafetyStoreError::SemanticRefusal(
-                "retained publication was validated under a different pinned context".into(),
+                super::error::SemanticRefusalDetail::Static(
+                    "retained publication was validated under a different pinned context",
+                ),
             ));
         }
 
@@ -1363,9 +1375,10 @@ impl SafetyRecordOwner {
             Some(inc) if inc == self.backend.incarnation() => {}
             _ => {
                 return PublishResult::RefusedPreWrite(SafetyStoreError::SemanticRefusal(
-                    "retained publication is not an O5 recovery capability for this backend \
-                     incarnation (no cross-store / cross-reopen transfer of recovery authority)"
-                        .into(),
+                    super::error::SemanticRefusalDetail::Static(
+                        "retained publication is not an O5 recovery capability for this backend \
+                         incarnation (no cross-store / cross-reopen transfer of recovery authority)",
+                    ),
                 ))
             }
         }
@@ -1375,7 +1388,7 @@ impl SafetyRecordOwner {
         // coverage) refuses.
         if stored.as_slice() != retained.encoded() {
             return PublishResult::RefusedPreWrite(SafetyStoreError::PublicationMismatch(
-                "stored publication differs from retained original (byte-for-byte)".into(),
+                "stored publication differs from retained original (byte-for-byte)",
             ));
         }
         // The retained revision must also still be the authoritative revision.
@@ -1449,9 +1462,9 @@ impl SafetyRecordOwner {
                     new_revision: meta.current_revision,
                 }
             }
-            PublishOutcome::PreWriteRefused(m) => {
-                PublishResult::RefusedPreWrite(SafetyStoreError::WriteFailed(m))
-            }
+            PublishOutcome::PreWriteRefused(m) => PublishResult::RefusedPreWrite(
+                SafetyStoreError::WriteFailed(super::error::WriteFailedDetail::Static(m)),
+            ),
             PublishOutcome::WriteError(m) => PublishResult::WriteFailedAmbiguous(m),
             PublishOutcome::UncertainDurable => PublishResult::UncertainDurable,
         }

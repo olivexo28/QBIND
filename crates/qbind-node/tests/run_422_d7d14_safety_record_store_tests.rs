@@ -3469,6 +3469,298 @@ fn d7d14_g1b_decode_and_semantic_diagnostics_construction_is_allocation_free() {
     }
 }
 
+// ---------------------------------------------------------------------------
+// G1b continuation (RUN 422 D7-D14 D7–D14): the remaining OWNER / BACKEND
+// diagnostics reachable through O1–O5 are now construction-time ALLOCATION-FREE.
+//
+// At the reviewed revision these sites still allocated an owned `String`: the
+// earlier `SemanticRefusalDetail::Static` addition did NOT change their existing
+// `.into()` calls, because `From<&str>` constructs `Message(s.to_string())`. Each
+// site below fires while its O1–O5 publication / read reservation is live, so an
+// owned diagnostic `String` here is a protected-path allocation with no proven
+// covering headroom. The correction carries each as a `&'static str` (or a typed
+// `WriteFailedDetail::Static`), so construction allocates zero heap; `Display`
+// renders the identical message. This test exercises the diagnostics at the
+// `SafetyStoreError` boundary (what a caller actually observes).
+// ---------------------------------------------------------------------------
+#[test]
+fn d7d14_g1b_owner_backend_diagnostics_construction_is_allocation_free() {
+    use qbind_node::safety_record_store::error::{
+        SemanticRefusalDetail, StructuralRefusalDetail, WriteFailedDetail,
+    };
+
+    // Construct the full observable `SafetyStoreError` under the allocation
+    // observer, assert it adds zero heap, then confirm its deferred `Display` is
+    // byte-identical to the text the previous owned-`String` form produced.
+    fn zero_alloc_err(make: impl FnOnce() -> SafetyStoreError, expect: &str) {
+        let (val, allocs) = measure_allocs(make);
+        assert_eq!(
+            allocs, 0,
+            "typed/static owner/backend diagnostic must construct with no heap allocation \
+             (text: {expect})"
+        );
+        assert_eq!(
+            val.to_string(),
+            expect,
+            "deferred Display preserves the exact diagnostic text"
+        );
+    }
+
+    // --- O2/O3 load_established missing-established-state + structural family ---
+    zero_alloc_err(
+        || SafetyStoreError::MissingEstablishedState("no metadata"),
+        "safety store: missing established state: no metadata",
+    );
+    zero_alloc_err(
+        || {
+            SafetyStoreError::StructuralRefusal(StructuralRefusalDetail::Static(
+                "metadata without record",
+            ))
+        },
+        "safety store: structural refusal: metadata without record",
+    );
+    zero_alloc_err(
+        || SafetyStoreError::StructuralRefusal(StructuralRefusalDetail::Static("metadata length")),
+        "safety store: structural refusal: metadata length",
+    );
+
+    // --- O1 uncertain publication ---
+    zero_alloc_err(
+        || SafetyStoreError::UncertainPublication("O1 metadata+bootstrap publish outcome uncertain"),
+        "safety store: uncertain publication: O1 metadata+bootstrap publish outcome uncertain",
+    );
+
+    // --- O5 foreign-context / missing-recovery-capability / byte-for-byte mismatch ---
+    zero_alloc_err(
+        || {
+            SafetyStoreError::SemanticRefusal(SemanticRefusalDetail::Static(
+                "retained publication was validated under a different pinned context",
+            ))
+        },
+        "safety store: semantic refusal: retained publication was validated under a different \
+         pinned context",
+    );
+    zero_alloc_err(
+        || {
+            SafetyStoreError::SemanticRefusal(SemanticRefusalDetail::Static(
+                "retained publication is not an O5 recovery capability for this backend \
+                 incarnation (no cross-store / cross-reopen transfer of recovery authority)",
+            ))
+        },
+        "safety store: semantic refusal: retained publication is not an O5 recovery capability \
+         for this backend incarnation (no cross-store / cross-reopen transfer of recovery \
+         authority)",
+    );
+    zero_alloc_err(
+        || {
+            SafetyStoreError::PublicationMismatch(
+                "stored publication differs from retained original (byte-for-byte)",
+            )
+        },
+        "safety store: publication mismatch: stored publication differs from retained original \
+         (byte-for-byte)",
+    );
+
+    // --- Backend publication write-failure outcomes mapped through the owner ---
+    // The fixed ambiguous-write diagnostic the backend surfaces (and the pre-write
+    // refusal) now reach the caller as a `WriteFailedDetail::Static`, allocating no
+    // owned `String` while the publication reservation is still live.
+    zero_alloc_err(
+        || {
+            SafetyStoreError::WriteFailed(WriteFailedDetail::Static(
+                "backend write error (ambiguous durable outcome)",
+            ))
+        },
+        "safety store: write failed: backend write error (ambiguous durable outcome)",
+    );
+
+    // Baseline sensitivity: the superseded owned-`String` forms DID allocate on
+    // these same protected paths (one heap buffer each). `From<&str>` still routes
+    // through `String::from`, so the previous `.into()` at every site above
+    // allocated exactly like this.
+    let (_s, old_lit_allocs) = measure_allocs(|| String::from("no metadata"));
+    assert!(
+        old_lit_allocs >= 1,
+        "the superseded \".into()\" owner literal allocated an owned String"
+    );
+    let (_s, old_detail_allocs) =
+        measure_allocs(|| WriteFailedDetail::Message(String::from("open: boom")));
+    assert!(
+        old_detail_allocs >= 1,
+        "a dynamic (out-of-reservation) WriteFailedDetail::Message still owns a String"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Deliverable C (RUN 422 D7-D14 D7–D14): LATE O2 partial-decode operational
+// regression through the real `SafetyRecordOwner::open()`.
+//
+// The payload-level `d7d14_g1b_*` tests above establish allocation-free CONSTRUCTION
+// and a decoder refusal during the EARLY genesis-ID read. They do NOT establish O2
+// behaviour after substantial evidence has already been decoded. This test plants an
+// admitted (size-gate- and CRC-valid) malformed maximum-TC stored record whose only
+// corruption is the predecessor presence discriminant `D_pred`. Source trace
+// (`codec::decode_record`): for a `TcDerived` record `read_optional_predecessor`
+// runs only AFTER `decode_timeout_cert` has decoded the full TC evidence graph
+// (signers, N signatures, signed_timeouts) AND `read_optional_anchor` has decoded
+// the committed anchor — so reaching `InvalidPredecessorDiscriminant` proves the
+// evidence graph is already owned at the refusal point (NOT a header / size / CRC
+// refusal). The O2 reservation is admitted across the whole `load_established`, so
+// it is active at that late point; we bracket it by leaving EXACTLY the O2 charge of
+// headroom (decode proceeds to the late refusal) versus one byte less (admission
+// refuses BEFORE decode).
+// ---------------------------------------------------------------------------
+#[test]
+fn d7d14_late_o2_partial_decode_diagnostic_after_tc_evidence_through_open() {
+    use qbind_node::safety_record_store::accounting::max_transient_decoded_working_set;
+    use qbind_node::safety_record_store::codec::record_crc32_for_test;
+    use qbind_node::safety_record_store::error::{DecodeDiagnostic, StructuralRefusalDetail};
+
+    let dir = tempfile::tempdir().unwrap();
+    let ctx = ctx_n(4); // N = 4, s_sig = 8 — maximum fixture dimensions.
+    let owner = init_owner(dir.path(), &ctx); // O1 establishes metadata at revision 0.
+    let backend = owner.backend_for_test();
+    let agg_cap = backend.accounting_aggregate_cap().unwrap();
+    let ctx_live = backend.context_accounting_current();
+    let rec = max_safety_record_bytes(&ctx).unwrap();
+    let transient = max_transient_decoded_working_set(&ctx).unwrap();
+    let o2_charge = rec + META_ENCODED_LEN_MIRROR + transient;
+
+    // Capture the admissible bootstrap record so the store can be returned to a
+    // decodable state after the test condition is cleared.
+    let valid_stored = backend
+        .read_record(rec)
+        .unwrap()
+        .expect("bootstrap record present after O1");
+    let meta_before = backend.read_meta(META_ENCODED_LEN_MIRROR).unwrap();
+
+    // ----- Fixture construction (OUTSIDE every measured interval) -----
+    // A COMPLETE maximum-TC record: anchored (D_ca=1) and predecessor-present
+    // (D_pred=1), so the corruption flips a *present* discriminant to an invalid one
+    // without changing the serialized length (admission bounds preserved).
+    let complete_tc = max_tc_locked_anchored(&ctx, 5, 6);
+    // Document the substantial evidence graph that IS decoded before the refusal.
+    match &complete_tc.evidence {
+        SupportingEvidence::TcDerived { tc, .. } => {
+            assert_eq!(tc.signers.len(), ctx.n(), "N TC signers decoded");
+            assert_eq!(
+                tc.signed_timeouts.len(),
+                ctx.n(),
+                "N signed_timeouts decoded"
+            );
+        }
+        other => panic!("expected a TcDerived maximum fixture, got {other:?}"),
+    }
+    let dec_complete = DecodedRecord {
+        persistence_format_version: 1,
+        network_genesis_id: ctx.network_genesis_id,
+        publication_revision: 0,
+        record: SafetyRecord::Locked(complete_tc),
+    };
+    let mut enc = encode_record(&dec_complete, &ctx).unwrap();
+    assert!(
+        (enc.len() as u128) <= rec,
+        "malformed max-TC record {} fits the admitted record bound {rec}",
+        enc.len()
+    );
+    // D_pred byte offset in the Locked layout: version(2) + genesis(32) +
+    // authority(32) + D_ev(1) + D_ca(1) = 68.
+    const D_PRED_OFFSET: usize = 2 + 32 + 32 + 1 + 1;
+    assert_eq!(
+        enc[D_PRED_OFFSET], 1,
+        "anchored max-TC fixture encodes D_pred=1 (predecessor present)"
+    );
+    enc[D_PRED_OFFSET] = 2; // invalid predecessor presence discriminant
+    let body_len = enc.len() - 4;
+    let fixed_crc = record_crc32_for_test(&enc[..body_len]).to_be_bytes();
+    enc[body_len..].copy_from_slice(&fixed_crc); // keep the record-internal CRC valid
+    backend
+        .debug_overwrite_record(&enc)
+        .expect("plant admitted malformed max-TC stored record");
+
+    // The planted record passes the header / size / CRC gates and fails LATE, after
+    // the full TC evidence graph and the committed anchor are decoded and owned.
+    match decode_record(&enc, &ctx) {
+        Err(SafetyStoreError::StructuralRefusal(StructuralRefusalDetail::Decode(
+            DecodeDiagnostic::InvalidPredecessorDiscriminant(2),
+        ))) => {}
+        other => panic!("expected a LATE InvalidPredecessorDiscriminant(2) refusal, got {other:?}"),
+    }
+    // The late diagnostic itself constructs with zero heap (typed `Copy`).
+    let (_d, diag_allocs) =
+        measure_allocs(|| DecodeDiagnostic::InvalidPredecessorDiscriminant(2));
+    assert_eq!(diag_allocs, 0, "late O2 diagnostic constructs allocation-free");
+
+    // ----- Reservation active at the late decode point -----
+    // Leave EXACTLY the O2 read/decode charge of aggregate headroom: the reservation
+    // admits, decode proceeds through the full TC evidence, and refuses LATE.
+    let standing_fits = agg_cap - ctx_live - o2_charge;
+    let standing = backend
+        .reserve_standing_for_test(standing_fits)
+        .expect("standing pressure leaving exactly the O2 working set");
+    let peak_before = backend.accounting_aggregate_peak();
+    match owner.open() {
+        Err(SafetyStoreError::StructuralRefusal(StructuralRefusalDetail::Decode(
+            DecodeDiagnostic::InvalidPredecessorDiscriminant(2),
+        ))) => {}
+        other => panic!("expected O2 open to refuse LATE after TC decode, got {other:?}"),
+    }
+    assert!(
+        backend.accounting_aggregate_peak() <= agg_cap,
+        "late-refused O2 never exceeded the aggregate ceiling"
+    );
+    assert!(
+        backend.accounting_aggregate_peak() >= peak_before + o2_charge
+            || backend.accounting_aggregate_peak() == agg_cap,
+        "O2 held its full read/decode reservation across the late decode point"
+    );
+    assert_eq!(
+        backend.accounting_aggregate_current(),
+        ctx_live + standing_fits,
+        "late-refused O2 released its read/decode reservation on the refusal exit"
+    );
+    assert_eq!(
+        backend.read_record(rec).unwrap(),
+        Some(enc.clone()),
+        "late-refused O2 did not mutate the stored (malformed) record bytes"
+    );
+    assert_eq!(
+        backend.read_meta(META_ENCODED_LEN_MIRROR).unwrap(),
+        meta_before,
+        "late-refused O2 did not mutate stored metadata"
+    );
+    assert!(
+        !owner.recovery_required(),
+        "late-refused O2 did not disturb the effectiveness latch"
+    );
+    drop(standing);
+
+    // ----- One byte less headroom: admission refuses BEFORE decode -----
+    let standing_short = agg_cap - ctx_live - (o2_charge - 1);
+    let standing = backend
+        .reserve_standing_for_test(standing_short)
+        .expect("standing pressure one byte short of the O2 working set");
+    match owner.open() {
+        Err(SafetyStoreError::CapacityRefusal(_)) => {}
+        other => panic!("expected pre-decode CapacityRefusal one byte short, got {other:?}"),
+    }
+    assert_eq!(
+        backend.accounting_aggregate_current(),
+        ctx_live + standing_short,
+        "pre-decode refused O2 released its rolled-back admission cleanly"
+    );
+    drop(standing);
+
+    // ----- Subsequent admissible work succeeds once the condition is cleared -----
+    backend
+        .debug_overwrite_record(&valid_stored)
+        .expect("restore the admissible bootstrap record");
+    let meta = owner
+        .open()
+        .expect("O2 open succeeds once the admissible record is restored");
+    assert_eq!(meta.current_revision, 0, "restored admissible O2 reads revision 0");
+}
+
 #[test]
 fn corr_invalid_lock_evidence_binding_refused() {
     let dir = tempfile::tempdir().unwrap();

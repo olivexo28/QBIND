@@ -492,7 +492,7 @@ impl SafetyBackend {
         let mut opts = rocksdb::Options::default();
         opts.create_if_missing(true);
         let db = rocksdb::DB::open(&opts, path)
-            .map_err(|e| SafetyStoreError::WriteFailed(format!("open: {e}")))?;
+            .map_err(|e| SafetyStoreError::WriteFailed(format!("open: {e}").into()))?;
         // One aggregate admission authority per backend open, shared by both the
         // operational and the context-ownership partitions so their combined live
         // charge is bounded by the accepted component aggregate ceiling (§ 13.7,
@@ -818,7 +818,7 @@ impl SafetyBackend {
         #[cfg(any(test, feature = "test-utils"))]
         let o1_owner_snapshot = O1_OWNER_SNAPSHOT.with(|c| c.take());
         if self.injected() == InjectFault::FailBeforeSubmit {
-            return PublishOutcome::PreWriteRefused("injected pre-submit refusal".into());
+            return PublishOutcome::PreWriteRefused("injected pre-submit refusal");
         }
 
         let mut batch = rocksdb::WriteBatch::default();
@@ -896,7 +896,7 @@ impl SafetyBackend {
 
         if self.injected() == InjectFault::WriteErrors {
             self.mark_not_effective();
-            return PublishOutcome::WriteError("injected write error (ambiguous)".into());
+            return PublishOutcome::WriteError("injected write error (ambiguous)");
         }
 
         match self.db.write_opt(batch, &write_opts) {
@@ -921,9 +921,12 @@ impl SafetyBackend {
                 // publication reservation is still live, so embedding an unbounded
                 // backend string would peak a component-owned allocation above the
                 // admitted charge (§ 13.7P, D7-D14 Finding B). The fail-closed
-                // ambiguous-write distinction is preserved as this bounded,
-                // fixed-length outcome.
-                PublishOutcome::WriteError("backend write error (ambiguous durable outcome)".into())
+                // ambiguous-write distinction is preserved as this fixed
+                // `&'static str`, which lives in the binary's read-only data and
+                // allocates NO owned `String` at construction (D7-D14 G1b): the
+                // former `.into()` still constructed `String::from(&str)` here while
+                // the reservation was live.
+                PublishOutcome::WriteError("backend write error (ambiguous durable outcome)")
             }
         }
     }
@@ -1005,7 +1008,7 @@ impl SafetyBackend {
         write_opts.set_sync(true);
         self.db
             .put_opt(RECORD_KEY, Self::wrap(record_bytes), &write_opts)
-            .map_err(|e| SafetyStoreError::WriteFailed(e.to_string()))
+            .map_err(|e| SafetyStoreError::WriteFailed(e.to_string().into()))
     }
 
     /// Source/test-only: write an arbitrary raw key/value into the backing
@@ -1018,7 +1021,7 @@ impl SafetyBackend {
         write_opts.set_sync(true);
         self.db
             .put_opt(key, value, &write_opts)
-            .map_err(|e| SafetyStoreError::WriteFailed(e.to_string()))
+            .map_err(|e| SafetyStoreError::WriteFailed(e.to_string().into()))
     }
 }
 
@@ -1028,11 +1031,17 @@ impl SafetyBackend {
 /// despite the caller receiving no success.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PublishOutcome {
-    /// Refused before any bytes were submitted; prior state is intact.
-    PreWriteRefused(String),
+    /// Refused before any bytes were submitted; prior state is intact. Carries a
+    /// fixed `&'static str`: every pre-write refusal is a compile-time diagnostic,
+    /// so no owned `String` is allocated while a publication reservation is live.
+    PreWriteRefused(&'static str),
     /// The write returned an error; the durable outcome is ambiguous and the
-    /// predecessor must not be assumed to have survived.
-    WriteError(String),
+    /// predecessor must not be assumed to have survived. Carries a fixed
+    /// `&'static str` (D7-D14 G1b): the backend error's variable-length `Display`
+    /// text is deliberately NOT copied, and the fixed diagnostic is a compile-time
+    /// static, so no component-owned `String` is allocated while the O1/O4/O5
+    /// publication reservation is still live.
+    WriteError(&'static str),
     /// The write durably succeeded but no success was delivered to the caller.
     UncertainDurable,
     /// The write durably succeeded and was acknowledged.
