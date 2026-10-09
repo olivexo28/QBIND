@@ -6,7 +6,9 @@
 //! durability never manufacture a verified-evidence result.
 
 use super::codec::compute_evidence_lock_binding;
-use super::error::{CapacityRefusalDetail, MissingIndependentInputSite, SafetyStoreError};
+use super::error::{
+    CapacityRefusalDetail, MissingIndependentInputSite, SafetyStoreError, SemanticRefusalDetail,
+};
 use super::profile::PinnedSafetyContext;
 use super::record::{
     DecodedRecord, EvidenceStatus, LockedRecord, RetainedRecord, SafetyRecord, SupportingEvidence,
@@ -108,7 +110,7 @@ pub fn validate_decoded<H: CommittedHistory + ?Sized>(
     let reencoded = super::codec::encode_record(&decoded, ctx)?;
     if reencoded != encoded {
         return Err(SafetyStoreError::SemanticRefusal(
-            "decoded content does not correspond to the supplied encoded bytes".into(),
+            SemanticRefusalDetail::Static("decoded content does not correspond to the supplied encoded bytes"),
         ));
     }
     // The correspondence re-encode has served its ONLY purpose. Drop its
@@ -150,7 +152,7 @@ pub fn validate_decoded<H: CommittedHistory + ?Sized>(
     // Common identity binding to the pinned context (P4 prelude).
     if decoded.network_genesis_id != ctx.network_genesis_id {
         return Err(SafetyStoreError::SemanticRefusal(
-            "network_genesis_id does not match pinned context".into(),
+            SemanticRefusalDetail::Static("network_genesis_id does not match pinned context"),
         ));
     }
 
@@ -161,7 +163,7 @@ pub fn validate_decoded<H: CommittedHistory + ?Sized>(
         } => {
             if *authority_context_ref != ctx.authority_context_ref {
                 return Err(SafetyStoreError::SemanticRefusal(
-                    "bootstrap authority_context_ref mismatch".into(),
+                    SemanticRefusalDetail::Static("bootstrap authority_context_ref mismatch"),
                 ));
             }
             // No lock, no evidence, no committed anchor. Nothing further to verify.
@@ -206,7 +208,7 @@ fn validate_locked<H: CommittedHistory + ?Sized>(
     // P4: the authorized-context descriptor must match the pinned context.
     if l.authority_context_ref != ctx.authority_context_ref {
         return Err(SafetyStoreError::SemanticRefusal(
-            "locked authority_context_ref mismatch".into(),
+            SemanticRefusalDetail::Static("locked authority_context_ref mismatch"),
         ));
     }
 
@@ -221,7 +223,7 @@ fn validate_locked<H: CommittedHistory + ?Sized>(
     )?;
     if recomputed != l.evidence_lock_binding {
         return Err(SafetyStoreError::SemanticRefusal(
-            "evidence_lock_binding does not recompute".into(),
+            SemanticRefusalDetail::Static("evidence_lock_binding does not recompute"),
         ));
     }
 
@@ -230,36 +232,36 @@ fn validate_locked<H: CommittedHistory + ?Sized>(
             // P4: chain/epoch/suite correspondence.
             if qc.chain_id != ctx.chain_id {
                 return Err(SafetyStoreError::SemanticRefusal(
-                    "qc chain_id mismatch".into(),
+                    SemanticRefusalDetail::Static("qc chain_id mismatch"),
                 ));
             }
             if qc.epoch != ctx.epoch {
                 return Err(SafetyStoreError::SemanticRefusal(
-                    "qc epoch mismatch".into(),
+                    SemanticRefusalDetail::Static("qc epoch mismatch"),
                 ));
             }
             if qc.suite_id != ctx.qc_suite_id {
                 return Err(SafetyStoreError::SemanticRefusal(
-                    "qc suite_id mismatch".into(),
+                    SemanticRefusalDetail::Static("qc suite_id mismatch"),
                 ));
             }
             // P1: the supporting certificate binds the locked block.
             if qc.block_id != l.lock_block_id {
                 return Err(SafetyStoreError::SemanticRefusal(
-                    "qc block_id does not equal lock_block_id (P1)".into(),
+                    SemanticRefusalDetail::Static("qc block_id does not equal lock_block_id (P1)"),
                 ));
             }
             // P2: the QC logical view binds to wire `height`, not `round`.
             if qc.height != l.lock_view {
                 return Err(SafetyStoreError::SemanticRefusal(
-                    "qc height does not equal lock_view (P2 view-binding)".into(),
+                    SemanticRefusalDetail::Static("qc height does not equal lock_view (P2 view-binding)"),
                 ));
             }
             // Optional, explicit profile choice — never silently conflated with
             // the P2 view binding above.
             if ctx.require_height_equals_round && qc.height != qc.round {
                 return Err(SafetyStoreError::SemanticRefusal(
-                    "profile requires height == round and it does not hold".into(),
+                    SemanticRefusalDetail::Static("profile requires height == round and it does not hold"),
                 ));
             }
             // Structural signer-set / quorum checks (separate from stage-2 crypto).
@@ -282,7 +284,7 @@ fn validate_locked<H: CommittedHistory + ?Sized>(
             Some(h) => {
                 if !h.contains_committed(&anchor.block_id, anchor.height) {
                     return Err(SafetyStoreError::SemanticRefusal(
-                        "committed anchor not on supplied committed history (P3)".into(),
+                        SemanticRefusalDetail::Static("committed anchor not on supplied committed history (P3)"),
                     ));
                 }
             }
@@ -337,12 +339,12 @@ fn validate_qc_signers(
     }
     if signer_indices.is_empty() {
         return Err(SafetyStoreError::SemanticRefusal(
-            "qc has no set signer bits".into(),
+            SemanticRefusalDetail::Static("qc has no set signer bits"),
         ));
     }
     if signer_indices.len() != qc.signatures.len() {
         return Err(SafetyStoreError::SemanticRefusal(
-            "qc set-bit count does not match signature count".into(),
+            SemanticRefusalDetail::Static("qc set-bit count does not match signature count"),
         ));
     }
     let mut acc: u128 = 0;
@@ -351,7 +353,7 @@ fn validate_qc_signers(
         match ctx.voting_power(id) {
             None => {
                 return Err(SafetyStoreError::SemanticRefusal(
-                    format!("qc signer index {idx} is not an authorized member").into(),
+                    SemanticRefusalDetail::QcSignerIndexNotMember { index: *idx },
                 ))
             }
             Some(p) => acc += p as u128,
@@ -359,7 +361,7 @@ fn validate_qc_signers(
     }
     if acc < ctx.two_thirds_vp() {
         return Err(SafetyStoreError::SemanticRefusal(
-            "qc accumulated voting power below ceil(2W/3)".into(),
+            SemanticRefusalDetail::Static("qc accumulated voting power below ceil(2W/3)"),
         ));
     }
     Ok(())
@@ -386,7 +388,7 @@ fn validate_tc(
     for s in &tc.signers {
         if !ctx.is_member(*s) {
             return Err(SafetyStoreError::SemanticRefusal(
-                format!("tc signer {} not an authorized member (TA4)", s.as_u64()).into(),
+                SemanticRefusalDetail::TcSignerNotMember { signer: s.as_u64() },
             ));
         }
     }
@@ -396,7 +398,7 @@ fn validate_tc(
     for s in &tc.signers {
         if !uniq_set_insert(&mut seen, s.as_u64()) {
             return Err(SafetyStoreError::SemanticRefusal(
-                format!("tc duplicate signer {} (TA3)", s.as_u64()).into(),
+                SemanticRefusalDetail::TcDuplicateSigner { signer: s.as_u64() },
             ));
         }
     }
@@ -407,20 +409,16 @@ fn validate_tc(
     for t in &tc.signed_timeouts {
         if !ctx.is_member(t.validator_id) {
             return Err(SafetyStoreError::SemanticRefusal(
-                format!(
-                    "signed_timeout validator {} not a member (TA4)",
-                    t.validator_id.as_u64()
-                )
-                .into(),
+                SemanticRefusalDetail::SignedTimeoutValidatorNotMember {
+                    validator: t.validator_id.as_u64(),
+                },
             ));
         }
         if !uniq_set_insert(&mut st_ids, t.validator_id.as_u64()) {
             return Err(SafetyStoreError::SemanticRefusal(
-                format!(
-                    "duplicate signed_timeout validator {} (TA3)",
-                    t.validator_id.as_u64()
-                )
-                .into(),
+                SemanticRefusalDetail::DuplicateSignedTimeoutValidator {
+                    validator: t.validator_id.as_u64(),
+                },
             ));
         }
     }
@@ -429,18 +427,17 @@ fn validate_tc(
     // sorted unique `UNIQ_SET` vectors, so set equality is a direct comparison.
     if st_ids != seen {
         return Err(SafetyStoreError::SemanticRefusal(
-            "tc.signers set does not correspond to signed_timeouts set (TA5)".into(),
+            SemanticRefusalDetail::Static("tc.signers set does not correspond to signed_timeouts set (TA5)"),
         ));
     }
     // TA6: timeout-view consistency — every signed timeout is for tc.timeout_view.
     for t in &tc.signed_timeouts {
         if t.view != tc.timeout_view {
             return Err(SafetyStoreError::SemanticRefusal(
-                format!(
-                    "signed_timeout view {} != tc.timeout_view {} (TA6)",
-                    t.view, tc.timeout_view
-                )
-                .into(),
+                SemanticRefusalDetail::SignedTimeoutViewMismatch {
+                    view: t.view,
+                    timeout_view: tc.timeout_view,
+                },
             ));
         }
     }
@@ -452,7 +449,7 @@ fn validate_tc(
     }
     if acc < ctx.two_thirds_vp() {
         return Err(SafetyStoreError::SemanticRefusal(
-            "tc timeout voting power below ceil(2W/3) (TA7)".into(),
+            SemanticRefusalDetail::Static("tc timeout voting power below ceil(2W/3) (TA7)"),
         ));
     }
     // TA2: the derived max high-QC from the signed timeouts must correspond to
@@ -469,14 +466,15 @@ fn validate_tc(
         (Some(d), Some(c)) => {
             if d.block_id != c.block_id || d.view != c.view {
                 return Err(SafetyStoreError::SemanticRefusal(
-                    "tc.high_qc does not correspond to select_max_high_qc(signed_timeouts) (TA2)"
-                        .into(),
+                    SemanticRefusalDetail::Static(
+                        "tc.high_qc does not correspond to select_max_high_qc(signed_timeouts) (TA2)",
+                    ),
                 ));
             }
         }
         _ => {
             return Err(SafetyStoreError::SemanticRefusal(
-                "tc.high_qc presence disagrees with derived max high-QC (TA2)".into(),
+                SemanticRefusalDetail::Static("tc.high_qc presence disagrees with derived max high-QC (TA2)"),
             ))
         }
     }
@@ -489,25 +487,25 @@ fn validate_tc(
                 || record_high_qc.signers != c.signers
             {
                 return Err(SafetyStoreError::SemanticRefusal(
-                    "record high_qc is not byte-identical to tc.high_qc (TA1)".into(),
+                    SemanticRefusalDetail::Static("record high_qc is not byte-identical to tc.high_qc (TA1)"),
                 ));
             }
         }
         None => {
             return Err(SafetyStoreError::SemanticRefusal(
-                "tc-derived lock requires a carried high_qc (TA1)".into(),
+                SemanticRefusalDetail::Static("tc-derived lock requires a carried high_qc (TA1)"),
             ))
         }
     }
     // TA1: the lock binds to the retained high-QC (block + view identity).
     if record_high_qc.block_id != l.lock_block_id {
         return Err(SafetyStoreError::SemanticRefusal(
-            "tc record high_qc block_id != lock_block_id (TA1/P1)".into(),
+            SemanticRefusalDetail::Static("tc record high_qc block_id != lock_block_id (TA1/P1)"),
         ));
     }
     if record_high_qc.view != l.lock_view {
         return Err(SafetyStoreError::SemanticRefusal(
-            "tc record high_qc view != lock_view (TA1/P2 view-binding)".into(),
+            SemanticRefusalDetail::Static("tc record high_qc view != lock_view (TA1/P2 view-binding)"),
         ));
     }
     Ok(())

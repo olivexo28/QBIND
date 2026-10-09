@@ -7,7 +7,8 @@
 use sha3::{Digest, Sha3_256};
 
 use super::error::{
-    CapField, DeclaredBoundDetail, PrefixField, SafetyStoreError, StructuralRefusalDetail,
+    CapField, DecodeDiagnostic, DeclaredBoundDetail, PrefixField, SafetyStoreError,
+    StructuralRefusalDetail,
 };
 use super::profile::{
     max_qc_bytes, max_safety_record_bytes, max_tc_bytes, PinnedSafetyContext, MAX_BITMAP_LEN,
@@ -41,7 +42,10 @@ impl<'a> Reader<'a> {
     fn take(&mut self, n: usize) -> Result<&'a [u8], SafetyStoreError> {
         if self.remaining() < n {
             return Err(SafetyStoreError::StructuralRefusal(
-                format!("truncated: need {n}, have {}", self.remaining()).into(),
+                StructuralRefusalDetail::Decode(DecodeDiagnostic::Truncated {
+                    need: n as u64,
+                    have: self.remaining() as u64,
+                }),
             ));
         }
         let s = &self.buf[self.pos..self.pos + n];
@@ -253,7 +257,9 @@ fn decode_timeout_msg(
         1 => Some(decode_logical_qc(r, ctx)?),
         other => {
             return Err(SafetyStoreError::StructuralRefusal(
-                format!("invalid timeout high_qc discriminant {other}").into(),
+                StructuralRefusalDetail::Decode(
+                    DecodeDiagnostic::InvalidTimeoutHighQcDiscriminant(other),
+                ),
             ))
         }
     };
@@ -320,7 +326,9 @@ fn decode_timeout_cert(
         1 => Some(decode_logical_qc(r, ctx)?),
         other => {
             return Err(SafetyStoreError::StructuralRefusal(
-                format!("invalid tc high_qc discriminant {other}").into(),
+                StructuralRefusalDetail::Decode(DecodeDiagnostic::InvalidTcHighQcDiscriminant(
+                    other,
+                )),
             ))
         }
     };
@@ -788,14 +796,14 @@ pub fn decode_record(
     }
     if buf.len() < 4 + 2 {
         return Err(SafetyStoreError::StructuralRefusal(
-            "record too short".into(),
+            StructuralRefusalDetail::Static("record too short"),
         ));
     }
     // CRC32 over all preceding bytes.
     let (body, crc_bytes) = buf.split_at(buf.len() - 4);
     let stored_crc = u32::from_be_bytes([crc_bytes[0], crc_bytes[1], crc_bytes[2], crc_bytes[3]]);
     if signing_journal_crc32(body) != stored_crc {
-        return Err(SafetyStoreError::StructuralRefusal("CRC32 mismatch".into()));
+        return Err(SafetyStoreError::StructuralRefusal(StructuralRefusalDetail::Static("CRC32 mismatch")));
     }
 
     let mut r = Reader::new(body);
@@ -814,7 +822,7 @@ pub fn decode_record(
         x if x == EvidenceDiscriminant::Bootstrap as u8 => {
             if d_ca != 0 {
                 return Err(SafetyStoreError::StructuralRefusal(
-                    "bootstrap record must not carry a committed anchor".into(),
+                    StructuralRefusalDetail::Static("bootstrap record must not carry a committed anchor"),
                 ));
             }
             let predecessor_ref = read_optional_predecessor(&mut r, d_pred)?;
@@ -851,12 +859,16 @@ pub fn decode_record(
                 1 => decode_logical_qc(&mut r, ctx)?,
                 0 => {
                     return Err(SafetyStoreError::StructuralRefusal(
-                        "tc-derived record requires a carried record-level high_qc (TA1)".into(),
+                        StructuralRefusalDetail::Static(
+                        "tc-derived record requires a carried record-level high_qc (TA1)",
+                    ),
                     ))
                 }
                 other => {
                     return Err(SafetyStoreError::StructuralRefusal(
-                        format!("invalid record-level high_qc discriminant {other}").into(),
+                        StructuralRefusalDetail::Decode(
+                            DecodeDiagnostic::InvalidRecordHighQcDiscriminant(other),
+                        ),
                     ))
                 }
             };
@@ -875,14 +887,18 @@ pub fn decode_record(
         }
         other => {
             return Err(SafetyStoreError::StructuralRefusal(
-                format!("unknown evidence discriminant {other}").into(),
+                StructuralRefusalDetail::Decode(DecodeDiagnostic::UnknownEvidenceDiscriminant(
+                    other,
+                )),
             ))
         }
     };
 
     if r.remaining() != 0 {
         return Err(SafetyStoreError::StructuralRefusal(
-            format!("trailing bytes after record: {}", r.remaining()).into(),
+            StructuralRefusalDetail::Decode(DecodeDiagnostic::TrailingBytes {
+                have: r.remaining() as u64,
+            }),
         ));
     }
 
@@ -906,7 +922,9 @@ fn read_optional_anchor(
             Ok(Some(CommittedAnchor { block_id, height }))
         }
         other => Err(SafetyStoreError::StructuralRefusal(
-            format!("invalid committed-anchor discriminant {other}").into(),
+            StructuralRefusalDetail::Decode(DecodeDiagnostic::InvalidCommittedAnchorDiscriminant(
+                other,
+            )),
         )),
     }
 }
@@ -916,7 +934,9 @@ fn read_optional_predecessor(r: &mut Reader, d_pred: u8) -> Result<Option<u64>, 
         0 => Ok(None),
         1 => Ok(Some(r.u64()?)),
         other => Err(SafetyStoreError::StructuralRefusal(
-            format!("invalid predecessor discriminant {other}").into(),
+            StructuralRefusalDetail::Decode(DecodeDiagnostic::InvalidPredecessorDiscriminant(
+                other,
+            )),
         )),
     }
 }
