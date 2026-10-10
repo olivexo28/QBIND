@@ -1,0 +1,4 @@
+|      tm       |                                                                                  col1                                                                                   |
++---------------+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+| TupleTypeRepr | Ill-formed type mention at /home/runner/candidate-src/crates/qbind-node/examples/run_259_durable_completion_audit_publication_receipt_release_binary_helper.rs:2091     |
+| TupleTypeRepr | Ill-formed type mention at /home/runner/candidate-src/crates/qbind-node/examples/run_261_durable_completion_audit_receipt_acknowledgement_release_binary_helper.rs:1862 |
