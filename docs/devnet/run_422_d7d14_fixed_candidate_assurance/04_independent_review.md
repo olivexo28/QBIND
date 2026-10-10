@@ -7,8 +7,9 @@ An independent reviewer examining:
 - the exact implementation candidate `aad0a4aaca8f66580d257c3468f1c27059145dbd`
   (tree `82caed80…`), full component source plus relevant callers and the
   acceptance tests, against
-- the contract/evidence requirements at the reviewed documentation revision
-  `b8278d89…` (including §13.8A and §13.9).
+- the contract/evidence requirements at the reviewed assurance revision
+  `b826454…` (including §13.8A and §13.9). (An earlier draft cited `b8278d89…`;
+  the operative reviewed assurance revision is `b826454…`, corrected here.)
 
 ## Available review interface (inspected)
 
