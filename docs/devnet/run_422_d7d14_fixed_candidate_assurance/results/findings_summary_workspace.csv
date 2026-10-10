@@ -1,0 +1,5 @@
+ruleId,workspace_count,component_count
+rust/hard-coded-cryptographic-value,671,0
+rust/cleartext-logging,147,50
+rust/log-injection,8,0
+rust/unused-variable,2,0

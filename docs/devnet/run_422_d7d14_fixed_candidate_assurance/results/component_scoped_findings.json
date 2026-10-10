@@ -1,0 +1,509 @@
+{
+ "suite": "codeql/rust-queries:codeql-suites/rust-security-and-quality.qls",
+ "tool": "CodeQL 2.27.2",
+ "rust_queries_pack": "codeql/rust-queries@0.1.44",
+ "total_workspace_results": 828,
+ "component_results": 50,
+ "results": [
+  {
+   "ruleId": "rust/cleartext-logging",
+   "message": "This operation writes [decode_timeout_cert(...)](1) to a log file.",
+   "locations": [
+    {
+     "uri": "crates/qbind-node/tests/run_422_d7d14_safety_record_store_tests.rs",
+     "line": 934
+    }
+   ]
+  },
+  {
+   "ruleId": "rust/cleartext-logging",
+   "message": "This operation writes [decode_timeout_cert(...)](1) to a log file.",
+   "locations": [
+    {
+     "uri": "crates/qbind-node/tests/run_422_d7d14_safety_record_store_tests.rs",
+     "line": 1366
+    }
+   ]
+  },
+  {
+   "ruleId": "rust/cleartext-logging",
+   "message": "This operation writes [decode_timeout_cert(...)](1) to a log file.",
+   "locations": [
+    {
+     "uri": "crates/qbind-node/tests/run_422_d7d14_safety_record_store_tests.rs",
+     "line": 1387
+    }
+   ]
+  },
+  {
+   "ruleId": "rust/cleartext-logging",
+   "message": "This operation writes [admit_timeout_cert(...)](1) to a log file.\nThis operation writes [decode_timeout_cert(...)](2) to a log file.",
+   "locations": [
+    {
+     "uri": "crates/qbind-node/tests/run_422_d7d14_safety_record_store_tests.rs",
+     "line": 1411
+    }
+   ]
+  },
+  {
+   "ruleId": "rust/cleartext-logging",
+   "message": "This operation writes [admit_timeout_cert(...)](1) to a log file.\nThis operation writes [decode_timeout_cert(...)](2) to a log file.",
+   "locations": [
+    {
+     "uri": "crates/qbind-node/tests/run_422_d7d14_safety_record_store_tests.rs",
+     "line": 2035
+    }
+   ]
+  },
+  {
+   "ruleId": "rust/cleartext-logging",
+   "message": "This operation writes [admit_timeout_cert(...)](1) to a log file.",
+   "locations": [
+    {
+     "uri": "crates/qbind-node/tests/run_422_d7d14_safety_record_store_tests.rs",
+     "line": 2539
+    }
+   ]
+  },
+  {
+   "ruleId": "rust/cleartext-logging",
+   "message": "This operation writes [admit_timeout_cert(...)](1) to a log file.",
+   "locations": [
+    {
+     "uri": "crates/qbind-node/tests/run_422_d7d14_safety_record_store_tests.rs",
+     "line": 2564
+    }
+   ]
+  },
+  {
+   "ruleId": "rust/cleartext-logging",
+   "message": "This operation writes [admit_timeout_cert(...)](1) to a log file.",
+   "locations": [
+    {
+     "uri": "crates/qbind-node/tests/run_422_d7d14_safety_record_store_tests.rs",
+     "line": 2602
+    }
+   ]
+  },
+  {
+   "ruleId": "rust/cleartext-logging",
+   "message": "This operation writes [admit_timeout_cert(...)](1) to a log file.",
+   "locations": [
+    {
+     "uri": "crates/qbind-node/tests/run_422_d7d14_safety_record_store_tests.rs",
+     "line": 2609
+    }
+   ]
+  },
+  {
+   "ruleId": "rust/cleartext-logging",
+   "message": "This operation writes [decode_timeout_cert(...)](1) to a log file.",
+   "locations": [
+    {
+     "uri": "crates/qbind-node/tests/run_422_d7d14_safety_record_store_tests.rs",
+     "line": 2686
+    }
+   ]
+  },
+  {
+   "ruleId": "rust/cleartext-logging",
+   "message": "This operation writes [decode_timeout_cert(...)](1) to a log file.",
+   "locations": [
+    {
+     "uri": "crates/qbind-node/tests/run_422_d7d14_safety_record_store_tests.rs",
+     "line": 2733
+    }
+   ]
+  },
+  {
+   "ruleId": "rust/cleartext-logging",
+   "message": "This operation writes [decode_timeout_cert(...)](1) to a log file.",
+   "locations": [
+    {
+     "uri": "crates/qbind-node/tests/run_422_d7d14_safety_record_store_tests.rs",
+     "line": 3277
+    }
+   ]
+  },
+  {
+   "ruleId": "rust/cleartext-logging",
+   "message": "This operation writes [decode_timeout_cert(...)](1) to a log file.",
+   "locations": [
+    {
+     "uri": "crates/qbind-node/tests/run_422_d7d14_safety_record_store_tests.rs",
+     "line": 3468
+    }
+   ]
+  },
+  {
+   "ruleId": "rust/cleartext-logging",
+   "message": "This operation writes [admit_timeout_cert(...)](1) to a log file.",
+   "locations": [
+    {
+     "uri": "crates/qbind-node/tests/run_422_d7d14_safety_record_store_tests.rs",
+     "line": 3663
+    }
+   ]
+  },
+  {
+   "ruleId": "rust/cleartext-logging",
+   "message": "This operation writes [decode_timeout_cert(...)](1) to a log file.",
+   "locations": [
+    {
+     "uri": "crates/qbind-node/tests/run_422_d7d14_safety_record_store_tests.rs",
+     "line": 3687
+    }
+   ]
+  },
+  {
+   "ruleId": "rust/cleartext-logging",
+   "message": "This operation writes [decode_timeout_cert(...)](1) to a log file.",
+   "locations": [
+    {
+     "uri": "crates/qbind-node/tests/run_422_d7d14_safety_record_store_tests.rs",
+     "line": 3721
+    }
+   ]
+  },
+  {
+   "ruleId": "rust/cleartext-logging",
+   "message": "This operation writes [decode_timeout_cert(...)](1) to a log file.",
+   "locations": [
+    {
+     "uri": "crates/qbind-node/tests/run_422_d7d14_safety_record_store_tests.rs",
+     "line": 3794
+    }
+   ]
+  },
+  {
+   "ruleId": "rust/cleartext-logging",
+   "message": "This operation writes [decode_timeout_cert(...)](1) to a log file.",
+   "locations": [
+    {
+     "uri": "crates/qbind-node/tests/run_422_d7d14_safety_record_store_tests.rs",
+     "line": 3823
+    }
+   ]
+  },
+  {
+   "ruleId": "rust/cleartext-logging",
+   "message": "This operation writes [admit_timeout_cert(...)](1) to a log file.",
+   "locations": [
+    {
+     "uri": "crates/qbind-node/tests/run_422_d7d14_safety_record_store_tests.rs",
+     "line": 4145
+    }
+   ]
+  },
+  {
+   "ruleId": "rust/cleartext-logging",
+   "message": "This operation writes [admit_timeout_cert(...)](1) to a log file.",
+   "locations": [
+    {
+     "uri": "crates/qbind-node/tests/run_422_d7d14_safety_record_store_tests.rs",
+     "line": 4170
+    }
+   ]
+  },
+  {
+   "ruleId": "rust/cleartext-logging",
+   "message": "This operation writes [admit_timeout_cert(...)](1) to a log file.",
+   "locations": [
+    {
+     "uri": "crates/qbind-node/tests/run_422_d7d14_safety_record_store_tests.rs",
+     "line": 5134
+    }
+   ]
+  },
+  {
+   "ruleId": "rust/cleartext-logging",
+   "message": "This operation writes [admit_timeout_cert(...)](1) to a log file.\nThis operation writes [decode_timeout_cert(...)](2) to a log file.",
+   "locations": [
+    {
+     "uri": "crates/qbind-node/tests/run_422_d7d14_safety_record_store_tests.rs",
+     "line": 5715
+    }
+   ]
+  },
+  {
+   "ruleId": "rust/cleartext-logging",
+   "message": "This operation writes [decode_timeout_cert(...)](1) to a log file.",
+   "locations": [
+    {
+     "uri": "crates/qbind-node/tests/run_422_d7d14_safety_record_store_tests.rs",
+     "line": 5873
+    }
+   ]
+  },
+  {
+   "ruleId": "rust/cleartext-logging",
+   "message": "This operation writes [decode_timeout_cert(...)](1) to a log file.",
+   "locations": [
+    {
+     "uri": "crates/qbind-node/tests/run_422_d7d14_safety_record_store_tests.rs",
+     "line": 6232
+    }
+   ]
+  },
+  {
+   "ruleId": "rust/cleartext-logging",
+   "message": "This operation writes [decode_timeout_cert(...)](1) to a log file.",
+   "locations": [
+    {
+     "uri": "crates/qbind-node/tests/run_422_d7d14_safety_record_store_tests.rs",
+     "line": 6234
+    }
+   ]
+  },
+  {
+   "ruleId": "rust/cleartext-logging",
+   "message": "This operation writes [decode_timeout_cert(...)](1) to a log file.",
+   "locations": [
+    {
+     "uri": "crates/qbind-node/tests/run_422_d7d14_safety_record_store_tests.rs",
+     "line": 6391
+    }
+   ]
+  },
+  {
+   "ruleId": "rust/cleartext-logging",
+   "message": "This operation writes [decode_timeout_cert(...)](1) to a log file.",
+   "locations": [
+    {
+     "uri": "crates/qbind-node/tests/run_422_d7d14_safety_record_store_tests.rs",
+     "line": 6393
+    }
+   ]
+  },
+  {
+   "ruleId": "rust/cleartext-logging",
+   "message": "This operation writes [admit_timeout_cert(...)](1) to a log file.",
+   "locations": [
+    {
+     "uri": "crates/qbind-node/tests/run_422_d7d14_safety_record_store_tests.rs",
+     "line": 6784
+    }
+   ]
+  },
+  {
+   "ruleId": "rust/cleartext-logging",
+   "message": "This operation writes [admit_timeout_cert(...)](1) to a log file.",
+   "locations": [
+    {
+     "uri": "crates/qbind-node/tests/run_422_d7d14_safety_record_store_tests.rs",
+     "line": 6808
+    }
+   ]
+  },
+  {
+   "ruleId": "rust/cleartext-logging",
+   "message": "This operation writes [admit_timeout_cert(...)](1) to a log file.",
+   "locations": [
+    {
+     "uri": "crates/qbind-node/tests/run_422_d7d14_safety_record_store_tests.rs",
+     "line": 6872
+    }
+   ]
+  },
+  {
+   "ruleId": "rust/cleartext-logging",
+   "message": "This operation writes [admit_timeout_cert(...)](1) to a log file.\nThis operation writes [decode_timeout_cert(...)](2) to a log file.",
+   "locations": [
+    {
+     "uri": "crates/qbind-node/tests/run_422_d7d14_safety_record_store_tests.rs",
+     "line": 7117
+    }
+   ]
+  },
+  {
+   "ruleId": "rust/cleartext-logging",
+   "message": "This operation writes [admit_timeout_cert(...)](1) to a log file.",
+   "locations": [
+    {
+     "uri": "crates/qbind-node/tests/run_422_d7d14_safety_record_store_tests.rs",
+     "line": 7574
+    }
+   ]
+  },
+  {
+   "ruleId": "rust/cleartext-logging",
+   "message": "This operation writes [admit_timeout_cert(...)](1) to a log file.",
+   "locations": [
+    {
+     "uri": "crates/qbind-node/tests/run_422_d7d14_safety_record_store_tests.rs",
+     "line": 7600
+    }
+   ]
+  },
+  {
+   "ruleId": "rust/cleartext-logging",
+   "message": "This operation writes [admit_timeout_cert(...)](1) to a log file.",
+   "locations": [
+    {
+     "uri": "crates/qbind-node/tests/run_422_d7d14_safety_record_store_tests.rs",
+     "line": 7803
+    }
+   ]
+  },
+  {
+   "ruleId": "rust/cleartext-logging",
+   "message": "This operation writes [admit_timeout_cert(...)](1) to a log file.",
+   "locations": [
+    {
+     "uri": "crates/qbind-node/tests/run_422_d7d14_safety_record_store_tests.rs",
+     "line": 7848
+    }
+   ]
+  },
+  {
+   "ruleId": "rust/cleartext-logging",
+   "message": "This operation writes [admit_timeout_cert(...)](1) to a log file.",
+   "locations": [
+    {
+     "uri": "crates/qbind-node/tests/run_422_d7d14_safety_record_store_tests.rs",
+     "line": 7883
+    }
+   ]
+  },
+  {
+   "ruleId": "rust/cleartext-logging",
+   "message": "This operation writes [admit_timeout_cert(...)](1) to a log file.",
+   "locations": [
+    {
+     "uri": "crates/qbind-node/tests/run_422_d7d14_safety_record_store_tests.rs",
+     "line": 7925
+    }
+   ]
+  },
+  {
+   "ruleId": "rust/cleartext-logging",
+   "message": "This operation writes [admit_timeout_cert(...)](1) to a log file.",
+   "locations": [
+    {
+     "uri": "crates/qbind-node/tests/run_422_d7d14_safety_record_store_tests.rs",
+     "line": 8125
+    }
+   ]
+  },
+  {
+   "ruleId": "rust/cleartext-logging",
+   "message": "This operation writes [admit_timeout_cert(...)](1) to a log file.",
+   "locations": [
+    {
+     "uri": "crates/qbind-node/tests/run_422_d7d14_safety_record_store_tests.rs",
+     "line": 8190
+    }
+   ]
+  },
+  {
+   "ruleId": "rust/cleartext-logging",
+   "message": "This operation writes [admit_timeout_cert(...)](1) to a log file.",
+   "locations": [
+    {
+     "uri": "crates/qbind-node/tests/run_422_d7d14_safety_record_store_tests.rs",
+     "line": 8215
+    }
+   ]
+  },
+  {
+   "ruleId": "rust/cleartext-logging",
+   "message": "This operation writes [admit_timeout_cert(...)](1) to a log file.",
+   "locations": [
+    {
+     "uri": "crates/qbind-node/tests/run_422_d7d14_safety_record_store_tests.rs",
+     "line": 8236
+    }
+   ]
+  },
+  {
+   "ruleId": "rust/cleartext-logging",
+   "message": "This operation writes [admit_timeout_cert(...)](1) to a log file.",
+   "locations": [
+    {
+     "uri": "crates/qbind-node/tests/run_422_d7d14_safety_record_store_tests.rs",
+     "line": 8625
+    }
+   ]
+  },
+  {
+   "ruleId": "rust/cleartext-logging",
+   "message": "This operation writes [admit_timeout_cert(...)](1) to a log file.",
+   "locations": [
+    {
+     "uri": "crates/qbind-node/tests/run_422_d7d14_safety_record_store_tests.rs",
+     "line": 8903
+    }
+   ]
+  },
+  {
+   "ruleId": "rust/cleartext-logging",
+   "message": "This operation writes [admit_timeout_cert(...)](1) to a log file.",
+   "locations": [
+    {
+     "uri": "crates/qbind-node/tests/run_422_d7d14_safety_record_store_tests.rs",
+     "line": 8913
+    }
+   ]
+  },
+  {
+   "ruleId": "rust/cleartext-logging",
+   "message": "This operation writes [admit_timeout_cert(...)](1) to a log file.",
+   "locations": [
+    {
+     "uri": "crates/qbind-node/tests/run_422_d7d14_safety_record_store_tests.rs",
+     "line": 9707
+    }
+   ]
+  },
+  {
+   "ruleId": "rust/cleartext-logging",
+   "message": "This operation writes [admit_timeout_cert(...)](1) to a log file.",
+   "locations": [
+    {
+     "uri": "crates/qbind-node/tests/run_422_d7d14_safety_record_store_tests.rs",
+     "line": 9734
+    }
+   ]
+  },
+  {
+   "ruleId": "rust/cleartext-logging",
+   "message": "This operation writes [admit_timeout_cert(...)](1) to a log file.",
+   "locations": [
+    {
+     "uri": "crates/qbind-node/tests/run_422_d7d14_safety_record_store_tests.rs",
+     "line": 9985
+    }
+   ]
+  },
+  {
+   "ruleId": "rust/cleartext-logging",
+   "message": "This operation writes [admit_timeout_cert(...)](1) to a log file.\nThis operation writes [decode_timeout_cert(...)](2) to a log file.",
+   "locations": [
+    {
+     "uri": "crates/qbind-node/tests/run_422_d7d14_safety_record_store_tests.rs",
+     "line": 10651
+    }
+   ]
+  },
+  {
+   "ruleId": "rust/cleartext-logging",
+   "message": "This operation writes [admit_timeout_cert(...)](1) to a log file.",
+   "locations": [
+    {
+     "uri": "crates/qbind-node/tests/run_422_d7d14_safety_record_store_tests.rs",
+     "line": 10870
+    }
+   ]
+  },
+  {
+   "ruleId": "rust/cleartext-logging",
+   "message": "This operation writes [cert_cap](1) to a log file.",
+   "locations": [
+    {
+     "uri": "crates/qbind-node/src/safety_record_store/codec.rs",
+     "line": 415
+    }
+   ]
+  }
+ ]
+}

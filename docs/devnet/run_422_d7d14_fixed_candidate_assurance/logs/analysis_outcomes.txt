@@ -1,0 +1,8 @@
+### analyze (rust-security-and-quality.qls) — key outcomes
+CodeQL scanned 909 out of 909 Rust files in this invocation. Check the status page for overall coverage information: https://github.com/olivexo28/QBIND/security/code-scanning/tools/CodeQL/status/
+Analysis produced the following metric data:
+| Total number of Rust files that were extracted without error |   819 |
+| Total number of Rust files that were extracted with errors   |    92 |
+Exported results to SARIF v2.1.0 (614ms).
+
+exit=0 (all suite queries evaluated after raising --ram to 12000; first attempt at default heap 1080 MiB hit JVM OOM and was rerun)

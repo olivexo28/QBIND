@@ -1,0 +1,10 @@
+# RUN 422 D7-D14 fixed-candidate assurance — artifact checksums
+# CodeQL bundle (official github/codeql-action release codeql-bundle-v2.27.2)
+bundle_asset: codeql-bundle-linux64.tar.gz
+bundle_published_sha256: f002864be6dd8d5d7bdb123aaf7291ec8e291012bd9f70b6d2362f730db52aeb
+bundle_downloaded_sha256: f002864be6dd8d5d7bdb123aaf7291ec8e291012bd9f70b6d2362f730db52aeb
+bundle_verify: OK (downloaded == published)
+
+# Full workspace SARIF (preserved locally at /tmp/run422_d7d14/sarif/, not committed; 6.0 MiB)
+sarif_full_sha256: de7d10f368323f0591ebb8535a65828d581217acc0abea26847ae58f601777fa
+sarif_full_results: 828 (workspace), 50 (component-scoped)
