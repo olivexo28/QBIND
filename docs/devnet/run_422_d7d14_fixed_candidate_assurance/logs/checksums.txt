@@ -5,6 +5,14 @@ bundle_published_sha256: f002864be6dd8d5d7bdb123aaf7291ec8e291012bd9f70b6d2362f7
 bundle_downloaded_sha256: f002864be6dd8d5d7bdb123aaf7291ec8e291012bd9f70b6d2362f730db52aeb
 bundle_verify: OK (downloaded == published)
 
-# Full workspace SARIF (preserved locally at /tmp/run422_d7d14/sarif/, not committed; 6.0 MiB)
-sarif_full_sha256: de7d10f368323f0591ebb8535a65828d581217acc0abea26847ae58f601777fa
+# Full workspace SARIF — ORIGINAL execution record (historical, preserved as-is):
+#   The ~6.0 MiB full-workspace SARIF from the original run was written ONLY to the
+#   temporary path /tmp/run422_d7d14/sarif/ and was never committed. A temporary path
+#   plus a recorded checksum is NOT durable artifact preservation.
+# CONTINUATION STATUS (this pass): /tmp/run422_d7d14/ is ABSENT in the continuation
+#   sandbox (fresh clone), so the original SARIF could NOT be recovered and the
+#   recorded SHA-256 below could NOT be re-verified here. No replacement execution was
+#   performed; the original checksum/execution identity is NOT re-attributed to any
+#   new artifact. Durable preservation of the full SARIF is therefore NOT established.
+sarif_full_sha256: de7d10f368323f0591ebb8535a65828d581217acc0abea26847ae58f601777fa  (ORIGINAL run; unverifiable in continuation — artifact absent)
 sarif_full_results: 828 (workspace), 50 (component-scoped)
