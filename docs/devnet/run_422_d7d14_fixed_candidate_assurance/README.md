@@ -184,9 +184,11 @@ locations, data-flow traces, **all** workspace results):
 The **original** ~6 MiB all-features SARIF (`de7d10f3…601777fa`, 828/50) existed only
 under the temporary `/tmp/run422_d7d14/sarif/` and is **absent** in a fresh clone; no
 actual artifact source exists, so it could **not** be recovered and its SHA-256 is
-**not** re-verifiable and is **not** re-attributed. Config B is a **new** execution of
-the equivalent configuration that preserves that configuration's complete evidence
-durably, with its own distinct checksum.
+**not** re-verifiable and is **not** re-attributed. Config B is a **new**, **separately-identified** execution
+— with its own distinct checksum and identity — of a **separately-run** configuration
+whose agreement with the historical all-features totals is an **observation**, **not** proof
+of semantic-model equivalence (that inference is withdrawn); it preserves that run's
+complete evidence durably.
 
 ## Findings & per-result dispositions
 
