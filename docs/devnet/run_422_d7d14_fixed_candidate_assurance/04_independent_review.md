@@ -1,118 +1,91 @@
-# Independent full-source review — RUN 422 D7-D14 (OPEN)
+# Independent full-source review — RUN 422 D7-D14 (COMPLETE)
 
 This arm is the required **independent full-source review** of the frozen storage
-candidate. It is **OPEN**. Implementation-agent self-assessment and a documentation-diff
-review do **not** discharge this gate.
+candidate. It is now **COMPLETE** as an **AI-assisted internal review** of the fixed
+revision's full source (not a documentation diff). The full report is in
+`independent_review/00_review_report.md`; this page records the outcome and the residual
+limitations that bound it.
 
-## 1. Review target (the full frozen source, not a diff)
+**Independence caveat (unchanged gate semantics).** This review is AI-assisted and internal.
+It is **not** a human audit and **not** an organizationally-independent security assessment.
+If the isolated-component acceptance gate requires human / external / organizationally
+independent assurance, that stronger-independence obligation is **not** discharged here.
+
+## 1. Reviewed target and verified source correspondence
 
 - **Frozen implementation/test candidate:** `aad0a4aaca8f66580d257c3468f1c27059145dbd`
 - **Candidate tree:** `82caed801176b243beda89ad07e5a7376fe958e9`
-- The candidate is byte-identical to this branch's HEAD across every implementation,
-  test, `Cargo`, lockfile, configuration, and CI blob (see `../README.md`, `manifests/`),
-  so only documentation differs on the branch — the implementation itself is **not** in
-  the branch diff and must be reviewed from the fixed revision's **full source**.
+- **Reviewed evidence revision:** `ecf4cfdcc36e9438293173d89e44cd819d709ca5`
+- **Working branch / HEAD:** `copilot/copilotcopilotrun-422-d7-d14-please-work-again` /
+  `53a2f7cad6111e024f19a48b50fd5a1db788f6d5` (branch used as supplied; not renamed).
 
-### Component source (nine files) — to be reviewed in full
+The candidate commit, candidate tree, and evidence revision were **fetched** (not ancestors
+of HEAD; correspondence established by content). All nine component files and the acceptance
+test target are **byte-identical** (git blob equality) to the frozen candidate tree, and the
+operative §13 contract at HEAD is byte-identical to the evidence revision. The working tree
+therefore *is* the frozen source and was reviewed directly — an empty implementation diff did
+not block the review.
 
-- `crates/qbind-node/src/safety_record_store/accounting.rs`
-- `crates/qbind-node/src/safety_record_store/backend.rs`
-- `crates/qbind-node/src/safety_record_store/codec.rs`
-- `crates/qbind-node/src/safety_record_store/error.rs`
-- `crates/qbind-node/src/safety_record_store/mod.rs`
-- `crates/qbind-node/src/safety_record_store/owner.rs`
-- `crates/qbind-node/src/safety_record_store/profile.rs`
-- `crates/qbind-node/src/safety_record_store/record.rs`
-- `crates/qbind-node/src/safety_record_store/validate.rs`
+## 2. Reviewed scope (read in full)
 
-Per-file SHA-256 in `manifests/component_sha256.txt`; blob SHAs in
-`manifests/component_blob_shas.txt`.
+Nine component files (`accounting.rs`, `backend.rs`, `codec.rs`, `error.rs`, `mod.rs`,
+`owner.rs`, `profile.rs`, `record.rs`, `validate.rs`), the acceptance target
+`crates/qbind-node/tests/run_422_d7d14_safety_record_store_tests.rs`, and the operative §13
+contract (structural/semantic/ownership/accounting/acceptance obligations, including the
+adopted §13.8A H7/H16 evidence methods and §13.9 exclusions). Additional files traced:
+`crates/qbind-node/src/lib.rs`, `crates/qbind-node/Cargo.toml` (`test-utils` gating), and the
+preserved CodeQL evidence under this directory.
 
-### Relevant callers / dependencies and the acceptance test
+## 3. Outcome
 
-- The owner mutation surface (`owner.rs`: `attach`, `initialize`/O1, `open`/O2,
-  `read_validate`/O3, `publish_locked`/O4, `reacknowledge`/O5) and the backend it binds
-  (`backend.rs`), including the `#[cfg(any(test, feature = "test-utils"))]`-gated debug
-  helpers, must be inspected together with the module's public re-export surface
-  (`crates/qbind-node/src/lib.rs`).
-- **D7-D14 integration/acceptance test:**
-  `crates/qbind-node/tests/run_422_d7d14_safety_record_store_tests.rs`.
+- **Confirmed component defects:** **NONE** within the accepted isolated-component scope
+  (H2–H12, H16, H18–H25, H26, H27, H30). The ownership, recovery-lifecycle, validation,
+  codec, accounting, and failure-handling logic are defensively sound against the §13
+  obligations; no source-derived counterexample was found.
+- **Newly executed verification (this review):** a fresh build from the frozen source ran a
+  focused subset of the acceptance suite — **26 passed / 0 failed / 0 ignored** (covering H7,
+  H8b, H10/H11 recovery, H12, H19, H20, H26, H27, H30, the O5 measurement/charge family, and
+  the child-process `pd_*` tests). The previously reported **157 passed / 1 ignored**
+  integration result and the 3-passed H7 unit result remain **inherited** and are not
+  promoted to newly executed.
+- **CodeQL dispositions:** I **concur** with all 52 component `rust/cleartext-logging`
+  dispositions as a per-location false-positive judgment (the flagged values are public
+  consensus-protocol quantities, not secrets), while preserving the rule's reported level
+  `warning` and `security-severity 7.5` as separate metadata.
 
-### Applicable contract requirements
+## 4. Residual limitations that bound this arm
 
-- `docs/protocol/QBIND_CONSENSUS_RECOVERY_SIGNING_HISTORY_CORRESPONDENCE_CONTRACT.md`
-  **§13.8A** (adopted evidence methods for H7 and H16) and **§13.9** (existing-vs-missing
-  scope exclusions and the single-successor verdict). The reviewer must assess the
-  candidate against these, not only against the branch diff.
+1. **Material evidence gap — A/B SARIF absent at HEAD.** `sarif/A_production_default.sarif.gz`
+   and `sarif/B_acceptance_testutils.sarif.gz` (and `diagnostics/FINDINGS.md`) are **deleted**
+   at the working-tree HEAD relative to the evidence revision `ecf4cf…`, while
+   `logs/checksums.txt` still references the SARIF (dangling references). The SARIF **contents**
+   could therefore **not** be independently re-verified in this review; the derived
+   dispositions/summary, checksum text, and diagnostic outputs were reviewed instead.
+   Restoring the SARIF is outside this review's authorized writes, so the gap is **documented,
+   not remediated**, and the "durable artifact integrity VERIFIED / byte-identical" narrative
+   cannot be independently reconfirmed at HEAD.
+2. **Analyzer limitations (not runtime defects):** per-file extractor diagnostic cap on the
+   D7-D14 test file; unresolved `$crate::panic::panic_2021` macro at test line 5324;
+   supplementary-query provenance limits; example-only `type_name` "Ill-formed type mention"
+   results in two standalone `examples/` helpers (not the component/test/callers).
+3. **Stronger independence not provided** (see caveat above).
+4. **Out of scope (kept separate, not findings):** production engine/decision wiring,
+   stage-2 cryptographic verification, durable anti-rollback, activation/launch, and
+   release-binary configured-authority evidence — the §13.9-excluded rows (H1, H13–H15, H17,
+   H25e, H26l, H28, H29).
 
-## 2. Preserved evidence available to the reviewer
+## 5. Acceptance recommendation
 
-- **A/B security-suite SARIF** (lossless gzip, complete metadata/invocations/diagnostics/
-  related-locations/traces/all workspace results):
-  - `sarif/A_production_default.sarif.gz` — Config A (production default:
-    `rust.cargo_features=default`, `rust.cargo_cfg_overrides=-test`, cfg(test) disabled);
-    50 workspace / 2 component results.
-  - `sarif/B_acceptance_testutils.sarif.gz` — Config B (acceptance:
-    `rust.cargo_features=default,qbind-node/test-utils`, cfg(test) enabled);
-    828 workspace / 50 component results.
-  - Compressed and decompressed SHA-256 in `logs/checksums.txt` (both verified
-    byte-identical and checksum-matching in this pass).
-- **Dispositions:** `results/dispositions.csv` / `.json` — all **52** component-scoped
-  result mappings, each with explicit `reported_level` (`warning`) and `security_severity`
-  (`7.5`) fields read from the preserved SARIF, inspected evidence, disposition, and
-  rationale. The only component-scoped rule is `rust/cleartext-logging`; each result is
-  dispositioned a per-location false positive on inspected non-sensitive values, a
-  conclusion kept **separate** from the rule's reported severity metadata.
-- **Supplementary diagnostic assessment** (`diagnostics/`, run on rebuilt databases,
-  distinct from the security-suite executions): type-inference consistency queries locate
-  the two error-level "Ill-formed type mention" results as tuple arguments to
-  `std::any::type_name` in two standalone example helpers
-  (`examples/run_259_…:2091`, `examples/run_261_…:1862`) — not the component, not the
-  D7-D14 test, not relevant callers/dependencies; scoped conclusion: not a
-  storage-component defect. `diagnostics/qlpack.yml` pins `codeql/rust-all: 0.2.23`.
-
-## 3. Known analyzer limitations and inherited test execution (kept separate)
-
-- **Analyzer limitations.** Config B reaches the extractor's per-file diagnostic cap for
-  the D7-D14 test file; the suppressed contents are **not recoverable** from the preserved
-  SARIF and are **not** asserted benign. The unresolved `$crate::panic::panic_2021` at
-  test line 5324 is an analyzer macro-expansion limitation, **not** a Rust test failure.
-  Function presence and resolved-call counts support, but do **not** prove, complete
-  semantic/data-flow coverage.
-- **Inherited test execution.** Previously recorded integration/unit test outcomes are
-  **inherited** and attributed to their producing executions; they are **not** re-run here
-  and are kept distinct from the CodeQL analyzer coverage above.
-
-## 4. Why this arm is still OPEN
-
-The review interfaces reachable from this environment are **diff-scoped**: they review the
-current branch's staged/unstaged/branch change set (the same change set surfaced to PR Code
-Review) and do **not** accept an arbitrary fixed commit plus its full source tree as an
-independent-review target. Because the branch diff is documentation-only, a diff-scoped
-reviewer would see only the documentation files — not the `safety_record_store`
-implementation, its callers, or the acceptance tests — and therefore cannot discharge the
-independent review of the component source. The implementation agent's self-assessment is
-explicitly **insufficient** for this gate. No people were contacted and no source was
-transmitted to any new external service; the unavailable review wrapper was **not**
-re-invoked merely to obtain another "no comments" summary.
-
-## 5. Required reviewer output (to close this arm)
-
-An independent reviewer targeting the **fixed revision's full source** (the nine component
-files, the relevant callers/dependencies, and the D7-D14 acceptance test above) against
-contract §13.8A / §13.9 must return:
-
-1. The **reviewed revision** (commit + tree) and the **inspected scope** (files/surfaces).
-2. **Findings** with concrete source references (file:line).
-3. **Dispositions** for each finding (and concurrence or dissent on the 52 preserved
-   CodeQL dispositions).
-4. **Remaining limitations** and any obligations left not demonstrated.
-
-## 6. Next executable action
-
-Route the fixed revision `aad0a4a` full component source (plus callers and
-`run_422_d7d14_safety_record_store_tests.rs`) and the §13.8A / §13.9 requirements to a
-reviewer interface that supports fixed-revision, full-source targeting (independent of the
-working-branch diff). Until such an interface is available, this arm remains **OPEN**; the
-CodeQL A/B arm stands on its own preserved evidence and does not promote any global
-acceptance verdict.
+This review supports a subsequent **isolated-component** acceptance decision for the accepted
+23-row subset **on the source and executed evidence**, **provided** that (a) the absent A/B
+SARIF evidence gap is closed (artifacts restored and re-verified) and (b) any governing
+requirement for human / organizationally-independent assurance is satisfied separately. It
+does **not** support production integration, stage-2 verification, durable anti-rollback,
+activation, or launch; those remain separate later gates. All global verdicts are preserved
+unchanged: `D7D14_STORAGE_COMPONENT=PARTIAL-IMPLEMENTATION`;
+`D7D14_STORAGE_ACCEPTANCE=INCOMPLETE`; `DURABLE_ANTI_ROLLBACK=NOT-ESTABLISHED`;
+`GENESIS_AUTHORITY_ACTIVATION=DISABLED`; `PRODUCTION_WIRE_CHAIN_ID_BEHAVIOR=UNCHANGED`;
+`CONFIGURED_AUTHORITY_RELEASE_BINARY_EVIDENCE=NOT-YET-CAPTURED`;
+`SECURITY_POSTURE=RS1-OPEN / PUBLIC-DEVNET-NO-GO`; C4/C5 OPEN; H22 separately limited;
+default-disabled / MainNet-refused operation, unverified recovered evidence, and fail-closed
+`CurrentEpochUnavailable` preserved.
