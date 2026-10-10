@@ -18160,7 +18160,7 @@ This section records the **actual** assurance-execution pass over the frozen can
 * **Provisioning — SUCCESS.** Official `github/codeql-action` release **`codeql-bundle-v2.27.2`** (CLI **2.27.2**), asset `codeql-bundle-linux64.tar.gz`, downloaded to a task-specific temporary directory outside the repository. Published SHA-256 `f002864b…52aeb` equals the downloaded SHA-256 (verified). `codeql` was absent from `PATH` at start (expected precondition). No persistent/system-wide install, credentials, security-setting, or CI change.
 * **Rust extraction — SUCCESS.** Rust uses `build_modes: [none]`; a database was built with `codeql database create --language=rust --build-mode=none --source-root=<candidate worktree>` over the **complete** candidate source (no snippet extraction, no source removal). Default config enables **all** cargo features (so `test-utils` is covered); a **separate** `rust.cargo_cfg_overrides=test` database produced an **identical** component extraction, and `#[cfg(test)]` items are present in the default DB — establishing that this extractor parses the full AST independent of cfg. Required coverage is verified at the **symbol** level: all nine `safety_record_store/*.rs` files plus `tests/run_422_d7d14_safety_record_store_tests.rs` (191 functions) carry extracted `Function` nodes with **zero** extraction errors / `semantic analyzer unavailable` diagnostics in candidate source (the only such diagnostics are Rust toolchain/stdlib library files).
 * **Query + SARIF — SUCCESS.** Suite `codeql/rust-queries:codeql-suites/rust-security-and-quality.qls` (pack `codeql/rust-queries@0.1.44`, lib `codeql/rust-all@0.2.23`) ran to completion (909/909 files scanned; SARIF v2.1.0 emitted). The first invocation at the auto-selected 1080 MiB JVM heap hit an out-of-memory condition on several queries and was rerun at `--ram=12000`, after which every suite query evaluated. The query set was **not** weakened and results were **not** filtered to changed lines.
-* **Findings (verified scope).** 828 workspace results; 50 touch the component — 49 `rust/cleartext-logging` in the **test** file and **one** in production source, `safety_record_store/codec.rs:415`, flagging the integer `cert_cap` inside a `debug_assert!` message (a non-sensitive capacity bound; `debug_assert!` is stripped in release). Assessed a **low-severity false positive**; per task scope the implementation/tests were **not** modified, and it is recorded for any separately scoped correction. **No** high-severity security finding (injection, broken/hard-coded crypto, invalid-pointer) touches the component.
+* **Findings (verified scope).** 828 workspace results; 50 touch the component — 49 `rust/cleartext-logging` in the **test** file and **one** in production source, `safety_record_store/codec.rs:415`, flagging the integer `cert_cap` inside a `debug_assert!` message (a non-sensitive capacity bound; `debug_assert!` is stripped in release). Assessed a **low-severity false positive**; per task scope the implementation/tests were **not** modified, and it is recorded for any separately scoped correction. **No** high-severity security finding (injection, broken/hard-coded crypto, invalid-pointer) touches the component. *[SUPERSEDED by the finishing-pass reconciliation at the end of this document: the `rust/cleartext-logging` rule metadata read from the preserved full SARIF is level `warning` / `security-severity` `7.5` (high band); the "low-severity" / "no high-severity finding" phrasing here is withdrawn. The per-location false-positive disposition is a separate, narrower conclusion that does not change the reported severity.]*
 * **Independent-review arm — OPEN.** The available review interface is diff-scoped; the frozen implementation yields no implementation diff (candidate ≡ HEAD across all code/test/Cargo/lock/config/CI blobs), so no available reviewer can target the fixed revision's full component source. The agent self-assessment does not satisfy the gate; the arm stays **OPEN** (`run_422_d7d14_fixed_candidate_assurance/04_independent_review.md`).
 * **Scope preserved.** This CodeQL evidence stands only within its verified extraction/query scope; it does not prove consensus correctness, cryptographic security, or public-DevNet readiness. The 23-row H7/H16 Covered subset, C4/C5 OPEN, `SECURITY_POSTURE=RS1-OPEN / PUBLIC-DEVNET-NO-GO`, default-disabled/MainNet-refused operation, and fail-closed `CurrentEpochUnavailable` are unchanged, and the global `D7D14_*` / anti-rollback / activation / wire-chain verdicts are **not** promoted. Inherited 157 passed / 1 ignored integration and 3 passed H7 unit results remain **inherited (not rerun)**.
 
@@ -18174,7 +18174,7 @@ This entry is a **clearly-identified correction** appended to the Run 422 D7-D14
 * **Coverage level (parsed AST vs semantic resolution).** Symbol-level presence is established for all nine `safety_record_store/*.rs` files and the integration test file (191 functions carry `Function` nodes) in the executed configuration. Per the `to_cfg_overrides` behavior above, the extractor retains AST nodes from `cfg(test)` code regardless of cfg selection; a `Function` node or matching function count alone therefore does **not** establish semantic-resolution or data-flow coverage for a given configuration. The 92 "extracted with errors" / semantic-unavailable diagnostics are confined to Rust toolchain/stdlib library files under `.rustup/.../rustlib` (historical diagnostic record); this is stated as their effect on component analysis (none observed in candidate source), not as proof from file location alone.
 * **Environment limitation (precise).** In this bounded continuation sandbox `codeql` is not on `PATH`, the prior temporary install and databases under `/tmp/run422_d7d14/` are **absent** (fresh clone), and the executed suite required `--ram=12000` against ~13 GiB available. Configurations A and B were therefore not executed here; the useful completed all-features analysis is preserved and the precise remaining limitation is named, rather than replaced with a universal "all configurations covered" claim.
 * **Artifact preservation — durable preservation NOT established; original UNAVAILABLE.** The ~6 MiB full-workspace SARIF (`de7d10f3…601777fa`, 828/50) existed **only** under `/tmp/run422_d7d14/sarif/`, which is not durable. That path is absent in this continuation sandbox, so the original SARIF could **not** be recovered and its recorded SHA-256 could **not** be re-verified. No replacement analysis was executed; the original checksum and execution identity are **not** re-attributed to any new artifact. The committed, retrievable artifacts remain the abbreviated `results/component_scoped_findings.json` (50 component results, no rule metadata/severity), the workspace rule-count summary, and the per-config coverage CSVs; the full SARIF (rule metadata, severities, invocation/execution info, extraction diagnostics, related/data-flow traces, all workspace results) is **not** durably preserved. `logs/checksums.txt` records this status.
-* **Findings disposition (component scope, not promoted to all workspace results).** 50 component-scoped results: **49** `rust/cleartext-logging` in `tests/run_422_d7d14_safety_record_store_tests.rs` (`println!`/format of decode/admit values in test assertions), dispositioned as test-harness diagnostic output (per-location in the abbreviated JSON), **not** solely on the basis of residing in a test file; and **1** production result at `safety_record_store/codec.rs:415` — the `debug_assert!(cert.capacity() == cert_cap, …)` divergence message (verified `codec.rs:413–417`), where `cert_cap` is a non-sensitive **capacity bound** and `debug_assert!` is stripped in release — **assessed** a false positive. The rule's reported severity is kept **separate** from this false-positive assessment and is **not** claimed from the abbreviated JSON (which omits rule metadata); the authoritative severity lives in the full SARIF, which is not durably preserved. No high-severity security finding (injection, broken/hard-coded crypto, invalid-pointer) touches the component. All 828 workspace results remain available in the original run record, but only the 50 component-scoped results are dispositioned here; no claim is made that every workspace finding has been dispositioned. No genuine implementation defect was identified; the frozen source is **not** modified.
+* **Findings disposition (component scope, not promoted to all workspace results).** 50 component-scoped results: **49** `rust/cleartext-logging` in `tests/run_422_d7d14_safety_record_store_tests.rs` (`println!`/format of decode/admit values in test assertions), dispositioned as test-harness diagnostic output (per-location in the abbreviated JSON), **not** solely on the basis of residing in a test file; and **1** production result at `safety_record_store/codec.rs:415` — the `debug_assert!(cert.capacity() == cert_cap, …)` divergence message (verified `codec.rs:413–417`), where `cert_cap` is a non-sensitive **capacity bound** and `debug_assert!` is stripped in release — **assessed** a false positive. The rule's reported severity is kept **separate** from this false-positive assessment and is **not** claimed from the abbreviated JSON (which omits rule metadata); the authoritative severity lives in the full SARIF, which is not durably preserved. No high-severity security finding (injection, broken/hard-coded crypto, invalid-pointer) touches the component. All 828 workspace results remain available in the original run record, but only the 50 component-scoped results are dispositioned here; no claim is made that every workspace finding has been dispositioned. No genuine implementation defect was identified; the frozen source is **not** modified. *[SUPERSEDED in part by the finishing-pass reconciliation at the end of this document: the full SARIF was subsequently preserved for the A/B executions, and the `rust/cleartext-logging` reported metadata is level `warning` / `security-severity` `7.5`; the "no high-severity security finding" phrasing here is withdrawn in favour of that metadata, with the per-location false-positive disposition kept separate.]*
 * **Independent review — OPEN (unchanged).** The available review interface is diff-scoped (documentation-only diff here), so no available reviewer can target the fixed revision `aad0a4a…` full component source, relevant callers, and the acceptance tests against contract §13.8A/§13.9. The implementation agent's self-assessment does not satisfy the gate. The unavailable documentation-diff-only reviewer was **not** re-invoked for another wrapper "no comments" response. A concise handoff (frozen candidate commit/tree, full component + callers + acceptance-test scope, §13.8A/§13.9, the retrievable CodeQL artifacts and dispositions, and the need for a full-fixed-source reviewer) is retained in `04_independent_review.md`. No people were contacted and no source was transmitted to any new service.
 * **CodeQL arm status.** Complete **only within its verified scope** (the single all-features / test-enabled configuration, with symbol-level component coverage and the dispositioned 50 component results). It is **not** described as closing the full configuration-coverage gate: the production-default (A) and acceptance-test (B) configurations and durable full-SARIF preservation remain **open**.
 * **Global verdicts (retained, not promoted):** `D7D14_STORAGE_COMPONENT=PARTIAL-IMPLEMENTATION`; `D7D14_STORAGE_ACCEPTANCE=INCOMPLETE`; `DURABLE_ANTI_ROLLBACK=NOT-ESTABLISHED`; `GENESIS_AUTHORITY_ACTIVATION=DISABLED`; `PRODUCTION_WIRE_CHAIN_ID_BEHAVIOR=UNCHANGED`; `CONFIGURED_AUTHORITY_RELEASE_BINARY_EVIDENCE=NOT-YET-CAPTURED`; `SECURITY_POSTURE=RS1-OPEN / PUBLIC-DEVNET-NO-GO`. C4/C5 remain OPEN; H22's separate limitation and fail-closed `CurrentEpochUnavailable` are preserved. No contract rewrite and no change to the accepted H7/H16 evidence methods. No production integration, signing, verifier wiring, anti-rollback establishment, activation, seed publication, D15, or Run 423 work was performed.
@@ -18202,3 +18202,73 @@ implementation is unchanged (component manifest 10/10 OK). All global verdicts
 DURABLE_ANTI_ROLLBACK=NOT-ESTABLISHED, GENESIS_AUTHORITY_ACTIVATION=DISABLED,
 SECURITY_POSTURE=RS1-OPEN / PUBLIC-DEVNET-NO-GO) and the independent full-source review
 (OPEN) are preserved and unchanged.
+
+## Run 422 D7-D14 — CodeQL evidence reconciliation + independent-review handoff (finishing pass, documentation/artifact only)
+
+This finishing pass completes the outstanding evidence corrections over the preserved
+A/B analyses of the frozen candidate `aad0a4a` (tree `82caed80`). It changes **no** Rust,
+tests, Cargo, lockfile, configuration, CI, protocol contract, or the preserved A/B SARIF
+files; the component manifest re-verifies 10/10. It supersedes the operative phrasing of
+the two earlier historical entries (`…EXECUTION`, `…CORRECTION` above) where they wrote
+"low-severity" / "no high-severity finding" — those phrasings are **withdrawn** as below;
+the historical entries are retained as history.
+
+- **Reported rule severity (corrected, kept separate from disposition).** The only
+  component-scoped security rule in either config is `rust/cleartext-logging`. Read from
+  the **preserved full SARIF**, its reported metadata is **level `warning`** and
+  **`security-severity` `7.5`** (CVSS-style high band). The earlier "low-severity" /
+  "no high-severity finding touches the component" statements **misrepresented** this
+  metadata and are corrected. The per-location **false-positive** dispositions are a
+  **separate**, narrower conclusion scoped to the inspected locations and subject to the
+  analyzer limitations recorded in `diagnostics/FINDINGS.md`; they do **not** change the
+  rule's reported severity. `results/dispositions.{csv,json}` now carry explicit
+  `reported_level` and `security_severity` fields on all **52** preserved result mappings.
+- **Test-file function counts (corrected).** The D7-D14 integration-test file parses to
+  **188** AST `Function` nodes under Config A and **191** under Config B
+  (`results/coverage_functions_A_default.csv`, `_B_testutils.csv`); the three-function
+  difference is itself configuration sensitivity (`cfg(test)` under `test-utils`). A prior
+  "both DBs parse 188" statement is corrected. The separately measured resolved-call
+  counts (A 18/12, B 1857/123) are preserved.
+- **Withdrawn equivalence inference.** Config B's workspace/component totals (828/50)
+  numerically match the historical all-features execution, but **a matching total does not
+  prove an equivalent semantic model**. The historical all-features execution and the new
+  Config B execution retain **separate identities and checksums**; function presence and
+  resolved-call observations support, but do not prove, complete semantic/data-flow
+  coverage.
+- **Supplementary diagnostic assessment (separate from the security suite).** The
+  `diagnostics/` type-inference consistency queries (run on **rebuilt** databases, distinct
+  from the security-suite executions that produced the preserved SARIF) locate the two
+  error-level "Ill-formed type mention" results as tuple arguments to `std::any::type_name`
+  in two standalone example helpers
+  (`examples/run_259_…:2091`, `examples/run_261_…:1862`) — not the component, not the
+  D7-D14 test, not relevant callers/dependencies; scoped conclusion: these particular
+  inconsistencies do **not** identify a storage-component defect. The saved Config A result
+  is `diagnostics/nonunique_A.txt` (empty set). `diagnostics/qlpack.yml` now **pins**
+  `codeql/rust-all: 0.2.23` for reproducibility; this pin was added by the finishing pass
+  and does not retrospectively prove the version an earlier execution loaded (no
+  `qlpack.lock.yml` was captured; the resolved library is corroborated only by
+  `logs/codeql_resolve_packs_rust.txt`).
+- **Retained limitations (explicit).** Config B reaches the extractor's per-file
+  diagnostic cap for the D7-D14 test file; the **suppressed contents are not recoverable**
+  from the preserved SARIF and are **not** described as benign. The unresolved
+  `$crate::panic::panic_2021` at test line 5324 is an analyzer macro-expansion limitation,
+  **not** a Rust test failure.
+- **Durable integrity.** Both `sarif/*.sarif.gz` remain byte-identical; decompressed
+  contents still match their recorded SHA-256; diagnostic sources/outputs and changed
+  artifacts have SHA-256 entries in `logs/checksums.txt`.
+
+**Separate assurance statuses (this pass):**
+
+- A/B security-suite execution: **COMPLETE** (preserved SARIF unchanged; not re-run).
+- Durable artifact integrity: **VERIFIED** (A/B `.sarif.gz` byte-identical; checksums refreshed).
+- Diagnostic assessment and residual limitations: **RECORDED** (example-only tuple mentions; per-file cap; macro-expansion limit; missing per-query logs noted precisely).
+- Evidence reconciliation: **COMPLETE** (severity metadata, A=188/B=191 counts, withdrawn equivalence inference, 52 consistent dispositions).
+- Independent full-source review: **OPEN** (self-assessment and documentation-diff review do not discharge it; handoff in `run_422_d7d14_fixed_candidate_assurance/04_independent_review.md`).
+
+All global verdicts are preserved unchanged: `D7D14_STORAGE_COMPONENT=PARTIAL-IMPLEMENTATION`;
+`D7D14_STORAGE_ACCEPTANCE=INCOMPLETE`; `DURABLE_ANTI_ROLLBACK=NOT-ESTABLISHED`;
+`GENESIS_AUTHORITY_ACTIVATION=DISABLED`; `PRODUCTION_WIRE_CHAIN_ID_BEHAVIOR=UNCHANGED`;
+`CONFIGURED_AUTHORITY_RELEASE_BINARY_EVIDENCE=NOT-YET-CAPTURED`;
+`SECURITY_POSTURE=RS1-OPEN / PUBLIC-DEVNET-NO-GO`; C4/C5 OPEN; H22 separately limited;
+default-disabled / MainNet-refused operation, unverified recovered evidence, and fail-closed
+`CurrentEpochUnavailable` preserved.

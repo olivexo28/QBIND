@@ -78,6 +78,13 @@ contract §13.8A and §13.9.
 
 ## Rust extraction & coverage (established)
 
+> **[Historical — superseded in operative status by "Configuration-coverage — A and B
+> EXECUTED" below.]** This subsection records the earlier single-database provisioning and
+> the withdrawn cfg-inference from the continuation pass, before Configs A and B were
+> executed end-to-end. Its withdrawn inferences are retained for the record; the operative
+> configuration coverage, severity metadata, and A=188 / B=191 function counts are stated
+> in the executed-A/B sections that follow.
+
 - Rust uses `build_modes: [none]` — extraction is rust-analyzer-based parsing of
   the whole cargo workspace; no compilation step. See `logs/rust_extractor_options.txt`.
 - Default config enables **all** cargo features, so the `test-utils` feature code
@@ -146,15 +153,23 @@ own config dump in the build logs.
 - **B** confirms the D7-D14 integration-test target **is** represented in the semantic
   model: `test-utils`-gated helper present (2 defs) and 1857 calls from the test file
   resolve into component functions via type inference (`Call.getStaticTarget()`), not
-  mere source-archive/AST presence (both DBs parse the test file into 188 AST
-  `Function` nodes — AST presence ≠ semantic/data-flow coverage).
+  mere source-archive/AST presence. AST `Function`-node counts for the D7-D14 test file
+  are themselves **configuration-sensitive**: Config A parses **188** functions and
+  Config B parses **191** (the three additional functions appear once `cfg(test)` is
+  enabled under `test-utils`; `results/coverage_functions_A_default.csv`,
+  `results/coverage_functions_B_testutils.csv`). AST presence ≠ semantic/data-flow
+  coverage, and function presence plus resolved-call counts support — but do **not**
+  prove — complete semantic or data-flow coverage.
 - Configuration sensitivity is visible directly in the **security-query data-flow**
   output: component `rust/cleartext-logging` results are **2** under A vs **50** under B.
 
-These are **new executions** with their own identities (`logs/checksums.txt`); Config B
-independently reproduces the historical all-features/test-enabled totals (828/50) because,
-for this component, `default+test-utils` with `cfg(test)` enabled is the same effective
-model — it is **not** the original artifact and does **not** reuse the original checksum.
+These are **new executions** with their own identities (`logs/checksums.txt`). Config B's
+workspace/component totals (828/50) **numerically match** the historical all-features
+execution, but a **matching result total does not prove an equivalent semantic model**:
+the historical all-features execution and this new Config B execution retain **separate
+identities** and separate checksums. Config B is **not** the original artifact, does
+**not** reuse the original checksum, and its agreement with the historical totals is
+recorded as an observation, not as proof of model equivalence.
 
 ## Full-workspace SARIF — durably preserved (A and B); original NOT recovered
 
@@ -179,15 +194,28 @@ Workspace totals and component counts for **both** configs are in
 `results/findings_summary_workspace.csv`. A machine-readable per-result disposition
 table (one row per component-scoped result, covering both A and B) is in
 `results/dispositions.csv` and `results/dispositions.json` with columns:
-`run/configuration | result identifier | rule | location | reported severity |
-inspected evidence | disposition | rationale`. (52 rows: A = 1 test + 1 production;
+`run/configuration | result identifier | rule | location | reported level (`warning`) |
+security severity (`7.5`) | reported severity | inspected evidence | disposition |
+rationale`. The explicit `reported_level` and `security_severity` fields carry the rule
+metadata read from the preserved full SARIF and are kept separate from the per-location
+`disposition`. (52 rows: A = 1 test + 1 production;
 B = 49 test + 1 production.) The abbreviated `results/component_scoped_findings.json`
 is retained for continuity but is superseded by the full per-config
 `results/config{A,B}/component_findings_*.json` (which carry rule id, reported severity,
 location, flow source, and message) and the disposition table.
 
-- **No** high-severity security finding (injection, broken/hard-coded crypto,
-  pointer/cert issues) touches the component source in either config.
+- **Reported rule metadata (stated, not minimized).** Every component-scoped result in
+  both configs is the single rule `rust/cleartext-logging`, whose preserved SARIF metadata
+  is reported **level `warning`** with **`security-severity` `7.5`** (CVSS-style high band).
+  This is the rule's **reported metadata** and is recorded **separately** from the
+  per-location dispositions below. Earlier "no high-severity finding" / "low-severity"
+  phrasings are **withdrawn** as a misrepresentation of that metadata. No other security
+  rule (injection, broken/hard-coded crypto, pointer/cert issues) produces a
+  component-scoped result in either config; the narrower disposition conclusion is that
+  **each** of the 52 `rust/cleartext-logging` results is a per-location **false positive**
+  on inspected non-sensitive values (see below), a disposition that is **scoped to these
+  inspected locations** and **subject to the analyzer limitations** recorded in
+  `diagnostics/FINDINGS.md` and does **not** downgrade the rule's reported severity.
 - The single **production** component hit is `safety_record_store/codec.rs:415` in
   **both** A and B: `rust/cleartext-logging` (reported severity `warning`) on the integer
   `cert_cap` inside a `debug_assert!` divergence message (`codec.rs:413–417`). `cert_cap`
@@ -212,6 +240,26 @@ diff to review). No available reviewer can take the fixed revision `aad0a4a`
 full component source as an independent-review target. The implementation
 agent's own assessment does not satisfy the gate, so this arm is left **OPEN**;
 see `04_independent_review.md`.
+
+## Separate assurance statuses (this finishing pass)
+
+These are reported **separately** and do not promote any global acceptance verdict:
+
+- **A/B security-suite execution — COMPLETE.** Configs A and B executed end-to-end;
+  preserved SARIF unchanged and not re-run.
+- **Durable artifact integrity — VERIFIED.** Both `sarif/*.sarif.gz` byte-identical;
+  decompressed contents match recorded SHA-256; `logs/checksums.txt` refreshed for changed
+  artifacts and extended with diagnostic sources/outputs.
+- **Diagnostic assessment & residual limitations — RECORDED.** Example-only ill-formed
+  tuple mentions (not a component defect); Config B per-file diagnostic cap (suppressed
+  contents unrecoverable, not asserted benign); unresolved `panic_2021` macro at test line
+  5324 is an analyzer limitation, not a test failure; missing per-query logs noted precisely.
+- **Evidence reconciliation — COMPLETE.** `rust/cleartext-logging` reported metadata
+  (level `warning`, `security-severity` `7.5`) stated and kept separate from the 52
+  per-location false-positive dispositions; test-file function counts A=188 / B=191;
+  equivalent-semantic-model inference withdrawn.
+- **Independent full-source review — OPEN.** Not discharged by self-assessment or a
+  documentation-diff review.
 
 ## Scope / verdicts preserved
 

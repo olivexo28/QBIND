@@ -13,7 +13,9 @@
       "reported_severity": "warning",
       "inspected_evidence": "flow source crates/qbind-node/src/safety_record_store/codec.rs:546; sink is a test-assertion diagnostic (panic!/assert!/println! format message) in the D7-D14 integration test; source values are synthetic fixture TimeoutCert objects (decode_timeout_cert/admit_timeout_cert) and Debug-formatted error enums / capacity integers",
       "disposition": "FALSE_POSITIVE_NON_SENSITIVE_TEST_DIAGNOSTIC",
-      "rationale": "Sink is a non-production test-assertion diagnostic; the value reaching output is synthetic fixture data / an error diagnostic / a public capacity quantity, established by inspecting the flow source and sink rather than solely because the result lies in a test file. No secret, key, or credential reaches the sink. rust/cleartext-logging reported severity is retained separately."
+      "rationale": "Sink is a non-production test-assertion diagnostic; the value reaching output is synthetic fixture data / an error diagnostic / a public capacity quantity, established by inspecting the flow source and sink rather than solely because the result lies in a test file. No secret, key, or credential reaches the sink. rust/cleartext-logging reported severity is retained separately.",
+      "reported_level": "warning",
+      "security_severity": "7.5"
     },
     {
       "configuration": "A_production_default",
@@ -23,7 +25,9 @@
       "reported_severity": "warning",
       "inspected_evidence": "codec.rs:413-417 debug_assert!(cert.capacity()==cert_cap, \"evidence cert backing capacity {} diverged from the admitted cap {cert_cap}\"); value reaching sink is the integer capacity bound cert_cap/cert.capacity(); debug_assert! is compiled out in release builds",
       "disposition": "FALSE_POSITIVE_NON_SENSITIVE",
-      "rationale": "Value is a non-sensitive integer capacity bound (public quantity), not key/credential material; emitted only in a debug_assert! divergence message removed from release binaries. rust/cleartext-logging reported severity (warning) is retained; this per-result assessment is a false positive and the frozen implementation is not modified under this task."
+      "rationale": "Value is a non-sensitive integer capacity bound (public quantity), not key/credential material; emitted only in a debug_assert! divergence message removed from release binaries. rust/cleartext-logging reported severity (warning) is retained; this per-result assessment is a false positive and the frozen implementation is not modified under this task.",
+      "reported_level": "warning",
+      "security_severity": "7.5"
     },
     {
       "configuration": "B_acceptance_testutils",
@@ -33,7 +37,9 @@
       "reported_severity": "warning",
       "inspected_evidence": "flow source crates/qbind-node/src/safety_record_store/codec.rs:879; sink is a test-assertion diagnostic (panic!/assert!/println! format message) in the D7-D14 integration test; source values are synthetic fixture TimeoutCert objects (decode_timeout_cert/admit_timeout_cert) and Debug-formatted error enums / capacity integers",
       "disposition": "FALSE_POSITIVE_NON_SENSITIVE_TEST_DIAGNOSTIC",
-      "rationale": "Sink is a non-production test-assertion diagnostic; the value reaching output is synthetic fixture data / an error diagnostic / a public capacity quantity, established by inspecting the flow source and sink rather than solely because the result lies in a test file. No secret, key, or credential reaches the sink. rust/cleartext-logging reported severity is retained separately."
+      "rationale": "Sink is a non-production test-assertion diagnostic; the value reaching output is synthetic fixture data / an error diagnostic / a public capacity quantity, established by inspecting the flow source and sink rather than solely because the result lies in a test file. No secret, key, or credential reaches the sink. rust/cleartext-logging reported severity is retained separately.",
+      "reported_level": "warning",
+      "security_severity": "7.5"
     },
     {
       "configuration": "B_acceptance_testutils",
@@ -43,7 +49,9 @@
       "reported_severity": "warning",
       "inspected_evidence": "flow source crates/qbind-node/src/safety_record_store/codec.rs:879; sink is a test-assertion diagnostic (panic!/assert!/println! format message) in the D7-D14 integration test; source values are synthetic fixture TimeoutCert objects (decode_timeout_cert/admit_timeout_cert) and Debug-formatted error enums / capacity integers",
       "disposition": "FALSE_POSITIVE_NON_SENSITIVE_TEST_DIAGNOSTIC",
-      "rationale": "Sink is a non-production test-assertion diagnostic; the value reaching output is synthetic fixture data / an error diagnostic / a public capacity quantity, established by inspecting the flow source and sink rather than solely because the result lies in a test file. No secret, key, or credential reaches the sink. rust/cleartext-logging reported severity is retained separately."
+      "rationale": "Sink is a non-production test-assertion diagnostic; the value reaching output is synthetic fixture data / an error diagnostic / a public capacity quantity, established by inspecting the flow source and sink rather than solely because the result lies in a test file. No secret, key, or credential reaches the sink. rust/cleartext-logging reported severity is retained separately.",
+      "reported_level": "warning",
+      "security_severity": "7.5"
     },
     {
       "configuration": "B_acceptance_testutils",
@@ -53,7 +61,9 @@
       "reported_severity": "warning",
       "inspected_evidence": "flow source crates/qbind-node/src/safety_record_store/codec.rs:879; sink is a test-assertion diagnostic (panic!/assert!/println! format message) in the D7-D14 integration test; source values are synthetic fixture TimeoutCert objects (decode_timeout_cert/admit_timeout_cert) and Debug-formatted error enums / capacity integers",
       "disposition": "FALSE_POSITIVE_NON_SENSITIVE_TEST_DIAGNOSTIC",
-      "rationale": "Sink is a non-production test-assertion diagnostic; the value reaching output is synthetic fixture data / an error diagnostic / a public capacity quantity, established by inspecting the flow source and sink rather than solely because the result lies in a test file. No secret, key, or credential reaches the sink. rust/cleartext-logging reported severity is retained separately."
+      "rationale": "Sink is a non-production test-assertion diagnostic; the value reaching output is synthetic fixture data / an error diagnostic / a public capacity quantity, established by inspecting the flow source and sink rather than solely because the result lies in a test file. No secret, key, or credential reaches the sink. rust/cleartext-logging reported severity is retained separately.",
+      "reported_level": "warning",
+      "security_severity": "7.5"
     },
     {
       "configuration": "B_acceptance_testutils",
@@ -63,7 +73,9 @@
       "reported_severity": "warning",
       "inspected_evidence": "flow source crates/qbind-node/src/safety_record_store/codec.rs:546; sink is a test-assertion diagnostic (panic!/assert!/println! format message) in the D7-D14 integration test; source values are synthetic fixture TimeoutCert objects (decode_timeout_cert/admit_timeout_cert) and Debug-formatted error enums / capacity integers",
       "disposition": "FALSE_POSITIVE_NON_SENSITIVE_TEST_DIAGNOSTIC",
-      "rationale": "Sink is a non-production test-assertion diagnostic; the value reaching output is synthetic fixture data / an error diagnostic / a public capacity quantity, established by inspecting the flow source and sink rather than solely because the result lies in a test file. No secret, key, or credential reaches the sink. rust/cleartext-logging reported severity is retained separately."
+      "rationale": "Sink is a non-production test-assertion diagnostic; the value reaching output is synthetic fixture data / an error diagnostic / a public capacity quantity, established by inspecting the flow source and sink rather than solely because the result lies in a test file. No secret, key, or credential reaches the sink. rust/cleartext-logging reported severity is retained separately.",
+      "reported_level": "warning",
+      "security_severity": "7.5"
     },
     {
       "configuration": "B_acceptance_testutils",
@@ -73,7 +85,9 @@
       "reported_severity": "warning",
       "inspected_evidence": "flow source crates/qbind-node/src/safety_record_store/codec.rs:546; sink is a test-assertion diagnostic (panic!/assert!/println! format message) in the D7-D14 integration test; source values are synthetic fixture TimeoutCert objects (decode_timeout_cert/admit_timeout_cert) and Debug-formatted error enums / capacity integers",
       "disposition": "FALSE_POSITIVE_NON_SENSITIVE_TEST_DIAGNOSTIC",
-      "rationale": "Sink is a non-production test-assertion diagnostic; the value reaching output is synthetic fixture data / an error diagnostic / a public capacity quantity, established by inspecting the flow source and sink rather than solely because the result lies in a test file. No secret, key, or credential reaches the sink. rust/cleartext-logging reported severity is retained separately."
+      "rationale": "Sink is a non-production test-assertion diagnostic; the value reaching output is synthetic fixture data / an error diagnostic / a public capacity quantity, established by inspecting the flow source and sink rather than solely because the result lies in a test file. No secret, key, or credential reaches the sink. rust/cleartext-logging reported severity is retained separately.",
+      "reported_level": "warning",
+      "security_severity": "7.5"
     },
     {
       "configuration": "B_acceptance_testutils",
@@ -83,7 +97,9 @@
       "reported_severity": "warning",
       "inspected_evidence": "flow source crates/qbind-node/src/safety_record_store/codec.rs:546; sink is a test-assertion diagnostic (panic!/assert!/println! format message) in the D7-D14 integration test; source values are synthetic fixture TimeoutCert objects (decode_timeout_cert/admit_timeout_cert) and Debug-formatted error enums / capacity integers",
       "disposition": "FALSE_POSITIVE_NON_SENSITIVE_TEST_DIAGNOSTIC",
-      "rationale": "Sink is a non-production test-assertion diagnostic; the value reaching output is synthetic fixture data / an error diagnostic / a public capacity quantity, established by inspecting the flow source and sink rather than solely because the result lies in a test file. No secret, key, or credential reaches the sink. rust/cleartext-logging reported severity is retained separately."
+      "rationale": "Sink is a non-production test-assertion diagnostic; the value reaching output is synthetic fixture data / an error diagnostic / a public capacity quantity, established by inspecting the flow source and sink rather than solely because the result lies in a test file. No secret, key, or credential reaches the sink. rust/cleartext-logging reported severity is retained separately.",
+      "reported_level": "warning",
+      "security_severity": "7.5"
     },
     {
       "configuration": "B_acceptance_testutils",
@@ -93,7 +109,9 @@
       "reported_severity": "warning",
       "inspected_evidence": "flow source crates/qbind-node/src/safety_record_store/codec.rs:546; sink is a test-assertion diagnostic (panic!/assert!/println! format message) in the D7-D14 integration test; source values are synthetic fixture TimeoutCert objects (decode_timeout_cert/admit_timeout_cert) and Debug-formatted error enums / capacity integers",
       "disposition": "FALSE_POSITIVE_NON_SENSITIVE_TEST_DIAGNOSTIC",
-      "rationale": "Sink is a non-production test-assertion diagnostic; the value reaching output is synthetic fixture data / an error diagnostic / a public capacity quantity, established by inspecting the flow source and sink rather than solely because the result lies in a test file. No secret, key, or credential reaches the sink. rust/cleartext-logging reported severity is retained separately."
+      "rationale": "Sink is a non-production test-assertion diagnostic; the value reaching output is synthetic fixture data / an error diagnostic / a public capacity quantity, established by inspecting the flow source and sink rather than solely because the result lies in a test file. No secret, key, or credential reaches the sink. rust/cleartext-logging reported severity is retained separately.",
+      "reported_level": "warning",
+      "security_severity": "7.5"
     },
     {
       "configuration": "B_acceptance_testutils",
@@ -103,7 +121,9 @@
       "reported_severity": "warning",
       "inspected_evidence": "flow source crates/qbind-node/src/safety_record_store/codec.rs:546; sink is a test-assertion diagnostic (panic!/assert!/println! format message) in the D7-D14 integration test; source values are synthetic fixture TimeoutCert objects (decode_timeout_cert/admit_timeout_cert) and Debug-formatted error enums / capacity integers",
       "disposition": "FALSE_POSITIVE_NON_SENSITIVE_TEST_DIAGNOSTIC",
-      "rationale": "Sink is a non-production test-assertion diagnostic; the value reaching output is synthetic fixture data / an error diagnostic / a public capacity quantity, established by inspecting the flow source and sink rather than solely because the result lies in a test file. No secret, key, or credential reaches the sink. rust/cleartext-logging reported severity is retained separately."
+      "rationale": "Sink is a non-production test-assertion diagnostic; the value reaching output is synthetic fixture data / an error diagnostic / a public capacity quantity, established by inspecting the flow source and sink rather than solely because the result lies in a test file. No secret, key, or credential reaches the sink. rust/cleartext-logging reported severity is retained separately.",
+      "reported_level": "warning",
+      "security_severity": "7.5"
     },
     {
       "configuration": "B_acceptance_testutils",
@@ -113,7 +133,9 @@
       "reported_severity": "warning",
       "inspected_evidence": "flow source crates/qbind-node/src/safety_record_store/codec.rs:546; sink is a test-assertion diagnostic (panic!/assert!/println! format message) in the D7-D14 integration test; source values are synthetic fixture TimeoutCert objects (decode_timeout_cert/admit_timeout_cert) and Debug-formatted error enums / capacity integers",
       "disposition": "FALSE_POSITIVE_NON_SENSITIVE_TEST_DIAGNOSTIC",
-      "rationale": "Sink is a non-production test-assertion diagnostic; the value reaching output is synthetic fixture data / an error diagnostic / a public capacity quantity, established by inspecting the flow source and sink rather than solely because the result lies in a test file. No secret, key, or credential reaches the sink. rust/cleartext-logging reported severity is retained separately."
+      "rationale": "Sink is a non-production test-assertion diagnostic; the value reaching output is synthetic fixture data / an error diagnostic / a public capacity quantity, established by inspecting the flow source and sink rather than solely because the result lies in a test file. No secret, key, or credential reaches the sink. rust/cleartext-logging reported severity is retained separately.",
+      "reported_level": "warning",
+      "security_severity": "7.5"
     },
     {
       "configuration": "B_acceptance_testutils",
@@ -123,7 +145,9 @@
       "reported_severity": "warning",
       "inspected_evidence": "flow source crates/qbind-node/src/safety_record_store/codec.rs:879; sink is a test-assertion diagnostic (panic!/assert!/println! format message) in the D7-D14 integration test; source values are synthetic fixture TimeoutCert objects (decode_timeout_cert/admit_timeout_cert) and Debug-formatted error enums / capacity integers",
       "disposition": "FALSE_POSITIVE_NON_SENSITIVE_TEST_DIAGNOSTIC",
-      "rationale": "Sink is a non-production test-assertion diagnostic; the value reaching output is synthetic fixture data / an error diagnostic / a public capacity quantity, established by inspecting the flow source and sink rather than solely because the result lies in a test file. No secret, key, or credential reaches the sink. rust/cleartext-logging reported severity is retained separately."
+      "rationale": "Sink is a non-production test-assertion diagnostic; the value reaching output is synthetic fixture data / an error diagnostic / a public capacity quantity, established by inspecting the flow source and sink rather than solely because the result lies in a test file. No secret, key, or credential reaches the sink. rust/cleartext-logging reported severity is retained separately.",
+      "reported_level": "warning",
+      "security_severity": "7.5"
     },
     {
       "configuration": "B_acceptance_testutils",
@@ -133,7 +157,9 @@
       "reported_severity": "warning",
       "inspected_evidence": "flow source crates/qbind-node/src/safety_record_store/codec.rs:879; sink is a test-assertion diagnostic (panic!/assert!/println! format message) in the D7-D14 integration test; source values are synthetic fixture TimeoutCert objects (decode_timeout_cert/admit_timeout_cert) and Debug-formatted error enums / capacity integers",
       "disposition": "FALSE_POSITIVE_NON_SENSITIVE_TEST_DIAGNOSTIC",
-      "rationale": "Sink is a non-production test-assertion diagnostic; the value reaching output is synthetic fixture data / an error diagnostic / a public capacity quantity, established by inspecting the flow source and sink rather than solely because the result lies in a test file. No secret, key, or credential reaches the sink. rust/cleartext-logging reported severity is retained separately."
+      "rationale": "Sink is a non-production test-assertion diagnostic; the value reaching output is synthetic fixture data / an error diagnostic / a public capacity quantity, established by inspecting the flow source and sink rather than solely because the result lies in a test file. No secret, key, or credential reaches the sink. rust/cleartext-logging reported severity is retained separately.",
+      "reported_level": "warning",
+      "security_severity": "7.5"
     },
     {
       "configuration": "B_acceptance_testutils",
@@ -143,7 +169,9 @@
       "reported_severity": "warning",
       "inspected_evidence": "flow source crates/qbind-node/src/safety_record_store/codec.rs:879; sink is a test-assertion diagnostic (panic!/assert!/println! format message) in the D7-D14 integration test; source values are synthetic fixture TimeoutCert objects (decode_timeout_cert/admit_timeout_cert) and Debug-formatted error enums / capacity integers",
       "disposition": "FALSE_POSITIVE_NON_SENSITIVE_TEST_DIAGNOSTIC",
-      "rationale": "Sink is a non-production test-assertion diagnostic; the value reaching output is synthetic fixture data / an error diagnostic / a public capacity quantity, established by inspecting the flow source and sink rather than solely because the result lies in a test file. No secret, key, or credential reaches the sink. rust/cleartext-logging reported severity is retained separately."
+      "rationale": "Sink is a non-production test-assertion diagnostic; the value reaching output is synthetic fixture data / an error diagnostic / a public capacity quantity, established by inspecting the flow source and sink rather than solely because the result lies in a test file. No secret, key, or credential reaches the sink. rust/cleartext-logging reported severity is retained separately.",
+      "reported_level": "warning",
+      "security_severity": "7.5"
     },
     {
       "configuration": "B_acceptance_testutils",
@@ -153,7 +181,9 @@
       "reported_severity": "warning",
       "inspected_evidence": "flow source crates/qbind-node/src/safety_record_store/codec.rs:879; sink is a test-assertion diagnostic (panic!/assert!/println! format message) in the D7-D14 integration test; source values are synthetic fixture TimeoutCert objects (decode_timeout_cert/admit_timeout_cert) and Debug-formatted error enums / capacity integers",
       "disposition": "FALSE_POSITIVE_NON_SENSITIVE_TEST_DIAGNOSTIC",
-      "rationale": "Sink is a non-production test-assertion diagnostic; the value reaching output is synthetic fixture data / an error diagnostic / a public capacity quantity, established by inspecting the flow source and sink rather than solely because the result lies in a test file. No secret, key, or credential reaches the sink. rust/cleartext-logging reported severity is retained separately."
+      "rationale": "Sink is a non-production test-assertion diagnostic; the value reaching output is synthetic fixture data / an error diagnostic / a public capacity quantity, established by inspecting the flow source and sink rather than solely because the result lies in a test file. No secret, key, or credential reaches the sink. rust/cleartext-logging reported severity is retained separately.",
+      "reported_level": "warning",
+      "security_severity": "7.5"
     },
     {
       "configuration": "B_acceptance_testutils",
@@ -163,7 +193,9 @@
       "reported_severity": "warning",
       "inspected_evidence": "flow source crates/qbind-node/src/safety_record_store/codec.rs:546; sink is a test-assertion diagnostic (panic!/assert!/println! format message) in the D7-D14 integration test; source values are synthetic fixture TimeoutCert objects (decode_timeout_cert/admit_timeout_cert) and Debug-formatted error enums / capacity integers",
       "disposition": "FALSE_POSITIVE_NON_SENSITIVE_TEST_DIAGNOSTIC",
-      "rationale": "Sink is a non-production test-assertion diagnostic; the value reaching output is synthetic fixture data / an error diagnostic / a public capacity quantity, established by inspecting the flow source and sink rather than solely because the result lies in a test file. No secret, key, or credential reaches the sink. rust/cleartext-logging reported severity is retained separately."
+      "rationale": "Sink is a non-production test-assertion diagnostic; the value reaching output is synthetic fixture data / an error diagnostic / a public capacity quantity, established by inspecting the flow source and sink rather than solely because the result lies in a test file. No secret, key, or credential reaches the sink. rust/cleartext-logging reported severity is retained separately.",
+      "reported_level": "warning",
+      "security_severity": "7.5"
     },
     {
       "configuration": "B_acceptance_testutils",
@@ -173,7 +205,9 @@
       "reported_severity": "warning",
       "inspected_evidence": "flow source crates/qbind-node/src/safety_record_store/codec.rs:879; sink is a test-assertion diagnostic (panic!/assert!/println! format message) in the D7-D14 integration test; source values are synthetic fixture TimeoutCert objects (decode_timeout_cert/admit_timeout_cert) and Debug-formatted error enums / capacity integers",
       "disposition": "FALSE_POSITIVE_NON_SENSITIVE_TEST_DIAGNOSTIC",
-      "rationale": "Sink is a non-production test-assertion diagnostic; the value reaching output is synthetic fixture data / an error diagnostic / a public capacity quantity, established by inspecting the flow source and sink rather than solely because the result lies in a test file. No secret, key, or credential reaches the sink. rust/cleartext-logging reported severity is retained separately."
+      "rationale": "Sink is a non-production test-assertion diagnostic; the value reaching output is synthetic fixture data / an error diagnostic / a public capacity quantity, established by inspecting the flow source and sink rather than solely because the result lies in a test file. No secret, key, or credential reaches the sink. rust/cleartext-logging reported severity is retained separately.",
+      "reported_level": "warning",
+      "security_severity": "7.5"
     },
     {
       "configuration": "B_acceptance_testutils",
@@ -183,7 +217,9 @@
       "reported_severity": "warning",
       "inspected_evidence": "flow source crates/qbind-node/src/safety_record_store/codec.rs:879; sink is a test-assertion diagnostic (panic!/assert!/println! format message) in the D7-D14 integration test; source values are synthetic fixture TimeoutCert objects (decode_timeout_cert/admit_timeout_cert) and Debug-formatted error enums / capacity integers",
       "disposition": "FALSE_POSITIVE_NON_SENSITIVE_TEST_DIAGNOSTIC",
-      "rationale": "Sink is a non-production test-assertion diagnostic; the value reaching output is synthetic fixture data / an error diagnostic / a public capacity quantity, established by inspecting the flow source and sink rather than solely because the result lies in a test file. No secret, key, or credential reaches the sink. rust/cleartext-logging reported severity is retained separately."
+      "rationale": "Sink is a non-production test-assertion diagnostic; the value reaching output is synthetic fixture data / an error diagnostic / a public capacity quantity, established by inspecting the flow source and sink rather than solely because the result lies in a test file. No secret, key, or credential reaches the sink. rust/cleartext-logging reported severity is retained separately.",
+      "reported_level": "warning",
+      "security_severity": "7.5"
     },
     {
       "configuration": "B_acceptance_testutils",
@@ -193,7 +229,9 @@
       "reported_severity": "warning",
       "inspected_evidence": "flow source crates/qbind-node/src/safety_record_store/codec.rs:879; sink is a test-assertion diagnostic (panic!/assert!/println! format message) in the D7-D14 integration test; source values are synthetic fixture TimeoutCert objects (decode_timeout_cert/admit_timeout_cert) and Debug-formatted error enums / capacity integers",
       "disposition": "FALSE_POSITIVE_NON_SENSITIVE_TEST_DIAGNOSTIC",
-      "rationale": "Sink is a non-production test-assertion diagnostic; the value reaching output is synthetic fixture data / an error diagnostic / a public capacity quantity, established by inspecting the flow source and sink rather than solely because the result lies in a test file. No secret, key, or credential reaches the sink. rust/cleartext-logging reported severity is retained separately."
+      "rationale": "Sink is a non-production test-assertion diagnostic; the value reaching output is synthetic fixture data / an error diagnostic / a public capacity quantity, established by inspecting the flow source and sink rather than solely because the result lies in a test file. No secret, key, or credential reaches the sink. rust/cleartext-logging reported severity is retained separately.",
+      "reported_level": "warning",
+      "security_severity": "7.5"
     },
     {
       "configuration": "B_acceptance_testutils",
@@ -203,7 +241,9 @@
       "reported_severity": "warning",
       "inspected_evidence": "flow source crates/qbind-node/src/safety_record_store/codec.rs:879; sink is a test-assertion diagnostic (panic!/assert!/println! format message) in the D7-D14 integration test; source values are synthetic fixture TimeoutCert objects (decode_timeout_cert/admit_timeout_cert) and Debug-formatted error enums / capacity integers",
       "disposition": "FALSE_POSITIVE_NON_SENSITIVE_TEST_DIAGNOSTIC",
-      "rationale": "Sink is a non-production test-assertion diagnostic; the value reaching output is synthetic fixture data / an error diagnostic / a public capacity quantity, established by inspecting the flow source and sink rather than solely because the result lies in a test file. No secret, key, or credential reaches the sink. rust/cleartext-logging reported severity is retained separately."
+      "rationale": "Sink is a non-production test-assertion diagnostic; the value reaching output is synthetic fixture data / an error diagnostic / a public capacity quantity, established by inspecting the flow source and sink rather than solely because the result lies in a test file. No secret, key, or credential reaches the sink. rust/cleartext-logging reported severity is retained separately.",
+      "reported_level": "warning",
+      "security_severity": "7.5"
     },
     {
       "configuration": "B_acceptance_testutils",
@@ -213,7 +253,9 @@
       "reported_severity": "warning",
       "inspected_evidence": "flow source crates/qbind-node/src/safety_record_store/codec.rs:546; sink is a test-assertion diagnostic (panic!/assert!/println! format message) in the D7-D14 integration test; source values are synthetic fixture TimeoutCert objects (decode_timeout_cert/admit_timeout_cert) and Debug-formatted error enums / capacity integers",
       "disposition": "FALSE_POSITIVE_NON_SENSITIVE_TEST_DIAGNOSTIC",
-      "rationale": "Sink is a non-production test-assertion diagnostic; the value reaching output is synthetic fixture data / an error diagnostic / a public capacity quantity, established by inspecting the flow source and sink rather than solely because the result lies in a test file. No secret, key, or credential reaches the sink. rust/cleartext-logging reported severity is retained separately."
+      "rationale": "Sink is a non-production test-assertion diagnostic; the value reaching output is synthetic fixture data / an error diagnostic / a public capacity quantity, established by inspecting the flow source and sink rather than solely because the result lies in a test file. No secret, key, or credential reaches the sink. rust/cleartext-logging reported severity is retained separately.",
+      "reported_level": "warning",
+      "security_severity": "7.5"
     },
     {
       "configuration": "B_acceptance_testutils",
@@ -223,7 +265,9 @@
       "reported_severity": "warning",
       "inspected_evidence": "flow source crates/qbind-node/src/safety_record_store/codec.rs:546; sink is a test-assertion diagnostic (panic!/assert!/println! format message) in the D7-D14 integration test; source values are synthetic fixture TimeoutCert objects (decode_timeout_cert/admit_timeout_cert) and Debug-formatted error enums / capacity integers",
       "disposition": "FALSE_POSITIVE_NON_SENSITIVE_TEST_DIAGNOSTIC",
-      "rationale": "Sink is a non-production test-assertion diagnostic; the value reaching output is synthetic fixture data / an error diagnostic / a public capacity quantity, established by inspecting the flow source and sink rather than solely because the result lies in a test file. No secret, key, or credential reaches the sink. rust/cleartext-logging reported severity is retained separately."
+      "rationale": "Sink is a non-production test-assertion diagnostic; the value reaching output is synthetic fixture data / an error diagnostic / a public capacity quantity, established by inspecting the flow source and sink rather than solely because the result lies in a test file. No secret, key, or credential reaches the sink. rust/cleartext-logging reported severity is retained separately.",
+      "reported_level": "warning",
+      "security_severity": "7.5"
     },
     {
       "configuration": "B_acceptance_testutils",
@@ -233,7 +277,9 @@
       "reported_severity": "warning",
       "inspected_evidence": "flow source crates/qbind-node/src/safety_record_store/codec.rs:546; sink is a test-assertion diagnostic (panic!/assert!/println! format message) in the D7-D14 integration test; source values are synthetic fixture TimeoutCert objects (decode_timeout_cert/admit_timeout_cert) and Debug-formatted error enums / capacity integers",
       "disposition": "FALSE_POSITIVE_NON_SENSITIVE_TEST_DIAGNOSTIC",
-      "rationale": "Sink is a non-production test-assertion diagnostic; the value reaching output is synthetic fixture data / an error diagnostic / a public capacity quantity, established by inspecting the flow source and sink rather than solely because the result lies in a test file. No secret, key, or credential reaches the sink. rust/cleartext-logging reported severity is retained separately."
+      "rationale": "Sink is a non-production test-assertion diagnostic; the value reaching output is synthetic fixture data / an error diagnostic / a public capacity quantity, established by inspecting the flow source and sink rather than solely because the result lies in a test file. No secret, key, or credential reaches the sink. rust/cleartext-logging reported severity is retained separately.",
+      "reported_level": "warning",
+      "security_severity": "7.5"
     },
     {
       "configuration": "B_acceptance_testutils",
@@ -243,7 +289,9 @@
       "reported_severity": "warning",
       "inspected_evidence": "flow source crates/qbind-node/src/safety_record_store/codec.rs:546; sink is a test-assertion diagnostic (panic!/assert!/println! format message) in the D7-D14 integration test; source values are synthetic fixture TimeoutCert objects (decode_timeout_cert/admit_timeout_cert) and Debug-formatted error enums / capacity integers",
       "disposition": "FALSE_POSITIVE_NON_SENSITIVE_TEST_DIAGNOSTIC",
-      "rationale": "Sink is a non-production test-assertion diagnostic; the value reaching output is synthetic fixture data / an error diagnostic / a public capacity quantity, established by inspecting the flow source and sink rather than solely because the result lies in a test file. No secret, key, or credential reaches the sink. rust/cleartext-logging reported severity is retained separately."
+      "rationale": "Sink is a non-production test-assertion diagnostic; the value reaching output is synthetic fixture data / an error diagnostic / a public capacity quantity, established by inspecting the flow source and sink rather than solely because the result lies in a test file. No secret, key, or credential reaches the sink. rust/cleartext-logging reported severity is retained separately.",
+      "reported_level": "warning",
+      "security_severity": "7.5"
     },
     {
       "configuration": "B_acceptance_testutils",
@@ -253,7 +301,9 @@
       "reported_severity": "warning",
       "inspected_evidence": "flow source crates/qbind-node/src/safety_record_store/codec.rs:879; sink is a test-assertion diagnostic (panic!/assert!/println! format message) in the D7-D14 integration test; source values are synthetic fixture TimeoutCert objects (decode_timeout_cert/admit_timeout_cert) and Debug-formatted error enums / capacity integers",
       "disposition": "FALSE_POSITIVE_NON_SENSITIVE_TEST_DIAGNOSTIC",
-      "rationale": "Sink is a non-production test-assertion diagnostic; the value reaching output is synthetic fixture data / an error diagnostic / a public capacity quantity, established by inspecting the flow source and sink rather than solely because the result lies in a test file. No secret, key, or credential reaches the sink. rust/cleartext-logging reported severity is retained separately."
+      "rationale": "Sink is a non-production test-assertion diagnostic; the value reaching output is synthetic fixture data / an error diagnostic / a public capacity quantity, established by inspecting the flow source and sink rather than solely because the result lies in a test file. No secret, key, or credential reaches the sink. rust/cleartext-logging reported severity is retained separately.",
+      "reported_level": "warning",
+      "security_severity": "7.5"
     },
     {
       "configuration": "B_acceptance_testutils",
@@ -263,7 +313,9 @@
       "reported_severity": "warning",
       "inspected_evidence": "flow source crates/qbind-node/src/safety_record_store/codec.rs:879; sink is a test-assertion diagnostic (panic!/assert!/println! format message) in the D7-D14 integration test; source values are synthetic fixture TimeoutCert objects (decode_timeout_cert/admit_timeout_cert) and Debug-formatted error enums / capacity integers",
       "disposition": "FALSE_POSITIVE_NON_SENSITIVE_TEST_DIAGNOSTIC",
-      "rationale": "Sink is a non-production test-assertion diagnostic; the value reaching output is synthetic fixture data / an error diagnostic / a public capacity quantity, established by inspecting the flow source and sink rather than solely because the result lies in a test file. No secret, key, or credential reaches the sink. rust/cleartext-logging reported severity is retained separately."
+      "rationale": "Sink is a non-production test-assertion diagnostic; the value reaching output is synthetic fixture data / an error diagnostic / a public capacity quantity, established by inspecting the flow source and sink rather than solely because the result lies in a test file. No secret, key, or credential reaches the sink. rust/cleartext-logging reported severity is retained separately.",
+      "reported_level": "warning",
+      "security_severity": "7.5"
     },
     {
       "configuration": "B_acceptance_testutils",
@@ -273,7 +325,9 @@
       "reported_severity": "warning",
       "inspected_evidence": "flow source crates/qbind-node/src/safety_record_store/codec.rs:879; sink is a test-assertion diagnostic (panic!/assert!/println! format message) in the D7-D14 integration test; source values are synthetic fixture TimeoutCert objects (decode_timeout_cert/admit_timeout_cert) and Debug-formatted error enums / capacity integers",
       "disposition": "FALSE_POSITIVE_NON_SENSITIVE_TEST_DIAGNOSTIC",
-      "rationale": "Sink is a non-production test-assertion diagnostic; the value reaching output is synthetic fixture data / an error diagnostic / a public capacity quantity, established by inspecting the flow source and sink rather than solely because the result lies in a test file. No secret, key, or credential reaches the sink. rust/cleartext-logging reported severity is retained separately."
+      "rationale": "Sink is a non-production test-assertion diagnostic; the value reaching output is synthetic fixture data / an error diagnostic / a public capacity quantity, established by inspecting the flow source and sink rather than solely because the result lies in a test file. No secret, key, or credential reaches the sink. rust/cleartext-logging reported severity is retained separately.",
+      "reported_level": "warning",
+      "security_severity": "7.5"
     },
     {
       "configuration": "B_acceptance_testutils",
@@ -283,7 +337,9 @@
       "reported_severity": "warning",
       "inspected_evidence": "flow source crates/qbind-node/src/safety_record_store/codec.rs:879; sink is a test-assertion diagnostic (panic!/assert!/println! format message) in the D7-D14 integration test; source values are synthetic fixture TimeoutCert objects (decode_timeout_cert/admit_timeout_cert) and Debug-formatted error enums / capacity integers",
       "disposition": "FALSE_POSITIVE_NON_SENSITIVE_TEST_DIAGNOSTIC",
-      "rationale": "Sink is a non-production test-assertion diagnostic; the value reaching output is synthetic fixture data / an error diagnostic / a public capacity quantity, established by inspecting the flow source and sink rather than solely because the result lies in a test file. No secret, key, or credential reaches the sink. rust/cleartext-logging reported severity is retained separately."
+      "rationale": "Sink is a non-production test-assertion diagnostic; the value reaching output is synthetic fixture data / an error diagnostic / a public capacity quantity, established by inspecting the flow source and sink rather than solely because the result lies in a test file. No secret, key, or credential reaches the sink. rust/cleartext-logging reported severity is retained separately.",
+      "reported_level": "warning",
+      "security_severity": "7.5"
     },
     {
       "configuration": "B_acceptance_testutils",
@@ -293,7 +349,9 @@
       "reported_severity": "warning",
       "inspected_evidence": "flow source crates/qbind-node/src/safety_record_store/codec.rs:879; sink is a test-assertion diagnostic (panic!/assert!/println! format message) in the D7-D14 integration test; source values are synthetic fixture TimeoutCert objects (decode_timeout_cert/admit_timeout_cert) and Debug-formatted error enums / capacity integers",
       "disposition": "FALSE_POSITIVE_NON_SENSITIVE_TEST_DIAGNOSTIC",
-      "rationale": "Sink is a non-production test-assertion diagnostic; the value reaching output is synthetic fixture data / an error diagnostic / a public capacity quantity, established by inspecting the flow source and sink rather than solely because the result lies in a test file. No secret, key, or credential reaches the sink. rust/cleartext-logging reported severity is retained separately."
+      "rationale": "Sink is a non-production test-assertion diagnostic; the value reaching output is synthetic fixture data / an error diagnostic / a public capacity quantity, established by inspecting the flow source and sink rather than solely because the result lies in a test file. No secret, key, or credential reaches the sink. rust/cleartext-logging reported severity is retained separately.",
+      "reported_level": "warning",
+      "security_severity": "7.5"
     },
     {
       "configuration": "B_acceptance_testutils",
@@ -303,7 +361,9 @@
       "reported_severity": "warning",
       "inspected_evidence": "flow source crates/qbind-node/src/safety_record_store/codec.rs:546; sink is a test-assertion diagnostic (panic!/assert!/println! format message) in the D7-D14 integration test; source values are synthetic fixture TimeoutCert objects (decode_timeout_cert/admit_timeout_cert) and Debug-formatted error enums / capacity integers",
       "disposition": "FALSE_POSITIVE_NON_SENSITIVE_TEST_DIAGNOSTIC",
-      "rationale": "Sink is a non-production test-assertion diagnostic; the value reaching output is synthetic fixture data / an error diagnostic / a public capacity quantity, established by inspecting the flow source and sink rather than solely because the result lies in a test file. No secret, key, or credential reaches the sink. rust/cleartext-logging reported severity is retained separately."
+      "rationale": "Sink is a non-production test-assertion diagnostic; the value reaching output is synthetic fixture data / an error diagnostic / a public capacity quantity, established by inspecting the flow source and sink rather than solely because the result lies in a test file. No secret, key, or credential reaches the sink. rust/cleartext-logging reported severity is retained separately.",
+      "reported_level": "warning",
+      "security_severity": "7.5"
     },
     {
       "configuration": "B_acceptance_testutils",
@@ -313,7 +373,9 @@
       "reported_severity": "warning",
       "inspected_evidence": "flow source crates/qbind-node/src/safety_record_store/codec.rs:546; sink is a test-assertion diagnostic (panic!/assert!/println! format message) in the D7-D14 integration test; source values are synthetic fixture TimeoutCert objects (decode_timeout_cert/admit_timeout_cert) and Debug-formatted error enums / capacity integers",
       "disposition": "FALSE_POSITIVE_NON_SENSITIVE_TEST_DIAGNOSTIC",
-      "rationale": "Sink is a non-production test-assertion diagnostic; the value reaching output is synthetic fixture data / an error diagnostic / a public capacity quantity, established by inspecting the flow source and sink rather than solely because the result lies in a test file. No secret, key, or credential reaches the sink. rust/cleartext-logging reported severity is retained separately."
+      "rationale": "Sink is a non-production test-assertion diagnostic; the value reaching output is synthetic fixture data / an error diagnostic / a public capacity quantity, established by inspecting the flow source and sink rather than solely because the result lies in a test file. No secret, key, or credential reaches the sink. rust/cleartext-logging reported severity is retained separately.",
+      "reported_level": "warning",
+      "security_severity": "7.5"
     },
     {
       "configuration": "B_acceptance_testutils",
@@ -323,7 +385,9 @@
       "reported_severity": "warning",
       "inspected_evidence": "flow source crates/qbind-node/src/safety_record_store/codec.rs:546; sink is a test-assertion diagnostic (panic!/assert!/println! format message) in the D7-D14 integration test; source values are synthetic fixture TimeoutCert objects (decode_timeout_cert/admit_timeout_cert) and Debug-formatted error enums / capacity integers",
       "disposition": "FALSE_POSITIVE_NON_SENSITIVE_TEST_DIAGNOSTIC",
-      "rationale": "Sink is a non-production test-assertion diagnostic; the value reaching output is synthetic fixture data / an error diagnostic / a public capacity quantity, established by inspecting the flow source and sink rather than solely because the result lies in a test file. No secret, key, or credential reaches the sink. rust/cleartext-logging reported severity is retained separately."
+      "rationale": "Sink is a non-production test-assertion diagnostic; the value reaching output is synthetic fixture data / an error diagnostic / a public capacity quantity, established by inspecting the flow source and sink rather than solely because the result lies in a test file. No secret, key, or credential reaches the sink. rust/cleartext-logging reported severity is retained separately.",
+      "reported_level": "warning",
+      "security_severity": "7.5"
     },
     {
       "configuration": "B_acceptance_testutils",
@@ -333,7 +397,9 @@
       "reported_severity": "warning",
       "inspected_evidence": "flow source crates/qbind-node/src/safety_record_store/codec.rs:546; sink is a test-assertion diagnostic (panic!/assert!/println! format message) in the D7-D14 integration test; source values are synthetic fixture TimeoutCert objects (decode_timeout_cert/admit_timeout_cert) and Debug-formatted error enums / capacity integers",
       "disposition": "FALSE_POSITIVE_NON_SENSITIVE_TEST_DIAGNOSTIC",
-      "rationale": "Sink is a non-production test-assertion diagnostic; the value reaching output is synthetic fixture data / an error diagnostic / a public capacity quantity, established by inspecting the flow source and sink rather than solely because the result lies in a test file. No secret, key, or credential reaches the sink. rust/cleartext-logging reported severity is retained separately."
+      "rationale": "Sink is a non-production test-assertion diagnostic; the value reaching output is synthetic fixture data / an error diagnostic / a public capacity quantity, established by inspecting the flow source and sink rather than solely because the result lies in a test file. No secret, key, or credential reaches the sink. rust/cleartext-logging reported severity is retained separately.",
+      "reported_level": "warning",
+      "security_severity": "7.5"
     },
     {
       "configuration": "B_acceptance_testutils",
@@ -343,7 +409,9 @@
       "reported_severity": "warning",
       "inspected_evidence": "flow source crates/qbind-node/src/safety_record_store/codec.rs:546; sink is a test-assertion diagnostic (panic!/assert!/println! format message) in the D7-D14 integration test; source values are synthetic fixture TimeoutCert objects (decode_timeout_cert/admit_timeout_cert) and Debug-formatted error enums / capacity integers",
       "disposition": "FALSE_POSITIVE_NON_SENSITIVE_TEST_DIAGNOSTIC",
-      "rationale": "Sink is a non-production test-assertion diagnostic; the value reaching output is synthetic fixture data / an error diagnostic / a public capacity quantity, established by inspecting the flow source and sink rather than solely because the result lies in a test file. No secret, key, or credential reaches the sink. rust/cleartext-logging reported severity is retained separately."
+      "rationale": "Sink is a non-production test-assertion diagnostic; the value reaching output is synthetic fixture data / an error diagnostic / a public capacity quantity, established by inspecting the flow source and sink rather than solely because the result lies in a test file. No secret, key, or credential reaches the sink. rust/cleartext-logging reported severity is retained separately.",
+      "reported_level": "warning",
+      "security_severity": "7.5"
     },
     {
       "configuration": "B_acceptance_testutils",
@@ -353,7 +421,9 @@
       "reported_severity": "warning",
       "inspected_evidence": "flow source crates/qbind-node/src/safety_record_store/codec.rs:546; sink is a test-assertion diagnostic (panic!/assert!/println! format message) in the D7-D14 integration test; source values are synthetic fixture TimeoutCert objects (decode_timeout_cert/admit_timeout_cert) and Debug-formatted error enums / capacity integers",
       "disposition": "FALSE_POSITIVE_NON_SENSITIVE_TEST_DIAGNOSTIC",
-      "rationale": "Sink is a non-production test-assertion diagnostic; the value reaching output is synthetic fixture data / an error diagnostic / a public capacity quantity, established by inspecting the flow source and sink rather than solely because the result lies in a test file. No secret, key, or credential reaches the sink. rust/cleartext-logging reported severity is retained separately."
+      "rationale": "Sink is a non-production test-assertion diagnostic; the value reaching output is synthetic fixture data / an error diagnostic / a public capacity quantity, established by inspecting the flow source and sink rather than solely because the result lies in a test file. No secret, key, or credential reaches the sink. rust/cleartext-logging reported severity is retained separately.",
+      "reported_level": "warning",
+      "security_severity": "7.5"
     },
     {
       "configuration": "B_acceptance_testutils",
@@ -363,7 +433,9 @@
       "reported_severity": "warning",
       "inspected_evidence": "flow source crates/qbind-node/src/safety_record_store/codec.rs:546; sink is a test-assertion diagnostic (panic!/assert!/println! format message) in the D7-D14 integration test; source values are synthetic fixture TimeoutCert objects (decode_timeout_cert/admit_timeout_cert) and Debug-formatted error enums / capacity integers",
       "disposition": "FALSE_POSITIVE_NON_SENSITIVE_TEST_DIAGNOSTIC",
-      "rationale": "Sink is a non-production test-assertion diagnostic; the value reaching output is synthetic fixture data / an error diagnostic / a public capacity quantity, established by inspecting the flow source and sink rather than solely because the result lies in a test file. No secret, key, or credential reaches the sink. rust/cleartext-logging reported severity is retained separately."
+      "rationale": "Sink is a non-production test-assertion diagnostic; the value reaching output is synthetic fixture data / an error diagnostic / a public capacity quantity, established by inspecting the flow source and sink rather than solely because the result lies in a test file. No secret, key, or credential reaches the sink. rust/cleartext-logging reported severity is retained separately.",
+      "reported_level": "warning",
+      "security_severity": "7.5"
     },
     {
       "configuration": "B_acceptance_testutils",
@@ -373,7 +445,9 @@
       "reported_severity": "warning",
       "inspected_evidence": "flow source crates/qbind-node/src/safety_record_store/codec.rs:546; sink is a test-assertion diagnostic (panic!/assert!/println! format message) in the D7-D14 integration test; source values are synthetic fixture TimeoutCert objects (decode_timeout_cert/admit_timeout_cert) and Debug-formatted error enums / capacity integers",
       "disposition": "FALSE_POSITIVE_NON_SENSITIVE_TEST_DIAGNOSTIC",
-      "rationale": "Sink is a non-production test-assertion diagnostic; the value reaching output is synthetic fixture data / an error diagnostic / a public capacity quantity, established by inspecting the flow source and sink rather than solely because the result lies in a test file. No secret, key, or credential reaches the sink. rust/cleartext-logging reported severity is retained separately."
+      "rationale": "Sink is a non-production test-assertion diagnostic; the value reaching output is synthetic fixture data / an error diagnostic / a public capacity quantity, established by inspecting the flow source and sink rather than solely because the result lies in a test file. No secret, key, or credential reaches the sink. rust/cleartext-logging reported severity is retained separately.",
+      "reported_level": "warning",
+      "security_severity": "7.5"
     },
     {
       "configuration": "B_acceptance_testutils",
@@ -383,7 +457,9 @@
       "reported_severity": "warning",
       "inspected_evidence": "flow source crates/qbind-node/src/safety_record_store/codec.rs:546; sink is a test-assertion diagnostic (panic!/assert!/println! format message) in the D7-D14 integration test; source values are synthetic fixture TimeoutCert objects (decode_timeout_cert/admit_timeout_cert) and Debug-formatted error enums / capacity integers",
       "disposition": "FALSE_POSITIVE_NON_SENSITIVE_TEST_DIAGNOSTIC",
-      "rationale": "Sink is a non-production test-assertion diagnostic; the value reaching output is synthetic fixture data / an error diagnostic / a public capacity quantity, established by inspecting the flow source and sink rather than solely because the result lies in a test file. No secret, key, or credential reaches the sink. rust/cleartext-logging reported severity is retained separately."
+      "rationale": "Sink is a non-production test-assertion diagnostic; the value reaching output is synthetic fixture data / an error diagnostic / a public capacity quantity, established by inspecting the flow source and sink rather than solely because the result lies in a test file. No secret, key, or credential reaches the sink. rust/cleartext-logging reported severity is retained separately.",
+      "reported_level": "warning",
+      "security_severity": "7.5"
     },
     {
       "configuration": "B_acceptance_testutils",
@@ -393,7 +469,9 @@
       "reported_severity": "warning",
       "inspected_evidence": "flow source crates/qbind-node/src/safety_record_store/codec.rs:546; sink is a test-assertion diagnostic (panic!/assert!/println! format message) in the D7-D14 integration test; source values are synthetic fixture TimeoutCert objects (decode_timeout_cert/admit_timeout_cert) and Debug-formatted error enums / capacity integers",
       "disposition": "FALSE_POSITIVE_NON_SENSITIVE_TEST_DIAGNOSTIC",
-      "rationale": "Sink is a non-production test-assertion diagnostic; the value reaching output is synthetic fixture data / an error diagnostic / a public capacity quantity, established by inspecting the flow source and sink rather than solely because the result lies in a test file. No secret, key, or credential reaches the sink. rust/cleartext-logging reported severity is retained separately."
+      "rationale": "Sink is a non-production test-assertion diagnostic; the value reaching output is synthetic fixture data / an error diagnostic / a public capacity quantity, established by inspecting the flow source and sink rather than solely because the result lies in a test file. No secret, key, or credential reaches the sink. rust/cleartext-logging reported severity is retained separately.",
+      "reported_level": "warning",
+      "security_severity": "7.5"
     },
     {
       "configuration": "B_acceptance_testutils",
@@ -403,7 +481,9 @@
       "reported_severity": "warning",
       "inspected_evidence": "flow source crates/qbind-node/src/safety_record_store/codec.rs:546; sink is a test-assertion diagnostic (panic!/assert!/println! format message) in the D7-D14 integration test; source values are synthetic fixture TimeoutCert objects (decode_timeout_cert/admit_timeout_cert) and Debug-formatted error enums / capacity integers",
       "disposition": "FALSE_POSITIVE_NON_SENSITIVE_TEST_DIAGNOSTIC",
-      "rationale": "Sink is a non-production test-assertion diagnostic; the value reaching output is synthetic fixture data / an error diagnostic / a public capacity quantity, established by inspecting the flow source and sink rather than solely because the result lies in a test file. No secret, key, or credential reaches the sink. rust/cleartext-logging reported severity is retained separately."
+      "rationale": "Sink is a non-production test-assertion diagnostic; the value reaching output is synthetic fixture data / an error diagnostic / a public capacity quantity, established by inspecting the flow source and sink rather than solely because the result lies in a test file. No secret, key, or credential reaches the sink. rust/cleartext-logging reported severity is retained separately.",
+      "reported_level": "warning",
+      "security_severity": "7.5"
     },
     {
       "configuration": "B_acceptance_testutils",
@@ -413,7 +493,9 @@
       "reported_severity": "warning",
       "inspected_evidence": "flow source crates/qbind-node/src/safety_record_store/codec.rs:546; sink is a test-assertion diagnostic (panic!/assert!/println! format message) in the D7-D14 integration test; source values are synthetic fixture TimeoutCert objects (decode_timeout_cert/admit_timeout_cert) and Debug-formatted error enums / capacity integers",
       "disposition": "FALSE_POSITIVE_NON_SENSITIVE_TEST_DIAGNOSTIC",
-      "rationale": "Sink is a non-production test-assertion diagnostic; the value reaching output is synthetic fixture data / an error diagnostic / a public capacity quantity, established by inspecting the flow source and sink rather than solely because the result lies in a test file. No secret, key, or credential reaches the sink. rust/cleartext-logging reported severity is retained separately."
+      "rationale": "Sink is a non-production test-assertion diagnostic; the value reaching output is synthetic fixture data / an error diagnostic / a public capacity quantity, established by inspecting the flow source and sink rather than solely because the result lies in a test file. No secret, key, or credential reaches the sink. rust/cleartext-logging reported severity is retained separately.",
+      "reported_level": "warning",
+      "security_severity": "7.5"
     },
     {
       "configuration": "B_acceptance_testutils",
@@ -423,7 +505,9 @@
       "reported_severity": "warning",
       "inspected_evidence": "flow source crates/qbind-node/src/safety_record_store/codec.rs:546; sink is a test-assertion diagnostic (panic!/assert!/println! format message) in the D7-D14 integration test; source values are synthetic fixture TimeoutCert objects (decode_timeout_cert/admit_timeout_cert) and Debug-formatted error enums / capacity integers",
       "disposition": "FALSE_POSITIVE_NON_SENSITIVE_TEST_DIAGNOSTIC",
-      "rationale": "Sink is a non-production test-assertion diagnostic; the value reaching output is synthetic fixture data / an error diagnostic / a public capacity quantity, established by inspecting the flow source and sink rather than solely because the result lies in a test file. No secret, key, or credential reaches the sink. rust/cleartext-logging reported severity is retained separately."
+      "rationale": "Sink is a non-production test-assertion diagnostic; the value reaching output is synthetic fixture data / an error diagnostic / a public capacity quantity, established by inspecting the flow source and sink rather than solely because the result lies in a test file. No secret, key, or credential reaches the sink. rust/cleartext-logging reported severity is retained separately.",
+      "reported_level": "warning",
+      "security_severity": "7.5"
     },
     {
       "configuration": "B_acceptance_testutils",
@@ -433,7 +517,9 @@
       "reported_severity": "warning",
       "inspected_evidence": "flow source crates/qbind-node/src/safety_record_store/codec.rs:546; sink is a test-assertion diagnostic (panic!/assert!/println! format message) in the D7-D14 integration test; source values are synthetic fixture TimeoutCert objects (decode_timeout_cert/admit_timeout_cert) and Debug-formatted error enums / capacity integers",
       "disposition": "FALSE_POSITIVE_NON_SENSITIVE_TEST_DIAGNOSTIC",
-      "rationale": "Sink is a non-production test-assertion diagnostic; the value reaching output is synthetic fixture data / an error diagnostic / a public capacity quantity, established by inspecting the flow source and sink rather than solely because the result lies in a test file. No secret, key, or credential reaches the sink. rust/cleartext-logging reported severity is retained separately."
+      "rationale": "Sink is a non-production test-assertion diagnostic; the value reaching output is synthetic fixture data / an error diagnostic / a public capacity quantity, established by inspecting the flow source and sink rather than solely because the result lies in a test file. No secret, key, or credential reaches the sink. rust/cleartext-logging reported severity is retained separately.",
+      "reported_level": "warning",
+      "security_severity": "7.5"
     },
     {
       "configuration": "B_acceptance_testutils",
@@ -443,7 +529,9 @@
       "reported_severity": "warning",
       "inspected_evidence": "flow source crates/qbind-node/src/safety_record_store/codec.rs:546; sink is a test-assertion diagnostic (panic!/assert!/println! format message) in the D7-D14 integration test; source values are synthetic fixture TimeoutCert objects (decode_timeout_cert/admit_timeout_cert) and Debug-formatted error enums / capacity integers",
       "disposition": "FALSE_POSITIVE_NON_SENSITIVE_TEST_DIAGNOSTIC",
-      "rationale": "Sink is a non-production test-assertion diagnostic; the value reaching output is synthetic fixture data / an error diagnostic / a public capacity quantity, established by inspecting the flow source and sink rather than solely because the result lies in a test file. No secret, key, or credential reaches the sink. rust/cleartext-logging reported severity is retained separately."
+      "rationale": "Sink is a non-production test-assertion diagnostic; the value reaching output is synthetic fixture data / an error diagnostic / a public capacity quantity, established by inspecting the flow source and sink rather than solely because the result lies in a test file. No secret, key, or credential reaches the sink. rust/cleartext-logging reported severity is retained separately.",
+      "reported_level": "warning",
+      "security_severity": "7.5"
     },
     {
       "configuration": "B_acceptance_testutils",
@@ -453,7 +541,9 @@
       "reported_severity": "warning",
       "inspected_evidence": "flow source crates/qbind-node/src/safety_record_store/codec.rs:546; sink is a test-assertion diagnostic (panic!/assert!/println! format message) in the D7-D14 integration test; source values are synthetic fixture TimeoutCert objects (decode_timeout_cert/admit_timeout_cert) and Debug-formatted error enums / capacity integers",
       "disposition": "FALSE_POSITIVE_NON_SENSITIVE_TEST_DIAGNOSTIC",
-      "rationale": "Sink is a non-production test-assertion diagnostic; the value reaching output is synthetic fixture data / an error diagnostic / a public capacity quantity, established by inspecting the flow source and sink rather than solely because the result lies in a test file. No secret, key, or credential reaches the sink. rust/cleartext-logging reported severity is retained separately."
+      "rationale": "Sink is a non-production test-assertion diagnostic; the value reaching output is synthetic fixture data / an error diagnostic / a public capacity quantity, established by inspecting the flow source and sink rather than solely because the result lies in a test file. No secret, key, or credential reaches the sink. rust/cleartext-logging reported severity is retained separately.",
+      "reported_level": "warning",
+      "security_severity": "7.5"
     },
     {
       "configuration": "B_acceptance_testutils",
@@ -463,7 +553,9 @@
       "reported_severity": "warning",
       "inspected_evidence": "flow source crates/qbind-node/src/safety_record_store/codec.rs:546; sink is a test-assertion diagnostic (panic!/assert!/println! format message) in the D7-D14 integration test; source values are synthetic fixture TimeoutCert objects (decode_timeout_cert/admit_timeout_cert) and Debug-formatted error enums / capacity integers",
       "disposition": "FALSE_POSITIVE_NON_SENSITIVE_TEST_DIAGNOSTIC",
-      "rationale": "Sink is a non-production test-assertion diagnostic; the value reaching output is synthetic fixture data / an error diagnostic / a public capacity quantity, established by inspecting the flow source and sink rather than solely because the result lies in a test file. No secret, key, or credential reaches the sink. rust/cleartext-logging reported severity is retained separately."
+      "rationale": "Sink is a non-production test-assertion diagnostic; the value reaching output is synthetic fixture data / an error diagnostic / a public capacity quantity, established by inspecting the flow source and sink rather than solely because the result lies in a test file. No secret, key, or credential reaches the sink. rust/cleartext-logging reported severity is retained separately.",
+      "reported_level": "warning",
+      "security_severity": "7.5"
     },
     {
       "configuration": "B_acceptance_testutils",
@@ -473,7 +565,9 @@
       "reported_severity": "warning",
       "inspected_evidence": "flow source crates/qbind-node/src/safety_record_store/codec.rs:546; sink is a test-assertion diagnostic (panic!/assert!/println! format message) in the D7-D14 integration test; source values are synthetic fixture TimeoutCert objects (decode_timeout_cert/admit_timeout_cert) and Debug-formatted error enums / capacity integers",
       "disposition": "FALSE_POSITIVE_NON_SENSITIVE_TEST_DIAGNOSTIC",
-      "rationale": "Sink is a non-production test-assertion diagnostic; the value reaching output is synthetic fixture data / an error diagnostic / a public capacity quantity, established by inspecting the flow source and sink rather than solely because the result lies in a test file. No secret, key, or credential reaches the sink. rust/cleartext-logging reported severity is retained separately."
+      "rationale": "Sink is a non-production test-assertion diagnostic; the value reaching output is synthetic fixture data / an error diagnostic / a public capacity quantity, established by inspecting the flow source and sink rather than solely because the result lies in a test file. No secret, key, or credential reaches the sink. rust/cleartext-logging reported severity is retained separately.",
+      "reported_level": "warning",
+      "security_severity": "7.5"
     },
     {
       "configuration": "B_acceptance_testutils",
@@ -483,7 +577,9 @@
       "reported_severity": "warning",
       "inspected_evidence": "flow source crates/qbind-node/src/safety_record_store/codec.rs:546; sink is a test-assertion diagnostic (panic!/assert!/println! format message) in the D7-D14 integration test; source values are synthetic fixture TimeoutCert objects (decode_timeout_cert/admit_timeout_cert) and Debug-formatted error enums / capacity integers",
       "disposition": "FALSE_POSITIVE_NON_SENSITIVE_TEST_DIAGNOSTIC",
-      "rationale": "Sink is a non-production test-assertion diagnostic; the value reaching output is synthetic fixture data / an error diagnostic / a public capacity quantity, established by inspecting the flow source and sink rather than solely because the result lies in a test file. No secret, key, or credential reaches the sink. rust/cleartext-logging reported severity is retained separately."
+      "rationale": "Sink is a non-production test-assertion diagnostic; the value reaching output is synthetic fixture data / an error diagnostic / a public capacity quantity, established by inspecting the flow source and sink rather than solely because the result lies in a test file. No secret, key, or credential reaches the sink. rust/cleartext-logging reported severity is retained separately.",
+      "reported_level": "warning",
+      "security_severity": "7.5"
     },
     {
       "configuration": "B_acceptance_testutils",
@@ -493,7 +589,9 @@
       "reported_severity": "warning",
       "inspected_evidence": "flow source crates/qbind-node/src/safety_record_store/codec.rs:546; sink is a test-assertion diagnostic (panic!/assert!/println! format message) in the D7-D14 integration test; source values are synthetic fixture TimeoutCert objects (decode_timeout_cert/admit_timeout_cert) and Debug-formatted error enums / capacity integers",
       "disposition": "FALSE_POSITIVE_NON_SENSITIVE_TEST_DIAGNOSTIC",
-      "rationale": "Sink is a non-production test-assertion diagnostic; the value reaching output is synthetic fixture data / an error diagnostic / a public capacity quantity, established by inspecting the flow source and sink rather than solely because the result lies in a test file. No secret, key, or credential reaches the sink. rust/cleartext-logging reported severity is retained separately."
+      "rationale": "Sink is a non-production test-assertion diagnostic; the value reaching output is synthetic fixture data / an error diagnostic / a public capacity quantity, established by inspecting the flow source and sink rather than solely because the result lies in a test file. No secret, key, or credential reaches the sink. rust/cleartext-logging reported severity is retained separately.",
+      "reported_level": "warning",
+      "security_severity": "7.5"
     },
     {
       "configuration": "B_acceptance_testutils",
@@ -503,7 +601,9 @@
       "reported_severity": "warning",
       "inspected_evidence": "flow source crates/qbind-node/src/safety_record_store/codec.rs:546; sink is a test-assertion diagnostic (panic!/assert!/println! format message) in the D7-D14 integration test; source values are synthetic fixture TimeoutCert objects (decode_timeout_cert/admit_timeout_cert) and Debug-formatted error enums / capacity integers",
       "disposition": "FALSE_POSITIVE_NON_SENSITIVE_TEST_DIAGNOSTIC",
-      "rationale": "Sink is a non-production test-assertion diagnostic; the value reaching output is synthetic fixture data / an error diagnostic / a public capacity quantity, established by inspecting the flow source and sink rather than solely because the result lies in a test file. No secret, key, or credential reaches the sink. rust/cleartext-logging reported severity is retained separately."
+      "rationale": "Sink is a non-production test-assertion diagnostic; the value reaching output is synthetic fixture data / an error diagnostic / a public capacity quantity, established by inspecting the flow source and sink rather than solely because the result lies in a test file. No secret, key, or credential reaches the sink. rust/cleartext-logging reported severity is retained separately.",
+      "reported_level": "warning",
+      "security_severity": "7.5"
     },
     {
       "configuration": "B_acceptance_testutils",
@@ -513,7 +613,9 @@
       "reported_severity": "warning",
       "inspected_evidence": "flow source crates/qbind-node/src/safety_record_store/codec.rs:546; sink is a test-assertion diagnostic (panic!/assert!/println! format message) in the D7-D14 integration test; source values are synthetic fixture TimeoutCert objects (decode_timeout_cert/admit_timeout_cert) and Debug-formatted error enums / capacity integers",
       "disposition": "FALSE_POSITIVE_NON_SENSITIVE_TEST_DIAGNOSTIC",
-      "rationale": "Sink is a non-production test-assertion diagnostic; the value reaching output is synthetic fixture data / an error diagnostic / a public capacity quantity, established by inspecting the flow source and sink rather than solely because the result lies in a test file. No secret, key, or credential reaches the sink. rust/cleartext-logging reported severity is retained separately."
+      "rationale": "Sink is a non-production test-assertion diagnostic; the value reaching output is synthetic fixture data / an error diagnostic / a public capacity quantity, established by inspecting the flow source and sink rather than solely because the result lies in a test file. No secret, key, or credential reaches the sink. rust/cleartext-logging reported severity is retained separately.",
+      "reported_level": "warning",
+      "security_severity": "7.5"
     },
     {
       "configuration": "B_acceptance_testutils",
@@ -523,7 +625,9 @@
       "reported_severity": "warning",
       "inspected_evidence": "codec.rs:413-417 debug_assert!(cert.capacity()==cert_cap, \"evidence cert backing capacity {} diverged from the admitted cap {cert_cap}\"); value reaching sink is the integer capacity bound cert_cap/cert.capacity(); debug_assert! is compiled out in release builds",
       "disposition": "FALSE_POSITIVE_NON_SENSITIVE",
-      "rationale": "Value is a non-sensitive integer capacity bound (public quantity), not key/credential material; emitted only in a debug_assert! divergence message removed from release binaries. rust/cleartext-logging reported severity (warning) is retained; this per-result assessment is a false positive and the frozen implementation is not modified under this task."
+      "rationale": "Value is a non-sensitive integer capacity bound (public quantity), not key/credential material; emitted only in a debug_assert! divergence message removed from release binaries. rust/cleartext-logging reported severity (warning) is retained; this per-result assessment is a false positive and the frozen implementation is not modified under this task.",
+      "reported_level": "warning",
+      "security_severity": "7.5"
     }
   ],
   "grouped": [
@@ -538,7 +642,9 @@
           "location": "crates/qbind-node/tests/run_422_d7d14_safety_record_store_tests.rs:8625",
           "rule": "rust/cleartext-logging",
           "reported_severity": "warning",
-          "inspected_evidence": "flow source crates/qbind-node/src/safety_record_store/codec.rs:546; sink is a test-assertion diagnostic (panic!/assert!/println! format message) in the D7-D14 integration test; source values are synthetic fixture TimeoutCert objects (decode_timeout_cert/admit_timeout_cert) and Debug-formatted error enums / capacity integers"
+          "inspected_evidence": "flow source crates/qbind-node/src/safety_record_store/codec.rs:546; sink is a test-assertion diagnostic (panic!/assert!/println! format message) in the D7-D14 integration test; source values are synthetic fixture TimeoutCert objects (decode_timeout_cert/admit_timeout_cert) and Debug-formatted error enums / capacity integers",
+          "reported_level": "warning",
+          "security_severity": "7.5"
         }
       ]
     },
@@ -553,7 +659,9 @@
           "location": "crates/qbind-node/src/safety_record_store/codec.rs:415",
           "rule": "rust/cleartext-logging",
           "reported_severity": "warning",
-          "inspected_evidence": "codec.rs:413-417 debug_assert!(cert.capacity()==cert_cap, \"evidence cert backing capacity {} diverged from the admitted cap {cert_cap}\"); value reaching sink is the integer capacity bound cert_cap/cert.capacity(); debug_assert! is compiled out in release builds"
+          "inspected_evidence": "codec.rs:413-417 debug_assert!(cert.capacity()==cert_cap, \"evidence cert backing capacity {} diverged from the admitted cap {cert_cap}\"); value reaching sink is the integer capacity bound cert_cap/cert.capacity(); debug_assert! is compiled out in release builds",
+          "reported_level": "warning",
+          "security_severity": "7.5"
         }
       ]
     },
@@ -568,343 +676,441 @@
           "location": "crates/qbind-node/tests/run_422_d7d14_safety_record_store_tests.rs:934",
           "rule": "rust/cleartext-logging",
           "reported_severity": "warning",
-          "inspected_evidence": "flow source crates/qbind-node/src/safety_record_store/codec.rs:879; sink is a test-assertion diagnostic (panic!/assert!/println! format message) in the D7-D14 integration test; source values are synthetic fixture TimeoutCert objects (decode_timeout_cert/admit_timeout_cert) and Debug-formatted error enums / capacity integers"
+          "inspected_evidence": "flow source crates/qbind-node/src/safety_record_store/codec.rs:879; sink is a test-assertion diagnostic (panic!/assert!/println! format message) in the D7-D14 integration test; source values are synthetic fixture TimeoutCert objects (decode_timeout_cert/admit_timeout_cert) and Debug-formatted error enums / capacity integers",
+          "reported_level": "warning",
+          "security_severity": "7.5"
         },
         {
           "result_id": "B_acceptance_testutils#result[39]",
           "location": "crates/qbind-node/tests/run_422_d7d14_safety_record_store_tests.rs:1366",
           "rule": "rust/cleartext-logging",
           "reported_severity": "warning",
-          "inspected_evidence": "flow source crates/qbind-node/src/safety_record_store/codec.rs:879; sink is a test-assertion diagnostic (panic!/assert!/println! format message) in the D7-D14 integration test; source values are synthetic fixture TimeoutCert objects (decode_timeout_cert/admit_timeout_cert) and Debug-formatted error enums / capacity integers"
+          "inspected_evidence": "flow source crates/qbind-node/src/safety_record_store/codec.rs:879; sink is a test-assertion diagnostic (panic!/assert!/println! format message) in the D7-D14 integration test; source values are synthetic fixture TimeoutCert objects (decode_timeout_cert/admit_timeout_cert) and Debug-formatted error enums / capacity integers",
+          "reported_level": "warning",
+          "security_severity": "7.5"
         },
         {
           "result_id": "B_acceptance_testutils#result[40]",
           "location": "crates/qbind-node/tests/run_422_d7d14_safety_record_store_tests.rs:1387",
           "rule": "rust/cleartext-logging",
           "reported_severity": "warning",
-          "inspected_evidence": "flow source crates/qbind-node/src/safety_record_store/codec.rs:879; sink is a test-assertion diagnostic (panic!/assert!/println! format message) in the D7-D14 integration test; source values are synthetic fixture TimeoutCert objects (decode_timeout_cert/admit_timeout_cert) and Debug-formatted error enums / capacity integers"
+          "inspected_evidence": "flow source crates/qbind-node/src/safety_record_store/codec.rs:879; sink is a test-assertion diagnostic (panic!/assert!/println! format message) in the D7-D14 integration test; source values are synthetic fixture TimeoutCert objects (decode_timeout_cert/admit_timeout_cert) and Debug-formatted error enums / capacity integers",
+          "reported_level": "warning",
+          "security_severity": "7.5"
         },
         {
           "result_id": "B_acceptance_testutils#result[41]",
           "location": "crates/qbind-node/tests/run_422_d7d14_safety_record_store_tests.rs:1411",
           "rule": "rust/cleartext-logging",
           "reported_severity": "warning",
-          "inspected_evidence": "flow source crates/qbind-node/src/safety_record_store/codec.rs:546; sink is a test-assertion diagnostic (panic!/assert!/println! format message) in the D7-D14 integration test; source values are synthetic fixture TimeoutCert objects (decode_timeout_cert/admit_timeout_cert) and Debug-formatted error enums / capacity integers"
+          "inspected_evidence": "flow source crates/qbind-node/src/safety_record_store/codec.rs:546; sink is a test-assertion diagnostic (panic!/assert!/println! format message) in the D7-D14 integration test; source values are synthetic fixture TimeoutCert objects (decode_timeout_cert/admit_timeout_cert) and Debug-formatted error enums / capacity integers",
+          "reported_level": "warning",
+          "security_severity": "7.5"
         },
         {
           "result_id": "B_acceptance_testutils#result[42]",
           "location": "crates/qbind-node/tests/run_422_d7d14_safety_record_store_tests.rs:2035",
           "rule": "rust/cleartext-logging",
           "reported_severity": "warning",
-          "inspected_evidence": "flow source crates/qbind-node/src/safety_record_store/codec.rs:546; sink is a test-assertion diagnostic (panic!/assert!/println! format message) in the D7-D14 integration test; source values are synthetic fixture TimeoutCert objects (decode_timeout_cert/admit_timeout_cert) and Debug-formatted error enums / capacity integers"
+          "inspected_evidence": "flow source crates/qbind-node/src/safety_record_store/codec.rs:546; sink is a test-assertion diagnostic (panic!/assert!/println! format message) in the D7-D14 integration test; source values are synthetic fixture TimeoutCert objects (decode_timeout_cert/admit_timeout_cert) and Debug-formatted error enums / capacity integers",
+          "reported_level": "warning",
+          "security_severity": "7.5"
         },
         {
           "result_id": "B_acceptance_testutils#result[43]",
           "location": "crates/qbind-node/tests/run_422_d7d14_safety_record_store_tests.rs:2539",
           "rule": "rust/cleartext-logging",
           "reported_severity": "warning",
-          "inspected_evidence": "flow source crates/qbind-node/src/safety_record_store/codec.rs:546; sink is a test-assertion diagnostic (panic!/assert!/println! format message) in the D7-D14 integration test; source values are synthetic fixture TimeoutCert objects (decode_timeout_cert/admit_timeout_cert) and Debug-formatted error enums / capacity integers"
+          "inspected_evidence": "flow source crates/qbind-node/src/safety_record_store/codec.rs:546; sink is a test-assertion diagnostic (panic!/assert!/println! format message) in the D7-D14 integration test; source values are synthetic fixture TimeoutCert objects (decode_timeout_cert/admit_timeout_cert) and Debug-formatted error enums / capacity integers",
+          "reported_level": "warning",
+          "security_severity": "7.5"
         },
         {
           "result_id": "B_acceptance_testutils#result[44]",
           "location": "crates/qbind-node/tests/run_422_d7d14_safety_record_store_tests.rs:2564",
           "rule": "rust/cleartext-logging",
           "reported_severity": "warning",
-          "inspected_evidence": "flow source crates/qbind-node/src/safety_record_store/codec.rs:546; sink is a test-assertion diagnostic (panic!/assert!/println! format message) in the D7-D14 integration test; source values are synthetic fixture TimeoutCert objects (decode_timeout_cert/admit_timeout_cert) and Debug-formatted error enums / capacity integers"
+          "inspected_evidence": "flow source crates/qbind-node/src/safety_record_store/codec.rs:546; sink is a test-assertion diagnostic (panic!/assert!/println! format message) in the D7-D14 integration test; source values are synthetic fixture TimeoutCert objects (decode_timeout_cert/admit_timeout_cert) and Debug-formatted error enums / capacity integers",
+          "reported_level": "warning",
+          "security_severity": "7.5"
         },
         {
           "result_id": "B_acceptance_testutils#result[45]",
           "location": "crates/qbind-node/tests/run_422_d7d14_safety_record_store_tests.rs:2602",
           "rule": "rust/cleartext-logging",
           "reported_severity": "warning",
-          "inspected_evidence": "flow source crates/qbind-node/src/safety_record_store/codec.rs:546; sink is a test-assertion diagnostic (panic!/assert!/println! format message) in the D7-D14 integration test; source values are synthetic fixture TimeoutCert objects (decode_timeout_cert/admit_timeout_cert) and Debug-formatted error enums / capacity integers"
+          "inspected_evidence": "flow source crates/qbind-node/src/safety_record_store/codec.rs:546; sink is a test-assertion diagnostic (panic!/assert!/println! format message) in the D7-D14 integration test; source values are synthetic fixture TimeoutCert objects (decode_timeout_cert/admit_timeout_cert) and Debug-formatted error enums / capacity integers",
+          "reported_level": "warning",
+          "security_severity": "7.5"
         },
         {
           "result_id": "B_acceptance_testutils#result[46]",
           "location": "crates/qbind-node/tests/run_422_d7d14_safety_record_store_tests.rs:2609",
           "rule": "rust/cleartext-logging",
           "reported_severity": "warning",
-          "inspected_evidence": "flow source crates/qbind-node/src/safety_record_store/codec.rs:546; sink is a test-assertion diagnostic (panic!/assert!/println! format message) in the D7-D14 integration test; source values are synthetic fixture TimeoutCert objects (decode_timeout_cert/admit_timeout_cert) and Debug-formatted error enums / capacity integers"
+          "inspected_evidence": "flow source crates/qbind-node/src/safety_record_store/codec.rs:546; sink is a test-assertion diagnostic (panic!/assert!/println! format message) in the D7-D14 integration test; source values are synthetic fixture TimeoutCert objects (decode_timeout_cert/admit_timeout_cert) and Debug-formatted error enums / capacity integers",
+          "reported_level": "warning",
+          "security_severity": "7.5"
         },
         {
           "result_id": "B_acceptance_testutils#result[47]",
           "location": "crates/qbind-node/tests/run_422_d7d14_safety_record_store_tests.rs:2686",
           "rule": "rust/cleartext-logging",
           "reported_severity": "warning",
-          "inspected_evidence": "flow source crates/qbind-node/src/safety_record_store/codec.rs:879; sink is a test-assertion diagnostic (panic!/assert!/println! format message) in the D7-D14 integration test; source values are synthetic fixture TimeoutCert objects (decode_timeout_cert/admit_timeout_cert) and Debug-formatted error enums / capacity integers"
+          "inspected_evidence": "flow source crates/qbind-node/src/safety_record_store/codec.rs:879; sink is a test-assertion diagnostic (panic!/assert!/println! format message) in the D7-D14 integration test; source values are synthetic fixture TimeoutCert objects (decode_timeout_cert/admit_timeout_cert) and Debug-formatted error enums / capacity integers",
+          "reported_level": "warning",
+          "security_severity": "7.5"
         },
         {
           "result_id": "B_acceptance_testutils#result[48]",
           "location": "crates/qbind-node/tests/run_422_d7d14_safety_record_store_tests.rs:2733",
           "rule": "rust/cleartext-logging",
           "reported_severity": "warning",
-          "inspected_evidence": "flow source crates/qbind-node/src/safety_record_store/codec.rs:879; sink is a test-assertion diagnostic (panic!/assert!/println! format message) in the D7-D14 integration test; source values are synthetic fixture TimeoutCert objects (decode_timeout_cert/admit_timeout_cert) and Debug-formatted error enums / capacity integers"
+          "inspected_evidence": "flow source crates/qbind-node/src/safety_record_store/codec.rs:879; sink is a test-assertion diagnostic (panic!/assert!/println! format message) in the D7-D14 integration test; source values are synthetic fixture TimeoutCert objects (decode_timeout_cert/admit_timeout_cert) and Debug-formatted error enums / capacity integers",
+          "reported_level": "warning",
+          "security_severity": "7.5"
         },
         {
           "result_id": "B_acceptance_testutils#result[49]",
           "location": "crates/qbind-node/tests/run_422_d7d14_safety_record_store_tests.rs:3277",
           "rule": "rust/cleartext-logging",
           "reported_severity": "warning",
-          "inspected_evidence": "flow source crates/qbind-node/src/safety_record_store/codec.rs:879; sink is a test-assertion diagnostic (panic!/assert!/println! format message) in the D7-D14 integration test; source values are synthetic fixture TimeoutCert objects (decode_timeout_cert/admit_timeout_cert) and Debug-formatted error enums / capacity integers"
+          "inspected_evidence": "flow source crates/qbind-node/src/safety_record_store/codec.rs:879; sink is a test-assertion diagnostic (panic!/assert!/println! format message) in the D7-D14 integration test; source values are synthetic fixture TimeoutCert objects (decode_timeout_cert/admit_timeout_cert) and Debug-formatted error enums / capacity integers",
+          "reported_level": "warning",
+          "security_severity": "7.5"
         },
         {
           "result_id": "B_acceptance_testutils#result[50]",
           "location": "crates/qbind-node/tests/run_422_d7d14_safety_record_store_tests.rs:3468",
           "rule": "rust/cleartext-logging",
           "reported_severity": "warning",
-          "inspected_evidence": "flow source crates/qbind-node/src/safety_record_store/codec.rs:879; sink is a test-assertion diagnostic (panic!/assert!/println! format message) in the D7-D14 integration test; source values are synthetic fixture TimeoutCert objects (decode_timeout_cert/admit_timeout_cert) and Debug-formatted error enums / capacity integers"
+          "inspected_evidence": "flow source crates/qbind-node/src/safety_record_store/codec.rs:879; sink is a test-assertion diagnostic (panic!/assert!/println! format message) in the D7-D14 integration test; source values are synthetic fixture TimeoutCert objects (decode_timeout_cert/admit_timeout_cert) and Debug-formatted error enums / capacity integers",
+          "reported_level": "warning",
+          "security_severity": "7.5"
         },
         {
           "result_id": "B_acceptance_testutils#result[51]",
           "location": "crates/qbind-node/tests/run_422_d7d14_safety_record_store_tests.rs:3663",
           "rule": "rust/cleartext-logging",
           "reported_severity": "warning",
-          "inspected_evidence": "flow source crates/qbind-node/src/safety_record_store/codec.rs:546; sink is a test-assertion diagnostic (panic!/assert!/println! format message) in the D7-D14 integration test; source values are synthetic fixture TimeoutCert objects (decode_timeout_cert/admit_timeout_cert) and Debug-formatted error enums / capacity integers"
+          "inspected_evidence": "flow source crates/qbind-node/src/safety_record_store/codec.rs:546; sink is a test-assertion diagnostic (panic!/assert!/println! format message) in the D7-D14 integration test; source values are synthetic fixture TimeoutCert objects (decode_timeout_cert/admit_timeout_cert) and Debug-formatted error enums / capacity integers",
+          "reported_level": "warning",
+          "security_severity": "7.5"
         },
         {
           "result_id": "B_acceptance_testutils#result[52]",
           "location": "crates/qbind-node/tests/run_422_d7d14_safety_record_store_tests.rs:3687",
           "rule": "rust/cleartext-logging",
           "reported_severity": "warning",
-          "inspected_evidence": "flow source crates/qbind-node/src/safety_record_store/codec.rs:879; sink is a test-assertion diagnostic (panic!/assert!/println! format message) in the D7-D14 integration test; source values are synthetic fixture TimeoutCert objects (decode_timeout_cert/admit_timeout_cert) and Debug-formatted error enums / capacity integers"
+          "inspected_evidence": "flow source crates/qbind-node/src/safety_record_store/codec.rs:879; sink is a test-assertion diagnostic (panic!/assert!/println! format message) in the D7-D14 integration test; source values are synthetic fixture TimeoutCert objects (decode_timeout_cert/admit_timeout_cert) and Debug-formatted error enums / capacity integers",
+          "reported_level": "warning",
+          "security_severity": "7.5"
         },
         {
           "result_id": "B_acceptance_testutils#result[53]",
           "location": "crates/qbind-node/tests/run_422_d7d14_safety_record_store_tests.rs:3721",
           "rule": "rust/cleartext-logging",
           "reported_severity": "warning",
-          "inspected_evidence": "flow source crates/qbind-node/src/safety_record_store/codec.rs:879; sink is a test-assertion diagnostic (panic!/assert!/println! format message) in the D7-D14 integration test; source values are synthetic fixture TimeoutCert objects (decode_timeout_cert/admit_timeout_cert) and Debug-formatted error enums / capacity integers"
+          "inspected_evidence": "flow source crates/qbind-node/src/safety_record_store/codec.rs:879; sink is a test-assertion diagnostic (panic!/assert!/println! format message) in the D7-D14 integration test; source values are synthetic fixture TimeoutCert objects (decode_timeout_cert/admit_timeout_cert) and Debug-formatted error enums / capacity integers",
+          "reported_level": "warning",
+          "security_severity": "7.5"
         },
         {
           "result_id": "B_acceptance_testutils#result[54]",
           "location": "crates/qbind-node/tests/run_422_d7d14_safety_record_store_tests.rs:3794",
           "rule": "rust/cleartext-logging",
           "reported_severity": "warning",
-          "inspected_evidence": "flow source crates/qbind-node/src/safety_record_store/codec.rs:879; sink is a test-assertion diagnostic (panic!/assert!/println! format message) in the D7-D14 integration test; source values are synthetic fixture TimeoutCert objects (decode_timeout_cert/admit_timeout_cert) and Debug-formatted error enums / capacity integers"
+          "inspected_evidence": "flow source crates/qbind-node/src/safety_record_store/codec.rs:879; sink is a test-assertion diagnostic (panic!/assert!/println! format message) in the D7-D14 integration test; source values are synthetic fixture TimeoutCert objects (decode_timeout_cert/admit_timeout_cert) and Debug-formatted error enums / capacity integers",
+          "reported_level": "warning",
+          "security_severity": "7.5"
         },
         {
           "result_id": "B_acceptance_testutils#result[55]",
           "location": "crates/qbind-node/tests/run_422_d7d14_safety_record_store_tests.rs:3823",
           "rule": "rust/cleartext-logging",
           "reported_severity": "warning",
-          "inspected_evidence": "flow source crates/qbind-node/src/safety_record_store/codec.rs:879; sink is a test-assertion diagnostic (panic!/assert!/println! format message) in the D7-D14 integration test; source values are synthetic fixture TimeoutCert objects (decode_timeout_cert/admit_timeout_cert) and Debug-formatted error enums / capacity integers"
+          "inspected_evidence": "flow source crates/qbind-node/src/safety_record_store/codec.rs:879; sink is a test-assertion diagnostic (panic!/assert!/println! format message) in the D7-D14 integration test; source values are synthetic fixture TimeoutCert objects (decode_timeout_cert/admit_timeout_cert) and Debug-formatted error enums / capacity integers",
+          "reported_level": "warning",
+          "security_severity": "7.5"
         },
         {
           "result_id": "B_acceptance_testutils#result[56]",
           "location": "crates/qbind-node/tests/run_422_d7d14_safety_record_store_tests.rs:4145",
           "rule": "rust/cleartext-logging",
           "reported_severity": "warning",
-          "inspected_evidence": "flow source crates/qbind-node/src/safety_record_store/codec.rs:546; sink is a test-assertion diagnostic (panic!/assert!/println! format message) in the D7-D14 integration test; source values are synthetic fixture TimeoutCert objects (decode_timeout_cert/admit_timeout_cert) and Debug-formatted error enums / capacity integers"
+          "inspected_evidence": "flow source crates/qbind-node/src/safety_record_store/codec.rs:546; sink is a test-assertion diagnostic (panic!/assert!/println! format message) in the D7-D14 integration test; source values are synthetic fixture TimeoutCert objects (decode_timeout_cert/admit_timeout_cert) and Debug-formatted error enums / capacity integers",
+          "reported_level": "warning",
+          "security_severity": "7.5"
         },
         {
           "result_id": "B_acceptance_testutils#result[57]",
           "location": "crates/qbind-node/tests/run_422_d7d14_safety_record_store_tests.rs:4170",
           "rule": "rust/cleartext-logging",
           "reported_severity": "warning",
-          "inspected_evidence": "flow source crates/qbind-node/src/safety_record_store/codec.rs:546; sink is a test-assertion diagnostic (panic!/assert!/println! format message) in the D7-D14 integration test; source values are synthetic fixture TimeoutCert objects (decode_timeout_cert/admit_timeout_cert) and Debug-formatted error enums / capacity integers"
+          "inspected_evidence": "flow source crates/qbind-node/src/safety_record_store/codec.rs:546; sink is a test-assertion diagnostic (panic!/assert!/println! format message) in the D7-D14 integration test; source values are synthetic fixture TimeoutCert objects (decode_timeout_cert/admit_timeout_cert) and Debug-formatted error enums / capacity integers",
+          "reported_level": "warning",
+          "security_severity": "7.5"
         },
         {
           "result_id": "B_acceptance_testutils#result[58]",
           "location": "crates/qbind-node/tests/run_422_d7d14_safety_record_store_tests.rs:5134",
           "rule": "rust/cleartext-logging",
           "reported_severity": "warning",
-          "inspected_evidence": "flow source crates/qbind-node/src/safety_record_store/codec.rs:546; sink is a test-assertion diagnostic (panic!/assert!/println! format message) in the D7-D14 integration test; source values are synthetic fixture TimeoutCert objects (decode_timeout_cert/admit_timeout_cert) and Debug-formatted error enums / capacity integers"
+          "inspected_evidence": "flow source crates/qbind-node/src/safety_record_store/codec.rs:546; sink is a test-assertion diagnostic (panic!/assert!/println! format message) in the D7-D14 integration test; source values are synthetic fixture TimeoutCert objects (decode_timeout_cert/admit_timeout_cert) and Debug-formatted error enums / capacity integers",
+          "reported_level": "warning",
+          "security_severity": "7.5"
         },
         {
           "result_id": "B_acceptance_testutils#result[59]",
           "location": "crates/qbind-node/tests/run_422_d7d14_safety_record_store_tests.rs:5715",
           "rule": "rust/cleartext-logging",
           "reported_severity": "warning",
-          "inspected_evidence": "flow source crates/qbind-node/src/safety_record_store/codec.rs:546; sink is a test-assertion diagnostic (panic!/assert!/println! format message) in the D7-D14 integration test; source values are synthetic fixture TimeoutCert objects (decode_timeout_cert/admit_timeout_cert) and Debug-formatted error enums / capacity integers"
+          "inspected_evidence": "flow source crates/qbind-node/src/safety_record_store/codec.rs:546; sink is a test-assertion diagnostic (panic!/assert!/println! format message) in the D7-D14 integration test; source values are synthetic fixture TimeoutCert objects (decode_timeout_cert/admit_timeout_cert) and Debug-formatted error enums / capacity integers",
+          "reported_level": "warning",
+          "security_severity": "7.5"
         },
         {
           "result_id": "B_acceptance_testutils#result[60]",
           "location": "crates/qbind-node/tests/run_422_d7d14_safety_record_store_tests.rs:5873",
           "rule": "rust/cleartext-logging",
           "reported_severity": "warning",
-          "inspected_evidence": "flow source crates/qbind-node/src/safety_record_store/codec.rs:879; sink is a test-assertion diagnostic (panic!/assert!/println! format message) in the D7-D14 integration test; source values are synthetic fixture TimeoutCert objects (decode_timeout_cert/admit_timeout_cert) and Debug-formatted error enums / capacity integers"
+          "inspected_evidence": "flow source crates/qbind-node/src/safety_record_store/codec.rs:879; sink is a test-assertion diagnostic (panic!/assert!/println! format message) in the D7-D14 integration test; source values are synthetic fixture TimeoutCert objects (decode_timeout_cert/admit_timeout_cert) and Debug-formatted error enums / capacity integers",
+          "reported_level": "warning",
+          "security_severity": "7.5"
         },
         {
           "result_id": "B_acceptance_testutils#result[61]",
           "location": "crates/qbind-node/tests/run_422_d7d14_safety_record_store_tests.rs:6232",
           "rule": "rust/cleartext-logging",
           "reported_severity": "warning",
-          "inspected_evidence": "flow source crates/qbind-node/src/safety_record_store/codec.rs:879; sink is a test-assertion diagnostic (panic!/assert!/println! format message) in the D7-D14 integration test; source values are synthetic fixture TimeoutCert objects (decode_timeout_cert/admit_timeout_cert) and Debug-formatted error enums / capacity integers"
+          "inspected_evidence": "flow source crates/qbind-node/src/safety_record_store/codec.rs:879; sink is a test-assertion diagnostic (panic!/assert!/println! format message) in the D7-D14 integration test; source values are synthetic fixture TimeoutCert objects (decode_timeout_cert/admit_timeout_cert) and Debug-formatted error enums / capacity integers",
+          "reported_level": "warning",
+          "security_severity": "7.5"
         },
         {
           "result_id": "B_acceptance_testutils#result[62]",
           "location": "crates/qbind-node/tests/run_422_d7d14_safety_record_store_tests.rs:6234",
           "rule": "rust/cleartext-logging",
           "reported_severity": "warning",
-          "inspected_evidence": "flow source crates/qbind-node/src/safety_record_store/codec.rs:879; sink is a test-assertion diagnostic (panic!/assert!/println! format message) in the D7-D14 integration test; source values are synthetic fixture TimeoutCert objects (decode_timeout_cert/admit_timeout_cert) and Debug-formatted error enums / capacity integers"
+          "inspected_evidence": "flow source crates/qbind-node/src/safety_record_store/codec.rs:879; sink is a test-assertion diagnostic (panic!/assert!/println! format message) in the D7-D14 integration test; source values are synthetic fixture TimeoutCert objects (decode_timeout_cert/admit_timeout_cert) and Debug-formatted error enums / capacity integers",
+          "reported_level": "warning",
+          "security_severity": "7.5"
         },
         {
           "result_id": "B_acceptance_testutils#result[63]",
           "location": "crates/qbind-node/tests/run_422_d7d14_safety_record_store_tests.rs:6391",
           "rule": "rust/cleartext-logging",
           "reported_severity": "warning",
-          "inspected_evidence": "flow source crates/qbind-node/src/safety_record_store/codec.rs:879; sink is a test-assertion diagnostic (panic!/assert!/println! format message) in the D7-D14 integration test; source values are synthetic fixture TimeoutCert objects (decode_timeout_cert/admit_timeout_cert) and Debug-formatted error enums / capacity integers"
+          "inspected_evidence": "flow source crates/qbind-node/src/safety_record_store/codec.rs:879; sink is a test-assertion diagnostic (panic!/assert!/println! format message) in the D7-D14 integration test; source values are synthetic fixture TimeoutCert objects (decode_timeout_cert/admit_timeout_cert) and Debug-formatted error enums / capacity integers",
+          "reported_level": "warning",
+          "security_severity": "7.5"
         },
         {
           "result_id": "B_acceptance_testutils#result[64]",
           "location": "crates/qbind-node/tests/run_422_d7d14_safety_record_store_tests.rs:6393",
           "rule": "rust/cleartext-logging",
           "reported_severity": "warning",
-          "inspected_evidence": "flow source crates/qbind-node/src/safety_record_store/codec.rs:879; sink is a test-assertion diagnostic (panic!/assert!/println! format message) in the D7-D14 integration test; source values are synthetic fixture TimeoutCert objects (decode_timeout_cert/admit_timeout_cert) and Debug-formatted error enums / capacity integers"
+          "inspected_evidence": "flow source crates/qbind-node/src/safety_record_store/codec.rs:879; sink is a test-assertion diagnostic (panic!/assert!/println! format message) in the D7-D14 integration test; source values are synthetic fixture TimeoutCert objects (decode_timeout_cert/admit_timeout_cert) and Debug-formatted error enums / capacity integers",
+          "reported_level": "warning",
+          "security_severity": "7.5"
         },
         {
           "result_id": "B_acceptance_testutils#result[65]",
           "location": "crates/qbind-node/tests/run_422_d7d14_safety_record_store_tests.rs:6784",
           "rule": "rust/cleartext-logging",
           "reported_severity": "warning",
-          "inspected_evidence": "flow source crates/qbind-node/src/safety_record_store/codec.rs:546; sink is a test-assertion diagnostic (panic!/assert!/println! format message) in the D7-D14 integration test; source values are synthetic fixture TimeoutCert objects (decode_timeout_cert/admit_timeout_cert) and Debug-formatted error enums / capacity integers"
+          "inspected_evidence": "flow source crates/qbind-node/src/safety_record_store/codec.rs:546; sink is a test-assertion diagnostic (panic!/assert!/println! format message) in the D7-D14 integration test; source values are synthetic fixture TimeoutCert objects (decode_timeout_cert/admit_timeout_cert) and Debug-formatted error enums / capacity integers",
+          "reported_level": "warning",
+          "security_severity": "7.5"
         },
         {
           "result_id": "B_acceptance_testutils#result[66]",
           "location": "crates/qbind-node/tests/run_422_d7d14_safety_record_store_tests.rs:6808",
           "rule": "rust/cleartext-logging",
           "reported_severity": "warning",
-          "inspected_evidence": "flow source crates/qbind-node/src/safety_record_store/codec.rs:546; sink is a test-assertion diagnostic (panic!/assert!/println! format message) in the D7-D14 integration test; source values are synthetic fixture TimeoutCert objects (decode_timeout_cert/admit_timeout_cert) and Debug-formatted error enums / capacity integers"
+          "inspected_evidence": "flow source crates/qbind-node/src/safety_record_store/codec.rs:546; sink is a test-assertion diagnostic (panic!/assert!/println! format message) in the D7-D14 integration test; source values are synthetic fixture TimeoutCert objects (decode_timeout_cert/admit_timeout_cert) and Debug-formatted error enums / capacity integers",
+          "reported_level": "warning",
+          "security_severity": "7.5"
         },
         {
           "result_id": "B_acceptance_testutils#result[67]",
           "location": "crates/qbind-node/tests/run_422_d7d14_safety_record_store_tests.rs:6872",
           "rule": "rust/cleartext-logging",
           "reported_severity": "warning",
-          "inspected_evidence": "flow source crates/qbind-node/src/safety_record_store/codec.rs:546; sink is a test-assertion diagnostic (panic!/assert!/println! format message) in the D7-D14 integration test; source values are synthetic fixture TimeoutCert objects (decode_timeout_cert/admit_timeout_cert) and Debug-formatted error enums / capacity integers"
+          "inspected_evidence": "flow source crates/qbind-node/src/safety_record_store/codec.rs:546; sink is a test-assertion diagnostic (panic!/assert!/println! format message) in the D7-D14 integration test; source values are synthetic fixture TimeoutCert objects (decode_timeout_cert/admit_timeout_cert) and Debug-formatted error enums / capacity integers",
+          "reported_level": "warning",
+          "security_severity": "7.5"
         },
         {
           "result_id": "B_acceptance_testutils#result[68]",
           "location": "crates/qbind-node/tests/run_422_d7d14_safety_record_store_tests.rs:7117",
           "rule": "rust/cleartext-logging",
           "reported_severity": "warning",
-          "inspected_evidence": "flow source crates/qbind-node/src/safety_record_store/codec.rs:546; sink is a test-assertion diagnostic (panic!/assert!/println! format message) in the D7-D14 integration test; source values are synthetic fixture TimeoutCert objects (decode_timeout_cert/admit_timeout_cert) and Debug-formatted error enums / capacity integers"
+          "inspected_evidence": "flow source crates/qbind-node/src/safety_record_store/codec.rs:546; sink is a test-assertion diagnostic (panic!/assert!/println! format message) in the D7-D14 integration test; source values are synthetic fixture TimeoutCert objects (decode_timeout_cert/admit_timeout_cert) and Debug-formatted error enums / capacity integers",
+          "reported_level": "warning",
+          "security_severity": "7.5"
         },
         {
           "result_id": "B_acceptance_testutils#result[69]",
           "location": "crates/qbind-node/tests/run_422_d7d14_safety_record_store_tests.rs:7574",
           "rule": "rust/cleartext-logging",
           "reported_severity": "warning",
-          "inspected_evidence": "flow source crates/qbind-node/src/safety_record_store/codec.rs:546; sink is a test-assertion diagnostic (panic!/assert!/println! format message) in the D7-D14 integration test; source values are synthetic fixture TimeoutCert objects (decode_timeout_cert/admit_timeout_cert) and Debug-formatted error enums / capacity integers"
+          "inspected_evidence": "flow source crates/qbind-node/src/safety_record_store/codec.rs:546; sink is a test-assertion diagnostic (panic!/assert!/println! format message) in the D7-D14 integration test; source values are synthetic fixture TimeoutCert objects (decode_timeout_cert/admit_timeout_cert) and Debug-formatted error enums / capacity integers",
+          "reported_level": "warning",
+          "security_severity": "7.5"
         },
         {
           "result_id": "B_acceptance_testutils#result[70]",
           "location": "crates/qbind-node/tests/run_422_d7d14_safety_record_store_tests.rs:7600",
           "rule": "rust/cleartext-logging",
           "reported_severity": "warning",
-          "inspected_evidence": "flow source crates/qbind-node/src/safety_record_store/codec.rs:546; sink is a test-assertion diagnostic (panic!/assert!/println! format message) in the D7-D14 integration test; source values are synthetic fixture TimeoutCert objects (decode_timeout_cert/admit_timeout_cert) and Debug-formatted error enums / capacity integers"
+          "inspected_evidence": "flow source crates/qbind-node/src/safety_record_store/codec.rs:546; sink is a test-assertion diagnostic (panic!/assert!/println! format message) in the D7-D14 integration test; source values are synthetic fixture TimeoutCert objects (decode_timeout_cert/admit_timeout_cert) and Debug-formatted error enums / capacity integers",
+          "reported_level": "warning",
+          "security_severity": "7.5"
         },
         {
           "result_id": "B_acceptance_testutils#result[71]",
           "location": "crates/qbind-node/tests/run_422_d7d14_safety_record_store_tests.rs:7803",
           "rule": "rust/cleartext-logging",
           "reported_severity": "warning",
-          "inspected_evidence": "flow source crates/qbind-node/src/safety_record_store/codec.rs:546; sink is a test-assertion diagnostic (panic!/assert!/println! format message) in the D7-D14 integration test; source values are synthetic fixture TimeoutCert objects (decode_timeout_cert/admit_timeout_cert) and Debug-formatted error enums / capacity integers"
+          "inspected_evidence": "flow source crates/qbind-node/src/safety_record_store/codec.rs:546; sink is a test-assertion diagnostic (panic!/assert!/println! format message) in the D7-D14 integration test; source values are synthetic fixture TimeoutCert objects (decode_timeout_cert/admit_timeout_cert) and Debug-formatted error enums / capacity integers",
+          "reported_level": "warning",
+          "security_severity": "7.5"
         },
         {
           "result_id": "B_acceptance_testutils#result[72]",
           "location": "crates/qbind-node/tests/run_422_d7d14_safety_record_store_tests.rs:7848",
           "rule": "rust/cleartext-logging",
           "reported_severity": "warning",
-          "inspected_evidence": "flow source crates/qbind-node/src/safety_record_store/codec.rs:546; sink is a test-assertion diagnostic (panic!/assert!/println! format message) in the D7-D14 integration test; source values are synthetic fixture TimeoutCert objects (decode_timeout_cert/admit_timeout_cert) and Debug-formatted error enums / capacity integers"
+          "inspected_evidence": "flow source crates/qbind-node/src/safety_record_store/codec.rs:546; sink is a test-assertion diagnostic (panic!/assert!/println! format message) in the D7-D14 integration test; source values are synthetic fixture TimeoutCert objects (decode_timeout_cert/admit_timeout_cert) and Debug-formatted error enums / capacity integers",
+          "reported_level": "warning",
+          "security_severity": "7.5"
         },
         {
           "result_id": "B_acceptance_testutils#result[73]",
           "location": "crates/qbind-node/tests/run_422_d7d14_safety_record_store_tests.rs:7883",
           "rule": "rust/cleartext-logging",
           "reported_severity": "warning",
-          "inspected_evidence": "flow source crates/qbind-node/src/safety_record_store/codec.rs:546; sink is a test-assertion diagnostic (panic!/assert!/println! format message) in the D7-D14 integration test; source values are synthetic fixture TimeoutCert objects (decode_timeout_cert/admit_timeout_cert) and Debug-formatted error enums / capacity integers"
+          "inspected_evidence": "flow source crates/qbind-node/src/safety_record_store/codec.rs:546; sink is a test-assertion diagnostic (panic!/assert!/println! format message) in the D7-D14 integration test; source values are synthetic fixture TimeoutCert objects (decode_timeout_cert/admit_timeout_cert) and Debug-formatted error enums / capacity integers",
+          "reported_level": "warning",
+          "security_severity": "7.5"
         },
         {
           "result_id": "B_acceptance_testutils#result[74]",
           "location": "crates/qbind-node/tests/run_422_d7d14_safety_record_store_tests.rs:7925",
           "rule": "rust/cleartext-logging",
           "reported_severity": "warning",
-          "inspected_evidence": "flow source crates/qbind-node/src/safety_record_store/codec.rs:546; sink is a test-assertion diagnostic (panic!/assert!/println! format message) in the D7-D14 integration test; source values are synthetic fixture TimeoutCert objects (decode_timeout_cert/admit_timeout_cert) and Debug-formatted error enums / capacity integers"
+          "inspected_evidence": "flow source crates/qbind-node/src/safety_record_store/codec.rs:546; sink is a test-assertion diagnostic (panic!/assert!/println! format message) in the D7-D14 integration test; source values are synthetic fixture TimeoutCert objects (decode_timeout_cert/admit_timeout_cert) and Debug-formatted error enums / capacity integers",
+          "reported_level": "warning",
+          "security_severity": "7.5"
         },
         {
           "result_id": "B_acceptance_testutils#result[75]",
           "location": "crates/qbind-node/tests/run_422_d7d14_safety_record_store_tests.rs:8125",
           "rule": "rust/cleartext-logging",
           "reported_severity": "warning",
-          "inspected_evidence": "flow source crates/qbind-node/src/safety_record_store/codec.rs:546; sink is a test-assertion diagnostic (panic!/assert!/println! format message) in the D7-D14 integration test; source values are synthetic fixture TimeoutCert objects (decode_timeout_cert/admit_timeout_cert) and Debug-formatted error enums / capacity integers"
+          "inspected_evidence": "flow source crates/qbind-node/src/safety_record_store/codec.rs:546; sink is a test-assertion diagnostic (panic!/assert!/println! format message) in the D7-D14 integration test; source values are synthetic fixture TimeoutCert objects (decode_timeout_cert/admit_timeout_cert) and Debug-formatted error enums / capacity integers",
+          "reported_level": "warning",
+          "security_severity": "7.5"
         },
         {
           "result_id": "B_acceptance_testutils#result[76]",
           "location": "crates/qbind-node/tests/run_422_d7d14_safety_record_store_tests.rs:8190",
           "rule": "rust/cleartext-logging",
           "reported_severity": "warning",
-          "inspected_evidence": "flow source crates/qbind-node/src/safety_record_store/codec.rs:546; sink is a test-assertion diagnostic (panic!/assert!/println! format message) in the D7-D14 integration test; source values are synthetic fixture TimeoutCert objects (decode_timeout_cert/admit_timeout_cert) and Debug-formatted error enums / capacity integers"
+          "inspected_evidence": "flow source crates/qbind-node/src/safety_record_store/codec.rs:546; sink is a test-assertion diagnostic (panic!/assert!/println! format message) in the D7-D14 integration test; source values are synthetic fixture TimeoutCert objects (decode_timeout_cert/admit_timeout_cert) and Debug-formatted error enums / capacity integers",
+          "reported_level": "warning",
+          "security_severity": "7.5"
         },
         {
           "result_id": "B_acceptance_testutils#result[77]",
           "location": "crates/qbind-node/tests/run_422_d7d14_safety_record_store_tests.rs:8215",
           "rule": "rust/cleartext-logging",
           "reported_severity": "warning",
-          "inspected_evidence": "flow source crates/qbind-node/src/safety_record_store/codec.rs:546; sink is a test-assertion diagnostic (panic!/assert!/println! format message) in the D7-D14 integration test; source values are synthetic fixture TimeoutCert objects (decode_timeout_cert/admit_timeout_cert) and Debug-formatted error enums / capacity integers"
+          "inspected_evidence": "flow source crates/qbind-node/src/safety_record_store/codec.rs:546; sink is a test-assertion diagnostic (panic!/assert!/println! format message) in the D7-D14 integration test; source values are synthetic fixture TimeoutCert objects (decode_timeout_cert/admit_timeout_cert) and Debug-formatted error enums / capacity integers",
+          "reported_level": "warning",
+          "security_severity": "7.5"
         },
         {
           "result_id": "B_acceptance_testutils#result[78]",
           "location": "crates/qbind-node/tests/run_422_d7d14_safety_record_store_tests.rs:8236",
           "rule": "rust/cleartext-logging",
           "reported_severity": "warning",
-          "inspected_evidence": "flow source crates/qbind-node/src/safety_record_store/codec.rs:546; sink is a test-assertion diagnostic (panic!/assert!/println! format message) in the D7-D14 integration test; source values are synthetic fixture TimeoutCert objects (decode_timeout_cert/admit_timeout_cert) and Debug-formatted error enums / capacity integers"
+          "inspected_evidence": "flow source crates/qbind-node/src/safety_record_store/codec.rs:546; sink is a test-assertion diagnostic (panic!/assert!/println! format message) in the D7-D14 integration test; source values are synthetic fixture TimeoutCert objects (decode_timeout_cert/admit_timeout_cert) and Debug-formatted error enums / capacity integers",
+          "reported_level": "warning",
+          "security_severity": "7.5"
         },
         {
           "result_id": "B_acceptance_testutils#result[79]",
           "location": "crates/qbind-node/tests/run_422_d7d14_safety_record_store_tests.rs:8625",
           "rule": "rust/cleartext-logging",
           "reported_severity": "warning",
-          "inspected_evidence": "flow source crates/qbind-node/src/safety_record_store/codec.rs:546; sink is a test-assertion diagnostic (panic!/assert!/println! format message) in the D7-D14 integration test; source values are synthetic fixture TimeoutCert objects (decode_timeout_cert/admit_timeout_cert) and Debug-formatted error enums / capacity integers"
+          "inspected_evidence": "flow source crates/qbind-node/src/safety_record_store/codec.rs:546; sink is a test-assertion diagnostic (panic!/assert!/println! format message) in the D7-D14 integration test; source values are synthetic fixture TimeoutCert objects (decode_timeout_cert/admit_timeout_cert) and Debug-formatted error enums / capacity integers",
+          "reported_level": "warning",
+          "security_severity": "7.5"
         },
         {
           "result_id": "B_acceptance_testutils#result[80]",
           "location": "crates/qbind-node/tests/run_422_d7d14_safety_record_store_tests.rs:8903",
           "rule": "rust/cleartext-logging",
           "reported_severity": "warning",
-          "inspected_evidence": "flow source crates/qbind-node/src/safety_record_store/codec.rs:546; sink is a test-assertion diagnostic (panic!/assert!/println! format message) in the D7-D14 integration test; source values are synthetic fixture TimeoutCert objects (decode_timeout_cert/admit_timeout_cert) and Debug-formatted error enums / capacity integers"
+          "inspected_evidence": "flow source crates/qbind-node/src/safety_record_store/codec.rs:546; sink is a test-assertion diagnostic (panic!/assert!/println! format message) in the D7-D14 integration test; source values are synthetic fixture TimeoutCert objects (decode_timeout_cert/admit_timeout_cert) and Debug-formatted error enums / capacity integers",
+          "reported_level": "warning",
+          "security_severity": "7.5"
         },
         {
           "result_id": "B_acceptance_testutils#result[81]",
           "location": "crates/qbind-node/tests/run_422_d7d14_safety_record_store_tests.rs:8913",
           "rule": "rust/cleartext-logging",
           "reported_severity": "warning",
-          "inspected_evidence": "flow source crates/qbind-node/src/safety_record_store/codec.rs:546; sink is a test-assertion diagnostic (panic!/assert!/println! format message) in the D7-D14 integration test; source values are synthetic fixture TimeoutCert objects (decode_timeout_cert/admit_timeout_cert) and Debug-formatted error enums / capacity integers"
+          "inspected_evidence": "flow source crates/qbind-node/src/safety_record_store/codec.rs:546; sink is a test-assertion diagnostic (panic!/assert!/println! format message) in the D7-D14 integration test; source values are synthetic fixture TimeoutCert objects (decode_timeout_cert/admit_timeout_cert) and Debug-formatted error enums / capacity integers",
+          "reported_level": "warning",
+          "security_severity": "7.5"
         },
         {
           "result_id": "B_acceptance_testutils#result[82]",
           "location": "crates/qbind-node/tests/run_422_d7d14_safety_record_store_tests.rs:9707",
           "rule": "rust/cleartext-logging",
           "reported_severity": "warning",
-          "inspected_evidence": "flow source crates/qbind-node/src/safety_record_store/codec.rs:546; sink is a test-assertion diagnostic (panic!/assert!/println! format message) in the D7-D14 integration test; source values are synthetic fixture TimeoutCert objects (decode_timeout_cert/admit_timeout_cert) and Debug-formatted error enums / capacity integers"
+          "inspected_evidence": "flow source crates/qbind-node/src/safety_record_store/codec.rs:546; sink is a test-assertion diagnostic (panic!/assert!/println! format message) in the D7-D14 integration test; source values are synthetic fixture TimeoutCert objects (decode_timeout_cert/admit_timeout_cert) and Debug-formatted error enums / capacity integers",
+          "reported_level": "warning",
+          "security_severity": "7.5"
         },
         {
           "result_id": "B_acceptance_testutils#result[83]",
           "location": "crates/qbind-node/tests/run_422_d7d14_safety_record_store_tests.rs:9734",
           "rule": "rust/cleartext-logging",
           "reported_severity": "warning",
-          "inspected_evidence": "flow source crates/qbind-node/src/safety_record_store/codec.rs:546; sink is a test-assertion diagnostic (panic!/assert!/println! format message) in the D7-D14 integration test; source values are synthetic fixture TimeoutCert objects (decode_timeout_cert/admit_timeout_cert) and Debug-formatted error enums / capacity integers"
+          "inspected_evidence": "flow source crates/qbind-node/src/safety_record_store/codec.rs:546; sink is a test-assertion diagnostic (panic!/assert!/println! format message) in the D7-D14 integration test; source values are synthetic fixture TimeoutCert objects (decode_timeout_cert/admit_timeout_cert) and Debug-formatted error enums / capacity integers",
+          "reported_level": "warning",
+          "security_severity": "7.5"
         },
         {
           "result_id": "B_acceptance_testutils#result[84]",
           "location": "crates/qbind-node/tests/run_422_d7d14_safety_record_store_tests.rs:9985",
           "rule": "rust/cleartext-logging",
           "reported_severity": "warning",
-          "inspected_evidence": "flow source crates/qbind-node/src/safety_record_store/codec.rs:546; sink is a test-assertion diagnostic (panic!/assert!/println! format message) in the D7-D14 integration test; source values are synthetic fixture TimeoutCert objects (decode_timeout_cert/admit_timeout_cert) and Debug-formatted error enums / capacity integers"
+          "inspected_evidence": "flow source crates/qbind-node/src/safety_record_store/codec.rs:546; sink is a test-assertion diagnostic (panic!/assert!/println! format message) in the D7-D14 integration test; source values are synthetic fixture TimeoutCert objects (decode_timeout_cert/admit_timeout_cert) and Debug-formatted error enums / capacity integers",
+          "reported_level": "warning",
+          "security_severity": "7.5"
         },
         {
           "result_id": "B_acceptance_testutils#result[85]",
           "location": "crates/qbind-node/tests/run_422_d7d14_safety_record_store_tests.rs:10651",
           "rule": "rust/cleartext-logging",
           "reported_severity": "warning",
-          "inspected_evidence": "flow source crates/qbind-node/src/safety_record_store/codec.rs:546; sink is a test-assertion diagnostic (panic!/assert!/println! format message) in the D7-D14 integration test; source values are synthetic fixture TimeoutCert objects (decode_timeout_cert/admit_timeout_cert) and Debug-formatted error enums / capacity integers"
+          "inspected_evidence": "flow source crates/qbind-node/src/safety_record_store/codec.rs:546; sink is a test-assertion diagnostic (panic!/assert!/println! format message) in the D7-D14 integration test; source values are synthetic fixture TimeoutCert objects (decode_timeout_cert/admit_timeout_cert) and Debug-formatted error enums / capacity integers",
+          "reported_level": "warning",
+          "security_severity": "7.5"
         },
         {
           "result_id": "B_acceptance_testutils#result[86]",
           "location": "crates/qbind-node/tests/run_422_d7d14_safety_record_store_tests.rs:10870",
           "rule": "rust/cleartext-logging",
           "reported_severity": "warning",
-          "inspected_evidence": "flow source crates/qbind-node/src/safety_record_store/codec.rs:546; sink is a test-assertion diagnostic (panic!/assert!/println! format message) in the D7-D14 integration test; source values are synthetic fixture TimeoutCert objects (decode_timeout_cert/admit_timeout_cert) and Debug-formatted error enums / capacity integers"
+          "inspected_evidence": "flow source crates/qbind-node/src/safety_record_store/codec.rs:546; sink is a test-assertion diagnostic (panic!/assert!/println! format message) in the D7-D14 integration test; source values are synthetic fixture TimeoutCert objects (decode_timeout_cert/admit_timeout_cert) and Debug-formatted error enums / capacity integers",
+          "reported_level": "warning",
+          "security_severity": "7.5"
         }
       ]
     },
@@ -919,9 +1125,19 @@
           "location": "crates/qbind-node/src/safety_record_store/codec.rs:415",
           "rule": "rust/cleartext-logging",
           "reported_severity": "warning",
-          "inspected_evidence": "codec.rs:413-417 debug_assert!(cert.capacity()==cert_cap, \"evidence cert backing capacity {} diverged from the admitted cap {cert_cap}\"); value reaching sink is the integer capacity bound cert_cap/cert.capacity(); debug_assert! is compiled out in release builds"
+          "inspected_evidence": "codec.rs:413-417 debug_assert!(cert.capacity()==cert_cap, \"evidence cert backing capacity {} diverged from the admitted cap {cert_cap}\"); value reaching sink is the integer capacity bound cert_cap/cert.capacity(); debug_assert! is compiled out in release builds",
+          "reported_level": "warning",
+          "security_severity": "7.5"
         }
       ]
     }
-  ]
+  ],
+  "rule_metadata": {
+    "rust/cleartext-logging": {
+      "reported_level": "warning",
+      "security_severity": "7.5",
+      "source": "preserved full SARIF tool.driver.rules (both A and B identical)",
+      "note": "security-severity 7.5 is the rule's CVSS-style metadata (high band); it is the rule's reported metadata and is kept SEPARATE from the per-result false-positive dispositions below. A false-positive assessment of an individual result does not change this rule metadata."
+    }
+  }
 }

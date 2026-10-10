@@ -1,4 +1,12 @@
 name: run422/diag
 version: 0.0.1
 dependencies:
-  codeql/rust-all: "*"
+  # Finishing-pass reproducibility pin. This pins the INTENDED dependency to the
+  # version resolved during the diagnostic execution (codeql/rust-all 0.2.23, the
+  # library bundled with codeql/rust-queries@0.1.44 in CodeQL CLI 2.27.2). This pin
+  # was ADDED by the finishing pass; it does not retrospectively prove which version
+  # the earlier diagnostic execution loaded. No qlpack.lock.yml was captured at
+  # execution time (recorded as a precise limitation in FINDINGS.md); the resolved
+  # library version is corroborated only by logs/codeql_resolve_packs_rust.txt
+  # (rust-all 0.2.23) from the security-suite provisioning.
+  codeql/rust-all: 0.2.23

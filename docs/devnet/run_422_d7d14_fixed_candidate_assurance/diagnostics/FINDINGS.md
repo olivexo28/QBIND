@@ -15,10 +15,22 @@ Databases rebuilt from the frozen candidate `aad0a4aaca8f66580d257c3468f1c270591
   (`nonUniqueCertainType`).
 - `qlpack.yml` — pack with `codeql/rust-all` dependency.
 
-Invocation (both configs):
-`codeql query run --ram=10000 --database=dbs/dbX --additional-packs=. diagql/<query>.ql`
+Invocation (both configs) — **command template, not a captured log.** The per-query
+execution console logs were not preserved; this template records the command shape used.
+The query files are in **this** directory (`diagnostics/`); run from the evidence root the
+query path is `diagnostics/<query>.ql`:
+`codeql query run --ram=<selected> --database=dbs/dbX --additional-packs=. diagnostics/<query>.ql`
 Database create A: `-O rust.cargo_features=default -O rust.cargo_cfg_overrides=-test`.
 Database create B: `-O rust.cargo_features=default,qbind-node/test-utils` (cfg(test) enabled).
+
+### Dependency pin and resolved-version provenance
+The committed `qlpack.yml` pins `codeql/rust-all: 0.2.23` for reproducibility. This pin was
+**added by the finishing pass** and does **not** retrospectively prove which library version the
+earlier diagnostic execution loaded. Three things are kept distinct: (1) the reported historical
+execution environment (CodeQL CLI 2.27.2 bundle); (2) retained evidence of the resolved library —
+`../logs/codeql_resolve_packs_rust.txt` shows `codeql/rust-all/0.2.23` present under the
+2.27.2 bundle; (3) the pin itself. **No `qlpack.lock.yml` was captured at diagnostic-execution
+time** — that is a precise, documented limitation, not reconstructed. No timestamps are invented.
 
 ## Type-inference inconsistencies (the "two" reported in both SARIFs)
 Both configurations resolve to the SAME two "Ill-formed type mention" results, both
