@@ -1,0 +1,11 @@
+"col0","col1"
+"crates/qbind-node/src/safety_record_store/accounting.rs",51
+"crates/qbind-node/src/safety_record_store/backend.rs",67
+"crates/qbind-node/src/safety_record_store/codec.rs",36
+"crates/qbind-node/src/safety_record_store/error.rs",89
+"crates/qbind-node/src/safety_record_store/mod.rs",1
+"crates/qbind-node/src/safety_record_store/owner.rs",64
+"crates/qbind-node/src/safety_record_store/profile.rs",29
+"crates/qbind-node/src/safety_record_store/record.rs",51
+"crates/qbind-node/src/safety_record_store/validate.rs",17
+"crates/qbind-node/tests/run_422_d7d14_safety_record_store_tests.rs",191

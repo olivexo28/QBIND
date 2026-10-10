@@ -1,0 +1,2 @@
+      codeql/rust-all@0.2.23: (library) /tmp/run422_d7d14/tools/codeql/qlpacks/codeql/rust-all/0.2.23/qlpack.yml
+      codeql/rust-queries@0.1.44: (query) /tmp/run422_d7d14/tools/codeql/qlpacks/codeql/rust-queries/0.1.44/qlpack.yml

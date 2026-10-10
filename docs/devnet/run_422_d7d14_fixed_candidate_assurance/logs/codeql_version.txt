@@ -1,0 +1,6 @@
+CodeQL command-line toolchain release 2.27.2.
+Copyright (C) 2019-2026 GitHub, Inc.
+Unpacked in: /tmp/run422_d7d14/tools/codeql
+   Analysis results depend critically on separately distributed query and
+   extractor modules. To list modules that are visible to the toolchain,
+   use 'codeql resolve packs' and 'codeql resolve languages'.
