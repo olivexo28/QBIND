@@ -18178,3 +18178,27 @@ This entry is a **clearly-identified correction** appended to the Run 422 D7-D14
 * **Independent review — OPEN (unchanged).** The available review interface is diff-scoped (documentation-only diff here), so no available reviewer can target the fixed revision `aad0a4a…` full component source, relevant callers, and the acceptance tests against contract §13.8A/§13.9. The implementation agent's self-assessment does not satisfy the gate. The unavailable documentation-diff-only reviewer was **not** re-invoked for another wrapper "no comments" response. A concise handoff (frozen candidate commit/tree, full component + callers + acceptance-test scope, §13.8A/§13.9, the retrievable CodeQL artifacts and dispositions, and the need for a full-fixed-source reviewer) is retained in `04_independent_review.md`. No people were contacted and no source was transmitted to any new service.
 * **CodeQL arm status.** Complete **only within its verified scope** (the single all-features / test-enabled configuration, with symbol-level component coverage and the dispositioned 50 component results). It is **not** described as closing the full configuration-coverage gate: the production-default (A) and acceptance-test (B) configurations and durable full-SARIF preservation remain **open**.
 * **Global verdicts (retained, not promoted):** `D7D14_STORAGE_COMPONENT=PARTIAL-IMPLEMENTATION`; `D7D14_STORAGE_ACCEPTANCE=INCOMPLETE`; `DURABLE_ANTI_ROLLBACK=NOT-ESTABLISHED`; `GENESIS_AUTHORITY_ACTIVATION=DISABLED`; `PRODUCTION_WIRE_CHAIN_ID_BEHAVIOR=UNCHANGED`; `CONFIGURED_AUTHORITY_RELEASE_BINARY_EVIDENCE=NOT-YET-CAPTURED`; `SECURITY_POSTURE=RS1-OPEN / PUBLIC-DEVNET-NO-GO`. C4/C5 remain OPEN; H22's separate limitation and fail-closed `CurrentEpochUnavailable` are preserved. No contract rewrite and no change to the accepted H7/H16 evidence methods. No production integration, signing, verifier wiring, anti-rollback establishment, activation, seed publication, D15, or Run 423 work was performed.
+## Run 422 D7-D14 — CodeQL A/B execution (configs A & B executed; full SARIF preserved)
+
+Both required CodeQL configurations were executed end-to-end against the frozen
+candidate `aad0a4a` (tree `82caed80`) with the pinned official bundle
+`codeql-bundle-v2.27.2` (CLI 2.27.2, `codeql/rust-queries@0.1.44`), SHA-256 of the
+downloaded bundle verified against the official published digest
+`f002864b…52aeb`. Config A (production default: `rust.cargo_features=default`,
+`rust.cargo_cfg_overrides=-test`; cfg(test) DISABLED) → 50 workspace / 2 component
+results. Config B (acceptance: `rust.cargo_features=default,qbind-node/test-utils`;
+cfg(test) ENABLED by extractor default) → 828 workspace / 50 component results.
+Complete SARIF for both is durably preserved as lossless `.sarif.gz` under
+`run_422_d7d14_fixed_candidate_assurance/sarif/` with SHA-256 checksums. Configuration
+sensitivity is established at the semantic/data-flow level (not AST counts): the
+`test-utils`-gated `set_inject_write_failure` resolves to 0 defs under A vs 2 under B,
+and test-file calls resolving into the component are 18/12 under A vs 1857/123 under B.
+Per-result dispositions for all 52 component results are in
+`run_422_d7d14_fixed_candidate_assurance/results/dispositions.{csv,json}`. The original
+all-features SARIF remains unrecoverable (temp-only) and its checksum is not
+re-attributed; Config B is a new execution of the equivalent configuration. The frozen
+implementation is unchanged (component manifest 10/10 OK). All global verdicts
+(D7D14_STORAGE_COMPONENT=PARTIAL-IMPLEMENTATION, D7D14_STORAGE_ACCEPTANCE=INCOMPLETE,
+DURABLE_ANTI_ROLLBACK=NOT-ESTABLISHED, GENESIS_AUTHORITY_ACTIVATION=DISABLED,
+SECURITY_POSTURE=RS1-OPEN / PUBLIC-DEVNET-NO-GO) and the independent full-source review
+(OPEN) are preserved and unchanged.

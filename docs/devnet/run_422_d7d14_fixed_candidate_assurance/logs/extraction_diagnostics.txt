@@ -1,0 +1,40 @@
+RUN 422 D7-D14 — CodeQL rust extractor diagnostics (frozen candidate aad0a4a)
+Note: extractor WARN lines are ANSI-colorized in the raw build logs.
+
+CONFIG A (production default: rust.cargo_features=default, rust.cargo_cfg_overrides=-test)
+  Rust files extracted WITHOUT error : 819
+  Rust files extracted WITH errors   : 92  (all under .rustup/.../rustlib — Rust toolchain/stdlib library files, NOT candidate source)
+  Extractor ERROR lines on candidate source : 0
+  Total extractor WARN lines (whole workspace) : 2063
+  WARN lines on component PRODUCTION src (safety_record_store/*.rs, excl. test) : 14
+    files: error.rs (10), mod.rs (2), owner.rs (2) — "unknown character escape" / "Invalid escape"
+  WARN lines on the D7-D14 integration TEST file : 74  (all "Invalid escape")
+  Assessment: all component-source/test WARNs are benign rust-analyzer lexer notes on
+  string/regex literal escape sequences (e.g. "\d", "\." inside non-raw string/regex docs);
+  the affected files are still extracted WITHOUT error and all their Function nodes are
+  present (see results/coverage_functions_A_default.csv). No semantic-analysis ERROR and no
+  "semantic analyzer unavailable" diagnostic touches candidate source.
+
+CONFIG B (acceptance: rust.cargo_features=default,qbind-node/test-utils; cargo_cfg_overrides empty => cfg(test) enabled by extractor default)
+  Rust files extracted WITHOUT error : 819
+  Rust files extracted WITH errors   : 92  (all under .rustup/.../rustlib — NOT candidate source)
+  Extractor ERROR lines on candidate source : 0
+  Total extractor WARN lines (whole workspace) : 2180
+  WARN lines on component PRODUCTION src (safety_record_store/*.rs, excl. test) : 14
+    files: error.rs (10), mod.rs (2), owner.rs (2) — "unknown character escape" / "Invalid escape" only
+    (the 1 workspace "macro expansion failed" on the component glob is in the integration TEST file,
+     run_422_d7d14_safety_record_store_tests.rs:5324, `$crate::panic::panic_2021`, not production src)
+  WARN lines on the D7-D14 integration test file : 101 (100 "Invalid escape" + 1 unresolved panic macro)
+  Assessment: same benign-lexer characterization as Config A. The single "macro expansion
+  failed" WARN is an unresolved `panic!` macro in the test file; it does not block extraction
+  (file still among the 819 extracted without error; its Function nodes present — see
+  results/coverage_functions_B_testutils.csv). Unresolved-macro/semantic limitations are
+  inherent to rust-analyzer-based extraction and are recorded here, not hidden.
+
+Semantic-resolution note (AST presence vs semantic coverage):
+  Both DBs parse the integration-test file into 188 Function AST nodes, but calls from that
+  file resolving (type-inference getStaticTarget) into component functions differ sharply:
+  Config A = 18 resolved calls / 12 distinct targets; Config B = 1857 resolved calls /
+  123 distinct targets. The test-utils-gated helper `set_inject_write_failure` has 0 defs in
+  Config A and 2 in Config B. AST presence therefore does NOT imply semantic/data-flow
+  coverage; the configurations are materially different semantic models.

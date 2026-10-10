@@ -1,0 +1,32 @@
+{
+  "configuration": "A_production_default",
+  "extractor_options": {
+    "rust.cargo_features": "default",
+    "rust.cargo_cfg_overrides": "-test"
+  },
+  "cfg_test": "disabled",
+  "workspace_total": 50,
+  "component_count": 2,
+  "results": [
+    {
+      "result_index": 0,
+      "rule": "rust/cleartext-logging",
+      "reported_severity": "warning",
+      "location": "crates/qbind-node/tests/run_422_d7d14_safety_record_store_tests.rs:8625",
+      "primary_in_scope": true,
+      "trace_cross_scope": false,
+      "flow_source": "crates/qbind-node/src/safety_record_store/codec.rs:546",
+      "message": "This operation writes [admit_timeout_cert(...)](1) to a log file."
+    },
+    {
+      "result_index": 2,
+      "rule": "rust/cleartext-logging",
+      "reported_severity": "warning",
+      "location": "crates/qbind-node/src/safety_record_store/codec.rs:415",
+      "primary_in_scope": true,
+      "trace_cross_scope": false,
+      "flow_source": "crates/qbind-node/src/safety_record_store/codec.rs:415",
+      "message": "This operation writes [cert_cap](1) to a log file."
+    }
+  ]
+}

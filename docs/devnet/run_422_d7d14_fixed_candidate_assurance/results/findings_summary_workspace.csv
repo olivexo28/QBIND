@@ -1,5 +1,10 @@
-ruleId,workspace_count,component_count
-rust/hard-coded-cryptographic-value,671,0
-rust/cleartext-logging,147,50
-rust/log-injection,8,0
-rust/unused-variable,2,0
+configuration,rule,workspace_count,component_count
+A_production_default,rust/cleartext-logging,20,2
+A_production_default,rust/hard-coded-cryptographic-value,28,0
+A_production_default,rust/unused-variable,2,0
+A_production_default,__TOTAL__,50,2
+B_acceptance_testutils,rust/cleartext-logging,147,50
+B_acceptance_testutils,rust/hard-coded-cryptographic-value,671,0
+B_acceptance_testutils,rust/log-injection,8,0
+B_acceptance_testutils,rust/unused-variable,2,0
+B_acceptance_testutils,__TOTAL__,828,50

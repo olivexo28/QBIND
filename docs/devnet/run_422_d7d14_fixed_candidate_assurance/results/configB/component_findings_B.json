@@ -1,0 +1,512 @@
+{
+  "configuration": "B_acceptance_testutils",
+  "extractor_options": {
+    "rust.cargo_features": "default,qbind-node/test-utils",
+    "rust.cargo_cfg_overrides": "(empty; test enabled by extractor default)"
+  },
+  "cfg_test": "enabled",
+  "workspace_total": 828,
+  "component_count": 50,
+  "results": [
+    {
+      "result_index": 38,
+      "rule": "rust/cleartext-logging",
+      "reported_severity": "warning",
+      "location": "crates/qbind-node/tests/run_422_d7d14_safety_record_store_tests.rs:934",
+      "primary_in_scope": true,
+      "trace_cross_scope": false,
+      "flow_source": "crates/qbind-node/src/safety_record_store/codec.rs:879",
+      "message": "This operation writes [decode_timeout_cert(...)](1) to a log file."
+    },
+    {
+      "result_index": 39,
+      "rule": "rust/cleartext-logging",
+      "reported_severity": "warning",
+      "location": "crates/qbind-node/tests/run_422_d7d14_safety_record_store_tests.rs:1366",
+      "primary_in_scope": true,
+      "trace_cross_scope": false,
+      "flow_source": "crates/qbind-node/src/safety_record_store/codec.rs:879",
+      "message": "This operation writes [decode_timeout_cert(...)](1) to a log file."
+    },
+    {
+      "result_index": 40,
+      "rule": "rust/cleartext-logging",
+      "reported_severity": "warning",
+      "location": "crates/qbind-node/tests/run_422_d7d14_safety_record_store_tests.rs:1387",
+      "primary_in_scope": true,
+      "trace_cross_scope": false,
+      "flow_source": "crates/qbind-node/src/safety_record_store/codec.rs:879",
+      "message": "This operation writes [decode_timeout_cert(...)](1) to a log file."
+    },
+    {
+      "result_index": 41,
+      "rule": "rust/cleartext-logging",
+      "reported_severity": "warning",
+      "location": "crates/qbind-node/tests/run_422_d7d14_safety_record_store_tests.rs:1411",
+      "primary_in_scope": true,
+      "trace_cross_scope": false,
+      "flow_source": "crates/qbind-node/src/safety_record_store/codec.rs:546",
+      "message": "This operation writes [admit_timeout_cert(...)](1) to a log file. This operation writes [decode_timeout_cert(...)](2) to a log file."
+    },
+    {
+      "result_index": 42,
+      "rule": "rust/cleartext-logging",
+      "reported_severity": "warning",
+      "location": "crates/qbind-node/tests/run_422_d7d14_safety_record_store_tests.rs:2035",
+      "primary_in_scope": true,
+      "trace_cross_scope": false,
+      "flow_source": "crates/qbind-node/src/safety_record_store/codec.rs:546",
+      "message": "This operation writes [admit_timeout_cert(...)](1) to a log file. This operation writes [decode_timeout_cert(...)](2) to a log file."
+    },
+    {
+      "result_index": 43,
+      "rule": "rust/cleartext-logging",
+      "reported_severity": "warning",
+      "location": "crates/qbind-node/tests/run_422_d7d14_safety_record_store_tests.rs:2539",
+      "primary_in_scope": true,
+      "trace_cross_scope": false,
+      "flow_source": "crates/qbind-node/src/safety_record_store/codec.rs:546",
+      "message": "This operation writes [admit_timeout_cert(...)](1) to a log file."
+    },
+    {
+      "result_index": 44,
+      "rule": "rust/cleartext-logging",
+      "reported_severity": "warning",
+      "location": "crates/qbind-node/tests/run_422_d7d14_safety_record_store_tests.rs:2564",
+      "primary_in_scope": true,
+      "trace_cross_scope": false,
+      "flow_source": "crates/qbind-node/src/safety_record_store/codec.rs:546",
+      "message": "This operation writes [admit_timeout_cert(...)](1) to a log file."
+    },
+    {
+      "result_index": 45,
+      "rule": "rust/cleartext-logging",
+      "reported_severity": "warning",
+      "location": "crates/qbind-node/tests/run_422_d7d14_safety_record_store_tests.rs:2602",
+      "primary_in_scope": true,
+      "trace_cross_scope": false,
+      "flow_source": "crates/qbind-node/src/safety_record_store/codec.rs:546",
+      "message": "This operation writes [admit_timeout_cert(...)](1) to a log file."
+    },
+    {
+      "result_index": 46,
+      "rule": "rust/cleartext-logging",
+      "reported_severity": "warning",
+      "location": "crates/qbind-node/tests/run_422_d7d14_safety_record_store_tests.rs:2609",
+      "primary_in_scope": true,
+      "trace_cross_scope": false,
+      "flow_source": "crates/qbind-node/src/safety_record_store/codec.rs:546",
+      "message": "This operation writes [admit_timeout_cert(...)](1) to a log file."
+    },
+    {
+      "result_index": 47,
+      "rule": "rust/cleartext-logging",
+      "reported_severity": "warning",
+      "location": "crates/qbind-node/tests/run_422_d7d14_safety_record_store_tests.rs:2686",
+      "primary_in_scope": true,
+      "trace_cross_scope": false,
+      "flow_source": "crates/qbind-node/src/safety_record_store/codec.rs:879",
+      "message": "This operation writes [decode_timeout_cert(...)](1) to a log file."
+    },
+    {
+      "result_index": 48,
+      "rule": "rust/cleartext-logging",
+      "reported_severity": "warning",
+      "location": "crates/qbind-node/tests/run_422_d7d14_safety_record_store_tests.rs:2733",
+      "primary_in_scope": true,
+      "trace_cross_scope": false,
+      "flow_source": "crates/qbind-node/src/safety_record_store/codec.rs:879",
+      "message": "This operation writes [decode_timeout_cert(...)](1) to a log file."
+    },
+    {
+      "result_index": 49,
+      "rule": "rust/cleartext-logging",
+      "reported_severity": "warning",
+      "location": "crates/qbind-node/tests/run_422_d7d14_safety_record_store_tests.rs:3277",
+      "primary_in_scope": true,
+      "trace_cross_scope": false,
+      "flow_source": "crates/qbind-node/src/safety_record_store/codec.rs:879",
+      "message": "This operation writes [decode_timeout_cert(...)](1) to a log file."
+    },
+    {
+      "result_index": 50,
+      "rule": "rust/cleartext-logging",
+      "reported_severity": "warning",
+      "location": "crates/qbind-node/tests/run_422_d7d14_safety_record_store_tests.rs:3468",
+      "primary_in_scope": true,
+      "trace_cross_scope": false,
+      "flow_source": "crates/qbind-node/src/safety_record_store/codec.rs:879",
+      "message": "This operation writes [decode_timeout_cert(...)](1) to a log file."
+    },
+    {
+      "result_index": 51,
+      "rule": "rust/cleartext-logging",
+      "reported_severity": "warning",
+      "location": "crates/qbind-node/tests/run_422_d7d14_safety_record_store_tests.rs:3663",
+      "primary_in_scope": true,
+      "trace_cross_scope": false,
+      "flow_source": "crates/qbind-node/src/safety_record_store/codec.rs:546",
+      "message": "This operation writes [admit_timeout_cert(...)](1) to a log file."
+    },
+    {
+      "result_index": 52,
+      "rule": "rust/cleartext-logging",
+      "reported_severity": "warning",
+      "location": "crates/qbind-node/tests/run_422_d7d14_safety_record_store_tests.rs:3687",
+      "primary_in_scope": true,
+      "trace_cross_scope": false,
+      "flow_source": "crates/qbind-node/src/safety_record_store/codec.rs:879",
+      "message": "This operation writes [decode_timeout_cert(...)](1) to a log file."
+    },
+    {
+      "result_index": 53,
+      "rule": "rust/cleartext-logging",
+      "reported_severity": "warning",
+      "location": "crates/qbind-node/tests/run_422_d7d14_safety_record_store_tests.rs:3721",
+      "primary_in_scope": true,
+      "trace_cross_scope": false,
+      "flow_source": "crates/qbind-node/src/safety_record_store/codec.rs:879",
+      "message": "This operation writes [decode_timeout_cert(...)](1) to a log file."
+    },
+    {
+      "result_index": 54,
+      "rule": "rust/cleartext-logging",
+      "reported_severity": "warning",
+      "location": "crates/qbind-node/tests/run_422_d7d14_safety_record_store_tests.rs:3794",
+      "primary_in_scope": true,
+      "trace_cross_scope": false,
+      "flow_source": "crates/qbind-node/src/safety_record_store/codec.rs:879",
+      "message": "This operation writes [decode_timeout_cert(...)](1) to a log file."
+    },
+    {
+      "result_index": 55,
+      "rule": "rust/cleartext-logging",
+      "reported_severity": "warning",
+      "location": "crates/qbind-node/tests/run_422_d7d14_safety_record_store_tests.rs:3823",
+      "primary_in_scope": true,
+      "trace_cross_scope": false,
+      "flow_source": "crates/qbind-node/src/safety_record_store/codec.rs:879",
+      "message": "This operation writes [decode_timeout_cert(...)](1) to a log file."
+    },
+    {
+      "result_index": 56,
+      "rule": "rust/cleartext-logging",
+      "reported_severity": "warning",
+      "location": "crates/qbind-node/tests/run_422_d7d14_safety_record_store_tests.rs:4145",
+      "primary_in_scope": true,
+      "trace_cross_scope": false,
+      "flow_source": "crates/qbind-node/src/safety_record_store/codec.rs:546",
+      "message": "This operation writes [admit_timeout_cert(...)](1) to a log file."
+    },
+    {
+      "result_index": 57,
+      "rule": "rust/cleartext-logging",
+      "reported_severity": "warning",
+      "location": "crates/qbind-node/tests/run_422_d7d14_safety_record_store_tests.rs:4170",
+      "primary_in_scope": true,
+      "trace_cross_scope": false,
+      "flow_source": "crates/qbind-node/src/safety_record_store/codec.rs:546",
+      "message": "This operation writes [admit_timeout_cert(...)](1) to a log file."
+    },
+    {
+      "result_index": 58,
+      "rule": "rust/cleartext-logging",
+      "reported_severity": "warning",
+      "location": "crates/qbind-node/tests/run_422_d7d14_safety_record_store_tests.rs:5134",
+      "primary_in_scope": true,
+      "trace_cross_scope": false,
+      "flow_source": "crates/qbind-node/src/safety_record_store/codec.rs:546",
+      "message": "This operation writes [admit_timeout_cert(...)](1) to a log file."
+    },
+    {
+      "result_index": 59,
+      "rule": "rust/cleartext-logging",
+      "reported_severity": "warning",
+      "location": "crates/qbind-node/tests/run_422_d7d14_safety_record_store_tests.rs:5715",
+      "primary_in_scope": true,
+      "trace_cross_scope": false,
+      "flow_source": "crates/qbind-node/src/safety_record_store/codec.rs:546",
+      "message": "This operation writes [admit_timeout_cert(...)](1) to a log file. This operation writes [decode_timeout_cert(...)](2) to a log file."
+    },
+    {
+      "result_index": 60,
+      "rule": "rust/cleartext-logging",
+      "reported_severity": "warning",
+      "location": "crates/qbind-node/tests/run_422_d7d14_safety_record_store_tests.rs:5873",
+      "primary_in_scope": true,
+      "trace_cross_scope": false,
+      "flow_source": "crates/qbind-node/src/safety_record_store/codec.rs:879",
+      "message": "This operation writes [decode_timeout_cert(...)](1) to a log file."
+    },
+    {
+      "result_index": 61,
+      "rule": "rust/cleartext-logging",
+      "reported_severity": "warning",
+      "location": "crates/qbind-node/tests/run_422_d7d14_safety_record_store_tests.rs:6232",
+      "primary_in_scope": true,
+      "trace_cross_scope": false,
+      "flow_source": "crates/qbind-node/src/safety_record_store/codec.rs:879",
+      "message": "This operation writes [decode_timeout_cert(...)](1) to a log file."
+    },
+    {
+      "result_index": 62,
+      "rule": "rust/cleartext-logging",
+      "reported_severity": "warning",
+      "location": "crates/qbind-node/tests/run_422_d7d14_safety_record_store_tests.rs:6234",
+      "primary_in_scope": true,
+      "trace_cross_scope": false,
+      "flow_source": "crates/qbind-node/src/safety_record_store/codec.rs:879",
+      "message": "This operation writes [decode_timeout_cert(...)](1) to a log file."
+    },
+    {
+      "result_index": 63,
+      "rule": "rust/cleartext-logging",
+      "reported_severity": "warning",
+      "location": "crates/qbind-node/tests/run_422_d7d14_safety_record_store_tests.rs:6391",
+      "primary_in_scope": true,
+      "trace_cross_scope": false,
+      "flow_source": "crates/qbind-node/src/safety_record_store/codec.rs:879",
+      "message": "This operation writes [decode_timeout_cert(...)](1) to a log file."
+    },
+    {
+      "result_index": 64,
+      "rule": "rust/cleartext-logging",
+      "reported_severity": "warning",
+      "location": "crates/qbind-node/tests/run_422_d7d14_safety_record_store_tests.rs:6393",
+      "primary_in_scope": true,
+      "trace_cross_scope": false,
+      "flow_source": "crates/qbind-node/src/safety_record_store/codec.rs:879",
+      "message": "This operation writes [decode_timeout_cert(...)](1) to a log file."
+    },
+    {
+      "result_index": 65,
+      "rule": "rust/cleartext-logging",
+      "reported_severity": "warning",
+      "location": "crates/qbind-node/tests/run_422_d7d14_safety_record_store_tests.rs:6784",
+      "primary_in_scope": true,
+      "trace_cross_scope": false,
+      "flow_source": "crates/qbind-node/src/safety_record_store/codec.rs:546",
+      "message": "This operation writes [admit_timeout_cert(...)](1) to a log file."
+    },
+    {
+      "result_index": 66,
+      "rule": "rust/cleartext-logging",
+      "reported_severity": "warning",
+      "location": "crates/qbind-node/tests/run_422_d7d14_safety_record_store_tests.rs:6808",
+      "primary_in_scope": true,
+      "trace_cross_scope": false,
+      "flow_source": "crates/qbind-node/src/safety_record_store/codec.rs:546",
+      "message": "This operation writes [admit_timeout_cert(...)](1) to a log file."
+    },
+    {
+      "result_index": 67,
+      "rule": "rust/cleartext-logging",
+      "reported_severity": "warning",
+      "location": "crates/qbind-node/tests/run_422_d7d14_safety_record_store_tests.rs:6872",
+      "primary_in_scope": true,
+      "trace_cross_scope": false,
+      "flow_source": "crates/qbind-node/src/safety_record_store/codec.rs:546",
+      "message": "This operation writes [admit_timeout_cert(...)](1) to a log file."
+    },
+    {
+      "result_index": 68,
+      "rule": "rust/cleartext-logging",
+      "reported_severity": "warning",
+      "location": "crates/qbind-node/tests/run_422_d7d14_safety_record_store_tests.rs:7117",
+      "primary_in_scope": true,
+      "trace_cross_scope": false,
+      "flow_source": "crates/qbind-node/src/safety_record_store/codec.rs:546",
+      "message": "This operation writes [admit_timeout_cert(...)](1) to a log file. This operation writes [decode_timeout_cert(...)](2) to a log file."
+    },
+    {
+      "result_index": 69,
+      "rule": "rust/cleartext-logging",
+      "reported_severity": "warning",
+      "location": "crates/qbind-node/tests/run_422_d7d14_safety_record_store_tests.rs:7574",
+      "primary_in_scope": true,
+      "trace_cross_scope": false,
+      "flow_source": "crates/qbind-node/src/safety_record_store/codec.rs:546",
+      "message": "This operation writes [admit_timeout_cert(...)](1) to a log file."
+    },
+    {
+      "result_index": 70,
+      "rule": "rust/cleartext-logging",
+      "reported_severity": "warning",
+      "location": "crates/qbind-node/tests/run_422_d7d14_safety_record_store_tests.rs:7600",
+      "primary_in_scope": true,
+      "trace_cross_scope": false,
+      "flow_source": "crates/qbind-node/src/safety_record_store/codec.rs:546",
+      "message": "This operation writes [admit_timeout_cert(...)](1) to a log file."
+    },
+    {
+      "result_index": 71,
+      "rule": "rust/cleartext-logging",
+      "reported_severity": "warning",
+      "location": "crates/qbind-node/tests/run_422_d7d14_safety_record_store_tests.rs:7803",
+      "primary_in_scope": true,
+      "trace_cross_scope": false,
+      "flow_source": "crates/qbind-node/src/safety_record_store/codec.rs:546",
+      "message": "This operation writes [admit_timeout_cert(...)](1) to a log file."
+    },
+    {
+      "result_index": 72,
+      "rule": "rust/cleartext-logging",
+      "reported_severity": "warning",
+      "location": "crates/qbind-node/tests/run_422_d7d14_safety_record_store_tests.rs:7848",
+      "primary_in_scope": true,
+      "trace_cross_scope": false,
+      "flow_source": "crates/qbind-node/src/safety_record_store/codec.rs:546",
+      "message": "This operation writes [admit_timeout_cert(...)](1) to a log file."
+    },
+    {
+      "result_index": 73,
+      "rule": "rust/cleartext-logging",
+      "reported_severity": "warning",
+      "location": "crates/qbind-node/tests/run_422_d7d14_safety_record_store_tests.rs:7883",
+      "primary_in_scope": true,
+      "trace_cross_scope": false,
+      "flow_source": "crates/qbind-node/src/safety_record_store/codec.rs:546",
+      "message": "This operation writes [admit_timeout_cert(...)](1) to a log file."
+    },
+    {
+      "result_index": 74,
+      "rule": "rust/cleartext-logging",
+      "reported_severity": "warning",
+      "location": "crates/qbind-node/tests/run_422_d7d14_safety_record_store_tests.rs:7925",
+      "primary_in_scope": true,
+      "trace_cross_scope": false,
+      "flow_source": "crates/qbind-node/src/safety_record_store/codec.rs:546",
+      "message": "This operation writes [admit_timeout_cert(...)](1) to a log file."
+    },
+    {
+      "result_index": 75,
+      "rule": "rust/cleartext-logging",
+      "reported_severity": "warning",
+      "location": "crates/qbind-node/tests/run_422_d7d14_safety_record_store_tests.rs:8125",
+      "primary_in_scope": true,
+      "trace_cross_scope": false,
+      "flow_source": "crates/qbind-node/src/safety_record_store/codec.rs:546",
+      "message": "This operation writes [admit_timeout_cert(...)](1) to a log file."
+    },
+    {
+      "result_index": 76,
+      "rule": "rust/cleartext-logging",
+      "reported_severity": "warning",
+      "location": "crates/qbind-node/tests/run_422_d7d14_safety_record_store_tests.rs:8190",
+      "primary_in_scope": true,
+      "trace_cross_scope": false,
+      "flow_source": "crates/qbind-node/src/safety_record_store/codec.rs:546",
+      "message": "This operation writes [admit_timeout_cert(...)](1) to a log file."
+    },
+    {
+      "result_index": 77,
+      "rule": "rust/cleartext-logging",
+      "reported_severity": "warning",
+      "location": "crates/qbind-node/tests/run_422_d7d14_safety_record_store_tests.rs:8215",
+      "primary_in_scope": true,
+      "trace_cross_scope": false,
+      "flow_source": "crates/qbind-node/src/safety_record_store/codec.rs:546",
+      "message": "This operation writes [admit_timeout_cert(...)](1) to a log file."
+    },
+    {
+      "result_index": 78,
+      "rule": "rust/cleartext-logging",
+      "reported_severity": "warning",
+      "location": "crates/qbind-node/tests/run_422_d7d14_safety_record_store_tests.rs:8236",
+      "primary_in_scope": true,
+      "trace_cross_scope": false,
+      "flow_source": "crates/qbind-node/src/safety_record_store/codec.rs:546",
+      "message": "This operation writes [admit_timeout_cert(...)](1) to a log file."
+    },
+    {
+      "result_index": 79,
+      "rule": "rust/cleartext-logging",
+      "reported_severity": "warning",
+      "location": "crates/qbind-node/tests/run_422_d7d14_safety_record_store_tests.rs:8625",
+      "primary_in_scope": true,
+      "trace_cross_scope": false,
+      "flow_source": "crates/qbind-node/src/safety_record_store/codec.rs:546",
+      "message": "This operation writes [admit_timeout_cert(...)](1) to a log file."
+    },
+    {
+      "result_index": 80,
+      "rule": "rust/cleartext-logging",
+      "reported_severity": "warning",
+      "location": "crates/qbind-node/tests/run_422_d7d14_safety_record_store_tests.rs:8903",
+      "primary_in_scope": true,
+      "trace_cross_scope": false,
+      "flow_source": "crates/qbind-node/src/safety_record_store/codec.rs:546",
+      "message": "This operation writes [admit_timeout_cert(...)](1) to a log file."
+    },
+    {
+      "result_index": 81,
+      "rule": "rust/cleartext-logging",
+      "reported_severity": "warning",
+      "location": "crates/qbind-node/tests/run_422_d7d14_safety_record_store_tests.rs:8913",
+      "primary_in_scope": true,
+      "trace_cross_scope": false,
+      "flow_source": "crates/qbind-node/src/safety_record_store/codec.rs:546",
+      "message": "This operation writes [admit_timeout_cert(...)](1) to a log file."
+    },
+    {
+      "result_index": 82,
+      "rule": "rust/cleartext-logging",
+      "reported_severity": "warning",
+      "location": "crates/qbind-node/tests/run_422_d7d14_safety_record_store_tests.rs:9707",
+      "primary_in_scope": true,
+      "trace_cross_scope": false,
+      "flow_source": "crates/qbind-node/src/safety_record_store/codec.rs:546",
+      "message": "This operation writes [admit_timeout_cert(...)](1) to a log file."
+    },
+    {
+      "result_index": 83,
+      "rule": "rust/cleartext-logging",
+      "reported_severity": "warning",
+      "location": "crates/qbind-node/tests/run_422_d7d14_safety_record_store_tests.rs:9734",
+      "primary_in_scope": true,
+      "trace_cross_scope": false,
+      "flow_source": "crates/qbind-node/src/safety_record_store/codec.rs:546",
+      "message": "This operation writes [admit_timeout_cert(...)](1) to a log file."
+    },
+    {
+      "result_index": 84,
+      "rule": "rust/cleartext-logging",
+      "reported_severity": "warning",
+      "location": "crates/qbind-node/tests/run_422_d7d14_safety_record_store_tests.rs:9985",
+      "primary_in_scope": true,
+      "trace_cross_scope": false,
+      "flow_source": "crates/qbind-node/src/safety_record_store/codec.rs:546",
+      "message": "This operation writes [admit_timeout_cert(...)](1) to a log file."
+    },
+    {
+      "result_index": 85,
+      "rule": "rust/cleartext-logging",
+      "reported_severity": "warning",
+      "location": "crates/qbind-node/tests/run_422_d7d14_safety_record_store_tests.rs:10651",
+      "primary_in_scope": true,
+      "trace_cross_scope": false,
+      "flow_source": "crates/qbind-node/src/safety_record_store/codec.rs:546",
+      "message": "This operation writes [admit_timeout_cert(...)](1) to a log file. This operation writes [decode_timeout_cert(...)](2) to a log file."
+    },
+    {
+      "result_index": 86,
+      "rule": "rust/cleartext-logging",
+      "reported_severity": "warning",
+      "location": "crates/qbind-node/tests/run_422_d7d14_safety_record_store_tests.rs:10870",
+      "primary_in_scope": true,
+      "trace_cross_scope": false,
+      "flow_source": "crates/qbind-node/src/safety_record_store/codec.rs:546",
+      "message": "This operation writes [admit_timeout_cert(...)](1) to a log file."
+    },
+    {
+      "result_index": 143,
+      "rule": "rust/cleartext-logging",
+      "reported_severity": "warning",
+      "location": "crates/qbind-node/src/safety_record_store/codec.rs:415",
+      "primary_in_scope": true,
+      "trace_cross_scope": false,
+      "flow_source": "crates/qbind-node/src/safety_record_store/codec.rs:415",
+      "message": "This operation writes [cert_cap](1) to a log file."
+    }
+  ]
+}

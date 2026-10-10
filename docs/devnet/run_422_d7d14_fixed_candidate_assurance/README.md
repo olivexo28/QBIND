@@ -1,23 +1,22 @@
 # RUN 422 D7-D14 — Fixed-Candidate CodeQL Assurance (Ondrat / QBIND)
 
-> **Continuation correction (D7-D14 configuration-coverage / artifact-preservation
-> pass).** Two operative claims recorded in earlier revisions of this directory are
-> **corrected** here; the historical execution record is preserved, not relabelled.
-> (1) The earlier inference that two databases demonstrated *configuration-independent
-> extraction* is **withdrawn**: in the official CodeQL extractor at tag
-> `codeql-cli/v2.27.2`, `rust/extractor/src/config.rs` `to_cfg_overrides` seeds
-> `enabled_cfgs` with `test` **by default** (L253), and only a `-`-prefixed spec
-> (`-test`) disables a cfg (L256–259). The second database's
-> `rust.cargo_cfg_overrides=test` therefore left `test` **enabled** (identical to the
-> default) and did **not** establish a test-disabled comparison; matching function
-> counts and rounded relation sizes do not prove identical semantic databases. The
-> production-default (test-disabled) and the explicit acceptance-test (`test-utils`)
-> configurations are consequently **not yet demonstrated** — see the remaining-gap
-> note below. (2) The ~6 MiB full-workspace SARIF was preserved only under the
-> temporary path `/tmp/run422_d7d14/sarif/`, which is **not** durable preservation and
-> is **absent** in this continuation sandbox; its recorded SHA-256 could **not** be
-> re-verified here. See `logs/checksums.txt` and the Run 422 D7-D14 continuation entry
-> in `../QBIND_DEVNET_EVIDENCE_RUN_422_D7.md`.
+> **Execution pass (D7-D14 configuration-coverage / artifact-preservation).** The two
+> previously-open deliverables are now **executed**, not merely corrected. Both required
+> CodeQL configurations (A production-default, B acceptance-tests) were run end-to-end
+> against the frozen candidate, and their complete SARIF is durably preserved in this
+> directory as lossless `.sarif.gz`. The earlier corrections remain accurate and are
+> retained as context: (1) in the official extractor at `codeql-bundle-v2.27.2`,
+> `cargo_cfg_overrides` seeds `test` **enabled by default**, and only a `-`-prefixed spec
+> (`-test`) disables a cfg — so a prior `cargo_cfg_overrides=test` run did **not** disable
+> `cfg(test)`. This pass therefore uses the correct forms: Config A passes
+> `rust.cargo_features=default` **and** `rust.cargo_cfg_overrides=-test` (cfg(test)
+> DISABLED), and Config B passes `rust.cargo_features=default,qbind-node/test-utils`
+> (cfg(test) ENABLED by extractor default). (2) The original ~6 MiB full-workspace SARIF
+> remains **unrecoverable** (it only ever existed under the temporary `/tmp/run422_d7d14/`
+> and is absent in a fresh clone; its SHA-256 is **not** re-verifiable and **not**
+> re-attributed). The two SARIFs preserved here are **new executions** with their own
+> identities/checksums (`logs/checksums.txt`). See the Run 422 D7-D14 entry in
+> `../QBIND_DEVNET_EVIDENCE_RUN_422_D7.md`.
 
 Bounded evidence for the assurance-execution pass over the **frozen** D7-D14
 `safety_record_store` candidate. The implementation was **not** modified; this
@@ -126,68 +125,83 @@ The two DB rows above are both **test-enabled** extractions (the second's
 correction). They establish the all-features / test-enabled model, not the
 production-default or the explicit `test-utils` model.
 
-## Configuration-coverage gap (remaining limitation)
+## Configuration-coverage — A and B EXECUTED
 
-The successful execution above covers **one** effective configuration: all Cargo
-features enabled with `cfg(test)` enabled. Two required configurations are **not yet
-demonstrated**, and are recorded as an explicit limitation rather than claimed:
+Both required configurations were executed end-to-end against the frozen candidate
+(`effective settings → database creation → extraction/finalization → full query
+execution → SARIF generation`). Effective settings were confirmed from the extractor's
+own config dump in the build logs.
 
-- **A — Production default.** `rust.cargo_features=default` **with**
-  `rust.cargo_cfg_overrides=-test` (leading `-` to disable `cfg(test)`), to confirm
-  the production semantic model excludes `test-utils` and test-only
-  mutation/fault-injection surfaces. Not executed here.
-- **B — Acceptance test.** An explicit default-plus-`test-utils` configuration with
-  the required `cfg(test)` treatment, with the integration-test target shown to be
-  represented in the semantic model (not inferred from source-archive presence).
-  The preserved all-features run has **not** been shown equivalent to this required
-  configuration. Not executed here.
+| Config | `rust.cargo_features` | `rust.cargo_cfg_overrides` | cfg(test) | DB relations | workspace results | component results |
+| --- | --- | --- | --- | --- | --- | --- |
+| **A — production default** | `default` | `-test` | **disabled** | 250.44 MiB | 50 | 2 |
+| **B — acceptance tests** | `default,qbind-node/test-utils` | *(empty → test enabled)* | **enabled** | 284.83 MiB | 828 | 50 |
 
-Environment limitation (this continuation sandbox): `codeql` is not on `PATH`, the
-prior temporary install under `/tmp/run422_d7d14/` is absent (fresh clone), and the
-earlier run required `--ram=12000` against ~13 GiB available. The missing
-configuration runs are therefore left as a **named open gap**; no universal "all
-configurations covered" claim is made, and the useful completed all-features
-analysis is preserved.
+- **A** confirms the production semantic model **excludes** `test-utils`: the
+  `test-utils`-gated helper `set_inject_write_failure` resolves to **0** definitions
+  (Config B: **2**), and the D7-D14 integration-test target's calls into the component
+  largely do not resolve (18 resolved calls / 12 distinct targets, vs Config B's
+  **1857 / 123**). `results/coverage_testutils_helper_*.csv`,
+  `results/coverage_resolved_calls_*.csv`.
+- **B** confirms the D7-D14 integration-test target **is** represented in the semantic
+  model: `test-utils`-gated helper present (2 defs) and 1857 calls from the test file
+  resolve into component functions via type inference (`Call.getStaticTarget()`), not
+  mere source-archive/AST presence (both DBs parse the test file into 188 AST
+  `Function` nodes — AST presence ≠ semantic/data-flow coverage).
+- Configuration sensitivity is visible directly in the **security-query data-flow**
+  output: component `rust/cleartext-logging` results are **2** under A vs **50** under B.
 
-## Full-workspace SARIF — durable preservation NOT established
+These are **new executions** with their own identities (`logs/checksums.txt`); Config B
+independently reproduces the historical all-features/test-enabled totals (828/50) because,
+for this component, `default+test-utils` with `cfg(test)` enabled is the same effective
+model — it is **not** the original artifact and does **not** reuse the original checksum.
 
-The ~6 MiB full-workspace SARIF (`sarif_full_sha256`
-`de7d10f3…601777fa`, 828 workspace / 50 component results) was written only to the
-temporary path `/tmp/run422_d7d14/sarif/`. A temporary path plus a recorded checksum
-is **not** durable artifact preservation. In this continuation sandbox that path is
-**absent**, so the original artifact could **not** be recovered and its recorded
-SHA-256 could **not** be re-verified here. The committed, retrievable artifacts in
-this directory remain the abbreviated `results/component_scoped_findings.json`
-(50 component results, no rule metadata/severity), the workspace rule-count summary,
-and the per-config coverage CSVs. The full SARIF (rule metadata, severities,
-invocation/execution info, extraction diagnostics, related locations, data-flow
-traces, all workspace results) is **not** durably preserved. No new checksum or
-execution identity is attributed to any replacement, and the original checksum is
-**not** re-attributed. `logs/checksums.txt` records this status.
+## Full-workspace SARIF — durably preserved (A and B); original NOT recovered
 
-## Findings (within verified scope)
+Complete SARIF for both executed configurations is durably preserved in this directory
+as lossless gzip (rule metadata, severities, invocations, diagnostics, related
+locations, data-flow traces, **all** workspace results):
 
-Workspace totals and component-scoped counts are in
-`results/findings_summary_workspace.csv`; the 50 component-scoped results are in
-`results/component_scoped_findings.json`.
+- `sarif/A_production_default.sarif.gz` — 50 workspace results (decompresses + validates
+  as JSON; SHA-256 in `logs/checksums.txt`).
+- `sarif/B_acceptance_testutils.sarif.gz` — 828 workspace results (likewise verified).
+
+The **original** ~6 MiB all-features SARIF (`de7d10f3…601777fa`, 828/50) existed only
+under the temporary `/tmp/run422_d7d14/sarif/` and is **absent** in a fresh clone; no
+actual artifact source exists, so it could **not** be recovered and its SHA-256 is
+**not** re-verifiable and is **not** re-attributed. Config B is a **new** execution of
+the equivalent configuration that preserves that configuration's complete evidence
+durably, with its own distinct checksum.
+
+## Findings & per-result dispositions
+
+Workspace totals and component counts for **both** configs are in
+`results/findings_summary_workspace.csv`. A machine-readable per-result disposition
+table (one row per component-scoped result, covering both A and B) is in
+`results/dispositions.csv` and `results/dispositions.json` with columns:
+`run/configuration | result identifier | rule | location | reported severity |
+inspected evidence | disposition | rationale`. (52 rows: A = 1 test + 1 production;
+B = 49 test + 1 production.) The abbreviated `results/component_scoped_findings.json`
+is retained for continuity but is superseded by the full per-config
+`results/config{A,B}/component_findings_*.json` (which carry rule id, reported severity,
+location, flow source, and message) and the disposition table.
 
 - **No** high-severity security finding (injection, broken/hard-coded crypto,
-  pointer/cert issues) touches the component source.
-- Component-scoped: 50 × `rust/cleartext-logging` — 49 in the integration
-  **test** file (`println!`/formatting in test assertions) and **1** in
-  production source: `safety_record_store/codec.rs:415`. That single production
-  hit flags the integer `cert_cap` inside a `debug_assert!` message (verified:
-  `codec.rs:413–417`, the `debug_assert!(cert.capacity() == cert_cap, …)` divergence
-  message); `cert_cap` is a non-sensitive capacity bound and `debug_assert!` is
-  compiled out in release. The **assessment** of this result as a false positive is
-  recorded **separately** from the rule's reported severity: the abbreviated
-  `component_scoped_findings.json` omits rule metadata/severity, so no severity is
-  claimed from it — the reported severity of `rust/cleartext-logging` lives in the
-  full SARIF's rule metadata, which is not durably preserved here (above). The 49
-  test-file results are dispositioned per-location in the evidence doc's disposition
-  table, not solely on the basis that they lie in a test file. Per task scope, the
-  implementation and tests were **not** modified to satisfy the analyzer; this is
-  recorded for any separately scoped correction decision.
+  pointer/cert issues) touches the component source in either config.
+- The single **production** component hit is `safety_record_store/codec.rs:415` in
+  **both** A and B: `rust/cleartext-logging` (reported severity `warning`) on the integer
+  `cert_cap` inside a `debug_assert!` divergence message (`codec.rs:413–417`). `cert_cap`
+  is a non-sensitive capacity bound and `debug_assert!` is compiled out in release →
+  disposed **FALSE_POSITIVE_NON_SENSITIVE**. Reported severity is recorded **separately**
+  from this false-positive assessment.
+- The **test-file** component hits (49 under B, 1 under A) flow from synthetic
+  fixture certificates (`decode_timeout_cert`/`admit_timeout_cert`) and Debug-formatted
+  error enums / capacity integers into `panic!`/`assert!`/`println!` **test-assertion
+  diagnostics**. Each is disposed per-location by inspecting its flow source and sink
+  (not merely because it lies in a test file); none carries secret/key/credential
+  material → **FALSE_POSITIVE_NON_SENSITIVE_TEST_DIAGNOSTIC**.
+- Per task scope, the implementation and tests were **not** modified to satisfy the
+  analyzer; the frozen candidate is byte-identical to the manifest (10/10 OK).
 
 ## Independent-review arm — OPEN
 

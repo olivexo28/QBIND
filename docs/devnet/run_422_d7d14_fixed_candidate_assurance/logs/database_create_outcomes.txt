@@ -1,12 +1,11 @@
-### db create (default) — key outcomes
-[2026-10-10 05:32:02] [2026-10-10 05:32:02] [34mDEBUG[0m ExtractionStep { action: LoadManifest, file: Some("$T/candidate_src/Cargo.toml"), ms: 257487 }
-[2026-10-10 05:34:03] [2026-10-10 05:34:03] [32m INFO[0m total duration (LoadManifest): 4min17.487s
-[2026-10-10 05:34:03] [2026-10-10 05:34:03] [32m INFO[0m total duration: 6min27.498s
-Finished writing database (relations: 219.94 MiB; string pool: 22.03 MiB).
-TRAP import complete (1m19s).
-Successfully created database at $T/db/rust-default.
+Config A (production default: cargo_features=default, cargo_cfg_overrides=-test):
+[2026-10-10 07:06:06] [2026-10-10 07:06:06]     number of inputs: 911,
+Finished writing database (relations: 250.44 MiB; string pool: 22.03 MiB).
+TRAP import complete (37.1s).
+Successfully created database at /home/runner/codeql-run422/dbs/dbA.
 
-### db create (cfg(test)) — key outcomes
-[2026-10-10 05:48:23] [2026-10-10 05:48:23] [32m INFO[0m total duration: 10min07.987s
-Finished writing database (relations: 219.94 MiB; string pool: 22.03 MiB).
-Successfully created database at $T/db/rust-cfgtest.
+Config B (acceptance: cargo_features=default,qbind-node/test-utils; cfg_overrides empty => test enabled):
+[2026-10-10 07:23:50] [2026-10-10 07:23:50]     number of inputs: 911,
+Finished writing database (relations: 284.83 MiB; string pool: 22.03 MiB).
+TRAP import complete (42.8s).
+Successfully created database at /home/runner/codeql-run422/dbs/dbB.
