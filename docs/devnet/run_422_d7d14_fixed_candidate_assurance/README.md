@@ -233,15 +233,18 @@ location, flow source, and message) and the disposition table.
 - Per task scope, the implementation and tests were **not** modified to satisfy the
   analyzer; the frozen candidate is byte-identical to the manifest (10/10 OK).
 
-## Independent-review arm — OPEN
+## Independent-review arm — COMPLETE (AI-assisted internal review)
 
-The available review interfaces (PR Code Review / the diff-scoped reviewer) are
-scoped to the current change set, which here is **documentation-only** (the
-implementation is frozen and identical to HEAD, so there is no implementation
-diff to review). No available reviewer can take the fixed revision `aad0a4a`
-full component source as an independent-review target. The implementation
-agent's own assessment does not satisfy the gate, so this arm is left **OPEN**;
-see `04_independent_review.md`.
+The PR Code Review / diff-scoped reviewer interfaces are scoped to the current change
+set, which here is **documentation-only** (the implementation is frozen and identical to
+HEAD, so there is no implementation diff to review). The independent full-source review
+was instead performed by **reading the frozen component source directly** at the fixed
+revision `aad0a4a` (byte-identical to HEAD), which does not require an implementation diff.
+That review is now **COMPLETE** as an **AI-assisted internal review** — see
+`independent_review/00_review_report.md` (full report) and `04_independent_review.md`
+(outcome). It is not a human audit or an organizationally-independent assessment; that
+difference is recorded as an assurance-level limitation, not an unmet contractual obligation.
+The implementation agent's own self-assessment is separate and does not substitute for it.
 
 ## Separate assurance statuses (this finishing pass)
 
@@ -249,9 +252,12 @@ These are reported **separately** and do not promote any global acceptance verdi
 
 - **A/B security-suite execution — COMPLETE.** Configs A and B executed end-to-end;
   preserved SARIF unchanged and not re-run.
-- **Durable artifact integrity — VERIFIED.** Both `sarif/*.sarif.gz` byte-identical;
-  decompressed contents match recorded SHA-256; `logs/checksums.txt` refreshed for changed
-  artifacts and extended with diagnostic sources/outputs.
+- **Durable artifact integrity — VERIFIED (restored byte-exact on the review branch).** Both
+  `sarif/*.sarif.gz` byte-identical to `ecf4cf…`; decompressed contents match recorded SHA-256;
+  `logs/checksums.txt` entries all pass. The independent-review continuation restored three
+  absent files (`sarif/A`, `sarif/B`, `diagnostics/FINDINGS.md`) and sixteen CRLF/final-newline
+  byte-drifted checksum-listed artifacts (plus drifted raw `logs/` artifacts) to their exact
+  original `ecf4cf…` bytes — original checksums preserved, not rewritten.
 - **Diagnostic assessment & residual limitations — RECORDED.** Example-only ill-formed
   tuple mentions (not a component defect); Config B per-file diagnostic cap (suppressed
   contents unrecoverable, not asserted benign); unresolved `panic_2021` macro at test line
@@ -260,8 +266,11 @@ These are reported **separately** and do not promote any global acceptance verdi
   (level `warning`, `security-severity` `7.5`) stated and kept separate from the 52
   per-location false-positive dispositions; test-file function counts A=188 / B=191;
   equivalent-semantic-model inference withdrawn.
-- **Independent full-source review — OPEN.** Not discharged by self-assessment or a
-  documentation-diff review.
+- **Independent full-source review — COMPLETE (AI-assisted internal review).** Performed by
+  reading the frozen `aad0a4a` component source directly (not a documentation-diff review);
+  full A/B SARIF inspected, 52 dispositions assessed, dependency trace completed. Recorded as
+  an assurance-level limitation (not a human / organizationally-independent audit), not as an
+  unmet obligation. See `independent_review/00_review_report.md` and `04_independent_review.md`.
 
 ## Scope / verdicts preserved
 
