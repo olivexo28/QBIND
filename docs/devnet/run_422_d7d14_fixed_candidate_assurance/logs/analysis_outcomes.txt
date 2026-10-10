@@ -1,8 +1,23 @@
-### analyze (rust-security-and-quality.qls) — key outcomes
-CodeQL scanned 909 out of 909 Rust files in this invocation. Check the status page for overall coverage information: https://github.com/olivexo28/QBIND/security/code-scanning/tools/CodeQL/status/
-Analysis produced the following metric data:
-| Total number of Rust files that were extracted without error |   819 |
-| Total number of Rust files that were extracted with errors   |    92 |
-Exported results to SARIF v2.1.0 (614ms).
+RUN 422 D7-D14 — CodeQL A/B execution outcomes (frozen candidate aad0a4a / tree 82caed80)
+Suite: codeql/rust-queries:codeql-suites/rust-security-and-quality.qls (41 queries resolved)
+Query pack codeql/rust-queries@0.1.44 ; library codeql/rust-all@0.2.23 ; CLI 2.27.2
 
-exit=0 (all suite queries evaluated after raising --ram to 12000; first attempt at default heap 1080 MiB hit JVM OOM and was rerun)
+Config A — production default (cargo_features=default, cargo_cfg_overrides=-test; cfg(test) DISABLED)
+  database create : SUCCESS (relations 250.44 MiB; 911 inputs; TRAP import 37.1s)
+  analyze/SARIF   : SUCCESS (--ram=10000, 4 threads; no OOM)
+  workspace results: 50  (hard-coded-cryptographic-value 28, cleartext-logging 20, unused-variable 2)
+  component-scoped : 2   (cleartext-logging: 1 test-file line 8625, 1 production codec.rs:415)
+  SARIF (durable)  : sarif/A_production_default.sarif.gz
+
+Config B — acceptance tests (cargo_features=default,qbind-node/test-utils; cfg(test) ENABLED by extractor default)
+  database create : SUCCESS (relations 284.83 MiB; 911 inputs; TRAP import 42.8s)
+  analyze/SARIF   : SUCCESS (--ram=10000, 4 threads; no OOM)
+  workspace results: 828 (hard-coded-cryptographic-value 671, cleartext-logging 147, log-injection 8, unused-variable 2)
+  component-scoped : 50  (cleartext-logging: 49 test-file, 1 production codec.rs:415)
+  SARIF (durable)  : sarif/B_acceptance_testutils.sarif.gz
+
+New executions with their own identity/counts. Config B independently reproduces the
+historical all-features/test-enabled totals (828 workspace / 50 component) because
+default+qbind-node/test-utils with cfg(test) enabled is, for this component, the same
+effective model; it is NOT the original artifact and does NOT reuse the original checksum.
+Config A is a genuinely distinct (test-disabled) model: 50/2 vs 828/50.

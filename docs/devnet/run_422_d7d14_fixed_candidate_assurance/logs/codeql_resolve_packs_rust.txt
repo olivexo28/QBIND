@@ -1,2 +1,10 @@
-      codeql/rust-all@0.2.23: (library) /tmp/run422_d7d14/tools/codeql/qlpacks/codeql/rust-all/0.2.23/qlpack.yml
-      codeql/rust-queries@0.1.44: (query) /tmp/run422_d7d14/tools/codeql/qlpacks/codeql/rust-queries/0.1.44/qlpack.yml
+   /home/runner/codeql-run422/codeql/qlpacks/codeql/rust-queries/0.1.44/.codeql/libraries/codeql/concepts/0.0.33
+   /home/runner/codeql-run422/codeql/qlpacks/codeql/rust-queries/0.1.44/.codeql/libraries/codeql/controlflow/2.0.43
+   /home/runner/codeql-run422/codeql/qlpacks/codeql/rust-queries/0.1.44/.codeql/libraries/codeql/dataflow/2.1.15
+   /home/runner/codeql-run422/codeql/qlpacks/codeql/rust-queries/0.1.44/.codeql/libraries/codeql/mad/1.0.59
+   /home/runner/codeql-run422/codeql/qlpacks/codeql/rust-queries/0.1.44/.codeql/libraries/codeql/namebinding/0.0.8
+   /home/runner/codeql-run422/codeql/qlpacks/codeql/rust-queries/0.1.44/.codeql/libraries/codeql/regex/1.0.59
+WARNING: codeql/rust-all is found in 2 same-priority locations, so attempts to resolve it will fail:
+   /home/runner/codeql-run422/codeql/qlpacks/codeql/rust-queries/0.1.44/.codeql/libraries/codeql/rust-all/0.2.23
+   /home/runner/codeql-run422/codeql/qlpacks/codeql/rust-all/0.2.23
+codeql/rust-queries (/home/runner/codeql-run422/codeql/qlpacks/codeql/rust-queries/0.1.44)

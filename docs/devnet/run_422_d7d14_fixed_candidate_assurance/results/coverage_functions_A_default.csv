@@ -1,0 +1,11 @@
+"path","n"
+"/home/runner/candidate-src/crates/qbind-node/src/safety_record_store/accounting.rs",51
+"/home/runner/candidate-src/crates/qbind-node/src/safety_record_store/backend.rs",28
+"/home/runner/candidate-src/crates/qbind-node/src/safety_record_store/codec.rs",34
+"/home/runner/candidate-src/crates/qbind-node/src/safety_record_store/error.rs",89
+"/home/runner/candidate-src/crates/qbind-node/src/safety_record_store/mod.rs",1
+"/home/runner/candidate-src/crates/qbind-node/src/safety_record_store/owner.rs",26
+"/home/runner/candidate-src/crates/qbind-node/src/safety_record_store/profile.rs",26
+"/home/runner/candidate-src/crates/qbind-node/src/safety_record_store/record.rs",50
+"/home/runner/candidate-src/crates/qbind-node/src/safety_record_store/validate.rs",13
+"/home/runner/candidate-src/crates/qbind-node/tests/run_422_d7d14_safety_record_store_tests.rs",188
