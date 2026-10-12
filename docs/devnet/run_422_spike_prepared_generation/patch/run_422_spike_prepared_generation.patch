@@ -1,0 +1,1878 @@
+diff --git a/crates/qbind-node/Cargo.toml b/crates/qbind-node/Cargo.toml
+index e676fa7..b2fa456 100755
+--- a/crates/qbind-node/Cargo.toml
++++ b/crates/qbind-node/Cargo.toml
+@@ -73,6 +73,14 @@ name = "run_422_d7d14_safety_record_store_tests"
+ path = "tests/run_422_d7d14_safety_record_store_tests.rs"
+ required-features = ["test-utils"]
+ 
++# RUN 422 generation-only prepared-decision L0 ownership spike. Uses the same
++# `test-utils`-gated accounting/registry inspection seams, so it is declared with
++# the same `required-features` and skipped on a default build.
++[[test]]
++name = "run_422_spike_prepared_generation_tests"
++path = "tests/run_422_spike_prepared_generation_tests.rs"
++required-features = ["test-utils"]
++
+ # `m16_epoch_transition_hardening_tests` likewise drives the `test-utils`-gated
+ # `RocksDbConsensusStorage::set_inject_write_failure` / `clear_epoch_transition_marker`
+ # fault-injection helpers. Without an explicit `required-features` declaration the
+diff --git a/crates/qbind-node/src/safety_record_store/accounting.rs b/crates/qbind-node/src/safety_record_store/accounting.rs
+index 0b9ecde..6b7c5bb 100644
+--- a/crates/qbind-node/src/safety_record_store/accounting.rs
++++ b/crates/qbind-node/src/safety_record_store/accounting.rs
+@@ -18,7 +18,7 @@ use super::profile::{
+ };
+ use super::record::{
+     size_of_retained_generation, size_of_timeout_msg, DecodedRecord, RetainedGeneration,
+-    SafetyRecord, SupportingEvidence,
++    RetainedRecord, SafetyRecord, SupportingEvidence,
+ };
+ 
+ fn add(a: u128, b: u128) -> Result<u128, SafetyStoreError> {
+@@ -56,6 +56,46 @@ pub fn generation_charge(
+     Ok(total)
+ }
+ 
++/// The **generation-only** retained-memory charge for a prepared-decision L0
++/// entry (§ 13.6), measured in place from the live retained generation **without
++/// cloning** it.
++///
++/// This mirrors [`generation_charge`] but reads the evidence backings directly
++/// from the live [`RetainedRecord`] a captured proof moved into the registry,
++/// rather than from a separately-built [`RetainedGeneration`] wrapper (whose
++/// `from_locked` constructor *clones* the evidence into a second representation
++/// whose capacities are the clone's, not the live object's). It charges the
++/// inline generation wrapper + the actual capacity-measured evidence backings +
++/// the shared-allocation overhead once, and is always
++/// `<= MAX_RETAINED_GENERATION_BYTES` — so a prepared generation consumes one of
++/// the generations the aggregate's `gen_term` already budgets, with no ceiling
++/// increase. A `BootstrapNoLock` record is refused (prepared retention is a
++/// Locked-only experiment).
++pub fn prepared_generation_charge(
++    ctx: &PinnedSafetyContext,
++    retained: &RetainedRecord,
++) -> Result<u128, SafetyStoreError> {
++    let evidence = match &retained.record {
++        SafetyRecord::Locked(l) => &l.evidence,
++        SafetyRecord::BootstrapNoLock { .. } => {
++            return Err(SafetyStoreError::StructuralRefusal(
++                super::error::StructuralRefusalDetail::Static(
++                    "prepared generation charge requires a Locked generation",
++                ),
++            ));
++        }
++    };
++    let mut total = add(size_of_retained_generation(), evidence_backing_capacity(evidence)?)?;
++    total = add(total, ARC_CTRL)?;
++    let cap = max_retained_generation_bytes(ctx, size_of_timeout_msg())?;
++    if total > cap {
++        return Err(SafetyStoreError::DeclaredBoundExceeded(
++            DeclaredBoundDetail::GenerationChargeExceeds { charge: total, cap },
++        ));
++    }
++    Ok(total)
++}
++
+ /// The **capacity-measured** heap-backing charge for a supporting-evidence value
+ /// (§ 13.7A(b), D7-D14 capacity-aware correction).
+ ///
+diff --git a/crates/qbind-node/src/safety_record_store/backend.rs b/crates/qbind-node/src/safety_record_store/backend.rs
+index 5b081f7..875da28 100644
+--- a/crates/qbind-node/src/safety_record_store/backend.rs
++++ b/crates/qbind-node/src/safety_record_store/backend.rs
+@@ -15,6 +15,7 @@ use std::sync::{Arc, Mutex, MutexGuard};
+ 
+ use super::accounting::{AggregateAuthority, SharedAccountant};
+ use super::error::{EnvelopeFailureKind, ReadFailedDetail, ReadWhat, SafetyStoreError};
++use super::prepared::PreparedRegistry;
+ use crate::pqc_trust_bundle::TrustBundleEnvironment;
+ use crate::storage::signing_journal_crc32;
+ 
+@@ -442,6 +443,17 @@ pub struct SafetyBackend {
+     /// not perturb the O1–O5 working-set/holder measurements, while still bounding
+     /// the concurrent distinct context owners (`MAX_CONCURRENT_CONTEXT_OWNERS`).
+     context_accounting: SharedAccountant,
++    /// The shared, bounded **prepared-decision L0** registry (§ 13.6). Shared by
++    /// every attached handle / clone of this instance (the inner `Arc` is cloned,
++    /// never re-created), so a second handle cannot open a bypass registry. It is
++    /// backend infrastructure on a par with the serialization domain and the
++    /// accountant mutexes — the registry *container* (a fixed inline slot array
++    /// behind one `Arc<Mutex<..>>`) is not charged against the retained-bytes
++    /// aggregate; only the per-entry application-owned retained data (identity +
++    /// arc-handle + the shared generation) is, under the terms the aggregate
++    /// already budgets. A fresh backend open (and reopen) draws a fresh empty
++    /// registry bound to this open's ownership incarnation.
++    prepared: Arc<Mutex<PreparedRegistry>>,
+     /// Source/test-only: a deterministic hook fired by the owner at the exact
+     /// point **after** an atomic publication has returned its durability
+     /// acknowledgement but **before** the component performs its in-memory
+@@ -498,6 +510,9 @@ impl SafetyBackend {
+         // charge is bounded by the accepted component aggregate ceiling (§ 13.7,
+         // finding #4). Cloning the handle below shares the single inner guard.
+         let aggregate = AggregateAuthority::new();
++        // Draw this open's ownership incarnation once so the prepared registry is
++        // bound to the same incarnation the struct records below.
++        let incarnation = OWNERSHIP_INCARNATION.fetch_add(1, Ordering::SeqCst);
+         Ok(SafetyBackend {
+             db: Arc::new(db),
+             domain: Arc::new(Mutex::new(SerializationDomain(()))),
+@@ -507,7 +522,7 @@ impl SafetyBackend {
+             // durability acknowledgement (§ 13.4 / § 13.5).
+             effective: Arc::new(AtomicBool::new(false)),
+             // Draw a fresh ownership incarnation for this open (and reopen).
+-            incarnation: OWNERSHIP_INCARNATION.fetch_add(1, Ordering::SeqCst),
++            incarnation,
+             // A fresh, unbound operational accountant partition; the first
+             // attached handle binds its per-context operational sub-ceiling.
+             accounting: SharedAccountant::new(aggregate.clone()),
+@@ -517,6 +532,9 @@ impl SafetyBackend {
+             // partition, so neither partition can admit beyond the accepted
+             // combined coexistence budget.
+             context_accounting: SharedAccountant::new(aggregate),
++            // A fresh empty prepared-decision L0 registry bound to this open's
++            // ownership incarnation (shared by every attached handle thereafter).
++            prepared: Arc::new(Mutex::new(PreparedRegistry::new(incarnation))),
+             // No crash-boundary hook installed unless a test installs one.
+             #[cfg(any(test, feature = "test-utils"))]
+             pre_effective_hook: Arc::new(Mutex::new(None)),
+@@ -624,6 +642,21 @@ impl SafetyBackend {
+             .expect("safety serialization domain poisoned")
+     }
+ 
++    /// The shared prepared-decision L0 registry `Arc` (§ 13.6). Returns a cloned
++    /// handle to the single shared registry; never re-creates it. Crate-internal:
++    /// used by the owner capture/release path and by a [`super::prepared::PreparedPin`]'s
++    /// automatic-abandonment `Drop`.
++    pub(crate) fn prepared_registry(&self) -> Arc<Mutex<PreparedRegistry>> {
++        Arc::clone(&self.prepared)
++    }
++
++    /// Source/test-only: borrow the shared prepared registry to assert its live
++    /// object coverage and serial state directly. Gated behind `test-utils`.
++    #[cfg(any(test, feature = "test-utils"))]
++    pub fn prepared_registry_for_test(&self) -> Arc<Mutex<PreparedRegistry>> {
++        Arc::clone(&self.prepared)
++    }
++
+     /// Read the raw (CRC-verified) metadata bytes, if present. `max_payload` is
+     /// the applicable record-size bound enforced on the backend-internal view
+     /// **before** any component-owned copy is made.
+diff --git a/crates/qbind-node/src/safety_record_store/mod.rs b/crates/qbind-node/src/safety_record_store/mod.rs
+index 89e9576..d92633e 100644
+--- a/crates/qbind-node/src/safety_record_store/mod.rs
++++ b/crates/qbind-node/src/safety_record_store/mod.rs
+@@ -36,6 +36,7 @@ pub mod backend;
+ pub mod codec;
+ pub mod error;
+ pub mod owner;
++pub mod prepared;
+ pub mod profile;
+ pub mod record;
+ pub mod validate;
+@@ -43,6 +44,10 @@ pub mod validate;
+ pub use backend::{InjectFault, PublishOutcome, SafetyBackend, SafetyBackendPolicy};
+ pub use error::SafetyStoreError;
+ pub use owner::{PublishResult, SafetyMeta, SafetyRecordOwner};
++pub use prepared::{
++    CaptureRefusal, GenerationIdentity, PreparedHandle, PreparedPin, PreparedRegistry,
++    ReleaseOutcome,
++};
+ pub use profile::PinnedSafetyContext;
+ pub use record::{
+     DecodedRecord, EvidenceStatus, LockedRecord, RetainedRecord, SafetyRecord, SupportingEvidence,
+diff --git a/crates/qbind-node/src/safety_record_store/owner.rs b/crates/qbind-node/src/safety_record_store/owner.rs
+index fa51f17..ae2478e 100644
+--- a/crates/qbind-node/src/safety_record_store/owner.rs
++++ b/crates/qbind-node/src/safety_record_store/owner.rs
+@@ -18,10 +18,11 @@ use super::error::{
+     AlreadyEstablishedKind, ArithmeticOverflowSite, CapacityRefusalDetail,
+     MissingIndependentInputSite, RecoveryRequiredReason, SafetyStoreError, StructuralRefusalDetail,
+ };
++use super::accounting::prepared_generation_charge;
+ use super::profile::{
+     context_owner_ceiling_term, context_ownership_charge, max_component_aggregate_bytes,
+     max_context_ownership_bytes, max_retained_generation_bytes, max_safety_record_bytes,
+-    PinnedSafetyContext,
++    prepared_entry_charge, PinnedSafetyContext,
+ };
+ use super::record::{
+     size_of_timeout_msg, validated_holder_handle_bytes, DecodedRecord, EvidenceStatus,
+@@ -1172,6 +1173,195 @@ impl SafetyRecordOwner {
+             .grant_recovery_capability(self.backend.incarnation()))
+     }
+ 
++    // -----------------------------------------------------------------------
++    // §13.6 — prepared-decision L0 capture (generation-only, non-authorizing)
++    // -----------------------------------------------------------------------
++
++    /// Read the current authoritative publication revision **under an
++    /// already-held serialization-domain guard**, charging the component-owned
++    /// metadata buffer *before* it is allocated (§ 13.7: reservations precede the
++    /// copy). The transient `META_ENCODED_LEN` scratch releases at return.
++    fn authoritative_revision_locked(
++        &self,
++        _guard: &std::sync::MutexGuard<'_, super::backend::SerializationDomain>,
++    ) -> Result<u64, SafetyStoreError> {
++        // Cover the metadata-read allocation before `read_meta` copies the stored
++        // payload into a component-owned buffer.
++        let _meta_scratch = self
++            .backend
++            .accounting()
++            .reserve(super::backend::META_ENCODED_LEN)?;
++        let meta_bytes = self
++            .backend
++            .read_meta(super::backend::META_ENCODED_LEN)?
++            .ok_or(SafetyStoreError::MissingEstablishedState("no metadata"))?;
++        let meta = SafetyMeta::decode(&meta_bytes)?;
++        if meta.context_digest != context_digest(self.pinned()) {
++            return Err(SafetyStoreError::SemanticRefusal(
++                super::error::SemanticRefusalDetail::PinnedContextDisagreement,
++            ));
++        }
++        Ok(meta.current_revision)
++        // `_meta_scratch` drops here, releasing the metadata-read charge.
++    }
++
++    /// **§ 13.6 prepared-decision L0 capture** — retain, for a prepared signing
++    /// decision, the **generation only** of a read-validated proof plus the
++    /// provenance required to rebind it, charged under the terms the aggregate
++    /// already budgets for a prepared holder. **Non-authorizing**: it mints no
++    /// authorization, freshness, durability acknowledgement, or verified-evidence
++    /// status, and establishes no engine decision timing.
++    ///
++    /// The complete provenance gate runs on the **borrowed** proof first; on any
++    /// refusal the original proof is returned **intact** (its original bytes and
++    /// holder reservation untouched). Only after the generation-only and
++    /// per-entry reservations are admitted is the proof consumed; its original
++    /// full-proof holder reservation is released **after** the new reservations
++    /// are live, so no live object is uncharged across the conversion.
++    ///
++    /// Capture is linearized with publication under the backend serialization
++    /// domain (the outer lock); the registry mutex is a leaf taken under it.
++    pub fn capture_prepared_decision(
++        &self,
++        proof: ValidatedRecord,
++        expected_authoritative_revision: u64,
++    ) -> Result<super::prepared::PreparedPin, (ValidatedRecord, super::prepared::CaptureRefusal)>
++    {
++        use super::prepared::CaptureRefusal;
++
++        // --- provenance gate on the borrowed proof (no consumption) ---
++        if self.backend.recovery_required() {
++            return Err((proof, CaptureRefusal::RecoveryRequired));
++        }
++        let incarnation = self.backend.incarnation();
++        // Foreign incarnation OR standalone/uncharged (None) proof — both refused.
++        if proof.recovery_backend_incarnation() != Some(incarnation) {
++            return Err((proof, CaptureRefusal::ForeignOrUncharged));
++        }
++        if proof.origin_context_digest() != &context_digest(self.pinned()) {
++            return Err((proof, CaptureRefusal::ForeignContext));
++        }
++        let identity = match super::prepared::GenerationIdentity::from_retained(proof.retained()) {
++            Some(id) => id,
++            // BootstrapNoLock — left explicitly unresolved (Locked-only).
++            None => return Err((proof, CaptureRefusal::BootstrapUnresolved)),
++        };
++
++        // --- linearize with publication under the serialization domain ---
++        let guard = self.backend.lock_domain();
++        if self.backend.recovery_required() {
++            return Err((proof, CaptureRefusal::RecoveryRequired));
++        }
++        let current = match self.authoritative_revision_locked(&guard) {
++            Ok(rev) => rev,
++            Err(e) => return Err((proof, CaptureRefusal::MetadataUnavailable(e))),
++        };
++        // The proof must reflect the current authoritative revision, and the
++        // caller's expectation must agree with it (stale-work fencing, § 13.5).
++        if proof.publication_revision() != current || expected_authoritative_revision != current {
++            return Err((
++                proof,
++                CaptureRefusal::StaleRevision {
++                    expected: expected_authoritative_revision,
++                    found: current,
++                },
++            ));
++        }
++
++        // --- admission + consume under the registry leaf lock ---
++        let registry_arc = self.backend.prepared_registry();
++        let mut reg = registry_arc.lock().expect("prepared registry poisoned");
++
++        // Refuse a full registry WITHOUT eviction; proof returned intact.
++        if reg.free_slot().is_none() {
++            return Err((proof, CaptureRefusal::RegistryFull));
++        }
++        // Fail closed BEFORE any mutation if the serial counter is exhausted.
++        if reg.next_serial_checked().is_none() {
++            return Err((proof, CaptureRefusal::CounterExhausted));
++        }
++
++        // Admission-before-allocation: reserve the per-entry charge (48) first.
++        let entry_res = match self.backend.accounting().reserve(prepared_entry_charge()) {
++            Ok(r) => r,
++            Err(e) => return Err((proof, CaptureRefusal::Admission(e))),
++        };
++
++        // Share an existing generation backing if one holds an equal retained
++        // generation (one generation charge for both entries); otherwise reserve
++        // a new generation-only charge WHILE the proof's full holder is still
++        // live, so the moved evidence is never uncharged across the conversion.
++        let shared = reg.shareable_backing_for(proof.retained());
++        let handle = if let Some(backing) = shared {
++            // Shared path: consume the proof; the incoming generation is dropped
++            // (its charge was the proof holder's, released below), the existing
++            // backing is reused. No new generation reservation.
++            let parts = proof.into_prepared_parts();
++            // Release the proof's original full-proof holder AFTER the shared
++            // backing (already charged) and the per-entry reservation are live.
++            if let Some(h) = parts.prior_holder {
++                h.release_now();
++            }
++            drop(parts.retained); // incoming generation freed (shared reused)
++            reg.insert_shared(identity, backing, entry_res)
++                .expect("free slot + serial pre-checked under the held registry lock")
++        } else {
++            let gen_charge = match prepared_generation_charge(self.pinned(), proof.retained()) {
++                Ok(c) => c,
++                Err(e) => {
++                    drop(entry_res);
++                    return Err((proof, CaptureRefusal::Admission(e)));
++                }
++            };
++            // Reserve the generation-only charge while the proof holder is live.
++            let gen_res = match self.backend.accounting().reserve(gen_charge) {
++                Ok(r) => r,
++                Err(e) => {
++                    drop(entry_res);
++                    return Err((proof, CaptureRefusal::Admission(e)));
++                }
++            };
++            // Now consume the proof: move the retained generation in, drop the
++            // encoded buffer, and release the proof's full holder AFTER gen_res +
++            // entry_res are live (no uncharged interval).
++            let parts = proof.into_prepared_parts();
++            let prior_holder = parts.prior_holder;
++            let recovery_incarnation = parts
++                .recovery_backend_incarnation
++                .expect("gate verified Some(incarnation)");
++            let handle = reg
++                .insert_fresh(
++                    identity,
++                    parts.retained,
++                    parts.origin_context_digest,
++                    recovery_incarnation,
++                    parts.evidence_status,
++                    current,
++                    gen_res,
++                    entry_res,
++                )
++                .expect("free slot + serial pre-checked under the held registry lock");
++            if let Some(h) = prior_holder {
++                h.release_now();
++            }
++            handle
++        };
++
++        drop(reg);
++        drop(guard);
++        Ok(super::prepared::PreparedPin::new(registry_arc, handle))
++    }
++
++    /// Release a captured prepared entry explicitly (normal completion). Dropping
++    /// the pin without calling this performs the same cleanup automatically
++    /// (abandonment). Does not alter any D10 signing-journal obligation.
++    pub fn release_prepared(
++        &self,
++        pin: super::prepared::PreparedPin,
++    ) -> super::prepared::ReleaseOutcome {
++        pin.release()
++    }
++
+     // -----------------------------------------------------------------------
+     // O4 — publish a new restriction
+     // -----------------------------------------------------------------------
+diff --git a/crates/qbind-node/src/safety_record_store/prepared.rs b/crates/qbind-node/src/safety_record_store/prepared.rs
+new file mode 100644
+index 0000000..a8695f0
+--- /dev/null
++++ b/crates/qbind-node/src/safety_record_store/prepared.rs
+@@ -0,0 +1,509 @@
++//! RUN 422 — **generation-only** prepared-decision L0 evidence retention
++//! (§ 13.6), an isolated executable experiment.
++//!
++//! # What this is
++//!
++//! A bounded registry that retains, for a prepared signing decision, **only the
++//! decoded evidence generation** of a successfully read-validated proof plus the
++//! provenance required to rebind it — *not* the original encoded publication
++//! record. A captured entry therefore charges only:
++//!
++//! * one (possibly **shared**) generation backing — the inline generation
++//!   wrapper + the live evidence heap backings + one shared-allocation overhead,
++//!   measured in place from the moved [`RetainedRecord`]
++//!   ([`super::accounting::prepared_generation_charge`], non-cloning), and
++//! * a per-entry identity + arc-handle term
++//!   ([`super::profile::prepared_entry_charge`] = 48).
++//!
++//! Both terms are already reserved by the accepted aggregate ceiling
++//! ([`super::profile::max_aggregate_retained_bytes`]): its holder term budgets
++//! `MAX_OUTSTANDING_PREPARED_L0 × (identity + arc_handle)` and its generation
++//! term budgets `(prepared + 1 + candidate)` distinct generations, while its
++//! encoded-buffer term budgets **no** publication buffer for a prepared holder.
++//! A generation-only entry therefore fits with **no ceiling increase** — the
++//! defect of a full-proof holder (which re-charged the encoded buffer) is that
++//! it consumed budget the ceiling never reserved for prepared retention.
++//!
++//! # What this is NOT
++//!
++//! Capture is **non-authorizing**: it establishes no engine decision timing, no
++//! verification, no freshness, and no activation. `BootstrapNoLock` is left
++//! explicitly unresolved (a Locked-only experiment). The component stays
++//! disabled-by-default and is constructed only from its own focused tests.
++//!
++//! # Lock ordering
++//!
++//! The backend serialization domain ([`super::backend::SafetyBackend::lock_domain`])
++//! is the **outer** lock; the registry mutex is a **leaf** taken under it during
++//! capture (capture is linearized with publication). Release and automatic
++//! abandonment take **only** the registry mutex, never re-entering the domain,
++//! so no lock cycle is possible.
++
++use std::sync::{Arc, Mutex};
++
++use super::accounting::Reservation;
++use super::profile::MAX_OUTSTANDING_PREPARED_L0;
++use super::record::{EvidenceStatus, RetainedRecord, SafetyRecord};
++
++/// The per-entry prepared-decision L0 charge in bytes (§ 13.6): identity (40) +
++/// arc-handle (8) = 48, the single source of truth shared with the aggregate's
++/// holder budget. Re-exported here for the capture path and its tests.
++pub fn prepared_entry_charge_bytes() -> u128 {
++    super::profile::prepared_entry_charge()
++}
++
++/// The number of concurrently outstanding prepared-decision L0 holders the
++/// registry admits — the accepted `MAX_OUTSTANDING_PREPARED_L0` (§ 13.6), used
++/// here as the fixed inline slot count so the registry owns no growable backing.
++pub const PREPARED_SLOTS: usize = MAX_OUTSTANDING_PREPARED_L0 as usize;
++
++/// The pinned restriction identity a prepared generation carries (§ 13.6): the
++/// `lock_block_id` (32) + `lock_view` (8) of the retained `Locked` record. This
++/// is exactly the `PREPARED_IDENTITY_BYTES` the aggregate budgets per holder.
++#[derive(Clone, Copy, PartialEq, Eq, Debug)]
++pub struct GenerationIdentity {
++    pub lock_block_id: [u8; 32],
++    pub lock_view: u64,
++}
++
++impl GenerationIdentity {
++    /// Derive the identity of a retained generation, or `None` for a
++    /// `BootstrapNoLock` record (which prepared retention refuses).
++    pub fn from_retained(retained: &RetainedRecord) -> Option<Self> {
++        match &retained.record {
++            SafetyRecord::Locked(l) => Some(GenerationIdentity {
++                lock_block_id: l.lock_block_id,
++                lock_view: l.lock_view,
++            }),
++            SafetyRecord::BootstrapNoLock { .. } => None,
++        }
++    }
++}
++
++/// Why a capture was refused. Every refusal returns the original proof intact
++/// (including its original bytes and reservation); none mints authorization,
++/// freshness, durability acknowledgement, or verified-evidence status.
++#[derive(Debug)]
++pub enum CaptureRefusal {
++    /// The backend requires a successful recovery before dependent work.
++    RecoveryRequired,
++    /// The proof carries no O5 recovery capability for *this* backend
++    /// incarnation — a standalone/uncharged proof (`None`) or one minted by a
++    /// foreign backend incarnation. Catches both.
++    ForeignOrUncharged,
++    /// The proof was sealed under a different pinned-context digest.
++    ForeignContext,
++    /// The proof is a `BootstrapNoLock` record; prepared retention is a
++    /// Locked-only experiment and leaves bootstrap explicitly unresolved.
++    BootstrapUnresolved,
++    /// The proof's publication revision is not the current authoritative
++    /// revision read under the serialization domain.
++    StaleRevision { expected: u64, found: u64 },
++    /// All prepared slots are occupied; refused **without eviction**.
++    RegistryFull,
++    /// The generation serial counter is exhausted; refused **before** any
++    /// mutation (never wraps or reuses an identity).
++    CounterExhausted,
++    /// The per-entry or generation admission was refused by the shared
++    /// accountant (aggregate or partition ceiling).
++    Admission(super::error::SafetyStoreError),
++    /// The authoritative metadata could not be read under the domain.
++    MetadataUnavailable(super::error::SafetyStoreError),
++}
++
++/// The outcome of releasing a prepared entry.
++#[derive(Debug, PartialEq, Eq)]
++pub enum ReleaseOutcome {
++    /// The entry was found (incarnation + serial matched) and removed.
++    Released,
++    /// No matching entry (already released, abandoned, or a stale serial).
++    NotFound,
++    /// The handle was minted under a different backend incarnation.
++    ForeignIncarnation,
++}
++
++/// A **non-owning** identifier for a prepared entry. `Copy`, owns nothing: a
++/// handle alone can neither keep an entry alive nor release it twice. It carries
++/// the backend incarnation it was minted under so a foreign/stale handle is
++/// refused on lookup **and** release.
++#[derive(Clone, Copy, PartialEq, Eq, Debug)]
++pub struct PreparedHandle {
++    slot: usize,
++    serial: u64,
++    incarnation: u64,
++}
++
++impl PreparedHandle {
++    /// The backend ownership-incarnation this handle was minted under.
++    pub fn incarnation(&self) -> u64 {
++        self.incarnation
++    }
++    /// The entry serial this handle refers to.
++    pub fn serial(&self) -> u64 {
++        self.serial
++    }
++}
++
++/// The retained generation backing shared by one or more prepared entries. It
++/// owns the **moved** decoded generation (never a clone) and the single
++/// generation-only reservation; when the **last** entry sharing it drops, the
++/// reservation drops and the generation charge is released. A prior (first)
++/// drop merely decrements the shared `Arc` and retains the charge.
++///
++/// Every field is retained **by design** — the §13.6 provenance a prepared
++/// decision must carry to rebind safely (and the RAII reservations). Several are
++/// read only through the test-gated inspector, so `dead_code` is allowed here.
++#[allow(dead_code)]
++#[derive(Debug)]
++struct GenerationBacking {
++    retained: RetainedRecord,
++    origin_context_digest: [u8; 32],
++    recovery_backend_incarnation: u64,
++    evidence_status: EvidenceStatus,
++    captured_revision: u64,
++    /// The generation-only charge (inline wrapper + evidence backings + one
++    /// shared-allocation overhead). Its lifetime **is** the accounting (RAII);
++    /// never read directly outside test accessors.
++    gen_reservation: Reservation,
++}
++
++/// An **opaque** crate-visible token for a shareable live generation backing,
++/// returned by [`PreparedRegistry::shareable_backing_for`] and consumed by
++/// [`PreparedRegistry::insert_shared`]. It keeps [`GenerationBacking`] private
++/// while letting the owner capture path pass a found backing back for sharing.
++pub struct SharedGenerationBacking(Arc<GenerationBacking>);
++
++/// One prepared-decision L0 entry: the pinned identity, its serial, a (possibly
++/// shared) generation backing, and the per-entry reservation (identity +
++/// arc-handle). Dropping the entry releases the per-entry charge and, if it held
++/// the last share of its backing, the generation charge too.
++///
++/// `identity` is retained for the registry's shareable/metadata role and read by
++/// the test-gated inspector; `dead_code` is allowed for that reason.
++#[allow(dead_code)]
++#[derive(Debug)]
++struct PreparedEntry {
++    identity: GenerationIdentity,
++    serial: u64,
++    backing: Arc<GenerationBacking>,
++    /// Per-entry `identity + arc_handle` charge (48). RAII lifetime == entry.
++    _entry_reservation: Reservation,
++}
++
++/// The bounded prepared-decision L0 registry: a fixed inline slot array (no
++/// growable backing — its inline size already includes its embedded slots and
++/// entries), a monotonic serial counter, and the backend incarnation it belongs
++/// to. Shared across attached handles behind one `Arc<Mutex<..>>` created at
++/// backend open, so a second handle cannot open a bypass registry.
++#[derive(Debug)]
++pub struct PreparedRegistry {
++    slots: [Option<PreparedEntry>; PREPARED_SLOTS],
++    next_serial: u64,
++    incarnation: u64,
++}
++
++impl PreparedRegistry {
++    /// A fresh empty registry bound to a backend incarnation.
++    pub fn new(incarnation: u64) -> Self {
++        PreparedRegistry {
++            slots: Default::default(),
++            next_serial: 0,
++            incarnation,
++        }
++    }
++
++    /// The number of occupied slots.
++    pub fn occupied(&self) -> usize {
++        self.slots.iter().filter(|s| s.is_some()).count()
++    }
++
++    /// Whether every slot is occupied (a further capture is refused without
++    /// eviction).
++    pub fn is_full(&self) -> bool {
++        self.slots.iter().all(|s| s.is_some())
++    }
++
++    /// The first free slot index, or `None` when full.
++    fn first_free(&self) -> Option<usize> {
++        self.slots.iter().position(|s| s.is_none())
++    }
++
++    /// Find a live backing whose retained generation equals `retained`, so a new
++    /// entry can **share** one generation charge. Equality is a non-cloning
++    /// structural compare of the moved retained generation.
++    fn find_shared_backing(&self, retained: &RetainedRecord) -> Option<Arc<GenerationBacking>> {
++        for slot in self.slots.iter().flatten() {
++            if &slot.backing.retained == retained {
++                return Some(Arc::clone(&slot.backing));
++            }
++        }
++        None
++    }
++
++    /// The next serial value **without** mutating the counter, failing closed if
++    /// the counter is exhausted (never wraps or reuses an identity).
++    fn peek_serial(&self) -> Option<u64> {
++        // The next serial is `next_serial`; the counter advances to
++        // `next_serial + 1` on a successful insert. Exhaustion is when that
++        // advance would overflow.
++        self.next_serial.checked_add(1).map(|_| self.next_serial)
++    }
++
++    /// Remove the entry a handle refers to, verifying backend incarnation first
++    /// (foreign/stale handle refused) then the slot + serial.
++    pub fn release_by_handle(&mut self, handle: PreparedHandle) -> ReleaseOutcome {
++        if handle.incarnation != self.incarnation {
++            return ReleaseOutcome::ForeignIncarnation;
++        }
++        if handle.slot >= self.slots.len() {
++            return ReleaseOutcome::NotFound;
++        }
++        let matches = self.slots[handle.slot]
++            .as_ref()
++            .map(|e| e.serial == handle.serial)
++            .unwrap_or(false);
++        if matches {
++            // Dropping the entry releases the per-entry charge and, if last
++            // share, the generation charge.
++            self.slots[handle.slot] = None;
++            ReleaseOutcome::Released
++        } else {
++            ReleaseOutcome::NotFound
++        }
++    }
++
++    // ---- test seams (gated; no hidden allocations in measured intervals) ----
++
++    /// Test-only: look up a live entry by handle (incarnation-checked), exposing
++    /// read-only measurements. Returns `None` for a foreign/stale handle.
++    #[cfg(any(test, feature = "test-utils"))]
++    pub fn inspect(&self, handle: PreparedHandle) -> Option<PreparedEntryView> {
++        if handle.incarnation != self.incarnation {
++            return None;
++        }
++        let e = self.slots.get(handle.slot)?.as_ref()?;
++        if e.serial != handle.serial {
++            return None;
++        }
++        Some(PreparedEntryView {
++            identity: e.identity,
++            serial: e.serial,
++            entry_charge: e._entry_reservation.charge(),
++            generation_charge: e.backing.gen_reservation.charge(),
++            backing_shares: Arc::strong_count(&e.backing),
++            captured_revision: e.backing.captured_revision,
++            recovery_backend_incarnation: e.backing.recovery_backend_incarnation,
++            origin_context_digest: e.backing.origin_context_digest,
++            evidence_status: e.backing.evidence_status,
++            evidence_backing_capacity: e.backing.retained.evidence_backing_capacity(),
++        })
++    }
++
++    /// Test-only: the current serial counter.
++    #[cfg(any(test, feature = "test-utils"))]
++    pub fn next_serial_for_test(&self) -> u64 {
++        self.next_serial
++    }
++
++    /// Test-only bounded seam: drive the serial counter to the brink of
++    /// exhaustion so the fail-closed path is reachable deterministically.
++    #[cfg(any(test, feature = "test-utils"))]
++    pub fn force_next_serial(&mut self, v: u64) {
++        self.next_serial = v;
++    }
++}
++
++/// Test-only read-only view of a live prepared entry's measurements, taken
++/// independently of any reservation **counter** (the strong-count and charges
++/// establish object coverage, not reservation state).
++#[cfg(any(test, feature = "test-utils"))]
++#[derive(Debug, Clone)]
++pub struct PreparedEntryView {
++    pub identity: GenerationIdentity,
++    pub serial: u64,
++    pub entry_charge: u128,
++    pub generation_charge: u128,
++    pub backing_shares: usize,
++    pub captured_revision: u64,
++    pub recovery_backend_incarnation: u64,
++    pub origin_context_digest: [u8; 32],
++    pub evidence_status: EvidenceStatus,
++    pub evidence_backing_capacity: usize,
++}
++
++/// The **owning, non-`Copy`** guard returned by a successful capture. Its `Drop`
++/// provides automatic abandonment cleanup: an abandoned (never explicitly
++/// released) pin releases its entry — and, if the last share, its generation
++/// charge — when it goes out of scope, while the backend stays alive. Explicit
++/// [`PreparedPin::release`] is the normal-completion path; dropping the returned
++/// outcome is a no-op because the pin marks itself released.
++pub struct PreparedPin {
++    registry: Arc<Mutex<PreparedRegistry>>,
++    handle: PreparedHandle,
++    released: bool,
++}
++
++impl std::fmt::Debug for PreparedPin {
++    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
++        f.debug_struct("PreparedPin")
++            .field("handle", &self.handle)
++            .field("released", &self.released)
++            .finish()
++    }
++}
++
++impl PreparedPin {
++    /// Crate-internal: build a pin over an inserted entry.
++    pub(crate) fn new(registry: Arc<Mutex<PreparedRegistry>>, handle: PreparedHandle) -> Self {
++        PreparedPin {
++            registry,
++            handle,
++            released: false,
++        }
++    }
++
++    /// The non-owning handle for this entry (for inspection / handle-based APIs).
++    pub fn handle(&self) -> PreparedHandle {
++        self.handle
++    }
++
++    fn release_inner(&mut self) -> ReleaseOutcome {
++        if self.released {
++            return ReleaseOutcome::NotFound;
++        }
++        self.released = true;
++        let mut reg = self.registry.lock().expect("prepared registry poisoned");
++        reg.release_by_handle(self.handle)
++    }
++
++    /// Normal completion: release this entry explicitly, consuming the pin.
++    pub fn release(mut self) -> ReleaseOutcome {
++        self.release_inner()
++    }
++}
++
++impl Drop for PreparedPin {
++    fn drop(&mut self) {
++        // Automatic abandonment cleanup — releases the entry (and, if last
++        // share, the generation charge) with the backend still alive.
++        let _ = self.release_inner();
++    }
++}
++
++// ---- measurement helpers (test-gated; no hidden allocations) ----
++
++/// Test-only: `size_of` the registry container value (its inline slots + serial
++/// counter + incarnation), counted once. Its inline size already includes the
++/// embedded slots and entries.
++#[cfg(any(test, feature = "test-utils"))]
++pub fn size_of_prepared_registry() -> usize {
++    std::mem::size_of::<PreparedRegistry>()
++}
++
++/// Test-only: `size_of` one prepared entry value.
++#[cfg(any(test, feature = "test-utils"))]
++pub fn size_of_prepared_entry() -> usize {
++    std::mem::size_of::<PreparedEntry>()
++}
++
++/// Test-only: `size_of` one generation backing value.
++#[cfg(any(test, feature = "test-utils"))]
++pub fn size_of_generation_backing() -> usize {
++    std::mem::size_of::<GenerationBacking>()
++}
++
++/// Test-only: `size_of` the non-owning handle.
++#[cfg(any(test, feature = "test-utils"))]
++pub fn size_of_prepared_handle() -> usize {
++    std::mem::size_of::<PreparedHandle>()
++}
++
++// ---- crate-internal construction primitives used by the owner capture path --
++
++impl PreparedRegistry {
++    /// Crate-internal: insert a **new, un-shared** generation backing plus its
++    /// entry, consuming the pre-taken reservations. Caller guarantees a free slot
++    /// (via a prior [`PreparedRegistry::first_free`] check) and a non-exhausted
++    /// serial (via [`PreparedRegistry::peek_serial`]); both are re-checked here so
++    /// insertion cannot silently overwrite or wrap.
++    #[allow(clippy::too_many_arguments)]
++    pub(crate) fn insert_fresh(
++        &mut self,
++        identity: GenerationIdentity,
++        retained: RetainedRecord,
++        origin_context_digest: [u8; 32],
++        recovery_backend_incarnation: u64,
++        evidence_status: EvidenceStatus,
++        captured_revision: u64,
++        gen_reservation: Reservation,
++        entry_reservation: Reservation,
++    ) -> Option<PreparedHandle> {
++        let backing = Arc::new(GenerationBacking {
++            retained,
++            origin_context_digest,
++            recovery_backend_incarnation,
++            evidence_status,
++            captured_revision,
++            gen_reservation,
++        });
++        self.place(identity, backing, entry_reservation)
++    }
++
++    /// Crate-internal: insert an entry that **shares** an existing backing (one
++    /// generation charge), consuming only the per-entry reservation.
++    pub(crate) fn insert_shared(
++        &mut self,
++        identity: GenerationIdentity,
++        backing: SharedGenerationBacking,
++        entry_reservation: Reservation,
++    ) -> Option<PreparedHandle> {
++        self.place(identity, backing.0, entry_reservation)
++    }
++
++    /// Crate-internal: find a shareable backing (equal retained generation).
++    pub(crate) fn shareable_backing_for(
++        &self,
++        retained: &RetainedRecord,
++    ) -> Option<SharedGenerationBacking> {
++        self.find_shared_backing(retained).map(SharedGenerationBacking)
++    }
++
++    /// Crate-internal: a free slot index, or `None` when full.
++    pub(crate) fn free_slot(&self) -> Option<usize> {
++        self.first_free()
++    }
++
++    /// Crate-internal: the next serial, failing closed on exhaustion.
++    pub(crate) fn next_serial_checked(&self) -> Option<u64> {
++        self.peek_serial()
++    }
++
++    /// Crate-internal: the backend incarnation this registry is bound to.
++    #[allow(dead_code)]
++    pub(crate) fn incarnation(&self) -> u64 {
++        self.incarnation
++    }
++
++    fn place(
++        &mut self,
++        identity: GenerationIdentity,
++        backing: Arc<GenerationBacking>,
++        entry_reservation: Reservation,
++    ) -> Option<PreparedHandle> {
++        let slot = self.first_free()?;
++        let serial = self.peek_serial()?;
++        let next = self.next_serial.checked_add(1)?;
++        self.slots[slot] = Some(PreparedEntry {
++            identity,
++            serial,
++            backing,
++            _entry_reservation: entry_reservation,
++        });
++        self.next_serial = next;
++        Some(PreparedHandle {
++            slot,
++            serial,
++            incarnation: self.incarnation,
++        })
++    }
++}
+diff --git a/crates/qbind-node/src/safety_record_store/profile.rs b/crates/qbind-node/src/safety_record_store/profile.rs
+index a50427b..ec06c9f 100644
+--- a/crates/qbind-node/src/safety_record_store/profile.rs
++++ b/crates/qbind-node/src/safety_record_store/profile.rs
+@@ -59,6 +59,25 @@ pub const ARC_CTRL: u128 = 16;
+ pub const MAX_OUTSTANDING_PREPARED_L0: u128 = 2;
+ pub const MAX_CONCURRENT_CANDIDATES: u128 = 1;
+ pub const MAX_CONCURRENT_PUBLICATIONS: u128 = 1;
++
++/// Prepared-decision L0 per-holder identity bytes (§ 13.6): the restriction
++/// identity a prepared generation pins — `lock_block_id` (32) + `lock_view` (8).
++/// This is the `identity` term the aggregate's holder budget already reserves
++/// `MAX_OUTSTANDING_PREPARED_L0 ×` of; a prepared entry charges exactly it.
++pub const PREPARED_IDENTITY_BYTES: u128 = 40;
++/// Prepared-decision L0 per-holder shared-generation handle bytes (§ 13.6): the
++/// `Arc` handle an entry holds to its (possibly shared) generation backing. This
++/// is the `arc_handle` term the aggregate's holder budget already reserves per
++/// prepared holder.
++pub const PREPARED_ARC_HANDLE_BYTES: u128 = 8;
++
++/// The per-entry prepared-decision L0 charge (§ 13.6): `PREPARED_IDENTITY_BYTES +
++/// PREPARED_ARC_HANDLE_BYTES` = 48. The aggregate's holder term already budgets
++/// `MAX_OUTSTANDING_PREPARED_L0 × (identity + arc_handle)`, so admitting this per
++/// entry consumes budget the ceiling already reserves — no ceiling increase.
++pub const fn prepared_entry_charge() -> u128 {
++    PREPARED_IDENTITY_BYTES + PREPARED_ARC_HANDLE_BYTES
++}
+ /// Initial-profile capacity-normalization slack, in **elements** (§ 13.7).
+ pub const CAPNORM_SLACK: u128 = 0;
+ 
+@@ -361,8 +380,8 @@ pub fn max_aggregate_retained_bytes(
+     size_of_timeout_msg: u128,
+     validation_scratch: u128,
+ ) -> Result<u128, SafetyStoreError> {
+-    let arc_handle: u128 = 8;
+-    let identity: u128 = 40;
++    let arc_handle: u128 = PREPARED_ARC_HANDLE_BYTES;
++    let identity: u128 = PREPARED_IDENTITY_BYTES;
+     let gen = max_retained_generation_bytes(ctx, size_of_timeout_msg)?;
+     let rec = max_safety_record_bytes(ctx)?;
+     // holder term
+diff --git a/crates/qbind-node/src/safety_record_store/record.rs b/crates/qbind-node/src/safety_record_store/record.rs
+index 82c1190..cfb298d 100644
+--- a/crates/qbind-node/src/safety_record_store/record.rs
++++ b/crates/qbind-node/src/safety_record_store/record.rs
+@@ -170,6 +170,20 @@ impl RetainedRecord {
+     pub fn is_locked(&self) -> bool {
+         matches!(self.record, SafetyRecord::Locked(_))
+     }
++
++    /// Test-only: the actual `Vec::capacity()` sum of the evidence heap backings
++    /// this retained generation owns, measured in place (non-cloning). Returns 0
++    /// for a `BootstrapNoLock` record (no supporting evidence). Used to assert
++    /// that generation-only prepared retention keeps the live evidence backing.
++    #[cfg(any(test, feature = "test-utils"))]
++    pub fn evidence_backing_capacity(&self) -> usize {
++        match &self.record {
++            SafetyRecord::BootstrapNoLock { .. } => 0,
++            SafetyRecord::Locked(l) => {
++                super::accounting::evidence_backing_capacity(&l.evidence).unwrap_or(0) as usize
++            }
++        }
++    }
+ }
+ 
+ /// The complete O3 result: an **opaque** validated publication. Callers cannot
+@@ -339,6 +353,78 @@ impl ValidatedRecord {
+     pub fn origin_context_digest(&self) -> &[u8; 32] {
+         &self.origin_context_digest
+     }
++
++    /// Test-only: the actual `Vec::capacity()` of the evidence heap backings the
++    /// retained generation owns (the backing that generation-only prepared
++    /// retention keeps, measured independently of any reservation counter). Read
++    /// to assert that generation-only capture retains the live evidence backing
++    /// rather than the original `encoded` publication buffer.
++    #[cfg(any(test, feature = "test-utils"))]
++    pub fn retained_evidence_capacity(&self) -> usize {
++        self.retained.evidence_backing_capacity()
++    }
++
++    /// **Generation-only consuming conversion** (§ 13.6 prepared-decision L0).
++    ///
++    /// Move the retained decoded generation ([`RetainedRecord`], which owns the
++    /// live evidence heap backings) and the provenance fields out of this proof
++    /// for prepared retention, **dropping the original `encoded` publication
++    /// buffer**. Generation-only retention deliberately does *not* reuse the
++    /// full-proof holder charge (which covered `encoded` + generation + handle):
++    /// the dropped buffer is freed and the caller charges only the smaller
++    /// generation + per-entry terms the aggregate already budgets for a prepared
++    /// holder.
++    ///
++    /// The evidence is **moved, not cloned** (no second representation). The
++    /// proof's original full-proof holder reservation is returned in
++    /// `prior_holder`; the caller releases it only **after** the generation-only
++    /// reservation is already live, so no live object is ever uncharged across
++    /// the conversion. Crate-internal: reachable only from the owner's capture
++    /// path, which performs the complete provenance gate on the borrowed proof
++    /// before consuming it.
++    pub(crate) fn into_prepared_parts(self) -> ConsumedForPrepared {
++        let ValidatedRecord {
++            retained,
++            evidence_status,
++            encoded: _dropped_publication_buffer,
++            origin_context_digest,
++            recovery_backend_incarnation,
++            holder,
++        } = self;
++        // `_dropped_publication_buffer` is freed here — generation-only retention
++        // keeps the decoded generation, not the original encoded record.
++        ConsumedForPrepared {
++            retained,
++            evidence_status,
++            origin_context_digest,
++            recovery_backend_incarnation,
++            prior_holder: holder,
++        }
++    }
++}
++
++/// The generation-only parts moved out of a consumed [`ValidatedRecord`] for
++/// prepared-decision retention (§ 13.6). The retained generation and provenance
++/// are **moved** (no clone); the original `encoded` publication buffer has been
++/// **dropped**; `prior_holder` carries the proof's original full-proof holder
++/// reservation so the caller can release it only after the smaller
++/// generation-only reservation is live.
++#[derive(Debug)]
++pub struct ConsumedForPrepared {
++    /// The moved retained decoded generation (owns the live evidence backings).
++    pub retained: RetainedRecord,
++    /// The explicit (always `Unverified`) evidence status, carried forward.
++    pub evidence_status: EvidenceStatus,
++    /// The originating pinned-context digest the proof was sealed under.
++    pub origin_context_digest: [u8; 32],
++    /// The backend ownership-incarnation the proof's O5 capability was bound to
++    /// (always `Some` once the capture provenance gate has verified it).
++    pub recovery_backend_incarnation: Option<u64>,
++    /// The proof's original full-proof holder reservation (covers the now-dropped
++    /// `encoded` buffer + generation + handle). Released by the caller **only
++    /// after** the generation-only reservation is admitted, so the live evidence
++    /// backings are never uncharged across the conversion.
++    pub prior_holder: Option<super::accounting::Reservation>,
+ }
+ 
+ /// The single decoded-generation wrapper whose `size_of` is the whole-enum
+diff --git a/crates/qbind-node/tests/run_422_spike_prepared_generation_tests.rs b/crates/qbind-node/tests/run_422_spike_prepared_generation_tests.rs
+new file mode 100644
+index 0000000..f6344ea
+--- /dev/null
++++ b/crates/qbind-node/tests/run_422_spike_prepared_generation_tests.rs
+@@ -0,0 +1,816 @@
++//! RUN 422 — generation-only prepared-decision L0 ownership feasibility spike.
++//!
++//! Executable, discriminating tests for the §13.6 prepared-decision L0
++//! experiment built on the accepted `safety_record_store` component. They use
++//! **real RocksDB-backed storage** and the maximum complete QC/TC fixtures at
++//! N=1 and N=4, assert fixture dimensions/capacities before measuring, and
++//! measure owned capacities + inline objects **independently** of reservation
++//! counters.
++//!
++//! Non-authorizing: capture establishes no engine decision timing, verification,
++//! freshness, or activation. Activation stays DISABLED; public DevNet is NO-GO.
++
++use qbind_consensus::ids::ValidatorId;
++use qbind_consensus::qc::QuorumCertificate as LogicalQc;
++use qbind_consensus::timeout::{TimeoutCertificate, TimeoutMsg};
++use qbind_node::pqc_trust_bundle::TrustBundleEnvironment;
++use qbind_node::safety_record_store::accounting::prepared_generation_charge;
++use qbind_node::safety_record_store::backend::{InjectFault, SafetyBackend, SafetyBackendPolicy};
++use qbind_node::safety_record_store::codec::encode_record;
++use qbind_node::safety_record_store::owner::{make_locked_qc, PublishResult, SafetyRecordOwner};
++use qbind_node::safety_record_store::prepared::{
++    prepared_entry_charge_bytes, size_of_generation_backing, size_of_prepared_entry,
++    size_of_prepared_handle, size_of_prepared_registry, CaptureRefusal, ReleaseOutcome,
++};
++use qbind_node::safety_record_store::profile::{max_retained_generation_bytes, PinnedSafetyContext};
++use qbind_node::safety_record_store::record::{
++    size_of_timeout_msg, DecodedRecord, EvidenceStatus, LockedRecord, SafetyRecord,
++    SupportingEvidence, WireQc,
++};
++use qbind_node::safety_record_store::validate::{validate_decoded, FixtureCommittedHistory};
++
++const QC_SUITE: u16 = 7;
++const TIMEOUT_SUITE: u8 = 100;
++const S_SIG: usize = 8;
++const CHAIN_ID: u32 = 42;
++const EPOCH: u64 = 7;
++
++fn ctx_n(n: u64) -> PinnedSafetyContext {
++    let validators = (0..n).map(|i| (ValidatorId::new(i), 1u64)).collect();
++    PinnedSafetyContext {
++        network_genesis_id: [1u8; 32],
++        authority_context_ref: [2u8; 32],
++        chain_id: CHAIN_ID,
++        epoch: EPOCH,
++        qc_suite_id: QC_SUITE,
++        timeout_suite_id: TIMEOUT_SUITE,
++        s_sig: S_SIG,
++        validators,
++        require_height_equals_round: false,
++    }
++}
++
++/// A context with the SAME dimensions (so the per-context ceiling is identical,
++/// `attach` binds idempotently) but a DIFFERENT `authority_context_ref`, so its
++/// context digest differs — used to reach the ForeignContext gate in isolation.
++fn ctx_n_foreign(n: u64) -> PinnedSafetyContext {
++    let mut c = ctx_n(n);
++    c.authority_context_ref = [0x5Au8; 32];
++    c
++}
++
++fn valid_wire_qc(ctx: &PinnedSafetyContext, block_id: [u8; 32], view: u64) -> WireQc {
++    let n = ctx.n();
++    let need = ((2 * n) + 2) / 3; // ceil(2N/3)
++    let mut bitmap = vec![0u8; ((n + 7) / 8).max(1)];
++    let mut signatures = Vec::new();
++    for i in 0..need {
++        bitmap[i / 8] |= 1 << (i % 8);
++        signatures.push(vec![0xABu8; S_SIG]);
++    }
++    signatures.shrink_to_fit();
++    WireQc {
++        version: 1,
++        chain_id: CHAIN_ID,
++        epoch: EPOCH,
++        height: view,
++        round: view,
++        step: 0,
++        block_id,
++        suite_id: QC_SUITE,
++        signer_bitmap: bitmap,
++        signatures,
++    }
++}
++
++/// The maximum complete TC-derived record for `ctx` (every decoded row present:
++/// record-level + nested high-QC signers, N signed timeouts with signatures and
++/// nested high-QCs) — the heaviest generation the per-class ceiling admits.
++fn valid_tc_record(ctx: &PinnedSafetyContext, lock_view: u64, timeout_view: u64) -> LockedRecord {
++    let need = ((2 * ctx.n()) + 2) / 3;
++    let high = LogicalQc::new(
++        [9u8; 32],
++        lock_view,
++        (0..need as u64).map(ValidatorId::new).collect(),
++    );
++    let mut signed = Vec::new();
++    for i in 0..need as u64 {
++        let mut t = TimeoutMsg::new(timeout_view, Some(high.clone()), ValidatorId::new(i));
++        t.set_signature(vec![0xCD; S_SIG]);
++        signed.push(t);
++    }
++    signed.shrink_to_fit();
++    let tc = TimeoutCertificate {
++        view: timeout_view + 1,
++        high_qc: Some(high.clone()),
++        signers: (0..need as u64).map(ValidatorId::new).collect(),
++        signed_timeouts: signed,
++        timeout_view,
++    };
++    let evidence = SupportingEvidence::TcDerived {
++        high_qc: high.clone(),
++        tc,
++    };
++    let binding = qbind_node::safety_record_store::codec::compute_evidence_lock_binding(
++        &[9u8; 32],
++        lock_view,
++        &evidence,
++        &ctx.authority_context_ref,
++        ctx,
++    )
++    .unwrap();
++    LockedRecord {
++        lock_block_id: [9u8; 32],
++        lock_view,
++        evidence_lock_binding: binding,
++        authority_context_ref: ctx.authority_context_ref,
++        committed_anchor: None,
++        predecessor_ref: None,
++        evidence,
++    }
++}
++
++fn open_enabled(dir: &std::path::Path) -> SafetyBackend {
++    SafetyBackend::open_or_initialize(
++        dir,
++        SafetyBackendPolicy::EnabledForTesting,
++        TrustBundleEnvironment::Devnet,
++    )
++    .expect("enabled devnet backend opens")
++}
++
++fn init_owner(dir: &std::path::Path, ctx: &PinnedSafetyContext) -> SafetyRecordOwner {
++    let backend = open_enabled(dir);
++    let owner = SafetyRecordOwner::attach(backend, ctx.clone()).expect("attach");
++    owner.initialize(true).expect("O1 initialize");
++    owner
++}
++
++/// Publish one QC-derived restriction and return (owner, new_revision).
++fn publish_qc(owner: &SafetyRecordOwner, ctx: &PinnedSafetyContext, block: [u8; 32], view: u64, expected: u64) -> u64 {
++    let qc = valid_wire_qc(ctx, block, view);
++    let l = make_locked_qc(ctx, block, view, qc, None).unwrap();
++    match owner.publish_locked(l, expected, None::<&FixtureCommittedHistory>) {
++        PublishResult::DurableAcknowledged { new_revision } => new_revision,
++        other => panic!("expected DurableAcknowledged, got {other:?}"),
++    }
++}
++
++fn op_current(owner: &SafetyRecordOwner) -> u128 {
++    owner.backend_for_test().accounting_current()
++}
++
++// ===========================================================================
++// 1. Fixture dimensions + generation-only charge is strictly smaller than the
++//    full-proof holder charge (the whole point of generation-only retention).
++// ===========================================================================
++
++fn dimensions_and_charges(n: u64) {
++    let ctx = ctx_n(n);
++    // Assert fixture dimensions BEFORE measurement.
++    assert_eq!(ctx.n() as u64, n, "fixture N");
++    assert_eq!(ctx.s_sig, S_SIG, "fixture S_sig");
++
++    let dir = tempfile::tempdir().unwrap();
++    let owner = init_owner(dir.path(), &ctx);
++    publish_qc(&owner, &ctx, [9u8; 32], 5, 0);
++
++    let proof = owner
++        .read_validate(None::<&FixtureCommittedHistory>)
++        .expect("O3 read-validate");
++    // The retained generation owns a non-empty evidence backing (capacity),
++    // measured independently of any reservation counter.
++    assert!(
++        proof.retained_evidence_capacity() > 0,
++        "retained generation must own a live evidence backing"
++    );
++    assert!(proof.encoded_capacity() > 0, "proof still owns its original encoded buffer pre-capture");
++
++    let gen_charge = prepared_generation_charge(&ctx, proof.retained()).unwrap();
++    let gen_ceiling = max_retained_generation_bytes(&ctx, size_of_timeout_msg()).unwrap();
++    assert!(gen_charge <= gen_ceiling, "gen-only charge within the retained ceiling (no increase)");
++    assert_eq!(prepared_entry_charge_bytes(), 48, "per-entry = identity 40 + arc_handle 8");
++
++    // The holder charge the full proof reserves (encoded + generation + handle)
++    // is strictly larger than the generation-only charge: generation-only
++    // retention does NOT reuse the full-proof holder charge.
++    let holder_live = op_current(&owner); // proof holder live
++    assert!(
++        holder_live > gen_charge + prepared_entry_charge_bytes(),
++        "full-proof holder ({holder_live}) must exceed gen-only charge ({}+48)",
++        gen_charge
++    );
++
++    println!(
++        "[dims N={n}] gen_charge={gen_charge} gen_ceiling={gen_ceiling} full_holder={holder_live} \
++         sizeof(registry={},entry={},backing={},handle={})",
++        size_of_prepared_registry(),
++        size_of_prepared_entry(),
++        size_of_generation_backing(),
++        size_of_prepared_handle(),
++    );
++}
++
++#[test]
++fn spike_dimensions_and_charges_n1() {
++    dimensions_and_charges(1);
++}
++#[test]
++fn spike_dimensions_and_charges_n4() {
++    dimensions_and_charges(4);
++}
++
++// ===========================================================================
++// 2. Shared generation: two entries, ONE generation charge; first drop retains
++//    it, final drop releases it.
++// ===========================================================================
++
++fn shared_generation(n: u64) {
++    let ctx = ctx_n(n);
++    let dir = tempfile::tempdir().unwrap();
++    let owner = init_owner(dir.path(), &ctx);
++    publish_qc(&owner, &ctx, [9u8; 32], 5, 0);
++
++    let baseline = op_current(&owner);
++    assert_eq!(baseline, 0, "no live operational holders at baseline");
++
++    let proof1 = owner.read_validate(None::<&FixtureCommittedHistory>).unwrap();
++    let gen = prepared_generation_charge(&ctx, proof1.retained()).unwrap();
++    let entry = prepared_entry_charge_bytes();
++
++    let pin1 = owner
++        .capture_prepared_decision(proof1, 1)
++        .expect("capture 1");
++    assert_eq!(op_current(&owner), gen + entry, "one gen + one entry live; full holder released");
++
++    // Second, EQUAL proof shares the one generation backing.
++    let proof2 = owner.read_validate(None::<&FixtureCommittedHistory>).unwrap();
++    let pin2 = owner
++        .capture_prepared_decision(proof2, 1)
++        .expect("capture 2 (shared)");
++    assert_eq!(
++        op_current(&owner),
++        gen + entry + entry,
++        "ONE generation charge for two entries (+ two per-entry charges)"
++    );
++
++    // Measure object coverage independently of counters: both entries share the
++    // one backing (strong_count 2) and carry the same generation charge.
++    let reg = owner.backend_for_test().prepared_registry_for_test();
++    {
++        let g = reg.lock().unwrap();
++        let v1 = g.inspect(pin1.handle()).expect("entry 1 live");
++        let v2 = g.inspect(pin2.handle()).expect("entry 2 live");
++        assert_eq!(v1.backing_shares, 2, "generation backing shared by both entries");
++        assert_eq!(v2.backing_shares, 2);
++        assert_eq!(v1.generation_charge, gen);
++        assert_eq!(v2.generation_charge, gen);
++        assert_eq!(v1.entry_charge, entry);
++        assert!(v1.evidence_backing_capacity > 0);
++        assert!(matches!(v1.evidence_status, EvidenceStatus::Unverified));
++    }
++
++    // First drop RETAINS the generation (second entry still shares it).
++    assert_eq!(pin1.release(), ReleaseOutcome::Released);
++    assert_eq!(op_current(&owner), gen + entry, "generation retained after first drop");
++
++    // Final drop RELEASES the generation.
++    assert_eq!(pin2.release(), ReleaseOutcome::Released);
++    assert_eq!(op_current(&owner), 0, "generation released after final drop");
++
++    println!("[shared N={n}] gen={gen} entry={entry} two_entries_current={}", gen + 2 * entry);
++}
++
++#[test]
++fn spike_shared_generation_n1() {
++    shared_generation(1);
++}
++#[test]
++fn spike_shared_generation_n4() {
++    shared_generation(4);
++}
++
++// ===========================================================================
++// 3. Distinct generations across replacement + coexistence during O4; and a
++//    full registry refuses a third capture WITHOUT eviction.
++// ===========================================================================
++
++fn distinct_generations_and_full(n: u64) {
++    let ctx = ctx_n(n);
++    let dir = tempfile::tempdir().unwrap();
++    let owner = init_owner(dir.path(), &ctx);
++
++    // rev 1: lock A (QC). Capture entry 1.
++    publish_qc(&owner, &ctx, [0x11u8; 32], 5, 0);
++    let pa = owner.read_validate(None::<&FixtureCommittedHistory>).unwrap();
++    let ga = prepared_generation_charge(&ctx, pa.retained()).unwrap();
++    let pin1 = owner.capture_prepared_decision(pa, 1).expect("capture A");
++    let entry = prepared_entry_charge_bytes();
++    assert_eq!(op_current(&owner), ga + entry);
++
++    // O4 publishes rev 2 (a distinct lock B) WHILE entry 1 is pinned —
++    // contemporaneous live objects + reservations during O4. Report success.
++    let rev2 = publish_qc(&owner, &ctx, [0x22u8; 32], 9, 1);
++    assert_eq!(rev2, 2, "O4 succeeds while a prepared entry is pinned (coexistence)");
++
++    // rev 2: capture entry 2 — a DISTINCT generation (different lock identity).
++    let pb = owner.read_validate(None::<&FixtureCommittedHistory>).unwrap();
++    let gb = prepared_generation_charge(&ctx, pb.retained()).unwrap();
++    let pin2 = owner.capture_prepared_decision(pb, 2).expect("capture B");
++
++    // Two DISTINCT generation charges coexist (NOT shared): current carries both
++    // gen charges, not one. If they had shared, current would be ga + 2*entry.
++    assert_eq!(
++        op_current(&owner),
++        ga + gb + 2 * entry,
++        "two distinct generations coexist (combined live objects)"
++    );
++    let cap = owner.backend_for_test().accounting_aggregate_cap().unwrap();
++    assert!(op_current(&owner) <= cap, "coexistence fits the unchanged aggregate ceiling");
++    {
++        let reg = owner.backend_for_test().prepared_registry_for_test();
++        let g = reg.lock().unwrap();
++        assert_eq!(g.inspect(pin1.handle()).unwrap().backing_shares, 1, "distinct backing A");
++        assert_eq!(g.inspect(pin2.handle()).unwrap().backing_shares, 1, "distinct backing B");
++        assert_eq!(g.occupied(), 2);
++        assert!(g.is_full(), "both slots occupied");
++    }
++
++    // rev 3 published, then a THIRD capture is refused WITHOUT eviction; the
++    // returned proof is intact.
++    let rev3 = publish_qc(&owner, &ctx, [0x33u8; 32], 13, 2);
++    assert_eq!(rev3, 3);
++    let pc = owner.read_validate(None::<&FixtureCommittedHistory>).unwrap();
++    let pc_rev = pc.publication_revision();
++    let pc_enc_cap = pc.encoded_capacity();
++    match owner.capture_prepared_decision(pc, 3) {
++        Err((returned, CaptureRefusal::RegistryFull)) => {
++            assert_eq!(returned.publication_revision(), pc_rev, "refused proof revision intact");
++            assert_eq!(returned.encoded_capacity(), pc_enc_cap, "refused proof original bytes intact");
++            assert!(returned.recovery_backend_incarnation().is_some(), "refused proof O5 capability intact");
++        }
++        other => panic!("expected RegistryFull, got {other:?}"),
++    }
++    {
++        // No eviction: the two prior entries are still present.
++        let reg = owner.backend_for_test().prepared_registry_for_test();
++        assert_eq!(reg.lock().unwrap().occupied(), 2, "no eviction on refusal");
++    }
++
++    println!("[distinct N={n}] ga={ga} gb={gb} coexist_current={} cap={cap}", ga + gb + 2 * entry);
++    drop(pin1);
++    drop(pin2);
++}
++
++#[test]
++fn spike_distinct_generations_and_full_n1() {
++    distinct_generations_and_full(1);
++}
++#[test]
++fn spike_distinct_generations_and_full_n4() {
++    distinct_generations_and_full(4);
++}
++
++// ===========================================================================
++// 4. Normal release AND automatic abandonment (Drop) both clean up to the
++//    baseline while the backend stays alive; backend remains usable afterwards.
++// ===========================================================================
++
++fn release_and_abandonment(n: u64) {
++    let ctx = ctx_n(n);
++    let dir = tempfile::tempdir().unwrap();
++    let owner = init_owner(dir.path(), &ctx);
++    publish_qc(&owner, &ctx, [9u8; 32], 5, 0);
++
++    // Normal explicit release.
++    let p1 = owner.read_validate(None::<&FixtureCommittedHistory>).unwrap();
++    let pin1 = owner.capture_prepared_decision(p1, 1).unwrap();
++    assert!(op_current(&owner) > 0);
++    assert_eq!(owner.release_prepared(pin1), ReleaseOutcome::Released);
++    assert_eq!(op_current(&owner), 0, "normal release cleans to baseline");
++
++    // Automatic abandonment: drop the pin WITHOUT releasing.
++    let p2 = owner.read_validate(None::<&FixtureCommittedHistory>).unwrap();
++    let pin2 = owner.capture_prepared_decision(p2, 1).unwrap();
++    assert!(op_current(&owner) > 0);
++    drop(pin2); // non-Copy guard Drop performs cleanup
++    assert_eq!(op_current(&owner), 0, "abandonment (Drop) cleans to baseline");
++    {
++        let reg = owner.backend_for_test().prepared_registry_for_test();
++        assert_eq!(reg.lock().unwrap().occupied(), 0);
++    }
++
++    // Backend still alive and usable (existing O5-style read path intact).
++    let p3 = owner.read_validate(None::<&FixtureCommittedHistory>).unwrap();
++    assert!(p3.recovery_backend_incarnation().is_some(), "backend alive after abandonment");
++}
++
++#[test]
++fn spike_release_and_abandonment_n1() {
++    release_and_abandonment(1);
++}
++#[test]
++fn spike_release_and_abandonment_n4() {
++    release_and_abandonment(4);
++}
++
++// ===========================================================================
++// 5. Provenance-gate refusals — each returns the proof intact and mints nothing.
++// ===========================================================================
++
++#[test]
++fn spike_refuse_bootstrap_unresolved() {
++    // A freshly initialized store is BootstrapNoLock (rev 0): capture refuses,
++    // leaving bootstrap explicitly unresolved.
++    let ctx = ctx_n(4);
++    let dir = tempfile::tempdir().unwrap();
++    let owner = init_owner(dir.path(), &ctx);
++    let proof = owner.read_validate(None::<&FixtureCommittedHistory>).unwrap();
++    assert!(matches!(proof.retained().record, SafetyRecord::BootstrapNoLock { .. }));
++    match owner.capture_prepared_decision(proof, 0) {
++        Err((p, CaptureRefusal::BootstrapUnresolved)) => {
++            assert_eq!(p.publication_revision(), 0);
++        }
++        other => panic!("expected BootstrapUnresolved, got {other:?}"),
++    }
++}
++
++#[test]
++fn spike_refuse_stale_revision() {
++    let ctx = ctx_n(4);
++    let dir = tempfile::tempdir().unwrap();
++    let owner = init_owner(dir.path(), &ctx);
++    publish_qc(&owner, &ctx, [9u8; 32], 5, 0);
++    let stale = owner.read_validate(None::<&FixtureCommittedHistory>).unwrap(); // rev 1
++    publish_qc(&owner, &ctx, [0x22u8; 32], 9, 1); // authoritative now rev 2
++    match owner.capture_prepared_decision(stale, 1) {
++        Err((p, CaptureRefusal::StaleRevision { expected, found })) => {
++            assert_eq!(expected, 1);
++            assert_eq!(found, 2);
++            assert_eq!(p.publication_revision(), 1, "stale proof returned intact");
++        }
++        other => panic!("expected StaleRevision, got {other:?}"),
++    }
++}
++
++#[test]
++fn spike_refuse_foreign_incarnation() {
++    // A proof minted by backend A is refused by an owner on backend B (a
++    // different ownership incarnation) — the incarnation check also guards
++    // capture, not only O5.
++    let ctx = ctx_n(4);
++    let dir_a = tempfile::tempdir().unwrap();
++    let owner_a = init_owner(dir_a.path(), &ctx);
++    publish_qc(&owner_a, &ctx, [9u8; 32], 5, 0);
++    let proof_a = owner_a.read_validate(None::<&FixtureCommittedHistory>).unwrap();
++
++    let dir_b = tempfile::tempdir().unwrap();
++    let owner_b = init_owner(dir_b.path(), &ctx); // distinct incarnation
++    match owner_b.capture_prepared_decision(proof_a, 1) {
++        Err((p, CaptureRefusal::ForeignOrUncharged)) => {
++            assert!(p.recovery_backend_incarnation().is_some());
++        }
++        other => panic!("expected ForeignOrUncharged, got {other:?}"),
++    }
++}
++
++#[test]
++fn spike_refuse_standalone_uncharged_none() {
++    // A standalone semantic/codec proof carries NO O5 capability (None) and NO
++    // holder reservation: capture refuses it as uncharged.
++    let ctx = ctx_n(4);
++    let qc = valid_wire_qc(&ctx, [9u8; 32], 5);
++    let l = make_locked_qc(&ctx, [9u8; 32], 5, qc, None).unwrap();
++    let decoded = DecodedRecord {
++        persistence_format_version: 1,
++        network_genesis_id: ctx.network_genesis_id,
++        publication_revision: 1,
++        record: SafetyRecord::Locked(l),
++    };
++    let bytes = encode_record(&decoded, &ctx).unwrap();
++    let standalone = validate_decoded(decoded, bytes, &ctx, None::<&FixtureCommittedHistory>).unwrap();
++    assert!(standalone.recovery_backend_incarnation().is_none(), "standalone proof has no capability");
++
++    let dir = tempfile::tempdir().unwrap();
++    let owner = init_owner(dir.path(), &ctx);
++    publish_qc(&owner, &ctx, [9u8; 32], 5, 0);
++    match owner.capture_prepared_decision(standalone, 1) {
++        Err((p, CaptureRefusal::ForeignOrUncharged)) => {
++            assert!(p.recovery_backend_incarnation().is_none());
++        }
++        other => panic!("expected ForeignOrUncharged (standalone), got {other:?}"),
++    }
++}
++
++#[test]
++fn spike_refuse_foreign_context() {
++    // Same backend (so the incarnation matches), but a second owner handle with
++    // a different context digest: the ForeignContext gate (checked before the
++    // domain) refuses, and the revision/metadata path is never reached.
++    let ctx = ctx_n(4);
++    let foreign = ctx_n_foreign(4);
++    let dir = tempfile::tempdir().unwrap();
++    let backend = open_enabled(dir.path());
++    let owner = SafetyRecordOwner::attach(backend.clone(), ctx.clone()).unwrap();
++    owner.initialize(true).unwrap();
++    publish_qc(&owner, &ctx, [9u8; 32], 5, 0);
++    let proof = owner.read_validate(None::<&FixtureCommittedHistory>).unwrap();
++
++    // A second handle on the SAME backend with the foreign context (same N, so
++    // attach binds the identical ceiling idempotently).
++    let owner_foreign = SafetyRecordOwner::attach(backend, foreign).unwrap();
++    match owner_foreign.capture_prepared_decision(proof, 1) {
++        Err((p, CaptureRefusal::ForeignContext)) => {
++            assert_eq!(p.publication_revision(), 1, "proof intact on ForeignContext");
++        }
++        other => panic!("expected ForeignContext, got {other:?}"),
++    }
++}
++
++#[test]
++fn spike_refuse_recovery_required() {
++    let ctx = ctx_n(4);
++    let dir = tempfile::tempdir().unwrap();
++    let backend = open_enabled(dir.path());
++    let owner = SafetyRecordOwner::attach(backend.clone(), ctx.clone()).unwrap();
++    owner.initialize(true).unwrap();
++    publish_qc(&owner, &ctx, [9u8; 32], 5, 0);
++    let proof = owner.read_validate(None::<&FixtureCommittedHistory>).unwrap();
++
++    // Drive the backend into recovery-required via an uncertain-but-durable O4.
++    backend.set_inject(InjectFault::UncertainAfterWrite);
++    let _ = owner.publish_locked(
++        make_locked_qc(&ctx, [0x22u8; 32], 9, valid_wire_qc(&ctx, [0x22u8; 32], 9), None).unwrap(),
++        1,
++        None::<&FixtureCommittedHistory>,
++    );
++    backend.set_inject(InjectFault::None);
++    assert!(owner.recovery_required(), "uncertain O4 sets the recovery latch");
++
++    match owner.capture_prepared_decision(proof, 1) {
++        Err((_p, CaptureRefusal::RecoveryRequired)) => {}
++        other => panic!("expected RecoveryRequired, got {other:?}"),
++    }
++}
++
++// ===========================================================================
++// 6. Counter exhaustion fails closed BEFORE mutation (bounded test seam); and
++//    stale/foreign handles are refused on handle-based release.
++// ===========================================================================
++
++#[test]
++fn spike_counter_exhaustion_fails_closed() {
++    let ctx = ctx_n(4);
++    let dir = tempfile::tempdir().unwrap();
++    let owner = init_owner(dir.path(), &ctx);
++    publish_qc(&owner, &ctx, [9u8; 32], 5, 0);
++    let proof = owner.read_validate(None::<&FixtureCommittedHistory>).unwrap();
++
++    let before = op_current(&owner); // proof holder live
++    {
++        let reg = owner.backend_for_test().prepared_registry_for_test();
++        reg.lock().unwrap().force_next_serial(u64::MAX);
++    }
++    match owner.capture_prepared_decision(proof, 1) {
++        Err((p, CaptureRefusal::CounterExhausted)) => {
++            assert!(p.recovery_backend_incarnation().is_some(), "proof intact on counter exhaustion");
++            // Fail-closed BEFORE any mutation/allocation: while the refused proof
++            // is still alive, only its holder is charged — no +48 entry leaked.
++            assert_eq!(op_current(&owner), before, "no charge leaked on counter exhaustion");
++        }
++        other => panic!("expected CounterExhausted, got {other:?}"),
++    }
++    assert_eq!(
++        owner.backend_for_test().prepared_registry_for_test().lock().unwrap().occupied(),
++        0,
++        "no entry inserted"
++    );
++}
++
++#[test]
++fn spike_stale_and_foreign_handles_refused() {
++    let ctx = ctx_n(4);
++    // Backend A: capture a real entry, remember its handle.
++    let dir_a = tempfile::tempdir().unwrap();
++    let owner_a = init_owner(dir_a.path(), &ctx);
++    publish_qc(&owner_a, &ctx, [9u8; 32], 5, 0);
++    let pa = owner_a.read_validate(None::<&FixtureCommittedHistory>).unwrap();
++    let pin = owner_a.capture_prepared_decision(pa, 1).unwrap();
++    let handle = pin.handle();
++
++    // Foreign incarnation: present A's handle to B's registry.
++    let dir_b = tempfile::tempdir().unwrap();
++    let owner_b = init_owner(dir_b.path(), &ctx);
++    {
++        let reg_b = owner_b.backend_for_test().prepared_registry_for_test();
++        assert_eq!(
++            reg_b.lock().unwrap().release_by_handle(handle),
++            ReleaseOutcome::ForeignIncarnation,
++            "foreign-incarnation handle refused"
++        );
++    }
++
++    // Stale serial: release the real entry, then re-release the same handle.
++    let reg_a = owner_a.backend_for_test().prepared_registry_for_test();
++    assert_eq!(reg_a.lock().unwrap().release_by_handle(handle), ReleaseOutcome::Released);
++    assert_eq!(
++        reg_a.lock().unwrap().release_by_handle(handle),
++        ReleaseOutcome::NotFound,
++        "stale serial refused"
++    );
++    // The owning pin's Drop now finds nothing to release (idempotent).
++    drop(pin);
++}
++
++// ===========================================================================
++// 7. Admission refusal BEFORE new allocation; cleanup to the correct baseline;
++//    subsequent readmission; and the refused proof's existing O5 recovery path.
++// ===========================================================================
++
++fn admission_refusal_and_readmission(n: u64) {
++    let ctx = ctx_n(n);
++    let dir = tempfile::tempdir().unwrap();
++    let owner = init_owner(dir.path(), &ctx);
++    publish_qc(&owner, &ctx, [9u8; 32], 5, 0);
++
++    let cap = owner.backend_for_test().accounting_aggregate_cap().unwrap();
++
++    // Read the real proof we will try (and fail) to capture. Its holder is now
++    // live and charged against the aggregate.
++    let proof = owner.read_validate(None::<&FixtureCommittedHistory>).unwrap();
++    let gen = prepared_generation_charge(&ctx, proof.retained()).unwrap();
++    let proof_rev = proof.publication_revision();
++
++    // Current aggregate = context partition + the live proof holder. Add a
++    // standing reservation leaving headroom of exactly (entry + gen - 1): enough
++    // for the per-entry (48) reservation to succeed, but one byte short of the
++    // generation. Thus admission of the generation is refused AFTER the per-entry
++    // reservation — exercising cleanup-to-baseline (release of the per-entry).
++    let entry = prepared_entry_charge_bytes();
++    let used = owner.backend_for_test().accounting_aggregate_current();
++    let standing_charge = cap - used - entry - (gen - 1);
++    let standing = owner
++        .backend_for_test()
++        .reserve_standing_for_test(standing_charge)
++        .expect("standing reservation admits (holder + entry fit, gen does not)");
++    let baseline_under_pressure = owner.backend_for_test().accounting_aggregate_current();
++
++    match owner.capture_prepared_decision(proof, 1) {
++        Err((returned, CaptureRefusal::Admission(_))) => {
++            // The refused proof is intact and still an O5-usable recovery token.
++            assert!(returned.recovery_backend_incarnation().is_some());
++            assert!(returned.encoded_capacity() > 0, "refused proof original bytes intact");
++            assert_eq!(returned.publication_revision(), proof_rev, "revision unchanged");
++            // Cleanup to the correct baseline: the per-entry reservation taken
++            // before the generation admission failed is released; only the
++            // returned proof holder + our standing remain.
++            assert_eq!(
++                owner.backend_for_test().accounting_aggregate_current(),
++                baseline_under_pressure,
++                "per-entry reservation released on generation-admission refusal"
++            );
++            assert_eq!(
++                owner.backend_for_test().prepared_registry_for_test().lock().unwrap().occupied(),
++                0,
++                "no entry inserted on refusal"
++            );
++            drop(returned);
++        }
++        other => panic!("expected Admission refusal, got {other:?}"),
++    }
++
++    // Readmission: release the pressure and capture a freshly read proof.
++    drop(standing);
++    let fresh = owner.read_validate(None::<&FixtureCommittedHistory>).unwrap();
++    assert!(fresh.recovery_backend_incarnation().is_some());
++    let pin = owner
++        .capture_prepared_decision(fresh, 1)
++        .map_err(|(_, r)| r)
++        .expect("readmission succeeds once pressure is released");
++    assert_eq!(
++        owner.backend_for_test().prepared_registry_for_test().lock().unwrap().occupied(),
++        1,
++        "readmitted entry present"
++    );
++    owner.release_prepared(pin);
++}
++
++#[test]
++fn spike_admission_refusal_and_readmission_n1() {
++    admission_refusal_and_readmission(1);
++}
++#[test]
++fn spike_admission_refusal_and_readmission_n4() {
++    admission_refusal_and_readmission(4);
++}
++
++// ===========================================================================
++// 8. Capture / publication interleaving under the serialization boundary: a
++//    capture and an O4 publication are linearized; a capture reflects only the
++//    authoritative revision read under the domain.
++// ===========================================================================
++
++#[test]
++fn spike_capture_publication_interleaving() {
++    let ctx = ctx_n(4);
++    let dir = tempfile::tempdir().unwrap();
++    let owner = init_owner(dir.path(), &ctx);
++    publish_qc(&owner, &ctx, [9u8; 32], 5, 0); // rev 1
++
++    // A proof read at rev 1, then an O4 advances to rev 2 BEFORE the capture:
++    // capture reads the authoritative revision under the domain and refuses the
++    // now-stale proof (linearization with publication).
++    let p_rev1 = owner.read_validate(None::<&FixtureCommittedHistory>).unwrap();
++    publish_qc(&owner, &ctx, [0x22u8; 32], 9, 1); // rev 2
++    match owner.capture_prepared_decision(p_rev1, 1) {
++        Err((_p, CaptureRefusal::StaleRevision { found, .. })) => assert_eq!(found, 2),
++        other => panic!("expected StaleRevision under interleaving, got {other:?}"),
++    }
++    // A fresh read at the authoritative rev 2 captures successfully.
++    let p_rev2 = owner.read_validate(None::<&FixtureCommittedHistory>).unwrap();
++    let pin = owner.capture_prepared_decision(p_rev2, 2).expect("capture at authoritative rev");
++    assert!(op_current(&owner) > 0);
++    drop(pin);
++}
++
++// ===========================================================================
++// 9. Maximum complete TC-derived generation: capture retains the heaviest
++//    complete generation within the unchanged ceiling.
++// ===========================================================================
++
++fn tc_generation_capture(n: u64) {
++    let ctx = ctx_n(n);
++    let dir = tempfile::tempdir().unwrap();
++    let owner = init_owner(dir.path(), &ctx);
++
++    // Publish a maximum complete TC-derived restriction.
++    let ltc = valid_tc_record(&ctx, 5, 4);
++    assert!(
++        matches!(&ltc.evidence, SupportingEvidence::TcDerived { tc, .. } if !tc.signed_timeouts.is_empty()),
++        "TC fixture carries complete signed timeouts"
++    );
++    match owner.publish_locked(ltc, 0, None::<&FixtureCommittedHistory>) {
++        PublishResult::DurableAcknowledged { new_revision: 1 } => {}
++        other => panic!("TC publish: {other:?}"),
++    }
++
++    let proof = owner.read_validate(None::<&FixtureCommittedHistory>).unwrap();
++    assert!(
++        matches!(proof.retained().record, SafetyRecord::Locked(ref l) if matches!(l.evidence, SupportingEvidence::TcDerived { .. })),
++        "retained TC generation"
++    );
++    let gen = prepared_generation_charge(&ctx, proof.retained()).unwrap();
++    let ceiling = max_retained_generation_bytes(&ctx, size_of_timeout_msg()).unwrap();
++    assert!(gen <= ceiling, "complete TC generation within the unchanged ceiling");
++
++    let pin = owner.capture_prepared_decision(proof, 1).expect("capture TC generation");
++    assert_eq!(op_current(&owner), gen + prepared_entry_charge_bytes());
++    println!("[tc N={n}] tc_gen_charge={gen} ceiling={ceiling}");
++    drop(pin);
++    assert_eq!(op_current(&owner), 0);
++}
++
++#[test]
++fn spike_tc_generation_capture_n1() {
++    tc_generation_capture(1);
++}
++#[test]
++fn spike_tc_generation_capture_n4() {
++    tc_generation_capture(4);
++}
++
++// ===========================================================================
++// 10. Evidence/context binding correctness: the captured entry carries exactly
++//     the proof's provenance (context digest, incarnation, revision, evidence).
++// ===========================================================================
++
++fn evidence_context_binding(n: u64) {
++    let ctx = ctx_n(n);
++    let dir = tempfile::tempdir().unwrap();
++    let owner = init_owner(dir.path(), &ctx);
++    publish_qc(&owner, &ctx, [9u8; 32], 5, 0);
++    let proof = owner.read_validate(None::<&FixtureCommittedHistory>).unwrap();
++    let expect_digest = *proof.origin_context_digest();
++    let expect_incarnation = proof.recovery_backend_incarnation().unwrap();
++    let expect_rev = proof.publication_revision();
++
++    let pin = owner.capture_prepared_decision(proof, 1).unwrap();
++    let reg = owner.backend_for_test().prepared_registry_for_test();
++    let g = reg.lock().unwrap();
++    let view = g.inspect(pin.handle()).unwrap();
++    assert_eq!(view.origin_context_digest, expect_digest, "bound to the originating context");
++    assert_eq!(view.recovery_backend_incarnation, expect_incarnation, "bound to the originating incarnation");
++    assert_eq!(view.captured_revision, expect_rev, "bound to the captured revision");
++    assert!(matches!(view.evidence_status, EvidenceStatus::Unverified), "capture mints no verified status");
++    drop(g);
++    drop(pin);
++}
++
++#[test]
++fn spike_evidence_context_binding_n1() {
++    evidence_context_binding(1);
++}
++#[test]
++fn spike_evidence_context_binding_n4() {
++    evidence_context_binding(4);
++}

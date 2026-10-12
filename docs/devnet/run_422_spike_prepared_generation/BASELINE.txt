@@ -1,0 +1,5 @@
+Supplied branch: copilot/complete-engineering-brief
+Baseline HEAD (experiment parent): 8aa44e520cf6e15568231bc4da122da804f5b4fb
+Asserted implementation-correspondence target: cfb88a3ff5c3a8e1c47fa2740450c10e7ba2a76d
+  (absent from this shallow single-branch clone; correspondence asserted per brief, not re-verified by diff)
+Isolated experimental checkout: /tmp/spike2 (cp -a of baseline, same branch name, unrenamed)

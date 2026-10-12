@@ -1,0 +1,38 @@
+    Finished `test` profile [unoptimized] target(s) in 0.13s
+     Running tests/run_422_spike_prepared_generation_tests.rs (target/debug/deps/run_422_spike_prepared_generation_tests-71cc7af93cd79cea)
+
+running 23 tests
+test spike_admission_refusal_and_readmission_n1 ... ok
+test spike_admission_refusal_and_readmission_n4 ... ok
+test spike_counter_exhaustion_fails_closed ... ok
+test spike_capture_publication_interleaving ... ok
+[dims N=1] gen_charge=417 gen_ceiling=552 full_holder=1097 sizeof(registry=240,entry=112,backing=464,handle=24)
+[dims N=4] gen_charge=481 gen_ceiling=1104 full_holder=2051 sizeof(registry=240,entry=112,backing=464,handle=24)
+test spike_dimensions_and_charges_n1 ... ok
+test spike_dimensions_and_charges_n4 ... ok
+[distinct N=4] ga=481 gb=481 coexist_current=1058 cap=7772
+test spike_distinct_generations_and_full_n4 ... ok
+[distinct N=1] ga=417 gb=417 coexist_current=930 cap=3956
+test spike_distinct_generations_and_full_n1 ... ok
+test spike_evidence_context_binding_n1 ... ok
+test spike_evidence_context_binding_n4 ... ok
+test spike_refuse_bootstrap_unresolved ... ok
+test spike_refuse_foreign_context ... ok
+test spike_refuse_stale_revision ... ok
+test spike_refuse_recovery_required ... ok
+test spike_refuse_standalone_uncharged_none ... ok
+test spike_refuse_foreign_incarnation ... ok
+test spike_release_and_abandonment_n1 ... ok
+test spike_release_and_abandonment_n4 ... ok
+[shared N=4] gen=481 entry=48 two_entries_current=577
+test spike_shared_generation_n4 ... ok
+[shared N=1] gen=417 entry=48 two_entries_current=513
+test spike_shared_generation_n1 ... ok
+[tc N=1] tc_gen_charge=536 ceiling=552
+test spike_tc_generation_capture_n1 ... ok
+[tc N=4] tc_gen_charge=888 ceiling=1104
+test spike_tc_generation_capture_n4 ... ok
+test spike_stale_and_foreign_handles_refused ... ok
+
+test result: ok. 23 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.11s
+
