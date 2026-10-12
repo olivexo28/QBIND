@@ -18279,3 +18279,67 @@ An AI-assisted internal full-source review of the frozen `safety_record_store` c
 ## Run 422 D7-D14 Independent review — evidence restored + SARIF review completed (continuation)
 
 This continuation ran on branch `copilot/run-422-restore-evidence-package` (starting HEAD `afc0fa1…`, parent `53a2f7c…`; upstream `origin/<same>`; worktree clean; documentation-only), correcting the earlier report's `copilot/copilotcopilotrun-422-d7-d14-please-work-again` / single-HEAD `53a2f7c…` attribution. It **completes** the previously PARTIAL independent review and **retires** the earlier "A/B SARIF absent at HEAD / contents not re-verifiable" limitation. **Evidence restoration (byte-exact):** the three absent files (`sarif/A_production_default.sarif.gz`, `sarif/B_acceptance_testutils.sarif.gz`, `diagnostics/FINDINGS.md`) and the **sixteen** present checksum-listed artifacts that had CRLF/final-newline byte-drift (plus drifted raw `logs/` artifacts — **33 files** total) were rewritten from their exact `ecf4cf…` git-blob bytes (verified `git hash-object == ecf4cf…:<path>`); original checksums were preserved, not rewritten. After restoration every recorded committed-file checksum **passes**, the compressed **and uncompressed** SARIF SHA-256 match the recorded values, both SARIF are valid JSON with workspace counts **A=50 / B=828**, and `manifests/` were already byte-identical. **Full-SARIF review (now done):** both runs are CodeQL `2.27.2`, one invocation each (`executionSuccessful=true`); the `rust/cleartext-logging` rule carries `level warning` / `security-severity 7.5` / CWE-312·359·532; the **52** component-scoped results (A=2, B=50, all `rust/cleartext-logging`) were checked against the disposition tables — all codeFlow sources resolve into `safety_record_store/codec.rs`, with one production `debug_assert!` sink per config at `codec.rs:415` — and **all 52 per-location false-positive dispositions are concurred** (public consensus quantities / synthetic fixtures, no secrets), keeping the reported level/severity, the per-location judgment, and the analyzer coverage limitations (per-file diagnostic cap with non-recoverable suppressed contents; unresolved `panic_2021` macro at test line 5324; supplementary-query provenance; example-only type-mention results) as **separate** facts. The external-dependency trace was completed (CRC helper `crate::storage::signing_journal_crc32`; QC/TC types `qbind_consensus::qc::QuorumCertificate` and `timeout::TimeoutCertificate`/`TimeoutMsg` with the component's bounded `encode/decode/admit_timeout_cert` codec; RocksDB `WriteBatch` + `WriteOptions::set_sync(true)` atomic-commit behaviour in `backend.rs`), and H-row references were made traceable to exact symbols (e.g. **H18** `h18_record_and_evidence_co_located_single_store_no_partial_cross_store` — structural unavailability of a split-store interface, not an executed split-store refusal; **H8** keeps `d7d14_h8a_planted_malformed_successor_across_process_death_refused` — a **test-planted malformed** fixture across process termination, **not** torn-write/power-loss — separate from `d7d14_h8b_uncertain_successor_restart_then_o5_recovers`). The prior **26-test** focused `cargo test` run remains attributed to its original command/tests and was **not** re-executed; no CodeQL re-run was performed or needed. The only residual non-repository item is the CodeQL tooling bundle `codeql-bundle-linux64.tar.gz`, which was **not** retrieved — its recorded digest is carried as a claim, **not** asserted reverified. Independence is recorded as an **AI-assisted internal review** (separate from the implementation session); no clause mandating human/organizationally-independent assurance was located, so the difference is a stated **assurance-level limitation**, not an established unmet obligation. **Outcome: review execution COMPLETE; no confirmed findings within the inspected scope** ("no confirmed findings" ≠ absence of all possible defects); it supports an isolated-component acceptance decision for the accepted 23-row subset only. Zero non-documentation drift from the frozen candidate `aad0a4a…`. All global verdicts preserved unchanged (`D7D14_STORAGE_COMPONENT=PARTIAL-IMPLEMENTATION`, `D7D14_STORAGE_ACCEPTANCE=INCOMPLETE`, `DURABLE_ANTI_ROLLBACK=NOT-ESTABLISHED`, `GENESIS_AUTHORITY_ACTIVATION=DISABLED`, `PRODUCTION_WIRE_CHAIN_ID_BEHAVIOR=UNCHANGED`, `CONFIGURED_AUTHORITY_RELEASE_BINARY_EVIDENCE=NOT-YET-CAPTURED`, `SECURITY_POSTURE=RS1-OPEN / PUBLIC-DEVNET-NO-GO`; C4/C5 OPEN); no implementation/test/Cargo/lockfile/config/CI/contract change; no PR; no D15 or Run 423 work.
+## Run 422 D7-D14 — Final isolated-component acceptance decision + public DevNet critical path (this pass)
+
+**Scope.** One bounded acceptance-and-planning pass over the frozen candidate `aad0a4a…`
+(tree `82caed80…`), the completed evidence/review revision `7cfa7b8…`, and the original
+assurance artifacts `ecf4cf…`. Documentation-only; the obsolete `0f258734…` implementation was
+**not** restored. Starting HEAD of this pass `39b69d0…` on branch
+`copilot/run-422-d7-d14-final-isolated-acceptance-decision` (used as supplied, not renamed);
+starting worktree clean. `git diff` against the prior candidate commit touches **only** `.md`
+documentation; every Rust source blob, the `run_422_d7d14_safety_record_store_tests.rs` target,
+Cargo files, lockfile, configuration, CI, preserved SARIF, raw logs, dispositions, and historical
+checksums are byte-identical (zero non-documentation drift). Content correspondence of the nine
+component source files + acceptance target to the candidate tree was established separately from
+ancestry in `run_422_d7d14_fixed_candidate_assurance/independent_review/00_review_report.md` §2.
+
+**Review-table corrections completed (documentation-only).** In
+`independent_review/00_review_report.md` §7: H3 now cites `h23_o2_refuses_absent_state_o3_no_write`
+(its actual assertion: `owner.open()` on a fresh uninitialized backend returns
+`Err(SafetyStoreError::MissingEstablishedState(_))`, then O3 reads leave the revision unchanged) and
+records that the previously cited `corr_missing_committed_history_for_anchored_refused` /
+`corr_unknown_namespace_key_refuses_o1_without_repair` establish different obligations. H8
+execution provenance is split: `d7d14_h8b_uncertain_successor_restart_then_o5_recovers` was in the
+recorded 26-test command (it matches the `o5` selector) and is **newly executed**;
+`d7d14_h8a_planted_malformed_successor_across_process_death_refused` matched no selector and stays
+**inherited**, with its test-planted-malformed / process-termination limitation preserved. The
+remaining generic citations (read/validate admit, association/empty-signer, committed-comparison,
+crash-before-ack, capacity+replacement, cert/lock-mismatch, unverified-carry, no-commit
+lock-recovery, bootstrap→first-Locked) were replaced with exact existing test symbols and their
+relevant assertions, reusing the reconciled clause-level evidence; §13.8A H7/H16 methods and §13.9
+exclusions are preserved. No new tests were written and no test was executed to repair citations.
+
+**Isolated-component acceptance decision (promoted).** The accepted 23 H rows (H2–H12, H16,
+H18–H25, H26, H27, H30) each resolve to concrete test symbols with no uncovered in-scope
+obligation; the full A/B SARIF were inspected and all 52 CodeQL `rust/cleartext-logging`
+dispositions concurred; the separate-session AI-assisted internal full-source review is COMPLETE;
+analyzer/review limitations are recorded. On that basis this pass records, for the accepted
+isolated storage subset **only**:
+
+```
+D7D14_STORAGE_COMPONENT=IMPLEMENTED-ISOLATED
+D7D14_STORAGE_ACCEPTANCE=PASS-ACCEPTED-SUBSET
+```
+
+The CodeQL bundle's provenance (verified during the producing execution; not re-retrieved here) is
+preserved without inventing a mandatory repeat-download requirement, and the AI-assisted/internal
+assurance level is retained as a limitation without inventing a human-exclusive requirement.
+
+**Preserved global posture (unchanged).**
+`DURABLE_ANTI_ROLLBACK=NOT-ESTABLISHED`; `GENESIS_AUTHORITY_ACTIVATION=DISABLED`;
+`PRODUCTION_WIRE_CHAIN_ID_BEHAVIOR=UNCHANGED`;
+`CONFIGURED_AUTHORITY_RELEASE_BINARY_EVIDENCE=NOT-YET-CAPTURED`;
+`SECURITY_POSTURE=RS1-OPEN / PUBLIC-DEVNET-NO-GO`; C4/C5 OPEN; default-disabled / MainNet-refused
+operation, unverified recovered evidence, and fail-closed `CurrentEpochUnavailable` preserved. The
+promoted subset verdicts apply to the isolated storage component only and assert **nothing** about
+production integration, stage-2 verification, durable anti-rollback, activation, or launch.
+
+**Public DevNet critical path.** The launch-blocker inventory, dependency ordering, next
+executable task, longest dependency chain, concurrent work, external/owner decisions, and
+conditional effort estimate are published in
+`docs/devnet/QBIND_PUBLIC_DEVNET_CRITICAL_PATH.md`. The isolated storage acceptance above is a
+completed-component input to that plan, **not** a launch gate.
+
+No implementation, test, Cargo, lockfile, configuration, CI, protocol-contract, SARIF, raw-log,
+disposition, or historical-checksum change; no PR beyond the supplied workflow; no production
+integration, signing/verifier wiring, activation, seed publication, D15, or Run 423 work.

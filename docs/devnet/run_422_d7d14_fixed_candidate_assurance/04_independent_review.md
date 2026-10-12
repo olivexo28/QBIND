@@ -90,16 +90,18 @@ preserved CodeQL evidence under this directory.
 
 ## 5. Acceptance recommendation
 
-This review supports a subsequent **isolated-component** acceptance decision for the accepted
+This review **makes** the **isolated-component** acceptance decision for the accepted
 23-row subset **on the inspected source, the restored and verified CodeQL evidence, and the
 earlier focused-test execution**. The prior SARIF-availability proviso is **satisfied** (the A/B
 SARIF are restored, byte-exact, and content-inspected); the only residual qualifier is the
 assurance-level limitation (AI-assisted internal vs. human/organizationally-independent), recorded
 as a limitation rather than an unmet obligation. It
 does **not** support production integration, stage-2 verification, durable anti-rollback,
-activation, or launch; those remain separate later gates. All global verdicts are preserved
-unchanged: `D7D14_STORAGE_COMPONENT=PARTIAL-IMPLEMENTATION`;
-`D7D14_STORAGE_ACCEPTANCE=INCOMPLETE`; `DURABLE_ANTI_ROLLBACK=NOT-ESTABLISHED`;
+activation, or launch; those remain separate later gates. The two accepted-subset verdicts are
+**promoted** for the isolated storage subset only:
+`D7D14_STORAGE_COMPONENT=IMPLEMENTED-ISOLATED`;
+`D7D14_STORAGE_ACCEPTANCE=PASS-ACCEPTED-SUBSET`. All global posture verdicts are preserved
+unchanged: `DURABLE_ANTI_ROLLBACK=NOT-ESTABLISHED`;
 `GENESIS_AUTHORITY_ACTIVATION=DISABLED`; `PRODUCTION_WIRE_CHAIN_ID_BEHAVIOR=UNCHANGED`;
 `CONFIGURED_AUTHORITY_RELEASE_BINARY_EVIDENCE=NOT-YET-CAPTURED`;
 `SECURITY_POSTURE=RS1-OPEN / PUBLIC-DEVNET-NO-GO`; C4/C5 OPEN; H22 separately limited;

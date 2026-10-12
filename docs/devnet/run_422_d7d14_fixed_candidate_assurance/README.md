@@ -278,9 +278,20 @@ This CodeQL pass supplies evidence only within its verified extraction/query
 scope; it does not prove consensus correctness, cryptographic security, or
 public-DevNet readiness. The 23 Covered items under H7/H16, C4/C5 OPEN,
 default-disabled/MainNet-refused operation, fail-closed
-`CurrentEpochUnavailable`, and the global D7D14/security verdicts are **not**
-promoted or changed by this task. The inherited 157 passed / 1 ignored
+`CurrentEpochUnavailable`, and the global security verdicts are **not**
+promoted or changed by this CodeQL task. The inherited 157 passed / 1 ignored
 integration and 3 passed H7 unit results were **not** rerun and remain inherited.
+
+**Acceptance-status reconciliation (isolated storage subset only).** The isolated-component
+acceptance decision is made by the independent full-source review (not by this CodeQL pass). That
+review now records, for the accepted 23-row isolated storage subset only,
+`D7D14_STORAGE_COMPONENT=IMPLEMENTED-ISOLATED` and
+`D7D14_STORAGE_ACCEPTANCE=PASS-ACCEPTED-SUBSET` (see
+`independent_review/00_review_report.md` §11). The global posture verdicts
+(`DURABLE_ANTI_ROLLBACK=NOT-ESTABLISHED`, `GENESIS_AUTHORITY_ACTIVATION=DISABLED`,
+`PRODUCTION_WIRE_CHAIN_ID_BEHAVIOR=UNCHANGED`,
+`CONFIGURED_AUTHORITY_RELEASE_BINARY_EVIDENCE=NOT-YET-CAPTURED`,
+`SECURITY_POSTURE=RS1-OPEN / PUBLIC-DEVNET-NO-GO`) remain unchanged.
 
 ## Directory map
 
