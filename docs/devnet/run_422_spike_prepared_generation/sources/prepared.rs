@@ -205,8 +205,18 @@ struct PreparedEntry {
 /// The bounded prepared-decision L0 registry: a fixed inline slot array (no
 /// growable backing — its inline size already includes its embedded slots and
 /// entries), a monotonic serial counter, and the backend incarnation it belongs
-/// to. Shared across attached handles behind one `Arc<Mutex<..>>` created at
-/// backend open, so a second handle cannot open a bypass registry.
+/// to. The whole registry is **lazily allocated** — it does not exist at backend
+/// open or ordinary attachment. It is created only by the first prepared capture,
+/// **after** that capture has admitted the registry-storage charge, and is then
+/// installed **once** behind a shared `Arc<Mutex<..>>` (under the backend
+/// serialization domain, so concurrent handles cannot install bypass registries).
+/// Once installed, the registry — and the [`Reservation`] it owns from
+/// construction — persists for the **entire lifetime of the allocation**,
+/// including periods with zero live entries, and is released only when the last
+/// owner of the allocation (the backend slot and any outstanding
+/// [`PreparedPin`]) drops. The reservation lifetime therefore follows the
+/// registry's **actual shared ownership**, so a pin that outlives its owner
+/// handle keeps the allocation (and its covering reservation) alive.
 #[derive(Debug)]
 pub struct PreparedRegistry {
     slots: [Option<PreparedEntry>; PREPARED_SLOTS],
@@ -214,21 +224,31 @@ pub struct PreparedRegistry {
     incarnation: u64,
     /// The **registry-storage** charge (the whole `Mutex<PreparedRegistry>` cell
     /// value + its shared-allocation overhead), covering this container and its
-    /// embedded entry slots **once**. Reserved lazily by the capture path when the
-    /// registry transitions empty → occupied, and released (RAII) when it returns
-    /// to empty, so an unused backend charges nothing for prepared storage while a
-    /// backend holding ≥1 live entry always covers its registry storage.
-    registry_reservation: Option<Reservation>,
+    /// embedded entry slots **once**. It is admitted by the capture path **before**
+    /// the allocation is created and moved in here at construction, so its lifetime
+    /// **is** the allocation's lifetime (RAII): it stays charged for as long as the
+    /// registry allocation is retained — including while empty — and is released
+    /// exactly when the allocation is destroyed (its last owner drops). It is never
+    /// dropped on an empty→occupied→empty cycle; deallocation-whenever-empty is not
+    /// required and is deliberately not done.
+    ///
+    /// `#[allow(dead_code)]`: the field is held purely for its RAII `Drop` (the
+    /// reservation is released when the allocation is destroyed) and is read only
+    /// by the `test-utils` accessor below, so the default build sees no reader.
+    #[allow(dead_code)]
+    registry_reservation: Reservation,
 }
 
 impl PreparedRegistry {
-    /// A fresh empty registry bound to a backend incarnation.
-    pub fn new(incarnation: u64) -> Self {
+    /// A fresh empty registry bound to a backend incarnation, consuming the
+    /// already-admitted registry-storage [`Reservation`] (admission precedes this
+    /// allocation). The reservation is owned for the allocation's whole lifetime.
+    pub fn new(incarnation: u64, registry_reservation: Reservation) -> Self {
         PreparedRegistry {
             slots: Default::default(),
             next_serial: 0,
             incarnation,
-            registry_reservation: None,
+            registry_reservation,
         }
     }
 
@@ -285,12 +305,11 @@ impl PreparedRegistry {
         if matches {
             // Dropping the entry drops its `Arc<GenerationBacking>` share and, if
             // this was the last share, the generation core + control charges
-            // (RAII). When the registry returns to empty, release its one-time
-            // registry-storage charge too.
+            // (RAII). The registry-storage reservation is **not** touched here: it
+            // stays charged for the entire allocation lifetime (including this
+            // empty period) and is released only when the allocation is destroyed
+            // (its last owner — the backend slot and any outstanding pin — drops).
             self.slots[handle.slot] = None;
-            if self.occupied() == 0 {
-                self.registry_reservation = None;
-            }
             ReleaseOutcome::Released
         } else {
             ReleaseOutcome::NotFound
@@ -334,6 +353,15 @@ impl PreparedRegistry {
     #[cfg(any(test, feature = "test-utils"))]
     pub fn next_serial_for_test(&self) -> u64 {
         self.next_serial
+    }
+
+    /// Test-only: the standing registry-storage reservation charge this
+    /// allocation holds for its whole lifetime (covers the cell once, retained
+    /// even while empty). Observes the reservation directly, independent of entry
+    /// state.
+    #[cfg(any(test, feature = "test-utils"))]
+    pub fn registry_reservation_charge(&self) -> u128 {
+        self.registry_reservation.charge()
     }
 
     /// Test-only bounded seam: drive the serial counter to the brink of
@@ -473,7 +501,8 @@ pub(crate) fn generation_backing_struct_size() -> u128 {
 /// The **registry-storage** charge: the whole `Mutex<PreparedRegistry>` cell value
 /// (container + its embedded entry slots + serial + incarnation + the inline
 /// registry reservation, counted **once**) plus the shared-allocation (`Arc`)
-/// overhead. Reserved lazily on the empty → occupied transition.
+/// overhead. Admitted by the first prepared capture **before** the registry
+/// allocation is created, then retained for the allocation's whole lifetime.
 pub(crate) fn registry_cell_charge() -> u128 {
     std::mem::size_of::<Mutex<PreparedRegistry>>() as u128 + ARC_CTRL
 }
@@ -535,7 +564,6 @@ impl PreparedRegistry {
         captured_revision: u64,
         gen_reservation: Reservation,
         control_reservation: Reservation,
-        registry_reservation: Option<Reservation>,
     ) -> Option<PreparedHandle> {
         let backing = Arc::new(GenerationBacking {
             retained,
@@ -546,7 +574,7 @@ impl PreparedRegistry {
             gen_reservation,
             control_reservation,
         });
-        self.place(identity, backing, registry_reservation)
+        self.place(identity, backing)
     }
 
     /// Crate-internal: insert an entry that **shares** an existing backing (one
@@ -555,9 +583,8 @@ impl PreparedRegistry {
         &mut self,
         identity: GenerationIdentity,
         backing: SharedGenerationBacking,
-        registry_reservation: Option<Reservation>,
     ) -> Option<PreparedHandle> {
-        self.place(identity, backing.0, registry_reservation)
+        self.place(identity, backing.0)
     }
 
     /// Crate-internal: find a shareable backing (equal retained generation).
@@ -588,17 +615,13 @@ impl PreparedRegistry {
         &mut self,
         identity: GenerationIdentity,
         backing: Arc<GenerationBacking>,
-        registry_reservation: Option<Reservation>,
     ) -> Option<PreparedHandle> {
         let slot = self.first_free()?;
         let serial = self.peek_serial()?;
         let next = self.next_serial.checked_add(1)?;
-        // Adopt the one-time registry-storage reservation on the empty → occupied
-        // transition (the caller passes `Some` iff the registry was empty); any
-        // surplus reservation is released by being dropped.
-        if self.registry_reservation.is_none() {
-            self.registry_reservation = registry_reservation;
-        }
+        // The registry-storage reservation was admitted and moved in at
+        // construction (admission precedes allocation); it is retained for the
+        // allocation's whole lifetime, so nothing is adopted or charged here.
         self.slots[slot] = Some(PreparedEntry {
             identity,
             serial,
