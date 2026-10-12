@@ -290,8 +290,12 @@ test profile … in 5m 06s` build. Newly executed tests include: `h7_declared_co
 `d7d14_o5_publication_envelope_coexistence_reserved_within_aggregate`,
 `d7d14_r4_o5_reacknowledge_max_complete_tc_publication_boundary_coverage`,
 `h19_o5_refuses_divergence_outside_binding_digest`, `h20_stale_o5_does_not_overwrite_newer`),
-the H8b restart-recovery test, H12 competing-handles test, and the child-process
-process-death tests (`pd_*`).
+the H8-B restart-recovery test `d7d14_h8b_uncertain_successor_restart_then_o5_recovers` (included
+because it matches the `o5` substring selector), H12 competing-handles test, and the child-process
+process-death tests (`pd_*`). **H8-A** (`d7d14_h8a_planted_malformed_successor_across_process_death_refused`)
+does **not** match any of the `agg_ceiling…`/`o5`/`h26`/`h7`/`h30` selectors and was therefore **not**
+in this 26-test command; its evidence remains **inherited** (not re-executed in this review), and its
+test-planted-malformed / process-termination limitation is preserved.
 
 **Newly executed in this continuation (evidence restoration + SARIF completion phase).** No
 `cargo` tests were re-run in this continuation, and **no citation added below re-executes any
@@ -333,25 +337,25 @@ Excluded rows H1, H13–H15, H17, H25e, H26l, H28, H29 are **not** imported into
 | H | Obligation (summary) | Source basis | Tests present | Exec | Uncovered obligation |
 | --- | --- | --- | --- | --- | --- |
 | H2 | First `initialize` on genuine absence → ADMIT O1, no signing | `owner.rs` O1 requires `first_use_intent`, bounded namespace scan, no signer call | `d7d14_fa_o1_real_initialize_peak_reserves_borrowed_decoded_local` (real O1 admit path), `o1_refuses_duplicate_initialization_and_missing_intent` (intent required; no signer call), `pd_reopen_after_clean_exit_requires_o5_before_o4` | inherited | none within scope |
-| H3 | `open` on missing-but-expected → REFUSE (no auto-init) | `owner.rs` O2 refuses absent-but-expected; no auto-init path exists | `corr_missing_committed_history_for_anchored_refused`, `corr_unknown_namespace_key_refuses_o1_without_repair` | inherited | none |
+| H3 | `open` on missing-but-expected → REFUSE (no auto-init) | `owner.rs` O2 refuses absent-but-expected; no auto-init path exists | `h23_o2_refuses_absent_state_o3_no_write` — on a fresh uninitialized backend `owner.open()` returns `Err(SafetyStoreError::MissingEstablishedState(_))` (O2 refuses absent established state, no auto-init); after a genuine O1 the two subsequent `read_validate` (O3) reads leave the retained revision unchanged (no write). (The previously cited `corr_missing_committed_history_for_anchored_refused` and `corr_unknown_namespace_key_refuses_o1_without_repair` establish **different** obligations — anchored committed-history P3 refusal and O1 unknown-namespace no-repair — and are not the H3 missing-but-expected-`open` assertion.) | inherited | none |
 | H4 | Duplicate `initialize` / uncertain-init survival → REFUSE 2nd; O2 opens survivor | `owner.rs` O1 refuses established/partial/malformed | `o1_refuses_duplicate_initialization_and_missing_intent`, `pd_duplicate_o1_after_surviving_init_refused` (second O1 refused across surviving init) | inherited | none |
-| H5 | Valid lock/evidence/context association → ADMIT read/validate | `validate.rs` P1–P4/TA1–TA8 admit valid association | read/validate admit tests | inherited | none |
-| H6 | Invalid association / empty-signer QC → structural REFUSE; present-unverified carried | `codec.rs` empty-signer refuse; `validate.rs` stage-3 mismatch refuse; `Unverified` carry | association/empty-signer refuse tests | inherited | none |
+| H5 | Valid lock/evidence/context association → ADMIT read/validate | `validate.rs` P1–P4/TA1–TA8 admit valid association | `corr_valid_publication_reaches_evidence_allocation` (a valid O4 `publish_locked` returns `DurableAcknowledged { new_revision: 1 }` and exercises the evidence-binding allocation path, `evidence_payload_encode_count() >= 1`); `d7d14_o3_real_read_validate_with_live_holder_within_aggregate` (real O3 `read_validate` admits the max-TC locked proof — `proof.retained().is_locked()` — within the aggregate ceiling) | inherited | none |
+| H6 | Invalid association / empty-signer QC → structural REFUSE; present-unverified carried | `codec.rs` empty-signer refuse; `validate.rs` stage-3 mismatch refuse; `Unverified` carry | `h6_empty_signer_certificate_refused` / `corr_empty_signer_refusal_is_typed_through_encode_admission` (empty-signer QC → `encode_record` returns `StructuralRefusal(StructuralRefusalDetail::EmptySignerCertificate)` at encode admission); `corr_invalid_lock_evidence_binding_refused` (valid CRC, wrong `evidence_lock_binding` → `read_validate` → `SemanticRefusal`); `h11_success_is_unverified` (admitted evidence carries `EvidenceStatus::Unverified`) | inherited | none |
 | H7 | Size limits / checked arithmetic / bad version / corruption → REFUSE at decode | `codec.rs` bounded decode; `profile.rs` checked `add`/`mul`; §13.8A [H7-EM1] | `h7_declared_count_over_bound_refused` | **newly executed** | range-proof is source-derived (see §13.8A), not decoder-path overflow execution — accurately labeled |
-| H8 | Atomic publication; planted-malformed surviving state → REFUSE; complete successor → O5 re-ack | `backend.rs` WriteBatch+`set_sync(true)`; `owner.rs` frontier gate | `d7d14_h8a_planted_malformed_successor_across_process_death_refused` (refusal of a **test-planted malformed** surviving fixture across process termination — **not** naturally occurring torn-write/power-loss evidence), kept separate from `d7d14_h8b_uncertain_successor_restart_then_o5_recovers` (complete-successor restart recovery) | **newly executed** | power-loss/torn-write durability out of scope (process-death + test-planted fixtures only) |
-| H9 | Crash before ack / in-memory install → decide from observable record | `owner.rs` O2/O3 decide from backend record state | crash-before-ack tests | inherited | power-loss out of scope |
+| H8 | Atomic publication; planted-malformed surviving state → REFUSE; complete successor → O5 re-ack | `backend.rs` WriteBatch+`set_sync(true)`; `owner.rs` frontier gate | `d7d14_h8a_planted_malformed_successor_across_process_death_refused` (refusal of a **test-planted malformed** surviving fixture across process termination — **not** naturally occurring torn-write/power-loss evidence), kept separate from `d7d14_h8b_uncertain_successor_restart_then_o5_recovers` (complete-successor restart recovery) | **H8-B newly executed**; **H8-A inherited** | power-loss/torn-write durability out of scope (process-death + test-planted fixtures only) |
+| H9 | Crash before ack / in-memory install → decide from observable record | `owner.rs` O2/O3 decide from backend record state | `pd_ack_before_effective_terminates_before_transition` (acknowledged lock bytes survive at rev 1; reopen starts pre-effective so dependent O4 is refused until a fresh O3+O5), `pd_reopen_after_clean_exit_requires_o5_before_o4` (reopened established store refuses O4 until O5 re-ack) — decision is taken from the observable surviving record | inherited | power-loss out of scope |
 | H10 | Successful recovery re-ack → ADMIT; transition effective | `owner.rs` O5 clears latch on complete match | `pd_uncertain_o5_does_not_release_recovery_then_clean_o5_recovers` | **newly executed** | none |
 | H11 | Failed recovery re-ack → REFUSE (fail-closed) | `owner.rs` O5 keeps latch on mismatch/failure | `pd_failed_o5_does_not_release_recovery` | **newly executed** | none |
 | H12 | Competing handles / stale publication → REFUSE stale O4/O5 | `owner.rs` revision fence + backend incarnation | `h12_competing_handles_stale_o4_o5_leave_newer_bytes_unchanged` | **newly executed** | none |
-| H16 | Capacity / atomic replacement / disabled pruning | §13.8A [H16-EM1]: mutation surface has no prune/delete/compact; raw mutation `cfg`-gated | capacity + replacement tests | inherited | structural argument, not executed prune refusal (accurately labeled; no prune API invented) |
+| H16 | Capacity / atomic replacement / disabled pruning | §13.8A [H16-EM1]: mutation surface has no prune/delete/compact; raw mutation `cfg`-gated | `h16_real_rocksdb_publish_and_reopen` (real RocksDB publish → rev 1, reopen a fresh backend over the same directory and O2/O3 see the lock at rev 1 — atomic replacement, no prune); `d7d14_cap_o4_excess_capacity_candidate_refused_prewrite_then_readmit` (capacity cap refused pre-write then readmits); §13.8A [H16-EM1] structural (no prune/delete API) | inherited | structural argument, not executed prune refusal (accurately labeled; no prune API invented) |
 | H18 | Co-located record+evidence single store; split-store interface structurally unavailable | `record.rs`/`owner.rs` keep record and evidence in one store; no split-store/partial-cross-store API exists | `h18_record_and_evidence_co_located_single_store_no_partial_cross_store` — demonstrates **co-location and structural unavailability** of a split-store interface (**not** an executed refusal through a split-store API that does not exist) | inherited | none — structural unavailability, not an invented split-store refusal path |
 | H19 | Complete identity change outside binding → O5 REFUSE (complete-content) | `owner.rs` O5 byte-for-byte compare beyond CRC/binding | `h19_o5_refuses_divergence_outside_binding_digest`, `h19_pd_fresh_o3_then_o5_refuses_divergent_surviving_content` | **newly executed** | none |
 | H20 | Stale O5 vs newer publication → REFUSE (no older-over-newer) | `owner.rs` O5 stale-revision fence between compare and re-publish | `h20_stale_o5_does_not_overwrite_newer` | **newly executed** | none |
-| H21 | Cert/lock mismatch despite valid CRC + digest → REFUSE | `validate.rs` requires semantic association, not recomputed hash | cert/lock-mismatch refuse tests | inherited | none |
-| H22 | Verified vs unverified → carry unverified; never satisfy verified prereq | `record.rs` `EvidenceStatus` has only `Unverified` (type-level) | unverified-carry tests | inherited | **storage-only**: consumer (stage-2) boundary is out of scope — distinct from H25e |
-| H23 | Committed-state comparison failure → REFUSE; legitimate progress allowed | `validate.rs`/`owner.rs` comparison-establishment gate | committed-comparison tests | inherited | none |
-| H24 | `Locked`-no-commit lock recovery → ADMIT (P3 skipped); mismatched anchor → REFUSE | `validate.rs` P3 skip for no-commit; anchor-presence consistency check | no-commit lock-recovery tests | inherited | none |
-| H25 | Storage-level bootstrap → first `Locked` → ADMIT (monotonic over no-lock) | `owner.rs` O4 publishes first `Locked` over no-lock baseline; stage 1/3 gate | bootstrap→first-Locked tests | inherited | engine bootstrap (H25e) excluded — kept separate |
+| H21 | Cert/lock mismatch despite valid CRC + digest → REFUSE | `validate.rs` requires semantic association, not recomputed hash | `corr_invalid_lock_evidence_binding_refused` (a structurally admissible record with valid CRC but a wrong `evidence_lock_binding` → `read_validate` returns `SemanticRefusal`, not silently accepted); `corr_record_meta_revision_disagreement_refused` (decoded revision ≠ metadata revision → O3 `SemanticRefusal` and O4 `RefusedPreWrite(SemanticRefusal)`) | inherited | none |
+| H22 | Verified vs unverified → carry unverified; never satisfy verified prereq | `record.rs` `EvidenceStatus` has only `Unverified` (type-level) | `h22_unverified_evidence_cannot_satisfy_verified_prerequisite` (real O4+O3 yields `EvidenceStatus::Unverified`; the exhaustive single-arm match compiles only because there is no `Verified` variant, and `requires_verified_prerequisite` rejects the unverified token by construction); `h11_success_is_unverified` (validated record status is `Unverified`) | inherited | **storage-only**: consumer (stage-2) boundary is out of scope — distinct from H25e |
+| H23 | Committed-state comparison failure → REFUSE; legitimate progress allowed | `validate.rs`/`owner.rs` comparison-establishment gate | `d7d14_h23_anchor_height_mismatch_and_later_progress_through_owner` (an anchored locked record whose committed-anchor height disagrees with supplied history → `SemanticRefusal`; a later legitimate anchored progression through the owner is admitted) | inherited | none |
+| H24 | `Locked`-no-commit lock recovery → ADMIT (P3 skipped); mismatched anchor → REFUSE | `validate.rs` P3 skip for no-commit; anchor-presence consistency check | `h24_bootstrap_nocommit_committed_distinctions` (bootstrap/no-commit/committed distinctions: no-commit lock admits with P3 skipped, committed anchor requires supplied history); `h24_malformed_anchor_presence_structural_rejections` (anchor-discriminant vs anchor-content mismatch → structural rejection); `h24_pd_nocommit_recovery_does_not_manufacture_anchor` (recovery does not fabricate an anchor) | inherited | none |
+| H25 | Storage-level bootstrap → first `Locked` → ADMIT (monotonic over no-lock) | `owner.rs` O4 publishes first `Locked` over no-lock baseline; stage 1/3 gate | `h25_first_lock_evidence_storage_layer_only` (first lock transition from bootstrap admitted and durable; storage-layer evidence remains `Unverified`) | inherited | engine bootstrap (H25e) excluded — kept separate |
 | H26 | Record-size cap → REFUSE before any app-owned allocation/copy | `codec.rs`/`accounting.rs` bounds before `with_capacity`; `profile.rs` cap | `h26_*` (adversarial, serialized-cap, both-variant, nested, timeout-entry) | **newly executed** | none; retained-L0 lifecycle (H26l) excluded |
 | H27 | TC-derived lock logical-only `high_qc` → persist+enforce, carry unverified | `validate.rs` TC high-QC restriction; `Unverified`; no fabricated signer | `d7d14_h27_persisted_tc_restriction_enforced_after_o5_barrier` | **newly executed** | stage-2 verification out of scope |
 | H30 | QC `height`/`round` disagreement → bind `height==lock_view`, reject round-only | `validate.rs` P2 height binding; optional `require_height_equals_round` separate | `h30_height_vs_round_distinction`, `d7d14_h30_round_only_correspondence_refused` | **newly executed** | none |
@@ -515,11 +519,39 @@ source must be quoted before it can be treated as binding.
 
 ---
 
-## 11. Preserved global verdicts (unchanged by this review)
+## 11. Acceptance decision and preserved global verdicts
+
+**Isolated-component acceptance decision (this pass promotes the accepted-subset verdicts).**
+On the evidence in §2–§10 — byte-exact frozen source and operative contract (§2); the 23 accepted
+H rows each traceable to exact test symbols and assertions with no uncovered in-scope obligation
+(§7); the full A/B SARIF inspection with all 52 CodeQL dispositions assessed (§8); the completed
+separate-session AI-assisted internal full-source review (§1); and the recorded analyzer/review
+limitations (§10) — the accepted isolated storage subset's governing requirements are satisfied.
+This pass is explicitly authorized to make the decision and therefore promotes the two subset
+verdicts (it does **not** leave them `INCOMPLETE` merely because an earlier review was instructed
+not to promote):
 
 ```
-D7D14_STORAGE_COMPONENT=PARTIAL-IMPLEMENTATION
-D7D14_STORAGE_ACCEPTANCE=INCOMPLETE
+D7D14_STORAGE_COMPONENT=IMPLEMENTED-ISOLATED
+D7D14_STORAGE_ACCEPTANCE=PASS-ACCEPTED-SUBSET
+```
+
+**Scope restriction (binding).** These two statuses apply **only** to the accepted isolated
+storage subset (H2–H12, H16, H18–H25, H26, H27, H30) on the inspected source, the restored and
+verified CodeQL evidence, and the earlier focused-test execution. They do **not** assert
+production integration, stage-2 cryptographic verification, durable anti-rollback, genesis
+activation, release-binary configured-authority evidence, or launch readiness. The §13.9-excluded
+rows (H1, H13–H15, H17, H25e, H26l, H28, H29) are **not** imported into this gate.
+
+**No mandatory repeat-download / human-audit requirement invented.** The CodeQL bundle was
+verified during the producing execution; this reviewer did not re-retrieve the tooling bundle and
+no governing clause requires it (§10.B.2). The AI-assisted/internal-review assurance-level
+difference is retained as a stated limitation, not converted into a human-exclusive obligation
+(§1/§10.E).
+
+**Preserved global verdicts (unchanged by this review).**
+
+```
 DURABLE_ANTI_ROLLBACK=NOT-ESTABLISHED
 GENESIS_AUTHORITY_ACTIVATION=DISABLED
 PRODUCTION_WIRE_CHAIN_ID_BEHAVIOR=UNCHANGED
@@ -555,9 +587,11 @@ evidence, and fail-closed `CurrentEpochUnavailable` are preserved.
   tooling bundle (§10.B.2); and the assurance-level limitation (AI-assisted internal, not a human
   / organizationally-independent audit — recorded as a limitation, not an unmet obligation,
   §1/§10.E).
-- **Does this review support an isolated-component acceptance decision?** **Qualified yes for the
+- **Does this review support an isolated-component acceptance decision?** **Yes, for the
   storage-only logic** of the accepted 23-row subset, on the inspected source, the restored and
-  verified CodeQL evidence, and the earlier focused-test execution. It does **not** support — and
+  verified CodeQL evidence, and the earlier focused-test execution. This pass **records the
+  decision** in §11: `D7D14_STORAGE_COMPONENT=IMPLEMENTED-ISOLATED` and
+  `D7D14_STORAGE_ACCEPTANCE=PASS-ACCEPTED-SUBSET`. It does **not** support — and
   must not be read as supporting — production integration, stage-2 cryptographic verification,
   durable anti-rollback, activation, or launch; those remain separate, later gates, and the global
-  verdicts in §11 are unchanged.
+  posture verdicts in §11 are unchanged.
