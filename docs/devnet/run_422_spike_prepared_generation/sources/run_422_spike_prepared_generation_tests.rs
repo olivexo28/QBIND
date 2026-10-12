@@ -4,8 +4,23 @@
 //! experiment built on the accepted `safety_record_store` component. They use
 //! **real RocksDB-backed storage** and the maximum complete QC/TC fixtures at
 //! N=1 and N=4, assert fixture dimensions/capacities before measuring, and
-//! measure owned capacities + inline objects **independently** of reservation
-//! counters.
+//! measure the ACTUAL live objects (the `Arc<GenerationBacking>` allocation, the
+//! `Mutex<PreparedRegistry>` cell, and each `PreparedPin`) against their covering
+//! reservations — never a synthetic wrapper or a bare counter.
+//!
+//! §1 ACTUAL-OBJECT ACCOUNTING: the prepared generation is retained as a private
+//! `GenerationBacking` allocation, NOT the synthetic `RetainedGeneration`. Its live
+//! footprint (`size_of::<GenerationBacking>()` inline + owned evidence backings +
+//! `Arc` overhead) is covered by TWO reservations — the generation-core charge and
+//! the holder/control charge — whose sum equals the full allocation exactly. The
+//! registry cell and each owning pin carry their own charges. Measurement failure
+//! is explicit (no silent `unwrap_or(0)` substitution).
+//!
+//! §2 SHARING-PATH LIFETIME: a shared capture destroys the duplicate proof's
+//! separately owned evidence backings BEFORE releasing the reservation that
+//! covered them, so no live byte is ever uncharged across the conversion. A
+//! discriminating regression distinguishes this correct ordering from the
+//! premature-release defect.
 //!
 //! Non-authorizing: capture establishes no engine decision timing, verification,
 //! freshness, or activation. Activation stays DISABLED; public DevNet is NO-GO.
@@ -14,18 +29,28 @@ use qbind_consensus::ids::ValidatorId;
 use qbind_consensus::qc::QuorumCertificate as LogicalQc;
 use qbind_consensus::timeout::{TimeoutCertificate, TimeoutMsg};
 use qbind_node::pqc_trust_bundle::TrustBundleEnvironment;
-use qbind_node::safety_record_store::accounting::prepared_generation_charge;
+use qbind_node::safety_record_store::accounting::{
+    prepared_generation_charge, prepared_holder_control_charge,
+};
 use qbind_node::safety_record_store::backend::{InjectFault, SafetyBackend, SafetyBackendPolicy};
 use qbind_node::safety_record_store::codec::encode_record;
-use qbind_node::safety_record_store::owner::{make_locked_qc, PublishResult, SafetyRecordOwner};
-use qbind_node::safety_record_store::prepared::{
-    prepared_entry_charge_bytes, size_of_generation_backing, size_of_prepared_entry,
-    size_of_prepared_handle, size_of_prepared_registry, CaptureRefusal, ReleaseOutcome,
+use qbind_node::safety_record_store::error::{CapacityRefusalDetail, SafetyStoreError};
+use qbind_node::safety_record_store::owner::{
+    make_locked_qc, set_shared_release_order, shared_dup_live_at_release, PublishResult,
+    SafetyRecordOwner, SharedReleaseOrder,
 };
-use qbind_node::safety_record_store::profile::{max_retained_generation_bytes, PinnedSafetyContext};
+use qbind_node::safety_record_store::prepared::{
+    generation_backing_struct_size_bytes, pin_charge_bytes, registry_cell_charge_bytes,
+    size_of_generation_backing, size_of_prepared_entry, size_of_prepared_handle,
+    size_of_prepared_pin, size_of_prepared_registry, size_of_prepared_registry_cell,
+    CaptureRefusal, ReleaseOutcome,
+};
+use qbind_node::safety_record_store::profile::{
+    max_retained_generation_bytes, PinnedSafetyContext, ARC_CTRL,
+};
 use qbind_node::safety_record_store::record::{
-    size_of_timeout_msg, DecodedRecord, EvidenceStatus, LockedRecord, SafetyRecord,
-    SupportingEvidence, WireQc,
+    size_of_retained_record, size_of_timeout_msg, DecodedRecord, EvidenceStatus, LockedRecord,
+    SafetyRecord, SupportingEvidence, WireQc,
 };
 use qbind_node::safety_record_store::validate::{validate_decoded, FixtureCommittedHistory};
 
@@ -84,8 +109,9 @@ fn valid_wire_qc(ctx: &PinnedSafetyContext, block_id: [u8; 32], view: u64) -> Wi
 }
 
 /// The maximum complete TC-derived record for `ctx` (every decoded row present:
-/// record-level + nested high-QC signers, N signed timeouts with signatures and
-/// nested high-QCs) — the heaviest generation the per-class ceiling admits.
+/// record-level + nested high-QC signers, N signed timeouts with maximum-length
+/// signatures and nested high-QCs) — the heaviest generation the per-class
+/// ceiling admits.
 fn valid_tc_record(ctx: &PinnedSafetyContext, lock_view: u64, timeout_view: u64) -> LockedRecord {
     let need = ((2 * ctx.n()) + 2) / 3;
     let high = LogicalQc::new(
@@ -147,7 +173,13 @@ fn init_owner(dir: &std::path::Path, ctx: &PinnedSafetyContext) -> SafetyRecordO
 }
 
 /// Publish one QC-derived restriction and return (owner, new_revision).
-fn publish_qc(owner: &SafetyRecordOwner, ctx: &PinnedSafetyContext, block: [u8; 32], view: u64, expected: u64) -> u64 {
+fn publish_qc(
+    owner: &SafetyRecordOwner,
+    ctx: &PinnedSafetyContext,
+    block: [u8; 32],
+    view: u64,
+    expected: u64,
+) -> u64 {
     let qc = valid_wire_qc(ctx, block, view);
     let l = make_locked_qc(ctx, block, view, qc, None).unwrap();
     match owner.publish_locked(l, expected, None::<&FixtureCommittedHistory>) {
@@ -156,18 +188,170 @@ fn publish_qc(owner: &SafetyRecordOwner, ctx: &PinnedSafetyContext, block: [u8; 
     }
 }
 
+/// The operational partition's current charged total (holds the prepared
+/// reservations: generation-core, holder/control, registry-cell, and pins).
 fn op_current(owner: &SafetyRecordOwner) -> u128 {
     owner.backend_for_test().accounting_current()
 }
 
+/// The full aggregate (operational + context partitions) current charge.
+fn agg_current(owner: &SafetyRecordOwner) -> u128 {
+    owner.backend_for_test().accounting_aggregate_current()
+}
+
+// ---- corrected, actual-object charge constants (derived at runtime) ---------
+
+/// The holder/control charge = `size_of::<GenerationBacking>() -
+/// size_of::<RetainedRecord>()`, covering the wrapper's provenance, inline
+/// reservation, and padding beyond the generation core.
+fn control_charge() -> u128 {
+    prepared_holder_control_charge(generation_backing_struct_size_bytes()).unwrap()
+}
+
+/// The registry-storage charge (the whole `Mutex<PreparedRegistry>` cell + Arc),
+/// charged once while the registry is occupied.
+fn registry_cell() -> u128 {
+    registry_cell_charge_bytes()
+}
+
+/// The owning-pin charge (`size_of::<PreparedPin>()`), charged per live pin.
+fn pin_bytes() -> u128 {
+    pin_charge_bytes()
+}
+
 // ===========================================================================
-// 1. Fixture dimensions + generation-only charge is strictly smaller than the
-//    full-proof holder charge (the whole point of generation-only retention).
+// §1. ACTUAL-OBJECT ACCOUNTING — the discriminating reproduction.
+//
+// The live generation is an `Arc<GenerationBacking>`, NOT the synthetic
+// `RetainedGeneration`. Its complete allocation (inline wrapper + owned evidence
+// backings + Arc overhead) is covered EXACTLY by generation-core + holder/control.
+// The OLD core-only coverage (what `prepared_generation_charge` reserved alone)
+// falls short by exactly the holder/control charge — the reproduced discrepancy.
+// ===========================================================================
+
+fn actual_object_accounting(n: u64) {
+    let ctx = ctx_n(n);
+    // Explicit dimension assertions BEFORE measurement.
+    assert_eq!(ctx.n() as u64, n, "fixture N");
+    assert_eq!(ctx.s_sig, S_SIG, "fixture S_sig");
+
+    let dir = tempfile::tempdir().unwrap();
+    let owner = init_owner(dir.path(), &ctx);
+    // Maximum complete TC-derived generation (the heaviest the ceiling admits).
+    let ltc = valid_tc_record(&ctx, 5, 4);
+    assert!(
+        matches!(&ltc.evidence, SupportingEvidence::TcDerived { tc, .. }
+            if tc.signed_timeouts.len() as u64 == ((2 * n) + 2) / 3
+                && tc.signed_timeouts.iter().all(|t| t.signature.len() == S_SIG)),
+        "TC fixture carries N signed timeouts with maximum-length signatures"
+    );
+    match owner.publish_locked(ltc, 0, None::<&FixtureCommittedHistory>) {
+        PublishResult::DurableAcknowledged { new_revision: 1 } => {}
+        other => panic!("TC publish: {other:?}"),
+    }
+
+    let proof = owner
+        .read_validate(None::<&FixtureCommittedHistory>)
+        .expect("O3 read-validate");
+    // Capacity assertion BEFORE measurement: the retained generation owns a
+    // non-empty evidence backing (measured independently of any counter).
+    let owned_backings = proof
+        .retained_evidence_capacity()
+        .expect("retained evidence capacity measurement must be explicit");
+    assert!(owned_backings > 0, "retained generation owns live evidence backings");
+
+    // The covering reservations.
+    let core = prepared_generation_charge(&ctx, proof.retained()).unwrap();
+    let control = control_charge();
+    let gen_ceiling = max_retained_generation_bytes(&ctx, size_of_timeout_msg()).unwrap();
+
+    // The ACTUAL live `Arc<GenerationBacking>` allocation:
+    //   inline wrapper  +  owned evidence backings  +  Arc overhead.
+    let backing_inline = size_of_generation_backing() as u128;
+    let arc_overhead = ARC_CTRL;
+    let actual_allocation = backing_inline + owned_backings as u128 + arc_overhead;
+
+    // (a) generation-core stays within the unchanged retained ceiling.
+    assert!(core <= gen_ceiling, "generation-core within the retained ceiling (no ceiling increase)");
+
+    // (b) THE DISCREPANCY: the OLD core-only coverage is strictly LESS than the
+    //     actual allocation, short by EXACTLY the holder/control charge.
+    assert!(
+        core < actual_allocation,
+        "core-only ({core}) under-covers the actual GenerationBacking allocation ({actual_allocation})"
+    );
+    assert_eq!(
+        actual_allocation - core,
+        control,
+        "the uncovered remainder is exactly the holder/control charge"
+    );
+
+    // (c) THE CORRECTION: generation-core + holder/control cover every live byte
+    //     of the allocation exactly (inline + backings + Arc).
+    assert_eq!(
+        core + control,
+        actual_allocation,
+        "core + control covers the whole Arc<GenerationBacking> allocation exactly"
+    );
+
+    // (d) the inline split is exact by construction: core's inline part is the
+    //     embedded RetainedRecord; control is the rest of the wrapper.
+    assert_eq!(
+        control,
+        backing_inline - size_of_retained_record(),
+        "control = size_of(GenerationBacking) - size_of(RetainedRecord)"
+    );
+
+    // Capture and confirm the LIVE reservations equal the decomposition (plus the
+    // registry cell charged once and the owning pin).
+    let pin1 = owner.capture_prepared_decision(proof, 1).expect("capture");
+    assert_eq!(
+        op_current(&owner),
+        core + control + registry_cell() + pin_bytes(),
+        "live reservations = core + control + registry-cell + pin"
+    );
+    {
+        let reg = owner.backend_for_test().prepared_registry_for_test();
+        let g = reg.lock().unwrap();
+        let v = g.inspect(pin1.handle()).expect("entry live");
+        assert_eq!(v.generation_core_charge, core, "inspected core charge");
+        assert_eq!(v.generation_control_charge, control, "inspected control charge");
+        assert_eq!(v.evidence_backing_capacity, owned_backings, "inspected owned backings");
+        assert_eq!(v.backing_shares, 1);
+    }
+    println!(
+        "[§1 N={n}] backing_inline={backing_inline} owned_backings={owned_backings} arc={arc_overhead} \
+         actual_allocation={actual_allocation} core={core} control={control} \
+         registry_cell={} pin={} sizeof(registry={},registry_cell={},entry={},backing={},pin={},handle={})",
+        registry_cell(),
+        pin_bytes(),
+        size_of_prepared_registry(),
+        size_of_prepared_registry_cell(),
+        size_of_prepared_entry(),
+        size_of_generation_backing(),
+        size_of_prepared_pin(),
+        size_of_prepared_handle(),
+    );
+    assert_eq!(pin1.release(), ReleaseOutcome::Released);
+    assert_eq!(op_current(&owner), 0, "all prepared reservations released to baseline");
+}
+
+#[test]
+fn spike_actual_object_accounting_n1() {
+    actual_object_accounting(1);
+}
+#[test]
+fn spike_actual_object_accounting_n4() {
+    actual_object_accounting(4);
+}
+
+// ===========================================================================
+// §1. Generation-only charge is strictly smaller than the full-proof holder it
+//     replaces, and within the retained ceiling (QC fixtures, N=1 and N=4).
 // ===========================================================================
 
 fn dimensions_and_charges(n: u64) {
     let ctx = ctx_n(n);
-    // Assert fixture dimensions BEFORE measurement.
     assert_eq!(ctx.n() as u64, n, "fixture N");
     assert_eq!(ctx.s_sig, S_SIG, "fixture S_sig");
 
@@ -178,37 +362,26 @@ fn dimensions_and_charges(n: u64) {
     let proof = owner
         .read_validate(None::<&FixtureCommittedHistory>)
         .expect("O3 read-validate");
-    // The retained generation owns a non-empty evidence backing (capacity),
-    // measured independently of any reservation counter.
     assert!(
-        proof.retained_evidence_capacity() > 0,
+        proof.retained_evidence_capacity().expect("explicit capacity") > 0,
         "retained generation must own a live evidence backing"
     );
     assert!(proof.encoded_capacity() > 0, "proof still owns its original encoded buffer pre-capture");
 
-    let gen_charge = prepared_generation_charge(&ctx, proof.retained()).unwrap();
+    let core = prepared_generation_charge(&ctx, proof.retained()).unwrap();
     let gen_ceiling = max_retained_generation_bytes(&ctx, size_of_timeout_msg()).unwrap();
-    assert!(gen_charge <= gen_ceiling, "gen-only charge within the retained ceiling (no increase)");
-    assert_eq!(prepared_entry_charge_bytes(), 48, "per-entry = identity 40 + arc_handle 8");
+    assert!(core <= gen_ceiling, "gen-only core within the retained ceiling (no increase)");
 
-    // The holder charge the full proof reserves (encoded + generation + handle)
-    // is strictly larger than the generation-only charge: generation-only
-    // retention does NOT reuse the full-proof holder charge.
+    // The full-proof holder charge the proof reserves is strictly larger than the
+    // generation-only core+control: generation-only retention does NOT reuse it.
     let holder_live = op_current(&owner); // proof holder live
     assert!(
-        holder_live > gen_charge + prepared_entry_charge_bytes(),
-        "full-proof holder ({holder_live}) must exceed gen-only charge ({}+48)",
-        gen_charge
+        holder_live > core + control_charge(),
+        "full-proof holder ({holder_live}) must exceed gen-only core+control ({}+{})",
+        core,
+        control_charge()
     );
-
-    println!(
-        "[dims N={n}] gen_charge={gen_charge} gen_ceiling={gen_ceiling} full_holder={holder_live} \
-         sizeof(registry={},entry={},backing={},handle={})",
-        size_of_prepared_registry(),
-        size_of_prepared_entry(),
-        size_of_generation_backing(),
-        size_of_prepared_handle(),
-    );
+    println!("[dims N={n}] core={core} control={} gen_ceiling={gen_ceiling} full_holder={holder_live}", control_charge());
 }
 
 #[test]
@@ -221,8 +394,9 @@ fn spike_dimensions_and_charges_n4() {
 }
 
 // ===========================================================================
-// 2. Shared generation: two entries, ONE generation charge; first drop retains
-//    it, final drop releases it.
+// §1/§2. Shared generation: two entries, ONE generation backing (one core + one
+// control). First drop retains the generation; final drop releases it. Each live
+// pin carries its own pin charge; the registry cell is charged once.
 // ===========================================================================
 
 fn shared_generation(n: u64) {
@@ -235,27 +409,38 @@ fn shared_generation(n: u64) {
     assert_eq!(baseline, 0, "no live operational holders at baseline");
 
     let proof1 = owner.read_validate(None::<&FixtureCommittedHistory>).unwrap();
-    let gen = prepared_generation_charge(&ctx, proof1.retained()).unwrap();
-    let entry = prepared_entry_charge_bytes();
+    let core = prepared_generation_charge(&ctx, proof1.retained()).unwrap();
+    let control = control_charge();
 
     let pin1 = owner
         .capture_prepared_decision(proof1, 1)
         .expect("capture 1");
-    assert_eq!(op_current(&owner), gen + entry, "one gen + one entry live; full holder released");
+    assert_eq!(
+        op_current(&owner),
+        core + control + registry_cell() + pin_bytes(),
+        "one generation (core+control) + registry-cell + one pin"
+    );
 
-    // Second, EQUAL proof shares the one generation backing.
+    // Second, EQUAL proof shares the one generation backing (default = corrected
+    // ordering).
     let proof2 = owner.read_validate(None::<&FixtureCommittedHistory>).unwrap();
     let pin2 = owner
         .capture_prepared_decision(proof2, 1)
         .expect("capture 2 (shared)");
     assert_eq!(
         op_current(&owner),
-        gen + entry + entry,
-        "ONE generation charge for two entries (+ two per-entry charges)"
+        core + control + registry_cell() + 2 * pin_bytes(),
+        "ONE generation charge for two entries (+ a second pin only)"
+    );
+    // The corrected sharing lifetime destroyed the duplicate's evidence before
+    // releasing its covering reservation: nothing was live-but-uncharged.
+    assert_eq!(
+        shared_dup_live_at_release(),
+        Some(0),
+        "corrected ordering: duplicate evidence destroyed before its reservation released"
     );
 
-    // Measure object coverage independently of counters: both entries share the
-    // one backing (strong_count 2) and carry the same generation charge.
+    // Object coverage independent of counters: both entries share one backing.
     let reg = owner.backend_for_test().prepared_registry_for_test();
     {
         let g = reg.lock().unwrap();
@@ -263,22 +448,26 @@ fn shared_generation(n: u64) {
         let v2 = g.inspect(pin2.handle()).expect("entry 2 live");
         assert_eq!(v1.backing_shares, 2, "generation backing shared by both entries");
         assert_eq!(v2.backing_shares, 2);
-        assert_eq!(v1.generation_charge, gen);
-        assert_eq!(v2.generation_charge, gen);
-        assert_eq!(v1.entry_charge, entry);
+        assert_eq!(v1.generation_core_charge, core);
+        assert_eq!(v1.generation_control_charge, control);
+        assert_eq!(v2.generation_core_charge, core);
         assert!(v1.evidence_backing_capacity > 0);
         assert!(matches!(v1.evidence_status, EvidenceStatus::Unverified));
     }
 
     // First drop RETAINS the generation (second entry still shares it).
     assert_eq!(pin1.release(), ReleaseOutcome::Released);
-    assert_eq!(op_current(&owner), gen + entry, "generation retained after first drop");
+    assert_eq!(
+        op_current(&owner),
+        core + control + registry_cell() + pin_bytes(),
+        "generation retained after first drop (one pin released)"
+    );
 
-    // Final drop RELEASES the generation.
+    // Final drop RELEASES the generation, the registry cell, and the last pin.
     assert_eq!(pin2.release(), ReleaseOutcome::Released);
     assert_eq!(op_current(&owner), 0, "generation released after final drop");
 
-    println!("[shared N={n}] gen={gen} entry={entry} two_entries_current={}", gen + 2 * entry);
+    println!("[shared N={n}] core={core} control={control}");
 }
 
 #[test]
@@ -291,75 +480,266 @@ fn spike_shared_generation_n4() {
 }
 
 // ===========================================================================
-// 3. Distinct generations across replacement + coexistence during O4; and a
-//    full registry refuses a third capture WITHOUT eviction.
+// §2. SHARING-PATH LIFETIME REGRESSION (discriminating). The duplicate proof's
+// separately owned evidence backings MUST be destroyed before releasing the
+// reservation that covered them. The premature ordering leaves those bytes live
+// while their covering reservation is already gone (an uncharged interval); the
+// corrected ordering leaves zero. Covers fresh, shared, refusal, explicit
+// release, and automatic Drop. Sensitivity mutations are restored before return.
+// ===========================================================================
+
+fn sharing_lifetime_regression(n: u64) {
+    let ctx = ctx_n(n);
+    let dir = tempfile::tempdir().unwrap();
+    let owner = init_owner(dir.path(), &ctx);
+    publish_qc(&owner, &ctx, [9u8; 32], 5, 0);
+
+    // FRESH conversion establishes the shared backing (slot 1). A fresh capture is
+    // NOT a shared conversion, so it records no shared-release observation. The
+    // registry admits MAX_OUTSTANDING_PREPARED_L0 = 2 entries, so each subsequent
+    // shared capture is released before the next.
+    let p1 = owner.read_validate(None::<&FixtureCommittedHistory>).unwrap();
+    let dup_bytes = p1.retained_evidence_capacity().expect("explicit capacity");
+    assert!(dup_bytes > 0, "the duplicate will own non-empty evidence backings");
+    let pin1 = owner.capture_prepared_decision(p1, 1).expect("fresh capture");
+
+    // (1) CORRECTED ordering (default): the duplicate's evidence is destroyed
+    //     BEFORE its covering reservation is released — zero live-at-release.
+    let pc = owner.read_validate(None::<&FixtureCommittedHistory>).unwrap();
+    let pin_c = owner.capture_prepared_decision(pc, 1).expect("shared capture (corrected)");
+    assert_eq!(
+        shared_dup_live_at_release(),
+        Some(0),
+        "CORRECTED: no duplicate evidence live when its reservation is released"
+    );
+    assert_eq!(pin_c.release(), ReleaseOutcome::Released); // EXPLICIT release
+
+    // (2) PREMATURE ordering (armed defect reproduction): the covering reservation
+    //     is released while the duplicate's evidence is still alive — a nonzero
+    //     uncharged interval equal to the duplicate's owned backings. This is the
+    //     discriminating regression: it FAILS (nonzero) under the premature ordering
+    //     and PASSES (zero) under the correction.
+    set_shared_release_order(SharedReleaseOrder::HolderBeforeRetained);
+    let pp = owner.read_validate(None::<&FixtureCommittedHistory>).unwrap();
+    let pin_p = owner.capture_prepared_decision(pp, 1).expect("shared capture (premature)");
+    assert_eq!(
+        shared_dup_live_at_release(),
+        Some(dup_bytes),
+        "PREMATURE: the duplicate's evidence bytes are live-but-uncharged at release"
+    );
+    assert_eq!(pin_p.release(), ReleaseOutcome::Released);
+
+    // (3) The seam is one-shot; the next shared capture is back to the correction.
+    let pr = owner.read_validate(None::<&FixtureCommittedHistory>).unwrap();
+    let pin_r = owner.capture_prepared_decision(pr, 1).expect("shared capture (reset)");
+    assert_eq!(
+        shared_dup_live_at_release(),
+        Some(0),
+        "seam auto-reset to the corrected ordering after one shared capture"
+    );
+    drop(pin_r); // AUTOMATIC Drop cleanup of a shared entry
+
+    // AUTOMATIC Drop of the fresh backing holder returns to baseline.
+    drop(pin1);
+    assert_eq!(op_current(&owner), 0, "all pins released/dropped to baseline");
+
+    // REFUSAL path shares nothing: a fresh proof read at the authoritative revision
+    // but presented with a MISMATCHED expected revision is fenced out (StaleRevision)
+    // before any conversion. On refusal the proof is returned and dropped; no entry
+    // is created or shared, and the registry stays empty.
+    let fresh = owner.read_validate(None::<&FixtureCommittedHistory>).unwrap();
+    match owner.capture_prepared_decision(fresh, 999) {
+        Err((_p, CaptureRefusal::StaleRevision { expected, found })) => {
+            assert_eq!(expected, 999);
+            assert_eq!(found, 1);
+        }
+        other => panic!("expected StaleRevision on refusal, got {other:?}"),
+    }
+    assert_eq!(op_current(&owner), 0, "refusal shares nothing; registry stays empty");
+    assert_eq!(
+        owner.backend_for_test().prepared_registry_for_test().lock().unwrap().occupied(),
+        0,
+        "no entry created on refusal"
+    );
+
+    // Restore sensitivity mutation explicitly (belt-and-braces).
+    set_shared_release_order(SharedReleaseOrder::RetainedBeforeHolder);
+    println!("[§2 lifetime N={n}] dup_bytes={dup_bytes} corrected=0 premature={dup_bytes}");
+}
+
+#[test]
+fn spike_sharing_lifetime_regression_n1() {
+    sharing_lifetime_regression(1);
+}
+#[test]
+fn spike_sharing_lifetime_regression_n4() {
+    sharing_lifetime_regression(4);
+}
+
+// ===========================================================================
+// §3. Distinct generations coexisting through O4 while TWO prepared generations
+// remain pinned; the complete accounting (context ownership + both generations +
+// registry cell + pins + the O4 publication reservation) is measured against the
+// UNCHANGED aggregate ceiling. A full registry refuses a third capture WITHOUT
+// eviction. Reports honest success (coexistence fits) or the exact shortfall.
 // ===========================================================================
 
 fn distinct_generations_and_full(n: u64) {
     let ctx = ctx_n(n);
     let dir = tempfile::tempdir().unwrap();
     let owner = init_owner(dir.path(), &ctx);
+    let cap = owner.backend_for_test().accounting_aggregate_cap().unwrap();
 
-    // rev 1: lock A (QC). Capture entry 1.
+    // Context ownership is a standing partition charge present before any capture.
+    let context_ownership = agg_current(&owner);
+    assert!(context_ownership > 0, "context ownership partition is charged standing");
+
+    // rev 1: lock A (QC). Capture entry 1 (DISTINCT generation A).
     publish_qc(&owner, &ctx, [0x11u8; 32], 5, 0);
     let pa = owner.read_validate(None::<&FixtureCommittedHistory>).unwrap();
     let ga = prepared_generation_charge(&ctx, pa.retained()).unwrap();
+    assert!(ga <= max_retained_generation_bytes(&ctx, size_of_timeout_msg()).unwrap());
     let pin1 = owner.capture_prepared_decision(pa, 1).expect("capture A");
-    let entry = prepared_entry_charge_bytes();
-    assert_eq!(op_current(&owner), ga + entry);
+    let control = control_charge();
+    assert_eq!(op_current(&owner), ga + control + registry_cell() + pin_bytes());
+    let agg_one_pinned = agg_current(&owner);
+    assert_eq!(agg_one_pinned, context_ownership + ga + control + registry_cell() + pin_bytes());
 
-    // O4 publishes rev 2 (a distinct lock B) WHILE entry 1 is pinned —
-    // contemporaneous live objects + reservations during O4. Report success.
-    let rev2 = publish_qc(&owner, &ctx, [0x22u8; 32], 9, 1);
-    assert_eq!(rev2, 2, "O4 succeeds while a prepared entry is pinned (coexistence)");
+    // Assembling a SECOND distinct generation requires an O4 publication (a new
+    // authoritative lock B) WHILE entry 1 is pinned — the capture reservations and
+    // the O4 publication reservation must overlap (conversion overlap). Measure the
+    // ACTUAL outcome honestly against the UNCHANGED aggregate ceiling; do NOT raise
+    // limits or redefine exclusions to force a pass.
+    let lock_b = make_locked_qc(&ctx, [0x22u8; 32], 9, valid_wire_qc(&ctx, [0x22u8; 32], 9), None).unwrap();
+    match owner.publish_locked(lock_b, 1, None::<&FixtureCommittedHistory>) {
+        // --- SUCCESS: the two distinct generations can coexist through O4 ---------
+        PublishResult::DurableAcknowledged { new_revision: 2 } => {
+            let pb = owner.read_validate(None::<&FixtureCommittedHistory>).unwrap();
+            let gb = prepared_generation_charge(&ctx, pb.retained()).unwrap();
+            let pin2 = owner.capture_prepared_decision(pb, 2).expect("capture B");
 
-    // rev 2: capture entry 2 — a DISTINCT generation (different lock identity).
-    let pb = owner.read_validate(None::<&FixtureCommittedHistory>).unwrap();
-    let gb = prepared_generation_charge(&ctx, pb.retained()).unwrap();
-    let pin2 = owner.capture_prepared_decision(pb, 2).expect("capture B");
+            // Two DISTINCT generations (NOT shared): two cores + two controls + one
+            // registry cell + two pins.
+            let coexist = ga + gb + 2 * control + registry_cell() + 2 * pin_bytes();
+            assert_eq!(op_current(&owner), coexist, "two distinct generations' combined live objects");
+            {
+                let reg = owner.backend_for_test().prepared_registry_for_test();
+                let g = reg.lock().unwrap();
+                assert_eq!(g.inspect(pin1.handle()).unwrap().backing_shares, 1, "distinct backing A");
+                assert_eq!(g.inspect(pin2.handle()).unwrap().backing_shares, 1, "distinct backing B");
+                assert_eq!(g.occupied(), 2);
+                assert!(g.is_full(), "both slots occupied");
+            }
+            let aggregate_with_two = agg_current(&owner);
+            assert_eq!(
+                aggregate_with_two,
+                context_ownership + coexist,
+                "aggregate = context ownership + the two pinned generations' objects"
+            );
+            assert!(
+                aggregate_with_two <= cap,
+                "COEXISTENCE FITS: aggregate {aggregate_with_two} <= ceiling {cap}"
+            );
 
-    // Two DISTINCT generation charges coexist (NOT shared): current carries both
-    // gen charges, not one. If they had shared, current would be ga + 2*entry.
-    assert_eq!(
-        op_current(&owner),
-        ga + gb + 2 * entry,
-        "two distinct generations coexist (combined live objects)"
-    );
-    let cap = owner.backend_for_test().accounting_aggregate_cap().unwrap();
-    assert!(op_current(&owner) <= cap, "coexistence fits the unchanged aggregate ceiling");
-    {
-        let reg = owner.backend_for_test().prepared_registry_for_test();
-        let g = reg.lock().unwrap();
-        assert_eq!(g.inspect(pin1.handle()).unwrap().backing_shares, 1, "distinct backing A");
-        assert_eq!(g.inspect(pin2.handle()).unwrap().backing_shares, 1, "distinct backing B");
-        assert_eq!(g.occupied(), 2);
-        assert!(g.is_full(), "both slots occupied");
-    }
+            // Measure THROUGH O4 (a further authoritative publication) WHILE BOTH
+            // distinct generations remain pinned. This overlaps the two live
+            // generations' reservations with an O4 publication reservation. Honour
+            // the UNCHANGED ceiling: report the ACTUAL outcome, do not raise limits.
+            let lock_c = make_locked_qc(&ctx, [0x33u8; 32], 13, valid_wire_qc(&ctx, [0x33u8; 32], 13), None).unwrap();
+            match owner.publish_locked(lock_c, 2, None::<&FixtureCommittedHistory>) {
+                PublishResult::DurableAcknowledged { new_revision: 3 } => {
+                    assert_eq!(op_current(&owner), coexist, "O4 reservation released; two generations intact");
 
-    // rev 3 published, then a THIRD capture is refused WITHOUT eviction; the
-    // returned proof is intact.
-    let rev3 = publish_qc(&owner, &ctx, [0x33u8; 32], 13, 2);
-    assert_eq!(rev3, 3);
-    let pc = owner.read_validate(None::<&FixtureCommittedHistory>).unwrap();
-    let pc_rev = pc.publication_revision();
-    let pc_enc_cap = pc.encoded_capacity();
-    match owner.capture_prepared_decision(pc, 3) {
-        Err((returned, CaptureRefusal::RegistryFull)) => {
-            assert_eq!(returned.publication_revision(), pc_rev, "refused proof revision intact");
-            assert_eq!(returned.encoded_capacity(), pc_enc_cap, "refused proof original bytes intact");
-            assert!(returned.recovery_backend_incarnation().is_some(), "refused proof O5 capability intact");
+                    // A THIRD capture is refused WITHOUT eviction; returned proof intact.
+                    let pc = owner.read_validate(None::<&FixtureCommittedHistory>).unwrap();
+                    let pc_rev = pc.publication_revision();
+                    let pc_enc_cap = pc.encoded_capacity();
+                    match owner.capture_prepared_decision(pc, 3) {
+                        Err((returned, CaptureRefusal::RegistryFull)) => {
+                            assert_eq!(returned.publication_revision(), pc_rev, "refused proof revision intact");
+                            assert_eq!(returned.encoded_capacity(), pc_enc_cap, "refused proof original bytes intact");
+                            assert!(returned.recovery_backend_incarnation().is_some(), "refused proof O5 capability intact");
+                        }
+                        other => panic!("expected RegistryFull, got {other:?}"),
+                    }
+                    assert_eq!(
+                        owner.backend_for_test().prepared_registry_for_test().lock().unwrap().occupied(),
+                        2,
+                        "no eviction on refusal"
+                    );
+                    println!(
+                        "[§3 distinct N={n}] RESULT=COEXIST_THROUGH_O4 context_ownership={context_ownership} ga={ga}                  gb={gb} coexist={coexist} aggregate={aggregate_with_two} cap={cap} headroom={}",
+                        cap - aggregate_with_two
+                    );
+                }
+                PublishResult::RefusedPreWrite(SafetyStoreError::CapacityRefusal(
+                    CapacityRefusalDetail::AdmissionOverflow { next, cap: ov_cap, .. },
+                )) => {
+                    // Honest, conservative refusal: the two distinct generations COEXIST
+                    // while pinned (aggregate_with_two <= cap, asserted above), but an O4
+                    // publication THROUGH both of them overlaps past the UNCHANGED ceiling.
+                    assert_eq!(ov_cap, cap, "refusal is against the unchanged aggregate ceiling");
+                    let shortfall = next - cap;
+                    assert!(shortfall > 0, "a positive shortfall is reported");
+                    // The refusal mutated nothing: both generations still pinned, registry full.
+                    assert_eq!(op_current(&owner), coexist, "no charge leaked by the refused O4");
+                    assert_eq!(
+                        owner.backend_for_test().prepared_registry_for_test().lock().unwrap().occupied(),
+                        2,
+                        "both generations stay pinned; the refused O4 mutated nothing"
+                    );
+                    println!(
+                        "[§3 distinct N={n}] RESULT=COEXIST_REFUSE_O4 context_ownership={context_ownership} ga={ga}                  gb={gb} coexist={coexist} aggregate={aggregate_with_two} cap={cap} o4_next={next} shortfall={shortfall}                  (two generations coexist while pinned, but an O4 through both exceeds the unchanged ceiling)"
+                    );
+                }
+                other => panic!("unexpected O4-through-two-pinned outcome: {other:?}"),
+            }
+
+            // Cleanup/readmission: release both, return to the standing baseline.
+            assert_eq!(owner.release_prepared(pin1), ReleaseOutcome::Released);
+            assert_eq!(owner.release_prepared(pin2), ReleaseOutcome::Released);
+            assert_eq!(op_current(&owner), 0, "both released to operational baseline");
+            assert_eq!(agg_current(&owner), context_ownership, "aggregate back to context ownership only");
         }
-        other => panic!("expected RegistryFull, got {other:?}"),
-    }
-    {
-        // No eviction: the two prior entries are still present.
-        let reg = owner.backend_for_test().prepared_registry_for_test();
-        assert_eq!(reg.lock().unwrap().occupied(), 2, "no eviction on refusal");
-    }
+        // --- CONSERVATIVE REFUSAL: complete accounting prevents coexistence -------
+        PublishResult::RefusedPreWrite(SafetyStoreError::CapacityRefusal(
+            CapacityRefusalDetail::AdmissionOverflow { next, cap: ov_cap, .. },
+        )) => {
+            // Honest, conservative refusal: assembling a second distinct generation
+            // (a fresh O4 publication) while the first is pinned would push the
+            // aggregate past the UNCHANGED ceiling. Report the EXACT shortfall and
+            // demonstrate cleanup + readmission instead of raising any limit.
+            assert_eq!(ov_cap, cap, "refusal is against the unchanged aggregate ceiling");
+            let shortfall = next - cap;
+            assert!(shortfall > 0, "a positive shortfall is reported");
+            // The registry is unchanged; the first generation is still pinned/intact.
+            assert_eq!(
+                owner.backend_for_test().prepared_registry_for_test().lock().unwrap().occupied(),
+                1,
+                "the first generation stays pinned; the refusal mutated nothing"
+            );
+            assert_eq!(agg_current(&owner), agg_one_pinned, "no charge leaked by the refused O4");
 
-    println!("[distinct N={n}] ga={ga} gb={gb} coexist_current={} cap={cap}", ga + gb + 2 * entry);
-    drop(pin1);
-    drop(pin2);
+            // CLEANUP: release the first generation so the aggregate has headroom.
+            assert_eq!(owner.release_prepared(pin1), ReleaseOutcome::Released);
+            assert_eq!(op_current(&owner), 0, "cleanup to operational baseline");
+
+            // READMISSION: the SAME O4 now succeeds once the pin is gone, and a fresh
+            // generation can be captured against the authoritative revision.
+            let rev2 = publish_qc(&owner, &ctx, [0x22u8; 32], 9, 1);
+            assert_eq!(rev2, 2, "O4 succeeds after cleanup (readmission)");
+            let pb = owner.read_validate(None::<&FixtureCommittedHistory>).unwrap();
+            let gb = prepared_generation_charge(&ctx, pb.retained()).unwrap();
+            let pin2 = owner.capture_prepared_decision(pb, 2).expect("readmitted capture B");
+            assert_eq!(op_current(&owner), gb + control + registry_cell() + pin_bytes());
+            println!(
+                "[§3 distinct N={n}] RESULT=CONSERVATIVE_REFUSAL context_ownership={context_ownership}                  ga={ga} one_pinned_aggregate={agg_one_pinned} cap={cap} o4_next={next} shortfall={shortfall}                  (coexistence of a pinned generation with a concurrent O4 exceeds the unchanged ceiling;                  cleanup+readmission demonstrated)"
+            );
+            assert_eq!(owner.release_prepared(pin2), ReleaseOutcome::Released);
+            assert_eq!(op_current(&owner), 0, "readmitted generation cleaned up");
+        }
+        other => panic!("unexpected O4-while-pinned outcome: {other:?}"),
+    }
 }
 
 #[test]
@@ -372,8 +752,8 @@ fn spike_distinct_generations_and_full_n4() {
 }
 
 // ===========================================================================
-// 4. Normal release AND automatic abandonment (Drop) both clean up to the
-//    baseline while the backend stays alive; backend remains usable afterwards.
+// §2/§3. Normal explicit release AND automatic abandonment (Drop) both clean up
+// to the baseline while the backend stays alive and usable.
 // ===========================================================================
 
 fn release_and_abandonment(n: u64) {
@@ -415,13 +795,11 @@ fn spike_release_and_abandonment_n4() {
 }
 
 // ===========================================================================
-// 5. Provenance-gate refusals — each returns the proof intact and mints nothing.
+// Provenance-gate refusals — each returns the proof intact and mints nothing.
 // ===========================================================================
 
 #[test]
 fn spike_refuse_bootstrap_unresolved() {
-    // A freshly initialized store is BootstrapNoLock (rev 0): capture refuses,
-    // leaving bootstrap explicitly unresolved.
     let ctx = ctx_n(4);
     let dir = tempfile::tempdir().unwrap();
     let owner = init_owner(dir.path(), &ctx);
@@ -455,9 +833,6 @@ fn spike_refuse_stale_revision() {
 
 #[test]
 fn spike_refuse_foreign_incarnation() {
-    // A proof minted by backend A is refused by an owner on backend B (a
-    // different ownership incarnation) — the incarnation check also guards
-    // capture, not only O5.
     let ctx = ctx_n(4);
     let dir_a = tempfile::tempdir().unwrap();
     let owner_a = init_owner(dir_a.path(), &ctx);
@@ -476,8 +851,6 @@ fn spike_refuse_foreign_incarnation() {
 
 #[test]
 fn spike_refuse_standalone_uncharged_none() {
-    // A standalone semantic/codec proof carries NO O5 capability (None) and NO
-    // holder reservation: capture refuses it as uncharged.
     let ctx = ctx_n(4);
     let qc = valid_wire_qc(&ctx, [9u8; 32], 5);
     let l = make_locked_qc(&ctx, [9u8; 32], 5, qc, None).unwrap();
@@ -504,9 +877,6 @@ fn spike_refuse_standalone_uncharged_none() {
 
 #[test]
 fn spike_refuse_foreign_context() {
-    // Same backend (so the incarnation matches), but a second owner handle with
-    // a different context digest: the ForeignContext gate (checked before the
-    // domain) refuses, and the revision/metadata path is never reached.
     let ctx = ctx_n(4);
     let foreign = ctx_n_foreign(4);
     let dir = tempfile::tempdir().unwrap();
@@ -516,8 +886,6 @@ fn spike_refuse_foreign_context() {
     publish_qc(&owner, &ctx, [9u8; 32], 5, 0);
     let proof = owner.read_validate(None::<&FixtureCommittedHistory>).unwrap();
 
-    // A second handle on the SAME backend with the foreign context (same N, so
-    // attach binds the identical ceiling idempotently).
     let owner_foreign = SafetyRecordOwner::attach(backend, foreign).unwrap();
     match owner_foreign.capture_prepared_decision(proof, 1) {
         Err((p, CaptureRefusal::ForeignContext)) => {
@@ -537,7 +905,6 @@ fn spike_refuse_recovery_required() {
     publish_qc(&owner, &ctx, [9u8; 32], 5, 0);
     let proof = owner.read_validate(None::<&FixtureCommittedHistory>).unwrap();
 
-    // Drive the backend into recovery-required via an uncertain-but-durable O4.
     backend.set_inject(InjectFault::UncertainAfterWrite);
     let _ = owner.publish_locked(
         make_locked_qc(&ctx, [0x22u8; 32], 9, valid_wire_qc(&ctx, [0x22u8; 32], 9), None).unwrap(),
@@ -554,8 +921,7 @@ fn spike_refuse_recovery_required() {
 }
 
 // ===========================================================================
-// 6. Counter exhaustion fails closed BEFORE mutation (bounded test seam); and
-//    stale/foreign handles are refused on handle-based release.
+// Counter exhaustion fails closed BEFORE mutation; stale/foreign handles refused.
 // ===========================================================================
 
 #[test]
@@ -574,8 +940,8 @@ fn spike_counter_exhaustion_fails_closed() {
     match owner.capture_prepared_decision(proof, 1) {
         Err((p, CaptureRefusal::CounterExhausted)) => {
             assert!(p.recovery_backend_incarnation().is_some(), "proof intact on counter exhaustion");
-            // Fail-closed BEFORE any mutation/allocation: while the refused proof
-            // is still alive, only its holder is charged — no +48 entry leaked.
+            // Fail-closed BEFORE any mutation/allocation: while the refused proof is
+            // still alive, only its holder is charged — no prepared reservation leaked.
             assert_eq!(op_current(&owner), before, "no charge leaked on counter exhaustion");
         }
         other => panic!("expected CounterExhausted, got {other:?}"),
@@ -590,7 +956,6 @@ fn spike_counter_exhaustion_fails_closed() {
 #[test]
 fn spike_stale_and_foreign_handles_refused() {
     let ctx = ctx_n(4);
-    // Backend A: capture a real entry, remember its handle.
     let dir_a = tempfile::tempdir().unwrap();
     let owner_a = init_owner(dir_a.path(), &ctx);
     publish_qc(&owner_a, &ctx, [9u8; 32], 5, 0);
@@ -618,13 +983,13 @@ fn spike_stale_and_foreign_handles_refused() {
         ReleaseOutcome::NotFound,
         "stale serial refused"
     );
-    // The owning pin's Drop now finds nothing to release (idempotent).
     drop(pin);
 }
 
 // ===========================================================================
-// 7. Admission refusal BEFORE new allocation; cleanup to the correct baseline;
-//    subsequent readmission; and the refused proof's existing O5 recovery path.
+// §3. Admission refusal BEFORE new allocation; cleanup to the correct baseline;
+// O5 recovery exercised with the ACTUAL returned refused proof after releasing
+// artificial pressure (byte-for-byte comparison + recovery outcome); readmission.
 // ===========================================================================
 
 fn admission_refusal_and_readmission(n: u64) {
@@ -635,52 +1000,58 @@ fn admission_refusal_and_readmission(n: u64) {
 
     let cap = owner.backend_for_test().accounting_aggregate_cap().unwrap();
 
-    // Read the real proof we will try (and fail) to capture. Its holder is now
-    // live and charged against the aggregate.
+    // Read the real proof we will try (and fail) to capture; its holder is live.
     let proof = owner.read_validate(None::<&FixtureCommittedHistory>).unwrap();
-    let gen = prepared_generation_charge(&ctx, proof.retained()).unwrap();
+    let core = prepared_generation_charge(&ctx, proof.retained()).unwrap();
+    let control = control_charge();
     let proof_rev = proof.publication_revision();
+    let proof_enc_cap = proof.encoded_capacity();
 
-    // Current aggregate = context partition + the live proof holder. Add a
-    // standing reservation leaving headroom of exactly (entry + gen - 1): enough
-    // for the per-entry (48) reservation to succeed, but one byte short of the
-    // generation. Thus admission of the generation is refused AFTER the per-entry
-    // reservation — exercising cleanup-to-baseline (release of the per-entry).
-    let entry = prepared_entry_charge_bytes();
+    // The capture reserves, in order: the registry cell (empty -> occupied), the
+    // owning pin, then the generation core, then the control. Leave headroom for
+    // registry-cell + pin + core but ONE byte short of the control, so admission is
+    // refused on the LAST reservation — exercising cleanup of the earlier ones.
+    let entry_pre = registry_cell() + pin_bytes() + core;
     let used = owner.backend_for_test().accounting_aggregate_current();
-    let standing_charge = cap - used - entry - (gen - 1);
+    let standing_charge = cap - used - entry_pre - (control - 1);
     let standing = owner
         .backend_for_test()
         .reserve_standing_for_test(standing_charge)
-        .expect("standing reservation admits (holder + entry fit, gen does not)");
+        .expect("standing reservation admits (cell + pin + core fit, control does not)");
     let baseline_under_pressure = owner.backend_for_test().accounting_aggregate_current();
 
     match owner.capture_prepared_decision(proof, 1) {
         Err((returned, CaptureRefusal::Admission(_))) => {
-            // The refused proof is intact and still an O5-usable recovery token.
             assert!(returned.recovery_backend_incarnation().is_some());
-            assert!(returned.encoded_capacity() > 0, "refused proof original bytes intact");
+            assert_eq!(returned.encoded_capacity(), proof_enc_cap, "refused proof original bytes intact");
             assert_eq!(returned.publication_revision(), proof_rev, "revision unchanged");
-            // Cleanup to the correct baseline: the per-entry reservation taken
-            // before the generation admission failed is released; only the
-            // returned proof holder + our standing remain.
+            // Cleanup to the correct baseline: every reservation taken before the
+            // failed one is released; only the returned proof holder + standing remain.
             assert_eq!(
                 owner.backend_for_test().accounting_aggregate_current(),
                 baseline_under_pressure,
-                "per-entry reservation released on generation-admission refusal"
+                "earlier prepared reservations released on admission refusal"
             );
             assert_eq!(
                 owner.backend_for_test().prepared_registry_for_test().lock().unwrap().occupied(),
                 0,
                 "no entry inserted on refusal"
             );
+
+            // O5 with the ACTUAL returned refused proof, after releasing pressure.
+            drop(standing);
+            match owner.reacknowledge(&returned) {
+                PublishResult::DurableAcknowledged { new_revision } => {
+                    assert_eq!(new_revision, proof_rev, "O5 re-acknowledges the SAME revision");
+                }
+                other => panic!("expected O5 DurableAcknowledged on intact refused proof, got {other:?}"),
+            }
             drop(returned);
         }
         other => panic!("expected Admission refusal, got {other:?}"),
     }
 
-    // Readmission: release the pressure and capture a freshly read proof.
-    drop(standing);
+    // Readmission: capture a freshly read proof now that pressure is gone.
     let fresh = owner.read_validate(None::<&FixtureCommittedHistory>).unwrap();
     assert!(fresh.recovery_backend_incarnation().is_some());
     let pin = owner
@@ -692,7 +1063,9 @@ fn admission_refusal_and_readmission(n: u64) {
         1,
         "readmitted entry present"
     );
+    assert_eq!(op_current(&owner), core + control + registry_cell() + pin_bytes(), "readmitted full charge");
     owner.release_prepared(pin);
+    assert_eq!(op_current(&owner), 0, "readmitted entry cleaned up");
 }
 
 #[test]
@@ -705,37 +1078,61 @@ fn spike_admission_refusal_and_readmission_n4() {
 }
 
 // ===========================================================================
-// 8. Capture / publication interleaving under the serialization boundary: a
-//    capture and an O4 publication are linearized; a capture reflects only the
-//    authoritative revision read under the domain.
+// §3. Deterministic capture/publication boundary: the capture reads the
+// authoritative revision UNDER THE SERIALIZATION DOMAIN, so it linearizes with an
+// O4 publication. This distinguishes correct serialization (a proof read before a
+// publication boundary is refused as stale) from its removal (which would admit
+// the stale proof). Deterministic — no threads, no timing.
 // ===========================================================================
 
 #[test]
-fn spike_capture_publication_interleaving() {
+fn spike_capture_publication_boundary() {
     let ctx = ctx_n(4);
     let dir = tempfile::tempdir().unwrap();
     let owner = init_owner(dir.path(), &ctx);
     publish_qc(&owner, &ctx, [9u8; 32], 5, 0); // rev 1
 
-    // A proof read at rev 1, then an O4 advances to rev 2 BEFORE the capture:
-    // capture reads the authoritative revision under the domain and refuses the
-    // now-stale proof (linearization with publication).
+    // A proof read at rev 1 is captured successfully BEFORE any boundary: the
+    // authoritative revision read under the domain equals the proof's revision.
+    let p_before = owner.read_validate(None::<&FixtureCommittedHistory>).unwrap();
+    let pin = owner
+        .capture_prepared_decision(p_before, 1)
+        .expect("capture at the authoritative revision (pre-boundary)");
+    drop(pin);
+
+    // Now cross a publication boundary: O4 advances to rev 2. A proof read at rev 1
+    // and presented AFTER the boundary must be refused as stale — the capture re-reads
+    // the authoritative revision under the domain rather than trusting the proof.
     let p_rev1 = owner.read_validate(None::<&FixtureCommittedHistory>).unwrap();
-    publish_qc(&owner, &ctx, [0x22u8; 32], 9, 1); // rev 2
+    publish_qc(&owner, &ctx, [0x22u8; 32], 9, 1); // rev 2 (the boundary)
     match owner.capture_prepared_decision(p_rev1, 1) {
-        Err((_p, CaptureRefusal::StaleRevision { found, .. })) => assert_eq!(found, 2),
-        other => panic!("expected StaleRevision under interleaving, got {other:?}"),
+        Err((p, CaptureRefusal::StaleRevision { expected, found })) => {
+            assert_eq!(expected, 1);
+            assert_eq!(found, 2, "capture observed the post-boundary authoritative revision");
+            assert_eq!(p.publication_revision(), 1, "stale proof returned intact");
+        }
+        other => panic!("expected StaleRevision across the boundary, got {other:?}"),
     }
-    // A fresh read at the authoritative rev 2 captures successfully.
-    let p_rev2 = owner.read_validate(None::<&FixtureCommittedHistory>).unwrap();
-    let pin = owner.capture_prepared_decision(p_rev2, 2).expect("capture at authoritative rev");
+    // Even asking for the correct new revision with a stale proof is refused (the
+    // proof itself still carries rev 1): the boundary is on the authoritative read,
+    // not merely the caller's expectation.
+    let p_rev1b = owner.read_validate(None::<&FixtureCommittedHistory>).unwrap();
+    publish_qc(&owner, &ctx, [0x33u8; 32], 13, 2); // rev 3
+    // p_rev1b is now stale (rev 2 at read time, authoritative advanced to 3).
+    match owner.capture_prepared_decision(p_rev1b, 2) {
+        Err((_p, CaptureRefusal::StaleRevision { found, .. })) => assert_eq!(found, 3),
+        other => panic!("expected StaleRevision, got {other:?}"),
+    }
+    // A fresh read at the authoritative revision captures successfully.
+    let p_fresh = owner.read_validate(None::<&FixtureCommittedHistory>).unwrap();
+    let pin = owner.capture_prepared_decision(p_fresh, 3).expect("capture at authoritative rev");
     assert!(op_current(&owner) > 0);
     drop(pin);
 }
 
 // ===========================================================================
-// 9. Maximum complete TC-derived generation: capture retains the heaviest
-//    complete generation within the unchanged ceiling.
+// §3. Maximum complete TC-derived generation: capture retains the heaviest
+// complete generation within the unchanged ceiling; charge decomposition holds.
 // ===========================================================================
 
 fn tc_generation_capture(n: u64) {
@@ -743,11 +1140,14 @@ fn tc_generation_capture(n: u64) {
     let dir = tempfile::tempdir().unwrap();
     let owner = init_owner(dir.path(), &ctx);
 
-    // Publish a maximum complete TC-derived restriction.
     let ltc = valid_tc_record(&ctx, 5, 4);
+    let need = ((2 * n) + 2) / 3;
     assert!(
-        matches!(&ltc.evidence, SupportingEvidence::TcDerived { tc, .. } if !tc.signed_timeouts.is_empty()),
-        "TC fixture carries complete signed timeouts"
+        matches!(&ltc.evidence, SupportingEvidence::TcDerived { tc, high_qc }
+            if tc.signed_timeouts.len() as u64 == need
+                && tc.signers.len() as u64 == need
+                && high_qc.signers.len() as u64 == need),
+        "TC fixture: N signer + timeout entries with nested high-QC signers"
     );
     match owner.publish_locked(ltc, 0, None::<&FixtureCommittedHistory>) {
         PublishResult::DurableAcknowledged { new_revision: 1 } => {}
@@ -759,13 +1159,13 @@ fn tc_generation_capture(n: u64) {
         matches!(proof.retained().record, SafetyRecord::Locked(ref l) if matches!(l.evidence, SupportingEvidence::TcDerived { .. })),
         "retained TC generation"
     );
-    let gen = prepared_generation_charge(&ctx, proof.retained()).unwrap();
+    let core = prepared_generation_charge(&ctx, proof.retained()).unwrap();
     let ceiling = max_retained_generation_bytes(&ctx, size_of_timeout_msg()).unwrap();
-    assert!(gen <= ceiling, "complete TC generation within the unchanged ceiling");
+    assert!(core <= ceiling, "complete TC generation core within the unchanged ceiling");
 
     let pin = owner.capture_prepared_decision(proof, 1).expect("capture TC generation");
-    assert_eq!(op_current(&owner), gen + prepared_entry_charge_bytes());
-    println!("[tc N={n}] tc_gen_charge={gen} ceiling={ceiling}");
+    assert_eq!(op_current(&owner), core + control_charge() + registry_cell() + pin_bytes());
+    println!("[tc N={n}] tc_core={core} control={} ceiling={ceiling}", control_charge());
     drop(pin);
     assert_eq!(op_current(&owner), 0);
 }
@@ -780,8 +1180,8 @@ fn spike_tc_generation_capture_n4() {
 }
 
 // ===========================================================================
-// 10. Evidence/context binding correctness: the captured entry carries exactly
-//     the proof's provenance (context digest, incarnation, revision, evidence).
+// Evidence/context binding: the captured entry carries exactly the proof's
+// provenance (context digest, incarnation, revision, evidence status).
 // ===========================================================================
 
 fn evidence_context_binding(n: u64) {

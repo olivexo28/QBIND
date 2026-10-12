@@ -1,37 +1,46 @@
-    Finished `test` profile [unoptimized] target(s) in 0.13s
+    Finished `test` profile [unoptimized] target(s) in 0.14s
      Running tests/run_422_spike_prepared_generation_tests.rs (target/debug/deps/run_422_spike_prepared_generation_tests-71cc7af93cd79cea)
 
-running 23 tests
-test spike_admission_refusal_and_readmission_n1 ... ok
+running 27 tests
+[§1 N=1] backing_inline=512 owned_backings=152 arc=16 actual_allocation=680 core=536 control=144 registry_cell=208 pin=96 sizeof(registry=176,registry_cell=192,entry=56,backing=512,pin=96,handle=24)
+[§1 N=4] backing_inline=512 owned_backings=504 arc=16 actual_allocation=1032 core=888 control=144 registry_cell=208 pin=96 sizeof(registry=176,registry_cell=192,entry=56,backing=512,pin=96,handle=24)
 test spike_admission_refusal_and_readmission_n4 ... ok
-test spike_counter_exhaustion_fails_closed ... ok
-test spike_capture_publication_interleaving ... ok
-[dims N=1] gen_charge=417 gen_ceiling=552 full_holder=1097 sizeof(registry=240,entry=112,backing=464,handle=24)
-[dims N=4] gen_charge=481 gen_ceiling=1104 full_holder=2051 sizeof(registry=240,entry=112,backing=464,handle=24)
+test spike_actual_object_accounting_n1 ... ok
+test spike_actual_object_accounting_n4 ... ok
+test spike_admission_refusal_and_readmission_n1 ... ok
+[dims N=1] core=417 control=144 gen_ceiling=552 full_holder=1097
 test spike_dimensions_and_charges_n1 ... ok
+test spike_counter_exhaustion_fails_closed ... ok
+[dims N=4] core=481 control=144 gen_ceiling=1104 full_holder=2051
 test spike_dimensions_and_charges_n4 ... ok
-[distinct N=4] ga=481 gb=481 coexist_current=1058 cap=7772
-test spike_distinct_generations_and_full_n4 ... ok
-[distinct N=1] ga=417 gb=417 coexist_current=930 cap=3956
+test spike_capture_publication_boundary ... ok
+[§3 distinct N=1] RESULT=COEXIST_REFUSE_O4 context_ownership=192 ga=417                  gb=417 coexist=1522 aggregate=1714 cap=3956 o4_next=4103 shortfall=147                  (two generations coexist while pinned, but an O4 through both exceeds the unchanged ceiling)
+[§3 distinct N=4] RESULT=COEXIST_THROUGH_O4 context_ownership=240 ga=481                  gb=481 coexist=1650 aggregate=1890 cap=7772 headroom=5882
 test spike_distinct_generations_and_full_n1 ... ok
+test spike_distinct_generations_and_full_n4 ... ok
 test spike_evidence_context_binding_n1 ... ok
 test spike_evidence_context_binding_n4 ... ok
 test spike_refuse_bootstrap_unresolved ... ok
 test spike_refuse_foreign_context ... ok
-test spike_refuse_stale_revision ... ok
 test spike_refuse_recovery_required ... ok
-test spike_refuse_standalone_uncharged_none ... ok
+test spike_refuse_stale_revision ... ok
 test spike_refuse_foreign_incarnation ... ok
+test spike_refuse_standalone_uncharged_none ... ok
 test spike_release_and_abandonment_n1 ... ok
-test spike_release_and_abandonment_n4 ... ok
-[shared N=4] gen=481 entry=48 two_entries_current=577
-test spike_shared_generation_n4 ... ok
-[shared N=1] gen=417 entry=48 two_entries_current=513
+[shared N=1] core=417 control=144
 test spike_shared_generation_n1 ... ok
-[tc N=1] tc_gen_charge=536 ceiling=552
+[shared N=4] core=481 control=144
+test spike_release_and_abandonment_n4 ... ok
+test spike_shared_generation_n4 ... ok
+[§2 lifetime N=1] dup_bytes=33 corrected=0 premature=33
+test spike_sharing_lifetime_regression_n1 ... ok
+[§2 lifetime N=4] dup_bytes=97 corrected=0 premature=97
+[tc N=1] tc_core=536 control=144 ceiling=552
 test spike_tc_generation_capture_n1 ... ok
-[tc N=4] tc_gen_charge=888 ceiling=1104
+test spike_sharing_lifetime_regression_n4 ... ok
+[tc N=4] tc_core=888 control=144 ceiling=1104
 test spike_tc_generation_capture_n4 ... ok
 test spike_stale_and_foreign_handles_refused ... ok
 
-test result: ok. 23 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.11s
+test result: ok. 27 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.14s
+

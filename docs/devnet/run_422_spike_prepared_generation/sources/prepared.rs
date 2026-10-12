@@ -8,12 +8,16 @@
 //! provenance required to rebind it — *not* the original encoded publication
 //! record. A captured entry therefore charges only:
 //!
-//! * one (possibly **shared**) generation backing — the inline generation
-//!   wrapper + the live evidence heap backings + one shared-allocation overhead,
-//!   measured in place from the moved [`RetainedRecord`]
-//!   ([`super::accounting::prepared_generation_charge`], non-cloning), and
-//! * a per-entry identity + arc-handle term
-//!   ([`super::profile::prepared_entry_charge`] = 48).
+//! * one (possibly **shared**) generation backing, measured in place from the
+//!   moved [`RetainedRecord`] as the **actual** `GenerationBacking` allocation:
+//!   a generation-**core** charge (the real retained generation inline + the live
+//!   evidence heap backings + one shared-allocation overhead,
+//!   [`super::accounting::prepared_generation_charge`], non-cloning) plus a
+//!   holder/**control** charge for the wrapper's provenance + inline reservation
+//!   + padding ([`super::accounting::prepared_holder_control_charge`]); together
+//!   they cover every live byte of the `Arc<GenerationBacking>`, and
+//! * the registry-storage charge for the containing slot array (counting the
+//!   embedded entry once) and an owning-pin charge per outstanding pin.
 //!
 //! Both terms are already reserved by the accepted aggregate ceiling
 //! ([`super::profile::max_aggregate_retained_bytes`]): its holder term budgets
@@ -42,7 +46,7 @@
 use std::sync::{Arc, Mutex};
 
 use super::accounting::Reservation;
-use super::profile::MAX_OUTSTANDING_PREPARED_L0;
+use super::profile::{ARC_CTRL, MAX_OUTSTANDING_PREPARED_L0};
 use super::record::{EvidenceStatus, RetainedRecord, SafetyRecord};
 
 /// The per-entry prepared-decision L0 charge in bytes (§ 13.6): identity (40) +
@@ -161,10 +165,17 @@ struct GenerationBacking {
     recovery_backend_incarnation: u64,
     evidence_status: EvidenceStatus,
     captured_revision: u64,
-    /// The generation-only charge (inline wrapper + evidence backings + one
-    /// shared-allocation overhead). Its lifetime **is** the accounting (RAII);
-    /// never read directly outside test accessors.
+    /// The generation **core** charge: the actual `RetainedRecord` inline + the
+    /// evidence backings + one shared-allocation (`Arc`) overhead, bounded by the
+    /// generation sub-ceiling. Its lifetime **is** the accounting (RAII); never
+    /// read directly outside test accessors.
     gen_reservation: Reservation,
+    /// The generation **holder/control** charge: the live `GenerationBacking`
+    /// inline bytes **beyond** the retained core — the provenance fields, the
+    /// inline `gen_reservation` itself, and layout padding — counted once inside
+    /// this containing allocation. Held here so it is released together with the
+    /// generation on the **last** share drop (RAII); never read directly.
+    control_reservation: Reservation,
 }
 
 /// An **opaque** crate-visible token for a shareable live generation backing,
@@ -173,10 +184,13 @@ struct GenerationBacking {
 /// while letting the owner capture path pass a found backing back for sharing.
 pub struct SharedGenerationBacking(Arc<GenerationBacking>);
 
-/// One prepared-decision L0 entry: the pinned identity, its serial, a (possibly
-/// shared) generation backing, and the per-entry reservation (identity +
-/// arc-handle). Dropping the entry releases the per-entry charge and, if it held
-/// the last share of its backing, the generation charge too.
+/// One prepared-decision L0 entry **embedded** in the registry's inline slot
+/// array: the pinned identity, its serial, and a (possibly shared) `Arc` share of
+/// the generation backing. The entry's own inline bytes (identity + serial +
+/// arc-handle + padding) are covered **once** by the registry-storage charge that
+/// counts this containing allocation; dropping the entry drops its backing share
+/// and, if it held the **last** share, releases the generation core + control
+/// charges (RAII).
 ///
 /// `identity` is retained for the registry's shareable/metadata role and read by
 /// the test-gated inspector; `dead_code` is allowed for that reason.
@@ -186,8 +200,6 @@ struct PreparedEntry {
     identity: GenerationIdentity,
     serial: u64,
     backing: Arc<GenerationBacking>,
-    /// Per-entry `identity + arc_handle` charge (48). RAII lifetime == entry.
-    _entry_reservation: Reservation,
 }
 
 /// The bounded prepared-decision L0 registry: a fixed inline slot array (no
@@ -200,6 +212,13 @@ pub struct PreparedRegistry {
     slots: [Option<PreparedEntry>; PREPARED_SLOTS],
     next_serial: u64,
     incarnation: u64,
+    /// The **registry-storage** charge (the whole `Mutex<PreparedRegistry>` cell
+    /// value + its shared-allocation overhead), covering this container and its
+    /// embedded entry slots **once**. Reserved lazily by the capture path when the
+    /// registry transitions empty → occupied, and released (RAII) when it returns
+    /// to empty, so an unused backend charges nothing for prepared storage while a
+    /// backend holding ≥1 live entry always covers its registry storage.
+    registry_reservation: Option<Reservation>,
 }
 
 impl PreparedRegistry {
@@ -209,6 +228,7 @@ impl PreparedRegistry {
             slots: Default::default(),
             next_serial: 0,
             incarnation,
+            registry_reservation: None,
         }
     }
 
@@ -263,9 +283,14 @@ impl PreparedRegistry {
             .map(|e| e.serial == handle.serial)
             .unwrap_or(false);
         if matches {
-            // Dropping the entry releases the per-entry charge and, if last
-            // share, the generation charge.
+            // Dropping the entry drops its `Arc<GenerationBacking>` share and, if
+            // this was the last share, the generation core + control charges
+            // (RAII). When the registry returns to empty, release its one-time
+            // registry-storage charge too.
             self.slots[handle.slot] = None;
+            if self.occupied() == 0 {
+                self.registry_reservation = None;
+            }
             ReleaseOutcome::Released
         } else {
             ReleaseOutcome::NotFound
@@ -288,14 +313,20 @@ impl PreparedRegistry {
         Some(PreparedEntryView {
             identity: e.identity,
             serial: e.serial,
-            entry_charge: e._entry_reservation.charge(),
-            generation_charge: e.backing.gen_reservation.charge(),
+            generation_core_charge: e.backing.gen_reservation.charge(),
+            generation_control_charge: e.backing.control_reservation.charge(),
             backing_shares: Arc::strong_count(&e.backing),
             captured_revision: e.backing.captured_revision,
             recovery_backend_incarnation: e.backing.recovery_backend_incarnation,
             origin_context_digest: e.backing.origin_context_digest,
             evidence_status: e.backing.evidence_status,
-            evidence_backing_capacity: e.backing.retained.evidence_backing_capacity(),
+            // Measurement failure is surfaced explicitly (panic), never silently
+            // substituted with 0.
+            evidence_backing_capacity: e
+                .backing
+                .retained
+                .evidence_backing_capacity()
+                .expect("evidence backing capacity measurement failed"),
         })
     }
 
@@ -321,8 +352,11 @@ impl PreparedRegistry {
 pub struct PreparedEntryView {
     pub identity: GenerationIdentity,
     pub serial: u64,
-    pub entry_charge: u128,
-    pub generation_charge: u128,
+    /// The generation **core** reservation (RetainedRecord inline + backings + Arc).
+    pub generation_core_charge: u128,
+    /// The generation **holder/control** reservation (GenerationBacking inline
+    /// beyond the retained core: provenance + inline reservation + padding).
+    pub generation_control_charge: u128,
     pub backing_shares: usize,
     pub captured_revision: u64,
     pub recovery_backend_incarnation: u64,
@@ -341,6 +375,10 @@ pub struct PreparedPin {
     registry: Arc<Mutex<PreparedRegistry>>,
     handle: PreparedHandle,
     released: bool,
+    /// The **owning-pin** charge covering this guard's own live bytes
+    /// (`size_of::<PreparedPin>()`, which includes this field). Released (RAII)
+    /// when the pin is released or dropped.
+    _pin_reservation: Reservation,
 }
 
 impl std::fmt::Debug for PreparedPin {
@@ -354,11 +392,16 @@ impl std::fmt::Debug for PreparedPin {
 
 impl PreparedPin {
     /// Crate-internal: build a pin over an inserted entry.
-    pub(crate) fn new(registry: Arc<Mutex<PreparedRegistry>>, handle: PreparedHandle) -> Self {
+    pub(crate) fn new(
+        registry: Arc<Mutex<PreparedRegistry>>,
+        handle: PreparedHandle,
+        pin_reservation: Reservation,
+    ) -> Self {
         PreparedPin {
             registry,
             handle,
             released: false,
+            _pin_reservation: pin_reservation,
         }
     }
 
@@ -418,6 +461,61 @@ pub fn size_of_prepared_handle() -> usize {
     std::mem::size_of::<PreparedHandle>()
 }
 
+/// The actual inline size of the private [`GenerationBacking`] wrapper value
+/// (`size_of::<GenerationBacking>()`). Crate-internal: supplied to
+/// [`super::accounting::prepared_holder_control_charge`] by the capture path,
+/// which cannot see the private layout, so the holder/control charge is derived
+/// from the **actual** wrapper size rather than a synthetic wrapper.
+pub(crate) fn generation_backing_struct_size() -> u128 {
+    std::mem::size_of::<GenerationBacking>() as u128
+}
+
+/// The **registry-storage** charge: the whole `Mutex<PreparedRegistry>` cell value
+/// (container + its embedded entry slots + serial + incarnation + the inline
+/// registry reservation, counted **once**) plus the shared-allocation (`Arc`)
+/// overhead. Reserved lazily on the empty → occupied transition.
+pub(crate) fn registry_cell_charge() -> u128 {
+    std::mem::size_of::<Mutex<PreparedRegistry>>() as u128 + ARC_CTRL
+}
+
+/// The **owning-pin** charge: the inline size of a [`PreparedPin`] guard value
+/// (`size_of::<PreparedPin>()`, which already includes its inline reservation
+/// field), charged per live outstanding pin.
+pub(crate) fn pin_charge() -> u128 {
+    std::mem::size_of::<PreparedPin>() as u128
+}
+
+/// Test-only: the registry-storage charge (`registry_cell_charge`).
+#[cfg(any(test, feature = "test-utils"))]
+pub fn registry_cell_charge_bytes() -> u128 {
+    registry_cell_charge()
+}
+
+/// Test-only: the owning-pin charge (`pin_charge`).
+#[cfg(any(test, feature = "test-utils"))]
+pub fn pin_charge_bytes() -> u128 {
+    pin_charge()
+}
+
+/// Test-only: the actual inline size of the private `GenerationBacking` wrapper.
+#[cfg(any(test, feature = "test-utils"))]
+pub fn generation_backing_struct_size_bytes() -> u128 {
+    generation_backing_struct_size()
+}
+
+/// Test-only: `size_of` the `Mutex<PreparedRegistry>` cell value whose storage the
+/// registry charge covers (container + embedded entry slots, counted once).
+#[cfg(any(test, feature = "test-utils"))]
+pub fn size_of_prepared_registry_cell() -> usize {
+    std::mem::size_of::<Mutex<PreparedRegistry>>()
+}
+
+/// Test-only: `size_of` the owning [`PreparedPin`] guard value.
+#[cfg(any(test, feature = "test-utils"))]
+pub fn size_of_prepared_pin() -> usize {
+    std::mem::size_of::<PreparedPin>()
+}
+
 // ---- crate-internal construction primitives used by the owner capture path --
 
 impl PreparedRegistry {
@@ -436,7 +534,8 @@ impl PreparedRegistry {
         evidence_status: EvidenceStatus,
         captured_revision: u64,
         gen_reservation: Reservation,
-        entry_reservation: Reservation,
+        control_reservation: Reservation,
+        registry_reservation: Option<Reservation>,
     ) -> Option<PreparedHandle> {
         let backing = Arc::new(GenerationBacking {
             retained,
@@ -445,8 +544,9 @@ impl PreparedRegistry {
             evidence_status,
             captured_revision,
             gen_reservation,
+            control_reservation,
         });
-        self.place(identity, backing, entry_reservation)
+        self.place(identity, backing, registry_reservation)
     }
 
     /// Crate-internal: insert an entry that **shares** an existing backing (one
@@ -455,9 +555,9 @@ impl PreparedRegistry {
         &mut self,
         identity: GenerationIdentity,
         backing: SharedGenerationBacking,
-        entry_reservation: Reservation,
+        registry_reservation: Option<Reservation>,
     ) -> Option<PreparedHandle> {
-        self.place(identity, backing.0, entry_reservation)
+        self.place(identity, backing.0, registry_reservation)
     }
 
     /// Crate-internal: find a shareable backing (equal retained generation).
@@ -488,16 +588,21 @@ impl PreparedRegistry {
         &mut self,
         identity: GenerationIdentity,
         backing: Arc<GenerationBacking>,
-        entry_reservation: Reservation,
+        registry_reservation: Option<Reservation>,
     ) -> Option<PreparedHandle> {
         let slot = self.first_free()?;
         let serial = self.peek_serial()?;
         let next = self.next_serial.checked_add(1)?;
+        // Adopt the one-time registry-storage reservation on the empty → occupied
+        // transition (the caller passes `Some` iff the registry was empty); any
+        // surplus reservation is released by being dropped.
+        if self.registry_reservation.is_none() {
+            self.registry_reservation = registry_reservation;
+        }
         self.slots[slot] = Some(PreparedEntry {
             identity,
             serial,
             backing,
-            _entry_reservation: entry_reservation,
         });
         self.next_serial = next;
         Some(PreparedHandle {
