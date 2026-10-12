@@ -18343,3 +18343,80 @@ completed-component input to that plan, **not** a launch gate.
 No implementation, test, Cargo, lockfile, configuration, CI, protocol-contract, SARIF, raw-log,
 disposition, or historical-checksum change; no PR beyond the supplied workflow; no production
 integration, signing/verifier wiring, activation, seed publication, D15, or Run 423 work.
+
+## RUN 422 — Handoff correction: preserve accepted evidence, restore assurance artifacts, correct activation successor + launch model (this pass, docs-only)
+
+**Scope.** One bounded handoff-correction pass. No activation, signer enablement, external
+deployment, seed publication, or Run 423 execution; the `main.rs` activation refusal is left intact.
+Branch `copilot/run-422-preserve-accepted-storage-evidence` (used as supplied, not renamed);
+starting HEAD `579eac95a33597d8d490ad7ff2ce044c277e827b` (parent
+`39b69d04df58c923f341319ecb0042c9efb3c8ca`); reviewed planning revision
+`19a4faab746c7de20f36ae94d41ad32eebddaf30`, verified assurance revision
+`7cfa7b8e255e1395a437c0423775ecb3e22feeb2`, and frozen implementation candidate
+`aad0a4aaca8f66580d257c3468f1c27059145dbd` (tree `82caed801176b243beda89ad07e5a7376fe958e9`) were
+fetched by SHA (shallow single-branch clone; none an ancestor of HEAD). Authorized writes only: the
+critical-path document, the review/acceptance handoff `independent_review/00_review_report.md`, this
+devnet evidence summary, the contradiction ledger, and exact restoration of assurance artifacts.
+
+**1. Evidence restoration + final-tree integrity.** At the starting HEAD both
+`sarif/A_production_default.sarif.gz` and `sarif/B_acceptance_testutils.sarif.gz` were **absent**,
+and seventeen checksum-listed artifacts were CRLF/final-newline byte-drifted (the drift already
+present in `39b69d04`). All missing and byte-drifted raw assurance artifacts under
+`docs/devnet/run_422_d7d14_fixed_candidate_assurance/` (33 files total) were restored to their exact
+`7cfa7b8e` git-blob bytes (git `hash-object` identity), **preserving the original committed
+checksums rather than rewriting them** to fit changed formatting. The three genuinely-newer
+acceptance/review narratives (`README.md`, `diagnostics/04_independent_review.md`,
+`independent_review/00_review_report.md`) were preserved at HEAD. Verified against the final
+committed tree: every applicable committed-artifact checksum passes; compressed and decompressed
+SARIF SHA-256 match; no manifest-referenced artifact is missing; the frozen candidate's ten
+component files match `component_sha256.txt` (zero implementation/test/Cargo/config/CI drift). CodeQL
+was **not** re-run and its tooling bundle was **not** re-downloaded for this repair.
+
+**2. Preserved isolated acceptance + H21 attribution fix.** `D7D14_STORAGE_COMPONENT=IMPLEMENTED-ISOLATED`
+and `D7D14_STORAGE_ACCEPTANCE=PASS-ACCEPTED-SUBSET` are retained for the accepted isolated 23-row
+subset only, with its existing evidence and AI-assisted/internal assurance-level limitations.
+H21 is corrected to the existing `h8_p1_p2_binding_enforced` test (certificate block identity
+differs from lock identity, construction recomputes the binding, encoding supplies a valid CRC, and
+semantic validation refuses the mismatch); the wrong-binding-digest and metadata-revision tests keep
+their actual obligations and the corrected H3/H8 execution provenance is preserved. No new tests or
+implementation changes were made to correct these references.
+
+**3. Premature Run 423 recommendation withdrawn.** The `RUN_422_TASK.txt` successor condition is not
+met: genesis-bound authority activation is DISABLED — the release binary refuses
+`--consensus-authority-from-genesis` with `FATAL … exit 1` before P2P and any consensus task, no
+override (`crates/qbind-node/src/main.rs:5405`, left intact). Configured-authority release-binary
+evidence is lifecycle-contract §3.3.1 **item 8**, gated on items 1–7, not the entrypoint; it is
+produced by isolated validation of an implemented+reviewed configured path, not by treating the
+activation flag as an operator permission switch. The critical-path document now distinguishes
+isolated validation that produces evidence from authorization for public operation and avoids
+circular prerequisites, test bypasses, and fixture-authority escape.
+
+**4. Activation prerequisites + ONE smallest step.** The critical-path document §4.1 now carries a
+source-grounded eight-dependency table (authorization; bootstrap/absent-QC; trusted identity +
+runtime/wire correspondence; authority/engine/verifier/signer wiring; QC + Timeout/NewView
+compatibility; current-authority freshness; signing-state recovery + rollback safety;
+configured-authority release-binary evidence), each with current implementation, existing evidence,
+precise missing work, dependencies, and completion criterion. Restart/rollback safety is **not**
+optional for this signing profile. The ONE smallest non-activating engineering step selected
+(design prerequisites resolved) is the **durable local signing-journal crash-consistency**
+persistence + fail-closed recovery of the per-position anti-equivocation record (continuity contract
+§3.1/§3.2/§3.3/§3.4/§4.1/§5.2 rows 1–9), explicitly excluding the §6 anti-rollback anchor,
+whole-copy-rollback resistance, consensus-lock recovery (§5.3), freshness, copied-key exclusivity,
+and activation. The genuine owner-input design decision flagged (not resolved this pass) is the
+**independent anti-rollback/freshness anchor selection** (§6 / §5.2–§5.3; protected local hardware
+vs remote witness).
+
+**5. Launch dependency model corrected.** Required launch gate = every must-have **M1–M20 Green** +
+**RS1 closed** with deployed-path evidence + **explicit launch authorization**. **S5/S7 remain
+should-haves** (not promoted into the required gate). RS1 remediation and eligible-seed preparation
+are shown as **parallel workstreams** converging at launch; preparatory work is separated from live
+publication/public activation; **C4/C5 keep their separate MainNet scope** (not imported into the
+DevNet gate); effort estimates stay conditional on the prerequisite graph.
+
+**Preserved global posture (unchanged).** `DURABLE_ANTI_ROLLBACK=NOT-ESTABLISHED`;
+`GENESIS_AUTHORITY_ACTIVATION=DISABLED`; `PRODUCTION_WIRE_CHAIN_ID_BEHAVIOR=UNCHANGED`;
+`CONFIGURED_AUTHORITY_RELEASE_BINARY_EVIDENCE=NOT-YET-CAPTURED`;
+`SECURITY_POSTURE=RS1-OPEN / PUBLIC-DEVNET-NO-GO`; C4/C5 OPEN; fail-closed `CurrentEpochUnavailable`
+and default-disabled / MainNet-refused operation preserved. No Rust/test/Cargo/config/CI or
+protocol-contract change; no activation, signer enablement, external deployment, seed publication,
+rename, force-push, PR, or Run 423 execution.
