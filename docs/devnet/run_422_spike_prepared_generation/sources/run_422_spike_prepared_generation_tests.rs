@@ -311,13 +311,19 @@ fn actual_object_accounting(n: u64) {
         "live reservations = core + control + registry-cell + pin"
     );
     {
-        let reg = owner.backend_for_test().prepared_registry_for_test();
+        let reg = owner
+            .backend_for_test()
+            .prepared_registry_for_test()
+            .expect("registry lazily installed by the capture");
         let g = reg.lock().unwrap();
         let v = g.inspect(pin1.handle()).expect("entry live");
         assert_eq!(v.generation_core_charge, core, "inspected core charge");
         assert_eq!(v.generation_control_charge, control, "inspected control charge");
         assert_eq!(v.evidence_backing_capacity, owned_backings, "inspected owned backings");
         assert_eq!(v.backing_shares, 1);
+        // The registry holds its standing storage reservation for the whole
+        // allocation lifetime (admitted before the allocation existed).
+        assert_eq!(g.registry_reservation_charge(), registry_cell(), "standing registry reservation");
     }
     println!(
         "[§1 N={n}] backing_inline={backing_inline} owned_backings={owned_backings} arc={arc_overhead} \
@@ -333,7 +339,25 @@ fn actual_object_accounting(n: u64) {
         size_of_prepared_handle(),
     );
     assert_eq!(pin1.release(), ReleaseOutcome::Released);
-    assert_eq!(op_current(&owner), 0, "all prepared reservations released to baseline");
+    // Last entry released while the backend is still alive: the registry allocation
+    // is RETAINED and its storage reservation remains charged (deallocation when
+    // empty is not required). The operational baseline is now the standing cell.
+    assert_eq!(
+        op_current(&owner),
+        registry_cell(),
+        "retained empty registry keeps its standing reservation after the last release"
+    );
+    assert_eq!(
+        owner
+            .backend_for_test()
+            .prepared_registry_for_test()
+            .expect("registry retained")
+            .lock()
+            .unwrap()
+            .occupied(),
+        0,
+        "registry retained but empty after the last release"
+    );
 }
 
 #[test]
@@ -441,7 +465,10 @@ fn shared_generation(n: u64) {
     );
 
     // Object coverage independent of counters: both entries share one backing.
-    let reg = owner.backend_for_test().prepared_registry_for_test();
+    let reg = owner
+        .backend_for_test()
+        .prepared_registry_for_test()
+        .expect("registry lazily installed by the first capture");
     {
         let g = reg.lock().unwrap();
         let v1 = g.inspect(pin1.handle()).expect("entry 1 live");
@@ -453,6 +480,8 @@ fn shared_generation(n: u64) {
         assert_eq!(v2.generation_core_charge, core);
         assert!(v1.evidence_backing_capacity > 0);
         assert!(matches!(v1.evidence_status, EvidenceStatus::Unverified));
+        // Shared handles cover ONE registry and ONE covering reservation.
+        assert_eq!(g.registry_reservation_charge(), registry_cell(), "one covering registry reservation");
     }
 
     // First drop RETAINS the generation (second entry still shares it).
@@ -463,9 +492,14 @@ fn shared_generation(n: u64) {
         "generation retained after first drop (one pin released)"
     );
 
-    // Final drop RELEASES the generation, the registry cell, and the last pin.
+    // Final drop releases the generation and the last pin; the registry allocation
+    // is RETAINED with its standing reservation (backend still alive).
     assert_eq!(pin2.release(), ReleaseOutcome::Released);
-    assert_eq!(op_current(&owner), 0, "generation released after final drop");
+    assert_eq!(
+        op_current(&owner),
+        registry_cell(),
+        "generation released; retained empty registry keeps its standing reservation"
+    );
 
     println!("[shared N={n}] core={core} control={control}");
 }
@@ -539,14 +573,19 @@ fn sharing_lifetime_regression(n: u64) {
     );
     drop(pin_r); // AUTOMATIC Drop cleanup of a shared entry
 
-    // AUTOMATIC Drop of the fresh backing holder returns to baseline.
+    // AUTOMATIC Drop of the fresh backing holder releases the last pin. The
+    // registry allocation is RETAINED with its standing reservation (backend alive).
     drop(pin1);
-    assert_eq!(op_current(&owner), 0, "all pins released/dropped to baseline");
+    assert_eq!(
+        op_current(&owner),
+        registry_cell(),
+        "all pins released/dropped; retained empty registry keeps its standing reservation"
+    );
 
     // REFUSAL path shares nothing: a fresh proof read at the authoritative revision
     // but presented with a MISMATCHED expected revision is fenced out (StaleRevision)
     // before any conversion. On refusal the proof is returned and dropped; no entry
-    // is created or shared, and the registry stays empty.
+    // is created or shared, and the (already-installed) registry stays empty.
     let fresh = owner.read_validate(None::<&FixtureCommittedHistory>).unwrap();
     match owner.capture_prepared_decision(fresh, 999) {
         Err((_p, CaptureRefusal::StaleRevision { expected, found })) => {
@@ -555,9 +594,19 @@ fn sharing_lifetime_regression(n: u64) {
         }
         other => panic!("expected StaleRevision on refusal, got {other:?}"),
     }
-    assert_eq!(op_current(&owner), 0, "refusal shares nothing; registry stays empty");
     assert_eq!(
-        owner.backend_for_test().prepared_registry_for_test().lock().unwrap().occupied(),
+        op_current(&owner),
+        registry_cell(),
+        "refusal shares nothing; retained registry keeps only its standing reservation"
+    );
+    assert_eq!(
+        owner
+            .backend_for_test()
+            .prepared_registry_for_test()
+            .expect("registry retained")
+            .lock()
+            .unwrap()
+            .occupied(),
         0,
         "no entry created on refusal"
     );
@@ -623,7 +672,7 @@ fn distinct_generations_and_full(n: u64) {
             let coexist = ga + gb + 2 * control + registry_cell() + 2 * pin_bytes();
             assert_eq!(op_current(&owner), coexist, "two distinct generations' combined live objects");
             {
-                let reg = owner.backend_for_test().prepared_registry_for_test();
+                let reg = owner.backend_for_test().prepared_registry_for_test().expect("registry installed");
                 let g = reg.lock().unwrap();
                 assert_eq!(g.inspect(pin1.handle()).unwrap().backing_shares, 1, "distinct backing A");
                 assert_eq!(g.inspect(pin2.handle()).unwrap().backing_shares, 1, "distinct backing B");
@@ -663,7 +712,7 @@ fn distinct_generations_and_full(n: u64) {
                         other => panic!("expected RegistryFull, got {other:?}"),
                     }
                     assert_eq!(
-                        owner.backend_for_test().prepared_registry_for_test().lock().unwrap().occupied(),
+                        owner.backend_for_test().prepared_registry_for_test().expect("registry installed").lock().unwrap().occupied(),
                         2,
                         "no eviction on refusal"
                     );
@@ -684,7 +733,7 @@ fn distinct_generations_and_full(n: u64) {
                     // The refusal mutated nothing: both generations still pinned, registry full.
                     assert_eq!(op_current(&owner), coexist, "no charge leaked by the refused O4");
                     assert_eq!(
-                        owner.backend_for_test().prepared_registry_for_test().lock().unwrap().occupied(),
+                        owner.backend_for_test().prepared_registry_for_test().expect("registry installed").lock().unwrap().occupied(),
                         2,
                         "both generations stay pinned; the refused O4 mutated nothing"
                     );
@@ -695,11 +744,16 @@ fn distinct_generations_and_full(n: u64) {
                 other => panic!("unexpected O4-through-two-pinned outcome: {other:?}"),
             }
 
-            // Cleanup/readmission: release both, return to the standing baseline.
+            // Cleanup/readmission: release both; the registry allocation is retained
+            // with its standing reservation (backend alive).
             assert_eq!(owner.release_prepared(pin1), ReleaseOutcome::Released);
             assert_eq!(owner.release_prepared(pin2), ReleaseOutcome::Released);
-            assert_eq!(op_current(&owner), 0, "both released to operational baseline");
-            assert_eq!(agg_current(&owner), context_ownership, "aggregate back to context ownership only");
+            assert_eq!(op_current(&owner), registry_cell(), "both released; retained registry charged");
+            assert_eq!(
+                agg_current(&owner),
+                context_ownership + registry_cell(),
+                "aggregate back to context ownership + the standing registry reservation"
+            );
         }
         // --- CONSERVATIVE REFUSAL: complete accounting prevents coexistence -------
         PublishResult::RefusedPreWrite(SafetyStoreError::CapacityRefusal(
@@ -714,15 +768,16 @@ fn distinct_generations_and_full(n: u64) {
             assert!(shortfall > 0, "a positive shortfall is reported");
             // The registry is unchanged; the first generation is still pinned/intact.
             assert_eq!(
-                owner.backend_for_test().prepared_registry_for_test().lock().unwrap().occupied(),
+                owner.backend_for_test().prepared_registry_for_test().expect("registry installed").lock().unwrap().occupied(),
                 1,
                 "the first generation stays pinned; the refusal mutated nothing"
             );
             assert_eq!(agg_current(&owner), agg_one_pinned, "no charge leaked by the refused O4");
 
             // CLEANUP: release the first generation so the aggregate has headroom.
+            // The registry allocation is retained with its standing reservation.
             assert_eq!(owner.release_prepared(pin1), ReleaseOutcome::Released);
-            assert_eq!(op_current(&owner), 0, "cleanup to operational baseline");
+            assert_eq!(op_current(&owner), registry_cell(), "cleanup; retained registry charged");
 
             // READMISSION: the SAME O4 now succeeds once the pin is gone, and a fresh
             // generation can be captured against the authoritative revision.
@@ -736,7 +791,7 @@ fn distinct_generations_and_full(n: u64) {
                 "[§3 distinct N={n}] RESULT=CONSERVATIVE_REFUSAL context_ownership={context_ownership}                  ga={ga} one_pinned_aggregate={agg_one_pinned} cap={cap} o4_next={next} shortfall={shortfall}                  (coexistence of a pinned generation with a concurrent O4 exceeds the unchanged ceiling;                  cleanup+readmission demonstrated)"
             );
             assert_eq!(owner.release_prepared(pin2), ReleaseOutcome::Released);
-            assert_eq!(op_current(&owner), 0, "readmitted generation cleaned up");
+            assert_eq!(op_current(&owner), registry_cell(), "readmitted generation released; registry retained");
         }
         other => panic!("unexpected O4-while-pinned outcome: {other:?}"),
     }
@@ -762,21 +817,25 @@ fn release_and_abandonment(n: u64) {
     let owner = init_owner(dir.path(), &ctx);
     publish_qc(&owner, &ctx, [9u8; 32], 5, 0);
 
-    // Normal explicit release.
+    // Normal explicit release. The registry allocation (installed by this capture)
+    // is RETAINED with its standing reservation after the entry is released.
     let p1 = owner.read_validate(None::<&FixtureCommittedHistory>).unwrap();
     let pin1 = owner.capture_prepared_decision(p1, 1).unwrap();
     assert!(op_current(&owner) > 0);
     assert_eq!(owner.release_prepared(pin1), ReleaseOutcome::Released);
-    assert_eq!(op_current(&owner), 0, "normal release cleans to baseline");
+    assert_eq!(op_current(&owner), registry_cell(), "normal release; retained registry charged");
 
-    // Automatic abandonment: drop the pin WITHOUT releasing.
+    // Automatic abandonment: drop the pin WITHOUT releasing (registry reused, no
+    // duplicate charge). Cleanup leaves the retained registry with its reservation.
     let p2 = owner.read_validate(None::<&FixtureCommittedHistory>).unwrap();
     let pin2 = owner.capture_prepared_decision(p2, 1).unwrap();
-    assert!(op_current(&owner) > 0);
+    // One registry charge only (reused): live total is the registry cell + the
+    // entry's generation/pin charges, strictly above the standing baseline.
+    assert!(op_current(&owner) > registry_cell(), "reused registry carries an entry above the standing cell");
     drop(pin2); // non-Copy guard Drop performs cleanup
-    assert_eq!(op_current(&owner), 0, "abandonment (Drop) cleans to baseline");
+    assert_eq!(op_current(&owner), registry_cell(), "abandonment (Drop) cleans to the retained-registry baseline");
     {
-        let reg = owner.backend_for_test().prepared_registry_for_test();
+        let reg = owner.backend_for_test().prepared_registry_for_test().expect("registry installed");
         assert_eq!(reg.lock().unwrap().occupied(), 0);
     }
 
@@ -930,27 +989,37 @@ fn spike_counter_exhaustion_fails_closed() {
     let dir = tempfile::tempdir().unwrap();
     let owner = init_owner(dir.path(), &ctx);
     publish_qc(&owner, &ctx, [9u8; 32], 5, 0);
-    let proof = owner.read_validate(None::<&FixtureCommittedHistory>).unwrap();
 
-    let before = op_current(&owner); // proof holder live
+    // A first successful capture lazily ALLOCATES and installs the registry (with
+    // its standing reservation). Only now can the serial counter be driven to the
+    // brink — before any capture there is no registry to exhaust.
+    let p0 = owner.read_validate(None::<&FixtureCommittedHistory>).unwrap();
+    let pin0 = owner.capture_prepared_decision(p0, 1).expect("first capture installs the registry");
     {
-        let reg = owner.backend_for_test().prepared_registry_for_test();
+        let reg = owner.backend_for_test().prepared_registry_for_test().expect("registry installed");
         reg.lock().unwrap().force_next_serial(u64::MAX);
     }
+
+    // A second capture now refuses with CounterExhausted, failing closed BEFORE any
+    // mutation. The refusal is AFTER registry initialization: the installed registry
+    // (and its standing reservation) is RETAINED, not revived or re-charged.
+    let proof = owner.read_validate(None::<&FixtureCommittedHistory>).unwrap();
+    let before = op_current(&owner); // pin0 entry + registry cell + refused proof holder
     match owner.capture_prepared_decision(proof, 1) {
         Err((p, CaptureRefusal::CounterExhausted)) => {
             assert!(p.recovery_backend_incarnation().is_some(), "proof intact on counter exhaustion");
-            // Fail-closed BEFORE any mutation/allocation: while the refused proof is
-            // still alive, only its holder is charged — no prepared reservation leaked.
+            // Fail-closed BEFORE any mutation: no new prepared reservation leaked and
+            // the retained registry keeps exactly its standing + first-entry charges.
             assert_eq!(op_current(&owner), before, "no charge leaked on counter exhaustion");
         }
         other => panic!("expected CounterExhausted, got {other:?}"),
     }
     assert_eq!(
-        owner.backend_for_test().prepared_registry_for_test().lock().unwrap().occupied(),
-        0,
-        "no entry inserted"
+        owner.backend_for_test().prepared_registry_for_test().expect("registry installed").lock().unwrap().occupied(),
+        1,
+        "no new entry inserted; only the first capture's entry remains"
     );
+    drop(pin0);
 }
 
 #[test]
@@ -963,20 +1032,28 @@ fn spike_stale_and_foreign_handles_refused() {
     let pin = owner_a.capture_prepared_decision(pa, 1).unwrap();
     let handle = pin.handle();
 
-    // Foreign incarnation: present A's handle to B's registry.
+    // Foreign incarnation: present A's handle to B's registry. B must first capture
+    // once to lazily allocate its own (distinct-incarnation) registry.
     let dir_b = tempfile::tempdir().unwrap();
     let owner_b = init_owner(dir_b.path(), &ctx);
+    publish_qc(&owner_b, &ctx, [9u8; 32], 5, 0);
+    let pb = owner_b.read_validate(None::<&FixtureCommittedHistory>).unwrap();
+    let pin_b = owner_b.capture_prepared_decision(pb, 1).expect("B installs its own registry");
     {
-        let reg_b = owner_b.backend_for_test().prepared_registry_for_test();
+        let reg_b = owner_b
+            .backend_for_test()
+            .prepared_registry_for_test()
+            .expect("B registry installed");
         assert_eq!(
             reg_b.lock().unwrap().release_by_handle(handle),
             ReleaseOutcome::ForeignIncarnation,
             "foreign-incarnation handle refused"
         );
     }
+    drop(pin_b);
 
     // Stale serial: release the real entry, then re-release the same handle.
-    let reg_a = owner_a.backend_for_test().prepared_registry_for_test();
+    let reg_a = owner_a.backend_for_test().prepared_registry_for_test().expect("registry installed");
     assert_eq!(reg_a.lock().unwrap().release_by_handle(handle), ReleaseOutcome::Released);
     assert_eq!(
         reg_a.lock().unwrap().release_by_handle(handle),
@@ -1007,10 +1084,11 @@ fn admission_refusal_and_readmission(n: u64) {
     let proof_rev = proof.publication_revision();
     let proof_enc_cap = proof.encoded_capacity();
 
-    // The capture reserves, in order: the registry cell (empty -> occupied), the
-    // owning pin, then the generation core, then the control. Leave headroom for
-    // registry-cell + pin + core but ONE byte short of the control, so admission is
-    // refused on the LAST reservation — exercising cleanup of the earlier ones.
+    // The capture reserves, in order: the registry cell (lazy allocation, admitted
+    // before the registry is created), the owning pin, then the generation core,
+    // then the control. Leave headroom for registry-cell + pin + core but ONE byte
+    // short of the control, so admission is refused on the LAST reservation —
+    // exercising cleanup of the pin + core, with the just-installed registry RETAINED.
     let entry_pre = registry_cell() + pin_bytes() + core;
     let used = owner.backend_for_test().accounting_aggregate_current();
     let standing_charge = cap - used - entry_pre - (control - 1);
@@ -1025,15 +1103,17 @@ fn admission_refusal_and_readmission(n: u64) {
             assert!(returned.recovery_backend_incarnation().is_some());
             assert_eq!(returned.encoded_capacity(), proof_enc_cap, "refused proof original bytes intact");
             assert_eq!(returned.publication_revision(), proof_rev, "revision unchanged");
-            // Cleanup to the correct baseline: every reservation taken before the
-            // failed one is released; only the returned proof holder + standing remain.
+            // A later capture step (the control reservation) refused AFTER registry
+            // initialization: the chosen behavior is to RETAIN the just-installed
+            // registry with its standing reservation. The pin + core reservations
+            // taken before the failed one are released; no entry is published.
             assert_eq!(
                 owner.backend_for_test().accounting_aggregate_current(),
-                baseline_under_pressure,
-                "earlier prepared reservations released on admission refusal"
+                baseline_under_pressure + registry_cell(),
+                "pin + core released; the just-installed registry is retained with its reservation"
             );
             assert_eq!(
-                owner.backend_for_test().prepared_registry_for_test().lock().unwrap().occupied(),
+                owner.backend_for_test().prepared_registry_for_test().expect("registry retained after refusal").lock().unwrap().occupied(),
                 0,
                 "no entry inserted on refusal"
             );
@@ -1059,13 +1139,13 @@ fn admission_refusal_and_readmission(n: u64) {
         .map_err(|(_, r)| r)
         .expect("readmission succeeds once pressure is released");
     assert_eq!(
-        owner.backend_for_test().prepared_registry_for_test().lock().unwrap().occupied(),
+        owner.backend_for_test().prepared_registry_for_test().expect("registry installed").lock().unwrap().occupied(),
         1,
         "readmitted entry present"
     );
-    assert_eq!(op_current(&owner), core + control + registry_cell() + pin_bytes(), "readmitted full charge");
+    assert_eq!(op_current(&owner), core + control + registry_cell() + pin_bytes(), "readmitted full charge (registry reused, charged once)");
     owner.release_prepared(pin);
-    assert_eq!(op_current(&owner), 0, "readmitted entry cleaned up");
+    assert_eq!(op_current(&owner), registry_cell(), "readmitted entry released; registry retained with its reservation");
 }
 
 #[test]
@@ -1167,7 +1247,7 @@ fn tc_generation_capture(n: u64) {
     assert_eq!(op_current(&owner), core + control_charge() + registry_cell() + pin_bytes());
     println!("[tc N={n}] tc_core={core} control={} ceiling={ceiling}", control_charge());
     drop(pin);
-    assert_eq!(op_current(&owner), 0);
+    assert_eq!(op_current(&owner), registry_cell(), "entry released; registry retained with its reservation");
 }
 
 #[test]
@@ -1195,7 +1275,7 @@ fn evidence_context_binding(n: u64) {
     let expect_rev = proof.publication_revision();
 
     let pin = owner.capture_prepared_decision(proof, 1).unwrap();
-    let reg = owner.backend_for_test().prepared_registry_for_test();
+    let reg = owner.backend_for_test().prepared_registry_for_test().expect("registry installed");
     let g = reg.lock().unwrap();
     let view = g.inspect(pin.handle()).unwrap();
     assert_eq!(view.origin_context_digest, expect_digest, "bound to the originating context");
@@ -1213,4 +1293,190 @@ fn spike_evidence_context_binding_n1() {
 #[test]
 fn spike_evidence_context_binding_n4() {
     evidence_context_binding(4);
+}
+
+// ===========================================================================
+// §LT. FOCUSED ALLOCATION-LIFETIME EVIDENCE (lazy registry allocation).
+//
+// These tests exercise the registry's ACTUAL allocation lifetime directly —
+// using `prepared_registry_for_test()` (allocation presence) alongside the
+// aggregate charge (reservation presence):
+//   - open/attach without capture        -> no allocation, no charge
+//   - first-capture admission refusal     -> no uncharged allocation
+//   - successful first capture            -> admission precedes allocation
+//   - shared handles                      -> one registry, one covering reservation
+//   - last entry release, backend alive   -> retained registry stays charged
+//   - subsequent capture                  -> reuse, no duplicate charge
+//   - final destruction, pin > owner      -> reservation released at the end
+// ===========================================================================
+
+#[test]
+fn spike_lt_open_attach_without_capture_no_allocation() {
+    let ctx = ctx_n(4);
+    let dir = tempfile::tempdir().unwrap();
+    let owner = init_owner(dir.path(), &ctx);
+
+    // Before any prepared capture there is NO registry allocation and NO
+    // prepared/registry charge on the operational ledger.
+    assert!(
+        owner.backend_for_test().prepared_registry_for_test().is_none(),
+        "no registry allocation exists before the first prepared capture"
+    );
+    assert_eq!(op_current(&owner), 0, "no prepared storage charged at open/attach");
+
+    // Ordinary attachment work (an O4 publish) does not allocate the registry.
+    publish_qc(&owner, &ctx, [9u8; 32], 5, 0);
+    assert!(
+        owner.backend_for_test().prepared_registry_for_test().is_none(),
+        "ordinary publish does not allocate the prepared registry"
+    );
+    assert_eq!(op_current(&owner), 0, "ordinary publish charges no prepared storage");
+
+    // A read-validate alone (no capture) still does not allocate.
+    let proof = owner.read_validate(None::<&FixtureCommittedHistory>).unwrap();
+    assert!(
+        owner.backend_for_test().prepared_registry_for_test().is_none(),
+        "read-validate without capture does not allocate the registry"
+    );
+    drop(proof);
+}
+
+#[test]
+fn spike_lt_first_capture_admission_refusal_no_uncharged_allocation() {
+    let ctx = ctx_n(4);
+    let dir = tempfile::tempdir().unwrap();
+    let owner = init_owner(dir.path(), &ctx);
+    publish_qc(&owner, &ctx, [9u8; 32], 5, 0);
+
+    let proof = owner.read_validate(None::<&FixtureCommittedHistory>).unwrap();
+    let cap = owner.backend_for_test().accounting_aggregate_cap().unwrap();
+    let used = owner.backend_for_test().accounting_aggregate_current();
+
+    // Leave headroom ONE byte short of the registry-storage charge, so the FIRST
+    // persistent reservation of the capture (the registry cell, admitted before
+    // any allocation) is refused — exercising insufficient admission on the very
+    // first prepared capture.
+    let standing_charge = cap - used - (registry_cell() - 1);
+    let standing = owner
+        .backend_for_test()
+        .reserve_standing_for_test(standing_charge)
+        .expect("standing reservation admits (one byte short of the registry cell)");
+    let before = owner.backend_for_test().accounting_aggregate_current();
+
+    match owner.capture_prepared_decision(proof, 1) {
+        Err((returned, CaptureRefusal::Admission(_))) => {
+            assert!(returned.recovery_backend_incarnation().is_some(), "proof returned intact");
+            // No registry storage was created and no charge leaked: the proof is
+            // returned intact WITHOUT publishing an entry or allocating a registry.
+            assert!(
+                owner.backend_for_test().prepared_registry_for_test().is_none(),
+                "no registry allocation created on insufficient admission"
+            );
+            assert_eq!(
+                owner.backend_for_test().accounting_aggregate_current(),
+                before,
+                "no uncharged allocation; nothing leaked on first-capture refusal"
+            );
+            drop(returned);
+        }
+        other => panic!("expected Admission refusal on the registry cell, got {other:?}"),
+    }
+    drop(standing);
+
+    // Pressure released: the first capture now succeeds and lazily allocates.
+    let fresh = owner.read_validate(None::<&FixtureCommittedHistory>).unwrap();
+    let pin = owner
+        .capture_prepared_decision(fresh, 1)
+        .map_err(|(_, r)| r)
+        .expect("first capture succeeds once pressure is released");
+    assert!(
+        owner.backend_for_test().prepared_registry_for_test().is_some(),
+        "registry lazily allocated on the first successful capture"
+    );
+    drop(pin);
+}
+
+#[test]
+fn spike_lt_admission_precedes_allocation_then_retained_reuse() {
+    let ctx = ctx_n(4);
+    let dir = tempfile::tempdir().unwrap();
+    let owner = init_owner(dir.path(), &ctx);
+    publish_qc(&owner, &ctx, [9u8; 32], 5, 0);
+
+    // None before, Some after: the registry is allocated by (and only by) the
+    // first successful capture.
+    assert!(owner.backend_for_test().prepared_registry_for_test().is_none(), "no allocation before capture");
+    let p0 = owner.read_validate(None::<&FixtureCommittedHistory>).unwrap();
+    let pin0 = owner.capture_prepared_decision(p0, 1).expect("first capture");
+    let reg = owner.backend_for_test().prepared_registry_for_test().expect("allocated by first capture");
+    {
+        let g = reg.lock().unwrap();
+        assert_eq!(g.occupied(), 1, "first entry present");
+        assert_eq!(g.registry_reservation_charge(), registry_cell(), "standing reservation covers the allocation");
+    }
+
+    // Last entry release with the backend still alive: the registry allocation is
+    // RETAINED and its standing reservation remains charged across the zero-entry
+    // period (deallocation-when-empty is NOT required).
+    owner.release_prepared(pin0);
+    {
+        let g = reg.lock().unwrap();
+        assert_eq!(g.occupied(), 0, "registry empty after last release");
+        assert_eq!(g.registry_reservation_charge(), registry_cell(), "standing reservation retained while empty");
+    }
+    assert!(
+        owner.backend_for_test().prepared_registry_for_test().is_some(),
+        "empty registry retained until its final owner drops"
+    );
+    assert_eq!(op_current(&owner), registry_cell(), "only the retained registry reservation remains");
+
+    // Subsequent capture: SAFE REUSE of the retained registry — no duplicate
+    // registry charge and no stale-handle revival (fresh serial).
+    let p1 = owner.read_validate(None::<&FixtureCommittedHistory>).unwrap();
+    let core = prepared_generation_charge(&ctx, p1.retained()).unwrap();
+    let pin1 = owner.capture_prepared_decision(p1, 1).expect("subsequent capture reuses the retained registry");
+    let reg2 = owner.backend_for_test().prepared_registry_for_test().expect("still the one registry");
+    assert!(std::sync::Arc::ptr_eq(&reg, &reg2), "the SAME shared registry is reused, not re-created");
+    assert_eq!(
+        op_current(&owner),
+        core + control_charge() + registry_cell() + pin_bytes(),
+        "reuse charges the new entry but NOT a duplicate registry cell"
+    );
+    drop(pin1);
+}
+
+#[test]
+fn spike_lt_pin_outliving_owner_releases_reservation_at_end() {
+    let ctx = ctx_n(4);
+    let dir = tempfile::tempdir().unwrap();
+    let owner = init_owner(dir.path(), &ctx);
+    publish_qc(&owner, &ctx, [9u8; 32], 5, 0);
+
+    // Observe the shared operational ledger through an independent handle so the
+    // charge can be read AFTER the owner/backend have dropped.
+    let acct = owner.backend_for_test().accounting_handle_for_test();
+
+    let proof = owner.read_validate(None::<&FixtureCommittedHistory>).unwrap();
+    let core = prepared_generation_charge(&ctx, proof.retained()).unwrap();
+    let pin = owner.capture_prepared_decision(proof, 1).expect("capture installs the registry");
+    assert_eq!(
+        acct.current(),
+        core + control_charge() + registry_cell() + pin_bytes(),
+        "entry + registry fully charged while the owner is alive"
+    );
+
+    // Drop the owner (and the only backend handle) while the PIN is still alive.
+    // The pin holds a clone of the shared registry `Arc`, so the registry — and
+    // its standing reservation — follow actual shared ownership and remain alive.
+    drop(owner);
+    assert_eq!(
+        acct.current(),
+        core + control_charge() + registry_cell() + pin_bytes(),
+        "pin outliving its owner keeps the generation + registry reservation charged"
+    );
+
+    // Dropping the final owner (the pin) tears down the entry AND the retained
+    // registry, releasing every reservation — correct end-of-life cleanup.
+    drop(pin);
+    assert_eq!(acct.current(), 0, "last owner (the outliving pin) released all prepared reservations");
 }

@@ -14,12 +14,18 @@ artifacts, and verdicts on the supplied branch are **not** modified by this
 package — `prepared.rs` and the spike test are delivered as an evidence patch,
 not wired into the accepted component.
 
-This revision corrects the prepared-generation **object accounting** and the
-shared-conversion **lifetime** of the previous package. The headings below keep
-four kinds of evidence distinct: *source-derived arithmetic* (struct layout and
-charge formulas), *executed object observations* (measured live allocations),
-*reservation observations* (live aggregate charges), and *inherited evidence*
-(the baseline identity and the re-executed D7–D14 target).
+This revision completes the prepared-generation registry's **allocation
+lifetime**: the registry is now **lazily allocated** — it does not exist at
+backend open or ordinary attachment, is created only on the first prepared
+capture after its storage charge is admitted, and is then **retained with its
+reservation for the whole allocation lifetime** (including zero-entry periods),
+released only when the allocation is destroyed. It preserves the corrected
+prepared-generation **object accounting** and shared-conversion **lifetime** of
+the previous package. The headings below keep four kinds of evidence distinct:
+*source-derived arithmetic* (struct layout and charge formulas), *executed
+object observations* (measured live allocations), *reservation observations*
+(live aggregate charges), and *inherited evidence* (the baseline identity and
+the re-executed D7–D14 target).
 
 ## 1. Baseline and experimental identity
 
@@ -33,7 +39,7 @@ See [`BASELINE.txt`](BASELINE.txt).
 - Isolated experimental checkout: `cp -a` of the baseline, same branch name.
 - Complete applicable patch:
   [`patch/run_422_spike_prepared_generation.patch`](patch/run_422_spike_prepared_generation.patch)
-  (9 files, +2381/-5; two new files included).
+  (9 files, +2736/-6; two new files included).
 
 ## 2. The corrected defect (inherited observation)
 
@@ -67,8 +73,13 @@ previously-exempt owning objects, with no silent measurement substitution:
   of the heap wrapper beyond the embedded record, including the embedded control
   `Reservation`, provenance pin, and padding.
 - The registry cell (`Arc<Mutex<PreparedRegistry>>` + its reservation) is charged
-  **once**, lazily, on the empty→occupied transition; each owning `PreparedPin`
-  is charged per live pin. Neither is exempt.
+  **once**, **lazily**: no registry exists before the first prepared capture; on
+  first capture the registry-storage charge is admitted **before** the allocation
+  is created, and the installed registry then **owns that reservation for its
+  entire allocation lifetime — including while it holds zero entries** — releasing
+  it only when the allocation is destroyed (its last owner, the backend slot plus
+  any outstanding pin, drops). Deallocation-whenever-empty is **not** performed.
+  Each owning `PreparedPin` is charged per live pin. Neither is exempt.
 
 Every embedded entry is counted **once** within its containing allocation: the
 `RetainedRecord` is counted inside `GenerationBacking` (never separately), and
@@ -86,6 +97,13 @@ the registry's fixed `[Option; 2]` slots are counted inside the registry cell.
 | `size_of::<PreparedPin>()` / pin charge | **96** |
 | `size_of::<PreparedEntry>()` | 56 |
 | `size_of::<PreparedHandle>()` | 24 |
+
+The registry-storage charge was **re-measured** after the lifetime change (the
+registry's reservation field is now an owned `Reservation`, held for the whole
+allocation lifetime, rather than an `Option<Reservation>` cleared when empty):
+`size_of::<PreparedRegistry>()` is **176** and the registry-cell charge
+(`Mutex<PreparedRegistry>` cell + `Arc` control overhead) is **208** —
+measured, not assumed.
 
 ### Executed object observation vs covering reservation
 
@@ -172,7 +190,57 @@ included):
   bytes compared, recovery outcome verified, cleanup/readmission preserved.
 - Retained refusals/isolation: foreign-context, standalone/uncharged `None`,
   recovery-required, counter-exhaustion (fail-closed before mutation),
-  automatic-abandonment (`Drop`), stale/foreign handle isolation.
+  automatic-abandonment (`Drop`), stale/foreign handle isolation. Under lazy
+  allocation the counter-exhaustion and foreign-incarnation refusals now run
+  **after** a first capture has installed the registry (there is no registry to
+  exhaust or to present a foreign handle to before the first capture).
+
+## 5b. §LT — Lazy registry allocation lifetime (allocation + reservation)
+
+The registry is **not** allocated at backend open or ordinary attachment. The one
+shared registry is created lazily on the first prepared capture, serialized across
+all handles sharing the backend by the existing serialization-domain guard, with
+its storage charge **admitted before** the allocation. It is then retained with a
+standing reservation for the whole allocation lifetime and released only when the
+allocation is destroyed.
+
+**Control-storage inventory.** The lazy lifecycle adds exactly one piece of
+control storage: the backend's registry slot, now
+`Mutex<Option<Arc<Mutex<PreparedRegistry>>>>` (previously a non-optional
+`Arc<Mutex<PreparedRegistry>>`). The added `Option` is a one-word discriminant
+living inside the already-charged backend container; it is **uncharged control
+storage on the same accepted accounting boundary as the serialization domain**
+(the backend's own infrastructure, outside the prepared-generation aggregate),
+and it holds the one shared registry rather than a second eagerly-allocated
+registry. The owning pin now also holds a clone of the shared registry `Arc`, so
+the registry (and its reservation) follow **actual shared ownership**: a pin may
+outlive its owner handle and keeps the allocation alive until it drops.
+
+**Chosen behavior on a post-initialization refusal.** When a later capture step
+(pin / generation / control admission, `RegistryFull`, or `CounterExhausted`)
+refuses **after** the registry was initialized, the chosen behavior is to
+**RETAIN** the installed registry with its standing reservation (an empty charged
+registry, which the brief permits), never a rollback or stale-handle revival.
+When the registry-storage admission **itself** is refused on the first capture, no
+registry is created and the proof is returned intact.
+
+Focused allocation-lifetime evidence (`spike_lt_*`), using allocation presence
+(`prepared_registry_for_test()`) alongside reservation observations:
+
+| Scenario | Allocation | Reservation |
+|---|---|---|
+| open/attach + ordinary O4, no capture | `None` | no prepared/registry charge |
+| first-capture admission refusal (one byte short of the cell) | `None` | nothing leaked; proof intact |
+| successful first capture | installed | charge admitted **before** install |
+| last entry released, backend alive | **retained** | standing reservation **retained** |
+| subsequent capture | same `Arc` reused | **no** duplicate registry charge |
+| pin outlives its owner (owner dropped, pin live) | retained via pin | reservation held until the pin drops |
+| final destruction (last owner drops) | freed | reservation **released** |
+
+The subsequent-capture reuse is verified by `Arc::ptr_eq` (the **same** shared
+registry, not a re-created one) with a fresh serial (no stale-handle revival), and
+the pin-outlives-owner case observes the shared operational ledger through an
+independent accountant handle after the owner/backend have been dropped.
 
 ## 6. §4 — Executed test results
 
@@ -181,7 +249,7 @@ Commands run in the isolated checkout after the corrections. Raw logs under
 
 | # | Command | Exit | Result | Log |
 |---|---|---|---|---|
-| 1 | `cargo test -p qbind-node --features test-utils --test run_422_spike_prepared_generation_tests -- --nocapture` | 0 | **27 passed; 0 failed; 0 ignored** | [`logs/01_spike_tests.log`](logs/01_spike_tests.log) |
+| 1 | `cargo test -p qbind-node --features test-utils --test run_422_spike_prepared_generation_tests -- --nocapture` | 0 | **31 passed; 0 failed; 0 ignored** | [`logs/01_spike_tests.log`](logs/01_spike_tests.log) |
 | 2 | `cargo build -p qbind-node` | 0 | **Finished** (spike + seams are `test-utils`-gated, absent from a default build) | [`logs/02_default_lib_build.log`](logs/02_default_lib_build.log) |
 | 3 | `cargo test -p qbind-node --features test-utils --test run_422_d7d14_safety_record_store_tests` | 0 | **157 passed; 0 failed; 1 ignored** (inherited, re-executed, **not** relabeled as newly authored) | [`logs/03_d7d14_regression.log`](logs/03_d7d14_regression.log) |
 
@@ -193,6 +261,14 @@ Commands run in the isolated checkout after the corrections. Raw logs under
   reservation**; no component object is exempted and no counter or synthetic
   wrapper is substituted for an actual measurement. Measurement failure is
   explicit.
+- The prepared registry is **lazily allocated**: absent before the first capture,
+  created only after its storage charge is admitted, installed once under the
+  shared serialization boundary, retained with its reservation for the whole
+  allocation lifetime (including empty periods), and released only when the
+  allocation is destroyed — with a pin able to outlive its owner handle. For a
+  backend that never captures, there is no registry and no standing reservation,
+  preserving the accepted operational baseline; the accepted D7–D14 assertions are
+  unchanged.
 - The shared-conversion path keeps a duplicate proof's reservation active until
   its separately-owned evidence backings are destroyed, while preserving the
   canonical generation's independent reservation.

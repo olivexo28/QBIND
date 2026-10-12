@@ -119,7 +119,7 @@ index 0b9ecde..fc10e3e 100644
  /// (§ 13.7A(b), D7-D14 capacity-aware correction).
  ///
 diff --git a/crates/qbind-node/src/safety_record_store/backend.rs b/crates/qbind-node/src/safety_record_store/backend.rs
-index 5b081f7..875da28 100644
+index 5b081f7..6af8833 100644
 --- a/crates/qbind-node/src/safety_record_store/backend.rs
 +++ b/crates/qbind-node/src/safety_record_store/backend.rs
 @@ -15,6 +15,7 @@ use std::sync::{Arc, Mutex, MutexGuard};
@@ -130,35 +130,45 @@ index 5b081f7..875da28 100644
  use crate::pqc_trust_bundle::TrustBundleEnvironment;
  use crate::storage::signing_journal_crc32;
  
-@@ -442,6 +443,17 @@ pub struct SafetyBackend {
+@@ -442,6 +443,27 @@ pub struct SafetyBackend {
      /// not perturb the O1–O5 working-set/holder measurements, while still bounding
      /// the concurrent distinct context owners (`MAX_CONCURRENT_CONTEXT_OWNERS`).
      context_accounting: SharedAccountant,
-+    /// The shared, bounded **prepared-decision L0** registry (§ 13.6). Shared by
-+    /// every attached handle / clone of this instance (the inner `Arc` is cloned,
-+    /// never re-created), so a second handle cannot open a bypass registry. It is
-+    /// backend infrastructure on a par with the serialization domain and the
-+    /// accountant mutexes — the registry *container* (a fixed inline slot array
-+    /// behind one `Arc<Mutex<..>>`) is not charged against the retained-bytes
-+    /// aggregate; only the per-entry application-owned retained data (identity +
-+    /// arc-handle + the shared generation) is, under the terms the aggregate
-+    /// already budgets. A fresh backend open (and reopen) draws a fresh empty
-+    /// registry bound to this open's ownership incarnation.
-+    prepared: Arc<Mutex<PreparedRegistry>>,
++    /// The shared **lazy-initialization slot** for the bounded prepared-decision
++    /// L0 registry (§ 13.6). This slot is `None` at backend open and ordinary
++    /// attachment — **no registry allocation exists** until the first prepared
++    /// capture admits the registry-storage charge and installs one here (under the
++    /// serialization domain, so concurrent handles cannot install bypass
++    /// registries). Every attached handle / clone shares this one slot (the outer
++    /// `Arc` is cloned, never re-created), so the registry, once installed, is
++    /// unique and shared.
++    ///
++    /// **Control-storage inventory / accounting treatment:** the slot itself is a
++    /// fixed, pointer-sized `Option<Arc<..>>` behind one `Mutex`, cloned-`Arc`
++    /// shared infrastructure on a par with the serialization domain and the
++    /// accountant mutexes — a bounded, O(1) coordination cell that is **not**
++    /// charged against the retained-bytes aggregate (it holds no application
++    /// retained data; empty, it owns nothing). The charged object is the registry
++    /// *allocation* the slot may come to hold: its `Mutex<PreparedRegistry>` cell
++    /// (and the per-entry/generation/pin data) is admitted and reserved before it
++    /// is created, so the uncharged allocation is **not** merely moved into a new
++    /// eagerly allocated wrapper. A fresh backend open (and reopen) starts empty
++    /// and binds any later-installed registry to this open's ownership incarnation.
++    prepared: Arc<Mutex<Option<Arc<Mutex<PreparedRegistry>>>>>,
      /// Source/test-only: a deterministic hook fired by the owner at the exact
      /// point **after** an atomic publication has returned its durability
      /// acknowledgement but **before** the component performs its in-memory
-@@ -498,6 +510,9 @@ impl SafetyBackend {
+@@ -498,6 +520,9 @@ impl SafetyBackend {
          // charge is bounded by the accepted component aggregate ceiling (§ 13.7,
          // finding #4). Cloning the handle below shares the single inner guard.
          let aggregate = AggregateAuthority::new();
-+        // Draw this open's ownership incarnation once so the prepared registry is
-+        // bound to the same incarnation the struct records below.
++        // Draw this open's ownership incarnation once; the struct records it below
++        // and any lazily-installed prepared registry is later bound to it.
 +        let incarnation = OWNERSHIP_INCARNATION.fetch_add(1, Ordering::SeqCst);
          Ok(SafetyBackend {
              db: Arc::new(db),
              domain: Arc::new(Mutex::new(SerializationDomain(()))),
-@@ -507,7 +522,7 @@ impl SafetyBackend {
+@@ -507,7 +532,7 @@ impl SafetyBackend {
              // durability acknowledgement (§ 13.4 / § 13.5).
              effective: Arc::new(AtomicBool::new(false)),
              // Draw a fresh ownership incarnation for this open (and reopen).
@@ -167,33 +177,80 @@ index 5b081f7..875da28 100644
              // A fresh, unbound operational accountant partition; the first
              // attached handle binds its per-context operational sub-ceiling.
              accounting: SharedAccountant::new(aggregate.clone()),
-@@ -517,6 +532,9 @@ impl SafetyBackend {
+@@ -517,6 +542,11 @@ impl SafetyBackend {
              // partition, so neither partition can admit beyond the accepted
              // combined coexistence budget.
              context_accounting: SharedAccountant::new(aggregate),
-+            // A fresh empty prepared-decision L0 registry bound to this open's
-+            // ownership incarnation (shared by every attached handle thereafter).
-+            prepared: Arc::new(Mutex::new(PreparedRegistry::new(incarnation))),
++            // The prepared-decision L0 registry is LAZILY allocated: the slot is
++            // empty at open and ordinary attachment; the first prepared capture
++            // admits the registry-storage charge and installs one registry here,
++            // bound to this open's ownership incarnation.
++            prepared: Arc::new(Mutex::new(None)),
              // No crash-boundary hook installed unless a test installs one.
              #[cfg(any(test, feature = "test-utils"))]
              pre_effective_hook: Arc::new(Mutex::new(None)),
-@@ -624,6 +642,21 @@ impl SafetyBackend {
+@@ -614,6 +644,17 @@ impl SafetyBackend {
+         self.accounting.reserve(charge)
+     }
+ 
++    /// Source/test-only: an independent clone of the operational accountant
++    /// handle. The handle shares the same underlying sub-ledger, so a test can
++    /// observe the aggregate charge AFTER the backend (and its owner) have been
++    /// dropped — e.g. to prove that a pin outliving its owner keeps the lazily
++    /// allocated registry's standing reservation charged until the pin drops.
++    /// Gated behind `test-utils`.
++    #[cfg(any(test, feature = "test-utils"))]
++    pub fn accounting_handle_for_test(&self) -> super::accounting::SharedAccountant {
++        self.accounting.clone()
++    }
++
+     /// Acquire the single shared serialization domain for a check-then-write
+     /// sequence. Every attached handle contends on the same lock. Crate-internal:
+     /// the guard is only ever produced for, and consumed by, this backend's own
+@@ -624,6 +665,48 @@ impl SafetyBackend {
              .expect("safety serialization domain poisoned")
      }
  
-+    /// The shared prepared-decision L0 registry `Arc` (§ 13.6). Returns a cloned
-+    /// handle to the single shared registry; never re-creates it. Crate-internal:
-+    /// used by the owner capture/release path and by a [`super::prepared::PreparedPin`]'s
-+    /// automatic-abandonment `Drop`.
-+    pub(crate) fn prepared_registry(&self) -> Arc<Mutex<PreparedRegistry>> {
-+        Arc::clone(&self.prepared)
++    /// The installed shared prepared-decision L0 registry `Arc`, or `None` if no
++    /// registry has been allocated yet (before the first prepared capture).
++    /// Crate-internal: used by the owner capture/release path. Never allocates —
++    /// allocation is performed by the capture path after admitting its charge.
++    pub(crate) fn prepared_registry_installed(&self) -> Option<Arc<Mutex<PreparedRegistry>>> {
++        self.prepared
++            .lock()
++            .expect("prepared registry slot poisoned")
++            .clone()
 +    }
 +
-+    /// Source/test-only: borrow the shared prepared registry to assert its live
-+    /// object coverage and serial state directly. Gated behind `test-utils`.
++    /// Install the first (and only) shared prepared-decision L0 registry, under a
++    /// **held serialization-domain guard** so first-initialization is serialized
++    /// across every attached handle — concurrent captures cannot each install a
++    /// bypass registry. If a registry is already installed (it never is while the
++    /// domain guard is held, but this is checked rather than assumed), the existing
++    /// one is returned and `registry` (with its surplus reservation) is dropped.
++    /// Crate-internal: the caller admits the registry-storage charge and moves it
++    /// into `registry` **before** calling this.
++    pub(crate) fn install_prepared_registry(
++        &self,
++        _domain: &MutexGuard<'_, SerializationDomain>,
++        registry: Arc<Mutex<PreparedRegistry>>,
++    ) -> Arc<Mutex<PreparedRegistry>> {
++        let mut slot = self.prepared.lock().expect("prepared registry slot poisoned");
++        match slot.as_ref() {
++            Some(existing) => Arc::clone(existing),
++            None => {
++                *slot = Some(Arc::clone(&registry));
++                registry
++            }
++        }
++    }
++
++    /// Source/test-only: the installed shared prepared registry, or `None` if none
++    /// has been lazily allocated yet. Used to assert allocation lifetime and live
++    /// object coverage directly. Gated behind `test-utils`.
 +    #[cfg(any(test, feature = "test-utils"))]
-+    pub fn prepared_registry_for_test(&self) -> Arc<Mutex<PreparedRegistry>> {
-+        Arc::clone(&self.prepared)
++    pub fn prepared_registry_for_test(&self) -> Option<Arc<Mutex<PreparedRegistry>>> {
++        self.prepared_registry_installed()
 +    }
 +
      /// Read the raw (CRC-verified) metadata bytes, if present. `max_payload` is
@@ -223,9 +280,18 @@ index 89e9576..d92633e 100644
  pub use record::{
      DecodedRecord, EvidenceStatus, LockedRecord, RetainedRecord, SafetyRecord, SupportingEvidence,
 diff --git a/crates/qbind-node/src/safety_record_store/owner.rs b/crates/qbind-node/src/safety_record_store/owner.rs
-index fa51f17..9750268 100644
+index fa51f17..991269e 100644
 --- a/crates/qbind-node/src/safety_record_store/owner.rs
 +++ b/crates/qbind-node/src/safety_record_store/owner.rs
+@@ -8,7 +8,7 @@
+ //! write failure, uncertain publication, acknowledged durable success, and
+ //! in-memory effectiveness are returned as distinct outcomes.
+ 
+-use std::sync::Arc;
++use std::sync::{Arc, Mutex};
+ 
+ use sha3::{Digest, Sha3_256};
+ 
 @@ -18,6 +18,7 @@ use super::error::{
      AlreadyEstablishedKind, ArithmeticOverflowSite, CapacityRefusalDetail,
      MissingIndependentInputSite, RecoveryRequiredReason, SafetyStoreError, StructuralRefusalDetail,
@@ -286,7 +352,7 @@ index fa51f17..9750268 100644
  /// Decoded initialization metadata (one per backend DB).
  #[derive(Debug, Clone, PartialEq, Eq)]
  pub struct SafetyMeta {
-@@ -1172,6 +1218,280 @@ impl SafetyRecordOwner {
+@@ -1172,6 +1218,295 @@ impl SafetyRecordOwner {
              .grant_recovery_capability(self.backend.incarnation()))
      }
  
@@ -385,48 +451,67 @@ index fa51f17..9750268 100644
 +            ));
 +        }
 +
-+        // --- admission + consume under the registry leaf lock ---
-+        let registry_arc = self.backend.prepared_registry();
++        // --- lazy registry allocation (charge admitted before allocation) ------
++        // Before the first prepared capture no registry allocation exists. Obtain
++        // the one shared registry, allocating it lazily on first capture: admit the
++        // registry-storage charge BEFORE the allocation is created, then install
++        // exactly one shared registry under the held serialization-domain `guard`
++        // (first-initialization is serialized across all handles sharing the
++        // backend, so concurrent captures cannot install bypass registries). The
++        // installed registry owns its standing reservation for the ENTIRE allocation
++        // lifetime — including zero-entry periods — releasing it only when the
++        // allocation is destroyed (its last owner, the backend slot plus any
++        // outstanding pin, drops). A reused registry is NOT re-charged.
++        let registry_arc = match self.backend.prepared_registry_installed() {
++            Some(existing) => existing,
++            None => {
++                // On insufficient admission, return the proof intact WITHOUT
++                // creating any registry storage or publishing an entry.
++                let registry_res = match self
++                    .backend
++                    .accounting()
++                    .reserve(super::prepared::registry_cell_charge())
++                {
++                    Ok(r) => r,
++                    Err(e) => return Err((proof, CaptureRefusal::Admission(e))),
++                };
++                let fresh = Arc::new(Mutex::new(super::prepared::PreparedRegistry::new(
++                    incarnation,
++                    registry_res,
++                )));
++                self.backend.install_prepared_registry(&guard, fresh)
++            }
++        };
 +        let mut reg = registry_arc.lock().expect("prepared registry poisoned");
 +
-+        // Refuse a full registry WITHOUT eviction; proof returned intact.
++        // Refuse a full registry WITHOUT eviction; proof returned intact. (A
++        // registry just installed by this capture is empty, so this only fires for
++        // a reused registry.) The retained registry keeps its standing reservation.
 +        if reg.free_slot().is_none() {
 +            return Err((proof, CaptureRefusal::RegistryFull));
 +        }
-+        // Fail closed BEFORE any mutation if the serial counter is exhausted.
++        // Fail closed BEFORE any mutation if the serial counter is exhausted; the
++        // retained registry (and its standing reservation) is left intact. This is a
++        // later capture step refusing AFTER registry initialization: the chosen
++        // behavior is to RETAIN the allocation with its reservation (documented and
++        // tested), never a stale-handle revival.
 +        if reg.next_serial_checked().is_none() {
 +            return Err((proof, CaptureRefusal::CounterExhausted));
 +        }
 +
-+        // Admission-before-allocation. Every prepared live object is charged
-+        // against the ACTUAL object it covers (no synthetic wrapper, no exempt
-+        // "infrastructure"): the registry-storage charge covers the containing
-+        // slot array (and its embedded entry, counted once) when the registry
-+        // transitions empty -> occupied; the owning-pin charge covers the returned
-+        // guard. Both are reserved WHILE the proof's full holder is still live, so
-+        // no live object is ever uncharged across the conversion.
-+        let registry_res = if reg.occupied() == 0 {
-+            match self
-+                .backend
-+                .accounting()
-+                .reserve(super::prepared::registry_cell_charge())
-+            {
-+                Ok(r) => Some(r),
-+                Err(e) => return Err((proof, CaptureRefusal::Admission(e))),
-+            }
-+        } else {
-+            None
-+        };
++        // Admission-before-allocation for the owning-pin object. (The registry
++        // storage charge was already admitted before the registry was allocated
++        // above.) The pin is reserved WHILE the proof's full holder is still live,
++        // so no live object is ever uncharged across the conversion. If this refuses
++        // after a just-installed registry, that empty registry is retained with its
++        // standing reservation (chosen behavior for a post-initialization refusal).
 +        let pin_res = match self
 +            .backend
 +            .accounting()
 +            .reserve(super::prepared::pin_charge())
 +        {
 +            Ok(r) => r,
-+            Err(e) => {
-+                drop(registry_res);
-+                return Err((proof, CaptureRefusal::Admission(e)));
-+            }
++            Err(e) => return Err((proof, CaptureRefusal::Admission(e))),
 +        };
 +
 +        // Share an existing generation backing if one holds an equal retained
@@ -479,14 +564,13 @@ index fa51f17..9750268 100644
 +                    h.release_now();
 +                }
 +            }
-+            reg.insert_shared(identity, backing, registry_res)
++            reg.insert_shared(identity, backing)
 +                .expect("free slot + serial pre-checked under the held registry lock")
 +        } else {
 +            let gen_charge = match prepared_generation_charge(self.pinned(), proof.retained()) {
 +                Ok(c) => c,
 +                Err(e) => {
 +                    drop(pin_res);
-+                    drop(registry_res);
 +                    return Err((proof, CaptureRefusal::Admission(e)));
 +                }
 +            };
@@ -499,7 +583,6 @@ index fa51f17..9750268 100644
 +                Ok(c) => c,
 +                Err(e) => {
 +                    drop(pin_res);
-+                    drop(registry_res);
 +                    return Err((proof, CaptureRefusal::Admission(e)));
 +                }
 +            };
@@ -509,7 +592,6 @@ index fa51f17..9750268 100644
 +                Ok(r) => r,
 +                Err(e) => {
 +                    drop(pin_res);
-+                    drop(registry_res);
 +                    return Err((proof, CaptureRefusal::Admission(e)));
 +                }
 +            };
@@ -518,13 +600,13 @@ index fa51f17..9750268 100644
 +                Err(e) => {
 +                    drop(gen_res);
 +                    drop(pin_res);
-+                    drop(registry_res);
 +                    return Err((proof, CaptureRefusal::Admission(e)));
 +                }
 +            };
 +            // Now consume the proof: move the retained generation in, drop the
 +            // encoded buffer, insert, and release the proof's full holder AFTER the
-+            // core + control (+ registry + pin) reservations are live.
++            // core + control (+ pin) reservations are live. The registry already
++            // owns its standing registry-storage reservation.
 +            let parts = proof.into_prepared_parts();
 +            let prior_holder = parts.prior_holder;
 +            let recovery_incarnation = parts
@@ -540,7 +622,6 @@ index fa51f17..9750268 100644
 +                    current,
 +                    gen_res,
 +                    control_res,
-+                    registry_res,
 +                )
 +                .expect("free slot + serial pre-checked under the held registry lock");
 +            if let Some(h) = prior_holder {
@@ -569,10 +650,10 @@ index fa51f17..9750268 100644
      // -----------------------------------------------------------------------
 diff --git a/crates/qbind-node/src/safety_record_store/prepared.rs b/crates/qbind-node/src/safety_record_store/prepared.rs
 new file mode 100644
-index 0000000..c697346
+index 0000000..33897eb
 --- /dev/null
 +++ b/crates/qbind-node/src/safety_record_store/prepared.rs
-@@ -0,0 +1,614 @@
+@@ -0,0 +1,637 @@
 +//! RUN 422 — **generation-only** prepared-decision L0 evidence retention
 +//! (§ 13.6), an isolated executable experiment.
 +//!
@@ -780,8 +861,18 @@ index 0000000..c697346
 +/// The bounded prepared-decision L0 registry: a fixed inline slot array (no
 +/// growable backing — its inline size already includes its embedded slots and
 +/// entries), a monotonic serial counter, and the backend incarnation it belongs
-+/// to. Shared across attached handles behind one `Arc<Mutex<..>>` created at
-+/// backend open, so a second handle cannot open a bypass registry.
++/// to. The whole registry is **lazily allocated** — it does not exist at backend
++/// open or ordinary attachment. It is created only by the first prepared capture,
++/// **after** that capture has admitted the registry-storage charge, and is then
++/// installed **once** behind a shared `Arc<Mutex<..>>` (under the backend
++/// serialization domain, so concurrent handles cannot install bypass registries).
++/// Once installed, the registry — and the [`Reservation`] it owns from
++/// construction — persists for the **entire lifetime of the allocation**,
++/// including periods with zero live entries, and is released only when the last
++/// owner of the allocation (the backend slot and any outstanding
++/// [`PreparedPin`]) drops. The reservation lifetime therefore follows the
++/// registry's **actual shared ownership**, so a pin that outlives its owner
++/// handle keeps the allocation (and its covering reservation) alive.
 +#[derive(Debug)]
 +pub struct PreparedRegistry {
 +    slots: [Option<PreparedEntry>; PREPARED_SLOTS],
@@ -789,21 +880,31 @@ index 0000000..c697346
 +    incarnation: u64,
 +    /// The **registry-storage** charge (the whole `Mutex<PreparedRegistry>` cell
 +    /// value + its shared-allocation overhead), covering this container and its
-+    /// embedded entry slots **once**. Reserved lazily by the capture path when the
-+    /// registry transitions empty → occupied, and released (RAII) when it returns
-+    /// to empty, so an unused backend charges nothing for prepared storage while a
-+    /// backend holding ≥1 live entry always covers its registry storage.
-+    registry_reservation: Option<Reservation>,
++    /// embedded entry slots **once**. It is admitted by the capture path **before**
++    /// the allocation is created and moved in here at construction, so its lifetime
++    /// **is** the allocation's lifetime (RAII): it stays charged for as long as the
++    /// registry allocation is retained — including while empty — and is released
++    /// exactly when the allocation is destroyed (its last owner drops). It is never
++    /// dropped on an empty→occupied→empty cycle; deallocation-whenever-empty is not
++    /// required and is deliberately not done.
++    ///
++    /// `#[allow(dead_code)]`: the field is held purely for its RAII `Drop` (the
++    /// reservation is released when the allocation is destroyed) and is read only
++    /// by the `test-utils` accessor below, so the default build sees no reader.
++    #[allow(dead_code)]
++    registry_reservation: Reservation,
 +}
 +
 +impl PreparedRegistry {
-+    /// A fresh empty registry bound to a backend incarnation.
-+    pub fn new(incarnation: u64) -> Self {
++    /// A fresh empty registry bound to a backend incarnation, consuming the
++    /// already-admitted registry-storage [`Reservation`] (admission precedes this
++    /// allocation). The reservation is owned for the allocation's whole lifetime.
++    pub fn new(incarnation: u64, registry_reservation: Reservation) -> Self {
 +        PreparedRegistry {
 +            slots: Default::default(),
 +            next_serial: 0,
 +            incarnation,
-+            registry_reservation: None,
++            registry_reservation,
 +        }
 +    }
 +
@@ -860,12 +961,11 @@ index 0000000..c697346
 +        if matches {
 +            // Dropping the entry drops its `Arc<GenerationBacking>` share and, if
 +            // this was the last share, the generation core + control charges
-+            // (RAII). When the registry returns to empty, release its one-time
-+            // registry-storage charge too.
++            // (RAII). The registry-storage reservation is **not** touched here: it
++            // stays charged for the entire allocation lifetime (including this
++            // empty period) and is released only when the allocation is destroyed
++            // (its last owner — the backend slot and any outstanding pin — drops).
 +            self.slots[handle.slot] = None;
-+            if self.occupied() == 0 {
-+                self.registry_reservation = None;
-+            }
 +            ReleaseOutcome::Released
 +        } else {
 +            ReleaseOutcome::NotFound
@@ -909,6 +1009,15 @@ index 0000000..c697346
 +    #[cfg(any(test, feature = "test-utils"))]
 +    pub fn next_serial_for_test(&self) -> u64 {
 +        self.next_serial
++    }
++
++    /// Test-only: the standing registry-storage reservation charge this
++    /// allocation holds for its whole lifetime (covers the cell once, retained
++    /// even while empty). Observes the reservation directly, independent of entry
++    /// state.
++    #[cfg(any(test, feature = "test-utils"))]
++    pub fn registry_reservation_charge(&self) -> u128 {
++        self.registry_reservation.charge()
 +    }
 +
 +    /// Test-only bounded seam: drive the serial counter to the brink of
@@ -1048,7 +1157,8 @@ index 0000000..c697346
 +/// The **registry-storage** charge: the whole `Mutex<PreparedRegistry>` cell value
 +/// (container + its embedded entry slots + serial + incarnation + the inline
 +/// registry reservation, counted **once**) plus the shared-allocation (`Arc`)
-+/// overhead. Reserved lazily on the empty → occupied transition.
++/// overhead. Admitted by the first prepared capture **before** the registry
++/// allocation is created, then retained for the allocation's whole lifetime.
 +pub(crate) fn registry_cell_charge() -> u128 {
 +    std::mem::size_of::<Mutex<PreparedRegistry>>() as u128 + ARC_CTRL
 +}
@@ -1110,7 +1220,6 @@ index 0000000..c697346
 +        captured_revision: u64,
 +        gen_reservation: Reservation,
 +        control_reservation: Reservation,
-+        registry_reservation: Option<Reservation>,
 +    ) -> Option<PreparedHandle> {
 +        let backing = Arc::new(GenerationBacking {
 +            retained,
@@ -1121,7 +1230,7 @@ index 0000000..c697346
 +            gen_reservation,
 +            control_reservation,
 +        });
-+        self.place(identity, backing, registry_reservation)
++        self.place(identity, backing)
 +    }
 +
 +    /// Crate-internal: insert an entry that **shares** an existing backing (one
@@ -1130,9 +1239,8 @@ index 0000000..c697346
 +        &mut self,
 +        identity: GenerationIdentity,
 +        backing: SharedGenerationBacking,
-+        registry_reservation: Option<Reservation>,
 +    ) -> Option<PreparedHandle> {
-+        self.place(identity, backing.0, registry_reservation)
++        self.place(identity, backing.0)
 +    }
 +
 +    /// Crate-internal: find a shareable backing (equal retained generation).
@@ -1163,17 +1271,13 @@ index 0000000..c697346
 +        &mut self,
 +        identity: GenerationIdentity,
 +        backing: Arc<GenerationBacking>,
-+        registry_reservation: Option<Reservation>,
 +    ) -> Option<PreparedHandle> {
 +        let slot = self.first_free()?;
 +        let serial = self.peek_serial()?;
 +        let next = self.next_serial.checked_add(1)?;
-+        // Adopt the one-time registry-storage reservation on the empty → occupied
-+        // transition (the caller passes `Some` iff the registry was empty); any
-+        // surplus reservation is released by being dropped.
-+        if self.registry_reservation.is_none() {
-+            self.registry_reservation = registry_reservation;
-+        }
++        // The registry-storage reservation was admitted and moved in at
++        // construction (admission precedes allocation); it is retained for the
++        // allocation's whole lifetime, so nothing is adopted or charged here.
 +        self.slots[slot] = Some(PreparedEntry {
 +            identity,
 +            serial,
@@ -1337,10 +1441,10 @@ index 82c1190..f8425ba 100644
  /// The single decoded-generation wrapper whose `size_of` is the whole-enum
 diff --git a/crates/qbind-node/tests/run_422_spike_prepared_generation_tests.rs b/crates/qbind-node/tests/run_422_spike_prepared_generation_tests.rs
 new file mode 100644
-index 0000000..92b46da
+index 0000000..66e6885
 --- /dev/null
 +++ b/crates/qbind-node/tests/run_422_spike_prepared_generation_tests.rs
-@@ -0,0 +1,1216 @@
+@@ -0,0 +1,1482 @@
 +//! RUN 422 — generation-only prepared-decision L0 ownership feasibility spike.
 +//!
 +//! Executable, discriminating tests for the §13.6 prepared-decision L0
@@ -1654,13 +1758,19 @@ index 0000000..92b46da
 +        "live reservations = core + control + registry-cell + pin"
 +    );
 +    {
-+        let reg = owner.backend_for_test().prepared_registry_for_test();
++        let reg = owner
++            .backend_for_test()
++            .prepared_registry_for_test()
++            .expect("registry lazily installed by the capture");
 +        let g = reg.lock().unwrap();
 +        let v = g.inspect(pin1.handle()).expect("entry live");
 +        assert_eq!(v.generation_core_charge, core, "inspected core charge");
 +        assert_eq!(v.generation_control_charge, control, "inspected control charge");
 +        assert_eq!(v.evidence_backing_capacity, owned_backings, "inspected owned backings");
 +        assert_eq!(v.backing_shares, 1);
++        // The registry holds its standing storage reservation for the whole
++        // allocation lifetime (admitted before the allocation existed).
++        assert_eq!(g.registry_reservation_charge(), registry_cell(), "standing registry reservation");
 +    }
 +    println!(
 +        "[§1 N={n}] backing_inline={backing_inline} owned_backings={owned_backings} arc={arc_overhead} \
@@ -1676,7 +1786,25 @@ index 0000000..92b46da
 +        size_of_prepared_handle(),
 +    );
 +    assert_eq!(pin1.release(), ReleaseOutcome::Released);
-+    assert_eq!(op_current(&owner), 0, "all prepared reservations released to baseline");
++    // Last entry released while the backend is still alive: the registry allocation
++    // is RETAINED and its storage reservation remains charged (deallocation when
++    // empty is not required). The operational baseline is now the standing cell.
++    assert_eq!(
++        op_current(&owner),
++        registry_cell(),
++        "retained empty registry keeps its standing reservation after the last release"
++    );
++    assert_eq!(
++        owner
++            .backend_for_test()
++            .prepared_registry_for_test()
++            .expect("registry retained")
++            .lock()
++            .unwrap()
++            .occupied(),
++        0,
++        "registry retained but empty after the last release"
++    );
 +}
 +
 +#[test]
@@ -1784,7 +1912,10 @@ index 0000000..92b46da
 +    );
 +
 +    // Object coverage independent of counters: both entries share one backing.
-+    let reg = owner.backend_for_test().prepared_registry_for_test();
++    let reg = owner
++        .backend_for_test()
++        .prepared_registry_for_test()
++        .expect("registry lazily installed by the first capture");
 +    {
 +        let g = reg.lock().unwrap();
 +        let v1 = g.inspect(pin1.handle()).expect("entry 1 live");
@@ -1796,6 +1927,8 @@ index 0000000..92b46da
 +        assert_eq!(v2.generation_core_charge, core);
 +        assert!(v1.evidence_backing_capacity > 0);
 +        assert!(matches!(v1.evidence_status, EvidenceStatus::Unverified));
++        // Shared handles cover ONE registry and ONE covering reservation.
++        assert_eq!(g.registry_reservation_charge(), registry_cell(), "one covering registry reservation");
 +    }
 +
 +    // First drop RETAINS the generation (second entry still shares it).
@@ -1806,9 +1939,14 @@ index 0000000..92b46da
 +        "generation retained after first drop (one pin released)"
 +    );
 +
-+    // Final drop RELEASES the generation, the registry cell, and the last pin.
++    // Final drop releases the generation and the last pin; the registry allocation
++    // is RETAINED with its standing reservation (backend still alive).
 +    assert_eq!(pin2.release(), ReleaseOutcome::Released);
-+    assert_eq!(op_current(&owner), 0, "generation released after final drop");
++    assert_eq!(
++        op_current(&owner),
++        registry_cell(),
++        "generation released; retained empty registry keeps its standing reservation"
++    );
 +
 +    println!("[shared N={n}] core={core} control={control}");
 +}
@@ -1882,14 +2020,19 @@ index 0000000..92b46da
 +    );
 +    drop(pin_r); // AUTOMATIC Drop cleanup of a shared entry
 +
-+    // AUTOMATIC Drop of the fresh backing holder returns to baseline.
++    // AUTOMATIC Drop of the fresh backing holder releases the last pin. The
++    // registry allocation is RETAINED with its standing reservation (backend alive).
 +    drop(pin1);
-+    assert_eq!(op_current(&owner), 0, "all pins released/dropped to baseline");
++    assert_eq!(
++        op_current(&owner),
++        registry_cell(),
++        "all pins released/dropped; retained empty registry keeps its standing reservation"
++    );
 +
 +    // REFUSAL path shares nothing: a fresh proof read at the authoritative revision
 +    // but presented with a MISMATCHED expected revision is fenced out (StaleRevision)
 +    // before any conversion. On refusal the proof is returned and dropped; no entry
-+    // is created or shared, and the registry stays empty.
++    // is created or shared, and the (already-installed) registry stays empty.
 +    let fresh = owner.read_validate(None::<&FixtureCommittedHistory>).unwrap();
 +    match owner.capture_prepared_decision(fresh, 999) {
 +        Err((_p, CaptureRefusal::StaleRevision { expected, found })) => {
@@ -1898,9 +2041,19 @@ index 0000000..92b46da
 +        }
 +        other => panic!("expected StaleRevision on refusal, got {other:?}"),
 +    }
-+    assert_eq!(op_current(&owner), 0, "refusal shares nothing; registry stays empty");
 +    assert_eq!(
-+        owner.backend_for_test().prepared_registry_for_test().lock().unwrap().occupied(),
++        op_current(&owner),
++        registry_cell(),
++        "refusal shares nothing; retained registry keeps only its standing reservation"
++    );
++    assert_eq!(
++        owner
++            .backend_for_test()
++            .prepared_registry_for_test()
++            .expect("registry retained")
++            .lock()
++            .unwrap()
++            .occupied(),
 +        0,
 +        "no entry created on refusal"
 +    );
@@ -1966,7 +2119,7 @@ index 0000000..92b46da
 +            let coexist = ga + gb + 2 * control + registry_cell() + 2 * pin_bytes();
 +            assert_eq!(op_current(&owner), coexist, "two distinct generations' combined live objects");
 +            {
-+                let reg = owner.backend_for_test().prepared_registry_for_test();
++                let reg = owner.backend_for_test().prepared_registry_for_test().expect("registry installed");
 +                let g = reg.lock().unwrap();
 +                assert_eq!(g.inspect(pin1.handle()).unwrap().backing_shares, 1, "distinct backing A");
 +                assert_eq!(g.inspect(pin2.handle()).unwrap().backing_shares, 1, "distinct backing B");
@@ -2006,7 +2159,7 @@ index 0000000..92b46da
 +                        other => panic!("expected RegistryFull, got {other:?}"),
 +                    }
 +                    assert_eq!(
-+                        owner.backend_for_test().prepared_registry_for_test().lock().unwrap().occupied(),
++                        owner.backend_for_test().prepared_registry_for_test().expect("registry installed").lock().unwrap().occupied(),
 +                        2,
 +                        "no eviction on refusal"
 +                    );
@@ -2027,7 +2180,7 @@ index 0000000..92b46da
 +                    // The refusal mutated nothing: both generations still pinned, registry full.
 +                    assert_eq!(op_current(&owner), coexist, "no charge leaked by the refused O4");
 +                    assert_eq!(
-+                        owner.backend_for_test().prepared_registry_for_test().lock().unwrap().occupied(),
++                        owner.backend_for_test().prepared_registry_for_test().expect("registry installed").lock().unwrap().occupied(),
 +                        2,
 +                        "both generations stay pinned; the refused O4 mutated nothing"
 +                    );
@@ -2038,11 +2191,16 @@ index 0000000..92b46da
 +                other => panic!("unexpected O4-through-two-pinned outcome: {other:?}"),
 +            }
 +
-+            // Cleanup/readmission: release both, return to the standing baseline.
++            // Cleanup/readmission: release both; the registry allocation is retained
++            // with its standing reservation (backend alive).
 +            assert_eq!(owner.release_prepared(pin1), ReleaseOutcome::Released);
 +            assert_eq!(owner.release_prepared(pin2), ReleaseOutcome::Released);
-+            assert_eq!(op_current(&owner), 0, "both released to operational baseline");
-+            assert_eq!(agg_current(&owner), context_ownership, "aggregate back to context ownership only");
++            assert_eq!(op_current(&owner), registry_cell(), "both released; retained registry charged");
++            assert_eq!(
++                agg_current(&owner),
++                context_ownership + registry_cell(),
++                "aggregate back to context ownership + the standing registry reservation"
++            );
 +        }
 +        // --- CONSERVATIVE REFUSAL: complete accounting prevents coexistence -------
 +        PublishResult::RefusedPreWrite(SafetyStoreError::CapacityRefusal(
@@ -2057,15 +2215,16 @@ index 0000000..92b46da
 +            assert!(shortfall > 0, "a positive shortfall is reported");
 +            // The registry is unchanged; the first generation is still pinned/intact.
 +            assert_eq!(
-+                owner.backend_for_test().prepared_registry_for_test().lock().unwrap().occupied(),
++                owner.backend_for_test().prepared_registry_for_test().expect("registry installed").lock().unwrap().occupied(),
 +                1,
 +                "the first generation stays pinned; the refusal mutated nothing"
 +            );
 +            assert_eq!(agg_current(&owner), agg_one_pinned, "no charge leaked by the refused O4");
 +
 +            // CLEANUP: release the first generation so the aggregate has headroom.
++            // The registry allocation is retained with its standing reservation.
 +            assert_eq!(owner.release_prepared(pin1), ReleaseOutcome::Released);
-+            assert_eq!(op_current(&owner), 0, "cleanup to operational baseline");
++            assert_eq!(op_current(&owner), registry_cell(), "cleanup; retained registry charged");
 +
 +            // READMISSION: the SAME O4 now succeeds once the pin is gone, and a fresh
 +            // generation can be captured against the authoritative revision.
@@ -2079,7 +2238,7 @@ index 0000000..92b46da
 +                "[§3 distinct N={n}] RESULT=CONSERVATIVE_REFUSAL context_ownership={context_ownership}                  ga={ga} one_pinned_aggregate={agg_one_pinned} cap={cap} o4_next={next} shortfall={shortfall}                  (coexistence of a pinned generation with a concurrent O4 exceeds the unchanged ceiling;                  cleanup+readmission demonstrated)"
 +            );
 +            assert_eq!(owner.release_prepared(pin2), ReleaseOutcome::Released);
-+            assert_eq!(op_current(&owner), 0, "readmitted generation cleaned up");
++            assert_eq!(op_current(&owner), registry_cell(), "readmitted generation released; registry retained");
 +        }
 +        other => panic!("unexpected O4-while-pinned outcome: {other:?}"),
 +    }
@@ -2105,21 +2264,25 @@ index 0000000..92b46da
 +    let owner = init_owner(dir.path(), &ctx);
 +    publish_qc(&owner, &ctx, [9u8; 32], 5, 0);
 +
-+    // Normal explicit release.
++    // Normal explicit release. The registry allocation (installed by this capture)
++    // is RETAINED with its standing reservation after the entry is released.
 +    let p1 = owner.read_validate(None::<&FixtureCommittedHistory>).unwrap();
 +    let pin1 = owner.capture_prepared_decision(p1, 1).unwrap();
 +    assert!(op_current(&owner) > 0);
 +    assert_eq!(owner.release_prepared(pin1), ReleaseOutcome::Released);
-+    assert_eq!(op_current(&owner), 0, "normal release cleans to baseline");
++    assert_eq!(op_current(&owner), registry_cell(), "normal release; retained registry charged");
 +
-+    // Automatic abandonment: drop the pin WITHOUT releasing.
++    // Automatic abandonment: drop the pin WITHOUT releasing (registry reused, no
++    // duplicate charge). Cleanup leaves the retained registry with its reservation.
 +    let p2 = owner.read_validate(None::<&FixtureCommittedHistory>).unwrap();
 +    let pin2 = owner.capture_prepared_decision(p2, 1).unwrap();
-+    assert!(op_current(&owner) > 0);
++    // One registry charge only (reused): live total is the registry cell + the
++    // entry's generation/pin charges, strictly above the standing baseline.
++    assert!(op_current(&owner) > registry_cell(), "reused registry carries an entry above the standing cell");
 +    drop(pin2); // non-Copy guard Drop performs cleanup
-+    assert_eq!(op_current(&owner), 0, "abandonment (Drop) cleans to baseline");
++    assert_eq!(op_current(&owner), registry_cell(), "abandonment (Drop) cleans to the retained-registry baseline");
 +    {
-+        let reg = owner.backend_for_test().prepared_registry_for_test();
++        let reg = owner.backend_for_test().prepared_registry_for_test().expect("registry installed");
 +        assert_eq!(reg.lock().unwrap().occupied(), 0);
 +    }
 +
@@ -2273,27 +2436,37 @@ index 0000000..92b46da
 +    let dir = tempfile::tempdir().unwrap();
 +    let owner = init_owner(dir.path(), &ctx);
 +    publish_qc(&owner, &ctx, [9u8; 32], 5, 0);
-+    let proof = owner.read_validate(None::<&FixtureCommittedHistory>).unwrap();
 +
-+    let before = op_current(&owner); // proof holder live
++    // A first successful capture lazily ALLOCATES and installs the registry (with
++    // its standing reservation). Only now can the serial counter be driven to the
++    // brink — before any capture there is no registry to exhaust.
++    let p0 = owner.read_validate(None::<&FixtureCommittedHistory>).unwrap();
++    let pin0 = owner.capture_prepared_decision(p0, 1).expect("first capture installs the registry");
 +    {
-+        let reg = owner.backend_for_test().prepared_registry_for_test();
++        let reg = owner.backend_for_test().prepared_registry_for_test().expect("registry installed");
 +        reg.lock().unwrap().force_next_serial(u64::MAX);
 +    }
++
++    // A second capture now refuses with CounterExhausted, failing closed BEFORE any
++    // mutation. The refusal is AFTER registry initialization: the installed registry
++    // (and its standing reservation) is RETAINED, not revived or re-charged.
++    let proof = owner.read_validate(None::<&FixtureCommittedHistory>).unwrap();
++    let before = op_current(&owner); // pin0 entry + registry cell + refused proof holder
 +    match owner.capture_prepared_decision(proof, 1) {
 +        Err((p, CaptureRefusal::CounterExhausted)) => {
 +            assert!(p.recovery_backend_incarnation().is_some(), "proof intact on counter exhaustion");
-+            // Fail-closed BEFORE any mutation/allocation: while the refused proof is
-+            // still alive, only its holder is charged — no prepared reservation leaked.
++            // Fail-closed BEFORE any mutation: no new prepared reservation leaked and
++            // the retained registry keeps exactly its standing + first-entry charges.
 +            assert_eq!(op_current(&owner), before, "no charge leaked on counter exhaustion");
 +        }
 +        other => panic!("expected CounterExhausted, got {other:?}"),
 +    }
 +    assert_eq!(
-+        owner.backend_for_test().prepared_registry_for_test().lock().unwrap().occupied(),
-+        0,
-+        "no entry inserted"
++        owner.backend_for_test().prepared_registry_for_test().expect("registry installed").lock().unwrap().occupied(),
++        1,
++        "no new entry inserted; only the first capture's entry remains"
 +    );
++    drop(pin0);
 +}
 +
 +#[test]
@@ -2306,20 +2479,28 @@ index 0000000..92b46da
 +    let pin = owner_a.capture_prepared_decision(pa, 1).unwrap();
 +    let handle = pin.handle();
 +
-+    // Foreign incarnation: present A's handle to B's registry.
++    // Foreign incarnation: present A's handle to B's registry. B must first capture
++    // once to lazily allocate its own (distinct-incarnation) registry.
 +    let dir_b = tempfile::tempdir().unwrap();
 +    let owner_b = init_owner(dir_b.path(), &ctx);
++    publish_qc(&owner_b, &ctx, [9u8; 32], 5, 0);
++    let pb = owner_b.read_validate(None::<&FixtureCommittedHistory>).unwrap();
++    let pin_b = owner_b.capture_prepared_decision(pb, 1).expect("B installs its own registry");
 +    {
-+        let reg_b = owner_b.backend_for_test().prepared_registry_for_test();
++        let reg_b = owner_b
++            .backend_for_test()
++            .prepared_registry_for_test()
++            .expect("B registry installed");
 +        assert_eq!(
 +            reg_b.lock().unwrap().release_by_handle(handle),
 +            ReleaseOutcome::ForeignIncarnation,
 +            "foreign-incarnation handle refused"
 +        );
 +    }
++    drop(pin_b);
 +
 +    // Stale serial: release the real entry, then re-release the same handle.
-+    let reg_a = owner_a.backend_for_test().prepared_registry_for_test();
++    let reg_a = owner_a.backend_for_test().prepared_registry_for_test().expect("registry installed");
 +    assert_eq!(reg_a.lock().unwrap().release_by_handle(handle), ReleaseOutcome::Released);
 +    assert_eq!(
 +        reg_a.lock().unwrap().release_by_handle(handle),
@@ -2350,10 +2531,11 @@ index 0000000..92b46da
 +    let proof_rev = proof.publication_revision();
 +    let proof_enc_cap = proof.encoded_capacity();
 +
-+    // The capture reserves, in order: the registry cell (empty -> occupied), the
-+    // owning pin, then the generation core, then the control. Leave headroom for
-+    // registry-cell + pin + core but ONE byte short of the control, so admission is
-+    // refused on the LAST reservation — exercising cleanup of the earlier ones.
++    // The capture reserves, in order: the registry cell (lazy allocation, admitted
++    // before the registry is created), the owning pin, then the generation core,
++    // then the control. Leave headroom for registry-cell + pin + core but ONE byte
++    // short of the control, so admission is refused on the LAST reservation —
++    // exercising cleanup of the pin + core, with the just-installed registry RETAINED.
 +    let entry_pre = registry_cell() + pin_bytes() + core;
 +    let used = owner.backend_for_test().accounting_aggregate_current();
 +    let standing_charge = cap - used - entry_pre - (control - 1);
@@ -2368,15 +2550,17 @@ index 0000000..92b46da
 +            assert!(returned.recovery_backend_incarnation().is_some());
 +            assert_eq!(returned.encoded_capacity(), proof_enc_cap, "refused proof original bytes intact");
 +            assert_eq!(returned.publication_revision(), proof_rev, "revision unchanged");
-+            // Cleanup to the correct baseline: every reservation taken before the
-+            // failed one is released; only the returned proof holder + standing remain.
++            // A later capture step (the control reservation) refused AFTER registry
++            // initialization: the chosen behavior is to RETAIN the just-installed
++            // registry with its standing reservation. The pin + core reservations
++            // taken before the failed one are released; no entry is published.
 +            assert_eq!(
 +                owner.backend_for_test().accounting_aggregate_current(),
-+                baseline_under_pressure,
-+                "earlier prepared reservations released on admission refusal"
++                baseline_under_pressure + registry_cell(),
++                "pin + core released; the just-installed registry is retained with its reservation"
 +            );
 +            assert_eq!(
-+                owner.backend_for_test().prepared_registry_for_test().lock().unwrap().occupied(),
++                owner.backend_for_test().prepared_registry_for_test().expect("registry retained after refusal").lock().unwrap().occupied(),
 +                0,
 +                "no entry inserted on refusal"
 +            );
@@ -2402,13 +2586,13 @@ index 0000000..92b46da
 +        .map_err(|(_, r)| r)
 +        .expect("readmission succeeds once pressure is released");
 +    assert_eq!(
-+        owner.backend_for_test().prepared_registry_for_test().lock().unwrap().occupied(),
++        owner.backend_for_test().prepared_registry_for_test().expect("registry installed").lock().unwrap().occupied(),
 +        1,
 +        "readmitted entry present"
 +    );
-+    assert_eq!(op_current(&owner), core + control + registry_cell() + pin_bytes(), "readmitted full charge");
++    assert_eq!(op_current(&owner), core + control + registry_cell() + pin_bytes(), "readmitted full charge (registry reused, charged once)");
 +    owner.release_prepared(pin);
-+    assert_eq!(op_current(&owner), 0, "readmitted entry cleaned up");
++    assert_eq!(op_current(&owner), registry_cell(), "readmitted entry released; registry retained with its reservation");
 +}
 +
 +#[test]
@@ -2510,7 +2694,7 @@ index 0000000..92b46da
 +    assert_eq!(op_current(&owner), core + control_charge() + registry_cell() + pin_bytes());
 +    println!("[tc N={n}] tc_core={core} control={} ceiling={ceiling}", control_charge());
 +    drop(pin);
-+    assert_eq!(op_current(&owner), 0);
++    assert_eq!(op_current(&owner), registry_cell(), "entry released; registry retained with its reservation");
 +}
 +
 +#[test]
@@ -2538,7 +2722,7 @@ index 0000000..92b46da
 +    let expect_rev = proof.publication_revision();
 +
 +    let pin = owner.capture_prepared_decision(proof, 1).unwrap();
-+    let reg = owner.backend_for_test().prepared_registry_for_test();
++    let reg = owner.backend_for_test().prepared_registry_for_test().expect("registry installed");
 +    let g = reg.lock().unwrap();
 +    let view = g.inspect(pin.handle()).unwrap();
 +    assert_eq!(view.origin_context_digest, expect_digest, "bound to the originating context");
@@ -2556,4 +2740,190 @@ index 0000000..92b46da
 +#[test]
 +fn spike_evidence_context_binding_n4() {
 +    evidence_context_binding(4);
++}
++
++// ===========================================================================
++// §LT. FOCUSED ALLOCATION-LIFETIME EVIDENCE (lazy registry allocation).
++//
++// These tests exercise the registry's ACTUAL allocation lifetime directly —
++// using `prepared_registry_for_test()` (allocation presence) alongside the
++// aggregate charge (reservation presence):
++//   - open/attach without capture        -> no allocation, no charge
++//   - first-capture admission refusal     -> no uncharged allocation
++//   - successful first capture            -> admission precedes allocation
++//   - shared handles                      -> one registry, one covering reservation
++//   - last entry release, backend alive   -> retained registry stays charged
++//   - subsequent capture                  -> reuse, no duplicate charge
++//   - final destruction, pin > owner      -> reservation released at the end
++// ===========================================================================
++
++#[test]
++fn spike_lt_open_attach_without_capture_no_allocation() {
++    let ctx = ctx_n(4);
++    let dir = tempfile::tempdir().unwrap();
++    let owner = init_owner(dir.path(), &ctx);
++
++    // Before any prepared capture there is NO registry allocation and NO
++    // prepared/registry charge on the operational ledger.
++    assert!(
++        owner.backend_for_test().prepared_registry_for_test().is_none(),
++        "no registry allocation exists before the first prepared capture"
++    );
++    assert_eq!(op_current(&owner), 0, "no prepared storage charged at open/attach");
++
++    // Ordinary attachment work (an O4 publish) does not allocate the registry.
++    publish_qc(&owner, &ctx, [9u8; 32], 5, 0);
++    assert!(
++        owner.backend_for_test().prepared_registry_for_test().is_none(),
++        "ordinary publish does not allocate the prepared registry"
++    );
++    assert_eq!(op_current(&owner), 0, "ordinary publish charges no prepared storage");
++
++    // A read-validate alone (no capture) still does not allocate.
++    let proof = owner.read_validate(None::<&FixtureCommittedHistory>).unwrap();
++    assert!(
++        owner.backend_for_test().prepared_registry_for_test().is_none(),
++        "read-validate without capture does not allocate the registry"
++    );
++    drop(proof);
++}
++
++#[test]
++fn spike_lt_first_capture_admission_refusal_no_uncharged_allocation() {
++    let ctx = ctx_n(4);
++    let dir = tempfile::tempdir().unwrap();
++    let owner = init_owner(dir.path(), &ctx);
++    publish_qc(&owner, &ctx, [9u8; 32], 5, 0);
++
++    let proof = owner.read_validate(None::<&FixtureCommittedHistory>).unwrap();
++    let cap = owner.backend_for_test().accounting_aggregate_cap().unwrap();
++    let used = owner.backend_for_test().accounting_aggregate_current();
++
++    // Leave headroom ONE byte short of the registry-storage charge, so the FIRST
++    // persistent reservation of the capture (the registry cell, admitted before
++    // any allocation) is refused — exercising insufficient admission on the very
++    // first prepared capture.
++    let standing_charge = cap - used - (registry_cell() - 1);
++    let standing = owner
++        .backend_for_test()
++        .reserve_standing_for_test(standing_charge)
++        .expect("standing reservation admits (one byte short of the registry cell)");
++    let before = owner.backend_for_test().accounting_aggregate_current();
++
++    match owner.capture_prepared_decision(proof, 1) {
++        Err((returned, CaptureRefusal::Admission(_))) => {
++            assert!(returned.recovery_backend_incarnation().is_some(), "proof returned intact");
++            // No registry storage was created and no charge leaked: the proof is
++            // returned intact WITHOUT publishing an entry or allocating a registry.
++            assert!(
++                owner.backend_for_test().prepared_registry_for_test().is_none(),
++                "no registry allocation created on insufficient admission"
++            );
++            assert_eq!(
++                owner.backend_for_test().accounting_aggregate_current(),
++                before,
++                "no uncharged allocation; nothing leaked on first-capture refusal"
++            );
++            drop(returned);
++        }
++        other => panic!("expected Admission refusal on the registry cell, got {other:?}"),
++    }
++    drop(standing);
++
++    // Pressure released: the first capture now succeeds and lazily allocates.
++    let fresh = owner.read_validate(None::<&FixtureCommittedHistory>).unwrap();
++    let pin = owner
++        .capture_prepared_decision(fresh, 1)
++        .map_err(|(_, r)| r)
++        .expect("first capture succeeds once pressure is released");
++    assert!(
++        owner.backend_for_test().prepared_registry_for_test().is_some(),
++        "registry lazily allocated on the first successful capture"
++    );
++    drop(pin);
++}
++
++#[test]
++fn spike_lt_admission_precedes_allocation_then_retained_reuse() {
++    let ctx = ctx_n(4);
++    let dir = tempfile::tempdir().unwrap();
++    let owner = init_owner(dir.path(), &ctx);
++    publish_qc(&owner, &ctx, [9u8; 32], 5, 0);
++
++    // None before, Some after: the registry is allocated by (and only by) the
++    // first successful capture.
++    assert!(owner.backend_for_test().prepared_registry_for_test().is_none(), "no allocation before capture");
++    let p0 = owner.read_validate(None::<&FixtureCommittedHistory>).unwrap();
++    let pin0 = owner.capture_prepared_decision(p0, 1).expect("first capture");
++    let reg = owner.backend_for_test().prepared_registry_for_test().expect("allocated by first capture");
++    {
++        let g = reg.lock().unwrap();
++        assert_eq!(g.occupied(), 1, "first entry present");
++        assert_eq!(g.registry_reservation_charge(), registry_cell(), "standing reservation covers the allocation");
++    }
++
++    // Last entry release with the backend still alive: the registry allocation is
++    // RETAINED and its standing reservation remains charged across the zero-entry
++    // period (deallocation-when-empty is NOT required).
++    owner.release_prepared(pin0);
++    {
++        let g = reg.lock().unwrap();
++        assert_eq!(g.occupied(), 0, "registry empty after last release");
++        assert_eq!(g.registry_reservation_charge(), registry_cell(), "standing reservation retained while empty");
++    }
++    assert!(
++        owner.backend_for_test().prepared_registry_for_test().is_some(),
++        "empty registry retained until its final owner drops"
++    );
++    assert_eq!(op_current(&owner), registry_cell(), "only the retained registry reservation remains");
++
++    // Subsequent capture: SAFE REUSE of the retained registry — no duplicate
++    // registry charge and no stale-handle revival (fresh serial).
++    let p1 = owner.read_validate(None::<&FixtureCommittedHistory>).unwrap();
++    let core = prepared_generation_charge(&ctx, p1.retained()).unwrap();
++    let pin1 = owner.capture_prepared_decision(p1, 1).expect("subsequent capture reuses the retained registry");
++    let reg2 = owner.backend_for_test().prepared_registry_for_test().expect("still the one registry");
++    assert!(std::sync::Arc::ptr_eq(&reg, &reg2), "the SAME shared registry is reused, not re-created");
++    assert_eq!(
++        op_current(&owner),
++        core + control_charge() + registry_cell() + pin_bytes(),
++        "reuse charges the new entry but NOT a duplicate registry cell"
++    );
++    drop(pin1);
++}
++
++#[test]
++fn spike_lt_pin_outliving_owner_releases_reservation_at_end() {
++    let ctx = ctx_n(4);
++    let dir = tempfile::tempdir().unwrap();
++    let owner = init_owner(dir.path(), &ctx);
++    publish_qc(&owner, &ctx, [9u8; 32], 5, 0);
++
++    // Observe the shared operational ledger through an independent handle so the
++    // charge can be read AFTER the owner/backend have dropped.
++    let acct = owner.backend_for_test().accounting_handle_for_test();
++
++    let proof = owner.read_validate(None::<&FixtureCommittedHistory>).unwrap();
++    let core = prepared_generation_charge(&ctx, proof.retained()).unwrap();
++    let pin = owner.capture_prepared_decision(proof, 1).expect("capture installs the registry");
++    assert_eq!(
++        acct.current(),
++        core + control_charge() + registry_cell() + pin_bytes(),
++        "entry + registry fully charged while the owner is alive"
++    );
++
++    // Drop the owner (and the only backend handle) while the PIN is still alive.
++    // The pin holds a clone of the shared registry `Arc`, so the registry — and
++    // its standing reservation — follow actual shared ownership and remain alive.
++    drop(owner);
++    assert_eq!(
++        acct.current(),
++        core + control_charge() + registry_cell() + pin_bytes(),
++        "pin outliving its owner keeps the generation + registry reservation charged"
++    );
++
++    // Dropping the final owner (the pin) tears down the entry AND the retained
++    // registry, releasing every reservation — correct end-of-life cleanup.
++    drop(pin);
++    assert_eq!(acct.current(), 0, "last owner (the outliving pin) released all prepared reservations");
 +}
