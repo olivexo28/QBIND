@@ -690,6 +690,24 @@ thread_local! {
         const { std::cell::Cell::new(None) };
 }
 
+// Test-only (RUN 422 §3 correction): a one-shot fault that forces the next
+// O4-owned live-object measurement on THIS thread to fail, exercising the
+// post-acknowledgement instrumentation-failure path through the REAL publication.
+// Absent from production/release builds.
+#[cfg(any(test, feature = "test-utils"))]
+thread_local! {
+    static O4_MEASUREMENT_FAULT: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Test-only (RUN 422 §3 correction): arm a one-shot fault so the next O4-owned
+/// live-object measurement on this thread returns `Err`, letting a bounded
+/// regression reach the post-acknowledgement instrumentation-failure path via the
+/// real publication. The fault is consumed (cleared) by the measurement it fails.
+#[cfg(any(test, feature = "test-utils"))]
+pub fn arm_o4_measurement_fault() {
+    O4_MEASUREMENT_FAULT.with(|c| c.set(true));
+}
+
 /// Test-only (RUN 422 §3): the O4-owned live-object measurement recorded by the
 /// most recent acknowledged O4 publication at its pre-effective phase, read by the
 /// one-shot pre-effective sampler on the SAME (publishing) thread. `None` until an
@@ -710,6 +728,14 @@ fn record_o4_owned_live_objects(
     meta_encoded_capacity: usize,
 ) -> Result<(), SafetyStoreError> {
     let _ = meta_encoded;
+    // Test-only (RUN 422 §3 correction): consume a one-shot armed fault so a
+    // bounded regression can reach the post-acknowledgement instrumentation
+    // failure through the real publication path.
+    if O4_MEASUREMENT_FAULT.with(|c| c.replace(false)) {
+        return Err(SafetyStoreError::ArithmeticOverflow(
+            super::error::ArithmeticOverflowSite::O4WorkingSetCharge,
+        ));
+    }
     let sample = O4OwnedLiveObjects {
         validated_inline: super::record::size_of_validated_record(),
         retained_evidence_capacity: validated.retained_evidence_capacity()? as u128,
@@ -1954,12 +1980,25 @@ impl SafetyRecordOwner {
                 // `DecodedRecord`), its retained evidence backings, its retained
                 // `encoded` buffer, and the live `meta_encoded` payload. Measure
                 // them IN PLACE for the pre-effective sampler BEFORE firing the
-                // hook; a failed measurement is surfaced explicitly.
+                // hook.
+                //
+                // This measurement is TEST-ONLY instrumentation (absent from a
+                // default/release build). A failed measurement is an
+                // instrumentation defect, not a publication outcome: the durable
+                // write has ALREADY been acknowledged, so it must never be
+                // relabelled as a pre-write refusal. Surface the failure as an
+                // explicit test failure (`panic!`) under the same `cfg` gate; the
+                // default build has no measurement here and its publication
+                // behaviour is unchanged.
                 #[cfg(any(test, feature = "test-utils"))]
                 if let Err(e) =
                     record_o4_owned_live_objects(&validated, &meta_encoded, meta_encoded_capacity)
                 {
-                    return PublishResult::RefusedPreWrite(e);
+                    panic!(
+                        "O4-owned live-object instrumentation failed at the \
+                         post-acknowledgement / pre-effective phase (rev {new_revision}); \
+                         an acknowledged durable write is never a pre-write refusal: {e:?}"
+                    );
                 }
                 #[cfg(any(test, feature = "test-utils"))]
                 self.backend.run_pre_effective_hook("O4", new_revision);
