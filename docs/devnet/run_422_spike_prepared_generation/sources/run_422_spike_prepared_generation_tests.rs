@@ -30,7 +30,7 @@ use qbind_consensus::qc::QuorumCertificate as LogicalQc;
 use qbind_consensus::timeout::{TimeoutCertificate, TimeoutMsg};
 use qbind_node::pqc_trust_bundle::TrustBundleEnvironment;
 use qbind_node::safety_record_store::accounting::{
-    prepared_generation_charge, prepared_holder_control_charge,
+    decoded_working_set_charge, prepared_generation_charge, prepared_holder_control_charge,
 };
 use qbind_node::safety_record_store::backend::{InjectFault, SafetyBackend, SafetyBackendPolicy};
 use qbind_node::safety_record_store::codec::encode_record;
@@ -799,6 +799,26 @@ fn spike_duplicate_release_invariant_n4() {
 // eviction. Reports honest success (coexistence fits) or the exact shortfall.
 // ===========================================================================
 
+/// The contemporaneous in-operation O4 observation, captured by a bounded,
+/// one-shot pre-effective sampler fired at the real O4 phase (after the
+/// publication's durability acknowledgement and BEFORE the O4 working-set
+/// reservation is released, while both prepared generations remain pinned). It
+/// records BOTH kinds of evidence kept deliberately distinct:
+/// * `in_op` / `in_agg` — the **reservation observations** (the operational and
+///   aggregate charges sampled from the shared ledger at that phase), and
+/// * `measured_prepared_objects` / `occupied` — an **object measurement** of the
+///   live pinned-generation graph (each live `Arc<GenerationBacking>` measured in
+///   place from its retained inline size + its MEASURED evidence-backing
+///   capacity + the shared-allocation overhead + the holder/control bytes, plus
+///   the registry cell once and one pin per live pin). It is derived from the
+///   live objects, never from a reservation counter.
+struct O4LiveSample {
+    in_op: u128,
+    in_agg: u128,
+    measured_prepared_objects: u128,
+    occupied: usize,
+}
+
 fn distinct_generations_and_full(n: u64) {
     let ctx = ctx_n(n);
     let dir = tempfile::tempdir().unwrap();
@@ -872,14 +892,38 @@ fn distinct_generations_and_full(n: u64) {
             // Task 1 — CONTEMPORANEOUS in-operation O4 observation. Install a bounded,
             // one-shot sampler fired at a REAL O4 phase: after the publication's
             // durability acknowledgement and BEFORE the O4 working-set reservation is
-            // released, while BOTH prepared generations remain pinned. It samples the
-            // executing backend's operational and aggregate reservations at that phase.
-            // On a REFUSED O4 (N=1 below) the publication never reaches this phase, so
-            // the slot stays `None` — no admitted O4 phase is fabricated for a refusal.
-            let o4_phase_sample: std::sync::Arc<std::sync::Mutex<Option<(u128, u128)>>> =
+            // released, while BOTH prepared generations remain pinned. At that phase it
+            // records (a) the RESERVATION observations (operational + aggregate charges)
+            // and (b) an independent OBJECT MEASUREMENT of the live pinned-generation
+            // graph — each live `Arc<GenerationBacking>` measured in place from its
+            // retained inline size + its MEASURED evidence-backing capacity + the
+            // shared-allocation overhead + the holder/control bytes, plus the registry
+            // cell once and one pin per live pin. The pinned graph is inspected through
+            // the registry's LEAF mutex (never the serialization domain the publish
+            // holds), so no clone of the measured graph is taken and no lifetime is
+            // extended. On a REFUSED O4 (N=1 below) the publication never reaches this
+            // phase, so the slot stays `None` — no admitted O4 phase is fabricated.
+            //
+            // Task 2 — the sampler is NON-CYCLIC: it captures an independent accounting
+            // handle (`accounting_handle_for_test`) and a leaf registry `Arc`, NOT a
+            // cloned `SafetyBackend`. The earlier cloned-backend callback was retained
+            // by the backend's own shared hook slot, forming a reference cycle that kept
+            // the backend (and thus the registry reservation) alive forever; capturing
+            // the ledger/registry handles instead breaks that cycle.
+            let o4_phase_sample: std::sync::Arc<std::sync::Mutex<Option<O4LiveSample>>> =
                 std::sync::Arc::new(std::sync::Mutex::new(None));
             {
-                let backend = owner.backend_for_test().clone();
+                let acct = owner.backend_for_test().accounting_handle_for_test();
+                let reg = owner
+                    .backend_for_test()
+                    .prepared_registry_for_test()
+                    .expect("registry installed before the O4 sampler");
+                let h1 = pin1.handle();
+                let h2 = pin2.handle();
+                let reg_cell = registry_cell();
+                let pin_each = pin_bytes();
+                let rr_inline = size_of_retained_record();
+                let control = control_charge();
                 let slot = std::sync::Arc::clone(&o4_phase_sample);
                 owner
                     .backend_for_test()
@@ -887,10 +931,48 @@ fn distinct_generations_and_full(n: u64) {
                         if op == "O4" {
                             let mut g = slot.lock().unwrap();
                             if g.is_none() {
-                                *g = Some((
-                                    backend.accounting_current(),
-                                    backend.accounting_aggregate_current(),
-                                ));
+                                // Object measurement of the live pinned-generation graph
+                                // (leaf registry lock; the publish holds only the domain).
+                                let reg_guard = reg.lock().unwrap();
+                                let occupied = reg_guard.occupied();
+                                // PHASE GUARD: record ONLY the genuine TWO-PIN O4 — the
+                                // phase at which both measured prepared generations are
+                                // actually live. A later admitted O4 on this backend (the
+                                // N=1 abandon-and-retry below, which runs with one pin
+                                // already released) is NOT the sampled phase, so it is
+                                // skipped rather than fabricating a sample for objects that
+                                // are no longer all live. The two-pin O4 is refused at N=1,
+                                // so the slot correctly stays `None` there.
+                                if occupied != 2 {
+                                    return;
+                                }
+                                // Reservation observations (sampled from the shared
+                                // ledger via the independent handle).
+                                let in_op = acct.current();
+                                let in_agg = acct.aggregate().current();
+                                let mut measured_prepared_objects =
+                                    reg_cell + (occupied as u128) * pin_each;
+                                for h in [h1, h2] {
+                                    // Missing measurement fails explicitly (the inspector
+                                    // panics on a failed backing-capacity measurement) —
+                                    // never a silent 0.
+                                    let v = reg_guard
+                                        .inspect(h)
+                                        .expect("pinned generation live at the two-pin O4 phase");
+                                    // actual object = generation core (retained inline +
+                                    // MEASURED evidence backings + Arc overhead) +
+                                    // holder/control bytes.
+                                    measured_prepared_objects += rr_inline
+                                        + (v.evidence_backing_capacity as u128)
+                                        + ARC_CTRL
+                                        + control;
+                                }
+                                *g = Some(O4LiveSample {
+                                    in_op,
+                                    in_agg,
+                                    measured_prepared_objects,
+                                    occupied,
+                                });
                             }
                         }
                     }));
@@ -952,22 +1034,58 @@ fn distinct_generations_and_full(n: u64) {
                     // Task 1 — the CONTEMPORANEOUS in-operation O4 observation (reached
                     // only on the N=4 success path, where the O4 was actually admitted).
                     // Distinct from the pre-operation headroom captured above.
-                    let (in_op, in_agg) = o4_phase_sample
+                    let O4LiveSample {
+                        in_op,
+                        in_agg,
+                        measured_prepared_objects,
+                        occupied,
+                    } = o4_phase_sample
                         .lock()
                         .unwrap()
+                        .take()
                         .expect("the O4 post-acknowledgement / pre-release phase was sampled");
-                    // Source-derived arithmetic (live objects, independent of the
-                    // sampled counters): the two pinned generations' combined live-object
-                    // charge is exactly `coexist`.
-                    assert!(
-                        in_op >= coexist,
-                        "in-operation operational reservation {in_op} covers both pinned generations' live objects {coexist}"
+                    assert_eq!(occupied, 2, "both prepared generations were live at the sampled O4 phase");
+
+                    // OBJECT MEASUREMENT (kept separate from the reservation counters and
+                    // from the source-derived `coexist` arithmetic): the live pinned graph
+                    // measured in place equals the source-derived `coexist` charge exactly.
+                    assert_eq!(
+                        measured_prepared_objects, coexist,
+                        "measured live pinned-generation objects equal the source-derived coexist charge"
                     );
-                    let o4_reservation = in_op - coexist; // the live O4 working-set reservation at that phase
+
+                    // The O4-OWNED live objects at the pre-effective phase: the transient
+                    // decoded working set plus the retained encoded publication buffer the
+                    // publication still holds live at that phase. Derived INDEPENDENTLY from
+                    // the SAME lock C fixture (actual inline sizes + MEASURED evidence-backing
+                    // capacities + the real encoded length), not from the live graph and not
+                    // from a reservation counter. The already-destroyed staging envelopes are
+                    // NOT counted: `publish_atomic` has returned by this phase.
+                    let decoded_c = DecodedRecord {
+                        persistence_format_version: 1,
+                        network_genesis_id: ctx.network_genesis_id,
+                        publication_revision: 3,
+                        record: SafetyRecord::Locked(lock_c_same),
+                    };
+                    let o4_decoded_object = decoded_working_set_charge(&decoded_c)
+                        .expect("O4 decoded working-set object measurement");
+                    let o4_encoded_object = encode_record(&decoded_c, &ctx)
+                        .expect("O4 encoded publication buffer measurement")
+                        .len() as u128;
+                    let o4_owned_objects = o4_decoded_object + o4_encoded_object;
+
+                    // The MEASURED live-object total at the O4 phase (object measurements
+                    // only; NOT a reservation counter).
+                    let measured_live_objects = measured_prepared_objects + o4_owned_objects;
+
+                    // (1) measured live-object charge <= contemporaneous covering operational
+                    // reservation.
                     assert!(
-                        o4_reservation > 0,
-                        "a real O4 working-set reservation was held at the sampled phase"
+                        measured_live_objects <= in_op,
+                        "measured live objects {measured_live_objects} (pinned {measured_prepared_objects} + O4-owned {o4_owned_objects}) <= contemporaneous operational reservation {in_op}"
                     );
+                    // (2) context + operational reservations <= UNCHANGED aggregate ceiling,
+                    // AT the phase (not merely before it).
                     assert_eq!(
                         in_agg,
                         context_ownership + in_op,
@@ -976,6 +1094,14 @@ fn distinct_generations_and_full(n: u64) {
                     assert!(
                         in_agg <= cap,
                         "the UNCHANGED aggregate ceiling {cap} is honored AT the O4 phase (in-operation aggregate {in_agg}), not merely before it"
+                    );
+
+                    // Source-derived bound, kept separate from the two measurements above:
+                    // the live O4 working-set reservation at the sampled phase.
+                    let o4_reservation = in_op - coexist;
+                    assert!(
+                        o4_reservation > 0,
+                        "a real O4 working-set reservation was held at the sampled phase"
                     );
                     let in_operation_headroom = cap - in_agg;
 
@@ -997,7 +1123,7 @@ fn distinct_generations_and_full(n: u64) {
                         "no eviction on refusal"
                     );
                     println!(
-                        "[§3 distinct N={n}] RESULT=COEXIST_THROUGH_O4 context_ownership={context_ownership} ga={ga}                  gb={gb} coexist={coexist} aggregate={aggregate_with_two} cap={cap}                  pre_operation_headroom={pre_operation_headroom}                  in_operation[op={in_op} agg={in_agg} o4_reservation={o4_reservation} headroom={in_operation_headroom}]                  (pre-operation headroom is the slack BEFORE the O4; the in-operation sample is taken at a real O4 phase while both generations stay pinned and the O4 reservation is live; the unchanged ceiling holds AT that phase)"
+                        "[§3 distinct N={n}] RESULT=COEXIST_THROUGH_O4 context_ownership={context_ownership} ga={ga}                  gb={gb} coexist={coexist} aggregate={aggregate_with_two} cap={cap}                  pre_operation_headroom={pre_operation_headroom}                  in_operation[op={in_op} agg={in_agg} o4_reservation={o4_reservation} headroom={in_operation_headroom}]                  measured_live_objects[total={measured_live_objects} pinned={measured_prepared_objects} o4_owned={o4_owned_objects} (decoded={o4_decoded_object} encoded={o4_encoded_object})]                  (pre-operation headroom is the slack BEFORE the O4; the in-operation sample is taken at a real O4 phase while both generations stay pinned and the O4 reservation is live; the measured live-object total is <= the operational reservation and the unchanged ceiling holds AT that phase)"
                     );
 
                     // Cleanup/readmission: release both; the registry allocation is
@@ -1009,6 +1135,22 @@ fn distinct_generations_and_full(n: u64) {
                         agg_current(&owner),
                         context_ownership + registry_cell(),
                         "aggregate back to context ownership + the standing registry reservation"
+                    );
+
+                    // Task 2 — sampler teardown. With the backend-retaining cycle removed,
+                    // dropping the owner releases the backend, its serialization domain, the
+                    // installed registry, AND the installed sampler (which held only the
+                    // independent ledger/registry handles). An INDEPENDENT accountant,
+                    // captured before teardown, then observes NO remaining registry or
+                    // generation reservation. (Retaining the empty charged registry while a
+                    // genuine backend owner remained alive — asserted just above — was still
+                    // correct; this verifies the final release once that owner drops too.)
+                    let teardown_acct = owner.backend_for_test().accounting_handle_for_test();
+                    drop(owner);
+                    assert_eq!(
+                        teardown_acct.current(),
+                        0,
+                        "after pins, proofs, owner/backend, and the non-cyclic sampler are released, no registry or generation reservation remains"
                     );
                 }
                 // --- TWO-PIN PUBLICATION REFUSAL: the actual before/after/abandon/retry ---
