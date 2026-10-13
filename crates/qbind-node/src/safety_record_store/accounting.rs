@@ -17,8 +17,8 @@ use super::profile::{
     CAPNORM_SLACK, VALIDATOR_ID_WIDTH,
 };
 use super::record::{
-    size_of_retained_generation, size_of_timeout_msg, DecodedRecord, RetainedGeneration,
-    SafetyRecord, SupportingEvidence,
+    size_of_retained_generation, size_of_retained_record, size_of_timeout_msg, DecodedRecord,
+    RetainedGeneration, RetainedRecord, SafetyRecord, SupportingEvidence,
 };
 
 fn add(a: u128, b: u128) -> Result<u128, SafetyStoreError> {
@@ -29,6 +29,11 @@ fn add(a: u128, b: u128) -> Result<u128, SafetyStoreError> {
 fn mul(a: u128, b: u128) -> Result<u128, SafetyStoreError> {
     a.checked_mul(b).ok_or(SafetyStoreError::ArithmeticOverflow(
         ArithmeticOverflowSite::AccountingProduct,
+    ))
+}
+fn sub(a: u128, b: u128) -> Result<u128, SafetyStoreError> {
+    a.checked_sub(b).ok_or(SafetyStoreError::ArithmeticOverflow(
+        ArithmeticOverflowSite::AccountingSum,
     ))
 }
 
@@ -54,6 +59,75 @@ pub fn generation_charge(
         ));
     }
     Ok(total)
+}
+
+/// The **generation-core** retained-memory charge for a prepared-decision L0
+/// entry (§ 13.6), measured in place from the **actual** live retained
+/// generation **without cloning** it.
+///
+/// This is the generation portion of the single `Arc<GenerationBacking>` a
+/// captured proof's decoded generation is moved into: the inline size of the
+/// **actual** [`RetainedRecord`] the backing embeds (`size_of_retained_record`,
+/// the real retained object — NOT the synthetic [`RetainedGeneration`] wrapper
+/// whose `from_locked` constructor *clones* the evidence into a second
+/// representation), plus the actual capacity-measured evidence backings the live
+/// generation owns, plus the shared-allocation (`Arc`) overhead charged once. It
+/// is always `<= MAX_RETAINED_GENERATION_BYTES`, so a prepared generation
+/// consumes one of the generations the aggregate's `gen_term` already budgets,
+/// with no ceiling increase.
+///
+/// This charge covers **only** the generation core. The remaining live bytes of
+/// the `GenerationBacking` allocation — the provenance fields, the inline
+/// generation `Reservation`, and layout padding the wrapper adds **around** the
+/// retained core — are a separate holder/control charge
+/// ([`prepared_holder_control_charge`]); together the two reservations cover every
+/// live byte of the `Arc<GenerationBacking>` allocation (inline + backings + Arc).
+/// A `BootstrapNoLock` record is refused (prepared retention is a Locked-only
+/// experiment).
+pub fn prepared_generation_charge(
+    ctx: &PinnedSafetyContext,
+    retained: &RetainedRecord,
+) -> Result<u128, SafetyStoreError> {
+    let evidence = match &retained.record {
+        SafetyRecord::Locked(l) => &l.evidence,
+        SafetyRecord::BootstrapNoLock { .. } => {
+            return Err(SafetyStoreError::StructuralRefusal(
+                super::error::StructuralRefusalDetail::Static(
+                    "prepared generation charge requires a Locked generation",
+                ),
+            ));
+        }
+    };
+    // The ACTUAL retained object's inline size (RetainedRecord), the actual
+    // capacity-measured evidence backings, and the shared-allocation overhead —
+    // no synthetic wrapper, no counter substitution.
+    let mut total = add(size_of_retained_record(), evidence_backing_capacity(evidence)?)?;
+    total = add(total, ARC_CTRL)?;
+    let cap = max_retained_generation_bytes(ctx, size_of_timeout_msg())?;
+    if total > cap {
+        return Err(SafetyStoreError::DeclaredBoundExceeded(
+            DeclaredBoundDetail::GenerationChargeExceeds { charge: total, cap },
+        ));
+    }
+    Ok(total)
+}
+
+/// The **holder/control** charge for the `GenerationBacking` wrapper around a
+/// prepared generation (§ 13.6, actual-object accounting correction): the live
+/// bytes the single `Arc<GenerationBacking>` allocation carries **in addition to**
+/// the generation core charged by [`prepared_generation_charge`] — the retained
+/// provenance (origin-context digest, recovery incarnation, evidence status,
+/// captured revision), the inline generation `Reservation`, and any layout
+/// padding. It is exactly `size_of::<GenerationBacking>() -
+/// size_of::<RetainedRecord>()`, supplied by the registry as
+/// `generation_backing_struct_size` (the owner cannot see the private wrapper
+/// layout). Counting the embedded reservation and provenance **once** inside their
+/// containing allocation, generation-core + this control charge = the complete
+/// inline footprint of the wrapper, so every live inline byte is covered.
+pub fn prepared_holder_control_charge(
+    generation_backing_struct_size: u128,
+) -> Result<u128, SafetyStoreError> {
+    sub(generation_backing_struct_size, size_of_retained_record())
 }
 
 /// The **capacity-measured** heap-backing charge for a supporting-evidence value
