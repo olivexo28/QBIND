@@ -8,7 +8,7 @@
 //! write failure, uncertain publication, acknowledged durable success, and
 //! in-memory effectiveness are returned as distinct outcomes.
 
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use sha3::{Digest, Sha3_256};
 
@@ -18,6 +18,7 @@ use super::error::{
     AlreadyEstablishedKind, ArithmeticOverflowSite, CapacityRefusalDetail,
     MissingIndependentInputSite, RecoveryRequiredReason, SafetyStoreError, StructuralRefusalDetail,
 };
+use super::accounting::prepared_generation_charge;
 use super::profile::{
     context_owner_ceiling_term, context_ownership_charge, max_component_aggregate_bytes,
     max_context_ownership_bytes, max_retained_generation_bytes, max_safety_record_bytes,
@@ -487,6 +488,236 @@ fn measure_o5_transient_decode(decoded: &DecodedRecord) -> Result<u128, SafetySt
         ));
     }
     super::accounting::decoded_working_set_charge(decoded)
+}
+
+// Test-only shared-conversion lifetime seam (RUN 422 §13.6 §2 correction). The
+// shared capture path must DESTROY the duplicate proof's separately owned evidence
+// backings BEFORE releasing `prior_holder` â the reservation that covered them â
+// so those live bytes are never uncharged across the conversion. When this seam is
+// armed, the NEXT shared capture on this thread uses the PREMATURE ordering (release
+// the covering reservation first, while the duplicate evidence is still alive): an
+// INSTRUMENTED reproduction of the historical defect, consumed (reset to `Correct`)
+// by the shared capture that reads it. Absent from production builds; the production
+// path always uses the corrected `RetainedBeforeHolder` ordering.
+#[cfg(any(test, feature = "test-utils"))]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum SharedReleaseOrder {
+    /// Corrected ordering: drop the duplicate's evidence backings, THEN release the
+    /// covering `prior_holder` reservation.
+    #[default]
+    RetainedBeforeHolder,
+    /// Premature ordering (defect reproduction): release `prior_holder` while the
+    /// duplicate's evidence backings are still alive.
+    HolderBeforeRetained,
+}
+
+#[cfg(any(test, feature = "test-utils"))]
+thread_local! {
+    static SHARED_RELEASE_ORDER: std::cell::Cell<SharedReleaseOrder> =
+        const { std::cell::Cell::new(SharedReleaseOrder::RetainedBeforeHolder) };
+    static SHARED_DUP_LIVE_AT_RELEASE: std::cell::Cell<Option<usize>> =
+        const { std::cell::Cell::new(None) };
+}
+
+/// Test-only (RUN 422 §2 lifetime regression): force the NEXT shared capture on this
+/// thread to use the given release ordering. The flag is consumed by that capture.
+#[cfg(any(test, feature = "test-utils"))]
+pub fn set_shared_release_order(order: SharedReleaseOrder) {
+    SHARED_RELEASE_ORDER.with(|c| c.set(order));
+}
+
+/// Test-only (RUN 422 §2 lifetime regression): the duplicate's evidence-backing
+/// bytes still live when its covering reservation was released by the most recent
+/// shared capture. `Some(0)` after the corrected ordering, `Some(n>0)` after the
+/// premature ordering. `None` if no shared capture has run on this thread.
+///
+/// NOTE (RUN 422 §2 B): this is the earlier, NARROWER **branch-assigned** observer
+/// — the capture path *sets* it from the selected [`SharedReleaseOrder`] branch
+/// (`Some(0)` in the corrected branch, `Some(dup_bytes)` in the premature branch).
+/// It reports which branch ran and what that branch claims; it does not
+/// independently observe backing destruction. The independent observer is
+/// [`dup_backing_live_at_release`] below. This one is retained as historical
+/// evidence for the branch-selection experiment (`spike_sharing_lifetime_regression`).
+#[cfg(any(test, feature = "test-utils"))]
+pub fn shared_dup_live_at_release() -> Option<usize> {
+    SHARED_DUP_LIVE_AT_RELEASE.with(|c| c.get())
+}
+
+// Independent duplicate-backing OWNED-OBJECT DESTRUCTION probe (RUN 422 §2 B).
+// Unlike the branch-assigned `shared_dup_live_at_release` observer above — which
+// the capture path SETS from the selected release-order flag — this probe
+// measures the ACTUAL destruction of the duplicate proof's owned evidence-backing
+// objects by their MEASURED BACKING BYTES (it does NOT trace allocation
+// addresses or object identities). Each duplicate backing is registered as live
+// with its measured byte size and a `Drop` probe is bundled onto the retained
+// object; the probe decrements the live byte total when (and ONLY when) that
+// owned object is actually destroyed. At the covering-reservation release
+// boundary the still-live total is sampled. The sample is therefore derived from
+// real owned-object destruction — not from the branch chosen and not from any
+// hard-coded expected value. A source mutation that releases the covering
+// reservation before destroying the duplicate's backing leaves the probe
+// un-dropped at the sample, so it reports the still-live bytes and the invariant
+// fails — demonstrating its release-order sensitivity.
+#[cfg(any(test, feature = "test-utils"))]
+thread_local! {
+    static DUP_BACKING_LIVE_BYTES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    static DUP_BACKING_LIVE_AT_RELEASE: std::cell::Cell<Option<usize>> =
+        const { std::cell::Cell::new(None) };
+}
+
+/// A bounded **owned-object destruction probe** with measured backing bytes,
+/// bundled onto the duplicate proof's retained evidence backing: constructing it
+/// registers `bytes` live; dropping it (which happens exactly when the bundled
+/// owned object is destroyed) removes them. It measures owned-object destruction
+/// by byte size, not allocation-address/identity tracing, and is independent of
+/// the release-order branch.
+#[cfg(any(test, feature = "test-utils"))]
+struct DupBackingLiveProbe {
+    bytes: usize,
+}
+
+#[cfg(any(test, feature = "test-utils"))]
+impl Drop for DupBackingLiveProbe {
+    fn drop(&mut self) {
+        DUP_BACKING_LIVE_BYTES.with(|c| c.set(c.get().saturating_sub(self.bytes)));
+    }
+}
+
+/// Test-only (RUN 422 §2 B): the number of duplicate evidence-backing bytes that
+/// were still live at the moment the most recent shared capture released the
+/// reservation covering them, measured by the INDEPENDENT owned-object
+/// destruction probe (not the release-order flag, not a hard-coded value).
+/// `Some(0)` means the invariant held — no duplicate byte outlived its covering
+/// reservation; `Some(n>0)` means `n` bytes were live-but-uncharged at the
+/// release boundary. `None` if no shared capture has run on this thread.
+#[cfg(any(test, feature = "test-utils"))]
+pub fn dup_backing_live_at_release() -> Option<usize> {
+    DUP_BACKING_LIVE_AT_RELEASE.with(|c| c.get())
+}
+
+// ---------------------------------------------------------------------------
+// Test-only (RUN 422 §3 serialization regression): a one-shot hook fired by the
+// capture path at the EXACT interval between the authoritative-state check and
+// the registry insertion, WHILE the serialization domain guard is held. It lets
+// a focused test create a coordinated capture/publication OVERLAP: a concurrent
+// O4 publication (which must take the SAME domain lock, see `publish_locked`)
+// cannot make progress while this hook runs, so correct serialization keeps the
+// two mutually exclusive. The hook is thread-local (fires on the capturing
+// thread) and consumed on first fire. Absent from production/release builds.
+#[cfg(any(test, feature = "test-utils"))]
+thread_local! {
+    static CAPTURE_INTERVAL_HOOK: std::cell::RefCell<Option<Box<dyn Fn()>>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// Test-only (RUN 422 §3): install a one-shot capture-interval hook on this
+/// thread. The NEXT prepared capture on this thread fires it once (between the
+/// authoritative-state check and the registry insertion, under the domain guard)
+/// and clears it.
+#[cfg(any(test, feature = "test-utils"))]
+pub fn set_capture_interval_hook<F: Fn() + Send + Sync + 'static>(f: F) {
+    CAPTURE_INTERVAL_HOOK.with(|h| *h.borrow_mut() = Some(Box::new(f)));
+}
+
+/// Test-only (RUN 422 §3): clear any installed capture-interval hook on this
+/// thread.
+#[cfg(any(test, feature = "test-utils"))]
+pub fn clear_capture_interval_hook() {
+    CAPTURE_INTERVAL_HOOK.with(|h| *h.borrow_mut() = None);
+}
+
+/// Fire and consume the one-shot capture-interval hook, if installed. Called by
+/// the capture path while holding the serialization domain guard.
+#[cfg(any(test, feature = "test-utils"))]
+fn fire_capture_interval_hook() {
+    let cb = CAPTURE_INTERVAL_HOOK.with(|h| h.borrow_mut().take());
+    if let Some(cb) = cb {
+        cb();
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Test-only (RUN 422 §3 pre-effective O4-owned live-object observation). At the
+// post-acknowledgement / pre-effectiveness O4 phase, the publish path holds the
+// ACTUAL live publication objects: the validated proof (`validated`, a
+// `ValidatedRecord` — NOT a transient `DecodedRecord`), whose embedded retained
+// generation still owns its evidence heap backings and whose `encoded` buffer is
+// retained verbatim, and the component-owned metadata-encoding temporary
+// (`meta_encoded`), which stays live through the publish match arm. The CRC
+// staging envelopes inside `publish_atomic` have already been destroyed (the call
+// has returned by this phase) and are deliberately NOT counted.
+//
+// At exactly that phase the publish path measures those live objects IN PLACE —
+// the complete `ValidatedRecord` inline size counted once, its MEASURED owned
+// evidence-backing capacity, its retained `encoded` buffer capacity, and the live
+// metadata payload capacity — and records them here for the one-shot sampler to
+// read. A missing measurement fails EXPLICITLY (the capacity read surfaces its
+// `Err`) rather than being silently substituted. The graph is never cloned, no
+// lifetime is extended, and nothing is derived from a reservation counter.
+// Absent from production/release builds.
+#[cfg(any(test, feature = "test-utils"))]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct O4OwnedLiveObjects {
+    /// `size_of::<ValidatedRecord>()` — the complete inline proof object the O4
+    /// phase holds live, counted ONCE (it embeds its own retained generation
+    /// inline; that embedded record is never counted separately here).
+    pub validated_inline: u128,
+    /// The MEASURED `Vec::capacity()` of the evidence heap backings the live
+    /// validated proof's retained generation owns.
+    pub retained_evidence_capacity: u128,
+    /// The MEASURED `Vec::capacity()` of the proof's retained `encoded`
+    /// publication buffer.
+    pub retained_encoded_capacity: u128,
+    /// The MEASURED `Vec::capacity()` of the live component-owned metadata
+    /// encoding temporary still held through the publish match arm.
+    pub metadata_payload_capacity: u128,
+}
+
+#[cfg(any(test, feature = "test-utils"))]
+impl O4OwnedLiveObjects {
+    /// The total O4-owned live-object bytes at the pre-effective phase.
+    pub fn total(&self) -> u128 {
+        self.validated_inline
+            + self.retained_evidence_capacity
+            + self.retained_encoded_capacity
+            + self.metadata_payload_capacity
+    }
+}
+
+#[cfg(any(test, feature = "test-utils"))]
+thread_local! {
+    static O4_OWNED_LIVE_OBJECTS: std::cell::Cell<Option<O4OwnedLiveObjects>> =
+        const { std::cell::Cell::new(None) };
+}
+
+/// Test-only (RUN 422 §3): the O4-owned live-object measurement recorded by the
+/// most recent acknowledged O4 publication at its pre-effective phase, read by the
+/// one-shot pre-effective sampler on the SAME (publishing) thread. `None` until an
+/// acknowledged O4 reaches the pre-effective phase on this thread.
+#[cfg(any(test, feature = "test-utils"))]
+pub fn o4_owned_live_objects() -> Option<O4OwnedLiveObjects> {
+    O4_OWNED_LIVE_OBJECTS.with(|c| c.get())
+}
+
+/// Test-only (RUN 422 §3): measure the ACTUAL live O4-owned objects held by the
+/// publish path at the pre-effective phase and record them for the sampler. A
+/// failed evidence-capacity measurement is surfaced EXPLICITLY (`Err`), never a
+/// silent `0`.
+#[cfg(any(test, feature = "test-utils"))]
+fn record_o4_owned_live_objects(
+    validated: &ValidatedRecord,
+    meta_encoded: &[u8],
+    meta_encoded_capacity: usize,
+) -> Result<(), SafetyStoreError> {
+    let _ = meta_encoded;
+    let sample = O4OwnedLiveObjects {
+        validated_inline: super::record::size_of_validated_record(),
+        retained_evidence_capacity: validated.retained_evidence_capacity()? as u128,
+        retained_encoded_capacity: validated.encoded_capacity() as u128,
+        metadata_payload_capacity: meta_encoded_capacity as u128,
+    };
+    O4_OWNED_LIVE_OBJECTS.with(|c| c.set(Some(sample)));
+    Ok(())
 }
 
 /// Decoded initialization metadata (one per backend DB).
@@ -1173,6 +1404,333 @@ impl SafetyRecordOwner {
     }
 
     // -----------------------------------------------------------------------
+    // §13.6 — prepared-decision L0 capture (generation-only, non-authorizing)
+    // -----------------------------------------------------------------------
+
+    /// Read the current authoritative publication revision **under an
+    /// already-held serialization-domain guard**, charging the component-owned
+    /// metadata buffer *before* it is allocated (§ 13.7: reservations precede the
+    /// copy). The transient `META_ENCODED_LEN` scratch releases at return.
+    fn authoritative_revision_locked(
+        &self,
+        _guard: &std::sync::MutexGuard<'_, super::backend::SerializationDomain>,
+    ) -> Result<u64, SafetyStoreError> {
+        // Cover the metadata-read allocation before `read_meta` copies the stored
+        // payload into a component-owned buffer.
+        let _meta_scratch = self
+            .backend
+            .accounting()
+            .reserve(super::backend::META_ENCODED_LEN)?;
+        let meta_bytes = self
+            .backend
+            .read_meta(super::backend::META_ENCODED_LEN)?
+            .ok_or(SafetyStoreError::MissingEstablishedState("no metadata"))?;
+        let meta = SafetyMeta::decode(&meta_bytes)?;
+        if meta.context_digest != context_digest(self.pinned()) {
+            return Err(SafetyStoreError::SemanticRefusal(
+                super::error::SemanticRefusalDetail::PinnedContextDisagreement,
+            ));
+        }
+        Ok(meta.current_revision)
+        // `_meta_scratch` drops here, releasing the metadata-read charge.
+    }
+
+    /// **§ 13.6 prepared-decision L0 capture** — retain, for a prepared signing
+    /// decision, the **generation only** of a read-validated proof plus the
+    /// provenance required to rebind it, charged under the terms the aggregate
+    /// already budgets for a prepared holder. **Non-authorizing**: it mints no
+    /// authorization, freshness, durability acknowledgement, or verified-evidence
+    /// status, and establishes no engine decision timing.
+    ///
+    /// The complete provenance gate runs on the **borrowed** proof first; on any
+    /// refusal the original proof is returned **intact** (its original bytes and
+    /// holder reservation untouched). Only after the generation-only and
+    /// per-entry reservations are admitted is the proof consumed; its original
+    /// full-proof holder reservation is released **after** the new reservations
+    /// are live, so no live object is uncharged across the conversion.
+    ///
+    /// Capture is linearized with publication under the backend serialization
+    /// domain (the outer lock); the registry mutex is a leaf taken under it.
+    pub fn capture_prepared_decision(
+        &self,
+        proof: ValidatedRecord,
+        expected_authoritative_revision: u64,
+    ) -> Result<super::prepared::PreparedPin, (ValidatedRecord, super::prepared::CaptureRefusal)>
+    {
+        use super::prepared::CaptureRefusal;
+
+        // --- provenance gate on the borrowed proof (no consumption) ---
+        if self.backend.recovery_required() {
+            return Err((proof, CaptureRefusal::RecoveryRequired));
+        }
+        let incarnation = self.backend.incarnation();
+        // Foreign incarnation OR standalone/uncharged (None) proof — both refused.
+        if proof.recovery_backend_incarnation() != Some(incarnation) {
+            return Err((proof, CaptureRefusal::ForeignOrUncharged));
+        }
+        if proof.origin_context_digest() != &context_digest(self.pinned()) {
+            return Err((proof, CaptureRefusal::ForeignContext));
+        }
+        let identity = match super::prepared::GenerationIdentity::from_retained(proof.retained()) {
+            Some(id) => id,
+            // BootstrapNoLock — left explicitly unresolved (Locked-only).
+            None => return Err((proof, CaptureRefusal::BootstrapUnresolved)),
+        };
+
+        // --- linearize with publication under the serialization domain ---
+        let mut guard = self.backend.lock_domain();
+        if self.backend.recovery_required() {
+            return Err((proof, CaptureRefusal::RecoveryRequired));
+        }
+        let current = match self.authoritative_revision_locked(&guard) {
+            Ok(rev) => rev,
+            Err(e) => return Err((proof, CaptureRefusal::MetadataUnavailable(e))),
+        };
+        // The proof must reflect the current authoritative revision, and the
+        // caller's expectation must agree with it (stale-work fencing, § 13.5).
+        if proof.publication_revision() != current || expected_authoritative_revision != current {
+            return Err((
+                proof,
+                CaptureRefusal::StaleRevision {
+                    expected: expected_authoritative_revision,
+                    found: current,
+                },
+            ));
+        }
+
+        // Source/test-only: fire the capture-interval hook (if installed) at the
+        // EXACT point between the authoritative-state check above and the registry
+        // insertion below, WHILE the serialization domain `guard` is held. A focused
+        // serialization regression installs a hook here that signals a concurrent O4
+        // publisher and then waits briefly: because that publisher must take the same
+        // domain lock (`publish_locked`), correct serialization keeps it blocked for
+        // the whole interval. Compiled only under `test`/`test-utils`; unreachable in
+        // a default/release build.
+        #[cfg(any(test, feature = "test-utils"))]
+        fire_capture_interval_hook();
+
+        // --- lazy registry allocation (charge admitted before allocation) ------
+        // Before the first prepared capture no registry allocation exists. Obtain
+        // the one shared registry, allocating it lazily on first capture: admit the
+        // registry-storage charge BEFORE the allocation is created, then install
+        // exactly one shared registry under the held serialization-domain `guard`
+        // (first-initialization is serialized across all handles sharing the
+        // backend, so concurrent captures cannot install bypass registries). The
+        // installed registry owns its standing reservation for the ENTIRE allocation
+        // lifetime — including zero-entry periods — releasing it only when the
+        // allocation is destroyed (its last owner, the backend slot plus any
+        // outstanding pin, drops). A reused registry is NOT re-charged.
+        let registry_arc = match self.backend.prepared_registry_installed(&guard) {
+            Some(existing) => existing,
+            None => {
+                // On insufficient admission, return the proof intact WITHOUT
+                // creating any registry storage or publishing an entry.
+                let registry_res = match self
+                    .backend
+                    .accounting()
+                    .reserve(super::prepared::registry_cell_charge())
+                {
+                    Ok(r) => r,
+                    Err(e) => return Err((proof, CaptureRefusal::Admission(e))),
+                };
+                let fresh = Arc::new(Mutex::new(super::prepared::PreparedRegistry::new(
+                    incarnation,
+                    registry_res,
+                )));
+                self.backend.install_prepared_registry(&mut guard, fresh)
+            }
+        };
+        let mut reg = registry_arc.lock().expect("prepared registry poisoned");
+
+        // Refuse a full registry WITHOUT eviction; proof returned intact. (A
+        // registry just installed by this capture is empty, so this only fires for
+        // a reused registry.) The retained registry keeps its standing reservation.
+        if reg.free_slot().is_none() {
+            return Err((proof, CaptureRefusal::RegistryFull));
+        }
+        // Fail closed BEFORE any mutation if the serial counter is exhausted; the
+        // retained registry (and its standing reservation) is left intact. This is a
+        // later capture step refusing AFTER registry initialization: the chosen
+        // behavior is to RETAIN the allocation with its reservation (documented and
+        // tested), never a stale-handle revival.
+        if reg.next_serial_checked().is_none() {
+            return Err((proof, CaptureRefusal::CounterExhausted));
+        }
+
+        // Admission-before-allocation for the owning-pin object. (The registry
+        // storage charge was already admitted before the registry was allocated
+        // above.) The pin is reserved WHILE the proof's full holder is still live,
+        // so no live object is ever uncharged across the conversion. If this refuses
+        // after a just-installed registry, that empty registry is retained with its
+        // standing reservation (chosen behavior for a post-initialization refusal).
+        let pin_res = match self
+            .backend
+            .accounting()
+            .reserve(super::prepared::pin_charge())
+        {
+            Ok(r) => r,
+            Err(e) => return Err((proof, CaptureRefusal::Admission(e))),
+        };
+
+        // Share an existing generation backing if one holds an equal retained
+        // generation (its core + control charges cover both entries); otherwise
+        // reserve a fresh generation core + holder/control charge WHILE the proof's
+        // full holder is still live, so the moved evidence is never uncharged
+        // across the conversion.
+        let shared = reg.shareable_backing_for(proof.retained());
+        let handle = if let Some(backing) = shared {
+            // Shared path: consume the proof and reuse the existing backing. The
+            // duplicate proof's SEPARATELY OWNED evidence backings (`parts.retained`)
+            // must be DESTROYED before the proof's prior holder reservation — which
+            // covered them — is released, so those live bytes are never uncharged.
+            let parts = proof.into_prepared_parts();
+            let prior_holder = parts.prior_holder;
+            // Measure the duplicate's separately owned evidence backings BEFORE any
+            // teardown, so both observers can see whether they were still live when
+            // the covering reservation was released.
+            #[cfg(any(test, feature = "test-utils"))]
+            let dup_evidence_bytes = parts
+                .retained
+                .evidence_backing_capacity()
+                .expect("duplicate evidence backing capacity measurement failed");
+            // INDEPENDENT owned-object destruction probe (RUN 422 §2 B): register the
+            // duplicate backing's measured bytes as live and bundle a Drop probe onto
+            // the retained object so the live byte total is decremented exactly when
+            // the owned backing object is actually destroyed — measured from real
+            // owned-object destruction (by byte size, not allocation-address/identity
+            // tracing), never derived from the branch below or a hard-coded value.
+            #[cfg(any(test, feature = "test-utils"))]
+            DUP_BACKING_LIVE_BYTES.with(|c| c.set(c.get() + dup_evidence_bytes));
+            #[cfg(any(test, feature = "test-utils"))]
+            let retained = (
+                parts.retained,
+                DupBackingLiveProbe {
+                    bytes: dup_evidence_bytes,
+                },
+            );
+            #[cfg(not(any(test, feature = "test-utils")))]
+            let retained = parts.retained;
+
+            #[cfg(any(test, feature = "test-utils"))]
+            let premature = SHARED_RELEASE_ORDER.with(|c| {
+                let o = c.get();
+                c.set(SharedReleaseOrder::RetainedBeforeHolder); // consume (one-shot)
+                o == SharedReleaseOrder::HolderBeforeRetained
+            });
+            #[cfg(not(any(test, feature = "test-utils")))]
+            let premature = false;
+
+            if premature {
+                // PREMATURE ordering (historical branch-selection experiment, §2):
+                // release the covering reservation while the duplicate's evidence is
+                // still alive, leaving those live bytes uncharged for the interval.
+                #[cfg(any(test, feature = "test-utils"))]
+                SHARED_DUP_LIVE_AT_RELEASE.with(|c| c.set(Some(dup_evidence_bytes)));
+                #[cfg(any(test, feature = "test-utils"))]
+                DUP_BACKING_LIVE_AT_RELEASE
+                    .with(|c| c.set(Some(DUP_BACKING_LIVE_BYTES.with(|b| b.get()))));
+                if let Some(h) = prior_holder {
+                    h.release_now();
+                }
+                drop(retained);
+            } else {
+                // CORRECTED NORMAL ordering: destroy the duplicate's evidence backings
+                // (and, with them, the tracker probe — decrementing the live total)
+                // FIRST, then sample the independent tracker at the release boundary
+                // and release the reservation that covered them, so no live byte is
+                // ever uncharged across the conversion.
+                drop(retained);
+                #[cfg(any(test, feature = "test-utils"))]
+                SHARED_DUP_LIVE_AT_RELEASE.with(|c| c.set(Some(0)));
+                #[cfg(any(test, feature = "test-utils"))]
+                DUP_BACKING_LIVE_AT_RELEASE
+                    .with(|c| c.set(Some(DUP_BACKING_LIVE_BYTES.with(|b| b.get()))));
+                if let Some(h) = prior_holder {
+                    h.release_now();
+                }
+            }
+            reg.insert_shared(identity, backing)
+                .expect("free slot + serial pre-checked under the held registry lock")
+        } else {
+            let gen_charge = match prepared_generation_charge(self.pinned(), proof.retained()) {
+                Ok(c) => c,
+                Err(e) => {
+                    drop(pin_res);
+                    return Err((proof, CaptureRefusal::Admission(e)));
+                }
+            };
+            // The holder/control charge is derived from the ACTUAL private
+            // `GenerationBacking` wrapper size (provenance + inline reservation +
+            // padding), not a synthetic wrapper.
+            let control_charge = match super::accounting::prepared_holder_control_charge(
+                super::prepared::generation_backing_struct_size(),
+            ) {
+                Ok(c) => c,
+                Err(e) => {
+                    drop(pin_res);
+                    return Err((proof, CaptureRefusal::Admission(e)));
+                }
+            };
+            // Reserve the generation core + control charges while the proof holder
+            // is live (conversion overlap; no uncharged interval).
+            let gen_res = match self.backend.accounting().reserve(gen_charge) {
+                Ok(r) => r,
+                Err(e) => {
+                    drop(pin_res);
+                    return Err((proof, CaptureRefusal::Admission(e)));
+                }
+            };
+            let control_res = match self.backend.accounting().reserve(control_charge) {
+                Ok(r) => r,
+                Err(e) => {
+                    drop(gen_res);
+                    drop(pin_res);
+                    return Err((proof, CaptureRefusal::Admission(e)));
+                }
+            };
+            // Now consume the proof: move the retained generation in, drop the
+            // encoded buffer, insert, and release the proof's full holder AFTER the
+            // core + control (+ pin) reservations are live. The registry already
+            // owns its standing registry-storage reservation.
+            let parts = proof.into_prepared_parts();
+            let prior_holder = parts.prior_holder;
+            let recovery_incarnation = parts
+                .recovery_backend_incarnation
+                .expect("gate verified Some(incarnation)");
+            let handle = reg
+                .insert_fresh(
+                    identity,
+                    parts.retained,
+                    parts.origin_context_digest,
+                    recovery_incarnation,
+                    parts.evidence_status,
+                    current,
+                    gen_res,
+                    control_res,
+                )
+                .expect("free slot + serial pre-checked under the held registry lock");
+            if let Some(h) = prior_holder {
+                h.release_now();
+            }
+            handle
+        };
+
+        drop(reg);
+        drop(guard);
+        Ok(super::prepared::PreparedPin::new(registry_arc, handle, pin_res))
+    }
+
+    /// Release a captured prepared entry explicitly (normal completion). Dropping
+    /// the pin without calling this performs the same cleanup automatically
+    /// (abandonment). Does not alter any D10 signing-journal obligation.
+    pub fn release_prepared(
+        &self,
+        pin: super::prepared::PreparedPin,
+    ) -> super::prepared::ReleaseOutcome {
+        pin.release()
+    }
+
+    // -----------------------------------------------------------------------
     // O4 — publish a new restriction
     // -----------------------------------------------------------------------
 
@@ -1370,9 +1928,17 @@ impl SafetyRecordOwner {
             context_digest: meta.context_digest,
             current_revision: new_revision,
         };
+        // Bind the component-owned metadata encoding so it is a named live object
+        // measurable at the pre-effective phase (it otherwise remains live through
+        // this match arm as a temporary). `publish_atomic` borrows it; the
+        // measured capacity is read before the match so the live object the O4
+        // phase holds is observed, not a reconstruction.
+        let meta_encoded = new_meta.encode();
+        #[cfg(any(test, feature = "test-utils"))]
+        let meta_encoded_capacity = meta_encoded.capacity();
         match self
             .backend
-            .publish_atomic(&guard, &new_meta.encode(), validated.encoded())
+            .publish_atomic(&guard, &meta_encoded, validated.encoded())
         {
             PublishOutcome::DurableAcknowledged => {
                 // Deterministic post-acknowledgement / pre-effectiveness crash
@@ -1382,6 +1948,19 @@ impl SafetyRecordOwner {
                 // identify and terminate at exactly this point, proving that
                 // termination precedes the transition and that a reopen starts
                 // without inherited effectiveness.
+                //
+                // At this exact phase the O4-owned live objects are still held:
+                // the validated proof (`ValidatedRecord`, not a transient
+                // `DecodedRecord`), its retained evidence backings, its retained
+                // `encoded` buffer, and the live `meta_encoded` payload. Measure
+                // them IN PLACE for the pre-effective sampler BEFORE firing the
+                // hook; a failed measurement is surfaced explicitly.
+                #[cfg(any(test, feature = "test-utils"))]
+                if let Err(e) =
+                    record_o4_owned_live_objects(&validated, &meta_encoded, meta_encoded_capacity)
+                {
+                    return PublishResult::RefusedPreWrite(e);
+                }
                 #[cfg(any(test, feature = "test-utils"))]
                 self.backend.run_pre_effective_hook("O4", new_revision);
                 // An acknowledged O4 durable success keeps the shared state

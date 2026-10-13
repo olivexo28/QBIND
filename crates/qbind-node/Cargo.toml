@@ -73,6 +73,12 @@ name = "run_422_d7d14_safety_record_store_tests"
 path = "tests/run_422_d7d14_safety_record_store_tests.rs"
 required-features = ["test-utils"]
 
+# RUN 422 generation-only prepared-decision L0 ownership spike.
+[[test]]
+name = "run_422_spike_prepared_generation_tests"
+path = "tests/run_422_spike_prepared_generation_tests.rs"
+required-features = ["test-utils"]
+
 # `m16_epoch_transition_hardening_tests` likewise drives the `test-utils`-gated
 # `RocksDbConsensusStorage::set_inject_write_failure` / `clear_epoch_transition_marker`
 # fault-injection helpers. Without an explicit `required-features` declaration the

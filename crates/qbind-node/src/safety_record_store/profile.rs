@@ -59,6 +59,25 @@ pub const ARC_CTRL: u128 = 16;
 pub const MAX_OUTSTANDING_PREPARED_L0: u128 = 2;
 pub const MAX_CONCURRENT_CANDIDATES: u128 = 1;
 pub const MAX_CONCURRENT_PUBLICATIONS: u128 = 1;
+
+/// Prepared-decision L0 per-holder identity bytes (§ 13.6): the restriction
+/// identity a prepared generation pins — `lock_block_id` (32) + `lock_view` (8).
+/// This is the `identity` term the aggregate's holder budget already reserves
+/// `MAX_OUTSTANDING_PREPARED_L0 ×` of; a prepared entry charges exactly it.
+pub const PREPARED_IDENTITY_BYTES: u128 = 40;
+/// Prepared-decision L0 per-holder shared-generation handle bytes (§ 13.6): the
+/// `Arc` handle an entry holds to its (possibly shared) generation backing. This
+/// is the `arc_handle` term the aggregate's holder budget already reserves per
+/// prepared holder.
+pub const PREPARED_ARC_HANDLE_BYTES: u128 = 8;
+
+/// The per-entry prepared-decision L0 charge (§ 13.6): `PREPARED_IDENTITY_BYTES +
+/// PREPARED_ARC_HANDLE_BYTES` = 48. The aggregate's holder term already budgets
+/// `MAX_OUTSTANDING_PREPARED_L0 × (identity + arc_handle)`, so admitting this per
+/// entry consumes budget the ceiling already reserves — no ceiling increase.
+pub const fn prepared_entry_charge() -> u128 {
+    PREPARED_IDENTITY_BYTES + PREPARED_ARC_HANDLE_BYTES
+}
 /// Initial-profile capacity-normalization slack, in **elements** (§ 13.7).
 pub const CAPNORM_SLACK: u128 = 0;
 
@@ -361,8 +380,8 @@ pub fn max_aggregate_retained_bytes(
     size_of_timeout_msg: u128,
     validation_scratch: u128,
 ) -> Result<u128, SafetyStoreError> {
-    let arc_handle: u128 = 8;
-    let identity: u128 = 40;
+    let arc_handle: u128 = PREPARED_ARC_HANDLE_BYTES;
+    let identity: u128 = PREPARED_IDENTITY_BYTES;
     let gen = max_retained_generation_bytes(ctx, size_of_timeout_msg)?;
     let rec = max_safety_record_bytes(ctx)?;
     // holder term

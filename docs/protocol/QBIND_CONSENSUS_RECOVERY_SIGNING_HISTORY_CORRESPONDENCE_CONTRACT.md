@@ -2565,6 +2565,24 @@ durable-before-sign invariant governs (recovered `Reserved` = potentially signed
 Because each crash state is independently recoverable from the two ordered barriers,
 the extra complexity of a spanning transaction is **not** justified within scope.
 
+**Implementation status (isolated, Run 422 — this landing).** The bounded in-memory
+generation-retention described above is now implemented as an **isolated** maintained-source
+component under `crates/qbind-node/src/safety_record_store/` (new `prepared.rs` plus the
+supporting accounting/backend/owner/profile/record changes), exercised by the dedicated
+`test-utils`-gated target `tests/run_422_spike_prepared_generation_tests.rs` (34 passed;
+D7–D14 regression 157 passed / 1 ignored unchanged). It implements only **generation-only
+retention**: an O3 proof is consumed into a captured generation (original proof returned
+intact on refusal, preserving O5), held through one lazily-allocated registry inside the
+existing serialization domain with admission-before-allocation and a standing reservation.
+Capture is **non-authorizing and Locked-only**; the explicit `BootstrapUnresolved` refusal
+is preserved. This mechanism does **not** supply the “proposed missing interface” of the
+table above — it does **not** establish when an engine decision occurred, does **not** bind
+an exact candidate to a decision, and is **not** wired to any production caller
+(`capture_prepared_decision` has no non-test call site; `main.rs`/`binary_consensus_loop`/
+the consensus routes are unchanged). The §13.6 binding remains a **proposed requirement**;
+activation stays DISABLED and public DevNet stays NO-GO. The prior frozen-candidate review
+and CodeQL results are **not** claimed to cover this extension.
+
 ### 13.7 Retention, replacement, and capacity
 
 **Concrete bounded policy (initial profile): retain exactly one authoritative
