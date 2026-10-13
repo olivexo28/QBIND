@@ -43,10 +43,10 @@ use qbind_node::safety_record_store::prepared::{
     generation_backing_struct_size_bytes, pin_charge_bytes, registry_cell_charge_bytes,
     size_of_generation_backing, size_of_prepared_entry, size_of_prepared_handle,
     size_of_prepared_pin, size_of_prepared_registry, size_of_prepared_registry_cell,
-    CaptureRefusal, ReleaseOutcome,
+    CaptureRefusal, PreparedEntryView, PreparedHandle, ReleaseOutcome,
 };
 use qbind_node::safety_record_store::profile::{
-    max_retained_generation_bytes, PinnedSafetyContext, ARC_CTRL,
+    max_retained_generation_bytes, max_safety_record_bytes, PinnedSafetyContext, ARC_CTRL,
 };
 use qbind_node::safety_record_store::record::{
     size_of_retained_record, size_of_timeout_msg, CommittedAnchor, DecodedRecord, EvidenceStatus,
@@ -252,6 +252,66 @@ fn registry_cell() -> u128 {
 /// The owning-pin charge (`size_of::<PreparedPin>()`), charged per live pin.
 fn pin_bytes() -> u128 {
     pin_charge_bytes()
+}
+
+/// The number of occupied registry slots (acquires the domain lock itself; must
+/// not be called while a capture holds the domain guard).
+fn registry_occupied(owner: &SafetyRecordOwner) -> usize {
+    owner
+        .backend_for_test()
+        .prepared_registry_for_test()
+        .expect("registry installed")
+        .lock()
+        .unwrap()
+        .occupied()
+}
+
+/// Resolve a pin handle to its live entry's retained generation
+/// identity/provenance view, or `None` if it no longer resolves.
+fn inspect_pin(owner: &SafetyRecordOwner, h: PreparedHandle) -> Option<PreparedEntryView> {
+    owner
+        .backend_for_test()
+        .prepared_registry_for_test()
+        .expect("registry installed")
+        .lock()
+        .unwrap()
+        .inspect(h)
+}
+
+/// Assert that a pin still resolves to the SAME retained generation identity and
+/// provenance it did before — occupancy alone is insufficient. Compares the
+/// pinned identity, the entry serial, the captured revision, the originating
+/// backend incarnation, the originating context digest, the evidence status, and
+/// the retained evidence-backing capacity field by field.
+fn assert_same_provenance(label: &str, before: &PreparedEntryView, after: &PreparedEntryView) {
+    assert_eq!(
+        after.identity, before.identity,
+        "{label}: retained generation identity unchanged"
+    );
+    assert_eq!(
+        after.serial, before.serial,
+        "{label}: entry serial (retained generation) unchanged"
+    );
+    assert_eq!(
+        after.captured_revision, before.captured_revision,
+        "{label}: captured revision unchanged"
+    );
+    assert_eq!(
+        after.recovery_backend_incarnation, before.recovery_backend_incarnation,
+        "{label}: originating backend incarnation unchanged"
+    );
+    assert_eq!(
+        after.origin_context_digest, before.origin_context_digest,
+        "{label}: originating context digest unchanged"
+    );
+    assert_eq!(
+        after.evidence_status, before.evidence_status,
+        "{label}: evidence status unchanged"
+    );
+    assert_eq!(
+        after.evidence_backing_capacity, before.evidence_backing_capacity,
+        "{label}: retained evidence backing capacity unchanged"
+    );
 }
 
 // ===========================================================================
@@ -673,19 +733,20 @@ fn spike_sharing_lifetime_regression_n4() {
 
 // ===========================================================================
 // §2. DISCRIMINATING duplicate-release invariant, observed by an INDEPENDENT
-// allocation-identity tracker (RUN 422 §2 B). A shared conversion must leave ZERO
-// duplicate backing bytes alive when the covering reservation is released. This
-// test asserts ONLY the correct outcome (`Some(0)`) read from
-// `dup_backing_live_at_release()`, which samples the ACTUAL live-backing total at
-// the release boundary — it is NOT derived from the selected `SharedReleaseOrder`
-// branch (that narrower, branch-assigned observer is exercised separately by
-// `spike_sharing_lifetime_regression`) and it is NOT a hard-coded expectation.
-// Under the shipped source it PASSES; a source mutation that moves the covering
-// reservation's release BEFORE the duplicate backing's destruction — with THIS
-// observer and assertion left unchanged — makes it FAIL with a nonzero live count.
-// The raw FAIL (mutated) and PASS (restored byte-identically) command outcomes are
-// preserved in the evidence package (logs/04_dup_release_mutation_fail.log,
-// 05_dup_release_restored_pass.log).
+// owned-object destruction probe (RUN 422 §2 B). A shared conversion must leave
+// ZERO duplicate backing bytes alive when the covering reservation is released.
+// This test asserts ONLY the correct outcome (`Some(0)`) read from
+// `dup_backing_live_at_release()`, which samples the ACTUAL live-backing byte
+// total at the release boundary (measured owned-object destruction, not
+// allocation-address/identity tracing) — it is NOT derived from the selected
+// `SharedReleaseOrder` branch (that narrower, branch-assigned observer is
+// exercised separately by `spike_sharing_lifetime_regression`) and it is NOT a
+// hard-coded expectation. Under the shipped source it PASSES; a source mutation
+// that moves the covering reservation's release BEFORE the duplicate backing's
+// destruction — with THIS observer and assertion left unchanged — makes it FAIL
+// with a nonzero live count. The raw FAIL (mutated) and PASS (restored
+// byte-identically) command outcomes are preserved in the evidence package
+// (logs/04_dup_release_mutation_fail.log, 05_dup_release_restored_pass.log).
 // ===========================================================================
 
 fn duplicate_release_invariant(n: u64) {
@@ -702,8 +763,9 @@ fn duplicate_release_invariant(n: u64) {
 
     // Shared conversion on the DEFAULT (shipped) ordering — NO seam is armed. The
     // duplicate's separately owned backings must be destroyed BEFORE the
-    // reservation covering them is released. The INDEPENDENT tracker observes the
-    // real liveness of the duplicate backing allocation at the release boundary.
+    // reservation covering them is released. The INDEPENDENT probe measures the
+    // real destruction of the duplicate backing object (by byte size) at the
+    // release boundary.
     let pc = owner.read_validate(None::<&FixtureCommittedHistory>).unwrap();
     let pin_c = owner
         .capture_prepared_decision(pc, 1)
@@ -801,6 +863,39 @@ fn distinct_generations_and_full(n: u64) {
                 "COEXISTENCE FITS: aggregate {aggregate_with_two} <= ceiling {cap}"
             );
 
+            // PRE-OPERATION headroom: the ceiling slack measured BEFORE the O4 even
+            // begins (the sample `aggregate_with_two` is taken while both generations
+            // are pinned but no O4 reservation is yet live). Reported separately from
+            // the contemporaneous in-operation observation below.
+            let pre_operation_headroom = cap - aggregate_with_two;
+
+            // Task 1 — CONTEMPORANEOUS in-operation O4 observation. Install a bounded,
+            // one-shot sampler fired at a REAL O4 phase: after the publication's
+            // durability acknowledgement and BEFORE the O4 working-set reservation is
+            // released, while BOTH prepared generations remain pinned. It samples the
+            // executing backend's operational and aggregate reservations at that phase.
+            // On a REFUSED O4 (N=1 below) the publication never reaches this phase, so
+            // the slot stays `None` — no admitted O4 phase is fabricated for a refusal.
+            let o4_phase_sample: std::sync::Arc<std::sync::Mutex<Option<(u128, u128)>>> =
+                std::sync::Arc::new(std::sync::Mutex::new(None));
+            {
+                let backend = owner.backend_for_test().clone();
+                let slot = std::sync::Arc::clone(&o4_phase_sample);
+                owner
+                    .backend_for_test()
+                    .set_pre_effective_hook(std::sync::Arc::new(move |op, _rev| {
+                        if op == "O4" {
+                            let mut g = slot.lock().unwrap();
+                            if g.is_none() {
+                                *g = Some((
+                                    backend.accounting_current(),
+                                    backend.accounting_aggregate_current(),
+                                ));
+                            }
+                        }
+                    }));
+            }
+
             // Measure THROUGH O4 (a further authoritative publication, lock C) WHILE
             // BOTH distinct generations remain pinned. This overlaps the two live
             // generations' reservations with an O4 publication reservation. Honour the
@@ -809,28 +904,80 @@ fn distinct_generations_and_full(n: u64) {
             let lock_c = max_qc_lock(&ctx, [0x33u8; 32], 13);
             let lock_c_same = lock_c.clone();
 
-            // BEFORE the two-pin O4: snapshot the authoritative record bytes,
-            // metadata/revision, recovery state, and the two retained pins. The read
-            // proof is dropped immediately so its transient O2 working-set reservation
-            // does not perturb the subsequent measurements.
-            let (before_rev, before_bytes, before_incarnation) = {
-                let before = owner.read_validate(Some(&history)).unwrap();
-                assert!(before.recovery_backend_incarnation().is_some(), "recovery (O5) state present before the refused O4");
-                (before.publication_revision(), before.encoded_capacity(), before.recovery_backend_incarnation())
-            };
-            let before_occupied = owner
+            // BEFORE the two-pin O4 (Task 2): snapshot the ACTUAL comparable state so
+            // the refusal can be shown to mutate nothing. Capture the COMPLETE stored
+            // record bytes and COMPLETE stored metadata bytes by value; the publication
+            // revision, the owner's recovery_required() latch, and both retained pins'
+            // generation identities/provenance separately. Every temporary read proof
+            // is released BEFORE the operational/aggregate baselines are sampled, so no
+            // transient reservation perturbs the measured baselines.
+            let record_bound = max_safety_record_bytes(&ctx).unwrap();
+            let before_record_bytes = owner
                 .backend_for_test()
-                .prepared_registry_for_test()
-                .expect("registry installed")
-                .lock()
+                .read_record(record_bound)
                 .unwrap()
-                .occupied();
+                .expect("authoritative record present before the refused O4");
+            let before_meta_bytes = owner
+                .backend_for_test()
+                .read_meta(record_bound)
+                .unwrap()
+                .expect("authoritative metadata present before the refused O4");
+            let before_rev = {
+                let before = owner.read_validate(Some(&history)).unwrap();
+                assert!(
+                    before.recovery_backend_incarnation().is_some(),
+                    "recovery (O5) capability present before the refused O4"
+                );
+                before.publication_revision()
+            };
+            let before_recovery_required = owner.recovery_required();
+            // Both pins' retained generation identities/provenance (not occupancy):
+            // identity, serial, captured revision, originating incarnation/context,
+            // evidence status, and retained evidence-backing capacity.
+            let before_pin1 =
+                inspect_pin(&owner, pin1.handle()).expect("pin1 live before the refused O4");
+            let before_pin2 =
+                inspect_pin(&owner, pin2.handle()).expect("pin2 live before the refused O4");
+            let before_occupied = registry_occupied(&owner);
             assert_eq!(before_occupied, 2, "both pins retained before the refused O4");
+            // Operational AND aggregate baselines sampled LAST, after every temporary
+            // proof above is dropped.
             let before_op = op_current(&owner);
+            let before_agg = agg_current(&owner);
 
             match owner.publish_locked(lock_c, 2, Some(&history)) {
                 PublishResult::DurableAcknowledged { new_revision: 3 } => {
                     assert_eq!(op_current(&owner), coexist, "O4 reservation released; two generations intact");
+
+                    // Task 1 — the CONTEMPORANEOUS in-operation O4 observation (reached
+                    // only on the N=4 success path, where the O4 was actually admitted).
+                    // Distinct from the pre-operation headroom captured above.
+                    let (in_op, in_agg) = o4_phase_sample
+                        .lock()
+                        .unwrap()
+                        .expect("the O4 post-acknowledgement / pre-release phase was sampled");
+                    // Source-derived arithmetic (live objects, independent of the
+                    // sampled counters): the two pinned generations' combined live-object
+                    // charge is exactly `coexist`.
+                    assert!(
+                        in_op >= coexist,
+                        "in-operation operational reservation {in_op} covers both pinned generations' live objects {coexist}"
+                    );
+                    let o4_reservation = in_op - coexist; // the live O4 working-set reservation at that phase
+                    assert!(
+                        o4_reservation > 0,
+                        "a real O4 working-set reservation was held at the sampled phase"
+                    );
+                    assert_eq!(
+                        in_agg,
+                        context_ownership + in_op,
+                        "aggregate = context ownership + operational AT the O4 phase"
+                    );
+                    assert!(
+                        in_agg <= cap,
+                        "the UNCHANGED aggregate ceiling {cap} is honored AT the O4 phase (in-operation aggregate {in_agg}), not merely before it"
+                    );
+                    let in_operation_headroom = cap - in_agg;
 
                     // A THIRD capture is refused WITHOUT eviction; returned proof intact.
                     let pc = owner.read_validate(Some(&history)).unwrap();
@@ -850,8 +997,7 @@ fn distinct_generations_and_full(n: u64) {
                         "no eviction on refusal"
                     );
                     println!(
-                        "[§3 distinct N={n}] RESULT=COEXIST_THROUGH_O4 context_ownership={context_ownership} ga={ga}                  gb={gb} coexist={coexist} aggregate={aggregate_with_two} cap={cap} headroom={}",
-                        cap - aggregate_with_two
+                        "[§3 distinct N={n}] RESULT=COEXIST_THROUGH_O4 context_ownership={context_ownership} ga={ga}                  gb={gb} coexist={coexist} aggregate={aggregate_with_two} cap={cap}                  pre_operation_headroom={pre_operation_headroom}                  in_operation[op={in_op} agg={in_agg} o4_reservation={o4_reservation} headroom={in_operation_headroom}]                  (pre-operation headroom is the slack BEFORE the O4; the in-operation sample is taken at a real O4 phase while both generations stay pinned and the O4 reservation is live; the unchanged ceiling holds AT that phase)"
                     );
 
                     // Cleanup/readmission: release both; the registry allocation is
@@ -872,22 +1018,73 @@ fn distinct_generations_and_full(n: u64) {
                     assert_eq!(ov_cap, cap, "refusal is against the unchanged aggregate ceiling");
                     let shortfall = next - cap;
                     assert!(shortfall > 0, "a positive shortfall is reported");
-                    // AFTER the refused two-pin O4: the refusal mutated NOTHING. Compare
-                    // record bytes, metadata/revision, recovery state, retained pins, and
-                    // the operational charge against the before-snapshot. The read proof
-                    // is scoped so its transient reservation is released immediately.
+                    // Honest N=1 refusal: the O4 was never admitted, so no in-operation
+                    // O4 phase was sampled. Do not fabricate an admitted phase.
+                    assert!(
+                        o4_phase_sample.lock().unwrap().is_none(),
+                        "no admitted O4 phase was sampled for the REFUSED operation"
+                    );
+                    // AFTER the refused two-pin O4 (Task 2): the refusal mutated NOTHING.
+                    // Compare the COMPLETE stored record bytes, the COMPLETE stored
+                    // metadata bytes, the publication revision (separately), the owner's
+                    // recovery_required() latch, and both pins' retained generation
+                    // identities/provenance. Occupancy alone is insufficient — the pin
+                    // identities are compared field by field. Temporary read proofs are
+                    // released before the operational/aggregate baselines are compared.
+                    let after_record_bytes = owner
+                        .backend_for_test()
+                        .read_record(record_bound)
+                        .unwrap()
+                        .expect("authoritative record still present after the refused O4");
+                    let after_meta_bytes = owner
+                        .backend_for_test()
+                        .read_meta(record_bound)
+                        .unwrap()
+                        .expect("authoritative metadata still present after the refused O4");
+                    assert_eq!(
+                        after_record_bytes, before_record_bytes,
+                        "complete stored record bytes unchanged by the refused O4"
+                    );
+                    assert_eq!(
+                        after_meta_bytes, before_meta_bytes,
+                        "complete stored metadata bytes unchanged by the refused O4"
+                    );
                     {
                         let after = owner.read_validate(Some(&history)).unwrap();
-                        assert_eq!(after.publication_revision(), before_rev, "revision unchanged by the refused O4");
-                        assert_eq!(after.encoded_capacity(), before_bytes, "record bytes unchanged by the refused O4");
-                        assert_eq!(after.recovery_backend_incarnation(), before_incarnation, "recovery (O5) state unchanged");
+                        assert_eq!(
+                            after.publication_revision(),
+                            before_rev,
+                            "publication revision unchanged by the refused O4"
+                        );
                     }
                     assert_eq!(
-                        owner.backend_for_test().prepared_registry_for_test().expect("registry installed").lock().unwrap().occupied(),
+                        owner.recovery_required(),
+                        before_recovery_required,
+                        "owner.recovery_required() unchanged by the refused O4"
+                    );
+                    let after_pin1 = inspect_pin(&owner, pin1.handle())
+                        .expect("pin1 still resolves to its retained generation after the refused O4");
+                    let after_pin2 = inspect_pin(&owner, pin2.handle())
+                        .expect("pin2 still resolves to its retained generation after the refused O4");
+                    assert_same_provenance("pin1", &before_pin1, &after_pin1);
+                    assert_same_provenance("pin2", &before_pin2, &after_pin2);
+                    assert_eq!(
+                        registry_occupied(&owner),
                         before_occupied,
                         "both generations stay pinned; the refused O4 mutated nothing"
                     );
-                    assert_eq!(op_current(&owner), before_op, "no charge leaked by the refused O4");
+                    // Operational AND aggregate reservations returned to the pre-operation
+                    // baseline sampled before the refusal.
+                    assert_eq!(
+                        op_current(&owner),
+                        before_op,
+                        "operational reservation returned to the pre-operation baseline"
+                    );
+                    assert_eq!(
+                        agg_current(&owner),
+                        before_agg,
+                        "aggregate reservation returned to the pre-operation baseline"
+                    );
                     assert_eq!(op_current(&owner), coexist, "operational charge is still the two pinned generations");
 
                     // ABANDON the necessary pin (pin1) to create headroom. The registry
@@ -912,7 +1109,7 @@ fn distinct_generations_and_full(n: u64) {
                     let pin3 = owner.capture_prepared_decision(pc2, 3).expect("readmitted capture into the freed slot");
                     assert_eq!(op_current(&owner), gb + gc + 2 * control + registry_cell() + 2 * pin_bytes(), "readmitted second generation pinned");
                     println!(
-                        "[§3 distinct N={n}] RESULT=COEXIST_REFUSE_O4 context_ownership={context_ownership} ga={ga}                  gb={gb} coexist={coexist} aggregate={aggregate_with_two} cap={cap} o4_next={next} shortfall={shortfall}                  (two generations coexist while pinned; the O4 through both is refused against the unchanged ceiling; abandon pin1, retry the SAME lock C -> readmitted rev 3)"
+                        "[§3 distinct N={n}] RESULT=COEXIST_REFUSE_O4 context_ownership={context_ownership} ga={ga}                  gb={gb} coexist={coexist} aggregate={aggregate_with_two} cap={cap} pre_operation_headroom={pre_operation_headroom}                  o4_next={next} shortfall={shortfall} in_operation_o4_phase=NONE(refused)                  (two generations coexist while pinned; the O4 through both is REFUSED against the unchanged ceiling, so there is no admitted in-operation O4 phase; the refusal mutated nothing; abandon pin1, retry the SAME lock C -> readmitted rev 3)"
                     );
 
                     // Release everything; the registry keeps its standing reservation.
@@ -1751,4 +1948,4 @@ fn spike_lt_pin_outliving_owner_releases_reservation_at_end() {
     // registry, releasing every reservation — correct end-of-life cleanup.
     drop(pin);
     assert_eq!(acct.current(), 0, "last owner (the outliving pin) released all prepared reservations");
-}
+}
