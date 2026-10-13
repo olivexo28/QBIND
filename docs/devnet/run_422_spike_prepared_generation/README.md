@@ -168,15 +168,17 @@ independently measuring backing liveness. It is retained as historical evidence
 for the branch-selection experiment (`spike_sharing_lifetime_regression`).
 
 The **invariant** test, `spike_duplicate_release_invariant_n{1,4}`, instead reads
-an **independent allocation-identity tracker** (`dup_backing_live_at_release()`):
-each duplicate evidence backing is registered live with its measured byte size and
-a `Drop` probe is bundled onto the retained object, so the live total decrements
-exactly when that allocation is actually destroyed. The tracker is sampled at the
-covering-reservation **release boundary**. The sampled value is therefore derived
-from real allocation liveness — **not** from the selected release-order flag and
-**not** from a hard-coded expected value. The single unchanged invariant it
-asserts is **`Some(0)`: zero duplicate backing bytes remain live when their
-covering reservation is released** — it never expects the defect value.
+an **independent owned-object destruction probe** (`dup_backing_live_at_release()`):
+each duplicate evidence backing is registered live with its measured backing byte
+size and a `Drop` probe is bundled onto the retained object, so the live byte total
+decrements exactly when that owned object is actually destroyed. The probe measures
+owned-object destruction by byte size — it does **not** trace allocation addresses
+or object identities. It is sampled at the covering-reservation **release
+boundary**. The sampled value is therefore derived from real owned-object
+destruction — **not** from the selected release-order flag and **not** from a
+hard-coded expected value. The single unchanged invariant it asserts is
+**`Some(0)`: zero duplicate backing bytes remain live when their covering
+reservation is released** — it never expects the defect value.
 
 To show this invariant is *sensitive to the production teardown order*, the normal
 (corrected) shared branch was mutated **in source** by moving the covering
@@ -189,7 +191,7 @@ assertion byte-for-byte unchanged:
 | mutated (release before backing destruction) | **FAILS** — `Some(33)` / `Some(129)` | [`logs/04_dup_release_mutation_fail.log`](logs/04_dup_release_mutation_fail.log) |
 | restored (destroy backing before release) | **PASSES** — `Some(0)` / `Some(0)` | [`logs/05_dup_release_restored_pass.log`](logs/05_dup_release_restored_pass.log) |
 
-The failing `Some(33)` / `Some(129)` counts are read from the independent tracker,
+The failing `Some(33)` / `Some(129)` counts are read from the independent probe,
 not assigned by the selected branch. The source was restored **byte-identically**
 (sha256 `d7dcea17…` verified before and after) after the experiment; the
 production path drops the probe under `#[cfg(not(test))]` (no runtime cost).
@@ -216,20 +218,40 @@ included):
 | aggregate ceiling | 3956 | 7772 |
 
 **Two distinct prepared generations coexist while pinned at both N** (1714 ≤ 3956;
-1954 ≤ 7772). The honest distinction is the *contemporaneous O4 through both*:
+1954 ≤ 7772). That aggregate-with-two figure is the **pre-operation** reservation,
+sampled *before* any O4 is attempted — its slack from the ceiling is the
+**pre-operation headroom** (2242 at N=1, 5818 at N=4). The honest distinction is
+the *contemporaneous O4 through both*, observed at a real O4 phase while both
+generations stay pinned:
 
 - **N=4 — COEXIST_THROUGH_O4:** a further authoritative publication (a third
-  maximum anchored lock) while both generations stay pinned **succeeds** (headroom
-  5818). A third capture is then refused `RegistryFull` without eviction; both pins
-  release to baseline.
+  maximum anchored lock) while both generations stay pinned **succeeds**. The run
+  now samples the executing backend **during** the O4 — at the publish
+  pre-effective phase, after admission and before release, while both prepared
+  generations remain pinned and the O4 reservation is live. The contemporaneous
+  sample is **operational 6413, aggregate 6653** (= context-ownership 240 +
+  operational 6413), giving an **in-operation O4 reservation of 4699** and an
+  **in-operation headroom of 1119**; the unchanged aggregate ceiling **holds at
+  that phase** (6653 ≤ 7772). This is distinct from, and much tighter than, the
+  5818 pre-operation headroom. A third capture is then refused `RegistryFull`
+  without eviction; both pins release to baseline.
 - **N=1 — COEXIST_REFUSE_O4 (genuine two-pin publication refusal):** the same O4
   through both pinned generations would reach **4103 > 3956**, an exact
   **147-byte shortfall** (measured against the unchanged fixtures, not forced to a
-  prior figure). The run (a) snapshots the authoritative record bytes, metadata
-  revision, recovery (O5) incarnation, and the two retained pins **before** the
-  refused publication; (b) confirms **after** the refusal that record bytes,
-  revision, recovery state, both pins, and the operational charge are all
-  unchanged (the refusal mutated nothing); (c) **explicitly abandons** the
+  prior figure). Because the operation is **refused**, there is **no admitted
+  in-operation O4 phase** to sample — the in-operation observation is honestly
+  `NONE(refused)` and no admitted O4 is fabricated. Across the refusal the run
+  compares **actual state**: it captures, *before* the refused publication (and
+  outside the measured allocation interval), the **complete stored record bytes**,
+  the **complete stored metadata bytes**, the **publication revision** (separately),
+  **`owner.recovery_required()`** (not merely the backend incarnation), both
+  retained **pin identities/provenance**, and the **operational and aggregate**
+  reservations; then confirms *after* the refusal that **every one** of these is
+  unchanged — complete record bytes equal, complete metadata bytes equal, revision
+  equal, `recovery_required()` equal, both pins still resolve to their original
+  retained generation identities/provenance (occupancy alone is insufficient), and
+  both the operational and aggregate reservations returned to the pre-operation
+  baseline (the refusal mutated nothing). It then (c) **explicitly abandons** the
   necessary pin (`release_prepared(pin1)`), freeing one registry slot while the
   retained registry keeps its standing reservation; (d) **retries the SAME refused
   publication** (the byte-identical cloned lock C at the same expected revision),
@@ -367,18 +389,26 @@ the test fails on the defect and passes on the correction:
   unchanged.
 - The shared-conversion path keeps a duplicate proof's reservation active until
   its separately-owned evidence backings are destroyed, while preserving the
-  canonical generation's independent reservation. An **independent
-  allocation-identity tracker** (not the release-order flag, not a hard-coded
-  value) observes zero duplicate backing bytes live at the covering-reservation
-  release boundary; a release-before-destruction source mutation makes that
-  invariant fail with the actual still-live byte count.
+  canonical generation's independent reservation. An **independent owned-object
+  destruction probe** with measured backing bytes (not allocation-address/identity
+  tracing, not the release-order flag, not a hard-coded value) measures zero
+  duplicate backing bytes live at the covering-reservation release boundary; a
+  release-before-destruction source mutation makes that invariant fail with the
+  actual still-live byte count.
 - Under **complete** maximum-fixture accounting, two distinct prepared generations
-  coexist while pinned at both N, but at N=1 a contemporaneous O4 through both
-  exceeds the **unchanged** ceiling by an honest **147-byte** shortfall; the run
-  snapshots/compares record bytes, revision, recovery state, and pins before and
-  after the refusal, then abandons the necessary pin and **retries the SAME
-  refused publication** to readmission — rather than raising any limit. At N=4 the
-  O4 succeeds (headroom 5818).
+  coexist while pinned at both N. At N=4 a contemporaneous O4 through both
+  **succeeds** and is sampled **in operation** (after admission, before release,
+  both generations pinned, O4 reservation live): operational 6413 / aggregate 6653
+  (in-operation O4 reservation 4699, in-operation headroom 1119), with the
+  **unchanged** ceiling holding at that phase (6653 ≤ 7772) — distinct from the
+  5818 pre-operation headroom. At N=1 the same O4 through both exceeds the
+  **unchanged** ceiling by an honest **147-byte** shortfall and is **refused** (no
+  admitted in-operation O4 phase is fabricated); across the refusal the run
+  captures and compares **complete record bytes**, **complete metadata bytes**, the
+  **publication revision** (separately), **`owner.recovery_required()`**, both **pin
+  identities/provenance**, and the **operational and aggregate** reservations —
+  every property unchanged — then abandons the necessary pin and **retries the SAME
+  refused publication** to readmission (revision 3), rather than raising any limit.
 
 These are bounded experimental observations only. Deliberately **untested until
 actual engine integration** (capture is non-authorizing): engine decision timing,
