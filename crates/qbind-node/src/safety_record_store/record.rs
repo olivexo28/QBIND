@@ -170,6 +170,23 @@ impl RetainedRecord {
     pub fn is_locked(&self) -> bool {
         matches!(self.record, SafetyRecord::Locked(_))
     }
+
+    /// Test-only: the actual `Vec::capacity()` sum of the evidence heap backings
+    /// this retained generation owns, measured in place (non-cloning). A
+    /// `BootstrapNoLock` record owns no supporting evidence, so its backing
+    /// capacity is `0`; a `Locked` record's capacity is measured and a
+    /// **measurement failure is surfaced explicitly** (`Err`), never silently
+    /// substituted with `0`. Used to assert that generation-only prepared
+    /// retention keeps the live evidence backing.
+    #[cfg(any(test, feature = "test-utils"))]
+    pub fn evidence_backing_capacity(&self) -> Result<usize, super::error::SafetyStoreError> {
+        match &self.record {
+            SafetyRecord::BootstrapNoLock { .. } => Ok(0),
+            SafetyRecord::Locked(l) => {
+                Ok(super::accounting::evidence_backing_capacity(&l.evidence)? as usize)
+            }
+        }
+    }
 }
 
 /// The complete O3 result: an **opaque** validated publication. Callers cannot
@@ -339,6 +356,78 @@ impl ValidatedRecord {
     pub fn origin_context_digest(&self) -> &[u8; 32] {
         &self.origin_context_digest
     }
+
+    /// Test-only: the actual `Vec::capacity()` of the evidence heap backings the
+    /// retained generation owns (the backing that generation-only prepared
+    /// retention keeps, measured independently of any reservation counter). Read
+    /// to assert that generation-only capture retains the live evidence backing
+    /// rather than the original `encoded` publication buffer.
+    #[cfg(any(test, feature = "test-utils"))]
+    pub fn retained_evidence_capacity(&self) -> Result<usize, super::error::SafetyStoreError> {
+        self.retained.evidence_backing_capacity()
+    }
+
+    /// **Generation-only consuming conversion** (§ 13.6 prepared-decision L0).
+    ///
+    /// Move the retained decoded generation ([`RetainedRecord`], which owns the
+    /// live evidence heap backings) and the provenance fields out of this proof
+    /// for prepared retention, **dropping the original `encoded` publication
+    /// buffer**. Generation-only retention deliberately does *not* reuse the
+    /// full-proof holder charge (which covered `encoded` + generation + handle):
+    /// the dropped buffer is freed and the caller charges only the smaller
+    /// generation + per-entry terms the aggregate already budgets for a prepared
+    /// holder.
+    ///
+    /// The evidence is **moved, not cloned** (no second representation). The
+    /// proof's original full-proof holder reservation is returned in
+    /// `prior_holder`; the caller releases it only **after** the generation-only
+    /// reservation is already live, so no live object is ever uncharged across
+    /// the conversion. Crate-internal: reachable only from the owner's capture
+    /// path, which performs the complete provenance gate on the borrowed proof
+    /// before consuming it.
+    pub(crate) fn into_prepared_parts(self) -> ConsumedForPrepared {
+        let ValidatedRecord {
+            retained,
+            evidence_status,
+            encoded: _dropped_publication_buffer,
+            origin_context_digest,
+            recovery_backend_incarnation,
+            holder,
+        } = self;
+        // `_dropped_publication_buffer` is freed here — generation-only retention
+        // keeps the decoded generation, not the original encoded record.
+        ConsumedForPrepared {
+            retained,
+            evidence_status,
+            origin_context_digest,
+            recovery_backend_incarnation,
+            prior_holder: holder,
+        }
+    }
+}
+
+/// The generation-only parts moved out of a consumed [`ValidatedRecord`] for
+/// prepared-decision retention (§ 13.6). The retained generation and provenance
+/// are **moved** (no clone); the original `encoded` publication buffer has been
+/// **dropped**; `prior_holder` carries the proof's original full-proof holder
+/// reservation so the caller can release it only after the smaller
+/// generation-only reservation is live.
+#[derive(Debug)]
+pub struct ConsumedForPrepared {
+    /// The moved retained decoded generation (owns the live evidence backings).
+    pub retained: RetainedRecord,
+    /// The explicit (always `Unverified`) evidence status, carried forward.
+    pub evidence_status: EvidenceStatus,
+    /// The originating pinned-context digest the proof was sealed under.
+    pub origin_context_digest: [u8; 32],
+    /// The backend ownership-incarnation the proof's O5 capability was bound to
+    /// (always `Some` once the capture provenance gate has verified it).
+    pub recovery_backend_incarnation: Option<u64>,
+    /// The proof's original full-proof holder reservation (covers the now-dropped
+    /// `encoded` buffer + generation + handle). Released by the caller **only
+    /// after** the generation-only reservation is admitted, so the live evidence
+    /// backings are never uncharged across the conversion.
+    pub prior_holder: Option<super::accounting::Reservation>,
 }
 
 /// The single decoded-generation wrapper whose `size_of` is the whole-enum

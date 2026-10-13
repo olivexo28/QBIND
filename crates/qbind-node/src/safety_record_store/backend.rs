@@ -15,6 +15,7 @@ use std::sync::{Arc, Mutex, MutexGuard};
 
 use super::accounting::{AggregateAuthority, SharedAccountant};
 use super::error::{EnvelopeFailureKind, ReadFailedDetail, ReadWhat, SafetyStoreError};
+use super::prepared::PreparedRegistry;
 use crate::pqc_trust_bundle::TrustBundleEnvironment;
 use crate::storage::signing_journal_crc32;
 
@@ -396,11 +397,45 @@ pub enum InjectFault {
 }
 
 /// A shared serialization domain. The owned guard proves the single-writer
-/// boundary is held for a check-then-write sequence. The inner field is private
+/// boundary is held for a check-then-write sequence. The fields are private
 /// so this type is **not** publicly constructible: a caller cannot fabricate a
 /// `SerializationDomain` (or a guard over one) to forge ownership of a backend.
+///
+/// The domain also **holds** the lazily-allocated prepared-decision L0 registry
+/// slot (§ 13.6). Keeping that slot inside the domain means the one coordination
+/// cell that already serializes capture-vs-publication is reused for registry
+/// first-initialization: there is no separate registry mutex, and no new
+/// per-open allocation is introduced for the slot (see `prepared_registry`).
 #[derive(Debug)]
-pub struct SerializationDomain(());
+pub struct SerializationDomain {
+    /// Private zero-sized marker, kept so the struct is not publicly
+    /// constructible from outside this module.
+    _private: (),
+    /// The shared **lazy-initialization slot** for the bounded prepared-decision
+    /// L0 registry (§ 13.6). `None` at backend open and ordinary attachment —
+    /// **no registry allocation exists** until the first prepared capture admits
+    /// the registry-storage charge and installs one here. Because this slot lives
+    /// **inside** the serialization domain (reached only through the pre-existing
+    /// shared `domain` mutex), its first-initialization is serialized by the very
+    /// same guard that linearizes capture with publication — concurrent handles
+    /// cannot install bypass registries — and it adds **no** new coordination
+    /// allocation of its own (it is a fixed, pointer-sized `Option<Arc<..>>`
+    /// field embedded in the already-allocated domain value).
+    ///
+    /// **Control-storage inventory / accounting treatment:** the only control
+    /// storage this adds over the accepted baseline is this single
+    /// `Option<Arc<Mutex<PreparedRegistry>>>` field inlined into the existing
+    /// domain — no extra `Arc`, no extra `Mutex`. Empty, it owns nothing and is
+    /// **not** charged against the retained-bytes aggregate, on a par with the
+    /// domain/accountant coordination cells. The charged object is the registry
+    /// *allocation* this slot may come to hold: its `Mutex<PreparedRegistry>`
+    /// cell (and per-entry/generation/pin data) is admitted and reserved
+    /// **before** it is created, so the previously-uncharged allocation is **not**
+    /// merely moved into a new eagerly allocated wrapper. A fresh open (and
+    /// reopen) starts empty and binds any later-installed registry to this open's
+    /// ownership incarnation.
+    prepared_registry: Option<Arc<Mutex<PreparedRegistry>>>,
+}
 
 /// The safety backend: an `Arc`-shared RocksDB handle plus the single
 /// serialization domain shared by every attached handle.
@@ -498,16 +533,28 @@ impl SafetyBackend {
         // charge is bounded by the accepted component aggregate ceiling (§ 13.7,
         // finding #4). Cloning the handle below shares the single inner guard.
         let aggregate = AggregateAuthority::new();
+        // Draw this open's ownership incarnation once; the struct records it below
+        // and any lazily-installed prepared registry is later bound to it.
+        let incarnation = OWNERSHIP_INCARNATION.fetch_add(1, Ordering::SeqCst);
         Ok(SafetyBackend {
             db: Arc::new(db),
-            domain: Arc::new(Mutex::new(SerializationDomain(()))),
+            domain: Arc::new(Mutex::new(SerializationDomain {
+                _private: (),
+                // The prepared-decision L0 registry is LAZILY allocated: this slot
+                // is empty at open and ordinary attachment; the first prepared
+                // capture admits the registry-storage charge and installs one
+                // registry here, bound to this open's ownership incarnation. It
+                // lives inside the domain, so no separate coordination allocation
+                // is introduced at open.
+                prepared_registry: None,
+            })),
             inject: Arc::new(AtomicU8::new(InjectFault::None as u8)),
             // A freshly opened backend is NOT effective: dependent O4 is blocked
             // until an acknowledged O1 or a successful O5 establishes a fresh
             // durability acknowledgement (§ 13.4 / § 13.5).
             effective: Arc::new(AtomicBool::new(false)),
             // Draw a fresh ownership incarnation for this open (and reopen).
-            incarnation: OWNERSHIP_INCARNATION.fetch_add(1, Ordering::SeqCst),
+            incarnation,
             // A fresh, unbound operational accountant partition; the first
             // attached handle binds its per-context operational sub-ceiling.
             accounting: SharedAccountant::new(aggregate.clone()),
@@ -614,6 +661,17 @@ impl SafetyBackend {
         self.accounting.reserve(charge)
     }
 
+    /// Source/test-only: an independent clone of the operational accountant
+    /// handle. The handle shares the same underlying sub-ledger, so a test can
+    /// observe the aggregate charge AFTER the backend (and its owner) have been
+    /// dropped — e.g. to prove that a pin outliving its owner keeps the lazily
+    /// allocated registry's standing reservation charged until the pin drops.
+    /// Gated behind `test-utils`.
+    #[cfg(any(test, feature = "test-utils"))]
+    pub fn accounting_handle_for_test(&self) -> super::accounting::SharedAccountant {
+        self.accounting.clone()
+    }
+
     /// Acquire the single shared serialization domain for a check-then-write
     /// sequence. Every attached handle contends on the same lock. Crate-internal:
     /// the guard is only ever produced for, and consumed by, this backend's own
@@ -622,6 +680,53 @@ impl SafetyBackend {
         self.domain
             .lock()
             .expect("safety serialization domain poisoned")
+    }
+
+    /// The installed shared prepared-decision L0 registry `Arc`, or `None` if no
+    /// registry has been allocated yet (before the first prepared capture). The
+    /// slot lives inside the serialization domain, so the caller must already hold
+    /// the domain `guard`; this reads it **through** that held guard (never
+    /// re-locks the domain, so it cannot self-deadlock a capture that holds it).
+    /// Crate-internal: used by the owner capture/release path. Never allocates —
+    /// allocation is performed by the capture path after admitting its charge.
+    pub(crate) fn prepared_registry_installed(
+        &self,
+        domain: &MutexGuard<'_, SerializationDomain>,
+    ) -> Option<Arc<Mutex<PreparedRegistry>>> {
+        domain.prepared_registry.clone()
+    }
+
+    /// Install the first (and only) shared prepared-decision L0 registry, mutating
+    /// the slot held **inside** the serialization domain through the caller's
+    /// `domain` guard so first-initialization is serialized across every attached
+    /// handle — concurrent captures cannot each install a bypass registry. If a
+    /// registry is already installed (it never is while the domain guard is held,
+    /// but this is checked rather than assumed), the existing one is returned and
+    /// `registry` (with its surplus reservation) is dropped. Crate-internal: the
+    /// caller admits the registry-storage charge and moves it into `registry`
+    /// **before** calling this.
+    pub(crate) fn install_prepared_registry(
+        &self,
+        domain: &mut MutexGuard<'_, SerializationDomain>,
+        registry: Arc<Mutex<PreparedRegistry>>,
+    ) -> Arc<Mutex<PreparedRegistry>> {
+        match domain.prepared_registry.as_ref() {
+            Some(existing) => Arc::clone(existing),
+            None => {
+                domain.prepared_registry = Some(Arc::clone(&registry));
+                registry
+            }
+        }
+    }
+
+    /// Source/test-only: the installed shared prepared registry, or `None` if none
+    /// has been lazily allocated yet. Used to assert allocation lifetime and live
+    /// object coverage directly. Gated behind `test-utils`. Acquires the domain
+    /// lock itself (callers are not holding it), so it must not be called while a
+    /// capture holds the domain guard.
+    #[cfg(any(test, feature = "test-utils"))]
+    pub fn prepared_registry_for_test(&self) -> Option<Arc<Mutex<PreparedRegistry>>> {
+        self.lock_domain().prepared_registry.clone()
     }
 
     /// Read the raw (CRC-verified) metadata bytes, if present. `max_payload` is
