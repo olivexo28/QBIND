@@ -1,0 +1,37 @@
+$ # SOURCE MUTATION (RUN 422 §2 duplicate-release sensitivity):
+$ #   default SharedReleaseOrder: RetainedBeforeHolder -> HolderBeforeRetained (release covering reservation before destroying the duplicate backings)
+$ cargo test -p qbind-node --features test-utils --test run_422_spike_prepared_generation_tests spike_duplicate_release_invariant
+   Compiling qbind-node v0.1.0 (/tmp/spike2/crates/qbind-node)
+    Finished `test` profile [unoptimized] target(s) in 14.94s
+     Running tests/run_422_spike_prepared_generation_tests.rs (target/debug/deps/run_422_spike_prepared_generation_tests-71cc7af93cd79cea)
+
+running 2 tests
+test spike_duplicate_release_invariant_n1 ... FAILED
+test spike_duplicate_release_invariant_n4 ... FAILED
+
+failures:
+
+---- spike_duplicate_release_invariant_n1 stdout ----
+
+thread 'spike_duplicate_release_invariant_n1' (17548) panicked at crates/qbind-node/tests/run_422_spike_prepared_generation_tests.rs:660:5:
+assertion `left == right` failed: INVARIANT: no duplicate evidence is live when its covering reservation is released
+  left: Some(33)
+ right: Some(0)
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+---- spike_duplicate_release_invariant_n4 stdout ----
+
+thread 'spike_duplicate_release_invariant_n4' (17549) panicked at crates/qbind-node/tests/run_422_spike_prepared_generation_tests.rs:660:5:
+assertion `left == right` failed: INVARIANT: no duplicate evidence is live when its covering reservation is released
+  left: Some(97)
+ right: Some(0)
+
+
+failures:
+    spike_duplicate_release_invariant_n1
+    spike_duplicate_release_invariant_n4
+
+test result: FAILED. 0 passed; 2 failed; 0 ignored; 0 measured; 32 filtered out; finished in 0.01s
+
+error: test failed, to rerun pass `-p qbind-node --test run_422_spike_prepared_generation_tests`
+EXIT=101

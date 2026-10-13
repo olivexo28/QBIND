@@ -21,7 +21,20 @@ capture after its storage charge is admitted, and is then **retained with its
 reservation for the whole allocation lifetime** (including zero-entry periods),
 released only when the allocation is destroyed. It preserves the corrected
 prepared-generation **object accounting** and shared-conversion **lifetime** of
-the previous package. The headings below keep four kinds of evidence distinct:
+the previous package.
+
+This revision additionally **removes the uncharged eager initialization
+allocation** the previous package had introduced: the backend no longer allocates
+a separate `Arc<Mutex<Option<Arc<Mutex<PreparedRegistry>>>>>` lazy-init wrapper at
+open. The one-word lazy slot now lives **inside the already-existing
+serialization domain** (reached through the pre-existing `domain` mutex), so no
+new per-open heap allocation is created and the corrected inner lifecycle
+(admission-before-allocation, one shared registry, standing reservation while
+empty, ownership extending through an outliving pin) is unchanged. It also adds
+two **discriminating** sensitivity experiments — a duplicate-release invariant and
+a coordinated concurrent-serialization overlap — each exercised against an actual
+**source mutation** with raw failure/restoration logs. The headings below keep
+four kinds of evidence distinct:
 *source-derived arithmetic* (struct layout and charge formulas), *executed
 object observations* (measured live allocations), *reservation observations*
 (live aggregate charges), and *inherited evidence* (the baseline identity and
@@ -31,7 +44,7 @@ the re-executed D7–D14 target).
 
 See [`BASELINE.txt`](BASELINE.txt).
 
-- Supplied branch (unrenamed): `copilot/complete-engineering-brief`
+- Supplied branch (unrenamed): `copilot/run-422-finish-lazy-registry-allocation`
 - Baseline HEAD (experiment parent): `8aa44e520cf6e15568231bc4da122da804f5b4fb`
 - Asserted correspondence target: `cfb88a3ff5c3a8e1c47fa2740450c10e7ba2a76d`
   (absent from this shallow single-branch clone; correspondence is asserted per
@@ -39,7 +52,7 @@ See [`BASELINE.txt`](BASELINE.txt).
 - Isolated experimental checkout: `cp -a` of the baseline, same branch name.
 - Complete applicable patch:
   [`patch/run_422_spike_prepared_generation.patch`](patch/run_422_spike_prepared_generation.patch)
-  (9 files, +2736/-6; two new files included).
+  (9 files, +2962/-9; two new files included).
 
 ## 2. The corrected defect (inherited observation)
 
@@ -146,6 +159,25 @@ The test fails under the premature ordering and passes after correction, then
 Holder)`). It covers fresh conversion, shared conversion, refusal (no conversion,
 empty registry), explicit release, and automatic `Drop`.
 
+### Discriminating invariant + source-mutation evidence
+
+The runtime seam above proves the ordering is *observable*; a separate
+**invariant** test, `spike_duplicate_release_invariant_n{1,4}`, asserts only the
+correct outcome — **`Some(0)`: zero duplicate bytes live at the moment the
+duplicate reservation is released** — and never expects the defect value. To show
+this invariant is *sensitive to the production release order* (not merely to the
+test seam), the default `SharedReleaseOrder` was flipped **in source** to
+`HolderBeforeRetained`:
+
+| Source state | `spike_duplicate_release_invariant` | Log |
+|---|---|---|
+| mutated default (`HolderBeforeRetained`) | **FAILS** — `Some(33)` / `Some(97)` | [`logs/04_dup_release_mutation_fail.log`](logs/04_dup_release_mutation_fail.log) |
+| restored default (`RetainedBeforeHolder`) | **PASSES** — `Some(0)` / `Some(0)` | [`logs/05_dup_release_restored_pass.log`](logs/05_dup_release_restored_pass.log) |
+
+The source was restored **byte-identically** (sha256 verified) after the
+experiment; the production path forces the corrected order via
+`#[cfg(not(test))]`.
+
 ## 5. §3 — Bounded coexistence evidence (measured, not hardcoded)
 
 Aggregate ceiling: **3956** (N=1) / **7772** (N=4), unchanged. Maximum complete QC
@@ -185,6 +217,21 @@ included):
 - `spike_capture_publication_boundary`: a deterministic capture/publication
   boundary test (replacing the prior sequential "concurrency" claim) that
   distinguishes correct serialization from its removal.
+- `spike_capture_publication_serialization_overlap`: a **coordinated concurrent**
+  test (replacing the earlier "deterministic — no threads" substitution) in which
+  a publisher thread and a capturing thread genuinely contend for the
+  serialization-domain guard. A bounded, one-shot capture-interval hook on the
+  capturing thread releases the publisher and then samples, after a bounded delay,
+  whether the publisher completed **while the capture still held the domain
+  guard**. Correct serialization keeps the publisher blocked (observed = false).
+  Dropping the guard across the interval **in source** makes the publisher's write
+  overlap the capture interval and the test fails; the source was restored
+  byte-identically (sha256 verified) and the test passes again:
+
+  | Source state | `spike_capture_publication_serialization_overlap` | Log |
+  |---|---|---|
+  | mutated (guard dropped across interval) | **FAILS** — overlap observed | [`logs/06_serialization_mutation_fail.log`](logs/06_serialization_mutation_fail.log) |
+  | restored (guard held across interval) | **PASSES** — no overlap | [`logs/07_serialization_restored_pass.log`](logs/07_serialization_restored_pass.log) |
 - `spike_admission_refusal_and_readmission`: O5 exercised with an **actual
   returned refused proof** after releasing artificial pressure — exact original
   bytes compared, recovery outcome verified, cleanup/readmission preserved.
@@ -204,17 +251,25 @@ its storage charge **admitted before** the allocation. It is then retained with 
 standing reservation for the whole allocation lifetime and released only when the
 allocation is destroyed.
 
-**Control-storage inventory.** The lazy lifecycle adds exactly one piece of
-control storage: the backend's registry slot, now
-`Mutex<Option<Arc<Mutex<PreparedRegistry>>>>` (previously a non-optional
-`Arc<Mutex<PreparedRegistry>>`). The added `Option` is a one-word discriminant
-living inside the already-charged backend container; it is **uncharged control
-storage on the same accepted accounting boundary as the serialization domain**
-(the backend's own infrastructure, outside the prepared-generation aggregate),
-and it holds the one shared registry rather than a second eagerly-allocated
-registry. The owning pin now also holds a clone of the shared registry `Arc`, so
-the registry (and its reservation) follow **actual shared ownership**: a pin may
-outlive its owner handle and keeps the allocation alive until it drops.
+**Control-storage inventory.** The lazy slot now lives **inside the pre-existing
+`SerializationDomain`** (itself reached through the already-existing
+`domain: Arc<Mutex<SerializationDomain>>`), as a single
+`Option<Arc<Mutex<PreparedRegistry>>>` field. The earlier revision had instead
+introduced a **separate** `Arc<Mutex<Option<Arc<Mutex<PreparedRegistry>>>>>`
+field that was heap-allocated at **every** backend open — an uncharged eager
+allocation that this revision **removes**. Embedding the slot in the domain adds
+**no new per-open heap allocation**: the only added control storage is one
+`Option` discriminant word plus one pointer word living inside the domain value
+that is already allocated for serialization. That storage sits on the **same
+accepted accounting boundary as the serialization domain** (the backend's own
+infrastructure, outside the prepared-generation aggregate), and it holds the one
+shared registry rather than a second eagerly-allocated registry. The capture path
+reads and installs the registry **through the serialization-domain guard it
+already holds** (the accessors take `&`/`&mut` to that guard), so no second lock
+is taken and lock ordering is unchanged. The owning pin holds a clone of the
+shared registry `Arc`, so the registry (and its reservation) follow **actual
+shared ownership**: a pin may outlive its owner handle and keeps the allocation
+alive until it drops.
 
 **Chosen behavior on a post-initialization refusal.** When a later capture step
 (pin / generation / control admission, `RegistryFull`, or `CounterExhausted`)
@@ -249,9 +304,25 @@ Commands run in the isolated checkout after the corrections. Raw logs under
 
 | # | Command | Exit | Result | Log |
 |---|---|---|---|---|
-| 1 | `cargo test -p qbind-node --features test-utils --test run_422_spike_prepared_generation_tests -- --nocapture` | 0 | **31 passed; 0 failed; 0 ignored** | [`logs/01_spike_tests.log`](logs/01_spike_tests.log) |
+| 1 | `cargo test -p qbind-node --features test-utils --test run_422_spike_prepared_generation_tests -- --nocapture` | 0 | **34 passed; 0 failed; 0 ignored** | [`logs/01_spike_tests.log`](logs/01_spike_tests.log) |
 | 2 | `cargo build -p qbind-node` | 0 | **Finished** (spike + seams are `test-utils`-gated, absent from a default build) | [`logs/02_default_lib_build.log`](logs/02_default_lib_build.log) |
 | 3 | `cargo test -p qbind-node --features test-utils --test run_422_d7d14_safety_record_store_tests` | 0 | **157 passed; 0 failed; 1 ignored** (inherited, re-executed, **not** relabeled as newly authored) | [`logs/03_d7d14_regression.log`](logs/03_d7d14_regression.log) |
+
+The spike count is **34** (the previous 31 plus the duplicate-release invariant
+`spike_duplicate_release_invariant_n{1,4}` and the concurrent-serialization
+overlap `spike_capture_publication_serialization_overlap`); the brief does not
+require it to remain exactly 31/33.
+
+### Source-mutation sensitivity experiments (raw failure/restoration logs)
+
+Each discriminating test was exercised against an actual **source** mutation and a
+**byte-identical** restoration (sha256 verified before/after), establishing that
+the test fails on the defect and passes on the correction:
+
+| # | Experiment | Mutated → Restored | Logs |
+|---|---|---|---|
+| 4/5 | duplicate-release invariant | `SharedReleaseOrder` default flipped `HolderBeforeRetained` → `RetainedBeforeHolder` | [`04`](logs/04_dup_release_mutation_fail.log) / [`05`](logs/05_dup_release_restored_pass.log) |
+| 6/7 | concurrent-serialization overlap | domain guard dropped across capture interval → held across interval | [`06`](logs/06_serialization_mutation_fail.log) / [`07`](logs/07_serialization_restored_pass.log) |
 
 ## 7. What the corrected execution establishes
 

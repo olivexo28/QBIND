@@ -36,8 +36,8 @@ use qbind_node::safety_record_store::backend::{InjectFault, SafetyBackend, Safet
 use qbind_node::safety_record_store::codec::encode_record;
 use qbind_node::safety_record_store::error::{CapacityRefusalDetail, SafetyStoreError};
 use qbind_node::safety_record_store::owner::{
-    make_locked_qc, set_shared_release_order, shared_dup_live_at_release, PublishResult,
-    SafetyRecordOwner, SharedReleaseOrder,
+    make_locked_qc, set_capture_interval_hook, set_shared_release_order, shared_dup_live_at_release,
+    PublishResult, SafetyRecordOwner, SharedReleaseOrder,
 };
 use qbind_node::safety_record_store::prepared::{
     generation_backing_struct_size_bytes, pin_charge_bytes, registry_cell_charge_bytes,
@@ -626,6 +626,59 @@ fn spike_sharing_lifetime_regression_n4() {
 }
 
 // ===========================================================================
+// §2. DISCRIMINATING duplicate-release invariant (independent of any runtime
+// seam). A shared conversion must leave ZERO duplicate backing bytes alive when
+// the covering reservation is released. This test asserts ONLY the corrected
+// value (`Some(0)`): it never arms, nor expects, the premature defect's positive
+// value. Under the shipped source it PASSES; a source mutation that releases the
+// covering reservation before destroying the duplicate's backings (e.g. flipping
+// the default `SharedReleaseOrder`) makes THIS test FAIL with a nonzero live
+// count — establishing discriminating sensitivity. The raw FAIL (mutated) and
+// PASS (restored byte-identically) command outcomes are preserved in the evidence
+// package (logs/04_dup_release_mutation_fail.log, 05_dup_release_restored_pass.log).
+// ===========================================================================
+
+fn duplicate_release_invariant(n: u64) {
+    let ctx = ctx_n(n);
+    let dir = tempfile::tempdir().unwrap();
+    let owner = init_owner(dir.path(), &ctx);
+    publish_qc(&owner, &ctx, [9u8; 32], 5, 0);
+
+    // Fresh conversion establishes the shared backing (slot 1).
+    let p1 = owner.read_validate(None::<&FixtureCommittedHistory>).unwrap();
+    let dup_bytes = p1.retained_evidence_capacity().expect("explicit capacity");
+    assert!(dup_bytes > 0, "the duplicate will own non-empty evidence backings");
+    let pin1 = owner.capture_prepared_decision(p1, 1).expect("fresh capture");
+
+    // Shared conversion on the DEFAULT (shipped) ordering — NO seam is touched.
+    // The duplicate's separately owned backings must be destroyed BEFORE the
+    // reservation covering them is released.
+    let pc = owner.read_validate(None::<&FixtureCommittedHistory>).unwrap();
+    let pin_c = owner
+        .capture_prepared_decision(pc, 1)
+        .expect("shared capture (default ordering)");
+    assert_eq!(
+        shared_dup_live_at_release(),
+        Some(0),
+        "INVARIANT: no duplicate evidence is live when its covering reservation is released"
+    );
+    assert_eq!(pin_c.release(), ReleaseOutcome::Released);
+    drop(pin1);
+    // The retained empty registry keeps its standing reservation (backend alive).
+    assert_eq!(op_current(&owner), registry_cell());
+    println!("[§2-inv N={n}] dup_bytes={dup_bytes} live_at_release=0 (discriminating; nonzero under premature-release mutation)");
+}
+
+#[test]
+fn spike_duplicate_release_invariant_n1() {
+    duplicate_release_invariant(1);
+}
+#[test]
+fn spike_duplicate_release_invariant_n4() {
+    duplicate_release_invariant(4);
+}
+
+// ===========================================================================
 // §3. Distinct generations coexisting through O4 while TWO prepared generations
 // remain pinned; the complete accounting (context ownership + both generations +
 // registry cell + pins + the O4 publication reservation) is measured against the
@@ -1208,6 +1261,102 @@ fn spike_capture_publication_boundary() {
     let pin = owner.capture_prepared_decision(p_fresh, 3).expect("capture at authoritative rev");
     assert!(op_current(&owner) > 0);
     drop(pin);
+}
+
+// ===========================================================================
+// §3. DISCRIMINATING capture/publication serialization OVERLAP (coordinated, not
+// sequential). A capturer thread and a publisher thread are coordinated via a
+// bounded test hook so the publisher attempts an O4 publication at the EXACT
+// interval between the capture's authoritative-state check and its registry
+// insertion. Because BOTH the capture and `publish_locked` take the shared
+// serialization domain lock, correct serialization keeps the publisher BLOCKED
+// for the whole interval: the capturer observes that the publication has NOT
+// progressed (`observed_publish_during_interval == false`). Removing the
+// serialization protection — a source mutation that releases the domain guard
+// across this interval — lets the publisher interleave, the capturer observes the
+// publication completing mid-interval, and THIS test FAILS. Raw fail/restore
+// command outcomes are preserved in the evidence package
+// (logs/06_serialization_mutation_fail.log, 07_serialization_restored_pass.log).
+// ===========================================================================
+#[test]
+fn spike_capture_publication_serialization_overlap() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::Arc;
+    use std::time::{Duration, Instant};
+
+    let ctx = Arc::new(ctx_n(4));
+    let dir = tempfile::tempdir().unwrap();
+    let owner = Arc::new(init_owner(dir.path(), &ctx));
+    publish_qc(&owner, &ctx, [9u8; 32], 5, 0); // rev 1
+
+    // Prime the shared registry with a first fresh capture, so the instrumented
+    // capture below exercises the check->insert interval on registry REUSE (the
+    // serialization boundary in isolation, not first-initialization).
+    let p0 = owner.read_validate(None::<&FixtureCommittedHistory>).unwrap();
+    let prime = owner.capture_prepared_decision(p0, 1).expect("prime registry");
+    assert_eq!(prime.release(), ReleaseOutcome::Released);
+
+    let publisher_may_start = Arc::new(AtomicBool::new(false));
+    let publisher_done = Arc::new(AtomicBool::new(false));
+    let observed_publish_during_interval = Arc::new(AtomicBool::new(false));
+
+    // Publisher thread: once released, attempt an O4 publication over rev 1. Under
+    // correct serialization it blocks on the domain lock until the capturer's whole
+    // check->insert interval completes.
+    let publisher = {
+        let owner = Arc::clone(&owner);
+        let ctx = Arc::clone(&ctx);
+        let may_start = Arc::clone(&publisher_may_start);
+        let done = Arc::clone(&publisher_done);
+        std::thread::spawn(move || {
+            let deadline = Instant::now() + Duration::from_secs(10);
+            while !may_start.load(Ordering::Acquire) {
+                if Instant::now() > deadline {
+                    break;
+                }
+                std::thread::yield_now();
+            }
+            // Blocks here on the serialization domain if the capturer holds it.
+            let new_rev = publish_qc(&owner, &ctx, [0x22u8; 32], 9, 1);
+            assert_eq!(new_rev, 2, "publisher advanced the authoritative revision to 2");
+            done.store(true, Ordering::Release);
+        })
+    };
+
+    // Capturer (this thread): install the one-shot interval hook, which releases the
+    // publisher and then waits a bounded window before sampling whether the
+    // publication has progressed. Correct serialization keeps it blocked ⇒ false.
+    {
+        let may_start = Arc::clone(&publisher_may_start);
+        let done = Arc::clone(&publisher_done);
+        let observed = Arc::clone(&observed_publish_during_interval);
+        set_capture_interval_hook(move || {
+            may_start.store(true, Ordering::Release);
+            std::thread::sleep(Duration::from_millis(300));
+            observed.store(done.load(Ordering::Acquire), Ordering::Release);
+        });
+    }
+
+    let p = owner.read_validate(None::<&FixtureCommittedHistory>).unwrap();
+    let pin = owner
+        .capture_prepared_decision(p, 1)
+        .expect("capture succeeds at the unchanged revision under serialization");
+    // The capture completed its guarded check->insert interval; release the pin.
+    assert_eq!(pin.release(), ReleaseOutcome::Released);
+
+    publisher.join().expect("publisher thread");
+
+    // DISCRIMINATING assertion: the publication did NOT complete during the
+    // capturer's guarded check->insert interval. A source mutation that drops the
+    // serialization protection across this interval flips this to `true`.
+    assert!(
+        !observed_publish_during_interval.load(Ordering::Acquire),
+        "SERIALIZATION: publication must not progress during the capture's guarded interval"
+    );
+    // The publication did eventually complete (strictly after the capture released
+    // the domain), advancing the revision to 2.
+    assert!(publisher_done.load(Ordering::Acquire), "publication completed after the capture");
+    println!("[§3 overlap] serialized: publication blocked for the whole guarded interval; captured at rev 1, published rev 2 after release");
 }
 
 // ===========================================================================

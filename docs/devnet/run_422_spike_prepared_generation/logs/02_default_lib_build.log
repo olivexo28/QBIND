@@ -1,1 +1,6 @@
-    Finished `dev` profile [unoptimized] target(s) in 0.10s
+$ cargo clean -p qbind-node
+$ cargo build -p qbind-node
+   Compiling qbind-node v0.1.0 (/tmp/spike2/crates/qbind-node)
+    Finished `dev` profile [unoptimized] target(s) in 14.87s
+
+EXIT=0

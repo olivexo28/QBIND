@@ -1,0 +1,12 @@
+$ # RESTORED byte-identically (single held guard across the check->insert interval)
+$ cargo test -p qbind-node --features test-utils --test run_422_spike_prepared_generation_tests spike_capture_publication_serialization_overlap
+   Compiling qbind-node v0.1.0 (/tmp/spike2/crates/qbind-node)
+    Finished `test` profile [unoptimized] target(s) in 14.94s
+     Running tests/run_422_spike_prepared_generation_tests.rs (target/debug/deps/run_422_spike_prepared_generation_tests-71cc7af93cd79cea)
+
+running 1 test
+test spike_capture_publication_serialization_overlap ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 33 filtered out; finished in 0.31s
+
+EXIT=0
