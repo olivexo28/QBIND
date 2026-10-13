@@ -2,9 +2,9 @@ $ # SOURCE MUTATION (RUN 422 §2 B release-before-destruction sensitivity):
 $ #   normal/corrected shared branch: move the covering-reservation release (h.release_now())
 $ #   BEFORE the duplicate backing destruction (drop(retained)); observer + assertion unchanged.
 $ diff -u owner.rs(pristine) owner.rs(mutated):
-    --- /tmp/owner_pristine.rs	2026-10-13 06:00:45.648185238 +0000
-    +++ crates/qbind-node/src/safety_record_store/owner.rs	2026-10-13 06:13:47.919965112 +0000
-    @@ -1545,20 +1545,21 @@
+    --- /tmp/owner_pristine.rs	2026-10-13 09:38:31.889454555 +0000
+    +++ crates/qbind-node/src/safety_record_store/owner.rs	2026-10-13 09:38:42.008374944 +0000
+    @@ -1634,20 +1634,21 @@
                      }
                      drop(retained);
                  } else {
@@ -35,8 +35,8 @@ $ diff -u owner.rs(pristine) owner.rs(mutated):
                  reg.insert_shared(identity, backing)
                      .expect("free slot + serial pre-checked under the held registry lock")
 $ cargo test -p qbind-node --features test-utils --test run_422_spike_prepared_generation_tests spike_duplicate_release_invariant
-   Compiling qbind-node v0.1.0 (/tmp/spike2/crates/qbind-node)
-    Finished `test` profile [unoptimized] target(s) in 16.81s
+   Compiling qbind-node v0.1.0 (/tmp/expcheckout/crates/qbind-node)
+    Finished `test` profile [unoptimized] target(s) in 14.19s
      Running tests/run_422_spike_prepared_generation_tests.rs (target/debug/deps/run_422_spike_prepared_generation_tests-71cc7af93cd79cea)
 
 running 2 tests
@@ -47,7 +47,7 @@ failures:
 
 ---- spike_duplicate_release_invariant_n1 stdout ----
 
-thread 'spike_duplicate_release_invariant_n1' (18180) panicked at crates/qbind-node/tests/run_422_spike_prepared_generation_tests.rs:711:5:
+thread 'spike_duplicate_release_invariant_n1' (27229) panicked at crates/qbind-node/tests/run_422_spike_prepared_generation_tests.rs:774:5:
 assertion `left == right` failed: INVARIANT: zero duplicate backing bytes remain live when their covering reservation is released
   left: Some(33)
  right: Some(0)
@@ -55,7 +55,7 @@ note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
 
 ---- spike_duplicate_release_invariant_n4 stdout ----
 
-thread 'spike_duplicate_release_invariant_n4' (18181) panicked at crates/qbind-node/tests/run_422_spike_prepared_generation_tests.rs:711:5:
+thread 'spike_duplicate_release_invariant_n4' (27230) panicked at crates/qbind-node/tests/run_422_spike_prepared_generation_tests.rs:774:5:
 assertion `left == right` failed: INVARIANT: zero duplicate backing bytes remain live when their covering reservation is released
   left: Some(129)
  right: Some(0)
@@ -65,7 +65,7 @@ failures:
     spike_duplicate_release_invariant_n1
     spike_duplicate_release_invariant_n4
 
-test result: FAILED. 0 passed; 2 failed; 0 ignored; 0 measured; 32 filtered out; finished in 0.01s
+test result: FAILED. 0 passed; 2 failed; 0 ignored; 0 measured; 32 filtered out; finished in 0.09s
 
 error: test failed, to rerun pass `-p qbind-node --test run_422_spike_prepared_generation_tests`
 EXIT=101

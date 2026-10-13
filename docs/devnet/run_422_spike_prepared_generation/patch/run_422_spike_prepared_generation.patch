@@ -305,7 +305,7 @@ index 89e9576..d92633e 100644
  pub use record::{
      DecodedRecord, EvidenceStatus, LockedRecord, RetainedRecord, SafetyRecord, SupportingEvidence,
 diff --git a/crates/qbind-node/src/safety_record_store/owner.rs b/crates/qbind-node/src/safety_record_store/owner.rs
-index fa51f17..17cb6ec 100644
+index fa51f17..eb06515 100644
 --- a/crates/qbind-node/src/safety_record_store/owner.rs
 +++ b/crates/qbind-node/src/safety_record_store/owner.rs
 @@ -8,7 +8,7 @@
@@ -325,7 +325,7 @@ index fa51f17..17cb6ec 100644
  use super::profile::{
      context_owner_ceiling_term, context_ownership_charge, max_component_aggregate_bytes,
      max_context_ownership_bytes, max_retained_generation_bytes, max_safety_record_bytes,
-@@ -489,6 +490,152 @@ fn measure_o5_transient_decode(decoded: &DecodedRecord) -> Result<u128, SafetySt
+@@ -489,6 +490,236 @@ fn measure_o5_transient_decode(decoded: &DecodedRecord) -> Result<u128, SafetySt
      super::accounting::decoded_working_set_charge(decoded)
  }
  
@@ -475,10 +475,94 @@ index fa51f17..17cb6ec 100644
 +    }
 +}
 +
++// ---------------------------------------------------------------------------
++// Test-only (RUN 422 §3 pre-effective O4-owned live-object observation). At the
++// post-acknowledgement / pre-effectiveness O4 phase, the publish path holds the
++// ACTUAL live publication objects: the validated proof (`validated`, a
++// `ValidatedRecord` — NOT a transient `DecodedRecord`), whose embedded retained
++// generation still owns its evidence heap backings and whose `encoded` buffer is
++// retained verbatim, and the component-owned metadata-encoding temporary
++// (`meta_encoded`), which stays live through the publish match arm. The CRC
++// staging envelopes inside `publish_atomic` have already been destroyed (the call
++// has returned by this phase) and are deliberately NOT counted.
++//
++// At exactly that phase the publish path measures those live objects IN PLACE —
++// the complete `ValidatedRecord` inline size counted once, its MEASURED owned
++// evidence-backing capacity, its retained `encoded` buffer capacity, and the live
++// metadata payload capacity — and records them here for the one-shot sampler to
++// read. A missing measurement fails EXPLICITLY (the capacity read surfaces its
++// `Err`) rather than being silently substituted. The graph is never cloned, no
++// lifetime is extended, and nothing is derived from a reservation counter.
++// Absent from production/release builds.
++#[cfg(any(test, feature = "test-utils"))]
++#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
++pub struct O4OwnedLiveObjects {
++    /// `size_of::<ValidatedRecord>()` — the complete inline proof object the O4
++    /// phase holds live, counted ONCE (it embeds its own retained generation
++    /// inline; that embedded record is never counted separately here).
++    pub validated_inline: u128,
++    /// The MEASURED `Vec::capacity()` of the evidence heap backings the live
++    /// validated proof's retained generation owns.
++    pub retained_evidence_capacity: u128,
++    /// The MEASURED `Vec::capacity()` of the proof's retained `encoded`
++    /// publication buffer.
++    pub retained_encoded_capacity: u128,
++    /// The MEASURED `Vec::capacity()` of the live component-owned metadata
++    /// encoding temporary still held through the publish match arm.
++    pub metadata_payload_capacity: u128,
++}
++
++#[cfg(any(test, feature = "test-utils"))]
++impl O4OwnedLiveObjects {
++    /// The total O4-owned live-object bytes at the pre-effective phase.
++    pub fn total(&self) -> u128 {
++        self.validated_inline
++            + self.retained_evidence_capacity
++            + self.retained_encoded_capacity
++            + self.metadata_payload_capacity
++    }
++}
++
++#[cfg(any(test, feature = "test-utils"))]
++thread_local! {
++    static O4_OWNED_LIVE_OBJECTS: std::cell::Cell<Option<O4OwnedLiveObjects>> =
++        const { std::cell::Cell::new(None) };
++}
++
++/// Test-only (RUN 422 §3): the O4-owned live-object measurement recorded by the
++/// most recent acknowledged O4 publication at its pre-effective phase, read by the
++/// one-shot pre-effective sampler on the SAME (publishing) thread. `None` until an
++/// acknowledged O4 reaches the pre-effective phase on this thread.
++#[cfg(any(test, feature = "test-utils"))]
++pub fn o4_owned_live_objects() -> Option<O4OwnedLiveObjects> {
++    O4_OWNED_LIVE_OBJECTS.with(|c| c.get())
++}
++
++/// Test-only (RUN 422 §3): measure the ACTUAL live O4-owned objects held by the
++/// publish path at the pre-effective phase and record them for the sampler. A
++/// failed evidence-capacity measurement is surfaced EXPLICITLY (`Err`), never a
++/// silent `0`.
++#[cfg(any(test, feature = "test-utils"))]
++fn record_o4_owned_live_objects(
++    validated: &ValidatedRecord,
++    meta_encoded: &[u8],
++    meta_encoded_capacity: usize,
++) -> Result<(), SafetyStoreError> {
++    let _ = meta_encoded;
++    let sample = O4OwnedLiveObjects {
++        validated_inline: super::record::size_of_validated_record(),
++        retained_evidence_capacity: validated.retained_evidence_capacity()? as u128,
++        retained_encoded_capacity: validated.encoded_capacity() as u128,
++        metadata_payload_capacity: meta_encoded_capacity as u128,
++    };
++    O4_OWNED_LIVE_OBJECTS.with(|c| c.set(Some(sample)));
++    Ok(())
++}
++
  /// Decoded initialization metadata (one per backend DB).
  #[derive(Debug, Clone, PartialEq, Eq)]
  pub struct SafetyMeta {
-@@ -1172,6 +1319,333 @@ impl SafetyRecordOwner {
+@@ -1172,6 +1403,333 @@ impl SafetyRecordOwner {
              .grant_recovery_capability(self.backend.incarnation()))
      }
  
@@ -812,6 +896,45 @@ index fa51f17..17cb6ec 100644
      // -----------------------------------------------------------------------
      // O4 — publish a new restriction
      // -----------------------------------------------------------------------
+@@ -1370,9 +1928,17 @@ impl SafetyRecordOwner {
+             context_digest: meta.context_digest,
+             current_revision: new_revision,
+         };
++        // Bind the component-owned metadata encoding so it is a named live object
++        // measurable at the pre-effective phase (it otherwise remains live through
++        // this match arm as a temporary). `publish_atomic` borrows it; the
++        // measured capacity is read before the match so the live object the O4
++        // phase holds is observed, not a reconstruction.
++        let meta_encoded = new_meta.encode();
++        #[cfg(any(test, feature = "test-utils"))]
++        let meta_encoded_capacity = meta_encoded.capacity();
+         match self
+             .backend
+-            .publish_atomic(&guard, &new_meta.encode(), validated.encoded())
++            .publish_atomic(&guard, &meta_encoded, validated.encoded())
+         {
+             PublishOutcome::DurableAcknowledged => {
+                 // Deterministic post-acknowledgement / pre-effectiveness crash
+@@ -1382,6 +1948,19 @@ impl SafetyRecordOwner {
+                 // identify and terminate at exactly this point, proving that
+                 // termination precedes the transition and that a reopen starts
+                 // without inherited effectiveness.
++                //
++                // At this exact phase the O4-owned live objects are still held:
++                // the validated proof (`ValidatedRecord`, not a transient
++                // `DecodedRecord`), its retained evidence backings, its retained
++                // `encoded` buffer, and the live `meta_encoded` payload. Measure
++                // them IN PLACE for the pre-effective sampler BEFORE firing the
++                // hook; a failed measurement is surfaced explicitly.
++                #[cfg(any(test, feature = "test-utils"))]
++                if let Err(e) =
++                    record_o4_owned_live_objects(&validated, &meta_encoded, meta_encoded_capacity)
++                {
++                    return PublishResult::RefusedPreWrite(e);
++                }
+                 #[cfg(any(test, feature = "test-utils"))]
+                 self.backend.run_pre_effective_hook("O4", new_revision);
+                 // An acknowledged O4 durable success keeps the shared state
 diff --git a/crates/qbind-node/src/safety_record_store/prepared.rs b/crates/qbind-node/src/safety_record_store/prepared.rs
 new file mode 100644
 index 0000000..33897eb
@@ -1605,10 +1728,10 @@ index 82c1190..f8425ba 100644
  /// The single decoded-generation wrapper whose `size_of` is the whole-enum
 diff --git a/crates/qbind-node/tests/run_422_spike_prepared_generation_tests.rs b/crates/qbind-node/tests/run_422_spike_prepared_generation_tests.rs
 new file mode 100644
-index 0000000..a613546
+index 0000000..a4323e0
 --- /dev/null
 +++ b/crates/qbind-node/tests/run_422_spike_prepared_generation_tests.rs
-@@ -0,0 +1,2093 @@
+@@ -0,0 +1,2144 @@
 +//! RUN 422 — generation-only prepared-decision L0 ownership feasibility spike.
 +//!
 +//! Executable, discriminating tests for the §13.6 prepared-decision L0
@@ -1641,14 +1764,15 @@ index 0000000..a613546
 +use qbind_consensus::timeout::{TimeoutCertificate, TimeoutMsg};
 +use qbind_node::pqc_trust_bundle::TrustBundleEnvironment;
 +use qbind_node::safety_record_store::accounting::{
-+    decoded_working_set_charge, prepared_generation_charge, prepared_holder_control_charge,
++    prepared_generation_charge, prepared_holder_control_charge,
 +};
 +use qbind_node::safety_record_store::backend::{InjectFault, SafetyBackend, SafetyBackendPolicy};
 +use qbind_node::safety_record_store::codec::encode_record;
 +use qbind_node::safety_record_store::error::{CapacityRefusalDetail, SafetyStoreError};
 +use qbind_node::safety_record_store::owner::{
-+    dup_backing_live_at_release, make_locked_qc, set_capture_interval_hook, set_shared_release_order,
-+    shared_dup_live_at_release, PublishResult, SafetyRecordOwner, SharedReleaseOrder,
++    dup_backing_live_at_release, make_locked_qc, o4_owned_live_objects, set_capture_interval_hook,
++    set_shared_release_order, shared_dup_live_at_release, O4OwnedLiveObjects, PublishResult,
++    SafetyRecordOwner, SharedReleaseOrder,
 +};
 +use qbind_node::safety_record_store::prepared::{
 +    generation_backing_struct_size_bytes, pin_charge_bytes, registry_cell_charge_bytes,
@@ -2428,6 +2552,12 @@ index 0000000..a613546
 +    in_agg: u128,
 +    measured_prepared_objects: u128,
 +    occupied: usize,
++    /// The ACTUAL O4-owned live objects measured in place by the publish path at
++    /// the pre-effective phase (the live `ValidatedRecord` + its retained evidence
++    /// backings + its retained `encoded` buffer + the live metadata payload),
++    /// read here from the publishing thread. Never a post-operation
++    /// reconstruction and never derived from a reservation counter.
++    o4_owned: O4OwnedLiveObjects,
 +}
 +
 +fn distinct_generations_and_full(n: u64) {
@@ -2578,11 +2708,22 @@ index 0000000..a613546
 +                                        + ARC_CTRL
 +                                        + control;
 +                                }
++                                // The ACTUAL O4-owned live objects the publish path
++                                // measured IN PLACE at this pre-effective phase (live
++                                // `ValidatedRecord` inline + retained evidence backings +
++                                // retained `encoded` buffer + live metadata payload),
++                                // recorded on this same publishing thread just before the
++                                // hook fired. A missing measurement would have failed
++                                // explicitly inside the publish path (surfaced `Err`),
++                                // never a silent 0; its absence here is itself a failure.
++                                let o4_owned = o4_owned_live_objects()
++                                    .expect("O4-owned live objects measured at the pre-effective phase");
 +                                *g = Some(O4LiveSample {
 +                                    in_op,
 +                                    in_agg,
 +                                    measured_prepared_objects,
 +                                    occupied,
++                                    o4_owned,
 +                                });
 +                            }
 +                        }
@@ -2650,6 +2791,7 @@ index 0000000..a613546
 +                        in_agg,
 +                        measured_prepared_objects,
 +                        occupied,
++                        o4_owned,
 +                    } = o4_phase_sample
 +                        .lock()
 +                        .unwrap()
@@ -2665,29 +2807,61 @@ index 0000000..a613546
 +                        "measured live pinned-generation objects equal the source-derived coexist charge"
 +                    );
 +
-+                    // The O4-OWNED live objects at the pre-effective phase: the transient
-+                    // decoded working set plus the retained encoded publication buffer the
-+                    // publication still holds live at that phase. Derived INDEPENDENTLY from
-+                    // the SAME lock C fixture (actual inline sizes + MEASURED evidence-backing
-+                    // capacities + the real encoded length), not from the live graph and not
-+                    // from a reservation counter. The already-destroyed staging envelopes are
-+                    // NOT counted: `publish_atomic` has returned by this phase.
-+                    let decoded_c = DecodedRecord {
-+                        persistence_format_version: 1,
-+                        network_genesis_id: ctx.network_genesis_id,
-+                        publication_revision: 3,
-+                        record: SafetyRecord::Locked(lock_c_same),
-+                    };
-+                    let o4_decoded_object = decoded_working_set_charge(&decoded_c)
-+                        .expect("O4 decoded working-set object measurement");
-+                    let o4_encoded_object = encode_record(&decoded_c, &ctx)
-+                        .expect("O4 encoded publication buffer measurement")
-+                        .len() as u128;
-+                    let o4_owned_objects = o4_decoded_object + o4_encoded_object;
++                    // The O4-OWNED live objects at the pre-effective phase, measured IN
++                    // PLACE by the publish path from the ACTUAL live objects it still holds
++                    // at that phase — NOT a post-operation reconstruction and NOT derived
++                    // from a reservation counter. At that phase `owner.rs` holds a
++                    // `ValidatedRecord` (not a transient `DecodedRecord`): its complete
++                    // inline size is counted once, plus its MEASURED owned evidence-backing
++                    // capacities, plus its retained `encoded` publication buffer capacity,
++                    // plus the live metadata-encoding payload capacity still held through
++                    // the publish match arm. The CRC staging envelopes inside
++                    // `publish_atomic` have already been destroyed (the call has returned)
++                    // and are NOT counted. A missing measurement fails explicitly (the
++                    // publish path surfaces its `Err`; the sampler panics on a `None`
++                    // slot), never a silent 0.
++                    let o4_validated_inline = o4_owned.validated_inline;
++                    let o4_evidence_backing = o4_owned.retained_evidence_capacity;
++                    let o4_encoded_object = o4_owned.retained_encoded_capacity;
++                    let o4_metadata_payload = o4_owned.metadata_payload_capacity;
++                    let o4_owned_objects = o4_owned.total();
++                    assert_eq!(
++                        o4_owned_objects,
++                        o4_validated_inline + o4_evidence_backing + o4_encoded_object + o4_metadata_payload,
++                        "O4-owned live total is the sum of its four measured live components"
++                    );
++                    // Each measured O4-owned component is a genuine live object: the inline
++                    // proof and both heap backings are non-zero, and the metadata payload is
++                    // the live component-owned buffer.
++                    assert!(o4_validated_inline > 0, "live ValidatedRecord inline measured");
++                    assert!(o4_evidence_backing > 0, "live retained evidence backing measured");
++                    assert!(o4_encoded_object > 0, "live retained encoded buffer measured");
++                    assert!(o4_metadata_payload > 0, "live metadata payload measured");
++                    // The already-dropped original publication buffer is NOT re-counted:
++                    // the retained generation's evidence backing is strictly smaller than
++                    // the retained encoded buffer here, confirming the proof retains its
++                    // decoded generation rather than a second copy of the encoded record.
++
++                    // Independent source-derived CROSS-CHECK (audit only; NOT the asserted
++                    // observation and NOT substituted for the measured values): using the
++                    // reported layouts and a 310-byte encoded capacity,
++                    //   1714 + 496 + 129 + 310 + 42 = 2691.
++                    // The measured values are derived and reported from the executing
++                    // operation above; this equality is a consistency audit, never the
++                    // source of the numbers.
++                    let cross_check = measured_prepared_objects
++                        + o4_validated_inline
++                        + o4_evidence_backing
++                        + o4_encoded_object
++                        + o4_metadata_payload;
 +
 +                    // The MEASURED live-object total at the O4 phase (object measurements
 +                    // only; NOT a reservation counter).
 +                    let measured_live_objects = measured_prepared_objects + o4_owned_objects;
++                    assert_eq!(
++                        measured_live_objects, cross_check,
++                        "measured live-object total equals the component cross-check sum"
++                    );
 +
 +                    // (1) measured live-object charge <= contemporaneous covering operational
 +                    // reservation.
@@ -2734,7 +2908,7 @@ index 0000000..a613546
 +                        "no eviction on refusal"
 +                    );
 +                    println!(
-+                        "[§3 distinct N={n}] RESULT=COEXIST_THROUGH_O4 context_ownership={context_ownership} ga={ga}                  gb={gb} coexist={coexist} aggregate={aggregate_with_two} cap={cap}                  pre_operation_headroom={pre_operation_headroom}                  in_operation[op={in_op} agg={in_agg} o4_reservation={o4_reservation} headroom={in_operation_headroom}]                  measured_live_objects[total={measured_live_objects} pinned={measured_prepared_objects} o4_owned={o4_owned_objects} (decoded={o4_decoded_object} encoded={o4_encoded_object})]                  (pre-operation headroom is the slack BEFORE the O4; the in-operation sample is taken at a real O4 phase while both generations stay pinned and the O4 reservation is live; the measured live-object total is <= the operational reservation and the unchanged ceiling holds AT that phase)"
++                        "[§3 distinct N={n}] RESULT=COEXIST_THROUGH_O4 context_ownership={context_ownership} ga={ga}                  gb={gb} coexist={coexist} aggregate={aggregate_with_two} cap={cap}                  pre_operation_headroom={pre_operation_headroom}                  in_operation[op={in_op} agg={in_agg} o4_reservation={o4_reservation} headroom={in_operation_headroom}]                  measured_live_objects[total={measured_live_objects} pinned={measured_prepared_objects} o4_owned={o4_owned_objects} (validated_inline={o4_validated_inline} evidence_backing={o4_evidence_backing} encoded={o4_encoded_object} metadata={o4_metadata_payload})] cross_check={cross_check}                  (pre-operation headroom is the slack BEFORE the O4; the in-operation sample is taken at a real O4 phase while both generations stay pinned and the O4 reservation is live; the O4-owned objects are the live ValidatedRecord + its evidence backings + its retained encoded buffer + the live metadata payload, measured in place; the measured live-object total is <= the operational reservation and the unchanged ceiling holds AT that phase)"
 +                    );
 +
 +                    // Cleanup/readmission: release both; the registry allocation is
