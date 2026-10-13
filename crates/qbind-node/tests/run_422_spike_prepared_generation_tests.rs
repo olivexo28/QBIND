@@ -36,9 +36,9 @@ use qbind_node::safety_record_store::backend::{InjectFault, SafetyBackend, Safet
 use qbind_node::safety_record_store::codec::encode_record;
 use qbind_node::safety_record_store::error::{CapacityRefusalDetail, SafetyStoreError};
 use qbind_node::safety_record_store::owner::{
-    dup_backing_live_at_release, make_locked_qc, o4_owned_live_objects, set_capture_interval_hook,
-    set_shared_release_order, shared_dup_live_at_release, O4OwnedLiveObjects, PublishResult,
-    SafetyRecordOwner, SharedReleaseOrder,
+    arm_o4_measurement_fault, dup_backing_live_at_release, make_locked_qc, o4_owned_live_objects,
+    set_capture_interval_hook, set_shared_release_order, shared_dup_live_at_release,
+    O4OwnedLiveObjects, PublishResult, SafetyRecordOwner, SharedReleaseOrder,
 };
 use qbind_node::safety_record_store::prepared::{
     generation_backing_struct_size_bytes, pin_charge_bytes, registry_cell_charge_bytes,
@@ -1537,6 +1537,52 @@ fn spike_refuse_recovery_required() {
     match owner.capture_prepared_decision(proof, 1) {
         Err((_p, CaptureRefusal::RecoveryRequired)) => {}
         other => panic!("expected RecoveryRequired, got {other:?}"),
+    }
+}
+
+// ===========================================================================
+// RUN 422 §3 correction: a failed O4-owned live-object MEASUREMENT at the
+// post-acknowledgement / pre-effective phase is surfaced as an explicit TEST
+// FAILURE (panic) and is NEVER relabelled as a pre-write refusal. The durable
+// write has already been acknowledged, so reporting a pre-write refusal would
+// falsely deny a write that actually landed. The fault is reached through the
+// REAL publication path.
+// ===========================================================================
+
+#[test]
+fn spike_o4_measurement_failure_is_test_failure_not_refused_pre_write() {
+    let ctx = ctx_n(4);
+    let dir = tempfile::tempdir().unwrap();
+    let owner = init_owner(dir.path(), &ctx);
+
+    // A first REAL acknowledged publication establishes the authoritative record
+    // and proves the normal (non-faulted) O4 live-object observation path works:
+    // the successful publication records its live objects on this thread.
+    publish_qc(&owner, &ctx, [0x11u8; 32], 5, 0);
+    assert!(
+        o4_owned_live_objects().is_some(),
+        "the successful O4 publication observed its live objects in place"
+    );
+
+    // Arm the one-shot O4 measurement fault on THIS (publishing) thread, then drive
+    // a further REAL authoritative publication. The write is durably acknowledged;
+    // the subsequent live-object MEASUREMENT then fails.
+    arm_o4_measurement_fault();
+    let lock_b =
+        make_locked_qc(&ctx, [0x22u8; 32], 9, valid_wire_qc(&ctx, [0x22u8; 32], 9), None).unwrap();
+    let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        owner.publish_locked(lock_b, 1, None::<&FixtureCommittedHistory>)
+    }));
+
+    // The instrumentation failure is surfaced as an explicit TEST FAILURE (panic),
+    // never a publication outcome. In particular it is NOT relabelled as a
+    // RefusedPreWrite: an acknowledged durable write is never a pre-write refusal.
+    match outcome {
+        Err(_panicked) => {}
+        Ok(result) => panic!(
+            "post-acknowledgement measurement failure must surface as a test panic, \
+             but publish_locked returned {result:?}"
+        ),
     }
 }
 
