@@ -1577,8 +1577,36 @@ fn spike_o4_measurement_failure_is_test_failure_not_refused_pre_write() {
     // The instrumentation failure is surfaced as an explicit TEST FAILURE (panic),
     // never a publication outcome. In particular it is NOT relabelled as a
     // RefusedPreWrite: an acknowledged durable write is never a pre-write refusal.
+    // Inspect the panic payload to confirm it is the SPECIFIC O4-owned live-object
+    // instrumentation failure, at its post-acknowledgement / pre-effective phase,
+    // for the faulted revision 2 (initialize -> rev 0, publish_qc -> rev 1,
+    // publish_locked -> rev 2). Any unrelated panic payload, or any normal returned
+    // publication result, is rejected.
     match outcome {
-        Err(_panicked) => {}
+        Err(panicked) => {
+            let message = panicked
+                .downcast_ref::<String>()
+                .map(String::as_str)
+                .or_else(|| panicked.downcast_ref::<&'static str>().copied())
+                .expect("the measurement failure must panic with a string payload");
+            assert!(
+                message.contains(
+                    "O4-owned live-object instrumentation failed at the \
+                     post-acknowledgement / pre-effective phase"
+                ),
+                "unexpected panic payload (not the O4-owned instrumentation failure \
+                 at the post-acknowledgement / pre-effective phase): {message:?}"
+            );
+            assert!(
+                message.contains("(rev 2)"),
+                "the instrumentation failure must name the faulted revision 2: {message:?}"
+            );
+            assert!(
+                message.contains("an acknowledged durable write is never a pre-write refusal"),
+                "the panic must assert the acknowledged write is never a pre-write refusal: \
+                 {message:?}"
+            );
+        }
         Ok(result) => panic!(
             "post-acknowledgement measurement failure must surface as a test panic, \
              but publish_locked returned {result:?}"
