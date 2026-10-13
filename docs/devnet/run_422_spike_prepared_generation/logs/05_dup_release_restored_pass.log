@@ -1,0 +1,13 @@
+$ # RESTORED byte-identically (default SharedReleaseOrder back to RetainedBeforeHolder)
+$ cargo test -p qbind-node --features test-utils --test run_422_spike_prepared_generation_tests spike_duplicate_release_invariant
+   Compiling qbind-node v0.1.0 (/tmp/spike2/crates/qbind-node)
+    Finished `test` profile [unoptimized] target(s) in 14.73s
+     Running tests/run_422_spike_prepared_generation_tests.rs (target/debug/deps/run_422_spike_prepared_generation_tests-71cc7af93cd79cea)
+
+running 2 tests
+test spike_duplicate_release_invariant_n1 ... ok
+test spike_duplicate_release_invariant_n4 ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 32 filtered out; finished in 0.01s
+
+EXIT=0

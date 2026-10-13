@@ -119,7 +119,7 @@ index 0b9ecde..fc10e3e 100644
  /// (§ 13.7A(b), D7-D14 capacity-aware correction).
  ///
 diff --git a/crates/qbind-node/src/safety_record_store/backend.rs b/crates/qbind-node/src/safety_record_store/backend.rs
-index 5b081f7..6af8833 100644
+index 5b081f7..fde6782 100644
 --- a/crates/qbind-node/src/safety_record_store/backend.rs
 +++ b/crates/qbind-node/src/safety_record_store/backend.rs
 @@ -15,6 +15,7 @@ use std::sync::{Arc, Mutex, MutexGuard};
@@ -130,35 +130,55 @@ index 5b081f7..6af8833 100644
  use crate::pqc_trust_bundle::TrustBundleEnvironment;
  use crate::storage::signing_journal_crc32;
  
-@@ -442,6 +443,27 @@ pub struct SafetyBackend {
-     /// not perturb the O1–O5 working-set/holder measurements, while still bounding
-     /// the concurrent distinct context owners (`MAX_CONCURRENT_CONTEXT_OWNERS`).
-     context_accounting: SharedAccountant,
+@@ -396,11 +397,45 @@ pub enum InjectFault {
+ }
+ 
+ /// A shared serialization domain. The owned guard proves the single-writer
+-/// boundary is held for a check-then-write sequence. The inner field is private
++/// boundary is held for a check-then-write sequence. The fields are private
+ /// so this type is **not** publicly constructible: a caller cannot fabricate a
+ /// `SerializationDomain` (or a guard over one) to forge ownership of a backend.
++///
++/// The domain also **holds** the lazily-allocated prepared-decision L0 registry
++/// slot (§ 13.6). Keeping that slot inside the domain means the one coordination
++/// cell that already serializes capture-vs-publication is reused for registry
++/// first-initialization: there is no separate registry mutex, and no new
++/// per-open allocation is introduced for the slot (see `prepared_registry`).
+ #[derive(Debug)]
+-pub struct SerializationDomain(());
++pub struct SerializationDomain {
++    /// Private zero-sized marker, kept so the struct is not publicly
++    /// constructible from outside this module.
++    _private: (),
 +    /// The shared **lazy-initialization slot** for the bounded prepared-decision
-+    /// L0 registry (§ 13.6). This slot is `None` at backend open and ordinary
-+    /// attachment — **no registry allocation exists** until the first prepared
-+    /// capture admits the registry-storage charge and installs one here (under the
-+    /// serialization domain, so concurrent handles cannot install bypass
-+    /// registries). Every attached handle / clone shares this one slot (the outer
-+    /// `Arc` is cloned, never re-created), so the registry, once installed, is
-+    /// unique and shared.
++    /// L0 registry (§ 13.6). `None` at backend open and ordinary attachment —
++    /// **no registry allocation exists** until the first prepared capture admits
++    /// the registry-storage charge and installs one here. Because this slot lives
++    /// **inside** the serialization domain (reached only through the pre-existing
++    /// shared `domain` mutex), its first-initialization is serialized by the very
++    /// same guard that linearizes capture with publication — concurrent handles
++    /// cannot install bypass registries — and it adds **no** new coordination
++    /// allocation of its own (it is a fixed, pointer-sized `Option<Arc<..>>`
++    /// field embedded in the already-allocated domain value).
 +    ///
-+    /// **Control-storage inventory / accounting treatment:** the slot itself is a
-+    /// fixed, pointer-sized `Option<Arc<..>>` behind one `Mutex`, cloned-`Arc`
-+    /// shared infrastructure on a par with the serialization domain and the
-+    /// accountant mutexes — a bounded, O(1) coordination cell that is **not**
-+    /// charged against the retained-bytes aggregate (it holds no application
-+    /// retained data; empty, it owns nothing). The charged object is the registry
-+    /// *allocation* the slot may come to hold: its `Mutex<PreparedRegistry>` cell
-+    /// (and the per-entry/generation/pin data) is admitted and reserved before it
-+    /// is created, so the uncharged allocation is **not** merely moved into a new
-+    /// eagerly allocated wrapper. A fresh backend open (and reopen) starts empty
-+    /// and binds any later-installed registry to this open's ownership incarnation.
-+    prepared: Arc<Mutex<Option<Arc<Mutex<PreparedRegistry>>>>>,
-     /// Source/test-only: a deterministic hook fired by the owner at the exact
-     /// point **after** an atomic publication has returned its durability
-     /// acknowledgement but **before** the component performs its in-memory
-@@ -498,6 +520,9 @@ impl SafetyBackend {
++    /// **Control-storage inventory / accounting treatment:** the only control
++    /// storage this adds over the accepted baseline is this single
++    /// `Option<Arc<Mutex<PreparedRegistry>>>` field inlined into the existing
++    /// domain — no extra `Arc`, no extra `Mutex`. Empty, it owns nothing and is
++    /// **not** charged against the retained-bytes aggregate, on a par with the
++    /// domain/accountant coordination cells. The charged object is the registry
++    /// *allocation* this slot may come to hold: its `Mutex<PreparedRegistry>`
++    /// cell (and per-entry/generation/pin data) is admitted and reserved
++    /// **before** it is created, so the previously-uncharged allocation is **not**
++    /// merely moved into a new eagerly allocated wrapper. A fresh open (and
++    /// reopen) starts empty and binds any later-installed registry to this open's
++    /// ownership incarnation.
++    prepared_registry: Option<Arc<Mutex<PreparedRegistry>>>,
++}
+ 
+ /// The safety backend: an `Arc`-shared RocksDB handle plus the single
+ /// serialization domain shared by every attached handle.
+@@ -498,16 +533,28 @@ impl SafetyBackend {
          // charge is bounded by the accepted component aggregate ceiling (§ 13.7,
          // finding #4). Cloning the handle below shares the single inner guard.
          let aggregate = AggregateAuthority::new();
@@ -167,8 +187,20 @@ index 5b081f7..6af8833 100644
 +        let incarnation = OWNERSHIP_INCARNATION.fetch_add(1, Ordering::SeqCst);
          Ok(SafetyBackend {
              db: Arc::new(db),
-             domain: Arc::new(Mutex::new(SerializationDomain(()))),
-@@ -507,7 +532,7 @@ impl SafetyBackend {
+-            domain: Arc::new(Mutex::new(SerializationDomain(()))),
++            domain: Arc::new(Mutex::new(SerializationDomain {
++                _private: (),
++                // The prepared-decision L0 registry is LAZILY allocated: this slot
++                // is empty at open and ordinary attachment; the first prepared
++                // capture admits the registry-storage charge and installs one
++                // registry here, bound to this open's ownership incarnation. It
++                // lives inside the domain, so no separate coordination allocation
++                // is introduced at open.
++                prepared_registry: None,
++            })),
+             inject: Arc::new(AtomicU8::new(InjectFault::None as u8)),
+             // A freshly opened backend is NOT effective: dependent O4 is blocked
+             // until an acknowledged O1 or a successful O5 establishes a fresh
              // durability acknowledgement (§ 13.4 / § 13.5).
              effective: Arc::new(AtomicBool::new(false)),
              // Draw a fresh ownership incarnation for this open (and reopen).
@@ -177,19 +209,7 @@ index 5b081f7..6af8833 100644
              // A fresh, unbound operational accountant partition; the first
              // attached handle binds its per-context operational sub-ceiling.
              accounting: SharedAccountant::new(aggregate.clone()),
-@@ -517,6 +542,11 @@ impl SafetyBackend {
-             // partition, so neither partition can admit beyond the accepted
-             // combined coexistence budget.
-             context_accounting: SharedAccountant::new(aggregate),
-+            // The prepared-decision L0 registry is LAZILY allocated: the slot is
-+            // empty at open and ordinary attachment; the first prepared capture
-+            // admits the registry-storage charge and installs one registry here,
-+            // bound to this open's ownership incarnation.
-+            prepared: Arc::new(Mutex::new(None)),
-             // No crash-boundary hook installed unless a test installs one.
-             #[cfg(any(test, feature = "test-utils"))]
-             pre_effective_hook: Arc::new(Mutex::new(None)),
-@@ -614,6 +644,17 @@ impl SafetyBackend {
+@@ -614,6 +661,17 @@ impl SafetyBackend {
          self.accounting.reserve(charge)
      }
  
@@ -207,39 +227,42 @@ index 5b081f7..6af8833 100644
      /// Acquire the single shared serialization domain for a check-then-write
      /// sequence. Every attached handle contends on the same lock. Crate-internal:
      /// the guard is only ever produced for, and consumed by, this backend's own
-@@ -624,6 +665,48 @@ impl SafetyBackend {
+@@ -624,6 +682,53 @@ impl SafetyBackend {
              .expect("safety serialization domain poisoned")
      }
  
 +    /// The installed shared prepared-decision L0 registry `Arc`, or `None` if no
-+    /// registry has been allocated yet (before the first prepared capture).
++    /// registry has been allocated yet (before the first prepared capture). The
++    /// slot lives inside the serialization domain, so the caller must already hold
++    /// the domain `guard`; this reads it **through** that held guard (never
++    /// re-locks the domain, so it cannot self-deadlock a capture that holds it).
 +    /// Crate-internal: used by the owner capture/release path. Never allocates —
 +    /// allocation is performed by the capture path after admitting its charge.
-+    pub(crate) fn prepared_registry_installed(&self) -> Option<Arc<Mutex<PreparedRegistry>>> {
-+        self.prepared
-+            .lock()
-+            .expect("prepared registry slot poisoned")
-+            .clone()
++    pub(crate) fn prepared_registry_installed(
++        &self,
++        domain: &MutexGuard<'_, SerializationDomain>,
++    ) -> Option<Arc<Mutex<PreparedRegistry>>> {
++        domain.prepared_registry.clone()
 +    }
 +
-+    /// Install the first (and only) shared prepared-decision L0 registry, under a
-+    /// **held serialization-domain guard** so first-initialization is serialized
-+    /// across every attached handle — concurrent captures cannot each install a
-+    /// bypass registry. If a registry is already installed (it never is while the
-+    /// domain guard is held, but this is checked rather than assumed), the existing
-+    /// one is returned and `registry` (with its surplus reservation) is dropped.
-+    /// Crate-internal: the caller admits the registry-storage charge and moves it
-+    /// into `registry` **before** calling this.
++    /// Install the first (and only) shared prepared-decision L0 registry, mutating
++    /// the slot held **inside** the serialization domain through the caller's
++    /// `domain` guard so first-initialization is serialized across every attached
++    /// handle — concurrent captures cannot each install a bypass registry. If a
++    /// registry is already installed (it never is while the domain guard is held,
++    /// but this is checked rather than assumed), the existing one is returned and
++    /// `registry` (with its surplus reservation) is dropped. Crate-internal: the
++    /// caller admits the registry-storage charge and moves it into `registry`
++    /// **before** calling this.
 +    pub(crate) fn install_prepared_registry(
 +        &self,
-+        _domain: &MutexGuard<'_, SerializationDomain>,
++        domain: &mut MutexGuard<'_, SerializationDomain>,
 +        registry: Arc<Mutex<PreparedRegistry>>,
 +    ) -> Arc<Mutex<PreparedRegistry>> {
-+        let mut slot = self.prepared.lock().expect("prepared registry slot poisoned");
-+        match slot.as_ref() {
++        match domain.prepared_registry.as_ref() {
 +            Some(existing) => Arc::clone(existing),
 +            None => {
-+                *slot = Some(Arc::clone(&registry));
++                domain.prepared_registry = Some(Arc::clone(&registry));
 +                registry
 +            }
 +        }
@@ -247,10 +270,12 @@ index 5b081f7..6af8833 100644
 +
 +    /// Source/test-only: the installed shared prepared registry, or `None` if none
 +    /// has been lazily allocated yet. Used to assert allocation lifetime and live
-+    /// object coverage directly. Gated behind `test-utils`.
++    /// object coverage directly. Gated behind `test-utils`. Acquires the domain
++    /// lock itself (callers are not holding it), so it must not be called while a
++    /// capture holds the domain guard.
 +    #[cfg(any(test, feature = "test-utils"))]
 +    pub fn prepared_registry_for_test(&self) -> Option<Arc<Mutex<PreparedRegistry>>> {
-+        self.prepared_registry_installed()
++        self.lock_domain().prepared_registry.clone()
 +    }
 +
      /// Read the raw (CRC-verified) metadata bytes, if present. `max_payload` is
@@ -280,7 +305,7 @@ index 89e9576..d92633e 100644
  pub use record::{
      DecodedRecord, EvidenceStatus, LockedRecord, RetainedRecord, SafetyRecord, SupportingEvidence,
 diff --git a/crates/qbind-node/src/safety_record_store/owner.rs b/crates/qbind-node/src/safety_record_store/owner.rs
-index fa51f17..991269e 100644
+index fa51f17..9e9236a 100644
 --- a/crates/qbind-node/src/safety_record_store/owner.rs
 +++ b/crates/qbind-node/src/safety_record_store/owner.rs
 @@ -8,7 +8,7 @@
@@ -300,7 +325,7 @@ index fa51f17..991269e 100644
  use super::profile::{
      context_owner_ceiling_term, context_ownership_charge, max_component_aggregate_bytes,
      max_context_ownership_bytes, max_retained_generation_bytes, max_safety_record_bytes,
-@@ -489,6 +490,51 @@ fn measure_o5_transient_decode(decoded: &DecodedRecord) -> Result<u128, SafetySt
+@@ -489,6 +490,92 @@ fn measure_o5_transient_decode(decoded: &DecodedRecord) -> Result<u128, SafetySt
      super::accounting::decoded_working_set_charge(decoded)
  }
  
@@ -349,10 +374,51 @@ index fa51f17..991269e 100644
 +    SHARED_DUP_LIVE_AT_RELEASE.with(|c| c.get())
 +}
 +
++// ---------------------------------------------------------------------------
++// Test-only (RUN 422 §3 serialization regression): a one-shot hook fired by the
++// capture path at the EXACT interval between the authoritative-state check and
++// the registry insertion, WHILE the serialization domain guard is held. It lets
++// a focused test create a coordinated capture/publication OVERLAP: a concurrent
++// O4 publication (which must take the SAME domain lock, see `publish_locked`)
++// cannot make progress while this hook runs, so correct serialization keeps the
++// two mutually exclusive. The hook is thread-local (fires on the capturing
++// thread) and consumed on first fire. Absent from production/release builds.
++#[cfg(any(test, feature = "test-utils"))]
++thread_local! {
++    static CAPTURE_INTERVAL_HOOK: std::cell::RefCell<Option<Box<dyn Fn()>>> =
++        const { std::cell::RefCell::new(None) };
++}
++
++/// Test-only (RUN 422 §3): install a one-shot capture-interval hook on this
++/// thread. The NEXT prepared capture on this thread fires it once (between the
++/// authoritative-state check and the registry insertion, under the domain guard)
++/// and clears it.
++#[cfg(any(test, feature = "test-utils"))]
++pub fn set_capture_interval_hook<F: Fn() + Send + Sync + 'static>(f: F) {
++    CAPTURE_INTERVAL_HOOK.with(|h| *h.borrow_mut() = Some(Box::new(f)));
++}
++
++/// Test-only (RUN 422 §3): clear any installed capture-interval hook on this
++/// thread.
++#[cfg(any(test, feature = "test-utils"))]
++pub fn clear_capture_interval_hook() {
++    CAPTURE_INTERVAL_HOOK.with(|h| *h.borrow_mut() = None);
++}
++
++/// Fire and consume the one-shot capture-interval hook, if installed. Called by
++/// the capture path while holding the serialization domain guard.
++#[cfg(any(test, feature = "test-utils"))]
++fn fire_capture_interval_hook() {
++    let cb = CAPTURE_INTERVAL_HOOK.with(|h| h.borrow_mut().take());
++    if let Some(cb) = cb {
++        cb();
++    }
++}
++
  /// Decoded initialization metadata (one per backend DB).
  #[derive(Debug, Clone, PartialEq, Eq)]
  pub struct SafetyMeta {
-@@ -1172,6 +1218,295 @@ impl SafetyRecordOwner {
+@@ -1172,6 +1259,306 @@ impl SafetyRecordOwner {
              .grant_recovery_capability(self.backend.incarnation()))
      }
  
@@ -431,7 +497,7 @@ index fa51f17..991269e 100644
 +        };
 +
 +        // --- linearize with publication under the serialization domain ---
-+        let guard = self.backend.lock_domain();
++        let mut guard = self.backend.lock_domain();
 +        if self.backend.recovery_required() {
 +            return Err((proof, CaptureRefusal::RecoveryRequired));
 +        }
@@ -451,6 +517,17 @@ index fa51f17..991269e 100644
 +            ));
 +        }
 +
++        // Source/test-only: fire the capture-interval hook (if installed) at the
++        // EXACT point between the authoritative-state check above and the registry
++        // insertion below, WHILE the serialization domain `guard` is held. A focused
++        // serialization regression installs a hook here that signals a concurrent O4
++        // publisher and then waits briefly: because that publisher must take the same
++        // domain lock (`publish_locked`), correct serialization keeps it blocked for
++        // the whole interval. Compiled only under `test`/`test-utils`; unreachable in
++        // a default/release build.
++        #[cfg(any(test, feature = "test-utils"))]
++        fire_capture_interval_hook();
++
 +        // --- lazy registry allocation (charge admitted before allocation) ------
 +        // Before the first prepared capture no registry allocation exists. Obtain
 +        // the one shared registry, allocating it lazily on first capture: admit the
@@ -462,7 +539,7 @@ index fa51f17..991269e 100644
 +        // lifetime — including zero-entry periods — releasing it only when the
 +        // allocation is destroyed (its last owner, the backend slot plus any
 +        // outstanding pin, drops). A reused registry is NOT re-charged.
-+        let registry_arc = match self.backend.prepared_registry_installed() {
++        let registry_arc = match self.backend.prepared_registry_installed(&guard) {
 +            Some(existing) => existing,
 +            None => {
 +                // On insufficient admission, return the proof intact WITHOUT
@@ -479,7 +556,7 @@ index fa51f17..991269e 100644
 +                    incarnation,
 +                    registry_res,
 +                )));
-+                self.backend.install_prepared_registry(&guard, fresh)
++                self.backend.install_prepared_registry(&mut guard, fresh)
 +            }
 +        };
 +        let mut reg = registry_arc.lock().expect("prepared registry poisoned");
@@ -1441,10 +1518,10 @@ index 82c1190..f8425ba 100644
  /// The single decoded-generation wrapper whose `size_of` is the whole-enum
 diff --git a/crates/qbind-node/tests/run_422_spike_prepared_generation_tests.rs b/crates/qbind-node/tests/run_422_spike_prepared_generation_tests.rs
 new file mode 100644
-index 0000000..66e6885
+index 0000000..6ddb525
 --- /dev/null
 +++ b/crates/qbind-node/tests/run_422_spike_prepared_generation_tests.rs
-@@ -0,0 +1,1482 @@
+@@ -0,0 +1,1631 @@
 +//! RUN 422 — generation-only prepared-decision L0 ownership feasibility spike.
 +//!
 +//! Executable, discriminating tests for the §13.6 prepared-decision L0
@@ -1483,8 +1560,8 @@ index 0000000..66e6885
 +use qbind_node::safety_record_store::codec::encode_record;
 +use qbind_node::safety_record_store::error::{CapacityRefusalDetail, SafetyStoreError};
 +use qbind_node::safety_record_store::owner::{
-+    make_locked_qc, set_shared_release_order, shared_dup_live_at_release, PublishResult,
-+    SafetyRecordOwner, SharedReleaseOrder,
++    make_locked_qc, set_capture_interval_hook, set_shared_release_order, shared_dup_live_at_release,
++    PublishResult, SafetyRecordOwner, SharedReleaseOrder,
 +};
 +use qbind_node::safety_record_store::prepared::{
 +    generation_backing_struct_size_bytes, pin_charge_bytes, registry_cell_charge_bytes,
@@ -2073,6 +2150,59 @@ index 0000000..66e6885
 +}
 +
 +// ===========================================================================
++// §2. DISCRIMINATING duplicate-release invariant (independent of any runtime
++// seam). A shared conversion must leave ZERO duplicate backing bytes alive when
++// the covering reservation is released. This test asserts ONLY the corrected
++// value (`Some(0)`): it never arms, nor expects, the premature defect's positive
++// value. Under the shipped source it PASSES; a source mutation that releases the
++// covering reservation before destroying the duplicate's backings (e.g. flipping
++// the default `SharedReleaseOrder`) makes THIS test FAIL with a nonzero live
++// count — establishing discriminating sensitivity. The raw FAIL (mutated) and
++// PASS (restored byte-identically) command outcomes are preserved in the evidence
++// package (logs/04_dup_release_mutation_fail.log, 05_dup_release_restored_pass.log).
++// ===========================================================================
++
++fn duplicate_release_invariant(n: u64) {
++    let ctx = ctx_n(n);
++    let dir = tempfile::tempdir().unwrap();
++    let owner = init_owner(dir.path(), &ctx);
++    publish_qc(&owner, &ctx, [9u8; 32], 5, 0);
++
++    // Fresh conversion establishes the shared backing (slot 1).
++    let p1 = owner.read_validate(None::<&FixtureCommittedHistory>).unwrap();
++    let dup_bytes = p1.retained_evidence_capacity().expect("explicit capacity");
++    assert!(dup_bytes > 0, "the duplicate will own non-empty evidence backings");
++    let pin1 = owner.capture_prepared_decision(p1, 1).expect("fresh capture");
++
++    // Shared conversion on the DEFAULT (shipped) ordering — NO seam is touched.
++    // The duplicate's separately owned backings must be destroyed BEFORE the
++    // reservation covering them is released.
++    let pc = owner.read_validate(None::<&FixtureCommittedHistory>).unwrap();
++    let pin_c = owner
++        .capture_prepared_decision(pc, 1)
++        .expect("shared capture (default ordering)");
++    assert_eq!(
++        shared_dup_live_at_release(),
++        Some(0),
++        "INVARIANT: no duplicate evidence is live when its covering reservation is released"
++    );
++    assert_eq!(pin_c.release(), ReleaseOutcome::Released);
++    drop(pin1);
++    // The retained empty registry keeps its standing reservation (backend alive).
++    assert_eq!(op_current(&owner), registry_cell());
++    println!("[§2-inv N={n}] dup_bytes={dup_bytes} live_at_release=0 (discriminating; nonzero under premature-release mutation)");
++}
++
++#[test]
++fn spike_duplicate_release_invariant_n1() {
++    duplicate_release_invariant(1);
++}
++#[test]
++fn spike_duplicate_release_invariant_n4() {
++    duplicate_release_invariant(4);
++}
++
++// ===========================================================================
 +// §3. Distinct generations coexisting through O4 while TWO prepared generations
 +// remain pinned; the complete accounting (context ownership + both generations +
 +// registry cell + pins + the O4 publication reservation) is measured against the
@@ -2655,6 +2785,102 @@ index 0000000..66e6885
 +    let pin = owner.capture_prepared_decision(p_fresh, 3).expect("capture at authoritative rev");
 +    assert!(op_current(&owner) > 0);
 +    drop(pin);
++}
++
++// ===========================================================================
++// §3. DISCRIMINATING capture/publication serialization OVERLAP (coordinated, not
++// sequential). A capturer thread and a publisher thread are coordinated via a
++// bounded test hook so the publisher attempts an O4 publication at the EXACT
++// interval between the capture's authoritative-state check and its registry
++// insertion. Because BOTH the capture and `publish_locked` take the shared
++// serialization domain lock, correct serialization keeps the publisher BLOCKED
++// for the whole interval: the capturer observes that the publication has NOT
++// progressed (`observed_publish_during_interval == false`). Removing the
++// serialization protection — a source mutation that releases the domain guard
++// across this interval — lets the publisher interleave, the capturer observes the
++// publication completing mid-interval, and THIS test FAILS. Raw fail/restore
++// command outcomes are preserved in the evidence package
++// (logs/06_serialization_mutation_fail.log, 07_serialization_restored_pass.log).
++// ===========================================================================
++#[test]
++fn spike_capture_publication_serialization_overlap() {
++    use std::sync::atomic::{AtomicBool, Ordering};
++    use std::sync::Arc;
++    use std::time::{Duration, Instant};
++
++    let ctx = Arc::new(ctx_n(4));
++    let dir = tempfile::tempdir().unwrap();
++    let owner = Arc::new(init_owner(dir.path(), &ctx));
++    publish_qc(&owner, &ctx, [9u8; 32], 5, 0); // rev 1
++
++    // Prime the shared registry with a first fresh capture, so the instrumented
++    // capture below exercises the check->insert interval on registry REUSE (the
++    // serialization boundary in isolation, not first-initialization).
++    let p0 = owner.read_validate(None::<&FixtureCommittedHistory>).unwrap();
++    let prime = owner.capture_prepared_decision(p0, 1).expect("prime registry");
++    assert_eq!(prime.release(), ReleaseOutcome::Released);
++
++    let publisher_may_start = Arc::new(AtomicBool::new(false));
++    let publisher_done = Arc::new(AtomicBool::new(false));
++    let observed_publish_during_interval = Arc::new(AtomicBool::new(false));
++
++    // Publisher thread: once released, attempt an O4 publication over rev 1. Under
++    // correct serialization it blocks on the domain lock until the capturer's whole
++    // check->insert interval completes.
++    let publisher = {
++        let owner = Arc::clone(&owner);
++        let ctx = Arc::clone(&ctx);
++        let may_start = Arc::clone(&publisher_may_start);
++        let done = Arc::clone(&publisher_done);
++        std::thread::spawn(move || {
++            let deadline = Instant::now() + Duration::from_secs(10);
++            while !may_start.load(Ordering::Acquire) {
++                if Instant::now() > deadline {
++                    break;
++                }
++                std::thread::yield_now();
++            }
++            // Blocks here on the serialization domain if the capturer holds it.
++            let new_rev = publish_qc(&owner, &ctx, [0x22u8; 32], 9, 1);
++            assert_eq!(new_rev, 2, "publisher advanced the authoritative revision to 2");
++            done.store(true, Ordering::Release);
++        })
++    };
++
++    // Capturer (this thread): install the one-shot interval hook, which releases the
++    // publisher and then waits a bounded window before sampling whether the
++    // publication has progressed. Correct serialization keeps it blocked ⇒ false.
++    {
++        let may_start = Arc::clone(&publisher_may_start);
++        let done = Arc::clone(&publisher_done);
++        let observed = Arc::clone(&observed_publish_during_interval);
++        set_capture_interval_hook(move || {
++            may_start.store(true, Ordering::Release);
++            std::thread::sleep(Duration::from_millis(300));
++            observed.store(done.load(Ordering::Acquire), Ordering::Release);
++        });
++    }
++
++    let p = owner.read_validate(None::<&FixtureCommittedHistory>).unwrap();
++    let pin = owner
++        .capture_prepared_decision(p, 1)
++        .expect("capture succeeds at the unchanged revision under serialization");
++    // The capture completed its guarded check->insert interval; release the pin.
++    assert_eq!(pin.release(), ReleaseOutcome::Released);
++
++    publisher.join().expect("publisher thread");
++
++    // DISCRIMINATING assertion: the publication did NOT complete during the
++    // capturer's guarded check->insert interval. A source mutation that drops the
++    // serialization protection across this interval flips this to `true`.
++    assert!(
++        !observed_publish_during_interval.load(Ordering::Acquire),
++        "SERIALIZATION: publication must not progress during the capture's guarded interval"
++    );
++    // The publication did eventually complete (strictly after the capture released
++    // the domain), advancing the revision to 2.
++    assert!(publisher_done.load(Ordering::Acquire), "publication completed after the capture");
++    println!("[§3 overlap] serialized: publication blocked for the whole guarded interval; captured at rev 1, published rev 2 after release");
 +}
 +
 +// ===========================================================================
