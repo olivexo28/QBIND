@@ -126,7 +126,7 @@ measured, not assumed.
 | N / class | inline | owned backings | Arc | **actual** | core | control | core+control |
 |---|---|---|---|---|---|---|---|
 | N=1 TC | 512 | 152 | 16 | **680** | 536 | 144 | **680** |
-| N=4 TC | 512 | 504 | 16 | **1032** | 888 | 144 | **1032** |
+| N=4 TC | 512 | 704 | 16 | **1232** | 1088 | 144 | **1232** |
 
 The discriminating assertion (`spike_actual_object_accounting_n{1,4}`) shows
 core-only **under-covers** the actual allocation by **exactly** the holder/control
@@ -151,7 +151,7 @@ its reservation is released**:
 
 | ordering | live-at-release (N=1 / N=4) |
 |---|---|
-| premature (`HolderBeforeRetained`) | 33 / 97 — **non-zero: the defect** |
+| premature (`HolderBeforeRetained`) | 33 / 129 — **non-zero: the defect** |
 | corrected (`RetainedBeforeHolder`, default) | 0 / 0 — **passes** |
 
 The test fails under the premature ordering and passes after correction, then
@@ -161,22 +161,38 @@ empty registry), explicit release, and automatic `Drop`.
 
 ### Discriminating invariant + source-mutation evidence
 
-The runtime seam above proves the ordering is *observable*; a separate
-**invariant** test, `spike_duplicate_release_invariant_n{1,4}`, asserts only the
-correct outcome — **`Some(0)`: zero duplicate bytes live at the moment the
-duplicate reservation is released** — and never expects the defect value. To show
-this invariant is *sensitive to the production release order* (not merely to the
-test seam), the default `SharedReleaseOrder` was flipped **in source** to
-`HolderBeforeRetained`:
+The runtime seam above proves the branch *selection* is observable, but it is a
+**branch-assigned** observer: the capture path *sets* the reported value from the
+chosen `SharedReleaseOrder` branch, so it reports which branch ran rather than
+independently measuring backing liveness. It is retained as historical evidence
+for the branch-selection experiment (`spike_sharing_lifetime_regression`).
+
+The **invariant** test, `spike_duplicate_release_invariant_n{1,4}`, instead reads
+an **independent allocation-identity tracker** (`dup_backing_live_at_release()`):
+each duplicate evidence backing is registered live with its measured byte size and
+a `Drop` probe is bundled onto the retained object, so the live total decrements
+exactly when that allocation is actually destroyed. The tracker is sampled at the
+covering-reservation **release boundary**. The sampled value is therefore derived
+from real allocation liveness — **not** from the selected release-order flag and
+**not** from a hard-coded expected value. The single unchanged invariant it
+asserts is **`Some(0)`: zero duplicate backing bytes remain live when their
+covering reservation is released** — it never expects the defect value.
+
+To show this invariant is *sensitive to the production teardown order*, the normal
+(corrected) shared branch was mutated **in source** by moving the covering
+reservation's release (`prior_holder.release_now()`) **before** the duplicate
+backing's destruction (`drop(retained)`), leaving the observer and the test
+assertion byte-for-byte unchanged:
 
 | Source state | `spike_duplicate_release_invariant` | Log |
 |---|---|---|
-| mutated default (`HolderBeforeRetained`) | **FAILS** — `Some(33)` / `Some(97)` | [`logs/04_dup_release_mutation_fail.log`](logs/04_dup_release_mutation_fail.log) |
-| restored default (`RetainedBeforeHolder`) | **PASSES** — `Some(0)` / `Some(0)` | [`logs/05_dup_release_restored_pass.log`](logs/05_dup_release_restored_pass.log) |
+| mutated (release before backing destruction) | **FAILS** — `Some(33)` / `Some(129)` | [`logs/04_dup_release_mutation_fail.log`](logs/04_dup_release_mutation_fail.log) |
+| restored (destroy backing before release) | **PASSES** — `Some(0)` / `Some(0)` | [`logs/05_dup_release_restored_pass.log`](logs/05_dup_release_restored_pass.log) |
 
-The source was restored **byte-identically** (sha256 verified) after the
-experiment; the production path forces the corrected order via
-`#[cfg(not(test))]`.
+The failing `Some(33)` / `Some(129)` counts are read from the independent tracker,
+not assigned by the selected branch. The source was restored **byte-identically**
+(sha256 `d7dcea17…` verified before and after) after the experiment; the
+production path drops the probe under `#[cfg(not(test))]` (no runtime cost).
 
 ## 5. §3 — Bounded coexistence evidence (measured, not hardcoded)
 
@@ -194,23 +210,32 @@ included):
 | Quantity | N=1 | N=4 |
 |---|---|---|
 | context-ownership standing partition | 192 | 240 |
-| generation-core, each (QC) | 417 | 481 |
-| two distinct generations, operational (2·core + 2·control + registry-cell + 2·pin) | 1522 | 1650 |
-| aggregate with two pinned (context + operational) | **1714** | **1890** |
+| generation-core, each (QC) | 417 | 513 |
+| two distinct generations, operational (2·core + 2·control + registry-cell + 2·pin) | 1522 | 1714 |
+| aggregate with two pinned (context + operational) | **1714** | **1954** |
 | aggregate ceiling | 3956 | 7772 |
 
 **Two distinct prepared generations coexist while pinned at both N** (1714 ≤ 3956;
-1890 ≤ 7772). The honest distinction is the *contemporaneous O4 through both*:
+1954 ≤ 7772). The honest distinction is the *contemporaneous O4 through both*:
 
-- **N=4 — COEXIST_THROUGH_O4:** a further authoritative publication while both
-  generations stay pinned **succeeds** (headroom 5882). A third capture is then
-  refused `RegistryFull` without eviction; both pins release to baseline.
-- **N=1 — COEXIST_REFUSE_O4 (conservative refusal):** the same O4 through both
-  pinned generations would reach **4103 > 3956**, an exact **147-byte shortfall**.
-  The run reports the shortfall honestly, confirms the refusal mutated nothing
-  (both pins intact, no leaked charge), and then **demonstrates cleanup +
-  readmission** (release, re-publish, re-capture) — **without** raising any limit
-  or redefining any exclusion.
+- **N=4 — COEXIST_THROUGH_O4:** a further authoritative publication (a third
+  maximum anchored lock) while both generations stay pinned **succeeds** (headroom
+  5818). A third capture is then refused `RegistryFull` without eviction; both pins
+  release to baseline.
+- **N=1 — COEXIST_REFUSE_O4 (genuine two-pin publication refusal):** the same O4
+  through both pinned generations would reach **4103 > 3956**, an exact
+  **147-byte shortfall** (measured against the unchanged fixtures, not forced to a
+  prior figure). The run (a) snapshots the authoritative record bytes, metadata
+  revision, recovery (O5) incarnation, and the two retained pins **before** the
+  refused publication; (b) confirms **after** the refusal that record bytes,
+  revision, recovery state, both pins, and the operational charge are all
+  unchanged (the refusal mutated nothing); (c) **explicitly abandons** the
+  necessary pin (`release_prepared(pin1)`), freeing one registry slot while the
+  retained registry keeps its standing reservation; (d) **retries the SAME refused
+  publication** (the byte-identical cloned lock C at the same expected revision),
+  which is now **readmitted** to revision 3; (e) captures into the freed slot and
+  releases both, returning the aggregate to context-ownership + the standing
+  registry charge — **without** raising any limit or redefining any exclusion.
 
 ### Other §3 evidence
 
@@ -321,7 +346,7 @@ the test fails on the defect and passes on the correction:
 
 | # | Experiment | Mutated → Restored | Logs |
 |---|---|---|---|
-| 4/5 | duplicate-release invariant | `SharedReleaseOrder` default flipped `HolderBeforeRetained` → `RetainedBeforeHolder` | [`04`](logs/04_dup_release_mutation_fail.log) / [`05`](logs/05_dup_release_restored_pass.log) |
+| 4/5 | duplicate-release invariant | normal shared branch: covering-reservation release moved **before** backing destruction → restored to **destroy backing before release** | [`04`](logs/04_dup_release_mutation_fail.log) / [`05`](logs/05_dup_release_restored_pass.log) |
 | 6/7 | concurrent-serialization overlap | domain guard dropped across capture interval → held across interval | [`06`](logs/06_serialization_mutation_fail.log) / [`07`](logs/07_serialization_restored_pass.log) |
 
 ## 7. What the corrected execution establishes
@@ -342,12 +367,18 @@ the test fails on the defect and passes on the correction:
   unchanged.
 - The shared-conversion path keeps a duplicate proof's reservation active until
   its separately-owned evidence backings are destroyed, while preserving the
-  canonical generation's independent reservation.
-- Under **complete** accounting, two distinct prepared generations coexist while
-  pinned at both N, but at N=1 a contemporaneous O4 through both exceeds the
-  **unchanged** ceiling by exactly 147 bytes; the run reports that shortfall and
-  demonstrates cleanup/readmission rather than raising any limit. At N=4 the O4
-  succeeds.
+  canonical generation's independent reservation. An **independent
+  allocation-identity tracker** (not the release-order flag, not a hard-coded
+  value) observes zero duplicate backing bytes live at the covering-reservation
+  release boundary; a release-before-destruction source mutation makes that
+  invariant fail with the actual still-live byte count.
+- Under **complete** maximum-fixture accounting, two distinct prepared generations
+  coexist while pinned at both N, but at N=1 a contemporaneous O4 through both
+  exceeds the **unchanged** ceiling by an honest **147-byte** shortfall; the run
+  snapshots/compares record bytes, revision, recovery state, and pins before and
+  after the refusal, then abandons the necessary pin and **retries the SAME
+  refused publication** to readmission — rather than raising any limit. At N=4 the
+  O4 succeeds (headroom 5818).
 
 These are bounded experimental observations only. Deliberately **untested until
 actual engine integration** (capture is non-authorizing): engine decision timing,

@@ -1,13 +1,16 @@
-$ # RESTORED byte-identically (default SharedReleaseOrder back to RetainedBeforeHolder)
+$ # RESTORE byte-identically to the shipped source and re-run (invariant holds):
+$ cp owner_pristine.rs crates/qbind-node/src/safety_record_store/owner.rs
+$ sha256sum crates/qbind-node/src/safety_record_store/owner.rs
+d7dcea1749ce0c6a76fcf1d979c751b651b0f99d872ca98e6b7a90309d312c66  crates/qbind-node/src/safety_record_store/owner.rs
 $ cargo test -p qbind-node --features test-utils --test run_422_spike_prepared_generation_tests spike_duplicate_release_invariant
    Compiling qbind-node v0.1.0 (/tmp/spike2/crates/qbind-node)
-    Finished `test` profile [unoptimized] target(s) in 14.73s
+    Finished `test` profile [unoptimized] target(s) in 16.69s
      Running tests/run_422_spike_prepared_generation_tests.rs (target/debug/deps/run_422_spike_prepared_generation_tests-71cc7af93cd79cea)
 
 running 2 tests
-test spike_duplicate_release_invariant_n1 ... ok
 test spike_duplicate_release_invariant_n4 ... ok
+test spike_duplicate_release_invariant_n1 ... ok
 
-test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 32 filtered out; finished in 0.01s
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 32 filtered out; finished in 0.02s
 
 EXIT=0
