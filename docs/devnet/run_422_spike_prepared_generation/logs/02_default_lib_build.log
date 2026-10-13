@@ -1,6 +1,6 @@
 $ cargo clean -p qbind-node
-     Removed 68 files, 520.7MiB total
+     Removed 62 files, 495.2MiB total
 $ cargo build -p qbind-node
-   Compiling qbind-node v0.1.0 (/tmp/spike2/crates/qbind-node)
-    Finished `dev` profile [unoptimized] target(s) in 16.96s
+   Compiling qbind-node v0.1.0 (/tmp/expcheckout/crates/qbind-node)
+    Finished `dev` profile [unoptimized] target(s) in 16.11s
 EXIT=0

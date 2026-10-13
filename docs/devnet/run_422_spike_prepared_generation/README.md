@@ -52,7 +52,7 @@ See [`BASELINE.txt`](BASELINE.txt).
 - Isolated experimental checkout: `cp -a` of the baseline, same branch name.
 - Complete applicable patch:
   [`patch/run_422_spike_prepared_generation.patch`](patch/run_422_spike_prepared_generation.patch)
-  (9 files, +2962/-9; two new files included).
+  (9 files, +3511/-9; two new files included).
 
 ## 2. The corrected defect (inherited observation)
 
@@ -229,11 +229,40 @@ generations stay pinned:
   now samples the executing backend **during** the O4 — at the publish
   pre-effective phase, after admission and before release, while both prepared
   generations remain pinned and the O4 reservation is live. The contemporaneous
-  sample is **operational 6413, aggregate 6653** (= context-ownership 240 +
-  operational 6413), giving an **in-operation O4 reservation of 4699** and an
+  reservation sample is **operational 6413, aggregate 6653** (= context-ownership
+  240 + operational 6413), giving an **in-operation O4 reservation of 4699** and an
   **in-operation headroom of 1119**; the unchanged aggregate ceiling **holds at
   that phase** (6653 ≤ 7772). This is distinct from, and much tighter than, the
-  5818 pre-operation headroom. A third capture is then refused `RegistryFull`
+  5818 pre-operation headroom.
+
+  At that **same** pre-effective phase the run also derives an **independent
+  live-object measurement** — an actual per-object charge, not a reservation
+  counter — for every contract-charged object live there: the two pinned prepared
+  generations (each measured as its retained-record size + evidence backing
+  **capacities** + `Arc` control + control charge), the prepared **registry cell**
+  once, and one **pin** per occupied slot (**1714** pinned-object bytes), plus the
+  **O4-owned object** of the in-flight publication — its decoded working set
+  (**537**) plus its retained encoded publication buffer (**310**) = **847** —
+  independently derived from the same maximum lock fixture rather than cloning the
+  live measured graph or extending its lifetime. The measured live-object total is
+  **2561** (pinned 1714 + O4-owned 847). The precise phase is identified by its
+  genuine two-pin occupancy (`occupied == 2`); objects already destroyed there
+  (the CRC staging envelopes) are **not** counted. Object measurements, reservation
+  observations, and source-derived bounds are kept **separate**, and a missing
+  backing capacity **fails explicitly**. The asserted bounds are
+  **measured live-object charge 2561 ≤ contemporaneous covering operational
+  reservation 6413** and **context 240 + operational 6413 = aggregate 6653 ≤
+  unchanged ceiling 7772**; the 4699 in-operation O4 reservation is retained only as
+  a source-derived bound and is **not** substituted for the object measurement.
+
+  The in-operation observation is taken through a **non-cyclic** mechanism: the
+  pre-effective hook captures a shared `accounting_handle_for_test()` accountant
+  (plus leaf registry/pin handles) instead of a **cloned `SafetyBackend`**, so the
+  backend's shared hook slot no longer retains a backend clone (the previous
+  backend→hook→callback→backend retention cycle is removed). After the pins,
+  temporary proofs, owner/backend handles, and sampler ownership are released, an
+  **independent accountant** observes **0** remaining registry or generation
+  reservation (teardown verified). A third capture is then refused `RegistryFull`
   without eviction; both pins release to baseline.
 - **N=1 — COEXIST_REFUSE_O4 (genuine two-pin publication refusal):** the same O4
   through both pinned generations would reach **4103 > 3956**, an exact
@@ -401,9 +430,21 @@ the test fails on the defect and passes on the correction:
   both generations pinned, O4 reservation live): operational 6413 / aggregate 6653
   (in-operation O4 reservation 4699, in-operation headroom 1119), with the
   **unchanged** ceiling holding at that phase (6653 ≤ 7772) — distinct from the
-  5818 pre-operation headroom. At N=1 the same O4 through both exceeds the
+  5818 pre-operation headroom. At that same phase an **independent live-object
+  measurement** charges every object actually live there — the two pinned
+  generations, the registry cell, each pin (1714), plus the O4-owned decoded +
+  encoded publication object (847) — for a **measured live-object total of 2561**,
+  reported alongside the reservation total and asserted **≤ the contemporaneous
+  operational reservation (2561 ≤ 6413)** without substituting the 4699 reservation
+  for the object measurement; already-destroyed staging envelopes are excluded and
+  a missing backing capacity fails explicitly. The in-operation sample is taken
+  through a **non-cyclic** accountant handle (no retained backend clone), and after
+  all pins, proofs, owner/backend handles, and sampler ownership release, an
+  independent accountant observes **0** remaining registry/generation reservation.
+  At N=1 the same O4 through both exceeds the
   **unchanged** ceiling by an honest **147-byte** shortfall and is **refused** (no
-  admitted in-operation O4 phase is fabricated); across the refusal the run
+  admitted in-operation O4 phase is fabricated, the in-operation observation stays
+  honestly `NONE(refused)`); across the refusal the run
   captures and compares **complete record bytes**, **complete metadata bytes**, the
   **publication revision** (separately), **`owner.recovery_required()`**, both **pin
   identities/provenance**, and the **operational and aggregate** reservations —
