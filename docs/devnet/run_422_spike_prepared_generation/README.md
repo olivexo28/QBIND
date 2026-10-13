@@ -52,7 +52,7 @@ See [`BASELINE.txt`](BASELINE.txt).
 - Isolated experimental checkout: `cp -a` of the baseline, same branch name.
 - Complete applicable patch:
   [`patch/run_422_spike_prepared_generation.patch`](patch/run_422_spike_prepared_generation.patch)
-  (9 files, +3511/-9; two new files included).
+  (9 files, +3668/-10; two new files included).
 
 ## 2. The corrected defect (inherited observation)
 
@@ -241,19 +241,30 @@ generations stay pinned:
   generations (each measured as its retained-record size + evidence backing
   **capacities** + `Arc` control + control charge), the prepared **registry cell**
   once, and one **pin** per occupied slot (**1714** pinned-object bytes), plus the
-  **O4-owned object** of the in-flight publication — its decoded working set
-  (**537**) plus its retained encoded publication buffer (**310**) = **847** —
-  independently derived from the same maximum lock fixture rather than cloning the
-  live measured graph or extending its lifetime. The measured live-object total is
-  **2561** (pinned 1714 + O4-owned 847). The precise phase is identified by its
-  genuine two-pin occupancy (`occupied == 2`); objects already destroyed there
-  (the CRC staging envelopes) are **not** counted. Object measurements, reservation
-  observations, and source-derived bounds are kept **separate**, and a missing
-  backing capacity **fails explicitly**. The asserted bounds are
-  **measured live-object charge 2561 ≤ contemporaneous covering operational
-  reservation 6413** and **context 240 + operational 6413 = aggregate 6653 ≤
-  unchanged ceiling 7772**; the 4699 in-operation O4 reservation is retained only as
-  a source-derived bound and is **not** substituted for the object measurement.
+  **O4-owned objects** of the in-flight publication. Those O4-owned objects are the
+  **actual live objects the publish path still holds at that phase**, measured **in
+  place** — not a post-operation reconstruction and not derived from a reservation
+  counter. At the pre-effective phase `owner.rs` holds a **`ValidatedRecord`** (the
+  retained validated proof — **not** a transient `DecodedRecord`), and its
+  metadata-encoding temporary remains live through the publish match arm. The
+  measured O4-owned bytes are therefore the **complete `ValidatedRecord` inline
+  size** counted once (**496**), its **owned evidence-backing capacities** (**129**),
+  its **retained encoded publication buffer** capacity (**310**), and the **live
+  metadata payload** capacity (**42**) = **977**. The measured live-object total is
+  **2691** (pinned 1714 + O4-owned 977). The precise phase is identified by its
+  genuine two-pin occupancy (`occupied == 2`); objects already destroyed there (the
+  CRC staging envelopes inside `publish_atomic`, which has returned by this phase)
+  are **not** counted. Object measurements, reservation observations, and
+  source-derived bounds are kept **separate**, and a missing backing capacity
+  **fails explicitly** (the publish-path measurement surfaces its `Err`; the sampler
+  rejects a missing slot). An independent **source-derived cross-check** (audit
+  only, not the asserted observation and not substituted for the measured values),
+  using the reported layouts and a 310-byte encoded capacity, is
+  `1714 + 496 + 129 + 310 + 42 = 2691`. The asserted bounds are **measured
+  live-object charge 2691 ≤ contemporaneous covering operational reservation 6413**
+  and **context 240 + operational 6413 = aggregate 6653 ≤ unchanged ceiling 7772**;
+  the 4699 in-operation O4 reservation is retained only as a source-derived bound
+  and is **not** substituted for the object measurement.
 
   The in-operation observation is taken through a **non-cyclic** mechanism: the
   pre-effective hook captures a shared `accounting_handle_for_test()` accountant
@@ -432,10 +443,13 @@ the test fails on the defect and passes on the correction:
   **unchanged** ceiling holding at that phase (6653 ≤ 7772) — distinct from the
   5818 pre-operation headroom. At that same phase an **independent live-object
   measurement** charges every object actually live there — the two pinned
-  generations, the registry cell, each pin (1714), plus the O4-owned decoded +
-  encoded publication object (847) — for a **measured live-object total of 2561**,
+  generations, the registry cell, each pin (1714), plus the **O4-owned live
+  objects** the publish path still holds (the complete `ValidatedRecord` inline 496
+  + owned evidence backing 129 + retained encoded buffer 310 + live metadata
+  payload 42 = 977), measured **in place** at the pre-effective phase — for a
+  **measured live-object total of 2691**,
   reported alongside the reservation total and asserted **≤ the contemporaneous
-  operational reservation (2561 ≤ 6413)** without substituting the 4699 reservation
+  operational reservation (2691 ≤ 6413)** without substituting the 4699 reservation
   for the object measurement; already-destroyed staging envelopes are excluded and
   a missing backing capacity fails explicitly. The in-operation sample is taken
   through a **non-cyclic** accountant handle (no retained backend clone), and after

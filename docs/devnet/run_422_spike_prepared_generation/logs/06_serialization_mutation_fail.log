@@ -1,10 +1,10 @@
 $ # SOURCE MUTATION (RUN 422 §3): drop(guard) across the capture check->insert interval (serialization protection removed)
 $ cargo test -p qbind-node --features test-utils --test run_422_spike_prepared_generation_tests spike_capture_publication_serialization_overlap
-   Compiling qbind-node v0.1.0 (/tmp/spike2/crates/qbind-node)
+   Compiling qbind-node v0.1.0 (/tmp/expcheckout/crates/qbind-node)
 warning: variable does not need to be mutable
-    --> crates/qbind-node/src/safety_record_store/owner.rs:1393:13
+    --> crates/qbind-node/src/safety_record_store/owner.rs:1481:13
      |
-1393 |         let mut guard = self.backend.lock_domain();
+1481 |         let mut guard = self.backend.lock_domain();
      |             ----^^^^^
      |             |
      |             help: remove this `mut`
@@ -12,7 +12,7 @@ warning: variable does not need to be mutable
      = note: `#[warn(unused_mut)]` (part of `#[warn(unused)]`) on by default
 
 warning: `qbind-node` (lib) generated 1 warning (run `cargo fix --lib -p qbind-node` to apply 1 suggestion)
-    Finished `test` profile [unoptimized] target(s) in 16.83s
+    Finished `test` profile [unoptimized] target(s) in 13.74s
      Running tests/run_422_spike_prepared_generation_tests.rs (target/debug/deps/run_422_spike_prepared_generation_tests-71cc7af93cd79cea)
 
 running 1 test
@@ -22,7 +22,7 @@ failures:
 
 ---- spike_capture_publication_serialization_overlap stdout ----
 
-thread 'spike_capture_publication_serialization_overlap' (18879) panicked at crates/qbind-node/tests/run_422_spike_prepared_generation_tests.rs:1470:5:
+thread 'spike_capture_publication_serialization_overlap' (28093) panicked at crates/qbind-node/tests/run_422_spike_prepared_generation_tests.rs:1860:5:
 SERIALIZATION: publication must not progress during the capture's guarded interval
 note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
 
@@ -30,7 +30,7 @@ note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
 failures:
     spike_capture_publication_serialization_overlap
 
-test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 33 filtered out; finished in 0.31s
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 33 filtered out; finished in 0.34s
 
 error: test failed, to rerun pass `-p qbind-node --test run_422_spike_prepared_generation_tests`
 EXIT=101

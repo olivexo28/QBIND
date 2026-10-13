@@ -36,7 +36,6 @@ pub mod backend;
 pub mod codec;
 pub mod error;
 pub mod owner;
-pub mod prepared;
 pub mod profile;
 pub mod record;
 pub mod validate;
@@ -44,10 +43,6 @@ pub mod validate;
 pub use backend::{InjectFault, PublishOutcome, SafetyBackend, SafetyBackendPolicy};
 pub use error::SafetyStoreError;
 pub use owner::{PublishResult, SafetyMeta, SafetyRecordOwner};
-pub use prepared::{
-    CaptureRefusal, GenerationIdentity, PreparedHandle, PreparedPin, PreparedRegistry,
-    ReleaseOutcome,
-};
 pub use profile::PinnedSafetyContext;
 pub use record::{
     DecodedRecord, EvidenceStatus, LockedRecord, RetainedRecord, SafetyRecord, SupportingEvidence,
