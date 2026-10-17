@@ -361,6 +361,152 @@ where
     fn observe(&mut self, decision: &SafetyDecisionView<'_, BlockIdT>);
 }
 
+/// Run 422 §13.6 — opaque, engine-uninterpreted token a [`SafetyDecisionGate`]
+/// returns to **refuse** the dependent self-vote at the real safety decision.
+///
+/// The engine never inspects, matches on, or acts on this value beyond
+/// propagating it in a typed refusal: a gate establishes **no** authorization,
+/// durable correspondence, or permission to sign, and its refusal is **not**
+/// an ordinary proposal rejection nor a verified-ingestion pre-check error.
+/// It is a unit marker so the gate implementation and the engine agree only
+/// that "the gate declined"; the reason, if any, is the gate's own concern.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct SafetyGateRefusal;
+
+impl std::fmt::Display for SafetyGateRefusal {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "safety-decision gate refused the self-vote")
+    }
+}
+
+/// Run 422 §13.6 — typed refusal of a gated self-vote, raised on the opt-in
+/// gated ingestion routes ([`BasicHotStuffEngine::on_proposal_event_gated`] /
+/// [`BasicHotStuffEngine::on_verified_proposal_event_gated`]).
+///
+/// A refusal is distinct from an **ordinary** proposal rejection (the gated
+/// entrypoints return `Ok(None)` for those, exactly as the unobserved route
+/// returns `None`) and from the verified-ingestion pre-check errors
+/// ([`VerifiedProposalIngestError`]). On refusal the engine performs **no**
+/// self-vote, **no** vote-derived lock transition, and emits **no** outbound
+/// `Vote`; because `voted_in_view` is left unset, a later admissible proposal
+/// for the same view can still be voted for (the refusal does not consume the
+/// vote opportunity).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GatedSelfVoteRefusal {
+    /// The gate was consulted at the real safe-voting decision and declined,
+    /// returning its opaque [`SafetyGateRefusal`].
+    GateRejected(SafetyGateRefusal),
+    /// A required observation input was missing: the just-registered candidate
+    /// block was not present when the decision view would have been built (for
+    /// example it was evicted under block-slot pressure). The gate could not be
+    /// given a faithful decision view, so the self-vote is refused rather than
+    /// cast unobserved.
+    MissingCandidate,
+}
+
+impl std::fmt::Display for GatedSelfVoteRefusal {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            GatedSelfVoteRefusal::GateRejected(r) => write!(f, "{r}"),
+            GatedSelfVoteRefusal::MissingCandidate => write!(
+                f,
+                "gated self-vote refused: required decision-view candidate absent"
+            ),
+        }
+    }
+}
+
+impl std::error::Error for GatedSelfVoteRefusal {}
+
+/// Run 422 §13.6 — error of the gated **verified** ingestion entrypoint
+/// ([`BasicHotStuffEngine::on_verified_proposal_event_gated`]).
+///
+/// It keeps the verified-ingestion pre-checks (`Ingest`) explicitly separate
+/// from a gate refusal (`Gate`): an `Ingest` value means the proposal never
+/// reached the safety decision (a present-QC / exact-evidence / wire-chain /
+/// epoch / retention pre-check rejected it before any mutation), whereas a
+/// `Gate` value means the pre-checks passed, the real safety decision was
+/// `Safe(_)`, and the gate then declined the dependent self-vote.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum GatedVerifiedProposalError {
+    /// A verified-ingestion pre-check rejected the proposal before the safety
+    /// decision (no engine mutation, no fallback to the legacy path).
+    Ingest(VerifiedProposalIngestError),
+    /// The verified pre-checks passed but the gate refused the dependent
+    /// self-vote at the real safety decision.
+    Gate(GatedSelfVoteRefusal),
+}
+
+impl std::fmt::Display for GatedVerifiedProposalError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            GatedVerifiedProposalError::Ingest(e) => write!(f, "{e}"),
+            GatedVerifiedProposalError::Gate(r) => write!(f, "{r}"),
+        }
+    }
+}
+
+impl std::error::Error for GatedVerifiedProposalError {}
+
+/// Run 422 §13.6 — opt-in, non-authorizing gate consulted **once** at the real
+/// safe-voting decision, strictly **before** the dependent self-vote.
+///
+/// This is a bounded fallible control-flow seam, defined by trait-inversion in
+/// `qbind-consensus` exactly like [`SafetyDecisionObserver`] so the engine
+/// never names any downstream (node-side) type and no crate dependency cycle is
+/// introduced. The gate is handed the same borrowed, stack-resident
+/// [`SafetyDecisionView`] the observer sees — the decision that **actually**
+/// decided safety, with the lock in effect (L0) before a same-event self-vote
+/// raises it (L1) — and returns:
+///
+/// * `Ok(())` to **allow** the dependent self-vote (the route then proceeds
+///   exactly as the corresponding unobserved route), or
+/// * `Err(SafetyGateRefusal)` to **refuse** it, after which the engine performs
+///   no self-vote, no lock transition, and emits no `Vote`.
+///
+/// The gate must use **no panic** for a normal refusal. It establishes **no**
+/// authorization, durable correspondence, or permission to sign; it is purely a
+/// fallible decision-point control that can veto the self-vote.
+pub trait SafetyDecisionGate<BlockIdT>
+where
+    BlockIdT: Eq + std::hash::Hash + Clone,
+{
+    /// Evaluate the real safe-voting decision and decide whether the dependent
+    /// self-vote may proceed. Called exactly once per `Safe(_)` decision on the
+    /// gated route, strictly before the self-vote. `Ok(())` allows the vote;
+    /// `Err(_)` refuses it with no self-vote, lock transition, or emitted
+    /// `Vote`.
+    fn evaluate(
+        &mut self,
+        decision: &SafetyDecisionView<'_, BlockIdT>,
+    ) -> Result<(), SafetyGateRefusal>;
+}
+
+/// Internal: which fallible/observing hook (if any) is driven at the real
+/// safety decision inside [`BasicHotStuffEngine::ingest_proposal`]. Replaces the
+/// former `observer: Option<&mut dyn SafetyDecisionObserver>` parameter so the
+/// unobserved, observed, and gated routes share one body without conflating
+/// their guarantees.
+enum DecisionHook<'a> {
+    /// Unobserved legacy / verified route: no callback at the decision. Behaves
+    /// byte-for-byte as before.
+    None,
+    /// Observed route: the borrowed observer sees the decision; a missing
+    /// candidate silently refuses the self-vote (preserved historical
+    /// behavior).
+    Observe(&'a mut dyn SafetyDecisionObserver<[u8; 32]>),
+    /// Gated route: the borrowed gate may veto the self-vote. A refusal (or a
+    /// missing candidate) is reported out-of-band through `refusal`, and the
+    /// body returns no action, leaving `voted_in_view` unset.
+    Gate {
+        /// The borrowed fallible gate consulted at the decision.
+        gate: &'a mut dyn SafetyDecisionGate<[u8; 32]>,
+        /// Out-slot set to the typed refusal when the gate declines or the
+        /// decision-view candidate is absent; left `None` when the gate allows.
+        refusal: &'a mut Option<GatedSelfVoteRefusal>,
+    },
+}
+
 // ============================================================================
 // ViewDurationRecorder - Metrics callback trait (T90.5)
 // ============================================================================
@@ -1930,7 +2076,7 @@ impl BasicHotStuffEngine<[u8; 32]> {
         proposal: &qbind_wire::consensus::BlockProposal,
     ) -> Option<ConsensusEngineAction<ValidatorId>> {
         // Legacy / absent-QC / unverified path: no retained evidence.
-        self.ingest_proposal(from, proposal, None, None)
+        self.ingest_proposal(from, proposal, None, DecisionHook::None)
     }
 
     /// Run 422 §13.6 spike: legacy ingestion entrypoint with scoped borrowed
@@ -1944,7 +2090,49 @@ impl BasicHotStuffEngine<[u8; 32]> {
         proposal: &qbind_wire::consensus::BlockProposal,
         observer: &mut dyn SafetyDecisionObserver<[u8; 32]>,
     ) -> Option<ConsensusEngineAction<ValidatorId>> {
-        self.ingest_proposal(from, proposal, None, Some(observer))
+        self.ingest_proposal(from, proposal, None, DecisionHook::Observe(observer))
+    }
+
+    /// Run 422 §13.6: legacy ingestion entrypoint with a scoped borrowed
+    /// fallible [`SafetyDecisionGate`]. Identical to [`Self::on_proposal_event`]
+    /// except that, after the real successful safety decision and strictly
+    /// before the self-vote, `gate` is consulted once and may **refuse** it.
+    ///
+    /// Returns:
+    /// * `Ok(Some(BroadcastVote))` when the gate allows — byte-identical to the
+    ///   corresponding [`Self::on_proposal_event`] outcome and resulting state;
+    /// * `Ok(None)` for an **ordinary** rejection reached before the decision
+    ///   (wrong epoch/view/leader, already voted, unsafe proposal) — exactly as
+    ///   the unobserved route returns `None`; or
+    /// * `Err(GatedSelfVoteRefusal)` when the gate declines or the required
+    ///   decision-view candidate is absent. On refusal there is no self-vote,
+    ///   no lock transition, and no emitted `Vote`; `voted_in_view` is left
+    ///   unset so a subsequent admissible proposal for the same view can still
+    ///   be voted for. The gate establishes no authorization or permission to
+    ///   sign and uses no panic for a normal refusal. Evidence guarantees of the
+    ///   legacy entrypoint (no retained evidence) are unchanged.
+    pub fn on_proposal_event_gated(
+        &mut self,
+        from: ValidatorId,
+        proposal: &qbind_wire::consensus::BlockProposal,
+        gate: &mut dyn SafetyDecisionGate<[u8; 32]>,
+    ) -> Result<Option<ConsensusEngineAction<ValidatorId>>, GatedSelfVoteRefusal> {
+        let mut refusal: Option<GatedSelfVoteRefusal> = None;
+        let action = self.ingest_proposal(
+            from,
+            proposal,
+            None,
+            DecisionHook::Gate {
+                gate,
+                refusal: &mut refusal,
+            },
+        );
+        if let Some(refusal) = refusal {
+            // A gate refusal never leaves a cast vote behind.
+            debug_assert!(action.is_none(), "refusal must not emit an action");
+            return Err(refusal);
+        }
+        Ok(action)
     }
 
     /// Run 422 D7-C3F: verified embedded-QC ingestion entrypoint.
@@ -1989,7 +2177,7 @@ impl BasicHotStuffEngine<[u8; 32]> {
         proposal: &qbind_wire::consensus::BlockProposal,
         evidence: Arc<VerifiedQuorumCertificate>,
     ) -> Result<Option<ConsensusEngineAction<ValidatorId>>, VerifiedProposalIngestError> {
-        self.ingest_verified_proposal(from, proposal, evidence, None)
+        self.ingest_verified_proposal(from, proposal, evidence, DecisionHook::None)
     }
 
     /// Run 422 §13.6 spike: verified ingestion entrypoint with scoped borrowed
@@ -2004,7 +2192,51 @@ impl BasicHotStuffEngine<[u8; 32]> {
         evidence: Arc<VerifiedQuorumCertificate>,
         observer: &mut dyn SafetyDecisionObserver<[u8; 32]>,
     ) -> Result<Option<ConsensusEngineAction<ValidatorId>>, VerifiedProposalIngestError> {
-        self.ingest_verified_proposal(from, proposal, evidence, Some(observer))
+        self.ingest_verified_proposal(from, proposal, evidence, DecisionHook::Observe(observer))
+    }
+
+    /// Run 422 §13.6: verified ingestion entrypoint with a scoped borrowed
+    /// fallible [`SafetyDecisionGate`]. The verified pre-checks (present QC,
+    /// exact evidence match, wire-chain/epoch, retention budget, block-slot) are
+    /// identical to [`Self::on_verified_proposal_event`] and run BEFORE any
+    /// mutation; the gate is consulted once at the real successful safety
+    /// decision, strictly before the self-vote, and may **refuse** it.
+    ///
+    /// The two failure kinds are kept distinct in the typed error:
+    /// * [`GatedVerifiedProposalError::Ingest`] — a verified pre-check rejected
+    ///   the proposal before the safety decision (no mutation, no legacy
+    ///   fallback); identical to the [`VerifiedProposalIngestError`] the
+    ///   non-gated verified entrypoint would return.
+    /// * [`GatedVerifiedProposalError::Gate`] — the pre-checks passed, the
+    ///   decision was `Safe(_)`, and the gate declined the dependent self-vote
+    ///   (or the decision-view candidate was absent). On a gate refusal there is
+    ///   no self-vote, no lock transition, and no emitted `Vote`;
+    ///   `voted_in_view` is left unset. The gate never relaxes a pre-check and
+    ///   never authorizes anything.
+    pub fn on_verified_proposal_event_gated(
+        &mut self,
+        from: ValidatorId,
+        proposal: &qbind_wire::consensus::BlockProposal,
+        evidence: Arc<VerifiedQuorumCertificate>,
+        gate: &mut dyn SafetyDecisionGate<[u8; 32]>,
+    ) -> Result<Option<ConsensusEngineAction<ValidatorId>>, GatedVerifiedProposalError> {
+        let mut refusal: Option<GatedSelfVoteRefusal> = None;
+        let action = self
+            .ingest_verified_proposal(
+                from,
+                proposal,
+                evidence,
+                DecisionHook::Gate {
+                    gate,
+                    refusal: &mut refusal,
+                },
+            )
+            .map_err(GatedVerifiedProposalError::Ingest)?;
+        if let Some(refusal) = refusal {
+            debug_assert!(action.is_none(), "refusal must not emit an action");
+            return Err(GatedVerifiedProposalError::Gate(refusal));
+        }
+        Ok(action)
     }
 
     /// Shared verified-ingestion body: runs the C3F pre-checks (present QC,
@@ -2016,7 +2248,7 @@ impl BasicHotStuffEngine<[u8; 32]> {
         from: ValidatorId,
         proposal: &qbind_wire::consensus::BlockProposal,
         evidence: Arc<VerifiedQuorumCertificate>,
-        observer: Option<&mut dyn SafetyDecisionObserver<[u8; 32]>>,
+        hook: DecisionHook<'_>,
     ) -> Result<Option<ConsensusEngineAction<ValidatorId>>, VerifiedProposalIngestError> {
         // (1) Require a present embedded QC. Absent-QC/bootstrap authorization
         // is explicitly out of scope and must not be routed here.
@@ -2083,7 +2315,7 @@ impl BasicHotStuffEngine<[u8; 32]> {
         }
 
         // Delegate to the shared proposal-processing body with the evidence.
-        Ok(self.ingest_proposal(from, proposal, Some(evidence), observer))
+        Ok(self.ingest_proposal(from, proposal, Some(evidence), hook))
     }
 
     /// Shared proposal-processing body for [`Self::on_proposal_event`] (legacy,
@@ -2096,7 +2328,7 @@ impl BasicHotStuffEngine<[u8; 32]> {
         from: ValidatorId,
         proposal: &qbind_wire::consensus::BlockProposal,
         verified_evidence: Option<Arc<VerifiedQuorumCertificate>>,
-        observer: Option<&mut dyn SafetyDecisionObserver<[u8; 32]>>,
+        hook: DecisionHook<'_>,
     ) -> Option<ConsensusEngineAction<ValidatorId>> {
         // T101: Epoch validation - reject proposals from wrong epoch
         if proposal.header.epoch != self.current_epoch {
@@ -2193,12 +2425,12 @@ impl BasicHotStuffEngine<[u8; 32]> {
                 return None;
             }
             SafetyDecision::Safe(branch) => {
-                // Scoped borrowed observation at the real decision, strictly
-                // before `on_vote`. The borrow of `self.state` here ends with
-                // this block, before the mutable `on_vote` call below.
+                // Scoped borrowed observation/gating at the real decision,
+                // strictly before `on_vote`. The borrow of `self.state` here
+                // ends with this block, before the mutable `on_vote` call below.
                 //
                 // Run 422 §13.6 correction — eliminate silent observation
-                // omission. The observation input is the just-registered
+                // omission. The observation/gating input is the just-registered
                 // candidate block. It is NOT guaranteed present: under
                 // block-slot pressure (e.g. `max_pending_blocks == 0`)
                 // `register_block` immediately evicts the candidate it just
@@ -2208,15 +2440,24 @@ impl BasicHotStuffEngine<[u8; 32]> {
                 // candidate's `justify_qc`). The earlier revision then
                 // silently skipped observation and self-voted anyway.
                 //
-                // On the opt-in OBSERVED route this is now explicit: if the
-                // observation input is missing we refuse to self-vote and emit
-                // no action, BEFORE the self-vote or `BroadcastVote`. The
-                // observed route therefore never casts a vote that was not
-                // observed — "observe and vote, or do neither". The UNOBSERVED
-                // legacy route (`observer` is `None`) is unchanged: it votes
-                // exactly as before, and the safety predicate is untouched.
-                if let Some(observer) = observer {
-                    match self.state.get_block(&block_id) {
+                // Per hook:
+                // * `None` (unobserved legacy / verified route) — unchanged:
+                //   proceed straight to the self-vote.
+                // * `Observe` — preserved historical behavior: observe when the
+                //   candidate is present; if it is absent, silently refuse to
+                //   self-vote and emit no action ("observe and vote, or do
+                //   neither"). The safety predicate is untouched.
+                // * `Gate` — the opt-in fallible route: build the SAME decision
+                //   view and consult the gate exactly once. If the candidate is
+                //   absent, report `MissingCandidate`; if the gate declines,
+                //   report `GateRejected`. In BOTH refusal cases return no
+                //   action here, BEFORE the self-vote or `BroadcastVote`, and
+                //   WITHOUT setting `voted_in_view`, so the refusal casts no
+                //   vote, drives no lock transition, and does not consume the
+                //   vote opportunity. No panic is used for a normal refusal.
+                match hook {
+                    DecisionHook::None => {}
+                    DecisionHook::Observe(observer) => match self.state.get_block(&block_id) {
                         Some(candidate) => {
                             let decision = SafetyDecisionView {
                                 state: &self.state,
@@ -2235,6 +2476,36 @@ impl BasicHotStuffEngine<[u8; 32]> {
                             // Do not fabricate a view, do not self-vote, do not
                             // emit an action on the observed route.
                             return None;
+                        }
+                    },
+                    DecisionHook::Gate { gate, refusal } => {
+                        match self.state.get_block(&block_id) {
+                            Some(candidate) => {
+                                let decision = SafetyDecisionView {
+                                    state: &self.state,
+                                    candidate,
+                                    locked: self.state.locked_qc(),
+                                    branch,
+                                    origin_view: view,
+                                    from,
+                                    verified_entrypoint,
+                                };
+                                if let Err(r) = gate.evaluate(&decision) {
+                                    // Gate declined: refuse the self-vote with no
+                                    // mutation, no lock transition, no action.
+                                    *refusal = Some(GatedSelfVoteRefusal::GateRejected(r));
+                                    return None;
+                                }
+                                // Gate allowed: fall through to the self-vote,
+                                // which is then byte-identical to the
+                                // corresponding unobserved route.
+                            }
+                            None => {
+                                // Required decision-view candidate absent: refuse
+                                // rather than cast an un-gated vote.
+                                *refusal = Some(GatedSelfVoteRefusal::MissingCandidate);
+                                return None;
+                            }
                         }
                     }
                 }
