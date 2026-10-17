@@ -1,0 +1,1036 @@
+diff --git a/crates/qbind-consensus/src/basic_hotstuff_engine.rs b/crates/qbind-consensus/src/basic_hotstuff_engine.rs
+index a17ad0d43564d053b1fd8bb82c6e02f195ef32aa..956764347b99f84afbbe60f586789e4fdf01ed1b 100755
+--- a/crates/qbind-consensus/src/basic_hotstuff_engine.rs
++++ b/crates/qbind-consensus/src/basic_hotstuff_engine.rs
+@@ -30,6 +30,204 @@ use crate::validator_set::ConsensusValidatorSet;
+ use std::sync::Arc;
+ use std::time::{Duration, Instant};
+ 
++use crate::block_state::BlockNode;
++use crate::hotstuff_state_engine::{SafetyBranch, SafetyDecision};
++
++// ============================================================================
++// Run 422 §13.6 spike: scoped borrowed safety-decision observation
++// ============================================================================
++
++/// Run 422 §13.6 spike: a borrowed, scoped view of a *successful* safe-voting
++/// decision, presented to a [`SafetyDecisionObserver`] at the exact moment the
++/// engine decided it is safe to vote — AFTER the safety predicate succeeded and
++/// BEFORE the self-vote (which can form a QC and raise the lock) mutates state.
++///
++/// # What this is NOT
++///
++/// This is a read-only *observation*, not provenance capture. It holds no owned
++/// data, clones no certificate `Arc`, takes no admission token, performs no
++/// storage capture, and confers no signing permission. All fields are borrowed
++/// from the engine state for the duration of the callback only.
++///
++/// # Lifetime / escape
++///
++/// `'eng` is the borrow of the engine state that backs this view. The view is
++/// handed to the observer only by shared reference (`&self`), and every
++/// accessor returns either a `Copy` scalar or a reference borrowed from the
++/// view. Because the observer callback returns `()` and the view never escapes
++/// the engine's `&self.state` borrow, no engine-backed reference can be stored
++/// beyond the callback through safe code. (Ordinary `Copy` scalars that the
++/// observer reads MAY of course be retained — that is plain copied data, not an
++/// engine-backed reference.)
++pub struct SafetyDecisionView<'eng, BlockIdT>
++where
++    BlockIdT: Eq + std::hash::Hash + Clone,
++{
++    /// Engine state backing ancestry inspection (borrowed, read-only).
++    state: &'eng HotStuffStateEngine<BlockIdT>,
++    /// The exact candidate block the decision admitted a vote for.
++    candidate: &'eng BlockNode<BlockIdT>,
++    /// The lock in effect AT the decision. `None` on the NoLock branch.
++    locked: Option<&'eng QuorumCertificate<BlockIdT>>,
++    /// Which branch of the safe-voting rule decided safety.
++    branch: SafetyBranch,
++    /// The view the originating proposal/action was processed in.
++    origin_view: u64,
++    /// The proposer the originating proposal came from.
++    from: ValidatorId,
++    /// Whether the candidate carries retained verified justification evidence
++    /// (i.e. it arrived via the verified entrypoint). This distinguishes the
++    /// two entrypoints' evidence guarantees WITHOUT cloning the evidence.
++    verified_entrypoint: bool,
++}
++
++impl<'eng, BlockIdT> SafetyDecisionView<'eng, BlockIdT>
++where
++    BlockIdT: Eq + std::hash::Hash + Clone,
++{
++    /// The branch of the safe-voting rule that decided this (successful) vote.
++    pub fn branch(&self) -> SafetyBranch {
++        self.branch
++    }
++
++    /// The view the originating proposal was processed in.
++    pub fn origin_view(&self) -> u64 {
++        self.origin_view
++    }
++
++    /// The proposer the originating proposal came from.
++    pub fn from(&self) -> ValidatorId {
++        self.from
++    }
++
++    /// Whether this decision came through the verified entrypoint (the
++    /// candidate retains verified justification evidence). `false` for the
++    /// legacy entrypoint.
++    pub fn is_verified_entrypoint(&self) -> bool {
++        self.verified_entrypoint
++    }
++
++    /// The exact candidate block id the decision admitted a vote for.
++    pub fn candidate_id(&self) -> &BlockIdT {
++        &self.candidate.id
++    }
++
++    /// The candidate's view.
++    pub fn candidate_view(&self) -> u64 {
++        self.candidate.view
++    }
++
++    /// The candidate's parent block id, if any.
++    pub fn candidate_parent(&self) -> Option<&BlockIdT> {
++        self.candidate.parent_id.as_ref()
++    }
++
++    /// The candidate's justification QC view, if the candidate carries one.
++    pub fn candidate_justify_view(&self) -> Option<u64> {
++        self.candidate.justify_qc.as_ref().map(|qc| qc.view)
++    }
++
++    /// The block id of the lock in effect at the decision, or `None` on the
++    /// [`SafetyBranch::NoLock`] branch.
++    pub fn locked_block_id(&self) -> Option<&BlockIdT> {
++        self.locked.map(|qc| &qc.block_id)
++    }
++
++    /// The view of the lock in effect at the decision, or `None` on the
++    /// [`SafetyBranch::NoLock`] branch.
++    pub fn locked_view(&self) -> Option<u64> {
++        self.locked.map(|qc| qc.view)
++    }
++
++    /// Bounded, read-only inspection of the candidate's strict ancestors.
++    ///
++    /// This is *optional* inspection, distinct from the ancestry the predicate
++    /// actually used: on the [`SafetyBranch::ViewSufficiency`] branch the
++    /// predicate short-circuited and walked NO ancestry, yet an observer may
++    /// still wish to inspect it. It never changes the voting rule.
++    ///
++    /// Traversal starts at the candidate's parent and follows `parent_id`
++    /// links. It is bounded by `max_hops` AND terminates early on a missing
++    /// parent link or a block absent from the engine, so a cyclic or truncated
++    /// graph can neither loop forever nor panic. The block graph is neither
++    /// cloned nor retained; each ancestor is passed by shared reference whose
++    /// lifetime is confined to the callback.
++    pub fn for_each_ancestor<F>(&self, max_hops: usize, mut f: F)
++    where
++        F: FnMut(&BlockNode<BlockIdT>),
++    {
++        let mut current = self.candidate;
++        let mut hops = 0usize;
++        while hops < max_hops {
++            let parent_id = match current.parent_id.as_ref() {
++                Some(pid) => pid,
++                None => break,
++            };
++            let parent = match self.state.get_block(parent_id) {
++                Some(node) => node,
++                None => break,
++            };
++            f(parent);
++            current = parent;
++            hops += 1;
++        }
++    }
++}
++
++/// Run 422 §13.6 spike: borrowed observer of a successful safe-voting decision.
++///
++/// Implementors receive a [`SafetyDecisionView`] by shared reference at the
++/// instant the engine decides it is safe to vote, before the self-vote mutates
++/// state. The callback returns `()`: it cannot hand an owned handle, token, or
++/// admission back to the engine, and (by construction of the view) cannot let
++/// an engine-backed reference escape. It observes; it does not authorize.
++///
++/// # Escape is a compile error
++///
++/// An engine-backed reference obtained from the view cannot be stashed beyond
++/// the callback, because every borrowing accessor ties its result to the
++/// `&SafetyDecisionView` argument's (anonymous, call-scoped) lifetime:
++///
++/// ```compile_fail
++/// use qbind_consensus::{SafetyDecisionObserver, SafetyDecisionView};
++/// struct Escaper<'a> {
++///     stash: Vec<&'a [u8; 32]>,
++/// }
++/// impl<'a> SafetyDecisionObserver<[u8; 32]> for Escaper<'a> {
++///     fn observe(&mut self, decision: &SafetyDecisionView<'_, [u8; 32]>) {
++///         // ERROR: the borrowed candidate id cannot outlive the callback.
++///         self.stash.push(decision.candidate_id());
++///     }
++/// }
++/// ```
++///
++/// Ordinary *copied* scalar data may of course be retained — that is plain
++/// data, not an engine-backed reference:
++///
++/// ```
++/// use qbind_consensus::{SafetyDecisionObserver, SafetyDecisionView};
++/// #[derive(Default)]
++/// struct Copier {
++///     ids: Vec<[u8; 32]>,
++///     views: Vec<u64>,
++/// }
++/// impl SafetyDecisionObserver<[u8; 32]> for Copier {
++///     fn observe(&mut self, decision: &SafetyDecisionView<'_, [u8; 32]>) {
++///         // OK: dereference copies the array out of the borrow.
++///         self.ids.push(*decision.candidate_id());
++///         self.views.push(decision.candidate_view());
++///     }
++/// }
++/// ```
++pub trait SafetyDecisionObserver<BlockIdT>
++where
++    BlockIdT: Eq + std::hash::Hash + Clone,
++{
++    /// Observe a successful safe-voting decision. Called exactly once per
++    /// emitted self-vote, only when the safety predicate returned `Safe(_)`.
++    fn observe(&mut self, decision: &SafetyDecisionView<'_, BlockIdT>);
++}
++
+ // ============================================================================
+ // ViewDurationRecorder - Metrics callback trait (T90.5)
+ // ============================================================================
+@@ -1599,7 +1797,21 @@ impl BasicHotStuffEngine<[u8; 32]> {
+         proposal: &qbind_wire::consensus::BlockProposal,
+     ) -> Option<ConsensusEngineAction<ValidatorId>> {
+         // Legacy / absent-QC / unverified path: no retained evidence.
+-        self.ingest_proposal(from, proposal, None)
++        self.ingest_proposal(from, proposal, None, None)
++    }
++
++    /// Run 422 §13.6 spike: legacy ingestion entrypoint with scoped borrowed
++    /// safety-decision observation. Identical to [`Self::on_proposal_event`]
++    /// except that `observer` is invoked at the real safety decision, before
++    /// the self-vote. Preserves the legacy entrypoint's evidence guarantees
++    /// (no retained evidence); the observation never authorizes anything.
++    pub fn on_proposal_event_observed(
++        &mut self,
++        from: ValidatorId,
++        proposal: &qbind_wire::consensus::BlockProposal,
++        observer: &mut dyn SafetyDecisionObserver<[u8; 32]>,
++    ) -> Option<ConsensusEngineAction<ValidatorId>> {
++        self.ingest_proposal(from, proposal, None, Some(observer))
+     }
+ 
+     /// Run 422 D7-C3F: verified embedded-QC ingestion entrypoint.
+@@ -1643,6 +1855,35 @@ impl BasicHotStuffEngine<[u8; 32]> {
+         from: ValidatorId,
+         proposal: &qbind_wire::consensus::BlockProposal,
+         evidence: Arc<VerifiedQuorumCertificate>,
++    ) -> Result<Option<ConsensusEngineAction<ValidatorId>>, VerifiedProposalIngestError> {
++        self.ingest_verified_proposal(from, proposal, evidence, None)
++    }
++
++    /// Run 422 §13.6 spike: verified ingestion entrypoint with scoped borrowed
++    /// safety-decision observation. Identical pre-checks and evidence
++    /// guarantees as [`Self::on_verified_proposal_event`]; `observer` is invoked
++    /// at the real safety decision, before the self-vote. The observation never
++    /// authorizes anything and does not relax any pre-check.
++    pub fn on_verified_proposal_event_observed(
++        &mut self,
++        from: ValidatorId,
++        proposal: &qbind_wire::consensus::BlockProposal,
++        evidence: Arc<VerifiedQuorumCertificate>,
++        observer: &mut dyn SafetyDecisionObserver<[u8; 32]>,
++    ) -> Result<Option<ConsensusEngineAction<ValidatorId>>, VerifiedProposalIngestError> {
++        self.ingest_verified_proposal(from, proposal, evidence, Some(observer))
++    }
++
++    /// Shared verified-ingestion body: runs the C3F pre-checks (present QC,
++    /// exact evidence match, wire-chain/epoch, retention budget, block-slot)
++    /// BEFORE any mutation, then delegates to [`Self::ingest_proposal`] with the
++    /// evidence and an optional observer.
++    fn ingest_verified_proposal(
++        &mut self,
++        from: ValidatorId,
++        proposal: &qbind_wire::consensus::BlockProposal,
++        evidence: Arc<VerifiedQuorumCertificate>,
++        observer: Option<&mut dyn SafetyDecisionObserver<[u8; 32]>>,
+     ) -> Result<Option<ConsensusEngineAction<ValidatorId>>, VerifiedProposalIngestError> {
+         // (1) Require a present embedded QC. Absent-QC/bootstrap authorization
+         // is explicitly out of scope and must not be routed here.
+@@ -1709,7 +1950,7 @@ impl BasicHotStuffEngine<[u8; 32]> {
+         }
+ 
+         // Delegate to the shared proposal-processing body with the evidence.
+-        Ok(self.ingest_proposal(from, proposal, Some(evidence)))
++        Ok(self.ingest_proposal(from, proposal, Some(evidence), observer))
+     }
+ 
+     /// Shared proposal-processing body for [`Self::on_proposal_event`] (legacy,
+@@ -1722,6 +1963,7 @@ impl BasicHotStuffEngine<[u8; 32]> {
+         from: ValidatorId,
+         proposal: &qbind_wire::consensus::BlockProposal,
+         verified_evidence: Option<Arc<VerifiedQuorumCertificate>>,
++        observer: Option<&mut dyn SafetyDecisionObserver<[u8; 32]>>,
+     ) -> Option<ConsensusEngineAction<ValidatorId>> {
+         // T101: Epoch validation - reject proposals from wrong epoch
+         if proposal.header.epoch != self.current_epoch {
+@@ -1789,6 +2031,7 @@ impl BasicHotStuffEngine<[u8; 32]> {
+         // this candidate). We still propagate any (unreachable) failure
+         // explicitly — never `let _ =`, a panic, or a post-effect rollback: on
+         // failure we abort WITHOUT self-voting or emitting any action.
++        let verified_entrypoint = verified_evidence.is_some();
+         match verified_evidence {
+             Some(evidence) => {
+                 if self
+@@ -1806,10 +2049,38 @@ impl BasicHotStuffEngine<[u8; 32]> {
+         }
+ 
+         // Enforce locked-block safety: only vote if this block is on a chain
+-        // that includes the locked block as an ancestor (or if there is no lock yet).
+-        if !self.state.is_safe_to_vote_on_block(&block_id) {
+-            // Proposal is on a conflicting fork; do not vote.
+-            return None;
++        // that includes the locked block as an ancestor (or if there is no lock
++        // yet). Run 422 §13.6 spike: evaluate the decision ONCE (typed), so the
++        // branch that decided safety and the lock in effect are captured from
++        // the SAME evaluation and can be observed BEFORE the self-vote mutates
++        // state. An `Unsafe` decision emits no observation (early refusal).
++        match self.state.safety_decision(&block_id) {
++            SafetyDecision::Unsafe => {
++                // Proposal is on a conflicting fork; do not vote, do not observe.
++                return None;
++            }
++            SafetyDecision::Safe(branch) => {
++                // Scoped borrowed observation at the real decision, strictly
++                // before `on_vote`. The borrow of `self.state` here ends with
++                // this block, before the mutable `on_vote` call below.
++                if let Some(observer) = observer {
++                    // The candidate was just registered, so this lookup is
++                    // present; if (impossibly) absent we simply skip observation
++                    // rather than fabricate a view.
++                    if let Some(candidate) = self.state.get_block(&block_id) {
++                        let decision = SafetyDecisionView {
++                            state: &self.state,
++                            candidate,
++                            locked: self.state.locked_qc(),
++                            branch,
++                            origin_view: view,
++                            from,
++                            verified_entrypoint,
++                        };
++                        observer.observe(&decision);
++                    }
++                }
++            }
+         }
+ 
+         // Create and ingest our own vote
+diff --git a/crates/qbind-consensus/src/hotstuff_state_engine.rs b/crates/qbind-consensus/src/hotstuff_state_engine.rs
+index 99f1e0c9fc06a745ac9b67616059f362993135a8..81643cac31664071f105d7c072deb1377dcb9c26 100755
+--- a/crates/qbind-consensus/src/hotstuff_state_engine.rs
++++ b/crates/qbind-consensus/src/hotstuff_state_engine.rs
+@@ -1310,9 +1310,26 @@ where
+     /// - `true` if it is safe to vote for this block
+     /// - `false` if voting for this block would violate the safety rule
+     pub fn is_safe_to_vote_on_block(&self, block_id: &BlockIdT) -> bool {
++        matches!(self.safety_decision(block_id), SafetyDecision::Safe(_))
++    }
++
++    /// Run 422 §13.6 spike: the safe-voting predicate expressed as a typed
++    /// decision that *also* records WHICH branch of the rule decided safety.
++    ///
++    /// This is the single authoritative evaluation of the HotStuff safe-voting
++    /// rule; [`Self::is_safe_to_vote_on_block`] is a thin wrapper
++    /// (`Safe(_) => true`). The branch is derived from the SAME evaluation that
++    /// decides safety — it is never re-derived afterwards — so an observer of
++    /// the decision sees exactly the condition that admitted (or refused) the
++    /// vote, including the justification-view short-circuit (the ancestry walk
++    /// is NOT performed once [`SafetyBranch::ViewSufficiency`] holds).
++    ///
++    /// The boolean outcome, the OR structure and the short-circuit are
++    /// identical to the historical predicate; only the typed branch is added.
++    pub fn safety_decision(&self, block_id: &BlockIdT) -> SafetyDecision {
+         // 1. If no locked qc yet, allow.
+         let locked = match self.locked_qc.as_ref() {
+-            None => return true,
++            None => return SafetyDecision::Safe(SafetyBranch::NoLock),
+             Some(qc) => qc,
+         };
+ 
+@@ -1320,19 +1337,20 @@ where
+         let block_node = match self.blocks.get(block_id) {
+             Some(node) => node,
+             None => {
+-                // If the block is not yet registered, return false for safety
+-                // since we cannot verify the ancestor chain without the block data.
+-                // This ensures we never vote for a block whose ancestry we cannot verify.
+-                return false;
++                // If the block is not yet registered, return Unsafe: we cannot
++                // verify the ancestor chain without the block data. This ensures
++                // we never vote for a block whose ancestry we cannot verify.
++                return SafetyDecision::Unsafe;
+             }
+         };
+ 
+         // 3. Check if justify_qc.view >= locked_qc.view (liveness condition)
+         //    This is the standard HotStuff rule that allows progress even when
+-        //    the block doesn't directly extend the locked block.
++        //    the block doesn't directly extend the locked block. It
++        //    SHORT-CIRCUITS: the ancestry walk below is skipped on this branch.
+         if let Some(ref justify_qc) = block_node.justify_qc {
+             if justify_qc.view >= locked.view {
+-                return true;
++                return SafetyDecision::Safe(SafetyBranch::ViewSufficiency);
+             }
+         }
+ 
+@@ -1341,7 +1359,7 @@ where
+         let mut current = block_node;
+         loop {
+             if &current.id == locked_block_id {
+-                return true;
++                return SafetyDecision::Safe(SafetyBranch::Ancestry);
+             }
+             let parent_id = match &current.parent_id {
+                 Some(pid) => pid,
+@@ -1356,6 +1374,30 @@ where
+         // If we walked the chain and didn't find the locked block, and the
+         // justify_qc.view was not >= locked_qc.view, this block conflicts
+         // with our lock; do not vote.
+-        false
++        SafetyDecision::Unsafe
+     }
++}
++
++/// Run 422 §13.6 spike: which branch of the HotStuff safe-voting rule admitted
++/// a vote. Derived from the same evaluation that decides safety.
++#[derive(Debug, Clone, Copy, PartialEq, Eq)]
++pub enum SafetyBranch {
++    /// No locked QC yet: voting is admitted unconditionally at this boundary.
++    /// (The explicit NoLock boundary; no bootstrap authorization is implied.)
++    NoLock,
++    /// `justify_qc.view >= locked_qc.view`: justification-view sufficiency.
++    /// The predicate short-circuits here and does NOT walk ancestry.
++    ViewSufficiency,
++    /// The candidate's parent chain was walked and reached the locked block.
++    Ancestry,
++}
++
++/// Run 422 §13.6 spike: the typed outcome of the safe-voting predicate.
++#[derive(Debug, Clone, Copy, PartialEq, Eq)]
++pub enum SafetyDecision {
++    /// Safe to vote; carries the branch that decided it.
++    Safe(SafetyBranch),
++    /// Not safe to vote (conflicting fork, or the block / its ancestry is not
++    /// registered so safety cannot be established).
++    Unsafe,
+ }
+\ No newline at end of file
+diff --git a/crates/qbind-consensus/src/lib.rs b/crates/qbind-consensus/src/lib.rs
+index 273198cdaea5487d1490826d9e2ec3513a5e53af..b30438e9f7df432be239b1215c3efa872edc02c0 100755
+--- a/crates/qbind-consensus/src/lib.rs
++++ b/crates/qbind-consensus/src/lib.rs
+@@ -62,8 +62,9 @@ pub use adversarial_multi_sim::{AdversarialMultiNodeSim, InFlightMessage, Partit
+ pub use basic_hotstuff_engine::{
+     BasicHotStuffEngine, ConsensusProgressRecorder, NoopConsensusProgressRecorder,
+     NoopValidatorEquivocationRecorder, NoopValidatorVoteRecorder, NoopViewDurationRecorder,
+-    PendingReconfigIntentError, ValidatorEquivocationRecorder, ValidatorVoteRecorder,
+-    VerifiedProposalIngestError, ViewDurationRecorder,
++    PendingReconfigIntentError, SafetyDecisionObserver, SafetyDecisionView,
++    ValidatorEquivocationRecorder, ValidatorVoteRecorder, VerifiedProposalIngestError,
++    ViewDurationRecorder,
+ };
+ pub use block_state::BlockNode;
+ pub use crypto_verifier::{
+@@ -77,7 +78,7 @@ pub use driver::{
+ };
+ pub use governed_key_registry::{ConsensusKeyGovernance, GovernedValidatorKeyRegistry};
+ pub use hotstuff_state_engine::{
+-    CommittedEntry, EvidenceRetentionError, HotStuffStateEngine,
++    CommittedEntry, EvidenceRetentionError, HotStuffStateEngine, SafetyBranch, SafetyDecision,
+     DEFAULT_MAX_RETAINED_EVIDENCE_BYTES,
+ };
+ pub use ids::{ConsensusNodeId, ValidatorId, ValidatorPublicKey};
+diff --git a/crates/qbind-consensus/tests/run_422_safety_decision_observer_spike_tests.rs b/crates/qbind-consensus/tests/run_422_safety_decision_observer_spike_tests.rs
+new file mode 100644
+index 0000000000000000000000000000000000000000..f55d2b6bec7f3cef667a0a5b798fc9593c3bed3f
+--- /dev/null
++++ b/crates/qbind-consensus/tests/run_422_safety_decision_observer_spike_tests.rs
+@@ -0,0 +1,568 @@
++//! Run 422 §13.6 spike — executable feasibility evidence for the scoped
++//! borrowed safety-decision observer.
++//!
++//! These tests exercise the ACTUAL engine control flow
++//! ([`BasicHotStuffEngine::on_proposal_event_observed`] /
++//! [`BasicHotStuffEngine::on_verified_proposal_event_observed`]), not a
++//! test-authored consumer model, to establish that:
++//!
++//! - the observer sees the L0 decision BEFORE a same-event self-vote raises the
++//!   lock to L1;
++//! - the branch it observes is the one that actually decided safety
++//!   (justification-view short-circuit vs. ancestry), including the equality
++//!   boundary;
++//! - legacy and verified entrypoints both drive it while preserving their
++//!   distinct evidence guarantees;
++//! - an observed run is otherwise identical to a legacy run (equivalent action
++//!   and resulting state);
++//! - no observation occurs when no successful safety decision occurred (early
++//!   refusal) and when the callback panics no self-vote or action follows;
++//! - the observation machinery allocates nothing of its own (the view is a
++//!   fixed, stack-resident bundle of borrows and scalars) and clones no
++//!   certificate `Arc`.
++//!
++//! What this does NOT establish is called out in the brief: association with
++//! the eventual outbound action, correspondence to a durable generation,
++//! across-event revalidation, and the D10/signing prerequisite.
++
++use std::sync::Arc;
++
++use qbind_consensus::crypto_verifier::SimpleBackendRegistry;
++use qbind_consensus::key_registry::SuiteAwareValidatorKeyProvider;
++use qbind_consensus::qc_verify_domain::verify_quorum_certificate_with_domain;
++use qbind_consensus::validator_set::ValidatorSetEntry;
++use qbind_consensus::{
++    BasicHotStuffEngine, ConsensusEngineAction, ConsensusValidatorSet, SafetyBranch,
++    SafetyDecisionObserver, SafetyDecisionView, ValidatorId,
++};
++use qbind_crypto::ml_dsa44::MlDsa44Backend;
++use qbind_crypto::{ConsensusSigSuiteId, SUITE_PQ_RESERVED_1};
++use qbind_types::ChainId;
++use qbind_wire::consensus::{BlockHeader, BlockProposal, QuorumCertificate as WireQc, Vote};
++use qbind_wire::pv_signing_domain::ProposalVoteSigningDomainV2;
++
++// ===========================================================================
++// Helpers
++// ===========================================================================
++
++fn validator_set(num: u64) -> ConsensusValidatorSet {
++    let entries = (1..=num)
++        .map(|i| ValidatorSetEntry {
++            id: ValidatorId(i),
++            voting_power: 1,
++        })
++        .collect::<Vec<_>>();
++    ConsensusValidatorSet::new(entries).expect("valid set")
++}
++
++fn make_proposal(view: u64, parent_block_id: [u8; 32], proposer_index: u16) -> BlockProposal {
++    BlockProposal {
++        header: BlockHeader {
++            version: 1,
++            chain_id: 1,
++            epoch: 0,
++            height: view,
++            round: view,
++            parent_block_id,
++            payload_hash: [0u8; 32],
++            proposer_index,
++            suite_id: qbind_wire::DEFAULT_CONSENSUS_SUITE_ID,
++            tx_count: 0,
++            timestamp: 0,
++            payload_kind: qbind_wire::PAYLOAD_KIND_NORMAL,
++            next_epoch: 0,
++            batch_commitment: [0u8; 32],
++        },
++        qc: None,
++        txs: vec![],
++        signature: vec![],
++    }
++}
++
++/// A minimal logical (legacy) wire QC referencing `block_id` at `height`. Only
++/// `block_id` and `height` are read by the legacy ingestion path.
++fn logical_qc(block_id: [u8; 32], height: u64) -> WireQc {
++    WireQc {
++        version: 1,
++        chain_id: 1,
++        epoch: 0,
++        height,
++        round: height,
++        step: 0,
++        block_id,
++        suite_id: qbind_wire::DEFAULT_CONSENSUS_SUITE_ID,
++        signer_bitmap: vec![],
++        signatures: vec![],
++    }
++}
++
++/// Recording observer that copies out scalars only (never retains a borrow).
++#[derive(Default)]
++struct Recording {
++    calls: usize,
++    branch: Option<SafetyBranch>,
++    locked_block_id: Option<[u8; 32]>,
++    locked_view: Option<u64>,
++    candidate_id: Option<[u8; 32]>,
++    candidate_view: Option<u64>,
++    candidate_parent: Option<[u8; 32]>,
++    candidate_justify_view: Option<u64>,
++    origin_view: Option<u64>,
++    from: Option<ValidatorId>,
++    verified: Option<bool>,
++    ancestors: Vec<[u8; 32]>,
++}
++
++impl SafetyDecisionObserver<[u8; 32]> for Recording {
++    fn observe(&mut self, d: &SafetyDecisionView<'_, [u8; 32]>) {
++        self.calls += 1;
++        self.branch = Some(d.branch());
++        self.locked_block_id = d.locked_block_id().copied();
++        self.locked_view = d.locked_view();
++        self.candidate_id = Some(*d.candidate_id());
++        self.candidate_view = Some(d.candidate_view());
++        self.candidate_parent = d.candidate_parent().copied();
++        self.candidate_justify_view = d.candidate_justify_view();
++        self.origin_view = Some(d.origin_view());
++        self.from = Some(d.from());
++        self.verified = Some(d.is_verified_entrypoint());
++        d.for_each_ancestor(16, |node| self.ancestors.push(node.id));
++    }
++}
++
++/// Observer that performs no work (for no-op parity).
++struct NoopObserver;
++impl SafetyDecisionObserver<[u8; 32]> for NoopObserver {
++    fn observe(&mut self, _d: &SafetyDecisionView<'_, [u8; 32]>) {}
++}
++
++/// Drive a single-validator engine through one accepted proposal at view 0 so
++/// that its self-vote forms a QC and establishes the lock L0 (= the view-0
++/// block). Returns the engine and the locked (L0) block id.
++fn engine_locked_at_view0() -> (BasicHotStuffEngine<[u8; 32]>, [u8; 32]) {
++    let mut engine: BasicHotStuffEngine<[u8; 32]> =
++        BasicHotStuffEngine::new(ValidatorId(1), validator_set(1));
++    assert!(engine.locked_qc().is_none(), "no lock initially");
++
++    // View 0 proposal from the (sole) leader. Parent sentinel => no parent.
++    let p0 = make_proposal(0, [0xFF; 32], 1);
++    let action = engine.on_proposal_event(ValidatorId(1), &p0);
++    assert!(
++        matches!(action, Some(ConsensusEngineAction::BroadcastVote(_))),
++        "view-0 self-vote should broadcast"
++    );
++    let locked = engine.locked_qc().expect("lock L0 established by self-vote");
++    assert_eq!(locked.view, 0, "L0 is the view-0 block");
++    let l0_block = locked.block_id;
++    (engine, l0_block)
++}
++
++// ===========================================================================
++// 1. Real safety check under L0 followed by a same-event self-vote L1.
++//    The callback observes L0.
++// ===========================================================================
++
++#[test]
++fn observes_l0_before_same_event_self_vote_raises_l1() {
++    let (mut engine, l0_block) = engine_locked_at_view0();
++
++    // Advance to view 1 (resets voted_in_view). Sole validator remains leader.
++    engine.advance_view();
++    assert_eq!(engine.current_view(), 1);
++
++    // View-1 proposal whose justify QC references the L0 block at view 0, so
++    // justify_qc.view (0) >= locked.view (0) => ViewSufficiency.
++    let mut p1 = make_proposal(1, l0_block, 1);
++    p1.qc = Some(logical_qc(l0_block, 0));
++
++    let mut rec = Recording::default();
++    let action = engine.on_proposal_event_observed(ValidatorId(1), &p1, &mut rec);
++
++    // A vote was emitted...
++    assert!(
++        matches!(action, Some(ConsensusEngineAction::BroadcastVote(_))),
++        "view-1 proposal is safe and self-votes"
++    );
++    // ...exactly one observation happened...
++    assert_eq!(rec.calls, 1);
++    // ...and it observed the L0 lock, NOT the L1 that the self-vote just formed.
++    assert_eq!(rec.locked_view, Some(0), "observer saw L0 (view 0)");
++    assert_eq!(rec.locked_block_id, Some(l0_block));
++    assert_eq!(rec.candidate_view, Some(1));
++    assert_eq!(rec.origin_view, Some(1));
++    assert_eq!(rec.branch, Some(SafetyBranch::ViewSufficiency));
++
++    // The post-decision engine state has already been raised to L1 (view 1):
++    // reading the lock AFTER the event could not have established L0.
++    let post = engine.locked_qc().expect("lock present after self-vote");
++    assert_eq!(post.view, 1, "self-vote raised the lock to L1 (view 1)");
++    assert_ne!(
++        post.block_id, l0_block,
++        "L1 is a different block than the observed L0"
++    );
++}
++
++// ===========================================================================
++// 2. Justification-view and ancestry branches, including the equality boundary.
++// ===========================================================================
++
++#[test]
++fn view_sufficiency_branch_at_equality_boundary() {
++    let (mut engine, l0_block) = engine_locked_at_view0();
++    engine.advance_view();
++
++    // justify_qc.view == locked.view (0 == 0): the `>=` boundary admits via
++    // ViewSufficiency and the ancestry walk is short-circuited.
++    let mut p1 = make_proposal(1, [0x11; 32], 1);
++    p1.qc = Some(logical_qc(l0_block, 0));
++
++    let mut rec = Recording::default();
++    let action = engine.on_proposal_event_observed(ValidatorId(1), &p1, &mut rec);
++    assert!(matches!(
++        action,
++        Some(ConsensusEngineAction::BroadcastVote(_))
++    ));
++    assert_eq!(rec.calls, 1);
++    assert_eq!(rec.branch, Some(SafetyBranch::ViewSufficiency));
++    assert_eq!(rec.candidate_justify_view, Some(0));
++    assert_eq!(rec.locked_view, Some(0));
++}
++
++#[test]
++fn ancestry_branch_when_justify_view_below_lock() {
++    let (mut engine, l0_block) = engine_locked_at_view0();
++    engine.advance_view();
++
++    // No justify QC => the view-sufficiency branch cannot fire; the candidate's
++    // parent is the locked block, so the ancestry walk reaches it.
++    let p1 = make_proposal(1, l0_block, 1);
++    assert!(p1.qc.is_none());
++
++    let mut rec = Recording::default();
++    let action = engine.on_proposal_event_observed(ValidatorId(1), &p1, &mut rec);
++    assert!(matches!(
++        action,
++        Some(ConsensusEngineAction::BroadcastVote(_))
++    ));
++    assert_eq!(rec.calls, 1);
++    assert_eq!(rec.branch, Some(SafetyBranch::Ancestry));
++    assert_eq!(rec.candidate_parent, Some(l0_block));
++    // Optional ancestry inspection reaches the L0 block as a strict ancestor.
++    assert!(
++        rec.ancestors.contains(&l0_block),
++        "for_each_ancestor reaches the locked block"
++    );
++}
++
++#[test]
++fn no_lock_branch_is_explicit() {
++    // Fresh engine, no lock yet: the first proposal admits via NoLock.
++    let mut engine: BasicHotStuffEngine<[u8; 32]> =
++        BasicHotStuffEngine::new(ValidatorId(1), validator_set(1));
++    let p0 = make_proposal(0, [0xFF; 32], 1);
++
++    let mut rec = Recording::default();
++    let action = engine.on_proposal_event_observed(ValidatorId(1), &p0, &mut rec);
++    assert!(matches!(
++        action,
++        Some(ConsensusEngineAction::BroadcastVote(_))
++    ));
++    assert_eq!(rec.calls, 1);
++    assert_eq!(rec.branch, Some(SafetyBranch::NoLock));
++    assert_eq!(rec.locked_view, None, "NoLock: no effective lock");
++    assert_eq!(rec.locked_block_id, None);
++}
++
++// ===========================================================================
++// 3. No-op observation vs. legacy execution: equivalent action and state.
++// ===========================================================================
++
++#[test]
++fn observed_run_matches_legacy_run() {
++    // Legacy run.
++    let (mut legacy, l0_legacy) = engine_locked_at_view0();
++    legacy.advance_view();
++    let mut p_legacy = make_proposal(1, l0_legacy, 1);
++    p_legacy.qc = Some(logical_qc(l0_legacy, 0));
++    let a_legacy = legacy.on_proposal_event(ValidatorId(1), &p_legacy);
++
++    // Observed run with a no-op observer, identical inputs.
++    let (mut observed, l0_observed) = engine_locked_at_view0();
++    observed.advance_view();
++    let mut p_observed = make_proposal(1, l0_observed, 1);
++    p_observed.qc = Some(logical_qc(l0_observed, 0));
++    let mut noop = NoopObserver;
++    let a_observed = observed.on_proposal_event_observed(ValidatorId(1), &p_observed, &mut noop);
++
++    // Same block ids are derived (deterministic), same action shape, same lock.
++    assert_eq!(l0_legacy, l0_observed);
++    assert_eq!(
++        matches!(a_legacy, Some(ConsensusEngineAction::BroadcastVote(_))),
++        matches!(a_observed, Some(ConsensusEngineAction::BroadcastVote(_)))
++    );
++    assert_eq!(
++        legacy.locked_qc().map(|q| (q.block_id, q.view)),
++        observed.locked_qc().map(|q| (q.block_id, q.view)),
++        "a no-op observation changes neither the lock nor the outcome"
++    );
++    assert_eq!(legacy.current_view(), observed.current_view());
++}
++
++// ===========================================================================
++// 4. Early refusal: no observation where no successful safety decision occurred.
++// ===========================================================================
++
++#[test]
++fn no_observation_on_conflicting_fork() {
++    let (mut engine, _l0_block) = engine_locked_at_view0();
++    engine.advance_view();
++
++    // A view-1 proposal on a conflicting fork: parent is an unknown block and
++    // the justify QC's view is below the lock, so neither branch admits.
++    let mut p1 = make_proposal(1, [0x99; 32], 1);
++    // Reference a non-locked block at a view strictly below the lock would need
++    // view < 0 which is impossible; instead drop the justify QC entirely so the
++    // ancestry walk (parent 0x99 unknown) is the only path and it fails.
++    p1.qc = None;
++
++    let mut rec = Recording::default();
++    let action = engine.on_proposal_event_observed(ValidatorId(1), &p1, &mut rec);
++
++    assert!(action.is_none(), "conflicting fork must not vote");
++    assert_eq!(rec.calls, 0, "no successful decision => no observation");
++}
++
++// ===========================================================================
++// 5. Callback panic: no subsequent self-vote or returned action; earlier
++//    proposal-processing mutations (block registration) remain.
++// ===========================================================================
++
++struct PanicObserver;
++impl SafetyDecisionObserver<[u8; 32]> for PanicObserver {
++    fn observe(&mut self, _d: &SafetyDecisionView<'_, [u8; 32]>) {
++        panic!("observer panics during observation");
++    }
++}
++
++#[test]
++fn callback_panic_prevents_self_vote_and_action() {
++    let (mut engine, l0_block) = engine_locked_at_view0();
++    engine.advance_view();
++    let mut p1 = make_proposal(1, l0_block, 1);
++    p1.qc = Some(logical_qc(l0_block, 0));
++
++    // Pre-state: the view-1 block is not yet registered, lock is L0 (view 0).
++    assert_eq!(engine.locked_qc().map(|q| q.view), Some(0));
++    let blocks_before = engine.state().block_count();
++
++    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
++        let mut obs = PanicObserver;
++        engine.on_proposal_event_observed(ValidatorId(1), &p1, &mut obs)
++    }));
++    assert!(result.is_err(), "the panic propagates out of ingestion");
++
++    // Earlier proposal-processing mutation that remains: the candidate block WAS
++    // registered (it is created before the safety decision/observation), so the
++    // engine's block count grew by exactly one.
++    assert_eq!(
++        engine.state().block_count(),
++        blocks_before + 1,
++        "the registered candidate block survives the panic"
++    );
++    // But the self-vote never ran: the lock is still L0, not raised to L1.
++    assert_eq!(
++        engine.locked_qc().map(|q| q.view),
++        Some(0),
++        "no self-vote-generated L1 after a panicking observation"
++    );
++}
++
++// ===========================================================================
++// 6. Verified entrypoint drives the observer, preserving its evidence
++//    guarantee (candidate carries verified justification) without cloning the
++//    evidence Arc into the observation.
++// ===========================================================================
++
++const TEST_SUITE: ConsensusSigSuiteId = SUITE_PQ_RESERVED_1;
++const TEST_SUITE_U16: u16 = 100;
++const WIRE_CHAIN: u32 = 1;
++
++struct VerifiedFixture {
++    validators: ConsensusValidatorSet,
++    kp: TestKeyProvider,
++    sks: std::collections::HashMap<ValidatorId, Vec<u8>>,
++}
++
++#[derive(Debug, Default)]
++struct TestKeyProvider {
++    keys: std::collections::HashMap<ValidatorId, (ConsensusSigSuiteId, Vec<u8>)>,
++}
++impl SuiteAwareValidatorKeyProvider for TestKeyProvider {
++    fn get_suite_and_key(&self, id: ValidatorId) -> Option<(ConsensusSigSuiteId, Vec<u8>)> {
++        self.keys.get(&id).cloned()
++    }
++}
++
++fn verified_fixture(n: u64) -> VerifiedFixture {
++    let mut keys = std::collections::HashMap::new();
++    let mut sks = std::collections::HashMap::new();
++    let mut entries = Vec::new();
++    for id in 1..=n {
++        let (pk, sk) = MlDsa44Backend::generate_keypair().expect("keygen");
++        keys.insert(ValidatorId(id), (TEST_SUITE, pk));
++        sks.insert(ValidatorId(id), sk);
++        entries.push(ValidatorSetEntry {
++            id: ValidatorId(id),
++            voting_power: 1,
++        });
++    }
++    VerifiedFixture {
++        validators: ConsensusValidatorSet::new(entries).expect("set"),
++        kp: TestKeyProvider { keys },
++        sks,
++    }
++}
++
++fn domain_for(block_commitment: [u8; 32]) -> ProposalVoteSigningDomainV2 {
++    ProposalVoteSigningDomainV2::try_new(ChainId(1), WIRE_CHAIN, [9u8; 32], block_commitment)
++        .expect("domain")
++}
++
++fn set_bit(bitmap: &mut Vec<u8>, index: u16) {
++    let byte = (index / 8) as usize;
++    let bit = index % 8;
++    if bitmap.len() <= byte {
++        bitmap.resize(byte + 1, 0);
++    }
++    bitmap[byte] |= 1u8 << bit;
++}
++
++/// Build a QC signed under `d` by `signers` over the justified `block_id` at
++/// `height`.
++fn build_signed_qc(
++    f: &VerifiedFixture,
++    d: &ProposalVoteSigningDomainV2,
++    block_id: [u8; 32],
++    height: u64,
++    signers: &[u16],
++) -> WireQc {
++    let mut qc = WireQc {
++        version: 1,
++        chain_id: WIRE_CHAIN,
++        epoch: 0,
++        height,
++        round: height,
++        step: 1,
++        block_id,
++        suite_id: TEST_SUITE_U16,
++        signer_bitmap: vec![],
++        signatures: vec![],
++    };
++    let mut bitmap = Vec::new();
++    let mut sigs = Vec::new();
++    for &s in signers {
++        set_bit(&mut bitmap, s);
++        let vote = Vote {
++            version: qc.version,
++            chain_id: qc.chain_id,
++            epoch: qc.epoch,
++            height: qc.height,
++            round: qc.round,
++            step: qc.step,
++            block_id: qc.block_id,
++            validator_index: s,
++            suite_id: qc.suite_id,
++            signature: vec![],
++        };
++        let pre = d.vote_preimage(&vote);
++        let sk = f.sks.get(&ValidatorId(s as u64)).expect("sk");
++        sigs.push(MlDsa44Backend::sign(sk, &pre).expect("sign"));
++    }
++    qc.signer_bitmap = bitmap;
++    qc.signatures = sigs;
++    qc
++}
++
++#[test]
++fn verified_entrypoint_drives_observer_without_cloning_evidence() {
++    // 4 validators (ids 1..=4), threshold ceil(2*4/3)=3. Leader for view 0 is
++    // the lowest id (1).
++    let f = verified_fixture(4);
++    let justified_block = [0x55u8; 32];
++    let d = domain_for([3u8; 32]);
++    let wire_qc = build_signed_qc(&f, &d, justified_block, 0, &[1, 2, 3]);
++    let registry = SimpleBackendRegistry::with_backend(TEST_SUITE, Arc::new(MlDsa44Backend));
++
++    let verified = verify_quorum_certificate_with_domain(
++        &wire_qc,
++        &d,
++        0,
++        &f.validators,
++        &f.kp,
++        &registry,
++    )
++    .expect("quorum verifies");
++    let evidence = Arc::new(verified);
++    let strong_before = Arc::strong_count(&evidence);
++
++    // Engine over the same validator set; leader for view 0 is ValidatorId(1).
++    let mut engine: BasicHotStuffEngine<[u8; 32]> =
++        BasicHotStuffEngine::new(ValidatorId(1), f.validators.clone());
++
++    // A view-0 proposal whose embedded QC is exactly the verified certificate.
++    let mut proposal = make_proposal(0, [0xFF; 32], 1);
++    proposal.qc = Some(evidence.certificate().clone());
++
++    let mut rec = Recording::default();
++    let result = engine.on_verified_proposal_event_observed(
++        ValidatorId(1),
++        &proposal,
++        Arc::clone(&evidence),
++        &mut rec,
++    );
++
++    let action = result.expect("verified ingestion succeeds");
++    assert!(
++        matches!(action, Some(ConsensusEngineAction::BroadcastVote(_))),
++        "verified proposal is safe (NoLock) and self-votes"
++    );
++    assert_eq!(rec.calls, 1);
++    assert_eq!(rec.branch, Some(SafetyBranch::NoLock));
++    assert_eq!(
++        rec.verified,
++        Some(true),
++        "observer records the verified entrypoint"
++    );
++
++    // The observation did not clone the evidence Arc: the only extra strong
++    // reference belongs to the block node that now retains it (our `evidence`
++    // plus the Arc::clone we passed in, which the engine moved into the node).
++    // Observation itself adds none.
++    let strong_after = Arc::strong_count(&evidence);
++    assert!(
++        strong_after <= strong_before + 1,
++        "observation must not clone the certificate Arc (before={strong_before}, after={strong_after})"
++    );
++}
++
++// ===========================================================================
++// 7. Layout / allocation accounting of the observation machinery.
++// ===========================================================================
++
++#[test]
++fn view_layout_is_fixed_and_stack_resident() {
++    use std::mem::size_of;
++    // The view is a fixed bundle: two references (state, candidate), one
++    // Option<&QC>, a branch enum, two u64 scalars, a ValidatorId and a bool.
++    // It owns no heap allocation; its size is a small, fixed, inline cost.
++    let sz = size_of::<SafetyDecisionView<'static, [u8; 32]>>();
++    // Record the measured size (printed with `--nocapture`); assert it stays a
++    // handful of machine words rather than, say, an owned certificate.
++    assert!(
++        sz <= 8 * std::mem::size_of::<usize>(),
++        "SafetyDecisionView should be a few words (measured {sz} bytes)"
++    );
++    assert!(sz > 0);
++    println!("SafetyDecisionView<[u8;32]> size = {sz} bytes");
++    println!("SafetyBranch size = {} bytes", size_of::<SafetyBranch>());
++}

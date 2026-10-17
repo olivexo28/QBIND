@@ -1,0 +1,45 @@
+# RUN 422 — Safety-Decision Observer Spike — MANIFEST
+
+baseline:              0de4df69cf55a05e88baff50733ffa578cdf171e
+                       (subject: "Restore three Run 422 frozen artifact blobs to exact bytes")
+supplied-branch:       copilot/run-422-define-first-decison-binding
+spike-status:          ISOLATED — feasibility experiment only; NOT wired into accepted
+                       source, NOT landed. This directory publishes evidence only.
+
+## Execution dates
+original-experiment:   2026-10-13   (ORIGINAL build/test logs and checkout are
+                                      UNAVAILABLE — ephemeral storage was cleared; see README)
+re-execution:          2026-10-17   (the raw logs under logs/ are from this re-run)
+publication:           2026-10-17   (this evidence directory; patch apply --check re-confirmed)
+
+## Changed EXPERIMENTAL paths (relative to baseline; carried by the patch only,
+## NOT applied to this branch)
+M crates/qbind-consensus/src/basic_hotstuff_engine.rs
+M crates/qbind-consensus/src/hotstuff_state_engine.rs
+M crates/qbind-consensus/src/lib.rs
+A crates/qbind-consensus/tests/run_422_safety_decision_observer_spike_tests.rs
+
+## Patch
+patch/run_422_safety_decision_observer_spike.patch   44668 bytes, 1036 lines
+  sha256: 210e39e95f0c5b63fe4630570c1a5694cbc8a5cb6b6b1050255a97c6ffe3d89f
+
+## Post-edit file-content SHA-256 (the exact bytes the patch reproduces on baseline)
+0541300a1e2cee2b0a3655d238d15a81580709e482c7ae7278597c2231bf908f  crates/qbind-consensus/src/basic_hotstuff_engine.rs
+0d32c153b8ce2e35f5003b3be155bc84936db21e606beb183f45b005364e1744  crates/qbind-consensus/src/hotstuff_state_engine.rs
+cdbf468a1761f18cf936e2c330d428e6d3c9d3461e22bf33e1c9e15fc4776706  crates/qbind-consensus/src/lib.rs
+e49ed3e889b4cc253bd89cbbfda94ad9f391cf3c7955b5e9b79656393788e961  crates/qbind-consensus/tests/run_422_safety_decision_observer_spike_tests.rs
+
+## git blob indices (from the patch headers, for cross-checking object identity)
+basic_hotstuff_engine.rs : a17ad0d... -> 9567643...
+hotstuff_state_engine.rs : 99f1e0c... -> 81643ca...
+lib.rs                   : 273198c... -> b30438e...
+tests/...spike_tests.rs  : 0000000... -> f55d2b6...
+
+## Measured layout (from logs/02_spike_tests.log, re-executed 2026-10-17)
+SafetyDecisionView<[u8;32]> = 48 bytes   (size_of — establishes LAYOUT only)
+SafetyBranch                = 1 byte
+
+## Status
+§13.6 engine-decision binding: INCOMPLETE (this is observation, not binding)
+activation: DISABLED
+public DevNet: NO-GO

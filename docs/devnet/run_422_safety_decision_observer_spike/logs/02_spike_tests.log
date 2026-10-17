@@ -1,0 +1,28 @@
+## RECORDED OUTPUT — re-executed 2026-10-17 on a clean baseline worktree.
+## This is NOT the original 2026-10-13 run, whose logs are unavailable (see README).
+## The "panicked at ... observer panics during observation" line is the EXPECTED
+## panic inside callback_panic_prevents_self_vote_and_action, caught by
+## catch_unwind; that test reports ok.
+
+$ cargo test -p qbind-consensus --test run_422_safety_decision_observer_spike_tests -- --nocapture
+    Finished `test` profile [unoptimized] target(s) in 1.01s
+     Running tests/run_422_safety_decision_observer_spike_tests.rs (.../run_422_safety_decision_observer_spike_tests-e4a97f1bcdd0c001)
+
+running 9 tests
+
+thread 'callback_panic_prevents_self_vote_and_action' (6031) panicked at crates/qbind-consensus/tests/run_422_safety_decision_observer_spike_tests.rs:343:9:
+observer panics during observation
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+test ancestry_branch_when_justify_view_below_lock ... ok
+test no_lock_branch_is_explicit ... ok
+test no_observation_on_conflicting_fork ... ok
+test callback_panic_prevents_self_vote_and_action ... ok
+SafetyDecisionView<[u8;32]> size = 48 bytes
+SafetyBranch size = 1 bytes
+test view_layout_is_fixed_and_stack_resident ... ok
+test observes_l0_before_same_event_self_vote_raises_l1 ... ok
+test observed_run_matches_legacy_run ... ok
+test view_sufficiency_branch_at_equality_boundary ... ok
+test verified_entrypoint_drives_observer_without_cloning_evidence ... ok
+
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.07s

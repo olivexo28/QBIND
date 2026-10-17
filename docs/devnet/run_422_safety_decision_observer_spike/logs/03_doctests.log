@@ -1,0 +1,11 @@
+## RECORDED OUTPUT — re-executed 2026-10-17 on a clean baseline worktree.
+## This is NOT the original 2026-10-13 run, whose logs are unavailable (see README).
+## Shows the SafetyDecisionObserver doctests: the valid control (line 207) and the
+## compile_fail escape-is-an-error example (line 191). Full listing truncated to the
+## spike-relevant lines plus the final summary.
+
+$ cargo test -p qbind-consensus --doc
+test crates/qbind-consensus/src/basic_hotstuff_engine.rs - basic_hotstuff_engine::SafetyDecisionObserver (line 207) ... ok
+test crates/qbind-consensus/src/basic_hotstuff_engine.rs - basic_hotstuff_engine::SafetyDecisionObserver (line 191) - compile fail ... ok
+...
+test result: ok. 5 passed; 0 failed; 20 ignored; 0 measured; 0 filtered out; finished in 0.67s
