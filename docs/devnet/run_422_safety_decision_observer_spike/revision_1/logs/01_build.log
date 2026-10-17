@@ -1,0 +1,4 @@
+## NEWLY EXECUTED 2026-10-17T07:58:25Z — consensus crate compile check (corrected spike applied to baseline 0de4df69).
+$ cargo build -p qbind-consensus
+   Compiling qbind-consensus v0.1.0 (/tmp/iso/crates/qbind-consensus)
+    Finished `dev` profile [unoptimized] target(s) in 0.57s

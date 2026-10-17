@@ -1,0 +1,27 @@
+## NEWLY EXECUTED 2026-10-17T07:58:30Z — focused observer spike tests (corrected).
+$ cargo test -p qbind-consensus --test run_422_safety_decision_observer_spike_tests -- --nocapture
+   Compiling qbind-consensus v0.1.0 (/tmp/iso/crates/qbind-consensus)
+    Finished `test` profile [unoptimized] target(s) in 0.18s
+     Running tests/run_422_safety_decision_observer_spike_tests.rs (target/debug/deps/run_422_safety_decision_observer_spike_tests-e4a97f1bcdd0c001)
+
+running 12 tests
+
+thread 'callback_panic_prevents_self_vote_and_action' (10060) panicked at crates/qbind-consensus/tests/run_422_safety_decision_observer_spike_tests.rs:515:9:
+observer panics during observation
+test ancestry_branch_when_justify_view_below_lock ... note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+ok
+test no_observation_on_conflicting_fork ... ok
+test callback_panic_prevents_self_vote_and_action ... ok
+test no_lock_branch_is_explicit ... ok
+test observed_route_makes_missing_observation_input_explicit ... ok
+test observed_run_matches_legacy_run ... ok
+test observes_l0_before_same_event_self_vote_raises_l1 ... ok
+test opaque_ancestor_view_exposes_only_scalars_and_identifiers ... ok
+test unobserved_legacy_route_still_votes_when_candidate_evicted ... SafetyDecisionView<[u8;32]> size = 48 bytes
+SafetyBranch size = 1 bytes
+ok
+test view_layout_is_fixed_and_stack_resident ... ok
+test view_sufficiency_branch_at_equality_boundary ... ok
+test verified_entrypoint_drives_observer_without_cloning_evidence ... ok
+
+test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.04s

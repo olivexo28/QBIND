@@ -1,0 +1,84 @@
+# RUN 422 — Safety-Decision Observer Spike — REVISION 1 — MANIFEST
+
+baseline:              0de4df69cf55a05e88baff50733ffa578cdf171e
+                       (subject: "Restore three Run 422 frozen artifact blobs to exact bytes")
+supplied-branch:       copilot/run-422-close-api-gaps
+corrects:              the experimental observer published at
+                       881bbb9d5efd373d8fdb2f98c7c2158b8ac57929 (../ — revision 0),
+                       whose patch targets the same baseline.
+spike-status:          ISOLATED — feasibility experiment only; NOT wired into accepted
+                       source, NOT landed. This directory publishes evidence only. The
+                       parent directory's original package is preserved UNCHANGED.
+
+## What this revision corrects (two observer API gaps + evidence tightening)
+
+1. Ancestry access restricted. `SafetyDecisionView::for_each_ancestor` no longer
+   exposes `&BlockNode` (which leaked the node's owned `justify_qc`/`own_qc`
+   `QuorumCertificate` and its verified-justification `Arc`). It now hands the
+   callback an opaque `SafetyAncestorView` exposing only identifiers, the parent
+   relationship, and `Copy` scalar fields (`id`, `view`, `height`, `parent_id`,
+   `justify_view`, `justify_block_id`, `has_verified_justification`). Bounded
+   traversal and the voting rule are unchanged. A valid-use control doctest and a
+   focused external-API `compile_fail` doctest (a `CertThief` that cannot clone a
+   certificate out of an ancestor) are added on `SafetyDecisionObserver`.
+
+2. Silent observation omission eliminated. Reproduced through real engine control
+   flow (`max_pending_blocks == 0`): `register_block` evicts the candidate it just
+   registered, the `NoLock` predicate succeeds without reading the block, and the
+   observation input is therefore absent. The earlier revision silently skipped
+   observation and self-voted anyway. The opt-in OBSERVED route now makes this
+   explicit: when the observation input is missing it refuses to self-vote and
+   returns no action, BEFORE the self-vote / `BroadcastVote`. The UNOBSERVED legacy
+   route and the safety predicate are unchanged; no bootstrap authorization policy
+   is introduced.
+
+3. Evidence tightened. The observed-vs-legacy test now compares the COMPLETE
+   outgoing `Vote` (every field) instead of only the action variant. The panic
+   test requires the EXPECTED observer panic payload and rejects unrelated panics.
+   The post-operation `Arc::strong_count` assertion is described as an endpoint
+   (before/after) retention check — it does NOT detect temporary clones and does
+   NOT measure heap allocation.
+
+## Changed EXPERIMENTAL paths (relative to baseline; carried by the patch only,
+## NOT applied to this branch)
+M crates/qbind-consensus/src/basic_hotstuff_engine.rs
+M crates/qbind-consensus/src/hotstuff_state_engine.rs
+M crates/qbind-consensus/src/lib.rs
+A crates/qbind-consensus/tests/run_422_safety_decision_observer_spike_tests.rs
+
+## Patch
+patch/run_422_safety_decision_observer_spike.patch   60263 bytes, 1383 lines
+  sha256: 6e6654d8d9ef95eee970ae90501a7e56b46afa95209ed099229d6b47537f510f
+
+## Post-edit file-content SHA-256 (the exact bytes the patch reproduces on baseline)
+4ce1eae8f4df9bcf6886ecae75975629c8efd5e11064ca28dde14172a9ac78a8  crates/qbind-consensus/src/basic_hotstuff_engine.rs
+0d32c153b8ce2e35f5003b3be155bc84936db21e606beb183f45b005364e1744  crates/qbind-consensus/src/hotstuff_state_engine.rs
+149957ced9b72fa823207405df33db8a01a082f1183c427856550e59fdab793f  crates/qbind-consensus/src/lib.rs
+eaaecdc173df33fdf13a8267e7504f18fab58e7adffc11e2e9f3956165eb2941  crates/qbind-consensus/tests/run_422_safety_decision_observer_spike_tests.rs
+
+## git blob indices (from the patch headers, for cross-checking object identity)
+basic_hotstuff_engine.rs : a17ad0d43564d053b1fd8bb82c6e02f195ef32aa -> 26f66959055c8bd74f0a8e8584b5452094901ee1
+hotstuff_state_engine.rs : 99f1e0c9fc06a745ac9b67616059f362993135a8 -> 81643cac31664071f105d7c072deb1377dcb9c26
+lib.rs                   : 273198cdaea5487d1490826d9e2ec3513a5e53af -> 182802287faa2d550b2f4578d7169933a8409a22
+tests/...spike_tests.rs  : 0000000000000000000000000000000000000000 -> eb08cfbff21464137eac67cb6c826b4a9087d39d
+
+## Execution dates
+re-execution:          2026-10-17   (the raw logs under logs/ are from this run)
+publication:           2026-10-17   (this evidence directory; patch apply --check re-confirmed)
+
+## Measured layout (from logs/02_observer_tests.log, newly executed 2026-10-17)
+SafetyDecisionView<[u8;32]> = 48 bytes   (size_of — establishes LAYOUT only; the
+                                          corrections do not change the view's fields)
+SafetyBranch                = 1 byte
+
+## Newly-executed test counts (2026-10-17)
+observer spike tests (focused) : 12 passed  (logs/02_observer_tests.log)
+qbind-consensus doctests       : 7 passed / 20 ignored  (logs/03_doctests.log)
+                                 includes 2 compile_fail escape controls + 2 valid-use
+qbind-consensus lib regression : 183 passed  (logs/04_consensus_lib_regression.log)
+
+## Status
+§13.6 engine-decision binding: INCOMPLETE (this is observation, not binding)
+accepted storage:              CLOSED (unchanged)
+activation:                    DISABLED
+public DevNet:                 NO-GO
