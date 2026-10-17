@@ -62,8 +62,9 @@ pub use adversarial_multi_sim::{AdversarialMultiNodeSim, InFlightMessage, Partit
 pub use basic_hotstuff_engine::{
     BasicHotStuffEngine, ConsensusProgressRecorder, NoopConsensusProgressRecorder,
     NoopValidatorEquivocationRecorder, NoopValidatorVoteRecorder, NoopViewDurationRecorder,
-    PendingReconfigIntentError, ValidatorEquivocationRecorder, ValidatorVoteRecorder,
-    VerifiedProposalIngestError, ViewDurationRecorder,
+    PendingReconfigIntentError, SafetyAncestorView, SafetyDecisionObserver, SafetyDecisionView,
+    ValidatorEquivocationRecorder, ValidatorVoteRecorder, VerifiedProposalIngestError,
+    ViewDurationRecorder,
 };
 pub use block_state::BlockNode;
 pub use crypto_verifier::{
@@ -77,7 +78,7 @@ pub use driver::{
 };
 pub use governed_key_registry::{ConsensusKeyGovernance, GovernedValidatorKeyRegistry};
 pub use hotstuff_state_engine::{
-    CommittedEntry, EvidenceRetentionError, HotStuffStateEngine,
+    CommittedEntry, EvidenceRetentionError, HotStuffStateEngine, SafetyBranch, SafetyDecision,
     DEFAULT_MAX_RETAINED_EVIDENCE_BYTES,
 };
 pub use ids::{ConsensusNodeId, ValidatorId, ValidatorPublicKey};
