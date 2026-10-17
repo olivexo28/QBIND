@@ -1,0 +1,11 @@
+## RECORDED OUTPUT — re-executed 2026-10-17 on a clean baseline worktree
+## (git worktree add --detach <baseline 0de4df6>, CARGO_TARGET_DIR=/tmp/.../target)
+## This is NOT the original 2026-10-13 run, whose logs are unavailable (see README).
+
+$ cargo build -p qbind-consensus
+   Compiling qbind-types v0.1.0 (.../crates/qbind-types)
+   Compiling qbind-wire v0.1.0 (.../crates/qbind-wire)
+   Compiling qbind-hash v0.1.0 (.../crates/qbind-hash)
+   Compiling qbind-crypto v0.1.0 (.../crates/qbind-crypto)
+   Compiling qbind-consensus v0.1.0 (.../crates/qbind-consensus)
+    Finished `dev` profile [unoptimized] target(s) in 23.16s

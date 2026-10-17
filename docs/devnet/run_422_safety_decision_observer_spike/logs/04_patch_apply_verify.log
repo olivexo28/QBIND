@@ -1,0 +1,27 @@
+## RECORDED OUTPUT — verification performed 2026-10-17.
+## Patch applyability + byte-for-byte reproduction against a second pristine
+## baseline checkout. Re-confirmed 2026-10-17 at publication time (apply --check).
+
+$ git worktree add --detach .../verify 0de4df69cf55a05e88baff50733ffa578cdf171e
+HEAD is now at 0de4df6 Restore three Run 422 frozen artifact blobs to exact bytes
+
+$ git apply --check run_422_safety_decision_observer_spike.patch && echo APPLY-CHECK: OK
+APPLY-CHECK: OK
+
+$ git apply run_422_safety_decision_observer_spike.patch && echo APPLIED
+APPLIED
+
+$ diff -q baseline/<file> verify/<file>   # for each of the 4 changed files
+IDENTICAL: crates/qbind-consensus/src/basic_hotstuff_engine.rs
+IDENTICAL: crates/qbind-consensus/src/hotstuff_state_engine.rs
+IDENTICAL: crates/qbind-consensus/src/lib.rs
+IDENTICAL: crates/qbind-consensus/tests/run_422_safety_decision_observer_spike_tests.rs
+
+## Post-edit file-content SHA-256 (match the previously recorded values):
+0541300a1e2cee2b0a3655d238d15a81580709e482c7ae7278597c2231bf908f  crates/qbind-consensus/src/basic_hotstuff_engine.rs
+0d32c153b8ce2e35f5003b3be155bc84936db21e606beb183f45b005364e1744  crates/qbind-consensus/src/hotstuff_state_engine.rs
+cdbf468a1761f18cf936e2c330d428e6d3c9d3461e22bf33e1c9e15fc4776706  crates/qbind-consensus/src/lib.rs
+e49ed3e889b4cc253bd89cbbfda94ad9f391cf3c7955b5e9b79656393788e961  crates/qbind-consensus/tests/run_422_safety_decision_observer_spike_tests.rs
+
+## Patch SHA-256 (matches previously recorded value):
+210e39e95f0c5b63fe4630570c1a5694cbc8a5cb6b6b1050255a97c6ffe3d89f  run_422_safety_decision_observer_spike.patch
