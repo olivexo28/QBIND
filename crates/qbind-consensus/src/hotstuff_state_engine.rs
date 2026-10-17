@@ -1310,9 +1310,26 @@ where
     /// - `true` if it is safe to vote for this block
     /// - `false` if voting for this block would violate the safety rule
     pub fn is_safe_to_vote_on_block(&self, block_id: &BlockIdT) -> bool {
+        matches!(self.safety_decision(block_id), SafetyDecision::Safe(_))
+    }
+
+    /// Run 422 §13.6 spike: the safe-voting predicate expressed as a typed
+    /// decision that *also* records WHICH branch of the rule decided safety.
+    ///
+    /// This is the single authoritative evaluation of the HotStuff safe-voting
+    /// rule; [`Self::is_safe_to_vote_on_block`] is a thin wrapper
+    /// (`Safe(_) => true`). The branch is derived from the SAME evaluation that
+    /// decides safety — it is never re-derived afterwards — so an observer of
+    /// the decision sees exactly the condition that admitted (or refused) the
+    /// vote, including the justification-view short-circuit (the ancestry walk
+    /// is NOT performed once [`SafetyBranch::ViewSufficiency`] holds).
+    ///
+    /// The boolean outcome, the OR structure and the short-circuit are
+    /// identical to the historical predicate; only the typed branch is added.
+    pub fn safety_decision(&self, block_id: &BlockIdT) -> SafetyDecision {
         // 1. If no locked qc yet, allow.
         let locked = match self.locked_qc.as_ref() {
-            None => return true,
+            None => return SafetyDecision::Safe(SafetyBranch::NoLock),
             Some(qc) => qc,
         };
 
@@ -1320,19 +1337,20 @@ where
         let block_node = match self.blocks.get(block_id) {
             Some(node) => node,
             None => {
-                // If the block is not yet registered, return false for safety
-                // since we cannot verify the ancestor chain without the block data.
-                // This ensures we never vote for a block whose ancestry we cannot verify.
-                return false;
+                // If the block is not yet registered, return Unsafe: we cannot
+                // verify the ancestor chain without the block data. This ensures
+                // we never vote for a block whose ancestry we cannot verify.
+                return SafetyDecision::Unsafe;
             }
         };
 
         // 3. Check if justify_qc.view >= locked_qc.view (liveness condition)
         //    This is the standard HotStuff rule that allows progress even when
-        //    the block doesn't directly extend the locked block.
+        //    the block doesn't directly extend the locked block. It
+        //    SHORT-CIRCUITS: the ancestry walk below is skipped on this branch.
         if let Some(ref justify_qc) = block_node.justify_qc {
             if justify_qc.view >= locked.view {
-                return true;
+                return SafetyDecision::Safe(SafetyBranch::ViewSufficiency);
             }
         }
 
@@ -1341,7 +1359,7 @@ where
         let mut current = block_node;
         loop {
             if &current.id == locked_block_id {
-                return true;
+                return SafetyDecision::Safe(SafetyBranch::Ancestry);
             }
             let parent_id = match &current.parent_id {
                 Some(pid) => pid,
@@ -1356,6 +1374,30 @@ where
         // If we walked the chain and didn't find the locked block, and the
         // justify_qc.view was not >= locked_qc.view, this block conflicts
         // with our lock; do not vote.
-        false
+        SafetyDecision::Unsafe
     }
+}
+
+/// Run 422 §13.6 spike: which branch of the HotStuff safe-voting rule admitted
+/// a vote. Derived from the same evaluation that decides safety.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SafetyBranch {
+    /// No locked QC yet: voting is admitted unconditionally at this boundary.
+    /// (The explicit NoLock boundary; no bootstrap authorization is implied.)
+    NoLock,
+    /// `justify_qc.view >= locked_qc.view`: justification-view sufficiency.
+    /// The predicate short-circuits here and does NOT walk ancestry.
+    ViewSufficiency,
+    /// The candidate's parent chain was walked and reached the locked block.
+    Ancestry,
+}
+
+/// Run 422 §13.6 spike: the typed outcome of the safe-voting predicate.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SafetyDecision {
+    /// Safe to vote; carries the branch that decided it.
+    Safe(SafetyBranch),
+    /// Not safe to vote (conflicting fork, or the block / its ancestry is not
+    /// registered so safety cannot be established).
+    Unsafe,
 }
