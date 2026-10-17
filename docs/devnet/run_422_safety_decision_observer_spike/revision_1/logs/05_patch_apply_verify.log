@@ -1,0 +1,17 @@
+## NEWLY EXECUTED 2026-10-17T07:58:54Z — clean patch application + byte-for-byte source-hash reproduction
+## against a pristine baseline checkout (baseline 0de4df69cf55a05e88baff50733ffa578cdf171e).
+
+$ # pristine baseline worktree (the 4 touched files are byte-identical to baseline 0de4df69)
+$ git apply --check run_422_safety_decision_observer_spike.patch && echo APPLY-CHECK: OK
+APPLY-CHECK: OK
+$ git apply run_422_safety_decision_observer_spike.patch && echo APPLIED
+APPLIED
+
+## Post-edit file-content SHA-256 (reproduced on the pristine baseline):
+4ce1eae8f4df9bcf6886ecae75975629c8efd5e11064ca28dde14172a9ac78a8  crates/qbind-consensus/src/basic_hotstuff_engine.rs
+0d32c153b8ce2e35f5003b3be155bc84936db21e606beb183f45b005364e1744  crates/qbind-consensus/src/hotstuff_state_engine.rs
+149957ced9b72fa823207405df33db8a01a082f1183c427856550e59fdab793f  crates/qbind-consensus/src/lib.rs
+eaaecdc173df33fdf13a8267e7504f18fab58e7adffc11e2e9f3956165eb2941  crates/qbind-consensus/tests/run_422_safety_decision_observer_spike_tests.rs
+
+## Patch SHA-256:
+6e6654d8d9ef95eee970ae90501a7e56b46afa95209ed099229d6b47537f510f  run_422_safety_decision_observer_spike.patch

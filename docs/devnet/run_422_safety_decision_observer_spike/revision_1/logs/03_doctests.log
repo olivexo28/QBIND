@@ -1,0 +1,36 @@
+## NEWLY EXECUTED 2026-10-17T07:58:34Z — doctests (compile-fail escape + valid-use controls) for qbind-consensus.
+$ cargo test -p qbind-consensus --doc
+    Finished `test` profile [unoptimized] target(s) in 0.03s
+   Doc-tests qbind_consensus
+
+running 27 tests
+test crates/qbind-consensus/src/basic_hotstuff_engine.rs - basic_hotstuff_engine::BasicHotStuffEngine<BlockIdT>::transition_to_epoch (line 1226) ... ignored
+test crates/qbind-consensus/src/basic_hotstuff_engine.rs - basic_hotstuff_engine::SafetyDecisionObserver (line 318) - compile fail ... ok
+test crates/qbind-consensus/src/driver.rs - driver::ConsensusEngineDriver (line 159) ... ignored
+test crates/qbind-consensus/src/driver.rs - driver::HotStuffDriver<E,BlockIdT>::for_tests_permissive_validators (line 467) ... ignored
+test crates/qbind-consensus/src/driver.rs - driver::HotStuffDriver<E,BlockIdT>::is_strict_mode (line 339) ... ignored
+test crates/qbind-consensus/src/driver.rs - driver::HotStuffDriver<E,BlockIdT>::new_strict (line 297) ... ignored
+test crates/qbind-consensus/src/governed_key_registry.rs - governed_key_registry::GovernedValidatorKeyRegistry (line 67) ... ignored
+test crates/qbind-consensus/src/key_rotation.rs - key_rotation::KeyRotationEvent (line 104) ... ignored
+test crates/qbind-consensus/src/key_rotation.rs - key_rotation::KeyRotationRegistry (line 402) ... ignored
+test crates/qbind-consensus/src/basic_hotstuff_engine.rs - basic_hotstuff_engine::SafetyDecisionObserver (line 277) - compile fail ... ok
+test crates/qbind-consensus/src/multi_sim.rs - multi_sim (line 9) - compile ... ok
+test crates/qbind-consensus/src/basic_hotstuff_engine.rs - basic_hotstuff_engine::SafetyDecisionObserver (line 338) ... ok
+test crates/qbind-consensus/src/sim.rs - sim (line 9) ... ignored
+test crates/qbind-consensus/src/slashing/mod.rs - slashing (line 27) ... ignored
+test crates/qbind-consensus/src/slashing/mod.rs - slashing::PenaltyEngineConfig::from_governance_schedule (line 2278) ... ignored
+test crates/qbind-consensus/src/validator_set.rs - validator_set::EpochState (line 580) ... ignored
+test crates/qbind-consensus/src/validator_set.rs - validator_set::EpochState::validate_with_governance (line 737) ... ignored
+test crates/qbind-consensus/src/validator_set.rs - validator_set::StakeFilteringEpochStateProvider (line 1129) ... ignored
+test crates/qbind-consensus/src/validator_set.rs - validator_set::StaticEpochStateProvider (line 1003) ... ignored
+test crates/qbind-consensus/src/validator_set.rs - validator_set::build_validator_set_with_stake_and_jail_filter (line 278) ... ignored
+test crates/qbind-consensus/src/validator_set.rs - validator_set::build_validator_set_with_stake_filter (line 140) ... ignored
+test crates/qbind-consensus/src/verify.rs - verify::ensure_qc_suite_matches_epoch (line 105) ... ignored
+test crates/qbind-consensus/src/verify_job.rs - verify_job (line 17) ... ignored
+test crates/qbind-consensus/src/vote_accumulator.rs - vote_accumulator::VoteAccumulator (line 181) ... ignored
+test crates/qbind-consensus/src/basic_hotstuff_engine.rs - basic_hotstuff_engine::SafetyDecisionObserver (line 293) ... ok
+test crates/qbind-consensus/src/pacemaker.rs - pacemaker (line 30) ... ok
+test crates/qbind-consensus/src/pacemaker.rs - pacemaker (line 48) ... ok
+
+test result: ok. 7 passed; 0 failed; 20 ignored; 0 measured; 0 filtered out; finished in 0.14s
+
