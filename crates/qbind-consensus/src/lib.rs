@@ -60,11 +60,11 @@ pub mod vote_accumulator;
 
 pub use adversarial_multi_sim::{AdversarialMultiNodeSim, InFlightMessage, PartitionConfig};
 pub use basic_hotstuff_engine::{
-    BasicHotStuffEngine, ConsensusProgressRecorder, GatedSelfVoteRefusal,
+    BasicHotStuffEngine, ConsensusProgressRecorder, DecidedVote, GatedSelfVoteRefusal,
     GatedVerifiedProposalError, NoopConsensusProgressRecorder, NoopValidatorEquivocationRecorder,
-    NoopValidatorVoteRecorder, NoopViewDurationRecorder, PendingReconfigIntentError,
-    SafetyAncestorView, SafetyDecisionGate, SafetyDecisionObserver, SafetyDecisionView,
-    SafetyGateRefusal, ValidatorEquivocationRecorder, ValidatorVoteRecorder,
+    NoopValidatorVoteRecorder, NoopViewDurationRecorder, OwningSafetyDecisionGate,
+    PendingReconfigIntentError, SafetyAncestorView, SafetyDecisionGate, SafetyDecisionObserver,
+    SafetyDecisionView, SafetyGateRefusal, ValidatorEquivocationRecorder, ValidatorVoteRecorder,
     VerifiedProposalIngestError, ViewDurationRecorder,
 };
 pub use block_state::BlockNode;
