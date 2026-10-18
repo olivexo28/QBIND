@@ -1461,6 +1461,32 @@ impl SafetyRecordOwner {
         // `_meta_scratch` drops here, releasing the metadata-read charge.
     }
 
+    /// Borrowed-proof provenance precheck shared by the public capture wrapper and
+    /// the owner-controlled route (no consumption, no domain acquisition): refuse a
+    /// recovery-required backend, a foreign/uncharged incarnation, a foreign pinned
+    /// context, and a `BootstrapNoLock` proof (left explicitly unresolved). On
+    /// success it returns the retained generation identity used under the guard.
+    fn capture_precheck(
+        &self,
+        proof: &ValidatedRecord,
+    ) -> Result<super::prepared::GenerationIdentity, super::prepared::CaptureRefusal> {
+        use super::prepared::CaptureRefusal;
+        if self.backend.recovery_required() {
+            return Err(CaptureRefusal::RecoveryRequired);
+        }
+        let incarnation = self.backend.incarnation();
+        // Foreign incarnation OR standalone/uncharged (None) proof — both refused.
+        if proof.recovery_backend_incarnation() != Some(incarnation) {
+            return Err(CaptureRefusal::ForeignOrUncharged);
+        }
+        if proof.origin_context_digest() != &context_digest(self.pinned()) {
+            return Err(CaptureRefusal::ForeignContext);
+        }
+        // BootstrapNoLock — left explicitly unresolved (Locked-only).
+        super::prepared::GenerationIdentity::from_retained(proof.retained())
+            .ok_or(CaptureRefusal::BootstrapUnresolved)
+    }
+
     /// **§ 13.6 prepared-decision L0 capture** — retain, for a prepared signing
     /// decision, the **generation only** of a read-validated proof plus the
     /// provenance required to rebind it, charged under the terms the aggregate
@@ -1483,32 +1509,51 @@ impl SafetyRecordOwner {
         expected_authoritative_revision: u64,
     ) -> Result<super::prepared::PreparedPin, (ValidatedRecord, super::prepared::CaptureRefusal)>
     {
-        use super::prepared::CaptureRefusal;
-
         // --- provenance gate on the borrowed proof (no consumption) ---
-        if self.backend.recovery_required() {
-            return Err((proof, CaptureRefusal::RecoveryRequired));
-        }
-        let incarnation = self.backend.incarnation();
-        // Foreign incarnation OR standalone/uncharged (None) proof — both refused.
-        if proof.recovery_backend_incarnation() != Some(incarnation) {
-            return Err((proof, CaptureRefusal::ForeignOrUncharged));
-        }
-        if proof.origin_context_digest() != &context_digest(self.pinned()) {
-            return Err((proof, CaptureRefusal::ForeignContext));
-        }
-        let identity = match super::prepared::GenerationIdentity::from_retained(proof.retained()) {
-            Some(id) => id,
-            // BootstrapNoLock — left explicitly unresolved (Locked-only).
-            None => return Err((proof, CaptureRefusal::BootstrapUnresolved)),
+        let identity = match self.capture_precheck(&proof) {
+            Ok(id) => id,
+            Err(e) => return Err((proof, e)),
         };
 
         // --- linearize with publication under the serialization domain ---
+        // A single acquisition of the shared serialization domain; the held-guard
+        // tail is shared verbatim with the owner-controlled route through the
+        // private held-guard helper below (no re-acquisition, no duplicated capture
+        // body, no public raw-guard API).
         let mut guard = self.backend.lock_domain();
+        self.capture_prepared_decision_locked(
+            &mut guard,
+            proof,
+            expected_authoritative_revision,
+            identity,
+        )
+    }
+
+    /// Held-guard capture tail shared by the public
+    /// [`Self::capture_prepared_decision`] wrapper and the owner-controlled
+    /// `decide_and_capture_owned` route. The caller has already run the
+    /// borrowed-proof provenance precheck and acquired the one serialization-domain
+    /// `guard`; this performs the under-lock recovery recheck, authoritative-revision
+    /// fence, lazy registry allocation, slot/serial checks, all admissions,
+    /// generation sharing, the generation-only proof conversion and
+    /// destruction-before-release ordering, and returns the owning [`PreparedPin`].
+    /// It only **borrows** the guard (never re-acquires or releases the domain) so
+    /// the owner route can keep holding it across the engine decision; the borrow
+    /// ends when this returns, before the owner releases the guard.
+    fn capture_prepared_decision_locked(
+        &self,
+        guard: &mut std::sync::MutexGuard<'_, super::backend::SerializationDomain>,
+        proof: ValidatedRecord,
+        expected_authoritative_revision: u64,
+        identity: super::prepared::GenerationIdentity,
+    ) -> Result<super::prepared::PreparedPin, (ValidatedRecord, super::prepared::CaptureRefusal)>
+    {
+        use super::prepared::CaptureRefusal;
+        let incarnation = self.backend.incarnation();
         if self.backend.recovery_required() {
             return Err((proof, CaptureRefusal::RecoveryRequired));
         }
-        let current = match self.authoritative_revision_locked(&guard) {
+        let current = match self.authoritative_revision_locked(&*guard) {
             Ok(rev) => rev,
             Err(e) => return Err((proof, CaptureRefusal::MetadataUnavailable(e))),
         };
@@ -1546,7 +1591,7 @@ impl SafetyRecordOwner {
         // lifetime — including zero-entry periods — releasing it only when the
         // allocation is destroyed (its last owner, the backend slot plus any
         // outstanding pin, drops). A reused registry is NOT re-charged.
-        let registry_arc = match self.backend.prepared_registry_installed(&guard) {
+        let registry_arc = match self.backend.prepared_registry_installed(&*guard) {
             Some(existing) => existing,
             None => {
                 // On insufficient admission, return the proof intact WITHOUT
@@ -1563,7 +1608,7 @@ impl SafetyRecordOwner {
                     incarnation,
                     registry_res,
                 )));
-                self.backend.install_prepared_registry(&mut guard, fresh)
+                self.backend.install_prepared_registry(&mut *guard, fresh)
             }
         };
         let mut reg = registry_arc.lock().expect("prepared registry poisoned");
@@ -1742,8 +1787,105 @@ impl SafetyRecordOwner {
         };
 
         drop(reg);
-        drop(guard);
+        // NOTE: the serialization-domain `guard` is only borrowed here; the caller
+        // (public wrapper or owner route) owns and releases it after this returns.
         Ok(super::prepared::PreparedPin::new(registry_arc, handle, pin_res))
+    }
+
+    /// **§ 13.6 owner-controlled decide-and-capture** (isolated, opt-in, no
+    /// production caller). Acquire the one serialization domain, invoke the
+    /// existing legacy/logical owning engine entrypoint under it, and — at the real
+    /// L0 safe-voting decision and strictly before the dependent self-vote — run the
+    /// correspondence/projection checks, compute the streaming proposal commitment
+    /// and bounded ancestry binding, admit the additional charges, and consume the
+    /// proof through the shared held-guard capture helper. The engine then raises L1
+    /// via its own self-vote and seals a closed [`qbind_consensus::DecidedVote`].
+    ///
+    /// Ownership is explicit: a successful envelope moves the payload exactly once;
+    /// every pre-consumption refusal returns the intact proof and a typed reason;
+    /// the engine's defensive post-consumption pairing branch surfaces as an
+    /// invariant violation carrying no fabricated proof. **Non-authorizing**: it
+    /// mints no authorization, freshness, durability acknowledgement, or verified
+    /// status; the commitment is volatile decision association only.
+    pub fn decide_and_capture_owned(
+        &self,
+        engine: &mut qbind_consensus::BasicHotStuffEngine<[u8; 32]>,
+        from: qbind_consensus::ValidatorId,
+        proposal: &qbind_wire::consensus::BlockProposal,
+        limits: &super::decision_capture::PreparedDecisionInputLimits,
+        expected_authoritative_revision: u64,
+        proof: ValidatedRecord,
+    ) -> super::decision_capture::OwnedDecisionOutcome {
+        use super::decision_capture::{OwnedCaptureRefusal, OwnedDecisionOutcome};
+
+        // Borrowed-proof provenance precheck BEFORE acquiring the domain or invoking
+        // the engine (no consumption).
+        let identity = match self.capture_precheck(&proof) {
+            Ok(id) => id,
+            Err(reason) => {
+                return OwnedDecisionOutcome::Refused {
+                    proof,
+                    reason: OwnedCaptureRefusal::Precheck(reason),
+                };
+            }
+        };
+
+        // One domain acquisition, held across the engine decision and supplied to
+        // the private gate.
+        let mut guard = self.backend.lock_domain();
+        let mut gate = OwningCaptureGate {
+            owner: self,
+            guard: &mut guard,
+            proof: Some(proof),
+            limits,
+            expected_rev: expected_authoritative_revision,
+            proposer: from,
+            proposal,
+            identity,
+            reason: None,
+        };
+
+        let result = engine.on_proposal_event_gated_owning(from, proposal, &mut gate);
+
+        // End the gate's borrow of the guard BEFORE releasing the guard: move the
+        // retained proof/reason out and drop the gate (and its guard borrow) first.
+        let OwningCaptureGate {
+            proof: returned_proof,
+            reason,
+            ..
+        } = gate;
+        drop(guard);
+
+        match result {
+            // Success: the engine paired its own self-vote with our payload.
+            Ok(Some(decided)) => OwnedDecisionOutcome::Decided(decided),
+            Ok(None) => match returned_proof {
+                // The gate was never consulted (ordinary pre-decision engine
+                // rejection), so the proof is still intact in the gate.
+                Some(proof) => OwnedDecisionOutcome::Refused {
+                    proof,
+                    reason: reason.unwrap_or(OwnedCaptureRefusal::OrdinaryEngineRejection),
+                },
+                // The proof was consumed but the engine emitted no envelope: the
+                // defensive post-consumption pairing invariant. No proof to return.
+                None => OwnedDecisionOutcome::InvariantViolation,
+            },
+            // Our gate declined: recover the restored proof and its typed reason.
+            Err(qbind_consensus::GatedSelfVoteRefusal::GateRejected(_)) => {
+                let proof = returned_proof.expect("our gate refusal restores the proof");
+                let reason = reason.expect("our gate refusal records a typed reason");
+                OwnedDecisionOutcome::Refused { proof, reason }
+            }
+            // The required decision-view candidate was absent: our gate was never
+            // consulted, so the proof is intact.
+            Err(qbind_consensus::GatedSelfVoteRefusal::MissingCandidate) => {
+                let proof = returned_proof.expect("missing-candidate never consults our gate");
+                OwnedDecisionOutcome::Refused {
+                    proof,
+                    reason: OwnedCaptureRefusal::MissingCandidate,
+                }
+            }
+        }
     }
 
     /// Release a captured prepared entry explicitly (normal completion). Dropping
@@ -2266,4 +2408,272 @@ pub fn make_locked_qc(
         predecessor_ref: None,
         evidence,
     })
+}
+// ---------------------------------------------------------------------------
+// §13.6 owner-controlled capture gate (isolated, no production caller)
+// ---------------------------------------------------------------------------
+
+/// The private held-guard gate the owner route supplies to the existing owning
+/// engine entrypoint. It retains the unconsumed proof (normally in an `Option`)
+/// and a separate typed refusal reason, produces the opaque
+/// [`super::decision_capture::OwningCapturePayload`] on the allow path, and
+/// restores the intact proof on any pre-consumption refusal.
+///
+/// The guard is borrowed with a lifetime (`'o`) that is **separate** from the
+/// underlying `MutexGuard`'s own lifetime (`'g`): the mutable borrow ends when
+/// the gate is dropped, strictly before the owner releases the guard. This
+/// deliberately avoids the incorrect `&'g mut MutexGuard<'g, …>` design.
+struct OwningCaptureGate<'o, 'g> {
+    owner: &'o SafetyRecordOwner,
+    guard: &'o mut std::sync::MutexGuard<'g, super::backend::SerializationDomain>,
+    /// The unconsumed proof, restored here on any capture refusal.
+    proof: Option<ValidatedRecord>,
+    limits: &'o super::decision_capture::PreparedDecisionInputLimits,
+    expected_rev: u64,
+    proposer: qbind_consensus::ValidatorId,
+    proposal: &'o qbind_wire::consensus::BlockProposal,
+    identity: super::prepared::GenerationIdentity,
+    /// A separate typed refusal reason (a `SafetyGateRefusal` is only a unit
+    /// marker and cannot carry detail).
+    reason: Option<super::decision_capture::OwnedCaptureRefusal>,
+}
+
+impl OwningCaptureGate<'_, '_> {
+    /// Run every pre-consumption check on the borrowed proof, then consume it
+    /// through the shared held-guard capture helper. On any refusal the intact
+    /// proof is returned alongside a typed reason (no consumption has occurred).
+    fn try_capture(
+        &mut self,
+        decision: &qbind_consensus::SafetyDecisionView<'_, [u8; 32]>,
+        proof: ValidatedRecord,
+    ) -> Result<
+        super::decision_capture::OwningCapturePayload,
+        (ValidatedRecord, super::decision_capture::OwnedCaptureRefusal),
+    > {
+        use super::decision_capture::{
+            bind_ancestry, commit_proposal, derive_block_id_local, envelope_extra_charge,
+            scratch_charge, CorrespondenceRefusal, DecisionMetadata, EntrypointKind, MetaBranch,
+            OwnedCaptureRefusal, OwningCapturePayload, ProjectionMismatch,
+        };
+        use super::prepared::CaptureRefusal;
+        use qbind_consensus::SafetyBranch;
+
+        let owner = self.owner;
+        let limits = self.limits;
+        let proposal = self.proposal;
+        let proposer = self.proposer;
+        let identity = self.identity;
+
+        // --- correspondence: require a Locked decision (refuse engine NoLock) ---
+        let branch = decision.branch();
+        let (lock_id, lock_view) = match (decision.locked_block_id(), decision.locked_view()) {
+            (Some(id), Some(view)) if branch != SafetyBranch::NoLock => (*id, view),
+            _ => {
+                return Err((
+                    proof,
+                    OwnedCaptureRefusal::Correspondence(CorrespondenceRefusal::EngineNoLock),
+                ));
+            }
+        };
+        // engine L0 lock ↔ sealed proof's retained lock restriction (distinct from
+        // the proof-to-current-publication revision fence enforced in the helper).
+        if lock_id != identity.lock_block_id {
+            return Err((
+                proof,
+                OwnedCaptureRefusal::Correspondence(CorrespondenceRefusal::LockBlockMismatch),
+            ));
+        }
+        if lock_view != identity.lock_view {
+            return Err((
+                proof,
+                OwnedCaptureRefusal::Correspondence(CorrespondenceRefusal::LockViewMismatch),
+            ));
+        }
+
+        // --- proposal projection checks against the actual decision view ---
+        if decision.from() != proposer {
+            return Err((
+                proof,
+                OwnedCaptureRefusal::Projection(ProjectionMismatch::Proposer),
+            ));
+        }
+        let view = proposal.header.height;
+        if decision.candidate_view() != view {
+            return Err((
+                proof,
+                OwnedCaptureRefusal::Projection(ProjectionMismatch::CandidateView),
+            ));
+        }
+        let parent_field = proposal.header.parent_block_id;
+        match decision.candidate_parent() {
+            None => {
+                // Engine's exact no-parent convention: parent sentinel [0xFF; 32].
+                if parent_field != [0xFF; 32] {
+                    return Err((
+                        proof,
+                        OwnedCaptureRefusal::Projection(ProjectionMismatch::Parent),
+                    ));
+                }
+            }
+            Some(p) => {
+                if parent_field == [0xFF; 32] || *p != parent_field {
+                    return Err((
+                        proof,
+                        OwnedCaptureRefusal::Projection(ProjectionMismatch::Parent),
+                    ));
+                }
+            }
+        }
+        // Node-local candidate-id reproduction, proven at parity against the
+        // engine's own decision view (not a redesign of block identity).
+        let reproduced = derive_block_id_local(proposer.as_u64(), view, &parent_field);
+        if &reproduced != decision.candidate_id() {
+            return Err((
+                proof,
+                OwnedCaptureRefusal::Projection(ProjectionMismatch::CandidateId),
+            ));
+        }
+        // Justification: wire QC projects to the legacy logical justification.
+        match &proposal.qc {
+            Some(qc) => {
+                match decision.candidate_justify_block_id() {
+                    Some(jid) if *jid == qc.block_id => {}
+                    _ => {
+                        return Err((
+                            proof,
+                            OwnedCaptureRefusal::Projection(ProjectionMismatch::JustifyBlockId),
+                        ));
+                    }
+                }
+                match decision.candidate_justify_view() {
+                    Some(jv) if jv == qc.height => {}
+                    _ => {
+                        return Err((
+                            proof,
+                            OwnedCaptureRefusal::Projection(ProjectionMismatch::JustifyView),
+                        ));
+                    }
+                }
+            }
+            None => {
+                if decision.candidate_justify_block_id().is_some()
+                    || decision.candidate_justify_view().is_some()
+                {
+                    return Err((
+                        proof,
+                        OwnedCaptureRefusal::Projection(ProjectionMismatch::JustifyPresence),
+                    ));
+                }
+            }
+        }
+
+        // --- fixed decision metadata (separate from the commitment oracle) ---
+        let meta_branch = match branch {
+            SafetyBranch::ViewSufficiency => MetaBranch::ViewSufficiency,
+            SafetyBranch::Ancestry => MetaBranch::Ancestry,
+            SafetyBranch::NoLock => unreachable!("engine NoLock refused above"),
+        };
+        let entrypoint = if decision.is_verified_entrypoint() {
+            EntrypointKind::Verified
+        } else {
+            EntrypointKind::LegacyLogical
+        };
+        let meta = DecisionMetadata::new(
+            proposer.as_u64(),
+            meta_branch,
+            entrypoint,
+            decision.origin_view(),
+            *decision.candidate_id(),
+            decision.candidate_view(),
+        );
+
+        // --- admit the transient hashing/traversal scratch (conversion overlap
+        // with the still-live proof), compute the streaming commitment and the
+        // bounded ancestry binding, then release the scratch before consumption ---
+        let scratch = match owner.backend.accounting().reserve(scratch_charge()) {
+            Ok(r) => r,
+            Err(e) => return Err((proof, OwnedCaptureRefusal::Capture(CaptureRefusal::Admission(e)))),
+        };
+        let proposal_binding = match commit_proposal(proposal, limits) {
+            Ok(c) => c,
+            Err(e) => {
+                drop(scratch);
+                return Err((proof, OwnedCaptureRefusal::InputBound(e)));
+            }
+        };
+        let ancestry = match bind_ancestry(decision, limits) {
+            Ok(a) => a,
+            Err(e) => {
+                drop(scratch);
+                return Err((proof, OwnedCaptureRefusal::Ancestry(e)));
+            }
+        };
+        drop(scratch);
+
+        // --- admit the additional envelope charge BEFORE consuming the proof ---
+        let covering_charge = match envelope_extra_charge() {
+            Some(c) => c,
+            None => {
+                return Err((
+                    proof,
+                    OwnedCaptureRefusal::Capture(CaptureRefusal::Admission(
+                        super::error::SafetyStoreError::ArithmeticOverflow(
+                            super::error::ArithmeticOverflowSite::SizeSum,
+                        ),
+                    )),
+                ));
+            }
+        };
+        let covering = match owner.backend.accounting().reserve(covering_charge) {
+            Ok(r) => r,
+            Err(e) => return Err((proof, OwnedCaptureRefusal::Capture(CaptureRefusal::Admission(e)))),
+        };
+
+        // --- consume the proof through the shared held-guard capture helper ---
+        let pin = match owner.capture_prepared_decision_locked(
+            &mut *self.guard,
+            proof,
+            self.expected_rev,
+            identity,
+        ) {
+            Ok(p) => p,
+            Err((proof, cr)) => {
+                drop(covering);
+                return Err((proof, OwnedCaptureRefusal::Capture(cr)));
+            }
+        };
+
+        Ok(OwningCapturePayload::new(
+            proposal_binding,
+            ancestry,
+            meta,
+            pin,
+            covering,
+        ))
+    }
+}
+
+impl qbind_consensus::OwningSafetyDecisionGate<[u8; 32], super::decision_capture::OwningCapturePayload>
+    for OwningCaptureGate<'_, '_>
+{
+    fn evaluate_owning(
+        &mut self,
+        decision: &qbind_consensus::SafetyDecisionView<'_, [u8; 32]>,
+    ) -> Result<super::decision_capture::OwningCapturePayload, qbind_consensus::SafetyGateRefusal>
+    {
+        // The gate is consulted exactly once per `Safe(_)` decision with the proof
+        // present. Take it; on refusal restore it and record the typed reason.
+        let proof = self
+            .proof
+            .take()
+            .expect("owning gate consulted once with the proof present");
+        match self.try_capture(decision, proof) {
+            Ok(payload) => Ok(payload),
+            Err((proof, reason)) => {
+                self.proof = Some(proof);
+                self.reason = Some(reason);
+                Err(qbind_consensus::SafetyGateRefusal)
+            }
+        }
+    }
 }

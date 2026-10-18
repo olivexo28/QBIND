@@ -396,6 +396,19 @@ pub enum InjectFault {
     FailBackendGet = 5,
 }
 
+/// Source/test-only outcome of a non-blocking attempt on the serialization
+/// domain, distinguishing contention from poisoning for serialization evidence.
+#[cfg(any(test, feature = "test-utils"))]
+#[derive(Debug)]
+pub enum TryLockDomainOutcome<'a> {
+    /// The domain was acquired (no contention).
+    Acquired(MutexGuard<'a, SerializationDomain>),
+    /// The domain is currently held by another acquirer (contention).
+    WouldBlock,
+    /// The domain mutex is poisoned (a prior holder panicked).
+    Poisoned,
+}
+
 /// A shared serialization domain. The owned guard proves the single-writer
 /// boundary is held for a check-then-write sequence. The fields are private
 /// so this type is **not** publicly constructible: a caller cannot fabricate a
@@ -680,6 +693,22 @@ impl SafetyBackend {
         self.domain
             .lock()
             .expect("safety serialization domain poisoned")
+    }
+
+    /// Source/test-only: a **non-blocking** attempt on the same serialization
+    /// domain, so a serialization regression can observe `WouldBlock` while the
+    /// owner-controlled route is paused holding the domain guard — and
+    /// distinguish contention (`WouldBlock`) from poisoning. It takes the real
+    /// shared `Mutex`, never a separate lock, so it is a faithful coordinated
+    /// attempt against the one domain. Gated behind `test`/`test-utils`; it adds
+    /// no production behaviour and performs no timing sleeps.
+    #[cfg(any(test, feature = "test-utils"))]
+    pub fn try_lock_domain_for_test(&self) -> TryLockDomainOutcome<'_> {
+        match self.domain.try_lock() {
+            Ok(guard) => TryLockDomainOutcome::Acquired(guard),
+            Err(std::sync::TryLockError::WouldBlock) => TryLockDomainOutcome::WouldBlock,
+            Err(std::sync::TryLockError::Poisoned(_)) => TryLockDomainOutcome::Poisoned,
+        }
     }
 
     /// The installed shared prepared-decision L0 registry `Arc`, or `None` if no
