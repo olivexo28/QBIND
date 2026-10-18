@@ -482,6 +482,116 @@ where
     ) -> Result<(), SafetyGateRefusal>;
 }
 
+/// Run 422 §13.6 — isolated, opt-in **owning** decision-to-vote handoff gate
+/// (additive, NOT wired to any production caller).
+///
+/// This is the owning analogue of [`SafetyDecisionGate`]. Where the plain gate
+/// may only **veto** the self-vote (`Ok(())` / `Err`), an owning gate that
+/// allows the self-vote additionally **produces an opaque payload `P`** which
+/// the engine transports — unexamined — across the self-vote into a closed
+/// [`DecidedVote`] envelope. The engine never names, inspects, extracts, or
+/// replaces `P`; it only moves and later drops it. This preserves the same
+/// trait-inversion discipline as [`SafetyDecisionObserver`]/[`SafetyDecisionGate`]
+/// (no `qbind-consensus` → node dependency) while letting a node-side gate hand
+/// an owned reservation/pin payload back alongside the resulting `Vote`.
+///
+/// The payload is produced **inside** the gate call, at the real safe-voting
+/// decision and strictly **before** the dependent self-vote; a refusal
+/// (`Err(SafetyGateRefusal)`) yields no payload, no self-vote, no lock
+/// transition, and no emitted `Vote`, identically to the plain gated route.
+///
+/// Ownership/association only: an allowed payload establishes same-invocation
+/// association between the returned `Vote` and whatever the gate chose to own.
+/// It establishes **no** authorization, durable correspondence, verification,
+/// or permission to sign.
+pub trait OwningSafetyDecisionGate<BlockIdT, P>
+where
+    BlockIdT: Eq + std::hash::Hash + Clone,
+{
+    /// Evaluate the real safe-voting decision and, on allow, produce the opaque
+    /// owning payload `P` transported into the [`DecidedVote`]. Called exactly
+    /// once per `Safe(_)` decision, strictly before the self-vote. `Err(_)`
+    /// refuses the self-vote with no payload, self-vote, lock transition, or
+    /// emitted `Vote`. The gate must use no panic for a normal refusal.
+    fn evaluate_owning(
+        &mut self,
+        decision: &SafetyDecisionView<'_, BlockIdT>,
+    ) -> Result<P, SafetyGateRefusal>;
+}
+
+/// Run 422 §13.6 — closed envelope pairing the engine's own emitted `Vote` with
+/// an opaque owning payload `P` produced by an [`OwningSafetyDecisionGate`].
+///
+/// The envelope is deliberately **closed**:
+/// * fields are private and there is **no** `Clone`/`Copy`;
+/// * there is **no** payload extraction, replacement, or mutable access, and no
+///   `into_parts()`; only the immutable [`DecidedVote::vote`] inspector exists;
+/// * it is constructed **only** on the engine emission path
+///   ([`BasicHotStuffEngine::on_proposal_event_gated_owning`]) via a
+///   module-private constructor — a downstream consumer cannot fabricate one or
+///   swap in a replacement `Vote`.
+///
+/// A consumer may therefore inspect the associated `Vote` and **abandon** the
+/// envelope (drop it), but cannot separate the `Vote` from its payload. This is
+/// one-use ownership transport, not replay prevention.
+///
+/// **Drop order.** `vote` is declared before `payload`, and Rust drops struct
+/// fields in declaration order, so the `Vote` and (transitively) all
+/// payload-covered data are destroyed **before** any reservation the payload
+/// declares last is released. The node-side payload relies on this to release
+/// its trailing reservation only after the data it covers is gone.
+pub struct DecidedVote<P> {
+    /// The engine's own emitted self-vote. Declared FIRST so it drops before the
+    /// payload. Exposed read-only via [`DecidedVote::vote`].
+    vote: qbind_wire::consensus::Vote,
+    /// Opaque owning payload produced by the gate. Declared LAST so it (and any
+    /// reservation it declares last) is dropped after `vote`. Never inspected,
+    /// extracted, or replaced by the engine or this type.
+    ///
+    /// `#[allow(dead_code)]`: the engine holds the payload purely to own it and
+    /// drop it (RAII); it never reads it. Dropping the envelope destroys `vote`
+    /// then this payload.
+    #[allow(dead_code)]
+    payload: P,
+}
+
+impl<P> DecidedVote<P> {
+    /// Module-private constructor: only the engine emission path can build a
+    /// `DecidedVote`, binding the engine's own `Vote` to the gate's payload.
+    fn new(vote: qbind_wire::consensus::Vote, payload: P) -> Self {
+        Self { vote, payload }
+    }
+
+    /// Immutable inspection of the associated `Vote`. This is the **only**
+    /// accessor; there is no way to take, replace, clone, or mutate the `Vote`
+    /// or reach the payload.
+    pub fn vote(&self) -> &qbind_wire::consensus::Vote {
+        &self.vote
+    }
+}
+
+/// Internal adapter: presents an [`OwningSafetyDecisionGate`] as a plain
+/// [`SafetyDecisionGate`] so the owning route reuses the landed
+/// [`DecisionHook::Gate`] body verbatim. On allow it stashes the produced
+/// payload for the entrypoint to pair with the emitted `Vote`; on refusal it
+/// stashes nothing (the inner `Err` propagates unchanged).
+struct OwningGateAdapter<'g, P> {
+    gate: &'g mut dyn OwningSafetyDecisionGate<[u8; 32], P>,
+    captured: Option<P>,
+}
+
+impl<P> SafetyDecisionGate<[u8; 32]> for OwningGateAdapter<'_, P> {
+    fn evaluate(
+        &mut self,
+        decision: &SafetyDecisionView<'_, [u8; 32]>,
+    ) -> Result<(), SafetyGateRefusal> {
+        // Allow => capture the opaque payload; refusal => propagate unchanged,
+        // leaving `captured` as `None`.
+        self.captured = Some(self.gate.evaluate_owning(decision)?);
+        Ok(())
+    }
+}
+
 /// Internal: which fallible/observing hook (if any) is driven at the real
 /// safety decision inside [`BasicHotStuffEngine::ingest_proposal`]. Replaces the
 /// former `observer: Option<&mut dyn SafetyDecisionObserver>` parameter so the
@@ -2133,6 +2243,83 @@ impl BasicHotStuffEngine<[u8; 32]> {
             return Err(refusal);
         }
         Ok(action)
+    }
+
+    /// Run 422 §13.6 — isolated, opt-in **owning** gated entrypoint (additive,
+    /// NOT wired). Identical control flow to [`Self::on_proposal_event_gated`],
+    /// except the gate is an [`OwningSafetyDecisionGate`] that, on allow,
+    /// produces an opaque payload `P`. On a successful self-vote the engine
+    /// moves its own emitted `Vote` together with that payload into a closed
+    /// [`DecidedVote`] and returns it.
+    ///
+    /// The payload is produced **inside** the gate call, strictly before the
+    /// self-vote; the engine never inspects, extracts, or replaces it. Returns:
+    /// * `Ok(Some(DecidedVote))` when the gate allows — the carried `Vote` is
+    ///   byte-identical to the corresponding ungated/gated route's emitted vote;
+    /// * `Ok(None)` for an **ordinary** rejection reached before the decision
+    ///   (the gate is never consulted, so no payload is produced); or
+    /// * `Err(GatedSelfVoteRefusal)` when the gate declines or the required
+    ///   decision-view candidate is absent. On refusal no payload is produced,
+    ///   no self-vote or lock transition occurs, and `voted_in_view` is left
+    ///   unset so a later admissible proposal for the same view can still vote.
+    ///
+    /// This reuses the landed [`Self::on_proposal_event_gated`] body via an
+    /// internal adapter; it introduces no new multiplicity, registry slot, or
+    /// accounting boundary of its own. Any ownership the payload carries (e.g. a
+    /// captured pin/reservation on the node side) is entirely the gate's; the
+    /// engine establishes no authorization, durable correspondence, or signing
+    /// permission.
+    pub fn on_proposal_event_gated_owning<P>(
+        &mut self,
+        from: ValidatorId,
+        proposal: &qbind_wire::consensus::BlockProposal,
+        gate: &mut dyn OwningSafetyDecisionGate<[u8; 32], P>,
+    ) -> Result<Option<DecidedVote<P>>, GatedSelfVoteRefusal> {
+        let mut adapter = OwningGateAdapter {
+            gate,
+            captured: None,
+        };
+        let mut refusal: Option<GatedSelfVoteRefusal> = None;
+        let action = self.ingest_proposal(
+            from,
+            proposal,
+            None,
+            DecisionHook::Gate {
+                gate: &mut adapter,
+                refusal: &mut refusal,
+            },
+        );
+        if let Some(refusal) = refusal {
+            // A gate refusal never leaves a cast vote or a captured payload.
+            debug_assert!(action.is_none(), "refusal must not emit an action");
+            debug_assert!(
+                adapter.captured.is_none(),
+                "refusal must not capture a payload"
+            );
+            return Err(refusal);
+        }
+        match (action, adapter.captured) {
+            // Allow path: the gate produced a payload and the engine emitted its
+            // own self-vote. Bind them into the closed envelope.
+            (Some(ConsensusEngineAction::BroadcastVote(vote)), Some(payload)) => {
+                Ok(Some(DecidedVote::new(vote, payload)))
+            }
+            // Ordinary pre-decision rejection: the gate was never consulted, so
+            // there is neither a payload nor a vote.
+            (None, None) => Ok(None),
+            // Defensive: the allow path must pair a BroadcastVote with a
+            // captured payload. Any other combination is a logic error; drop any
+            // captured payload (releasing its reservations) rather than fabricate
+            // an unbacked association, and report no decided vote.
+            (_other, captured) => {
+                debug_assert!(
+                    false,
+                    "owning allow path must yield BroadcastVote paired with a payload"
+                );
+                drop(captured);
+                Ok(None)
+            }
+        }
     }
 
     /// Run 422 D7-C3F: verified embedded-QC ingestion entrypoint.

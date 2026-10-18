@@ -91,3 +91,13 @@ required-features = ["test-utils"]
 name = "m16_epoch_transition_hardening_tests"
 path = "tests/m16_epoch_transition_hardening_tests.rs"
 required-features = ["test-utils"]
+
+# RUN 422 §13.6 — isolated owning decision-to-vote handoff: the node-side
+# `HandoffPayload` (`PreparedPin` + trailing `Reservation`) captured in-gate and
+# transported through the consensus `DecidedVote<P>` envelope. Exercises the
+# `test-utils`-gated accounting observers (`accounting_current`,
+# `reserve_standing_for_test`, `backend_for_test`), so it is gated identically.
+[[test]]
+name = "run_422_owning_decision_vote_handoff_node_tests"
+path = "tests/run_422_owning_decision_vote_handoff_node_tests.rs"
+required-features = ["test-utils"]
