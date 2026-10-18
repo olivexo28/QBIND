@@ -535,6 +535,88 @@ where
 /// envelope (drop it), but cannot separate the `Vote` from its payload. This is
 /// one-use ownership transport, not replay prevention.
 ///
+/// # External API is closed (compile-fail controls)
+///
+/// The following examples are external-crate controls: each forbidden operation
+/// is a **compile error**, and the paired valid-use control compiles. They prove
+/// the closure from outside `qbind_consensus`, not from a privileged in-module
+/// test.
+///
+/// **Private construction** — there is no public constructor and the fields are
+/// private, so a downstream crate cannot fabricate an envelope (or swap in a
+/// replacement `Vote`):
+///
+/// ```compile_fail
+/// use qbind_consensus::DecidedVote;
+/// // ERROR: associated function `new` is private and the fields are private;
+/// // the only way to obtain a `DecidedVote` is the engine emission path.
+/// let _d: DecidedVote<u8> = DecidedVote::new(todo!(), 0u8);
+/// ```
+///
+/// **No `Clone`/`Copy` of the envelope** — the envelope itself cannot be
+/// duplicated (there is no `Clone`/`Copy` impl):
+///
+/// ```compile_fail
+/// use qbind_consensus::DecidedVote;
+/// fn f(d: DecidedVote<u8>) {
+///     // ERROR: `DecidedVote` does not implement `Clone` — the envelope and its
+///     // payload cannot be duplicated.
+///     let _dup = d.clone();
+/// }
+/// ```
+///
+/// **No mutable `Vote` access** — the only accessor hands out a shared reference,
+/// so the carried `Vote` cannot be mutated in place:
+///
+/// ```compile_fail
+/// use qbind_consensus::DecidedVote;
+/// fn f(d: DecidedVote<u8>) {
+///     // ERROR: `vote()` yields `&Vote`; the carried vote cannot be assigned
+///     // through a shared reference, and there is no `vote_mut`.
+///     d.vote().height = 9;
+/// }
+/// ```
+///
+/// **No payload / parts extraction** — the payload is private and there is no
+/// `into_parts`/`into_payload`, so the `Vote` can never be separated from it:
+///
+/// ```compile_fail
+/// use qbind_consensus::DecidedVote;
+/// fn f(d: DecidedVote<u8>) {
+///     // ERROR: field `payload` is private and there is no `into_parts()` to
+///     // split the envelope into its `Vote` and payload.
+///     let _p: u8 = d.payload;
+/// }
+/// ```
+///
+/// **Use after move** — abandoning (moving) the envelope consumes it; it is not
+/// `Copy`, so a later use does not compile:
+///
+/// ```compile_fail
+/// use qbind_consensus::DecidedVote;
+/// fn f(d: DecidedVote<u8>) {
+///     let _abandoned = d;        // move the envelope out
+///     let _again = d.vote();     // ERROR: use of moved value (`DecidedVote` is not `Copy`)
+/// }
+/// ```
+///
+/// **Valid-use control (this compiles):** the envelope may be inspected
+/// read-only and abandoned, and `vote().clone()` may produce a **detached plain
+/// `Vote`** — a copy of the carried vote that is no longer part of any envelope
+/// and carries no payload. Cloning the *vote* is not cloning the *envelope*:
+///
+/// ```
+/// use qbind_consensus::DecidedVote;
+/// fn f(d: DecidedVote<u8>) {
+///     // OK: read-only inspection of the carried vote.
+///     let _height = d.vote().height;
+///     // OK: a DETACHED plain `Vote` (not the envelope, not the payload).
+///     let _detached = d.vote().clone();
+///     // OK: abandon the envelope (drop destroys `vote` then `payload`).
+///     drop(d);
+/// }
+/// ```
+///
 /// **Drop order.** `vote` is declared before `payload`, and Rust drops struct
 /// fields in declaration order, so the `Vote` and (transitively) all
 /// payload-covered data are destroyed **before** any reservation the payload
@@ -563,8 +645,12 @@ impl<P> DecidedVote<P> {
     }
 
     /// Immutable inspection of the associated `Vote`. This is the **only**
-    /// accessor; there is no way to take, replace, clone, or mutate the `Vote`
-    /// or reach the payload.
+    /// accessor; there is no way to take, replace, or mutate the carried `Vote`
+    /// in place, nor to reach the payload. Because `Vote` is itself `Clone`,
+    /// `vote().clone()` **can** produce a detached plain `Vote` — a standalone
+    /// copy of the carried vote — but that clone is not part of this (or any)
+    /// envelope and carries no payload: cloning the `Vote` neither duplicates the
+    /// `DecidedVote` envelope nor its owning payload.
     pub fn vote(&self) -> &qbind_wire::consensus::Vote {
         &self.vote
     }
