@@ -24,7 +24,9 @@ use qbind_consensus::ids::ValidatorId;
 use qbind_consensus::validator_set::ValidatorSetEntry;
 use qbind_consensus::{BasicHotStuffEngine, ConsensusEngineAction, ConsensusValidatorSet};
 use qbind_node::pqc_trust_bundle::TrustBundleEnvironment;
-use qbind_node::safety_record_store::backend::{SafetyBackend, SafetyBackendPolicy, TryLockDomainOutcome};
+use qbind_node::safety_record_store::backend::{
+    SafetyBackend, SafetyBackendPolicy, TryLockDomainOutcome,
+};
 use qbind_node::safety_record_store::decision_capture::{
     OwnedCaptureRefusal, OwnedDecisionOutcome, PreparedDecisionInputLimits,
 };
@@ -227,10 +229,13 @@ fn owner_route_decides_l0_captures_and_self_votes_l1() {
     let owner = owner_with_matching_proof(dir.path(), &ctx, l0_block);
     let baseline = op_current(&owner);
 
-    let proof = owner.read_validate(None::<&FixtureCommittedHistory>).unwrap();
+    let proof = owner
+        .read_validate(None::<&FixtureCommittedHistory>)
+        .unwrap();
     let lim = limits(&ctx);
 
-    let outcome = owner.decide_and_capture_owned(&mut engine, ValidatorId::new(1), &p1, &lim, 1, proof);
+    let outcome =
+        owner.decide_and_capture_owned(&mut engine, ValidatorId::new(1), &p1, &lim, 1, proof);
 
     let decided = match outcome {
         OwnedDecisionOutcome::Decided(dv) => dv,
@@ -240,9 +245,20 @@ fn owner_route_decides_l0_captures_and_self_votes_l1() {
     // The real self-vote raised L1 AFTER the L0 decision/capture; the engine's
     // own live lock is now view 1, while the captured payload retains the L0
     // association (lock view 0) that drove the decision.
-    assert_eq!(engine.locked_qc().map(|q| q.view), Some(1), "self-vote raised L1");
-    assert_eq!(registry_occupied(&owner), 1, "the envelope owns one live pin");
-    assert!(op_current(&owner) > baseline, "pin + reservations charged while owned");
+    assert_eq!(
+        engine.locked_qc().map(|q| q.view),
+        Some(1),
+        "self-vote raised L1"
+    );
+    assert_eq!(
+        registry_occupied(&owner),
+        1,
+        "the envelope owns one live pin"
+    );
+    assert!(
+        op_current(&owner) > baseline,
+        "pin + reservations charged while owned"
+    );
 
     // The envelope carries the engine's own unsigned self-vote (read-only).
     assert_eq!(decided.vote().height, 1);
@@ -267,12 +283,18 @@ fn lock_mismatch_refuses_with_proof_returned_and_no_self_vote() {
     publish_qc(&owner, &ctx, [9u8; 32], 5, 0);
     let baseline = op_current(&owner);
 
-    let proof = owner.read_validate(None::<&FixtureCommittedHistory>).unwrap();
+    let proof = owner
+        .read_validate(None::<&FixtureCommittedHistory>)
+        .unwrap();
     let lim = limits(&ctx);
-    let outcome = owner.decide_and_capture_owned(&mut engine, ValidatorId::new(1), &p1, &lim, 1, proof);
+    let outcome =
+        owner.decide_and_capture_owned(&mut engine, ValidatorId::new(1), &p1, &lim, 1, proof);
 
     match outcome {
-        OwnedDecisionOutcome::Refused { proof: _returned, reason } => {
+        OwnedDecisionOutcome::Refused {
+            proof: _returned,
+            reason,
+        } => {
             assert!(
                 matches!(reason, OwnedCaptureRefusal::Correspondence(_)),
                 "expected a correspondence refusal, got {reason:?}"
@@ -281,7 +303,11 @@ fn lock_mismatch_refuses_with_proof_returned_and_no_self_vote() {
         other => panic!("expected Refused, got {other:?}"),
     }
     // No self-vote raised L1; the engine's live lock is still L0 (view 0).
-    assert_eq!(engine.locked_qc().map(|q| q.view), Some(0), "no self-vote on refusal");
+    assert_eq!(
+        engine.locked_qc().map(|q| q.view),
+        Some(0),
+        "no self-vote on refusal"
+    );
     assert_eq!(registry_occupied(&owner), 0, "no capture on refusal");
     assert_eq!(op_current(&owner), baseline, "charges returned to baseline");
 }
@@ -300,7 +326,9 @@ fn projection_mismatch_via_seam_refuses_with_proof_returned() {
     let owner = owner_with_matching_proof(dir.path(), &ctx, l0_block);
     let baseline = op_current(&owner);
 
-    let proof = owner.read_validate(None::<&FixtureCommittedHistory>).unwrap();
+    let proof = owner
+        .read_validate(None::<&FixtureCommittedHistory>)
+        .unwrap();
     let lim = limits(&ctx);
 
     // Gate projects a proposal whose candidate view / id disagree with the
@@ -320,7 +348,10 @@ fn projection_mismatch_via_seam_refuses_with_proof_returned() {
     );
 
     match outcome {
-        OwnedDecisionOutcome::Refused { proof: _returned, reason } => {
+        OwnedDecisionOutcome::Refused {
+            proof: _returned,
+            reason,
+        } => {
             assert!(
                 matches!(reason, OwnedCaptureRefusal::Projection(_)),
                 "expected a projection refusal, got {reason:?}"
@@ -328,7 +359,11 @@ fn projection_mismatch_via_seam_refuses_with_proof_returned() {
         }
         other => panic!("expected Refused, got {other:?}"),
     }
-    assert_eq!(registry_occupied(&owner), 0, "no capture on projection refusal");
+    assert_eq!(
+        registry_occupied(&owner),
+        0,
+        "no capture on projection refusal"
+    );
     assert_eq!(op_current(&owner), baseline, "charges returned to baseline");
 }
 
@@ -344,10 +379,13 @@ fn bootstrap_unresolved_precheck_returns_proof_before_engine() {
     let (mut engine, p1, _l0) = engine_locked_and_safe_view1();
     let owner = init_owner(dir.path(), &ctx);
     // No publish_qc: the authoritative restriction is BootstrapNoLock.
-    let proof = owner.read_validate(None::<&FixtureCommittedHistory>).unwrap();
+    let proof = owner
+        .read_validate(None::<&FixtureCommittedHistory>)
+        .unwrap();
     let lim = limits(&ctx);
 
-    let outcome = owner.decide_and_capture_owned(&mut engine, ValidatorId::new(1), &p1, &lim, 0, proof);
+    let outcome =
+        owner.decide_and_capture_owned(&mut engine, ValidatorId::new(1), &p1, &lim, 0, proof);
     match outcome {
         OwnedDecisionOutcome::Refused { proof: _p, reason } => {
             assert!(
@@ -383,10 +421,12 @@ fn admission_refusal_then_admissible_retry() {
     // remaining headroom so the route's first ADDITIONAL reservation (the
     // transient hashing/traversal scratch) is refused — without disturbing the
     // already-held proof.
-    let proof = owner.read_validate(None::<&FixtureCommittedHistory>).unwrap();
+    let proof = owner
+        .read_validate(None::<&FixtureCommittedHistory>)
+        .unwrap();
     let backend = owner.backend_for_test();
-    let op_headroom = backend.accounting_cap().expect("operational ceiling")
-        - backend.accounting_current();
+    let op_headroom =
+        backend.accounting_cap().expect("operational ceiling") - backend.accounting_current();
     let agg_headroom = backend
         .accounting_aggregate_cap()
         .expect("aggregate ceiling")
@@ -397,23 +437,38 @@ fn admission_refusal_then_admissible_retry() {
         .reserve_standing_for_test(headroom - 8)
         .expect("reserve standing to starve the route");
 
-    let outcome = owner.decide_and_capture_owned(&mut engine, ValidatorId::new(1), &p1, &lim, 1, proof);
+    let outcome =
+        owner.decide_and_capture_owned(&mut engine, ValidatorId::new(1), &p1, &lim, 1, proof);
     match outcome {
         OwnedDecisionOutcome::Refused { proof: _p, reason } => {
             assert!(
-                matches!(reason, OwnedCaptureRefusal::Capture(CaptureRefusal::Admission(_))),
+                matches!(
+                    reason,
+                    OwnedCaptureRefusal::Capture(CaptureRefusal::Admission(_))
+                ),
                 "expected an admission refusal, got {reason:?}"
             );
         }
         other => panic!("expected admission Refused, got {other:?}"),
     }
-    assert_eq!(engine.locked_qc().map(|q| q.view), Some(0), "no dependent self-vote");
-    assert_eq!(registry_occupied(&owner), 0, "no envelope/pin on admission refusal");
+    assert_eq!(
+        engine.locked_qc().map(|q| q.view),
+        Some(0),
+        "no dependent self-vote"
+    );
+    assert_eq!(
+        registry_occupied(&owner),
+        0,
+        "no envelope/pin on admission refusal"
+    );
 
     // Restore capacity; the route is admissible on retry.
     drop(standing);
-    let proof2 = owner.read_validate(None::<&FixtureCommittedHistory>).unwrap();
-    let retry = owner.decide_and_capture_owned(&mut engine, ValidatorId::new(1), &p1, &lim, 1, proof2);
+    let proof2 = owner
+        .read_validate(None::<&FixtureCommittedHistory>)
+        .unwrap();
+    let retry =
+        owner.decide_and_capture_owned(&mut engine, ValidatorId::new(1), &p1, &lim, 1, proof2);
     let decided = match retry {
         OwnedDecisionOutcome::Decided(dv) => dv,
         other => panic!("expected admissible retry to Decide, got {other:?}"),
@@ -438,22 +493,35 @@ fn envelope_shares_the_two_existing_prepared_slots() {
     let lim = limits(&ctx);
 
     // Slot 1: an ordinary capture.
-    let proof_a = owner.read_validate(None::<&FixtureCommittedHistory>).unwrap();
+    let proof_a = owner
+        .read_validate(None::<&FixtureCommittedHistory>)
+        .unwrap();
     let _ordinary = owner
         .capture_prepared_decision(proof_a, 1)
         .expect("ordinary capture takes slot 1");
     assert_eq!(registry_occupied(&owner), 1);
 
     // Slot 2: an owner-route envelope.
-    let proof_b = owner.read_validate(None::<&FixtureCommittedHistory>).unwrap();
-    let _decided = match owner.decide_and_capture_owned(&mut engine, ValidatorId::new(1), &p1, &lim, 1, proof_b) {
+    let proof_b = owner
+        .read_validate(None::<&FixtureCommittedHistory>)
+        .unwrap();
+    let _decided = match owner.decide_and_capture_owned(
+        &mut engine,
+        ValidatorId::new(1),
+        &p1,
+        &lim,
+        1,
+        proof_b,
+    ) {
         OwnedDecisionOutcome::Decided(dv) => dv,
         other => panic!("expected Decided, got {other:?}"),
     };
     assert_eq!(registry_occupied(&owner), 2, "both existing slots occupied");
 
     // A third capture refuses RegistryFull, proof intact — no new multiplicity.
-    let proof_c = owner.read_validate(None::<&FixtureCommittedHistory>).unwrap();
+    let proof_c = owner
+        .read_validate(None::<&FixtureCommittedHistory>)
+        .unwrap();
     match owner.capture_prepared_decision(proof_c, 1) {
         Err((_proof, CaptureRefusal::RegistryFull)) => {}
         other => panic!("expected RegistryFull with proof returned, got {other:?}"),
@@ -482,12 +550,16 @@ fn outgoing_vote_parity_all_ten_fields_and_zero_signature_capacity() {
     // Owner-route engine produces the SAME self-vote inside the envelope.
     let (mut engine, p1, l0_block) = engine_locked_and_safe_view1();
     let owner = owner_with_matching_proof(dir.path(), &ctx, l0_block);
-    let proof = owner.read_validate(None::<&FixtureCommittedHistory>).unwrap();
+    let proof = owner
+        .read_validate(None::<&FixtureCommittedHistory>)
+        .unwrap();
     let lim = limits(&ctx);
-    let decided = match owner.decide_and_capture_owned(&mut engine, ValidatorId::new(1), &p1, &lim, 1, proof) {
-        OwnedDecisionOutcome::Decided(dv) => dv,
-        other => panic!("expected Decided, got {other:?}"),
-    };
+    let decided =
+        match owner.decide_and_capture_owned(&mut engine, ValidatorId::new(1), &p1, &lim, 1, proof)
+        {
+            OwnedDecisionOutcome::Decided(dv) => dv,
+            other => panic!("expected Decided, got {other:?}"),
+        };
     let got = decided.vote();
 
     assert_eq!(got.version, ref_vote.version, "field 1: version");
@@ -497,10 +569,20 @@ fn outgoing_vote_parity_all_ten_fields_and_zero_signature_capacity() {
     assert_eq!(got.round, ref_vote.round, "field 5: round");
     assert_eq!(got.step, ref_vote.step, "field 6: step");
     assert_eq!(got.block_id, ref_vote.block_id, "field 7: block_id");
-    assert_eq!(got.validator_index, ref_vote.validator_index, "field 8: validator_index");
+    assert_eq!(
+        got.validator_index, ref_vote.validator_index,
+        "field 8: validator_index"
+    );
     assert_eq!(got.suite_id, ref_vote.suite_id, "field 9: suite_id");
-    assert_eq!(got.signature, ref_vote.signature, "field 10: signature bytes");
-    assert_eq!(got.signature.capacity(), 0, "unsigned: zero signature capacity");
+    assert_eq!(
+        got.signature, ref_vote.signature,
+        "field 10: signature bytes"
+    );
+    assert_eq!(
+        got.signature.capacity(),
+        0,
+        "unsigned: zero signature capacity"
+    );
 }
 
 // ===========================================================================
@@ -515,14 +597,21 @@ fn abandonment_restores_baseline_leaving_only_standing_registry() {
     let owner = owner_with_matching_proof(dir.path(), &ctx, l0_block);
     let baseline = op_current(&owner);
 
-    let proof = owner.read_validate(None::<&FixtureCommittedHistory>).unwrap();
+    let proof = owner
+        .read_validate(None::<&FixtureCommittedHistory>)
+        .unwrap();
     let lim = limits(&ctx);
-    let decided = match owner.decide_and_capture_owned(&mut engine, ValidatorId::new(1), &p1, &lim, 1, proof) {
-        OwnedDecisionOutcome::Decided(dv) => dv,
-        other => panic!("expected Decided, got {other:?}"),
-    };
+    let decided =
+        match owner.decide_and_capture_owned(&mut engine, ValidatorId::new(1), &p1, &lim, 1, proof)
+        {
+            OwnedDecisionOutcome::Decided(dv) => dv,
+            other => panic!("expected Decided, got {other:?}"),
+        };
     let occupied_charge = op_current(&owner);
-    assert!(occupied_charge > baseline, "pin + envelope reservation charged");
+    assert!(
+        occupied_charge > baseline,
+        "pin + envelope reservation charged"
+    );
 
     // Abandonment: covered objects destroyed before their covering reservations
     // release; the lazily installed registry cell persists as a standing charge.
@@ -546,9 +635,12 @@ fn view_sufficiency_records_not_applicable_ancestry() {
     // view 0 >= locked view 0): no ancestry walk is required.
     let (mut engine, p1, l0_block) = engine_locked_and_safe_view1();
     let owner = owner_with_matching_proof(dir.path(), &ctx, l0_block);
-    let proof = owner.read_validate(None::<&FixtureCommittedHistory>).unwrap();
+    let proof = owner
+        .read_validate(None::<&FixtureCommittedHistory>)
+        .unwrap();
     let lim = limits(&ctx);
-    let outcome = owner.decide_and_capture_owned(&mut engine, ValidatorId::new(1), &p1, &lim, 1, proof);
+    let outcome =
+        owner.decide_and_capture_owned(&mut engine, ValidatorId::new(1), &p1, &lim, 1, proof);
     assert!(
         matches!(outcome, OwnedDecisionOutcome::Decided(_)),
         "ViewSufficiency captures with not-applicable ancestry"
@@ -569,7 +661,9 @@ fn owner_route_holds_domain_until_release_observed_as_would_block() {
     let dir = tempfile::tempdir().unwrap();
     let (mut engine, p1, l0_block) = engine_locked_and_safe_view1();
     let owner = owner_with_matching_proof(dir.path(), &ctx, l0_block);
-    let proof = owner.read_validate(None::<&FixtureCommittedHistory>).unwrap();
+    let proof = owner
+        .read_validate(None::<&FixtureCommittedHistory>)
+        .unwrap();
     let lim = limits(&ctx);
 
     // Coordination: the hook signals "paused, guard held" and waits for release.
@@ -598,18 +692,30 @@ fn owner_route_holds_domain_until_release_observed_as_would_block() {
 
         // Owner thread: install the one-shot pause hook, then run the route.
         set_capture_interval_hook(move || {
-            entered_tx.lock().unwrap().send(()).expect("announce paused");
+            entered_tx
+                .lock()
+                .unwrap()
+                .send(())
+                .expect("announce paused");
             release_rx.lock().unwrap().recv().expect("await release");
         });
-        let outcome = owner.decide_and_capture_owned(&mut engine, ValidatorId::new(1), &p1, &lim, 1, proof);
+        let outcome =
+            owner.decide_and_capture_owned(&mut engine, ValidatorId::new(1), &p1, &lim, 1, proof);
         clear_capture_interval_hook();
-        assert!(matches!(outcome, OwnedDecisionOutcome::Decided(_)), "route completes after release");
+        assert!(
+            matches!(outcome, OwnedDecisionOutcome::Decided(_)),
+            "route completes after release"
+        );
 
         observer.join().expect("observer thread");
 
         // The capture committed under the guard: the envelope (still alive here)
         // owns one live pin.
-        assert_eq!(registry_occupied(&owner), 1, "the capture committed under the guard");
+        assert_eq!(
+            registry_occupied(&owner),
+            1,
+            "the capture committed under the guard"
+        );
 
         // After normal release, a late acquisition now succeeds (publication can
         // make progress); restore it immediately, byte-identically.

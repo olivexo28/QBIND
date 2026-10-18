@@ -683,15 +683,11 @@ impl std::fmt::Debug for OwnedDecisionOutcome {
         // The `DecidedVote` envelope is deliberately closed (no `Debug`); print
         // only the variant discriminant and the inspectable associated `Vote`.
         match self {
-            OwnedDecisionOutcome::Decided(dv) => {
-                f.debug_tuple("Decided").field(dv.vote()).finish()
-            }
+            OwnedDecisionOutcome::Decided(dv) => f.debug_tuple("Decided").field(dv.vote()).finish(),
             OwnedDecisionOutcome::Refused { reason, .. } => {
                 f.debug_struct("Refused").field("reason", reason).finish()
             }
-            OwnedDecisionOutcome::InvariantViolation => {
-                f.write_str("InvariantViolation")
-            }
+            OwnedDecisionOutcome::InvariantViolation => f.write_str("InvariantViolation"),
         }
     }
 }
@@ -723,7 +719,11 @@ pub(crate) fn scratch_charge() -> u128 {
 /// (`derive_block_id_from_header`): proposer id (8, LE) ‖ view (8, LE) ‖
 /// parent_block_id[..16]. Parity is proven against the engine's own decision
 /// views; this does not redesign block identity.
-pub(crate) fn derive_block_id_local(proposer: u64, view: u64, parent_block_id: &[u8; 32]) -> [u8; 32] {
+pub(crate) fn derive_block_id_local(
+    proposer: u64,
+    view: u64,
+    parent_block_id: &[u8; 32],
+) -> [u8; 32] {
     let mut id = [0u8; 32];
     id[..8].copy_from_slice(&proposer.to_le_bytes());
     id[8..16].copy_from_slice(&view.to_le_bytes());
