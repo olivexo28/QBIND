@@ -306,17 +306,41 @@ fn inspection_does_not_alter_vote_or_engine_state() {
     p1b.qc = Some(logical_qc(l0_block2, 0));
     let plain_action = plain.on_proposal_event(ValidatorId(1), &p1b);
 
-    // Same emitted action (a self-vote in both).
-    assert!(matches!(
-        observed_action,
-        Some(ConsensusEngineAction::BroadcastVote(_))
-    ));
-    assert!(matches!(
-        plain_action,
-        Some(ConsensusEngineAction::BroadcastVote(_))
-    ));
+    // Same emitted action: a self-vote in both. Extract each `Vote`, refusing
+    // any unexpected action variant, then compare the votes in full.
+    let observed_vote = match observed_action {
+        Some(ConsensusEngineAction::BroadcastVote(vote)) => vote,
+        other => panic!("observed run must emit BroadcastVote, got {other:?}"),
+    };
+    let plain_vote = match plain_action {
+        Some(ConsensusEngineAction::BroadcastVote(vote)) => vote,
+        other => panic!("un-observed run must emit BroadcastVote, got {other:?}"),
+    };
 
-    // Same resulting lock state (the same-event self-vote raised L1 identically).
+    // Whole-value equality: `Vote` derives `PartialEq`/`Eq`, so this compares
+    // every field (version, chain_id, epoch, height, round, step, block_id,
+    // validator_index, suite_id, signature) in one assertion.
+    assert_eq!(
+        observed_vote, plain_vote,
+        "inspecting the view must not alter any field of the emitted Vote"
+    );
+    // Make the per-field correspondence explicit as well, so a future change to
+    // the `Vote` layout cannot silently weaken the whole-value check above.
+    assert_eq!(observed_vote.version, plain_vote.version);
+    assert_eq!(observed_vote.chain_id, plain_vote.chain_id);
+    assert_eq!(observed_vote.epoch, plain_vote.epoch);
+    assert_eq!(observed_vote.height, plain_vote.height);
+    assert_eq!(observed_vote.round, plain_vote.round);
+    assert_eq!(observed_vote.step, plain_vote.step);
+    assert_eq!(observed_vote.block_id, plain_vote.block_id);
+    assert_eq!(observed_vote.validator_index, plain_vote.validator_index);
+    assert_eq!(observed_vote.suite_id, plain_vote.suite_id);
+    assert_eq!(observed_vote.signature, plain_vote.signature);
+
+    // Same resulting lock state on the specific properties compared below — the
+    // same-event self-vote raised L1 identically. This compares the lock block
+    // id, the lock view, and the current view; it is NOT a claim of exhaustive
+    // equality across all engine state.
     let o_lock = observed.locked_qc().expect("lock after vote");
     let p_lock = plain.locked_qc().expect("lock after vote");
     assert_eq!(o_lock.view, p_lock.view);
