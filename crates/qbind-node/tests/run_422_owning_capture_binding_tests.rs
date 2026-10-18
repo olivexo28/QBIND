@@ -37,7 +37,7 @@ use qbind_node::safety_record_store::owner::{
     make_locked_qc, set_binding_phase_hook, set_capture_interval_hook, set_pre_ingestion_hook,
     PublishResult, SafetyRecordOwner,
 };
-use qbind_node::safety_record_store::prepared::CaptureRefusal;
+use qbind_node::safety_record_store::prepared::{registry_cell_charge_bytes, CaptureRefusal};
 use qbind_node::safety_record_store::profile::PinnedSafetyContext;
 use qbind_node::safety_record_store::record::WireQc as StoreWireQc;
 use qbind_node::safety_record_store::validate::FixtureCommittedHistory;
@@ -125,6 +125,14 @@ fn publish_qc(
 
 fn op_current(owner: &SafetyRecordOwner) -> u128 {
     owner.backend_for_test().accounting_current()
+}
+
+/// The shared **aggregate** admission authority's current combined charge, read
+/// through the backend's test seam. Distinct from [`op_current`] (the operational
+/// sub-partition): the aggregate authority admits BOTH the operational and context
+/// partitions against the one accepted profile ceiling.
+fn agg_current(owner: &SafetyRecordOwner) -> u128 {
+    owner.backend_for_test().accounting_aggregate_current()
 }
 
 fn registry_occupied(owner: &SafetyRecordOwner) -> usize {
@@ -514,10 +522,13 @@ fn admission_refusal_then_admissible_retry() {
         .reserve_standing_for_test(headroom - 8)
         .expect("reserve standing to starve the route");
 
+    // Snapshot the proof's observable identity BEFORE the call, so the SAME
+    // returned proof can be shown preserved (not a fresh `read_validate`).
+    let before = fingerprint(&proof);
     let outcome =
         owner.decide_and_capture_owned(&mut engine, ValidatorId::new(1), &p1, &lim, 1, proof);
-    match outcome {
-        OwnedDecisionOutcome::Refused { proof: _p, reason } => {
+    let returned_proof = match outcome {
+        OwnedDecisionOutcome::Refused { proof: p, reason } => {
             assert!(
                 matches!(
                     reason,
@@ -525,9 +536,17 @@ fn admission_refusal_then_admissible_retry() {
                 ),
                 "expected an admission refusal, got {reason:?}"
             );
+            // The ACTUAL returned proof is byte-, revision- and provenance-identical
+            // to the pre-call snapshot: the refusal preserved the input proof.
+            assert_eq!(
+                fingerprint(&p),
+                before,
+                "the returned proof is preserved unchanged across the refusal"
+            );
+            p
         }
         other => panic!("expected admission Refused, got {other:?}"),
-    }
+    };
     assert_eq!(
         engine.locked_qc().map(|q| q.view),
         Some(0),
@@ -539,13 +558,17 @@ fn admission_refusal_then_admissible_retry() {
         "no envelope/pin on admission refusal"
     );
 
-    // Restore capacity; the route is admissible on retry.
+    // Remove the pressure and retry with the SAME returned proof (NOT a fresh
+    // read): proof preservation enables reuse once the pressure is gone.
     drop(standing);
-    let proof2 = owner
-        .read_validate(None::<&FixtureCommittedHistory>)
-        .unwrap();
-    let retry =
-        owner.decide_and_capture_owned(&mut engine, ValidatorId::new(1), &p1, &lim, 1, proof2);
+    let retry = owner.decide_and_capture_owned(
+        &mut engine,
+        ValidatorId::new(1),
+        &p1,
+        &lim,
+        1,
+        returned_proof,
+    );
     let decided = match retry {
         OwnedDecisionOutcome::Decided(dv) => dv,
         other => panic!("expected admissible retry to Decide, got {other:?}"),
@@ -663,7 +686,20 @@ fn outgoing_vote_parity_all_ten_fields_and_zero_signature_capacity() {
 }
 
 // ===========================================================================
-// 8. Abandonment, standing-registry baseline and final teardown.
+// 8. §3 — Successful-envelope abandonment: exact operational AND aggregate
+//    restoration, the intentionally retained standing registry cell, and final
+//    teardown to zero observed through an INDEPENDENT accounting handle after
+//    every owner, proof, envelope, pin, backend and registry inspector handle
+//    has been released.
+//
+//    Baselines are MEASURED through the existing authoritative accounting seams
+//    (not magic constants); the one standing charge that intentionally survives
+//    abandonment — the lazily installed registry cell — is identified by the
+//    existing `registry_cell_charge_bytes()` helper. Reservation counters are
+//    NOT interpreted as object-lifetime measurements: the final teardown-to-zero
+//    is observed only AFTER the live objects (proof, envelope, pin, registry)
+//    have actually been dropped, through an accounting handle that is itself not
+//    one of those objects.
 // ===========================================================================
 
 #[test]
@@ -672,11 +708,34 @@ fn abandonment_restores_baseline_leaving_only_standing_registry() {
     let dir = tempfile::tempdir().unwrap();
     let (mut engine, p1, l0_block) = engine_locked_and_safe_view1();
     let owner = owner_with_matching_proof(dir.path(), &ctx, l0_block);
-    let baseline = op_current(&owner);
 
+    // Operational AND aggregate baselines with NO input proof held yet. This is
+    // the baseline that does NOT include the still-live input proof.
+    let op_base = op_current(&owner);
+    let agg_base = agg_current(&owner);
+
+    // An INDEPENDENT accounting handle, taken now, that shares the same underlying
+    // ledger but is NOT the owner/backend/proof/envelope it observes — so it can
+    // report the final charge AFTER all of those have been dropped. (The observer
+    // must not retain the objects whose destruction it is meant to observe.)
+    let independent = owner.backend_for_test().accounting_handle_for_test();
+
+    // Read the input proof: its O3 holder charge is now live. This establishes the
+    // SEPARATE baseline that DOES include the still-live input proof.
     let proof = owner
         .read_validate(None::<&FixtureCommittedHistory>)
         .unwrap();
+    let op_with_proof = op_current(&owner);
+    let agg_with_proof = agg_current(&owner);
+    assert!(
+        op_with_proof > op_base,
+        "the live input proof adds an operational holder charge"
+    );
+    assert!(
+        agg_with_proof > agg_base,
+        "the live input proof is admitted against the aggregate authority too"
+    );
+
     let lim = limits(&ctx);
     let decided =
         match owner.decide_and_capture_owned(&mut engine, ValidatorId::new(1), &p1, &lim, 1, proof)
@@ -684,19 +743,63 @@ fn abandonment_restores_baseline_leaving_only_standing_registry() {
             OwnedDecisionOutcome::Decided(dv) => dv,
             other => panic!("expected Decided, got {other:?}"),
         };
-    let occupied_charge = op_current(&owner);
+    // On SUCCESS the input proof is CONSUMED into the envelope's retained
+    // generation (it is not returned); `op_with_proof` was the baseline that
+    // included the still-live input proof, and it no longer applies once the proof
+    // has been moved into the capture.
+    let occupied_op = op_current(&owner);
+    let occupied_agg = agg_current(&owner);
     assert!(
-        occupied_charge > baseline,
-        "pin + envelope reservation charged"
+        occupied_op > op_base,
+        "pin + envelope + retained generation charged above the empty baseline"
+    );
+    assert_eq!(registry_occupied(&owner), 1, "one occupied registry slot");
+
+    // Abandonment: the covered objects (envelope, pin, retained generation derived
+    // from the consumed proof) are destroyed before their covering reservations
+    // release; the lazily installed registry CELL persists as a standing charge
+    // (its slot is now free, but the cell itself is retained).
+    let standing_cell = registry_cell_charge_bytes();
+    drop(decided);
+    let after_op = op_current(&owner);
+    let after_agg = agg_current(&owner);
+    assert_eq!(registry_occupied(&owner), 0, "the occupied slot is freed");
+    assert_eq!(
+        after_op,
+        op_base + standing_cell,
+        "operational charge restored EXACTLY to the empty baseline plus the one \
+         intentionally retained standing registry cell (the consumed proof's \
+         generation was destroyed with the envelope)"
+    );
+    assert_eq!(
+        after_agg,
+        agg_base + standing_cell,
+        "aggregate charge restored EXACTLY to the empty baseline plus the one \
+         standing registry cell"
+    );
+    assert!(
+        after_op < occupied_op && after_agg < occupied_agg,
+        "pin + envelope + scratch + retained generation released on abandonment"
     );
 
-    // Abandonment: covered objects destroyed before their covering reservations
-    // release; the lazily installed registry cell persists as a standing charge.
-    drop(decided);
-    let after = op_current(&owner);
-    assert_eq!(registry_occupied(&owner), 0, "slot freed");
-    assert!(after >= baseline, "charges did not underflow the baseline");
-    assert!(after < occupied_charge, "pin + envelope + scratch released");
+    // Final teardown to ZERO, observed through the independent handle AFTER the
+    // owner (hence its backend, the installed registry and every reservation) has
+    // been dropped. `op_base`/`agg_base` here are the O1 initialization charges,
+    // which the backend owns and releases on drop, so the independent ledger goes
+    // fully to zero.
+    drop(engine);
+    drop(owner);
+    assert_eq!(
+        independent.current(),
+        0,
+        "operational ledger torn down to zero after every owner/backend/registry \
+         handle released"
+    );
+    assert_eq!(
+        independent.aggregate().current(),
+        0,
+        "aggregate ledger torn down to zero after full teardown"
+    );
 }
 
 // ===========================================================================
@@ -843,15 +946,28 @@ fn owner_route_rejects_policy_built_for_larger_validator_set() {
     let proof = owner
         .read_validate(None::<&FixtureCommittedHistory>)
         .unwrap();
+    let before = fingerprint(&proof);
+    // Operational charge with ONLY the live input proof held; the refusal returns
+    // this same proof, so the post-refusal charge is exactly this (nothing else is
+    // retained), distinct from the proof-free `baseline`.
+    let with_proof = op_current(&owner);
     let outcome =
         owner.decide_and_capture_owned(&mut engine, ValidatorId::new(1), &p1, &larger, 1, proof);
-    match outcome {
-        OwnedDecisionOutcome::Refused { proof: _p, reason } => assert!(
-            matches!(reason, OwnedCaptureRefusal::EffectivePolicyMismatch),
-            "expected EffectivePolicyMismatch, got {reason:?}"
-        ),
+    let returned_proof = match outcome {
+        OwnedDecisionOutcome::Refused { proof: p, reason } => {
+            assert!(
+                matches!(reason, OwnedCaptureRefusal::EffectivePolicyMismatch),
+                "expected EffectivePolicyMismatch, got {reason:?}"
+            );
+            assert_eq!(
+                fingerprint(&p),
+                before,
+                "the returned proof is preserved unchanged across the policy refusal"
+            );
+            p
+        }
         other => panic!("expected Refused, got {other:?}"),
-    }
+    };
     // The larger policy's four-plus-signature cap was never exercised: the engine
     // was never consulted (still L0 view 0), so no dependent self-vote occurred.
     assert_eq!(
@@ -860,16 +976,27 @@ fn owner_route_rejects_policy_built_for_larger_validator_set() {
         "no self-vote on policy refusal"
     );
     assert_eq!(registry_occupied(&owner), 0, "no capture on policy refusal");
-    assert_eq!(op_current(&owner), baseline, "charges returned to baseline");
+    assert_eq!(
+        op_current(&owner),
+        with_proof,
+        "charges restored to the proof-held baseline (only the returned proof remains)"
+    );
+    assert!(
+        with_proof > baseline,
+        "the proof-held baseline sits above the proof-free baseline"
+    );
 
-    // Correctly bounded case: the owner-derived N=4 policy is accepted.
-    let proof2 = owner
-        .read_validate(None::<&FixtureCommittedHistory>)
-        .unwrap();
+    // Correct the input (supply the correctly bounded owner-derived N=4 policy) and
+    // retry with the SAME returned proof — NOT a fresh read.
     let lim = limits(&ctx);
-    let decided = match owner
-        .decide_and_capture_owned(&mut engine, ValidatorId::new(1), &p1, &lim, 1, proof2)
-    {
+    let decided = match owner.decide_and_capture_owned(
+        &mut engine,
+        ValidatorId::new(1),
+        &p1,
+        &lim,
+        1,
+        returned_proof,
+    ) {
         OwnedDecisionOutcome::Decided(dv) => dv,
         other => panic!("expected Decided with owner-derived policy, got {other:?}"),
     };
@@ -903,6 +1030,10 @@ fn header_proposer_index_mismatch_refuses_projection() {
     let proof = owner
         .read_validate(None::<&FixtureCommittedHistory>)
         .unwrap();
+    let before = fingerprint(&proof);
+    // Operational charge with ONLY the live input proof held; the refusal returns
+    // this same proof, so the post-refusal charge is exactly this.
+    let with_proof = op_current(&owner);
     let outcome = owner.decide_and_capture_owned(
         &mut engine,
         ValidatorId::new(1),
@@ -911,32 +1042,51 @@ fn header_proposer_index_mismatch_refuses_projection() {
         1,
         proof,
     );
-    match outcome {
-        OwnedDecisionOutcome::Refused { proof: _p, reason } => assert!(
-            matches!(
-                reason,
-                OwnedCaptureRefusal::Projection(ProjectionMismatch::Proposer)
-            ),
-            "expected Projection(Proposer), got {reason:?}"
-        ),
+    let returned_proof = match outcome {
+        OwnedDecisionOutcome::Refused { proof: p, reason } => {
+            assert!(
+                matches!(
+                    reason,
+                    OwnedCaptureRefusal::Projection(ProjectionMismatch::Proposer)
+                ),
+                "expected Projection(Proposer), got {reason:?}"
+            );
+            assert_eq!(
+                fingerprint(&p),
+                before,
+                "the returned proof is preserved unchanged across the projection refusal"
+            );
+            p
+        }
         other => panic!("expected Refused, got {other:?}"),
-    }
+    };
     assert_eq!(
         engine.locked_qc().map(|q| q.view),
         Some(0),
         "no dependent self-vote on projection refusal"
     );
     assert_eq!(registry_occupied(&owner), 0, "no capture on projection refusal");
-    assert_eq!(op_current(&owner), baseline, "charges returned to baseline");
+    assert_eq!(
+        op_current(&owner),
+        with_proof,
+        "charges restored to the proof-held baseline (only the returned proof remains)"
+    );
+    assert!(
+        with_proof > baseline,
+        "the proof-held baseline sits above the proof-free baseline"
+    );
 
-    // The matching header (proposer_index == originating proposer 1) succeeds on
-    // the still-unvoted engine.
-    let proof2 = owner
-        .read_validate(None::<&FixtureCommittedHistory>)
-        .unwrap();
-    let decided = match owner
-        .decide_and_capture_owned(&mut engine, ValidatorId::new(1), &p1, &lim, 1, proof2)
-    {
+    // Correct the input (the matching header, proposer_index == originating
+    // proposer 1) and retry with the SAME returned proof on the still-unvoted
+    // engine — NOT a fresh read.
+    let decided = match owner.decide_and_capture_owned(
+        &mut engine,
+        ValidatorId::new(1),
+        &p1,
+        &lim,
+        1,
+        returned_proof,
+    ) {
         OwnedDecisionOutcome::Decided(dv) => dv,
         other => panic!("expected Decided for matching header, got {other:?}"),
     };
