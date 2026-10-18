@@ -207,6 +207,18 @@ where
         self.candidate.justify_qc.as_ref().map(|qc| qc.view)
     }
 
+    /// The block id the candidate's justification QC points at, if the candidate
+    /// carries a justification.
+    ///
+    /// This is read directly from the candidate's own logical justification and
+    /// returns a *borrowed* identifier only. It never hands out the
+    /// [`QuorumCertificate`], the verified-evidence `Arc`, mutable state, or any
+    /// new ownership: the QC's full surface stays private to the engine. The
+    /// returned reference is confined to the view's lifetime.
+    pub fn candidate_justify_block_id(&self) -> Option<&BlockIdT> {
+        self.candidate.justify_qc.as_ref().map(|qc| &qc.block_id)
+    }
+
     /// The block id of the lock in effect at the decision, or `None` on the
     /// [`SafetyBranch::NoLock`] branch.
     pub fn locked_block_id(&self) -> Option<&BlockIdT> {
@@ -258,6 +270,115 @@ where
             hops += 1;
         }
     }
+
+    /// Bounded, read-only classification of how the candidate relates to the
+    /// lock in effect at the decision, by walking `parent_id` links.
+    ///
+    /// This is *optional* inspection. It does NOT re-run or change the engine's
+    /// authoritative voting decision: on the [`SafetyBranch::ViewSufficiency`]
+    /// branch the predicate short-circuited and walked NO ancestry, yet a caller
+    /// may still ask this query what the parent chain looks like. The result is
+    /// descriptive only; it never promotes a missing link or an exhausted bound
+    /// into proved ancestry.
+    ///
+    /// # Hop convention
+    ///
+    /// A "hop" is one parent transition (candidate → parent → grandparent …).
+    /// The candidate itself is tested *before* any edge is traversed, so a
+    /// candidate that equals the lock is reported as [`AncestryRelation::CandidateIsLock`]
+    /// even when `max_hops == 0`. Reaching the lock after `k` parent transitions
+    /// is reported as [`AncestryRelation::ReachedLock`] `{ hops: k }`, and the
+    /// lock may be reached when `k == max_hops` (the bound is inclusive of the
+    /// node arrived at by the `max_hops`-th hop).
+    ///
+    /// # Termination
+    ///
+    /// The walk performs at most `max_hops` parent transitions, so it always
+    /// terminates within its stated bound — including on a cyclic parent graph,
+    /// where it stops with [`AncestryRelation::BoundExhausted`] rather than
+    /// looping. It inspects borrowed engine state in place: it allocates no
+    /// collection, clones no certificate, and retains nothing.
+    ///
+    /// # Outcomes
+    ///
+    /// - [`AncestryRelation::NoLock`] — no lock was in effect at the decision.
+    /// - [`AncestryRelation::CandidateIsLock`] — the candidate *is* the lock
+    ///   (zero hops).
+    /// - [`AncestryRelation::ReachedLock`] — the lock was reached after
+    ///   `hops` (`>= 1`) parent transitions.
+    /// - [`AncestryRelation::NoParentLink`] — a node on the walk has no parent
+    ///   link and it is not the lock (the chain ends before the lock).
+    /// - [`AncestryRelation::ParentAbsent`] — a node references a parent block
+    ///   that is absent from the engine, so the chain cannot be followed.
+    /// - [`AncestryRelation::BoundExhausted`] — `max_hops` parent transitions
+    ///   were taken without reaching the lock (also the result for a cycle).
+    pub fn ancestry_relation_to_lock(&self, max_hops: usize) -> AncestryRelation {
+        let locked_block_id = match self.locked {
+            Some(qc) => &qc.block_id,
+            None => return AncestryRelation::NoLock,
+        };
+
+        let mut current = self.candidate;
+        let mut hops = 0usize;
+        loop {
+            // Test the current node itself before traversing any edge. On the
+            // first iteration (hops == 0) this tests the candidate, so a
+            // candidate-is-lock is detected even when max_hops == 0.
+            if &current.id == locked_block_id {
+                return if hops == 0 {
+                    AncestryRelation::CandidateIsLock
+                } else {
+                    AncestryRelation::ReachedLock { hops }
+                };
+            }
+
+            // Not the lock: we must traverse one more parent edge to continue.
+            // If the hop bound is already reached, stop without claiming
+            // ancestry.
+            if hops == max_hops {
+                return AncestryRelation::BoundExhausted;
+            }
+
+            let parent_id = match current.parent_id.as_ref() {
+                Some(pid) => pid,
+                None => return AncestryRelation::NoParentLink,
+            };
+            current = match self.state.get_block(parent_id) {
+                Some(node) => node,
+                None => return AncestryRelation::ParentAbsent,
+            };
+            hops += 1;
+        }
+    }
+}
+
+/// Run 422 §13.6 spike: the bounded outcome of [`SafetyDecisionView::ancestry_relation_to_lock`].
+///
+/// Each variant describes *literally* what the bounded parent walk observed. A
+/// missing parent link, an absent referenced block, or an exhausted hop bound
+/// are each distinct from reaching the lock: none of them is presented as proved
+/// ancestry.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AncestryRelation {
+    /// No lock was in effect at the decision (the [`SafetyBranch::NoLock`]
+    /// boundary): there is no lock to relate the candidate to.
+    NoLock,
+    /// The candidate itself equals the lock block (zero parent transitions).
+    CandidateIsLock,
+    /// The lock block was reached after `hops` (`>= 1`) parent transitions.
+    ReachedLock {
+        /// The number of parent transitions taken to reach the lock.
+        hops: usize,
+    },
+    /// A node on the walk has no parent link and it is not the lock: the parent
+    /// chain ends before the lock is reached.
+    NoParentLink,
+    /// A node on the walk references a parent block that is absent from the
+    /// engine, so the chain cannot be followed further.
+    ParentAbsent,
+    /// `max_hops` parent transitions were taken without reaching the lock. This
+    /// is also the terminating outcome for a cyclic parent graph.
+    BoundExhausted,
 }
 
 /// Run 422 §13.6 spike: borrowed observer of a successful safe-voting decision.
@@ -3862,5 +3983,137 @@ mod tests {
         assert!(s2.contains("fail closed"));
         assert!(s2.contains("target_epoch=2"));
         assert!(s2.contains("current_epoch=3"));
+    }
+
+    // =======================================================================
+    // Run 422 §13.6 — CONSTRUCTED-FIXTURE coverage for
+    // `SafetyDecisionView::ancestry_relation_to_lock`.
+    //
+    // These are hand-registered block graphs with a directly set lock, built to
+    // exercise shapes the natural engine control flow does NOT produce
+    // (candidate-is-lock at zero hops, a deep multi-hop chain under a pinned
+    // older lock, and bounded termination on a cyclic parent graph). They are
+    // CONSTRUCTED fixtures, not executed engine voting decisions: the `branch`
+    // field is populated only to form the struct; `ancestry_relation_to_lock`
+    // never reads it. (Executed-decision coverage lives in the integration test
+    // `tests/run_422_decision_view_queries_tests.rs`.)
+    // =======================================================================
+
+    /// Build a decision view over borrowed, hand-registered engine state. This
+    /// bypasses the voting predicate entirely; it is a fixture, not a decision.
+    fn fixture_view<'e>(
+        state: &'e HotStuffStateEngine<[u8; 32]>,
+        candidate: &'e BlockNode<[u8; 32]>,
+        locked: Option<&'e QuorumCertificate<[u8; 32]>>,
+    ) -> SafetyDecisionView<'e, [u8; 32]> {
+        SafetyDecisionView {
+            state,
+            candidate,
+            locked,
+            branch: SafetyBranch::ViewSufficiency,
+            origin_view: candidate.view,
+            from: ValidatorId(1),
+            verified_entrypoint: false,
+        }
+    }
+
+    #[test]
+    fn fixture_candidate_is_lock_at_zero_hops() {
+        let mut engine = HotStuffStateEngine::<[u8; 32]>::new(make_validator_set(1));
+        let lock_id = [0x0A; 32];
+        engine.register_block(lock_id, 0, None, None);
+        engine.set_locked_qc(QuorumCertificate::new(lock_id, 0, vec![]));
+
+        let candidate = engine.get_block(&lock_id).expect("registered").clone();
+        let locked = QuorumCertificate::new(lock_id, 0, vec![]);
+        let view = fixture_view(&engine, &candidate, Some(&locked));
+
+        // The candidate itself IS the lock: detected before traversing any edge,
+        // even when max_hops == 0.
+        assert_eq!(
+            view.ancestry_relation_to_lock(0),
+            AncestryRelation::CandidateIsLock
+        );
+        assert_eq!(
+            view.ancestry_relation_to_lock(5),
+            AncestryRelation::CandidateIsLock
+        );
+    }
+
+    #[test]
+    fn fixture_multi_hop_exact_bound_and_one_short() {
+        let mut engine = HotStuffStateEngine::<[u8; 32]>::new(make_validator_set(1));
+        let b0 = [0x00; 32]; // lock (pinned, older)
+        let b1 = [0x01; 32];
+        let b2 = [0x02; 32]; // candidate, two hops from the lock
+        engine.register_block(b0, 0, None, None);
+        engine.register_block(b1, 1, Some(b0), None);
+        engine.register_block(b2, 2, Some(b1), None);
+        engine.set_locked_qc(QuorumCertificate::new(b0, 0, vec![]));
+
+        let candidate = engine.get_block(&b2).expect("registered").clone();
+        let locked = QuorumCertificate::new(b0, 0, vec![]);
+        let view = fixture_view(&engine, &candidate, Some(&locked));
+
+        // Zero bound: candidate != lock, no hop permitted => exhausted.
+        assert_eq!(
+            view.ancestry_relation_to_lock(0),
+            AncestryRelation::BoundExhausted
+        );
+        // One hop short of the two-hop lock => exhausted (not proved ancestry).
+        assert_eq!(
+            view.ancestry_relation_to_lock(1),
+            AncestryRelation::BoundExhausted
+        );
+        // Exact bound reaches the lock on the second parent transition.
+        assert_eq!(
+            view.ancestry_relation_to_lock(2),
+            AncestryRelation::ReachedLock { hops: 2 }
+        );
+        // A larger bound still reports the exact hop count where it was reached.
+        assert_eq!(
+            view.ancestry_relation_to_lock(9),
+            AncestryRelation::ReachedLock { hops: 2 }
+        );
+    }
+
+    #[test]
+    fn fixture_cyclic_parent_graph_terminates_bounded() {
+        let mut engine = HotStuffStateEngine::<[u8; 32]>::new(make_validator_set(1));
+        let a = [0xAA; 32];
+        let b = [0xBB; 32];
+        let z = [0xCC; 32]; // the lock: never on the a<->b cycle
+                            // a -> b (b not yet present: height 0)
+        engine.register_block(a, 1, Some(b), None);
+        // b -> a (closes the cycle)
+        engine.register_block(b, 2, Some(a), None);
+        engine.set_locked_qc(QuorumCertificate::new(z, 0, vec![]));
+
+        let candidate = engine.get_block(&a).expect("registered").clone();
+        let locked = QuorumCertificate::new(z, 0, vec![]);
+        let view = fixture_view(&engine, &candidate, Some(&locked));
+
+        // The lock is unreachable and the parent graph is a cycle: the walk is
+        // bounded by max_hops and reports exhaustion rather than looping.
+        assert_eq!(
+            view.ancestry_relation_to_lock(10),
+            AncestryRelation::BoundExhausted
+        );
+        assert_eq!(
+            view.ancestry_relation_to_lock(1000),
+            AncestryRelation::BoundExhausted
+        );
+    }
+
+    #[test]
+    fn fixture_no_lock_reports_no_lock() {
+        let mut engine = HotStuffStateEngine::<[u8; 32]>::new(make_validator_set(1));
+        let only = [0x07; 32];
+        engine.register_block(only, 0, None, None);
+        // No lock set.
+        let candidate = engine.get_block(&only).expect("registered").clone();
+        let view = fixture_view(&engine, &candidate, None);
+        assert_eq!(view.ancestry_relation_to_lock(0), AncestryRelation::NoLock);
+        assert_eq!(view.ancestry_relation_to_lock(5), AncestryRelation::NoLock);
     }
 }
