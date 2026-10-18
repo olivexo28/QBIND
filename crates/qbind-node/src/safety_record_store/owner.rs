@@ -1762,31 +1762,67 @@ impl SafetyRecordOwner {
         history: Option<&H>,
     ) -> super::decision_capture::RetainedDecisionObservation {
         use super::decision_capture::{
+            PreparedDecisionInputLimits, RetainedDecisionObservation, RetainedDecisionReject,
+        };
+
+        // 1. Bind the caller's effective limits to the owner's pinned policy
+        //    (a resource-policy binding only; authenticates nothing). This runs
+        //    BEFORE the serialization domain is acquired and is NOT delegated to
+        //    the held-guard helper, so a policy mismatch is refused without ever
+        //    taking the lock.
+        match PreparedDecisionInputLimits::from_pinned(self.pinned()) {
+            Ok(expected) => {
+                if *limits != expected {
+                    return RetainedDecisionObservation::Rejected(
+                        RetainedDecisionReject::EffectivePolicyMismatch,
+                    );
+                }
+            }
+            Err(e) => {
+                return RetainedDecisionObservation::Rejected(
+                    RetainedDecisionReject::OwnerPolicyUnavailable(e),
+                )
+            }
+        }
+
+        // 2. One acquisition of the serialization domain for the whole operation.
+        //    The post-lock observation checks are delegated to the private
+        //    held-guard helper, which borrows this guard and never reacquires it.
+        let guard = self.backend.lock_domain();
+        self.observe_checks_locked(&guard, engine, decided, proposal, limits, history)
+    }
+
+    /// Private held-guard tail of [`Self::observe_retained_decision`] (RUN 422
+    /// §13.6): steps 3–9 of the isolated non-consuming observation, performed
+    /// under a serialization-domain guard the caller already holds. It borrows
+    /// the guard and NEVER reacquires the domain (the single acquisition stays in
+    /// the public method), leaving the owner-derived policy binding — which must
+    /// precede the lock — to the caller. The check order, typed outcomes,
+    /// accounting admission, reservation lifetimes, and destruction-before-release
+    /// ordering are byte-for-byte the previously inlined sequence; this is a
+    /// behavior-preserving extraction only. It does NOT consume, sign, re-ingest,
+    /// or publish anything, and establishes no signing permission.
+    fn observe_checks_locked<H: CommittedHistory + ?Sized>(
+        &self,
+        guard: &std::sync::MutexGuard<'_, super::backend::SerializationDomain>,
+        engine: &qbind_consensus::BasicHotStuffEngine<[u8; 32]>,
+        decided: &qbind_consensus::DecidedVote<super::decision_capture::OwningCapturePayload>,
+        proposal: &qbind_wire::consensus::BlockProposal,
+        limits: &super::decision_capture::PreparedDecisionInputLimits,
+        history: Option<&H>,
+    ) -> super::decision_capture::RetainedDecisionObservation {
+        use super::decision_capture::{
             commit_proposal, derive_block_id_local, observation_working_set_charge,
             BoundedAncestryReject, CorrespondenceRefusal, CurrentLoadFailure, MetaField,
-            PreparedDecisionInputLimits, ProjectionMismatch, RetainedDecisionBlocked,
-            RetainedDecisionObservation, RetainedDecisionReject,
+            ProjectionMismatch, RetainedDecisionBlocked, RetainedDecisionObservation,
+            RetainedDecisionReject,
         };
         use qbind_consensus::BoundedSafetyOutcome;
 
         let reject = RetainedDecisionObservation::Rejected;
         let blocked = RetainedDecisionObservation::Inconclusive;
 
-        // 1. Bind the caller's effective limits to the owner's pinned policy
-        //    (a resource-policy binding only; authenticates nothing).
-        match PreparedDecisionInputLimits::from_pinned(self.pinned()) {
-            Ok(expected) => {
-                if *limits != expected {
-                    return reject(RetainedDecisionReject::EffectivePolicyMismatch);
-                }
-            }
-            Err(e) => return reject(RetainedDecisionReject::OwnerPolicyUnavailable(e)),
-        }
-
         let payload = decided.payload();
-
-        // 2. One acquisition of the serialization domain for the whole operation.
-        let guard = self.backend.lock_domain();
 
         // 3. An actually observed recovery-required state blocks (distinct from an
         //    engine/durable disagreement below).
@@ -1798,7 +1834,7 @@ impl SafetyRecordOwner {
         //    returned record carries its holder reservation and stays covered
         //    through every check below; its O3 validation scratch released inside
         //    the helper.
-        let validated = match self.load_current_validated_locked(&guard, history) {
+        let validated = match self.load_current_validated_locked(guard, history) {
             Ok(v) => v,
             Err(CurrentLoadFailure::Admission) => {
                 return blocked(RetainedDecisionBlocked::Admission)
@@ -1842,7 +1878,7 @@ impl SafetyRecordOwner {
 
         // 7. The pin's provenance (provenance + context-digest objects, covered by
         //    `obs_ws`), read through the held guard (leaf lock brief).
-        if let Err(r) = self.pin_provenance_locked(&guard, payload.pin()) {
+        if let Err(r) = self.pin_provenance_locked(guard, payload.pin()) {
             return reject(RetainedDecisionReject::Provenance(r));
         }
 
@@ -1864,7 +1900,8 @@ impl SafetyRecordOwner {
         // Perform the remaining checks, then release `obs_ws` before the
         // result is produced (its commitment/ancestry SHA3 / traversal temporaries
         // live only inside the calls below). `result` is a `Copy` diagnostic;
-        // `validated` and the domain guard drop after it.
+        // `validated` drops as this helper returns and the borrowed domain guard
+        // drops in the caller afterwards (same obs_ws → validated → guard order).
         let result = (|| {
             // 9a. Recompute the proposal commitment and compare to the retained
             //     binding (substitution / projection refusal).
@@ -1980,8 +2017,9 @@ impl SafetyRecordOwner {
         })();
 
         // Release the observation working set (its covered transients are gone),
-        // then the result is returned; `validated` (backings before holder) and
-        // the domain guard drop afterwards.
+        // then the result is returned; `validated` (backings before holder) drops
+        // as this helper returns and the borrowed domain guard drops in the caller
+        // afterwards.
         drop(obs_ws);
         result
     }
