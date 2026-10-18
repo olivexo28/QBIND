@@ -1816,6 +1816,57 @@ impl SafetyRecordOwner {
         expected_authoritative_revision: u64,
         proof: ValidatedRecord,
     ) -> super::decision_capture::OwnedDecisionOutcome {
+        // Production/normal route: the engine decides on, and the gate projects /
+        // commits, the SAME immutable proposal argument.
+        self.decide_and_capture_owned_inner(
+            engine,
+            from,
+            proposal,
+            proposal,
+            limits,
+            expected_authoritative_revision,
+            proof,
+        )
+    }
+
+    /// Test-only mismatched-input seam (§9): the engine decides on
+    /// `engine_proposal` while the gate projects and commits `gate_proposal`,
+    /// so a substitution test can force a projection mismatch without any
+    /// production substitution API. Gated behind `test`/`test-utils`.
+    #[cfg(any(test, feature = "test-utils"))]
+    #[allow(clippy::too_many_arguments)]
+    pub fn decide_and_capture_owned_projection_seam(
+        &self,
+        engine: &mut qbind_consensus::BasicHotStuffEngine<[u8; 32]>,
+        from: qbind_consensus::ValidatorId,
+        engine_proposal: &qbind_wire::consensus::BlockProposal,
+        gate_proposal: &qbind_wire::consensus::BlockProposal,
+        limits: &super::decision_capture::PreparedDecisionInputLimits,
+        expected_authoritative_revision: u64,
+        proof: ValidatedRecord,
+    ) -> super::decision_capture::OwnedDecisionOutcome {
+        self.decide_and_capture_owned_inner(
+            engine,
+            from,
+            engine_proposal,
+            gate_proposal,
+            limits,
+            expected_authoritative_revision,
+            proof,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn decide_and_capture_owned_inner(
+        &self,
+        engine: &mut qbind_consensus::BasicHotStuffEngine<[u8; 32]>,
+        from: qbind_consensus::ValidatorId,
+        engine_proposal: &qbind_wire::consensus::BlockProposal,
+        gate_proposal: &qbind_wire::consensus::BlockProposal,
+        limits: &super::decision_capture::PreparedDecisionInputLimits,
+        expected_authoritative_revision: u64,
+        proof: ValidatedRecord,
+    ) -> super::decision_capture::OwnedDecisionOutcome {
         use super::decision_capture::{OwnedCaptureRefusal, OwnedDecisionOutcome};
 
         // Borrowed-proof provenance precheck BEFORE acquiring the domain or invoking
@@ -1840,12 +1891,12 @@ impl SafetyRecordOwner {
             limits,
             expected_rev: expected_authoritative_revision,
             proposer: from,
-            proposal,
+            proposal: gate_proposal,
             identity,
             reason: None,
         };
 
-        let result = engine.on_proposal_event_gated_owning(from, proposal, &mut gate);
+        let result = engine.on_proposal_event_gated_owning(from, engine_proposal, &mut gate);
 
         // End the gate's borrow of the guard BEFORE releasing the guard: move the
         // retained proof/reason out and drop the gate (and its guard borrow) first.
