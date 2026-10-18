@@ -18527,7 +18527,7 @@ Internally the former `observer: Option<&mut dyn SafetyDecisionObserver>` parame
 **5. Literal validation (executed this pass).**
 - `cargo test -p qbind-consensus --test run_422_decision_view_queries_tests` → ok, 5 passed.
 - `cargo test -p qbind-consensus --lib fixture_` → ok, 4 passed (the new constructed fixtures); full `--lib` → ok, 187 passed.
-- `cargo test -p qbind-consensus --test run_422_safety_decision_observer_spike_tests --test run_422_safety_decision_gate_tests --test run_422_owning_decision_vote_handoff_tests` → ok (12 + 7 + 7 passed).
+- `cargo test -p qbind-consensus --test run_422_safety_decision_observer_spike_tests --test run_422_safety_decision_gate_tests --test run_422_owning_decision_vote_handoff_tests` → ok (12 + 7 + 6 passed; the owning-handoff target has six tests — the earlier `7` was a recording error, corrected here against the committed file and a re-execution of the target).
 - `cargo test -p qbind-consensus --doc` → ok, 13 passed / 20 ignored.
 - `cargo build -p qbind-node` (default features) → Finished (compatibility preserved).
 - `rustfmt --check` on the three changed source/test files: the only diffs are pre-existing repo-wide deviations outside the added regions; the new test file was formatted and is clean. `cargo clippy -p qbind-consensus --all-targets`: warnings are pre-existing; none fall in the added query/enum regions or the new test file.
