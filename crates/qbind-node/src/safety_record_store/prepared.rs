@@ -355,6 +355,22 @@ impl PreparedRegistry {
         self.next_serial
     }
 
+    /// Test-only bounded read-only seam: the pinned restriction identities of all
+    /// currently occupied entries, in slot order. Bounded by `PREPARED_SLOTS`
+    /// (the fixed inline capacity); no handle is required, no entry is mutated,
+    /// and nothing beyond the identity is exposed. Lets a focused regression
+    /// establish the PROVENANCE of the actual retained generation (e.g. that a
+    /// captured generation retains its L0 lock view after the engine self-vote
+    /// raised L1), rather than inferring it from registry occupancy alone.
+    #[cfg(any(test, feature = "test-utils"))]
+    pub fn occupied_identities_for_test(&self) -> Vec<GenerationIdentity> {
+        self.slots
+            .iter()
+            .flatten()
+            .map(|e| e.identity)
+            .collect()
+    }
+
     /// Test-only: the standing registry-storage reservation charge this
     /// allocation holds for its whole lifetime (covers the cell once, retained
     /// even while empty). Observes the reservation directly, independent of entry

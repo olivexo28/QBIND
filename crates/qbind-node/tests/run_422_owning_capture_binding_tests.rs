@@ -1110,3 +1110,51 @@ fn pre_ingestion_hook_observes_would_block_before_ingestion() {
     let new_rev = publish_qc(&owner, &ctx, [0x5Au8; 32], 2, 1);
     assert_eq!(new_rev, 2, "publication completed after normal release");
 }
+
+// ===========================================================================
+// 16. §6 Retained L0 — after the real self-vote raises the engine to L1, the
+//     ACTUAL captured generation identity still carries the L0 lock (view 0,
+//     block = the engine's L0 lock), established by inspecting the retained
+//     generation's provenance, not by registry occupancy alone.
+// ===========================================================================
+
+#[test]
+fn captured_generation_retains_l0_provenance_after_self_vote_l1() {
+    let ctx = ctx_n(4);
+    let dir = tempfile::tempdir().unwrap();
+    let (mut engine, p1, l0_block) = engine_locked_and_safe_view1();
+    let owner = owner_with_matching_proof(dir.path(), &ctx, l0_block);
+    let proof = owner
+        .read_validate(None::<&FixtureCommittedHistory>)
+        .unwrap();
+    let lim = limits(&ctx);
+
+    let decided = match owner
+        .decide_and_capture_owned(&mut engine, ValidatorId::new(1), &p1, &lim, 1, proof)
+    {
+        OwnedDecisionOutcome::Decided(dv) => dv,
+        other => panic!("expected Decided, got {other:?}"),
+    };
+    // The engine's own live lock advanced to L1 via the self-vote.
+    assert_eq!(engine.locked_qc().map(|q| q.view), Some(1), "self-vote raised L1");
+
+    // The captured generation's provenance is still L0: inspect the actual
+    // retained identity (not merely the occupancy count).
+    let reg = owner
+        .backend_for_test()
+        .prepared_registry_for_test()
+        .expect("registry allocated by the capture");
+    let identities = reg.lock().unwrap().occupied_identities_for_test();
+    assert_eq!(identities.len(), 1, "exactly one captured generation");
+    assert_eq!(
+        identities[0].lock_view, 0,
+        "captured generation retains the L0 lock view despite the engine at L1"
+    );
+    assert_eq!(
+        identities[0].lock_block_id, l0_block,
+        "captured generation retains the L0 lock block id"
+    );
+
+    drop(decided);
+    assert_eq!(registry_occupied(&owner), 0, "abandoning frees the slot");
+}
