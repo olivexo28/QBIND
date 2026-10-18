@@ -21,7 +21,7 @@ use qbind_consensus::{
 };
 use qbind_wire::consensus::{BlockProposal, QuorumCertificate, MSG_TYPE_QC};
 
-use super::prepared::{PreparedPin, PREPARED_SLOTS};
+use super::prepared::{GenerationIdentity, PreparedPin, PreparedProvenance, PREPARED_SLOTS};
 use super::profile::PinnedSafetyContext;
 use super::record::ValidatedRecord;
 
@@ -883,6 +883,47 @@ pub(crate) fn scratch_charge() -> u128 {
     (2 * std::mem::size_of::<Sha3_256>() + std::mem::size_of::<AncestryBinding>()) as u128
 }
 
+/// A fixed charge covering the **complete internal working set** of the isolated
+/// non-consuming observation route (RUN 422 §13.6), admitted BEFORE any of the
+/// objects it covers is constructed and released AFTER the bounded checks, so no
+/// covered object is ever constructed uncharged. It is distinct from
+/// [`scratch_charge`] (the capture route's commitment/ancestry scratch) because
+/// the observation route also builds, under the held domain, the restriction
+/// identity, the scalar provenance, and the context-digest hashing state before
+/// it reaches the commitment/ancestry work — and the earlier reviewed order
+/// admitted the scratch only AFTER that provenance/context-digest work had
+/// already run.
+///
+/// Inventory (each object counted once; a conservative simultaneous ceiling, not
+/// a phase-by-phase minimum, so the reservation strictly dominates the live set
+/// at every phase without claiming any runtime ceiling breach):
+///
+///   * **restriction-identity** — one [`GenerationIdentity`] (`lock_block_id` +
+///     `lock_view`), derived from the holder-covered validated record and read
+///     through every later check;
+///   * **provenance** — one scalar [`PreparedProvenance`] (identity + revision +
+///     incarnation + origin context digest) returned by the registry leaf
+///     lookup;
+///   * **context-digest hashing** — one transient `Sha3_256` state, the
+///     `context_digest` computation used by the provenance check;
+///   * **commitment / ancestry hashing + traversal control** — exactly the
+///     [`scratch_charge`] terms (two SHA3-256 states + the fixed
+///     [`AncestryBinding`] control) of the commitment recomputation and bounded
+///     ancestry re-evaluation.
+///
+/// The holder-covered validated record and its O3 validation scratch are charged
+/// SEPARATELY by the loader; this charge adds only the observation route's own
+/// derived objects and never double-counts the record.
+pub(crate) fn observation_working_set_charge() -> u128 {
+    let identity = std::mem::size_of::<GenerationIdentity>() as u128;
+    let provenance = std::mem::size_of::<PreparedProvenance>() as u128;
+    let context_digest_hasher = std::mem::size_of::<Sha3_256>() as u128;
+    identity
+        .saturating_add(provenance)
+        .saturating_add(context_digest_hasher)
+        .saturating_add(scratch_charge())
+}
+
 /// Reproduce the engine's current candidate-block-id algorithm node-locally
 /// (`derive_block_id_from_header`): proposer id (8, LE) ‖ view (8, LE) ‖
 /// parent_block_id[..16]. Parity is proven against the engine's own decision
@@ -919,6 +960,18 @@ pub fn covering_charge_for_test() -> Option<u128> {
 #[cfg(any(test, feature = "test-utils"))]
 pub fn scratch_charge_for_test() -> u128 {
     scratch_charge()
+}
+
+/// Test-only (RUN 422 §13.6): the complete observation-route working-set charge,
+/// exposed so a discriminating regression can assert that the LATER
+/// (observation-working-set) admission phase is charged separately from the
+/// loader phase, and that it strictly exceeds the capture-route
+/// [`scratch_charge`] (it adds the restriction-identity, provenance, and
+/// context-digest terms). Mirrors [`observation_working_set_charge`]; gated
+/// behind `test`/`test-utils`.
+#[cfg(any(test, feature = "test-utils"))]
+pub fn observation_working_set_charge_for_test() -> u128 {
+    observation_working_set_charge()
 }
 
 #[cfg(test)]

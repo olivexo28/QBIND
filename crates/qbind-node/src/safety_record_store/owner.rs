@@ -720,6 +720,61 @@ fn fire_binding_phase_hook() {
     }
 }
 
+// Test-only (RUN 422 §13.6 observation working-set admission + serialization
+// observation). This hook fires on the observing thread INSIDE
+// `observe_retained_decision`, WHILE the single serialization-domain guard is
+// held, AFTER the loader phase has already admitted and released its own
+// reservations (its holder reservation stays live, its O3 scratch is gone) and
+// the engine<->durable correspondence has passed, but strictly BEFORE the
+// observation working-set reservation is admitted and before any covered
+// restriction-identity / provenance / context-digest / commitment-ancestry
+// object is used in the bounded checks.
+//
+// It lets a focused regression do two separable things that the loader-phase
+// hook cannot:
+//   * ISOLATE the LATER admission phase — install a hook that reserves the
+//     remaining aggregate budget here, after the loader already succeeded, so
+//     ONLY the observation-working-set reservation is refused (`Admission`),
+//     proving the two admission phases are charged and can fail independently;
+//   * COORDINATE a publication-exclusion handshake — a concurrent publication
+//     must take the SAME domain lock, so while this hook pauses holding the
+//     guard a competing non-blocking acquisition observes `WouldBlock`, and an
+//     eligible publication succeeds only AFTER the observation releases.
+// Thread-local, one-shot, consumed on first fire. Absent from production builds.
+#[cfg(any(test, feature = "test-utils"))]
+thread_local! {
+    static OBSERVATION_WS_HOOK: std::cell::RefCell<Option<Box<dyn Fn()>>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// Test-only (RUN 422 §13.6): install a one-shot observation-working-set hook on
+/// this thread. The NEXT `observe_retained_decision` on this thread fires it once
+/// (domain guard held, loader phase complete, before the observation working-set
+/// reservation is admitted) and clears it.
+#[cfg(any(test, feature = "test-utils"))]
+pub fn set_observation_working_set_hook<F: Fn() + Send + Sync + 'static>(f: F) {
+    OBSERVATION_WS_HOOK.with(|h| *h.borrow_mut() = Some(Box::new(f)));
+}
+
+/// Test-only (RUN 422 §13.6): clear any installed observation-working-set hook on
+/// this thread.
+#[cfg(any(test, feature = "test-utils"))]
+pub fn clear_observation_working_set_hook() {
+    OBSERVATION_WS_HOOK.with(|h| *h.borrow_mut() = None);
+}
+
+/// Fire and consume the one-shot observation-working-set hook, if installed.
+/// Called by `observe_retained_decision` while holding the serialization domain
+/// guard, before the observation working-set reservation is admitted. A no-op in
+/// production (the hook is never installed there).
+#[cfg(any(test, feature = "test-utils"))]
+fn fire_observation_working_set_hook() {
+    let cb = OBSERVATION_WS_HOOK.with(|h| h.borrow_mut().take());
+    if let Some(cb) = cb {
+        cb();
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Test-only (RUN 422 §3 pre-effective O4-owned live-object observation). At the
 // post-acknowledgement / pre-effectiveness O4 phase, the publish path holds the
@@ -1707,10 +1762,10 @@ impl SafetyRecordOwner {
         history: Option<&H>,
     ) -> super::decision_capture::RetainedDecisionObservation {
         use super::decision_capture::{
-            commit_proposal, derive_block_id_local, scratch_charge, BoundedAncestryReject,
-            CorrespondenceRefusal, CurrentLoadFailure, MetaField, PreparedDecisionInputLimits,
-            ProjectionMismatch, RetainedDecisionBlocked, RetainedDecisionObservation,
-            RetainedDecisionReject,
+            commit_proposal, derive_block_id_local, observation_working_set_charge,
+            BoundedAncestryReject, CorrespondenceRefusal, CurrentLoadFailure, MetaField,
+            PreparedDecisionInputLimits, ProjectionMismatch, RetainedDecisionBlocked,
+            RetainedDecisionObservation, RetainedDecisionReject,
         };
         use qbind_consensus::BoundedSafetyOutcome;
 
@@ -1753,20 +1808,45 @@ impl SafetyRecordOwner {
             }
         };
 
-        // 5. The effective durable restriction identity. A `BootstrapNoLock`
-        //    record leaves this Locked-only route explicitly unresolved.
+        // 5. Admit the observation WORKING SET before constructing any of the
+        //    internal objects it covers (RUN 422 §13.6 accounting completion).
+        //    The earlier reviewed order built the restriction identity, the
+        //    provenance, and the context-digest BEFORE admitting any observation
+        //    reservation; here a single working-set reservation — sized for the
+        //    restriction-identity, the scalar provenance, the context-digest
+        //    hashing state, AND the commitment/ancestry scratch + control — is
+        //    admitted FIRST, while the loaded record stays holder-covered. It is
+        //    released after the bounded checks (its covered transient objects are
+        //    destroyed inside the steps below, before this release), so no covered
+        //    object is ever constructed uncharged. A refused admission blocks,
+        //    distinct from the loader-phase admission failure above.
+        #[cfg(any(test, feature = "test-utils"))]
+        fire_observation_working_set_hook();
+        let obs_ws = match self
+            .backend
+            .accounting()
+            .reserve(observation_working_set_charge())
+        {
+            Ok(r) => r,
+            Err(_) => return blocked(RetainedDecisionBlocked::Admission),
+        };
+
+        // 6. The effective durable restriction identity (restriction-identity
+        //    object, covered by `obs_ws`). A `BootstrapNoLock` record leaves this
+        //    Locked-only route explicitly unresolved.
         let durable = match super::prepared::GenerationIdentity::from_retained(validated.retained())
         {
             Some(id) => id,
             None => return blocked(RetainedDecisionBlocked::BootstrapUnresolved),
         };
 
-        // 6. The pin's provenance, read through the held guard (leaf lock brief).
+        // 7. The pin's provenance (provenance + context-digest objects, covered by
+        //    `obs_ws`), read through the held guard (leaf lock brief).
         if let Err(r) = self.pin_provenance_locked(&guard, payload.pin()) {
             return reject(RetainedDecisionReject::Provenance(r));
         }
 
-        // 7. Engine ↔ durable correspondence. Engine NoLock is refused on this
+        // 8. Engine ↔ durable correspondence. Engine NoLock is refused on this
         //    Locked-only route; an engine/durable lock disagreement blocks
         //    conservatively (NOT a recovery-required state).
         let (engine_lock_id, engine_lock_view) = match engine.locked_qc() {
@@ -1781,18 +1861,10 @@ impl SafetyRecordOwner {
             return blocked(RetainedDecisionBlocked::EngineDurableDisagreement);
         }
 
-        // 8. Admit the observation hashing/traversal scratch while the record
-        //    stays covered. Released before the result is returned, after its
-        //    covered transient objects are destroyed.
-        let obs_scratch = match self.backend.accounting().reserve(scratch_charge()) {
-            Ok(r) => r,
-            Err(_) => return blocked(RetainedDecisionBlocked::Admission),
-        };
-
-        // Perform the remaining checks, then release `obs_scratch` before the
-        // result is produced (its SHA3 / traversal temporaries live only inside
-        // the calls below). `result` is a `Copy` diagnostic; `validated` and the
-        // domain guard drop after it.
+        // Perform the remaining checks, then release `obs_ws` before the
+        // result is produced (its commitment/ancestry SHA3 / traversal temporaries
+        // live only inside the calls below). `result` is a `Copy` diagnostic;
+        // `validated` and the domain guard drop after it.
         let result = (|| {
             // 9a. Recompute the proposal commitment and compare to the retained
             //     binding (substitution / projection refusal).
@@ -1907,10 +1979,10 @@ impl SafetyRecordOwner {
             }
         })();
 
-        // Release the observation scratch (its covered transients are gone), then
-        // the result is returned; `validated` (backings before holder) and the
-        // domain guard drop afterwards.
-        drop(obs_scratch);
+        // Release the observation working set (its covered transients are gone),
+        // then the result is returned; `validated` (backings before holder) and
+        // the domain guard drop afterwards.
+        drop(obs_ws);
         result
     }
 
