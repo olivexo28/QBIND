@@ -1102,20 +1102,52 @@ mod tests {
     }
 
     // =======================================================================
-    // §6 Required ancestry — exercise `bind_ancestry`'s *Ancestry* arm through
-    // an ACTUAL engine-built `SafetyDecisionView` (an observed executed
-    // decision, not a constructed `SafetyDecisionView` fixture), at the exact
-    // admitted bound. `MAX_ANCESTRY_HOPS == 64`:
-    //   * a candidate exactly 64 parent transitions above the lock binds
-    //     successfully (`ReachedLock { hops: 64 }`); and
-    //   * a candidate 65 transitions above it is refused `OverBound { max: 64 }`.
-    // The `ViewSufficiency` not-applicable behaviour is exercised separately in
-    // the integration suite and is NOT conflated here. `CandidateIsLock`
-    // (zero-hop) and the `Unavailable` guard are covered by the constructed
-    // `ancestry_relation_to_lock` fixtures in qbind-consensus; they are not
-    // reachable through the Ancestry arm via real engine control flow (the
-    // predicate's own unbounded walk establishes the branch, so a bounded
-    // re-walk within the admitted hops either reaches the lock or is OverBound).
+    // §5/§6 NODE ancestry-binding coverage — exercise the node's own
+    // `bind_ancestry` through an ACTUAL engine-built `SafetyDecisionView` (an
+    // observed executed decision, not a manually constructed `SafetyDecisionView`
+    // fixture). This is DISTINCT from the qbind-consensus consensus fixtures that
+    // exercise `ancestry_relation_to_lock` directly: those do NOT call the node's
+    // `bind_ancestry`, so they establish consensus ancestry-query coverage, not
+    // node ancestry-binding coverage.
+    //
+    // Each harness below constructs an initial engine graph / lock and then lets
+    // ACTUAL engine control flow (`on_proposal_event_observed`) decide the branch
+    // and present the real decision view to `bind_ancestry`; none of them hands
+    // `bind_ancestry` a hand-built view. Branches covered through this node route:
+    //
+    //   * `ReachedLock { hops }` — a candidate exactly `hops` parent transitions
+    //     above the lock. `MAX_ANCESTRY_HOPS == 64`: 64 transitions bind
+    //     successfully; 65 transitions are refused `OverBound { max: 64 }`.
+    //   * `CandidateIsLock` (zero hops) — a candidate whose id EQUALS the lock,
+    //     re-proposed with a stale justify view below the lock view. The engine's
+    //     candidate-first safety check (the walk tests the candidate node itself
+    //     before traversing any edge, see `safety_decision` and
+    //     `ancestry_relation_to_lock`) takes the `Ancestry` branch and the bounded
+    //     relation reports `CandidateIsLock`. This case IS reachable through real
+    //     engine control flow and needs no consensus change; the earlier claim
+    //     that it was only reachable via constructed consensus fixtures was wrong.
+    //   * `Unavailable` via the `NoLock` branch — a decision taken with NO engine
+    //     lock. `bind_ancestry`'s `SafetyBranch::NoLock => Err(Unavailable)` arm is
+    //     exercised over the live view. This is the `NoLock -> Unavailable` case.
+    //
+    // The `ViewSufficiency` not-applicable binding is exercised through the full
+    // owner route in the integration suite (`view_sufficiency_records_not_\
+    // applicable_ancestry`) and is not conflated here.
+    //
+    // DEFENSIVE `Unavailable` sub-cases NOT executed here, with their exact
+    // reachability argument and explicit execution status:
+    //   * `locked_block_id()/locked_view()` returning `None` on the `Ancestry`
+    //     branch: unreachable — the branch is only produced when a lock is in
+    //     effect, so both are `Some`. (Defensive guard; NOT executed.)
+    //   * `AncestryRelation::{NoParentLink, ParentAbsent}` and the `walked != hops`
+    //     / `EndpointMismatch` guards: unreachable through a VALID `Ancestry`
+    //     decision view — `safety_decision` only returns `Safe(Ancestry)` after its
+    //     own UNBOUNDED walk actually reached the lock, so the parent chain up to
+    //     the lock is intact and present; a bounded re-walk within the admitted
+    //     hops therefore either reaches the lock (`ReachedLock`/`CandidateIsLock`)
+    //     or exhausts the bound (`OverBound`). A broken/absent link on the path to
+    //     the lock cannot coexist with an `Ancestry` decision. (Defensive guards;
+    //     NOT executed — they cannot be produced through a valid decision view.)
     // =======================================================================
 
     /// Drive the real engine to an executed `Ancestry`-branch decision whose
@@ -1250,6 +1282,196 @@ mod tests {
                 max: MAX_ANCESTRY_HOPS
             }),
             "65 required transitions exceed the admitted traversal bound"
+        );
+    }
+
+    /// §5 NODE binding coverage — drive the real engine to an executed
+    /// `Ancestry`-branch decision whose candidate id EQUALS the lock (re-proposed
+    /// with a stale justify view below the lock view), observe the live decision
+    /// view, and return the node's `bind_ancestry` outcome. The candidate-first
+    /// safety check reaches the lock at zero hops.
+    fn observed_candidate_is_lock_binding(
+    ) -> (Option<SafetyBranch>, Result<AncestryBinding, AncestryRefusal>) {
+        use qbind_consensus::{
+            BasicHotStuffEngine, ConsensusValidatorSet, QuorumCertificate as EngineQc,
+            SafetyDecisionObserver, SafetyDecisionView, ValidatorSetEntry,
+        };
+        use qbind_wire::consensus::QuorumCertificate as WireQc;
+
+        struct Rec {
+            branch: Option<SafetyBranch>,
+            binding: Option<Result<AncestryBinding, AncestryRefusal>>,
+        }
+        impl SafetyDecisionObserver<[u8; 32]> for Rec {
+            fn observe(&mut self, d: &SafetyDecisionView<'_, [u8; 32]>) {
+                self.branch = Some(d.branch());
+                self.binding = Some(bind_ancestry(
+                    d,
+                    &PreparedDecisionInputLimits::from_pinned(&ctx_n(4)).expect("policy"),
+                ));
+            }
+        }
+
+        let vset = ConsensusValidatorSet::new(vec![ValidatorSetEntry {
+            id: ValidatorId::new(1),
+            voting_power: 1,
+        }])
+        .expect("valid set");
+        let mut engine: BasicHotStuffEngine<[u8; 32]> =
+            BasicHotStuffEngine::new(ValidatorId::new(1), vset);
+
+        // The engine derives the candidate id from (proposer, view, parent[..16]);
+        // reproduce it locally and LOCK the engine at exactly that id, at a high
+        // view so the candidate's low justify view (0) cannot satisfy
+        // view-sufficiency and the predicate takes the Ancestry branch.
+        let cand_view = 5u64;
+        let parent = [0xC0u8; 32];
+        let candidate_id = derive_block_id_local(1, cand_view, &parent);
+        engine
+            .state_mut()
+            .set_locked_qc(EngineQc::new(candidate_id, 1000, vec![]));
+        for _ in 0..cand_view {
+            engine.advance_view();
+        }
+
+        let proposal = BlockProposal {
+            header: BlockHeader {
+                version: 1,
+                chain_id: 1,
+                epoch: 0,
+                height: cand_view,
+                round: cand_view,
+                parent_block_id: parent,
+                payload_hash: [0u8; 32],
+                proposer_index: 1,
+                suite_id: qbind_wire::DEFAULT_CONSENSUS_SUITE_ID,
+                tx_count: 0,
+                timestamp: 0,
+                payload_kind: qbind_wire::PAYLOAD_KIND_NORMAL,
+                next_epoch: 0,
+                batch_commitment: [0u8; 32],
+            },
+            qc: Some(WireQc {
+                version: 1,
+                chain_id: 1,
+                epoch: 0,
+                height: 0, // justify view 0 < locked view 1000: not view-sufficiency
+                round: 0,
+                step: 0,
+                block_id: candidate_id,
+                suite_id: qbind_wire::DEFAULT_CONSENSUS_SUITE_ID,
+                signer_bitmap: vec![],
+                signatures: vec![],
+            }),
+            txs: vec![],
+            signature: vec![],
+        };
+
+        let mut rec = Rec {
+            branch: None,
+            binding: None,
+        };
+        engine.on_proposal_event_observed(ValidatorId::new(1), &proposal, &mut rec);
+        (
+            rec.branch,
+            rec.binding.expect("observer fired on the executed decision"),
+        )
+    }
+
+    #[test]
+    fn required_ancestry_binds_candidate_is_lock_zero_hops() {
+        let (branch, binding) = observed_candidate_is_lock_binding();
+        assert_eq!(
+            branch,
+            Some(SafetyBranch::Ancestry),
+            "executed decision took the required-ancestry branch (candidate is the lock)"
+        );
+        let b = binding.expect("candidate-is-lock binds at zero hops");
+        assert_eq!(
+            b.kind(),
+            AncestryKind::CandidateIsLock,
+            "the candidate-first safety check reaches the lock at zero hops"
+        );
+    }
+
+    /// §5 NODE binding coverage — drive the real engine to a `NoLock` decision
+    /// (no engine lock in effect) and return the node's `bind_ancestry` outcome
+    /// over the live view. This is the `NoLock -> Unavailable` case, distinct from
+    /// the defensive unavailable-ancestry guards (which cannot be produced through
+    /// a valid `Ancestry` decision view — see the section comment above).
+    fn observed_nolock_binding(
+    ) -> (Option<SafetyBranch>, Option<Result<AncestryBinding, AncestryRefusal>>) {
+        use qbind_consensus::{
+            BasicHotStuffEngine, ConsensusValidatorSet, SafetyDecisionObserver, SafetyDecisionView,
+            ValidatorSetEntry,
+        };
+
+        struct Rec {
+            branch: Option<SafetyBranch>,
+            binding: Option<Result<AncestryBinding, AncestryRefusal>>,
+        }
+        impl SafetyDecisionObserver<[u8; 32]> for Rec {
+            fn observe(&mut self, d: &SafetyDecisionView<'_, [u8; 32]>) {
+                self.branch = Some(d.branch());
+                self.binding = Some(bind_ancestry(
+                    d,
+                    &PreparedDecisionInputLimits::from_pinned(&ctx_n(4)).expect("policy"),
+                ));
+            }
+        }
+
+        let vset = ConsensusValidatorSet::new(vec![ValidatorSetEntry {
+            id: ValidatorId::new(1),
+            voting_power: 1,
+        }])
+        .expect("valid set");
+        // Fresh engine, NO lock set: the decision is NoLock. The candidate is
+        // present (default block-slot limit), so the observer fires.
+        let mut engine: BasicHotStuffEngine<[u8; 32]> =
+            BasicHotStuffEngine::new(ValidatorId::new(1), vset);
+
+        let proposal = BlockProposal {
+            header: BlockHeader {
+                version: 1,
+                chain_id: 1,
+                epoch: 0,
+                height: 0,
+                round: 0,
+                parent_block_id: [0xFFu8; 32],
+                payload_hash: [0u8; 32],
+                proposer_index: 1,
+                suite_id: qbind_wire::DEFAULT_CONSENSUS_SUITE_ID,
+                tx_count: 0,
+                timestamp: 0,
+                payload_kind: qbind_wire::PAYLOAD_KIND_NORMAL,
+                next_epoch: 0,
+                batch_commitment: [0u8; 32],
+            },
+            qc: None,
+            txs: vec![],
+            signature: vec![],
+        };
+
+        let mut rec = Rec {
+            branch: None,
+            binding: None,
+        };
+        engine.on_proposal_event_observed(ValidatorId::new(1), &proposal, &mut rec);
+        (rec.branch, rec.binding)
+    }
+
+    #[test]
+    fn ancestry_unavailable_on_nolock_branch() {
+        let (branch, binding) = observed_nolock_binding();
+        assert_eq!(
+            branch,
+            Some(SafetyBranch::NoLock),
+            "executed decision took the NoLock branch (no engine lock in effect)"
+        );
+        assert_eq!(
+            binding.expect("observer fired on the executed NoLock decision"),
+            Err(AncestryRefusal::Unavailable),
+            "bind_ancestry refuses Unavailable on the NoLock branch"
         );
     }
 }
