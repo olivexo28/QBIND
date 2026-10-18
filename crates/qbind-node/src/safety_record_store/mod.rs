@@ -34,6 +34,7 @@
 pub mod accounting;
 pub mod backend;
 pub mod codec;
+pub mod decision_capture;
 pub mod error;
 pub mod owner;
 pub mod prepared;
@@ -42,6 +43,11 @@ pub mod record;
 pub mod validate;
 
 pub use backend::{InjectFault, PublishOutcome, SafetyBackend, SafetyBackendPolicy};
+pub use decision_capture::{
+    AncestryBinding, AncestryKind, AncestryRefusal, CorrespondenceRefusal, DecisionMetadata,
+    EntrypointKind, InputBoundRefusal, InputPolicyError, MetaBranch, OwnedCaptureRefusal,
+    OwnedDecisionOutcome, OwningCapturePayload, PreparedDecisionInputLimits, ProjectionMismatch,
+};
 pub use error::SafetyStoreError;
 pub use owner::{PublishResult, SafetyMeta, SafetyRecordOwner};
 pub use prepared::{

@@ -101,3 +101,13 @@ required-features = ["test-utils"]
 name = "run_422_owning_decision_vote_handoff_node_tests"
 path = "tests/run_422_owning_decision_vote_handoff_node_tests.rs"
 required-features = ["test-utils"]
+# RUN 422 §13.6 — isolated owner-controlled decision/capture binding. Drives the
+# real engine + storage route (`decide_and_capture_owned`) and the `test-utils`-
+# gated observation seams (`backend_for_test`, `accounting_current`,
+# `reserve_standing_for_test`, `prepared_registry_for_test`,
+# `try_lock_domain_for_test`, `set_capture_interval_hook`), so it is gated
+# identically. No production caller; activation remains DISABLED.
+[[test]]
+name = "run_422_owning_capture_binding_tests"
+path = "tests/run_422_owning_capture_binding_tests.rs"
+required-features = ["test-utils"]
