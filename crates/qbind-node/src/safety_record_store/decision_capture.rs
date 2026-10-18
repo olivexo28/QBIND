@@ -639,6 +639,16 @@ pub enum ProjectionMismatch {
 /// variant is returned alongside the intact [`ValidatedRecord`].
 #[derive(Debug)]
 pub enum OwnedCaptureRefusal {
+    /// The caller-supplied input policy's effective limits did not match the
+    /// policy derived from the owner's pinned context (§2). A typed,
+    /// allocation-free refusal raised before the engine decision, so no
+    /// dependent self-vote occurs and the proof is returned intact. This is a
+    /// resource-policy binding only; it establishes neither validator
+    /// authentication nor current authority.
+    EffectivePolicyMismatch,
+    /// The owner's pinned context could not yield a policy to bind against (§2),
+    /// e.g. an empty validator set. Raised before the engine decision.
+    OwnerPolicyUnavailable(InputPolicyError),
     /// The borrowed-proof provenance precheck refused before the engine call.
     Precheck(super::prepared::CaptureRefusal),
     /// The engine made an ordinary pre-decision rejection (not safe to vote);
@@ -734,6 +744,24 @@ pub(crate) fn derive_block_id_local(
 /// A compile-time check keeping the fixed inline slot count visible to this
 /// module (the registry owns no growable backing).
 const _: () = assert!(PREPARED_SLOTS >= 1);
+
+/// Test-only (RUN 422 §3): the additional envelope/data covering charge, exposed
+/// so a discriminating regression can assert the exact reservation overlap at the
+/// binding phase. Mirrors [`envelope_extra_charge`]; gated behind
+/// `test`/`test-utils`.
+#[cfg(any(test, feature = "test-utils"))]
+pub fn covering_charge_for_test() -> Option<u128> {
+    envelope_extra_charge()
+}
+
+/// Test-only (RUN 422 §3): the transient hashing/traversal scratch charge,
+/// exposed so a discriminating regression can assert the exact reservation
+/// overlap at the binding phase. Mirrors [`scratch_charge`]; gated behind
+/// `test`/`test-utils`.
+#[cfg(any(test, feature = "test-utils"))]
+pub fn scratch_charge_for_test() -> u128 {
+    scratch_charge()
+}
 
 #[cfg(test)]
 mod tests {
@@ -920,6 +948,57 @@ mod tests {
     }
 
     #[test]
+    fn total_canonical_exact_8mib_boundary_and_plus_one() {
+        // The independent aggregate cap is exactly 8,388,608 bytes of the complete
+        // canonical framing (fixed header + qc-length prefix + per-tx length
+        // frames + tx bytes). Build a proposal whose canonical total is EXACTLY
+        // the cap, with every individual tx-length, tx-count and (absent) QC limit
+        // satisfied, so the AGGREGATE boundary is the only cause.
+        let limits = PreparedDecisionInputLimits::from_pinned(&ctx_n(4)).unwrap();
+
+        // Fixed header (150) + qc length prefix (4) = 154 with qc absent.
+        const BASE: u64 = 1 + 4 + 8 + 8 + 8 + 32 + 32 + 2 + 2 + 4 + 8 + 1 + 8 + 32 + 4;
+        let full = limits.max_tx_len() as usize; // 1 MiB, the per-tx cap
+        // 7 full txs frame 7 * (4 + full); the last tx fills the remainder to hit
+        // exactly MAX_TOTAL_CANONICAL.
+        let framed_full = 4 + full as u64;
+        let remaining = MAX_TOTAL_CANONICAL - BASE - 7 * framed_full;
+        let last_len = (remaining - 4) as usize; // last tx length (minus its frame)
+        assert!(last_len <= full, "last tx stays within the per-tx cap");
+
+        let build = |last: usize| -> BlockProposal {
+            let mut txs: Vec<Vec<u8>> = (0..7).map(|_| vec![0u8; full]).collect();
+            txs.push(vec![0u8; last]);
+            BlockProposal {
+                header: header(1, 1, [0xFF; 32], txs.len() as u32),
+                qc: None,
+                txs,
+                signature: vec![],
+            }
+        };
+
+        // Exactly 8,388,608 bytes: admitted.
+        let at = build(last_len);
+        assert_eq!(at.txs.len(), 8, "count limit satisfied (8 <= 1024)");
+        assert!(
+            commit_proposal(&at, &limits).is_ok(),
+            "exactly 8,388,608 canonical bytes is admitted"
+        );
+
+        // Exactly 8,388,609 bytes (one more canonical byte): refused, with the
+        // aggregate cap as the cause (per-tx and count limits still satisfied).
+        let over = build(last_len + 1);
+        assert!(
+            matches!(
+                commit_proposal(&over, &limits),
+                Err(InputBoundRefusal::TotalCanonicalExceeded { total, max })
+                    if total == MAX_TOTAL_CANONICAL + 1 && max == MAX_TOTAL_CANONICAL
+            ),
+            "exactly 8,388,609 canonical bytes is refused on the aggregate boundary"
+        );
+    }
+
+    #[test]
     fn tx_len_boundary_and_plus_one() {
         let limits = PreparedDecisionInputLimits::from_pinned(&ctx_n(4)).unwrap();
         // Exactly at the per-tx cap is admitted (total cap still satisfied).
@@ -1020,5 +1099,157 @@ mod tests {
         let pin = std::mem::size_of::<PreparedPin>();
         assert_eq!(envelope_extra_charge(), Some((envelope - pin) as u128));
         assert!(scratch_charge() > 0);
+    }
+
+    // =======================================================================
+    // §6 Required ancestry — exercise `bind_ancestry`'s *Ancestry* arm through
+    // an ACTUAL engine-built `SafetyDecisionView` (an observed executed
+    // decision, not a constructed `SafetyDecisionView` fixture), at the exact
+    // admitted bound. `MAX_ANCESTRY_HOPS == 64`:
+    //   * a candidate exactly 64 parent transitions above the lock binds
+    //     successfully (`ReachedLock { hops: 64 }`); and
+    //   * a candidate 65 transitions above it is refused `OverBound { max: 64 }`.
+    // The `ViewSufficiency` not-applicable behaviour is exercised separately in
+    // the integration suite and is NOT conflated here. `CandidateIsLock`
+    // (zero-hop) and the `Unavailable` guard are covered by the constructed
+    // `ancestry_relation_to_lock` fixtures in qbind-consensus; they are not
+    // reachable through the Ancestry arm via real engine control flow (the
+    // predicate's own unbounded walk establishes the branch, so a bounded
+    // re-walk within the admitted hops either reaches the lock or is OverBound).
+    // =======================================================================
+
+    /// Drive the real engine to an executed `Ancestry`-branch decision whose
+    /// candidate sits exactly `hops` parent transitions above the lock, observe
+    /// the actual decision view, and return the owner route's `bind_ancestry`
+    /// outcome taken over that live view.
+    fn observed_ancestry_binding(hops: usize) -> (Option<SafetyBranch>, Result<AncestryBinding, AncestryRefusal>) {
+        use qbind_consensus::{
+            BasicHotStuffEngine, ConsensusValidatorSet, QuorumCertificate as EngineQc,
+            SafetyDecisionObserver, SafetyDecisionView, ValidatorSetEntry,
+        };
+        use qbind_wire::consensus::QuorumCertificate as WireQc;
+
+        struct Rec {
+            branch: Option<SafetyBranch>,
+            binding: Option<Result<AncestryBinding, AncestryRefusal>>,
+        }
+        impl SafetyDecisionObserver<[u8; 32]> for Rec {
+            fn observe(&mut self, d: &SafetyDecisionView<'_, [u8; 32]>) {
+                self.branch = Some(d.branch());
+                self.binding = Some(bind_ancestry(
+                    d,
+                    &PreparedDecisionInputLimits::from_pinned(&ctx_n(4)).expect("policy"),
+                ));
+            }
+        }
+
+        let vset = ConsensusValidatorSet::new(vec![ValidatorSetEntry {
+            id: ValidatorId::new(1),
+            voting_power: 1,
+        }])
+        .expect("valid set");
+        let mut engine: BasicHotStuffEngine<[u8; 32]> =
+            BasicHotStuffEngine::new(ValidatorId::new(1), vset);
+
+        // Build the ancestor chain b[0]=lock .. b[hops-1]=top; the candidate is
+        // supplied by the proposal and extends `top`, so candidate->lock is
+        // exactly `hops` transitions.
+        let id_of = |i: usize| {
+            let mut a = [0u8; 32];
+            a[0] = 0xB0;
+            a[1] = i as u8;
+            a[2] = (i >> 8) as u8;
+            a
+        };
+        let lock_id = id_of(0);
+        engine.state_mut().register_block(lock_id, 0, None, None);
+        let mut parent = lock_id;
+        for i in 1..hops {
+            let id = id_of(i);
+            engine.state_mut().register_block(id, i as u64, Some(parent), None);
+            parent = id;
+        }
+        // Lock at a high view so the candidate's low justify view (0) does NOT
+        // satisfy view-sufficiency and the predicate walks ancestry.
+        engine
+            .state_mut()
+            .set_locked_qc(EngineQc::new(lock_id, 1000, vec![]));
+
+        let cand_view = hops as u64 + 1;
+        for _ in 0..cand_view {
+            engine.advance_view();
+        }
+
+        let proposal = BlockProposal {
+            header: BlockHeader {
+                version: 1,
+                chain_id: 1,
+                epoch: 0,
+                height: cand_view,
+                round: cand_view,
+                parent_block_id: parent,
+                payload_hash: [0u8; 32],
+                proposer_index: 1,
+                suite_id: qbind_wire::DEFAULT_CONSENSUS_SUITE_ID,
+                tx_count: 0,
+                timestamp: 0,
+                payload_kind: qbind_wire::PAYLOAD_KIND_NORMAL,
+                next_epoch: 0,
+                batch_commitment: [0u8; 32],
+            },
+            qc: Some(WireQc {
+                version: 1,
+                chain_id: 1,
+                epoch: 0,
+                height: 0,
+                round: 0,
+                step: 0,
+                block_id: lock_id,
+                suite_id: qbind_wire::DEFAULT_CONSENSUS_SUITE_ID,
+                signer_bitmap: vec![],
+                signatures: vec![],
+            }),
+            txs: vec![],
+            signature: vec![],
+        };
+
+        let mut rec = Rec {
+            branch: None,
+            binding: None,
+        };
+        engine.on_proposal_event_observed(ValidatorId::new(1), &proposal, &mut rec);
+        (
+            rec.branch,
+            rec.binding.expect("observer fired on the executed decision"),
+        )
+    }
+
+    #[test]
+    fn required_ancestry_binds_at_exactly_64_transitions() {
+        let (branch, binding) = observed_ancestry_binding(MAX_ANCESTRY_HOPS);
+        assert_eq!(
+            branch,
+            Some(SafetyBranch::Ancestry),
+            "executed decision took the required-ancestry branch"
+        );
+        let b = binding.expect("64 transitions is within the admitted bound");
+        assert_eq!(b.kind(), AncestryKind::ReachedLock { hops: MAX_ANCESTRY_HOPS });
+    }
+
+    #[test]
+    fn required_ancestry_refuses_at_65_transitions_overbound() {
+        let (branch, binding) = observed_ancestry_binding(MAX_ANCESTRY_HOPS + 1);
+        assert_eq!(
+            branch,
+            Some(SafetyBranch::Ancestry),
+            "executed decision took the required-ancestry branch"
+        );
+        assert_eq!(
+            binding,
+            Err(AncestryRefusal::OverBound {
+                max: MAX_ANCESTRY_HOPS
+            }),
+            "65 required transitions exceed the admitted traversal bound"
+        );
     }
 }

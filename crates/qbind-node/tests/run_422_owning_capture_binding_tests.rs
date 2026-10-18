@@ -28,11 +28,13 @@ use qbind_node::safety_record_store::backend::{
     SafetyBackend, SafetyBackendPolicy, TryLockDomainOutcome,
 };
 use qbind_node::safety_record_store::decision_capture::{
-    OwnedCaptureRefusal, OwnedDecisionOutcome, PreparedDecisionInputLimits,
+    covering_charge_for_test, scratch_charge_for_test, OwnedCaptureRefusal, OwnedDecisionOutcome,
+    PreparedDecisionInputLimits, ProjectionMismatch,
 };
 use qbind_node::safety_record_store::owner::{
-    clear_capture_interval_hook, make_locked_qc, set_capture_interval_hook, PublishResult,
-    SafetyRecordOwner,
+    clear_binding_phase_hook, clear_capture_interval_hook, clear_pre_ingestion_hook,
+    make_locked_qc, set_binding_phase_hook, set_capture_interval_hook, set_pre_ingestion_hook,
+    PublishResult, SafetyRecordOwner,
 };
 use qbind_node::safety_record_store::prepared::CaptureRefusal;
 use qbind_node::safety_record_store::profile::PinnedSafetyContext;
@@ -724,4 +726,435 @@ fn owner_route_holds_domain_until_release_observed_as_would_block() {
             other => panic!("expected Acquired after release, got {other:?}"),
         }
     });
+}
+
+// ===========================================================================
+// 11. §2 — Bind the effective input policy to the owner's pinned context. A
+//     policy constructed for a LARGER validator set carries a relaxed
+//     QC-signature-count cap; the owner route must refuse it (typed,
+//     allocation-free) BEFORE the engine decision, so no dependent self-vote
+//     occurs. The correctly bounded owner-derived policy is then accepted.
+// ===========================================================================
+
+#[test]
+fn owner_route_rejects_policy_built_for_larger_validator_set() {
+    let ctx = ctx_n(4);
+    let dir = tempfile::tempdir().unwrap();
+    let (mut engine, p1, l0_block) = engine_locked_and_safe_view1();
+    let owner = owner_with_matching_proof(dir.path(), &ctx, l0_block);
+    let baseline = op_current(&owner);
+
+    // N=8 policy relaxes the QC-signature-count cap to 8; the owner's pinned N=4
+    // caps it at 4. The larger policy must not be admitted by the owner route.
+    let larger = limits(&ctx_n(8));
+    assert_eq!(larger.max_qc_sig_count(), 8, "larger policy admits 8 signatures");
+    assert_eq!(limits(&ctx).max_qc_sig_count(), 4, "owner-derived caps at 4");
+
+    let proof = owner
+        .read_validate(None::<&FixtureCommittedHistory>)
+        .unwrap();
+    let outcome =
+        owner.decide_and_capture_owned(&mut engine, ValidatorId::new(1), &p1, &larger, 1, proof);
+    match outcome {
+        OwnedDecisionOutcome::Refused { proof: _p, reason } => assert!(
+            matches!(reason, OwnedCaptureRefusal::EffectivePolicyMismatch),
+            "expected EffectivePolicyMismatch, got {reason:?}"
+        ),
+        other => panic!("expected Refused, got {other:?}"),
+    }
+    // The larger policy's four-plus-signature cap was never exercised: the engine
+    // was never consulted (still L0 view 0), so no dependent self-vote occurred.
+    assert_eq!(
+        engine.locked_qc().map(|q| q.view),
+        Some(0),
+        "no self-vote on policy refusal"
+    );
+    assert_eq!(registry_occupied(&owner), 0, "no capture on policy refusal");
+    assert_eq!(op_current(&owner), baseline, "charges returned to baseline");
+
+    // Correctly bounded case: the owner-derived N=4 policy is accepted.
+    let proof2 = owner
+        .read_validate(None::<&FixtureCommittedHistory>)
+        .unwrap();
+    let lim = limits(&ctx);
+    let decided = match owner
+        .decide_and_capture_owned(&mut engine, ValidatorId::new(1), &p1, &lim, 1, proof2)
+    {
+        OwnedDecisionOutcome::Decided(dv) => dv,
+        other => panic!("expected Decided with owner-derived policy, got {other:?}"),
+    };
+    assert_eq!(engine.locked_qc().map(|q| q.view), Some(1), "self-vote on accept");
+    assert_eq!(registry_occupied(&owner), 1);
+    drop(decided);
+}
+
+// ===========================================================================
+// 12. §4 — The header-to-originating-proposer projection check. The engine
+//     derives the candidate id from the originating `from`, not from
+//     `header.proposer_index`, so changing ONLY the header's proposer identity
+//     must be caught by the projection check (not the candidate-id check), with
+//     the proof returned intact and no dependent self-vote. The matching header
+//     succeeds.
+// ===========================================================================
+
+#[test]
+fn header_proposer_index_mismatch_refuses_projection() {
+    let ctx = ctx_n(4);
+    let dir = tempfile::tempdir().unwrap();
+    let (mut engine, p1, l0_block) = engine_locked_and_safe_view1();
+    let owner = owner_with_matching_proof(dir.path(), &ctx, l0_block);
+    let baseline = op_current(&owner);
+    let lim = limits(&ctx);
+
+    // Change ONLY the header's proposer identity (2 != originating proposer 1).
+    let mut mismatched = p1.clone();
+    mismatched.header.proposer_index = 2;
+
+    let proof = owner
+        .read_validate(None::<&FixtureCommittedHistory>)
+        .unwrap();
+    let outcome = owner.decide_and_capture_owned(
+        &mut engine,
+        ValidatorId::new(1),
+        &mismatched,
+        &lim,
+        1,
+        proof,
+    );
+    match outcome {
+        OwnedDecisionOutcome::Refused { proof: _p, reason } => assert!(
+            matches!(
+                reason,
+                OwnedCaptureRefusal::Projection(ProjectionMismatch::Proposer)
+            ),
+            "expected Projection(Proposer), got {reason:?}"
+        ),
+        other => panic!("expected Refused, got {other:?}"),
+    }
+    assert_eq!(
+        engine.locked_qc().map(|q| q.view),
+        Some(0),
+        "no dependent self-vote on projection refusal"
+    );
+    assert_eq!(registry_occupied(&owner), 0, "no capture on projection refusal");
+    assert_eq!(op_current(&owner), baseline, "charges returned to baseline");
+
+    // The matching header (proposer_index == originating proposer 1) succeeds on
+    // the still-unvoted engine.
+    let proof2 = owner
+        .read_validate(None::<&FixtureCommittedHistory>)
+        .unwrap();
+    let decided = match owner
+        .decide_and_capture_owned(&mut engine, ValidatorId::new(1), &p1, &lim, 1, proof2)
+    {
+        OwnedDecisionOutcome::Decided(dv) => dv,
+        other => panic!("expected Decided for matching header, got {other:?}"),
+    };
+    assert_eq!(engine.locked_qc().map(|q| q.view), Some(1), "self-vote on accept");
+    drop(decided);
+}
+
+// ===========================================================================
+// 13. §3 — Admission-before-construction: the additional `covering` (envelope/
+//     data) reservation is admitted BEFORE the binding values it covers. A
+//     discriminating observation reads the accounting occupancy at the binding
+//     phase (an observer thread, while the owner is paused holding the guard) and
+//     confirms the occupancy already includes BOTH `covering` and `scratch` — the
+//     reservation overlap that only holds when `covering` was admitted first. The
+//     reviewed order (covering admitted AFTER the bindings) would show only
+//     `scratch` at this phase.
+// ===========================================================================
+
+#[test]
+fn binding_phase_reservation_overlaps_covering() {
+    let ctx = ctx_n(4);
+    let dir = tempfile::tempdir().unwrap();
+    let (mut engine, p1, l0_block) = engine_locked_and_safe_view1();
+    let owner = owner_with_matching_proof(dir.path(), &ctx, l0_block);
+    let proof = owner
+        .read_validate(None::<&FixtureCommittedHistory>)
+        .unwrap();
+    let lim = limits(&ctx);
+
+    // Occupancy with the proof held, before the route runs (the registry is still
+    // unallocated and is only created during capture, AFTER this binding phase).
+    let before = op_current(&owner);
+    let covering = covering_charge_for_test().expect("covering charge");
+    let scratch = scratch_charge_for_test();
+
+    let (entered_tx, entered_rx) = mpsc::channel::<()>();
+    let (release_tx, release_rx) = mpsc::channel::<()>();
+    let entered_tx = std::sync::Mutex::new(entered_tx);
+    let release_rx = std::sync::Mutex::new(release_rx);
+    let snapshot = std::sync::Arc::new(std::sync::Mutex::new(None::<u128>));
+    let snapshot_obs = std::sync::Arc::clone(&snapshot);
+
+    std::thread::scope(|scope| {
+        let obs = &owner;
+        let observer = scope.spawn(move || {
+            entered_rx.recv().expect("owner signals the binding phase");
+            // Accounting is a SEPARATE mutex from the serialization domain, so this
+            // read does not contend with the held domain guard.
+            let occ = obs.backend_for_test().accounting_current();
+            *snapshot_obs.lock().unwrap() = Some(occ);
+            release_tx.send(()).expect("release the owner");
+        });
+
+        set_binding_phase_hook(move || {
+            entered_tx.lock().unwrap().send(()).expect("announce binding phase");
+            release_rx.lock().unwrap().recv().expect("await release");
+        });
+        let outcome =
+            owner.decide_and_capture_owned(&mut engine, ValidatorId::new(1), &p1, &lim, 1, proof);
+        clear_binding_phase_hook();
+        assert!(
+            matches!(outcome, OwnedDecisionOutcome::Decided(_)),
+            "route completes after the binding-phase observation"
+        );
+        observer.join().expect("observer thread");
+    });
+
+    let occ = snapshot.lock().unwrap().expect("binding-phase occupancy recorded");
+    assert_eq!(
+        occ,
+        before + covering + scratch,
+        "covering and scratch overlap at the binding phase: covering was admitted \
+         BEFORE the covered binding values (the corrected admission order)"
+    );
+}
+
+// ===========================================================================
+// 14. §3 — Continuous coverage on every refusal: the envelope (covering)
+//     admission refusal, the scratch admission refusal, and the capture refusal
+//     each destroy the covered objects before releasing their covering
+//     reservations, returning the proof intact and the charges exactly to the
+//     starved baseline, with no dependent self-vote.
+// ===========================================================================
+
+#[test]
+fn covering_scratch_and_capture_refusals_restore_baseline() {
+    let ctx = ctx_n(4);
+    let dir = tempfile::tempdir().unwrap();
+    let (mut engine, p1, l0_block) = engine_locked_and_safe_view1();
+    let owner = owner_with_matching_proof(dir.path(), &ctx, l0_block);
+    let lim = limits(&ctx);
+    let covering = covering_charge_for_test().expect("covering charge");
+
+    // --- envelope (covering) admission refusal: leave < covering ------------
+    {
+        let proof = owner
+            .read_validate(None::<&FixtureCommittedHistory>)
+            .unwrap();
+        let backend = owner.backend_for_test();
+        let op_headroom =
+            backend.accounting_cap().expect("op ceiling") - backend.accounting_current();
+        let agg_headroom = backend
+            .accounting_aggregate_cap()
+            .expect("agg ceiling")
+            - backend.accounting_aggregate_current();
+        let headroom = op_headroom.min(agg_headroom);
+        // Leave covering-1 bytes: the FIRST reservation (covering) is refused.
+        let standing = backend
+            .reserve_standing_for_test(headroom - (covering - 1))
+            .expect("starve below covering");
+        let starved = op_current(&owner);
+        let outcome =
+            owner.decide_and_capture_owned(&mut engine, ValidatorId::new(1), &p1, &lim, 1, proof);
+        assert!(
+            matches!(
+                outcome,
+                OwnedDecisionOutcome::Refused {
+                    reason: OwnedCaptureRefusal::Capture(CaptureRefusal::Admission(_)),
+                    ..
+                }
+            ),
+            "expected a covering admission refusal"
+        );
+        assert_eq!(engine.locked_qc().map(|q| q.view), Some(0), "no self-vote");
+        assert_eq!(registry_occupied(&owner), 0);
+        assert_eq!(op_current(&owner), starved, "covering released, baseline restored");
+        drop(standing);
+    }
+
+    // --- scratch admission refusal: leave exactly covering ------------------
+    {
+        let proof = owner
+            .read_validate(None::<&FixtureCommittedHistory>)
+            .unwrap();
+        let backend = owner.backend_for_test();
+        let op_headroom =
+            backend.accounting_cap().expect("op ceiling") - backend.accounting_current();
+        let agg_headroom = backend
+            .accounting_aggregate_cap()
+            .expect("agg ceiling")
+            - backend.accounting_aggregate_current();
+        let headroom = op_headroom.min(agg_headroom);
+        // Leave exactly covering bytes: covering succeeds, then scratch is refused.
+        let standing = backend
+            .reserve_standing_for_test(headroom - covering)
+            .expect("starve to exactly covering");
+        let starved = op_current(&owner);
+        let outcome =
+            owner.decide_and_capture_owned(&mut engine, ValidatorId::new(1), &p1, &lim, 1, proof);
+        assert!(
+            matches!(
+                outcome,
+                OwnedDecisionOutcome::Refused {
+                    reason: OwnedCaptureRefusal::Capture(CaptureRefusal::Admission(_)),
+                    ..
+                }
+            ),
+            "expected a scratch admission refusal"
+        );
+        assert_eq!(engine.locked_qc().map(|q| q.view), Some(0), "no self-vote");
+        assert_eq!(registry_occupied(&owner), 0);
+        assert_eq!(
+            op_current(&owner),
+            starved,
+            "covering + scratch released, baseline restored"
+        );
+        drop(standing);
+    }
+
+    // --- capture refusal (stale expected revision): covering + scratch admitted,
+    //     bindings computed, then the capture conversion refuses; covered objects
+    //     destroyed before the reservations release ----------------------------
+    {
+        let proof = owner
+            .read_validate(None::<&FixtureCommittedHistory>)
+            .unwrap();
+        let baseline = op_current(&owner);
+        // expected revision 2 disagrees with the current authoritative revision 1.
+        let outcome =
+            owner.decide_and_capture_owned(&mut engine, ValidatorId::new(1), &p1, &lim, 2, proof);
+        assert!(
+            matches!(
+                outcome,
+                OwnedDecisionOutcome::Refused {
+                    reason: OwnedCaptureRefusal::Capture(CaptureRefusal::StaleRevision { .. }),
+                    ..
+                }
+            ),
+            "expected a stale-revision capture refusal"
+        );
+        assert_eq!(engine.locked_qc().map(|q| q.view), Some(0), "no self-vote");
+        assert_eq!(registry_occupied(&owner), 0);
+        assert_eq!(
+            op_current(&owner),
+            baseline,
+            "covering + scratch released on capture refusal, baseline restored"
+        );
+    }
+}
+
+// ===========================================================================
+// 15. §5 — The pre-ingestion serialization observation point. A competing,
+//     non-blocking same-domain acquisition observes `WouldBlock` (contention,
+//     not poisoning) at the fixed semantic boundary immediately BEFORE the owner
+//     invokes the engine ingestion, establishing that the owner held the one
+//     serialization domain before ingestion. After normal release the route
+//     completes and an actual eligible publication succeeds (publication
+//     completion, not mere lock availability).
+// ===========================================================================
+
+#[test]
+fn pre_ingestion_hook_observes_would_block_before_ingestion() {
+    let ctx = ctx_n(4);
+    let dir = tempfile::tempdir().unwrap();
+    let (mut engine, p1, l0_block) = engine_locked_and_safe_view1();
+    let owner = owner_with_matching_proof(dir.path(), &ctx, l0_block);
+    let proof = owner
+        .read_validate(None::<&FixtureCommittedHistory>)
+        .unwrap();
+    let lim = limits(&ctx);
+
+    let (entered_tx, entered_rx) = mpsc::channel::<()>();
+    let (release_tx, release_rx) = mpsc::channel::<()>();
+    let entered_tx = std::sync::Mutex::new(entered_tx);
+    let release_rx = std::sync::Mutex::new(release_rx);
+
+    std::thread::scope(|scope| {
+        let obs = &owner;
+        let observer = scope.spawn(move || {
+            entered_rx.recv().expect("owner signals pre-ingestion pause");
+            // Same-domain non-blocking acquisition: contention, not poisoning.
+            match obs.backend_for_test().try_lock_domain_for_test() {
+                TryLockDomainOutcome::WouldBlock => {}
+                other => panic!("expected WouldBlock before ingestion, got {other:?}"),
+            }
+            release_tx.send(()).expect("release the owner");
+        });
+
+        // Install the pre-ingestion hook (fires strictly BEFORE the engine call).
+        set_pre_ingestion_hook(move || {
+            entered_tx.lock().unwrap().send(()).expect("announce pre-ingestion");
+            release_rx.lock().unwrap().recv().expect("await release");
+        });
+        let outcome =
+            owner.decide_and_capture_owned(&mut engine, ValidatorId::new(1), &p1, &lim, 1, proof);
+        clear_pre_ingestion_hook();
+        let decided = match outcome {
+            OwnedDecisionOutcome::Decided(dv) => dv,
+            other => panic!("route completes after release, got {other:?}"),
+        };
+        observer.join().expect("observer thread");
+
+        // The self-vote ran AFTER the pre-ingestion point, raising L1.
+        assert_eq!(engine.locked_qc().map(|q| q.view), Some(1), "ingestion ran after release");
+        drop(decided);
+    });
+
+    // After the route released the domain, perform an ACTUAL eligible publication
+    // (not merely a successful try_lock) and assert it completes, advancing the
+    // authoritative revision from 1 to 2.
+    let new_rev = publish_qc(&owner, &ctx, [0x5Au8; 32], 2, 1);
+    assert_eq!(new_rev, 2, "publication completed after normal release");
+}
+
+// ===========================================================================
+// 16. §6 Retained L0 — after the real self-vote raises the engine to L1, the
+//     ACTUAL captured generation identity still carries the L0 lock (view 0,
+//     block = the engine's L0 lock), established by inspecting the retained
+//     generation's provenance, not by registry occupancy alone.
+// ===========================================================================
+
+#[test]
+fn captured_generation_retains_l0_provenance_after_self_vote_l1() {
+    let ctx = ctx_n(4);
+    let dir = tempfile::tempdir().unwrap();
+    let (mut engine, p1, l0_block) = engine_locked_and_safe_view1();
+    let owner = owner_with_matching_proof(dir.path(), &ctx, l0_block);
+    let proof = owner
+        .read_validate(None::<&FixtureCommittedHistory>)
+        .unwrap();
+    let lim = limits(&ctx);
+
+    let decided = match owner
+        .decide_and_capture_owned(&mut engine, ValidatorId::new(1), &p1, &lim, 1, proof)
+    {
+        OwnedDecisionOutcome::Decided(dv) => dv,
+        other => panic!("expected Decided, got {other:?}"),
+    };
+    // The engine's own live lock advanced to L1 via the self-vote.
+    assert_eq!(engine.locked_qc().map(|q| q.view), Some(1), "self-vote raised L1");
+
+    // The captured generation's provenance is still L0: inspect the actual
+    // retained identity (not merely the occupancy count).
+    let reg = owner
+        .backend_for_test()
+        .prepared_registry_for_test()
+        .expect("registry allocated by the capture");
+    let identities = reg.lock().unwrap().occupied_identities_for_test();
+    assert_eq!(identities.len(), 1, "exactly one captured generation");
+    assert_eq!(
+        identities[0].lock_view, 0,
+        "captured generation retains the L0 lock view despite the engine at L1"
+    );
+    assert_eq!(
+        identities[0].lock_block_id, l0_block,
+        "captured generation retains the L0 lock block id"
+    );
+
+    drop(decided);
+    assert_eq!(registry_occupied(&owner), 0, "abandoning frees the slot");
 }
