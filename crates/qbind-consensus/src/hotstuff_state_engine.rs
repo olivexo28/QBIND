@@ -1376,6 +1376,76 @@ where
         // with our lock; do not vote.
         SafetyDecision::Unsafe
     }
+
+    /// RUN 422 §13.6 — the safe-voting rule evaluated with an **explicitly
+    /// bounded** ancestry walk, reporting which branch decided it and (for the
+    /// ancestry branch) exactly how many parent transitions were taken.
+    ///
+    /// Branch structure and the justification-view short-circuit are IDENTICAL
+    /// to [`Self::safety_decision`]: no lock ⇒ `SafeNoLock`; an unregistered
+    /// candidate ⇒ `CandidateAbsent`; `justify_qc.view >= locked.view` ⇒
+    /// `SafeViewSufficiency` WITHOUT walking ancestry. Only when neither
+    /// short-circuit applies is the parent chain walked, and then for **at most
+    /// `max_hops` parent transitions**. This method NEVER calls the unbounded
+    /// [`Self::safety_decision`] first and performs at most `max_hops` parent
+    /// dereferences, so it is finite even on a cyclically registered graph
+    /// (it returns `BoundExhausted` rather than looping).
+    ///
+    /// Each outcome is distinct so a caller can tell an exact in-bound ancestry
+    /// hit (`SafeAncestry { hops }`, with `hops == 0` meaning the candidate IS
+    /// the lock) from an over-bound refusal (`BoundExhausted`), a broken chain
+    /// (`NoParentLink`), or an unavailable ancestor (`ParentAbsent`). It grants
+    /// no authority: it reports only the checked safe-voting state.
+    pub fn bounded_safety_decision(
+        &self,
+        block_id: &BlockIdT,
+        max_hops: usize,
+    ) -> BoundedSafetyOutcome {
+        // 1. No locked qc yet: safe unconditionally at this boundary.
+        let locked = match self.locked_qc.as_ref() {
+            None => return BoundedSafetyOutcome::SafeNoLock,
+            Some(qc) => qc,
+        };
+
+        // 2. The candidate must be registered; otherwise its ancestry cannot be
+        //    established (mirrors the `Unsafe` arm of `safety_decision`, but kept
+        //    distinct so an observer sees the candidate-absent cause).
+        let block_node = match self.blocks.get(block_id) {
+            Some(node) => node,
+            None => return BoundedSafetyOutcome::CandidateAbsent,
+        };
+
+        // 3. Justification-view sufficiency SHORT-CIRCUITS before any walk.
+        if let Some(ref justify_qc) = block_node.justify_qc {
+            if justify_qc.view >= locked.view {
+                return BoundedSafetyOutcome::SafeViewSufficiency;
+            }
+        }
+
+        // 4. Bounded parent-chain walk: at most `max_hops` parent transitions.
+        let locked_block_id = &locked.block_id;
+        let mut current = block_node;
+        let mut hops: usize = 0;
+        loop {
+            if &current.id == locked_block_id {
+                return BoundedSafetyOutcome::SafeAncestry { hops };
+            }
+            // Refuse BEFORE taking the (max_hops + 1)-th parent transition, so a
+            // cyclic or over-long chain terminates deterministically.
+            if hops == max_hops {
+                return BoundedSafetyOutcome::BoundExhausted;
+            }
+            let parent_id = match &current.parent_id {
+                Some(pid) => pid,
+                None => return BoundedSafetyOutcome::NoParentLink,
+            };
+            current = match self.blocks.get(parent_id) {
+                Some(node) => node,
+                None => return BoundedSafetyOutcome::ParentAbsent,
+            };
+            hops += 1;
+        }
+    }
 }
 
 /// Run 422 §13.6 spike: which branch of the HotStuff safe-voting rule admitted
@@ -1400,4 +1470,31 @@ pub enum SafetyDecision {
     /// Not safe to vote (conflicting fork, or the block / its ancestry is not
     /// registered so safety cannot be established).
     Unsafe,
+}
+
+/// RUN 422 §13.6 — the bounded, branch-faithful outcome of
+/// [`HotStuffStateEngine::bounded_safety_decision`]. Every variant is distinct
+/// so a caller can separate an exact in-bound ancestry hit from an over-bound
+/// refusal, a broken chain, or an unavailable ancestor. It is `Copy` and
+/// allocation-free.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BoundedSafetyOutcome {
+    /// No locked QC yet: voting admitted unconditionally at this boundary.
+    SafeNoLock,
+    /// `justify_qc.view >= locked_qc.view`: justification-view sufficiency. The
+    /// ancestry walk was NOT performed.
+    SafeViewSufficiency,
+    /// The candidate's parent chain reached the locked block after exactly
+    /// `hops` parent transitions (`hops == 0` ⇒ the candidate IS the lock).
+    SafeAncestry { hops: usize },
+    /// The candidate block is not registered, so its ancestry cannot be
+    /// established.
+    CandidateAbsent,
+    /// A node on the walk has no parent link and is not the locked block.
+    NoParentLink,
+    /// A node on the walk referenced a parent block absent from the engine.
+    ParentAbsent,
+    /// `max_hops` parent transitions were taken without reaching the lock (also
+    /// the terminating outcome for a cyclically registered chain).
+    BoundExhausted,
 }

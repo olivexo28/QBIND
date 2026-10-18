@@ -79,8 +79,8 @@ pub use driver::{
 };
 pub use governed_key_registry::{ConsensusKeyGovernance, GovernedValidatorKeyRegistry};
 pub use hotstuff_state_engine::{
-    CommittedEntry, EvidenceRetentionError, HotStuffStateEngine, SafetyBranch, SafetyDecision,
-    DEFAULT_MAX_RETAINED_EVIDENCE_BYTES,
+    BoundedSafetyOutcome, CommittedEntry, EvidenceRetentionError, HotStuffStateEngine, SafetyBranch,
+    SafetyDecision, DEFAULT_MAX_RETAINED_EVIDENCE_BYTES,
 };
 pub use ids::{ConsensusNodeId, ValidatorId, ValidatorPublicKey};
 pub use key_registry::{

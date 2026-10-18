@@ -775,6 +775,23 @@ impl<P> DecidedVote<P> {
     pub fn vote(&self) -> &qbind_wire::consensus::Vote {
         &self.vote
     }
+
+    /// Immutable, **borrow-only** inspection of the owning payload (RUN 422
+    /// §13.6). This is the ONLY payload accessor; it hands out a shared `&P`
+    /// and never takes, replaces, mutates, consumes, or recombines the payload.
+    /// The envelope remains closed: there is still no `into_parts`/`into_payload`
+    /// and no way to separate the `Vote` from its payload, so an isolated
+    /// non-consuming observer can read the captured association through `&self`
+    /// while the engine-produced `Vote` stays bound to its original payload.
+    ///
+    /// A `&P` borrow is sound even though the node-side payload transitively
+    /// holds interior mutability (its `PreparedPin` owns an
+    /// `Arc<Mutex<PreparedRegistry>>` and its reservations carry shared
+    /// accounting state): the payload exposes only `&self` non-mutating methods
+    /// over private fields, so a shared borrow cannot extract or alter it.
+    pub fn payload(&self) -> &P {
+        &self.payload
+    }
 }
 
 /// Internal adapter: presents an [`OwningSafetyDecisionGate`] as a plain

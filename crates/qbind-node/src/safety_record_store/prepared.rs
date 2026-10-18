@@ -84,6 +84,36 @@ impl GenerationIdentity {
     }
 }
 
+/// The scalar, `Copy` provenance a prepared generation carries (RUN 422 §13.6),
+/// read under the serialization domain for the non-consuming observation route.
+/// It exposes only fixed-size scalars — never a borrow into the live registry —
+/// so a lookup cannot leak an interior reference or keep the leaf lock held.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct PreparedProvenance {
+    /// The pinned restriction identity (`lock_block_id` / `lock_view`).
+    pub identity: GenerationIdentity,
+    /// The publication revision the generation was captured against.
+    pub captured_revision: u64,
+    /// The backend ownership incarnation the generation's O5 capability was
+    /// minted under.
+    pub recovery_backend_incarnation: u64,
+    /// The originating pinned-context digest the generation was sealed under.
+    pub origin_context_digest: [u8; 32],
+}
+
+/// Why a provenance lookup refused (RUN 422 §13.6). A typed `Result` reason, not
+/// a flattened `Option`, so `Missing` (no live entry), `Stale` (the slot holds a
+/// newer serial), and `Foreign` (a different backend incarnation) stay distinct.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum ProvenanceRefusal {
+    /// No live entry for this handle's slot (released or never present).
+    Missing,
+    /// The slot is occupied by a different serial (the referenced entry is gone).
+    Stale,
+    /// The handle was minted under a different backend incarnation.
+    Foreign,
+}
+
 /// Why a capture was refused. Every refusal returns the original proof intact
 /// (including its original bytes and reservation); none mints authorization,
 /// freshness, durability acknowledgement, or verified-evidence status.
@@ -316,8 +346,36 @@ impl PreparedRegistry {
         }
     }
 
-    // ---- test seams (gated; no hidden allocations in measured intervals) ----
+    /// RUN 422 §13.6 — read a live entry's scalar provenance by handle for the
+    /// non-consuming observation route, returning a typed refusal reason. The
+    /// backend incarnation is checked FIRST (`Foreign`), then the slot presence
+    /// (`Missing`) and serial (`Stale`). Only fixed-size `Copy` scalars are
+    /// returned, so the caller holds the registry leaf lock for the briefest
+    /// possible interval and no interior reference escapes. This neither mutates
+    /// the registry nor extends any entry's lifetime.
+    pub(crate) fn provenance_by_handle(
+        &self,
+        handle: PreparedHandle,
+    ) -> Result<PreparedProvenance, ProvenanceRefusal> {
+        if handle.incarnation != self.incarnation {
+            return Err(ProvenanceRefusal::Foreign);
+        }
+        let entry = match self.slots.get(handle.slot).and_then(|s| s.as_ref()) {
+            Some(e) => e,
+            None => return Err(ProvenanceRefusal::Missing),
+        };
+        if entry.serial != handle.serial {
+            return Err(ProvenanceRefusal::Stale);
+        }
+        Ok(PreparedProvenance {
+            identity: entry.identity,
+            captured_revision: entry.backing.captured_revision,
+            recovery_backend_incarnation: entry.backing.recovery_backend_incarnation,
+            origin_context_digest: entry.backing.origin_context_digest,
+        })
+    }
 
+    // ---- test seams (gated; no hidden allocations in measured intervals) ----
     /// Test-only: look up a live entry by handle (incarnation-checked), exposing
     /// read-only measurements. Returns `None` for a foreign/stale handle.
     #[cfg(any(test, feature = "test-utils"))]

@@ -111,3 +111,9 @@ required-features = ["test-utils"]
 name = "run_422_owning_capture_binding_tests"
 path = "tests/run_422_owning_capture_binding_tests.rs"
 required-features = ["test-utils"]
+# RUN 422 §13.6 — isolated non-consuming retained-decision observation. Gated
+# behind `test-utils`; no production caller; activation remains DISABLED.
+[[test]]
+name = "run_422_retained_decision_observation_tests"
+path = "tests/run_422_retained_decision_observation_tests.rs"
+required-features = ["test-utils"]

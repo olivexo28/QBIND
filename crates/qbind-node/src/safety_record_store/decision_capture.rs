@@ -16,7 +16,8 @@
 use sha3::{Digest, Sha3_256};
 
 use qbind_consensus::{
-    AncestryRelation, DecidedVote, SafetyAncestorView, SafetyBranch, SafetyDecisionView,
+    AncestryRelation, BoundedSafetyOutcome, DecidedVote, SafetyAncestorView, SafetyBranch,
+    SafetyDecisionView,
 };
 use qbind_wire::consensus::{BlockProposal, QuorumCertificate, MSG_TYPE_QC};
 
@@ -700,6 +701,163 @@ impl std::fmt::Debug for OwnedDecisionOutcome {
             OwnedDecisionOutcome::InvariantViolation => f.write_str("InvariantViolation"),
         }
     }
+}
+
+// -----------------------------------------------------------------------------
+// Isolated non-consuming retained-decision observation (RUN 422 §13.6)
+// -----------------------------------------------------------------------------
+
+/// A bounded, `Copy` diagnostic for the held-guard current-record loader
+/// (RUN 422 §13.6). It carries NO owned `String`: the heap-bearing
+/// [`super::error::SafetyStoreError`] message variants are mapped to fixed
+/// discriminants so no owned diagnostic backing is forwarded into the
+/// observation result. The mapping is exhaustive, including storage-read failure
+/// and missing independent committed history.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum LoaderDiagnostic {
+    /// No established metadata/record present (unestablished or partial state).
+    MissingEstablishedState,
+    /// A backend metadata/record read failed.
+    StorageRead,
+    /// The stored content failed bounded structural decode.
+    StructuralRejected,
+    /// The stored content failed semantic validation.
+    SemanticRejected,
+    /// The stored pinned-context digest did not match this handle's context.
+    PinnedContextDisagreement,
+    /// Record and metadata disagreed on the publication revision.
+    RecordMetaRevisionDisagreement { record: u64, meta: u64 },
+    /// Required independent committed-history input was absent for an anchored
+    /// record.
+    MissingIndependentHistory,
+    /// The stored version is unsupported by this decoder.
+    UnsupportedVersion,
+    /// A declared or structural size bound was exceeded.
+    Oversize,
+    /// A checked size/width computation overflowed.
+    Arithmetic,
+    /// A residual typed store error with no owned backing (mapped by discriminant
+    /// so the observation never forwards an owned string).
+    Other,
+}
+
+/// The typed failure of the private held-guard current-record loader (RUN 422
+/// §13.6). It keeps **admission** failure (an accounting ceiling refused the
+/// load's covering reservations) distinct from **record-validation** failure,
+/// which a bare `Result<ValidatedRecord, LoaderDiagnostic>` could not express.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum CurrentLoadFailure {
+    /// A covering reservation (holder or O3 validation scratch) was refused by
+    /// the shared accountant. The current record could not be admitted.
+    Admission,
+    /// The current record was read but failed decode/validation.
+    Validation(LoaderDiagnostic),
+}
+
+/// Which fixed decision-metadata field mismatched the supplied proposal /
+/// registered candidate during a retained-decision observation (RUN 422 §13.6).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum MetaField {
+    /// The retained proposer did not match the supplied proposal.
+    Proposer,
+    /// The retained origin (proposal) view did not match the supplied proposal.
+    OriginView,
+    /// The retained candidate id did not match the reproduced candidate id.
+    CandidateId,
+    /// The retained candidate view did not match the supplied proposal height.
+    CandidateView,
+    /// The retained safety branch did not match the current bounded re-evaluation.
+    Branch,
+}
+
+/// A bounded-ancestry refusal distinguishing the exact cause the bounded
+/// safe-voting re-evaluation reported (RUN 422 §13.6). Mirrors the non-safe
+/// variants of [`BoundedSafetyOutcome`].
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum BoundedAncestryReject {
+    /// The engine no longer retains the exact candidate block.
+    CandidateAbsent,
+    /// An ancestor on the bounded walk is no longer retained by the engine.
+    ParentAbsent,
+    /// An ancestor on the bounded walk has no parent link and is not the lock.
+    NoParentLink,
+    /// The lock was not reached within the admitted hop bound (also the
+    /// terminating outcome for a cyclic chain).
+    OverBound { max: usize },
+}
+
+/// Why a retained-decision observation **refused** after reaching a definite
+/// checked conclusion (RUN 422 §13.6). A refusal reports a concrete
+/// non-correspondence; it is distinct from an *inconclusive* blocked state.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum RetainedDecisionReject {
+    /// The caller-supplied input policy's effective limits did not match the
+    /// policy derived from the owner's pinned context.
+    EffectivePolicyMismatch,
+    /// The owner's pinned context could not yield a policy to bind against.
+    OwnerPolicyUnavailable(InputPolicyError),
+    /// The borrowed proposal's recomputed commitment did not match the retained
+    /// proposal binding (substitution / projection refusal).
+    CommitmentMismatch,
+    /// An input bound was exceeded recomputing the proposal commitment.
+    InputBound(InputBoundRefusal),
+    /// A fixed decision-metadata field did not match the supplied proposal /
+    /// registered candidate.
+    Metadata(MetaField),
+    /// The engine decision did not correspond to the effective durable
+    /// restriction (e.g. the engine is `NoLock` on this Locked-only route, or the
+    /// lock identity disagrees with the validated record).
+    Correspondence(CorrespondenceRefusal),
+    /// A proposal-projection check against the registered candidate node failed.
+    Projection(ProjectionMismatch),
+    /// The bounded safe-voting re-evaluation refused.
+    Ancestry(BoundedAncestryReject),
+    /// The pin's provenance lookup refused (missing / stale / foreign).
+    Provenance(super::prepared::ProvenanceRefusal),
+}
+
+/// Why a retained-decision observation was **inconclusive** (RUN 422 §13.6):
+/// the operation could not reach a definite correspondence conclusion and
+/// conservatively declined, WITHOUT granting any authority. Distinct from a
+/// [`RetainedDecisionReject`], and in particular keeps an engine/durable
+/// *disagreement* distinct from an actually observed recovery-required state.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum RetainedDecisionBlocked {
+    /// The backend is in a recovery-required state; no current restriction can be
+    /// treated as effective until recovery clears it.
+    RecoveryRequired,
+    /// The in-memory engine lock and the validated durable restriction disagree
+    /// (not itself a recovery-required state): revalidation is declined
+    /// conservatively.
+    EngineDurableDisagreement,
+    /// The current durable record could not be admitted (a covering reservation
+    /// was refused).
+    Admission,
+    /// The current durable record could not be read/validated.
+    EvidenceUnavailable(LoaderDiagnostic),
+    /// The effective durable record is `BootstrapNoLock`; this Locked-only route
+    /// leaves bootstrap explicitly unresolved.
+    BootstrapUnresolved,
+}
+
+/// The `Copy`, allocation-free result of an isolated non-consuming
+/// retained-decision observation (RUN 422 §13.6). It describes ONLY the checked
+/// state against the effective durable restriction: it conveys no signing
+/// permission, no freshness guarantee, no retained-result-reuse authorization,
+/// and no certificate verification. As a fixed-size `Copy` diagnostic carrying
+/// no heap backing, it is a returned-value diagnostic under the established
+/// return-value convention and is not itself charged against retained
+/// accounting; its covering reservations follow the intermediate working set,
+/// not this result.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum RetainedDecisionObservation {
+    /// The retained decision was revalidated against the effective durable
+    /// restriction; carries the current bounded safe-voting outcome.
+    Revalidated(BoundedSafetyOutcome),
+    /// A definite non-correspondence was reached.
+    Rejected(RetainedDecisionReject),
+    /// The operation could not conclude and declined conservatively.
+    Inconclusive(RetainedDecisionBlocked),
 }
 
 // -----------------------------------------------------------------------------

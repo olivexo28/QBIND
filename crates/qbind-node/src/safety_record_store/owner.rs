@@ -1545,6 +1545,375 @@ impl SafetyRecordOwner {
         // `_meta_scratch` drops here, releasing the metadata-read charge.
     }
 
+    // -----------------------------------------------------------------------
+    // §13.6 — isolated non-consuming retained-decision observation
+    // -----------------------------------------------------------------------
+
+    /// Map a heap-bearing [`SafetyStoreError`] from the current-record load to a
+    /// bounded, `Copy` [`LoaderDiagnostic`] (RUN 422 §13.6). No owned diagnostic
+    /// `String` is ever forwarded into the observation; the message-bearing
+    /// variants collapse to fixed discriminants. The mapping covers storage-read
+    /// failure and missing independent committed history explicitly.
+    fn map_loader_error(e: SafetyStoreError) -> super::decision_capture::LoaderDiagnostic {
+        use super::decision_capture::LoaderDiagnostic as D;
+        use super::error::SemanticRefusalDetail as S;
+        match e {
+            SafetyStoreError::MissingEstablishedState(_)
+            | SafetyStoreError::AlreadyEstablished(_) => D::MissingEstablishedState,
+            SafetyStoreError::ReadFailed(_) | SafetyStoreError::WriteFailed(_) => D::StorageRead,
+            SafetyStoreError::StructuralRefusal(_) => D::StructuralRejected,
+            SafetyStoreError::SemanticRefusal(d) => match d {
+                S::PinnedContextDisagreement => D::PinnedContextDisagreement,
+                S::RecordMetaRevisionDisagreement {
+                    record_revision,
+                    meta_revision,
+                } => D::RecordMetaRevisionDisagreement {
+                    record: record_revision,
+                    meta: meta_revision,
+                },
+                _ => D::SemanticRejected,
+            },
+            SafetyStoreError::MissingIndependentInput(_) => D::MissingIndependentHistory,
+            SafetyStoreError::UnsupportedVersion(_) => D::UnsupportedVersion,
+            SafetyStoreError::Oversize { .. } | SafetyStoreError::DeclaredBoundExceeded(_) => {
+                D::Oversize
+            }
+            SafetyStoreError::ArithmeticOverflow(_) => D::Arithmetic,
+            _ => D::Other,
+        }
+    }
+
+    /// Read a prepared pin's scalar provenance **under the already-held
+    /// serialization-domain guard** (RUN 422 §13.6). The owner's installed
+    /// registry is obtained THROUGH the held `guard` (never re-acquiring the
+    /// domain); its leaf mutex is then held only for the duration of a single
+    /// scalar read and released immediately. Beyond the registry's own
+    /// incarnation/slot/serial checks, the generation's minted recovery
+    /// incarnation and sealed origin-context digest are required to match THIS
+    /// backend and owner (a foreign generation is refused). A typed
+    /// [`ProvenanceRefusal`] preserves the Missing / Stale / Foreign distinction.
+    fn pin_provenance_locked(
+        &self,
+        guard: &std::sync::MutexGuard<'_, super::backend::SerializationDomain>,
+        pin: &super::prepared::PreparedPin,
+    ) -> Result<super::prepared::PreparedProvenance, super::prepared::ProvenanceRefusal> {
+        use super::prepared::ProvenanceRefusal;
+        let registry = match self.backend.prepared_registry_installed(guard) {
+            Some(r) => r,
+            None => return Err(ProvenanceRefusal::Missing),
+        };
+        let prov = {
+            let reg = registry.lock().expect("prepared registry poisoned");
+            reg.provenance_by_handle(pin.handle())?
+            // leaf guard released here — the domain is never re-entered.
+        };
+        if prov.recovery_backend_incarnation != self.backend.incarnation() {
+            return Err(ProvenanceRefusal::Foreign);
+        }
+        if prov.origin_context_digest != context_digest(self.pinned()) {
+            return Err(ProvenanceRefusal::Foreign);
+        }
+        Ok(prov)
+    }
+
+    /// Load and validate the **current** authoritative record **under an
+    /// already-held serialization-domain guard** (RUN 422 §13.6), returning an
+    /// owned [`ValidatedRecord`] that carries its covering holder reservation for
+    /// the caller to keep alive across the remaining observation checks.
+    ///
+    /// This mirrors [`Self::read_validate`]'s O3 charging and validation EXACTLY
+    /// but never acquires the domain (the caller holds it), so it cannot
+    /// self-deadlock the observation. It is a single sequential operation:
+    /// admit the retained-holder reservation and the O3 validation scratch,
+    /// load + validate, then destroy the validation temporaries and release the
+    /// O3 scratch **inside** this helper, returning the record still covered by
+    /// its holder reservation. It never pauses halfway for the caller to admit
+    /// another reservation.
+    ///
+    /// The typed [`CurrentLoadFailure`] keeps an **admission** failure (a
+    /// covering reservation refused) distinct from a **validation** failure
+    /// (the record read but rejected), and validation failures carry only a
+    /// bounded `Copy` diagnostic — no owned error string is forwarded.
+    fn load_current_validated_locked<H: CommittedHistory + ?Sized>(
+        &self,
+        _guard: &std::sync::MutexGuard<'_, super::backend::SerializationDomain>,
+        history: Option<&H>,
+    ) -> Result<ValidatedRecord, super::decision_capture::CurrentLoadFailure> {
+        use super::decision_capture::CurrentLoadFailure;
+        // Admit the retained-holder charge BEFORE the stored payload is copied
+        // (reservations precede the copy). It is moved into the returned proof.
+        let holder_charge = self
+            .retained_holder_charge()
+            .map_err(|_| CurrentLoadFailure::Admission)?;
+        let holder_res = self
+            .backend
+            .accounting()
+            .reserve(holder_charge)
+            .map_err(|_| CurrentLoadFailure::Admission)?;
+        // O3 transient/validation scratch (identical terms to `read_validate`):
+        // the transient decoded object's excess over the retained ceiling plus a
+        // single record-sized validation buffer. Released inside this helper when
+        // the validation temporaries are destroyed (at return).
+        let transient = super::accounting::max_transient_decoded_working_set(self.pinned())
+            .map_err(|_| CurrentLoadFailure::Admission)?;
+        let retained_gen = max_retained_generation_bytes(self.pinned(), size_of_timeout_msg())
+            .map_err(|_| CurrentLoadFailure::Admission)?;
+        let transient_excess = transient.saturating_sub(retained_gen);
+        let record_buf =
+            max_safety_record_bytes(self.pinned()).map_err(|_| CurrentLoadFailure::Admission)?;
+        let o3_scratch = transient_excess
+            .checked_add(record_buf)
+            .ok_or(CurrentLoadFailure::Admission)?;
+        let scratch_res = self
+            .backend
+            .accounting()
+            .reserve(o3_scratch)
+            .map_err(|_| CurrentLoadFailure::Admission)?;
+        // Load + validate under the caller's held guard (NO domain re-acquisition).
+        let (_meta, record_bytes, decoded) = self
+            .load_established()
+            .map_err(|e| CurrentLoadFailure::Validation(Self::map_loader_error(e)))?;
+        let validated = validate_decoded(decoded, record_bytes, self.pinned(), history)
+            .map_err(|e| CurrentLoadFailure::Validation(Self::map_loader_error(e)))?;
+        // Validation temporaries are destroyed; release the O3 scratch BEFORE
+        // returning the still-covered record.
+        drop(scratch_res);
+        Ok(validated
+            .with_holder(holder_res)
+            .grant_recovery_capability(self.backend.incarnation()))
+    }
+
+    /// **§13.6 isolated non-consuming retained-decision observation.** Borrow a
+    /// retained [`DecidedVote`] envelope and the exact proposal it was captured
+    /// for, validate the current durable restriction with the applicable
+    /// independent committed history, verify the pin's provenance and the
+    /// candidate correspondence, and perform a bounded safe-voting
+    /// re-evaluation — all under a SINGLE acquisition of the serialization
+    /// domain. Nothing is consumed, re-ingested, signed, or published: the
+    /// original envelope, its `Vote`, and its pin are preserved, and the result
+    /// is a `Copy` diagnostic describing ONLY the checked state (no signing
+    /// permission, freshness, retained-result-reuse authorization, or
+    /// certificate verification).
+    ///
+    /// The engine is borrowed read-only; the existing unbounded ancestry walk is
+    /// never invoked. The registry leaf lookup releases promptly and the domain
+    /// is never re-entered.
+    pub fn observe_retained_decision<H: CommittedHistory + ?Sized>(
+        &self,
+        engine: &qbind_consensus::BasicHotStuffEngine<[u8; 32]>,
+        decided: &qbind_consensus::DecidedVote<super::decision_capture::OwningCapturePayload>,
+        proposal: &qbind_wire::consensus::BlockProposal,
+        limits: &super::decision_capture::PreparedDecisionInputLimits,
+        history: Option<&H>,
+    ) -> super::decision_capture::RetainedDecisionObservation {
+        use super::decision_capture::{
+            commit_proposal, derive_block_id_local, scratch_charge, BoundedAncestryReject,
+            CorrespondenceRefusal, CurrentLoadFailure, MetaField, PreparedDecisionInputLimits,
+            ProjectionMismatch, RetainedDecisionBlocked, RetainedDecisionObservation,
+            RetainedDecisionReject,
+        };
+        use qbind_consensus::BoundedSafetyOutcome;
+
+        let reject = RetainedDecisionObservation::Rejected;
+        let blocked = RetainedDecisionObservation::Inconclusive;
+
+        // 1. Bind the caller's effective limits to the owner's pinned policy
+        //    (a resource-policy binding only; authenticates nothing).
+        match PreparedDecisionInputLimits::from_pinned(self.pinned()) {
+            Ok(expected) => {
+                if *limits != expected {
+                    return reject(RetainedDecisionReject::EffectivePolicyMismatch);
+                }
+            }
+            Err(e) => return reject(RetainedDecisionReject::OwnerPolicyUnavailable(e)),
+        }
+
+        let payload = decided.payload();
+
+        // 2. One acquisition of the serialization domain for the whole operation.
+        let guard = self.backend.lock_domain();
+
+        // 3. An actually observed recovery-required state blocks (distinct from an
+        //    engine/durable disagreement below).
+        if self.backend.recovery_required() {
+            return blocked(RetainedDecisionBlocked::RecoveryRequired);
+        }
+
+        // 4. Validate the CURRENT durable restriction under the held guard. The
+        //    returned record carries its holder reservation and stays covered
+        //    through every check below; its O3 validation scratch released inside
+        //    the helper.
+        let validated = match self.load_current_validated_locked(&guard, history) {
+            Ok(v) => v,
+            Err(CurrentLoadFailure::Admission) => {
+                return blocked(RetainedDecisionBlocked::Admission)
+            }
+            Err(CurrentLoadFailure::Validation(d)) => {
+                return blocked(RetainedDecisionBlocked::EvidenceUnavailable(d))
+            }
+        };
+
+        // 5. The effective durable restriction identity. A `BootstrapNoLock`
+        //    record leaves this Locked-only route explicitly unresolved.
+        let durable = match super::prepared::GenerationIdentity::from_retained(validated.retained())
+        {
+            Some(id) => id,
+            None => return blocked(RetainedDecisionBlocked::BootstrapUnresolved),
+        };
+
+        // 6. The pin's provenance, read through the held guard (leaf lock brief).
+        if let Err(r) = self.pin_provenance_locked(&guard, payload.pin()) {
+            return reject(RetainedDecisionReject::Provenance(r));
+        }
+
+        // 7. Engine ↔ durable correspondence. Engine NoLock is refused on this
+        //    Locked-only route; an engine/durable lock disagreement blocks
+        //    conservatively (NOT a recovery-required state).
+        let (engine_lock_id, engine_lock_view) = match engine.locked_qc() {
+            Some(qc) => (qc.block_id, qc.view),
+            None => {
+                return reject(RetainedDecisionReject::Correspondence(
+                    CorrespondenceRefusal::EngineNoLock,
+                ))
+            }
+        };
+        if engine_lock_id != durable.lock_block_id || engine_lock_view != durable.lock_view {
+            return blocked(RetainedDecisionBlocked::EngineDurableDisagreement);
+        }
+
+        // 8. Admit the observation hashing/traversal scratch while the record
+        //    stays covered. Released before the result is returned, after its
+        //    covered transient objects are destroyed.
+        let obs_scratch = match self.backend.accounting().reserve(scratch_charge()) {
+            Ok(r) => r,
+            Err(_) => return blocked(RetainedDecisionBlocked::Admission),
+        };
+
+        // Perform the remaining checks, then release `obs_scratch` before the
+        // result is produced (its SHA3 / traversal temporaries live only inside
+        // the calls below). `result` is a `Copy` diagnostic; `validated` and the
+        // domain guard drop after it.
+        let result = (|| {
+            // 9a. Recompute the proposal commitment and compare to the retained
+            //     binding (substitution / projection refusal).
+            let recomputed = match commit_proposal(proposal, limits) {
+                Ok(c) => c,
+                Err(e) => return reject(RetainedDecisionReject::InputBound(e)),
+            };
+            if &recomputed != payload.proposal_binding() {
+                return reject(RetainedDecisionReject::CommitmentMismatch);
+            }
+
+            // 9b. Retained fixed metadata ↔ the supplied proposal.
+            let meta = payload.meta();
+            if meta.proposer() != u64::from(proposal.header.proposer_index) {
+                return reject(RetainedDecisionReject::Metadata(MetaField::Proposer));
+            }
+            let view = proposal.header.height;
+            if meta.candidate_view() != view {
+                return reject(RetainedDecisionReject::Metadata(MetaField::CandidateView));
+            }
+            let parent_field = proposal.header.parent_block_id;
+            let reproduced = derive_block_id_local(meta.proposer(), view, &parent_field);
+            if meta.candidate_id() != &reproduced {
+                return reject(RetainedDecisionReject::Metadata(MetaField::CandidateId));
+            }
+
+            // 9c. Projection ↔ the registered candidate node (view, full parent
+            //     incl. the `[0xFF; 32]` sentinel, justify presence/block/view).
+            //     An absent candidate is reported by the bounded evaluation.
+            let candidate_id = *meta.candidate_id();
+            if let Some(node) = engine.state().get_block(&candidate_id) {
+                if node.view != view {
+                    return reject(RetainedDecisionReject::Projection(
+                        ProjectionMismatch::CandidateView,
+                    ));
+                }
+                match node.parent_id {
+                    None => {
+                        if parent_field != [0xFF; 32] {
+                            return reject(RetainedDecisionReject::Projection(
+                                ProjectionMismatch::Parent,
+                            ));
+                        }
+                    }
+                    Some(p) => {
+                        if parent_field == [0xFF; 32] || p != parent_field {
+                            return reject(RetainedDecisionReject::Projection(
+                                ProjectionMismatch::Parent,
+                            ));
+                        }
+                    }
+                }
+                if node.id != reproduced {
+                    return reject(RetainedDecisionReject::Projection(
+                        ProjectionMismatch::CandidateId,
+                    ));
+                }
+                match &proposal.qc {
+                    Some(qc) => {
+                        match node.justify_qc.as_ref() {
+                            Some(j) if j.block_id == qc.block_id => {}
+                            _ => {
+                                return reject(RetainedDecisionReject::Projection(
+                                    ProjectionMismatch::JustifyBlockId,
+                                ))
+                            }
+                        }
+                        match node.justify_qc.as_ref() {
+                            Some(j) if j.view == qc.height => {}
+                            _ => {
+                                return reject(RetainedDecisionReject::Projection(
+                                    ProjectionMismatch::JustifyView,
+                                ))
+                            }
+                        }
+                    }
+                    None => {
+                        if node.justify_qc.is_some() {
+                            return reject(RetainedDecisionReject::Projection(
+                                ProjectionMismatch::JustifyPresence,
+                            ));
+                        }
+                    }
+                }
+            }
+
+            // 9d. Bounded safe-voting re-evaluation against the effective
+            //     restriction. The unbounded walk is never invoked first.
+            match engine
+                .state()
+                .bounded_safety_decision(&candidate_id, limits.max_ancestry_hops())
+            {
+                o @ (BoundedSafetyOutcome::SafeNoLock
+                | BoundedSafetyOutcome::SafeViewSufficiency
+                | BoundedSafetyOutcome::SafeAncestry { .. }) => {
+                    RetainedDecisionObservation::Revalidated(o)
+                }
+                BoundedSafetyOutcome::CandidateAbsent => {
+                    reject(RetainedDecisionReject::Ancestry(BoundedAncestryReject::CandidateAbsent))
+                }
+                BoundedSafetyOutcome::ParentAbsent => {
+                    reject(RetainedDecisionReject::Ancestry(BoundedAncestryReject::ParentAbsent))
+                }
+                BoundedSafetyOutcome::NoParentLink => {
+                    reject(RetainedDecisionReject::Ancestry(BoundedAncestryReject::NoParentLink))
+                }
+                BoundedSafetyOutcome::BoundExhausted => {
+                    reject(RetainedDecisionReject::Ancestry(BoundedAncestryReject::OverBound {
+                        max: limits.max_ancestry_hops(),
+                    }))
+                }
+            }
+        })();
+
+        // Release the observation scratch (its covered transients are gone), then
+        // the result is returned; `validated` (backings before holder) and the
+        // domain guard drop afterwards.
+        drop(obs_scratch);
+        result
+    }
+
     /// Borrowed-proof provenance precheck shared by the public capture wrapper and
     /// the owner-controlled route (no consumption, no domain acquisition): refuse a
     /// recovery-required backend, a foreign/uncharged incarnation, a foreign pinned
