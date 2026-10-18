@@ -135,6 +135,25 @@ fn agg_current(owner: &SafetyRecordOwner) -> u128 {
     owner.backend_for_test().accounting_aggregate_current()
 }
 
+/// A paired snapshot of BOTH admission ledgers taken through independent backend
+/// test seams: the operational sub-partition charge ([`op_current`]) AND the
+/// shared aggregate authority charge ([`agg_current`]). Neither counter is
+/// inferred from the other — each is read directly — so a refusal that leaks on
+/// one ledger but not the other is caught. Used to assert exact restoration of
+/// both counters across refusals while a returned proof is still held.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+struct LedgerSnapshot {
+    operational: u128,
+    aggregate: u128,
+}
+
+fn ledger_snapshot(owner: &SafetyRecordOwner) -> LedgerSnapshot {
+    LedgerSnapshot {
+        operational: op_current(owner),
+        aggregate: agg_current(owner),
+    }
+}
+
 fn registry_occupied(owner: &SafetyRecordOwner) -> usize {
     match owner.backend_for_test().prepared_registry_for_test() {
         Some(reg) => reg.lock().unwrap().occupied(),
@@ -179,6 +198,111 @@ fn classify_try_lock(outcome: TryLockDomainOutcome<'_>) -> DomainObservation {
         TryLockDomainOutcome::Acquired(_g) => DomainObservation::Acquired,
         TryLockDomainOutcome::Poisoned => DomainObservation::Poisoned,
     }
+}
+
+/// The four explicitly recorded legs of the bounded two-way observation
+/// handshake (§3). Each is `None` until attempted, then `Some(true)` on success
+/// or `Some(false)` on an actual channel failure (timeout or disconnect). The
+/// test credits an observation as evidence of the intended paused phase ONLY when
+/// [`HandshakeLegs::fully_completed`] holds; a silent timeout or a dropped
+/// endpoint therefore produces a DISTINCT, recorded test failure rather than
+/// being accepted as successful coordination.
+#[derive(Clone, Copy, Default, Debug)]
+struct HandshakeLegs {
+    owner_entry_signalled: Option<bool>,
+    owner_release_received: Option<bool>,
+    observer_entry_received: Option<bool>,
+    observer_release_acked: Option<bool>,
+}
+
+impl HandshakeLegs {
+    fn fully_completed(&self) -> bool {
+        self.owner_entry_signalled == Some(true)
+            && self.owner_release_received == Some(true)
+            && self.observer_entry_received == Some(true)
+            && self.observer_release_acked == Some(true)
+    }
+}
+
+/// Owner-side coordination handle, used INSIDE the serialization hook. The hook
+/// bound is `Fn() + Send + Sync + 'static`, so the single-consumer endpoints are
+/// wrapped in `Mutex` (both `Sender`/`Receiver` are `Send`). The hook only
+/// signals and waits; it records outcomes into the shared legs and never panics,
+/// so a failed hand-off cannot poison the held domain guard.
+struct OwnerHookCoord {
+    entry_tx: std::sync::Mutex<mpsc::Sender<()>>,
+    release_rx: std::sync::Mutex<mpsc::Receiver<()>>,
+    legs: std::sync::Arc<std::sync::Mutex<HandshakeLegs>>,
+}
+
+impl OwnerHookCoord {
+    /// Signal entry (guard held, paused) and wait for the observer's release
+    /// acknowledgement under the bounded timeout. Both outcomes are recorded; a
+    /// send failure or a timeout/disconnect is captured as `Some(false)`.
+    fn signal_entry_and_await_release(&self) {
+        let sent = self.entry_tx.lock().unwrap().send(()).is_ok();
+        self.legs.lock().unwrap().owner_entry_signalled = Some(sent);
+        let released = self
+            .release_rx
+            .lock()
+            .unwrap()
+            .recv_timeout(COORD_TIMEOUT)
+            .is_ok();
+        self.legs.lock().unwrap().owner_release_received = Some(released);
+    }
+}
+
+/// Observer-side coordination handle, owned by the single observer thread. Raw
+/// endpoints (no `Mutex`) since it is used from one thread only. Dropping it
+/// WITHOUT calling [`ObserverCoord::ack_release`] disconnects the owner's release
+/// channel — the actual-channel-failure negative control.
+struct ObserverCoord {
+    entry_rx: mpsc::Receiver<()>,
+    release_tx: mpsc::Sender<()>,
+    legs: std::sync::Arc<std::sync::Mutex<HandshakeLegs>>,
+}
+
+impl ObserverCoord {
+    /// Bounded wait for the owner's entry signal. Records and returns whether the
+    /// signal arrived; a timeout/disconnect returns `false` so the caller does NOT
+    /// credit any subsequent observation.
+    fn await_entry(&self) -> bool {
+        let got = self.entry_rx.recv_timeout(COORD_TIMEOUT).is_ok();
+        self.legs.lock().unwrap().observer_entry_received = Some(got);
+        got
+    }
+
+    /// Acknowledge release so the owner's bounded wait completes. Records whether
+    /// the acknowledgement was delivered.
+    fn ack_release(&self) {
+        let acked = self.release_tx.send(()).is_ok();
+        self.legs.lock().unwrap().observer_release_acked = Some(acked);
+    }
+}
+
+/// Build a fresh bounded handshake: an [`OwnerHookCoord`] for the hook, an
+/// [`ObserverCoord`] for the observer thread, and the shared [`HandshakeLegs`]
+/// the test inspects (OUTSIDE the guarded hook) to require successful
+/// coordination before crediting any observation.
+fn make_handshake() -> (
+    OwnerHookCoord,
+    ObserverCoord,
+    std::sync::Arc<std::sync::Mutex<HandshakeLegs>>,
+) {
+    let (entry_tx, entry_rx) = mpsc::channel::<()>();
+    let (release_tx, release_rx) = mpsc::channel::<()>();
+    let legs = std::sync::Arc::new(std::sync::Mutex::new(HandshakeLegs::default()));
+    let owner = OwnerHookCoord {
+        entry_tx: std::sync::Mutex::new(entry_tx),
+        release_rx: std::sync::Mutex::new(release_rx),
+        legs: std::sync::Arc::clone(&legs),
+    };
+    let observer = ObserverCoord {
+        entry_rx,
+        release_tx,
+        legs: std::sync::Arc::clone(&legs),
+    };
+    (owner, observer, legs)
 }
 
 // ===========================================================================
@@ -503,12 +627,16 @@ fn admission_refusal_then_admissible_retry() {
     let lim = limits(&ctx);
 
     // Read the proof FIRST (its O3 holder charge is now live), then starve the
-    // remaining headroom so the route's first ADDITIONAL reservation (the
-    // transient hashing/traversal scratch) is refused — without disturbing the
+    // remaining headroom so the route's FIRST additional reservation — the
+    // covering envelope/data reservation, which the corrected route admits BEFORE
+    // the transient hashing/traversal scratch — is refused, without disturbing the
     // already-held proof.
     let proof = owner
         .read_validate(None::<&FixtureCommittedHistory>)
         .unwrap();
+    // Paired (operational, aggregate) baseline that DOES include the live input
+    // proof's O3 holder charge but NOT the temporary pressure reservation.
+    let with_proof = ledger_snapshot(&owner);
     let backend = owner.backend_for_test();
     let op_headroom =
         backend.accounting_cap().expect("operational ceiling") - backend.accounting_current();
@@ -517,10 +645,13 @@ fn admission_refusal_then_admissible_retry() {
         .expect("aggregate ceiling")
         - backend.accounting_aggregate_current();
     let headroom = op_headroom.min(agg_headroom);
-    // Leave only 8 bytes: far below the route's fixed scratch charge.
+    // Leave only 8 bytes: far below the route's covering reservation. `standing`
+    // is the temporary pressure reservation.
     let standing = backend
         .reserve_standing_for_test(headroom - 8)
         .expect("reserve standing to starve the route");
+    // Paired baseline that NOW also includes the temporary pressure reservation.
+    let starved = ledger_snapshot(&owner);
 
     // Snapshot the proof's observable identity BEFORE the call, so the SAME
     // returned proof can be shown preserved (not a fresh `read_validate`).
@@ -557,10 +688,24 @@ fn admission_refusal_then_admissible_retry() {
         0,
         "no envelope/pin on admission refusal"
     );
+    // BOTH ledgers restore EXACTLY to the proof+pressure baseline with the returned
+    // proof still live: the covering reservation and every transient were released.
+    assert_eq!(
+        ledger_snapshot(&owner),
+        starved,
+        "operational AND aggregate charges restored to the proof+pressure baseline"
+    );
 
-    // Remove the pressure and retry with the SAME returned proof (NOT a fresh
-    // read): proof preservation enables reuse once the pressure is gone.
+    // Remove the temporary pressure and confirm its charge leaves BOTH ledgers
+    // WITHOUT discarding the returned proof: the ledgers return to the proof-held
+    // (pressure-free) baseline. Then retry with the SAME returned proof (NOT a
+    // fresh read): proof preservation enables reuse once the pressure is gone.
     drop(standing);
+    assert_eq!(
+        ledger_snapshot(&owner),
+        with_proof,
+        "temporary pressure removed from BOTH ledgers; the returned proof remains held"
+    );
     let retry = owner.decide_and_capture_owned(
         &mut engine,
         ValidatorId::new(1),
@@ -846,53 +991,49 @@ fn owner_route_holds_domain_until_release_observed_as_would_block() {
         .unwrap();
     let lim = limits(&ctx);
 
-    // Coordination: the hook signals "paused, guard held" and waits for release
-    // under a BOUNDED wait. The observer records its non-blocking acquisition
-    // classification into a shared slot and ALWAYS releases the owner — even on an
-    // unexpected observation or a timeout — so neither the scoped observer nor the
-    // owner's hook can wait indefinitely. The hook bound requires `Send + Sync`,
-    // so the endpoints it uses are wrapped in a `Mutex` (both `Sender`/`Receiver`
-    // are `Send`).
-    let (entered_tx, entered_rx) = mpsc::channel::<()>();
-    let (release_tx, release_rx) = mpsc::channel::<()>();
-    let entered_tx = std::sync::Mutex::new(entered_tx);
-    let release_rx = std::sync::Mutex::new(release_rx);
+    // Bounded two-way handshake with EXPLICITLY recorded legs (§3): the hook
+    // signals "paused, guard held" and waits for release; the observer waits for
+    // that entry signal, classifies the same-domain non-blocking acquisition, then
+    // ALWAYS acknowledges release. A timeout, disconnect, missed entry, or failed
+    // signalling is RECORDED (not silently accepted) and fails the test below, so a
+    // coordination failure can never masquerade as successful serialization.
+    let (owner_coord, observer_coord, legs) = make_handshake();
     let observed = std::sync::Arc::new(std::sync::Mutex::new(None::<DomainObservation>));
     let observed_obs = std::sync::Arc::clone(&observed);
 
     std::thread::scope(|scope| {
         let obs = &owner;
         let observer = scope.spawn(move || {
-            // Bounded wait until the owner is paused inside the capture interval
-            // holding the domain guard; never block forever.
-            let entered = entered_rx.recv_timeout(COORD_TIMEOUT);
-            // On a successful signal, classify the same-domain non-blocking
-            // acquisition (contention vs acquisition vs poisoning) WITHOUT holding
-            // any acquired guard. Record it; assert later, outside the hook.
-            if entered.is_ok() {
+            // Only classify after a SUCCESSFUL bounded entry handshake: no
+            // observation made after a failed handshake is credited as evidence.
+            if observer_coord.await_entry() {
                 *observed_obs.lock().unwrap() =
                     Some(classify_try_lock(obs.backend_for_test().try_lock_domain_for_test()));
             }
-            // ALWAYS release the owner so its bounded hook wait completes, even if
-            // we observed nothing (timeout/disconnect).
-            let _ = release_tx.send(());
+            // ALWAYS acknowledge release so the owner's bounded wait completes,
+            // even if we observed nothing (recorded as a handshake failure).
+            observer_coord.ack_release();
         });
 
         // Owner thread: install the one-shot pause hook, then run the route. The
         // hook never panics (so a failed hand-off cannot poison the held domain
         // guard) and waits only under the bounded timeout.
-        set_capture_interval_hook(move || {
-            let _ = entered_tx.lock().unwrap().send(());
-            let _ = release_rx.lock().unwrap().recv_timeout(COORD_TIMEOUT);
-        });
+        set_capture_interval_hook(move || owner_coord.signal_entry_and_await_release());
         let outcome =
             owner.decide_and_capture_owned(&mut engine, ValidatorId::new(1), &p1, &lim, 1, proof);
         clear_capture_interval_hook();
 
         observer.join().expect("observer thread");
 
-        // Assertions OUTSIDE the hook critical section: a failure here cannot
-        // leave a thread waiting or poison the domain.
+        // Assertions OUTSIDE the hook critical section: a failure here cannot leave
+        // a thread waiting or poison the domain. Require SUCCESSFUL coordination on
+        // every leg BEFORE crediting the observation.
+        let final_legs = *legs.lock().unwrap();
+        assert!(
+            final_legs.fully_completed(),
+            "the bounded entry/release handshake completed on both sides \
+             (no timeout, disconnect, or dropped endpoint): {final_legs:?}"
+        );
         assert_eq!(
             *observed.lock().unwrap(),
             Some(DomainObservation::WouldBlock),
@@ -935,7 +1076,8 @@ fn owner_route_rejects_policy_built_for_larger_validator_set() {
     let dir = tempfile::tempdir().unwrap();
     let (mut engine, p1, l0_block) = engine_locked_and_safe_view1();
     let owner = owner_with_matching_proof(dir.path(), &ctx, l0_block);
-    let baseline = op_current(&owner);
+    // Proof-free paired (operational, aggregate) baseline.
+    let baseline = ledger_snapshot(&owner);
 
     // N=8 policy relaxes the QC-signature-count cap to 8; the owner's pinned N=4
     // caps it at 4. The larger policy must not be admitted by the owner route.
@@ -947,10 +1089,10 @@ fn owner_route_rejects_policy_built_for_larger_validator_set() {
         .read_validate(None::<&FixtureCommittedHistory>)
         .unwrap();
     let before = fingerprint(&proof);
-    // Operational charge with ONLY the live input proof held; the refusal returns
-    // this same proof, so the post-refusal charge is exactly this (nothing else is
-    // retained), distinct from the proof-free `baseline`.
-    let with_proof = op_current(&owner);
+    // Paired baseline with ONLY the live input proof held; the refusal returns this
+    // same proof, so the post-refusal charge is exactly this (nothing else is
+    // retained), distinct from the proof-free `baseline`. No temporary pressure.
+    let with_proof = ledger_snapshot(&owner);
     let outcome =
         owner.decide_and_capture_owned(&mut engine, ValidatorId::new(1), &p1, &larger, 1, proof);
     let returned_proof = match outcome {
@@ -976,14 +1118,17 @@ fn owner_route_rejects_policy_built_for_larger_validator_set() {
         "no self-vote on policy refusal"
     );
     assert_eq!(registry_occupied(&owner), 0, "no capture on policy refusal");
+    // BOTH ledgers restored to the proof-held baseline (the returned proof remains
+    // live, nothing else retained), and that baseline sits above the proof-free one.
     assert_eq!(
-        op_current(&owner),
+        ledger_snapshot(&owner),
         with_proof,
-        "charges restored to the proof-held baseline (only the returned proof remains)"
+        "operational AND aggregate charges restored to the proof-held baseline (only the returned proof remains)"
     );
     assert!(
-        with_proof > baseline,
-        "the proof-held baseline sits above the proof-free baseline"
+        with_proof.operational > baseline.operational
+            && with_proof.aggregate > baseline.aggregate,
+        "the proof-held baseline sits above the proof-free baseline on BOTH ledgers"
     );
 
     // Correct the input (supply the correctly bounded owner-derived N=4 policy) and
@@ -1020,7 +1165,8 @@ fn header_proposer_index_mismatch_refuses_projection() {
     let dir = tempfile::tempdir().unwrap();
     let (mut engine, p1, l0_block) = engine_locked_and_safe_view1();
     let owner = owner_with_matching_proof(dir.path(), &ctx, l0_block);
-    let baseline = op_current(&owner);
+    // Proof-free paired (operational, aggregate) baseline.
+    let baseline = ledger_snapshot(&owner);
     let lim = limits(&ctx);
 
     // Change ONLY the header's proposer identity (2 != originating proposer 1).
@@ -1031,9 +1177,9 @@ fn header_proposer_index_mismatch_refuses_projection() {
         .read_validate(None::<&FixtureCommittedHistory>)
         .unwrap();
     let before = fingerprint(&proof);
-    // Operational charge with ONLY the live input proof held; the refusal returns
-    // this same proof, so the post-refusal charge is exactly this.
-    let with_proof = op_current(&owner);
+    // Paired baseline with ONLY the live input proof held; the refusal returns this
+    // same proof, so the post-refusal charge is exactly this. No temporary pressure.
+    let with_proof = ledger_snapshot(&owner);
     let outcome = owner.decide_and_capture_owned(
         &mut engine,
         ValidatorId::new(1),
@@ -1066,14 +1212,17 @@ fn header_proposer_index_mismatch_refuses_projection() {
         "no dependent self-vote on projection refusal"
     );
     assert_eq!(registry_occupied(&owner), 0, "no capture on projection refusal");
+    // BOTH ledgers restored to the proof-held baseline (returned proof still live),
+    // which sits above the proof-free baseline.
     assert_eq!(
-        op_current(&owner),
+        ledger_snapshot(&owner),
         with_proof,
-        "charges restored to the proof-held baseline (only the returned proof remains)"
+        "operational AND aggregate charges restored to the proof-held baseline (only the returned proof remains)"
     );
     assert!(
-        with_proof > baseline,
-        "the proof-held baseline sits above the proof-free baseline"
+        with_proof.operational > baseline.operational
+            && with_proof.aggregate > baseline.aggregate,
+        "the proof-held baseline sits above the proof-free baseline on BOTH ledgers"
     );
 
     // Correct the input (the matching header, proposer_index == originating
@@ -1122,35 +1271,38 @@ fn binding_phase_reservation_overlaps_covering() {
     let covering = covering_charge_for_test().expect("covering charge");
     let scratch = scratch_charge_for_test();
 
-    let (entered_tx, entered_rx) = mpsc::channel::<()>();
-    let (release_tx, release_rx) = mpsc::channel::<()>();
-    let entered_tx = std::sync::Mutex::new(entered_tx);
-    let release_rx = std::sync::Mutex::new(release_rx);
+    // Bounded two-way handshake with EXPLICITLY recorded legs (§3): the observer
+    // records the live accounting occupancy only after a SUCCESSFUL entry
+    // handshake, then ALWAYS acknowledges release. A coordination failure is
+    // recorded and fails the test below rather than being silently accepted.
+    let (owner_coord, observer_coord, legs) = make_handshake();
     let snapshot = std::sync::Arc::new(std::sync::Mutex::new(None::<u128>));
     let snapshot_obs = std::sync::Arc::clone(&snapshot);
 
     std::thread::scope(|scope| {
         let obs = &owner;
         let observer = scope.spawn(move || {
-            // Bounded wait for the binding-phase signal; never block forever.
-            if entered_rx.recv_timeout(COORD_TIMEOUT).is_ok() {
+            if observer_coord.await_entry() {
                 // Accounting is a SEPARATE mutex from the serialization domain, so
                 // this read does not contend with the held domain guard.
                 let occ = obs.backend_for_test().accounting_current();
                 *snapshot_obs.lock().unwrap() = Some(occ);
             }
-            // ALWAYS release the owner so its bounded hook wait completes.
-            let _ = release_tx.send(());
+            observer_coord.ack_release();
         });
 
-        set_binding_phase_hook(move || {
-            let _ = entered_tx.lock().unwrap().send(());
-            let _ = release_rx.lock().unwrap().recv_timeout(COORD_TIMEOUT);
-        });
+        set_binding_phase_hook(move || owner_coord.signal_entry_and_await_release());
         let outcome =
             owner.decide_and_capture_owned(&mut engine, ValidatorId::new(1), &p1, &lim, 1, proof);
         clear_binding_phase_hook();
         observer.join().expect("observer thread");
+
+        // Require SUCCESSFUL coordination before crediting the occupancy snapshot.
+        let final_legs = *legs.lock().unwrap();
+        assert!(
+            final_legs.fully_completed(),
+            "the bounded binding-phase handshake completed on both sides: {final_legs:?}"
+        );
         assert!(
             matches!(outcome, OwnedDecisionOutcome::Decided(_)),
             "route completes after the binding-phase observation"
@@ -1188,6 +1340,8 @@ fn covering_scratch_and_capture_refusals_restore_baseline() {
         let proof = owner
             .read_validate(None::<&FixtureCommittedHistory>)
             .unwrap();
+        // Proof-held, pressure-free paired (operational, aggregate) baseline.
+        let with_proof = ledger_snapshot(&owner);
         let backend = owner.backend_for_test();
         let op_headroom =
             backend.accounting_cap().expect("op ceiling") - backend.accounting_current();
@@ -1197,26 +1351,39 @@ fn covering_scratch_and_capture_refusals_restore_baseline() {
             - backend.accounting_aggregate_current();
         let headroom = op_headroom.min(agg_headroom);
         // Leave covering-1 bytes: the FIRST reservation (covering) is refused.
+        // `standing` is the temporary pressure reservation.
         let standing = backend
             .reserve_standing_for_test(headroom - (covering - 1))
             .expect("starve below covering");
-        let starved = op_current(&owner);
+        // Paired baseline that NOW also includes the temporary pressure.
+        let starved = ledger_snapshot(&owner);
         let outcome =
             owner.decide_and_capture_owned(&mut engine, ValidatorId::new(1), &p1, &lim, 1, proof);
-        assert!(
-            matches!(
-                outcome,
-                OwnedDecisionOutcome::Refused {
-                    reason: OwnedCaptureRefusal::Capture(CaptureRefusal::Admission(_)),
-                    ..
-                }
-            ),
-            "expected a covering admission refusal"
-        );
+        let returned = match outcome {
+            OwnedDecisionOutcome::Refused {
+                proof: p,
+                reason: OwnedCaptureRefusal::Capture(CaptureRefusal::Admission(_)),
+            } => p,
+            other => panic!("expected a covering admission refusal, got {other:?}"),
+        };
         assert_eq!(engine.locked_qc().map(|q| q.view), Some(0), "no self-vote");
         assert_eq!(registry_occupied(&owner), 0);
-        assert_eq!(op_current(&owner), starved, "covering released, baseline restored");
+        // Both ledgers restored to the proof+pressure baseline with the returned
+        // proof still held: covering was released before its covered objects leaked.
+        assert_eq!(
+            ledger_snapshot(&owner),
+            starved,
+            "covering released; operational AND aggregate restored to the proof+pressure baseline"
+        );
+        // Releasing the temporary pressure removes its charge from BOTH ledgers
+        // without discarding the returned proof.
         drop(standing);
+        assert_eq!(
+            ledger_snapshot(&owner),
+            with_proof,
+            "temporary pressure removed from BOTH ledgers; the returned proof is retained"
+        );
+        drop(returned);
     }
 
     // --- scratch admission refusal: leave exactly covering ------------------
@@ -1224,6 +1391,8 @@ fn covering_scratch_and_capture_refusals_restore_baseline() {
         let proof = owner
             .read_validate(None::<&FixtureCommittedHistory>)
             .unwrap();
+        // Proof-held, pressure-free paired baseline.
+        let with_proof = ledger_snapshot(&owner);
         let backend = owner.backend_for_test();
         let op_headroom =
             backend.accounting_cap().expect("op ceiling") - backend.accounting_current();
@@ -1233,30 +1402,39 @@ fn covering_scratch_and_capture_refusals_restore_baseline() {
             - backend.accounting_aggregate_current();
         let headroom = op_headroom.min(agg_headroom);
         // Leave exactly covering bytes: covering succeeds, then scratch is refused.
+        // `standing` is the temporary pressure reservation.
         let standing = backend
             .reserve_standing_for_test(headroom - covering)
             .expect("starve to exactly covering");
-        let starved = op_current(&owner);
+        // Paired baseline that NOW also includes the temporary pressure.
+        let starved = ledger_snapshot(&owner);
         let outcome =
             owner.decide_and_capture_owned(&mut engine, ValidatorId::new(1), &p1, &lim, 1, proof);
-        assert!(
-            matches!(
-                outcome,
-                OwnedDecisionOutcome::Refused {
-                    reason: OwnedCaptureRefusal::Capture(CaptureRefusal::Admission(_)),
-                    ..
-                }
-            ),
-            "expected a scratch admission refusal"
-        );
+        let returned = match outcome {
+            OwnedDecisionOutcome::Refused {
+                proof: p,
+                reason: OwnedCaptureRefusal::Capture(CaptureRefusal::Admission(_)),
+            } => p,
+            other => panic!("expected a scratch admission refusal, got {other:?}"),
+        };
         assert_eq!(engine.locked_qc().map(|q| q.view), Some(0), "no self-vote");
         assert_eq!(registry_occupied(&owner), 0);
+        // Both ledgers restored to the proof+pressure baseline (covering + scratch
+        // released) with the returned proof still held.
         assert_eq!(
-            op_current(&owner),
+            ledger_snapshot(&owner),
             starved,
-            "covering + scratch released, baseline restored"
+            "covering + scratch released; operational AND aggregate restored to the proof+pressure baseline"
         );
+        // Releasing the temporary pressure removes its charge from BOTH ledgers
+        // without discarding the returned proof.
         drop(standing);
+        assert_eq!(
+            ledger_snapshot(&owner),
+            with_proof,
+            "temporary pressure removed from BOTH ledgers; the returned proof is retained"
+        );
+        drop(returned);
     }
 
     // --- capture refusal (stale expected revision): covering + scratch admitted,
@@ -1266,27 +1444,28 @@ fn covering_scratch_and_capture_refusals_restore_baseline() {
         let proof = owner
             .read_validate(None::<&FixtureCommittedHistory>)
             .unwrap();
-        let baseline = op_current(&owner);
+        // Proof-held paired baseline (no temporary pressure in this sub-case).
+        let baseline = ledger_snapshot(&owner);
         // expected revision 2 disagrees with the current authoritative revision 1.
         let outcome =
             owner.decide_and_capture_owned(&mut engine, ValidatorId::new(1), &p1, &lim, 2, proof);
-        assert!(
-            matches!(
-                outcome,
-                OwnedDecisionOutcome::Refused {
-                    reason: OwnedCaptureRefusal::Capture(CaptureRefusal::StaleRevision { .. }),
-                    ..
-                }
-            ),
-            "expected a stale-revision capture refusal"
-        );
+        let returned = match outcome {
+            OwnedDecisionOutcome::Refused {
+                proof: p,
+                reason: OwnedCaptureRefusal::Capture(CaptureRefusal::StaleRevision { .. }),
+            } => p,
+            other => panic!("expected a stale-revision capture refusal, got {other:?}"),
+        };
         assert_eq!(engine.locked_qc().map(|q| q.view), Some(0), "no self-vote");
         assert_eq!(registry_occupied(&owner), 0);
+        // Covering + scratch released; both ledgers restored to the proof-held
+        // baseline with the returned proof still live.
         assert_eq!(
-            op_current(&owner),
+            ledger_snapshot(&owner),
             baseline,
-            "covering + scratch released on capture refusal, baseline restored"
+            "covering + scratch released on capture refusal; operational AND aggregate restored (returned proof held)"
         );
+        drop(returned);
     }
 }
 
@@ -1311,39 +1490,44 @@ fn pre_ingestion_hook_observes_would_block_before_ingestion() {
         .unwrap();
     let lim = limits(&ctx);
 
-    let (entered_tx, entered_rx) = mpsc::channel::<()>();
-    let (release_tx, release_rx) = mpsc::channel::<()>();
-    let entered_tx = std::sync::Mutex::new(entered_tx);
-    let release_rx = std::sync::Mutex::new(release_rx);
+    // Bounded two-way handshake with EXPLICITLY recorded legs (§3): the hook fires
+    // strictly BEFORE the engine call, signals its pause, and waits for release;
+    // the observer waits for that entry, classifies the same-domain non-blocking
+    // acquisition, then ALWAYS acknowledges release. A timeout, disconnect, missed
+    // entry, or failed signalling is RECORDED and fails the test, so no observation
+    // after a failed handshake is credited as the paused pre-ingestion phase.
+    let (owner_coord, observer_coord, legs) = make_handshake();
     let observed = std::sync::Arc::new(std::sync::Mutex::new(None::<DomainObservation>));
     let observed_obs = std::sync::Arc::clone(&observed);
 
     std::thread::scope(|scope| {
         let obs = &owner;
         let observer = scope.spawn(move || {
-            // Bounded wait for the pre-ingestion pause; never block forever.
-            if entered_rx.recv_timeout(COORD_TIMEOUT).is_ok() {
+            if observer_coord.await_entry() {
                 // Same-domain non-blocking acquisition: contention, not poisoning.
                 // Classified without retaining any acquired guard.
                 *observed_obs.lock().unwrap() =
                     Some(classify_try_lock(obs.backend_for_test().try_lock_domain_for_test()));
             }
-            // ALWAYS release the owner so its bounded hook wait completes.
-            let _ = release_tx.send(());
+            observer_coord.ack_release();
         });
 
         // Install the pre-ingestion hook (fires strictly BEFORE the engine call).
         // It never panics and waits only under the bounded timeout.
-        set_pre_ingestion_hook(move || {
-            let _ = entered_tx.lock().unwrap().send(());
-            let _ = release_rx.lock().unwrap().recv_timeout(COORD_TIMEOUT);
-        });
+        set_pre_ingestion_hook(move || owner_coord.signal_entry_and_await_release());
         let outcome =
             owner.decide_and_capture_owned(&mut engine, ValidatorId::new(1), &p1, &lim, 1, proof);
         clear_pre_ingestion_hook();
         observer.join().expect("observer thread");
 
-        // Assert the observation OUTSIDE the hook critical section.
+        // Require SUCCESSFUL coordination before crediting the observation, OUTSIDE
+        // the hook critical section.
+        let final_legs = *legs.lock().unwrap();
+        assert!(
+            final_legs.fully_completed(),
+            "the bounded pre-ingestion handshake completed on both sides \
+             (no timeout, disconnect, or dropped endpoint): {final_legs:?}"
+        );
         assert_eq!(
             *observed.lock().unwrap(),
             Some(DomainObservation::WouldBlock),
@@ -1364,6 +1548,79 @@ fn pre_ingestion_hook_observes_would_block_before_ingestion() {
     // authoritative revision from 1 to 2.
     let new_rev = publish_qc(&owner, &ctx, [0x5Au8; 32], 2, 1);
     assert_eq!(new_rev, 2, "publication completed after normal release");
+}
+
+// ===========================================================================
+// 15b. §3 — Negative control for the coordination-validation path. Using an
+//      ACTUAL channel failure (the observer receives the entry signal and then
+//      drops its endpoints WITHOUT acknowledging release, so the owner's bounded
+//      release wait returns `Disconnected` immediately — no synchronization sleep
+//      and no timing-dependent success), the SAME handshake validation rejects the
+//      failed handshake: the release-acknowledgement leg is recorded as a failure,
+//      `fully_completed()` is false, and no observation is credited as the paused
+//      phase. The route itself still completes normally, proving the rejection is
+//      the coordination check and not a route failure.
+// ===========================================================================
+
+#[test]
+fn failed_handshake_is_not_credited_as_coordination() {
+    let ctx = ctx_n(4);
+    let dir = tempfile::tempdir().unwrap();
+    let (mut engine, p1, l0_block) = engine_locked_and_safe_view1();
+    let owner = owner_with_matching_proof(dir.path(), &ctx, l0_block);
+    let proof = owner
+        .read_validate(None::<&FixtureCommittedHistory>)
+        .unwrap();
+    let lim = limits(&ctx);
+
+    let (owner_coord, observer_coord, legs) = make_handshake();
+    let observed = std::sync::Arc::new(std::sync::Mutex::new(None::<DomainObservation>));
+    let observed_obs = std::sync::Arc::clone(&observed);
+
+    std::thread::scope(|scope| {
+        let obs = &owner;
+        let observer = scope.spawn(move || {
+            if observer_coord.await_entry() {
+                *observed_obs.lock().unwrap() =
+                    Some(classify_try_lock(obs.backend_for_test().try_lock_domain_for_test()));
+            }
+            // Deliberately DO NOT acknowledge release: drop the endpoints instead.
+            // This disconnects the owner's release channel, so its bounded wait
+            // returns `Disconnected` at once (actual channel failure, no sleep).
+            drop(observer_coord);
+        });
+
+        set_pre_ingestion_hook(move || owner_coord.signal_entry_and_await_release());
+        let outcome =
+            owner.decide_and_capture_owned(&mut engine, ValidatorId::new(1), &p1, &lim, 1, proof);
+        clear_pre_ingestion_hook();
+        observer.join().expect("observer thread");
+
+        // The SAME validation path rejects the failed handshake: the entry leg may
+        // have signalled, but the release acknowledgement never arrived, so the
+        // handshake is NOT fully completed and the observation is not credited.
+        let final_legs = *legs.lock().unwrap();
+        assert!(
+            !final_legs.fully_completed(),
+            "a disconnected release handshake is rejected, not credited: {final_legs:?}"
+        );
+        assert_eq!(
+            final_legs.owner_release_received,
+            Some(false),
+            "the owner recorded the release wait as a FAILURE (disconnect), not success"
+        );
+        assert_eq!(
+            final_legs.observer_release_acked, None,
+            "the observer never acknowledged release"
+        );
+
+        // The route itself still completes normally: the rejection came from the
+        // coordination check, not from the owner route.
+        assert!(
+            matches!(outcome, OwnedDecisionOutcome::Decided(_)),
+            "the owner route still completes despite the failed handshake"
+        );
+    });
 }
 
 // ===========================================================================
@@ -1441,11 +1698,14 @@ fn ordinary_engine_rejection_refuses_with_proof_and_no_self_vote() {
     // policy is owner-derived. Correspondence WOULD pass, but the engine rejects
     // first so the gate is never reached.
     let owner = owner_with_matching_proof(dir.path(), &ctx, l0_block);
-    let baseline = op_current(&owner);
+    // Proof-free paired (operational, aggregate) baseline.
+    let baseline = ledger_snapshot(&owner);
     let proof = owner
         .read_validate(None::<&FixtureCommittedHistory>)
         .unwrap();
     let before = fingerprint(&proof);
+    // Paired baseline with ONLY the live input proof held. No temporary pressure.
+    let with_proof = ledger_snapshot(&owner);
     let lim = limits(&ctx);
 
     let outcome = owner.decide_and_capture_owned(
@@ -1456,7 +1716,7 @@ fn ordinary_engine_rejection_refuses_with_proof_and_no_self_vote() {
         1,
         proof,
     );
-    match outcome {
+    let returned_proof = match outcome {
         OwnedDecisionOutcome::Refused {
             proof: returned,
             reason,
@@ -1470,18 +1730,33 @@ fn ordinary_engine_rejection_refuses_with_proof_and_no_self_vote() {
                 before,
                 "the same proof is returned intact"
             );
+            returned
         }
         other => panic!("expected Refused, got {other:?}"),
-    }
+    };
     // The engine was consulted but rejected before the gate: no self-vote (still
-    // L0 view 0), no capture, and the charges return exactly to baseline.
+    // L0 view 0), no capture.
     assert_eq!(
         engine.locked_qc().map(|q| q.view),
         Some(0),
         "no dependent self-vote on an ordinary engine rejection"
     );
     assert_eq!(registry_occupied(&owner), 0, "no capture on ordinary rejection");
-    assert_eq!(op_current(&owner), baseline, "charges returned to baseline");
+    // BOTH ledgers restored to the proof-held baseline while the returned proof is
+    // still live (every transient the engine-rejection path touched was released).
+    assert_eq!(
+        ledger_snapshot(&owner),
+        with_proof,
+        "operational AND aggregate charges restored to the proof-held baseline (returned proof live)"
+    );
+    // Releasing the returned proof drops its O3 holder charge from BOTH ledgers,
+    // returning to the proof-free baseline.
+    drop(returned_proof);
+    assert_eq!(
+        ledger_snapshot(&owner),
+        baseline,
+        "operational AND aggregate charges returned to the proof-free baseline after the proof is released"
+    );
 }
 
 // ===========================================================================
@@ -1518,16 +1793,19 @@ fn missing_candidate_refuses_with_proof_and_no_self_vote() {
     // engine lock is absent, but correspondence is never reached.
     let owner = init_owner(dir.path(), &ctx);
     publish_qc(&owner, &ctx, [0x42u8; 32], 3, 0);
-    let baseline = op_current(&owner);
+    // Proof-free paired (operational, aggregate) baseline.
+    let baseline = ledger_snapshot(&owner);
     let proof = owner
         .read_validate(None::<&FixtureCommittedHistory>)
         .unwrap();
     let before = fingerprint(&proof);
+    // Paired baseline with ONLY the live input proof held. No temporary pressure.
+    let with_proof = ledger_snapshot(&owner);
     let lim = limits(&ctx);
 
     let outcome =
         owner.decide_and_capture_owned(&mut engine, ValidatorId::new(1), &p, &lim, 1, proof);
-    match outcome {
+    let returned_proof = match outcome {
         OwnedDecisionOutcome::Refused {
             proof: returned,
             reason,
@@ -1541,11 +1819,12 @@ fn missing_candidate_refuses_with_proof_and_no_self_vote() {
                 before,
                 "the same proof is returned intact"
             );
+            returned
         }
         other => panic!("expected Refused, got {other:?}"),
-    }
+    };
     // The engine held no lock to begin with, so there is nothing to self-vote
-    // into; no capture occurs and the charges return exactly to baseline.
+    // into; no capture occurs.
     assert!(
         engine.locked_qc().is_none(),
         "engine remains unlocked; no self-vote"
@@ -1555,5 +1834,19 @@ fn missing_candidate_refuses_with_proof_and_no_self_vote() {
         0,
         "no capture on missing-candidate refusal"
     );
-    assert_eq!(op_current(&owner), baseline, "charges returned to baseline");
+    // BOTH ledgers restored to the proof-held baseline while the returned proof is
+    // still live.
+    assert_eq!(
+        ledger_snapshot(&owner),
+        with_proof,
+        "operational AND aggregate charges restored to the proof-held baseline (returned proof live)"
+    );
+    // Releasing the returned proof drops its O3 holder charge from BOTH ledgers,
+    // returning to the proof-free baseline.
+    drop(returned_proof);
+    assert_eq!(
+        ledger_snapshot(&owner),
+        baseline,
+        "operational AND aggregate charges returned to the proof-free baseline after the proof is released"
+    );
 }
