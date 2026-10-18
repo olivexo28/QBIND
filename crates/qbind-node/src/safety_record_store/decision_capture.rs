@@ -639,6 +639,16 @@ pub enum ProjectionMismatch {
 /// variant is returned alongside the intact [`ValidatedRecord`].
 #[derive(Debug)]
 pub enum OwnedCaptureRefusal {
+    /// The caller-supplied input policy's effective limits did not match the
+    /// policy derived from the owner's pinned context (§2). A typed,
+    /// allocation-free refusal raised before the engine decision, so no
+    /// dependent self-vote occurs and the proof is returned intact. This is a
+    /// resource-policy binding only; it establishes neither validator
+    /// authentication nor current authority.
+    EffectivePolicyMismatch,
+    /// The owner's pinned context could not yield a policy to bind against (§2),
+    /// e.g. an empty validator set. Raised before the engine decision.
+    OwnerPolicyUnavailable(InputPolicyError),
     /// The borrowed-proof provenance precheck refused before the engine call.
     Precheck(super::prepared::CaptureRefusal),
     /// The engine made an ordinary pre-decision rejection (not safe to vote);
@@ -734,6 +744,24 @@ pub(crate) fn derive_block_id_local(
 /// A compile-time check keeping the fixed inline slot count visible to this
 /// module (the registry owns no growable backing).
 const _: () = assert!(PREPARED_SLOTS >= 1);
+
+/// Test-only (RUN 422 §3): the additional envelope/data covering charge, exposed
+/// so a discriminating regression can assert the exact reservation overlap at the
+/// binding phase. Mirrors [`envelope_extra_charge`]; gated behind
+/// `test`/`test-utils`.
+#[cfg(any(test, feature = "test-utils"))]
+pub fn covering_charge_for_test() -> Option<u128> {
+    envelope_extra_charge()
+}
+
+/// Test-only (RUN 422 §3): the transient hashing/traversal scratch charge,
+/// exposed so a discriminating regression can assert the exact reservation
+/// overlap at the binding phase. Mirrors [`scratch_charge`]; gated behind
+/// `test`/`test-utils`.
+#[cfg(any(test, feature = "test-utils"))]
+pub fn scratch_charge_for_test() -> u128 {
+    scratch_charge()
+}
 
 #[cfg(test)]
 mod tests {

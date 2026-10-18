@@ -636,6 +636,90 @@ fn fire_capture_interval_hook() {
     }
 }
 
+// Test-only (RUN 422 §5 pre-ingestion serialization observation). This hook
+// fires on the owner thread IMMEDIATELY BEFORE the owner invokes
+// `on_proposal_event_gated_owning`, i.e. after the single serialization-domain
+// guard has been acquired but before engine ingestion begins. Its semantic
+// location is fixed at the pre-ingestion boundary: unlike the capture-interval
+// hook (which fires inside capture, after ingestion has begun), this one can
+// establish that the owner held the domain BEFORE ingestion. A focused
+// serialization regression installs a hook here that signals a competing,
+// non-blocking same-domain acquisition (which must observe `WouldBlock`, not
+// poisoning) and then awaits release under a bounded wait. Thread-local,
+// one-shot, consumed on first fire. Absent from production/release builds.
+#[cfg(any(test, feature = "test-utils"))]
+thread_local! {
+    static PRE_INGESTION_HOOK: std::cell::RefCell<Option<Box<dyn Fn()>>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// Test-only (RUN 422 §5): install a one-shot pre-ingestion hook on this thread.
+/// The NEXT owner-route decision on this thread fires it once, strictly before
+/// `on_proposal_event_gated_owning`, while the serialization domain guard is
+/// held, and clears it.
+#[cfg(any(test, feature = "test-utils"))]
+pub fn set_pre_ingestion_hook<F: Fn() + Send + Sync + 'static>(f: F) {
+    PRE_INGESTION_HOOK.with(|h| *h.borrow_mut() = Some(Box::new(f)));
+}
+
+/// Test-only (RUN 422 §5): clear any installed pre-ingestion hook on this thread.
+#[cfg(any(test, feature = "test-utils"))]
+pub fn clear_pre_ingestion_hook() {
+    PRE_INGESTION_HOOK.with(|h| *h.borrow_mut() = None);
+}
+
+/// Fire and consume the one-shot pre-ingestion hook, if installed. Called by the
+/// owner route while holding the serialization domain guard, before ingestion.
+#[cfg(any(test, feature = "test-utils"))]
+fn fire_pre_ingestion_hook() {
+    let cb = PRE_INGESTION_HOOK.with(|h| h.borrow_mut().take());
+    if let Some(cb) = cb {
+        cb();
+    }
+}
+
+// Test-only (RUN 422 §3 binding-phase reservation-overlap observation). This
+// hook fires on the owner thread at the capture binding phase — after the
+// additional `covering` (envelope/data) reservation has been admitted and the
+// transient `scratch` reservation has been admitted, but BEFORE any covered
+// binding value (the proposal commitment / ancestry binding) is produced. At
+// that instant the baseline proof, the `covering` reservation and the `scratch`
+// reservation are all live simultaneously (the actual reservation overlap). A
+// discriminating regression reads the accounting occupancy here and confirms the
+// occupancy already includes `covering` — proving `covering` was admitted BEFORE
+// this phase (the corrected admission order), not afterwards as in the reviewed
+// order. Thread-local, one-shot. Absent from production/release builds.
+#[cfg(any(test, feature = "test-utils"))]
+thread_local! {
+    static BINDING_PHASE_HOOK: std::cell::RefCell<Option<Box<dyn Fn()>>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// Test-only (RUN 422 §3): install a one-shot binding-phase observation hook on
+/// this thread. The NEXT owner-route capture on this thread fires it once, at the
+/// binding phase (covering + scratch both admitted, before the covered binding
+/// values are produced), and clears it.
+#[cfg(any(test, feature = "test-utils"))]
+pub fn set_binding_phase_hook<F: Fn() + Send + Sync + 'static>(f: F) {
+    BINDING_PHASE_HOOK.with(|h| *h.borrow_mut() = Some(Box::new(f)));
+}
+
+/// Test-only (RUN 422 §3): clear any installed binding-phase hook on this thread.
+#[cfg(any(test, feature = "test-utils"))]
+pub fn clear_binding_phase_hook() {
+    BINDING_PHASE_HOOK.with(|h| *h.borrow_mut() = None);
+}
+
+/// Fire and consume the one-shot binding-phase hook, if installed. Called by the
+/// owner route at the binding phase while holding the serialization domain guard.
+#[cfg(any(test, feature = "test-utils"))]
+fn fire_binding_phase_hook() {
+    let cb = BINDING_PHASE_HOOK.with(|h| h.borrow_mut().take());
+    if let Some(cb) = cb {
+        cb();
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Test-only (RUN 422 §3 pre-effective O4-owned live-object observation). At the
 // post-acknowledgement / pre-effectiveness O4 phase, the publish path holds the
@@ -1881,6 +1965,31 @@ impl SafetyRecordOwner {
             }
         };
 
+        // Bind the effective input policy to the owner's pinned context (§2): a
+        // caller-supplied policy constructed for a larger validator set would relax
+        // the owner's intended QC-signature-count restriction. Derive the expected
+        // policy from `self.pinned()` and reject a supplied policy whose effective
+        // limits differ. Typed and allocation-free; raised BEFORE acquiring the
+        // domain or invoking the engine, so no dependent self-vote can occur. A
+        // resource-policy comparison does not establish validator authentication or
+        // current authority.
+        match super::decision_capture::PreparedDecisionInputLimits::from_pinned(self.pinned()) {
+            Ok(expected) => {
+                if *limits != expected {
+                    return OwnedDecisionOutcome::Refused {
+                        proof,
+                        reason: OwnedCaptureRefusal::EffectivePolicyMismatch,
+                    };
+                }
+            }
+            Err(e) => {
+                return OwnedDecisionOutcome::Refused {
+                    proof,
+                    reason: OwnedCaptureRefusal::OwnerPolicyUnavailable(e),
+                };
+            }
+        }
+
         // One domain acquisition, held across the engine decision and supplied to
         // the private gate.
         let mut guard = self.backend.lock_domain();
@@ -1895,6 +2004,16 @@ impl SafetyRecordOwner {
             identity,
             reason: None,
         };
+
+        // Source/test-only (§5): fire the pre-ingestion serialization observation
+        // hook at the fixed semantic boundary — the domain guard is held, but the
+        // engine has NOT yet ingested the proposal. A competing non-blocking
+        // same-domain acquisition at this instant must observe `WouldBlock`,
+        // establishing that the owner held the one serialization domain BEFORE
+        // ingestion began. Compiled only under `test`/`test-utils`; unreachable in
+        // a default/release build.
+        #[cfg(any(test, feature = "test-utils"))]
+        fire_pre_ingestion_hook();
 
         let result = engine.on_proposal_event_gated_owning(from, engine_proposal, &mut gate);
 
@@ -2548,6 +2667,21 @@ impl OwningCaptureGate<'_, '_> {
                 OwnedCaptureRefusal::Projection(ProjectionMismatch::Proposer),
             ));
         }
+        // Enforce the header-to-originating-proposer correspondence (§4): the
+        // reviewed `decision.from() == proposer` check only compares the decision
+        // view with the SAME originating argument passed to the engine; it never
+        // inspects `proposal.header.proposer_index`. A commitment covering the
+        // mismatched header is not a substitute for this projection check. Use the
+        // existing proposer-index / `ValidatorId` representation (the candidate-id
+        // reproduction below already commits to `proposer.as_u64()`), so a header
+        // whose proposer identity disagrees with the originating proposer is
+        // refused before any charge or consumption.
+        if u64::from(proposal.header.proposer_index) != proposer.as_u64() {
+            return Err((
+                proof,
+                OwnedCaptureRefusal::Projection(ProjectionMismatch::Proposer),
+            ));
+        }
         let view = proposal.header.height;
         if decision.candidate_view() != view {
             return Err((
@@ -2618,7 +2752,36 @@ impl OwningCaptureGate<'_, '_> {
             }
         }
 
-        // --- fixed decision metadata (separate from the commitment oracle) ---
+        // --- §3 admission-before-construction: admit the additional envelope/data
+        // coverage BEFORE constructing the metadata and binding values it covers,
+        // so every new charged object has continuous covering admission. `covering`
+        // is declared (and therefore released) FIRST, so on any refusal below the
+        // covered objects (meta, proposal_binding, ancestry) are destroyed before
+        // their covering reservation releases. The original proof's own reservation
+        // stays intact until the capture conversion transfers ownership; it is not
+        // used as spare capacity, and no uncharged temporary wrapper is introduced.
+        let covering_charge = match envelope_extra_charge() {
+            Some(c) => c,
+            None => {
+                return Err((
+                    proof,
+                    OwnedCaptureRefusal::Capture(CaptureRefusal::Admission(
+                        super::error::SafetyStoreError::ArithmeticOverflow(
+                            super::error::ArithmeticOverflowSite::SizeSum,
+                        ),
+                    )),
+                ));
+            }
+        };
+        let covering = match owner.backend.accounting().reserve(covering_charge) {
+            Ok(r) => r,
+            Err(e) => {
+                return Err((proof, OwnedCaptureRefusal::Capture(CaptureRefusal::Admission(e))))
+            }
+        };
+
+        // --- fixed decision metadata (covered by `covering`; separate from the
+        // commitment oracle) ---
         let meta_branch = match branch {
             SafetyBranch::ViewSufficiency => MetaBranch::ViewSufficiency,
             SafetyBranch::Ancestry => MetaBranch::Ancestry,
@@ -2638,13 +2801,29 @@ impl OwningCaptureGate<'_, '_> {
             decision.candidate_view(),
         );
 
-        // --- admit the transient hashing/traversal scratch (conversion overlap
-        // with the still-live proof), compute the streaming commitment and the
-        // bounded ancestry binding, then release the scratch before consumption ---
+        // --- admit the hashing/traversal scratch BEFORE creating its covered
+        // working objects (the transient SHA3 states live inside the calls below
+        // and are destroyed before `scratch` releases). At this binding phase the
+        // baseline proof, the `covering` reservation and `scratch` are ALL held
+        // simultaneously (the actual reservation overlap). Compute the streaming
+        // commitment and bounded ancestry binding, then release the scratch before
+        // consumption. On a scratch/commit/ancestry refusal the covered working
+        // objects are destroyed before `scratch` releases, and the covered binding
+        // values before `covering` releases (declaration order). ---
         let scratch = match owner.backend.accounting().reserve(scratch_charge()) {
             Ok(r) => r,
-            Err(e) => return Err((proof, OwnedCaptureRefusal::Capture(CaptureRefusal::Admission(e)))),
+            Err(e) => {
+                return Err((proof, OwnedCaptureRefusal::Capture(CaptureRefusal::Admission(e))))
+            }
         };
+        // Source/test-only: observe the reservation overlap at this binding phase
+        // (baseline + covering + scratch all live) BEFORE any covered binding value
+        // is produced. A discriminating regression reads the accounting occupancy
+        // here to confirm `covering` was admitted BEFORE this phase — the corrected
+        // admission order — rather than afterwards. Compiled only under
+        // `test`/`test-utils`; unreachable in a default/release build.
+        #[cfg(any(test, feature = "test-utils"))]
+        fire_binding_phase_hook();
         let proposal_binding = match commit_proposal(proposal, limits) {
             Ok(c) => c,
             Err(e) => {
@@ -2661,25 +2840,6 @@ impl OwningCaptureGate<'_, '_> {
         };
         drop(scratch);
 
-        // --- admit the additional envelope charge BEFORE consuming the proof ---
-        let covering_charge = match envelope_extra_charge() {
-            Some(c) => c,
-            None => {
-                return Err((
-                    proof,
-                    OwnedCaptureRefusal::Capture(CaptureRefusal::Admission(
-                        super::error::SafetyStoreError::ArithmeticOverflow(
-                            super::error::ArithmeticOverflowSite::SizeSum,
-                        ),
-                    )),
-                ));
-            }
-        };
-        let covering = match owner.backend.accounting().reserve(covering_charge) {
-            Ok(r) => r,
-            Err(e) => return Err((proof, OwnedCaptureRefusal::Capture(CaptureRefusal::Admission(e)))),
-        };
-
         // --- consume the proof through the shared held-guard capture helper ---
         let pin = match owner.capture_prepared_decision_locked(
             &mut *self.guard,
@@ -2689,7 +2849,11 @@ impl OwningCaptureGate<'_, '_> {
         ) {
             Ok(p) => p,
             Err((proof, cr)) => {
-                drop(covering);
+                // Destroy the covered binding values before releasing their
+                // covering reservation: `covering` was declared first, so returning
+                // here drops `ancestry`, `proposal_binding` and `meta` before
+                // `covering`. No explicit early release of `covering` (which would
+                // invert that order).
                 return Err((proof, OwnedCaptureRefusal::Capture(cr)));
             }
         };
