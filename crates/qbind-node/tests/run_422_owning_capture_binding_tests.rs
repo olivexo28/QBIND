@@ -19,6 +19,7 @@
 #![cfg(feature = "test-utils")]
 
 use std::sync::mpsc;
+use std::time::Duration;
 
 use qbind_consensus::ids::ValidatorId;
 use qbind_consensus::validator_set::ValidatorSetEntry;
@@ -36,7 +37,7 @@ use qbind_node::safety_record_store::owner::{
     make_locked_qc, set_binding_phase_hook, set_capture_interval_hook, set_pre_ingestion_hook,
     PublishResult, SafetyRecordOwner,
 };
-use qbind_node::safety_record_store::prepared::CaptureRefusal;
+use qbind_node::safety_record_store::prepared::{registry_cell_charge_bytes, CaptureRefusal};
 use qbind_node::safety_record_store::profile::PinnedSafetyContext;
 use qbind_node::safety_record_store::record::WireQc as StoreWireQc;
 use qbind_node::safety_record_store::validate::FixtureCommittedHistory;
@@ -126,6 +127,14 @@ fn op_current(owner: &SafetyRecordOwner) -> u128 {
     owner.backend_for_test().accounting_current()
 }
 
+/// The shared **aggregate** admission authority's current combined charge, read
+/// through the backend's test seam. Distinct from [`op_current`] (the operational
+/// sub-partition): the aggregate authority admits BOTH the operational and context
+/// partitions against the one accepted profile ceiling.
+fn agg_current(owner: &SafetyRecordOwner) -> u128 {
+    owner.backend_for_test().accounting_aggregate_current()
+}
+
 fn registry_occupied(owner: &SafetyRecordOwner) -> usize {
     match owner.backend_for_test().prepared_registry_for_test() {
         Some(reg) => reg.lock().unwrap().occupied(),
@@ -135,6 +144,65 @@ fn registry_occupied(owner: &SafetyRecordOwner) -> usize {
 
 fn limits(ctx: &PinnedSafetyContext) -> PreparedDecisionInputLimits {
     PreparedDecisionInputLimits::from_pinned(ctx).expect("pinned context yields a valid policy")
+}
+
+// ===========================================================================
+// Bounded coordination (§2)
+// ===========================================================================
+
+/// Upper bound on every cross-thread wait in the serialization observation
+/// tests. It is NOT a synchronization sleep: coordination is driven by actual
+/// channel signals (the owner's hook announces its pause; the observer announces
+/// release). The bound exists only so that an early owner refusal, a missing
+/// hook invocation, an observer failure, or an assertion failure can never leave
+/// a scoped thread waiting indefinitely — a stuck test fails within the bound
+/// instead of hanging. It is generous relative to the microseconds a real
+/// hand-off takes.
+const COORD_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// Classification of a non-blocking same-domain acquisition that does NOT retain
+/// an acquired guard: any `Acquired` guard is dropped at the match arm, so the
+/// classification never itself holds the serialization domain. This distinguishes
+/// contention (`WouldBlock`), successful acquisition, and poisoning.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum DomainObservation {
+    WouldBlock,
+    Acquired,
+    Poisoned,
+}
+
+fn classify_try_lock(outcome: TryLockDomainOutcome<'_>) -> DomainObservation {
+    match outcome {
+        TryLockDomainOutcome::WouldBlock => DomainObservation::WouldBlock,
+        // Drop the acquired guard immediately: the classification must never
+        // retain the domain it is merely observing.
+        TryLockDomainOutcome::Acquired(_g) => DomainObservation::Acquired,
+        TryLockDomainOutcome::Poisoned => DomainObservation::Poisoned,
+    }
+}
+
+// ===========================================================================
+// Returned-proof preservation (§3/§4)
+// ===========================================================================
+
+/// A read-only fingerprint of a [`ValidatedRecord`]'s externally observable
+/// identity, taken BEFORE an owner-route call so the SAME returned proof can be
+/// shown to be preserved — its original validated bytes, its publication
+/// revision, and its originating pinned-context provenance digest. This compares
+/// the ACTUAL returned proof (not a fresh `read_validate`) against the snapshot.
+#[derive(Clone, PartialEq, Eq, Debug)]
+struct ProofFingerprint {
+    encoded: Vec<u8>,
+    revision: u64,
+    origin: [u8; 32],
+}
+
+fn fingerprint(proof: &qbind_node::safety_record_store::ValidatedRecord) -> ProofFingerprint {
+    ProofFingerprint {
+        encoded: proof.encoded().to_vec(),
+        revision: proof.publication_revision(),
+        origin: *proof.origin_context_digest(),
+    }
 }
 
 // ===========================================================================
@@ -271,8 +339,12 @@ fn owner_route_decides_l0_captures_and_self_votes_l1() {
 }
 
 // ===========================================================================
-// 2. Engine L0 lock vs current durable restriction mismatch -> refusal, proof
-//    returned intact, no self-vote.
+// 2. Engine L0 lock vs sealed-proof retained restriction mismatch -> a GATE
+//    `Correspondence` refusal (produced INSIDE the fallible owning gate AFTER a
+//    safe engine decision, NOT an ordinary pre-gate engine rejection), with the
+//    SAME proof returned intact and no self-vote. The distinct ordinary
+//    pre-gate rejection is covered separately by
+//    `ordinary_engine_rejection_refuses_with_proof_and_no_self_vote`.
 // ===========================================================================
 
 #[test]
@@ -288,18 +360,29 @@ fn lock_mismatch_refuses_with_proof_returned_and_no_self_vote() {
     let proof = owner
         .read_validate(None::<&FixtureCommittedHistory>)
         .unwrap();
+    let before = fingerprint(&proof);
     let lim = limits(&ctx);
     let outcome =
         owner.decide_and_capture_owned(&mut engine, ValidatorId::new(1), &p1, &lim, 1, proof);
 
     match outcome {
         OwnedDecisionOutcome::Refused {
-            proof: _returned,
+            proof: returned,
             reason,
         } => {
+            // This is a GATE correspondence refusal (raised inside the owning
+            // gate after the engine decided safe), NOT an ordinary engine
+            // rejection taken before the gate was consulted.
             assert!(
                 matches!(reason, OwnedCaptureRefusal::Correspondence(_)),
-                "expected a correspondence refusal, got {reason:?}"
+                "expected a gate correspondence refusal, got {reason:?}"
+            );
+            // The SAME returned proof is preserved byte-for-byte (bytes, revision,
+            // provenance), not a re-read substitute.
+            assert_eq!(
+                fingerprint(&returned),
+                before,
+                "the returned proof is the intact original"
             );
         }
         other => panic!("expected Refused, got {other:?}"),
@@ -439,10 +522,13 @@ fn admission_refusal_then_admissible_retry() {
         .reserve_standing_for_test(headroom - 8)
         .expect("reserve standing to starve the route");
 
+    // Snapshot the proof's observable identity BEFORE the call, so the SAME
+    // returned proof can be shown preserved (not a fresh `read_validate`).
+    let before = fingerprint(&proof);
     let outcome =
         owner.decide_and_capture_owned(&mut engine, ValidatorId::new(1), &p1, &lim, 1, proof);
-    match outcome {
-        OwnedDecisionOutcome::Refused { proof: _p, reason } => {
+    let returned_proof = match outcome {
+        OwnedDecisionOutcome::Refused { proof: p, reason } => {
             assert!(
                 matches!(
                     reason,
@@ -450,9 +536,17 @@ fn admission_refusal_then_admissible_retry() {
                 ),
                 "expected an admission refusal, got {reason:?}"
             );
+            // The ACTUAL returned proof is byte-, revision- and provenance-identical
+            // to the pre-call snapshot: the refusal preserved the input proof.
+            assert_eq!(
+                fingerprint(&p),
+                before,
+                "the returned proof is preserved unchanged across the refusal"
+            );
+            p
         }
         other => panic!("expected admission Refused, got {other:?}"),
-    }
+    };
     assert_eq!(
         engine.locked_qc().map(|q| q.view),
         Some(0),
@@ -464,13 +558,17 @@ fn admission_refusal_then_admissible_retry() {
         "no envelope/pin on admission refusal"
     );
 
-    // Restore capacity; the route is admissible on retry.
+    // Remove the pressure and retry with the SAME returned proof (NOT a fresh
+    // read): proof preservation enables reuse once the pressure is gone.
     drop(standing);
-    let proof2 = owner
-        .read_validate(None::<&FixtureCommittedHistory>)
-        .unwrap();
-    let retry =
-        owner.decide_and_capture_owned(&mut engine, ValidatorId::new(1), &p1, &lim, 1, proof2);
+    let retry = owner.decide_and_capture_owned(
+        &mut engine,
+        ValidatorId::new(1),
+        &p1,
+        &lim,
+        1,
+        returned_proof,
+    );
     let decided = match retry {
         OwnedDecisionOutcome::Decided(dv) => dv,
         other => panic!("expected admissible retry to Decide, got {other:?}"),
@@ -588,7 +686,20 @@ fn outgoing_vote_parity_all_ten_fields_and_zero_signature_capacity() {
 }
 
 // ===========================================================================
-// 8. Abandonment, standing-registry baseline and final teardown.
+// 8. §3 — Successful-envelope abandonment: exact operational AND aggregate
+//    restoration, the intentionally retained standing registry cell, and final
+//    teardown to zero observed through an INDEPENDENT accounting handle after
+//    every owner, proof, envelope, pin, backend and registry inspector handle
+//    has been released.
+//
+//    Baselines are MEASURED through the existing authoritative accounting seams
+//    (not magic constants); the one standing charge that intentionally survives
+//    abandonment — the lazily installed registry cell — is identified by the
+//    existing `registry_cell_charge_bytes()` helper. Reservation counters are
+//    NOT interpreted as object-lifetime measurements: the final teardown-to-zero
+//    is observed only AFTER the live objects (proof, envelope, pin, registry)
+//    have actually been dropped, through an accounting handle that is itself not
+//    one of those objects.
 // ===========================================================================
 
 #[test]
@@ -597,11 +708,34 @@ fn abandonment_restores_baseline_leaving_only_standing_registry() {
     let dir = tempfile::tempdir().unwrap();
     let (mut engine, p1, l0_block) = engine_locked_and_safe_view1();
     let owner = owner_with_matching_proof(dir.path(), &ctx, l0_block);
-    let baseline = op_current(&owner);
 
+    // Operational AND aggregate baselines with NO input proof held yet. This is
+    // the baseline that does NOT include the still-live input proof.
+    let op_base = op_current(&owner);
+    let agg_base = agg_current(&owner);
+
+    // An INDEPENDENT accounting handle, taken now, that shares the same underlying
+    // ledger but is NOT the owner/backend/proof/envelope it observes — so it can
+    // report the final charge AFTER all of those have been dropped. (The observer
+    // must not retain the objects whose destruction it is meant to observe.)
+    let independent = owner.backend_for_test().accounting_handle_for_test();
+
+    // Read the input proof: its O3 holder charge is now live. This establishes the
+    // SEPARATE baseline that DOES include the still-live input proof.
     let proof = owner
         .read_validate(None::<&FixtureCommittedHistory>)
         .unwrap();
+    let op_with_proof = op_current(&owner);
+    let agg_with_proof = agg_current(&owner);
+    assert!(
+        op_with_proof > op_base,
+        "the live input proof adds an operational holder charge"
+    );
+    assert!(
+        agg_with_proof > agg_base,
+        "the live input proof is admitted against the aggregate authority too"
+    );
+
     let lim = limits(&ctx);
     let decided =
         match owner.decide_and_capture_owned(&mut engine, ValidatorId::new(1), &p1, &lim, 1, proof)
@@ -609,19 +743,63 @@ fn abandonment_restores_baseline_leaving_only_standing_registry() {
             OwnedDecisionOutcome::Decided(dv) => dv,
             other => panic!("expected Decided, got {other:?}"),
         };
-    let occupied_charge = op_current(&owner);
+    // On SUCCESS the input proof is CONSUMED into the envelope's retained
+    // generation (it is not returned); `op_with_proof` was the baseline that
+    // included the still-live input proof, and it no longer applies once the proof
+    // has been moved into the capture.
+    let occupied_op = op_current(&owner);
+    let occupied_agg = agg_current(&owner);
     assert!(
-        occupied_charge > baseline,
-        "pin + envelope reservation charged"
+        occupied_op > op_base,
+        "pin + envelope + retained generation charged above the empty baseline"
+    );
+    assert_eq!(registry_occupied(&owner), 1, "one occupied registry slot");
+
+    // Abandonment: the covered objects (envelope, pin, retained generation derived
+    // from the consumed proof) are destroyed before their covering reservations
+    // release; the lazily installed registry CELL persists as a standing charge
+    // (its slot is now free, but the cell itself is retained).
+    let standing_cell = registry_cell_charge_bytes();
+    drop(decided);
+    let after_op = op_current(&owner);
+    let after_agg = agg_current(&owner);
+    assert_eq!(registry_occupied(&owner), 0, "the occupied slot is freed");
+    assert_eq!(
+        after_op,
+        op_base + standing_cell,
+        "operational charge restored EXACTLY to the empty baseline plus the one \
+         intentionally retained standing registry cell (the consumed proof's \
+         generation was destroyed with the envelope)"
+    );
+    assert_eq!(
+        after_agg,
+        agg_base + standing_cell,
+        "aggregate charge restored EXACTLY to the empty baseline plus the one \
+         standing registry cell"
+    );
+    assert!(
+        after_op < occupied_op && after_agg < occupied_agg,
+        "pin + envelope + scratch + retained generation released on abandonment"
     );
 
-    // Abandonment: covered objects destroyed before their covering reservations
-    // release; the lazily installed registry cell persists as a standing charge.
-    drop(decided);
-    let after = op_current(&owner);
-    assert_eq!(registry_occupied(&owner), 0, "slot freed");
-    assert!(after >= baseline, "charges did not underflow the baseline");
-    assert!(after < occupied_charge, "pin + envelope + scratch released");
+    // Final teardown to ZERO, observed through the independent handle AFTER the
+    // owner (hence its backend, the installed registry and every reservation) has
+    // been dropped. `op_base`/`agg_base` here are the O1 initialization charges,
+    // which the backend owns and releases on drop, so the independent ledger goes
+    // fully to zero.
+    drop(engine);
+    drop(owner);
+    assert_eq!(
+        independent.current(),
+        0,
+        "operational ledger torn down to zero after every owner/backend/registry \
+         handle released"
+    );
+    assert_eq!(
+        independent.aggregate().current(),
+        0,
+        "aggregate ledger torn down to zero after full teardown"
+    );
 }
 
 // ===========================================================================
@@ -668,48 +846,63 @@ fn owner_route_holds_domain_until_release_observed_as_would_block() {
         .unwrap();
     let lim = limits(&ctx);
 
-    // Coordination: the hook signals "paused, guard held" and waits for release.
-    // The hook bound requires `Send + Sync`, so the endpoints it uses are wrapped
-    // in a `Mutex` (both `Sender`/`Receiver` are `Send`).
+    // Coordination: the hook signals "paused, guard held" and waits for release
+    // under a BOUNDED wait. The observer records its non-blocking acquisition
+    // classification into a shared slot and ALWAYS releases the owner — even on an
+    // unexpected observation or a timeout — so neither the scoped observer nor the
+    // owner's hook can wait indefinitely. The hook bound requires `Send + Sync`,
+    // so the endpoints it uses are wrapped in a `Mutex` (both `Sender`/`Receiver`
+    // are `Send`).
     let (entered_tx, entered_rx) = mpsc::channel::<()>();
     let (release_tx, release_rx) = mpsc::channel::<()>();
     let entered_tx = std::sync::Mutex::new(entered_tx);
     let release_rx = std::sync::Mutex::new(release_rx);
+    let observed = std::sync::Arc::new(std::sync::Mutex::new(None::<DomainObservation>));
+    let observed_obs = std::sync::Arc::clone(&observed);
 
     std::thread::scope(|scope| {
         let obs = &owner;
         let observer = scope.spawn(move || {
-            // Wait until the owner is paused inside the capture interval holding
-            // the domain guard.
-            entered_rx.recv().expect("owner signals it is paused");
-            // Same-domain non-blocking acquisition must observe contention, not
-            // poisoning: the owner holds the guard and has not panicked.
-            match obs.backend_for_test().try_lock_domain_for_test() {
-                TryLockDomainOutcome::WouldBlock => {}
-                other => panic!("expected WouldBlock while owner holds the guard, got {other:?}"),
+            // Bounded wait until the owner is paused inside the capture interval
+            // holding the domain guard; never block forever.
+            let entered = entered_rx.recv_timeout(COORD_TIMEOUT);
+            // On a successful signal, classify the same-domain non-blocking
+            // acquisition (contention vs acquisition vs poisoning) WITHOUT holding
+            // any acquired guard. Record it; assert later, outside the hook.
+            if entered.is_ok() {
+                *observed_obs.lock().unwrap() =
+                    Some(classify_try_lock(obs.backend_for_test().try_lock_domain_for_test()));
             }
-            // Let the owner complete and release the guard.
-            release_tx.send(()).expect("release the owner");
+            // ALWAYS release the owner so its bounded hook wait completes, even if
+            // we observed nothing (timeout/disconnect).
+            let _ = release_tx.send(());
         });
 
-        // Owner thread: install the one-shot pause hook, then run the route.
+        // Owner thread: install the one-shot pause hook, then run the route. The
+        // hook never panics (so a failed hand-off cannot poison the held domain
+        // guard) and waits only under the bounded timeout.
         set_capture_interval_hook(move || {
-            entered_tx
-                .lock()
-                .unwrap()
-                .send(())
-                .expect("announce paused");
-            release_rx.lock().unwrap().recv().expect("await release");
+            let _ = entered_tx.lock().unwrap().send(());
+            let _ = release_rx.lock().unwrap().recv_timeout(COORD_TIMEOUT);
         });
         let outcome =
             owner.decide_and_capture_owned(&mut engine, ValidatorId::new(1), &p1, &lim, 1, proof);
         clear_capture_interval_hook();
+
+        observer.join().expect("observer thread");
+
+        // Assertions OUTSIDE the hook critical section: a failure here cannot
+        // leave a thread waiting or poison the domain.
+        assert_eq!(
+            *observed.lock().unwrap(),
+            Some(DomainObservation::WouldBlock),
+            "same-domain acquisition observed contention (not poisoning) while the \
+             owner held the guard at the capture interval"
+        );
         assert!(
             matches!(outcome, OwnedDecisionOutcome::Decided(_)),
             "route completes after release"
         );
-
-        observer.join().expect("observer thread");
 
         // The capture committed under the guard: the envelope (still alive here)
         // owns one live pin.
@@ -753,15 +946,28 @@ fn owner_route_rejects_policy_built_for_larger_validator_set() {
     let proof = owner
         .read_validate(None::<&FixtureCommittedHistory>)
         .unwrap();
+    let before = fingerprint(&proof);
+    // Operational charge with ONLY the live input proof held; the refusal returns
+    // this same proof, so the post-refusal charge is exactly this (nothing else is
+    // retained), distinct from the proof-free `baseline`.
+    let with_proof = op_current(&owner);
     let outcome =
         owner.decide_and_capture_owned(&mut engine, ValidatorId::new(1), &p1, &larger, 1, proof);
-    match outcome {
-        OwnedDecisionOutcome::Refused { proof: _p, reason } => assert!(
-            matches!(reason, OwnedCaptureRefusal::EffectivePolicyMismatch),
-            "expected EffectivePolicyMismatch, got {reason:?}"
-        ),
+    let returned_proof = match outcome {
+        OwnedDecisionOutcome::Refused { proof: p, reason } => {
+            assert!(
+                matches!(reason, OwnedCaptureRefusal::EffectivePolicyMismatch),
+                "expected EffectivePolicyMismatch, got {reason:?}"
+            );
+            assert_eq!(
+                fingerprint(&p),
+                before,
+                "the returned proof is preserved unchanged across the policy refusal"
+            );
+            p
+        }
         other => panic!("expected Refused, got {other:?}"),
-    }
+    };
     // The larger policy's four-plus-signature cap was never exercised: the engine
     // was never consulted (still L0 view 0), so no dependent self-vote occurred.
     assert_eq!(
@@ -770,16 +976,27 @@ fn owner_route_rejects_policy_built_for_larger_validator_set() {
         "no self-vote on policy refusal"
     );
     assert_eq!(registry_occupied(&owner), 0, "no capture on policy refusal");
-    assert_eq!(op_current(&owner), baseline, "charges returned to baseline");
+    assert_eq!(
+        op_current(&owner),
+        with_proof,
+        "charges restored to the proof-held baseline (only the returned proof remains)"
+    );
+    assert!(
+        with_proof > baseline,
+        "the proof-held baseline sits above the proof-free baseline"
+    );
 
-    // Correctly bounded case: the owner-derived N=4 policy is accepted.
-    let proof2 = owner
-        .read_validate(None::<&FixtureCommittedHistory>)
-        .unwrap();
+    // Correct the input (supply the correctly bounded owner-derived N=4 policy) and
+    // retry with the SAME returned proof — NOT a fresh read.
     let lim = limits(&ctx);
-    let decided = match owner
-        .decide_and_capture_owned(&mut engine, ValidatorId::new(1), &p1, &lim, 1, proof2)
-    {
+    let decided = match owner.decide_and_capture_owned(
+        &mut engine,
+        ValidatorId::new(1),
+        &p1,
+        &lim,
+        1,
+        returned_proof,
+    ) {
         OwnedDecisionOutcome::Decided(dv) => dv,
         other => panic!("expected Decided with owner-derived policy, got {other:?}"),
     };
@@ -813,6 +1030,10 @@ fn header_proposer_index_mismatch_refuses_projection() {
     let proof = owner
         .read_validate(None::<&FixtureCommittedHistory>)
         .unwrap();
+    let before = fingerprint(&proof);
+    // Operational charge with ONLY the live input proof held; the refusal returns
+    // this same proof, so the post-refusal charge is exactly this.
+    let with_proof = op_current(&owner);
     let outcome = owner.decide_and_capture_owned(
         &mut engine,
         ValidatorId::new(1),
@@ -821,32 +1042,51 @@ fn header_proposer_index_mismatch_refuses_projection() {
         1,
         proof,
     );
-    match outcome {
-        OwnedDecisionOutcome::Refused { proof: _p, reason } => assert!(
-            matches!(
-                reason,
-                OwnedCaptureRefusal::Projection(ProjectionMismatch::Proposer)
-            ),
-            "expected Projection(Proposer), got {reason:?}"
-        ),
+    let returned_proof = match outcome {
+        OwnedDecisionOutcome::Refused { proof: p, reason } => {
+            assert!(
+                matches!(
+                    reason,
+                    OwnedCaptureRefusal::Projection(ProjectionMismatch::Proposer)
+                ),
+                "expected Projection(Proposer), got {reason:?}"
+            );
+            assert_eq!(
+                fingerprint(&p),
+                before,
+                "the returned proof is preserved unchanged across the projection refusal"
+            );
+            p
+        }
         other => panic!("expected Refused, got {other:?}"),
-    }
+    };
     assert_eq!(
         engine.locked_qc().map(|q| q.view),
         Some(0),
         "no dependent self-vote on projection refusal"
     );
     assert_eq!(registry_occupied(&owner), 0, "no capture on projection refusal");
-    assert_eq!(op_current(&owner), baseline, "charges returned to baseline");
+    assert_eq!(
+        op_current(&owner),
+        with_proof,
+        "charges restored to the proof-held baseline (only the returned proof remains)"
+    );
+    assert!(
+        with_proof > baseline,
+        "the proof-held baseline sits above the proof-free baseline"
+    );
 
-    // The matching header (proposer_index == originating proposer 1) succeeds on
-    // the still-unvoted engine.
-    let proof2 = owner
-        .read_validate(None::<&FixtureCommittedHistory>)
-        .unwrap();
-    let decided = match owner
-        .decide_and_capture_owned(&mut engine, ValidatorId::new(1), &p1, &lim, 1, proof2)
-    {
+    // Correct the input (the matching header, proposer_index == originating
+    // proposer 1) and retry with the SAME returned proof on the still-unvoted
+    // engine — NOT a fresh read.
+    let decided = match owner.decide_and_capture_owned(
+        &mut engine,
+        ValidatorId::new(1),
+        &p1,
+        &lim,
+        1,
+        returned_proof,
+    ) {
         OwnedDecisionOutcome::Decided(dv) => dv,
         other => panic!("expected Decided for matching header, got {other:?}"),
     };
@@ -892,26 +1132,29 @@ fn binding_phase_reservation_overlaps_covering() {
     std::thread::scope(|scope| {
         let obs = &owner;
         let observer = scope.spawn(move || {
-            entered_rx.recv().expect("owner signals the binding phase");
-            // Accounting is a SEPARATE mutex from the serialization domain, so this
-            // read does not contend with the held domain guard.
-            let occ = obs.backend_for_test().accounting_current();
-            *snapshot_obs.lock().unwrap() = Some(occ);
-            release_tx.send(()).expect("release the owner");
+            // Bounded wait for the binding-phase signal; never block forever.
+            if entered_rx.recv_timeout(COORD_TIMEOUT).is_ok() {
+                // Accounting is a SEPARATE mutex from the serialization domain, so
+                // this read does not contend with the held domain guard.
+                let occ = obs.backend_for_test().accounting_current();
+                *snapshot_obs.lock().unwrap() = Some(occ);
+            }
+            // ALWAYS release the owner so its bounded hook wait completes.
+            let _ = release_tx.send(());
         });
 
         set_binding_phase_hook(move || {
-            entered_tx.lock().unwrap().send(()).expect("announce binding phase");
-            release_rx.lock().unwrap().recv().expect("await release");
+            let _ = entered_tx.lock().unwrap().send(());
+            let _ = release_rx.lock().unwrap().recv_timeout(COORD_TIMEOUT);
         });
         let outcome =
             owner.decide_and_capture_owned(&mut engine, ValidatorId::new(1), &p1, &lim, 1, proof);
         clear_binding_phase_hook();
+        observer.join().expect("observer thread");
         assert!(
             matches!(outcome, OwnedDecisionOutcome::Decided(_)),
             "route completes after the binding-phase observation"
         );
-        observer.join().expect("observer thread");
     });
 
     let occ = snapshot.lock().unwrap().expect("binding-phase occupancy recorded");
@@ -1072,32 +1315,44 @@ fn pre_ingestion_hook_observes_would_block_before_ingestion() {
     let (release_tx, release_rx) = mpsc::channel::<()>();
     let entered_tx = std::sync::Mutex::new(entered_tx);
     let release_rx = std::sync::Mutex::new(release_rx);
+    let observed = std::sync::Arc::new(std::sync::Mutex::new(None::<DomainObservation>));
+    let observed_obs = std::sync::Arc::clone(&observed);
 
     std::thread::scope(|scope| {
         let obs = &owner;
         let observer = scope.spawn(move || {
-            entered_rx.recv().expect("owner signals pre-ingestion pause");
-            // Same-domain non-blocking acquisition: contention, not poisoning.
-            match obs.backend_for_test().try_lock_domain_for_test() {
-                TryLockDomainOutcome::WouldBlock => {}
-                other => panic!("expected WouldBlock before ingestion, got {other:?}"),
+            // Bounded wait for the pre-ingestion pause; never block forever.
+            if entered_rx.recv_timeout(COORD_TIMEOUT).is_ok() {
+                // Same-domain non-blocking acquisition: contention, not poisoning.
+                // Classified without retaining any acquired guard.
+                *observed_obs.lock().unwrap() =
+                    Some(classify_try_lock(obs.backend_for_test().try_lock_domain_for_test()));
             }
-            release_tx.send(()).expect("release the owner");
+            // ALWAYS release the owner so its bounded hook wait completes.
+            let _ = release_tx.send(());
         });
 
         // Install the pre-ingestion hook (fires strictly BEFORE the engine call).
+        // It never panics and waits only under the bounded timeout.
         set_pre_ingestion_hook(move || {
-            entered_tx.lock().unwrap().send(()).expect("announce pre-ingestion");
-            release_rx.lock().unwrap().recv().expect("await release");
+            let _ = entered_tx.lock().unwrap().send(());
+            let _ = release_rx.lock().unwrap().recv_timeout(COORD_TIMEOUT);
         });
         let outcome =
             owner.decide_and_capture_owned(&mut engine, ValidatorId::new(1), &p1, &lim, 1, proof);
         clear_pre_ingestion_hook();
+        observer.join().expect("observer thread");
+
+        // Assert the observation OUTSIDE the hook critical section.
+        assert_eq!(
+            *observed.lock().unwrap(),
+            Some(DomainObservation::WouldBlock),
+            "same-domain acquisition observed contention (not poisoning) before ingestion"
+        );
         let decided = match outcome {
             OwnedDecisionOutcome::Decided(dv) => dv,
             other => panic!("route completes after release, got {other:?}"),
         };
-        observer.join().expect("observer thread");
 
         // The self-vote ran AFTER the pre-ingestion point, raising L1.
         assert_eq!(engine.locked_qc().map(|q| q.view), Some(1), "ingestion ran after release");
@@ -1157,4 +1412,148 @@ fn captured_generation_retains_l0_provenance_after_self_vote_l1() {
 
     drop(decided);
     assert_eq!(registry_occupied(&owner), 0, "abandoning frees the slot");
+}
+// ===========================================================================
+// 17. §4 — Owner-route OrdinaryEngineRejection: an ACTUAL engine rejection taken
+//     BEFORE the gate is consulted. The engine decides it is NOT safe to vote on
+//     a conflicting-fork proposal (no justify QC, parent unregistered), so the
+//     fallible owning gate — and therefore every correspondence / projection /
+//     ancestry check — is never reached. The owner/proof is otherwise admissible
+//     (durable lock matches L0, policy derived from the pinned context). The SAME
+//     proof is returned intact, no dependent self-vote or capture occurs, and the
+//     charges return exactly to baseline. This is distinct from the gate
+//     `Correspondence` refusal in
+//     `lock_mismatch_refuses_with_proof_returned_and_no_self_vote`.
+// ===========================================================================
+
+#[test]
+fn ordinary_engine_rejection_refuses_with_proof_and_no_self_vote() {
+    let ctx = ctx_n(4);
+    let dir = tempfile::tempdir().unwrap();
+    // Engine locked at L0 (view 0). Build a CONFLICTING candidate: no justify QC
+    // (so the view-sufficiency short-circuit cannot apply) whose parent is an
+    // unregistered block (so the ancestry walk cannot reach the lock) -> the
+    // engine's safety predicate returns Unsafe BEFORE the gate is consulted.
+    let (mut engine, _safe_p1, l0_block) = engine_locked_and_safe_view1();
+    let mut conflicting = make_proposal(1, [0x77u8; 32], 1);
+    conflicting.qc = None;
+    // Admissible owner/proof: the durable lock matches the engine L0 and the
+    // policy is owner-derived. Correspondence WOULD pass, but the engine rejects
+    // first so the gate is never reached.
+    let owner = owner_with_matching_proof(dir.path(), &ctx, l0_block);
+    let baseline = op_current(&owner);
+    let proof = owner
+        .read_validate(None::<&FixtureCommittedHistory>)
+        .unwrap();
+    let before = fingerprint(&proof);
+    let lim = limits(&ctx);
+
+    let outcome = owner.decide_and_capture_owned(
+        &mut engine,
+        ValidatorId::new(1),
+        &conflicting,
+        &lim,
+        1,
+        proof,
+    );
+    match outcome {
+        OwnedDecisionOutcome::Refused {
+            proof: returned,
+            reason,
+        } => {
+            assert!(
+                matches!(reason, OwnedCaptureRefusal::OrdinaryEngineRejection),
+                "expected an ordinary pre-gate engine rejection, got {reason:?}"
+            );
+            assert_eq!(
+                fingerprint(&returned),
+                before,
+                "the same proof is returned intact"
+            );
+        }
+        other => panic!("expected Refused, got {other:?}"),
+    }
+    // The engine was consulted but rejected before the gate: no self-vote (still
+    // L0 view 0), no capture, and the charges return exactly to baseline.
+    assert_eq!(
+        engine.locked_qc().map(|q| q.view),
+        Some(0),
+        "no dependent self-vote on an ordinary engine rejection"
+    );
+    assert_eq!(registry_occupied(&owner), 0, "no capture on ordinary rejection");
+    assert_eq!(op_current(&owner), baseline, "charges returned to baseline");
+}
+
+// ===========================================================================
+// 18. §4 — Owner-route MissingCandidate: the existing engine missing-candidate
+//     path, reached through existing configuration (`max_pending_blocks == 0`)
+//     and the owner entrypoint. Under that block-slot pressure the just-
+//     registered candidate is immediately evicted, and a `NoLock` engine decision
+//     (the engine itself holds no lock) succeeds WITHOUT a candidate lookup; the
+//     owning gate then finds the required decision-view candidate absent and
+//     refuses `MissingCandidate` BEFORE any self-vote. The owner still holds a
+//     durable restriction (so the provenance precheck passes) and an admissible
+//     policy; the SAME proof is returned intact, no capture occurs, and the
+//     charges return exactly to baseline. This is an engine missing-candidate
+//     refusal, kept distinct from a storage bootstrap refusal.
+// ===========================================================================
+
+#[test]
+fn missing_candidate_refuses_with_proof_and_no_self_vote() {
+    let ctx = ctx_n(4);
+    let dir = tempfile::tempdir().unwrap();
+    // Fresh engine with NO lock and `max_pending_blocks == 0`: the candidate is
+    // evicted on registration and the decision is `NoLock` (no candidate lookup).
+    let limits_cfg = qbind_consensus::ConsensusLimitsConfig {
+        max_pending_blocks: 0,
+        ..Default::default()
+    };
+    let mut engine: BasicHotStuffEngine<[u8; 32]> = BasicHotStuffEngine::with_state_limits(
+        ValidatorId::new(1),
+        engine_validator_set(1),
+        limits_cfg,
+    );
+    let p = make_proposal(0, [0xFFu8; 32], 1);
+    // Owner holds a durable restriction so the provenance precheck passes; the
+    // engine lock is absent, but correspondence is never reached.
+    let owner = init_owner(dir.path(), &ctx);
+    publish_qc(&owner, &ctx, [0x42u8; 32], 3, 0);
+    let baseline = op_current(&owner);
+    let proof = owner
+        .read_validate(None::<&FixtureCommittedHistory>)
+        .unwrap();
+    let before = fingerprint(&proof);
+    let lim = limits(&ctx);
+
+    let outcome =
+        owner.decide_and_capture_owned(&mut engine, ValidatorId::new(1), &p, &lim, 1, proof);
+    match outcome {
+        OwnedDecisionOutcome::Refused {
+            proof: returned,
+            reason,
+        } => {
+            assert!(
+                matches!(reason, OwnedCaptureRefusal::MissingCandidate),
+                "expected a missing-candidate refusal, got {reason:?}"
+            );
+            assert_eq!(
+                fingerprint(&returned),
+                before,
+                "the same proof is returned intact"
+            );
+        }
+        other => panic!("expected Refused, got {other:?}"),
+    }
+    // The engine held no lock to begin with, so there is nothing to self-vote
+    // into; no capture occurs and the charges return exactly to baseline.
+    assert!(
+        engine.locked_qc().is_none(),
+        "engine remains unlocked; no self-vote"
+    );
+    assert_eq!(
+        registry_occupied(&owner),
+        0,
+        "no capture on missing-candidate refusal"
+    );
+    assert_eq!(op_current(&owner), baseline, "charges returned to baseline");
 }
