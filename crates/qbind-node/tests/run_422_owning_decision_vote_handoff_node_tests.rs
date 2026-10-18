@@ -542,3 +542,125 @@ fn embedded_pin_is_not_charged_twice() {
         "pin + generation + extra released; only the standing registry cell remains"
     );
 }
+
+// ===========================================================================
+// 5. Extra-byte reservation exhausted BEFORE capture: the in-gate extra
+//    reservation (taken first, fail-fast) is driven to refuse by standing
+//    pressure, so the capture API is never reached. There is no capture, no
+//    envelope, and no dependent self-vote; the operational and aggregate charges
+//    return to their pre-attempt values; removing the pressure and retrying the
+//    SAME proposal votes successfully — the vote opportunity was preserved. The
+//    temporary pressure charge is kept distinct from the intentionally retained
+//    standing registry charge.
+// ===========================================================================
+
+#[test]
+fn extra_reservation_exhaustion_before_capture_preserves_vote_opportunity() {
+    let ctx = ctx_n(4);
+    let dir = tempfile::tempdir().unwrap();
+    let owner = init_owner(dir.path(), &ctx);
+    publish_qc(&owner, &ctx, [9u8; 32], 5, 0); // -> revision 1
+
+    // Baseline BEFORE the proof is read: no live operational holders. The proof's
+    // standing charge is released when the retry capture consumes it, so the final
+    // post-abandonment total is measured against this proof-free baseline.
+    let baseline = op_current(&owner);
+
+    // The proof is held by the gate; the extra-reservation refusal returns it
+    // intact (the capture API is never reached), so it stays available for retry.
+    let proof = owner.read_validate(None::<&FixtureCommittedHistory>).unwrap();
+    let extra = extra_charge_bytes();
+
+    // Compute the headroom under the TIGHTER of the operational sub-ledger and
+    // the shared aggregate ceilings (the in-gate `reserve` must satisfy both),
+    // then reserve standing pressure that leaves strictly `extra - 1` bytes — so
+    // the gate's first-step extra reservation of `extra` bytes cannot fit.
+    let backend = owner.backend_for_test();
+    let op_headroom = backend.accounting_cap().expect("operational ceiling bound")
+        - backend.accounting_current();
+    let agg_headroom = backend
+        .accounting_aggregate_cap()
+        .expect("aggregate ceiling bound")
+        - backend.accounting_aggregate_current();
+    let headroom = op_headroom.min(agg_headroom);
+    assert!(
+        headroom >= extra,
+        "fixture must start with room for the extra charge (headroom {headroom}, extra {extra})"
+    );
+    let pressure = backend
+        .reserve_standing_for_test(headroom - (extra - 1))
+        .expect("pressure reservation fits under both ceilings");
+
+    // Pre-attempt snapshot (pressure applied, proof held): both running totals.
+    let pre_op = op_current(&owner);
+    let pre_agg = backend.accounting_aggregate_current();
+    assert_eq!(registry_occupied(&owner), 0, "no capture yet");
+
+    let (mut engine, p1) = engine_and_safe_view1_proposal();
+    let mut gate = NodeCapturingGate::new(&owner, proof, 1);
+
+    // The in-gate extra reservation cannot fit => refusal strictly before any
+    // capture.
+    let refusal = match engine.on_proposal_event_gated_owning(ValidatorId::new(1), &p1, &mut gate) {
+        Err(r) => r,
+        Ok(_) => panic!("extra-reservation exhaustion must surface as Err, not a decided vote"),
+    };
+    assert_eq!(gate.calls, 1, "gate consulted exactly once");
+    assert_eq!(refusal, GatedSelfVoteRefusal::GateRejected(SafetyGateRefusal));
+
+    // No capture, no envelope, no dependent self-vote. The capture API was never
+    // even reached, so no registry cell was installed and the proof was never
+    // taken from the gate (no capture refusal was recorded).
+    assert_eq!(registry_occupied(&owner), 0, "the exhausted attempt captured nothing");
+    assert!(
+        backend.prepared_registry_for_test().is_none(),
+        "no registry installed: capture never ran"
+    );
+    assert!(
+        gate.last_refusal.is_none(),
+        "capture was never attempted (the extra reservation refused first)"
+    );
+    assert_eq!(engine.locked_qc().map(|q| q.view), Some(0), "no self-vote => lock stays at L0");
+    assert_eq!(engine.current_view(), 1, "view unchanged by the refusal");
+
+    // Operational and aggregate charges returned to their pre-attempt values: the
+    // failed extra reservation disturbed neither running total.
+    assert_eq!(
+        op_current(&owner),
+        pre_op,
+        "operational charge returned to its pre-attempt value"
+    );
+    assert_eq!(
+        backend.accounting_aggregate_current(),
+        pre_agg,
+        "aggregate charge returned to its pre-attempt value"
+    );
+
+    // Remove the (temporary) pressure and retry the SAME proposal with the SAME
+    // gate (its proof is still held): the opportunity was preserved, so the retry
+    // captures and self-votes.
+    drop(pressure);
+    let retry = engine
+        .on_proposal_event_gated_owning(ValidatorId::new(1), &p1, &mut gate)
+        .expect("retry is admissible once pressure is removed")
+        .expect("retry yields a decided vote");
+    assert_eq!(gate.calls, 2, "gate consulted again on the retry");
+    assert_eq!(retry.vote().height, 1, "the retry carries the view-1 self-vote");
+    assert_eq!(
+        engine.locked_qc().map(|q| q.view),
+        Some(1),
+        "the retry self-vote raised the lock to L1 (view 1)"
+    );
+    assert_eq!(registry_occupied(&owner), 1, "the retry owns one live pin");
+
+    // Abandonment releases the pin + generation + extra (the temporary charges);
+    // only the intentionally retained standing registry cell — installed by the
+    // successful retry capture — remains, distinct from the released pressure.
+    drop(retry);
+    assert_eq!(registry_occupied(&owner), 0, "abandoning frees the slot");
+    assert_eq!(
+        op_current(&owner),
+        baseline + registry_cell_charge_bytes(),
+        "only the standing registry cell remains; all temporary charges released"
+    );
+}
