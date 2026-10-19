@@ -43,6 +43,49 @@ pub const ML_DSA_44_SECRET_KEY_SIZE: usize = 2560;
 pub const ML_DSA_44_SIGNATURE_SIZE: usize = 2420;
 
 // ============================================================================
+// Bounded signing error for the caller-buffer output path (RUN 422)
+// ============================================================================
+
+/// Fixed-size, `Copy` error for the bounded caller-buffer signing path
+/// ([`MlDsa44Backend::sign_into`] / [`ValidatorSigningKey::sign_into`]).
+///
+/// Unlike the legacy [`ConsensusSigError`], this type carries NO owned `String`
+/// and allocates nothing when constructed: every variant is a fixed discriminant,
+/// so a backend failure is mapped directly to a bounded code rather than a heap
+/// diagnostic. It is intentionally small and `Copy`.
+///
+/// # Scope
+///
+/// This is only the crypto-layer code set for the new bounded path. It does not
+/// replace [`ConsensusSigError`] on the existing `sign`/`verify` methods, which
+/// are preserved unchanged.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BoundedMlDsa44SignError {
+    /// The caller-provided output buffer is smaller than
+    /// [`ML_DSA_44_SIGNATURE_SIZE`]. Detected BEFORE key parsing or signing; the
+    /// output buffer is left unchanged.
+    OutputTooSmall,
+    /// The secret key is malformed (wrong length or rejected by the backend
+    /// key decoder). Detected BEFORE signing; the output buffer is left unchanged.
+    InvalidKey,
+    /// The underlying randomized signing operation failed (e.g. RNG failure).
+    /// The output buffer is left unchanged.
+    BackendFailed,
+}
+
+impl std::fmt::Display for BoundedMlDsa44SignError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            BoundedMlDsa44SignError::OutputTooSmall => write!(f, "output buffer too small"),
+            BoundedMlDsa44SignError::InvalidKey => write!(f, "invalid key material"),
+            BoundedMlDsa44SignError::BackendFailed => write!(f, "signing backend failed"),
+        }
+    }
+}
+
+impl std::error::Error for BoundedMlDsa44SignError {}
+
+// ============================================================================
 // ValidatorSigningKey Wrapper (T142)
 // ============================================================================
 
@@ -131,6 +174,39 @@ impl ValidatorSigningKey {
     /// Returns an error if the key is malformed or signing fails.
     pub fn sign(&self, message: &[u8]) -> Result<Vec<u8>, ConsensusSigError> {
         MlDsa44Backend::sign(&self.bytes, message)
+    }
+
+    /// Sign a message into a caller-owned output buffer (RUN 422 bounded path).
+    ///
+    /// This is the allocation-bounded analogue of [`Self::sign`]: it writes the
+    /// signature into `out` (owned by the caller) and returns the exact written
+    /// length, instead of returning a freshly-allocated `Vec<u8>`. It forwards to
+    /// [`MlDsa44Backend::sign_into`] and uses the SAME ML-DSA-44 algorithm,
+    /// message, empty signing context, and randomized signing operation as the
+    /// legacy path; it introduces no new signature construction.
+    ///
+    /// # Arguments
+    ///
+    /// * `message` - The message to sign
+    /// * `out` - Caller-owned output buffer; must be at least
+    ///   [`ML_DSA_44_SIGNATURE_SIZE`] bytes
+    ///
+    /// # Errors
+    ///
+    /// Returns a bounded [`BoundedMlDsa44SignError`] (no heap diagnostic) when the
+    /// output buffer is too small, the key is malformed, or signing fails. On any
+    /// error the output buffer is left unchanged.
+    ///
+    /// # Security Note
+    ///
+    /// This method does NOT log the secret key and retains neither the input nor
+    /// the output borrow.
+    pub fn sign_into(
+        &self,
+        message: &[u8],
+        out: &mut [u8],
+    ) -> Result<usize, BoundedMlDsa44SignError> {
+        MlDsa44Backend::sign_into(&self.bytes, message, out)
     }
 
     /// Derive the public key from this signing key.
@@ -294,6 +370,88 @@ impl MlDsa44Backend {
             .map_err(|_| ConsensusSigError::Other("ML-DSA-44 signing failed".to_string()))?;
 
         Ok(signature.to_vec())
+    }
+
+    /// Sign a message into a caller-owned output buffer (RUN 422 bounded path).
+    ///
+    /// This is the allocation-bounded analogue of [`Self::sign`]: instead of
+    /// returning a freshly-allocated `Vec<u8>`, it writes the signature into the
+    /// caller's `out` buffer and returns the exact written length. It does NOT
+    /// call [`Self::sign`] and copy its result — the heap signature-result
+    /// conversion of the legacy path is removed here. The ML-DSA-44 algorithm,
+    /// message, empty signing context, and randomized `try_sign` operation are
+    /// otherwise identical; no new signature construction is introduced.
+    ///
+    /// # Ordered contract
+    ///
+    /// 1. Output capacity is checked BEFORE key parsing or signing.
+    /// 2. The secret key is validated/decoded via the existing backend decoder.
+    /// 3. The existing randomized signing operation runs over `message` with an
+    ///    empty context.
+    /// 4. The backend's fixed-size signature value is obtained.
+    /// 5. The caller's output is written ONLY after a complete signature exists.
+    /// 6. The exact signature length is returned.
+    ///
+    /// On ANY error the caller's output buffer is left unchanged. On success,
+    /// only the `[0, ML_DSA_44_SIGNATURE_SIZE)` prefix of `out` is written; any
+    /// trailing bytes of an oversized buffer are left unchanged.
+    ///
+    /// # Arguments
+    ///
+    /// * `sk` - The secret key bytes (must be `ML_DSA_44_SECRET_KEY_SIZE` bytes)
+    /// * `message` - The message to sign
+    /// * `out` - Caller-owned output buffer; must be at least
+    ///   [`ML_DSA_44_SIGNATURE_SIZE`] bytes
+    ///
+    /// # Errors
+    ///
+    /// Returns [`BoundedMlDsa44SignError`] (no heap diagnostic):
+    /// - [`BoundedMlDsa44SignError::OutputTooSmall`] if `out.len() <
+    ///   ML_DSA_44_SIGNATURE_SIZE`;
+    /// - [`BoundedMlDsa44SignError::InvalidKey`] if the key is the wrong size or
+    ///   rejected by the backend decoder;
+    /// - [`BoundedMlDsa44SignError::BackendFailed`] if the randomized signing
+    ///   operation fails.
+    ///
+    /// # Security Note
+    ///
+    /// This function does NOT log the secret key.
+    pub fn sign_into(
+        sk: &[u8],
+        message: &[u8],
+        out: &mut [u8],
+    ) -> Result<usize, BoundedMlDsa44SignError> {
+        use fips204::ml_dsa_44;
+        use fips204::traits::{SerDes, Signer};
+
+        // (1) Output capacity BEFORE key parsing or signing. Leaves `out`
+        //     unchanged on refusal.
+        if out.len() < ML_DSA_44_SIGNATURE_SIZE {
+            return Err(BoundedMlDsa44SignError::OutputTooSmall);
+        }
+
+        // (2) Validate/decode the key with the existing backend decoder.
+        if sk.len() != ML_DSA_44_SECRET_KEY_SIZE {
+            return Err(BoundedMlDsa44SignError::InvalidKey);
+        }
+        let sk_array: [u8; ML_DSA_44_SECRET_KEY_SIZE] = sk
+            .try_into()
+            .map_err(|_| BoundedMlDsa44SignError::InvalidKey)?;
+        let secret_key = ml_dsa_44::PrivateKey::try_from_bytes(sk_array)
+            .map_err(|_| BoundedMlDsa44SignError::InvalidKey)?;
+
+        // (3)/(4) Existing randomized signing with empty context; the backend
+        //         returns a fixed-size `[u8; ML_DSA_44_SIGNATURE_SIZE]` value.
+        let signature = secret_key
+            .try_sign(message, &[])
+            .map_err(|_| BoundedMlDsa44SignError::BackendFailed)?;
+
+        // (5) Copy into the caller's output ONLY after a complete signature
+        //     exists. Only the signature-length prefix is written.
+        out[..ML_DSA_44_SIGNATURE_SIZE].copy_from_slice(&signature);
+
+        // (6) Return the exact signature length.
+        Ok(ML_DSA_44_SIGNATURE_SIZE)
     }
 
     /// Verify a signature using an ML-DSA-44 public key.
@@ -604,5 +762,147 @@ mod tests {
         assert_eq!(pk1, pk, "first derivation should match original");
         assert_eq!(pk1, pk2, "derivations should be consistent");
         assert_eq!(pk2, pk3, "derivations should be consistent");
+    }
+
+    // ========================================================================
+    // RUN 422 — bounded caller-buffer signing path (`sign_into`) tests.
+    // ========================================================================
+
+    /// Real-backend exact-capacity signing succeeds and verifies under the same
+    /// key, message, suite, and empty signing context as the legacy path.
+    #[test]
+    fn sign_into_exact_capacity_signs_and_verifies() {
+        let (pk, sk) = MlDsa44Backend::generate_keypair().expect("keygen failed");
+        let message = b"bounded sign_into message";
+
+        let mut out = [0u8; ML_DSA_44_SIGNATURE_SIZE];
+        let n = MlDsa44Backend::sign_into(&sk, message, &mut out).expect("sign_into failed");
+        assert_eq!(n, ML_DSA_44_SIGNATURE_SIZE, "returns exact signature length");
+
+        let backend = MlDsa44Backend::new();
+        assert!(
+            backend.verify_vote(1, &pk, message, &out[..n]).is_ok(),
+            "bounded signature should verify"
+        );
+    }
+
+    /// A signature produced by `sign_into` is rejected for a modified message and
+    /// a wrong key (same rejection semantics as the legacy signature).
+    #[test]
+    fn sign_into_signature_rejects_modified_message_and_wrong_key() {
+        let (pk, sk) = MlDsa44Backend::generate_keypair().expect("keygen failed");
+        let (wrong_pk, _) = MlDsa44Backend::generate_keypair().expect("keygen failed");
+        let message = b"authentic message";
+
+        let mut out = [0u8; ML_DSA_44_SIGNATURE_SIZE];
+        let n = MlDsa44Backend::sign_into(&sk, message, &mut out).expect("sign_into failed");
+
+        let backend = MlDsa44Backend::new();
+        assert!(
+            matches!(
+                backend.verify_vote(1, &pk, b"tampered message", &out[..n]),
+                Err(ConsensusSigError::InvalidSignature)
+            ),
+            "modified message must be rejected"
+        );
+        assert!(
+            matches!(
+                backend.verify_vote(1, &wrong_pk, message, &out[..n]),
+                Err(ConsensusSigError::InvalidSignature)
+            ),
+            "wrong key must be rejected"
+        );
+    }
+
+    /// Legacy `sign` and new `sign_into` both produce valid signatures for the
+    /// same intended input. Byte equality is NOT required: `fips204` `try_sign`
+    /// uses OS randomness, so independent signatures legitimately differ.
+    #[test]
+    fn sign_into_and_legacy_sign_both_verify_without_byte_equality() {
+        let (pk, sk) = MlDsa44Backend::generate_keypair().expect("keygen failed");
+        let message = b"same intended input";
+
+        let legacy = MlDsa44Backend::sign(&sk, message).expect("legacy sign failed");
+        let mut out = [0u8; ML_DSA_44_SIGNATURE_SIZE];
+        let n = MlDsa44Backend::sign_into(&sk, message, &mut out).expect("sign_into failed");
+
+        let backend = MlDsa44Backend::new();
+        assert!(backend.verify_vote(1, &pk, message, &legacy).is_ok());
+        assert!(backend.verify_vote(1, &pk, message, &out[..n]).is_ok());
+        assert_eq!(legacy.len(), n, "both produce the exact signature length");
+    }
+
+    /// An undersized output buffer is refused before signing and left unchanged.
+    #[test]
+    fn sign_into_undersized_output_refused_buffer_unchanged() {
+        let (_pk, sk) = MlDsa44Backend::generate_keypair().expect("keygen failed");
+        let message = b"message";
+
+        // Sentinel buffer one byte short of the required capacity.
+        let mut out = [0xABu8; ML_DSA_44_SIGNATURE_SIZE - 1];
+        let before = out;
+        let err = MlDsa44Backend::sign_into(&sk, message, &mut out).unwrap_err();
+        assert_eq!(err, BoundedMlDsa44SignError::OutputTooSmall);
+        assert_eq!(out, before, "refused output buffer is unchanged");
+    }
+
+    /// An oversized output buffer succeeds; only the signature-length prefix is
+    /// written and the trailing suffix is left unchanged.
+    #[test]
+    fn sign_into_oversized_output_suffix_unchanged() {
+        let (pk, sk) = MlDsa44Backend::generate_keypair().expect("keygen failed");
+        let message = b"oversized buffer message";
+
+        const EXTRA: usize = 64;
+        let mut out = [0x5Au8; ML_DSA_44_SIGNATURE_SIZE + EXTRA];
+        let n = MlDsa44Backend::sign_into(&sk, message, &mut out).expect("sign_into failed");
+        assert_eq!(n, ML_DSA_44_SIGNATURE_SIZE);
+
+        // Suffix sentinel is preserved.
+        assert!(
+            out[n..].iter().all(|&b| b == 0x5A),
+            "oversized suffix must remain unchanged"
+        );
+        let backend = MlDsa44Backend::new();
+        assert!(backend.verify_vote(1, &pk, message, &out[..n]).is_ok());
+    }
+
+    /// A malformed (wrong-size) key is refused and the output buffer is unchanged.
+    #[test]
+    fn sign_into_malformed_key_refused_buffer_unchanged() {
+        let message = b"message";
+        let short_key = vec![0u8; ML_DSA_44_SECRET_KEY_SIZE - 1];
+
+        let mut out = [0x11u8; ML_DSA_44_SIGNATURE_SIZE];
+        let before = out;
+        let err = MlDsa44Backend::sign_into(&short_key, message, &mut out).unwrap_err();
+        assert_eq!(err, BoundedMlDsa44SignError::InvalidKey);
+        assert_eq!(out, before, "refused output buffer is unchanged");
+    }
+
+    /// `ValidatorSigningKey::sign_into` forwards to the backend bounded path and
+    /// produces a verifiable signature.
+    #[test]
+    fn validator_signing_key_sign_into_verifies() {
+        let (pk, sk) = MlDsa44Backend::generate_keypair().expect("keygen failed");
+        let key = ValidatorSigningKey::new(sk);
+        let message = b"validator key bounded sign";
+
+        let mut out = [0u8; ML_DSA_44_SIGNATURE_SIZE];
+        let n = key.sign_into(message, &mut out).expect("sign_into failed");
+        assert_eq!(n, ML_DSA_44_SIGNATURE_SIZE);
+
+        let backend = MlDsa44Backend::new();
+        assert!(backend.verify_vote(1, &pk, message, &out[..n]).is_ok());
+    }
+
+    /// The bounded error type is a fixed-size `Copy` value (no owned `String`).
+    #[test]
+    fn bounded_sign_error_is_copy() {
+        fn assert_copy<T: Copy>() {}
+        assert_copy::<BoundedMlDsa44SignError>();
+        let e = BoundedMlDsa44SignError::BackendFailed;
+        let _copy = e; // `e` remains usable because the type is `Copy`.
+        assert_eq!(e, BoundedMlDsa44SignError::BackendFailed);
     }
 }

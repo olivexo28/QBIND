@@ -18835,3 +18835,27 @@ This is owned-object lifetime evidence only; it establishes NO allocator-address
 All fourteen §2 cases carry the required both-ledger + complete-Vote + pin-provenance assertions; the "every refusal" claim is supported case-by-case above (no inferred-total substitution).
 
 **7. Status preserved.** `D7D14_STORAGE_COMPONENT=IMPLEMENTED-ISOLATED`, `D7D14_STORAGE_ACCEPTANCE=PASS-ACCEPTED-SUBSET`; §13.6 whole-lifecycle remains INCOMPLETE; `GENESIS_AUTHORITY_ACTIVATION=DISABLED`; `SECURITY_POSTURE=RS1-OPEN / PUBLIC-DEVNET-NO-GO`; durable anti-rollback NOT-ESTABLISHED; C4/C5 OPEN. This pass establishes NO production regression, reopens NO accepted storage verdict, and grants NO signing/freshness/retained-reuse authorization. No production signing/verifier wiring, activation, deployment, new budget/ceiling, anchor selection, D15, or Run 423 work. No PR, force-push, or branch rename.
+
+## RUN 422 — Isolated Local Caller-Buffer Signing Primitive (code + test; this pass)
+
+Scope: the isolated local caller-buffer signing primitive ONLY. No journal migration, protected-use integration, production caller, retained delivery, verifier change, or activation was performed.
+
+Changed source paths:
+
+- `crates/qbind-crypto/src/ml_dsa44.rs` — added `pub enum BoundedMlDsa44SignError { OutputTooSmall, InvalidKey, BackendFailed }` (fixed-size, `Copy`, no owned `String`); added `MlDsa44Backend::sign_into(sk, message, out)` and `ValidatorSigningKey::sign_into(message, out)`, both `-> Result<usize, BoundedMlDsa44SignError>`. Order: capacity check → key decode via existing backend → existing randomized `fips204 0.4.6 try_sign` (message, empty context) → obtain fixed-size signature → copy into caller output only on success → return exact length (2420). The legacy `sign`/`verify` methods are unchanged; the new path does not call the old `Vec`-returning method.
+- `crates/qbind-crypto/src/lib.rs` — re-export `BoundedMlDsa44SignError`.
+- `crates/qbind-node/src/validator_signer.rs` — added fixed-size, `Copy` `BoundedSignError { SuiteMismatch, OutputTooSmall, BackendFailed, Unsupported }`; added object-safe `ValidatorSigner::signature_output_bound(&self)` and `sign_vote_into(&self, preimage, out)` defaulting to `Unsupported` (no legacy signing, output untouched); implemented both natively for `LocalKeySigner` with an ordinary runtime suite check effective in release builds, bound from `ML_DSA_44_SIGNATURE_SIZE`, delegating to the crypto path and mapping crypto `OutputTooSmall`→`OutputTooSmall`, `InvalidKey`/`BackendFailed`→`BackendFailed`. No fallback to the legacy allocating API.
+
+Output contract (native local path): suite/capacity refusal occurs before signing; every error leaves the caller's output unchanged (writes occur only after the complete signature is available); success writes exactly `ML_DSA_44_SIGNATURE_SIZE` bytes and leaves any oversized suffix unchanged; neither the input nor output borrow is retained.
+
+Executed evidence (literal commands / results):
+
+- `cargo test -p qbind-crypto --lib` → `test result: ok. 76 passed; 0 failed`, including new `sign_into` exact-capacity+verify, modified-message/wrong-key rejection, legacy-vs-new both-verify (no byte equality), undersized refusal (buffer unchanged), oversized suffix-unchanged, and malformed-key refusal tests.
+- `cargo test -p qbind-node --lib validator_signer` → `test result: ok. 18 passed; 0 failed` (debug).
+- `cargo test -p qbind-node --release --lib validator_signer` → `test result: ok. 19 passed; 0 failed`; the extra test is the DEBUG-EXCLUDED `#[cfg(not(debug_assertions))]` runtime suite-mismatch regression (`sign_vote_into_suite_mismatch_refused_release_only`), which can only construct a mismatched-suite `LocalKeySigner` where the constructor's `debug_assert_eq!(suite_id, 100)` is compiled out.
+- `cargo build -p qbind-node` → success.
+- Clippy (`cargo clippy -p qbind-crypto -p qbind-node --lib`): no new findings attributable to the edited files; remaining warnings are pre-existing across other crates. rustfmt is not enforced in this repository (untouched files such as `ml_dsa44_signature_suite.rs` already differ from `cargo fmt --check`); new code matches surrounding repository style, and no broad reformat was performed.
+
+Limits (not implemented / not claimed): this primitive establishes NO authorization, D10 eligibility, freshness, or permission to sign, and does NOT enforce accountant admission — admitting/sizing caller-owned output remains a future protected caller's obligation. It does NOT claim zero allocations throughout the cryptographic dependency or full protected-path memory fit; the specific improvement is removal of the legacy heap signature-result conversion from this new path. No production caller of the new methods was added. The deferred journal/accounting and retained-delivery sections of the design are NOT presented as implemented or accepted.
+
+Status unchanged by this pass: `D7D14_STORAGE_COMPONENT=IMPLEMENTED-ISOLATED`; `D7D14_STORAGE_ACCEPTANCE=PASS-ACCEPTED-SUBSET`; §13.6 INCOMPLETE; activation DISABLED; public DevNet NO-GO; durable anti-rollback NOT-ESTABLISHED; C4/C5 OPEN.
