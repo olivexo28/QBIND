@@ -2997,6 +2997,14 @@ impl SafetyRecordOwner {
     }
 }
 
+/// RUN 422 — Isolated Fresh-Vote Protected-Use Model (TEST-ONLY, NOT wired).
+/// A bounded, `#[cfg(test)]`-gated mirror of the production Vote signing path,
+/// implemented as a child module of `owner` so it can observe the
+/// parent-private `backend` field and the private held-guard helpers. It has no
+/// production caller and establishes no signing/authorization permission.
+#[cfg(test)]
+mod model;
+
 /// Build a `BootstrapNoLock` validated record view (used by callers/tests that
 /// need the explicit bootstrap variant with the always-`Unverified` status).
 pub fn bootstrap_validated(
