@@ -905,28 +905,350 @@ mod tests {
         drop(validated);
     }
 
-    // ---- 8. pressure refusal and retry after pressure removal -------------
+    // ---- 8. pressure refusal then ACTUAL retrieval after relief -----------
 
     #[test]
     fn pressure_refuses_then_retry_succeeds() {
         let (_d, owner) = bound_owner(ctx(4, 2420));
         let backend = owner.backend_for_test();
-        let baseline = backend.accounting_current();
-        // The aggregate authority is the binding constraint (it also carries the
-        // context-ownership charge). Consume all AGGREGATE headroom so admission
-        // refuses.
-        let fill = backend.accounting_aggregate_cap().unwrap()
-            - backend.accounting_aggregate_current();
+
+        // Hold a REAL ValidatedRecord proof live throughout (its retained-holder
+        // reservation is live in the operational partition; it is NOT a
+        // PreparedPin or DecidedVote).
+        let validated: ValidatedRecord = owner
+            .read_validate(None::<&crate::safety_record_store::FixtureCommittedHistory>)
+            .expect("bootstrap record validates");
+
+        // (1) Operational and aggregate baselines recorded SEPARATELY; context
+        // ownership is charged in the aggregate (distinct partition).
+        let baseline_op = backend.accounting_current();
+        let baseline_agg = backend.accounting_aggregate_current();
+        assert!(baseline_agg >= baseline_op);
+        // Existing profile ceilings are observed and preserved, never modified.
+        let op_cap = backend.accounting_cap().expect("operational cap bound");
+        let agg_cap = backend
+            .accounting_aggregate_cap()
+            .expect("aggregate cap bound");
+
+        // (2) Temporary pressure: consume all AGGREGATE headroom so workspace
+        // admission refuses. The standing reservation is taken against the shared
+        // operational accountant, so it raises BOTH the operational partition and
+        // the shared aggregate authority by `fill`.
+        let fill = agg_cap - backend.accounting_aggregate_current();
         let standing = backend.reserve_standing_for_test(fill).unwrap();
+        let pressured_op = backend.accounting_current();
+        let pressured_agg = backend.accounting_aggregate_current();
+        assert_eq!(pressured_op, baseline_op + fill);
+        assert_eq!(pressured_agg, baseline_agg + fill);
+        // Admission refuses, and the failed admission leaks NOTHING (complete
+        // rollback leaves both ledgers exactly at their pressured values).
         assert!(RetrievalWorkspaceOwner::new(backend).admit().is_err());
-        // Remove the pressure; admission now succeeds.
+        assert_eq!(backend.accounting_current(), pressured_op);
+        assert_eq!(backend.accounting_aggregate_current(), pressured_agg);
+
+        // (3) Remove the pressure WITHOUT dropping the proof.
         drop(standing);
-        let (output, scratch) = RetrievalWorkspaceOwner::new(backend).admit().unwrap();
+        assert_eq!(backend.accounting_current(), baseline_op);
+        assert_eq!(backend.accounting_aggregate_current(), baseline_agg);
+
+        // (4) Admit the workspace and execute an ACTUAL retrieval.
+        let (mut output, mut scratch) =
+            RetrievalWorkspaceOwner::new(backend).admit().unwrap();
+        let peak_op = backend.accounting_current();
+        let peak_agg = backend.accounting_aggregate_current();
+        assert_eq!(peak_op, baseline_op + output_charge() + envelope_charge());
+        // Both UNCHANGED caps are respected at the retrieval peak.
+        assert!(peak_op <= op_cap, "operational peak {peak_op} <= {op_cap}");
+        assert!(peak_agg <= agg_cap, "aggregate peak {peak_agg} <= {agg_cap}");
+
+        let p = pos(19);
+        let bdg = bind(15);
+        let (_s, journal) = model_journal(&[(
+            p,
+            encode_record(p, bdg, SigningRecordStage::Signed, 2420),
+        )]);
+        let r = journal
+            .retrieve_retained(&p, &bdg, &mut scratch, &mut output)
+            .unwrap();
+
+        // (5) Success means RETRIEVAL: the exact 2,420-byte signature is delivered.
+        match r {
+            RetainedDelivery::Retained(sig) => {
+                assert_eq!(sig.len(), 2420);
+                assert!(sig.iter().all(|&x| x == 0xAB));
+            }
+            other => panic!("expected Retained after pressure relief, got {other:?}"),
+        }
+        assert_eq!(output.used(), 2420);
+
+        // (6) Drop the scratch while the output remains covered, then drop the
+        // output while the proof stays live; assert exact restoration of BOTH
+        // ledgers at each boundary.
+        drop(scratch);
+        assert_eq!(backend.accounting_current(), baseline_op + output_charge());
         assert_eq!(
-            backend.accounting_current(),
-            baseline + output_charge() + envelope_charge()
+            backend.accounting_aggregate_current(),
+            baseline_agg + output_charge()
         );
-        drop((output, scratch));
-        assert_eq!(backend.accounting_current(), baseline);
+        drop(output);
+        assert_eq!(backend.accounting_current(), baseline_op);
+        assert_eq!(backend.accounting_aggregate_current(), baseline_agg);
+
+        // The required live proof is still held; drop it only now, after the whole
+        // pressure/relief/retrieval lifecycle has been observed.
+        drop(validated);
+    }
+
+    // ---- 9. failed-reissue fault injection → DeliverySuppressed + retry ----
+
+    /// The injected reissue fault mode for [`FaultReissueStore`].
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    enum ReissueFault {
+        /// No fault: delegate the synced reissue to the inner backend.
+        None,
+        /// Return an error WITHOUT performing the underlying synced write.
+        ErrorBeforeWrite,
+        /// Perform the underlying synced write, THEN return an error (an uncertain
+        /// durability acknowledgement where the bytes did reach the backend).
+        WriteThenError,
+    }
+
+    /// A test-only [`SigningJournalStorage`] wrapper over a real
+    /// [`InMemoryConsensusStorage`] that injects a controllable fault into
+    /// [`SigningJournalStorage::reissue_signing_envelope_synced`] and RECORDS how
+    /// many reissue calls were made and how many underlying synced writes actually
+    /// reached the inner backend. Every other trait method delegates unchanged, so
+    /// the retrieval read/validate path and the ownership domain are the real ones.
+    /// Because the recovered reissue intentionally rewrites IDENTICAL bytes,
+    /// byte-identity cannot prove whether the second (write-then-error) write
+    /// occurred — the recorded `underlying_writes` counter is the distinguishing
+    /// evidence.
+    struct FaultReissueStore {
+        inner: Arc<InMemoryConsensusStorage>,
+        fault: std::sync::RwLock<ReissueFault>,
+        reissue_calls: std::sync::atomic::AtomicUsize,
+        underlying_writes: std::sync::atomic::AtomicUsize,
+    }
+
+    impl FaultReissueStore {
+        fn new(inner: Arc<InMemoryConsensusStorage>) -> Self {
+            Self {
+                inner,
+                fault: std::sync::RwLock::new(ReissueFault::None),
+                reissue_calls: std::sync::atomic::AtomicUsize::new(0),
+                underlying_writes: std::sync::atomic::AtomicUsize::new(0),
+            }
+        }
+        fn set_fault(&self, f: ReissueFault) {
+            *self.fault.write().unwrap() = f;
+        }
+        fn reissue_calls(&self) -> usize {
+            self.reissue_calls.load(std::sync::atomic::Ordering::SeqCst)
+        }
+        fn underlying_writes(&self) -> usize {
+            self.underlying_writes
+                .load(std::sync::atomic::Ordering::SeqCst)
+        }
+    }
+
+    impl SigningJournalStorage for FaultReissueStore {
+        fn get_signing_record(&self, key: &[u8]) -> Result<Option<Vec<u8>>, StorageError> {
+            self.inner.get_signing_record(key)
+        }
+        fn put_signing_record_synced(&self, key: &[u8], value: &[u8]) -> Result<(), StorageError> {
+            self.inner.put_signing_record_synced(key, value)
+        }
+        fn get_signing_metadata(&self) -> Result<Option<Vec<u8>>, StorageError> {
+            self.inner.get_signing_metadata()
+        }
+        fn put_signing_metadata_synced(&self, value: &[u8]) -> Result<(), StorageError> {
+            self.inner.put_signing_metadata_synced(value)
+        }
+        fn put_signing_record_and_metadata_synced(
+            &self,
+            record_key: &[u8],
+            record_value: &[u8],
+            metadata_value: &[u8],
+        ) -> Result<(), StorageError> {
+            self.inner.put_signing_record_and_metadata_synced(
+                record_key,
+                record_value,
+                metadata_value,
+            )
+        }
+        fn for_each_signing_namespace_entry(
+            &self,
+            visitor: &mut dyn FnMut(&[u8], &[u8]) -> Result<(), StorageError>,
+        ) -> Result<(), StorageError> {
+            self.inner.for_each_signing_namespace_entry(visitor)
+        }
+        fn signing_ownership_domain(&self) -> Arc<SigningOwnershipDomain> {
+            self.inner.signing_ownership_domain()
+        }
+        fn read_signing_envelope_into(
+            &self,
+            journal_key: &[u8],
+            dst: &mut [u8],
+        ) -> Result<Option<usize>, crate::signing_reservation_journal::BoundedStorageError> {
+            self.inner.read_signing_envelope_into(journal_key, dst)
+        }
+        fn reissue_signing_envelope_synced(
+            &self,
+            journal_key: &[u8],
+            envelope: &[u8],
+        ) -> Result<(), crate::signing_reservation_journal::BoundedStorageError> {
+            use crate::signing_reservation_journal::{BoundedDiag, BoundedStorageError};
+            use std::sync::atomic::Ordering::SeqCst;
+            self.reissue_calls.fetch_add(1, SeqCst);
+            match *self.fault.read().unwrap() {
+                ReissueFault::None => {
+                    self.inner
+                        .reissue_signing_envelope_synced(journal_key, envelope)?;
+                    self.underlying_writes.fetch_add(1, SeqCst);
+                    Ok(())
+                }
+                ReissueFault::ErrorBeforeWrite => {
+                    // Fail BEFORE touching the inner backend: no underlying write.
+                    Err(BoundedStorageError::Io(BoundedDiag::WriteIo))
+                }
+                ReissueFault::WriteThenError => {
+                    // The underlying synced write reaches the inner backend FIRST,
+                    // then an uncertain-acknowledgement error is returned.
+                    self.inner
+                        .reissue_signing_envelope_synced(journal_key, envelope)?;
+                    self.underlying_writes.fetch_add(1, SeqCst);
+                    Err(BoundedStorageError::Io(BoundedDiag::WriteIo))
+                }
+            }
+        }
+    }
+
+    /// Build a recovered-`Signed` scenario over a [`FaultReissueStore`]: a
+    /// 2,420-byte `Signed` record is written at `p`/`b` with NO live entry, so
+    /// [`SigningReservationJournal::retrieve_retained`] takes the recovered
+    /// exact-envelope synced-reissue branch.
+    fn fault_scenario(
+        p: SigningPosition,
+        b: BindingDigest,
+    ) -> (Arc<FaultReissueStore>, SigningReservationJournal, Vec<u8>) {
+        let inner = Arc::new(InMemoryConsensusStorage::new());
+        let record = encode_record(p, b, SigningRecordStage::Signed, 2420);
+        inner
+            .put_signing_record_synced(&p.storage_key(), &record)
+            .unwrap();
+        let store = Arc::new(FaultReissueStore::new(inner));
+        let journal = SigningReservationJournal::attach_unestablished_for_test(
+            store.clone() as Arc<dyn SigningJournalStorage>,
+        );
+        (store, journal, record)
+    }
+
+    /// Drive one failed-reissue case end-to-end: inject `fault`, attempt a
+    /// recovered retrieval (expect `DeliverySuppressed` with zero caller-visible
+    /// effect and exact accounting restoration while the workspace AND proof stay
+    /// alive), then clear the fault and prove the SAME `retrieve_retained` route
+    /// delivers on retry and reissues AGAIN cache-free. `writes_during_fault` is
+    /// the number of underlying synced writes that must have reached the inner
+    /// backend while the fault was active (0 for error-before-write, 1 for
+    /// write-then-error).
+    fn drive_failed_reissue_case(fault: ReissueFault, writes_during_fault: usize) {
+        let (_d, owner) = bound_owner(ctx(4, 2420));
+        let backend = owner.backend_for_test();
+
+        // A real ValidatedRecord proof held live throughout (NOT a PreparedPin or
+        // DecidedVote).
+        let validated: ValidatedRecord = owner
+            .read_validate(None::<&crate::safety_record_store::FixtureCommittedHistory>)
+            .expect("bootstrap record validates");
+
+        let (mut output, mut scratch) =
+            RetrievalWorkspaceOwner::new(backend).admit().unwrap();
+
+        let p = pos(20);
+        let b = bind(20);
+        let (store, journal, record) = fault_scenario(p, b);
+
+        // Distinguishable PRE-EXISTING output state that must survive suppression.
+        let sentinel = [0xCDu8; 7];
+        output.set(&sentinel).unwrap();
+        assert_eq!(output.used(), 7);
+
+        // Pre-attempt ledgers, measured WITH the workspace + proof already alive.
+        let op_before = backend.accounting_current();
+        let agg_before = backend.accounting_aggregate_current();
+        // Context ownership is charged in the aggregate (distinct partition).
+        assert!(agg_before >= op_before);
+        let stored_before = store.get_signing_record(&p.storage_key()).unwrap().unwrap();
+
+        // ---- failed reissue → DeliverySuppressed -------------------------
+        store.set_fault(fault);
+        let r = journal
+            .retrieve_retained(&p, &b, &mut scratch, &mut output)
+            .unwrap();
+        assert!(
+            matches!(r, RetainedDelivery::DeliverySuppressed),
+            "expected DeliverySuppressed, got {r:?}"
+        );
+        // A reissue WAS attempted; the recorded underlying-write count distinguishes
+        // the two fault cases (identical reissued bytes cannot).
+        assert_eq!(store.reissue_calls(), 1);
+        assert_eq!(store.underlying_writes(), writes_during_fault);
+        // The complete caller output buffer AND its used length are unchanged.
+        assert_eq!(output.used(), 7);
+        assert_eq!(output.view(), &sentinel);
+        // The retained stored envelope is byte-identical.
+        let stored_after = store.get_signing_record(&p.storage_key()).unwrap().unwrap();
+        assert_eq!(stored_after, stored_before);
+        assert_eq!(stored_after, record);
+        // Both ledgers returned to their pre-attempt values; workspace + proof live.
+        assert_eq!(backend.accounting_current(), op_before);
+        assert_eq!(backend.accounting_aggregate_current(), agg_before);
+
+        // ---- clear the fault and retry through the SAME route -------------
+        store.set_fault(ReissueFault::None);
+        let r2 = journal
+            .retrieve_retained(&p, &b, &mut scratch, &mut output)
+            .unwrap();
+        match r2 {
+            RetainedDelivery::Retained(sig) => {
+                assert_eq!(sig.len(), 2420);
+                assert!(sig.iter().all(|&x| x == 0xAB));
+            }
+            other => panic!("expected Retained on retry, got {other:?}"),
+        }
+        assert_eq!(output.used(), 2420);
+        // The retry performed a NEW successful synced reissue BEFORE delivery.
+        assert_eq!(store.reissue_calls(), 2);
+        assert_eq!(store.underlying_writes(), writes_during_fault + 1);
+
+        // A further recovered retrieval reissues AGAIN (cache-free).
+        let r3 = journal
+            .retrieve_retained(&p, &b, &mut scratch, &mut output)
+            .unwrap();
+        assert!(matches!(r3, RetainedDelivery::Retained(_)));
+        assert_eq!(output.used(), 2420);
+        assert_eq!(store.reissue_calls(), 3);
+        assert_eq!(store.underlying_writes(), writes_during_fault + 2);
+
+        // No fresh signing obligation was created on ANY of these retrievals: the
+        // operational charge still equals the pre-attempt workspace baseline (the
+        // retrieval route takes no reservation and never invokes a signer).
+        assert_eq!(backend.accounting_current(), op_before);
+        assert_eq!(backend.accounting_aggregate_current(), agg_before);
+
+        // Drop the workspace; the proof remains live until the very end.
+        drop(scratch);
+        drop(output);
+        drop(validated);
+    }
+
+    #[test]
+    fn recovered_reissue_error_before_write_suppresses_delivery() {
+        drive_failed_reissue_case(ReissueFault::ErrorBeforeWrite, 0);
+    }
+
+    #[test]
+    fn recovered_reissue_write_then_error_suppresses_delivery() {
+        drive_failed_reissue_case(ReissueFault::WriteThenError, 1);
     }
 }
