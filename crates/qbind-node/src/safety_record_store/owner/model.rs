@@ -66,6 +66,16 @@ const MODEL_D6_SIGNING_FORMAT_VERSION: u8 = 2;
 /// within this bound.
 const MODEL_MAX_PREIMAGE_BYTES: u128 = 256;
 
+/// Conservative upper bound (bytes) on the owned public-key `Vec<u8>` the
+/// governed key provider returns from `get_suite_and_key`. The fixture provider
+/// clones a stored key, so the model owns that clone's backing for the duration
+/// of the signing working set and must reserve for it BEFORE the lookup. An
+/// ML-DSA-44 public key is 1312 bytes; this bound is held above that with
+/// headroom, and the tests verify the actual `capacity()` (not merely `len()`)
+/// against it. If a fixture provider cannot satisfy this bound it is refused —
+/// the model never claims an arbitrary provider satisfies the contract.
+const MODEL_MAX_PUBKEY_BYTES: u128 = 2048;
+
 // ===========================================================================
 // Bounded fixture signer (allocation-free).
 // ===========================================================================
@@ -107,6 +117,41 @@ impl BoundedVoteSigner for OkFixtureSigner {
         self.suite_id
     }
     fn sign_vote_into(&self, preimage: &[u8], out: &mut [u8]) -> Result<usize, ModelSignError> {
+        let tag = (preimage.len() as u64).to_le_bytes();
+        let n = tag.len().min(out.len());
+        out[..n].copy_from_slice(&tag[..n]);
+        Ok(n)
+    }
+}
+
+/// The digest-recording OK signer: in addition to writing the deterministic
+/// 8-byte length tag, it records a fixed-size SHA3-256 digest of the exact
+/// preimage it was handed plus its length, so a test can independently compute
+/// the preimage of the envelope's complete Vote (with only the permitted suite
+/// assignment) and prove the signer input matched byte-for-byte. The record is a
+/// `Copy` `(digest, len)` held in a `Cell`; the signer never retains the
+/// preimage bytes or the output.
+pub(crate) struct DigestRecordingSigner {
+    pub(crate) validator_id: u64,
+    pub(crate) suite_id: u16,
+    pub(crate) seen: std::cell::Cell<Option<([u8; 32], usize)>>,
+}
+
+impl BoundedVoteSigner for DigestRecordingSigner {
+    fn validator_id(&self) -> u64 {
+        self.validator_id
+    }
+    fn suite_id(&self) -> u16 {
+        self.suite_id
+    }
+    fn sign_vote_into(&self, preimage: &[u8], out: &mut [u8]) -> Result<usize, ModelSignError> {
+        use sha3::Digest;
+        let mut h = Sha3_256::new();
+        h.update(preimage);
+        let digest = h.finalize();
+        let mut arr = [0u8; 32];
+        arr.copy_from_slice(&digest);
+        self.seen.set(Some((arr, preimage.len())));
         let tag = (preimage.len() as u64).to_le_bytes();
         let n = tag.len().min(out.len());
         out[..n].copy_from_slice(&tag[..n]);
@@ -236,6 +281,10 @@ pub(crate) enum ModelFreshUseOutcome {
     AuthorizationAdmitRefused,
     ObservationRefused,
     LifecycleAmbiguous,
+    SigningAdmitRefused,
+    SignedInputRejected,
+    WrongWireChain,
+    WrongAuthorizedEpoch,
     ReserveConflict,
     ReservePotentiallySigned,
     ReserveExhausted,
@@ -250,55 +299,112 @@ pub(crate) enum ModelFreshUseOutcome {
 
 // ===========================================================================
 // Post-consume / pre-sign coordination hook (bounded, completed).
+//
+// This models the ACTUAL safety-publication boundary (RUN 422 §3 correction):
+// at a FIXED observation point — after the D10 reservation is consumed and the
+// original ticket reconfirmed, immediately before the fixture signer — the live
+// protected operation holds the backend serialization-domain guard. A competing
+// handle sharing the EXACT SAME `SafetyBackend` serialization domain is driven
+// through a bounded, completed handshake to perform a NON-BLOCKING domain
+// observation at that instant: it must observe `WouldBlock` (the domain is held
+// by the protected operation), which is what proves publication exclusion.
+// `Acquired` or `Poisoned` would NOT satisfy exclusion. The earlier reviewed
+// hook instead probed the D10 journal for a DIFFERENT reserved position, which
+// demonstrates journal behaviour, not safety-domain serialization; that probe is
+// withdrawn as the exclusion evidence.
 // ===========================================================================
 
-/// A fixed, bounded coordination point invoked AFTER the D10 reservation is
-/// consumed and BEFORE the signer is invoked. It models a publication-exclusion
-/// at this position: while the live operation holds the consumed reservation, an
-/// eligible concurrent publication for the SAME position is excluded. It is
-/// COMPLETED/bounded (one journal probe, no indefinite hold); after it returns
-/// the model proceeds, and after the guard releases an eligible publication may
-/// proceed later.
-pub(crate) struct ModelCoordinationHook<'j> {
-    probe_journal: Option<&'j SigningReservationJournal>,
-    pub(crate) calls: u32,
-    pub(crate) last_excluded: Option<bool>,
+/// The discriminated outcome of a competing handle's non-blocking observation of
+/// the shared serialization domain. `Send` (a plain `Copy` enum) so it can be
+/// handed back from the peer thread over a channel.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum PeerDomainObservation {
+    /// The domain is currently held by the protected operation (exclusion holds).
+    WouldBlock,
+    /// The competing handle unexpectedly acquired the domain (NOT excluded).
+    Acquired,
+    /// The domain mutex is poisoned (NOT a clean exclusion observation).
+    Poisoned,
 }
 
-impl<'j> ModelCoordinationHook<'j> {
-    /// An inert hook (no concurrent-publication probe); still records that the
+/// The bounded handshake endpoints the probing hook uses to drive the peer: a
+/// request signal to ask the peer to observe now, and a result channel to carry
+/// back the single discriminated observation. Every leg must succeed; a failed
+/// send, a timed-out receive, or a missing observation fails the hook (recorded
+/// in `failed`) so the test fails rather than silently passing.
+struct CoordinationProbe {
+    request_tx: std::sync::mpsc::Sender<()>,
+    result_rx: std::sync::mpsc::Receiver<PeerDomainObservation>,
+    timeout: std::time::Duration,
+}
+
+/// A fixed, bounded coordination point invoked AFTER the D10 reservation is
+/// consumed and the original ticket is reconfirmed, and BEFORE the signer is
+/// invoked. The probing variant drives a competing same-domain handle through a
+/// bounded, completed handshake and records whether the competing observation was
+/// `WouldBlock` (exclusion holds). It is COMPLETED/bounded (a single handshake,
+/// no indefinite hold, no sleeps); after it returns the model proceeds, and after
+/// the guard releases an eligible `publish_locked` may proceed later.
+pub(crate) struct ModelCoordinationHook {
+    probe: Option<CoordinationProbe>,
+    pub(crate) calls: u32,
+    pub(crate) last_excluded: Option<bool>,
+    /// Set if any handshake leg failed (send error, receive timeout/disconnect).
+    pub(crate) failed: bool,
+}
+
+impl ModelCoordinationHook {
+    /// An inert hook (no competing-handle observation); still records that the
     /// coordination point was reached.
     pub(crate) fn inert() -> Self {
         Self {
-            probe_journal: None,
+            probe: None,
             calls: 0,
             last_excluded: None,
+            failed: false,
         }
     }
 
-    /// A probing hook: at the coordination point, attempt a reservation at the
-    /// SAME position/binding to demonstrate exclusion of a concurrent
-    /// publication. It is bounded (a single attempt) and completed.
-    pub(crate) fn probing(journal: &'j SigningReservationJournal) -> Self {
+    /// A probing hook bound to a peer handshake. `request_tx` signals the peer to
+    /// observe the shared domain now; `result_rx` carries back the single
+    /// discriminated observation; `timeout` bounds the wait so a stuck peer fails
+    /// the test rather than hanging it.
+    pub(crate) fn probing(
+        request_tx: std::sync::mpsc::Sender<()>,
+        result_rx: std::sync::mpsc::Receiver<PeerDomainObservation>,
+        timeout: std::time::Duration,
+    ) -> Self {
         Self {
-            probe_journal: Some(journal),
+            probe: Some(CoordinationProbe {
+                request_tx,
+                result_rx,
+                timeout,
+            }),
             calls: 0,
             last_excluded: None,
+            failed: false,
         }
     }
 
-    fn on_post_consume_pre_sign(&mut self, position: &SigningPosition, binding: &BindingDigest) {
+    fn on_post_consume_pre_sign(&mut self) {
         self.calls = self.calls.saturating_add(1);
-        if let Some(j) = self.probe_journal {
-            // A concurrent reservation at this position is EXCLUDED because the
-            // live operation already consumed the reservation. Bounded, single,
-            // completed probe.
-            let excluded = !matches!(
-                j.reserve_for_sign(position, binding),
-                Ok(ReservationOutcome::FreshlyReserved(_))
-                    | Ok(ReservationOutcome::ExactRetryRetained(_))
-            );
-            self.last_excluded = Some(excluded);
+        if let Some(p) = &self.probe {
+            // Leg 1: signal the peer to observe the domain now. A failed send
+            // (disconnected peer) is a failed handshake.
+            if p.request_tx.send(()).is_err() {
+                self.failed = true;
+                return;
+            }
+            // Leg 2: receive the single bounded observation. A timeout or
+            // disconnect is a failed handshake. Only `WouldBlock` satisfies
+            // exclusion.
+            match p.result_rx.recv_timeout(p.timeout) {
+                Ok(PeerDomainObservation::WouldBlock) => self.last_excluded = Some(true),
+                Ok(PeerDomainObservation::Acquired | PeerDomainObservation::Poisoned) => {
+                    self.last_excluded = Some(false)
+                }
+                Err(_) => self.failed = true,
+            }
         }
     }
 }
@@ -316,34 +422,55 @@ impl<'j> ModelCoordinationHook<'j> {
 /// immutable borrow.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum ReconfirmPerturbation {
-    /// No perturbation: admit and confirm see the same owner generation.
+    /// No perturbation: admit and confirm see the same owner generation, and the
+    /// model-owned working Vote keeps every engine-produced field.
     None,
     /// Advance the owner generation after admit so `confirm` fails `Stale`.
     AdvanceGenerationBeforeConfirm,
+    /// Deterministically bump the MODEL-OWNED working Vote's `epoch` immediately
+    /// after it is derived from the (unchanged) captured envelope, to exercise the
+    /// §2 wrong-authorized-epoch admission guard. The real engine always stamps
+    /// `epoch == 0` and the genesis-static authority's `authorized_epoch()` is
+    /// fixed at `0`, so a genuine disagreement cannot be captured; this perturbs
+    /// ONLY the model's private clone (never `decided`'s envelope) so the guard is
+    /// still tested on a vote that disagrees with the authorized epoch.
+    BumpWorkingVoteEpoch,
 }
 
 // ===========================================================================
 // Model entry + private held-guard tail (ONE ordered protected sequence).
 // ===========================================================================
 
-/// Accounting charge (bytes) for the ticket/control objects kept alive across
-/// BOTH the checking and the signing phases.
+/// Accounting charge (bytes) for the authorization ticket/control objects kept
+/// alive across BOTH the checking and the signing phases. The ticket is admitted
+/// before it is constructed and stays live through its `confirm` and its
+/// destruction; the signing-phase position/binding objects are charged by
+/// `signing_charge` (where they are constructed and live), not here.
 fn control_charge() -> u128 {
-    (std::mem::size_of::<crate::genesis_consensus_authority::AuthorizationTicket>()
-        + std::mem::size_of::<SigningPosition>()
-        + std::mem::size_of::<BindingDigest>()) as u128
+    std::mem::size_of::<crate::genesis_consensus_authority::AuthorizationTicket>() as u128
 }
 
-/// Accounting charge (bytes) for the lifecycle-comparison working set.
+/// Accounting charge (bytes) for the lifecycle-comparison working set. Covers the
+/// model-held restriction identity, the scalar pin provenance, and the captured
+/// revision scalar. The current validated record is covered separately by the
+/// loader's own holder/scratch reservation (preserved unchanged).
 fn lifecycle_charge() -> u128 {
     (std::mem::size_of::<GenerationIdentity>()
         + std::mem::size_of::<PreparedProvenance>()
         + std::mem::size_of::<u64>()) as u128
 }
 
-/// Accounting charge (bytes) for the complete signing working set.
+/// Accounting charge (bytes) for the complete signing working set, admitted
+/// BEFORE any signing object is constructed. It conservatively bounds the
+/// simultaneously-live model-owned objects: the working Vote, the owned
+/// public-key lookup result (`Vec<u8>` control + its backing capacity), the
+/// preimage (`Vec<u8>` control + backing) and canonical-body temporary backing,
+/// the position/binding-input/hash-state scratch, the continuation and
+/// publication capability, the binding digest, and the fixed output array.
 fn signing_charge() -> u128 {
     let vote = std::mem::size_of::<Vote>() as u128;
+    let pubkey_control = std::mem::size_of::<Vec<u8>>() as u128;
+    let pubkey_backing = MODEL_MAX_PUBKEY_BYTES;
     let preimage_control = std::mem::size_of::<Vec<u8>>() as u128;
     let preimage_backing = MODEL_MAX_PREIMAGE_BYTES;
     let canonical_body_temp = MODEL_MAX_PREIMAGE_BYTES;
@@ -354,7 +481,9 @@ fn signing_charge() -> u128 {
     let publish_cap = std::mem::size_of::<ResultPublicationCapability>() as u128;
     let binding_digest = std::mem::size_of::<BindingDigest>() as u128;
     let out_array = MODEL_SIG_CAP as u128;
-    vote.saturating_add(preimage_control)
+    vote.saturating_add(pubkey_control)
+        .saturating_add(pubkey_backing)
+        .saturating_add(preimage_control)
         .saturating_add(preimage_backing)
         .saturating_add(canonical_body_temp)
         .saturating_add(position)
@@ -370,6 +499,27 @@ fn signing_charge() -> u128 {
 /// tail. ONE ordered protected sequence under a SINGLE serialization-domain
 /// guard. See the module docs: this MIRRORS the production vote path and never
 /// executes the production signing function.
+///
+/// Ownership/destruction order (RUN 422 §4 correction): the serialization-domain
+/// guard is acquired FIRST so it is the LAST thing dropped; the control
+/// reservation is admitted next and the ticket it covers is constructed after it,
+/// so on every exit the ticket is destroyed before its control reservation
+/// releases and the control reservation releases before the guard. The signing
+/// reservation is admitted before any signing object (the working Vote, the owned
+/// public-key lookup result and its backing, the preimage/canonical-body
+/// temporaries, the position/binding/hash scratch, the continuation, publication
+/// capability and output array), so those owned objects are all destroyed before
+/// the signing reservation releases. Because the declaration order is
+/// guard → control_res → ticket → signing_res → signing objects, Rust's reverse
+/// drop order already yields: signing objects → signing_res → ticket →
+/// control_res → guard on EVERY early-return refusal and on success. No
+/// release-then-recharge gap is introduced and no covered object is constructed
+/// uncharged.
+///
+/// The working Vote is derived EXCLUSIVELY from `decided.vote()` (RUN 422 §2
+/// correction): there is no independently-supplied owned Vote, so observation and
+/// signing operate on the SAME checked envelope. Every engine-produced field is
+/// preserved except the already-permitted governed suite assignment.
 #[allow(clippy::too_many_arguments)]
 fn fresh_vote_sign_model<H: CommittedHistory + ?Sized>(
     owner: &SafetyRecordOwner,
@@ -379,16 +529,15 @@ fn fresh_vote_sign_model<H: CommittedHistory + ?Sized>(
     limits: &PreparedDecisionInputLimits,
     history: Option<&H>,
     snapshot: &mut AuthorizedProposalVoteSnapshot,
-    vote: Vote,
     signer: &dyn BoundedVoteSigner,
     sink: &mut ModelRecordingSink,
     journal: &SigningReservationJournal,
-    coord: &mut ModelCoordinationHook<'_>,
+    coord: &mut ModelCoordinationHook,
     reconfirm: ReconfirmPerturbation,
 ) -> ModelFreshUseOutcome {
     use crate::genesis_consensus_authority::LocalAuthorizationState;
 
-    // 1. Owner-derived policy BEFORE locking.
+    // 1. Owner-derived policy BEFORE locking (no allocation).
     match PreparedDecisionInputLimits::from_pinned(owner.pinned()) {
         Ok(expected) => {
             if *limits != expected {
@@ -398,22 +547,21 @@ fn fresh_vote_sign_model<H: CommittedHistory + ?Sized>(
         Err(_) => return ModelFreshUseOutcome::PolicyRefused,
     }
 
-    // 2. Admit coverage for ticket/control BEFORE constructing them; kept alive
-    //    across BOTH checking and signing phases.
-    let control_res = match owner.backend.accounting().reserve(control_charge()) {
+    // 2. Acquire the serialization domain ONCE and FIRST so it is released LAST
+    //    (declared first ⇒ dropped last). Every subsequent early return drops the
+    //    in-scope objects in correct reverse order with the guard last.
+    let guard = owner.backend.lock_domain();
+
+    // 3. Admit control coverage BEFORE constructing the ticket; it stays live
+    //    through the ticket's confirm and destruction.
+    let _control_res = match owner.backend.accounting().reserve(control_charge()) {
         Ok(r) => r,
         Err(_) => return ModelFreshUseOutcome::AuthorizationAdmitRefused,
     };
     let ticket = match snapshot.owner().admit() {
         Ok(t) => t,
-        Err(_) => {
-            drop(control_res);
-            return ModelFreshUseOutcome::AuthorizationAdmitRefused;
-        }
+        Err(_) => return ModelFreshUseOutcome::AuthorizationAdmitRefused,
     };
-
-    // 3. Acquire the serialization domain ONCE.
-    let guard = owner.backend.lock_domain();
 
     // 4. Existing non-consuming observation under the held guard. Locked-only:
     //    SafeNoLock is NOT admitted.
@@ -421,107 +569,123 @@ fn fresh_vote_sign_model<H: CommittedHistory + ?Sized>(
         RetainedDecisionObservation::Revalidated(
             BoundedSafetyOutcome::SafeViewSufficiency | BoundedSafetyOutcome::SafeAncestry { .. },
         ) => {}
-        _ => {
-            drop(guard);
-            drop(control_res);
-            return ModelFreshUseOutcome::ObservationRefused;
-        }
+        _ => return ModelFreshUseOutcome::ObservationRefused,
     }
 
-    // 5. Lifecycle comparison UNDER THE SAME GUARD, separately charged.
+    // 5. Lifecycle comparison UNDER THE SAME GUARD, separately charged. The
+    //    reservation and the validated record are destroyed before the closure
+    //    returns (the record carries its own loader holder reservation).
     let lifecycle = (|| -> Option<()> {
         let lifecycle_res = owner
             .backend
             .accounting()
             .reserve(lifecycle_charge())
             .ok()?;
-        let validated: ValidatedRecord =
-            owner.load_current_validated_locked(&guard, history).ok()?;
-        let current_identity = GenerationIdentity::from_retained(validated.retained())?;
-        let current_revision = owner.authoritative_revision_locked(&guard).ok()?;
-        let captured: PreparedProvenance = owner
-            .pin_provenance_locked(&guard, decided.payload().pin())
-            .ok()?;
-        let (engine_lock_id, engine_lock_view) = match engine.locked_qc() {
-            Some(qc) => (qc.block_id, qc.view),
-            None => return None,
+        // Covered objects live in an inner block so they are destroyed BEFORE the
+        // covering `lifecycle_res` releases (RUN 422 §4), on both the success path
+        // and every `?` early exit (inner-block locals unwind before the closure's
+        // `lifecycle_res`).
+        let agree = {
+            let validated: ValidatedRecord =
+                owner.load_current_validated_locked(&guard, history).ok()?;
+            let current_identity = GenerationIdentity::from_retained(validated.retained())?;
+            let current_revision = owner.authoritative_revision_locked(&guard).ok()?;
+            let captured: PreparedProvenance = owner
+                .pin_provenance_locked(&guard, decided.payload().pin())
+                .ok()?;
+            let (engine_lock_id, engine_lock_view) = match engine.locked_qc() {
+                Some(qc) => (qc.block_id, qc.view),
+                None => return None,
+            };
+            captured.identity == current_identity
+                && captured.captured_revision == current_revision
+                && captured.recovery_backend_incarnation == owner.backend.incarnation()
+                && engine_lock_id == current_identity.lock_block_id
+                && engine_lock_view == current_identity.lock_view
         };
-        let agree = captured.identity == current_identity
-            && captured.captured_revision == current_revision
-            && captured.recovery_backend_incarnation == owner.backend.incarnation()
-            && engine_lock_id == current_identity.lock_block_id
-            && engine_lock_view == current_identity.lock_view;
-        drop(validated);
         drop(lifecycle_res);
-        if agree {
-            Some(())
-        } else {
-            None
-        }
+        agree.then_some(())
     })();
     if lifecycle.is_none() {
-        drop(guard);
-        drop(control_res);
         return ModelFreshUseOutcome::LifecycleAmbiguous;
     }
 
     // 6. Admit the signing working set BEFORE constructing any signing object.
-    let signing_res = match owner.backend.accounting().reserve(signing_charge()) {
+    let _signing_res = match owner.backend.accounting().reserve(signing_charge()) {
         Ok(r) => r,
-        Err(_) => {
-            drop(guard);
-            drop(control_res);
-            return ModelFreshUseOutcome::LifecycleAmbiguous;
-        }
+        Err(_) => return ModelFreshUseOutcome::SigningAdmitRefused,
     };
-    let mut vote = vote;
+
+    // 7. Unsigned-input assumption: the captured self-vote must be unsigned with a
+    //    zero-capacity signature backing. A populated (or non-empty-capacity)
+    //    signature is REFUSED here, before copying — it is never silently
+    //    discarded.
+    if !decided.vote().signature.is_empty() || decided.vote().signature.capacity() != 0 {
+        return ModelFreshUseOutcome::SignedInputRejected;
+    }
+
+    // 8. Construct the model-owned Vote EXCLUSIVELY from the checked envelope.
+    //    Clone preserves every engine field; `vec![]` clones to zero capacity, so
+    //    the signature invariant is maintained.
+    let mut vote: Vote = decided.vote().clone();
+    debug_assert!(
+        vote.signature.is_empty() && vote.signature.capacity() == 0,
+        "model-owned Vote must retain the zero-capacity unsigned-signature invariant"
+    );
+    // Test-only deterministic perturbation of the MODEL-OWNED working Vote (never
+    // the captured envelope) to exercise the §2 wrong-authorized-epoch guard.
+    if let ReconfirmPerturbation::BumpWorkingVoteEpoch = reconfirm {
+        vote.epoch = vote.epoch.wrapping_add(1);
+    }
     let mut out = [0u8; MODEL_SIG_CAP];
 
-    // 7. Mirror prepare_vote_signing_reservation.
-    let (position, binding, preimage, preimage_len) = {
+    // 9. Admission checks bound to the checked envelope, performed BEFORE any D10
+    //    reservation or signer invocation (RUN 422 §2). Compare the Vote's wire
+    //    chain id and epoch against the authorized snapshot.
+    if vote.chain_id != snapshot.verifier().signing_domain.expected_wire_chain_id() {
+        return ModelFreshUseOutcome::WrongWireChain;
+    }
+    if vote.epoch != snapshot.authorized_epoch() {
+        return ModelFreshUseOutcome::WrongAuthorizedEpoch;
+    }
+
+    // 10. Mirror prepare_vote_signing_reservation. Owned objects created here
+    //     (the lookup public key, the preimage, position, binding) are covered by
+    //     `signing_res` and returned into function scope so they are destroyed
+    //     before `signing_res` releases.
+    let (position, binding, preimage, _owned_pk, preimage_len) = {
         let ctx: &ProposalVoteAuthority = snapshot.verifier();
 
         if vote.round != vote.height || vote.step != 0 {
-            drop(signing_res);
-            drop(guard);
-            drop(control_res);
             return ModelFreshUseOutcome::ObservationRefused;
         }
         if vote.version != MODEL_WIRE_MESSAGE_VERSION {
-            drop(signing_res);
-            drop(guard);
-            drop(control_res);
             return ModelFreshUseOutcome::ObservationRefused;
         }
         let bound_id = ValidatorId::new(signer.validator_id());
         if signer.validator_id() != vote.validator_index as u64
             || !ctx.validators.contains(bound_id)
         {
-            drop(signing_res);
-            drop(guard);
-            drop(control_res);
             return ModelFreshUseOutcome::ObservationRefused;
         }
         // (2c) MODEL equivalent of the governed suite/key/backend correspondence
-        //      check, through PUBLIC interfaces ONLY (NOT the production signing
-        //      function): the governed key entry exists, its suite matches the
-        //      signer's suite, and a backend for that suite is available.
-        match ctx.key_provider.get_suite_and_key(bound_id) {
-            Some((suite, _pk)) if suite == ConsensusSigSuiteId::new(signer.suite_id()) => {
+        //      check, through PUBLIC interfaces ONLY. The owned public-key `Vec`
+        //      the provider CLONES is retained (model-owned) and its backing
+        //      capacity is verified against the reserved conservative bound: a
+        //      length assertion alone is insufficient backing-capacity evidence.
+        let owned_pk = match ctx.key_provider.get_suite_and_key(bound_id) {
+            Some((suite, pk)) if suite == ConsensusSigSuiteId::new(signer.suite_id()) => {
                 if ctx.backend_registry.get_backend(suite).is_none() {
-                    drop(signing_res);
-                    drop(guard);
-                    drop(control_res);
                     return ModelFreshUseOutcome::ObservationRefused;
                 }
+                pk
             }
-            _ => {
-                drop(signing_res);
-                drop(guard);
-                drop(control_res);
-                return ModelFreshUseOutcome::ObservationRefused;
-            }
-        }
+            _ => return ModelFreshUseOutcome::ObservationRefused,
+        };
+        debug_assert!(
+            owned_pk.capacity() as u128 <= MODEL_MAX_PUBKEY_BYTES,
+            "owned public-key backing capacity exceeded the reserved bound"
+        );
 
         vote.suite_id = signer.suite_id();
         let preimage = ctx.signing_domain.vote_preimage(&vote);
@@ -543,134 +707,73 @@ fn fresh_vote_sign_model<H: CommittedHistory + ?Sized>(
             canonical_preimage: &preimage,
         });
         let preimage_len = preimage.len();
-        (position, binding, preimage, preimage_len)
+        (position, binding, preimage, owned_pk, preimage_len)
     };
     debug_assert!(
         preimage_len as u128 <= MODEL_MAX_PREIMAGE_BYTES,
         "model preimage exceeded the reserved backing bound"
     );
 
-    // 8. D10 reserve -> consume.
+    // 11. D10 reserve -> consume.
     let continuation = match journal.reserve_for_sign(&position, &binding) {
         Ok(ReservationOutcome::FreshlyReserved(cont)) => cont,
         Ok(ReservationOutcome::ExactRetryRetained(_sig)) => {
-            drop(preimage);
-            drop(signing_res);
-            drop(guard);
-            drop(control_res);
             return ModelFreshUseOutcome::RetainedBlocked;
         }
-        Ok(ReservationOutcome::Conflict) => {
-            drop(preimage);
-            drop(signing_res);
-            drop(guard);
-            drop(control_res);
-            return ModelFreshUseOutcome::ReserveConflict;
-        }
+        Ok(ReservationOutcome::Conflict) => return ModelFreshUseOutcome::ReserveConflict,
         Ok(ReservationOutcome::PotentiallySigned) => {
-            drop(preimage);
-            drop(signing_res);
-            drop(guard);
-            drop(control_res);
             return ModelFreshUseOutcome::ReservePotentiallySigned;
         }
-        Ok(ReservationOutcome::Exhausted) => {
-            drop(preimage);
-            drop(signing_res);
-            drop(guard);
-            drop(control_res);
-            return ModelFreshUseOutcome::ReserveExhausted;
-        }
-        Err(_) => {
-            drop(preimage);
-            drop(signing_res);
-            drop(guard);
-            drop(control_res);
-            return ModelFreshUseOutcome::JournalFailed;
-        }
+        Ok(ReservationOutcome::Exhausted) => return ModelFreshUseOutcome::ReserveExhausted,
+        Err(_) => return ModelFreshUseOutcome::JournalFailed,
     };
     let cap: ResultPublicationCapability = match journal.consume_for_signing(continuation) {
         Ok(c) => c,
-        Err(_) => {
-            drop(preimage);
-            drop(signing_res);
-            drop(guard);
-            drop(control_res);
-            return ModelFreshUseOutcome::JournalFailed;
-        }
+        Err(_) => return ModelFreshUseOutcome::JournalFailed,
     };
 
-    // 8.5 Reconfirm perturbation (deterministic in-flight replacement).
+    // 11.5 Reconfirm perturbation (deterministic in-flight replacement).
     if let ReconfirmPerturbation::AdvanceGenerationBeforeConfirm = reconfirm {
         snapshot
             .owner_mut()
             .replace_for_fixture(LocalAuthorizationState::MissingStorage);
     }
 
-    // 9. Reconfirm the ORIGINAL ticket immediately before the signer.
+    // 12. Reconfirm the ORIGINAL ticket immediately before the signer.
     if snapshot.owner().confirm(&ticket).is_err() {
-        drop(cap);
-        drop(preimage);
-        drop(signing_res);
-        drop(guard);
-        drop(control_res);
         return ModelFreshUseOutcome::AuthorizationConfirmRefused;
     }
 
-    // 10. Bounded, completed coordination point (publication-exclusion).
-    coord.on_post_consume_pre_sign(&position, &binding);
+    // 13. Fixed observation point: the ACTUAL safety-publication boundary. A
+    //     competing same-domain handle observes `WouldBlock` here while this
+    //     operation holds the guard (bounded, completed handshake). Assertions on
+    //     the recorded result are performed outside this guarded callback.
+    coord.on_post_consume_pre_sign();
 
-    // 11. Invoke the bounded signer; validate length BEFORE slicing/persist/sink.
+    // 14. Invoke the bounded signer; validate length BEFORE slicing/persist/sink.
     let n = match signer.sign_vote_into(&preimage, &mut out[..]) {
         Ok(n) => n,
-        Err(_) => {
-            drop(cap);
-            drop(preimage);
-            drop(signing_res);
-            drop(guard);
-            drop(control_res);
-            return ModelFreshUseOutcome::SignerFailed;
-        }
+        Err(_) => return ModelFreshUseOutcome::SignerFailed,
     };
     if n == 0 {
-        drop(cap);
-        drop(preimage);
-        drop(signing_res);
-        drop(guard);
-        drop(control_res);
         return ModelFreshUseOutcome::EmptyWritten;
     }
     if n > MODEL_SIG_CAP {
-        drop(cap);
-        drop(preimage);
-        drop(signing_res);
-        drop(guard);
-        drop(control_res);
         return ModelFreshUseOutcome::OversizeWritten;
     }
 
-    // 12. Persist via the one-use capability, then invoke the sink.
+    // 15. Persist via the one-use capability, then invoke the sink.
     if journal.record_signed_result(&cap, &out[..n]).is_err() {
-        drop(cap);
-        drop(preimage);
-        drop(signing_res);
-        drop(guard);
-        drop(control_res);
         return ModelFreshUseOutcome::PersistFailed;
     }
     let mut diag = sink.record(&vote, &out[..n]);
     diag.preimage_len = preimage_len as u32;
 
-    // 13. Destroy covered working objects BEFORE releasing the signing
-    //     reservation; the ticket/control reservation releases after; the guard
-    //     releases LAST.
-    drop(cap);
-    drop(preimage);
+    // 16. Zero the fixed output array in place; the remaining owned objects and
+    //     reservations are destroyed by Rust's reverse drop order established by
+    //     the declaration order (signing objects → signing_res → ticket →
+    //     control_res → guard), so the guard releases LAST.
     out.fill(0);
-    drop(vote);
-    drop(signing_res);
-    drop(guard);
-    drop(control_res);
     ModelFreshUseOutcome::Signed(diag)
 }
 
@@ -707,7 +810,9 @@ mod tests {
         CurrentAuthorizationOwner, CurrentStateUnavailableReason, GenesisConsensusAuthority,
     };
     use crate::pqc_trust_bundle::TrustBundleEnvironment;
-    use crate::safety_record_store::backend::{SafetyBackend, SafetyBackendPolicy};
+    use crate::safety_record_store::backend::{
+        SafetyBackend, SafetyBackendPolicy, TryLockDomainOutcome,
+    };
     use crate::safety_record_store::decision_capture::{
         OwnedDecisionOutcome, OwningCapturePayload, PreparedDecisionInputLimits,
     };
@@ -715,10 +820,11 @@ mod tests {
     use crate::safety_record_store::record::WireQc as StoreWireQc;
     use crate::safety_record_store::validate::FixtureCommittedHistory;
     use crate::signing_reservation_journal::{
-        BindingDigest, DecisionBindingInput, ReservationOutcome, SigningKind, SigningPosition,
-        SigningReservationJournal, DEFAULT_MAX_RESERVED_POSITIONS,
+        BindingDigest, DecisionBindingInput, ReservationOutcome, SigningJournalStorage,
+        SigningKind, SigningOwnershipDomain, SigningPosition, SigningReservationJournal,
+        DEFAULT_MAX_RESERVED_POSITIONS,
     };
-    use crate::storage::InMemoryConsensusStorage;
+    use crate::storage::{InMemoryConsensusStorage, StorageError};
 
     use super::super::{make_locked_qc, PublishResult, SafetyRecordOwner};
     use super::super::super::decision_capture::derive_block_id_local;
@@ -731,6 +837,9 @@ mod tests {
     const EPOCH: u64 = 7;
     const SIGNER_VID: u64 = 1;
     const MODEL_SUITE_U16: u16 = 100;
+    /// The wire `chain_id` the real engine stamps on the captured self-vote; the
+    /// positive authority fixture expects exactly this.
+    const MODEL_WIRE_CHAIN_ID: u32 = 1;
 
     // -- safety context / owner fixtures (mirrors of the §13.6 fixtures) -----
     fn ctx_n(n: u64) -> PinnedSafetyContext {
@@ -978,12 +1087,32 @@ mod tests {
     }
 
     fn make_authority() -> ProposalVoteAuthority {
-        let (pk, _sk) = MlDsa44Backend::generate_keypair().expect("keygen");
+        // The captured self-vote carries wire `chain_id == MODEL_WIRE_CHAIN_ID`
+        // and `epoch == 0`; the positive fixture's signing domain expects exactly
+        // that wire chain id so the §2 wire-chain-id admission check is satisfied
+        // naturally (the authorized epoch is the genesis-static 0).
+        make_authority_wire(MODEL_WIRE_CHAIN_ID)
+    }
+
+    fn make_authority_wire(wire_chain_id: u32) -> ProposalVoteAuthority {
+        let (mut pk, _sk) = MlDsa44Backend::generate_keypair().expect("keygen");
+        // Bounded provider contract (RUN 422 §4): the stored key is CLONED by the
+        // provider, so the model owns that clone's backing for the signing working
+        // set. Shrink to a len-exact capacity and assert the backing fits the
+        // reserved conservative bound — a local, tested contract, not a claim that
+        // an arbitrary provider satisfies it.
+        pk.shrink_to_fit();
+        assert!(
+            pk.capacity() as u128 <= MODEL_MAX_PUBKEY_BYTES,
+            "fixture provider public-key backing {} exceeds the model bound {}",
+            pk.capacity(),
+            MODEL_MAX_PUBKEY_BYTES
+        );
         let mut keys: HashMap<ValidatorId, (ConsensusSigSuiteId, Vec<u8>)> = HashMap::new();
         keys.insert(ValidatorId::new(SIGNER_VID), (SUITE_PQ_RESERVED_1, pk));
         let domain = ProposalVoteSigningDomainV2::try_new(
             ChainId(0xD5D5_0000_0000_0001),
-            0,
+            wire_chain_id,
             [0x5Du8; 32],
             [0xA5u8; 32],
         )
@@ -1036,6 +1165,72 @@ mod tests {
             DEFAULT_MAX_RESERVED_POSITIONS,
         )
         .expect("initialize fresh in-memory signing journal")
+    }
+
+    /// A local test storage wrapper implementing the EXISTING
+    /// [`SigningJournalStorage`] interface. It forwards every operation to an
+    /// in-memory inner store, but can be armed to fail ONLY the single-record
+    /// synced write (`put_signing_record_synced`) that `record_signed_result`
+    /// issues. The reserve path uses `put_signing_record_and_metadata_synced`
+    /// (unaffected) and `consume_for_signing` performs no storage write, so arming
+    /// this wrapper injects a persistence failure SPECIFICALLY at
+    /// `record_signed_result`, after a successful reservation/consumption and one
+    /// signer invocation. No D10 production code is modified.
+    struct RecordWriteFailingStorage {
+        inner: Arc<InMemoryConsensusStorage>,
+        fail_record_write: std::sync::atomic::AtomicBool,
+    }
+    impl RecordWriteFailingStorage {
+        fn new() -> Self {
+            Self {
+                inner: Arc::new(InMemoryConsensusStorage::new()),
+                fail_record_write: std::sync::atomic::AtomicBool::new(false),
+            }
+        }
+        fn arm(&self) {
+            self.fail_record_write
+                .store(true, std::sync::atomic::Ordering::SeqCst);
+        }
+    }
+    impl SigningJournalStorage for RecordWriteFailingStorage {
+        fn get_signing_record(&self, key: &[u8]) -> Result<Option<Vec<u8>>, StorageError> {
+            self.inner.get_signing_record(key)
+        }
+        fn put_signing_record_synced(&self, key: &[u8], value: &[u8]) -> Result<(), StorageError> {
+            if self
+                .fail_record_write
+                .load(std::sync::atomic::Ordering::SeqCst)
+            {
+                return Err(StorageError::Io(
+                    "injected record_signed_result persistence failure".to_string(),
+                ));
+            }
+            self.inner.put_signing_record_synced(key, value)
+        }
+        fn get_signing_metadata(&self) -> Result<Option<Vec<u8>>, StorageError> {
+            self.inner.get_signing_metadata()
+        }
+        fn put_signing_metadata_synced(&self, value: &[u8]) -> Result<(), StorageError> {
+            self.inner.put_signing_metadata_synced(value)
+        }
+        fn put_signing_record_and_metadata_synced(
+            &self,
+            record_key: &[u8],
+            record_value: &[u8],
+            metadata_value: &[u8],
+        ) -> Result<(), StorageError> {
+            self.inner
+                .put_signing_record_and_metadata_synced(record_key, record_value, metadata_value)
+        }
+        fn for_each_signing_namespace_entry(
+            &self,
+            visitor: &mut dyn FnMut(&[u8], &[u8]) -> Result<(), StorageError>,
+        ) -> Result<(), StorageError> {
+            self.inner.for_each_signing_namespace_entry(visitor)
+        }
+        fn signing_ownership_domain(&self) -> Arc<SigningOwnershipDomain> {
+            self.inner.signing_ownership_domain()
+        }
     }
 
     /// Recompute the SAME (position, binding) the model derives for `base_vote`
@@ -1098,7 +1293,6 @@ mod tests {
             &lim,
             None,
             &mut snapshot,
-            base_vote.clone(),
             &signer,
             &mut sink,
             &journal,
@@ -1166,7 +1360,7 @@ mod tests {
 
         let outcome = fresh_vote_sign_model::<FixtureCommittedHistory>(
             &owner, &engine, &decided, &p1, &wrong, None, &mut snapshot,
-            base_vote.clone(), &signer, &mut sink, &journal, &mut coord,
+            &signer, &mut sink, &journal, &mut coord,
             ReconfirmPerturbation::None,
         );
         assert_eq!(outcome, ModelFreshUseOutcome::PolicyRefused);
@@ -1194,7 +1388,7 @@ mod tests {
 
         let outcome = fresh_vote_sign_model::<FixtureCommittedHistory>(
             &owner, &engine, &decided, &wrong_proposal, &lim, None, &mut snapshot,
-            base_vote.clone(), &signer, &mut sink, &journal, &mut coord,
+            &signer, &mut sink, &journal, &mut coord,
             ReconfirmPerturbation::None,
         );
         assert_eq!(outcome, ModelFreshUseOutcome::ObservationRefused);
@@ -1219,7 +1413,7 @@ mod tests {
 
         let outcome = fresh_vote_sign_model::<FixtureCommittedHistory>(
             &owner, &engine, &decided, &p1, &lim, None, &mut snapshot,
-            base_vote.clone(), &signer, &mut sink, &journal, &mut coord,
+            &signer, &mut sink, &journal, &mut coord,
             ReconfirmPerturbation::None,
         );
         assert_eq!(outcome, ModelFreshUseOutcome::AuthorizationAdmitRefused);
@@ -1229,7 +1423,72 @@ mod tests {
     }
 
     // ======================================================================
-    // Scenario 3 — original-ticket reconfirm rejection with ZERO signer calls.
+    // Scenario 2 (lifecycle) — advancing engine AND durable state to a NEW
+    // consistent lock (L1) through supported operations makes the retained
+    // L0 decision fail the model's unchanged-generation rule. Observation
+    // still passes (engine lock == durable restriction == L1, and the
+    // proposal/projection correspondence is intact), so the refusal is the
+    // INTENDED LifecycleAmbiguous — NOT an earlier, unrelated observation
+    // failure — and it occurs BEFORE any D10 reservation.
+    // ======================================================================
+    #[test]
+    fn scenario2_lifecycle_refused_after_consistent_generation_advance() {
+        let dir = tempfile::tempdir().unwrap();
+        let ctx = ctx_n(4);
+        let (owner, mut engine, decided, p1, lim, _rev) = capture_multi(dir.path(), &ctx);
+        let pv = make_authority();
+        let mut snapshot = established_snapshot(&pv);
+        let journal = fresh_journal();
+        let signer = DigestRecordingSigner {
+            validator_id: SIGNER_VID,
+            suite_id: MODEL_SUITE_U16,
+            seen: std::cell::Cell::new(None),
+        };
+        let mut sink = ModelRecordingSink::new();
+        let mut coord = ModelCoordinationHook::inert();
+        let base_vote = decided.vote().clone();
+
+        // Advance the ENGINE to lock the view-1 block (L1): the local self-vote
+        // was already cast at capture, so validators 2 and 3 complete the L1
+        // quorum. The engine lock moves L0 -> L1 and agrees with the durable
+        // advance below.
+        let l0_block = derive_block_id_local(1, 0, &[0xFF; 32]);
+        let l1_block = derive_block_id_local(2, 1, &l0_block);
+        assert!(
+            engine
+                .on_vote_event(ValidatorId::new(2), &logical_vote(1, l1_block, 2))
+                .expect("peer vote 2 for L1 ingests")
+                .is_none(),
+            "two votes are short of the L1 quorum"
+        );
+        let r3 = engine
+            .on_vote_event(ValidatorId::new(3), &logical_vote(1, l1_block, 3))
+            .expect("peer vote 3 for L1 ingests");
+        assert!(r3.is_some(), "the third vote forms the L1 quorum");
+        let lk = engine.locked_qc().expect("engine now locks L1");
+        assert_eq!(lk.block_id, l1_block, "engine lock advanced to L1");
+        assert_eq!(lk.view, 1);
+
+        // Advance the DURABLE restriction to the same L1 (strictly-increasing
+        // lock view 0 -> 1), moving the authoritative revision 1 -> 2.
+        let new_rev = publish_qc(&owner, &ctx, l1_block, 1, 1);
+        assert_eq!(new_rev, 2, "the L1 publication advances the durable revision");
+
+        let outcome = fresh_vote_sign_model::<FixtureCommittedHistory>(
+            &owner, &engine, &decided, &p1, &lim, None, &mut snapshot,
+            &signer, &mut sink, &journal, &mut coord,
+            ReconfirmPerturbation::None,
+        );
+        assert_eq!(
+            outcome,
+            ModelFreshUseOutcome::LifecycleAmbiguous,
+            "the retained L0 generation no longer matches the advanced L1 state"
+        );
+        assert_eq!(sink.calls, 0);
+        assert_eq!(coord.calls, 0, "no coordination point reached before the lifecycle refusal");
+        assert!(signer.seen.get().is_none(), "zero signer invocations");
+        assert_no_reservation_made(&journal, &pv, &base_vote);
+    }
     // A deterministic in-flight generation advance BETWEEN admit and confirm
     // (taking the owner by &mut, a faithful real advance) makes confirm `Stale`.
     // ======================================================================
@@ -1248,7 +1507,7 @@ mod tests {
 
         let outcome = fresh_vote_sign_model::<FixtureCommittedHistory>(
             &owner, &engine, &decided, &p1, &lim, None, &mut snapshot,
-            base_vote.clone(), &signer, &mut sink, &journal, &mut coord,
+            &signer, &mut sink, &journal, &mut coord,
             ReconfirmPerturbation::AdvanceGenerationBeforeConfirm,
         );
         assert_eq!(outcome, ModelFreshUseOutcome::AuthorizationConfirmRefused);
@@ -1279,37 +1538,66 @@ mod tests {
         let journal = fresh_journal();
         let signer = ok_signer();
         let mut sink = ModelRecordingSink::new();
-        let mut coord = ModelCoordinationHook::probing(&journal);
-        let base_vote = decided.vote().clone();
 
-        let outcome = fresh_vote_sign_model::<FixtureCommittedHistory>(
-            &owner, &engine, &decided, &p1, &lim, None, &mut snapshot,
-            base_vote.clone(), &signer, &mut sink, &journal, &mut coord,
-            ReconfirmPerturbation::None,
-        );
+        // A competing handle sharing the EXACT SAME `SafetyBackend` serialization
+        // domain (a clone shares the inner `Arc<Mutex<SerializationDomain>>`).
+        let peer_backend = owner.backend_for_test().clone();
+
+        // Bounded handshake endpoints: a request to observe, and a result carrying
+        // the single discriminated observation. No sleeps; every leg is bounded.
+        let (req_tx, req_rx) = std::sync::mpsc::channel::<()>();
+        let (res_tx, res_rx) = std::sync::mpsc::channel::<PeerDomainObservation>();
+        let timeout = std::time::Duration::from_secs(10);
+
+        let outcome = std::thread::scope(|scope| {
+            // Competing peer: on the single request (raised at the fixed post-D10,
+            // pre-signer observation point while the protected op holds the guard),
+            // perform ONE non-blocking domain observation and report it back.
+            let peer = scope.spawn(move || match req_rx.recv_timeout(timeout) {
+                Ok(()) => {
+                    let obs = match peer_backend.try_lock_domain_for_test() {
+                        TryLockDomainOutcome::WouldBlock => PeerDomainObservation::WouldBlock,
+                        TryLockDomainOutcome::Acquired(_g) => PeerDomainObservation::Acquired,
+                        TryLockDomainOutcome::Poisoned => PeerDomainObservation::Poisoned,
+                    };
+                    let _ = res_tx.send(obs);
+                }
+                Err(_) => { /* no request: the hook's recv times out and fails the test */ }
+            });
+
+            let mut coord = ModelCoordinationHook::probing(req_tx, res_rx, timeout);
+            let outcome = fresh_vote_sign_model::<FixtureCommittedHistory>(
+                &owner, &engine, &decided, &p1, &lim, None, &mut snapshot,
+                &signer, &mut sink, &journal, &mut coord,
+                ReconfirmPerturbation::None,
+            );
+            peer.join().expect("the bounded peer thread completes");
+            // Assertions outside the guarded callback. A failed leg (timeout /
+            // disconnect / missing observation) fails the test.
+            assert!(!coord.failed, "every handshake leg must succeed");
+            assert_eq!(coord.calls, 1, "the bounded coordination point ran once");
+            assert_eq!(
+                coord.last_excluded,
+                Some(true),
+                "the competing same-domain handle observed WouldBlock (exclusion holds)"
+            );
+            outcome
+        });
+
         match outcome {
             ModelFreshUseOutcome::Signed(_) => {}
             other => panic!("expected Signed, got {other:?}"),
         }
-        assert_eq!(coord.calls, 1, "the bounded coordination point ran once");
+        assert_eq!(sink.calls, 1, "exactly one sink publication");
+
+        // After the protected operation released the guard, an ACTUAL eligible
+        // `publish_locked` on that SAME backend succeeds with its expected revision
+        // advance (the pre-publish authoritative revision was 1 after capture).
+        let new_rev = publish_qc(&owner, &ctx, [0x5Au8; 32], 1, 1);
         assert_eq!(
-            coord.last_excluded,
-            Some(true),
-            "a concurrent publication at this position was EXCLUDED"
+            new_rev, 2,
+            "an eligible post-release publication advances the authoritative revision"
         );
-        // After the guard released, an eligible publication at a DIFFERENT
-        // position still proceeds (the journal is not globally blocked).
-        let other_pos = SigningPosition {
-            validator_id: SIGNER_VID,
-            network_genesis: *pv.signing_domain.genesis_identity(),
-            kind: SigningKind::Vote,
-            originating_view: 999,
-        };
-        let (_p, other_binding) = expected_pos_binding(&pv, &base_vote);
-        match journal.reserve_for_sign(&other_pos, &other_binding) {
-            Ok(ReservationOutcome::FreshlyReserved(_)) => {}
-            other => panic!("a distinct eligible position should be fresh, got {other:?}"),
-        }
     }
 
     // ======================================================================
@@ -1346,7 +1634,7 @@ mod tests {
         let base_vote = decided.vote().clone();
         let outcome = fresh_vote_sign_model::<FixtureCommittedHistory>(
             &owner, &engine, &decided, &p1, &lim, None, &mut snapshot,
-            base_vote.clone(), signer, &mut sink, &journal, &mut coord,
+            signer, &mut sink, &journal, &mut coord,
             ReconfirmPerturbation::None,
         );
         (outcome, sink.calls, journal, pv, base_vote)
@@ -1423,7 +1711,7 @@ mod tests {
         let mut coord = ModelCoordinationHook::inert();
         let outcome = fresh_vote_sign_model::<FixtureCommittedHistory>(
             &owner, &engine, &decided, &p1, &lim, None, &mut snapshot,
-            base_vote.clone(), &signer, &mut sink, &journal, &mut coord,
+            &signer, &mut sink, &journal, &mut coord,
             ReconfirmPerturbation::None,
         );
         assert_eq!(outcome, ModelFreshUseOutcome::RetainedBlocked);
@@ -1448,21 +1736,29 @@ mod tests {
         let mut coord = ModelCoordinationHook::inert();
         let base_vote = decided.vote().clone();
 
-        // Baseline active operational reservation BEFORE the model call (the
+        // Baseline active reservations BEFORE the model call, on BOTH ledgers (the
         // retained pin from `decided` is part of this baseline and is unchanged
-        // across the call).
+        // across the call). Cleanup is established from both ledgers directly, not
+        // an inferred aggregate total.
         let baseline = owner.backend_for_test().accounting_current();
+        let baseline_agg = owner.backend_for_test().accounting_aggregate_current();
 
         let outcome = fresh_vote_sign_model::<FixtureCommittedHistory>(
             &owner, &engine, &decided, &p1, &lim, None, &mut snapshot,
-            base_vote.clone(), &signer, &mut sink, &journal, &mut coord,
+            &signer, &mut sink, &journal, &mut coord,
             ReconfirmPerturbation::None,
         );
         assert!(matches!(outcome, ModelFreshUseOutcome::Signed(_)));
 
-        // Exact cleanup: every model reservation released, back to baseline.
+        // Exact cleanup on BOTH ledgers: every model reservation released, back to
+        // the operational AND aggregate baselines.
         let after = owner.backend_for_test().accounting_current();
-        assert_eq!(after, baseline, "all model reservations released after the run");
+        let after_agg = owner.backend_for_test().accounting_aggregate_current();
+        assert_eq!(after, baseline, "operational reservations released after the run");
+        assert_eq!(
+            after_agg, baseline_agg,
+            "aggregate reservations released after the run"
+        );
 
         // Preserved borrowed envelope / Vote / pin.
         assert_eq!(decided.vote(), &base_vote, "the Vote is unchanged");
@@ -1479,13 +1775,364 @@ mod tests {
             );
             assert!(peak <= cap, "observed peak {peak} within cap {cap}");
         }
-        // Emit the charge table for the report (visible under --nocapture).
+        // Emit the charge table for the report (visible under --nocapture). The
+        // accountant's lifetime `peak` is the max over the WHOLE process including
+        // fixture setup (capture/publish), so it is labelled a lifetime peak, not
+        // attributed to the model alone; the model's own live phase charge is
+        // `baseline + control + signing` at the signing phase.
+        let agg_peak = owner.backend_for_test().accounting_aggregate_peak();
+        let model_signing_phase = baseline + c_ctrl + c_sign;
         eprintln!(
             "RUN422-MODEL charges: control={c_ctrl} lifecycle={c_life} signing(C_sign)={c_sign} \
-             baseline={baseline} peak={peak} vote_size={} preimage_vec={} out_cap={}",
+             baseline={baseline} model_signing_phase_live={model_signing_phase} \
+             accountant_lifetime_peak={peak} accountant_lifetime_aggregate_peak={agg_peak} \
+             vote_size={} preimage_vec={} out_cap={}",
             std::mem::size_of::<Vote>(),
             std::mem::size_of::<Vec<u8>>(),
             MODEL_SIG_CAP,
         );
+    }
+
+    // ======================================================================
+    // §2 — BINDING EVIDENCE. The ACTUAL signer input matches an independently
+    // computed preimage of the envelope's COMPLETE Vote, with ONLY the permitted
+    // governed suite assignment differing from the captured envelope.
+    // ======================================================================
+    #[test]
+    fn signer_input_matches_independent_envelope_preimage() {
+        use sha3::Digest;
+        let dir = tempfile::tempdir().unwrap();
+        let ctx = ctx_n(4);
+        let (owner, engine, decided, p1, lim, _rev) = capture_multi(dir.path(), &ctx);
+        let pv = make_authority();
+        let mut snapshot = established_snapshot(&pv);
+        let journal = fresh_journal();
+        let mut sink = ModelRecordingSink::new();
+        let mut coord = ModelCoordinationHook::inert();
+
+        // Independently derive the expected preimage from the envelope's COMPLETE
+        // Vote, applying ONLY the permitted governed suite assignment.
+        let base_vote = decided.vote().clone();
+        let mut expected_vote = base_vote.clone();
+        expected_vote.suite_id = MODEL_SUITE_U16;
+        // The ONLY permitted difference is `suite_id`: every other field is taken
+        // verbatim from the captured envelope.
+        assert_eq!(expected_vote.version, base_vote.version);
+        assert_eq!(expected_vote.chain_id, base_vote.chain_id);
+        assert_eq!(expected_vote.epoch, base_vote.epoch);
+        assert_eq!(expected_vote.height, base_vote.height);
+        assert_eq!(expected_vote.round, base_vote.round);
+        assert_eq!(expected_vote.step, base_vote.step);
+        assert_eq!(expected_vote.block_id, base_vote.block_id);
+        assert_eq!(expected_vote.validator_index, base_vote.validator_index);
+        assert_eq!(expected_vote.signature, base_vote.signature);
+        let expected_preimage = pv.signing_domain.vote_preimage(&expected_vote);
+        let mut h = Sha3_256::new();
+        h.update(&expected_preimage);
+        let mut expected_digest = [0u8; 32];
+        expected_digest.copy_from_slice(&h.finalize());
+
+        let signer = DigestRecordingSigner {
+            validator_id: SIGNER_VID,
+            suite_id: MODEL_SUITE_U16,
+            seen: std::cell::Cell::new(None),
+        };
+        let outcome = fresh_vote_sign_model::<FixtureCommittedHistory>(
+            &owner, &engine, &decided, &p1, &lim, None, &mut snapshot,
+            &signer, &mut sink, &journal, &mut coord,
+            ReconfirmPerturbation::None,
+        );
+        assert!(matches!(outcome, ModelFreshUseOutcome::Signed(_)));
+        assert_eq!(sink.calls, 1, "exactly one sink call");
+        let (seen_digest, seen_len) =
+            signer.seen.get().expect("the signer was invoked exactly once");
+        assert_eq!(
+            seen_len,
+            expected_preimage.len(),
+            "the signer saw the full preimage length"
+        );
+        assert_eq!(
+            seen_digest, expected_digest,
+            "the signer input matched the independently computed envelope preimage"
+        );
+        // The captured envelope's Vote is unchanged (only the model's private
+        // clone received the suite assignment).
+        assert_eq!(decided.vote(), &base_vote);
+    }
+
+    // ======================================================================
+    // §2 — WRONG WIRE CHAIN. The authorized snapshot expects a different wire
+    // chain id than the engine stamped; refused BEFORE D10, zero signer calls.
+    // ======================================================================
+    #[test]
+    fn wrong_wire_chain_refused_before_d10_zero_signer() {
+        let dir = tempfile::tempdir().unwrap();
+        let ctx = ctx_n(4);
+        let (owner, engine, decided, p1, lim, _rev) = capture_multi(dir.path(), &ctx);
+        // The authorized snapshot expects a DIFFERENT wire chain id than the real
+        // engine stamped on the captured self-vote (1): a natural disagreement.
+        let pv = make_authority_wire(0xDEAD_BEEF);
+        let mut snapshot = established_snapshot(&pv);
+        let journal = fresh_journal();
+        let mut sink = ModelRecordingSink::new();
+        let mut coord = ModelCoordinationHook::inert();
+        let signer = DigestRecordingSigner {
+            validator_id: SIGNER_VID,
+            suite_id: MODEL_SUITE_U16,
+            seen: std::cell::Cell::new(None),
+        };
+        let base_vote = decided.vote().clone();
+
+        let outcome = fresh_vote_sign_model::<FixtureCommittedHistory>(
+            &owner, &engine, &decided, &p1, &lim, None, &mut snapshot,
+            &signer, &mut sink, &journal, &mut coord,
+            ReconfirmPerturbation::None,
+        );
+        assert_eq!(outcome, ModelFreshUseOutcome::WrongWireChain);
+        assert_eq!(sink.calls, 0);
+        assert_eq!(coord.calls, 0, "no coordination point reached before the refusal");
+        assert!(signer.seen.get().is_none(), "zero signer invocations");
+        assert_no_reservation_made(&journal, &pv, &base_vote);
+    }
+
+    // ======================================================================
+    // §2 — WRONG AUTHORIZED EPOCH. The model-owned working Vote (never the
+    // captured envelope) is deterministically bumped so its epoch disagrees with
+    // the genesis-static authorized epoch (both fixed at 0); refused BEFORE D10,
+    // zero signer calls.
+    // ======================================================================
+    #[test]
+    fn wrong_authorized_epoch_refused_before_d10_zero_signer() {
+        let dir = tempfile::tempdir().unwrap();
+        let ctx = ctx_n(4);
+        let (owner, engine, decided, p1, lim, _rev) = capture_multi(dir.path(), &ctx);
+        let pv = make_authority();
+        let mut snapshot = established_snapshot(&pv);
+        let journal = fresh_journal();
+        let mut sink = ModelRecordingSink::new();
+        let mut coord = ModelCoordinationHook::inert();
+        let signer = DigestRecordingSigner {
+            validator_id: SIGNER_VID,
+            suite_id: MODEL_SUITE_U16,
+            seen: std::cell::Cell::new(None),
+        };
+        let base_vote = decided.vote().clone();
+        assert_eq!(base_vote.epoch, 0, "the engine self-vote epoch is 0");
+        assert_eq!(snapshot.authorized_epoch(), 0, "authorized epoch is genesis-static 0");
+
+        let outcome = fresh_vote_sign_model::<FixtureCommittedHistory>(
+            &owner, &engine, &decided, &p1, &lim, None, &mut snapshot,
+            &signer, &mut sink, &journal, &mut coord,
+            ReconfirmPerturbation::BumpWorkingVoteEpoch,
+        );
+        assert_eq!(outcome, ModelFreshUseOutcome::WrongAuthorizedEpoch);
+        assert_eq!(sink.calls, 0);
+        assert_eq!(coord.calls, 0, "no coordination point reached before the refusal");
+        assert!(signer.seen.get().is_none(), "zero signer invocations");
+        assert_no_reservation_made(&journal, &pv, &base_vote);
+        // The captured envelope is untouched by the model-owned perturbation.
+        assert_eq!(decided.vote(), &base_vote);
+        assert_eq!(decided.vote().epoch, 0);
+    }
+
+    // ======================================================================
+    // §2 — UNSIGNED-INPUT PRECONDITION. The unsigned-input guard (signature empty
+    // AND zero capacity before copying) is fail-closed. The sealed `DecidedVote`
+    // envelope is immutable and the real engine self-vote is always unsigned, so a
+    // populated-signature input is structurally unreachable here; this documents
+    // the precondition the guard defends (it is never silently discarded).
+    // ======================================================================
+    #[test]
+    fn captured_self_vote_is_unsigned_with_zero_capacity_signature() {
+        let dir = tempfile::tempdir().unwrap();
+        let ctx = ctx_n(4);
+        let (_owner, _engine, decided, _p1, _lim, _rev) = capture_multi(dir.path(), &ctx);
+        assert!(
+            decided.vote().signature.is_empty(),
+            "the captured self-vote signature is empty"
+        );
+        assert_eq!(
+            decided.vote().signature.capacity(),
+            0,
+            "the captured self-vote signature has zero backing capacity"
+        );
+    }
+
+    // ======================================================================
+    // §5 — ACCOUNTING EXHAUSTION at CONTROL admission (the FIRST model
+    // reservation). A HEALTHY authorization owner is used, so the refusal is the
+    // accounting exhaustion, NOT an unavailable owner. Refused before any ticket,
+    // D10, coordination, or signer work.
+    // ======================================================================
+    #[test]
+    fn accounting_exhaustion_at_control_admission_refuses() {
+        let dir = tempfile::tempdir().unwrap();
+        let ctx = ctx_n(4);
+        let (owner, engine, decided, p1, lim, _rev) = capture_multi(dir.path(), &ctx);
+        let pv = make_authority();
+        let mut snapshot = established_snapshot(&pv);
+        let journal = fresh_journal();
+        let mut sink = ModelRecordingSink::new();
+        let mut coord = ModelCoordinationHook::inert();
+        let signer = DigestRecordingSigner {
+            validator_id: SIGNER_VID,
+            suite_id: MODEL_SUITE_U16,
+            seen: std::cell::Cell::new(None),
+        };
+        let base_vote = decided.vote().clone();
+
+        let cap = owner
+            .backend_for_test()
+            .accounting_aggregate_cap()
+            .expect("bounded aggregate cap");
+        let current = owner.backend_for_test().accounting_aggregate_current();
+        // Leave strictly less than control_charge() headroom on the binding
+        // (aggregate) ledger so the control reservation (the first model
+        // reservation) cannot be admitted.
+        let standing = cap - current - (control_charge() - 1);
+        let _pressure = owner
+            .backend_for_test()
+            .reserve_standing_for_test(standing)
+            .expect("standing reservation fits under the cap");
+
+        let outcome = fresh_vote_sign_model::<FixtureCommittedHistory>(
+            &owner, &engine, &decided, &p1, &lim, None, &mut snapshot,
+            &signer, &mut sink, &journal, &mut coord,
+            ReconfirmPerturbation::None,
+        );
+        assert_eq!(outcome, ModelFreshUseOutcome::AuthorizationAdmitRefused);
+        assert_eq!(sink.calls, 0);
+        assert_eq!(coord.calls, 0);
+        assert!(signer.seen.get().is_none(), "zero signer invocations");
+        assert_no_reservation_made(&journal, &pv, &base_vote);
+    }
+
+    // ======================================================================
+    // §5 — ACCOUNTING EXHAUSTION at SIGNING-WORKING-SET admission, isolated from
+    // the earlier control/lifecycle phases, then SUCCESS after the pressure is
+    // removed. The phase seam: the standing pressure leaves enough headroom for
+    // the held control reservation AND the transient lifecycle load, but less than
+    // signing_charge(), so the later signing admission is the refusal point.
+    // ======================================================================
+    #[test]
+    fn accounting_exhaustion_at_signing_admission_then_succeeds_after_relief() {
+        let dir = tempfile::tempdir().unwrap();
+        let ctx = ctx_n(4);
+        let (owner, engine, decided, p1, lim, _rev) = capture_multi(dir.path(), &ctx);
+        let pv = make_authority();
+        let mut snapshot = established_snapshot(&pv);
+        let journal = fresh_journal();
+        let mut sink = ModelRecordingSink::new();
+        let mut coord = ModelCoordinationHook::inert();
+        let signer = DigestRecordingSigner {
+            validator_id: SIGNER_VID,
+            suite_id: MODEL_SUITE_U16,
+            seen: std::cell::Cell::new(None),
+        };
+
+        let cap = owner
+            .backend_for_test()
+            .accounting_aggregate_cap()
+            .expect("bounded aggregate cap");
+        let current = owner.backend_for_test().accounting_aggregate_current();
+        // Target: available at signing admission == signing_charge() - 1 (one byte
+        // short) on the binding (aggregate) ledger, while control is held and the
+        // transient lifecycle phase already succeeded.
+        let standing = cap - current - control_charge() - (signing_charge() - 1);
+        let pressure = owner
+            .backend_for_test()
+            .reserve_standing_for_test(standing)
+            .expect("standing reservation fits under the cap");
+
+        let outcome = fresh_vote_sign_model::<FixtureCommittedHistory>(
+            &owner, &engine, &decided, &p1, &lim, None, &mut snapshot,
+            &signer, &mut sink, &journal, &mut coord,
+            ReconfirmPerturbation::None,
+        );
+        assert_eq!(
+            outcome,
+            ModelFreshUseOutcome::SigningAdmitRefused,
+            "the signing working set cannot be admitted (control/lifecycle already passed)"
+        );
+        assert_eq!(sink.calls, 0);
+        assert_eq!(coord.calls, 0, "no coordination point reached before the signing refusal");
+        assert!(signer.seen.get().is_none(), "zero signer invocations");
+        // Non-destructive: the refusal left NO reserved position (the journal is
+        // untouched, so the retry below can reuse it).
+        assert_eq!(journal.reserved_position_count(), 0, "no D10 reservation on a signing refusal");
+
+        // Remove the temporary pressure and retry the previously refused but
+        // admissible operation on the SAME (clean) journal: it now succeeds.
+        drop(pressure);
+        let mut sink2 = ModelRecordingSink::new();
+        let mut coord2 = ModelCoordinationHook::inert();
+        let signer2 = ok_signer();
+        let outcome2 = fresh_vote_sign_model::<FixtureCommittedHistory>(
+            &owner, &engine, &decided, &p1, &lim, None, &mut snapshot,
+            &signer2, &mut sink2, &journal, &mut coord2,
+            ReconfirmPerturbation::None,
+        );
+        assert!(
+            matches!(outcome2, ModelFreshUseOutcome::Signed(_)),
+            "after relief the admissible operation succeeds, got {outcome2:?}"
+        );
+        assert_eq!(sink2.calls, 1);
+    }
+
+    // ======================================================================
+    // §5 — PERSISTENCE FAILURE injected SPECIFICALLY during `record_signed_result`
+    // (after a successful reservation/consumption and ONE signer invocation),
+    // using a local storage wrapper over the existing journal-storage interface.
+    // The sink is suppressed and the post-consumption journal state is inspected:
+    // a retry is `PotentiallySigned` (the signer may already have run), NOT fresh.
+    // This is an IN-MEMORY journal-state test, not crash-durability evidence.
+    // ======================================================================
+    #[test]
+    fn persistence_failure_during_record_signed_result_suppresses_sink() {
+        let dir = tempfile::tempdir().unwrap();
+        let ctx = ctx_n(4);
+        let (owner, engine, decided, p1, lim, _rev) = capture_multi(dir.path(), &ctx);
+        let pv = make_authority();
+        let mut snapshot = established_snapshot(&pv);
+        let store = Arc::new(RecordWriteFailingStorage::new());
+        let journal =
+            SigningReservationJournal::initialize(store.clone(), DEFAULT_MAX_RESERVED_POSITIONS)
+                .expect("initialize journal over the wrapper store");
+        let mut sink = ModelRecordingSink::new();
+        let mut coord = ModelCoordinationHook::inert();
+        let signer = DigestRecordingSigner {
+            validator_id: SIGNER_VID,
+            suite_id: MODEL_SUITE_U16,
+            seen: std::cell::Cell::new(None),
+        };
+        let base_vote = decided.vote().clone();
+
+        // Arm the wrapper to fail ONLY the record_signed_result single-record
+        // write. Reserve + consume (which do not use that write) still succeed.
+        store.arm();
+
+        let outcome = fresh_vote_sign_model::<FixtureCommittedHistory>(
+            &owner, &engine, &decided, &p1, &lim, None, &mut snapshot,
+            &signer, &mut sink, &journal, &mut coord,
+            ReconfirmPerturbation::None,
+        );
+        assert_eq!(outcome, ModelFreshUseOutcome::PersistFailed);
+        assert_eq!(sink.calls, 0, "the sink is suppressed on a persistence failure");
+        // The signer WAS invoked exactly once (persist fails AFTER signing).
+        assert!(
+            signer.seen.get().is_some(),
+            "the signer ran once before the persistence failure"
+        );
+        assert_eq!(coord.calls, 1, "the coordination point ran before signing");
+
+        // Inspect the expected post-consumption journal state: a retry at the exact
+        // position is PotentiallySigned (the obligation is preserved), NOT fresh.
+        let (pos, binding) = expected_pos_binding(&pv, &base_vote);
+        match journal.reserve_for_sign(&pos, &binding) {
+            Ok(ReservationOutcome::PotentiallySigned) => {}
+            other => panic!(
+                "post-consumption retry must be PotentiallySigned, got {other:?}"
+            ),
+        }
     }
 }
