@@ -2162,6 +2162,11 @@ pub mod storage;
 // no durable anti-rollback anchor. See
 // docs/protocol/QBIND_PROPOSAL_VOTE_SIGNING_STATE_CONTINUITY_CONTRACT.md.
 pub mod signing_reservation_journal;
+// Run 422 — crate-internal workspace admission for the additive, isolated
+// retained-signature retrieval path. Admits fixed-capacity output/envelope
+// buffers through the EXISTING operational safety accountant; introduces no new
+// ledger, ceiling, or production caller.
+pub(crate) mod signing_journal_admission;
 pub mod production_consensus_storage;
 // Run 422 D7-C1 — read-only, non-authorizing observation boundary over an
 // already-opened consensus storage handle. Distinguishes absent handle,

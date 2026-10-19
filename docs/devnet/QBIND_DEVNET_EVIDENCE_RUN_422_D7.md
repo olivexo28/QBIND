@@ -18859,3 +18859,56 @@ Executed evidence (literal commands / results):
 Limits (not implemented / not claimed): this primitive establishes NO authorization, D10 eligibility, freshness, or permission to sign, and does NOT enforce accountant admission — admitting/sizing caller-owned output remains a future protected caller's obligation. It does NOT claim zero allocations throughout the cryptographic dependency or full protected-path memory fit; the specific improvement is removal of the legacy heap signature-result conversion from this new path. No production caller of the new methods was added. The deferred journal/accounting and retained-delivery sections of the design are NOT presented as implemented or accepted.
 
 Status unchanged by this pass: `D7D14_STORAGE_COMPONENT=IMPLEMENTED-ISOLATED`; `D7D14_STORAGE_ACCEPTANCE=PASS-ACCEPTED-SUBSET`; §13.6 INCOMPLETE; activation DISABLED; public DevNet NO-GO; durable anti-rollback NOT-ESTABLISHED; C4/C5 OPEN.
+
+## RUN 422 — Isolated, Admitted Retained-Signature Retrieval (code + test; this pass)
+
+Scope: the additive, crate-internal retained-signature RETRIEVAL path ONLY, admitted through the EXISTING operational `SharedAccountant` / `AggregateAuthority`. No new ledger, ceiling, partition, or multiplicity; no production caller; no signer invocation; no verification/delivery wiring; no activation. Accepted safety storage, prepared-generation machinery, the local caller-buffer signing primitive, and the legacy journal routes/cache/contracts are unchanged.
+
+Starting HEAD: `945c6a8d6b271f275e5d29cc4450da6ad473e3c3` (branch `copilot/run-422-finalize-retained-retrieval-workspace-admi`); worktree before this pass: clean except the untracked `signing_journal_admission.rs` and the three authorized edits recorded below. The final HEAD is the commit produced by this pass on the same branch (no PR, no force-push, no rename).
+
+Changed source paths (authorized):
+
+- `crates/qbind-node/src/signing_journal_admission.rs` (NEW, crate-internal) — workspace-admission primitives: fixed `AdmittedOutput` (`[u8; 2420]` output) and `EnvelopeScratch` (`[u8; 2520]` envelope + fixed `[u8; 55]` journal key), each with its covered buffer field declared BEFORE its `Reservation` field so Drop destroys bytes first and releases coverage afterwards (no release-then-recharge window); `RetrievalWorkspaceOwner` admitting both reservations BEFORE either buffer is built, with clean rollback (`release_now`) if the second refuses; `BorrowedRecordView` non-allocating parser validating BOTH checksum layers and every internal length relation; and `output_charge()`/`envelope_charge()` as compile-time `size_of` of the actual wrapper layouts plus the concrete working objects (backend-local key, borrowing decoder, checksum accumulator). Carries an in-crate `#[cfg(test)] mod tests`.
+- `crates/qbind-node/src/signing_reservation_journal.rs` — added non-allocating `SigningPosition::encode_key_into(&mut [u8]) -> Result<usize, KeyEncodeError>` writing the identical canonical key as the unchanged `storage_key()`; fixed-code `BoundedDiag`/`BoundedStorageError` and `RetainedDelivery`/`RefuseReason`/`RetrievalError`; two defaulted `SigningJournalStorage` methods (`read_signing_envelope_into`, `reissue_signing_envelope_synced`) that refuse `Unsupported` by default; and `retrieve_retained(...)` — single journal-domain acquisition, conservative `accounting_uncertain` → `Blocked` with zero side effects (no metadata read, reconciliation, latch clear, counter update, or write; `reconcile_accounting_if_uncertain` is never called), non-allocating key encode, bounded pinned read with disjoint key/envelope borrows, full structural+semantic validation (both CRCs, magic, version, kind/stage tags, stage/signature consistency, position, binding, output capacity) BEFORE any write or output mutation, then cache-free classification. Test-only seams (`attach_unestablished_for_test`, `set_accounting_uncertain_for_test`, `insert_live_for_test`) are gated behind `#[cfg(any(test, feature = "test-utils"))]`. New caller-free items carry `#[cfg_attr(not(test), allow(dead_code))]` matching the repository convention.
+- `crates/qbind-node/src/storage.rs` — `signing_backend_key_fixed` builds the fixed `[u8; 59]` prefixed key on the stack (length checked before copy; no allocating `signing_record_key`); RocksDB `read_signing_envelope_into` (pinned `get_pinned` read, length check BEFORE copying into the admitted workspace) and `reissue_signing_envelope_synced` (direct synced `put_opt(set_sync(true))` of the exact already-validated envelope — same `wrap_checksummed` layout, no re-wrap/second envelope); the in-memory MODEL synthesizes the outer checksum on read and strips it on reissue, preserving record-only storage (model behavior, NOT crash durability). RocksDB library-internal buffering is explicitly OUTSIDE this component's accounting claim; a pinned API is not by itself a zero-allocation guarantee.
+- `crates/qbind-node/src/lib.rs` — module wiring only (`pub(crate) mod signing_journal_admission;`).
+
+Classification preserved (retained-only, cache-free, additive): uncertain → `Blocked`; missing → `Missing` (no fresh reservation); position mismatch / malformed / binding conflict → typed `Refused`; `Reserved` → `PotentiallySigned`; `Signed` with live `result_acked=false` → `PotentiallySigned` (no reissue/delivery); `Signed` with live `result_acked=true` → delivered after validation; `Signed` with NO live entry → exact-envelope SYNCED reissue BEFORE delivery, failed/uncertain reissue → `DeliverySuppressed` with output unchanged. Both delivering branches converge on ONE checked output-copy; no recovery-cache read/insert, no fresh signing reservation, no signer call.
+
+Measured layouts (`size_of`, debug target, this pass):
+
+| Item | `size_of` (bytes) |
+| --- | --- |
+| `AdmittedOutput` (`[u8;2420]` + `used` + `Reservation`) | 2480 |
+| `EnvelopeScratch` (`[u8;2520]` + `[u8;55]` jkey + 2×`usize` + `Reservation`) | 2640 |
+| `BorrowedRecordView` | 88 |
+| `Reservation` | 48 |
+
+Derived charges: `output_charge()` = 2480; `envelope_charge()` = `size_of::<EnvelopeScratch>()`(2640) + `BACKEND_KEY_LEN`(59) + `size_of::<BorrowedRecordView>()`(88) + `size_of::<u32>()`(4) = 2791. Combined workspace admission increment = 2480 + 2791 = 5271 bytes.
+
+Measured coexistence gate (N=4, S_sig=2420, real profile/accounting functions; a live `ValidatedRecord` holder retained throughout — NOT a `PreparedPin`/`DecidedVote`):
+
+| Quantity | Value (bytes) |
+| --- | --- |
+| Operational cap (`accounting_cap`) | 84,956 |
+| Aggregate cap (`accounting_aggregate_cap`) | 84,956 |
+| Context-ownership charge in the aggregate (pre-validate) | 240 |
+| Retained-holder charge of the live `ValidatedRecord` (operational) | 21,347 |
+| Baseline operational / aggregate (holder live) | 21,347 / 21,587 |
+| Peak operational / aggregate (holder + admitted workspace) | 26,618 / 26,858 |
+
+Both peaks remain within both UNCHANGED caps (26,618 ≤ 84,956 and 26,858 ≤ 84,956); the increment matches the derived 5,271. Observed destruction ordering: dropping the scratch returns operational charge to baseline+`output_charge` (2,480 over baseline) with the output still charged; dropping the output returns to baseline with the `ValidatedRecord` still held. Pressure refusal and retry were exercised by consuming all AGGREGATE headroom via `reserve_standing_for_test` (admission refuses) and then releasing it (admission succeeds). No cap was enlarged and no required live object was discarded to obtain success.
+
+Executed evidence (literal commands / results):
+
+- `cargo test -p qbind-node --lib signing_journal_admission` → `test result: ok. 18 passed; 0 failed`. Covers: partial admission charging both reservations BEFORE buffer construction and releasing on drop; second-admission refusal with clean rollback; scratch release with output coverage surviving; non-allocating `encode_key_into` byte-equality vs legacy `storage_key()` across kinds/views; Reserved→PotentiallySigned; recovered Signed reissue+delivery repeated cache-free with record preserved; live-unacked PotentiallySigned (no delivery); live-acked delivery without reissue; Missing; PositionMismatch; BindingConflict; truncated/garbage MalformedRecord; a VALID 3,000-byte-signature record refused `WorkspaceCapacityExceeded` (distinct from corruption, no larger allocation); uncertainty `Blocked` with zero metadata reads / state mutation / writes; default `Unsupported` backend refusal; real RocksDB envelope byte-for-byte preservation across recovered reissue; and the measured coexistence gate + pressure refusal/retry.
+- `cargo test -p qbind-node --lib signing_reservation_journal` → `test result: ok. 53 passed; 0 failed` (legacy journal regressions unaffected).
+- `cargo test -p qbind-node --lib storage` → `test result: ok. 40 passed; 0 failed` (legacy storage regressions unaffected).
+- `cargo test -p qbind-node --lib` → `test result: ok. 1910 passed; 0 failed` (full crate; includes the 18 new tests).
+- `cargo build -p qbind-node` → success, 0 warnings attributable to the new path (caller-free additive items carry `#[cfg_attr(not(test), allow(dead_code))]`; they are exercised under `cargo test`). Default (non-test) build compatibility confirmed.
+
+Line-ending discipline: per-file endings were preserved — `signing_reservation_journal.rs` remains CRLF (no final newline); `storage.rs` and `lib.rs` remain LF (no final newline); the new `signing_journal_admission.rs` was written CRLF / no-final-newline to match its journal sibling. No `cargo fmt` reformat was performed.
+
+Limits (not implemented / not claimed): the in-memory model backend's synthesized-outer-checksum behavior is MODEL evidence for exercising the read/validate/reissue path, NOT crash durability; the RocksDB synced reissue is a durability MECHANISM under the stated `fsync` assumptions, not demonstrated power-loss durability. No production caller, fresh-signing integration, retained-result verification/delivery wiring, protected-consumer integration, activation, deployment, D15, or Run 423 work was performed. CodeQL/local review outcomes are recorded only to the extent literally executed; skipped scans and unavailable engines are not claimed as completed assurance.
+
+Status unchanged by this pass: `D7D14_STORAGE_COMPONENT=IMPLEMENTED-ISOLATED`; `D7D14_STORAGE_ACCEPTANCE=PASS-ACCEPTED-SUBSET`; §13.6 INCOMPLETE; `GENESIS_AUTHORITY_ACTIVATION=DISABLED`; `SECURITY_POSTURE=RS1-OPEN / PUBLIC-DEVNET-NO-GO`; durable anti-rollback NOT-ESTABLISHED; C4/C5 OPEN. This pass establishes NO production regression, reopens NO accepted storage verdict, and grants NO signing/freshness/retained-reuse authorization.

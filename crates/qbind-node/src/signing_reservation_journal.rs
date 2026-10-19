@@ -43,6 +43,9 @@ use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Mutex};
 
 use crate::storage::{signing_journal_crc32, StorageError};
+use crate::signing_journal_admission::{
+    AdmittedOutput, BorrowedRecordView, EnvelopeScratch, ENVELOPE_SIG_OFFSET, JOURNAL_KEY_LEN,
+};
 
 /// Journal-record format version — a **persistence-format identifier** for the
 /// signing record, independent of BOTH the wire-message version and the D6
@@ -179,6 +182,39 @@ impl SigningPosition {
         key.extend_from_slice(&self.originating_view.to_be_bytes());
         key
     }
+
+    /// Run 422 — write the canonical position key directly into `dst` WITHOUT
+    /// allocating (the retained-retrieval path must not call the allocating
+    /// [`SigningPosition::storage_key`], which returns a `Vec`). Writes exactly
+    /// [`JOURNAL_KEY_LEN`] bytes in the identical prefix / field order / width /
+    /// endianness / kind-tag layout as the legacy encoder, and returns the number
+    /// of bytes written. The legacy `storage_key` method is left unchanged.
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub(crate) fn encode_key_into(&self, dst: &mut [u8]) -> Result<usize, KeyEncodeError> {
+        if dst.len() < JOURNAL_KEY_LEN {
+            return Err(KeyEncodeError::BufferTooSmall);
+        }
+        let p = SIGNING_RECORD_KEY_PREFIX;
+        let plen = p.len();
+        dst[0..plen].copy_from_slice(p);
+        dst[plen] = self.kind.tag();
+        let vid = plen + 1;
+        dst[vid..vid + 8].copy_from_slice(&self.validator_id.to_be_bytes());
+        let gen = vid + 8;
+        dst[gen..gen + 32].copy_from_slice(&self.network_genesis);
+        let view = gen + 32;
+        dst[view..view + 8].copy_from_slice(&self.originating_view.to_be_bytes());
+        Ok(JOURNAL_KEY_LEN)
+    }
+}
+
+/// Run 422 — fixed-code failure of the non-allocating key encoder (no
+/// application-created `String`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(not(test), allow(dead_code))]
+pub(crate) enum KeyEncodeError {
+    /// The destination buffer is smaller than [`JOURNAL_KEY_LEN`].
+    BufferTooSmall,
 }
 
 /// The exact-message **binding digest**. A change to any exact-message binding
@@ -797,6 +833,98 @@ pub struct ResultPublicationCapability {
 /// operation. A backend whose write is not power-loss durable (the in-memory
 /// model) documents itself as such and must not masquerade as a durable
 /// production backend.
+/// Run 422 — fixed diagnostic codes for the bounded retained-retrieval storage
+/// methods. No application-created `String` is produced on this path; backend
+/// library-internal allocations (e.g. RocksDB's own key/value buffers) are
+/// documented as outside this component's accounting claim.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BoundedDiag {
+    /// A key/record could not be interpreted within its fixed layout.
+    DecodeInvalid,
+    /// A stored envelope failed a structural/length invariant.
+    EnvelopeInvalid,
+    /// A backend read failed.
+    ReadIo,
+    /// A backend write failed.
+    WriteIo,
+    /// A backend lock could not be acquired.
+    LockRefused,
+    /// A supplied journal key had an unexpected length.
+    KeyInvalid,
+}
+
+/// Run 422 — typed, allocation-free error for the bounded retained-retrieval
+/// storage methods.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BoundedStorageError {
+    /// A stored value exceeds the admitted workspace capacity. This is a bounded
+    /// refusal — NOT corruption and NOT a trigger for a larger allocation.
+    CapacityExceeded {
+        /// The stored value length.
+        stored_len: usize,
+        /// The admitted capacity it exceeded.
+        capacity: usize,
+    },
+    /// Stored bytes violate a structural invariant.
+    Corruption(BoundedDiag),
+    /// A backend I/O or lock failure.
+    Io(BoundedDiag),
+    /// The backend does not support the bounded retained-retrieval path.
+    Unsupported,
+}
+
+/// Run 422 — the outcome of a bounded retained-signature retrieval. Borrows the
+/// admitted output for `'o`; `Retained` is the ONLY delivering variant and every
+/// other variant leaves the output bytes and length unchanged.
+#[derive(Debug)]
+#[cfg_attr(not(test), allow(dead_code))]
+pub(crate) enum RetainedDelivery<'o> {
+    /// Journal accounting is uncertain; refused conservatively with zero side
+    /// effects (no metadata read, reconciliation, latch clearing, counter
+    /// update, or write).
+    Blocked,
+    /// No record exists at this position.
+    Missing,
+    /// A typed, non-delivering refusal.
+    Refused(RefuseReason),
+    /// A reservation (or a live-but-unacknowledged signed result) exists; no
+    /// retained signature is delivered.
+    PotentiallySigned,
+    /// A recovered signed record's synced reissue failed or was uncertain, so
+    /// delivery is suppressed and the output is unchanged.
+    DeliverySuppressed,
+    /// The validated retained signature, borrowed from the admitted output.
+    Retained(&'o [u8]),
+}
+
+/// Run 422 — typed, non-delivering refusal reasons (fixed codes).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(not(test), allow(dead_code))]
+pub(crate) enum RefuseReason {
+    /// The stored record's position does not match the requested key.
+    PositionMismatch,
+    /// The stored record is structurally or semantically malformed.
+    MalformedRecord,
+    /// The stored record's exact-message binding conflicts with the request.
+    BindingConflict,
+    /// A valid record whose signature/envelope exceeds the admitted workspace
+    /// capacity — a distinct bounded refusal, not corruption.
+    WorkspaceCapacityExceeded,
+}
+
+/// Run 422 — fatal (non-classification) errors from the retained-retrieval
+/// path.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(not(test), allow(dead_code))]
+pub(crate) enum RetrievalError {
+    /// The ownership-domain lock was poisoned.
+    Lock,
+    /// The backend does not support the bounded retained-retrieval path.
+    Unsupported,
+    /// A backend storage read/write error (fixed diagnostic code).
+    Storage(BoundedDiag),
+}
+
 pub trait SigningJournalStorage: Send + Sync {
     /// Read the raw record bytes stored at `key`, or `None` if absent. Corruption
     /// detected by the storage envelope is surfaced as
@@ -885,6 +1013,36 @@ pub trait SigningJournalStorage: Send + Sync {
     /// This is not an anti-rollback anchor and makes no cross-copy/cross-host
     /// exclusivity claim.
     fn signing_ownership_domain(&self) -> Arc<SigningOwnershipDomain>;
+
+    /// Run 422 — bounded, pinned read of ONE complete stored signing envelope at
+    /// `journal_key` into `dst`, WITHOUT any application-owned allocation. The
+    /// backend applies a length check BEFORE copying into `dst`: a stored value
+    /// larger than `dst` is refused with [`BoundedStorageError::CapacityExceeded`]
+    /// (never silently truncated, never grown). Returns the number of bytes
+    /// written, or `None` for a genuine absence. The default refuses with
+    /// [`BoundedStorageError::Unsupported`]; a supporting backend overrides it.
+    fn read_signing_envelope_into(
+        &self,
+        journal_key: &[u8],
+        dst: &mut [u8],
+    ) -> Result<Option<usize>, BoundedStorageError> {
+        let _ = (journal_key, dst);
+        Err(BoundedStorageError::Unsupported)
+    }
+
+    /// Run 422 — reissue one EXACT already-validated stored envelope at
+    /// `journal_key` under the required synced durability barrier, WITHOUT
+    /// re-wrapping, re-encoding, or allocating a second application envelope. The
+    /// default refuses with [`BoundedStorageError::Unsupported`]; a supporting
+    /// backend overrides it.
+    fn reissue_signing_envelope_synced(
+        &self,
+        journal_key: &[u8],
+        envelope: &[u8],
+    ) -> Result<(), BoundedStorageError> {
+        let _ = (journal_key, envelope);
+        Err(BoundedStorageError::Unsupported)
+    }
 }
 
 /// Run 422 D7-D10 Correction E — a bounded, process-local cache of recovered
@@ -1537,6 +1695,215 @@ impl SigningReservationJournal {
             binding: *binding,
             operation_id,
         }))
+    }
+
+    /// Run 422 — additive, isolated, retained-ONLY signature retrieval.
+    ///
+    /// Acquires the ownership domain ONCE. If journal accounting is uncertain it
+    /// refuses conservatively (`Blocked`) with ZERO side effects. Otherwise it
+    /// reads one bounded envelope into the admitted scratch, validates both
+    /// checksums, structure, position, binding, stage, and output capacity BEFORE
+    /// any reissue write or output mutation, and classifies exactly as
+    /// `reserve_for_sign` does — but cache-free and additive:
+    ///
+    /// * `Reserved` → `PotentiallySigned`.
+    /// * `Signed` with a live unacknowledged result → `PotentiallySigned`.
+    /// * `Signed` with a live acknowledged result → delivered after validation.
+    /// * `Signed` with NO live entry → exact-envelope SYNCED reissue BEFORE
+    ///   delivery (no recovery-cache read/insert); a failed/uncertain reissue
+    ///   suppresses delivery and leaves the output unchanged.
+    ///
+    /// Both delivering branches converge on ONE checked output-copy and return a
+    /// borrowed view of the admitted output. It makes no fresh reservation, grants
+    /// no continuation or publication capability, and never invokes the signer.
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub(crate) fn retrieve_retained<'o>(
+        &self,
+        position: &SigningPosition,
+        binding: &BindingDigest,
+        scratch: &mut EnvelopeScratch,
+        output: &'o mut AdmittedOutput,
+    ) -> Result<RetainedDelivery<'o>, RetrievalError> {
+        // Single ownership-domain acquisition (short-lived leaf; no re-entry).
+        let inner = self.domain.inner.lock().map_err(|_| RetrievalError::Lock)?;
+
+        // Conservative uncertainty refusal: no metadata read, reconciliation,
+        // latch clearing, counter update, or write.
+        if inner.accounting_uncertain {
+            return Ok(RetainedDelivery::Blocked);
+        }
+
+        // Non-allocating key encode into the admitted 55-byte array.
+        let klen = position
+            .encode_key_into(scratch.journal_key_buf())
+            .map_err(|_| RetrievalError::Storage(BoundedDiag::KeyInvalid))?;
+        scratch.set_jkey_len(klen);
+
+        // Bounded pinned read with disjoint key/envelope borrows.
+        let used = {
+            let (jk, env) = scratch.key_and_envelope();
+            match self.store.read_signing_envelope_into(jk, env) {
+                Ok(None) => return Ok(RetainedDelivery::Missing),
+                Ok(Some(n)) => n,
+                Err(BoundedStorageError::CapacityExceeded { .. }) => {
+                    return Ok(RetainedDelivery::Refused(
+                        RefuseReason::WorkspaceCapacityExceeded,
+                    ));
+                }
+                Err(BoundedStorageError::Unsupported) => {
+                    return Err(RetrievalError::Unsupported);
+                }
+                Err(BoundedStorageError::Corruption(d)) | Err(BoundedStorageError::Io(d)) => {
+                    return Err(RetrievalError::Storage(d));
+                }
+            }
+        };
+        scratch
+            .set_used(used)
+            .map_err(|_| RetrievalError::Storage(BoundedDiag::EnvelopeInvalid))?;
+
+        // Structural validation: both checksum layers and every length relation,
+        // then semantic validation — all BEFORE any write or output mutation.
+        let kind;
+        let stage;
+        let sig_len;
+        let decoded_position;
+        let decoded_binding;
+        {
+            let view = match BorrowedRecordView::parse(scratch.envelope()) {
+                Ok(v) => v,
+                Err(_) => {
+                    return Ok(RetainedDelivery::Refused(RefuseReason::MalformedRecord));
+                }
+            };
+            if view.magic != &RECORD_MAGIC[..] || view.version != SIGNING_RECORD_FORMAT_VERSION {
+                return Ok(RetainedDelivery::Refused(RefuseReason::MalformedRecord));
+            }
+            kind = match SigningKind::from_tag(view.kind_tag) {
+                Some(k) => k,
+                None => {
+                    return Ok(RetainedDelivery::Refused(RefuseReason::MalformedRecord));
+                }
+            };
+            stage = match SigningRecordStage::from_tag(view.stage_tag) {
+                Some(st) => st,
+                None => {
+                    return Ok(RetainedDelivery::Refused(RefuseReason::MalformedRecord));
+                }
+            };
+            sig_len = view.sig_len();
+            match stage {
+                SigningRecordStage::Reserved if sig_len != 0 => {
+                    return Ok(RetainedDelivery::Refused(RefuseReason::MalformedRecord));
+                }
+                SigningRecordStage::Signed if sig_len == 0 => {
+                    return Ok(RetainedDelivery::Refused(RefuseReason::MalformedRecord));
+                }
+                _ => {}
+            }
+            let mut genesis = [0u8; 32];
+            genesis.copy_from_slice(view.network_genesis);
+            decoded_position = SigningPosition {
+                validator_id: view.validator_id,
+                network_genesis: genesis,
+                kind,
+                originating_view: view.originating_view,
+            };
+            let mut bind = [0u8; 32];
+            bind.copy_from_slice(view.binding);
+            decoded_binding = BindingDigest(bind);
+        }
+
+        // Position/key-derivation invariant.
+        if decoded_position != *position {
+            return Ok(RetainedDelivery::Refused(RefuseReason::PositionMismatch));
+        }
+        // Exact-message binding.
+        if decoded_binding != *binding {
+            return Ok(RetainedDelivery::Refused(RefuseReason::BindingConflict));
+        }
+        // Output capacity validated BEFORE any reissue write or output mutation.
+        if sig_len > output.capacity() {
+            return Ok(RetainedDelivery::Refused(
+                RefuseReason::WorkspaceCapacityExceeded,
+            ));
+        }
+
+        // Classification (retained-only, cache-free). A `None` live entry is
+        // STRICTLY distinguished from `Some(false)`.
+        match stage {
+            SigningRecordStage::Reserved => {
+                return Ok(RetainedDelivery::PotentiallySigned);
+            }
+            SigningRecordStage::Signed => {
+                match inner.live.get(position).map(|ls| ls.result_acked) {
+                    Some(false) => {
+                        return Ok(RetainedDelivery::PotentiallySigned);
+                    }
+                    Some(true) => {
+                        // Live acknowledged: no reissue needed.
+                    }
+                    None => {
+                        // Recovered: cache-free exact-envelope synced reissue
+                        // BEFORE delivery.
+                        let jk = scratch.journal_key();
+                        let env = scratch.envelope();
+                        if self.store.reissue_signing_envelope_synced(jk, env).is_err() {
+                            return Ok(RetainedDelivery::DeliverySuppressed);
+                        }
+                    }
+                }
+            }
+        }
+
+        // One common checked output-copy step (both delivering Signed branches).
+        let env = scratch.envelope();
+        let sig = &env[ENVELOPE_SIG_OFFSET..ENVELOPE_SIG_OFFSET + sig_len];
+        output
+            .set(sig)
+            .map_err(|_| RetrievalError::Storage(BoundedDiag::EnvelopeInvalid))?;
+        Ok(RetainedDelivery::Retained(output.view()))
+    }
+
+    /// Test-only: attach a handle over `store` WITHOUT establishing a limit, so
+    /// the additive, read-only retained-retrieval path can be exercised against
+    /// directly-written records. (The retrieval path takes no new reservation and
+    /// does not require an established limit.)
+    #[cfg(any(test, feature = "test-utils"))]
+    pub(crate) fn attach_unestablished_for_test(store: Arc<dyn SigningJournalStorage>) -> Self {
+        let domain = store.signing_ownership_domain();
+        Self { store, domain }
+    }
+
+    /// Test-only: set/clear the domain's `accounting_uncertain` latch.
+    #[cfg(any(test, feature = "test-utils"))]
+    pub(crate) fn set_accounting_uncertain_for_test(&self, v: bool) {
+        let mut inner = self.domain.inner.lock().expect("domain lock");
+        inner.accounting_uncertain = v;
+    }
+
+    /// Test-only: install a live entry for `position` with the chosen
+    /// `result_acked`, modelling a live operation without running the full
+    /// signing flow.
+    #[cfg(any(test, feature = "test-utils"))]
+    pub(crate) fn insert_live_for_test(
+        &self,
+        position: SigningPosition,
+        binding: BindingDigest,
+        result_acked: bool,
+    ) {
+        let mut inner = self.domain.inner.lock().expect("domain lock");
+        let op = inner.next_operation_id;
+        inner.next_operation_id = op.wrapping_add(1);
+        inner.live.insert(
+            position,
+            LiveState {
+                operation_id: op,
+                binding,
+                invoked: true,
+                result_acked,
+            },
+        );
     }
 
     /// Run 422 D7-D10 Correction E — conservative accounting revalidation.

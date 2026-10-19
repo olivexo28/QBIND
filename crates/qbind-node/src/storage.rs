@@ -1339,6 +1339,34 @@ impl RocksDbConsensusStorage {
 /// demonstrated power-loss durability. Records are wrapped in the same CRC-32
 /// checksum envelope used for blocks/QCs/epoch values (corruption detection
 /// only — not authentication, not rollback protection).
+///
+/// Run 422 — build the fixed backend-prefixed signing key `sig:<journal_key>`
+/// into a stack `[u8; BACKEND_KEY_LEN]` WITHOUT the allocating legacy
+/// `signing_record_key` builder. The journal-key length is validated BEFORE any
+/// copy; a key of unexpected length is refused with a bounded error rather than
+/// panicking or truncating.
+fn signing_backend_key_fixed(
+    journal_key: &[u8],
+) -> Result<
+    [u8; crate::signing_journal_admission::BACKEND_KEY_LEN],
+    crate::signing_reservation_journal::BoundedStorageError,
+> {
+    use crate::signing_journal_admission::{BACKEND_KEY_LEN, JOURNAL_KEY_LEN};
+    if journal_key.len() != JOURNAL_KEY_LEN {
+        return Err(
+            crate::signing_reservation_journal::BoundedStorageError::CapacityExceeded {
+                stored_len: journal_key.len(),
+                capacity: JOURNAL_KEY_LEN,
+            },
+        );
+    }
+    let mut k = [0u8; BACKEND_KEY_LEN];
+    let plen = SIGNING_RECORD_STORAGE_PREFIX.len();
+    k[..plen].copy_from_slice(SIGNING_RECORD_STORAGE_PREFIX);
+    k[plen..].copy_from_slice(journal_key);
+    Ok(k)
+}
+
 impl crate::signing_reservation_journal::SigningJournalStorage for RocksDbConsensusStorage {
     fn get_signing_record(&self, key: &[u8]) -> Result<Option<Vec<u8>>, StorageError> {
         // Bounded direct read: a decision record is at most `MAX_RECORD_LEN`;
@@ -1477,6 +1505,60 @@ impl crate::signing_reservation_journal::SigningJournalStorage for RocksDbConsen
             visitor(journal_key, &payload)?;
         }
         Ok(())
+    }
+
+    fn read_signing_envelope_into(
+        &self,
+        journal_key: &[u8],
+        dst: &mut [u8],
+    ) -> Result<Option<usize>, crate::signing_reservation_journal::BoundedStorageError> {
+        use crate::signing_reservation_journal::{BoundedDiag, BoundedStorageError};
+        // Build the fixed backend-prefixed key on the stack (no allocating legacy
+        // key builder). Length is validated before any copy.
+        let bkey = signing_backend_key_fixed(journal_key)?;
+        // Pinned read: borrow the backend-internal value without an application
+        // copy, apply the length bound, then copy ONE complete envelope into the
+        // admitted workspace. The pinned slice is a RocksDB-internal buffer; this
+        // method makes no application-owned heap allocation. (RocksDB's own
+        // library-internal buffering is explicitly OUTSIDE this component's
+        // accounting claim; a pinned API is not by itself a zero-allocation
+        // guarantee for the backend library.)
+        match self.db.get_pinned(&bkey[..]) {
+            Ok(None) => Ok(None),
+            Ok(Some(pinned)) => {
+                let raw = pinned.as_ref();
+                // Length check BEFORE copying into `dst`. A stored value larger
+                // than the admitted workspace is a bounded refusal, never grown
+                // and never silently truncated.
+                if raw.len() > dst.len() {
+                    return Err(BoundedStorageError::CapacityExceeded {
+                        stored_len: raw.len(),
+                        capacity: dst.len(),
+                    });
+                }
+                dst[..raw.len()].copy_from_slice(raw);
+                Ok(Some(raw.len()))
+            }
+            Err(_) => Err(BoundedStorageError::Io(BoundedDiag::ReadIo)),
+        }
+    }
+
+    fn reissue_signing_envelope_synced(
+        &self,
+        journal_key: &[u8],
+        envelope: &[u8],
+    ) -> Result<(), crate::signing_reservation_journal::BoundedStorageError> {
+        use crate::signing_reservation_journal::{BoundedDiag, BoundedStorageError};
+        // Reissue the EXACT already-validated envelope bytes (outer CRC + record)
+        // under the required synced barrier. The stored format is identical to the
+        // legacy `wrap_checksummed` layout, so no re-wrap, re-encode, or second
+        // application envelope is produced.
+        let bkey = signing_backend_key_fixed(journal_key)?;
+        let mut write_opts = rocksdb::WriteOptions::default();
+        write_opts.set_sync(true);
+        self.db
+            .put_opt(&bkey[..], envelope, &write_opts)
+            .map_err(|_| BoundedStorageError::Io(BoundedDiag::WriteIo))
     }
 
     fn signing_ownership_domain(
@@ -1644,6 +1726,64 @@ impl crate::signing_reservation_journal::SigningJournalStorage for InMemoryConse
             }
             visitor(k, v)?;
         }
+        Ok(())
+    }
+
+    fn read_signing_envelope_into(
+        &self,
+        journal_key: &[u8],
+        dst: &mut [u8],
+    ) -> Result<Option<usize>, crate::signing_reservation_journal::BoundedStorageError> {
+        use crate::signing_journal_admission::OUTER_CRC_LEN;
+        use crate::signing_reservation_journal::{BoundedDiag, BoundedStorageError};
+        // MODEL backend: records are stored record-ONLY (no outer envelope) and
+        // keyed directly by the journal key. The model SYNTHESIZES the outer
+        // storage checksum on read so the caller validates the same two checksum
+        // layers it would for the durable backend. This is model behavior for
+        // exercising the read/validate/reissue path, NOT crash durability.
+        let map = self
+            .signing_records
+            .read()
+            .map_err(|_| BoundedStorageError::Io(BoundedDiag::LockRefused))?;
+        match map.get(journal_key) {
+            None => Ok(None),
+            Some(record) => {
+                let total = OUTER_CRC_LEN + record.len();
+                // Length check BEFORE copying into the admitted workspace.
+                if total > dst.len() {
+                    return Err(BoundedStorageError::CapacityExceeded {
+                        stored_len: total,
+                        capacity: dst.len(),
+                    });
+                }
+                let crc = signing_journal_crc32(record);
+                dst[..OUTER_CRC_LEN].copy_from_slice(&crc.to_be_bytes());
+                dst[OUTER_CRC_LEN..total].copy_from_slice(record);
+                Ok(Some(total))
+            }
+        }
+    }
+
+    fn reissue_signing_envelope_synced(
+        &self,
+        journal_key: &[u8],
+        envelope: &[u8],
+    ) -> Result<(), crate::signing_reservation_journal::BoundedStorageError> {
+        use crate::signing_journal_admission::OUTER_CRC_LEN;
+        use crate::signing_reservation_journal::{BoundedDiag, BoundedStorageError};
+        // MODEL backend: STRIP the synthesized outer checksum on reissue so the
+        // record-only storage format is preserved. The map insert is the model's
+        // internal storage, not a bounded production allocation, and provides no
+        // power-loss durability.
+        if envelope.len() < OUTER_CRC_LEN {
+            return Err(BoundedStorageError::Corruption(BoundedDiag::EnvelopeInvalid));
+        }
+        let record = &envelope[OUTER_CRC_LEN..];
+        let mut map = self
+            .signing_records
+            .write()
+            .map_err(|_| BoundedStorageError::Io(BoundedDiag::LockRefused))?;
+        map.insert(journal_key.to_vec(), record.to_vec());
         Ok(())
     }
 
