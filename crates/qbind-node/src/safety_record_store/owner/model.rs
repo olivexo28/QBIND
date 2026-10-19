@@ -522,6 +522,185 @@ pub(crate) enum ReconfirmPerturbation {
 }
 
 // ===========================================================================
+// RUN 422 §3 — owned-object lifetime observer (release-order evidence).
+//
+// A bounded, model-only observer that records, IN ORDER, the destruction of the
+// model's ACTUAL owned signing backings (the owned public-key lookup `Vec` and
+// the preimage `Vec`) and the release of their covering signing reservation, so
+// a test can assert every tracked backing is destroyed BEFORE the covering
+// reservation releases. It is installed through a thread-local so no production
+// signature or model call site changes; a run WITHOUT an installed probe pays
+// only a null check and records nothing.
+//
+// This is OWNED-OBJECT LIFETIME evidence only. It does NOT trace allocator
+// addresses, measure process RSS, or establish crash durability; ordering of the
+// unobserved scope objects remains source-reasoned (Rust reverse-drop order).
+//
+// The probe itself is a CALLER-OWNED test fixture (an `Rc` created by the test),
+// identified separately from the model's charged working set. The in-model
+// wrappers (`TrackedBacking`, `TrackedReservation`) add only a pointer-sized
+// `Option<Rc<..>>` and a `&'static str` label each — model-owned control objects
+// that fit within the UNCHANGED signing-working-set reservation (the actual
+// pubkey/preimage are far below their conservative `MODEL_MAX_*` backing bounds,
+// leaving ample slack); no cap or charge is raised to accommodate them.
+// ===========================================================================
+
+#[derive(Default)]
+struct ReleaseOrderState {
+    /// Ordered event log of backing destructions and the reservation release.
+    log: Vec<&'static str>,
+    /// Labels of the tracked backings destroyed so far.
+    fired_backings: Vec<&'static str>,
+    /// Snapshot of `fired_backings` taken at the covering reservation's release
+    /// boundary (set exactly once, when the covering reservation releases).
+    release_snapshot: Option<Vec<&'static str>>,
+}
+
+/// Owned-object lifetime observer (RUN 422 §3). See the module comment above.
+pub(crate) struct ReleaseOrderProbe {
+    state: std::cell::RefCell<ReleaseOrderState>,
+}
+
+impl ReleaseOrderProbe {
+    pub(crate) fn new() -> Self {
+        Self {
+            state: std::cell::RefCell::new(ReleaseOrderState::default()),
+        }
+    }
+
+    fn record_backing(&self, label: &'static str) {
+        let mut s = self.state.borrow_mut();
+        s.fired_backings.push(label);
+        s.log.push(label);
+    }
+
+    fn record_reservation_release(&self, label: &'static str) {
+        let mut s = self.state.borrow_mut();
+        // Snapshot which tracked backings have ALREADY been destroyed at the
+        // instant the covering reservation is about to release. Recorded once.
+        if s.release_snapshot.is_none() {
+            let fired = s.fired_backings.clone();
+            s.release_snapshot = Some(fired);
+        }
+        s.log.push(label);
+    }
+
+    /// True once the covering reservation's release boundary has been observed.
+    pub(crate) fn release_observed(&self) -> bool {
+        self.state.borrow().release_snapshot.is_some()
+    }
+
+    /// True iff EVERY `expected` tracked backing had already been destroyed at the
+    /// covering reservation's release boundary (i.e. no covered backing remained
+    /// live when the covering reservation released). False if the boundary was
+    /// never observed or any expected backing was still live there.
+    pub(crate) fn backings_destroyed_before_release(&self, expected: &[&'static str]) -> bool {
+        let s = self.state.borrow();
+        match &s.release_snapshot {
+            Some(snap) => expected.iter().all(|e| snap.contains(e)),
+            None => false,
+        }
+    }
+
+    /// The ordered destruction/release event log, for diagnostics.
+    pub(crate) fn event_log(&self) -> Vec<&'static str> {
+        self.state.borrow().log.clone()
+    }
+}
+
+thread_local! {
+    /// The release-order probe installed for the CURRENT thread's model call, if
+    /// any. `None` in normal runs — the model then records nothing.
+    static RELEASE_ORDER_PROBE: std::cell::RefCell<Option<std::rc::Rc<ReleaseOrderProbe>>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+fn current_release_probe() -> Option<std::rc::Rc<ReleaseOrderProbe>> {
+    RELEASE_ORDER_PROBE.with(|c| c.borrow().clone())
+}
+
+/// RAII installer for a release-order probe on the current thread; clears the
+/// thread-local on drop so a panicking test cannot leak the probe onto a reused
+/// test thread.
+pub(crate) struct ReleaseProbeGuard;
+
+impl Drop for ReleaseProbeGuard {
+    fn drop(&mut self) {
+        RELEASE_ORDER_PROBE.with(|c| *c.borrow_mut() = None);
+    }
+}
+
+pub(crate) fn install_release_probe(probe: std::rc::Rc<ReleaseOrderProbe>) -> ReleaseProbeGuard {
+    RELEASE_ORDER_PROBE.with(|c| *c.borrow_mut() = Some(probe));
+    ReleaseProbeGuard
+}
+
+/// Wraps an ACTUAL owned signing backing (`Vec<u8>`) so its destruction is
+/// recorded against the installed release-order probe (RUN 422 §3). The wrapper
+/// OWNS the real buffer, so the recorded event fires at the buffer's genuine
+/// destruction boundary — not at a co-located proxy.
+struct TrackedBacking {
+    buf: Vec<u8>,
+    probe: Option<std::rc::Rc<ReleaseOrderProbe>>,
+    label: &'static str,
+}
+
+impl TrackedBacking {
+    fn new(
+        buf: Vec<u8>,
+        probe: Option<std::rc::Rc<ReleaseOrderProbe>>,
+        label: &'static str,
+    ) -> Self {
+        Self { buf, probe, label }
+    }
+
+    fn as_slice(&self) -> &[u8] {
+        &self.buf
+    }
+
+    fn capacity(&self) -> usize {
+        self.buf.capacity()
+    }
+}
+
+impl Drop for TrackedBacking {
+    fn drop(&mut self) {
+        if let Some(p) = &self.probe {
+            p.record_backing(self.label);
+        }
+    }
+}
+
+/// Wraps the ACTUAL covering signing reservation so its release boundary is
+/// recorded against the installed release-order probe (RUN 422 §3). `Drop::drop`
+/// records the boundary while the inner reservation is still live, then the inner
+/// reservation releases; by then every tracked backing declared AFTER this
+/// wrapper has already been destroyed (Rust reverse-drop order).
+struct TrackedReservation<R> {
+    _res: R,
+    probe: Option<std::rc::Rc<ReleaseOrderProbe>>,
+    label: &'static str,
+}
+
+impl<R> TrackedReservation<R> {
+    fn new(res: R, probe: Option<std::rc::Rc<ReleaseOrderProbe>>, label: &'static str) -> Self {
+        Self {
+            _res: res,
+            probe,
+            label,
+        }
+    }
+}
+
+impl<R> Drop for TrackedReservation<R> {
+    fn drop(&mut self) {
+        if let Some(p) = &self.probe {
+            p.record_reservation_release(self.label);
+        }
+    }
+}
+
+// ===========================================================================
 // Model entry + private held-guard tail (ONE ordered protected sequence).
 // ===========================================================================
 
@@ -695,10 +874,16 @@ fn fresh_vote_sign_model<H: CommittedHistory + ?Sized>(
     }
 
     // 6. Admit the signing working set BEFORE constructing any signing object.
-    let _signing_res = match owner.backend.accounting().reserve(signing_charge()) {
+    //    RUN 422 §3 — capture the installed release-order probe (None in normal
+    //    runs) and wrap the covering signing reservation so its release boundary
+    //    is observable relative to the owned backings destroyed below.
+    let release_probe = current_release_probe();
+    let signing_res_inner = match owner.backend.accounting().reserve(signing_charge()) {
         Ok(r) => r,
         Err(_) => return ModelFreshUseOutcome::SigningAdmitRefused,
     };
+    let _signing_res =
+        TrackedReservation::new(signing_res_inner, release_probe.clone(), "signing_res_release");
 
     // 7. Unsigned-input assumption: the captured self-vote must be unsigned with a
     //    zero-capacity signature backing. A populated (or non-empty-capacity)
@@ -737,7 +922,7 @@ fn fresh_vote_sign_model<H: CommittedHistory + ?Sized>(
     //     (the lookup public key, the preimage, position, binding) are covered by
     //     `signing_res` and returned into function scope so they are destroyed
     //     before `signing_res` releases.
-    let (position, binding, preimage, _owned_pk, preimage_len) = {
+    let (position, binding, preimage, owned_pk, preimage_len) = {
         let ctx: &ProposalVoteAuthority = snapshot.verifier();
 
         if vote.round != vote.height || vote.step != 0 {
@@ -804,6 +989,17 @@ fn fresh_vote_sign_model<H: CommittedHistory + ?Sized>(
         preimage.capacity() as u128 <= MODEL_MAX_PREIMAGE_BYTES,
         "model preimage backing capacity exceeded the reserved bound"
     );
+    // RUN 422 §3 — wrap the ACTUAL owned signing backings (the preimage and the
+    // owned public-key lookup `Vec`) so their destruction is observed relative to
+    // the covering `signing_res` release. Declared AFTER `signing_res`, so Rust's
+    // reverse-drop order destroys both backings BEFORE the covering reservation
+    // releases on success and on every early return below.
+    let _owned_pk = TrackedBacking::new(owned_pk, release_probe.clone(), "owned_pk_backing");
+    let preimage = TrackedBacking::new(preimage, release_probe.clone(), "preimage_backing");
+    debug_assert!(
+        preimage.capacity() as u128 <= MODEL_MAX_PREIMAGE_BYTES,
+        "wrapped preimage backing capacity exceeded the reserved bound"
+    );
 
     // 11. D10 reserve -> consume.
     let continuation = match journal.reserve_for_sign(&position, &binding) {
@@ -842,7 +1038,7 @@ fn fresh_vote_sign_model<H: CommittedHistory + ?Sized>(
     coord.on_post_consume_pre_sign();
 
     // 14. Invoke the bounded signer; validate length BEFORE slicing/persist/sink.
-    let n = match signer.sign_vote_into(&preimage, &mut out[..]) {
+    let n = match signer.sign_vote_into(preimage.as_slice(), &mut out[..]) {
         Ok(n) => n,
         Err(_) => return ModelFreshUseOutcome::SignerFailed,
     };
@@ -1394,6 +1590,39 @@ mod tests {
             .expect("pin provenance readable under the domain guard")
     }
 
+    /// RUN 422 §2/§4 — shared refusal/success cleanup check. With the SAME borrowed
+    /// envelope and pin still alive, require exact restoration of BOTH accounting
+    /// ledgers to `ledgers_before` and equality of the complete borrowed Vote and
+    /// the ORIGINAL pin provenance. Ledger equality on a single partition is
+    /// insufficient, and ledger equality alone does not establish pin-provenance
+    /// preservation, so the fixed-size scalar provenance and the complete Vote are
+    /// compared directly. `ledgers_before`/`prov_before` must be sampled while the
+    /// envelope/pin are live, before the model call.
+    fn assert_cleanup_preserved(
+        owner: &SafetyRecordOwner,
+        decided: &qbind_consensus::DecidedVote<OwningCapturePayload>,
+        base_vote: &Vote,
+        ledgers_before: LedgerSnapshot,
+        prov_before: PreparedProvenance,
+        label: &str,
+    ) {
+        assert_eq!(
+            snapshot_ledgers(owner),
+            ledgers_before,
+            "both operational and aggregate ledgers restored after {label}"
+        );
+        assert_eq!(
+            pin_provenance_now(owner, decided),
+            prov_before,
+            "the original pin provenance is preserved across {label}"
+        );
+        assert_eq!(
+            decided.vote(),
+            base_vote,
+            "the complete borrowed Vote is unchanged across {label}"
+        );
+    }
+
     // ======================================================================
     // Scenario 1 — successful fresh execution: exactly ONE signer + ONE sink.
     // ======================================================================
@@ -1529,6 +1758,11 @@ mod tests {
         // Wrong limits: a different validator count yields a different policy.
         let wrong = limits(&ctx_n(5));
 
+        // RUN 422 §2/§4 — snapshot BOTH ledgers and the pin provenance before the
+        // call, with the borrowed envelope/pin live.
+        let ledgers_before = snapshot_ledgers(&owner);
+        let prov_before = pin_provenance_now(&owner, &decided);
+
         let outcome = fresh_vote_sign_model::<FixtureCommittedHistory>(
             &owner, &engine, &decided, &p1, &wrong, None, &mut snapshot,
             &signer, &mut sink, &journal, &mut coord,
@@ -1539,6 +1773,9 @@ mod tests {
         assert_eq!(coord.calls, 0);
         assert_eq!(signer.calls(), 0, "policy refusal invokes the signer zero times");
         assert_no_reservation_made(&journal, &pv, &base_vote);
+        assert_cleanup_preserved(
+            &owner, &decided, &base_vote, ledgers_before, prov_before, "the policy refusal",
+        );
     }
 
     #[test]
@@ -1559,6 +1796,9 @@ mod tests {
         let mut wrong_proposal = p1.clone();
         wrong_proposal.header.parent_block_id = [0x11; 32];
 
+        let ledgers_before = snapshot_ledgers(&owner);
+        let prov_before = pin_provenance_now(&owner, &decided);
+
         let outcome = fresh_vote_sign_model::<FixtureCommittedHistory>(
             &owner, &engine, &decided, &wrong_proposal, &lim, None, &mut snapshot,
             &signer, &mut sink, &journal, &mut coord,
@@ -1569,6 +1809,9 @@ mod tests {
         assert_eq!(coord.calls, 0);
         assert_eq!(signer.calls(), 0, "observation refusal invokes the signer zero times");
         assert_no_reservation_made(&journal, &pv, &base_vote);
+        assert_cleanup_preserved(
+            &owner, &decided, &base_vote, ledgers_before, prov_before, "the observation refusal",
+        );
     }
 
     #[test]
@@ -1586,6 +1829,9 @@ mod tests {
         let mut coord = ModelCoordinationHook::inert();
         let base_vote = decided.vote().clone();
 
+        let ledgers_before = snapshot_ledgers(&owner);
+        let prov_before = pin_provenance_now(&owner, &decided);
+
         let outcome = fresh_vote_sign_model::<FixtureCommittedHistory>(
             &owner, &engine, &decided, &p1, &lim, None, &mut snapshot,
             &signer, &mut sink, &journal, &mut coord,
@@ -1596,6 +1842,10 @@ mod tests {
         assert_eq!(coord.calls, 0);
         assert_eq!(signer.calls(), 0, "admission refusal invokes the signer zero times");
         assert_no_reservation_made(&journal, &pv, &base_vote);
+        assert_cleanup_preserved(
+            &owner, &decided, &base_vote, ledgers_before, prov_before,
+            "the unavailable-owner admission refusal",
+        );
     }
 
     // ======================================================================
@@ -1651,6 +1901,11 @@ mod tests {
         let new_rev = publish_qc(&owner, &ctx, l1_block, 1, 1);
         assert_eq!(new_rev, 2, "the L1 publication advances the durable revision");
 
+        // RUN 422 §2/§4 — baseline taken AFTER the deliberate engine/durable
+        // advancement, immediately before the model call, with the envelope live.
+        let ledgers_before = snapshot_ledgers(&owner);
+        let prov_before = pin_provenance_now(&owner, &decided);
+
         let outcome = fresh_vote_sign_model::<FixtureCommittedHistory>(
             &owner, &engine, &decided, &p1, &lim, None, &mut snapshot,
             &signer, &mut sink, &journal, &mut coord,
@@ -1667,6 +1922,9 @@ mod tests {
         assert_eq!(signer.calls(), 0, "zero signer invocations");
         assert!(inner.seen.get().is_none(), "the wrapped digest signer was never reached");
         assert_no_reservation_made(&journal, &pv, &base_vote);
+        assert_cleanup_preserved(
+            &owner, &decided, &base_vote, ledgers_before, prov_before, "the lifecycle refusal",
+        );
     }
     // A deterministic in-flight generation advance BETWEEN admit and confirm
     // (taking the owner by &mut, a faithful real advance) makes confirm `Stale`.
@@ -1685,6 +1943,8 @@ mod tests {
         let base_vote = decided.vote().clone();
 
         let counting = CountingSigner::new(&signer);
+        let ledgers_before = snapshot_ledgers(&owner);
+        let prov_before = pin_provenance_now(&owner, &decided);
         let outcome = fresh_vote_sign_model::<FixtureCommittedHistory>(
             &owner, &engine, &decided, &p1, &lim, None, &mut snapshot,
             &counting, &mut sink, &journal, &mut coord,
@@ -1702,6 +1962,14 @@ mod tests {
         // consumption without an acknowledged signed result, MUST be exactly
         // `PotentiallySigned` (RUN 422 §3). Any error, Conflict, Exhausted,
         // ExactRetryRetained, or FreshlyReserved fails this check.
+        //
+        // RUN 422 §2/§4 — BOTH ledgers are restored and the complete Vote + pin
+        // provenance are preserved across the refusal. This cleanup check runs
+        // BEFORE the mutating reserve probe below so the probe cannot perturb it.
+        assert_cleanup_preserved(
+            &owner, &decided, &base_vote, ledgers_before, prov_before,
+            "the original-ticket confirm refusal",
+        );
         let (pos, binding) = expected_pos_binding(&pv, &base_vote);
         match journal.reserve_for_sign(&pos, &binding) {
             Ok(ReservationOutcome::PotentiallySigned) => {}
@@ -1870,6 +2138,98 @@ mod tests {
     }
 
     // ======================================================================
+    // RUN 422 §3 — OWNED-OBJECT LIFETIME (release-order) evidence. A bounded,
+    // model-only observer (a caller-owned `Rc<ReleaseOrderProbe>` installed via a
+    // thread-local) records the destruction of the model's ACTUAL owned signing
+    // backings (the owned public-key lookup `Vec` and the preimage `Vec`) and the
+    // release of their covering signing reservation. The assertion — every tracked
+    // backing destroyed BEFORE the covering reservation releases — is executed
+    // OUTSIDE the model call, on both normal completion and an early return taken
+    // after those backings were constructed. This is owned-object lifetime
+    // evidence only (no allocator-address tracing, process RSS, or crash
+    // durability); the ordering of the unobserved scope objects stays
+    // source-reasoned (Rust reverse-drop order).
+    //
+    // The DISCRIMINATING sensitivity run (premature covering-reservation release
+    // → this exact assertion fails) is executed manually against a temporary,
+    // UNCOMMITTED source mutation and recorded literally in the evidence document;
+    // the committed code keeps the correct order, for which this test is GREEN.
+    // ======================================================================
+    fn run_model_with_release_probe(
+        dir: &std::path::Path,
+        signer: &dyn BoundedVoteSigner,
+    ) -> (ModelFreshUseOutcome, std::rc::Rc<ReleaseOrderProbe>) {
+        let ctx = ctx_n(4);
+        let (owner, engine, decided, p1, lim, _rev) = capture_multi(dir, &ctx);
+        let pv = make_authority();
+        let mut snapshot = established_snapshot(&pv);
+        let journal = fresh_journal();
+        let mut sink = ModelRecordingSink::new();
+        let mut coord = ModelCoordinationHook::inert();
+        let counting = CountingSigner::new(signer);
+
+        // Install the caller-owned probe for THIS thread's model call; the guard
+        // clears the thread-local on drop so a panic cannot leak it.
+        let probe = std::rc::Rc::new(ReleaseOrderProbe::new());
+        let _guard = install_release_probe(probe.clone());
+        let outcome = fresh_vote_sign_model::<FixtureCommittedHistory>(
+            &owner, &engine, &decided, &p1, &lim, None, &mut snapshot,
+            &counting, &mut sink, &journal, &mut coord,
+            ReconfirmPerturbation::None,
+        );
+        // The owned backings and the covering reservation were all destroyed while
+        // `fresh_vote_sign_model` returned, so the probe's event log is complete
+        // here, before the owner/journal fixtures are dropped.
+        (outcome, probe)
+    }
+
+    fn assert_backings_destroyed_before_reservation_release(probe: &ReleaseOrderProbe) {
+        assert!(
+            probe.release_observed(),
+            "the covering signing reservation's release boundary was observed; log={:?}",
+            probe.event_log()
+        );
+        assert!(
+            probe.backings_destroyed_before_release(&["owned_pk_backing", "preimage_backing"]),
+            "every tracked owned backing must be destroyed BEFORE the covering \
+             signing reservation releases; event log was {:?}",
+            probe.event_log()
+        );
+    }
+
+    #[test]
+    fn release_order_owned_backings_destroyed_before_covering_reservation_on_success() {
+        let dir = tempfile::tempdir().unwrap();
+        let signer = ok_signer();
+        let (outcome, probe) = run_model_with_release_probe(dir.path(), &signer);
+        assert!(
+            matches!(outcome, ModelFreshUseOutcome::Signed(_)),
+            "the positive fixture signs, got {outcome:?}"
+        );
+        assert_backings_destroyed_before_reservation_release(&probe);
+    }
+
+    #[test]
+    fn release_order_owned_backings_destroyed_before_covering_reservation_on_early_return() {
+        // The signer-error path is an EARLY RETURN taken AFTER the owned backings
+        // (public key, preimage) were constructed and after D10 reserve/consume and
+        // the original-ticket confirm: the covering `signing_res` still releases in
+        // reverse-drop order after both backings are destroyed.
+        let dir = tempfile::tempdir().unwrap();
+        let signer = ErrorFixtureSigner {
+            validator_id: SIGNER_VID,
+            suite_id: MODEL_SUITE_U16,
+        };
+        let (outcome, probe) = run_model_with_release_probe(dir.path(), &signer);
+        assert_eq!(
+            outcome,
+            ModelFreshUseOutcome::SignerFailed,
+            "the error fixture takes the signer-failed early return"
+        );
+        assert_backings_destroyed_before_reservation_release(&probe);
+    }
+
+    // ======================================================================
     // Scenario 5 — empty / oversize / signer-error / persist-failure: NO sink
     // call, and the durable D10 conflict obligation is PRESERVED.
     // ======================================================================
@@ -1908,10 +2268,21 @@ mod tests {
         // Count ACTUAL signer invocations at the boundary (RUN 422 §2) rather than
         // inferring them from the sink/outcome.
         let counting = CountingSigner::new(signer);
+
+        // RUN 422 §2/§4 — snapshot BOTH ledgers and the pin provenance before the
+        // call, and (below) require exact restoration + preserved Vote/pin BEFORE
+        // this helper drops its owner/envelope fixtures. Returning a Vote copy and
+        // the journal alone cannot establish preservation of the ORIGINAL live pin.
+        let ledgers_before = snapshot_ledgers(&owner);
+        let prov_before = pin_provenance_now(&owner, &decided);
         let outcome = fresh_vote_sign_model::<FixtureCommittedHistory>(
             &owner, &engine, &decided, &p1, &lim, None, &mut snapshot,
             &counting, &mut sink, &journal, &mut coord,
             ReconfirmPerturbation::None,
+        );
+        assert_cleanup_preserved(
+            &owner, &decided, &base_vote, ledgers_before, prov_before,
+            "the signing-fault refusal",
         );
         (outcome, sink.calls, counting.calls(), journal, pv, base_vote)
     }
@@ -1993,6 +2364,10 @@ mod tests {
         let mut sink = ModelRecordingSink::new();
         let mut coord = ModelCoordinationHook::inert();
         let counting = CountingSigner::new(&signer);
+        // RUN 422 §2/§4 — snapshot BOTH ledgers and the pin provenance after the
+        // seed op, immediately before the model call, with the envelope live.
+        let ledgers_before = snapshot_ledgers(&owner);
+        let prov_before = pin_provenance_now(&owner, &decided);
         let outcome = fresh_vote_sign_model::<FixtureCommittedHistory>(
             &owner, &engine, &decided, &p1, &lim, None, &mut snapshot,
             &counting, &mut sink, &journal, &mut coord,
@@ -2002,6 +2377,10 @@ mod tests {
         assert_eq!(sink.calls, 0, "no sink on a retained-blocked outcome");
         assert_eq!(coord.calls, 0, "no coordination/signing after retained block");
         assert_eq!(counting.calls(), 0, "retained-blocked outcome adds zero new signer calls");
+        assert_cleanup_preserved(
+            &owner, &decided, &base_vote, ledgers_before, prov_before,
+            "the retained-blocked refusal",
+        );
     }
 
     // ======================================================================
@@ -2173,6 +2552,8 @@ mod tests {
         let signer = CountingSigner::new(&inner);
         let base_vote = decided.vote().clone();
 
+        let ledgers_before = snapshot_ledgers(&owner);
+        let prov_before = pin_provenance_now(&owner, &decided);
         let outcome = fresh_vote_sign_model::<FixtureCommittedHistory>(
             &owner, &engine, &decided, &p1, &lim, None, &mut snapshot,
             &signer, &mut sink, &journal, &mut coord,
@@ -2184,6 +2565,9 @@ mod tests {
         assert_eq!(signer.calls(), 0, "zero signer invocations");
         assert!(inner.seen.get().is_none(), "the wrapped signer was never reached");
         assert_no_reservation_made(&journal, &pv, &base_vote);
+        assert_cleanup_preserved(
+            &owner, &decided, &base_vote, ledgers_before, prov_before, "the wrong-wire-chain refusal",
+        );
     }
 
     // ======================================================================
@@ -2212,6 +2596,8 @@ mod tests {
         assert_eq!(base_vote.epoch, 0, "the engine self-vote epoch is 0");
         assert_eq!(snapshot.authorized_epoch(), 0, "authorized epoch is genesis-static 0");
 
+        let ledgers_before = snapshot_ledgers(&owner);
+        let prov_before = pin_provenance_now(&owner, &decided);
         let outcome = fresh_vote_sign_model::<FixtureCommittedHistory>(
             &owner, &engine, &decided, &p1, &lim, None, &mut snapshot,
             &signer, &mut sink, &journal, &mut coord,
@@ -2226,6 +2612,10 @@ mod tests {
         // The captured envelope is untouched by the model-owned perturbation.
         assert_eq!(decided.vote(), &base_vote);
         assert_eq!(decided.vote().epoch, 0);
+        assert_cleanup_preserved(
+            &owner, &decided, &base_vote, ledgers_before, prov_before,
+            "the wrong-authorized-epoch refusal",
+        );
     }
 
     // ======================================================================
@@ -2357,6 +2747,13 @@ mod tests {
             "after relief the admissible operation succeeds, got {outcome2:?}"
         );
         assert_eq!(sink2.calls, 1);
+        // After the successful retry the model's reservations are released: BOTH
+        // ledgers are back at the ORIGINAL baseline and the complete Vote + pin
+        // provenance are still preserved (RUN 422 §4).
+        assert_cleanup_preserved(
+            &owner, &decided, &base_vote, ledgers_original, prov_before,
+            "the control-exhaustion retry success",
+        );
     }
 
     // ======================================================================
@@ -2462,6 +2859,12 @@ mod tests {
             "after relief the admissible operation succeeds, got {outcome2:?}"
         );
         assert_eq!(sink2.calls, 1);
+        // After the successful retry BOTH ledgers are back at the ORIGINAL baseline
+        // and the complete Vote + pin provenance are still preserved (RUN 422 §4).
+        assert_cleanup_preserved(
+            &owner, &decided, &base_vote, ledgers_original, prov_before,
+            "the signing-exhaustion retry success",
+        );
     }
 
     // ======================================================================
@@ -2497,6 +2900,11 @@ mod tests {
         // write. Reserve + consume (which do not use that write) still succeed.
         store.arm();
 
+        // RUN 422 §2/§4 — baseline taken AFTER the fault fixture is armed but
+        // BEFORE the model call, with the envelope/pin live.
+        let ledgers_before = snapshot_ledgers(&owner);
+        let prov_before = pin_provenance_now(&owner, &decided);
+
         let outcome = fresh_vote_sign_model::<FixtureCommittedHistory>(
             &owner, &engine, &decided, &p1, &lim, None, &mut snapshot,
             &signer, &mut sink, &journal, &mut coord,
@@ -2512,6 +2920,14 @@ mod tests {
             "the signer ran once before the persistence failure"
         );
         assert_eq!(coord.calls, 1, "the coordination point ran before signing");
+
+        // RUN 422 §2/§4 — BOTH ledgers restored and the complete Vote + pin
+        // provenance preserved across the persistence-failure refusal. Checked
+        // BEFORE the mutating post-consumption probe below.
+        assert_cleanup_preserved(
+            &owner, &decided, &base_vote, ledgers_before, prov_before,
+            "the persistence-failure refusal",
+        );
 
         // Inspect the expected post-consumption journal state: a retry at the exact
         // position is PotentiallySigned (the obligation is preserved), NOT fresh.
