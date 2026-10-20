@@ -229,9 +229,58 @@ impl AdmittedOutput {
         Ok(())
     }
 
+    /// RUN 422 — begin writing a fresh signature directly into the admitted
+    /// output buffer. Logical validity is cleared (`used = 0`) BEFORE any
+    /// mutable access is granted, so a previously committed length or its
+    /// trailing bytes can never be observed as part of a new, uncommitted (or
+    /// abandoned) write. The returned [`OutputWriter`] exclusively borrows this
+    /// output; it does not own or release the covering reservation.
+    pub(crate) fn begin_write(&mut self) -> OutputWriter<'_> {
+        self.used = 0;
+        OutputWriter { out: self }
+    }
+
     /// The charge this output's reservation holds (test/diagnostic observer).
     pub(crate) fn charge(&self) -> u128 {
         self.res.charge()
+    }
+}
+
+/// RUN 422 — a scoped, exclusive writer over an [`AdmittedOutput`]. Obtained
+/// from [`AdmittedOutput::begin_write`], which clears logical validity first, so
+/// while this writer is live the output holds no valid bytes (`used == 0`). The
+/// writer borrows the output mutably and neither owns nor releases its covering
+/// reservation; dropping it without a successful [`commit`](OutputWriter::commit)
+/// leaves the output empty. A successful commit establishes a valid byte span
+/// ONLY — never signature verification, authorization, journal acknowledgement,
+/// or delivery permission.
+#[derive(Debug)]
+pub(crate) struct OutputWriter<'a> {
+    out: &'a mut AdmittedOutput,
+}
+
+impl OutputWriter<'_> {
+    /// The full fixed-capacity output buffer to write the signature into:
+    /// exactly [`OUTPUT_CAP`] bytes, matching [`AdmittedOutput::capacity`].
+    pub(crate) fn buffer(&mut self) -> &mut [u8] {
+        &mut self.out.buf[..]
+    }
+
+    /// Commit exactly `n` written bytes as the valid output span, validating the
+    /// length BEFORE recording it. On a capacity refusal `used` stays `0` (the
+    /// output remains empty / logically invalid) and the bytes already in the
+    /// buffer are never exposed as a committed result. A zero-length commit is
+    /// structurally permitted here; exact signature-length validation remains a
+    /// future caller obligation.
+    pub(crate) fn commit(self, n: usize) -> Result<usize, WorkspaceCapacity> {
+        if n > OUTPUT_CAP {
+            return Err(WorkspaceCapacity {
+                len: n,
+                capacity: OUTPUT_CAP,
+            });
+        }
+        self.out.used = n;
+        Ok(n)
     }
 }
 
@@ -351,6 +400,19 @@ impl RetrievalWorkspaceOwner {
             }
         };
         Ok((AdmittedOutput::new(out_res), EnvelopeScratch::new(env_res)))
+    }
+
+    /// RUN 422 — admit ONLY the caller-owned output buffer, reserving exactly
+    /// [`output_charge()`] through the SAME existing operational accountant
+    /// (which shares its aggregate authority with the sibling partition). No
+    /// envelope scratch is allocated or charged, and no new accountant,
+    /// partition, ceiling, multiplicity, or independent allowance is introduced.
+    /// On a reservation refusal nothing is constructed and both ledgers are
+    /// unchanged. The paired [`admit`](RetrievalWorkspaceOwner::admit) is left
+    /// unchanged.
+    pub(crate) fn admit_output(&self) -> Result<AdmittedOutput, SafetyStoreError> {
+        let out_res = self.accountant.reserve(output_charge())?;
+        Ok(AdmittedOutput::new(out_res))
     }
 }
 
@@ -1250,5 +1312,224 @@ mod tests {
     #[test]
     fn recovered_reissue_write_then_error_suppresses_delivery() {
         drive_failed_reissue_case(ReissueFault::WriteThenError, 1);
+    }
+
+    // ---- 4. RUN 422 scoped writable-output lifecycle ----------------------
+    //
+    // Buffer-validity assertions below are kept DISTINCT from reservation-counter
+    // assertions: these cases never read the accountant, and the admission cases
+    // further down never inspect buffer contents.
+
+    /// A freshly admitted output exposes the full capacity but holds no valid
+    /// bytes yet.
+    #[test]
+    fn output_begins_empty() {
+        let (_d, owner) = bound_owner(ctx(4, 2420));
+        let out = RetrievalWorkspaceOwner::new(owner.backend_for_test())
+            .admit_output()
+            .unwrap();
+        assert_eq!(out.capacity(), OUTPUT_CAP);
+        assert_eq!(out.used(), 0);
+        assert!(out.view().is_empty());
+    }
+
+    /// Beginning a write clears any previously committed contents; an abandoned
+    /// writer leaves the output empty (invalidation is not deferred to commit).
+    #[test]
+    fn begin_write_invalidates_previous_commit_on_abandon() {
+        let (_d, owner) = bound_owner(ctx(4, 2420));
+        let mut out = RetrievalWorkspaceOwner::new(owner.backend_for_test())
+            .admit_output()
+            .unwrap();
+        {
+            let mut w = out.begin_write();
+            for byte in w.buffer()[..20].iter_mut() {
+                *byte = 0xCC;
+            }
+            assert_eq!(w.commit(20).unwrap(), 20);
+        }
+        assert_eq!(out.used(), 20);
+        // Begin another write and ABANDON it (drop without commit).
+        drop(out.begin_write());
+        assert_eq!(out.used(), 0);
+        assert!(out.view().is_empty());
+    }
+
+    /// A successful commit exposes exactly the written prefix, in order.
+    #[test]
+    fn commit_exposes_exact_prefix() {
+        let (_d, owner) = bound_owner(ctx(4, 2420));
+        let mut out = RetrievalWorkspaceOwner::new(owner.backend_for_test())
+            .admit_output()
+            .unwrap();
+        {
+            let mut w = out.begin_write();
+            let buf = w.buffer();
+            assert_eq!(buf.len(), OUTPUT_CAP);
+            for (i, byte) in buf[..5].iter_mut().enumerate() {
+                *byte = (i as u8) + 1;
+            }
+            assert_eq!(w.commit(5).unwrap(), 5);
+        }
+        assert_eq!(out.view(), &[1u8, 2, 3, 4, 5]);
+    }
+
+    /// The capacity boundary commits; one past it is refused and leaves the
+    /// output empty.
+    #[test]
+    fn capacity_boundary_accepted_plus_one_refused() {
+        let (_d, owner) = bound_owner(ctx(4, 2420));
+        let mut out = RetrievalWorkspaceOwner::new(owner.backend_for_test())
+            .admit_output()
+            .unwrap();
+        {
+            let mut w = out.begin_write();
+            for byte in w.buffer().iter_mut() {
+                *byte = 0x5A;
+            }
+            assert_eq!(w.commit(OUTPUT_CAP).unwrap(), OUTPUT_CAP);
+        }
+        assert_eq!(out.used(), OUTPUT_CAP);
+        {
+            let w = out.begin_write();
+            let err = w.commit(OUTPUT_CAP + 1).unwrap_err();
+            assert_eq!(
+                err,
+                WorkspaceCapacity {
+                    len: OUTPUT_CAP + 1,
+                    capacity: OUTPUT_CAP,
+                }
+            );
+        }
+        // The over-length commit left the output logically invalid.
+        assert_eq!(out.used(), 0);
+        assert!(out.view().is_empty());
+    }
+
+    /// A long committed result followed by a short reuse exposes ONLY the new
+    /// short prefix — never the stale trailing bytes of the prior write.
+    #[test]
+    fn long_then_short_reuse_exposes_only_new_prefix() {
+        let (_d, owner) = bound_owner(ctx(4, 2420));
+        let mut out = RetrievalWorkspaceOwner::new(owner.backend_for_test())
+            .admit_output()
+            .unwrap();
+        {
+            let mut w = out.begin_write();
+            for byte in w.buffer()[..100].iter_mut() {
+                *byte = 0xAA;
+            }
+            assert_eq!(w.commit(100).unwrap(), 100);
+        }
+        assert_eq!(out.used(), 100);
+        {
+            let mut w = out.begin_write();
+            for byte in w.buffer()[..10].iter_mut() {
+                *byte = 0xBB;
+            }
+            assert_eq!(w.commit(10).unwrap(), 10);
+        }
+        assert_eq!(out.view().len(), 10);
+        assert!(out.view().iter().all(|&byte| byte == 0xBB));
+    }
+
+    /// A zero-length commit is structurally permitted and yields an empty valid
+    /// span.
+    #[test]
+    fn zero_length_commit_is_structurally_valid_empty() {
+        let (_d, owner) = bound_owner(ctx(4, 2420));
+        let mut out = RetrievalWorkspaceOwner::new(owner.backend_for_test())
+            .admit_output()
+            .unwrap();
+        {
+            let mut w = out.begin_write();
+            for byte in w.buffer()[..7].iter_mut() {
+                *byte = 0x11;
+            }
+            assert_eq!(w.commit(7).unwrap(), 7);
+        }
+        assert_eq!(out.used(), 7);
+        {
+            let w = out.begin_write();
+            assert_eq!(w.commit(0).unwrap(), 0);
+        }
+        assert_eq!(out.used(), 0);
+        assert!(out.view().is_empty());
+    }
+
+    /// Output-only admission charges exactly `output_charge()` (and NO envelope
+    /// charge) on BOTH the operational and the shared aggregate ledgers, and
+    /// releases both on drop.
+    #[test]
+    fn admit_output_charges_output_only_on_both_ledgers() {
+        let (_d, owner) = bound_owner(ctx(4, 2420));
+        let backend = owner.backend_for_test();
+        let base_op = backend.accounting_current();
+        let base_agg = backend.accounting_aggregate_current();
+        {
+            let out = RetrievalWorkspaceOwner::new(backend).admit_output().unwrap();
+            assert_eq!(out.charge(), output_charge());
+            assert_eq!(backend.accounting_current(), base_op + output_charge());
+            assert_eq!(
+                backend.accounting_aggregate_current(),
+                base_agg + output_charge()
+            );
+            // Strictly the output charge: the envelope scratch is never admitted.
+            assert_ne!(output_charge(), output_charge() + envelope_charge());
+        }
+        assert_eq!(backend.accounting_current(), base_op);
+        assert_eq!(backend.accounting_aggregate_current(), base_agg);
+    }
+
+    /// A refused output-only admission leaves BOTH ledgers exactly at baseline.
+    #[test]
+    fn admit_output_refusal_leaves_both_ledgers_unchanged() {
+        let (_d, owner) = bound_owner(ctx(4, 2420));
+        let backend = owner.backend_for_test();
+        let base_op = backend.accounting_current();
+        let base_agg = backend.accounting_aggregate_current();
+        let cap = backend.accounting_cap().unwrap();
+        // Leave strictly less headroom than the output charge, so admission fails.
+        let fill = cap - base_op - (output_charge() - 1);
+        let standing = backend.reserve_standing_for_test(fill).unwrap();
+        let op_after_fill = backend.accounting_current();
+        let agg_after_fill = backend.accounting_aggregate_current();
+        assert!(RetrievalWorkspaceOwner::new(backend)
+            .admit_output()
+            .is_err());
+        // Neither ledger moved across the refusal.
+        assert_eq!(backend.accounting_current(), op_after_fill);
+        assert_eq!(backend.accounting_aggregate_current(), agg_after_fill);
+        drop(standing);
+        assert_eq!(backend.accounting_current(), base_op);
+        assert_eq!(backend.accounting_aggregate_current(), base_agg);
+    }
+
+    /// Pressure relief: once a standing reservation is released, output-only
+    /// admission succeeds; dropping the admitted output restores BOTH baselines.
+    #[test]
+    fn pressure_relief_permits_admit_output_then_drop_restores_both() {
+        let (_d, owner) = bound_owner(ctx(4, 2420));
+        let backend = owner.backend_for_test();
+        let base_op = backend.accounting_current();
+        let base_agg = backend.accounting_aggregate_current();
+        let cap = backend.accounting_cap().unwrap();
+        let fill = cap - base_op - (output_charge() - 1);
+        let standing = backend.reserve_standing_for_test(fill).unwrap();
+        assert!(RetrievalWorkspaceOwner::new(backend)
+            .admit_output()
+            .is_err());
+        // Relieve the pressure; admission is now permitted.
+        drop(standing);
+        {
+            let out = RetrievalWorkspaceOwner::new(backend).admit_output().unwrap();
+            assert_eq!(backend.accounting_current(), base_op + output_charge());
+            assert_eq!(
+                backend.accounting_aggregate_current(),
+                base_agg + output_charge()
+            );
+        }
+        assert_eq!(backend.accounting_current(), base_op);
+        assert_eq!(backend.accounting_aggregate_current(), base_agg);
     }
 }
