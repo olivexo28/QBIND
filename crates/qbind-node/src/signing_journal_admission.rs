@@ -452,10 +452,10 @@ mod tests {
         PinnedSafetyContext, SafetyBackend, SafetyBackendPolicy, SafetyRecordOwner, ValidatedRecord,
     };
     use crate::signing_reservation_journal::{
-        BindingDigest, CheckedRetrievalError, RefuseReason, RetainedDelivery, RetrievalError,
-        SigningDecisionRecord, SigningJournalStorage, SigningKind, SigningOwnershipDomain,
-        SigningPosition, SigningRecordStage, SigningReservationJournal, WorkspaceAdmissionError,
-        SIGNING_RECORD_FORMAT_VERSION,
+        BindingDigest, CheckedRetrievalError, RefuseReason, ReservationOutcome, RetainedDelivery,
+        RetirementOutcome, RetrievalError, SigningDecisionRecord, SigningJournalStorage,
+        SigningKind, SigningOwnershipDomain, SigningPosition, SigningRecordStage,
+        SigningReservationJournal, WorkspaceAdmissionError, SIGNING_RECORD_FORMAT_VERSION,
     };
     use crate::storage::{InMemoryConsensusStorage, RocksDbConsensusStorage, StorageError};
     use qbind_consensus::ValidatorId;
@@ -1995,5 +1995,132 @@ mod tests {
             .unwrap();
         assert!(matches!(d, RetainedDelivery::Retained(_)));
         assert_eq!(output.used(), 2420);
+    }
+
+
+    // ---- Evidence D: post-retirement cache-free checked retrieval ----------
+    //
+    // These drive the GENUINE reserve -> consume -> record -> retire flow over an
+    // envelope-capable backend, then retrieve through the association-sourced
+    // workspace and retrieve_retained_checked. After retirement there is no live
+    // entry, so the recovered exact-envelope SYNCED reissue runs before each
+    // delivery; a second successful retrieval requires ANOTHER reissue (genuine
+    // repeat-after-success, not a failed-then-successful retry), and an injected
+    // reissue error suppresses delivery under the existing retrieval semantics.
+
+    /// Build an ESTABLISHED journal over a reissue-counting backend and install
+    /// the supplied backend's operational accountant as the journal's association,
+    /// so admit_retrieval_workspace + retrieve_retained_checked share one ledger.
+    fn established_counting_journal(
+        backend: &SafetyBackend,
+    ) -> (Arc<FaultReissueStore>, SigningReservationJournal) {
+        let inner = Arc::new(InMemoryConsensusStorage::new());
+        let store = Arc::new(FaultReissueStore::new(inner));
+        let journal = SigningReservationJournal::initialize(
+            store.clone() as Arc<dyn SigningJournalStorage>,
+            1024,
+        )
+        .expect("initialize fresh envelope-capable journal");
+        journal
+            .install_accountant_association(&backend.accounting().clone())
+            .expect("install operational accountant association");
+        (store, journal)
+    }
+
+    #[test]
+    fn retired_operation_retrieves_via_reissue_repeatedly_through_checked_route() {
+        let (_d, owner) = bound_owner(ctx(4, 2420));
+        let backend = owner.backend_for_test();
+        let (store, journal) = established_counting_journal(backend);
+
+        let p = pos(30);
+        let b = bind(30);
+        // Genuine flow: reserve -> consume -> record an acknowledged result.
+        let cont = match journal.reserve_for_sign(&p, &b).unwrap() {
+            ReservationOutcome::FreshlyReserved(c) => c,
+            other => panic!("expected FreshlyReserved, got {other:?}"),
+        };
+        let cap = journal.consume_for_signing(cont).unwrap();
+        let sig = vec![0x5Au8; 64];
+        journal.record_signed_result(&cap, &sig).unwrap();
+
+        // Retire the acknowledged operation: the live entry is gone, the durable
+        // Signed record remains.
+        assert_eq!(
+            journal.retire_acknowledged_operation(&cap),
+            Ok(RetirementOutcome::Retired)
+        );
+
+        // First checked retrieval: recovered path reissues once, then delivers the
+        // exact bytes through the association-sourced workspace.
+        let (mut output, mut scratch) = journal.admit_retrieval_workspace().unwrap();
+        let d1 = journal
+            .retrieve_retained_checked(&p, &b, &mut scratch, &mut output)
+            .unwrap();
+        match d1 {
+            RetainedDelivery::Retained(got) => assert_eq!(got, &sig[..]),
+            other => panic!("expected Retained, got {other:?}"),
+        }
+        assert_eq!(store.reissue_calls(), 1);
+        assert_eq!(store.underlying_writes(), 1);
+
+        // A SECOND successful retrieval requires ANOTHER cache-free reissue
+        // (repeat-after-success, not a failed-then-successful retry).
+        let (mut output2, mut scratch2) = journal.admit_retrieval_workspace().unwrap();
+        let d2 = journal
+            .retrieve_retained_checked(&p, &b, &mut scratch2, &mut output2)
+            .unwrap();
+        match d2 {
+            RetainedDelivery::Retained(got) => assert_eq!(got, &sig[..]),
+            other => panic!("expected Retained, got {other:?}"),
+        }
+        assert_eq!(store.reissue_calls(), 2);
+        assert_eq!(store.underlying_writes(), 2);
+    }
+
+    #[test]
+    fn retired_operation_retrieval_reissue_error_suppresses_delivery() {
+        let (_d, owner) = bound_owner(ctx(4, 2420));
+        let backend = owner.backend_for_test();
+        let (store, journal) = established_counting_journal(backend);
+
+        let p = pos(31);
+        let b = bind(31);
+        let cont = match journal.reserve_for_sign(&p, &b).unwrap() {
+            ReservationOutcome::FreshlyReserved(c) => c,
+            other => panic!("expected FreshlyReserved, got {other:?}"),
+        };
+        let cap = journal.consume_for_signing(cont).unwrap();
+        let sig = vec![0x27u8; 48];
+        journal.record_signed_result(&cap, &sig).unwrap();
+        assert_eq!(
+            journal.retire_acknowledged_operation(&cap),
+            Ok(RetirementOutcome::Retired)
+        );
+
+        // An injected reissue error suppresses delivery; the output is unchanged.
+        store.set_fault(ReissueFault::ErrorBeforeWrite);
+        let (mut output, mut scratch) = journal.admit_retrieval_workspace().unwrap();
+        let suppressed = journal
+            .retrieve_retained_checked(&p, &b, &mut scratch, &mut output)
+            .unwrap();
+        assert!(
+            matches!(suppressed, RetainedDelivery::DeliverySuppressed),
+            "expected DeliverySuppressed, got {suppressed:?}"
+        );
+        assert_eq!(output.used(), 0, "no bytes delivered under suppression");
+        assert_eq!(store.reissue_calls(), 1);
+        assert_eq!(store.underlying_writes(), 0);
+
+        // Clearing the fault lets the SAME checked route deliver on retry.
+        store.set_fault(ReissueFault::None);
+        let (mut output2, mut scratch2) = journal.admit_retrieval_workspace().unwrap();
+        let ok = journal
+            .retrieve_retained_checked(&p, &b, &mut scratch2, &mut output2)
+            .unwrap();
+        match ok {
+            RetainedDelivery::Retained(got) => assert_eq!(got, &sig[..]),
+            other => panic!("expected Retained, got {other:?}"),
+        }
     }
 }

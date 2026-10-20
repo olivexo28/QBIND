@@ -1377,6 +1377,50 @@ pub(crate) enum CheckedRetrievalError {
     Retrieval(RetrievalError),
 }
 
+/// Run 422 — fixed-size, `Copy`, allocation-free SUCCESS outcome of
+/// acknowledged-operation retirement
+/// ([`SigningReservationJournal::retire_acknowledged_operation`]). It carries no
+/// heap and no key material, so it never forwards a heap-bearing [`JournalError`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(not(test), allow(dead_code))]
+pub(crate) enum RetirementOutcome {
+    /// The exact acknowledged live operation named by the capability was removed
+    /// from this domain's in-process live table. No storage was read or written,
+    /// no durable record/metadata changed, the durable reserved-position count was
+    /// not decremented, operation-id/uncertainty state was untouched, the
+    /// recovered-acknowledgement cache was not modified, and no accounting
+    /// coverage was reserved or released.
+    Retired,
+}
+
+/// Run 422 — fixed-size, `Copy`, allocation-free REFUSAL of acknowledged-operation
+/// retirement. Every variant is a defensive refusal that removes nothing; no
+/// heap-bearing [`JournalError`] is forwarded through this API and no
+/// attacker-controlled content is carried.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(not(test), allow(dead_code))]
+pub(crate) enum RetirementError {
+    /// The signing-journal ownership mutex was poisoned by a prior panic while
+    /// held. Nothing is removed.
+    LockPoisoned,
+    /// The capability belongs to a foreign ownership domain (its `domain_token`
+    /// does not match this journal's domain). Nothing is removed.
+    ForeignDomain,
+    /// No live entry exists at the capability's position (already retired, never
+    /// reserved in this process, or recovered-only). Nothing is removed.
+    NoLiveOperation,
+    /// A live entry exists at the position but its operation id or binding does not
+    /// match the capability, so it is a DIFFERENT operation. Nothing is removed.
+    OperationMismatch,
+    /// The live operation has not crossed the signer-invocation boundary
+    /// (`invoked == false`). Nothing is removed.
+    NotInvoked,
+    /// The live operation has no established in-process result-write
+    /// acknowledgement (`result_acked == false`). Readable `Signed` bytes alone do
+    /// NOT satisfy this (Correction C uncertainty rule). Nothing is removed.
+    NotAcknowledged,
+}
+
 /// Run 422 — map a `SafetyStoreError` from the admission reserve path into the
 /// fixed-size [`WorkspaceAdmissionError`]. The verified reserve path only produces
 /// `Unbound`, `AdmissionOverflow`, or `ArithmeticOverflow`; those are mapped
@@ -2155,6 +2199,79 @@ impl SigningReservationJournal {
             .map_err(CheckedRetrievalError::Retrieval)
     }
 
+    /// Run 422 — isolated, crate-internal, opt-in ACKNOWLEDGED-operation
+    /// retirement. Removes ONLY the exact in-process live entry owned by `cap`
+    /// once its result write has been acknowledged in THIS process, so the
+    /// volatile publication authority is explicitly released while the durable
+    /// signing obligation is left fully intact.
+    ///
+    /// The position is derived from the capability itself; no separately-selectable
+    /// position is accepted. The signing-journal ownership mutex is acquired ONCE;
+    /// BEFORE removing anything it requires that `cap` belongs to this ownership
+    /// domain, a live entry exists at its position, that entry's operation id and
+    /// binding match `cap`, `invoked == true`, and `result_acked == true`. On any
+    /// refusal or lock poisoning it removes nothing and returns a fixed-size,
+    /// allocation-free [`RetirementError`] (never a heap-bearing [`JournalError`]).
+    ///
+    /// It does NOT read or write storage, delete or rewrite the durable `Signed`
+    /// record or journal metadata, decrement the durable reserved-position count,
+    /// reset operation ids or uncertainty state, seed/clear/modify the
+    /// recovered-acknowledgement cache, reserve or release accounting coverage,
+    /// invoke a signer, or mint a continuation; it requires and installs no
+    /// accountant association. The removed [`LiveState`] is fully inline, so its
+    /// drop takes no accounting lock and touches no storage. Removing the entry
+    /// establishes NOTHING about the `HashMap`'s backing allocation (no bounded
+    /// container accounting or abandoned-operation reclamation is implied).
+    ///
+    /// After it succeeds the borrowed `cap` still exists but owns no live
+    /// operation: [`record_signed_result`](Self::record_signed_result) then rejects
+    /// it through its normal stale/missing-operation check, a repeated retirement
+    /// returns [`RetirementError::NoLiveOperation`] without changing state, and a
+    /// later reservation for the position still observes the durable record (never
+    /// `FreshlyReserved`). This acknowledges ONLY the recorded in-process
+    /// result-write acknowledgement; it asserts nothing about cryptographic
+    /// validity, freshness, rollback resistance, or signing permission.
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub(crate) fn retire_acknowledged_operation(
+        &self,
+        cap: &ResultPublicationCapability,
+    ) -> Result<RetirementOutcome, RetirementError> {
+        // Acquire the ownership mutex ONCE. A poisoned lock removes nothing.
+        let mut inner = self
+            .domain
+            .inner
+            .lock()
+            .map_err(|_| RetirementError::LockPoisoned)?;
+
+        // A foreign-domain capability never addresses this journal's live table.
+        if cap.domain_token != self.domain.token {
+            return Err(RetirementError::ForeignDomain);
+        }
+
+        // Validate the EXACT live entry BEFORE removing anything. The position is
+        // taken from the capability itself; a missing, mismatched, un-invoked, or
+        // unacknowledged operation is refused and leaves the table untouched.
+        match inner.live.get(&cap.position) {
+            None => return Err(RetirementError::NoLiveOperation),
+            Some(ls) => {
+                if ls.operation_id != cap.operation_id || ls.binding != cap.binding {
+                    return Err(RetirementError::OperationMismatch);
+                }
+                if !ls.invoked {
+                    return Err(RetirementError::NotInvoked);
+                }
+                if !ls.result_acked {
+                    return Err(RetirementError::NotAcknowledged);
+                }
+            }
+        }
+
+        // All preconditions hold: remove ONLY this exact live entry. Nothing else
+        // is read, written, released, reset, or recharged.
+        inner.live.remove(&cap.position);
+        Ok(RetirementOutcome::Retired)
+    }
+
     /// Test-only: attach a handle over `store` WITHOUT establishing a limit, so
     /// the additive, read-only retained-retrieval path can be exercised against
     /// directly-written records. (The retrieval path takes no new reservation and
@@ -2175,6 +2292,44 @@ impl SigningReservationJournal {
     /// Test-only: install a live entry for `position` with the chosen
     /// `result_acked`, modelling a live operation without running the full
     /// signing flow.
+    /// Test-only: number of live entries currently tracked in this domain.
+    #[cfg(any(test, feature = "test-utils"))]
+    pub(crate) fn live_len_for_test(&self) -> usize {
+        self.domain.inner.lock().expect("domain lock").live.len()
+    }
+
+    /// Test-only: whether a live entry currently exists at `position`.
+    #[cfg(any(test, feature = "test-utils"))]
+    pub(crate) fn live_contains_for_test(&self, position: &SigningPosition) -> bool {
+        self.domain
+            .inner
+            .lock()
+            .expect("domain lock")
+            .live
+            .contains_key(position)
+    }
+
+    /// Test-only: the domain's monotonic next-operation-id source. Retirement
+    /// must never reset it.
+    #[cfg(any(test, feature = "test-utils"))]
+    pub(crate) fn next_operation_id_for_test(&self) -> u64 {
+        self.domain
+            .inner
+            .lock()
+            .expect("domain lock")
+            .next_operation_id
+    }
+
+    /// Test-only: read the domain's `accounting_uncertain` latch.
+    #[cfg(any(test, feature = "test-utils"))]
+    pub(crate) fn accounting_uncertain_for_test(&self) -> bool {
+        self.domain
+            .inner
+            .lock()
+            .expect("domain lock")
+            .accounting_uncertain
+    }
+
     #[cfg(any(test, feature = "test-utils"))]
     pub(crate) fn insert_live_for_test(
         &self,
@@ -2194,6 +2349,20 @@ impl SigningReservationJournal {
                 result_acked,
             },
         );
+    }
+
+    /// Test-only (DEFENSIVE fixture): force the `invoked` flag of an existing
+    /// live entry at `position`. Genuine public control flow can never present a
+    /// publication capability for an un-invoked operation (a capability is minted
+    /// only by consuming the continuation, which sets `invoked`), so this exists
+    /// solely to exercise the defensive `invoked == true` precondition. It adds no
+    /// public capability constructor and no production mutation surface.
+    #[cfg(any(test, feature = "test-utils"))]
+    pub(crate) fn set_live_invoked_for_test(&self, position: &SigningPosition, invoked: bool) {
+        let mut inner = self.domain.inner.lock().expect("domain lock");
+        if let Some(ls) = inner.live.get_mut(position) {
+            ls.invoked = invoked;
+        }
     }
 
     /// Run 422 D7-D10 Correction E — conservative accounting revalidation.
@@ -4810,5 +4979,334 @@ mod tests {
             size_of::<SharedAccountant>(),
             "Option<SharedAccountant> uses an Arc niche (no extra discriminant word)"
         );
+    }
+
+
+    // ========================================================================
+    // Run 422 — Isolated acknowledged-operation retirement. These tests drive the
+    // genuine reserve -> consume -> record flow over the MODEL store and exercise
+    // retire_acknowledged_operation's preconditions, isolation, and the guarantee
+    // that retirement performs no storage I/O and mutates no durable/uncertainty/
+    // cache/accounting state. Post-retirement cache-free retrieval (evidence D) is
+    // covered in signing_journal_admission.rs over an envelope-capable backend.
+    // ========================================================================
+
+    /// Evidence A — a genuine acknowledged operation retires, removing EXACTLY its
+    /// live entry, while every durable byte, the durable count, the operation-id
+    /// source, the uncertainty latch, the recovered cache, and the storage write
+    /// count are unchanged (retirement performs no I/O).
+    #[test]
+    fn retire_acked_removes_exact_entry_without_io_or_durable_change() {
+        let store = Arc::new(ModelStore::default());
+        let journal = attach(store.clone());
+        let pos = position(SigningKind::Proposal, 701);
+        let b = binding(b"retire-A");
+        let cap = reserve_and_invoke(&journal, &pos, &b);
+        journal.record_signed_result(&cap, b"sigbytes").unwrap();
+
+        // Identical-result republication is available BEFORE retirement.
+        journal.record_signed_result(&cap, b"sigbytes").unwrap();
+        assert!(journal.live_contains_for_test(&pos));
+        assert_eq!(journal.live_len_for_test(), 1);
+
+        // Snapshot durable + in-memory state immediately before retirement.
+        let key = pos.storage_key();
+        let record_before = store.get_signing_record(&key).unwrap();
+        let meta_before = store.get_signing_metadata().unwrap();
+        let count_before = journal.reserved_position_count();
+        let next_op_before = journal.next_operation_id_for_test();
+        let uncertain_before = journal.accounting_uncertain_for_test();
+        let cache_before = journal.recovered_ack_cache_len();
+        let writes_before = store.record_writes();
+
+        assert_eq!(
+            journal.retire_acknowledged_operation(&cap),
+            Ok(RetirementOutcome::Retired)
+        );
+
+        // Exactly this entry disappeared.
+        assert!(!journal.live_contains_for_test(&pos));
+        assert_eq!(journal.live_len_for_test(), 0);
+        // Every durable and in-memory accounting datum is byte-for-byte unchanged.
+        assert_eq!(store.get_signing_record(&key).unwrap(), record_before);
+        assert_eq!(store.get_signing_metadata().unwrap(), meta_before);
+        assert_eq!(journal.reserved_position_count(), count_before);
+        assert_eq!(journal.next_operation_id_for_test(), next_op_before);
+        assert_eq!(journal.accounting_uncertain_for_test(), uncertain_before);
+        assert_eq!(journal.recovered_ack_cache_len(), cache_before);
+        // Retirement itself performed no storage write.
+        assert_eq!(store.record_writes(), writes_before, "retirement performs no I/O");
+    }
+
+    /// Evidence B — after retirement the borrowed capability is stale: the normal
+    /// publication check rejects it and a repeated retirement refuses with a fixed
+    /// code, neither mutating durable nor live state.
+    #[test]
+    fn retire_then_stale_publication_and_repeat_retire_refuse_without_change() {
+        let store = Arc::new(ModelStore::default());
+        let journal = attach(store.clone());
+        let pos = position(SigningKind::Vote, 702);
+        let b = binding(b"retire-B-stale");
+        let cap = reserve_and_invoke(&journal, &pos, &b);
+        journal.record_signed_result(&cap, b"the-sig").unwrap();
+        assert_eq!(
+            journal.retire_acknowledged_operation(&cap),
+            Ok(RetirementOutcome::Retired)
+        );
+
+        let key = pos.storage_key();
+        let record_after_retire = store.get_signing_record(&key).unwrap();
+        let writes_after_retire = store.record_writes();
+
+        // The durable signing obligation remains; stale publication is rejected
+        // through the EXISTING missing-live-operation check (no durable rewrite).
+        assert!(matches!(
+            journal.record_signed_result(&cap, b"the-sig"),
+            Err(JournalError::InvalidResultPublication(_))
+        ));
+        assert_eq!(store.get_signing_record(&key).unwrap(), record_after_retire);
+
+        // A repeated retirement is a fixed refusal with no state change.
+        assert_eq!(
+            journal.retire_acknowledged_operation(&cap),
+            Err(RetirementError::NoLiveOperation)
+        );
+        assert_eq!(journal.live_len_for_test(), 0);
+        assert_eq!(store.get_signing_record(&key).unwrap(), record_after_retire);
+        assert_eq!(store.record_writes(), writes_after_retire);
+    }
+
+    /// Evidence B — a capability from a FOREIGN ownership domain is refused and
+    /// removes nothing from either domain.
+    #[test]
+    fn retire_foreign_domain_capability_refused() {
+        let store_a = Arc::new(ModelStore::default());
+        let journal_a = attach(store_a);
+        let store_b = Arc::new(ModelStore::default());
+        let journal_b = attach(store_b);
+        let pos = position(SigningKind::Proposal, 703);
+        let b = binding(b"retire-B-foreign");
+        let cap_a = reserve_and_invoke(&journal_a, &pos, &b);
+        journal_a.record_signed_result(&cap_a, b"sig").unwrap();
+
+        // journal_b's domain token differs, so cap_a is foreign to it.
+        assert_eq!(
+            journal_b.retire_acknowledged_operation(&cap_a),
+            Err(RetirementError::ForeignDomain)
+        );
+        // The owning domain still holds the live entry (nothing removed anywhere).
+        assert!(journal_a.live_contains_for_test(&pos));
+    }
+
+    /// Evidence B — retiring one operation leaves a DIFFERENT live operation intact,
+    /// and that other operation can still publish idempotently.
+    #[test]
+    fn retire_preserves_another_live_operation() {
+        let store = Arc::new(ModelStore::default());
+        let journal = attach(store);
+        let p1 = position(SigningKind::Proposal, 704);
+        let p2 = position(SigningKind::Vote, 705);
+        let b1 = binding(b"retire-B-keep-1");
+        let b2 = binding(b"retire-B-keep-2");
+        let cap1 = reserve_and_invoke(&journal, &p1, &b1);
+        let cap2 = reserve_and_invoke(&journal, &p2, &b2);
+        journal.record_signed_result(&cap1, b"s1").unwrap();
+        journal.record_signed_result(&cap2, b"s2").unwrap();
+        assert_eq!(journal.live_len_for_test(), 2);
+
+        assert_eq!(
+            journal.retire_acknowledged_operation(&cap1),
+            Ok(RetirementOutcome::Retired)
+        );
+        assert!(!journal.live_contains_for_test(&p1));
+        assert!(journal.live_contains_for_test(&p2));
+        assert_eq!(journal.live_len_for_test(), 1);
+        // The surviving operation still republishes its identical result.
+        journal.record_signed_result(&cap2, b"s2").unwrap();
+    }
+
+    /// Evidence B (DEFENSIVE fixtures) — operation-id / binding mismatch and an
+    /// un-invoked live entry each refuse without removing the entry. Genuine public
+    /// control flow cannot present these, so they are built with explicitly
+    /// labelled in-module test mutators (no public capability constructor).
+    #[test]
+    fn retire_operation_id_binding_and_invoked_mismatches_refused() {
+        // operation-id mismatch: replace the live entry with a NEW operation id.
+        let store = Arc::new(ModelStore::default());
+        let journal = attach(store);
+        let pos = position(SigningKind::Proposal, 706);
+        let b = binding(b"retire-B-mismatch");
+        let cap = reserve_and_invoke(&journal, &pos, &b);
+        journal.record_signed_result(&cap, b"sig").unwrap();
+        // Overwrite the entry (same position+binding, FRESH operation id, acked).
+        journal.insert_live_for_test(pos, b, true);
+        assert_eq!(
+            journal.retire_acknowledged_operation(&cap),
+            Err(RetirementError::OperationMismatch)
+        );
+        assert!(journal.live_contains_for_test(&pos), "entry not removed on mismatch");
+
+        // binding mismatch: entry at the same position carries a DIFFERENT binding.
+        let store2 = Arc::new(ModelStore::default());
+        let journal2 = attach(store2);
+        let pos2 = position(SigningKind::Vote, 707);
+        let b2 = binding(b"retire-B-bind-a");
+        let cap2 = reserve_and_invoke(&journal2, &pos2, &b2);
+        journal2.record_signed_result(&cap2, b"sig").unwrap();
+        journal2.insert_live_for_test(pos2, binding(b"retire-B-bind-OTHER"), true);
+        assert_eq!(
+            journal2.retire_acknowledged_operation(&cap2),
+            Err(RetirementError::OperationMismatch)
+        );
+        assert!(journal2.live_contains_for_test(&pos2));
+
+        // un-invoked defensive: force invoked=false for the matching entry.
+        let store3 = Arc::new(ModelStore::default());
+        let journal3 = attach(store3);
+        let pos3 = position(SigningKind::Proposal, 708);
+        let b3 = binding(b"retire-B-uninvoked");
+        let cap3 = reserve_and_invoke(&journal3, &pos3, &b3);
+        journal3.record_signed_result(&cap3, b"sig").unwrap();
+        journal3.set_live_invoked_for_test(&pos3, false);
+        assert_eq!(
+            journal3.retire_acknowledged_operation(&cap3),
+            Err(RetirementError::NotInvoked)
+        );
+        assert!(journal3.live_contains_for_test(&pos3));
+    }
+
+    /// Evidence C — retirement refuses while an invoked operation remains
+    /// unacknowledged, INCLUDING a result write that stored bytes but returned an
+    /// error (readable Signed bytes do not satisfy result_acked). After a genuine
+    /// publication retry establishes acknowledgement, retirement succeeds.
+    #[test]
+    fn retire_refuses_until_result_acknowledged_then_succeeds() {
+        let store = Arc::new(ModelStore::default());
+        let journal = attach(store.clone());
+        let pos = position(SigningKind::Proposal, 709);
+        let b = binding(b"retire-C");
+        // Invoked but not yet acknowledged (no record_signed_result).
+        let cap = reserve_and_invoke(&journal, &pos, &b);
+        assert_eq!(
+            journal.retire_acknowledged_operation(&cap),
+            Err(RetirementError::NotAcknowledged)
+        );
+
+        // A write that stores readable bytes but returns an error does NOT
+        // acknowledge: result_acked stays false, so retirement still refuses.
+        store.set_store_then_error(true);
+        assert!(journal.record_signed_result(&cap, b"sig-C").is_err());
+        // The Signed bytes are now readable in the store...
+        assert!(store.get_signing_record(&pos.storage_key()).unwrap().is_some());
+        // ...yet retirement refuses because no in-process ack was established.
+        assert_eq!(
+            journal.retire_acknowledged_operation(&cap),
+            Err(RetirementError::NotAcknowledged)
+        );
+
+        // A successful publication retry establishes the acknowledgement.
+        store.set_store_then_error(false);
+        journal.record_signed_result(&cap, b"sig-C").unwrap();
+        assert_eq!(
+            journal.retire_acknowledged_operation(&cap),
+            Ok(RetirementOutcome::Retired)
+        );
+    }
+
+    /// Evidence E — after retirement, reserving the SAME position/binding is never
+    /// FreshlyReserved (the durable obligation persists), a DIFFERENT binding is a
+    /// Conflict, and neither path reduces the durable position count.
+    #[test]
+    fn retire_does_not_renew_signing_eligibility() {
+        let store = Arc::new(ModelStore::default());
+        let journal = attach(store);
+        let pos = position(SigningKind::Proposal, 710);
+        let b = binding(b"retire-E");
+        let cap = reserve_and_invoke(&journal, &pos, &b);
+        journal.record_signed_result(&cap, b"sig-E").unwrap();
+        let count_before = journal.reserved_position_count();
+        assert_eq!(
+            journal.retire_acknowledged_operation(&cap),
+            Ok(RetirementOutcome::Retired)
+        );
+
+        // Matching position/binding: the recovered durable Signed record is
+        // re-presented (never a fresh continuation).
+        assert!(matches!(
+            journal.reserve_for_sign(&pos, &b).unwrap(),
+            ReservationOutcome::ExactRetryRetained(ref s) if s == b"sig-E"
+        ));
+        // A different binding at the same position is a Conflict, not fresh.
+        assert!(matches!(
+            journal.reserve_for_sign(&pos, &binding(b"retire-E-DIFFERENT")).unwrap(),
+            ReservationOutcome::Conflict
+        ));
+        // The durable position count never decreased.
+        assert_eq!(journal.reserved_position_count(), count_before);
+    }
+
+    /// Evidence F — a retirement through one handle is observed by a second handle
+    /// sharing the same ownership domain.
+    #[test]
+    fn retire_observed_by_second_handle_sharing_domain() {
+        let store = Arc::new(ModelStore::default());
+        let journal_a = attach(store.clone());
+        // A second handle over the SAME store instance shares one ownership domain.
+        let journal_b = SigningReservationJournal::open(store.clone())
+            .expect("second handle opens the established model store");
+        let pos = position(SigningKind::Proposal, 711);
+        let b = binding(b"retire-F-shared");
+        let cap = reserve_and_invoke(&journal_a, &pos, &b);
+        journal_a.record_signed_result(&cap, b"sig-F").unwrap();
+        assert!(journal_b.live_contains_for_test(&pos), "shared domain sees the live entry");
+
+        assert_eq!(
+            journal_a.retire_acknowledged_operation(&cap),
+            Ok(RetirementOutcome::Retired)
+        );
+        // The second handle observes the removal through the shared domain.
+        assert!(!journal_b.live_contains_for_test(&pos));
+        assert!(matches!(
+            journal_b.record_signed_result(&cap, b"sig-F"),
+            Err(JournalError::InvalidResultPublication(_))
+        ));
+    }
+
+    /// Evidence F — for an associated fixture, the operational and aggregate ledgers
+    /// are unchanged directly across the retirement call (no retrieval workspace is
+    /// admitted, so no workspace charges enter the comparison).
+    #[test]
+    fn retire_leaves_associated_ledgers_unchanged() {
+        let store = Arc::new(ModelStore::default());
+        let journal = attach(store);
+        let agg = AggregateAuthority::new();
+        agg.bind(1 << 20).expect("bind aggregate ceiling");
+        let acct = SharedAccountant::new(agg);
+        acct.bind(&pinned_ctx(), 0).expect("bind operational sub-ledger");
+        assert_eq!(journal.install_accountant_association(&acct), Ok(()));
+
+        let pos = position(SigningKind::Proposal, 712);
+        let b = binding(b"retire-F-ledger");
+        let cap = reserve_and_invoke(&journal, &pos, &b);
+        journal.record_signed_result(&cap, b"sig-F2").unwrap();
+
+        let p_current = acct.current();
+        let p_peak = acct.peak();
+        let p_cap = acct.cap();
+        let a_current = acct.aggregate().current();
+        let a_peak = acct.aggregate().peak();
+        let a_cap = acct.aggregate().cap();
+
+        assert_eq!(
+            journal.retire_acknowledged_operation(&cap),
+            Ok(RetirementOutcome::Retired)
+        );
+
+        assert_eq!(acct.current(), p_current, "partition current unchanged");
+        assert_eq!(acct.peak(), p_peak, "partition peak unchanged");
+        assert_eq!(acct.cap(), p_cap, "partition cap unchanged");
+        assert_eq!(acct.aggregate().current(), a_current, "aggregate current unchanged");
+        assert_eq!(acct.aggregate().peak(), a_peak, "aggregate peak unchanged");
+        assert_eq!(acct.aggregate().cap(), a_cap, "aggregate cap unchanged");
     }
 }
