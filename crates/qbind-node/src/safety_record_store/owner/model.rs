@@ -1212,8 +1212,8 @@ pub(crate) enum ModelRetainedUseOutcome {
 /// conservatively bounds the simultaneously-live model-owned objects built from
 /// the borrowed Vote: the owned public-key lookup result (`Vec<u8>` control plus
 /// its backing capacity), the canonical preimage (`Vec<u8>` control plus backing)
-/// and the canonical-body temporary backing, the position, the binding input,
-/// the hash state, and the binding digest.
+/// and the canonical-body temporary (`Vec<u8>` control plus its bounded backing),
+/// the position, the binding input, the hash state, and the binding digest.
 ///
 /// It deliberately excludes a Vote-clone term (the model BORROWS `decided.vote()`
 /// and never owns a Vote), and excludes every D10 term the fresh model charged
@@ -1230,6 +1230,7 @@ fn verify_charge() -> u128 {
     let pubkey_backing = MODEL_MAX_PUBKEY_BYTES;
     let preimage_control = std::mem::size_of::<Vec<u8>>() as u128;
     let preimage_backing = MODEL_MAX_PREIMAGE_BYTES;
+    let canonical_body_control = std::mem::size_of::<Vec<u8>>() as u128;
     let canonical_body_temp = MODEL_MAX_PREIMAGE_BYTES;
     let position = std::mem::size_of::<SigningPosition>() as u128;
     let binding_input = std::mem::size_of::<DecisionBindingInput<'static>>() as u128;
@@ -1239,6 +1240,7 @@ fn verify_charge() -> u128 {
         .saturating_add(pubkey_backing)
         .saturating_add(preimage_control)
         .saturating_add(preimage_backing)
+        .saturating_add(canonical_body_control)
         .saturating_add(canonical_body_temp)
         .saturating_add(position)
         .saturating_add(binding_input)
@@ -4342,6 +4344,143 @@ mod tests {
             "with pressure removed the retained consumption succeeds, got {outcome:?}"
         );
         assert_eq!(sink.calls, 1);
+    }
+
+    /// Independent reconstruction of the PRE-correction verification working-set
+    /// charge: every term `verify_charge()` sums EXCEPT the canonical-body
+    /// `Vec<u8>` control term added by this correction. Deliberately composed from
+    /// the component sizes/bounds, NOT as `verify_charge() - size_of::<Vec<u8>>()`,
+    /// so reverting the correction cannot keep the regression below green.
+    fn previous_verify_allowance() -> u128 {
+        let vec_control = std::mem::size_of::<Vec<u8>>() as u128;
+        vec_control // pubkey_control
+            .saturating_add(MODEL_MAX_PUBKEY_BYTES) // pubkey_backing
+            .saturating_add(vec_control) // preimage_control
+            .saturating_add(MODEL_MAX_PREIMAGE_BYTES) // preimage_backing
+            .saturating_add(MODEL_MAX_PREIMAGE_BYTES) // canonical_body_temp (backing only)
+            .saturating_add(std::mem::size_of::<SigningPosition>() as u128)
+            .saturating_add(std::mem::size_of::<DecisionBindingInput<'static>>() as u128)
+            .saturating_add(std::mem::size_of::<Sha3_256>() as u128)
+            .saturating_add(std::mem::size_of::<BindingDigest>() as u128)
+    }
+
+    /// Run the retained model while leaving EXACTLY `verify_allowance` effective
+    /// headroom (the binding minimum of the operational and aggregate partitions)
+    /// at the verification admission, using the existing real-reservation per-stage
+    /// pressure hook (no admission weakening). The hook fires at the Verify stage
+    /// ONLY — after the dominating held-guard observation has released — consuming
+    /// all but `verify_allowance` of the effective headroom, so the model's own
+    /// `verify_charge()` reserve refuses iff it exceeds `verify_allowance`.
+    fn run_retained_with_verify_allowance(
+        owner: &SafetyRecordOwner,
+        engine: &BasicHotStuffEngine<[u8; 32]>,
+        decided: &DecidedVote<OwningCapturePayload>,
+        p1: &BlockProposal,
+        lim: &PreparedDecisionInputLimits,
+        snapshot: &mut AuthorizedProposalVoteSnapshot,
+        journal: &SigningReservationJournal,
+        verify_allowance: u128,
+    ) -> (ModelRetainedUseOutcome, u32) {
+        let backend = owner.backend_for_test().clone();
+        let held = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+        let held_hook = held.clone();
+        install_retained_admit_pressure_hook(move |s| {
+            if s == RetainedAdmitStage::Verify {
+                let op = backend.accounting_cap().expect("op cap")
+                    - backend.accounting_current();
+                let agg = backend.accounting_aggregate_cap().expect("agg cap")
+                    - backend.accounting_aggregate_current();
+                let eff = op.min(agg);
+                // Consume down to EXACTLY `verify_allowance` effective headroom.
+                let r = backend
+                    .reserve_standing_for_test(eff - verify_allowance)
+                    .expect("verify-allowance pressure fits");
+                held_hook.borrow_mut().push(r);
+            }
+        });
+        let mut sink = RetainedUseRecordingSink::new();
+        let mut coord = ModelCoordinationHook::inert();
+        let outcome = retained_vote_use_model::<FixtureCommittedHistory>(
+            owner, engine, decided, p1, lim, None, snapshot,
+            &mut sink, journal, &mut coord,
+            ReconfirmPerturbation::None,
+        );
+        clear_retained_admit_pressure_hook();
+        held.borrow_mut().clear();
+        (outcome, sink.calls)
+    }
+
+    // ----------------------------------------------------------------------
+    // RUN 422 — canonical-body Vec control-object accounting correction. The
+    // corrected verify_charge() adds exactly one Vec<u8> control term for the
+    // canonical-body temporary. With only the PRE-correction allowance available
+    // at the verification admission, the corrected charge refuses (the restored
+    // term is precisely what tips admission), consuming nothing; releasing the
+    // pressure and retrying the SAME envelope/journal succeeds. Both ledgers, the
+    // borrowed Vote, and the pin provenance are preserved across both paths. The
+    // allowance is reconstructed independently, so reverting the correction makes
+    // this regression fail (the old charge would fit and NOT refuse).
+    // ----------------------------------------------------------------------
+    #[test]
+    fn retained_verify_charge_canonical_body_control_admission_boundary() {
+        let prev_allowance = previous_verify_allowance();
+        let corrected = verify_charge();
+        let control = std::mem::size_of::<Vec<u8>>() as u128;
+        println!(
+            "RUN422 verify_charge measured: old={prev_allowance} new={corrected} control={control}"
+        );
+        assert_eq!(
+            corrected,
+            prev_allowance + control,
+            "verify_charge adds exactly the canonical-body Vec<u8> control term \
+             (prev={prev_allowance}, corrected={corrected}, control={control})"
+        );
+
+        let dir = tempfile::tempdir().unwrap();
+        let ctx = retained_ctx(4);
+        let (owner, engine, decided, p1, lim, _rev) = capture_multi(dir.path(), &ctx);
+        let (pv, sk) = make_retained_authority();
+        let mut snapshot = established_snapshot(&pv);
+        let base_vote = decided.vote().clone();
+        let (_store, journal, _sig) = seed_retained_signed(&pv, &base_vote, &sk);
+
+        let ledgers_before = snapshot_ledgers(&owner);
+        let prov_before = pin_provenance_now(&owner, &decided);
+
+        // Pre-correction allowance available => the corrected charge (one Vec
+        // control larger) refuses at the verification admission.
+        let (outcome, calls) = run_retained_with_verify_allowance(
+            &owner, &engine, &decided, &p1, &lim, &mut snapshot, &journal, prev_allowance,
+        );
+        assert_eq!(
+            outcome,
+            ModelRetainedUseOutcome::VerifyAdmitRefused,
+            "the corrected verification charge refuses when only the pre-correction \
+             allowance is available"
+        );
+        assert_eq!(calls, 0, "a verification-admission refusal consumes nothing");
+        assert_cleanup_preserved(
+            &owner, &decided, &base_vote, ledgers_before, prov_before,
+            "the corrected-charge verification-admission refusal",
+        );
+
+        // Release the pressure and retry the SAME envelope/journal: success.
+        let mut sink = RetainedUseRecordingSink::new();
+        let mut coord = ModelCoordinationHook::inert();
+        let outcome = retained_vote_use_model::<FixtureCommittedHistory>(
+            &owner, &engine, &decided, &p1, &lim, None, &mut snapshot,
+            &mut sink, &journal, &mut coord,
+            ReconfirmPerturbation::None,
+        );
+        assert!(
+            matches!(outcome, ModelRetainedUseOutcome::Consumed(_)),
+            "with pressure released the retained consumption succeeds, got {outcome:?}"
+        );
+        assert_eq!(sink.calls, 1, "exactly one sink consumption after relief");
+        assert_cleanup_preserved(
+            &owner, &decided, &base_vote, ledgers_before, prov_before,
+            "the post-relief retained consumption",
+        );
     }
 
     // ----------------------------------------------------------------------
