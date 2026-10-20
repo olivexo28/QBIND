@@ -1043,6 +1043,29 @@ pub trait SigningJournalStorage: Send + Sync {
         let _ = (journal_key, envelope);
         Err(BoundedStorageError::Unsupported)
     }
+
+    /// Run 422 §7.2 — persist an already-outer-framed signing-record envelope
+    /// AND its already-outer-framed accounting-metadata envelope together under
+    /// ONE atomic, synced storage operation. The inputs are BORROWED, caller-
+    /// framed bytes (outer CRC + payload); this method does NOT re-wrap, re-encode,
+    /// validate signing eligibility, mint a continuation, advance journal
+    /// accounting, invoke a signer, or authorize delivery — it establishes a
+    /// STORAGE acknowledgement only. Either both values become durable together or
+    /// neither does; a durable backend MUST NOT return `Ok(())` until the atomic
+    /// batch is synchronized to stable storage. A failed/uncertain result does
+    /// NOT prove that neither value was written, and the operation never
+    /// intentionally exposes a partially updated pair. The default refuses with
+    /// [`BoundedStorageError::Unsupported`] WITHOUT any write or allocating legacy
+    /// fallback; a supporting backend overrides it.
+    fn put_signing_envelope_and_metadata_synced(
+        &self,
+        record_key: &[u8],
+        record_envelope: &[u8],
+        metadata_envelope: &[u8],
+    ) -> Result<(), BoundedStorageError> {
+        let _ = (record_key, record_envelope, metadata_envelope);
+        Err(BoundedStorageError::Unsupported)
+    }
 }
 
 /// Run 422 D7-D10 Correction E — a bounded, process-local cache of recovered
@@ -2468,6 +2491,54 @@ mod tests {
             }
             Ok(())
         }
+        fn put_signing_envelope_and_metadata_synced(
+            &self,
+            record_key: &[u8],
+            record_envelope: &[u8],
+            metadata_envelope: &[u8],
+        ) -> Result<(), BoundedStorageError> {
+            use crate::signing_journal_admission::OUTER_CRC_LEN;
+            // Same fixed-framing preflight the durable/in-memory backends apply,
+            // BEFORE any fault branch, model-owned copy, or map mutation.
+            crate::storage::preflight_framed_envelope_pair(record_envelope, metadata_envelope)?;
+            // Match the durable backend's journal-key length invariant.
+            if record_key.len() != crate::signing_journal_admission::JOURNAL_KEY_LEN {
+                return Err(BoundedStorageError::CapacityExceeded {
+                    stored_len: record_key.len(),
+                    capacity: crate::signing_journal_admission::JOURNAL_KEY_LEN,
+                });
+            }
+            // Fail BEFORE any write: neither value is mutated, so both prior
+            // values (if any) remain. Labelled TEST fault injector.
+            if *self.fail_writes.read().unwrap() {
+                return Err(BoundedStorageError::Io(BoundedDiag::WriteIo));
+            }
+            // MODEL format: records are stored record-ONLY and metadata raw, with
+            // the outer checksum synthesized on read, so STRIP the already-present
+            // outer CRC from each framed input. These `.to_vec()` values are
+            // MODEL-OWNED copies of the stored values — NOT allocation-free.
+            let record_body = record_envelope[OUTER_CRC_LEN..].to_vec();
+            let metadata_body = metadata_envelope[OUTER_CRC_LEN..].to_vec();
+            // store_then_error: BOTH values become readable under one lock, but the
+            // durability acknowledgement is reported uncertain (error). The write
+            // count is bumped so a test distinguishes “write-then-error” from
+            // “failed-before-write” WITHOUT inferring it from the error itself.
+            if *self.store_then_error.read().unwrap() {
+                self.record_writes
+                    .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                let mut m = self.map.write().unwrap();
+                m.insert(record_key.to_vec(), record_body);
+                m.insert(MODEL_META_KEY.to_vec(), metadata_body);
+                return Err(BoundedStorageError::Io(BoundedDiag::WriteIo));
+            }
+            // Acknowledged success: both inserts land under one lock acquisition.
+            self.record_writes
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            let mut m = self.map.write().unwrap();
+            m.insert(record_key.to_vec(), record_body);
+            m.insert(MODEL_META_KEY.to_vec(), metadata_body);
+            Ok(())
+        }
         fn signing_ownership_domain(&self) -> Arc<SigningOwnershipDomain> {
             self.domain
                 .get_or_init(|| match *self.cache_cap.read().unwrap() {
@@ -2547,6 +2618,72 @@ mod tests {
             store.get_signing_metadata(),
             Err(StorageError::Corruption(_))
         ));
+    }
+
+    /// Run 422 §7.2 — wrap a body in the outer storage checksum envelope the
+    /// combined write accepts (the MODEL store strips it again before storing).
+    fn outer_frame(body: &[u8]) -> Vec<u8> {
+        use crate::signing_journal_admission::OUTER_CRC_LEN;
+        let mut env = Vec::with_capacity(OUTER_CRC_LEN + body.len());
+        env.extend_from_slice(&crate::storage::signing_journal_crc32(body).to_be_bytes());
+        env.extend_from_slice(body);
+        env
+    }
+
+    /// Run 422 §7.2 item 4: the combined bounded write FAILS BEFORE any write
+    /// under the `fail_writes` fault fixture — both previously-stored values
+    /// remain and the write counter does not advance. (Labelled TEST fixture.)
+    #[test]
+    fn put_signing_envelope_and_metadata_synced_model_fails_before_write() {
+        let store = Arc::new(ModelStore::default());
+        let p = position(SigningKind::Proposal, 41);
+        let b = binding(b"item4");
+        let (key, record_body) = reserved_kv(&p, &b);
+        let metadata_body = SigningJournalMetadata::new(DEFAULT_MAX_RESERVED_POSITIONS, 1).encode();
+        // Seed distinct OLD values the refused write must not disturb.
+        let old_record = vec![0x11u8; record_body.len()];
+        let old_meta = vec![0x22u8; metadata_body.len()];
+        store.overwrite(&key, old_record.clone());
+        store.overwrite(MODEL_META_KEY, old_meta.clone());
+        let writes_before = store.record_writes();
+        store.set_fail_writes(true);
+        let r = store.put_signing_envelope_and_metadata_synced(
+            &key,
+            &outer_frame(&record_body),
+            &outer_frame(&metadata_body),
+        );
+        assert!(matches!(r, Err(BoundedStorageError::Io(BoundedDiag::WriteIo))));
+        // Both OLD values remain; nothing was written.
+        assert_eq!(store.get_signing_record(&key).unwrap().unwrap(), old_record);
+        assert_eq!(store.get_signing_metadata().unwrap().unwrap(), old_meta);
+        assert_eq!(store.record_writes(), writes_before, "no write occurred");
+    }
+
+    /// Run 422 §7.2 item 5: under the `store_then_error` fault fixture BOTH new
+    /// values become readable although the result is an error. This is
+    /// distinguished from fail-before-write by the RECORDED write count, NOT by
+    /// assuming an error means no write. (Labelled TEST fixture.)
+    #[test]
+    fn put_signing_envelope_and_metadata_synced_model_write_then_error() {
+        let store = Arc::new(ModelStore::default());
+        let p = position(SigningKind::Proposal, 42);
+        let b = binding(b"item5");
+        let (key, record_body) = reserved_kv(&p, &b);
+        let metadata_body = SigningJournalMetadata::new(DEFAULT_MAX_RESERVED_POSITIONS, 1).encode();
+        let writes_before = store.record_writes();
+        store.set_store_then_error(true);
+        let r = store.put_signing_envelope_and_metadata_synced(
+            &key,
+            &outer_frame(&record_body),
+            &outer_frame(&metadata_body),
+        );
+        assert!(matches!(r, Err(BoundedStorageError::Io(BoundedDiag::WriteIo))));
+        // Despite the error, BOTH NEW (outer-CRC-stripped) bodies are readable.
+        assert_eq!(store.get_signing_record(&key).unwrap().unwrap(), record_body);
+        assert_eq!(store.get_signing_metadata().unwrap().unwrap(), metadata_body);
+        // The recorded write count proves a write WAS attempted (write-then-error),
+        // which a correct journal must NOT treat as an acknowledged barrier.
+        assert_eq!(store.record_writes(), writes_before + 1);
     }
 
     /// Test-fixture setup (NOT a mirror of production selection): an empty,
