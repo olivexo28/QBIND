@@ -26,6 +26,8 @@ use crate::signing_reservation_journal::{
     BindingDigest, DecisionBindingInput, ReservationOutcome, ResultPublicationCapability,
     SigningContinuation, SigningKind, SigningPosition, SigningReservationJournal,
 };
+use crate::signing_reservation_journal::{RefuseReason, RetainedDelivery};
+use crate::signing_journal_admission::RetrievalWorkspaceOwner;
 
 use super::super::decision_capture::{
     OwningCapturePayload, PreparedDecisionInputLimits, RetainedDecisionObservation,
@@ -1063,6 +1065,497 @@ fn fresh_vote_sign_model<H: CommittedHistory + ?Sized>(
     out.fill(0);
     ModelFreshUseOutcome::Signed(diag)
 }
+
+// ===========================================================================
+// RUN 422 — Isolated Protected Retained-Signature USE model (TEST-ONLY).
+//
+// Sibling of `fresh_vote_sign_model`. This operation does NOT sign and performs
+// NO D10 reservation/consumption/publication: it borrows the already-decided
+// envelope's Vote (`decided.vote()`, never a clone or a suite-reassigned copy),
+// retrieves an ALREADY-RETAINED signature through the admitted
+// `retrieve_retained` path, cryptographically verifies that borrowed signature
+// against the SAME Vote's canonical preimage, and consumes the verified result
+// through a scalar-only sink — all under ONE serialization-domain guard acquired
+// FIRST (released LAST). The unsigned-envelope invariant is preserved by
+// construction: the canonical preimage is `signing_domain.vote_preimage(vote)`,
+// which hashes `Vote::canonical_body()` — a body that EXCLUDES the `signature`
+// field — so the preimage is independent of the (empty) envelope signature and
+// the separately-retrieved journal signature is the ONLY signature verified.
+// ===========================================================================
+
+/// Fixed-size, `Copy` diagnostic the retained-use sink produces. Scalars only —
+/// never the signature bytes, never an owned Vote. `preimage_len` is the checked
+/// canonical-preimage length passed in EXPLICITLY by the model; the sink cannot
+/// derive it from its `sig` argument.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct RetainedUseDiag {
+    pub(crate) validator_index: u64,
+    pub(crate) height: u64,
+    pub(crate) round: u64,
+    pub(crate) step: u8,
+    pub(crate) suite_id: u16,
+    pub(crate) sig_len: u32,
+    pub(crate) preimage_len: u32,
+}
+
+/// Concrete recording sink for the VERIFIED retained signature. No callback, no
+/// Vote return, no signature copy/retain: it records only the fixed scalar
+/// diagnostic and a call count.
+pub(crate) struct RetainedUseRecordingSink {
+    pub(crate) last: Option<RetainedUseDiag>,
+    pub(crate) calls: u32,
+}
+
+impl RetainedUseRecordingSink {
+    pub(crate) fn new() -> Self {
+        Self {
+            last: None,
+            calls: 0,
+        }
+    }
+
+    /// Copy only fixed scalars out of `vote` plus the signature and preimage
+    /// lengths; never clone or retain `sig`. `preimage_len` is passed explicitly
+    /// (the sink cannot derive it from `sig`).
+    pub(crate) fn consume_verified(
+        &mut self,
+        vote: &Vote,
+        sig: &[u8],
+        preimage_len: usize,
+    ) -> RetainedUseDiag {
+        let diag = RetainedUseDiag {
+            validator_index: vote.validator_index as u64,
+            height: vote.height,
+            round: vote.round,
+            step: vote.step,
+            suite_id: vote.suite_id,
+            sig_len: sig.len() as u32,
+            preimage_len: preimage_len as u32,
+        };
+        self.calls = self.calls.saturating_add(1);
+        self.last = Some(diag);
+        diag
+    }
+}
+
+/// Typed refusal class for a non-delivering `retrieve_retained` refusal (fixed
+/// `Copy` codes mirrored from the journal's `RefuseReason`), kept DISTINCT from a
+/// cryptographic verification failure.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum RetainedRefuseClass {
+    PositionMismatch,
+    MalformedRecord,
+    BindingConflict,
+    WorkspaceCapacityExceeded,
+}
+
+/// Fixed-size, `Copy` typed outcome of the retained-use model. Never forwards an
+/// owned String. Every non-`Consumed` variant leaves the sink uncalled.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ModelRetainedUseOutcome {
+    /// The borrowed retrieved signature verified and was consumed (scalar
+    /// diagnostic).
+    Consumed(RetainedUseDiag),
+    /// Owner-derived policy mismatch before locking.
+    PolicyRefused,
+    /// Control-coverage admission refused before the ticket was admitted.
+    ControlAdmitRefused,
+    /// The original authorization ticket could not be admitted.
+    AuthorizationAdmitRefused,
+    /// The existing held-guard observation did not revalidate.
+    ObservationRefused,
+    /// Lifecycle-comparison coverage admission refused before the loader ran.
+    LifecycleAdmitRefused,
+    /// The lifecycle comparison disagreed or could not be established.
+    LifecycleAmbiguous,
+    /// The Vote's signer is not in the authorized membership.
+    MembershipRefused,
+    /// The Vote's wire chain id disagreed with the authorized domain.
+    WrongWireChain,
+    /// The Vote's epoch disagreed with the authorized epoch.
+    WrongAuthorizedEpoch,
+    /// The governed key provider returned no key for the signer.
+    KeyUnavailable,
+    /// The governed suite disagreed with the original Vote's suite.
+    SuiteMismatch,
+    /// No verifier backend is registered for the governed suite.
+    BackendUnavailable,
+    /// Verification-working-set admission refused before any verify object was
+    /// constructed.
+    VerifyAdmitRefused,
+    /// Retrieval-workspace admission refused; the verification inputs already
+    /// existed and are destroyed before their coverage releases.
+    RetrievalAdmitRefused,
+    /// Retrieval refused conservatively because journal accounting is uncertain.
+    RetainedBlocked,
+    /// No record exists at the derived position.
+    RetainedMissing,
+    /// A typed, non-delivering retrieval refusal (position/binding/malformed/
+    /// capacity), distinct from a cryptographic failure.
+    RetainedRefused(RetainedRefuseClass),
+    /// A reservation or live-unacknowledged result exists; no retained signature.
+    RetainedPotentiallySigned,
+    /// A recovered record's synced reissue failed/was uncertain; delivery
+    /// suppressed. A successful reissue remains a permitted side effect even when
+    /// later verification refuses; this variant is ONLY the suppressed case.
+    DeliverySuppressed,
+    /// A fatal retrieval error (lock/unsupported/storage).
+    RetrievalFailed,
+    /// The retrieved signature failed cryptographic verification.
+    VerificationFailed,
+    /// The original ticket failed its pre-consumption confirmation.
+    AuthorizationConfirmRefused,
+}
+
+/// Accounting charge (bytes) for the retained-signature VERIFICATION working set,
+/// admitted BEFORE any verification object is constructed (RUN 422 §3). It
+/// conservatively bounds the simultaneously-live model-owned objects built from
+/// the borrowed Vote: the owned public-key lookup result (`Vec<u8>` control plus
+/// its backing capacity), the canonical preimage (`Vec<u8>` control plus backing)
+/// and the canonical-body temporary backing, the position, the binding input,
+/// the hash state, and the binding digest.
+///
+/// It deliberately excludes a Vote-clone term (the model BORROWS `decided.vote()`
+/// and never owns a Vote), and excludes every D10 term the fresh model charged
+/// (continuation, publication capability, fixed output array): this operation
+/// makes no fresh reservation and invokes no signer. The retrieval workspace
+/// (output + envelope scratch) carries its OWN separate reservations admitted
+/// later by `RetrievalWorkspaceOwner`, so it is not part of this charge. The
+/// verifier backend is reached through a borrowed registry `Arc` dispatch handle
+/// (a fixture-owned handle, not a model-owned key/preimage/binding/hash
+/// temporary), so — consistent with the fresh model, which likewise reaches the
+/// registry without charge — it is not charged here.
+fn verify_charge() -> u128 {
+    let pubkey_control = std::mem::size_of::<Vec<u8>>() as u128;
+    let pubkey_backing = MODEL_MAX_PUBKEY_BYTES;
+    let preimage_control = std::mem::size_of::<Vec<u8>>() as u128;
+    let preimage_backing = MODEL_MAX_PREIMAGE_BYTES;
+    let canonical_body_temp = MODEL_MAX_PREIMAGE_BYTES;
+    let position = std::mem::size_of::<SigningPosition>() as u128;
+    let binding_input = std::mem::size_of::<DecisionBindingInput<'static>>() as u128;
+    let sha3 = std::mem::size_of::<Sha3_256>() as u128;
+    let binding_digest = std::mem::size_of::<BindingDigest>() as u128;
+    pubkey_control
+        .saturating_add(pubkey_backing)
+        .saturating_add(preimage_control)
+        .saturating_add(preimage_backing)
+        .saturating_add(canonical_body_temp)
+        .saturating_add(position)
+        .saturating_add(binding_input)
+        .saturating_add(sha3)
+        .saturating_add(binding_digest)
+}
+
+/// Test-only admission stages at which [`retained_vote_use_model`] admits a
+/// reservation. A test may install a one-shot pressure hook (see
+/// `install_retained_admit_pressure_hook`) that reserves STANDING pressure at a
+/// chosen stage so that exactly that admission refuses deterministically. This
+/// does NOT weaken admission: it injects real accounting pressure, exactly as
+/// the production observation-working-set hook does, and is required because the
+/// held-guard observation's transient working-set peak (the validated-record
+/// holder plus its working set) strictly dominates every LATER admission's
+/// cumulative charge, so a single global pressure cannot isolate the lifecycle,
+/// verify, or retrieval admissions as the first failure.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum RetainedAdmitStage {
+    Lifecycle,
+    Verify,
+    Retrieval,
+}
+
+thread_local! {
+    #[allow(clippy::type_complexity)]
+    static RETAINED_ADMIT_PRESSURE_HOOK: std::cell::RefCell<
+        Option<Box<dyn Fn(RetainedAdmitStage)>>,
+    > = const { std::cell::RefCell::new(None) };
+}
+
+/// Install a per-stage admission pressure hook on this thread. It fires once at
+/// EACH admission stage below (passing that stage); the installed closure
+/// decides whether to apply standing pressure. Cleared with
+/// `clear_retained_admit_pressure_hook`.
+fn install_retained_admit_pressure_hook<F: Fn(RetainedAdmitStage) + 'static>(f: F) {
+    RETAINED_ADMIT_PRESSURE_HOOK.with(|h| *h.borrow_mut() = Some(Box::new(f)));
+}
+
+/// Clear any installed admission pressure hook on this thread.
+fn clear_retained_admit_pressure_hook() {
+    RETAINED_ADMIT_PRESSURE_HOOK.with(|h| *h.borrow_mut() = None);
+}
+
+/// Fire the admission pressure hook for `stage`, if installed. A no-op when no
+/// hook is installed (the default on every production path; this whole module is
+/// `#[cfg(test)]`).
+fn fire_retained_admit_pressure(stage: RetainedAdmitStage) {
+    RETAINED_ADMIT_PRESSURE_HOOK.with(|h| {
+        if let Some(cb) = h.borrow().as_ref() {
+            cb(stage);
+        }
+    });
+}
+/// RUN 422 — the isolated protected retained-signature USE model. ONE ordered
+/// protected sequence under a SINGLE serialization-domain guard acquired FIRST
+/// (dropped LAST). It borrows `decided.vote()` exclusively, retrieves an
+/// already-retained signature, verifies it cryptographically, and consumes it
+/// through a scalar sink. No fresh signing, D10 reservation/consumption, or
+/// signed-result publication occurs.
+///
+/// Declaration order establishes the reverse-drop cleanup on EVERY exit:
+/// guard -> control_res -> ticket -> (lifecycle scope, fully destroyed before the
+/// verify phase) -> verify_res -> verify objects (owned pk, backend handle,
+/// preimage, position, binding) -> retrieval workspace (output, scratch). Rust's
+/// reverse-drop therefore releases: retrieval workspace -> verify objects ->
+/// verify_res -> ticket -> control_res -> guard. The lifecycle objects and the
+/// loader-owned validated record are destroyed and their coverage released at the
+/// end of the bounded lifecycle scope, while the SAME guard stays held into the
+/// verify/retrieval phase (no release-and-reacquire).
+#[allow(clippy::too_many_arguments)]
+fn retained_vote_use_model<H: CommittedHistory + ?Sized>(
+    owner: &SafetyRecordOwner,
+    engine: &qbind_consensus::BasicHotStuffEngine<[u8; 32]>,
+    decided: &qbind_consensus::DecidedVote<OwningCapturePayload>,
+    proposal: &qbind_wire::consensus::BlockProposal,
+    limits: &PreparedDecisionInputLimits,
+    history: Option<&H>,
+    snapshot: &mut AuthorizedProposalVoteSnapshot,
+    sink: &mut RetainedUseRecordingSink,
+    journal: &SigningReservationJournal,
+    coord: &mut ModelCoordinationHook,
+    reconfirm: ReconfirmPerturbation,
+) -> ModelRetainedUseOutcome {
+    use crate::genesis_consensus_authority::LocalAuthorizationState;
+
+    // 1. Owner-derived policy BEFORE locking (no allocation).
+    match PreparedDecisionInputLimits::from_pinned(owner.pinned()) {
+        Ok(expected) => {
+            if *limits != expected {
+                return ModelRetainedUseOutcome::PolicyRefused;
+            }
+        }
+        Err(_) => return ModelRetainedUseOutcome::PolicyRefused,
+    }
+
+    // The ONLY Vote used throughout: borrowed from the owning envelope. No clone,
+    // no suite reassignment, no signature assignment.
+    let vote: &Vote = decided.vote();
+
+    // 2. Acquire the serialization domain ONCE and FIRST so it is released LAST.
+    let guard = owner.backend.lock_domain();
+
+    // 3. Admit control coverage BEFORE constructing the ticket; it stays live
+    //    through the ticket's confirm and destruction.
+    let _control_res = match owner.backend.accounting().reserve(control_charge()) {
+        Ok(r) => r,
+        Err(_) => return ModelRetainedUseOutcome::ControlAdmitRefused,
+    };
+    let ticket = match snapshot.owner().admit() {
+        Ok(t) => t,
+        Err(_) => return ModelRetainedUseOutcome::AuthorizationAdmitRefused,
+    };
+
+    // 4. Existing non-consuming observation under the held guard (locked-only).
+    match owner.observe_checks_locked(&guard, engine, decided, proposal, limits, history) {
+        RetainedDecisionObservation::Revalidated(
+            BoundedSafetyOutcome::SafeViewSufficiency | BoundedSafetyOutcome::SafeAncestry { .. },
+        ) => {}
+        _ => return ModelRetainedUseOutcome::ObservationRefused,
+    }
+
+    // 5. Bounded lifecycle-check scope UNDER THE SAME GUARD, separately charged.
+    //    The validated record (which carries its own loader holder reservation)
+    //    and the lifecycle scalars are destroyed BEFORE the covering
+    //    `lifecycle_res` releases, on both the agree path and every `?` exit.
+    //    Admission refusal is DISTINCT from a lifecycle disagreement.
+    fire_retained_admit_pressure(RetainedAdmitStage::Lifecycle);
+    let lifecycle_res = match owner.backend.accounting().reserve(lifecycle_charge()) {
+        Ok(r) => r,
+        Err(_) => return ModelRetainedUseOutcome::LifecycleAdmitRefused,
+    };
+    let agree = (|| -> Option<bool> {
+        let validated: ValidatedRecord = owner.load_current_validated_locked(&guard, history).ok()?;
+        let current_identity = GenerationIdentity::from_retained(validated.retained())?;
+        let current_revision = owner.authoritative_revision_locked(&guard).ok()?;
+        let captured: PreparedProvenance = owner
+            .pin_provenance_locked(&guard, decided.payload().pin())
+            .ok()?;
+        let (engine_lock_id, engine_lock_view) = match engine.locked_qc() {
+            Some(qc) => (qc.block_id, qc.view),
+            None => return None,
+        };
+        Some(
+            captured.identity == current_identity
+                && captured.captured_revision == current_revision
+                && captured.recovery_backend_incarnation == owner.backend.incarnation()
+                && engine_lock_id == current_identity.lock_block_id
+                && engine_lock_view == current_identity.lock_view,
+        )
+    })();
+    drop(lifecycle_res);
+    match agree {
+        Some(true) => {}
+        _ => return ModelRetainedUseOutcome::LifecycleAmbiguous,
+    }
+
+    // 6. Membership / wire-chain / authorized-epoch checks on the borrowed Vote,
+    //    BEFORE the verification working set is admitted (RUN 422 §2 step 7).
+    let bound_id = ValidatorId::new(vote.validator_index as u64);
+    if !snapshot.verifier().validators.contains(bound_id) {
+        return ModelRetainedUseOutcome::MembershipRefused;
+    }
+    if vote.chain_id != snapshot.verifier().signing_domain.expected_wire_chain_id() {
+        return ModelRetainedUseOutcome::WrongWireChain;
+    }
+    if vote.epoch != snapshot.authorized_epoch() {
+        return ModelRetainedUseOutcome::WrongAuthorizedEpoch;
+    }
+
+    // 7. Admit the verification working set BEFORE constructing any verify object
+    //    (RUN 422 §3). `verify_res` is declared before the verify objects, so they
+    //    are all destroyed before it releases.
+    fire_retained_admit_pressure(RetainedAdmitStage::Verify);
+    let _verify_res = match owner.backend.accounting().reserve(verify_charge()) {
+        Ok(r) => r,
+        Err(_) => return ModelRetainedUseOutcome::VerifyAdmitRefused,
+    };
+
+    // 8. Key/suite/backend selection and position/binding/preimage derivation,
+    //    ALL from the SAME borrowed Vote and bound context. The owned public-key
+    //    `Vec` the provider clones is model-owned and its backing capacity is
+    //    checked against the reserved conservative bound. Any early refusal here
+    //    unwinds the objects already built before `verify_res` releases.
+    let key_suite_backend = {
+        let ctx: &ProposalVoteAuthority = snapshot.verifier();
+        match ctx.key_provider.get_suite_and_key(bound_id) {
+            Some((gov_suite, pk)) => {
+                if gov_suite != ConsensusSigSuiteId::new(vote.suite_id) {
+                    Err(ModelRetainedUseOutcome::SuiteMismatch)
+                } else {
+                    match ctx.backend_registry.get_backend(gov_suite) {
+                        Some(backend) => Ok((gov_suite, pk, backend)),
+                        None => Err(ModelRetainedUseOutcome::BackendUnavailable),
+                    }
+                }
+            }
+            None => Err(ModelRetainedUseOutcome::KeyUnavailable),
+        }
+    };
+    let (_gov_suite, owned_pk, backend) = match key_suite_backend {
+        Ok(v) => v,
+        Err(o) => return o,
+    };
+    debug_assert!(
+        owned_pk.capacity() as u128 <= MODEL_MAX_PUBKEY_BYTES,
+        "owned public-key backing capacity exceeded the reserved bound"
+    );
+
+    // Unsigned-envelope invariant (RUN 422 §1/§2): the canonical preimage hashes
+    // `Vote::canonical_body()`, which EXCLUDES the `signature` field, so the
+    // preimage is independent of the (empty) envelope signature. This is a
+    // focused by-construction assertion, NOT control flow: the retrieved journal
+    // signature is the only signature verified/consumed.
+    debug_assert!(
+        vote.signature.is_empty(),
+        "the owning envelope's Vote carries no inline signature"
+    );
+    let preimage = snapshot.verifier().signing_domain.vote_preimage(vote);
+    debug_assert!(
+        preimage.capacity() as u128 <= MODEL_MAX_PREIMAGE_BYTES,
+        "model preimage backing capacity exceeded the reserved bound"
+    );
+    let preimage_len = preimage.len();
+    let position = SigningPosition {
+        validator_id: vote.validator_index as u64,
+        network_genesis: *snapshot.verifier().signing_domain.genesis_identity(),
+        kind: SigningKind::Vote,
+        originating_view: vote.height,
+    };
+    let binding = BindingDigest::compute(&DecisionBindingInput {
+        position,
+        authorized_epoch: vote.epoch,
+        suite_id: vote.suite_id,
+        wire_message_version: vote.version as u16,
+        d6_signing_format_version: MODEL_D6_SIGNING_FORMAT_VERSION,
+        authority_commitment: *snapshot.verifier().signing_domain.authority_commitment(),
+        block_id: vote.block_id,
+        canonical_preimage: &preimage,
+    });
+
+    // 9. Admit the retrieval workspace (output + envelope scratch) AFTER the
+    //    verification inputs exist (RUN 422 §3). On refusal, those inputs are
+    //    destroyed before `verify_res` releases (reverse-drop). The workspace
+    //    carries its own separate reservations.
+    fire_retained_admit_pressure(RetainedAdmitStage::Retrieval);
+    let workspace = RetrievalWorkspaceOwner::new(&owner.backend).admit();
+    let (mut output, mut scratch) = match workspace {
+        Ok(ws) => ws,
+        Err(_) => return ModelRetainedUseOutcome::RetrievalAdmitRefused,
+    };
+
+    // 10. Retrieve the already-retained signature (no fresh reservation, no
+    //     continuation, no publication capability, no signer).
+    let retrieved = match journal.retrieve_retained(&position, &binding, &mut scratch, &mut output) {
+        Ok(RetainedDelivery::Retained(sig)) => sig,
+        Ok(RetainedDelivery::Blocked) => return ModelRetainedUseOutcome::RetainedBlocked,
+        Ok(RetainedDelivery::Missing) => return ModelRetainedUseOutcome::RetainedMissing,
+        Ok(RetainedDelivery::Refused(reason)) => {
+            let class = match reason {
+                RefuseReason::PositionMismatch => RetainedRefuseClass::PositionMismatch,
+                RefuseReason::MalformedRecord => RetainedRefuseClass::MalformedRecord,
+                RefuseReason::BindingConflict => RetainedRefuseClass::BindingConflict,
+                RefuseReason::WorkspaceCapacityExceeded => {
+                    RetainedRefuseClass::WorkspaceCapacityExceeded
+                }
+            };
+            return ModelRetainedUseOutcome::RetainedRefused(class);
+        }
+        Ok(RetainedDelivery::PotentiallySigned) => {
+            return ModelRetainedUseOutcome::RetainedPotentiallySigned
+        }
+        Ok(RetainedDelivery::DeliverySuppressed) => {
+            return ModelRetainedUseOutcome::DeliverySuppressed
+        }
+        Err(_) => return ModelRetainedUseOutcome::RetrievalFailed,
+    };
+
+    // 11. Borrowed-signature cryptographic verification against the SAME Vote's
+    //     canonical preimage and the governed key. `verify_vote` is a trait-object
+    //     method on the registry-dispatched backend; it borrows the signature.
+    if backend
+        .verify_vote(
+            vote.validator_index as u64,
+            owned_pk.as_slice(),
+            preimage.as_slice(),
+            retrieved,
+        )
+        .is_err()
+    {
+        return ModelRetainedUseOutcome::VerificationFailed;
+    }
+
+    // 11.5 Deterministic in-flight current-authorization replacement strictly
+    //      between the ORIGINAL ticket's admit and its pre-consumption confirm.
+    if let ReconfirmPerturbation::AdvanceGenerationBeforeConfirm = reconfirm {
+        snapshot
+            .owner_mut()
+            .replace_for_fixture(LocalAuthorizationState::MissingStorage);
+    }
+
+    // 12. Reconfirm the ORIGINAL ticket immediately before consumption.
+    if snapshot.owner().confirm(&ticket).is_err() {
+        return ModelRetainedUseOutcome::AuthorizationConfirmRefused;
+    }
+
+    // 13. Fixed observation point (publication exclusion): a competing same-domain
+    //     handle observes `WouldBlock` here while this operation holds the guard.
+    coord.on_post_consume_pre_sign();
+
+    // 14. Scalar-only model consumption of the VERIFIED borrowed signature. The
+    //     retrieval workspace, verify objects, reservations, ticket and guard are
+    //     destroyed by reverse-drop order after this returns (guard LAST).
+    let diag = sink.consume_verified(vote, retrieved, preimage_len);
+    ModelRetainedUseOutcome::Consumed(diag)
+}
+
 
 // ===========================================================================
 // Model unit tests (RUN 422 §13.x). The harness builds a REAL multi-validator
@@ -2939,4 +3432,1014 @@ mod tests {
             ),
         }
     }
+
+    // =======================================================================
+    // RUN 422 — Isolated Protected Retained-Signature USE model tests.
+    //
+    // These exercise the REAL `retrieve_retained` retrieval and REAL ML-DSA-44
+    // cryptographic verification. Authority/key material and the retained record
+    // are explicit, labelled fixtures; genuine signing occurs ONLY in setup to
+    // mint a retained signature, NEVER inside `retained_vote_use_model`.
+    // =======================================================================
+
+    use crate::signing_reservation_journal::{
+        SigningDecisionRecord, SigningRecordStage, SIGNING_RECORD_FORMAT_VERSION,
+    };
+    use crate::signing_journal_admission::{envelope_charge, output_charge};
+
+    /// The wire suite id the real engine stamps on the captured self-vote
+    /// (`DEFAULT_CONSENSUS_SUITE_ID == 0`). The retained model NEVER reassigns the
+    /// Vote's suite, so the positive authority must govern exactly this suite.
+    const RETAINED_VOTE_SUITE_U16: u16 = 0;
+
+    /// Pinned context sized for the REAL ML-DSA-44 artifact: `s_sig == 2420`
+    /// (`ML_DSA_44_SIGNATURE_SIZE`). This is the actual signature bound of the
+    /// pinned profile exercised here — NOT a widened ceiling — so the retrieval
+    /// workspace (output + envelope scratch) can be admitted alongside the
+    /// verification working set. The QC codec bounds signature length as an UPPER
+    /// bound, so the 8-byte fixture QC signatures still validate.
+    fn retained_ctx(n: u64) -> PinnedSafetyContext {
+        let validators = (0..n).map(|i| (ValidatorId::new(i), 1u64)).collect();
+        PinnedSafetyContext {
+            network_genesis_id: [1u8; 32],
+            authority_context_ref: [2u8; 32],
+            chain_id: CHAIN_ID,
+            epoch: EPOCH,
+            qc_suite_id: QC_SUITE,
+            timeout_suite_id: TIMEOUT_SUITE,
+            s_sig: qbind_crypto::ml_dsa44::ML_DSA_44_SIGNATURE_SIZE,
+            validators,
+            require_height_equals_round: false,
+        }
+    }
+
+    /// A signing authority that governs the ENGINE-STAMPED suite (0) for the
+    /// signer and registers a real ML-DSA-44 backend under that suite, RETAINING
+    /// the secret key so the test can mint a genuine retained signature. Mirrors
+    /// `make_authority_wire` but (a) governs suite 0 (no suite reassignment) and
+    /// (b) returns the secret key for fixture-only signing.
+    fn make_retained_authority_wire(wire_chain_id: u32) -> (ProposalVoteAuthority, Vec<u8>) {
+        let (mut pk, sk) = MlDsa44Backend::generate_keypair().expect("keygen");
+        pk.shrink_to_fit();
+        assert!(
+            pk.capacity() as u128 <= MODEL_MAX_PUBKEY_BYTES,
+            "fixture provider public-key backing {} exceeds the model bound {}",
+            pk.capacity(),
+            MODEL_MAX_PUBKEY_BYTES
+        );
+        let mut keys: HashMap<ValidatorId, (ConsensusSigSuiteId, Vec<u8>)> = HashMap::new();
+        keys.insert(
+            ValidatorId::new(SIGNER_VID),
+            (ConsensusSigSuiteId::new(RETAINED_VOTE_SUITE_U16), pk),
+        );
+        let domain = ProposalVoteSigningDomainV2::try_new(
+            ChainId(0xD5D5_0000_0000_0001),
+            wire_chain_id,
+            [0x5Du8; 32],
+            [0xA5u8; 32],
+        )
+        .expect("valid signing domain");
+        let pv = ProposalVoteAuthority {
+            validators: Arc::new(authority_validators()),
+            key_provider: Arc::new(TestKeyProvider { keys }),
+            backend_registry: Arc::new(SimpleBackendRegistry::with_backend(
+                ConsensusSigSuiteId::new(RETAINED_VOTE_SUITE_U16),
+                Arc::new(MlDsa44Backend),
+            )),
+            chain_id: QBIND_DEVNET_CHAIN_ID,
+            signer: None,
+            signing_domain: domain,
+        };
+        (pv, sk)
+    }
+
+    fn make_retained_authority() -> (ProposalVoteAuthority, Vec<u8>) {
+        make_retained_authority_wire(MODEL_WIRE_CHAIN_ID)
+    }
+
+    /// Recompute the SAME (position, binding) the retained model derives for
+    /// `base_vote` under `pv`. UNLIKE `expected_pos_binding`, it performs NO suite
+    /// reassignment: the binding uses the Vote's own `suite_id`, exactly as the
+    /// model does with the borrowed `decided.vote()`.
+    fn retained_pos_binding(
+        pv: &ProposalVoteAuthority,
+        base_vote: &Vote,
+    ) -> (SigningPosition, BindingDigest) {
+        let preimage = pv.signing_domain.vote_preimage(base_vote);
+        let position = SigningPosition {
+            validator_id: base_vote.validator_index as u64,
+            network_genesis: *pv.signing_domain.genesis_identity(),
+            kind: SigningKind::Vote,
+            originating_view: base_vote.height,
+        };
+        let binding = BindingDigest::compute(&DecisionBindingInput {
+            position,
+            authorized_epoch: base_vote.epoch,
+            suite_id: base_vote.suite_id,
+            wire_message_version: base_vote.version as u16,
+            d6_signing_format_version: MODEL_D6_SIGNING_FORMAT_VERSION,
+            authority_commitment: *pv.signing_domain.authority_commitment(),
+            block_id: base_vote.block_id,
+            canonical_preimage: &preimage,
+        });
+        (position, binding)
+    }
+
+    /// Mint a GENUINE ML-DSA-44 signature over the model's canonical preimage with
+    /// `sk`, wrap it in a `Signed` record at the model's exact position/binding,
+    /// and write it (with NO live entry) into a fresh in-memory store so
+    /// `retrieve_retained` takes the recovered exact-envelope synced-reissue
+    /// branch and delivers `Retained`. Returns the seeded store, a journal
+    /// attached over it, and the genuine signature bytes.
+    fn seed_retained_signed(
+        pv: &ProposalVoteAuthority,
+        base_vote: &Vote,
+        sk: &[u8],
+    ) -> (
+        Arc<InMemoryConsensusStorage>,
+        SigningReservationJournal,
+        Vec<u8>,
+    ) {
+        let (position, binding) = retained_pos_binding(pv, base_vote);
+        let preimage = pv.signing_domain.vote_preimage(base_vote);
+        let sig = MlDsa44Backend::sign(sk, &preimage).expect("genuine fixture signature");
+        assert_eq!(
+            sig.len(),
+            qbind_crypto::ml_dsa44::ML_DSA_44_SIGNATURE_SIZE,
+            "a genuine ML-DSA-44 signature is exactly the artifact size"
+        );
+        let store = seed_signed_record_store(position, binding, Some(sig.clone()));
+        let journal = SigningReservationJournal::attach_unestablished_for_test(
+            store.clone() as Arc<dyn SigningJournalStorage>,
+        );
+        (store, journal, sig)
+    }
+
+    /// Write a `Signed` record (or a `Reserved`/garbage one, per the given fields)
+    /// at `position.storage_key()` into a fresh in-memory store.
+    fn seed_signed_record_store(
+        position: SigningPosition,
+        binding: BindingDigest,
+        retained_signature: Option<Vec<u8>>,
+    ) -> Arc<InMemoryConsensusStorage> {
+        let stage = if retained_signature.is_some() {
+            SigningRecordStage::Signed
+        } else {
+            SigningRecordStage::Reserved
+        };
+        let bytes = SigningDecisionRecord {
+            record_format_version: SIGNING_RECORD_FORMAT_VERSION,
+            position,
+            binding,
+            stage,
+            retained_signature,
+        }
+        .encode()
+        .expect("seed record encodes");
+        let store = Arc::new(InMemoryConsensusStorage::new());
+        store
+            .put_signing_record_synced(&position.storage_key(), &bytes)
+            .expect("seed write");
+        store
+    }
+
+    /// A local, test-only storage wrapper that delegates every operation to an
+    /// in-memory inner store but, when armed, fails the recovered-record
+    /// exact-envelope synced reissue BEFORE touching the backend — the consumer's
+    /// `DeliverySuppressed` path. No production storage code is modified. The read
+    /// path is delegated so retrieval still reads/validates the real record.
+    struct ReissueFailingStore {
+        inner: Arc<InMemoryConsensusStorage>,
+        fail_reissue: std::sync::atomic::AtomicBool,
+    }
+    impl ReissueFailingStore {
+        fn new(inner: Arc<InMemoryConsensusStorage>) -> Self {
+            Self {
+                inner,
+                fail_reissue: std::sync::atomic::AtomicBool::new(false),
+            }
+        }
+        fn arm(&self) {
+            self.fail_reissue
+                .store(true, std::sync::atomic::Ordering::SeqCst);
+        }
+    }
+    impl SigningJournalStorage for ReissueFailingStore {
+        fn get_signing_record(&self, key: &[u8]) -> Result<Option<Vec<u8>>, StorageError> {
+            self.inner.get_signing_record(key)
+        }
+        fn put_signing_record_synced(&self, key: &[u8], value: &[u8]) -> Result<(), StorageError> {
+            self.inner.put_signing_record_synced(key, value)
+        }
+        fn get_signing_metadata(&self) -> Result<Option<Vec<u8>>, StorageError> {
+            self.inner.get_signing_metadata()
+        }
+        fn put_signing_metadata_synced(&self, value: &[u8]) -> Result<(), StorageError> {
+            self.inner.put_signing_metadata_synced(value)
+        }
+        fn put_signing_record_and_metadata_synced(
+            &self,
+            record_key: &[u8],
+            record_value: &[u8],
+            metadata_value: &[u8],
+        ) -> Result<(), StorageError> {
+            self.inner
+                .put_signing_record_and_metadata_synced(record_key, record_value, metadata_value)
+        }
+        fn for_each_signing_namespace_entry(
+            &self,
+            visitor: &mut dyn FnMut(&[u8], &[u8]) -> Result<(), StorageError>,
+        ) -> Result<(), StorageError> {
+            self.inner.for_each_signing_namespace_entry(visitor)
+        }
+        fn signing_ownership_domain(&self) -> Arc<SigningOwnershipDomain> {
+            self.inner.signing_ownership_domain()
+        }
+        fn read_signing_envelope_into(
+            &self,
+            journal_key: &[u8],
+            dst: &mut [u8],
+        ) -> Result<Option<usize>, crate::signing_reservation_journal::BoundedStorageError> {
+            self.inner.read_signing_envelope_into(journal_key, dst)
+        }
+        fn reissue_signing_envelope_synced(
+            &self,
+            journal_key: &[u8],
+            envelope: &[u8],
+        ) -> Result<(), crate::signing_reservation_journal::BoundedStorageError> {
+            use crate::signing_reservation_journal::{BoundedDiag, BoundedStorageError};
+            if self
+                .fail_reissue
+                .load(std::sync::atomic::Ordering::SeqCst)
+            {
+                return Err(BoundedStorageError::Io(BoundedDiag::WriteIo));
+            }
+            self.inner
+                .reissue_signing_envelope_synced(journal_key, envelope)
+        }
+    }
+
+    // ----------------------------------------------------------------------
+    // Positive: a genuine retained signature verifies and is consumed exactly
+    // once, with the exact scalar diagnostic, zero fresh signing, and full
+    // cleanup + borrowed-Vote/pin preservation.
+    // ----------------------------------------------------------------------
+    #[test]
+    fn retained1_genuine_signature_consumed_single_sink() {
+        let dir = tempfile::tempdir().unwrap();
+        let ctx = retained_ctx(4);
+        let (owner, engine, decided, p1, lim, _rev) = capture_multi(dir.path(), &ctx);
+        let (pv, sk) = make_retained_authority();
+        let mut snapshot = established_snapshot(&pv);
+        let base_vote = decided.vote().clone();
+        assert_eq!(
+            base_vote.suite_id, RETAINED_VOTE_SUITE_U16,
+            "the engine stamps the default consensus suite on the captured self-vote"
+        );
+        let (_store, journal, genuine_sig) = seed_retained_signed(&pv, &base_vote, &sk);
+        let mut sink = RetainedUseRecordingSink::new();
+        let mut coord = ModelCoordinationHook::inert();
+
+        let ledgers_before = snapshot_ledgers(&owner);
+        let prov_before = pin_provenance_now(&owner, &decided);
+
+        let outcome = retained_vote_use_model::<FixtureCommittedHistory>(
+            &owner, &engine, &decided, &p1, &lim, None, &mut snapshot,
+            &mut sink, &journal, &mut coord,
+            ReconfirmPerturbation::None,
+        );
+
+        let diag = match outcome {
+            ModelRetainedUseOutcome::Consumed(d) => d,
+            other => panic!("expected Consumed, got {other:?}"),
+        };
+        assert_eq!(diag.validator_index, SIGNER_VID);
+        assert_eq!(diag.height, 1);
+        assert_eq!(diag.round, 1);
+        assert_eq!(diag.step, 0);
+        assert_eq!(diag.suite_id, RETAINED_VOTE_SUITE_U16);
+        assert_eq!(
+            diag.sig_len as usize,
+            genuine_sig.len(),
+            "the consumed signature length equals the retained artifact length"
+        );
+        assert!(diag.preimage_len > 0);
+        assert!(diag.preimage_len as u128 <= MODEL_MAX_PREIMAGE_BYTES);
+        assert_eq!(sink.calls, 1, "exactly one sink consumption");
+        assert_eq!(coord.calls, 1, "the coordination point is reached once");
+
+        assert_cleanup_preserved(
+            &owner, &decided, &base_vote, ledgers_before, prov_before,
+            "the successful retained consumption",
+        );
+    }
+
+    // ----------------------------------------------------------------------
+    // Cryptographic rejection: a correctly-positioned, correctly-bound record
+    // carrying a WRONG (zeroed, correct-length) signature passes membership /
+    // wire-chain / epoch / suite / key / backend / retrieval and demonstrably
+    // reaches the verifier, which rejects it. Zero sink calls.
+    // ----------------------------------------------------------------------
+    #[test]
+    fn retained_crypto_rejection_invokes_verifier() {
+        let dir = tempfile::tempdir().unwrap();
+        let ctx = retained_ctx(4);
+        let (owner, engine, decided, p1, lim, _rev) = capture_multi(dir.path(), &ctx);
+        let (pv, _sk) = make_retained_authority();
+        let mut snapshot = established_snapshot(&pv);
+        let base_vote = decided.vote().clone();
+
+        // A correct-length but cryptographically invalid signature at the exact
+        // position/binding: earlier checks pass, so the verifier is reached.
+        let (position, binding) = retained_pos_binding(&pv, &base_vote);
+        let bogus = vec![0u8; qbind_crypto::ml_dsa44::ML_DSA_44_SIGNATURE_SIZE];
+        let store = seed_signed_record_store(position, binding, Some(bogus));
+        let journal = SigningReservationJournal::attach_unestablished_for_test(
+            store.clone() as Arc<dyn SigningJournalStorage>,
+        );
+        let mut sink = RetainedUseRecordingSink::new();
+        let mut coord = ModelCoordinationHook::inert();
+
+        let ledgers_before = snapshot_ledgers(&owner);
+        let prov_before = pin_provenance_now(&owner, &decided);
+
+        let outcome = retained_vote_use_model::<FixtureCommittedHistory>(
+            &owner, &engine, &decided, &p1, &lim, None, &mut snapshot,
+            &mut sink, &journal, &mut coord,
+            ReconfirmPerturbation::None,
+        );
+        assert_eq!(
+            outcome,
+            ModelRetainedUseOutcome::VerificationFailed,
+            "a correct-length but invalid signature is rejected by the verifier"
+        );
+        assert_eq!(sink.calls, 0, "a cryptographic rejection consumes nothing");
+        assert_cleanup_preserved(
+            &owner, &decided, &base_vote, ledgers_before, prov_before,
+            "the cryptographic rejection",
+        );
+    }
+
+    // ----------------------------------------------------------------------
+    // Binding conflict is classified DISTINCTLY from a cryptographic failure and
+    // BEFORE verification (no sink call).
+    // ----------------------------------------------------------------------
+    #[test]
+    fn retained_binding_conflict_distinct_from_crypto() {
+        let dir = tempfile::tempdir().unwrap();
+        let ctx = retained_ctx(4);
+        let (owner, engine, decided, p1, lim, _rev) = capture_multi(dir.path(), &ctx);
+        let (pv, sk) = make_retained_authority();
+        let mut snapshot = established_snapshot(&pv);
+        let base_vote = decided.vote().clone();
+
+        // A Signed record at the model's exact position but with a DIFFERENT
+        // stored binding: retrieval refuses with BindingConflict before verifying.
+        let (position, model_binding) = retained_pos_binding(&pv, &base_vote);
+        let preimage = pv.signing_domain.vote_preimage(&base_vote);
+        let genuine = MlDsa44Backend::sign(&sk, &preimage).expect("genuine sig");
+        let mut other = model_binding;
+        other.0[0] ^= 0xFF;
+        let store = seed_signed_record_store(position, other, Some(genuine));
+        let journal = SigningReservationJournal::attach_unestablished_for_test(
+            store.clone() as Arc<dyn SigningJournalStorage>,
+        );
+        let mut sink = RetainedUseRecordingSink::new();
+        let mut coord = ModelCoordinationHook::inert();
+
+        let outcome = retained_vote_use_model::<FixtureCommittedHistory>(
+            &owner, &engine, &decided, &p1, &lim, None, &mut snapshot,
+            &mut sink, &journal, &mut coord,
+            ReconfirmPerturbation::None,
+        );
+        assert_eq!(
+            outcome,
+            ModelRetainedUseOutcome::RetainedRefused(RetainedRefuseClass::BindingConflict),
+            "a mismatched stored binding is a typed retrieval refusal, not a crypto failure"
+        );
+        assert_ne!(outcome, ModelRetainedUseOutcome::VerificationFailed);
+        assert_eq!(sink.calls, 0);
+    }
+
+    // ----------------------------------------------------------------------
+    // A missing record is classified as RetainedMissing (no sink call).
+    // ----------------------------------------------------------------------
+    #[test]
+    fn retained_missing_record() {
+        let dir = tempfile::tempdir().unwrap();
+        let ctx = retained_ctx(4);
+        let (owner, engine, decided, p1, lim, _rev) = capture_multi(dir.path(), &ctx);
+        let (pv, _sk) = make_retained_authority();
+        let mut snapshot = established_snapshot(&pv);
+        let journal = SigningReservationJournal::attach_unestablished_for_test(
+            Arc::new(InMemoryConsensusStorage::new()) as Arc<dyn SigningJournalStorage>,
+        );
+        let mut sink = RetainedUseRecordingSink::new();
+        let mut coord = ModelCoordinationHook::inert();
+
+        let outcome = retained_vote_use_model::<FixtureCommittedHistory>(
+            &owner, &engine, &decided, &p1, &lim, None, &mut snapshot,
+            &mut sink, &journal, &mut coord,
+            ReconfirmPerturbation::None,
+        );
+        assert_eq!(outcome, ModelRetainedUseOutcome::RetainedMissing);
+        assert_eq!(sink.calls, 0);
+    }
+
+    // ----------------------------------------------------------------------
+    // Suite mismatch: the governed suite (100) disagrees with the Vote's suite
+    // (0). Refused BEFORE verification-object construction / retrieval.
+    // ----------------------------------------------------------------------
+    #[test]
+    fn retained_suite_mismatch_before_retrieval() {
+        let dir = tempfile::tempdir().unwrap();
+        let ctx = retained_ctx(4);
+        let (owner, engine, decided, p1, lim, _rev) = capture_multi(dir.path(), &ctx);
+        // `make_authority` governs SUITE_PQ_RESERVED_1 (100) != vote.suite_id (0).
+        let pv = make_authority();
+        let mut snapshot = established_snapshot(&pv);
+        let journal = fresh_journal();
+        let mut sink = RetainedUseRecordingSink::new();
+        let mut coord = ModelCoordinationHook::inert();
+
+        let outcome = retained_vote_use_model::<FixtureCommittedHistory>(
+            &owner, &engine, &decided, &p1, &lim, None, &mut snapshot,
+            &mut sink, &journal, &mut coord,
+            ReconfirmPerturbation::None,
+        );
+        assert_eq!(outcome, ModelRetainedUseOutcome::SuiteMismatch);
+        assert_eq!(sink.calls, 0);
+    }
+
+    // ----------------------------------------------------------------------
+    // Key unavailable: the governed provider has no key for the signer.
+    // ----------------------------------------------------------------------
+    #[test]
+    fn retained_key_unavailable() {
+        let dir = tempfile::tempdir().unwrap();
+        let ctx = retained_ctx(4);
+        let (owner, engine, decided, p1, lim, _rev) = capture_multi(dir.path(), &ctx);
+        let (mut pv, _sk) = make_retained_authority();
+        // Drop every key: membership still contains the signer, so the refusal is
+        // specifically KeyUnavailable (after membership/wire/epoch pass).
+        pv.key_provider = Arc::new(TestKeyProvider { keys: HashMap::new() });
+        let mut snapshot = established_snapshot(&pv);
+        let journal = fresh_journal();
+        let mut sink = RetainedUseRecordingSink::new();
+        let mut coord = ModelCoordinationHook::inert();
+
+        let outcome = retained_vote_use_model::<FixtureCommittedHistory>(
+            &owner, &engine, &decided, &p1, &lim, None, &mut snapshot,
+            &mut sink, &journal, &mut coord,
+            ReconfirmPerturbation::None,
+        );
+        assert_eq!(outcome, ModelRetainedUseOutcome::KeyUnavailable);
+        assert_eq!(sink.calls, 0);
+    }
+
+    // ----------------------------------------------------------------------
+    // Backend unavailable: the provider governs suite 0 with a key, but no
+    // verifier backend is registered for suite 0.
+    // ----------------------------------------------------------------------
+    #[test]
+    fn retained_backend_unavailable() {
+        let dir = tempfile::tempdir().unwrap();
+        let ctx = retained_ctx(4);
+        let (owner, engine, decided, p1, lim, _rev) = capture_multi(dir.path(), &ctx);
+        let (mut pv, _sk) = make_retained_authority();
+        // Register the backend under a DIFFERENT suite (100) so suite 0 has none.
+        pv.backend_registry = Arc::new(SimpleBackendRegistry::with_backend(
+            SUITE_PQ_RESERVED_1,
+            Arc::new(MlDsa44Backend),
+        ));
+        let mut snapshot = established_snapshot(&pv);
+        let journal = fresh_journal();
+        let mut sink = RetainedUseRecordingSink::new();
+        let mut coord = ModelCoordinationHook::inert();
+
+        let outcome = retained_vote_use_model::<FixtureCommittedHistory>(
+            &owner, &engine, &decided, &p1, &lim, None, &mut snapshot,
+            &mut sink, &journal, &mut coord,
+            ReconfirmPerturbation::None,
+        );
+        assert_eq!(outcome, ModelRetainedUseOutcome::BackendUnavailable);
+        assert_eq!(sink.calls, 0);
+    }
+
+    // ----------------------------------------------------------------------
+    // Membership refusal: the signer is not in the authorized membership. This
+    // is reached before key/suite/backend selection.
+    // ----------------------------------------------------------------------
+    #[test]
+    fn retained_membership_refused() {
+        let dir = tempfile::tempdir().unwrap();
+        let ctx = retained_ctx(4);
+        let (owner, engine, decided, p1, lim, _rev) = capture_multi(dir.path(), &ctx);
+        let (mut pv, _sk) = make_retained_authority();
+        // Membership excluding the signer id (1).
+        let entries = [0u64, 2, 3]
+            .into_iter()
+            .map(|i| ValidatorSetEntry {
+                id: ValidatorId::new(i),
+                voting_power: 1,
+            })
+            .collect::<Vec<_>>();
+        pv.validators = Arc::new(ConsensusValidatorSet::new(entries).expect("set"));
+        let mut snapshot = established_snapshot(&pv);
+        let journal = fresh_journal();
+        let mut sink = RetainedUseRecordingSink::new();
+        let mut coord = ModelCoordinationHook::inert();
+
+        let outcome = retained_vote_use_model::<FixtureCommittedHistory>(
+            &owner, &engine, &decided, &p1, &lim, None, &mut snapshot,
+            &mut sink, &journal, &mut coord,
+            ReconfirmPerturbation::None,
+        );
+        assert_eq!(outcome, ModelRetainedUseOutcome::MembershipRefused);
+        assert_eq!(sink.calls, 0);
+    }
+
+    // ----------------------------------------------------------------------
+    // Wrong wire chain: the governed signing domain expects a different wire
+    // chain id than the Vote carries.
+    // ----------------------------------------------------------------------
+    #[test]
+    fn retained_wrong_wire_chain() {
+        let dir = tempfile::tempdir().unwrap();
+        let ctx = retained_ctx(4);
+        let (owner, engine, decided, p1, lim, _rev) = capture_multi(dir.path(), &ctx);
+        let (pv, _sk) = make_retained_authority_wire(MODEL_WIRE_CHAIN_ID + 777);
+        let mut snapshot = established_snapshot(&pv);
+        let journal = fresh_journal();
+        let mut sink = RetainedUseRecordingSink::new();
+        let mut coord = ModelCoordinationHook::inert();
+
+        let outcome = retained_vote_use_model::<FixtureCommittedHistory>(
+            &owner, &engine, &decided, &p1, &lim, None, &mut snapshot,
+            &mut sink, &journal, &mut coord,
+            ReconfirmPerturbation::None,
+        );
+        assert_eq!(outcome, ModelRetainedUseOutcome::WrongWireChain);
+        assert_eq!(sink.calls, 0);
+    }
+
+    // ----------------------------------------------------------------------
+    // Observation refusal: a mismatching proposal breaks the held-guard
+    // observation BEFORE verification; zero sink calls, full cleanup.
+    // ----------------------------------------------------------------------
+    #[test]
+    fn retained_observation_refused() {
+        let dir = tempfile::tempdir().unwrap();
+        let ctx = retained_ctx(4);
+        let (owner, engine, decided, p1, lim, _rev) = capture_multi(dir.path(), &ctx);
+        let (pv, _sk) = make_retained_authority();
+        let mut snapshot = established_snapshot(&pv);
+        let journal = fresh_journal();
+        let base_vote = decided.vote().clone();
+        let mut wrong_proposal = p1.clone();
+        wrong_proposal.header.parent_block_id = [0x11; 32];
+        let mut sink = RetainedUseRecordingSink::new();
+        let mut coord = ModelCoordinationHook::inert();
+
+        let ledgers_before = snapshot_ledgers(&owner);
+        let prov_before = pin_provenance_now(&owner, &decided);
+
+        let outcome = retained_vote_use_model::<FixtureCommittedHistory>(
+            &owner, &engine, &decided, &wrong_proposal, &lim, None, &mut snapshot,
+            &mut sink, &journal, &mut coord,
+            ReconfirmPerturbation::None,
+        );
+        assert_eq!(outcome, ModelRetainedUseOutcome::ObservationRefused);
+        assert_eq!(sink.calls, 0);
+        assert_eq!(coord.calls, 0);
+        assert_cleanup_preserved(
+            &owner, &decided, &base_vote, ledgers_before, prov_before,
+            "the observation refusal",
+        );
+    }
+
+    // ----------------------------------------------------------------------
+    // Lifecycle refusal after a consistent generation advance (engine + durable
+    // advance to L1). Observation still passes; the lifecycle comparison
+    // disagrees. Zero sink calls, full cleanup.
+    // ----------------------------------------------------------------------
+    #[test]
+    fn retained_lifecycle_ambiguous_after_generation_advance() {
+        let dir = tempfile::tempdir().unwrap();
+        let ctx = retained_ctx(4);
+        let (owner, mut engine, decided, p1, lim, _rev) = capture_multi(dir.path(), &ctx);
+        let (pv, _sk) = make_retained_authority();
+        let mut snapshot = established_snapshot(&pv);
+        let journal = fresh_journal();
+        let base_vote = decided.vote().clone();
+
+        let l0_block = derive_block_id_local(1, 0, &[0xFF; 32]);
+        let l1_block = derive_block_id_local(2, 1, &l0_block);
+        assert!(engine
+            .on_vote_event(ValidatorId::new(2), &logical_vote(1, l1_block, 2))
+            .expect("peer vote 2 ingests")
+            .is_none());
+        assert!(engine
+            .on_vote_event(ValidatorId::new(3), &logical_vote(1, l1_block, 3))
+            .expect("peer vote 3 ingests")
+            .is_some());
+        let new_rev = publish_qc(&owner, &ctx, l1_block, 1, 1);
+        assert_eq!(new_rev, 2);
+
+        let ledgers_before = snapshot_ledgers(&owner);
+        let prov_before = pin_provenance_now(&owner, &decided);
+        let mut sink = RetainedUseRecordingSink::new();
+        let mut coord = ModelCoordinationHook::inert();
+
+        let outcome = retained_vote_use_model::<FixtureCommittedHistory>(
+            &owner, &engine, &decided, &p1, &lim, None, &mut snapshot,
+            &mut sink, &journal, &mut coord,
+            ReconfirmPerturbation::None,
+        );
+        assert_eq!(outcome, ModelRetainedUseOutcome::LifecycleAmbiguous);
+        assert_eq!(sink.calls, 0);
+        assert_eq!(coord.calls, 0);
+        assert_cleanup_preserved(
+            &owner, &decided, &base_vote, ledgers_before, prov_before,
+            "the lifecycle refusal",
+        );
+    }
+
+    // ----------------------------------------------------------------------
+    // Authorization admission refusal: an unavailable current-authorization
+    // owner can never admit the original ticket. Zero sink calls, full cleanup.
+    // ----------------------------------------------------------------------
+    #[test]
+    fn retained_authorization_admit_refused() {
+        let dir = tempfile::tempdir().unwrap();
+        let ctx = retained_ctx(4);
+        let (owner, engine, decided, p1, lim, _rev) = capture_multi(dir.path(), &ctx);
+        let (pv, _sk) = make_retained_authority();
+        let mut snapshot = unavailable_snapshot(&pv);
+        let journal = fresh_journal();
+        let base_vote = decided.vote().clone();
+        let mut sink = RetainedUseRecordingSink::new();
+        let mut coord = ModelCoordinationHook::inert();
+
+        let ledgers_before = snapshot_ledgers(&owner);
+        let prov_before = pin_provenance_now(&owner, &decided);
+
+        let outcome = retained_vote_use_model::<FixtureCommittedHistory>(
+            &owner, &engine, &decided, &p1, &lim, None, &mut snapshot,
+            &mut sink, &journal, &mut coord,
+            ReconfirmPerturbation::None,
+        );
+        assert_eq!(outcome, ModelRetainedUseOutcome::AuthorizationAdmitRefused);
+        assert_eq!(sink.calls, 0);
+        assert_cleanup_preserved(
+            &owner, &decided, &base_vote, ledgers_before, prov_before,
+            "the unavailable-owner admission refusal",
+        );
+    }
+
+    // ----------------------------------------------------------------------
+    // Original-ticket confirmation refusal: a deterministic in-flight
+    // current-authorization replacement between admit and confirm invalidates the
+    // ORIGINAL ticket AFTER a genuine signature verifies. The sink is NOT called
+    // (checking after delivery cannot undo delivery), yet the successful
+    // recovered reissue remains a permitted side effect.
+    // ----------------------------------------------------------------------
+    #[test]
+    fn retained_authorization_confirm_refused_after_verify() {
+        let dir = tempfile::tempdir().unwrap();
+        let ctx = retained_ctx(4);
+        let (owner, engine, decided, p1, lim, _rev) = capture_multi(dir.path(), &ctx);
+        let (pv, sk) = make_retained_authority();
+        let mut snapshot = established_snapshot(&pv);
+        let base_vote = decided.vote().clone();
+        let (store, journal, _sig) = seed_retained_signed(&pv, &base_vote, &sk);
+        let mut sink = RetainedUseRecordingSink::new();
+        let mut coord = ModelCoordinationHook::inert();
+
+        let outcome = retained_vote_use_model::<FixtureCommittedHistory>(
+            &owner, &engine, &decided, &p1, &lim, None, &mut snapshot,
+            &mut sink, &journal, &mut coord,
+            ReconfirmPerturbation::AdvanceGenerationBeforeConfirm,
+        );
+        assert_eq!(
+            outcome,
+            ModelRetainedUseOutcome::AuthorizationConfirmRefused,
+            "the ORIGINAL ticket's confirmation fails after the in-flight replacement"
+        );
+        assert_eq!(sink.calls, 0, "a confirm refusal consumes nothing");
+        // The recovered reissue (a permitted side effect) still rewrote the Signed
+        // record; later verification/confirm outcome does not undo it.
+        let (position, _b) = retained_pos_binding(&pv, &base_vote);
+        assert!(
+            store.get_signing_record(&position.storage_key()).unwrap().is_some(),
+            "the recovered record remains persisted"
+        );
+    }
+
+    // ----------------------------------------------------------------------
+    // Consumer-level DeliverySuppressed: a recovered Signed record whose synced
+    // reissue fails suppresses delivery via the real `retrieve_retained` path,
+    // through a local test-only storage wrapper. Zero sink calls.
+    // ----------------------------------------------------------------------
+    #[test]
+    fn retained_delivery_suppressed_via_reissue_failure() {
+        let dir = tempfile::tempdir().unwrap();
+        let ctx = retained_ctx(4);
+        let (owner, engine, decided, p1, lim, _rev) = capture_multi(dir.path(), &ctx);
+        let (pv, sk) = make_retained_authority();
+        let mut snapshot = established_snapshot(&pv);
+        let base_vote = decided.vote().clone();
+
+        let (position, binding) = retained_pos_binding(&pv, &base_vote);
+        let preimage = pv.signing_domain.vote_preimage(&base_vote);
+        let genuine = MlDsa44Backend::sign(&sk, &preimage).expect("genuine sig");
+        let inner = seed_signed_record_store(position, binding, Some(genuine));
+        let wrapper = Arc::new(ReissueFailingStore::new(inner));
+        wrapper.arm();
+        let journal = SigningReservationJournal::attach_unestablished_for_test(
+            wrapper.clone() as Arc<dyn SigningJournalStorage>,
+        );
+        let mut sink = RetainedUseRecordingSink::new();
+        let mut coord = ModelCoordinationHook::inert();
+
+        let outcome = retained_vote_use_model::<FixtureCommittedHistory>(
+            &owner, &engine, &decided, &p1, &lim, None, &mut snapshot,
+            &mut sink, &journal, &mut coord,
+            ReconfirmPerturbation::None,
+        );
+        assert_eq!(outcome, ModelRetainedUseOutcome::DeliverySuppressed);
+        assert_eq!(sink.calls, 0, "suppressed delivery consumes nothing");
+    }
+
+    // ----------------------------------------------------------------------
+    // Admission failures at each stage (control / lifecycle / verify / retrieval)
+    // leave BOTH ledgers exactly restored; removing the standing pressure and
+    // retrying reaches the successful consumption. Exercises the real shared
+    // accountant via `reserve_standing_for_test`.
+    // ----------------------------------------------------------------------
+    fn run_retained_with_standing(
+        owner: &SafetyRecordOwner,
+        engine: &BasicHotStuffEngine<[u8; 32]>,
+        decided: &DecidedVote<OwningCapturePayload>,
+        p1: &BlockProposal,
+        lim: &PreparedDecisionInputLimits,
+        snapshot: &mut AuthorizedProposalVoteSnapshot,
+        journal: &SigningReservationJournal,
+        fill: u128,
+    ) -> (ModelRetainedUseOutcome, u32) {
+        let standing = owner
+            .backend_for_test()
+            .reserve_standing_for_test(fill)
+            .expect("standing reservation fits");
+        let mut sink = RetainedUseRecordingSink::new();
+        let mut coord = ModelCoordinationHook::inert();
+        let outcome = retained_vote_use_model::<FixtureCommittedHistory>(
+            owner, engine, decided, p1, lim, None, snapshot,
+            &mut sink, journal, &mut coord,
+            ReconfirmPerturbation::None,
+        );
+        drop(standing);
+        (outcome, sink.calls)
+    }
+
+    // Force the admission at exactly `stage` to refuse by installing the
+    // per-stage pressure hook: when the model reaches `stage` (AFTER the
+    // held-guard observation has already succeeded and released its working
+    // set), the hook consumes ALL remaining effective headroom via the real
+    // shared accountant, so that stage's own reserve cannot be admitted. This
+    // isolates the lifecycle / verify / retrieval admissions, which a single
+    // global pressure cannot (the observation working-set peak dominates them).
+    fn run_retained_with_stage_pressure(
+        owner: &SafetyRecordOwner,
+        engine: &BasicHotStuffEngine<[u8; 32]>,
+        decided: &DecidedVote<OwningCapturePayload>,
+        p1: &BlockProposal,
+        lim: &PreparedDecisionInputLimits,
+        snapshot: &mut AuthorizedProposalVoteSnapshot,
+        journal: &SigningReservationJournal,
+        stage: RetainedAdmitStage,
+    ) -> (ModelRetainedUseOutcome, u32) {
+        let backend = owner.backend_for_test().clone();
+        let held = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+        let held_hook = held.clone();
+        install_retained_admit_pressure_hook(move |s| {
+            if s == stage {
+                let op = backend.accounting_cap().expect("op cap")
+                    - backend.accounting_current();
+                let agg = backend.accounting_aggregate_cap().expect("agg cap")
+                    - backend.accounting_aggregate_current();
+                // Consume the binding (minimum) remaining headroom so the next
+                // reserve of any positive charge at this stage refuses.
+                let r = backend
+                    .reserve_standing_for_test(op.min(agg))
+                    .expect("stage pressure fits");
+                held_hook.borrow_mut().push(r);
+            }
+        });
+        let mut sink = RetainedUseRecordingSink::new();
+        let mut coord = ModelCoordinationHook::inert();
+        let outcome = retained_vote_use_model::<FixtureCommittedHistory>(
+            owner, engine, decided, p1, lim, None, snapshot,
+            &mut sink, journal, &mut coord,
+            ReconfirmPerturbation::None,
+        );
+        clear_retained_admit_pressure_hook();
+        held.borrow_mut().clear();
+        (outcome, sink.calls)
+    }
+
+    #[test]
+    fn retained_admission_failures_cleanup_and_retry() {
+        let dir = tempfile::tempdir().unwrap();
+        let ctx = retained_ctx(4);
+        let (owner, engine, decided, p1, lim, _rev) = capture_multi(dir.path(), &ctx);
+        let (pv, sk) = make_retained_authority();
+        let mut snapshot = established_snapshot(&pv);
+        let base_vote = decided.vote().clone();
+        let (_store, journal, _sig) = seed_retained_signed(&pv, &base_vote, &sk);
+
+        let c_ctrl = control_charge();
+        let ledgers_before = snapshot_ledgers(&owner);
+
+        // CONTROL admission (step 3, BEFORE the held-guard observation) is the
+        // only stage isolable by a single global pressure: leave strictly less
+        // than control_charge() effective headroom so its reserve is the first to
+        // refuse. The model reserves against the operational accountant, whose
+        // reserve enforces BOTH the operational and aggregate ceilings, so the
+        // EFFECTIVE headroom is the binding minimum of the two partitions.
+        {
+            let eff_headroom = {
+                let b = owner.backend_for_test();
+                let op = b.accounting_cap().expect("bounded operational cap")
+                    - b.accounting_current();
+                let agg = b.accounting_aggregate_cap().expect("bounded aggregate cap")
+                    - b.accounting_aggregate_current();
+                op.min(agg)
+            };
+            let fill = eff_headroom - (c_ctrl - 1);
+            let (outcome, sink_calls) = run_retained_with_standing(
+                &owner, &engine, &decided, &p1, &lim, &mut snapshot, &journal, fill,
+            );
+            assert_eq!(
+                outcome,
+                ModelRetainedUseOutcome::ControlAdmitRefused,
+                "control admission refuses first under global pressure"
+            );
+            assert_eq!(sink_calls, 0, "an admission refusal consumes nothing");
+            assert_eq!(
+                snapshot_ledgers(&owner),
+                ledgers_before,
+                "both ledgers restored after ControlAdmitRefused"
+            );
+        }
+
+        // LIFECYCLE / VERIFY / RETRIEVAL admissions each occur AFTER the
+        // observation has succeeded and released its dominating working set, so
+        // they cannot be isolated by a single global pressure. The per-stage hook
+        // applies pressure at exactly that admission point, deterministically
+        // refusing it while every earlier stage (including observation) succeeds.
+        // Each refusal performs its stage's exact reverse-drop cleanup (the
+        // retrieval refusal in particular destroys the already-constructed
+        // verification inputs before their reservation releases) and restores
+        // both ledgers.
+        let stage_cases = [
+            (
+                RetainedAdmitStage::Lifecycle,
+                ModelRetainedUseOutcome::LifecycleAdmitRefused,
+            ),
+            (
+                RetainedAdmitStage::Verify,
+                ModelRetainedUseOutcome::VerifyAdmitRefused,
+            ),
+            (
+                RetainedAdmitStage::Retrieval,
+                ModelRetainedUseOutcome::RetrievalAdmitRefused,
+            ),
+        ];
+        for (stage, expected) in stage_cases {
+            let (outcome, sink_calls) = run_retained_with_stage_pressure(
+                &owner, &engine, &decided, &p1, &lim, &mut snapshot, &journal, stage,
+            );
+            assert_eq!(outcome, expected, "admission refusal at the expected stage");
+            assert_eq!(sink_calls, 0, "an admission refusal consumes nothing");
+            assert_eq!(
+                snapshot_ledgers(&owner),
+                ledgers_before,
+                "both ledgers restored after {expected:?}"
+            );
+        }
+
+        // Pressure removed: a retry reaches the successful consumption.
+        let mut sink = RetainedUseRecordingSink::new();
+        let mut coord = ModelCoordinationHook::inert();
+        let outcome = retained_vote_use_model::<FixtureCommittedHistory>(
+            &owner, &engine, &decided, &p1, &lim, None, &mut snapshot,
+            &mut sink, &journal, &mut coord,
+            ReconfirmPerturbation::None,
+        );
+        assert!(
+            matches!(outcome, ModelRetainedUseOutcome::Consumed(_)),
+            "with pressure removed the retained consumption succeeds, got {outcome:?}"
+        );
+        assert_eq!(sink.calls, 1);
+    }
+
+    // ----------------------------------------------------------------------
+    // Live operational AND aggregate ledgers are sampled at the fixed
+    // observation point, each within its enforced cap, reflecting the model's
+    // own live reservations; both are restored afterward.
+    // ----------------------------------------------------------------------
+    #[test]
+    fn retained_live_ledgers_observed_within_caps() {
+        let dir = tempfile::tempdir().unwrap();
+        let ctx = retained_ctx(4);
+        let (owner, engine, decided, p1, lim, _rev) = capture_multi(dir.path(), &ctx);
+        let (pv, sk) = make_retained_authority();
+        let mut snapshot = established_snapshot(&pv);
+        let base_vote = decided.vote().clone();
+        let (_store, journal, _sig) = seed_retained_signed(&pv, &base_vote, &sk);
+        let mut sink = RetainedUseRecordingSink::new();
+        let mut coord = ModelCoordinationHook::sampling(owner.backend_for_test().clone());
+
+        let op_cap = owner.backend_for_test().accounting_cap().expect("op cap");
+        let agg_cap = owner
+            .backend_for_test()
+            .accounting_aggregate_cap()
+            .expect("agg cap");
+        let baseline = snapshot_ledgers(&owner);
+
+        let outcome = retained_vote_use_model::<FixtureCommittedHistory>(
+            &owner, &engine, &decided, &p1, &lim, None, &mut snapshot,
+            &mut sink, &journal, &mut coord,
+            ReconfirmPerturbation::None,
+        );
+        assert!(matches!(outcome, ModelRetainedUseOutcome::Consumed(_)));
+        assert_eq!(coord.calls, 1);
+        let observed_op = coord.observed_operational.expect("operational sampled");
+        let observed_agg = coord.observed_aggregate.expect("aggregate sampled");
+        assert!(observed_op <= op_cap, "live op {observed_op} within cap {op_cap}");
+        assert!(observed_agg <= agg_cap, "live agg {observed_agg} within cap {agg_cap}");
+        assert!(
+            observed_op > baseline.operational && observed_agg > baseline.aggregate,
+            "the live sample reflects the model's own reservations"
+        );
+        assert_eq!(snapshot_ledgers(&owner), baseline, "both ledgers restored");
+    }
+
+    // ----------------------------------------------------------------------
+    // Publication exclusion at the fixed observation point: a competing
+    // same-domain handle observes WouldBlock while the protected op holds the
+    // guard; an eligible publication proceeds after release.
+    // ----------------------------------------------------------------------
+    #[test]
+    fn retained_coordination_excludes_concurrent_publication() {
+        let dir = tempfile::tempdir().unwrap();
+        let ctx = retained_ctx(4);
+        let (owner, engine, decided, p1, lim, _rev) = capture_multi(dir.path(), &ctx);
+        let (pv, sk) = make_retained_authority();
+        let mut snapshot = established_snapshot(&pv);
+        let base_vote = decided.vote().clone();
+        let (_store, journal, _sig) = seed_retained_signed(&pv, &base_vote, &sk);
+        let mut sink = RetainedUseRecordingSink::new();
+
+        let peer_backend = owner.backend_for_test().clone();
+        let (req_tx, req_rx) = std::sync::mpsc::channel::<()>();
+        let (res_tx, res_rx) = std::sync::mpsc::channel::<PeerDomainObservation>();
+        let timeout = std::time::Duration::from_secs(10);
+
+        let outcome = std::thread::scope(|scope| {
+            let peer = scope.spawn(move || {
+                if req_rx.recv_timeout(timeout).is_ok() {
+                    let obs = match peer_backend.try_lock_domain_for_test() {
+                        TryLockDomainOutcome::WouldBlock => PeerDomainObservation::WouldBlock,
+                        TryLockDomainOutcome::Acquired(_g) => PeerDomainObservation::Acquired,
+                        TryLockDomainOutcome::Poisoned => PeerDomainObservation::Poisoned,
+                    };
+                    let _ = res_tx.send(obs);
+                }
+            });
+            let mut coord = ModelCoordinationHook::probing(req_tx, res_rx, timeout);
+            let outcome = retained_vote_use_model::<FixtureCommittedHistory>(
+                &owner, &engine, &decided, &p1, &lim, None, &mut snapshot,
+                &mut sink, &journal, &mut coord,
+                ReconfirmPerturbation::None,
+            );
+            peer.join().expect("bounded peer completes");
+            assert!(!coord.failed, "every handshake leg must succeed");
+            assert_eq!(coord.calls, 1);
+            assert_eq!(
+                coord.last_excluded,
+                Some(true),
+                "the competing same-domain handle observed WouldBlock"
+            );
+            outcome
+        });
+        assert!(matches!(outcome, ModelRetainedUseOutcome::Consumed(_)));
+        assert_eq!(sink.calls, 1);
+
+        // After release, an eligible publication on the SAME backend proceeds.
+        let new_rev = publish_qc(&owner, &ctx, [0x5Au8; 32], 1, 1);
+        assert_eq!(new_rev, 2);
+    }
+
 }
