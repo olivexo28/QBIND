@@ -1136,6 +1136,17 @@ impl RecoveredAckCache {
     fn len(&self) -> usize {
         self.map.len()
     }
+
+    /// Test-only: an ordered snapshot (CONTENTS + FIFO order) of the cache, so a
+    /// test can assert retirement neither seeds, clears, nor reorders it — not
+    /// merely that the entry count is unchanged.
+    #[cfg(any(test, feature = "test-utils"))]
+    fn snapshot(&self) -> Vec<(SigningPosition, SigningDecisionRecord)> {
+        self.order
+            .iter()
+            .filter_map(|pos| self.map.get(pos).map(|rec| (*pos, rec.clone())))
+            .collect()
+    }
 }
 
 /// Run 422 D7-D10 Correction E — the established (durably validated) state of one
@@ -1782,6 +1793,21 @@ impl SigningReservationJournal {
         inner.recovered_acked.len()
     }
 
+    /// Test-only: an ordered snapshot (contents + FIFO order) of the recovered-
+    /// acknowledgement cache, so a test can assert retirement leaves it entirely
+    /// untouched (contents AND order), not merely its length.
+    #[cfg(any(test, feature = "test-utils"))]
+    pub(crate) fn recovered_ack_snapshot_for_test(
+        &self,
+    ) -> Vec<(SigningPosition, SigningDecisionRecord)> {
+        self.domain
+            .inner
+            .lock()
+            .expect("domain lock")
+            .recovered_acked
+            .snapshot()
+    }
+
     /// Reserve `position` for exactly one decision identified by `binding`,
     /// serialized against all handles sharing this ownership domain.
     ///
@@ -2330,6 +2356,20 @@ impl SigningReservationJournal {
             .accounting_uncertain
     }
 
+    /// Test-only: the tracked attempted update of the last uncertain reservation
+    /// write as `(prior_count, attempted_count)`. Retirement must leave the
+    /// COMPLETE uncertainty bookkeeping — this attempt AND `accounting_uncertain`
+    /// — untouched, so a test compares both across the call.
+    #[cfg(any(test, feature = "test-utils"))]
+    pub(crate) fn uncertain_attempt_for_test(&self) -> Option<(u64, u64)> {
+        self.domain
+            .inner
+            .lock()
+            .expect("domain lock")
+            .uncertain_attempt
+            .map(|a| (a.prior_count, a.attempted_count))
+    }
+
     #[cfg(any(test, feature = "test-utils"))]
     pub(crate) fn insert_live_for_test(
         &self,
@@ -2726,6 +2766,17 @@ mod tests {
         /// an EVICTED recovered position reissues one additional synced write while
         /// an exact cache hit reissues none. Test-only instrumentation.
         record_writes: std::sync::atomic::AtomicUsize,
+        /// RUN 422 finishing — comprehensive journal-storage call counters that
+        /// establish the retirement no-I/O boundary with an EXECUTED zero-delta
+        /// window immediately around `retire_acknowledged_operation`, kept
+        /// distinct from source inspection of the method. `reads` counts every
+        /// record/metadata/namespace read; `writes` counts every
+        /// record/metadata/envelope write entrypoint; `reissues` counts the
+        /// (structurally-unsupported-here) envelope read/reissue entrypoints so
+        /// the three storage categories are observed SEPARATELY. Test-only.
+        reads: std::sync::atomic::AtomicUsize,
+        writes: std::sync::atomic::AtomicUsize,
+        reissues: std::sync::atomic::AtomicUsize,
         /// Run 422 D7-D10 Correction A — optional test-only recovered-ack cache
         /// capacity. When `Some(n)`, the per-instance ownership domain is built
         /// with a cache bounded to `n` entries via the private test constructor so
@@ -2746,6 +2797,9 @@ mod tests {
                 fail_scan: RwLock::new(false),
                 visits: std::sync::atomic::AtomicUsize::new(0),
                 record_writes: std::sync::atomic::AtomicUsize::new(0),
+                reads: std::sync::atomic::AtomicUsize::new(0),
+                writes: std::sync::atomic::AtomicUsize::new(0),
+                reissues: std::sync::atomic::AtomicUsize::new(0),
                 // The modelled restart preserves the test-only cache bound so a
                 // recovery/eviction sequence spanning a reopen keeps a small cache.
                 cache_cap: RwLock::new(*self.cache_cap.read().unwrap()),
@@ -2775,6 +2829,17 @@ mod tests {
         fn record_writes(&self) -> usize {
             self.record_writes.load(std::sync::atomic::Ordering::SeqCst)
         }
+        /// RUN 422 finishing — the comprehensive `(reads, writes, reissues)`
+        /// storage-call totals so far, observed SEPARATELY so a test can assert a
+        /// zero delta across `retire_acknowledged_operation`.
+        fn storage_calls(&self) -> (usize, usize, usize) {
+            use std::sync::atomic::Ordering::SeqCst;
+            (
+                self.reads.load(SeqCst),
+                self.writes.load(SeqCst),
+                self.reissues.load(SeqCst),
+            )
+        }
         /// Bound the per-instance ownership domain's recovered-ack cache to `cap`
         /// entries (test-only). MUST be called before the domain is first accessed
         /// (before `initialize`/`open`), since the domain is created once per
@@ -2797,6 +2862,7 @@ mod tests {
 
     impl SigningJournalStorage for ModelStore {
         fn get_signing_record(&self, key: &[u8]) -> Result<Option<Vec<u8>>, StorageError> {
+            self.reads.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
             if *self.fail_reads.read().unwrap() {
                 return Err(StorageError::Io("injected read failure".to_string()));
             }
@@ -2818,6 +2884,7 @@ mod tests {
             }
         }
         fn put_signing_record_synced(&self, key: &[u8], value: &[u8]) -> Result<(), StorageError> {
+            self.writes.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
             if *self.fail_writes.read().unwrap() {
                 return Err(StorageError::Io("injected write failure".to_string()));
             }
@@ -2836,6 +2903,7 @@ mod tests {
             Ok(())
         }
         fn get_signing_metadata(&self) -> Result<Option<Vec<u8>>, StorageError> {
+            self.reads.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
             if *self.fail_reads.read().unwrap() {
                 return Err(StorageError::Io("injected read failure".to_string()));
             }
@@ -2857,6 +2925,7 @@ mod tests {
             }
         }
         fn put_signing_metadata_synced(&self, value: &[u8]) -> Result<(), StorageError> {
+            self.writes.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
             if *self.fail_writes.read().unwrap() {
                 return Err(StorageError::Io("injected write failure".to_string()));
             }
@@ -2879,6 +2948,7 @@ mod tests {
             record_value: &[u8],
             metadata_value: &[u8],
         ) -> Result<(), StorageError> {
+            self.writes.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
             if *self.fail_writes.read().unwrap() {
                 return Err(StorageError::Io("injected write failure".to_string()));
             }
@@ -2899,6 +2969,7 @@ mod tests {
             &self,
             visitor: &mut dyn FnMut(&[u8], &[u8]) -> Result<(), StorageError>,
         ) -> Result<(), StorageError> {
+            self.reads.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
             if *self.fail_reads.read().unwrap() {
                 return Err(StorageError::Io("injected read failure".to_string()));
             }
@@ -2933,6 +3004,7 @@ mod tests {
             record_envelope: &[u8],
             metadata_envelope: &[u8],
         ) -> Result<(), BoundedStorageError> {
+            self.writes.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
             use crate::signing_journal_admission::OUTER_CRC_LEN;
             // Same fixed-framing preflight the durable/in-memory backends apply,
             // BEFORE any fault branch, model-owned copy, or map mutation.
@@ -2974,6 +3046,26 @@ mod tests {
             m.insert(record_key.to_vec(), record_body);
             m.insert(MODEL_META_KEY.to_vec(), metadata_body);
             Ok(())
+        }
+        fn read_signing_envelope_into(
+            &self,
+            _journal_key: &[u8],
+            _dst: &mut [u8],
+        ) -> Result<Option<usize>, BoundedStorageError> {
+            // This model backend does not support envelope framing; the override
+            // exists ONLY to count the envelope-read/reissue category separately so
+            // the retirement no-I/O window observes reads, writes, AND reissues. It
+            // preserves the trait default's Unsupported refusal (no behaviour change).
+            self.reissues.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            Err(BoundedStorageError::Unsupported)
+        }
+        fn reissue_signing_envelope_synced(
+            &self,
+            _journal_key: &[u8],
+            _envelope: &[u8],
+        ) -> Result<(), BoundedStorageError> {
+            self.reissues.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            Err(BoundedStorageError::Unsupported)
         }
         fn signing_ownership_domain(&self) -> Arc<SigningOwnershipDomain> {
             self.domain
@@ -4999,6 +5091,28 @@ mod tests {
     fn retire_acked_removes_exact_entry_without_io_or_durable_change() {
         let store = Arc::new(ModelStore::default());
         let journal = attach(store.clone());
+
+        // Populate the recovered-acknowledgement cache through a LEGITIMATE route
+        // so the non-mutation comparison exercises a NON-EMPTY cache (contents +
+        // FIFO order), not merely a length: reserve->invoke->record a DIFFERENT
+        // position, retire it, then re-present it so the recovered path
+        // establishes the durability barrier and caches the exact record.
+        let seed_pos = position(SigningKind::Vote, 700);
+        let seed_b = binding(b"retire-A-seed");
+        let seed_cap = reserve_and_invoke(&journal, &seed_pos, &seed_b);
+        journal.record_signed_result(&seed_cap, b"seed-sig").unwrap();
+        journal.retire_acknowledged_operation(&seed_cap).unwrap();
+        assert!(matches!(
+            journal.reserve_for_sign(&seed_pos, &seed_b).unwrap(),
+            ReservationOutcome::ExactRetryRetained(ref s) if s == b"seed-sig"
+        ));
+        assert_eq!(
+            journal.recovered_ack_cache_len(),
+            1,
+            "cache populated through the genuine recovered route"
+        );
+
+        // The operation actually under test.
         let pos = position(SigningKind::Proposal, 701);
         let b = binding(b"retire-A");
         let cap = reserve_and_invoke(&journal, &pos, &b);
@@ -5007,35 +5121,57 @@ mod tests {
         // Identical-result republication is available BEFORE retirement.
         journal.record_signed_result(&cap, b"sigbytes").unwrap();
         assert!(journal.live_contains_for_test(&pos));
+        // The seed is recovered-only (no live entry); P is the sole live entry.
         assert_eq!(journal.live_len_for_test(), 1);
 
-        // Snapshot durable + in-memory state immediately before retirement.
+        // Snapshot durable + in-memory state immediately before retirement. These
+        // state-inspection reads happen BEFORE the storage-call window opens, so
+        // they are excluded from the around-retire delta.
         let key = pos.storage_key();
         let record_before = store.get_signing_record(&key).unwrap();
         let meta_before = store.get_signing_metadata().unwrap();
         let count_before = journal.reserved_position_count();
         let next_op_before = journal.next_operation_id_for_test();
         let uncertain_before = journal.accounting_uncertain_for_test();
-        let cache_before = journal.recovered_ack_cache_len();
+        let uncertain_attempt_before = journal.uncertain_attempt_for_test();
+        let cache_before = journal.recovered_ack_snapshot_for_test();
         let writes_before = store.record_writes();
 
+        // Open the comprehensive storage-call window IMMEDIATELY around the retire
+        // call: reads, writes, and reissues are counted SEPARATELY, and no fixture
+        // setup or state-inspection read falls inside it.
+        let calls_before = store.storage_calls();
         assert_eq!(
             journal.retire_acknowledged_operation(&cap),
             Ok(RetirementOutcome::Retired)
         );
+        let calls_after = store.storage_calls();
 
-        // Exactly this entry disappeared.
+        // Executed no-I/O evidence: ZERO reads, writes, AND reissues across the
+        // retirement. This per-category executed delta — NOT the earlier
+        // record-write-only counter — establishes the no-I/O boundary, and it is
+        // kept distinct from source inspection of the method.
+        assert_eq!(
+            calls_after, calls_before,
+            "retirement performs no storage reads, writes, or reissues"
+        );
+
+        // Exactly this entry disappeared; the recovered-only seed is untouched.
         assert!(!journal.live_contains_for_test(&pos));
         assert_eq!(journal.live_len_for_test(), 0);
-        // Every durable and in-memory accounting datum is byte-for-byte unchanged.
+        // Every durable and in-memory accounting datum is byte-for-byte unchanged,
+        // INCLUDING the complete uncertainty bookkeeping (latch AND tracked
+        // attempt) and the recovered-cache CONTENTS and ORDER (not just lengths).
         assert_eq!(store.get_signing_record(&key).unwrap(), record_before);
         assert_eq!(store.get_signing_metadata().unwrap(), meta_before);
         assert_eq!(journal.reserved_position_count(), count_before);
         assert_eq!(journal.next_operation_id_for_test(), next_op_before);
         assert_eq!(journal.accounting_uncertain_for_test(), uncertain_before);
-        assert_eq!(journal.recovered_ack_cache_len(), cache_before);
-        // Retirement itself performed no storage write.
-        assert_eq!(store.record_writes(), writes_before, "retirement performs no I/O");
+        assert_eq!(journal.uncertain_attempt_for_test(), uncertain_attempt_before);
+        assert_eq!(journal.recovered_ack_snapshot_for_test(), cache_before);
+        // The record-write counter is ALSO unchanged, but is no longer relied on
+        // alone to establish the no-I/O property (see the per-category delta).
+        assert_eq!(store.record_writes(), writes_before);
     }
 
     /// Evidence B — after retirement the borrowed capability is stale: the normal
@@ -5066,10 +5202,17 @@ mod tests {
         ));
         assert_eq!(store.get_signing_record(&key).unwrap(), record_after_retire);
 
-        // A repeated retirement is a fixed refusal with no state change.
+        // A repeated retirement is a fixed refusal with no state change and no
+        // storage I/O of any category.
+        let calls_before = store.storage_calls();
         assert_eq!(
             journal.retire_acknowledged_operation(&cap),
             Err(RetirementError::NoLiveOperation)
+        );
+        assert_eq!(
+            store.storage_calls(),
+            calls_before,
+            "a refused repeat retirement performs no storage I/O"
         );
         assert_eq!(journal.live_len_for_test(), 0);
         assert_eq!(store.get_signing_record(&key).unwrap(), record_after_retire);
@@ -5083,16 +5226,22 @@ mod tests {
         let store_a = Arc::new(ModelStore::default());
         let journal_a = attach(store_a);
         let store_b = Arc::new(ModelStore::default());
-        let journal_b = attach(store_b);
+        let journal_b = attach(store_b.clone());
         let pos = position(SigningKind::Proposal, 703);
         let b = binding(b"retire-B-foreign");
         let cap_a = reserve_and_invoke(&journal_a, &pos, &b);
         journal_a.record_signed_result(&cap_a, b"sig").unwrap();
 
         // journal_b's domain token differs, so cap_a is foreign to it.
+        let calls_before = store_b.storage_calls();
         assert_eq!(
             journal_b.retire_acknowledged_operation(&cap_a),
             Err(RetirementError::ForeignDomain)
+        );
+        assert_eq!(
+            store_b.storage_calls(),
+            calls_before,
+            "a foreign-domain refusal performs no storage I/O"
         );
         // The owning domain still holds the live entry (nothing removed anywhere).
         assert!(journal_a.live_contains_for_test(&pos));
@@ -5133,45 +5282,51 @@ mod tests {
     fn retire_operation_id_binding_and_invoked_mismatches_refused() {
         // operation-id mismatch: replace the live entry with a NEW operation id.
         let store = Arc::new(ModelStore::default());
-        let journal = attach(store);
+        let journal = attach(store.clone());
         let pos = position(SigningKind::Proposal, 706);
         let b = binding(b"retire-B-mismatch");
         let cap = reserve_and_invoke(&journal, &pos, &b);
         journal.record_signed_result(&cap, b"sig").unwrap();
         // Overwrite the entry (same position+binding, FRESH operation id, acked).
         journal.insert_live_for_test(pos, b, true);
+        let calls_before = store.storage_calls();
         assert_eq!(
             journal.retire_acknowledged_operation(&cap),
             Err(RetirementError::OperationMismatch)
         );
+        assert_eq!(store.storage_calls(), calls_before, "op-id mismatch refusal performs no storage I/O");
         assert!(journal.live_contains_for_test(&pos), "entry not removed on mismatch");
 
         // binding mismatch: entry at the same position carries a DIFFERENT binding.
         let store2 = Arc::new(ModelStore::default());
-        let journal2 = attach(store2);
+        let journal2 = attach(store2.clone());
         let pos2 = position(SigningKind::Vote, 707);
         let b2 = binding(b"retire-B-bind-a");
         let cap2 = reserve_and_invoke(&journal2, &pos2, &b2);
         journal2.record_signed_result(&cap2, b"sig").unwrap();
         journal2.insert_live_for_test(pos2, binding(b"retire-B-bind-OTHER"), true);
+        let calls_before2 = store2.storage_calls();
         assert_eq!(
             journal2.retire_acknowledged_operation(&cap2),
             Err(RetirementError::OperationMismatch)
         );
+        assert_eq!(store2.storage_calls(), calls_before2, "binding mismatch refusal performs no storage I/O");
         assert!(journal2.live_contains_for_test(&pos2));
 
         // un-invoked defensive: force invoked=false for the matching entry.
         let store3 = Arc::new(ModelStore::default());
-        let journal3 = attach(store3);
+        let journal3 = attach(store3.clone());
         let pos3 = position(SigningKind::Proposal, 708);
         let b3 = binding(b"retire-B-uninvoked");
         let cap3 = reserve_and_invoke(&journal3, &pos3, &b3);
         journal3.record_signed_result(&cap3, b"sig").unwrap();
         journal3.set_live_invoked_for_test(&pos3, false);
+        let calls_before3 = store3.storage_calls();
         assert_eq!(
             journal3.retire_acknowledged_operation(&cap3),
             Err(RetirementError::NotInvoked)
         );
+        assert_eq!(store3.storage_calls(), calls_before3, "un-invoked refusal performs no storage I/O");
         assert!(journal3.live_contains_for_test(&pos3));
     }
 
@@ -5187,10 +5342,12 @@ mod tests {
         let b = binding(b"retire-C");
         // Invoked but not yet acknowledged (no record_signed_result).
         let cap = reserve_and_invoke(&journal, &pos, &b);
+        let calls_before = store.storage_calls();
         assert_eq!(
             journal.retire_acknowledged_operation(&cap),
             Err(RetirementError::NotAcknowledged)
         );
+        assert_eq!(store.storage_calls(), calls_before, "unacknowledged refusal performs no storage I/O");
 
         // A write that stores readable bytes but returns an error does NOT
         // acknowledge: result_acked stays false, so retirement still refuses.
@@ -5198,11 +5355,14 @@ mod tests {
         assert!(journal.record_signed_result(&cap, b"sig-C").is_err());
         // The Signed bytes are now readable in the store...
         assert!(store.get_signing_record(&pos.storage_key()).unwrap().is_some());
-        // ...yet retirement refuses because no in-process ack was established.
+        // ...yet retirement refuses because no in-process ack was established,
+        // and the refusal itself performs no storage I/O.
+        let calls_before2 = store.storage_calls();
         assert_eq!(
             journal.retire_acknowledged_operation(&cap),
             Err(RetirementError::NotAcknowledged)
         );
+        assert_eq!(store.storage_calls(), calls_before2, "readable-but-unacked refusal performs no storage I/O");
 
         // A successful publication retry establishes the acknowledgement.
         store.set_store_then_error(false);
