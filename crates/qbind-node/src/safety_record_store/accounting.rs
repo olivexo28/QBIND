@@ -584,6 +584,15 @@ impl AggregateAuthority {
         }
     }
 
+    /// Run 422 — identity comparison for the non-enabling journal
+    /// accountant association: two handles share the SAME aggregate authority
+    /// iff they point at the SAME inner allocation. This is pointer identity
+    /// only — it takes no accounting lock, allocates nothing, reads no
+    /// ceiling/running total, and never constructs a replacement ledger.
+    pub(crate) fn same_authority(&self, other: &AggregateAuthority) -> bool {
+        Arc::ptr_eq(&self.inner, &other.inner)
+    }
+
     /// Admit `charge` against the accepted aggregate ceiling **before** the
     /// protected allocation. Refuses without disturbing the running total when
     /// the combined charge would exceed the aggregate.
@@ -678,6 +687,18 @@ impl SharedAccountant {
     /// The shared aggregate admission authority this partition admits against.
     pub fn aggregate(&self) -> &AggregateAuthority {
         &self.aggregate
+    }
+
+    /// Run 422 — identity comparison for the non-enabling journal
+    /// accountant association: two handles denote the SAME operational ledger
+    /// iff they share BOTH the same partition sub-ledger allocation and the
+    /// same aggregate authority. Pointer identity only — it takes no
+    /// accounting lock, allocates no replacement ledger, and changes no
+    /// admission behavior; it is used purely to decide whether an already
+    /// installed association may be reused.
+    pub(crate) fn same_ledger(&self, other: &SharedAccountant) -> bool {
+        Arc::ptr_eq(&self.inner, &other.inner)
+            && self.aggregate.same_authority(&other.aggregate)
     }
 
     fn lock(&self) -> std::sync::MutexGuard<'_, Option<AllocationAccountant>> {

@@ -1239,6 +1239,16 @@ struct DomainInner {
     /// Monotonic source of unique live operation ids (checked; exhaustion is a
     /// terminal fail-closed state, never wraparound). In-process bookkeeping.
     next_operation_id: u64,
+    /// Run 422 — the non-enabling accountant association for this signing
+    /// domain: at most ONE operational-ledger identity, recorded the first time
+    /// an association is installed and thereafter reused for identical-ledger
+    /// installs. It is identity bookkeeping ONLY: it enables no bounded signing
+    /// route, admits no memory, takes no accounting charge, and does not gate
+    /// any existing reservation/continuation/publication/workspace path. The
+    /// held clone is Arc-backed shared ownership of the EXISTING ledger (no new
+    /// ledger is allocated); it survives individual journal/facade handle drops
+    /// because the ownership domain outlives them.
+    admission: Option<crate::safety_record_store::accounting::SharedAccountant>,
 }
 
 impl SigningOwnershipDomain {
@@ -1272,6 +1282,7 @@ impl SigningOwnershipDomain {
                 accounting_uncertain: false,
                 uncertain_attempt: None,
                 next_operation_id: 1,
+                admission: None,
             }),
         })
     }
@@ -1293,6 +1304,21 @@ impl SigningOwnershipDomain {
 // ============================================================================
 // The journal
 // ============================================================================
+
+/// Run 422 — fixed-size, crate-internal refusal for installing the
+/// non-enabling accountant association. It is `Copy` and allocation-free: it
+/// carries no `String` and no owned payload, so constructing or returning it on
+/// any branch takes no accounting lock and performs no heap allocation. It is
+/// deliberately distinct from [`JournalError`], whose variants carry allocating
+/// diagnostic strings.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum AdmissionInstallError {
+    /// A different operational ledger is already associated with this signing
+    /// domain; the installed association is left unchanged.
+    LedgerMismatch,
+    /// The signing-domain mutex was poisoned by a panic in another holder.
+    LockPoisoned,
+}
 
 /// A bounded, versioned, signing-scoped, crash-consistent reservation journal
 /// **handle** over one shared [`SigningOwnershipDomain`].
@@ -1320,6 +1346,55 @@ impl std::fmt::Debug for SigningReservationJournal {
 }
 
 impl SigningReservationJournal {
+    /// Run 422 — install the **non-enabling accountant association** for this
+    /// journal's signing-ownership domain.
+    ///
+    /// This records at most ONE operational-ledger identity for the domain. It
+    /// is identity-only bookkeeping: it does NOT enable any bounded fresh-signing
+    /// route, admit journal memory, take any accounting charge, allocate or
+    /// retire a live-operation table, or alter any existing reservation,
+    /// continuation, publication-capability, retained-retrieval, storage-write,
+    /// or workspace path. Installing an association never flips the domain into
+    /// a “bounded-only” mode.
+    ///
+    /// All work happens under a SINGLE acquisition of the existing signing-domain
+    /// mutex (the same lock that serializes every supported handle over this
+    /// domain). No accounting lock is taken, no reservation is created, and no
+    /// second synchronization mechanism or out-of-lock installation candidate is
+    /// introduced:
+    ///
+    /// * **Unassociated** (`None`): one clone of `accountant` is retained — an
+    ///   Arc refcount bump sharing the EXISTING ledger, not a new ledger — and
+    ///   the call succeeds.
+    /// * **Same installed ledger**: succeeds WITHOUT replacing or re-cloning the
+    ///   stored value.
+    /// * **Different installed ledger**: refused with
+    ///   [`AdmissionInstallError::LedgerMismatch`]; the association is unchanged.
+    /// * **Poisoned mutex**: refused with [`AdmissionInstallError::LockPoisoned`].
+    ///
+    /// Because the association lives in the shared ownership domain (behind the
+    /// domain `Arc`), it outlives the individual journal/facade handles that
+    /// installed it and remains observable to any later handle opened over the
+    /// same backend instance.
+    pub(crate) fn install_accountant_association(
+        &self,
+        accountant: &crate::safety_record_store::accounting::SharedAccountant,
+    ) -> Result<(), AdmissionInstallError> {
+        let mut inner = self
+            .domain
+            .inner
+            .lock()
+            .map_err(|_| AdmissionInstallError::LockPoisoned)?;
+        match inner.admission.as_ref() {
+            None => {
+                inner.admission = Some(accountant.clone());
+                Ok(())
+            }
+            Some(existing) if existing.same_ledger(accountant) => Ok(()),
+            Some(_) => Err(AdmissionInstallError::LedgerMismatch),
+        }
+    }
+
     /// Run 422 D7-D10 Correction E — **explicitly initialize a new local
     /// journal**. This is the only route that creates initialization metadata; it
     /// requires an **empty signing namespace** (no metadata and no records) and
@@ -4272,5 +4347,276 @@ mod tests {
             .expect("open validates the surviving empty, consistent metadata and establishes the journal");
         assert_eq!(opened.established_limit(), limit);
         assert_eq!(opened.reserved_position_count(), 0);
+    }
+
+    // ========================================================================
+    // Run 422 — Non-enabling journal accountant association (identity-only
+    // installer). These tests live in-crate so they can observe the private
+    // `DomainInner::admission` field and the crate-internal installer without
+    // widening production visibility. Separate from the source-based argument
+    // that the installer acquires only the single signing-domain mutex and no
+    // accounting lock (visible in `install_accountant_association`).
+    // ========================================================================
+    use crate::safety_record_store::accounting::{AggregateAuthority, SharedAccountant};
+    use crate::safety_record_store::PinnedSafetyContext;
+
+    /// A fresh, independent operational ledger (its own partition sub-ledger and
+    /// its own aggregate authority). Two separate calls denote DIFFERENT ledgers.
+    fn fresh_ledger() -> SharedAccountant {
+        SharedAccountant::new(AggregateAuthority::new())
+    }
+
+    /// Snapshot the association currently installed on a journal's domain, cloning
+    /// the handle (an Arc refcount bump) so the domain lock is released promptly.
+    fn installed(j: &SigningReservationJournal) -> Option<SharedAccountant> {
+        j.domain.inner.lock().unwrap().admission.clone()
+    }
+
+    /// A minimal pinned context sufficient to bind a real operational sub-ledger so
+    /// scenario 6 can apply genuine accounting pressure through `reserve`.
+    fn pinned_ctx() -> PinnedSafetyContext {
+        use qbind_consensus::ids::ValidatorId;
+        PinnedSafetyContext {
+            network_genesis_id: [1u8; 32],
+            authority_context_ref: [2u8; 32],
+            chain_id: 42,
+            epoch: 7,
+            qc_suite_id: 7,
+            timeout_suite_id: 100,
+            s_sig: 8,
+            validators: (0..4u64).map(|i| (ValidatorId::new(i), 1u64)).collect(),
+            require_height_equals_round: false,
+        }
+    }
+
+    /// (1) The first installation over an unassociated domain succeeds and records
+    /// the supplied ledger identity.
+    #[test]
+    fn assoc_first_install_succeeds() {
+        let store = Arc::new(ModelStore::default());
+        let journal = attach(store);
+        let acct = fresh_ledger();
+        assert!(installed(&journal).is_none(), "fresh domain must be unassociated");
+        assert_eq!(journal.install_accountant_association(&acct), Ok(()));
+        let got = installed(&journal).expect("association recorded");
+        assert!(got.same_ledger(&acct), "recorded identity must match the installed ledger");
+    }
+
+    /// (2) Reinstalling a CLONE of the same ledger succeeds and preserves the exact
+    /// stored handle (no replacement).
+    #[test]
+    fn assoc_reinstall_same_ledger_preserves_association() {
+        let store = Arc::new(ModelStore::default());
+        let journal = attach(store);
+        let acct = fresh_ledger();
+        assert_eq!(journal.install_accountant_association(&acct), Ok(()));
+        let before = installed(&journal).expect("installed");
+        // A clone shares both partition and aggregate Arcs -> same ledger.
+        assert_eq!(journal.install_accountant_association(&acct.clone()), Ok(()));
+        let after = installed(&journal).expect("still installed");
+        assert!(after.same_ledger(&acct));
+        assert!(after.same_ledger(&before), "the stored association was preserved");
+    }
+
+    /// (3) A different ledger is refused with the fixed-size mismatch error and the
+    /// original association is left intact.
+    #[test]
+    fn assoc_different_ledger_is_refused_without_change() {
+        let store = Arc::new(ModelStore::default());
+        let journal = attach(store);
+        let first = fresh_ledger();
+        let other = fresh_ledger();
+        assert_eq!(journal.install_accountant_association(&first), Ok(()));
+        assert_eq!(
+            journal.install_accountant_association(&other),
+            Err(AdmissionInstallError::LedgerMismatch)
+        );
+        let got = installed(&journal).expect("association intact");
+        assert!(got.same_ledger(&first), "original association unchanged");
+        assert!(!got.same_ledger(&other));
+    }
+
+    /// (4) Two concurrent same-ledger installers both succeed; exactly one
+    /// association is stored and it matches that ledger.
+    #[test]
+    fn assoc_concurrent_same_ledger_installers_both_succeed() {
+        use std::sync::Barrier;
+        let store = Arc::new(ModelStore::default());
+        let journal = Arc::new(attach(store));
+        let acct = fresh_ledger();
+        let barrier = Arc::new(Barrier::new(2));
+        let mut handles = Vec::new();
+        for _ in 0..2 {
+            let j = Arc::clone(&journal);
+            let a = acct.clone();
+            let bar = Arc::clone(&barrier);
+            handles.push(std::thread::spawn(move || {
+                bar.wait();
+                j.install_accountant_association(&a)
+            }));
+        }
+        let results: Vec<_> = handles.into_iter().map(|h| h.join().expect("thread joined")).collect();
+        assert!(results.iter().all(|r| *r == Ok(())), "both same-ledger installs succeed: {results:?}");
+        let got = installed(&journal).expect("one association stored");
+        assert!(got.same_ledger(&acct));
+    }
+
+    /// (5) Two concurrent different-ledger installers produce exactly one winner and
+    /// one mismatch; the stored association matches the winner.
+    #[test]
+    fn assoc_concurrent_different_ledger_installers_one_winner() {
+        use std::sync::Barrier;
+        let store = Arc::new(ModelStore::default());
+        let journal = Arc::new(attach(store));
+        let a = fresh_ledger();
+        let b = fresh_ledger();
+        let barrier = Arc::new(Barrier::new(2));
+        let ja = Arc::clone(&journal);
+        let jb = Arc::clone(&journal);
+        let a2 = a.clone();
+        let b2 = b.clone();
+        let bar_a = Arc::clone(&barrier);
+        let bar_b = Arc::clone(&barrier);
+        let ha = std::thread::spawn(move || {
+            bar_a.wait();
+            ja.install_accountant_association(&a2)
+        });
+        let hb = std::thread::spawn(move || {
+            bar_b.wait();
+            jb.install_accountant_association(&b2)
+        });
+        let ra = ha.join().expect("thread a joined");
+        let rb = hb.join().expect("thread b joined");
+        let oks = [ra, rb].iter().filter(|r| **r == Ok(())).count();
+        let mismatches = [ra, rb]
+            .iter()
+            .filter(|r| **r == Err(AdmissionInstallError::LedgerMismatch))
+            .count();
+        assert_eq!(oks, 1, "exactly one winner: ra={ra:?} rb={rb:?}");
+        assert_eq!(mismatches, 1, "exactly one mismatch: ra={ra:?} rb={rb:?}");
+        let got = installed(&journal).expect("winner stored");
+        // The stored association equals whichever ledger won.
+        assert!(got.same_ledger(&a) ^ got.same_ledger(&b), "stored exactly one of the two ledgers");
+    }
+
+    /// (6) Install and reinstall leave the operational and aggregate ledger values
+    /// unchanged, including while a genuine reservation holds accounting pressure.
+    #[test]
+    fn assoc_install_does_not_change_ledger_values_under_pressure() {
+        let store = Arc::new(ModelStore::default());
+        let journal = attach(store);
+        let agg = AggregateAuthority::new();
+        agg.bind(1 << 20).expect("bind aggregate ceiling");
+        let acct = SharedAccountant::new(agg);
+        acct.bind(&pinned_ctx(), 0).expect("bind operational sub-ledger");
+        // Hold real pressure on BOTH the partition and the aggregate.
+        let _res = acct.reserve(64).expect("reserve applies pressure");
+        let p_current = acct.current();
+        let p_peak = acct.peak();
+        let p_cap = acct.cap();
+        let a_current = acct.aggregate().current();
+        let a_peak = acct.aggregate().peak();
+        let a_cap = acct.aggregate().cap();
+        assert!(p_current >= 64 && a_current >= 64, "pressure is present");
+
+        assert_eq!(journal.install_accountant_association(&acct), Ok(()));
+        assert_eq!(journal.install_accountant_association(&acct.clone()), Ok(()));
+
+        assert_eq!(acct.current(), p_current, "partition current unchanged");
+        assert_eq!(acct.peak(), p_peak, "partition peak unchanged");
+        assert_eq!(acct.cap(), p_cap, "partition cap unchanged");
+        assert_eq!(acct.aggregate().current(), a_current, "aggregate current unchanged");
+        assert_eq!(acct.aggregate().peak(), a_peak, "aggregate peak unchanged");
+        assert_eq!(acct.aggregate().cap(), a_cap, "aggregate cap unchanged");
+    }
+
+    /// (7) Dropping the installing handle while retaining the storage instance
+    /// preserves the association through the shared ownership domain; a new handle
+    /// opened over the SAME instance observes it.
+    #[test]
+    fn assoc_survives_handle_drop_same_instance() {
+        let store = Arc::new(ModelStore::default());
+        let acct = fresh_ledger();
+        {
+            let journal = attach(store.clone());
+            assert_eq!(journal.install_accountant_association(&acct), Ok(()));
+            // journal dropped here; `store` (and thus its domain) lives on.
+        }
+        let reopened = attach(store.clone());
+        let got = installed(&reopened).expect("association observed over same instance");
+        assert!(got.same_ledger(&acct));
+    }
+
+    /// (8) A genuinely new domain (a modelled restart: same bytes, fresh domain)
+    /// begins unassociated — the association is volatile ownership-domain state, not
+    /// durable record state.
+    #[test]
+    fn assoc_fresh_domain_begins_unassociated() {
+        let store = Arc::new(ModelStore::default());
+        let acct = fresh_ledger();
+        let journal = attach(store.clone());
+        assert_eq!(journal.install_accountant_association(&acct), Ok(()));
+        assert!(installed(&journal).is_some());
+        // A modelled restart is a NEW instance with a FRESH domain.
+        let restarted = attach(store.reopen());
+        assert!(installed(&restarted).is_none(), "fresh domain is unassociated");
+    }
+
+    /// (9) A poisoned signing-domain mutex yields the fixed-size refusal without
+    /// panicking or allocating.
+    #[test]
+    fn assoc_poisoned_lock_returns_fixed_refusal() {
+        let store = Arc::new(ModelStore::default());
+        let journal = attach(store);
+        let acct = fresh_ledger();
+        let domain = Arc::clone(&journal.domain);
+        // Poison the domain mutex by panicking while holding it.
+        let poisoner = std::thread::spawn(move || {
+            let _guard = domain.inner.lock().unwrap();
+            panic!("intentional poison for test");
+        });
+        assert!(poisoner.join().is_err(), "poisoning thread panicked as expected");
+        assert_eq!(
+            journal.install_accountant_association(&acct),
+            Err(AdmissionInstallError::LockPoisoned)
+        );
+    }
+
+    /// (10) Representative legacy reserve -> consume -> publish -> exact-retry
+    /// behavior is unchanged after an association is installed (the installer is
+    /// non-enabling and non-disabling).
+    #[test]
+    fn assoc_install_leaves_legacy_paths_unchanged() {
+        let store = Arc::new(ModelStore::default());
+        let journal = attach(store);
+        let acct = fresh_ledger();
+        assert_eq!(journal.install_accountant_association(&acct), Ok(()));
+
+        let pos = position(SigningKind::Proposal, 11);
+        let b = binding(b"legacy-after-install");
+        let cap = reserve_and_invoke(&journal, &pos, &b);
+        journal.record_signed_result(&cap, b"sigbytes").unwrap();
+        // Exact retry still reuses the retained signature with no fresh continuation.
+        assert!(matches!(
+            journal.reserve_for_sign(&pos, &b).unwrap(),
+            ReservationOutcome::ExactRetryRetained(ref s) if s == b"sigbytes"
+        ));
+        // Reinstall is still accepted and the legacy outcome above is unaffected.
+        assert_eq!(journal.install_accountant_association(&acct.clone()), Ok(()));
+    }
+
+    /// Measured layout observation (target-dependent): the inline association field
+    /// is a niche-optimized `Option<SharedAccountant>` that is the SAME size as
+    /// `SharedAccountant` (no added discriminant word). This documents that the new
+    /// field is identity bookkeeping of two Arc handles, not a new heap allocation;
+    /// it does NOT claim the whole domain allocation is admitted by this slice.
+    #[test]
+    fn assoc_field_is_niche_optimized_option() {
+        use std::mem::size_of;
+        assert_eq!(
+            size_of::<Option<SharedAccountant>>(),
+            size_of::<SharedAccountant>(),
+            "Option<SharedAccountant> uses an Arc niche (no extra discriminant word)"
+        );
     }
 }
