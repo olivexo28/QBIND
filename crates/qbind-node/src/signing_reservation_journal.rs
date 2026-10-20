@@ -44,7 +44,8 @@ use std::sync::{Arc, Mutex};
 
 use crate::storage::{signing_journal_crc32, StorageError};
 use crate::signing_journal_admission::{
-    AdmittedOutput, BorrowedRecordView, EnvelopeScratch, ENVELOPE_SIG_OFFSET, JOURNAL_KEY_LEN,
+    AdmittedOutput, BorrowedRecordView, EnvelopeScratch, RetrievalWorkspaceOwner,
+    ENVELOPE_SIG_OFFSET, JOURNAL_KEY_LEN,
 };
 
 /// Journal-record format version — a **persistence-format identifier** for the
@@ -1320,6 +1321,97 @@ pub(crate) enum AdmissionInstallError {
     LockPoisoned,
 }
 
+/// Run 422 — fixed-size, `Copy`, allocation-free refusal for association-sourced
+/// workspace admission ([`SigningReservationJournal::admit_retrieval_workspace`]).
+/// Every variant is `Copy` and carries no `String`, so constructing or returning
+/// it on any branch performs no heap allocation. The admission reserve path
+/// (verified in `accounting::SharedAccountant::reserve`, `AllocationAccountant::admit`,
+/// and `AggregateAuthority::admit`) can only yield an `Unbound` ledger, an
+/// `AdmissionOverflow` ceiling refusal, or an accounting `ArithmeticOverflow`;
+/// those are mapped faithfully, and any other (never taken on this path)
+/// `SafetyStoreError` is collapsed to `Other` WITHOUT allocating a replacement
+/// diagnostic string. It is deliberately distinct from the allocating `JournalError`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(not(test), allow(dead_code))]
+pub(crate) enum WorkspaceAdmissionError {
+    /// No operational accountant is installed in this journal's ownership domain.
+    NoAssociation,
+    /// The signing-domain mutex was poisoned by a panic in another holder.
+    Lock,
+    /// A reservation was attempted against a ledger partition/authority that was
+    /// never bound.
+    Unbound(crate::safety_record_store::error::LedgerScope),
+    /// A reservation charge would raise a partition or aggregate running total
+    /// over its ceiling. Built from `Copy` numeric data only.
+    CapacityExceeded {
+        scope: crate::safety_record_store::error::LedgerScope,
+        charge: u128,
+        current: u128,
+        next: u128,
+        cap: u128,
+    },
+    /// Accounting arithmetic overflowed while summing a charge.
+    Arithmetic(crate::safety_record_store::error::ArithmeticOverflowSite),
+    /// Any other `SafetyStoreError` (not produced on the verified admission reserve
+    /// path); collapsed to a fixed-size code without allocation.
+    Other,
+}
+
+/// Run 422 — fixed-size, `Copy`, allocation-free refusal for the opt-in checked
+/// retained-retrieval entrypoint
+/// ([`SigningReservationJournal::retrieve_retained_checked`]). Distinct from
+/// [`RetrievalError`]: it adds the two pre-delegation refusals (`NoAssociation`,
+/// `ForeignWorkspace`) and forwards the unchanged delegated retrieval error.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(not(test), allow(dead_code))]
+pub(crate) enum CheckedRetrievalError {
+    /// No operational accountant is installed in this journal's ownership domain.
+    NoAssociation,
+    /// The signing-domain mutex was poisoned by a panic in another holder.
+    Lock,
+    /// The output and/or scratch workspace is not covered by the installed
+    /// operational ledger + aggregate authority. Returned BEFORE any storage
+    /// access, reissue, or output mutation.
+    ForeignWorkspace,
+    /// The delegated, unchanged `retrieve_retained` returned an error.
+    Retrieval(RetrievalError),
+}
+
+/// Run 422 — map a `SafetyStoreError` from the admission reserve path into the
+/// fixed-size [`WorkspaceAdmissionError`]. The verified reserve path only produces
+/// `Unbound`, `AdmissionOverflow`, or `ArithmeticOverflow`; those are mapped
+/// faithfully and any other variant is collapsed to `Other` without allocating a
+/// replacement string. (Mapping an already-constructed error is NOT claimed to
+/// prevent an allocation a helper might already have performed — but no
+/// admission-path helper allocates on these branches.)
+#[cfg_attr(not(test), allow(dead_code))]
+fn map_admission_error(
+    e: crate::safety_record_store::SafetyStoreError,
+) -> WorkspaceAdmissionError {
+    use crate::safety_record_store::error::CapacityRefusalDetail;
+    use crate::safety_record_store::SafetyStoreError;
+    match e {
+        SafetyStoreError::CapacityRefusal(CapacityRefusalDetail::Unbound(scope)) => {
+            WorkspaceAdmissionError::Unbound(scope)
+        }
+        SafetyStoreError::CapacityRefusal(CapacityRefusalDetail::AdmissionOverflow {
+            scope,
+            charge,
+            current,
+            next,
+            cap,
+        }) => WorkspaceAdmissionError::CapacityExceeded {
+            scope,
+            charge,
+            current,
+            next,
+            cap,
+        },
+        SafetyStoreError::ArithmeticOverflow(site) => WorkspaceAdmissionError::Arithmetic(site),
+        _ => WorkspaceAdmissionError::Other,
+    }
+}
+
 /// A bounded, versioned, signing-scoped, crash-consistent reservation journal
 /// **handle** over one shared [`SigningOwnershipDomain`].
 ///
@@ -1961,6 +2053,106 @@ impl SigningReservationJournal {
             .set(sig)
             .map_err(|_| RetrievalError::Storage(BoundedDiag::EnvelopeInvalid))?;
         Ok(RetainedDelivery::Retained(output.view()))
+    }
+
+    /// Run 422 — association-sourced admission of the retained-retrieval
+    /// workspace. It sources its accountant EXCLUSIVELY from the accountant
+    /// already installed in this journal's ownership-domain association; it never
+    /// accepts a caller-selected substitute and never auto-installs one.
+    ///
+    /// Sequence: acquire the signing-domain mutex ONCE; if no association is
+    /// installed refuse `NoAssociation`, if the mutex is poisoned refuse `Lock`
+    /// (both fixed-size, allocation-free); otherwise clone the installed accountant
+    /// handle ONCE (an `Arc` refcount bump sharing the EXISTING ledger — no new
+    /// ledger), RELEASE the domain guard, and move that handle into the existing
+    /// [`RetrievalWorkspaceOwner`] admission mechanism. That owner reserves BOTH
+    /// existing workspace charges (output first, then envelope) BEFORE constructing
+    /// either buffer and rolls the first back if the second refuses, so a capacity
+    /// refusal leaves both ledgers unchanged and builds no buffer.
+    ///
+    /// Accounting: this adds NO new covered storage. The only incremental object is
+    /// the transient [`RetrievalWorkspaceOwner`], an admission FACTORY (not retained
+    /// workspace) holding a clone of the EXISTING installed accountant handle — the
+    /// association already recorded on `DomainInner::admission`, which this slice
+    /// does not newly charge. The two reservations it produces are exactly the
+    /// pre-existing output/envelope workspace charges under the UNCHANGED ceilings.
+    /// The still-uncompleted journal-domain accounting remains explicitly unfinished.
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub(crate) fn admit_retrieval_workspace(
+        &self,
+    ) -> Result<(AdmittedOutput, EnvelopeScratch), WorkspaceAdmissionError> {
+        // Acquire the signing-domain mutex ONCE, read the installed association,
+        // clone the handle, and release the guard before any accounting call.
+        let accountant = {
+            let inner = self
+                .domain
+                .inner
+                .lock()
+                .map_err(|_| WorkspaceAdmissionError::Lock)?;
+            match inner.admission.as_ref() {
+                None => return Err(WorkspaceAdmissionError::NoAssociation),
+                Some(a) => a.clone(),
+            }
+            // Domain guard released here, before any reservation is attempted.
+        };
+        // Move the installed-accountant handle into the existing workspace-owner
+        // admission mechanism (no substitute accountant, no automatic install).
+        RetrievalWorkspaceOwner::from_installed(accountant)
+            .admit()
+            .map_err(map_admission_error)
+    }
+
+    /// Run 422 — opt-in, additive CHECKED retained retrieval. It establishes that
+    /// BOTH the `output` and the `scratch` workspace are covered by the operational
+    /// accountant INSTALLED in this journal's ownership-domain association, then
+    /// delegates to the unchanged [`retrieve_retained`](Self::retrieve_retained).
+    /// Existing legacy callers of `retrieve_retained` are unaffected; this
+    /// guarantee applies ONLY to this opt-in route.
+    ///
+    /// Sequence: acquire the signing-domain mutex ONCE; BORROW (never clone) the
+    /// installed accountant; check both reservations against it with the
+    /// non-allocating, lock-free inspectors; refuse `NoAssociation` or
+    /// `ForeignWorkspace` BEFORE any storage read, reissue, or output mutation; end
+    /// the borrow and RELEASE the guard; then delegate. The association is set-once
+    /// immutable, so the identity checked under the guard still holds after release;
+    /// the exclusive `&mut` workspace borrows prevent substitution or release of the
+    /// checked objects across the delegated call; and the delegated
+    /// `retrieve_retained` re-acquires the SAME domain mutex, so the guard MUST be
+    /// released first (it is) to avoid a non-reentrant re-lock.
+    ///
+    /// This is an accounting-identity check ONLY: not authorization, a capability, a
+    /// freshness token, or permission to sign. `scratch` keeps its independent
+    /// lifetime (it is not tied to `'o`).
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub(crate) fn retrieve_retained_checked<'o>(
+        &self,
+        position: &SigningPosition,
+        binding: &BindingDigest,
+        scratch: &mut EnvelopeScratch,
+        output: &'o mut AdmittedOutput,
+    ) -> Result<RetainedDelivery<'o>, CheckedRetrievalError> {
+        // Identity gate under a SINGLE short-lived domain acquisition; the
+        // inspectors allocate nothing and take no accounting lock, so no storage
+        // read, reservation, release, or callback occurs here.
+        {
+            let inner = self
+                .domain
+                .inner
+                .lock()
+                .map_err(|_| CheckedRetrievalError::Lock)?;
+            let accountant = match inner.admission.as_ref() {
+                None => return Err(CheckedRetrievalError::NoAssociation),
+                Some(a) => a,
+            };
+            if !(output.is_covered_by(accountant) && scratch.is_covered_by(accountant)) {
+                return Err(CheckedRetrievalError::ForeignWorkspace);
+            }
+            // Borrow of `accountant` and the domain guard both end here.
+        }
+        // Guard released; delegate to the unchanged retrieval (which re-locks the
+        // same domain mutex and owns its own current journal-state checks).
+        self.retrieve_retained(position, binding, scratch, output)
+            .map_err(CheckedRetrievalError::Retrieval)
     }
 
     /// Test-only: attach a handle over `store` WITHOUT establishing a limit, so

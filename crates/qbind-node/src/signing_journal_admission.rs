@@ -244,6 +244,16 @@ impl AdmittedOutput {
     pub(crate) fn charge(&self) -> u128 {
         self.res.charge()
     }
+
+    /// RUN 422 — true iff this output's LIVE covering reservation was issued by
+    /// `acct` (its exact operational partition AND aggregate authority). The
+    /// covering reservation is a private field constructed only by [`admit`] /
+    /// [`admit_output`] and released only by a consuming `release_now`/drop, so a
+    /// positive result establishes that THIS buffer's coverage is live and owned
+    /// by `acct`. Non-allocating; acquires no accounting lock; exposes nothing.
+    pub(crate) fn is_covered_by(&self, acct: &SharedAccountant) -> bool {
+        self.res.is_issued_by(acct)
+    }
 }
 
 /// RUN 422 — a scoped, exclusive writer over an [`AdmittedOutput`]. Obtained
@@ -350,6 +360,14 @@ impl EnvelopeScratch {
     pub(crate) fn charge(&self) -> u128 {
         self.res.charge()
     }
+
+    /// RUN 422 — true iff this scratch's LIVE covering reservation was issued by
+    /// `acct` (its exact operational partition AND aggregate authority). Same
+    /// guarantees as [`AdmittedOutput::is_covered_by`]: non-allocating, lock-free,
+    /// and exposing neither the reservation nor its charge.
+    pub(crate) fn is_covered_by(&self, acct: &SharedAccountant) -> bool {
+        self.res.is_issued_by(acct)
+    }
 }
 
 /// The compile-time charge for an [`AdmittedOutput`]: its actual wrapper layout
@@ -384,6 +402,16 @@ impl RetrievalWorkspaceOwner {
         Self {
             accountant: backend.accounting().clone(),
         }
+    }
+
+    /// RUN 422 — construct an owner from an accountant handle ALREADY INSTALLED
+    /// in a signing domain's association (cloned by the caller under the
+    /// journal-domain guard and moved in here). Unlike [`new`](RetrievalWorkspaceOwner::new),
+    /// it reads no backend and selects no ledger: the caller supplies the installed
+    /// operational accountant directly, so no caller-selected substitute backend can
+    /// be introduced and no fresh ledger is allocated.
+    pub(crate) fn from_installed(accountant: SharedAccountant) -> Self {
+        Self { accountant }
     }
 
     /// Admit both workspace buffers. The output reservation is taken first, then
@@ -424,9 +452,10 @@ mod tests {
         PinnedSafetyContext, SafetyBackend, SafetyBackendPolicy, SafetyRecordOwner, ValidatedRecord,
     };
     use crate::signing_reservation_journal::{
-        BindingDigest, RefuseReason, RetainedDelivery, RetrievalError, SigningDecisionRecord,
-        SigningJournalStorage, SigningKind, SigningOwnershipDomain, SigningPosition,
-        SigningRecordStage, SigningReservationJournal, SIGNING_RECORD_FORMAT_VERSION,
+        BindingDigest, CheckedRetrievalError, RefuseReason, RetainedDelivery, RetrievalError,
+        SigningDecisionRecord, SigningJournalStorage, SigningKind, SigningOwnershipDomain,
+        SigningPosition, SigningRecordStage, SigningReservationJournal, WorkspaceAdmissionError,
+        SIGNING_RECORD_FORMAT_VERSION,
     };
     use crate::storage::{InMemoryConsensusStorage, RocksDbConsensusStorage, StorageError};
     use qbind_consensus::ValidatorId;
@@ -1531,5 +1560,440 @@ mod tests {
         }
         assert_eq!(backend.accounting_current(), base_op);
         assert_eq!(backend.accounting_aggregate_current(), base_agg);
+    }
+
+    // ===================================================================
+    // RUN 422 — journal-associated workspace admission + checked retained
+    // retrieval. These exercise the NEW opt-in methods only; the legacy
+    // `retrieve_retained` and existing admission helpers are unchanged.
+    // ===================================================================
+
+    /// A read-counting [`SigningJournalStorage`] wrapper over a real
+    /// [`InMemoryConsensusStorage`]. It records how many bounded envelope reads
+    /// reached the backend, so a test can establish that a checked-retrieval
+    /// refusal happened BEFORE any delegated storage access. Every method
+    /// delegates unchanged and the ownership domain is the real one.
+    struct ReadCountingStore {
+        inner: Arc<InMemoryConsensusStorage>,
+        reads: std::sync::atomic::AtomicUsize,
+    }
+    impl ReadCountingStore {
+        fn new(inner: Arc<InMemoryConsensusStorage>) -> Self {
+            Self {
+                inner,
+                reads: std::sync::atomic::AtomicUsize::new(0),
+            }
+        }
+        fn reads(&self) -> usize {
+            self.reads.load(std::sync::atomic::Ordering::SeqCst)
+        }
+    }
+    impl SigningJournalStorage for ReadCountingStore {
+        fn get_signing_record(&self, key: &[u8]) -> Result<Option<Vec<u8>>, StorageError> {
+            self.inner.get_signing_record(key)
+        }
+        fn put_signing_record_synced(&self, key: &[u8], value: &[u8]) -> Result<(), StorageError> {
+            self.inner.put_signing_record_synced(key, value)
+        }
+        fn get_signing_metadata(&self) -> Result<Option<Vec<u8>>, StorageError> {
+            self.inner.get_signing_metadata()
+        }
+        fn put_signing_metadata_synced(&self, value: &[u8]) -> Result<(), StorageError> {
+            self.inner.put_signing_metadata_synced(value)
+        }
+        fn put_signing_record_and_metadata_synced(
+            &self,
+            record_key: &[u8],
+            record_value: &[u8],
+            metadata_value: &[u8],
+        ) -> Result<(), StorageError> {
+            self.inner
+                .put_signing_record_and_metadata_synced(record_key, record_value, metadata_value)
+        }
+        fn for_each_signing_namespace_entry(
+            &self,
+            visitor: &mut dyn FnMut(&[u8], &[u8]) -> Result<(), StorageError>,
+        ) -> Result<(), StorageError> {
+            self.inner.for_each_signing_namespace_entry(visitor)
+        }
+        fn signing_ownership_domain(&self) -> Arc<SigningOwnershipDomain> {
+            self.inner.signing_ownership_domain()
+        }
+        fn read_signing_envelope_into(
+            &self,
+            journal_key: &[u8],
+            dst: &mut [u8],
+        ) -> Result<Option<usize>, crate::signing_reservation_journal::BoundedStorageError> {
+            self.reads.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            self.inner.read_signing_envelope_into(journal_key, dst)
+        }
+        fn reissue_signing_envelope_synced(
+            &self,
+            journal_key: &[u8],
+            envelope: &[u8],
+        ) -> Result<(), crate::signing_reservation_journal::BoundedStorageError> {
+            self.inner.reissue_signing_envelope_synced(journal_key, envelope)
+        }
+    }
+
+    /// A model journal over a [`ReadCountingStore`] holding ONE recovered
+    /// `Signed` record (no live entry) at `p`/`b`.
+    fn counting_journal(
+        p: SigningPosition,
+        b: BindingDigest,
+    ) -> (Arc<ReadCountingStore>, SigningReservationJournal) {
+        let inner = Arc::new(InMemoryConsensusStorage::new());
+        let record = encode_record(p, b, SigningRecordStage::Signed, 2420);
+        inner
+            .put_signing_record_synced(&p.storage_key(), &record)
+            .unwrap();
+        let store = Arc::new(ReadCountingStore::new(inner));
+        let journal = SigningReservationJournal::attach_unestablished_for_test(
+            store.clone() as Arc<dyn SigningJournalStorage>,
+        );
+        (store, journal)
+    }
+
+    // ---- 1. missing association refuses BOTH admission and checked retrieval
+
+    #[test]
+    fn checked_missing_association_refuses_admission_and_retrieval() {
+        let (_d, owner) = bound_owner(ctx(4, 2420));
+        let backend = owner.backend_for_test();
+        let p = pos(30);
+        let b = bind(30);
+        let (store, journal) = counting_journal(p, b);
+        // No association installed: admission refuses with a fixed-size code and
+        // reserves nothing.
+        let base = backend.accounting_current();
+        assert_eq!(
+            journal.admit_retrieval_workspace().unwrap_err(),
+            WorkspaceAdmissionError::NoAssociation
+        );
+        assert_eq!(backend.accounting_current(), base);
+        // A separately-admitted (matching-backend) workspace still cannot be used
+        // through the checked route without an installed association, and no read
+        // occurs.
+        let (mut output, mut scratch) = RetrievalWorkspaceOwner::new(backend).admit().unwrap();
+        output.set(&[0x11u8; 2420]).unwrap();
+        let before = output.view().to_vec();
+        assert_eq!(
+            journal
+                .retrieve_retained_checked(&p, &b, &mut scratch, &mut output)
+                .unwrap_err(),
+            CheckedRetrievalError::NoAssociation
+        );
+        assert_eq!(store.reads(), 0, "no delegated read on NoAssociation");
+        assert_eq!(output.view(), &before[..], "output bytes preserved");
+        assert_eq!(output.used(), 2420, "output length preserved");
+    }
+
+    // ---- 2. matching association admits and retrieves a REAL signature
+
+    #[test]
+    fn checked_matching_association_admits_and_retrieves() {
+        let (_d, owner) = bound_owner(ctx(4, 2420));
+        let backend = owner.backend_for_test();
+        let p = pos(31);
+        let b = bind(31);
+        let (store, journal) = counting_journal(p, b);
+        journal.install_accountant_association(backend.accounting()).unwrap();
+        // Admission is sourced from the INSTALLED association (not a caller handle).
+        let (mut output, mut scratch) = journal.admit_retrieval_workspace().unwrap();
+        assert_eq!(output.charge(), output_charge());
+        assert_eq!(scratch.charge(), envelope_charge());
+        let d = journal
+            .retrieve_retained_checked(&p, &b, &mut scratch, &mut output)
+            .unwrap();
+        match d {
+            RetainedDelivery::Retained(sig) => {
+                assert_eq!(sig.len(), 2420);
+                assert!(sig.iter().all(|&x| x == 0xAB));
+            }
+            other => panic!("expected Retained, got {other:?}"),
+        }
+        assert_eq!(output.used(), 2420);
+        assert!(store.reads() >= 1, "a delegated read occurred");
+    }
+
+    // ---- 3/4/5. foreign output, foreign scratch, and both foreign refuse
+    //            BEFORE any delegated read, with the output preserved.
+
+    #[test]
+    fn checked_foreign_coverage_refuses_before_any_read() {
+        let (_d, owner) = bound_owner(ctx(4, 2420));
+        let backend = owner.backend_for_test();
+        // A SEPARATE backend = a foreign operational ledger.
+        let (_d2, owner2) = bound_owner(ctx(4, 2420));
+        let backend2 = owner2.backend_for_test();
+
+        let p = pos(32);
+        let b = bind(32);
+        let (store, journal) = counting_journal(p, b);
+        journal.install_accountant_association(backend.accounting()).unwrap();
+
+        // Matching pair (installed ledger) and a foreign pair (backend2).
+        let (mut out_ok, mut scr_ok) = journal.admit_retrieval_workspace().unwrap();
+        let (mut out_foreign, mut scr_foreign) =
+            RetrievalWorkspaceOwner::new(backend2).admit().unwrap();
+        // Pre-fill the matching output to prove preservation on refusal.
+        out_ok.set(&[0x22u8; 2420]).unwrap();
+        let ok_bytes = out_ok.view().to_vec();
+
+        // (3) foreign OUTPUT + matching scratch.
+        assert_eq!(
+            journal
+                .retrieve_retained_checked(&p, &b, &mut scr_ok, &mut out_foreign)
+                .unwrap_err(),
+            CheckedRetrievalError::ForeignWorkspace
+        );
+        // (4) matching OUTPUT + foreign scratch.
+        assert_eq!(
+            journal
+                .retrieve_retained_checked(&p, &b, &mut scr_foreign, &mut out_ok)
+                .unwrap_err(),
+            CheckedRetrievalError::ForeignWorkspace
+        );
+        // (5) both foreign.
+        assert_eq!(
+            journal
+                .retrieve_retained_checked(&p, &b, &mut scr_foreign, &mut out_foreign)
+                .unwrap_err(),
+            CheckedRetrievalError::ForeignWorkspace
+        );
+        assert_eq!(store.reads(), 0, "no delegated read on any foreign refusal");
+        assert_eq!(out_ok.view(), &ok_bytes[..], "matching output bytes preserved");
+        assert_eq!(out_ok.used(), 2420, "matching output length preserved");
+    }
+
+    // ---- 6. same-ledger clone accepted; two domains sharing one ledger accept
+    //         the same workspace coverage (accounting identity, not domain id).
+
+    #[test]
+    fn checked_same_ledger_clone_and_shared_domains_accepted() {
+        let (_d, owner) = bound_owner(ctx(4, 2420));
+        let backend = owner.backend_for_test();
+        let p = pos(33);
+        let b = bind(33);
+
+        // Journal A installs a CLONE of the operational accountant.
+        let (_sa, journal_a) = counting_journal(p, b);
+        journal_a
+            .install_accountant_association(&backend.accounting().clone())
+            .unwrap();
+        // Journal B is a DISTINCT ownership domain sharing the SAME ledger.
+        let (_sb, journal_b) = counting_journal(p, b);
+        journal_b.install_accountant_association(backend.accounting()).unwrap();
+
+        // One workspace admitted against that shared ledger.
+        let (mut output, mut scratch) = journal_a.admit_retrieval_workspace().unwrap();
+        // Accepted by A (clone install).
+        assert!(matches!(
+            journal_a.retrieve_retained_checked(&p, &b, &mut scratch, &mut output),
+            Ok(RetainedDelivery::Retained(_))
+        ));
+        // And accepted by B (separate domain, same accounting identity).
+        assert!(matches!(
+            journal_b.retrieve_retained_checked(&p, &b, &mut scratch, &mut output),
+            Ok(RetainedDelivery::Retained(_))
+        ));
+    }
+
+    // ---- 7. real reservation pressure forces paired-admission rollback;
+    //         observe BOTH ledgers directly.
+
+    #[test]
+    fn admit_paired_rollback_under_real_pressure() {
+        let (_d, owner) = bound_owner(ctx(4, 2420));
+        let backend = owner.backend_for_test();
+        let p = pos(34);
+        let b = bind(34);
+        let (_s, journal) = counting_journal(p, b);
+        journal.install_accountant_association(backend.accounting()).unwrap();
+
+        let base_op = backend.accounting_current();
+        let base_agg = backend.accounting_aggregate_current();
+        let agg_cap = backend.accounting_aggregate_cap().unwrap();
+        // Leave headroom for the OUTPUT charge but not the full envelope charge, so
+        // the first reservation succeeds and the second refuses.
+        let headroom = output_charge() + envelope_charge() / 2;
+        let fill = agg_cap - base_agg - headroom;
+        let standing = backend.reserve_standing_for_test(fill).unwrap();
+        let pressured_op = backend.accounting_current();
+        let pressured_agg = backend.accounting_aggregate_current();
+        // Admission sourced from the installed association refuses; complete
+        // rollback leaves BOTH ledgers exactly at the pressured values.
+        assert!(journal.admit_retrieval_workspace().is_err());
+        assert_eq!(backend.accounting_current(), pressured_op);
+        assert_eq!(backend.accounting_aggregate_current(), pressured_agg);
+        drop(standing);
+        assert_eq!(backend.accounting_current(), base_op);
+        assert_eq!(backend.accounting_aggregate_current(), base_agg);
+    }
+
+    // ---- 8. pressure relief, then an ACTUAL successful checked retrieval.
+
+    #[test]
+    fn pressure_relief_then_checked_retrieval() {
+        let (_d, owner) = bound_owner(ctx(4, 2420));
+        let backend = owner.backend_for_test();
+        let p = pos(35);
+        let b = bind(35);
+        let (_s, journal) = counting_journal(p, b);
+        journal.install_accountant_association(backend.accounting()).unwrap();
+
+        let base_agg = backend.accounting_aggregate_current();
+        let agg_cap = backend.accounting_aggregate_cap().unwrap();
+        let fill = agg_cap - base_agg;
+        let standing = backend.reserve_standing_for_test(fill).unwrap();
+        assert!(journal.admit_retrieval_workspace().is_err());
+        drop(standing);
+        let (mut output, mut scratch) = journal.admit_retrieval_workspace().unwrap();
+        let d = journal
+            .retrieve_retained_checked(&p, &b, &mut scratch, &mut output)
+            .unwrap();
+        assert!(matches!(d, RetainedDelivery::Retained(_)));
+        assert_eq!(output.used(), 2420);
+    }
+
+    // ---- 9. a checked refusal preserves the complete output buffer and length.
+
+    #[test]
+    fn checked_refusal_preserves_full_output_bytes_and_used() {
+        let (_d, owner) = bound_owner(ctx(4, 2420));
+        let backend = owner.backend_for_test();
+        let p = pos(36);
+        let b = bind(36);
+        let (store, journal) = counting_journal(p, b);
+        journal.install_accountant_association(backend.accounting()).unwrap();
+
+        let (mut output, _scratch_ok) = journal.admit_retrieval_workspace().unwrap();
+        // A foreign scratch to force refusal while the matching output is full.
+        let (_d2, owner2) = bound_owner(ctx(4, 2420));
+        let (_out_foreign, mut scr_foreign) =
+            RetrievalWorkspaceOwner::new(owner2.backend_for_test()).admit().unwrap();
+
+        output.set(&[0x7Eu8; 2420]).unwrap();
+        let before = output.view().to_vec();
+        assert_eq!(
+            journal
+                .retrieve_retained_checked(&p, &b, &mut scr_foreign, &mut output)
+                .unwrap_err(),
+            CheckedRetrievalError::ForeignWorkspace
+        );
+        assert_eq!(store.reads(), 0);
+        assert_eq!(output.view(), &before[..]);
+        assert_eq!(output.used(), 2420);
+    }
+
+    // ---- 10. staged scratch-then-output cleanup restores BOTH ledgers exactly.
+
+    #[test]
+    fn staged_cleanup_restores_both_ledgers() {
+        let (_d, owner) = bound_owner(ctx(4, 2420));
+        let backend = owner.backend_for_test();
+        let p = pos(37);
+        let b = bind(37);
+        let (_s, journal) = counting_journal(p, b);
+        journal.install_accountant_association(backend.accounting()).unwrap();
+
+        let base_op = backend.accounting_current();
+        let base_agg = backend.accounting_aggregate_current();
+        let (output, scratch) = journal.admit_retrieval_workspace().unwrap();
+        assert_eq!(
+            backend.accounting_current(),
+            base_op + output_charge() + envelope_charge()
+        );
+        assert_eq!(
+            backend.accounting_aggregate_current(),
+            base_agg + output_charge() + envelope_charge()
+        );
+        // Release the scratch while the output coverage remains live.
+        drop(scratch);
+        assert_eq!(backend.accounting_current(), base_op + output_charge());
+        assert_eq!(
+            backend.accounting_aggregate_current(),
+            base_agg + output_charge()
+        );
+        drop(output);
+        assert_eq!(backend.accounting_current(), base_op);
+        assert_eq!(backend.accounting_aggregate_current(), base_agg);
+    }
+
+    // ---- 11. uncertainty blocking, failed-reissue suppression, and repeated
+    //          cache-free reissue, all through the CHECKED route.
+
+    #[test]
+    fn checked_route_preserves_uncertainty_suppression_and_cachefree() {
+        let (_d, owner) = bound_owner(ctx(4, 2420));
+        let backend = owner.backend_for_test();
+        let p = pos(38);
+        let b = bind(38);
+
+        // (a) Uncertainty latch blocks after the identity check, before any read.
+        let (store, journal) = counting_journal(p, b);
+        journal.install_accountant_association(backend.accounting()).unwrap();
+        let (mut output, mut scratch) = journal.admit_retrieval_workspace().unwrap();
+        journal.set_accounting_uncertain_for_test(true);
+        assert!(matches!(
+            journal.retrieve_retained_checked(&p, &b, &mut scratch, &mut output),
+            Ok(RetainedDelivery::Blocked)
+        ));
+        assert_eq!(store.reads(), 0, "uncertainty blocks before any read");
+        journal.set_accounting_uncertain_for_test(false);
+
+        // (b) Failed reissue suppresses delivery; a cleared fault then delivers,
+        //     reissuing AGAIN cache-free (reissue_calls increments each delivery).
+        let inner = Arc::new(InMemoryConsensusStorage::new());
+        let record = encode_record(p, b, SigningRecordStage::Signed, 2420);
+        inner
+            .put_signing_record_synced(&p.storage_key(), &record)
+            .unwrap();
+        let fstore = Arc::new(FaultReissueStore::new(inner));
+        let fjournal = SigningReservationJournal::attach_unestablished_for_test(
+            fstore.clone() as Arc<dyn SigningJournalStorage>,
+        );
+        fjournal.install_accountant_association(backend.accounting()).unwrap();
+        let (mut out2, mut scr2) = fjournal.admit_retrieval_workspace().unwrap();
+        out2.set(&[0x5Au8; 2420]).unwrap();
+        let preserved = out2.view().to_vec();
+
+        fstore.set_fault(ReissueFault::ErrorBeforeWrite);
+        assert!(matches!(
+            fjournal.retrieve_retained_checked(&p, &b, &mut scr2, &mut out2),
+            Ok(RetainedDelivery::DeliverySuppressed)
+        ));
+        assert_eq!(fstore.reissue_calls(), 1);
+        assert_eq!(fstore.underlying_writes(), 0);
+        assert_eq!(out2.view(), &preserved[..], "output unchanged on suppression");
+
+        fstore.set_fault(ReissueFault::None);
+        assert!(matches!(
+            fjournal.retrieve_retained_checked(&p, &b, &mut scr2, &mut out2),
+            Ok(RetainedDelivery::Retained(_))
+        ));
+        // A SECOND reissue occurred cache-free on the successful delivery.
+        assert_eq!(fstore.reissue_calls(), 2);
+        assert_eq!(fstore.underlying_writes(), 1);
+        assert_eq!(out2.used(), 2420);
+    }
+
+    // ---- 12. legacy behavior unchanged without an installed association.
+
+    #[test]
+    fn legacy_retrieve_retained_unchanged_without_association() {
+        let (_d, owner) = bound_owner(ctx(4, 2420));
+        let backend = owner.backend_for_test();
+        let p = pos(39);
+        let b = bind(39);
+        // Existing constructor admits a workspace (no association involved).
+        let (mut output, mut scratch) = RetrievalWorkspaceOwner::new(backend).admit().unwrap();
+        let (_s, journal) = counting_journal(p, b);
+        // The UNCHANGED legacy route still delivers with no association installed.
+        let d = journal
+            .retrieve_retained(&p, &b, &mut scratch, &mut output)
+            .unwrap();
+        assert!(matches!(d, RetainedDelivery::Retained(_)));
+        assert_eq!(output.used(), 2420);
     }
 }

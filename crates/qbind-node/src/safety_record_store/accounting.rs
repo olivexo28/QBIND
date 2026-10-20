@@ -842,6 +842,18 @@ impl Reservation {
         self.charge
     }
 
+    /// Run 422 — identity check for journal-associated workspace admission:
+    /// true iff this reservation was issued by `acct`'s EXACT operational
+    /// partition sub-ledger AND the same shared aggregate authority. Pointer
+    /// identity only (mirrors [`SharedAccountant::same_ledger`]): it takes NO
+    /// accounting lock, allocates nothing, reads no ceiling/running total, and
+    /// exposes neither the inner ledger nor the held charge for extraction.
+    /// Equal ceilings or equal balances are deliberately INSUFFICIENT — only the
+    /// issuing allocations match.
+    pub(crate) fn is_issued_by(&self, acct: &SharedAccountant) -> bool {
+        Arc::ptr_eq(&self.inner, &acct.inner) && self.aggregate.same_authority(&acct.aggregate)
+    }
+
     /// Reserve an **additional** holder of the same charge against the same
     /// shared accountant (both the partition sub-ledger and the shared
     /// aggregate). Used when a charged retained proof is duplicated: a clone owns
