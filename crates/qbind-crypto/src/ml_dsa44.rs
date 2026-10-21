@@ -42,6 +42,33 @@ pub const ML_DSA_44_SECRET_KEY_SIZE: usize = 2560;
 /// ML-DSA-44 signature size in bytes.
 pub const ML_DSA_44_SIGNATURE_SIZE: usize = 2420;
 
+/// Compiler-derived inline size, in bytes, of the decoded ML-DSA-44
+/// private-key object (`fips204::ml_dsa_44::PrivateKey`) as used by the existing
+/// [`MlDsa44Backend::sign_into`] caller-buffer path.
+///
+/// This is `core::mem::size_of::<fips204::ml_dsa_44::PrivateKey>()` for the
+/// compiled target and the resolved `fips204` dependency; it is never a
+/// hard-coded measurement. It exists so an upstream caller that cannot name the
+/// `fips204` type directly (e.g. `qbind-node`, which does not depend on
+/// `fips204`) can still obtain a source-derived bound for the decoded-key
+/// temporary that lives inside `sign_into`.
+///
+/// # What this is NOT
+///
+/// - NOT the serialized secret-key length ([`ML_DSA_44_SECRET_KEY_SIZE`]).
+/// - NOT a complete signing working-set bound; `sign_into` also holds an owned
+///   `[u8; ML_DSA_44_SECRET_KEY_SIZE]` key-byte copy and a fixed
+///   `[u8; ML_DSA_44_SIGNATURE_SIZE]` signature value.
+/// - NOT a bound on dependency-internal allocations, physical stack usage,
+///   process RSS, or execution time.
+/// - NOT authorization, admission, or permission to sign.
+///
+/// The value reflects the decoded type's inline representation only; a future
+/// `fips204` version could change that type's ownership shape, so the constant
+/// is recomputed from the resolved dependency at build time rather than frozen.
+pub const ML_DSA_44_PRIVATE_KEY_OBJECT_BYTES: usize =
+    core::mem::size_of::<fips204::ml_dsa_44::PrivateKey>();
+
 // ============================================================================
 // Bounded signing error for the caller-buffer output path (RUN 422)
 // ============================================================================
