@@ -967,6 +967,13 @@ pub(crate) enum AdmittedReserveError {
     /// The supplied workspace is not covered by the installed operational ledger +
     /// aggregate authority. Returned BEFORE any storage access.
     ForeignWorkspace,
+    /// The supplied workspace's continuation coverage, though drawn from the
+    /// installed accountant, holds LESS than the required continuation charge
+    /// (`cont_charge()`). A genuine same-ledger but under-charged reservation
+    /// substituted into the `pub(crate)` `cont_res` field is refused here, BEFORE
+    /// any storage access or live-state mutation; pointer identity alone cannot
+    /// establish charge adequacy.
+    InsufficientContinuationCoverage,
     /// The backend does not support the bounded envelope read/write path.
     Unsupported,
     /// The canonical position key could not be encoded within its fixed layout.
@@ -3034,6 +3041,17 @@ impl SigningReservationJournal {
             if !(ws.is_work_covered_by(accountant) && ws.is_cont_covered_by(accountant)) {
                 return Err(AdmittedReserveError::ForeignWorkspace);
             }
+        }
+
+        // (3b) Continuation charge adequacy. `cont_res` is `pub(crate)` (so the
+        //      fresh path can move it out by direct field access), which also lets
+        //      any crate caller overwrite it with a genuine SAME-LEDGER but
+        //      SMALLER reservation that passes the identity check above yet
+        //      under-charges the continuation handed back. Require adequate
+        //      continuation charge BEFORE any storage access or live-state
+        //      mutation; identity alone cannot establish charge adequacy.
+        if !ws.is_cont_charge_adequate() {
+            return Err(AdmittedReserveError::InsufficientContinuationCoverage);
         }
 
         // (4) Conservative uncertainty refusal: no reconciliation, no write, no
@@ -7930,5 +7948,236 @@ mod tests {
                 >= (aw + BACKEND_KEY_LEN + brv + core::mem::size_of::<u32>()
                     + RESERVED_ENVELOPE_LEN + META_ENVELOPE_LEN) as u128
         );
+    }
+
+    /// A caller can overwrite the `pub(crate)` `cont_res` with a GENUINE
+    /// same-ledger but under-charged reservation; the identity check still passes
+    /// but the continuation would be under-covered. The admitted route refuses
+    /// `InsufficientContinuationCoverage` BEFORE any storage access or live-state
+    /// mutation, and the consumed workspace is released exactly. A workspace whose
+    /// continuation holds the exact required charge is the adequately-covered
+    /// control. Foreign-ledger refusal is covered separately
+    /// (`admitted_reserve_foreign_workspace_refused_before_io`).
+    #[test]
+    fn admitted_insufficient_continuation_coverage_refused_before_io() {
+        let _serial = bounded_serial();
+        use crate::signing_journal_admission::{cont_charge, reserve_work_charge};
+        let (journal, acct, store) = envelope_journal(2, 1u128 << 40);
+        let container = container_charge(2);
+        let p = position(SigningKind::Proposal, 1);
+        let b = binding(b"m");
+
+        // Two discriminating under-charged substitutions: a ZERO-charge and an
+        // insufficient (cont_charge() - 1) reservation, BOTH drawn from the SAME
+        // installed accountant so the identity check passes.
+        for substitute in [0u128, cont_charge() - 1] {
+            assert_eq!(acct.current(), container, "only the container charged at start");
+            let mut ws = journal.admit_reserve_workspace().expect("admit");
+            assert_eq!(
+                acct.current(),
+                container + reserve_work_charge() + cont_charge(),
+                "both coverages held after admission"
+            );
+            // Overwrite cont_res: this drops the original adequate reservation
+            // (releasing cont_charge()) and installs the under-charged one.
+            ws.cont_res = acct.reserve(substitute).expect("same-ledger substitute reserves");
+            assert!(
+                ws.is_cont_covered_by(&acct),
+                "substitute is still issued by the installed accountant (identity passes)"
+            );
+            assert!(
+                !ws.is_cont_charge_adequate(),
+                "substitute holds less than cont_charge()"
+            );
+            assert_eq!(
+                acct.current(),
+                container + reserve_work_charge() + substitute,
+                "original continuation coverage released by substitution"
+            );
+            let reads_before = store.reads();
+            let positions_before = journal.reserved_positions_for_test();
+            assert_eq!(
+                journal.reserve_for_sign_admitted(&p, &b, ws).unwrap_err(),
+                AdmittedReserveError::InsufficientContinuationCoverage
+            );
+            assert_eq!(store.reads(), reads_before, "refused before any storage read");
+            assert_eq!(
+                journal.reserved_positions_for_test(),
+                positions_before,
+                "no durable counter mutation"
+            );
+            assert_eq!(journal.live_len_for_test(), 0, "no live-state mutation");
+            assert_eq!(
+                acct.current(),
+                container,
+                "consumed workspace fully released on refusal (work + substitute)"
+            );
+        }
+
+        // Adequately-covered control: an UNMODIFIED workspace (cont_res holds
+        // exactly cont_charge()) passes the adequacy gate to a real fresh
+        // acknowledgement.
+        let ws = journal.admit_reserve_workspace().expect("admit control");
+        assert!(ws.is_cont_charge_adequate(), "exact cont_charge() is adequate");
+        match journal.reserve_for_sign_admitted(&p, &b, ws).expect("control proceeds") {
+            AdmittedReservationOutcome::FreshlyReserved(c) => {
+                assert_eq!(c.coverage_charge(), cont_charge());
+            }
+            other => panic!("expected FreshlyReserved, got {:?}", other),
+        }
+    }
+
+    /// Coexistence under the established N=4, S_sig=2420 profile: the REAL admitted
+    /// fresh-reservation route and a REAL `ValidatedRecord` share the SAME
+    /// accounting authority (operational partition + aggregate). Operational and
+    /// aggregate charges are observed SEPARATELY across each phase, both are shown
+    /// within the profile-derived unchanged ceilings, and every cleanup boundary
+    /// restores its exact baseline. Source-derived charge arithmetic
+    /// (`reserve_work_charge()`, `cont_charge()`, `container_charge`) is kept
+    /// separate from the executed ledger samples.
+    #[test]
+    fn admitted_coexistence_within_profile_ceilings() {
+        let _serial = bounded_serial();
+        use crate::pqc_trust_bundle::TrustBundleEnvironment;
+        use crate::safety_record_store::{
+            SafetyBackend, SafetyBackendPolicy, SafetyRecordOwner, ValidatedRecord,
+        };
+        use crate::signing_journal_admission::{cont_charge, reserve_work_charge};
+
+        // Established N=4, S_sig=2420 profile backend; attach() binds the
+        // profile-derived operational and aggregate ceilings.
+        let dir = tempfile::tempdir().unwrap();
+        let backend = SafetyBackend::open_or_initialize(
+            dir.path(),
+            SafetyBackendPolicy::EnabledForTesting,
+            TrustBundleEnvironment::Devnet,
+        )
+        .unwrap();
+        let ctx = {
+            use qbind_consensus::ids::ValidatorId;
+            PinnedSafetyContext {
+                network_genesis_id: [1u8; 32],
+                authority_context_ref: [2u8; 32],
+                chain_id: 42,
+                epoch: 7,
+                qc_suite_id: 7,
+                timeout_suite_id: 100,
+                s_sig: 2420,
+                validators: (0..4u64).map(|i| (ValidatorId::new(i), 1u64)).collect(),
+                require_height_equals_round: false,
+            }
+        };
+        let owner = SafetyRecordOwner::attach(backend, ctx).unwrap();
+        owner.initialize(true).unwrap();
+
+        // A REAL ValidatedRecord held on the SAME accounting authority: its
+        // retained-holder reservation lives in the operational partition for the
+        // proof's whole lifetime (NOT a PreparedPin or DecidedVote).
+        let validated: ValidatedRecord = owner
+            .read_validate(None::<&crate::safety_record_store::FixtureCommittedHistory>)
+            .expect("bootstrap record validates");
+
+        // The journal shares the EXACT operational accountant (and aggregate) the
+        // proof is charged against; the ceilings are derived, observed, unchanged.
+        let be = owner.backend_for_test();
+        let op_cap = be.accounting_cap().expect("operational ceiling bound");
+        let agg_cap = be.accounting_aggregate_cap().expect("aggregate ceiling bound");
+        let acct = be.accounting_handle_for_test();
+
+        // Real admitted fresh-reservation route over the envelope-capable fixture,
+        // associated with that SAME accountant, in bounded live mode (a standing
+        // container reservation is taken against the shared accountant).
+        let store = Arc::new(EnvelopeModelStore::new());
+        let journal = SigningReservationJournal::initialize(
+            store.clone() as Arc<dyn SigningJournalStorage>,
+            DEFAULT_MAX_RESERVED_POSITIONS,
+        )
+        .expect("initialize envelope-capable backend");
+        journal
+            .install_accountant_association(&acct)
+            .expect("install association");
+        journal.enter_bounded_live_mode(2).expect("enter bounded live mode");
+
+        // Phase A — retained-proof/context + standing-container BASELINE, observed
+        // operationally and in aggregate SEPARATELY. Context ownership is charged
+        // in a DISTINCT partition, so the aggregate baseline is >= operational.
+        let base_op = acct.current();
+        let base_agg = acct.aggregate().current();
+        assert!(
+            base_agg >= base_op,
+            "aggregate baseline includes the distinct context partition"
+        );
+        assert!(base_op <= op_cap, "operational baseline within ceiling");
+        assert!(base_agg <= agg_cap, "aggregate baseline within ceiling");
+
+        let p = position(SigningKind::Proposal, 1);
+        let bd = binding(b"coexist");
+
+        // Phase B — admitted workspace + continuation coverage BOTH live. The
+        // source-derived peak increment is reserve_work_charge() + cont_charge();
+        // it hits BOTH the operational partition and the shared aggregate.
+        let ws = journal.admit_reserve_workspace().expect("admit");
+        let admit_delta = reserve_work_charge() + cont_charge();
+        assert_eq!(acct.current(), base_op + admit_delta, "op: baseline + work + cont");
+        assert_eq!(
+            acct.aggregate().current(),
+            base_agg + admit_delta,
+            "agg: baseline + work + cont"
+        );
+        assert!(acct.current() <= op_cap, "operational peak within ceiling");
+        assert!(acct.aggregate().current() <= agg_cap, "aggregate peak within ceiling");
+
+        // Phase C — returned continuation after workspace cleanup: the transient
+        // working set is released; continuation coverage persists.
+        let cont = match journal.reserve_for_sign_admitted(&p, &bd, ws).expect("fresh ok") {
+            AdmittedReservationOutcome::FreshlyReserved(c) => c,
+            other => panic!("expected FreshlyReserved, got {:?}", other),
+        };
+        assert_eq!(
+            acct.current(),
+            base_op + cont_charge(),
+            "op restored to baseline + cont after workspace cleanup"
+        );
+        assert_eq!(
+            acct.aggregate().current(),
+            base_agg + cont_charge(),
+            "agg restored to baseline + cont"
+        );
+
+        // Phase D — publication-capability coverage after consumption: the SAME
+        // reservation is moved through, with no release/recharge.
+        let capw = journal.consume_for_signing_admitted(cont).expect("consume");
+        assert_eq!(
+            acct.current(),
+            base_op + cont_charge(),
+            "op unchanged across consumption (coverage moved, not re-reserved)"
+        );
+        assert_eq!(
+            acct.aggregate().current(),
+            base_agg + cont_charge(),
+            "agg unchanged across consumption"
+        );
+        assert!(capw.is_covered_by(&acct));
+
+        // Phase E — final wrapper cleanup restores the EXACT baseline on both.
+        drop(capw);
+        assert_eq!(acct.current(), base_op, "op restored to baseline on wrapper drop");
+        assert_eq!(
+            acct.aggregate().current(),
+            base_agg,
+            "agg restored to baseline on wrapper drop"
+        );
+
+        // Ceilings were observed, never modified.
+        assert_eq!(be.accounting_cap(), Some(op_cap), "operational ceiling unchanged");
+        assert_eq!(
+            be.accounting_aggregate_cap(),
+            Some(agg_cap),
+            "aggregate ceiling unchanged"
+        );
+
+        // The required live ValidatedRecord is retained throughout; drop it only
+        // after the whole admitted lifecycle has been observed.
+        drop(validated);
     }
 }

@@ -632,6 +632,24 @@ impl AdmittedReserveWorkspace {
     pub(crate) fn is_cont_covered_by(&self, acct: &SharedAccountant) -> bool {
         self.cont_res.is_issued_by(acct)
     }
+
+    /// True iff the continuation reservation still holds AT LEAST the conservative
+    /// required continuation charge ([`cont_charge`]).
+    ///
+    /// `cont_res` is `pub(crate)` so the defining journal module can move it out
+    /// by direct field access on the fresh path; that same visibility lets ANY
+    /// crate caller overwrite the field with a genuine but SMALLER reservation
+    /// drawn from the SAME installed accountant. Such a substitute passes
+    /// [`is_cont_covered_by`](Self::is_cont_covered_by) (issuing-ledger pointer
+    /// identity) yet under-charges the continuation that is handed to the caller.
+    /// Identity alone therefore cannot establish charge adequacy; the admitted
+    /// route pairs the identity check with this charge check before any storage
+    /// access or live-state mutation. The transient `work_res` needs no such
+    /// guard: it is a private field, so it cannot be substituted from outside the
+    /// defining module.
+    pub(crate) fn is_cont_charge_adequate(&self) -> bool {
+        self.cont_res.charge() >= cont_charge()
+    }
 }
 
 /// The compile-time charge admitted for the transient working set of one
