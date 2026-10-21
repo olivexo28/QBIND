@@ -1275,9 +1275,43 @@ pub(crate) enum BoundedModeError {
 /// INJECTED allocation failure after admission, so a test can exercise the real
 /// constructor error-cleanup (automatic coverage release) and the
 /// `enter_bounded_live_mode` rollback. It is NOT a demonstrated system OOM.
+///
+/// The switch is **thread-local**, not process-global: `construct` runs
+/// synchronously on the thread that calls `enter_bounded_live_mode`, so the
+/// injection is observed only on the arming thread. A process-global flag (or a
+/// mutex held merely by the injecting test) would NOT protect an unrelated
+/// parallel `construct` call on another thread, which could then spuriously
+/// fail; thread-locality confines the injection to exactly the intended
+/// execution. Armed/disarmed through the RAII [`InjectedConstructAllocFailure`]
+/// guard so it cannot leak across tests even on panic.
 #[cfg(test)]
-static FORCE_CONSTRUCT_ALLOC_FAILURE: std::sync::atomic::AtomicBool =
-    std::sync::atomic::AtomicBool::new(false);
+thread_local! {
+    static FORCE_CONSTRUCT_ALLOC_FAILURE: std::cell::Cell<bool> =
+        const { std::cell::Cell::new(false) };
+}
+
+/// Run 422 (test-only) — RAII guard arming the thread-local
+/// [`FORCE_CONSTRUCT_ALLOC_FAILURE`] injected construction failure for the
+/// current thread, disarming it on drop (including on panic/unwind). Keeping the
+/// injection thread-confined means it can never be observed by a `construct`
+/// call on any other thread.
+#[cfg(test)]
+struct InjectedConstructAllocFailure;
+
+#[cfg(test)]
+impl InjectedConstructAllocFailure {
+    fn arm() -> Self {
+        FORCE_CONSTRUCT_ALLOC_FAILURE.with(|f| f.set(true));
+        InjectedConstructAllocFailure
+    }
+}
+
+#[cfg(test)]
+impl Drop for InjectedConstructAllocFailure {
+    fn drop(&mut self) {
+        FORCE_CONSTRUCT_ALLOC_FAILURE.with(|f| f.set(false));
+    }
+}
 
 /// Run 422 — the covered, fixed-capacity live-operation container installed by
 /// an explicit `enter_bounded_live_mode` transition. Its entire backing is
@@ -1288,8 +1322,9 @@ static FORCE_CONSTRUCT_ALLOC_FAILURE: std::sync::atomic::AtomicBool =
 struct LiveContainer {
     /// Non-growing slot backing: after construction
     /// `slots.len() == slots.capacity() == capacity`, and it is never
-    /// reallocated. Declared BEFORE `_backing` so reverse drop order frees this
-    /// heap backing FIRST, then releases its covering reservation.
+    /// reallocated. Declared BEFORE `_backing`; struct fields drop in
+    /// DECLARATION order, so this heap backing is freed FIRST, then `_backing`
+    /// releases its covering reservation.
     slots: Vec<Slot>,
     /// Count of occupied slots (live operations). Never exceeds `capacity`.
     occupied: usize,
@@ -1297,8 +1332,9 @@ struct LiveContainer {
     capacity: usize,
     /// The covering reservation for
     /// `size_of::<LiveContainer>() + L * size_of::<Slot>()`. Released only when
-    /// this container is destroyed (not when a journal handle drops), via
-    /// reverse-drop order AFTER `slots`.
+    /// this container is destroyed (not when a journal handle drops). Declared
+    /// AFTER `slots`, so in declaration drop order it is released AFTER the slot
+    /// backing is freed.
     _backing: crate::safety_record_store::accounting::Reservation,
 }
 
@@ -1316,10 +1352,11 @@ impl LiveContainer {
     ) -> Result<Self, BoundedModeError> {
         #[cfg(test)]
         {
-            if FORCE_CONSTRUCT_ALLOC_FAILURE.load(std::sync::atomic::Ordering::SeqCst) {
+            if FORCE_CONSTRUCT_ALLOC_FAILURE.with(|f| f.get()) {
                 // Injected allocation failure AFTER admission: `coverage` is
                 // dropped here, releasing its reservation exactly once (the real
-                // cleanup path). Labelled injected — never a system OOM.
+                // cleanup path). Labelled injected — never a system OOM. The
+                // switch is thread-local, so only the arming thread trips it.
                 return Err(BoundedModeError::Allocation);
             }
         }
@@ -1930,8 +1967,9 @@ impl SigningReservationJournal {
             .map_err(|_| BoundedModeError::AdmissionRefused)?;
 
         // (8) Construct the container fallibly, consuming `coverage`. On failure
-        //     the coverage is released automatically (reverse drop) and the
-        //     previous mode is preserved — nothing is installed.
+        //     `construct` owns and drops `coverage`, releasing its reservation
+        //     exactly once, and the previous mode is preserved — nothing is
+        //     installed.
         let container = LiveContainer::construct(capacity, coverage)?;
 
         // (9) Install ONLY on success. No further fallible admission.
@@ -2813,6 +2851,18 @@ impl SigningReservationJournal {
             .lock()
             .expect("domain lock")
             .next_operation_id
+    }
+
+    /// Test-only: the domain's in-memory durably-acknowledged reserved-position
+    /// count, so a test can assert that a retained-retry (or a failed fresh
+    /// write) does NOT increment the durable position count.
+    #[cfg(any(test, feature = "test-utils"))]
+    pub(crate) fn reserved_positions_for_test(&self) -> u64 {
+        self.domain
+            .inner
+            .lock()
+            .expect("domain lock")
+            .reserved_positions
     }
 
     /// Test-only: read the domain's `accounting_uncertain` latch.
@@ -5951,9 +6001,12 @@ mod tests {
     // =====================================================================
 
     /// Process-global serialization for tests that actually CONSTRUCT a bounded
-    /// container, because the injected allocation-failure switch
-    /// (`FORCE_CONSTRUCT_ALLOC_FAILURE`) is a process-global static. Poison is
-    /// tolerated so one failing test does not cascade.
+    /// container. The injected allocation-failure switch
+    /// (`FORCE_CONSTRUCT_ALLOC_FAILURE`) is now THREAD-LOCAL and armed through an
+    /// RAII guard, so it no longer requires this mutex for soundness (it cannot
+    /// leak to another thread). This serial is retained only as a conservative
+    /// ordering for construct-heavy tests; poison is tolerated so one failing
+    /// test does not cascade.
     static BOUNDED_CONSTRUCT_SERIAL: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
     fn bounded_serial() -> std::sync::MutexGuard<'static, ()> {
@@ -5991,6 +6044,30 @@ mod tests {
     fn container_charge(l: usize) -> u128 {
         std::mem::size_of::<LiveContainer>() as u128
             + (l as u128) * std::mem::size_of::<Slot>() as u128
+    }
+
+    /// Build a real, established, associated journal over the ENVELOPE-CAPABLE
+    /// [`crate::storage::InMemoryConsensusStorage`] backend (unlike
+    /// [`associated_journal`], whose `ModelStore` does NOT support
+    /// `read_signing_envelope_into`/`reissue_signing_envelope_synced`). This lets
+    /// a genuine stored `Signed` record be retrieved through the REAL
+    /// `retrieve_retained_checked` pipeline while a bounded container is live. The
+    /// operational sub-ledger and aggregate ceiling are both `cap`. The journal
+    /// owns the backend `Arc`, so the container stays live for the journal's
+    /// lifetime.
+    fn associated_real_journal(cap: u128) -> (SigningReservationJournal, SharedAccountant) {
+        let store = Arc::new(crate::storage::InMemoryConsensusStorage::new())
+            as Arc<dyn SigningJournalStorage>;
+        let journal = SigningReservationJournal::initialize(store, DEFAULT_MAX_RESERVED_POSITIONS)
+            .expect("initialize real envelope-capable backend");
+        let agg = AggregateAuthority::new();
+        agg.bind(cap).expect("bind aggregate ceiling");
+        let acct = SharedAccountant::new(agg);
+        acct.bind_cap(cap).expect("bind operational sub-ledger");
+        journal
+            .install_accountant_association(&acct)
+            .expect("install association");
+        (journal, acct)
     }
 
     /// Transition prerequisite: an installed accountant association is required.
@@ -6189,14 +6266,18 @@ mod tests {
     /// injected switch, NOT a demonstrated system OOM.
     #[test]
     fn bounded_injected_allocation_failure_cleans_up() {
-        use std::sync::atomic::Ordering::SeqCst;
         let _serial = bounded_serial();
         let (journal, acct, _store) = associated_journal(1u128 << 30);
         assert_eq!(acct.current(), 0);
-        FORCE_CONSTRUCT_ALLOC_FAILURE.store(true, SeqCst);
-        let outcome = journal.enter_bounded_live_mode(2);
-        // Reset the injected switch BEFORE asserting so a failure cannot leak it.
-        FORCE_CONSTRUCT_ALLOC_FAILURE.store(false, SeqCst);
+        // Arm the INJECTED construction-allocation failure for THIS thread only.
+        // The RAII guard disarms it on drop (even if an assertion panics), and
+        // because the switch is thread-local no unrelated parallel `construct`
+        // call on another thread can observe it. `construct` runs synchronously
+        // on this thread inside `enter_bounded_live_mode`.
+        let outcome = {
+            let _inject = InjectedConstructAllocFailure::arm();
+            journal.enter_bounded_live_mode(2)
+        };
         assert_eq!(outcome, Err(BoundedModeError::Allocation), "INJECTED failure");
         assert_eq!(acct.current(), 0, "admitted coverage released exactly once");
         assert_eq!(acct.aggregate().current(), 0);
@@ -6426,5 +6507,267 @@ mod tests {
         drop(res);
         assert_eq!(acct.current(), container, "workspace released; container charge remains");
         assert_eq!(acct.aggregate().current(), container);
+    }
+
+    /// RUN 422 (this pass) — REAL operation-level checked-retrieval coexistence.
+    /// Distinct from the lighter
+    /// `bounded_coexists_with_independent_workspace_charge_each_once` model (which
+    /// stands in an independent reservation for the workspace): here a GENUINE
+    /// stored `Signed` record is retrieved through the REAL
+    /// `retrieve_retained_checked` pipeline on the envelope-capable backend, using
+    /// the journal's INSTALLED accountant association to admit the workspace,
+    /// while the bounded container's standing reservation stays live. The standing
+    /// container charge and the admitted retrieval workspace (output + scratch)
+    /// coexist ADDITIVELY on the SAME operational and aggregate ledgers under
+    /// UNCHANGED ceilings, each counted once. Dropping the workspace in ownership
+    /// order (scratch admitted last, released first; then output) restores both
+    /// ledgers EXACTLY while the container remains live. The already-live standing
+    /// reservation is never counted twice.
+    #[test]
+    fn bounded_real_checked_retrieval_coexists_and_restores() {
+        let _serial = bounded_serial();
+        let cap = 1u128 << 30;
+        let (journal, acct) = associated_real_journal(cap);
+        assert_eq!(journal.enter_bounded_live_mode(2), Ok(()));
+        let standing = container_charge(2);
+        assert_eq!(acct.current(), standing);
+        assert_eq!(acct.aggregate().current(), standing);
+
+        // A genuine stored Signed record created through the REAL signing flow:
+        // the live slot holds an acknowledged result and the durable record is
+        // Signed. This installs into the bounded container; no charge beyond the
+        // standing container reservation is added (the slot is already covered).
+        let pos = position(SigningKind::Proposal, 900);
+        let b = binding(b"real-retrieve");
+        let cap_pub = reserve_and_invoke(&journal, &pos, &b);
+        journal.record_signed_result(&cap_pub, b"real-sig-bytes").unwrap();
+        assert_eq!(journal.live_len_for_test(), 1);
+        assert_eq!(
+            acct.current(),
+            standing,
+            "genuine signing adds no charge beyond the standing container"
+        );
+
+        // Admit the REAL retrieval workspace from the INSTALLED association.
+        let p_cap = acct.cap();
+        let a_cap = acct.aggregate().cap();
+        let (mut output, mut scratch) = journal.admit_retrieval_workspace().unwrap();
+        let out_charge = output.charge();
+        let scr_charge = scratch.charge();
+        assert!(out_charge > 0 && scr_charge > 0);
+        assert_eq!(
+            acct.current(),
+            standing + out_charge + scr_charge,
+            "container + workspace coexist, each counted once"
+        );
+        assert_eq!(acct.aggregate().current(), standing + out_charge + scr_charge);
+        assert_eq!(acct.cap(), p_cap, "operational ceiling unchanged");
+        assert_eq!(acct.aggregate().cap(), a_cap, "aggregate ceiling unchanged");
+
+        // Execute the real checked retrieval against the genuine Signed record.
+        match journal
+            .retrieve_retained_checked(&pos, &b, &mut scratch, &mut output)
+            .unwrap()
+        {
+            RetainedDelivery::Retained(sig) => {
+                assert_eq!(sig, &b"real-sig-bytes"[..], "exact returned signature bytes");
+            }
+            other => panic!("expected Retained, got {other:?}"),
+        }
+        assert_eq!(output.used(), b"real-sig-bytes".len());
+
+        // Drop the workspace in its actual ownership sequence (scratch first, then
+        // output) and assert EXACT ledger restoration while the container is live.
+        drop(scratch);
+        assert_eq!(acct.current(), standing + out_charge);
+        assert_eq!(acct.aggregate().current(), standing + out_charge);
+        drop(output);
+        assert_eq!(
+            acct.current(),
+            standing,
+            "workspace released; standing container charge remains"
+        );
+        assert_eq!(acct.aggregate().current(), standing);
+        assert!(journal.live_is_bounded_for_test(), "container remains live");
+        assert_eq!(journal.live_backing_charge_for_test(), Some(standing));
+    }
+
+    /// RUN 422 (this pass) — Obligation 2A: full-capacity retained retry. All `L`
+    /// live slots are occupied, INCLUDING an acknowledged `Signed` operation.
+    /// Re-presenting that exact operation yields `ExactRetryRetained` with the
+    /// exact bytes and installs NO fresh continuation, NO extra live entry, and NO
+    /// durable-position increment. A genuinely fresh position still refuses with
+    /// `LiveCapacityExhausted`. Conflict and PotentiallySigned classification at
+    /// full capacity are covered SEPARATELY by
+    /// `bounded_full_capacity_classifies_existing_before_fresh_refusal`.
+    #[test]
+    fn bounded_full_capacity_exact_retry_retained_without_new_position() {
+        let _serial = bounded_serial();
+        let (journal, _acct, _store) = associated_journal(1u128 << 30);
+        assert_eq!(journal.enter_bounded_live_mode(1), Ok(()));
+
+        // Fill the only slot with an acknowledged Signed operation.
+        let pos = position(SigningKind::Proposal, 950);
+        let b = binding(b"retry-retained");
+        let cap_pub = reserve_and_invoke(&journal, &pos, &b);
+        journal.record_signed_result(&cap_pub, b"retry-sig").unwrap();
+        assert_eq!(journal.live_len_for_test(), 1, "container is full");
+
+        let ops_before = journal.next_operation_id_for_test();
+        let positions_before = journal.reserved_positions_for_test();
+
+        // Re-present the SAME acknowledged operation: exact retry with exact bytes.
+        match journal.reserve_for_sign(&pos, &b).unwrap() {
+            ReservationOutcome::ExactRetryRetained(sig) => {
+                assert_eq!(sig.as_slice(), b"retry-sig", "exact retained bytes on retry");
+            }
+            other => panic!("expected ExactRetryRetained, got {:?}", other),
+        }
+
+        // No fresh continuation (operation-id source unchanged), no extra live
+        // entry, and no durable-position increment.
+        assert_eq!(
+            journal.next_operation_id_for_test(),
+            ops_before,
+            "no fresh continuation minted"
+        );
+        assert_eq!(journal.live_len_for_test(), 1, "no extra live entry");
+        assert_eq!(
+            journal.reserved_positions_for_test(),
+            positions_before,
+            "no durable-position increment"
+        );
+
+        // A genuinely fresh DIFFERENT position is still refused: capacity is full.
+        assert!(matches!(
+            journal
+                .reserve_for_sign(&position(SigningKind::Proposal, 951), &binding(b"retry-fresh"))
+                .unwrap(),
+            ReservationOutcome::LiveCapacityExhausted
+        ));
+        assert_eq!(journal.live_len_for_test(), 1);
+    }
+
+    /// RUN 422 (this pass) — Obligation 2B (before-write route). In bounded mode
+    /// with a FRESH slot available, a fault BEFORE any write (the existing
+    /// `set_fail_writes` route, mirroring the legacy
+    /// `read_and_write_failures_yield_no_permit`) yields NO successful fresh
+    /// continuation and installs NO live entry on the failed return. The
+    /// uncertainty bookkeeping is preserved (the atomic reservation write was
+    /// attempted), and nothing durable was written — the next attempt is a genuine
+    /// fresh reservation, not a conflict.
+    #[test]
+    fn bounded_fresh_write_before_write_fault_installs_no_entry() {
+        let _serial = bounded_serial();
+        let (journal, _acct, store) = associated_journal(1u128 << 30);
+        assert_eq!(journal.enter_bounded_live_mode(2), Ok(()));
+        assert_eq!(journal.live_len_for_test(), 0, "a fresh slot is available");
+
+        let pos = position(SigningKind::Proposal, 970);
+        let b = binding(b"before-write");
+        let (_, writes_before, _) = store.storage_calls();
+
+        // Fault BEFORE any write: the combined record+metadata synced write fails
+        // without mutating storage.
+        store.set_fail_writes(true);
+        assert!(matches!(
+            journal.reserve_for_sign(&pos, &b),
+            Err(JournalError::Storage(_))
+        ));
+        store.set_fail_writes(false);
+
+        // No live entry installed, uncertainty latched, and — the decisive
+        // durable-effect signal — NO record is readable: the before-write fault
+        // left storage unmutated (not inferred from the error, which is identical
+        // in shape to the write-then-error route).
+        assert_eq!(journal.live_len_for_test(), 0, "no installed live entry");
+        assert!(journal.accounting_uncertain_for_test(), "uncertainty preserved");
+        // The write entrypoint WAS reached (the fault is a genuine write attempt,
+        // refused before mutating storage), yet nothing became readable.
+        let (_, writes_after, _) = store.storage_calls();
+        assert_eq!(
+            writes_after,
+            writes_before + 1,
+            "the combined record+metadata write entrypoint was reached"
+        );
+        assert!(
+            store.get_signing_record(&pos.storage_key()).unwrap().is_none(),
+            "no durable reservation record exists (before-write route)"
+        );
+
+        // The fresh slot is still available: a subsequent attempt is a genuine
+        // fresh reservation (the before-write failure left nothing behind).
+        assert!(matches!(
+            journal.reserve_for_sign(&pos, &b).unwrap(),
+            ReservationOutcome::FreshlyReserved(_)
+        ));
+        assert_eq!(journal.live_len_for_test(), 1);
+    }
+
+    /// RUN 422 (this pass) — Obligation 2B (write-then-error route). In bounded
+    /// mode with a FRESH slot available, a write that becomes readable but whose
+    /// durability acknowledgement is uncertain (the existing `set_store_then_error`
+    /// route) yields NO successful fresh continuation and installs NO live entry.
+    /// The uncertainty bookkeeping is preserved, and a durable write DID reach
+    /// storage — proven DIRECTLY by the surviving readable record (NOT inferred
+    /// from the error, and NOT inferred away by it). Subsequent handling must NOT
+    /// treat the surviving reservation as a new unused position: re-presenting it
+    /// classifies `PotentiallySigned` (readable `Reserved` bytes are not a clean
+    /// fresh slot), NOT `FreshlyReserved` nor `LiveCapacityExhausted`. This is an
+    /// IN-MEMORY model; no crash-durability claim is made.
+    #[test]
+    fn bounded_fresh_write_then_error_leaves_surviving_reservation_not_new() {
+        let _serial = bounded_serial();
+        let (journal, _acct, store) = associated_journal(1u128 << 30);
+        assert_eq!(journal.enter_bounded_live_mode(2), Ok(()));
+        assert_eq!(journal.live_len_for_test(), 0, "a fresh slot is available");
+
+        let pos = position(SigningKind::Proposal, 980);
+        let b = binding(b"write-then-error");
+        let (_, writes_before, _) = store.storage_calls();
+
+        // Write-then-error: both record and metadata bodies become readable, then
+        // the synced acknowledgement is reported uncertain (error).
+        store.set_store_then_error(true);
+        assert!(matches!(
+            journal.reserve_for_sign(&pos, &b),
+            Err(JournalError::Storage(_))
+        ));
+        store.set_store_then_error(false);
+
+        // No live entry installed and uncertainty latched.
+        assert_eq!(journal.live_len_for_test(), 0, "no installed live entry");
+        assert!(journal.accounting_uncertain_for_test(), "uncertainty preserved");
+        // The combined record+metadata write entrypoint WAS reached (not inferred
+        // from the error) ...
+        let (_, writes_after, _) = store.storage_calls();
+        assert_eq!(
+            writes_after,
+            writes_before + 1,
+            "the combined record+metadata write entrypoint was reached"
+        );
+        // ... and the surviving record is DIRECTLY readable: a durable write
+        // reached storage. This is the decisive signal distinguishing this route
+        // from the before-write route, independent of the returned error.
+        assert!(
+            store.get_signing_record(&pos.storage_key()).unwrap().is_some(),
+            "the surviving reservation record is readable"
+        );
+
+        // Subsequent handling must not treat the surviving reservation as a new
+        // unused position. Re-presenting the SAME position classifies it as an
+        // existing (potentially-signed) reservation — never a fresh slot nor a
+        // capacity refusal. (The uncertainty latch is cleared by reconciliation
+        // against the durable metadata, which is a consistent outcome of the one
+        // failed batch.)
+        assert!(matches!(
+            journal.reserve_for_sign(&pos, &b).unwrap(),
+            ReservationOutcome::PotentiallySigned
+        ));
+        assert_eq!(
+            journal.live_len_for_test(),
+            0,
+            "the surviving reservation is not re-signed into a live slot"
+        );
     }
 }
