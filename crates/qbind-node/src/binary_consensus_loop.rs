@@ -4486,6 +4486,11 @@ fn prepare_proposal_signing_reservation<'a>(
                 .saturating_add(1);
             None
         }
+        // Run 422 — the bounded live-container is at capacity. Explicit
+        // non-signing refusal: do NOT consume, invoke the signer, broadcast,
+        // fall back to legacy behavior, or activate bounded mode. No production
+        // path enters bounded mode, so this arm is compatibility-only here.
+        Ok(ReservationOutcome::LiveCapacityExhausted) => None,
         Err(e) => {
             inbound_stats.outbound_proposal_journal_error_total = inbound_stats
                 .outbound_proposal_journal_error_total
@@ -4896,6 +4901,11 @@ fn prepare_vote_signing_reservation<'a>(
                 .saturating_add(1);
             None
         }
+        // Run 422 — the bounded live-container is at capacity. Explicit
+        // non-signing refusal: do NOT consume, invoke the signer, broadcast,
+        // fall back to legacy behavior, or activate bounded mode. No production
+        // path enters bounded mode, so this arm is compatibility-only here.
+        Ok(ReservationOutcome::LiveCapacityExhausted) => None,
         Err(e) => {
             inbound_stats.outbound_vote_journal_error_total = inbound_stats
                 .outbound_vote_journal_error_total

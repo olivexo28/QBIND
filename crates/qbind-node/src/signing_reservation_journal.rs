@@ -772,6 +772,14 @@ pub enum ReservationOutcome {
     /// The reservation budget is exhausted. Refuse further signing safely (no
     /// silent eviction of any conflict obligation).
     Exhausted,
+    /// Run 422 — the bounded live-container is at capacity: no free slot is
+    /// available to admit this fresh reservation. Refuse safely WITHOUT any new
+    /// durable fresh-reservation record/metadata write (it may follow existing
+    /// reads or recovery handling). Distinct from [`Self::Exhausted`], which is
+    /// the durable journal-wide position-limit refusal. Only ever produced by a
+    /// domain that has explicitly entered bounded live mode; a legacy domain
+    /// never yields it.
+    LiveCapacityExhausted,
 }
 
 /// Run 422 D7-D10 Correction B — an **operation-bound, one-use** continuation:
@@ -1209,6 +1217,272 @@ struct LiveState {
     result_acked: bool,
 }
 
+/// Run 422 — one occupied entry in the bounded live container: the canonical
+/// position plus its in-memory [`LiveState`]. A bounded slot is an
+/// `Option<LiveEntry>`; `None` marks a free slot.
+#[derive(Debug)]
+struct LiveEntry {
+    position: SigningPosition,
+    state: LiveState,
+}
+
+/// Run 422 — a fixed-capacity live-container slot. `None` is a free slot. The
+/// per-slot byte size is derived from `size_of::<Slot>()` (never hard-coded).
+type Slot = Option<LiveEntry>;
+
+/// Run 422 — fixed-size, `Copy`, allocation-free refusal for the explicit,
+/// non-enabling [`SigningReservationJournal::enter_bounded_live_mode`]
+/// transition. Every variant is `Copy` and carries no `String` / owned payload,
+/// so constructing or returning it on any branch performs no heap allocation.
+/// It is deliberately distinct from the allocating [`JournalError`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(not(test), allow(dead_code))]
+pub(crate) enum BoundedModeError {
+    /// No operational accountant association is installed in this domain, so the
+    /// container charge cannot be admitted. The mode is unchanged.
+    NoAccountantAssociation,
+    /// The journal domain has not been established (no `initialize`/`open`).
+    JournalNotEstablished,
+    /// The signing-domain mutex was poisoned by a panic in another holder.
+    DomainMutexPoisoned,
+    /// The requested capacity is zero.
+    ZeroCapacity,
+    /// The requested capacity exceeds the established durable-position limit.
+    CapacityAboveLimit,
+    /// Checked charge arithmetic overflowed while computing the container charge.
+    ChargeOverflow,
+    /// The requested backing allocation size is not representable on the target
+    /// (exceeds `isize::MAX`).
+    LayoutOverflow,
+    /// A first transition requires an empty legacy live map; it still holds live
+    /// entries. The mode is unchanged.
+    LegacyNotEmpty,
+    /// A first transition requires the legacy live map to own zero capacity; it
+    /// still retains allocated capacity. The mode is unchanged.
+    LegacyHasCapacity,
+    /// Already in bounded mode with a DIFFERENT capacity; the existing bounded
+    /// container is preserved unchanged.
+    CapacityMismatch,
+    /// The installed accountant refused the full container charge. No allocation
+    /// was attempted; both ledgers are unchanged.
+    AdmissionRefused,
+    /// The backing allocation itself failed AFTER admission. The admitted
+    /// coverage is released automatically; the previous mode is preserved.
+    Allocation,
+}
+
+/// Run 422 (test-only) — force [`LiveContainer::construct`] to report an
+/// INJECTED allocation failure after admission, so a test can exercise the real
+/// constructor error-cleanup (automatic coverage release) and the
+/// `enter_bounded_live_mode` rollback. It is NOT a demonstrated system OOM.
+#[cfg(test)]
+static FORCE_CONSTRUCT_ALLOC_FAILURE: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
+/// Run 422 — the covered, fixed-capacity live-operation container installed by
+/// an explicit `enter_bounded_live_mode` transition. Its entire backing is
+/// charged against the installed operational accountant BEFORE allocation; the
+/// charge is held for the container's whole lifetime (through empty periods) and
+/// released only at actual container destruction.
+#[derive(Debug)]
+struct LiveContainer {
+    /// Non-growing slot backing: after construction
+    /// `slots.len() == slots.capacity() == capacity`, and it is never
+    /// reallocated. Declared BEFORE `_backing` so reverse drop order frees this
+    /// heap backing FIRST, then releases its covering reservation.
+    slots: Vec<Slot>,
+    /// Count of occupied slots (live operations). Never exceeds `capacity`.
+    occupied: usize,
+    /// The fixed capacity `L` (`== slots.len()`).
+    capacity: usize,
+    /// The covering reservation for
+    /// `size_of::<LiveContainer>() + L * size_of::<Slot>()`. Released only when
+    /// this container is destroyed (not when a journal handle drops), via
+    /// reverse-drop order AFTER `slots`.
+    _backing: crate::safety_record_store::accounting::Reservation,
+}
+
+impl LiveContainer {
+    /// Run 422 — the one truthful, fallible constructor. The caller has already
+    /// validated `l` and admitted the full charge, obtaining `coverage`. The
+    /// operation sequence is: `try_reserve_exact` → initialize slots without
+    /// growth → wrap, consuming `coverage`. Allocation failure maps to
+    /// [`BoundedModeError::Allocation`] and is propagated normally (no
+    /// `expect`/`unwrap`/panic). On the error return `coverage` is dropped,
+    /// releasing its reservation exactly once; the caller installs nothing.
+    fn construct(
+        l: usize,
+        coverage: crate::safety_record_store::accounting::Reservation,
+    ) -> Result<Self, BoundedModeError> {
+        #[cfg(test)]
+        {
+            if FORCE_CONSTRUCT_ALLOC_FAILURE.load(std::sync::atomic::Ordering::SeqCst) {
+                // Injected allocation failure AFTER admission: `coverage` is
+                // dropped here, releasing its reservation exactly once (the real
+                // cleanup path). Labelled injected — never a system OOM.
+                return Err(BoundedModeError::Allocation);
+            }
+        }
+        let mut slots: Vec<Slot> = Vec::new();
+        slots
+            .try_reserve_exact(l)
+            .map_err(|_| BoundedModeError::Allocation)?;
+        // Fill to `len == l` WITHOUT growth. On the supported toolchain
+        // (rustc 1.99.0, default Global allocator, non-ZST `Slot`),
+        // `try_reserve_exact` records capacity exactly `l`, so this never
+        // reallocates. `resize_with` is used because `Slot`/`LiveEntry` are not
+        // `Clone`; the closure yields `None` for each free slot.
+        slots.resize_with(l, || None);
+        Ok(Self {
+            slots,
+            occupied: 0,
+            capacity: l,
+            _backing: coverage,
+        })
+    }
+
+    fn get(&self, pos: &SigningPosition) -> Option<&LiveState> {
+        for slot in self.slots.iter() {
+            if let Some(e) = slot {
+                if e.position == *pos {
+                    return Some(&e.state);
+                }
+            }
+        }
+        None
+    }
+
+    fn get_mut(&mut self, pos: &SigningPosition) -> Option<&mut LiveState> {
+        for slot in self.slots.iter_mut() {
+            if let Some(e) = slot {
+                if e.position == *pos {
+                    return Some(&mut e.state);
+                }
+            }
+        }
+        None
+    }
+
+    /// Insert or replace the live entry for `pos` with NO allocation and NO
+    /// growth. Returns `false` iff the container is full and `pos` is absent;
+    /// the reserve path settles capacity first under the lock, so it never
+    /// observes `false` there.
+    fn insert(&mut self, pos: SigningPosition, state: LiveState) -> bool {
+        for slot in self.slots.iter_mut() {
+            if let Some(e) = slot {
+                if e.position == pos {
+                    e.state = state;
+                    return true;
+                }
+            }
+        }
+        for slot in self.slots.iter_mut() {
+            if slot.is_none() {
+                *slot = Some(LiveEntry {
+                    position: pos,
+                    state,
+                });
+                self.occupied += 1;
+                return true;
+            }
+        }
+        false
+    }
+
+    fn remove(&mut self, pos: &SigningPosition) {
+        for slot in self.slots.iter_mut() {
+            let hit = matches!(slot, Some(e) if e.position == *pos);
+            if hit {
+                *slot = None;
+                self.occupied -= 1;
+                return;
+            }
+        }
+    }
+}
+
+/// Run 422 — the authoritative live-operation representation for one ownership
+/// domain. The domain starts in `Legacy` (the original unbounded `HashMap`); an
+/// explicit `enter_bounded_live_mode` transition installs a fixed-capacity
+/// `Bounded` container. The two modes are mutually exclusive and there is never
+/// a second live table.
+#[derive(Debug)]
+enum LiveMode {
+    Legacy(HashMap<SigningPosition, LiveState>),
+    Bounded(LiveContainer),
+}
+
+impl LiveMode {
+    fn get(&self, pos: &SigningPosition) -> Option<&LiveState> {
+        match self {
+            LiveMode::Legacy(m) => m.get(pos),
+            LiveMode::Bounded(c) => c.get(pos),
+        }
+    }
+
+    fn get_mut(&mut self, pos: &SigningPosition) -> Option<&mut LiveState> {
+        match self {
+            LiveMode::Legacy(m) => m.get_mut(pos),
+            LiveMode::Bounded(c) => c.get_mut(pos),
+        }
+    }
+
+    fn contains_key(&self, pos: &SigningPosition) -> bool {
+        self.get(pos).is_some()
+    }
+
+    fn len(&self) -> usize {
+        match self {
+            LiveMode::Legacy(m) => m.len(),
+            LiveMode::Bounded(c) => c.occupied,
+        }
+    }
+
+    /// Whether a currently-absent position can be admitted a fresh slot. Legacy
+    /// mode is unbounded; bounded mode has room iff `occupied < capacity`.
+    fn can_admit_fresh(&self) -> bool {
+        match self {
+            LiveMode::Legacy(_) => true,
+            LiveMode::Bounded(c) => c.occupied < c.capacity,
+        }
+    }
+
+    fn insert(&mut self, pos: SigningPosition, state: LiveState) -> bool {
+        match self {
+            LiveMode::Legacy(m) => {
+                m.insert(pos, state);
+                true
+            }
+            LiveMode::Bounded(c) => c.insert(pos, state),
+        }
+    }
+
+    fn remove(&mut self, pos: &SigningPosition) {
+        match self {
+            LiveMode::Legacy(m) => {
+                m.remove(pos);
+            }
+            LiveMode::Bounded(c) => c.remove(pos),
+        }
+    }
+
+    /// If bounded, the fixed capacity `L`; otherwise `None`.
+    fn bounded_capacity(&self) -> Option<usize> {
+        match self {
+            LiveMode::Bounded(c) => Some(c.capacity),
+            LiveMode::Legacy(_) => None,
+        }
+    }
+
+    /// If legacy, `(len, allocated_capacity)` of the map; otherwise `None`.
+    fn legacy_len_capacity(&self) -> Option<(usize, usize)> {
+        match self {
+            LiveMode::Legacy(m) => Some((m.len(), m.capacity())),
+            LiveMode::Bounded(_) => None,
+        }
+    }
+}
+
 #[derive(Debug)]
 struct DomainInner {
     /// Run 422 D7-D10 Correction E — the established journal-wide limit, present
@@ -1218,8 +1492,11 @@ struct DomainInner {
     /// a second handle over the same instance shares it without re-scanning or
     /// resetting, and concurrent init/open cannot duplicate-initialize.
     established: Option<EstablishedState>,
-    /// Positions with a live operation in this process.
-    live: HashMap<SigningPosition, LiveState>,
+    /// Positions with a live operation in this process. Run 422 — this is now
+    /// the authoritative [`LiveMode`]: `Legacy` (the original unbounded
+    /// `HashMap`) until an explicit `enter_bounded_live_mode` transition
+    /// installs a fixed-capacity `Bounded` container.
+    live: LiveMode,
     /// Run 422 D7-D10 Correction B/E — bounded recovery-acknowledgement cache.
     /// After a recovered (no live entry) `Signed` record has had its
     /// signing-record durability barrier established in THIS domain (an identical
@@ -1288,7 +1565,7 @@ impl SigningOwnershipDomain {
             token: NEXT_TOKEN.fetch_add(1, Ordering::Relaxed),
             inner: Mutex::new(DomainInner {
                 established: None,
-                live: HashMap::new(),
+                live: LiveMode::Legacy(HashMap::new()),
                 recovered_acked: RecoveredAckCache::new(cache_capacity),
                 reserved_positions: 0,
                 accounting_uncertain: false,
@@ -1540,6 +1817,126 @@ impl SigningReservationJournal {
             Some(existing) if existing.same_ledger(accountant) => Ok(()),
             Some(_) => Err(AdmissionInstallError::LedgerMismatch),
         }
+    }
+
+    /// Run 422 — the EXPLICIT, crate-internal, non-enabling transition into
+    /// bounded live-container mode. Installing an accountant association is
+    /// identity bookkeeping only and never enables bounded behavior; THIS
+    /// separate operation is the one that validates prerequisites, takes the
+    /// full container charge, and installs the fixed-capacity container.
+    ///
+    /// All work happens under ONE acquisition of the existing journal-domain
+    /// mutex. The sequence is: require an established journal and an installed
+    /// association; validate `capacity` against the established durable-position
+    /// limit; require the legacy live map to have zero entries AND zero
+    /// capacity (first transition); compute and admit the full charge
+    /// (`size_of::<LiveContainer>() + L * size_of::<Slot>()`) BEFORE any
+    /// allocation; construct the container fallibly; install ONLY on success.
+    ///
+    /// An identical repeated configuration is idempotent (`Ok`); a conflicting
+    /// capacity refuses with [`BoundedModeError::CapacityMismatch`] WITHOUT
+    /// changing the existing bounded container. Every failure preserves the
+    /// previous mode and both ledgers. There is no production caller: a domain
+    /// that never requests this transition keeps its unchanged legacy behavior.
+    pub(crate) fn enter_bounded_live_mode(
+        &self,
+        capacity: usize,
+    ) -> Result<(), BoundedModeError> {
+        use crate::safety_record_store::accounting::Reservation;
+        let mut inner = self
+            .domain
+            .inner
+            .lock()
+            .map_err(|_| BoundedModeError::DomainMutexPoisoned)?;
+
+        // (1) Require an established journal (the one journal-wide position limit).
+        let limit = inner
+            .established
+            .ok_or(BoundedModeError::JournalNotEstablished)?
+            .max_reserved_positions;
+
+        // (2) Require an installed accountant association. Installation is
+        //     identity association only; this explicit transition is the separate
+        //     operation that actually consults it and takes a charge.
+        let accountant = inner
+            .admission
+            .clone()
+            .ok_or(BoundedModeError::NoAccountantAssociation)?;
+
+        // (3) Validate configured capacity against the established durable-position
+        //     limit, with checked conversion. `0` is refused; the first slice does
+        //     not model a zero-capacity bounded container.
+        if capacity == 0 {
+            return Err(BoundedModeError::ZeroCapacity);
+        }
+        let capacity_u64 =
+            u64::try_from(capacity).map_err(|_| BoundedModeError::CapacityAboveLimit)?;
+        if capacity_u64 > limit {
+            return Err(BoundedModeError::CapacityAboveLimit);
+        }
+
+        // (4) Idempotence / conflict against an existing bounded container. An
+        //     identical repeated configuration is a no-op success; a different
+        //     capacity refuses WITHOUT changing the existing bounded container.
+        if let Some(existing_capacity) = inner.live.bounded_capacity() {
+            if existing_capacity == capacity {
+                return Ok(());
+            }
+            return Err(BoundedModeError::CapacityMismatch);
+        }
+
+        // (5) First-transition prerequisites: the legacy live map must have zero
+        //     entries AND zero allocated capacity (so no live owner or already-
+        //     allocated map storage is silently left uncharged).
+        let (legacy_len, legacy_capacity) = inner
+            .live
+            .legacy_len_capacity()
+            .expect("live is Legacy here (bounded handled above)");
+        if legacy_len != 0 {
+            return Err(BoundedModeError::LegacyNotEmpty);
+        }
+        if legacy_capacity != 0 {
+            return Err(BoundedModeError::LegacyHasCapacity);
+        }
+
+        // (6) Compute the FULL container charge with checked arithmetic BEFORE any
+        //     allocation. Sizes are derived from the actual types (never hard-
+        //     coded). The charge covers the container control representation
+        //     (`size_of::<LiveContainer>()`: the Vec control triple, the counters,
+        //     the embedded reservation, and padding) PLUS the slot backing
+        //     (`L * size_of::<Slot>()`).
+        let slot_size = std::mem::size_of::<Slot>() as u128;
+        let base = std::mem::size_of::<LiveContainer>() as u128;
+        let backing = (capacity as u128)
+            .checked_mul(slot_size)
+            .ok_or(BoundedModeError::ChargeOverflow)?;
+        // Allocation-layout representability on the target: the backing byte size
+        // must fit `isize` (the RawVec allocation bound).
+        if backing > isize::MAX as u128 {
+            return Err(BoundedModeError::LayoutOverflow);
+        }
+        let charge = base
+            .checked_add(backing)
+            .ok_or(BoundedModeError::ChargeOverflow)?;
+
+        // (7) Admit the full charge against the installed accountant BEFORE
+        //     constructing any covered allocation. The accounting lock is taken
+        //     here while holding the domain lock; the domain lock is never
+        //     re-entered by the accountant, so the (domain -> accounting) order is
+        //     acyclic. A refusal leaves both ledgers and the previous mode
+        //     unchanged (no allocation attempted).
+        let coverage: Reservation = accountant
+            .reserve(charge)
+            .map_err(|_| BoundedModeError::AdmissionRefused)?;
+
+        // (8) Construct the container fallibly, consuming `coverage`. On failure
+        //     the coverage is released automatically (reverse drop) and the
+        //     previous mode is preserved — nothing is installed.
+        let container = LiveContainer::construct(capacity, coverage)?;
+
+        // (9) Install ONLY on success. No further fallible admission.
+        inner.live = LiveMode::Bounded(container);
+        Ok(())
     }
 
     /// Run 422 D7-D10 Correction E — **explicitly initialize a new local
@@ -1897,6 +2294,16 @@ impl SigningReservationJournal {
         // the journal-wide limit FIRST, before any durable effect.
         if inner.reserved_positions >= limit {
             return Ok(ReservationOutcome::Exhausted);
+        }
+        // Run 422 — settle bounded live-container slot availability BEFORE any
+        // durable write, under this SAME journal-domain guard. In Legacy mode
+        // there is always room; in Bounded mode a FULL container refuses with a
+        // capacity refusal that performs NO fresh record/metadata write. This is
+        // reached only on the fresh-record-absent branch, so existing-position
+        // conflict / potentially-signed / retained-retry classification (resolved
+        // above against the durable record) is never suppressed by full capacity.
+        if !inner.live.can_admit_fresh() {
+            return Ok(ReservationOutcome::LiveCapacityExhausted);
         }
         let operation_id = inner.next_operation_id;
         let next_operation_id = operation_id
@@ -2333,6 +2740,68 @@ impl SigningReservationJournal {
             .expect("domain lock")
             .live
             .contains_key(position)
+    }
+
+    /// Test-only: whether the domain is in bounded live mode.
+    #[cfg(any(test, feature = "test-utils"))]
+    pub(crate) fn live_is_bounded_for_test(&self) -> bool {
+        matches!(
+            self.domain.inner.lock().expect("domain lock").live,
+            LiveMode::Bounded(_)
+        )
+    }
+
+    /// Test-only: the bounded container's fixed capacity `L` (`None` in legacy).
+    #[cfg(any(test, feature = "test-utils"))]
+    pub(crate) fn live_capacity_for_test(&self) -> Option<usize> {
+        self.domain
+            .inner
+            .lock()
+            .expect("domain lock")
+            .live
+            .bounded_capacity()
+    }
+
+    /// Test-only: the bounded container's `(Vec::len, Vec::capacity)` backing
+    /// shape, so a test can assert no growth (`len == capacity == L`) after
+    /// construction. `None` in legacy mode.
+    #[cfg(any(test, feature = "test-utils"))]
+    pub(crate) fn live_backing_shape_for_test(&self) -> Option<(usize, usize)> {
+        let inner = self.domain.inner.lock().expect("domain lock");
+        match &inner.live {
+            LiveMode::Bounded(c) => Some((c.slots.len(), c.slots.capacity())),
+            LiveMode::Legacy(_) => None,
+        }
+    }
+
+    /// Test-only: the standing container charge held by the bounded backing
+    /// reservation (`None` in legacy mode).
+    #[cfg(any(test, feature = "test-utils"))]
+    pub(crate) fn live_backing_charge_for_test(&self) -> Option<u128> {
+        let inner = self.domain.inner.lock().expect("domain lock");
+        match &inner.live {
+            LiveMode::Bounded(c) => Some(c._backing.charge()),
+            LiveMode::Legacy(_) => None,
+        }
+    }
+
+    /// Test-only: the legacy live map's allocated capacity (`None` in bounded
+    /// mode), so a test can construct the empty-but-allocated precondition.
+    #[cfg(any(test, feature = "test-utils"))]
+    pub(crate) fn legacy_live_capacity_for_test(&self) -> Option<usize> {
+        let inner = self.domain.inner.lock().expect("domain lock");
+        inner.live.legacy_len_capacity().map(|(_, cap)| cap)
+    }
+
+    /// Test-only: clear the legacy live map WITHOUT releasing its allocated
+    /// capacity (`HashMap::clear` retains capacity), modelling an empty-but-
+    /// allocated legacy map for the first-transition prerequisite test.
+    #[cfg(any(test, feature = "test-utils"))]
+    pub(crate) fn clear_legacy_live_keep_capacity_for_test(&self) {
+        let mut inner = self.domain.inner.lock().expect("domain lock");
+        if let LiveMode::Legacy(m) = &mut inner.live {
+            m.clear();
+        }
     }
 
     /// Test-only: the domain's monotonic next-operation-id source. Retirement
@@ -5468,5 +5937,494 @@ mod tests {
         assert_eq!(acct.aggregate().current(), a_current, "aggregate current unchanged");
         assert_eq!(acct.aggregate().peak(), a_peak, "aggregate peak unchanged");
         assert_eq!(acct.aggregate().cap(), a_cap, "aggregate cap unchanged");
+    }
+
+    // =====================================================================
+    // Run 422 — Isolated bounded journal live-container evidence.
+    //
+    // These tests exercise the REAL journal and REAL accountant through the
+    // explicit, non-enabling `enter_bounded_live_mode` transition and the
+    // bounded reserve/retire paths. Source-reasoning layout measurements,
+    // operational-ledger observations, and the single INJECTED allocation
+    // failure are labelled distinctly. No test claims system-OOM reproduction,
+    // crash durability, or process-RSS bounds.
+    // =====================================================================
+
+    /// Process-global serialization for tests that actually CONSTRUCT a bounded
+    /// container, because the injected allocation-failure switch
+    /// (`FORCE_CONSTRUCT_ALLOC_FAILURE`) is a process-global static. Poison is
+    /// tolerated so one failing test does not cascade.
+    static BOUNDED_CONSTRUCT_SERIAL: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    fn bounded_serial() -> std::sync::MutexGuard<'static, ()> {
+        BOUNDED_CONSTRUCT_SERIAL
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// Build a real, established, associated journal with a bound operational
+    /// sub-ledger and aggregate ceiling of `cap`, returning the journal, its
+    /// accountant handle, and the store `Arc` (held so a test can drop BOTH to
+    /// destroy the ownership domain and observe the exact release).
+    fn associated_journal_with_limit(
+        limit: u64,
+        cap: u128,
+    ) -> (SigningReservationJournal, SharedAccountant, Arc<ModelStore>) {
+        let store = Arc::new(ModelStore::default());
+        let journal = attach_with_budget(store.clone(), limit);
+        let agg = AggregateAuthority::new();
+        agg.bind(cap).expect("bind aggregate ceiling");
+        let acct = SharedAccountant::new(agg);
+        acct.bind_cap(cap).expect("bind operational sub-ledger");
+        journal
+            .install_accountant_association(&acct)
+            .expect("install association");
+        (journal, acct, store)
+    }
+
+    fn associated_journal(cap: u128) -> (SigningReservationJournal, SharedAccountant, Arc<ModelStore>) {
+        associated_journal_with_limit(DEFAULT_MAX_RESERVED_POSITIONS, cap)
+    }
+
+    /// The exact full container charge for capacity `l`, derived from the ACTUAL
+    /// types (never hard-coded): `size_of::<LiveContainer>() + l * size_of::<Slot>()`.
+    fn container_charge(l: usize) -> u128 {
+        std::mem::size_of::<LiveContainer>() as u128
+            + (l as u128) * std::mem::size_of::<Slot>() as u128
+    }
+
+    /// Transition prerequisite: an installed accountant association is required.
+    /// Without one the transition refuses with the fixed-size
+    /// `NoAccountantAssociation` and leaves the domain in Legacy mode.
+    #[test]
+    fn bounded_requires_accountant_association() {
+        let _serial = bounded_serial();
+        let store = Arc::new(ModelStore::default());
+        let journal = attach(store);
+        assert_eq!(
+            journal.enter_bounded_live_mode(1),
+            Err(BoundedModeError::NoAccountantAssociation)
+        );
+        assert!(!journal.live_is_bounded_for_test(), "mode unchanged (Legacy)");
+    }
+
+    /// Transition prerequisite: the journal domain must be established. An
+    /// unestablished handle refuses with `JournalNotEstablished` (checked before
+    /// the association), leaving the domain Legacy.
+    #[test]
+    fn bounded_requires_established_journal() {
+        let _serial = bounded_serial();
+        let store = Arc::new(ModelStore::default());
+        let journal = SigningReservationJournal::attach_unestablished_for_test(store);
+        assert_eq!(
+            journal.enter_bounded_live_mode(1),
+            Err(BoundedModeError::JournalNotEstablished)
+        );
+        assert!(!journal.live_is_bounded_for_test());
+    }
+
+    /// A zero capacity is refused with `ZeroCapacity`; the first slice does not
+    /// model a zero-capacity bounded container.
+    #[test]
+    fn bounded_zero_capacity_refused() {
+        let _serial = bounded_serial();
+        let (journal, _acct, _store) = associated_journal(1u128 << 30);
+        assert_eq!(
+            journal.enter_bounded_live_mode(0),
+            Err(BoundedModeError::ZeroCapacity)
+        );
+        assert!(!journal.live_is_bounded_for_test());
+    }
+
+    /// A capacity above the established durable-position limit is refused with
+    /// `CapacityAboveLimit`; the durable limit itself is unchanged.
+    #[test]
+    fn bounded_capacity_above_limit_refused() {
+        let _serial = bounded_serial();
+        let (journal, _acct, _store) = associated_journal_with_limit(4, 1u128 << 30);
+        assert_eq!(
+            journal.enter_bounded_live_mode(5),
+            Err(BoundedModeError::CapacityAboveLimit)
+        );
+        assert!(!journal.live_is_bounded_for_test());
+    }
+
+    /// A first transition over a NON-EMPTY legacy live map is refused with
+    /// `LegacyNotEmpty` and the mode is unchanged (no live owner is abandoned).
+    #[test]
+    fn bounded_refused_when_legacy_nonempty() {
+        let _serial = bounded_serial();
+        let (journal, _acct, _store) = associated_journal(1u128 << 30);
+        journal.insert_live_for_test(
+            position(SigningKind::Proposal, 1),
+            binding(b"legacy-live"),
+            false,
+        );
+        assert_eq!(journal.live_len_for_test(), 1);
+        assert_eq!(
+            journal.enter_bounded_live_mode(2),
+            Err(BoundedModeError::LegacyNotEmpty)
+        );
+        assert!(!journal.live_is_bounded_for_test());
+    }
+
+    /// A first transition over an EMPTY-but-ALLOCATED legacy live map is refused
+    /// with `LegacyHasCapacity`: already-allocated map storage is never silently
+    /// left uncharged. (`HashMap::clear` retains capacity.)
+    #[test]
+    fn bounded_refused_when_legacy_empty_but_allocated() {
+        let _serial = bounded_serial();
+        let (journal, _acct, _store) = associated_journal(1u128 << 30);
+        journal.insert_live_for_test(
+            position(SigningKind::Proposal, 2),
+            binding(b"legacy-cap"),
+            false,
+        );
+        journal.clear_legacy_live_keep_capacity_for_test();
+        assert_eq!(journal.live_len_for_test(), 0, "map is empty");
+        assert!(
+            journal.legacy_live_capacity_for_test().unwrap_or(0) > 0,
+            "map still owns allocated capacity"
+        );
+        assert_eq!(
+            journal.enter_bounded_live_mode(2),
+            Err(BoundedModeError::LegacyHasCapacity)
+        );
+        assert!(!journal.live_is_bounded_for_test());
+    }
+
+    /// Successful transition installs a fixed-capacity container whose backing is
+    /// charged exactly once; a repeated IDENTICAL configuration is idempotent and
+    /// does NOT re-charge. The standing charge equals the derived full charge.
+    #[test]
+    fn bounded_transition_succeeds_and_is_idempotent() {
+        let _serial = bounded_serial();
+        let (journal, acct, _store) = associated_journal(1u128 << 30);
+        assert_eq!(acct.current(), 0, "no standing charge before transition");
+        assert_eq!(journal.enter_bounded_live_mode(2), Ok(()));
+        assert!(journal.live_is_bounded_for_test());
+        assert_eq!(journal.live_capacity_for_test(), Some(2));
+        assert_eq!(journal.live_backing_shape_for_test(), Some((2, 2)));
+        assert_eq!(journal.live_backing_charge_for_test(), Some(container_charge(2)));
+        assert_eq!(acct.current(), container_charge(2), "charged exactly once");
+        // Idempotent repeat: no re-charge, same container.
+        assert_eq!(journal.enter_bounded_live_mode(2), Ok(()));
+        assert_eq!(acct.current(), container_charge(2), "no double charge");
+        assert_eq!(journal.live_capacity_for_test(), Some(2));
+    }
+
+    /// A conflicting capacity after bounded mode is installed is refused with
+    /// `CapacityMismatch` WITHOUT changing the existing bounded container or its
+    /// standing charge.
+    #[test]
+    fn bounded_conflicting_capacity_refused_without_change() {
+        let _serial = bounded_serial();
+        let (journal, acct, _store) = associated_journal(1u128 << 30);
+        assert_eq!(journal.enter_bounded_live_mode(2), Ok(()));
+        let charged = acct.current();
+        assert_eq!(
+            journal.enter_bounded_live_mode(3),
+            Err(BoundedModeError::CapacityMismatch)
+        );
+        assert_eq!(journal.live_capacity_for_test(), Some(2), "container unchanged");
+        assert_eq!(acct.current(), charged, "standing charge unchanged");
+    }
+
+    /// Every shared handle over the SAME store instance observes the installed
+    /// bounded mode (the mode is shared ownership-domain state).
+    #[test]
+    fn bounded_shared_handle_observes_mode() {
+        let _serial = bounded_serial();
+        let (journal_a, _acct, store) = associated_journal(1u128 << 30);
+        let journal_b = attach(store.clone());
+        assert!(!journal_b.live_is_bounded_for_test(), "legacy before transition");
+        assert_eq!(journal_a.enter_bounded_live_mode(3), Ok(()));
+        assert!(journal_b.live_is_bounded_for_test(), "shared handle sees bounded mode");
+        assert_eq!(journal_b.live_capacity_for_test(), Some(3));
+    }
+
+    /// Real accounting PRESSURE causes refusal BEFORE any allocation, and both the
+    /// operational and aggregate ledgers are exactly restored (the admission is
+    /// rolled back atomically). The mode stays Legacy.
+    #[test]
+    fn bounded_admission_pressure_refused_and_restores_ledgers() {
+        let _serial = bounded_serial();
+        // Ceiling leaves < container_charge(2) of headroom once 64 bytes are held.
+        let cap = container_charge(2) + 10;
+        let (journal, acct, _store) = associated_journal(cap);
+        let _held = acct.reserve(64).expect("hold real pressure");
+        let p_before = acct.current();
+        let a_before = acct.aggregate().current();
+        assert_eq!(
+            journal.enter_bounded_live_mode(2),
+            Err(BoundedModeError::AdmissionRefused)
+        );
+        assert_eq!(acct.current(), p_before, "operational ledger restored exactly");
+        assert_eq!(acct.aggregate().current(), a_before, "aggregate ledger restored exactly");
+        assert!(!journal.live_is_bounded_for_test(), "mode unchanged");
+    }
+
+    /// A capacity WITHIN the durable-position limit but whose full byte charge
+    /// exceeds the ledger headroom is refused BEFORE allocation (admission), with
+    /// both ledgers left at zero. Distinct from durable-limit refusal.
+    #[test]
+    fn bounded_within_limit_over_byte_headroom_refused() {
+        let _serial = bounded_serial();
+        // L = 4 is far within the default durable limit, but the ceiling is one
+        // byte short of the full container charge for L = 4.
+        let cap = container_charge(4) - 1;
+        let (journal, acct, _store) = associated_journal(cap);
+        assert_eq!(
+            journal.enter_bounded_live_mode(4),
+            Err(BoundedModeError::AdmissionRefused)
+        );
+        assert_eq!(acct.current(), 0, "no charge admitted");
+        assert_eq!(acct.aggregate().current(), 0);
+        assert!(!journal.live_is_bounded_for_test());
+    }
+
+    /// INJECTED allocation failure AFTER admission exercises the REAL constructor
+    /// cleanup: the admitted coverage is released exactly once (both ledgers return
+    /// to zero) and the previous Legacy mode is preserved. This is a deliberately
+    /// injected switch, NOT a demonstrated system OOM.
+    #[test]
+    fn bounded_injected_allocation_failure_cleans_up() {
+        use std::sync::atomic::Ordering::SeqCst;
+        let _serial = bounded_serial();
+        let (journal, acct, _store) = associated_journal(1u128 << 30);
+        assert_eq!(acct.current(), 0);
+        FORCE_CONSTRUCT_ALLOC_FAILURE.store(true, SeqCst);
+        let outcome = journal.enter_bounded_live_mode(2);
+        // Reset the injected switch BEFORE asserting so a failure cannot leak it.
+        FORCE_CONSTRUCT_ALLOC_FAILURE.store(false, SeqCst);
+        assert_eq!(outcome, Err(BoundedModeError::Allocation), "INJECTED failure");
+        assert_eq!(acct.current(), 0, "admitted coverage released exactly once");
+        assert_eq!(acct.aggregate().current(), 0);
+        assert!(!journal.live_is_bounded_for_test(), "previous mode preserved");
+    }
+
+    /// Measured layout (target-dependent; host x86_64-unknown-linux-gnu, rustc
+    /// 1.99.0): the standing backing charge equals the derived
+    /// `size_of::<LiveContainer>() + L * size_of::<Slot>()`, and the backing Vec
+    /// records `len == capacity == L` (no growth) after construction.
+    #[test]
+    fn bounded_measured_layout_and_no_growth() {
+        let _serial = bounded_serial();
+        let (journal, _acct, _store) = associated_journal(1u128 << 30);
+        assert_eq!(journal.enter_bounded_live_mode(3), Ok(()));
+        assert_eq!(journal.live_backing_shape_for_test(), Some((3, 3)));
+        assert_eq!(journal.live_backing_charge_for_test(), Some(container_charge(3)));
+        // Fill the container fully; the backing Vec must NOT reallocate.
+        for v in 0..3u64 {
+            let pos = position(SigningKind::Proposal, 300 + v);
+            match journal.reserve_for_sign(&pos, &binding(b"nogrowth")).unwrap() {
+                ReservationOutcome::FreshlyReserved(_) => {}
+                other => panic!("expected FreshlyReserved, got {:?}", other),
+            };
+        }
+        assert_eq!(journal.live_len_for_test(), 3);
+        assert_eq!(
+            journal.live_backing_shape_for_test(),
+            Some((3, 3)),
+            "no growth after filling to capacity"
+        );
+    }
+
+    /// Fresh insertion readiness, successful acknowledgement, slot reuse after
+    /// acknowledged retirement, and full-capacity fresh refusal — all under the
+    /// bounded container with no second live table.
+    #[test]
+    fn bounded_fresh_insert_ack_retire_and_slot_reuse() {
+        let _serial = bounded_serial();
+        let (journal, _acct, _store) = associated_journal(1u128 << 30);
+        assert_eq!(journal.enter_bounded_live_mode(1), Ok(()));
+        assert_eq!(journal.live_len_for_test(), 0);
+
+        let pos_a = position(SigningKind::Proposal, 400);
+        let b_a = binding(b"reuse-A");
+        let cap = reserve_and_invoke(&journal, &pos_a, &b_a);
+        assert_eq!(journal.live_len_for_test(), 1);
+        journal.record_signed_result(&cap, b"sig-A").unwrap();
+
+        // Container is full: a fresh DIFFERENT position refuses (no new write).
+        let pos_b = position(SigningKind::Proposal, 401);
+        assert!(matches!(
+            journal.reserve_for_sign(&pos_b, &binding(b"reuse-B")).unwrap(),
+            ReservationOutcome::LiveCapacityExhausted
+        ));
+
+        // Acknowledged retirement frees the slot WITHOUT releasing the backing.
+        assert_eq!(
+            journal.retire_acknowledged_operation(&cap),
+            Ok(RetirementOutcome::Retired)
+        );
+        assert_eq!(journal.live_len_for_test(), 0);
+        assert_eq!(journal.live_backing_charge_for_test(), Some(container_charge(1)));
+
+        // The freed slot is reused by the previously-refused fresh position.
+        assert!(matches!(
+            journal.reserve_for_sign(&pos_b, &binding(b"reuse-B")).unwrap(),
+            ReservationOutcome::FreshlyReserved(_)
+        ));
+        assert_eq!(journal.live_len_for_test(), 1);
+    }
+
+    /// At FULL capacity, existing-position classification (PotentiallySigned /
+    /// Conflict) is resolved against the durable record BEFORE fresh-slot
+    /// admission, so a full container never suppresses those classifications; only
+    /// a genuinely fresh position is refused with `LiveCapacityExhausted`.
+    #[test]
+    fn bounded_full_capacity_classifies_existing_before_fresh_refusal() {
+        let _serial = bounded_serial();
+        let (journal, _acct, _store) = associated_journal(1u128 << 30);
+        assert_eq!(journal.enter_bounded_live_mode(1), Ok(()));
+
+        let pos_a = position(SigningKind::Proposal, 500);
+        let b_a = binding(b"classify-A");
+        match journal.reserve_for_sign(&pos_a, &b_a).unwrap() {
+            ReservationOutcome::FreshlyReserved(_) => {} // continuation dropped: slot stays occupied
+            other => panic!("expected FreshlyReserved, got {:?}", other),
+        };
+        assert_eq!(journal.live_len_for_test(), 1, "container is full");
+
+        // Same position, same binding -> durable Reserved + live unacked -> PotentiallySigned.
+        assert!(matches!(
+            journal.reserve_for_sign(&pos_a, &b_a).unwrap(),
+            ReservationOutcome::PotentiallySigned
+        ));
+        // Same position, DIFFERENT binding -> Conflict (classified despite full capacity).
+        assert!(matches!(
+            journal.reserve_for_sign(&pos_a, &binding(b"classify-A2")).unwrap(),
+            ReservationOutcome::Conflict
+        ));
+        // Genuinely fresh position -> LiveCapacityExhausted.
+        assert!(matches!(
+            journal.reserve_for_sign(&position(SigningKind::Proposal, 501), &binding(b"classify-B")).unwrap(),
+            ReservationOutcome::LiveCapacityExhausted
+        ));
+    }
+
+    /// While an UNACKNOWLEDGED entry fills the only slot, the first slice
+    /// conservatively STALLS fresh admission: the capacity cannot be reclaimed
+    /// (acknowledged-only retirement), so fresh positions keep refusing. This is
+    /// conditional progress after acknowledged retirement, NOT general liveness.
+    #[test]
+    fn bounded_conservative_stall_while_unacknowledged_fills_capacity() {
+        let _serial = bounded_serial();
+        let (journal, _acct, _store) = associated_journal(1u128 << 30);
+        assert_eq!(journal.enter_bounded_live_mode(1), Ok(()));
+        // Reserve + invoke but do NOT acknowledge: the slot stays occupied.
+        let pos_a = position(SigningKind::Proposal, 600);
+        let _cap = reserve_and_invoke(&journal, &pos_a, &binding(b"stall-A"));
+        assert_eq!(journal.live_len_for_test(), 1);
+        // The unacknowledged entry cannot be retired, so fresh admission stalls.
+        assert!(matches!(
+            journal.retire_acknowledged_operation(&_cap),
+            Err(RetirementError::NotAcknowledged)
+        ));
+        assert!(matches!(
+            journal.reserve_for_sign(&position(SigningKind::Proposal, 601), &binding(b"stall-B")).unwrap(),
+            ReservationOutcome::LiveCapacityExhausted
+        ));
+        assert_eq!(journal.live_len_for_test(), 1, "capacity remains occupied (stall)");
+    }
+
+    /// A stale publication capability (its live entry already retired) is rejected
+    /// by retirement with `NoLiveOperation`; nothing is removed.
+    #[test]
+    fn bounded_stale_capability_rejected() {
+        let _serial = bounded_serial();
+        let (journal, _acct, _store) = associated_journal(1u128 << 30);
+        assert_eq!(journal.enter_bounded_live_mode(1), Ok(()));
+        let pos_a = position(SigningKind::Proposal, 700);
+        let cap = reserve_and_invoke(&journal, &pos_a, &binding(b"stale-A"));
+        journal.record_signed_result(&cap, b"sig-stale").unwrap();
+        assert_eq!(
+            journal.retire_acknowledged_operation(&cap),
+            Ok(RetirementOutcome::Retired)
+        );
+        // The same capability is now stale: its live entry is gone.
+        assert_eq!(
+            journal.retire_acknowledged_operation(&cap),
+            Err(RetirementError::NoLiveOperation)
+        );
+    }
+
+    /// The standing container charge persists THROUGH empty periods: after a live
+    /// operation is acknowledged and retired, the container is empty but the
+    /// backing charge and ledger total are unchanged (release is tied to container
+    /// destruction, not to an empty table or a dropped journal handle).
+    #[test]
+    fn bounded_standing_charge_through_empty_periods() {
+        let _serial = bounded_serial();
+        let (journal, acct, _store) = associated_journal(1u128 << 30);
+        assert_eq!(journal.enter_bounded_live_mode(1), Ok(()));
+        let standing = container_charge(1);
+        assert_eq!(acct.current(), standing);
+
+        let pos_a = position(SigningKind::Proposal, 800);
+        let cap = reserve_and_invoke(&journal, &pos_a, &binding(b"empty-period"));
+        journal.record_signed_result(&cap, b"sig-ep").unwrap();
+        assert_eq!(
+            journal.retire_acknowledged_operation(&cap),
+            Ok(RetirementOutcome::Retired)
+        );
+        assert_eq!(journal.live_len_for_test(), 0, "empty period");
+        assert_eq!(acct.current(), standing, "standing charge persists while empty");
+        assert_eq!(journal.live_backing_charge_for_test(), Some(standing));
+    }
+
+    /// Dropping ONE journal handle does NOT release the backing while the shared
+    /// domain lives on; the charge is released EXACTLY at actual container
+    /// destruction (when the last owner of the domain is dropped).
+    #[test]
+    fn bounded_charge_released_only_at_final_destruction() {
+        let _serial = bounded_serial();
+        let (journal, acct, store) = associated_journal(1u128 << 30);
+        assert_eq!(journal.enter_bounded_live_mode(2), Ok(()));
+        let standing = container_charge(2);
+        assert_eq!(acct.current(), standing);
+
+        // A second handle shares the domain. Dropping the first does NOT release.
+        let journal_b = attach(store.clone());
+        drop(journal);
+        assert_eq!(acct.current(), standing, "handle drop does not release backing");
+        assert!(journal_b.live_is_bounded_for_test());
+
+        // Drop the remaining handle AND the store: the domain (and container) is
+        // destroyed, releasing the backing exactly once.
+        drop(journal_b);
+        drop(store);
+        assert_eq!(acct.current(), 0, "released exactly at container destruction");
+        assert_eq!(acct.aggregate().current(), 0);
+    }
+
+    /// Coexistence model (lighter, honest): the standing container charge and an
+    /// independent reservation (modelling a checked-retrieval workspace) coexist
+    /// ADDITIVELY on the SAME operational and aggregate ledgers under unchanged
+    /// ceilings, each counted exactly once. This is NOT the full retained-
+    /// retrieval pipeline, which is out of scope for this slice.
+    #[test]
+    fn bounded_coexists_with_independent_workspace_charge_each_once() {
+        let _serial = bounded_serial();
+        let cap = 1u128 << 30;
+        let (journal, acct, _store) = associated_journal(cap);
+        assert_eq!(journal.enter_bounded_live_mode(4), Ok(()));
+        let container = container_charge(4);
+        assert_eq!(acct.current(), container);
+        assert_eq!(acct.aggregate().current(), container);
+
+        let p_cap = acct.cap();
+        let a_cap = acct.aggregate().cap();
+        let workspace = 4096u128;
+        let res = acct.reserve(workspace).expect("independent workspace reservation");
+        assert_eq!(acct.current(), container + workspace, "each owner counted once");
+        assert_eq!(acct.aggregate().current(), container + workspace);
+        assert_eq!(acct.cap(), p_cap, "operational ceiling unchanged");
+        assert_eq!(acct.aggregate().cap(), a_cap, "aggregate ceiling unchanged");
+
+        drop(res);
+        assert_eq!(acct.current(), container, "workspace released; container charge remains");
+        assert_eq!(acct.aggregate().current(), container);
     }
 }

@@ -333,6 +333,7 @@ pub(crate) enum ModelFreshUseOutcome {
     ReserveConflict,
     ReservePotentiallySigned,
     ReserveExhausted,
+    ReserveLiveCapacityExhausted,
     RetainedBlocked,
     JournalFailed,
     AuthorizationConfirmRefused,
@@ -1014,6 +1015,11 @@ fn fresh_vote_sign_model<H: CommittedHistory + ?Sized>(
             return ModelFreshUseOutcome::ReservePotentiallySigned;
         }
         Ok(ReservationOutcome::Exhausted) => return ModelFreshUseOutcome::ReserveExhausted,
+        // Run 422 — compatibility arm (no model path enters bounded mode): an
+        // explicit non-signing refusal, distinct from durable-position exhaustion.
+        Ok(ReservationOutcome::LiveCapacityExhausted) => {
+            return ModelFreshUseOutcome::ReserveLiveCapacityExhausted;
+        }
         Err(_) => return ModelFreshUseOutcome::JournalFailed,
     };
     let cap: ResultPublicationCapability = match journal.consume_for_signing(continuation) {
