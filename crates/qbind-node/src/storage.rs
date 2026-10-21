@@ -1423,6 +1423,36 @@ pub(crate) fn preflight_framed_envelope_pair(
     Ok(())
 }
 
+/// Run 422 — structural length preflight for the single already-outer-framed
+/// RECORD envelope accepted by `put_signing_record_envelope_synced`, applied
+/// BEFORE any key build, repository-owned staging allocation, or storage write.
+///
+/// This checks ONLY the fixed record framing bounds the storage primitive owns;
+/// it does NOT decode the inner record, verify a signature, or perform any
+/// semantic journal validation (position, suite, accounting, continuation,
+/// invoked/acknowledged state) — those remain the journal caller's
+/// responsibility. A record envelope shorter than `MIN_ENVELOPE_LEN` is
+/// malformed framing (`Corruption(EnvelopeInvalid)`); one longer than the broad
+/// FORMAT limit `4 + MAX_RECORD_LEN` (NOT any narrower read workspace) is refused
+/// with `CapacityExceeded`. Storage framing admission stays distinct from
+/// journal semantic validation.
+pub(crate) fn preflight_framed_record_envelope(
+    record_envelope: &[u8],
+) -> Result<(), crate::signing_reservation_journal::BoundedStorageError> {
+    use crate::signing_journal_admission::MIN_ENVELOPE_LEN;
+    use crate::signing_reservation_journal::{BoundedDiag, BoundedStorageError};
+    if record_envelope.len() < MIN_ENVELOPE_LEN {
+        return Err(BoundedStorageError::Corruption(BoundedDiag::EnvelopeInvalid));
+    }
+    if record_envelope.len() > MAX_RECORD_ENVELOPE_LEN {
+        return Err(BoundedStorageError::CapacityExceeded {
+            stored_len: record_envelope.len(),
+            capacity: MAX_RECORD_ENVELOPE_LEN,
+        });
+    }
+    Ok(())
+}
+
 impl crate::signing_reservation_journal::SigningJournalStorage for RocksDbConsensusStorage {
     fn get_signing_record(&self, key: &[u8]) -> Result<Option<Vec<u8>>, StorageError> {
         // Bounded direct read: a decision record is at most `MAX_RECORD_LEN`;
@@ -1648,6 +1678,34 @@ impl crate::signing_reservation_journal::SigningJournalStorage for RocksDbConsen
         // only guarantees the two keys are never left as a partially updated pair.
         self.db
             .write_opt(batch, &write_opts)
+            .map_err(|_| BoundedStorageError::Io(BoundedDiag::WriteIo))
+    }
+
+    fn put_signing_record_envelope_synced(
+        &self,
+        record_key: &[u8],
+        record_envelope: &[u8],
+    ) -> Result<(), crate::signing_reservation_journal::BoundedStorageError> {
+        use crate::signing_reservation_journal::{BoundedDiag, BoundedStorageError};
+        // Preflight the fixed RECORD framing bounds BEFORE building the stack key,
+        // so an oversized/under-min input is refused without any key copy or write.
+        preflight_framed_record_envelope(record_envelope)?;
+        // Build the fixed backend-prefixed key on the stack (no allocating legacy
+        // key builder); the journal-key length is validated here too.
+        let bkey = signing_backend_key_fixed(record_key)?;
+        // One record-key put committed with sync=true stores the already-outer-
+        // framed record envelope VERBATIM. The borrowed envelope is written as-is —
+        // no `wrap_checksummed` staging Vec, no dynamically assembled backend-key
+        // Vec, and no allocating legacy fallback on this route. RocksDB copies the
+        // borrowed bytes into its own internal buffer; that library-internal copy is
+        // OUTSIDE this component's application-owned allocation accounting. The
+        // metadata key is left untouched (reserved-position accounting unchanged).
+        let mut write_opts = rocksdb::WriteOptions::default();
+        write_opts.set_sync(true);
+        // Acknowledged success means the record was written under the synced
+        // contract; an error does NOT prove nothing was written.
+        self.db
+            .put_opt(&bkey[..], record_envelope, &write_opts)
             .map_err(|_| BoundedStorageError::Io(BoundedDiag::WriteIo))
     }
 
@@ -1915,6 +1973,41 @@ impl crate::signing_reservation_journal::SigningJournalStorage for InMemoryConse
             .map_err(|_| BoundedStorageError::Io(BoundedDiag::LockRefused))?;
         map.insert(record_key.to_vec(), record_body.to_vec());
         map.insert(INMEM_SIGNING_METADATA_KEY.to_vec(), metadata_body.to_vec());
+        Ok(())
+    }
+
+    fn put_signing_record_envelope_synced(
+        &self,
+        record_key: &[u8],
+        record_envelope: &[u8],
+    ) -> Result<(), crate::signing_reservation_journal::BoundedStorageError> {
+        use crate::signing_journal_admission::OUTER_CRC_LEN;
+        use crate::signing_reservation_journal::{BoundedDiag, BoundedStorageError};
+        // Same fixed RECORD framing preflight as the durable backend, applied
+        // BEFORE any model-owned copy or map mutation.
+        preflight_framed_record_envelope(record_envelope)?;
+        // The durable backend validates the journal-key length while building its
+        // fixed backend key; the model has no such key, so enforce the same length
+        // invariant explicitly to keep the primitive's contract uniform.
+        if record_key.len() != crate::signing_journal_admission::JOURNAL_KEY_LEN {
+            return Err(BoundedStorageError::CapacityExceeded {
+                stored_len: record_key.len(),
+                capacity: crate::signing_journal_admission::JOURNAL_KEY_LEN,
+            });
+        }
+        // MODEL backend: the model stores the record body record-ONLY (no outer
+        // envelope), SYNTHESIZING the outer checksum on read, so STRIP the already-
+        // present outer CRC to preserve the record-only storage format shared with
+        // the other model readers. The key `.to_vec()` and the value `.to_vec()`
+        // are MODEL-OWNED heap copies that persist for the life of the map entry;
+        // this model operation is NOT allocation-free, is backend-owned (not
+        // covered by any caller workspace reservation), and provides NO power-loss
+        // durability. Only the record map is updated — metadata is left untouched.
+        let record_body = &record_envelope[OUTER_CRC_LEN..];
+        self.signing_records
+            .write()
+            .map_err(|_| BoundedStorageError::Io(BoundedDiag::LockRefused))?
+            .insert(record_key.to_vec(), record_body.to_vec());
         Ok(())
     }
 
@@ -2483,6 +2576,204 @@ mod tests {
         // The default performs no write: the stub store still reports absence.
         assert!(store.get_signing_record(&key).expect("read").is_none());
         assert!(store.get_signing_metadata().expect("read").is_none());
+    }
+
+    // =======================================================================
+    // Run 422 — record-ONLY synced primitive `put_signing_record_envelope_synced`.
+    // Input is a single ALREADY-outer-framed record envelope; the primitive
+    // persists ONLY that record key under one synced barrier, performs NO
+    // metadata write, and establishes a STORAGE acknowledgement only (no signing
+    // permission, signature verification, journal acknowledgement, continuation,
+    // accounting, or delivery). Framing admission stays distinct from journal
+    // semantic validation.
+    // =======================================================================
+
+    /// A validly-framed record envelope whose body is `body_len` bytes.
+    fn framed_record_of_body(body_len: usize, fill: u8) -> Vec<u8> {
+        wrap_checksummed(&vec![fill; body_len])
+    }
+
+    /// Item 1: a backend that does NOT override the new method inherits the trait
+    /// default, which refuses with `Unsupported` and performs no write.
+    #[test]
+    fn put_record_envelope_synced_default_is_unsupported() {
+        use crate::signing_reservation_journal::{BoundedStorageError, SigningJournalStorage};
+        let store = DefaultOnlyStore::default();
+        let key = framed_test_key();
+        let (_rb, _mb, record_env, _me) = framed_test_pair();
+        assert!(matches!(
+            store.put_signing_record_envelope_synced(&key, &record_env),
+            Err(BoundedStorageError::Unsupported)
+        ));
+        // The default performs no write: the stub store still reports absence.
+        assert!(store.get_signing_record(&key).expect("read").is_none());
+    }
+
+    /// Item 2: wrong key length, below-minimum envelope, and above-FORMAT-maximum
+    /// envelope are all refused with their FIXED errors BEFORE any write — no
+    /// record or metadata value is persisted on a refused call.
+    #[test]
+    fn put_record_envelope_synced_preflight_refusals_before_write() {
+        use crate::signing_journal_admission::{JOURNAL_KEY_LEN, MIN_ENVELOPE_LEN};
+        use crate::signing_reservation_journal::{BoundedStorageError, SigningJournalStorage};
+        let store = InMemoryConsensusStorage::new();
+        let key = framed_test_key();
+
+        // Below-minimum record envelope → malformed framing.
+        let under = vec![0u8; MIN_ENVELOPE_LEN - 1];
+        assert!(matches!(
+            store.put_signing_record_envelope_synced(&key, &under),
+            Err(BoundedStorageError::Corruption(_))
+        ));
+        // Larger than the broad FORMAT limit (8324) → capacity refusal, NOT
+        // relabeled malformed and NOT narrowed to any read workspace.
+        let over = vec![0u8; MAX_RECORD_ENVELOPE_LEN + 1];
+        assert!(matches!(
+            store.put_signing_record_envelope_synced(&key, &over),
+            Err(BoundedStorageError::CapacityExceeded { .. })
+        ));
+        // Wrong-length key with a valid envelope → key refused by the length gate.
+        let short_key = [b'x'; JOURNAL_KEY_LEN - 1];
+        let valid = framed_record_of_body(MIN_ENVELOPE_LEN, 0x5A);
+        assert!(matches!(
+            store.put_signing_record_envelope_synced(&short_key, &valid),
+            Err(BoundedStorageError::CapacityExceeded { .. })
+        ));
+        // None of the refused calls wrote anything (record or metadata).
+        assert!(store.get_signing_record(&key).expect("read").is_none());
+        assert!(store.get_signing_metadata().expect("read").is_none());
+    }
+
+    /// Item 3/5 (durable): a Reserved then a Signed record envelope are each
+    /// stored through the new primitive and read back EXACTLY (RocksDB preserves
+    /// the verbatim framed bytes), replacing the record in place.
+    #[test]
+    fn put_record_envelope_synced_rocksdb_reserved_then_signed_exact_bytes() {
+        use crate::signing_journal_admission::MIN_ENVELOPE_LEN;
+        use crate::signing_reservation_journal::SigningJournalStorage;
+        let dir = tempfile::tempdir().unwrap();
+        let store = RocksDbConsensusStorage::open(dir.path()).unwrap();
+        let key = framed_test_key();
+
+        // Reserved-shaped envelope (opaque to storage; distinct body pattern).
+        let reserved = framed_record_of_body(MIN_ENVELOPE_LEN, 0x11);
+        store
+            .put_signing_record_envelope_synced(&key, &reserved)
+            .expect("reserved record write");
+        let mut dst = [0u8; 4096];
+        let n = store
+            .read_signing_envelope_into(&key, &mut dst)
+            .expect("bounded read")
+            .expect("present");
+        assert_eq!(&dst[..n], &reserved[..], "verbatim reserved framed bytes");
+
+        // Signed-shaped envelope (changed, longer body) overwrites in place; the
+        // record-only primitive accepts the CHANGED bytes (unlike exact reissue).
+        let signed = framed_record_of_body(MIN_ENVELOPE_LEN + 64, 0x22);
+        store
+            .put_signing_record_envelope_synced(&key, &signed)
+            .expect("signed record write");
+        let n2 = store
+            .read_signing_envelope_into(&key, &mut dst)
+            .expect("bounded read")
+            .expect("present");
+        assert_eq!(&dst[..n2], &signed[..], "verbatim signed framed bytes");
+        // No metadata was ever written by this record-only route.
+        assert!(store.get_signing_metadata().expect("read").is_none());
+    }
+
+    /// Item 3/5 (model): the in-memory MODEL backend stores record-ONLY and
+    /// synthesizes the outer CRC on read, so the same framed input round-trips
+    /// through every model reader. Labelled MODEL (no durability).
+    #[test]
+    fn put_record_envelope_synced_inmemory_model_roundtrip() {
+        use crate::signing_journal_admission::{MIN_ENVELOPE_LEN, OUTER_CRC_LEN};
+        use crate::signing_reservation_journal::SigningJournalStorage;
+        let store = InMemoryConsensusStorage::new();
+        let key = framed_test_key();
+        let env = framed_record_of_body(MIN_ENVELOPE_LEN, 0x33);
+        store
+            .put_signing_record_envelope_synced(&key, &env)
+            .expect("model record write");
+        // The direct reader returns the record-only body (outer CRC stripped).
+        assert_eq!(
+            store.get_signing_record(&key).expect("read").expect("present"),
+            &env[OUTER_CRC_LEN..]
+        );
+        // The bounded reader re-synthesizes the outer CRC, reproducing exact bytes.
+        let mut dst = [0u8; 4096];
+        let n = store
+            .read_signing_envelope_into(&key, &mut dst)
+            .expect("bounded read")
+            .expect("present");
+        assert_eq!(&dst[..n], &env[..]);
+    }
+
+    /// Item 4: the broad FORMAT boundary (`4 + MAX_RECORD_LEN` = 8324) is ACCEPTED
+    /// by this primitive; it is NOT narrowed to the smaller retained-retrieval
+    /// workspace. (A record larger than a given read workspace remains a separate
+    /// bounded-READ limitation, exercised elsewhere.)
+    #[test]
+    fn put_record_envelope_synced_accepts_broad_format_boundary() {
+        use crate::signing_journal_admission::OUTER_CRC_LEN;
+        use crate::signing_reservation_journal::{SigningJournalStorage, MAX_RECORD_LEN};
+        let dir = tempfile::tempdir().unwrap();
+        let store = RocksDbConsensusStorage::open(dir.path()).unwrap();
+        let key = framed_test_key();
+        // Body exactly MAX_RECORD_LEN → envelope exactly MAX_RECORD_ENVELOPE_LEN.
+        let at_limit = framed_record_of_body(MAX_RECORD_LEN, 0x44);
+        assert_eq!(at_limit.len(), OUTER_CRC_LEN + MAX_RECORD_LEN);
+        assert_eq!(at_limit.len(), MAX_RECORD_ENVELOPE_LEN);
+        store
+            .put_signing_record_envelope_synced(&key, &at_limit)
+            .expect("at-format-limit write accepted");
+        // Read back the verbatim bytes with a workspace large enough to hold them.
+        let mut dst = vec![0u8; MAX_RECORD_ENVELOPE_LEN];
+        let n = store
+            .read_signing_envelope_into(&key, &mut dst)
+            .expect("bounded read")
+            .expect("present");
+        assert_eq!(&dst[..n], &at_limit[..]);
+    }
+
+    /// Item 6: replacing a record leaves the complete metadata bytes AND an
+    /// unrelated record key byte-for-byte unchanged.
+    #[test]
+    fn put_record_envelope_synced_replacement_preserves_metadata_and_other_records() {
+        use crate::signing_journal_admission::MIN_ENVELOPE_LEN;
+        use crate::signing_reservation_journal::SigningJournalStorage;
+        let store = InMemoryConsensusStorage::new();
+        let (_rb, metadata_body, record_env, metadata_env) = framed_test_pair();
+        let key = framed_test_key();
+        // Seed metadata and a second unrelated record via existing primitives.
+        store
+            .put_signing_envelope_and_metadata_synced(&key, &record_env, &metadata_env)
+            .expect("seed record + metadata");
+        let mut other_key = framed_test_key();
+        other_key[6..12].copy_from_slice(b"OTHERR");
+        let other_env = framed_record_of_body(MIN_ENVELOPE_LEN, 0x77);
+        store
+            .put_signing_record_envelope_synced(&other_key, &other_env)
+            .expect("seed unrelated record");
+
+        // Replace the primary record only.
+        let replacement = framed_record_of_body(MIN_ENVELOPE_LEN + 8, 0x66);
+        store
+            .put_signing_record_envelope_synced(&key, &replacement)
+            .expect("replace primary record");
+
+        // Metadata is byte-for-byte unchanged.
+        assert_eq!(
+            store.get_signing_metadata().expect("read").expect("present"),
+            metadata_body
+        );
+        // The unrelated record is byte-for-byte unchanged (verbatim via bounded read).
+        let mut dst = [0u8; 4096];
+        let n = store
+            .read_signing_envelope_into(&other_key, &mut dst)
+            .expect("bounded read")
+            .expect("present");
+        assert_eq!(&dst[..n], &other_env[..]);
     }
 
     fn make_test_proposal(height: u64, suite_id: u16) -> BlockProposal {

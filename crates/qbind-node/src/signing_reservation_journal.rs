@@ -1272,6 +1272,35 @@ pub trait SigningJournalStorage: Send + Sync {
         let _ = (record_key, record_envelope, metadata_envelope);
         Err(BoundedStorageError::Unsupported)
     }
+
+    /// Run 422 — persist ONE already-outer-framed signing-record envelope at
+    /// `record_key` under the required synced durability barrier, WITHOUT
+    /// re-wrapping, re-encoding, allocating a second application envelope, or
+    /// touching the accounting metadata. The input is BORROWED, caller-framed
+    /// bytes (outer CRC + record body); this method does NOT decode, validate
+    /// signing eligibility, mint a continuation, advance journal/reserved-position
+    /// accounting, invoke a signer, verify a signature, or authorize delivery — it
+    /// establishes a STORAGE acknowledgement only. A durable backend MUST NOT
+    /// return `Ok(())` until the record is synchronized to stable storage; a
+    /// failed/uncertain result does NOT prove nothing was written. Unlike
+    /// [`Self::reissue_signing_envelope_synced`] (which reissues an EXACT already-
+    /// validated stored envelope) this method accepts a CHANGED record body for
+    /// the first `Reserved`→`Signed` write; unlike
+    /// [`Self::put_signing_envelope_and_metadata_synced`] it writes ONLY the
+    /// record key and performs NO metadata write (reserved-position accounting is
+    /// left untouched). Success establishes the backend's STORAGE acknowledgement
+    /// only: no signing permission, signature verification, journal-operation
+    /// acknowledgement, or delivery eligibility. The default refuses with
+    /// [`BoundedStorageError::Unsupported`] WITHOUT any write or allocating legacy
+    /// fallback; a supporting backend overrides it.
+    fn put_signing_record_envelope_synced(
+        &self,
+        record_key: &[u8],
+        record_envelope: &[u8],
+    ) -> Result<(), BoundedStorageError> {
+        let _ = (record_key, record_envelope);
+        Err(BoundedStorageError::Unsupported)
+    }
 }
 
 /// Run 422 D7-D10 Correction E — a bounded, process-local cache of recovered
@@ -4120,6 +4149,51 @@ mod tests {
             m.insert(MODEL_META_KEY.to_vec(), metadata_body);
             Ok(())
         }
+        /// Run 422 — record-ONLY synced override mirroring the model's framing and
+        /// fault behaviour but writing ONLY the record key (NO metadata). The
+        /// `writes` counter records the ATTEMPT (before faults) and `record_writes`
+        /// records an APPLIED record insert; a before-write refusal advances neither
+        /// map state nor `record_writes`, so tests distinguish fail-before-write
+        /// from store-then-error by the counter and direct stored-state inspection,
+        /// NOT by the returned error. (Labelled TEST fixture; MODEL storage-state
+        /// evidence only, NOT crash/power-loss durability.)
+        fn put_signing_record_envelope_synced(
+            &self,
+            record_key: &[u8],
+            record_envelope: &[u8],
+        ) -> Result<(), BoundedStorageError> {
+            self.writes.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            use crate::signing_journal_admission::OUTER_CRC_LEN;
+            // Same record-only fixed-framing preflight the backends apply, BEFORE
+            // any fault branch, model-owned copy, or map mutation.
+            crate::storage::preflight_framed_record_envelope(record_envelope)?;
+            if record_key.len() != crate::signing_journal_admission::JOURNAL_KEY_LEN {
+                return Err(BoundedStorageError::CapacityExceeded {
+                    stored_len: record_key.len(),
+                    capacity: crate::signing_journal_admission::JOURNAL_KEY_LEN,
+                });
+            }
+            // Fail BEFORE any write: the record map is NOT mutated and
+            // `record_writes` does not advance. Labelled TEST fault injector.
+            if *self.fail_writes.read().unwrap() {
+                return Err(BoundedStorageError::Io(BoundedDiag::WriteIo));
+            }
+            // MODEL format: strip the already-present outer CRC and store the
+            // record body record-ONLY. This `.to_vec()` is a MODEL-OWNED copy of the
+            // stored value — NOT allocation-free and NOT covered by any caller
+            // workspace reservation. Metadata is left untouched.
+            let record_body = record_envelope[OUTER_CRC_LEN..].to_vec();
+            if *self.store_then_error.read().unwrap() {
+                self.record_writes
+                    .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                self.map.write().unwrap().insert(record_key.to_vec(), record_body);
+                return Err(BoundedStorageError::Io(BoundedDiag::WriteIo));
+            }
+            self.record_writes
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            self.map.write().unwrap().insert(record_key.to_vec(), record_body);
+            Ok(())
+        }
         fn read_signing_envelope_into(
             &self,
             _journal_key: &[u8],
@@ -4284,6 +4358,58 @@ mod tests {
         assert_eq!(store.get_signing_metadata().unwrap().unwrap(), metadata_body);
         // The recorded write count proves a write WAS attempted (write-then-error),
         // which a correct journal must NOT treat as an acknowledged barrier.
+        assert_eq!(store.record_writes(), writes_before + 1);
+    }
+
+    /// Run 422 — record-ONLY primitive item 7: under `fail_writes` the write is
+    /// refused BEFORE any map mutation. An OLD record stays; the applied-write
+    /// counter does NOT advance; metadata is untouched. The before-write outcome
+    /// is proved by the counter and direct stored-state inspection, NOT inferred
+    /// from the returned error. (MODEL storage-state evidence, NOT crash/power
+    /// loss durability.)
+    #[test]
+    fn put_record_envelope_synced_model_fails_before_write() {
+        let store = Arc::new(ModelStore::default());
+        let p = position(SigningKind::Proposal, 51);
+        let b = binding(b"rec-item7a");
+        let (key, record_body) = reserved_kv(&p, &b);
+        // Seed a distinct OLD record and OLD metadata the refused write must not
+        // disturb.
+        let old_record = vec![0x11u8; record_body.len()];
+        let old_meta = vec![0x22u8; SigningJournalMetadata::new(DEFAULT_MAX_RESERVED_POSITIONS, 1).encode().len()];
+        store.overwrite(&key, old_record.clone());
+        store.overwrite(MODEL_META_KEY, old_meta.clone());
+        let writes_before = store.record_writes();
+        store.set_fail_writes(true);
+        let r = store.put_signing_record_envelope_synced(&key, &outer_frame(&record_body));
+        assert!(matches!(r, Err(BoundedStorageError::Io(BoundedDiag::WriteIo))));
+        // The OLD record remains and metadata is untouched; nothing was written.
+        assert_eq!(store.get_signing_record(&key).unwrap().unwrap(), old_record);
+        assert_eq!(store.get_signing_metadata().unwrap().unwrap(), old_meta);
+        assert_eq!(store.record_writes(), writes_before, "no record write occurred");
+    }
+
+    /// Run 422 — record-ONLY primitive item 7: under `store_then_error` the NEW
+    /// record becomes readable although the result is an error, and the applied-
+    /// write counter advances by exactly one. This is distinguished from fail-
+    /// before-write by the RECORDED count and stored state, NOT by assuming an
+    /// error means no write. Metadata is NOT written by this record-only route.
+    /// (MODEL storage-state evidence, NOT crash/power-loss durability.)
+    #[test]
+    fn put_record_envelope_synced_model_write_then_error() {
+        let store = Arc::new(ModelStore::default());
+        let p = position(SigningKind::Proposal, 52);
+        let b = binding(b"rec-item7b");
+        let (key, record_body) = reserved_kv(&p, &b);
+        let writes_before = store.record_writes();
+        store.set_store_then_error(true);
+        let r = store.put_signing_record_envelope_synced(&key, &outer_frame(&record_body));
+        assert!(matches!(r, Err(BoundedStorageError::Io(BoundedDiag::WriteIo))));
+        // Despite the error, the NEW (outer-CRC-stripped) record body is readable.
+        assert_eq!(store.get_signing_record(&key).unwrap().unwrap(), record_body);
+        // This record-only route wrote NO metadata.
+        assert!(store.get_signing_metadata().unwrap().is_none());
+        // The recorded write count proves a record write WAS attempted.
         assert_eq!(store.record_writes(), writes_before + 1);
     }
 
@@ -7516,6 +7642,50 @@ mod tests {
             let mut m = self.map.write().unwrap();
             m.insert(record_key.to_vec(), record_body);
             m.insert(MODEL_META_KEY.to_vec(), metadata_body);
+            Ok(())
+        }
+        /// Run 422 — record-ONLY synced override: writes ONLY the record key (NO
+        /// metadata), stripping the already-present outer CRC into the model's
+        /// record-only representation. `writes` counts the ATTEMPT (before faults);
+        /// `record_writes` counts an APPLIED record insert. A before-write refusal
+        /// advances neither the map nor `record_writes`, so a test distinguishes
+        /// fail-before-write from store-then-error by the counter and direct stored-
+        /// state inspection, NOT by the returned error. (TEST fixture; MODEL
+        /// storage-state evidence only, NOT crash/power-loss durability.)
+        fn put_signing_record_envelope_synced(
+            &self,
+            record_key: &[u8],
+            record_envelope: &[u8],
+        ) -> Result<(), BoundedStorageError> {
+            use crate::signing_journal_admission::OUTER_CRC_LEN;
+            self.writes.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            // Same record-only fixed-framing preflight the backends apply, BEFORE
+            // any fault branch, model-owned copy, or map mutation.
+            crate::storage::preflight_framed_record_envelope(record_envelope)?;
+            if record_key.len() != crate::signing_journal_admission::JOURNAL_KEY_LEN {
+                return Err(BoundedStorageError::CapacityExceeded {
+                    stored_len: record_key.len(),
+                    capacity: crate::signing_journal_admission::JOURNAL_KEY_LEN,
+                });
+            }
+            // Fail BEFORE any write: the record map is NOT mutated and record_writes
+            // is not advanced, so a before-write refusal is observed distinctly.
+            if *self.fail_writes.read().unwrap() {
+                return Err(BoundedStorageError::Io(BoundedDiag::WriteIo));
+            }
+            // Record-ONLY: strip the outer CRC and store the body; metadata key is
+            // left untouched. This `.to_vec()` is a MODEL-OWNED copy — NOT
+            // allocation-free and NOT covered by any caller workspace reservation.
+            let record_body = record_envelope[OUTER_CRC_LEN..].to_vec();
+            if *self.store_then_error.read().unwrap() {
+                self.record_writes
+                    .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                self.map.write().unwrap().insert(record_key.to_vec(), record_body);
+                return Err(BoundedStorageError::Io(BoundedDiag::WriteIo));
+            }
+            self.record_writes
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            self.map.write().unwrap().insert(record_key.to_vec(), record_body);
             Ok(())
         }
     }
