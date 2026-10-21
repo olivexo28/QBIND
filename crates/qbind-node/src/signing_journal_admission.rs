@@ -444,6 +444,277 @@ impl RetrievalWorkspaceOwner {
     }
 }
 
+// ============================================================================
+// RUN 422 — additive, isolated admitted FRESH-RESERVATION workspace.
+//
+// Unlike the retained-retrieval workspace above (which classifies and delivers a
+// signature through a borrowed output), this workspace backs the WRITE side of
+// the isolated admitted fresh-reservation route
+// ([`crate::signing_reservation_journal::SigningReservationJournal::reserve_for_sign_admitted`]):
+// it holds the non-allocating key buffer, the bounded classification-read
+// envelope buffer, and the two PRE-FRAMED (outer-CRC-prefixed) record/metadata
+// envelopes handed to the existing atomic envelope-pair storage primitive.
+//
+// It carries TWO reservations issued by the SAME installed operational
+// accountant:
+//
+// * `work_res` — the transient working-set coverage (this workspace layout plus
+//   the backend-local prefixed key, the borrowing decoder, the checksum
+//   accumulator, and the two transient encode `Vec`s produced while framing).
+// * `cont_res` — the coverage that, on a fresh acknowledged reservation, MOVES
+//   out of this workspace into the returned admitted continuation and then flows
+//   unchanged through consumption into the publication capability (never released
+//   and re-charged across that conversion).
+//
+// Field order places every buffer BEFORE both reservations, and `work_res`
+// before `cont_res`. There is NO custom `Drop`: on every non-fresh / error exit
+// the whole workspace drops, releasing BOTH reservations after its buffers; on
+// the fresh path the journal moves `cont_res` out by direct field access (a
+// partial move) and the remaining fields — buffers then `work_res` — are dropped
+// automatically in declaration order, so `work_res` is released after the buffers
+// it covered and `cont_res` persists with the continuation.
+// ============================================================================
+
+/// Fixed framed-record envelope length for a `Reserved` decision record: the
+/// 4-byte outer storage checksum over the fixed 96-byte reserved record body
+/// (92-byte header + 4-byte inner CRC, zero signature bytes) ⇒ exactly
+/// [`MIN_ENVELOPE_LEN`].
+pub(crate) const RESERVED_ENVELOPE_LEN: usize = MIN_ENVELOPE_LEN;
+
+/// Fixed framed-metadata envelope length: the 4-byte outer storage checksum over
+/// the fixed-length accounting-metadata encoding
+/// ([`crate::signing_reservation_journal::METADATA_ENCODED_LEN`]).
+pub(crate) const META_ENVELOPE_LEN: usize =
+    OUTER_CRC_LEN + crate::signing_reservation_journal::METADATA_ENCODED_LEN;
+
+/// RUN 422 — the covered working set for one admitted fresh-reservation attempt.
+///
+/// Consumed BY VALUE by the admitted reserve entrypoint. Every buffer field is
+/// declared before the two [`Reservation`] fields, and `work_res` before
+/// `cont_res`; Rust drops fields in declaration order, so covered bytes are
+/// destroyed before their coverage releases and there is no custom `Drop`. Only
+/// `cont_res` is exposed to the defining journal module (for the single direct
+/// field move on the fresh path); every other field is private and accessed
+/// through the methods below.
+#[derive(Debug)]
+pub(crate) struct AdmittedReserveWorkspace {
+    /// Non-allocating canonical journal key buffer.
+    key: [u8; JOURNAL_KEY_LEN],
+    /// Bounded classification-read envelope buffer (fresh-vs-existing probe).
+    read_env: [u8; ENVELOPE_CAP],
+    /// Pre-framed reserved-record envelope (outer CRC + 96-byte body).
+    rec_env: [u8; RESERVED_ENVELOPE_LEN],
+    /// Pre-framed accounting-metadata envelope (outer CRC + metadata body).
+    meta_env: [u8; META_ENVELOPE_LEN],
+    /// Valid journal-key length.
+    jkey_len: usize,
+    /// Valid classification-read length.
+    read_used: usize,
+    /// Valid framed-record length.
+    rec_used: usize,
+    /// Valid framed-metadata length.
+    meta_used: usize,
+    /// Transient working-set coverage, released when this workspace drops.
+    work_res: Reservation,
+    /// Continuation coverage. On the fresh path the defining journal module moves
+    /// this field directly into the returned admitted continuation; it is
+    /// otherwise released when this workspace drops.
+    pub(crate) cont_res: Reservation,
+}
+
+impl AdmittedReserveWorkspace {
+    fn new(work_res: Reservation, cont_res: Reservation) -> Self {
+        Self {
+            key: [0u8; JOURNAL_KEY_LEN],
+            read_env: [0u8; ENVELOPE_CAP],
+            rec_env: [0u8; RESERVED_ENVELOPE_LEN],
+            meta_env: [0u8; META_ENVELOPE_LEN],
+            jkey_len: 0,
+            read_used: 0,
+            rec_used: 0,
+            meta_used: 0,
+            work_res,
+            cont_res,
+        }
+    }
+
+    /// The fixed journal-key buffer, for the non-allocating key encoder.
+    pub(crate) fn journal_key_buf(&mut self) -> &mut [u8; JOURNAL_KEY_LEN] {
+        &mut self.key
+    }
+
+    /// Record the validated journal-key length after encoding.
+    pub(crate) fn set_jkey_len(&mut self, n: usize) {
+        self.jkey_len = n;
+    }
+
+    /// The encoded journal key bytes.
+    pub(crate) fn journal_key(&self) -> &[u8] {
+        &self.key[..self.jkey_len]
+    }
+
+    /// Disjoint borrows of the journal key (read) and the full mutable
+    /// classification-read envelope buffer (write), so a bounded probe read can
+    /// fill the envelope while referencing the key without a second allocation.
+    pub(crate) fn key_and_read_env(&mut self) -> (&[u8], &mut [u8]) {
+        (&self.key[..self.jkey_len], &mut self.read_env[..])
+    }
+
+    /// Record the validated classification-read length after a bounded read.
+    pub(crate) fn set_read_used(&mut self, n: usize) -> Result<(), WorkspaceCapacity> {
+        if n > ENVELOPE_CAP {
+            return Err(WorkspaceCapacity {
+                len: n,
+                capacity: ENVELOPE_CAP,
+            });
+        }
+        self.read_used = n;
+        Ok(())
+    }
+
+    /// The valid classification-read envelope bytes.
+    pub(crate) fn read_envelope(&self) -> &[u8] {
+        &self.read_env[..self.read_used]
+    }
+
+    /// Frame `body` into the reserved-record envelope buffer as
+    /// `[outer_crc32_be(4) | body]`, validating capacity BEFORE any mutation. On
+    /// a capacity refusal the buffer and `rec_used` are left unchanged.
+    pub(crate) fn set_framed_record(&mut self, body: &[u8]) -> Result<(), WorkspaceCapacity> {
+        let total = OUTER_CRC_LEN + body.len();
+        if total > RESERVED_ENVELOPE_LEN {
+            return Err(WorkspaceCapacity {
+                len: total,
+                capacity: RESERVED_ENVELOPE_LEN,
+            });
+        }
+        let crc = crate::storage::signing_journal_crc32(body);
+        self.rec_env[..OUTER_CRC_LEN].copy_from_slice(&crc.to_be_bytes());
+        self.rec_env[OUTER_CRC_LEN..total].copy_from_slice(body);
+        self.rec_used = total;
+        Ok(())
+    }
+
+    /// Frame `body` into the metadata envelope buffer as
+    /// `[outer_crc32_be(4) | body]`, validating capacity BEFORE any mutation. On
+    /// a capacity refusal the buffer and `meta_used` are left unchanged.
+    pub(crate) fn set_framed_metadata(&mut self, body: &[u8]) -> Result<(), WorkspaceCapacity> {
+        let total = OUTER_CRC_LEN + body.len();
+        if total > META_ENVELOPE_LEN {
+            return Err(WorkspaceCapacity {
+                len: total,
+                capacity: META_ENVELOPE_LEN,
+            });
+        }
+        let crc = crate::storage::signing_journal_crc32(body);
+        self.meta_env[..OUTER_CRC_LEN].copy_from_slice(&crc.to_be_bytes());
+        self.meta_env[OUTER_CRC_LEN..total].copy_from_slice(body);
+        self.meta_used = total;
+        Ok(())
+    }
+
+    /// The valid framed reserved-record envelope bytes.
+    pub(crate) fn framed_record(&self) -> &[u8] {
+        &self.rec_env[..self.rec_used]
+    }
+
+    /// The valid framed metadata envelope bytes.
+    pub(crate) fn framed_metadata(&self) -> &[u8] {
+        &self.meta_env[..self.meta_used]
+    }
+
+    /// True iff the transient working-set reservation was issued by `acct`.
+    pub(crate) fn is_work_covered_by(&self, acct: &SharedAccountant) -> bool {
+        self.work_res.is_issued_by(acct)
+    }
+
+    /// True iff the continuation reservation was issued by `acct`.
+    pub(crate) fn is_cont_covered_by(&self, acct: &SharedAccountant) -> bool {
+        self.cont_res.is_issued_by(acct)
+    }
+}
+
+/// The compile-time charge admitted for the transient working set of one
+/// admitted fresh-reservation attempt. It covers the actual workspace layout
+/// PLUS the concrete transient objects used during the attempt: the backend-local
+/// fixed prefixed key (`[u8; BACKEND_KEY_LEN]`), the borrowing decoder, the
+/// checksum accumulator, and the two transient encode `Vec`s produced while
+/// framing (a reserved-record encoding of at most [`RESERVED_ENVELOPE_LEN`] and a
+/// metadata encoding of at most [`META_ENVELOPE_LEN`]). Conservative and
+/// unconditional: it is charged in full before any covered object is constructed,
+/// regardless of which branch the attempt later takes.
+pub(crate) fn reserve_work_charge() -> u128 {
+    (core::mem::size_of::<AdmittedReserveWorkspace>()
+        + BACKEND_KEY_LEN
+        + core::mem::size_of::<BorrowedRecordView<'static>>()
+        + core::mem::size_of::<u32>()
+        + RESERVED_ENVELOPE_LEN
+        + META_ENVELOPE_LEN) as u128
+}
+
+/// The compile-time charge admitted for the continuation coverage of one
+/// admitted fresh-reservation attempt. It is the unconditional conservative
+/// maximum over the two representations the single continuation reservation must
+/// cover across the whole operation: the complete reservation RETURN
+/// (`Result<AdmittedReservationOutcome, AdmittedReserveError>`) and the complete
+/// continuation-to-publication CONVERSION (the held
+/// [`crate::signing_reservation_journal::AdmittedContinuation`] plus the
+/// publication-capability return
+/// `Result<AdmittedPublicationCapability, AdmittedConsumeError>`). The conversion
+/// introduces no additional independently owned object beyond these
+/// representations: consuming the continuation moves its embedded reservation
+/// into the publication capability without allocating a second covered object,
+/// so this bound dominates every intermediate. (Numeric `size_of` operands are
+/// left to implementation-time measurement; this is a conservative ownership
+/// bound, not a measured physical stack figure.)
+pub(crate) fn cont_charge() -> u128 {
+    use crate::signing_reservation_journal::{
+        AdmittedConsumeError, AdmittedContinuation, AdmittedPublicationCapability,
+        AdmittedReservationOutcome, AdmittedReserveError,
+    };
+    let ret =
+        core::mem::size_of::<Result<AdmittedReservationOutcome, AdmittedReserveError>>();
+    let conv = core::mem::size_of::<AdmittedContinuation>()
+        + core::mem::size_of::<Result<AdmittedPublicationCapability, AdmittedConsumeError>>();
+    (if ret > conv { ret } else { conv }) as u128
+}
+
+/// RUN 422 — the owner that admits and constructs the fresh-reservation
+/// workspace. Like [`RetrievalWorkspaceOwner`], it holds a clone of the EXISTING
+/// installed operational [`SharedAccountant`] (sharing its aggregate authority);
+/// it introduces no new ledger, ceiling, partition, or multiplicity.
+#[derive(Debug)]
+pub(crate) struct ReserveWorkspaceOwner {
+    accountant: SharedAccountant,
+}
+
+impl ReserveWorkspaceOwner {
+    /// Construct an owner from an accountant handle ALREADY INSTALLED in a signing
+    /// domain's association (cloned by the caller under the journal-domain guard
+    /// and moved in here). It reads no backend and selects no ledger, so no
+    /// caller-selected substitute backend can be introduced and no fresh ledger is
+    /// allocated.
+    pub(crate) fn from_installed(accountant: SharedAccountant) -> Self {
+        Self { accountant }
+    }
+
+    /// Admit both coverages. The transient working-set reservation is taken first,
+    /// then the continuation reservation; if the second refuses, the first is
+    /// released and NO workspace is constructed (clean rollback). Both reservations
+    /// are held before any covered buffer exists.
+    pub(crate) fn admit(&self) -> Result<AdmittedReserveWorkspace, SafetyStoreError> {
+        let work_res = self.accountant.reserve(reserve_work_charge())?;
+        let cont_res = match self.accountant.reserve(cont_charge()) {
+            Ok(r) => r,
+            Err(e) => {
+                work_res.release_now();
+                return Err(e);
+            }
+        };
+        Ok(AdmittedReserveWorkspace::new(work_res, cont_res))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
