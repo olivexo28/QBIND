@@ -997,6 +997,130 @@ pub(crate) enum AdmittedConsumeError {
     NoFreshLiveOp,
 }
 
+/// RUN 422 — the classification of an admitted publication attempt that reached
+/// a storage decision WITHOUT a prerequisite/ownership refusal. It carries NO
+/// lifetime and NO bytes. `Ok(..)` from
+/// [`SigningReservationJournal::publish_result_admitted`] INCLUDES the
+/// non-publishing variants below (`DifferentResultRefused`,
+/// `ReservedForeignBinding`, `PositionMismatch`, `MalformedRecord`, `NoRecord`):
+/// callers MUST inspect the variant and treat only `Published` /
+/// `AlreadyAcknowledged` as a durable acknowledged publication.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(not(test), allow(dead_code))]
+pub(crate) enum AdmittedPublishOutcome {
+    /// The supplied result was durably written (a `Reserved`->`Signed` transition,
+    /// or a fresh synced write re-establishing the durability barrier for readable-
+    /// but-unacknowledged identical `Signed` bytes) and this operation's live entry
+    /// is now acknowledged.
+    Published,
+    /// The stored record is already `Signed` with the IDENTICAL bytes AND this
+    /// operation already holds a durable acknowledgement in-process: idempotent
+    /// success with NO further write.
+    AlreadyAcknowledged,
+    /// A `Signed` obligation already exists whose retained bytes differ from the
+    /// supplied result (or a foreign-binding `Signed` record): refused WITHOUT
+    /// overwriting the existing obligation.
+    DifferentResultRefused,
+    /// A durable `Reserved` record exists at the position but its binding differs
+    /// from the capability's: refused WITHOUT a write.
+    ReservedForeignBinding,
+    /// The stored record decodes to a DIFFERENT position than the capability's
+    /// (a key-derivation/storage fault): refused WITHOUT a write.
+    PositionMismatch,
+    /// The stored envelope is structurally invalid (checksum/length/tag/magic/
+    /// version): refused WITHOUT a write. Distinct from a backend read failure.
+    MalformedRecord,
+    /// No record exists at the position: refused WITHOUT a write.
+    NoRecord,
+}
+
+/// RUN 422 — fixed-size, `Copy`, allocation-free refusal for the admitted
+/// publication entrypoint. Distinct from the allocating [`JournalError`]: no
+/// heap-bearing or attacker-controlled content is carried. These are the
+/// prerequisite, ownership, capacity, and backend FAILURES — kept separate from
+/// the non-publishing [`AdmittedPublishOutcome`] classifications returned in
+/// `Ok(..)`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(not(test), allow(dead_code))]
+pub(crate) enum AdmittedPublishError {
+    /// The journal domain has not been established (no `initialize`/`open`).
+    NotEstablished,
+    /// The journal domain is not in bounded live mode; the admitted route does not
+    /// auto-transition or fall back to the legacy allocating route.
+    NotBoundedMode,
+    /// No operational accountant association is installed; the route does not
+    /// auto-install one.
+    NoAssociation,
+    /// The signing-domain mutex was poisoned by a panic in another holder.
+    Lock,
+    /// The capability, signature output, or workspace is not covered by the
+    /// installed operational ledger + aggregate authority. Returned BEFORE any
+    /// storage access; distinct from a domain-token mismatch.
+    ForeignWorkspace,
+    /// The capability's ownership-domain token does not match THIS journal domain.
+    /// Returned BEFORE any storage access.
+    ForeignDomain,
+    /// No live, invoked operation matches the capability's position, operation id,
+    /// and binding (missing, stale, retired, mismatched, or un-invoked).
+    NoLiveInvokedOperation,
+    /// The admitted output holds no committed signature bytes; a structurally
+    /// invalid empty result is refused BEFORE any storage access or write.
+    EmptyOutput,
+    /// Journal accounting is uncertain; refused conservatively BEFORE any I/O with
+    /// NO reconciliation and NO mutation. The route never invokes legacy
+    /// reconciliation.
+    AccountingUncertain,
+    /// The canonical position key could not be encoded within its fixed layout.
+    KeyInvalid,
+    /// A stored envelope exceeds the admitted read-workspace capacity (bounded
+    /// refusal on the stored-record read). Kept separate from malformed records
+    /// and backend read failures.
+    WorkspaceCapacityExceeded,
+    /// The backend does not support the bounded envelope read/record-only write
+    /// path. There is NO allocating legacy fallback.
+    Unsupported,
+    /// A backend storage read/write error (fixed diagnostic code).
+    Storage(BoundedDiag),
+}
+
+/// RUN 422 — non-allocating signed-record encoder for the admitted publication
+/// route. Writes `[body(92) | sig | inner_crc(4)]` for a `Signed` record at
+/// `position`/`binding` over the BORROWED `signature` bytes directly into `dst`
+/// (the workspace's outgoing record region), returning the written length. It
+/// allocates NOTHING and copies the signature exactly once into the caller-
+/// covered destination — there is no owned signature `Vec` and no standalone
+/// encode `Vec`. The byte layout is identical to [`SigningDecisionRecord::encode`]
+/// for a `Signed` record, so a written record round-trips through
+/// [`SigningDecisionRecord::decode`] and `BorrowedRecordView::parse`. Fails closed
+/// if `dst` cannot hold the record or the signature length overflows `u32`.
+#[cfg_attr(not(test), allow(dead_code))]
+fn encode_signed_record_into(
+    position: &SigningPosition,
+    binding: &BindingDigest,
+    signature: &[u8],
+    dst: &mut [u8],
+) -> Result<usize, ()> {
+    let body_len = 92 + signature.len();
+    let total = body_len + 4;
+    if dst.len() < total {
+        return Err(());
+    }
+    let sig_len = u32::try_from(signature.len()).map_err(|_| ())?;
+    dst[0..4].copy_from_slice(&RECORD_MAGIC);
+    dst[4..6].copy_from_slice(&SIGNING_RECORD_FORMAT_VERSION.to_be_bytes());
+    dst[6] = position.kind.tag();
+    dst[7] = SigningRecordStage::Signed.tag();
+    dst[8..16].copy_from_slice(&position.validator_id.to_be_bytes());
+    dst[16..48].copy_from_slice(&position.network_genesis);
+    dst[48..56].copy_from_slice(&position.originating_view.to_be_bytes());
+    dst[56..88].copy_from_slice(&binding.0);
+    dst[88..92].copy_from_slice(&sig_len.to_be_bytes());
+    dst[92..body_len].copy_from_slice(signature);
+    let crc = signing_journal_crc32(&dst[..body_len]);
+    dst[body_len..total].copy_from_slice(&crc.to_be_bytes());
+    Ok(total)
+}
+
 /// RUN 422 — the ONE shared live-consumption state transition, performed under a
 /// lock the caller already holds. It checks the foreign-domain token FIRST (no
 /// live mutation on a foreign continuation), then requires a live entry at
@@ -3325,6 +3449,287 @@ impl SigningReservationJournal {
         self.retire_acknowledged_operation(&cap.inner)
     }
 
+    /// RUN 422 — admit the covered publication workspace from the journal's
+    /// INSTALLED accountant association. Acquires the journal-domain guard only to
+    /// read and clone the installed operational accountant, RELEASES it, then
+    /// admits the complete working-set charge through that accountant and
+    /// constructs the covered workspace. It selects no caller-supplied accountant,
+    /// auto-installs nothing, allocates no new ledger, and raises no ceiling. A
+    /// workspace-factory admission failure is reported as a
+    /// [`WorkspaceAdmissionError`], kept DISTINCT from the publication identity
+    /// failures of [`publish_result_admitted`](Self::publish_result_admitted).
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub(crate) fn admit_publish_workspace(
+        &self,
+    ) -> Result<crate::signing_journal_admission::AdmittedPublishWorkspace, WorkspaceAdmissionError>
+    {
+        let accountant = {
+            let inner = self
+                .domain
+                .inner
+                .lock()
+                .map_err(|_| WorkspaceAdmissionError::Lock)?;
+            match inner.admission.as_ref() {
+                None => return Err(WorkspaceAdmissionError::NoAssociation),
+                Some(a) => a.clone(),
+            }
+            // Domain guard released here, before any reservation is attempted.
+        };
+        crate::signing_journal_admission::PublishWorkspaceOwner::from_installed(accountant)
+            .admit()
+            .map_err(map_admission_error)
+    }
+
+    /// RUN 422 — the additive, isolated ADMITTED publication route. It PUBLISHES an
+    /// already-produced signature (supplied through the borrowed admitted `out`) as
+    /// a checked `Reserved`->`Signed` state transition; it NEVER invokes a signer,
+    /// mints a continuation, verifies a certificate, delivers a signature, or
+    /// authorizes network use. The capability and output are BORROWED and remain
+    /// caller-owned; the workspace is mutably borrowed and remains caller-owned
+    /// after return (nothing is moved out, so a permitted retry reuses the SAME
+    /// capability/output/workspace).
+    ///
+    /// `Ok(..)` INCLUDES non-publishing [`AdmittedPublishOutcome`] classifications
+    /// (`DifferentResultRefused`, `ReservedForeignBinding`, `PositionMismatch`,
+    /// `MalformedRecord`, `NoRecord`): callers MUST inspect the variant and treat
+    /// only `Published`/`AlreadyAcknowledged` as a durable acknowledged
+    /// publication. Prerequisite, ownership, capacity, and backend failures are
+    /// [`AdmittedPublishError`]s.
+    ///
+    /// The ownership domain is acquired ONCE and held through classification, the
+    /// synced record-only write, and the acknowledgement update. The fixed check
+    /// order is: (1) established journal, (2) bounded live mode, (3) installed
+    /// accountant with matching capability/output/workspace coverage, (4) actual
+    /// capability-domain token, (5) nonempty committed output, (6) uncertainty
+    /// latch (refused BEFORE any I/O with no reconciliation or mutation), (7)
+    /// matching live position/operation-id/binding/`invoked`, (8) bounded key
+    /// encode and stored-record read, (9) structural+semantic record checks, (10)
+    /// the stage-specific publication decision. It uses ONLY the completed record-
+    /// only synced primitive, never the allocating legacy `record_signed_result`,
+    /// and never re-acquires the journal-domain mutex. On any pre-write refusal or
+    /// write error the incoming live-state flags are preserved (an unacknowledged
+    /// operation keeps `result_acked == false`); `result_acked` is set true only
+    /// AFTER a successful storage acknowledgement, via an infallible update under
+    /// the same guard.
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub(crate) fn publish_result_admitted(
+        &self,
+        cap: &AdmittedPublicationCapability,
+        out: &crate::signing_journal_admission::AdmittedOutput,
+        ws: &mut crate::signing_journal_admission::AdmittedPublishWorkspace,
+    ) -> Result<AdmittedPublishOutcome, AdmittedPublishError> {
+        use crate::signing_journal_admission::BorrowedRecordView;
+
+        let mut inner = self
+            .domain
+            .inner
+            .lock()
+            .map_err(|_| AdmittedPublishError::Lock)?;
+
+        // (1) Established journal.
+        inner
+            .established
+            .ok_or(AdmittedPublishError::NotEstablished)?;
+
+        // (2) Bounded live mode required; never auto-transition.
+        if inner.live.bounded_capacity().is_none() {
+            return Err(AdmittedPublishError::NotBoundedMode);
+        }
+
+        // (3) Installed accountant required; the capability, output, AND workspace
+        //     must all be covered by it. Checked BEFORE any storage access; never
+        //     auto-install. (Ledger identity, distinct from the domain token.)
+        {
+            let accountant = inner
+                .admission
+                .as_ref()
+                .ok_or(AdmittedPublishError::NoAssociation)?;
+            if !(cap.is_covered_by(accountant)
+                && out.is_covered_by(accountant)
+                && ws.is_covered_by(accountant))
+            {
+                return Err(AdmittedPublishError::ForeignWorkspace);
+            }
+        }
+
+        // (4) Actual capability-domain token.
+        if cap.inner.domain_token != self.domain.token {
+            return Err(AdmittedPublishError::ForeignDomain);
+        }
+
+        // (5) Nonempty committed output span. The closed `AdmittedOutput` API bounds
+        //     `used()` by its capacity, so an oversized output is unrepresentable;
+        //     an EMPTY result is a structurally invalid publication refused BEFORE
+        //     any storage access (a `Signed` record must carry a signature).
+        let signature = out.view();
+        if signature.is_empty() {
+            return Err(AdmittedPublishError::EmptyOutput);
+        }
+
+        // (6) Conservative uncertainty refusal: no reconciliation, no write, no
+        //     mutation.
+        if inner.accounting_uncertain {
+            return Err(AdmittedPublishError::AccountingUncertain);
+        }
+
+        // (7) Operation ownership: only the live, invoked operation identified by
+        //     `cap` may publish. Missing/foreign/stale/retired/mismatched/un-invoked
+        //     is refused. Capture the current acknowledgement knowledge.
+        let already_acked = match inner.live.get(&cap.inner.position) {
+            Some(ls)
+                if ls.operation_id == cap.inner.operation_id
+                    && ls.binding == cap.inner.binding
+                    && ls.invoked =>
+            {
+                ls.result_acked
+            }
+            _ => return Err(AdmittedPublishError::NoLiveInvokedOperation),
+        };
+
+        // (8) Non-allocating key encode, then a single bounded stored-record read.
+        let klen = cap
+            .inner
+            .position
+            .encode_key_into(ws.journal_key_buf())
+            .map_err(|_| AdmittedPublishError::KeyInvalid)?;
+        ws.set_jkey_len(klen);
+        let used = {
+            let (jk, env) = ws.key_and_read_env();
+            match self.store.read_signing_envelope_into(jk, env) {
+                Ok(None) => None,
+                Ok(Some(n)) => Some(n),
+                Err(BoundedStorageError::CapacityExceeded { .. }) => {
+                    return Err(AdmittedPublishError::WorkspaceCapacityExceeded);
+                }
+                Err(BoundedStorageError::Unsupported) => {
+                    return Err(AdmittedPublishError::Unsupported);
+                }
+                Err(BoundedStorageError::Corruption(d)) | Err(BoundedStorageError::Io(d)) => {
+                    return Err(AdmittedPublishError::Storage(d));
+                }
+            }
+        };
+
+        // (9) Absent record is a non-writing classification.
+        let n = match used {
+            None => return Ok(AdmittedPublishOutcome::NoRecord),
+            Some(n) => n,
+        };
+        ws.set_read_used(n)
+            .map_err(|_| AdmittedPublishError::Storage(BoundedDiag::EnvelopeInvalid))?;
+
+        // Structural + semantic decode of the stored record. A structural fault is
+        // the non-writing `MalformedRecord` classification (distinct from a backend
+        // read failure and from the workspace-size refusal above).
+        let stage;
+        let decoded_position;
+        let decoded_binding;
+        let stored_sig_matches;
+        {
+            let view = match BorrowedRecordView::parse(ws.read_envelope()) {
+                Ok(v) => v,
+                Err(_) => return Ok(AdmittedPublishOutcome::MalformedRecord),
+            };
+            if view.magic != &RECORD_MAGIC[..] || view.version != SIGNING_RECORD_FORMAT_VERSION {
+                return Ok(AdmittedPublishOutcome::MalformedRecord);
+            }
+            let kind = match SigningKind::from_tag(view.kind_tag) {
+                Some(k) => k,
+                None => return Ok(AdmittedPublishOutcome::MalformedRecord),
+            };
+            stage = match SigningRecordStage::from_tag(view.stage_tag) {
+                Some(st) => st,
+                None => return Ok(AdmittedPublishOutcome::MalformedRecord),
+            };
+            let mut genesis = [0u8; 32];
+            genesis.copy_from_slice(view.network_genesis);
+            decoded_position = SigningPosition {
+                validator_id: view.validator_id,
+                network_genesis: genesis,
+                kind,
+                originating_view: view.originating_view,
+            };
+            let mut bind = [0u8; 32];
+            bind.copy_from_slice(view.binding);
+            decoded_binding = BindingDigest(bind);
+            // A `Reserved` record carries no signature, so this is false there.
+            stored_sig_matches = view.signature == signature;
+        }
+
+        // Position/key-derivation invariant: a record under this key for another
+        // position is a non-writing classification.
+        if decoded_position != cap.inner.position {
+            return Ok(AdmittedPublishOutcome::PositionMismatch);
+        }
+
+        // (10) Stage-specific publication decision.
+        let needs_write = match stage {
+            SigningRecordStage::Reserved => {
+                if decoded_binding != cap.inner.binding {
+                    return Ok(AdmittedPublishOutcome::ReservedForeignBinding);
+                }
+                // The permitted transition: a durable reservation becomes Signed.
+                true
+            }
+            SigningRecordStage::Signed => {
+                if decoded_binding != cap.inner.binding || !stored_sig_matches {
+                    // A foreign binding or different retained bytes: never overwrite
+                    // an existing signed obligation.
+                    return Ok(AdmittedPublishOutcome::DifferentResultRefused);
+                }
+                // Identical retained bytes. Idempotent success ONLY once this
+                // operation holds a durable acknowledgement in-process; otherwise a
+                // fresh synced write re-establishes the durability barrier before
+                // acknowledgement is claimed (readable bytes alone are not a barrier).
+                if already_acked {
+                    return Ok(AdmittedPublishOutcome::AlreadyAcknowledged);
+                }
+                true
+            }
+        };
+
+        // All fallible preparation is complete BEFORE the write. Frame the signed
+        // record IN PLACE into the outgoing envelope from the borrowed signature
+        // bytes (no owned signature copy), then perform the record-ONLY synced write
+        // via the completed primitive.
+        debug_assert!(needs_write);
+        let rec_len = encode_signed_record_into(
+            &cap.inner.position,
+            &cap.inner.binding,
+            signature,
+            ws.record_region_mut(),
+        )
+        .map_err(|_| AdmittedPublishError::Storage(BoundedDiag::EnvelopeInvalid))?;
+        ws.finalize_framed_record(rec_len)
+            .map_err(|_| AdmittedPublishError::Storage(BoundedDiag::EnvelopeInvalid))?;
+        match self
+            .store
+            .put_signing_record_envelope_synced(ws.journal_key(), ws.framed_record())
+        {
+            Ok(()) => {}
+            Err(BoundedStorageError::CapacityExceeded { .. }) => {
+                return Err(AdmittedPublishError::Storage(BoundedDiag::EnvelopeInvalid));
+            }
+            Err(BoundedStorageError::Unsupported) => {
+                return Err(AdmittedPublishError::Unsupported);
+            }
+            Err(BoundedStorageError::Corruption(d)) | Err(BoundedStorageError::Io(d)) => {
+                // A write error does NOT prove nothing was stored; but acknowledgement
+                // knowledge is updated ONLY after a SUCCESSFUL ack, so leave
+                // `result_acked` unchanged and refuse. A retry reuses the same
+                // capability/output and re-issues the synced write.
+                return Err(AdmittedPublishError::Storage(d));
+            }
+        }
+
+        // Only AFTER the durable storage acknowledgement: set this operation's live
+        // acknowledgement through an infallible update under the SAME guard. No
+        // fallible post-acknowledgement step can relabel this as a pre-write refusal.
+        if let Some(ls) = inner.live.get_mut(&cap.inner.position) {
+            ls.result_acked = true;
+        }
+        Ok(AdmittedPublishOutcome::Published)
+    }
     /// Test-only: attach a handle over `store` WITHOUT establishing a limit, so
     /// the additive, read-only retained-retrieval path can be exercised against
     /// directly-written records. (The retrieval path takes no new reservation and
@@ -3504,6 +3909,30 @@ impl SigningReservationJournal {
         if let Some(ls) = inner.live.get_mut(position) {
             ls.invoked = invoked;
         }
+    }
+
+    /// Test-only: force the `result_acked` flag of an existing live entry at
+    /// `position`, modelling a readable-but-unacknowledged `Signed` record (a
+    /// prior write stored bytes but its durable acknowledgement was not
+    /// established in-process) WITHOUT re-running the full flow. It mutates only
+    /// the matched live entry and touches no storage or accounting state.
+    #[cfg(any(test, feature = "test-utils"))]
+    pub(crate) fn set_result_acked_for_test(&self, position: &SigningPosition, acked: bool) {
+        let mut inner = self.domain.inner.lock().expect("domain lock");
+        if let Some(ls) = inner.live.get_mut(position) {
+            ls.result_acked = acked;
+        }
+    }
+
+    /// Test-only (DEFENSIVE fixture): clear the installed accountant association
+    /// AFTER bounded live mode was entered, so the admitted publication route's
+    /// defensive `NoAssociation` precondition (step 3) can be exercised. Genuine
+    /// control flow never clears a set-once association, so this exists solely to
+    /// drive that defensive refusal; it adds no production mutation surface.
+    #[cfg(any(test, feature = "test-utils"))]
+    pub(crate) fn clear_admission_for_test(&self) {
+        let mut inner = self.domain.inner.lock().expect("domain lock");
+        inner.admission = None;
     }
 
     /// Run 422 D7-D10 Correction E — conservative accounting revalidation.
@@ -7470,6 +7899,7 @@ mod tests {
         map: Arc<RwLock<StdHashMap<Vec<u8>, Vec<u8>>>>,
         fail_writes: RwLock<bool>,
         store_then_error: RwLock<bool>,
+        force_unsupported: RwLock<bool>,
         reads: std::sync::atomic::AtomicUsize,
         writes: std::sync::atomic::AtomicUsize,
         record_writes: std::sync::atomic::AtomicUsize,
@@ -7495,6 +7925,16 @@ mod tests {
         }
         fn record_writes(&self) -> usize {
             self.record_writes.load(std::sync::atomic::Ordering::SeqCst)
+        }
+        fn set_force_unsupported(&self, v: bool) {
+            *self.force_unsupported.write().unwrap() = v;
+        }
+        /// Inject a raw stored record body (record-only representation, WITHOUT
+        /// the outer storage CRC) under `key`, so a test can model a malformed,
+        /// position-foreign, or over-large stored record the admitted read path
+        /// then observes. No fault/counter bookkeeping is performed.
+        fn insert_raw_record(&self, key: &[u8], body: &[u8]) {
+            self.map.write().unwrap().insert(key.to_vec(), body.to_vec());
         }
     }
 
@@ -7567,6 +8007,9 @@ mod tests {
             dst: &mut [u8],
         ) -> Result<Option<usize>, BoundedStorageError> {
             use crate::signing_journal_admission::OUTER_CRC_LEN;
+            if *self.force_unsupported.read().unwrap() {
+                return Err(BoundedStorageError::Unsupported);
+            }
             self.reads.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
             let m = self.map.read().unwrap();
             match m.get(journal_key) {
@@ -7658,6 +8101,9 @@ mod tests {
             record_envelope: &[u8],
         ) -> Result<(), BoundedStorageError> {
             use crate::signing_journal_admission::OUTER_CRC_LEN;
+            if *self.force_unsupported.read().unwrap() {
+                return Err(BoundedStorageError::Unsupported);
+            }
             self.writes.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
             // Same record-only fixed-framing preflight the backends apply, BEFORE
             // any fault branch, model-owned copy, or map mutation.
@@ -8348,6 +8794,808 @@ mod tests {
 
         // The required live ValidatedRecord is retained throughout; drop it only
         // after the whole admitted lifecycle has been observed.
+        drop(validated);
+    }
+
+    // =======================================================================
+    // RUN 422 — isolated admitted SIGNED-RESULT PUBLICATION route: focused
+    // acceptance evidence. Drives the REAL `publish_result_admitted` route with
+    // the existing admitted wrappers (capability from reserve->consume, output
+    // from the retrieval admission factory) and the envelope-capable store's
+    // implemented record-only synced method. No signer/consumer wiring.
+    // =======================================================================
+
+    /// Mint a REAL admitted publication capability through the admitted
+    /// reserve->consume flow (live entry invoked, result-unacknowledged).
+    fn admitted_publication_cap(
+        journal: &SigningReservationJournal,
+        p: &SigningPosition,
+        b: &BindingDigest,
+    ) -> AdmittedPublicationCapability {
+        let ws = journal.admit_reserve_workspace().expect("admit reserve ws");
+        let cont = match journal.reserve_for_sign_admitted(p, b, ws).expect("fresh reserve") {
+            AdmittedReservationOutcome::FreshlyReserved(c) => c,
+            other => panic!("expected FreshlyReserved, got {:?}", other),
+        };
+        journal
+            .consume_for_signing_admitted(cont)
+            .expect("consume -> publication capability")
+    }
+
+    /// Admit a caller-owned signature output against `acct` and commit `sig`.
+    fn admitted_output_bytes(acct: &SharedAccountant, sig: &[u8]) -> AdmittedOutput {
+        let mut out = RetrievalWorkspaceOwner::from_installed(acct.clone())
+            .admit_output()
+            .expect("admit output");
+        out.set(sig).expect("set output bytes");
+        out
+    }
+
+    /// Decode the DIRECTLY stored record-only body at `p` (no outer CRC), so a
+    /// test inspects durable stored state independent of any returned error.
+    fn stored_record(
+        store: &EnvelopeModelStore,
+        p: &SigningPosition,
+    ) -> Option<SigningDecisionRecord> {
+        store
+            .get_signing_record(&p.storage_key())
+            .expect("read stored record")
+            .map(|b| SigningDecisionRecord::decode(&b).expect("decode stored record"))
+    }
+
+    /// Successful Reserved->Signed publication: exact stored signature, the live
+    /// entry acknowledged, exactly one record-only write, and the borrowed
+    /// capability/output left unchanged (identity + bytes/length preserved).
+    #[test]
+    fn publish_reserved_to_signed_success_and_ack() {
+        let _serial = bounded_serial();
+        let (journal, acct, store) = envelope_journal(4, 1u128 << 40);
+        let p = position(SigningKind::Proposal, 1);
+        let b = binding(b"pub-ok");
+        let cap = admitted_publication_cap(&journal, &p, &b);
+        let sig = vec![0x5Au8; 2420];
+        let out = admitted_output_bytes(&acct, &sig);
+        let mut ws = journal.admit_publish_workspace().expect("admit publish ws");
+
+        let used_before = out.used();
+        let pos_before = cap.position();
+        let rw_before = store.record_writes();
+
+        assert_eq!(
+            journal.publish_result_admitted(&cap, &out, &mut ws),
+            Ok(AdmittedPublishOutcome::Published)
+        );
+        assert_eq!(store.record_writes(), rw_before + 1, "exactly one record write");
+
+        // Durable stored state is a Signed record carrying the EXACT bytes.
+        let rec = stored_record(&store, &p).expect("signed record present");
+        assert_eq!(rec.stage, SigningRecordStage::Signed);
+        assert_eq!(rec.retained_signature.as_deref(), Some(&sig[..]));
+        assert_eq!(rec.binding, b);
+
+        // Borrowed caller objects are unchanged (bytes/length + capability identity).
+        assert_eq!(out.view(), &sig[..], "output bytes unchanged");
+        assert_eq!(out.used(), used_before, "output length unchanged");
+        assert_eq!(cap.position(), pos_before, "capability identity unchanged");
+        assert!(cap.is_covered_by(&acct), "capability coverage still live");
+    }
+
+    /// Identical ACKNOWLEDGED retry performs NO further write.
+    #[test]
+    fn publish_identical_acknowledged_retry_no_write() {
+        let _serial = bounded_serial();
+        let (journal, acct, store) = envelope_journal(4, 1u128 << 40);
+        let p = position(SigningKind::Proposal, 2);
+        let b = binding(b"ack-retry");
+        let cap = admitted_publication_cap(&journal, &p, &b);
+        let sig = b"same-signature-bytes".to_vec();
+        let out = admitted_output_bytes(&acct, &sig);
+        let mut ws = journal.admit_publish_workspace().unwrap();
+
+        assert_eq!(
+            journal.publish_result_admitted(&cap, &out, &mut ws),
+            Ok(AdmittedPublishOutcome::Published)
+        );
+        let rw = store.record_writes();
+        // Same capability, same output, same workspace — a permitted retry.
+        assert_eq!(
+            journal.publish_result_admitted(&cap, &out, &mut ws),
+            Ok(AdmittedPublishOutcome::AlreadyAcknowledged)
+        );
+        assert_eq!(store.record_writes(), rw, "no write on acknowledged retry");
+    }
+
+    /// Identical UNACKNOWLEDGED retry (readable Signed bytes but no in-process
+    /// acknowledgement) performs a FRESH successful synced write before Published:
+    /// readable bytes alone are not a durability barrier.
+    #[test]
+    fn publish_identical_unacknowledged_retry_fresh_write() {
+        let _serial = bounded_serial();
+        let (journal, acct, store) = envelope_journal(4, 1u128 << 40);
+        let p = position(SigningKind::Proposal, 3);
+        let b = binding(b"unack-retry");
+        let cap = admitted_publication_cap(&journal, &p, &b);
+        let sig = b"retained-sig".to_vec();
+        let out = admitted_output_bytes(&acct, &sig);
+        let mut ws = journal.admit_publish_workspace().unwrap();
+
+        assert_eq!(
+            journal.publish_result_admitted(&cap, &out, &mut ws),
+            Ok(AdmittedPublishOutcome::Published)
+        );
+        // Model a readable-but-unacknowledged state: the Signed bytes remain
+        // durably stored, but the in-process acknowledgement is cleared.
+        journal.set_result_acked_for_test(&p, false);
+        let rw = store.record_writes();
+        assert_eq!(
+            journal.publish_result_admitted(&cap, &out, &mut ws),
+            Ok(AdmittedPublishOutcome::Published)
+        );
+        assert_eq!(
+            store.record_writes(),
+            rw + 1,
+            "a fresh durability barrier is re-established before acknowledgement"
+        );
+    }
+
+    /// A DIFFERENT result for the same operation is refused WITHOUT overwriting
+    /// the existing signed obligation.
+    #[test]
+    fn publish_different_result_refused_no_overwrite() {
+        let _serial = bounded_serial();
+        let (journal, acct, store) = envelope_journal(4, 1u128 << 40);
+        let p = position(SigningKind::Proposal, 4);
+        let b = binding(b"diff");
+        let cap = admitted_publication_cap(&journal, &p, &b);
+        let sig_a = b"first-signature".to_vec();
+        let out_a = admitted_output_bytes(&acct, &sig_a);
+        let mut ws = journal.admit_publish_workspace().unwrap();
+        assert_eq!(
+            journal.publish_result_admitted(&cap, &out_a, &mut ws),
+            Ok(AdmittedPublishOutcome::Published)
+        );
+        let rw = store.record_writes();
+
+        let sig_b = b"second-signature-DIFFERENT".to_vec();
+        let out_b = admitted_output_bytes(&acct, &sig_b);
+        assert_eq!(
+            journal.publish_result_admitted(&cap, &out_b, &mut ws),
+            Ok(AdmittedPublishOutcome::DifferentResultRefused)
+        );
+        assert_eq!(store.record_writes(), rw, "refusal performs no write");
+        let rec = stored_record(&store, &p).expect("record present");
+        assert_eq!(
+            rec.retained_signature.as_deref(),
+            Some(&sig_a[..]),
+            "existing signed obligation is NOT overwritten"
+        );
+    }
+
+    /// Prerequisite refusals happen BEFORE any storage access: NotEstablished,
+    /// NotBoundedMode, NoAssociation (defensive), AccountingUncertain, and
+    /// EmptyOutput — each with zero storage reads where a journal/store exists.
+    #[test]
+    fn publish_prerequisite_refusals_before_io() {
+        let _serial = bounded_serial();
+
+        // Unestablished handle: NotEstablished, no read.
+        {
+            let store = Arc::new(EnvelopeModelStore::new());
+            let journal = SigningReservationJournal::attach_unestablished_for_test(
+                store.clone() as Arc<dyn SigningJournalStorage>,
+            );
+            let agg = AggregateAuthority::new();
+            agg.bind(1u128 << 40).unwrap();
+            let acct = SharedAccountant::new(agg);
+            acct.bind_cap(1u128 << 40).unwrap();
+            // A capability shell cannot exist without a live op; reach step (1)
+            // before ownership by constructing the output/workspace only.
+            let out = admitted_output_bytes(&acct, b"x");
+            let mut ws = crate::signing_journal_admission::PublishWorkspaceOwner::from_installed(
+                acct.clone(),
+            )
+            .admit()
+            .unwrap();
+            // Build a throwaway real capability on a SEPARATE established journal so
+            // the borrowed shapes are genuine, then drive the unestablished handle.
+            let (jr, _a, _s) = envelope_journal(1, 1u128 << 40);
+            let cap = admitted_publication_cap(&jr, &position(SigningKind::Proposal, 1), &binding(b"shell"));
+            let reads_before = store.reads();
+            assert_eq!(
+                journal.publish_result_admitted(&cap, &out, &mut ws),
+                Err(AdmittedPublishError::NotEstablished)
+            );
+            assert_eq!(store.reads(), reads_before, "no read before NotEstablished");
+        }
+
+        // Established but NOT bounded (legacy): NotBoundedMode.
+        {
+            let store = Arc::new(EnvelopeModelStore::new());
+            let journal = SigningReservationJournal::initialize(
+                store.clone() as Arc<dyn SigningJournalStorage>,
+                DEFAULT_MAX_RESERVED_POSITIONS,
+            )
+            .unwrap();
+            let agg = AggregateAuthority::new();
+            agg.bind(1u128 << 40).unwrap();
+            let acct = SharedAccountant::new(agg);
+            acct.bind_cap(1u128 << 40).unwrap();
+            journal.install_accountant_association(&acct).unwrap();
+            let out = admitted_output_bytes(&acct, b"x");
+            let mut ws = crate::signing_journal_admission::PublishWorkspaceOwner::from_installed(
+                acct.clone(),
+            )
+            .admit()
+            .unwrap();
+            let (jr, _a, _s) = envelope_journal(1, 1u128 << 40);
+            let cap = admitted_publication_cap(&jr, &position(SigningKind::Proposal, 1), &binding(b"shell"));
+            let reads_before = store.reads();
+            assert_eq!(
+                journal.publish_result_admitted(&cap, &out, &mut ws),
+                Err(AdmittedPublishError::NotBoundedMode)
+            );
+            assert_eq!(store.reads(), reads_before, "no read before NotBoundedMode");
+        }
+
+        // Established + bounded, association defensively cleared: NoAssociation.
+        {
+            let (journal, acct, store) = envelope_journal(4, 1u128 << 40);
+            let p = position(SigningKind::Proposal, 5);
+            let b = binding(b"no-assoc");
+            let cap = admitted_publication_cap(&journal, &p, &b);
+            let out = admitted_output_bytes(&acct, b"sigbytes");
+            let mut ws = journal.admit_publish_workspace().unwrap();
+            journal.clear_admission_for_test();
+            let reads_before = store.reads();
+            assert_eq!(
+                journal.publish_result_admitted(&cap, &out, &mut ws),
+                Err(AdmittedPublishError::NoAssociation)
+            );
+            assert_eq!(store.reads(), reads_before, "no read before NoAssociation");
+        }
+
+        // Accounting uncertain: refused BEFORE I/O with no mutation.
+        {
+            let (journal, acct, store) = envelope_journal(4, 1u128 << 40);
+            let p = position(SigningKind::Proposal, 6);
+            let b = binding(b"uncertain");
+            let cap = admitted_publication_cap(&journal, &p, &b);
+            let out = admitted_output_bytes(&acct, b"sigbytes");
+            let mut ws = journal.admit_publish_workspace().unwrap();
+            journal.set_accounting_uncertain_for_test(true);
+            let reads_before = store.reads();
+            let uncertain_before = journal.accounting_uncertain_for_test();
+            assert_eq!(
+                journal.publish_result_admitted(&cap, &out, &mut ws),
+                Err(AdmittedPublishError::AccountingUncertain)
+            );
+            assert_eq!(store.reads(), reads_before, "no read before AccountingUncertain");
+            assert_eq!(
+                journal.accounting_uncertain_for_test(),
+                uncertain_before,
+                "uncertainty latch unchanged (no reconciliation)"
+            );
+        }
+
+        // Empty committed output: structurally invalid, refused BEFORE I/O.
+        {
+            let (journal, acct, store) = envelope_journal(4, 1u128 << 40);
+            let p = position(SigningKind::Proposal, 7);
+            let b = binding(b"empty");
+            let cap = admitted_publication_cap(&journal, &p, &b);
+            let out = admitted_output_bytes(&acct, b""); // empty commit
+            let mut ws = journal.admit_publish_workspace().unwrap();
+            let reads_before = store.reads();
+            assert_eq!(
+                journal.publish_result_admitted(&cap, &out, &mut ws),
+                Err(AdmittedPublishError::EmptyOutput)
+            );
+            assert_eq!(store.reads(), reads_before, "no read before EmptyOutput");
+        }
+    }
+
+    /// Ownership refusals: a foreign-domain capability (same ledger, different
+    /// domain) is `ForeignDomain`; a foreign-ledger output/workspace is
+    /// `ForeignWorkspace`; a retired or un-invoked operation is
+    /// `NoLiveInvokedOperation`. Domain identity is kept DISTINCT from ledger
+    /// identity.
+    #[test]
+    fn publish_ownership_refusals() {
+        let _serial = bounded_serial();
+
+        // Shared accountant installed in TWO distinct domains (A and B). A
+        // capability minted on B is covered by the shared ledger (so coverage
+        // passes) yet carries B's domain token -> ForeignDomain on A, before I/O.
+        {
+            let agg = AggregateAuthority::new();
+            agg.bind(1u128 << 40).unwrap();
+            let acct = SharedAccountant::new(agg);
+            acct.bind_cap(1u128 << 40).unwrap();
+            let make = |acct: &SharedAccountant| {
+                let store = Arc::new(EnvelopeModelStore::new());
+                let journal = SigningReservationJournal::initialize(
+                    store.clone() as Arc<dyn SigningJournalStorage>,
+                    DEFAULT_MAX_RESERVED_POSITIONS,
+                )
+                .unwrap();
+                journal.install_accountant_association(acct).unwrap();
+                journal.enter_bounded_live_mode(4).unwrap();
+                (journal, store)
+            };
+            let (jour_a, store_a) = make(&acct);
+            let (jour_b, _store_b) = make(&acct);
+            let cap_b =
+                admitted_publication_cap(&jour_b, &position(SigningKind::Proposal, 1), &binding(b"B"));
+            let out = admitted_output_bytes(&acct, b"sig");
+            let mut ws = jour_a.admit_publish_workspace().unwrap();
+            assert!(cap_b.is_covered_by(&acct), "cap covered by the shared ledger");
+            let reads_before = store_a.reads();
+            assert_eq!(
+                jour_a.publish_result_admitted(&cap_b, &out, &mut ws),
+                Err(AdmittedPublishError::ForeignDomain)
+            );
+            assert_eq!(store_a.reads(), reads_before, "no read before ForeignDomain");
+        }
+
+        // Foreign-ledger output: a genuine output drawn from a DIFFERENT ledger is
+        // refused ForeignWorkspace before I/O (ledger identity, not domain).
+        {
+            let (journal, _acct, store) = envelope_journal(4, 1u128 << 40);
+            let p = position(SigningKind::Proposal, 2);
+            let b = binding(b"foreign-out");
+            let cap = admitted_publication_cap(&journal, &p, &b);
+            let foreign_agg = AggregateAuthority::new();
+            foreign_agg.bind(1u128 << 40).unwrap();
+            let foreign = SharedAccountant::new(foreign_agg);
+            foreign.bind_cap(1u128 << 40).unwrap();
+            let out = admitted_output_bytes(&foreign, b"sig");
+            let mut ws = journal.admit_publish_workspace().unwrap();
+            let reads_before = store.reads();
+            assert_eq!(
+                journal.publish_result_admitted(&cap, &out, &mut ws),
+                Err(AdmittedPublishError::ForeignWorkspace)
+            );
+            assert_eq!(store.reads(), reads_before, "no read before ForeignWorkspace");
+        }
+
+        // Foreign-ledger workspace: a workspace admitted from a DIFFERENT ledger.
+        {
+            let (journal, acct, store) = envelope_journal(4, 1u128 << 40);
+            let p = position(SigningKind::Proposal, 3);
+            let b = binding(b"foreign-ws");
+            let cap = admitted_publication_cap(&journal, &p, &b);
+            let out = admitted_output_bytes(&acct, b"sig");
+            let foreign_agg = AggregateAuthority::new();
+            foreign_agg.bind(1u128 << 40).unwrap();
+            let foreign = SharedAccountant::new(foreign_agg);
+            foreign.bind_cap(1u128 << 40).unwrap();
+            let mut ws = crate::signing_journal_admission::PublishWorkspaceOwner::from_installed(
+                foreign.clone(),
+            )
+            .admit()
+            .unwrap();
+            let reads_before = store.reads();
+            assert_eq!(
+                journal.publish_result_admitted(&cap, &out, &mut ws),
+                Err(AdmittedPublishError::ForeignWorkspace)
+            );
+            assert_eq!(store.reads(), reads_before, "no read before ForeignWorkspace");
+        }
+
+        // Retired operation (stale capability): NoLiveInvokedOperation. The same
+        // capability publishes once, is retired, then a retry finds no live op.
+        {
+            let (journal, acct, store) = envelope_journal(4, 1u128 << 40);
+            let p = position(SigningKind::Proposal, 4);
+            let b = binding(b"retire");
+            let cap = admitted_publication_cap(&journal, &p, &b);
+            let out = admitted_output_bytes(&acct, b"sig-retire");
+            let mut ws = journal.admit_publish_workspace().unwrap();
+            assert_eq!(
+                journal.publish_result_admitted(&cap, &out, &mut ws),
+                Ok(AdmittedPublishOutcome::Published)
+            );
+            assert_eq!(journal.retire_admitted(&cap), Ok(RetirementOutcome::Retired));
+            let rw = store.record_writes();
+            assert_eq!(
+                journal.publish_result_admitted(&cap, &out, &mut ws),
+                Err(AdmittedPublishError::NoLiveInvokedOperation)
+            );
+            assert_eq!(store.record_writes(), rw, "no write for a stale capability");
+        }
+
+        // Un-invoked operation (defensive): NoLiveInvokedOperation.
+        {
+            let (journal, acct, _store) = envelope_journal(4, 1u128 << 40);
+            let p = position(SigningKind::Proposal, 5);
+            let b = binding(b"uninvoked");
+            let cap = admitted_publication_cap(&journal, &p, &b);
+            journal.set_live_invoked_for_test(&p, false);
+            let out = admitted_output_bytes(&acct, b"sig");
+            let mut ws = journal.admit_publish_workspace().unwrap();
+            assert_eq!(
+                journal.publish_result_admitted(&cap, &out, &mut ws),
+                Err(AdmittedPublishError::NoLiveInvokedOperation)
+            );
+        }
+    }
+
+    /// Record-classification outcomes (all non-writing): NoRecord, MalformedRecord,
+    /// PositionMismatch, and ReservedForeignBinding — kept SEPARATE from backend
+    /// read failures and workspace-size refusal.
+    #[test]
+    fn publish_record_classifications() {
+        let _serial = bounded_serial();
+
+        // NoRecord: a live, invoked operation whose durable record was removed.
+        {
+            let (journal, acct, store) = envelope_journal(4, 1u128 << 40);
+            let p = position(SigningKind::Proposal, 1);
+            let b = binding(b"norecord");
+            let cap = admitted_publication_cap(&journal, &p, &b);
+            // Remove the durable Reserved record while the live entry persists,
+            // modelling a missing record under an otherwise-valid live operation.
+            store.map.write().unwrap().remove(&p.storage_key());
+            let out = admitted_output_bytes(&acct, b"sig");
+            let mut ws = journal.admit_publish_workspace().unwrap();
+            let rw = store.record_writes();
+            assert_eq!(
+                journal.publish_result_admitted(&cap, &out, &mut ws),
+                Ok(AdmittedPublishOutcome::NoRecord)
+            );
+            assert_eq!(store.record_writes(), rw, "NoRecord performs no write");
+        }
+
+        // MalformedRecord: a structurally invalid stored body (bad checksum).
+        {
+            let (journal, acct, store) = envelope_journal(4, 1u128 << 40);
+            let p = position(SigningKind::Proposal, 2);
+            let b = binding(b"malformed");
+            let cap = admitted_publication_cap(&journal, &p, &b);
+            // Overwrite the stored record-only body with a long garbage body that
+            // still fits the read workspace but fails structural parse.
+            store.insert_raw_record(&p.storage_key(), &vec![0xAAu8; 200]);
+            let out = admitted_output_bytes(&acct, b"sig");
+            let mut ws = journal.admit_publish_workspace().unwrap();
+            let rw = store.record_writes();
+            assert_eq!(
+                journal.publish_result_admitted(&cap, &out, &mut ws),
+                Ok(AdmittedPublishOutcome::MalformedRecord)
+            );
+            assert_eq!(store.record_writes(), rw, "MalformedRecord performs no write");
+        }
+
+        // PositionMismatch: a VALID record for a DIFFERENT position stored under
+        // this position's key.
+        {
+            let (journal, acct, store) = envelope_journal(4, 1u128 << 40);
+            let p = position(SigningKind::Proposal, 3);
+            let b = binding(b"posmismatch");
+            let cap = admitted_publication_cap(&journal, &p, &b);
+            let other = position(SigningKind::Proposal, 999);
+            let foreign_body = SigningDecisionRecord::reserved(other, b).encode().unwrap();
+            store.insert_raw_record(&p.storage_key(), &foreign_body);
+            let out = admitted_output_bytes(&acct, b"sig");
+            let mut ws = journal.admit_publish_workspace().unwrap();
+            let rw = store.record_writes();
+            assert_eq!(
+                journal.publish_result_admitted(&cap, &out, &mut ws),
+                Ok(AdmittedPublishOutcome::PositionMismatch)
+            );
+            assert_eq!(store.record_writes(), rw, "PositionMismatch performs no write");
+        }
+
+        // ReservedForeignBinding: a Reserved record at the correct position but a
+        // DIFFERENT binding than the capability.
+        {
+            let (journal, acct, store) = envelope_journal(4, 1u128 << 40);
+            let p = position(SigningKind::Proposal, 4);
+            let b = binding(b"rfb");
+            let cap = admitted_publication_cap(&journal, &p, &b);
+            let other_binding = binding(b"rfb-OTHER");
+            let foreign_body = SigningDecisionRecord::reserved(p, other_binding).encode().unwrap();
+            store.insert_raw_record(&p.storage_key(), &foreign_body);
+            let out = admitted_output_bytes(&acct, b"sig");
+            let mut ws = journal.admit_publish_workspace().unwrap();
+            let rw = store.record_writes();
+            assert_eq!(
+                journal.publish_result_admitted(&cap, &out, &mut ws),
+                Ok(AdmittedPublishOutcome::ReservedForeignBinding)
+            );
+            assert_eq!(store.record_writes(), rw, "ReservedForeignBinding performs no write");
+        }
+    }
+
+    /// A stored envelope LARGER than the bounded read workspace is a
+    /// WorkspaceCapacityExceeded refusal, DISTINCT from a malformed record and from
+    /// a backend read failure.
+    #[test]
+    fn publish_oversized_stored_envelope_refused() {
+        let _serial = bounded_serial();
+        let (journal, acct, store) = envelope_journal(4, 1u128 << 40);
+        let p = position(SigningKind::Proposal, 1);
+        let b = binding(b"oversize");
+        let cap = admitted_publication_cap(&journal, &p, &b);
+        // A record-only body so large that `4 + body.len()` exceeds the fixed read
+        // workspace (ENVELOPE_CAP). The read refuses before any structural parse.
+        let oversized = vec![0u8; crate::signing_journal_admission::ENVELOPE_CAP + 64];
+        store.insert_raw_record(&p.storage_key(), &oversized);
+        let out = admitted_output_bytes(&acct, b"sig");
+        let mut ws = journal.admit_publish_workspace().unwrap();
+        assert_eq!(
+            journal.publish_result_admitted(&cap, &out, &mut ws),
+            Err(AdmittedPublishError::WorkspaceCapacityExceeded)
+        );
+    }
+
+    /// An `Unsupported` backend is refused with NO allocating legacy fallback.
+    #[test]
+    fn publish_backend_unsupported_no_fallback() {
+        let _serial = bounded_serial();
+        let (journal, acct, store) = envelope_journal(4, 1u128 << 40);
+        let p = position(SigningKind::Proposal, 1);
+        let b = binding(b"unsupported");
+        let cap = admitted_publication_cap(&journal, &p, &b);
+        let out = admitted_output_bytes(&acct, b"sig");
+        let mut ws = journal.admit_publish_workspace().unwrap();
+        store.set_force_unsupported(true);
+        assert_eq!(
+            journal.publish_result_admitted(&cap, &out, &mut ws),
+            Err(AdmittedPublishError::Unsupported)
+        );
+        // The legacy allocating path is never consulted: the stored record is still
+        // the original Reserved record, untouched.
+        store.set_force_unsupported(false);
+        let rec = stored_record(&store, &p).expect("reserved record intact");
+        assert_eq!(rec.stage, SigningRecordStage::Reserved);
+    }
+
+    /// Before-write fault vs store-then-error: observed SEPARATELY via the applied
+    /// record-write counter and DIRECT stored-state inspection (never inferred from
+    /// the returned error). Pre-write and write errors preserve `result_acked ==
+    /// false`; a retry after each fault reuses the SAME capability/output.
+    #[test]
+    fn publish_before_write_and_store_then_error_then_retry() {
+        let _serial = bounded_serial();
+
+        // Fail BEFORE the record write: no applied write, record stays Reserved,
+        // acknowledgement not set. A retry (fault cleared) then succeeds.
+        {
+            let (journal, acct, store) = envelope_journal(4, 1u128 << 40);
+            let p = position(SigningKind::Proposal, 1);
+            let b = binding(b"before-write");
+            let cap = admitted_publication_cap(&journal, &p, &b);
+            let out = admitted_output_bytes(&acct, b"sig-bw");
+            let mut ws = journal.admit_publish_workspace().unwrap();
+            store.set_fail_writes(true);
+            let applied_before = store.record_writes();
+            assert_eq!(
+                journal.publish_result_admitted(&cap, &out, &mut ws),
+                Err(AdmittedPublishError::Storage(BoundedDiag::WriteIo))
+            );
+            assert_eq!(
+                store.record_writes(),
+                applied_before,
+                "before-write fault applies no record write"
+            );
+            // DIRECT stored-state proof: still Reserved (no Signed bytes).
+            assert_eq!(
+                stored_record(&store, &p).expect("record present").stage,
+                SigningRecordStage::Reserved
+            );
+            store.set_fail_writes(false);
+            // Retry with the SAME capability/output succeeds.
+            assert_eq!(
+                journal.publish_result_admitted(&cap, &out, &mut ws),
+                Ok(AdmittedPublishOutcome::Published)
+            );
+            assert_eq!(
+                stored_record(&store, &p).expect("record present").stage,
+                SigningRecordStage::Signed
+            );
+        }
+
+        // STORE then error: the Signed bytes become durably readable, yet the
+        // returned ack is an error, so `result_acked` is NOT set; the applied
+        // counter advances. A retry (identical bytes, still unacknowledged)
+        // re-issues a fresh successful write.
+        {
+            let (journal, acct, store) = envelope_journal(4, 1u128 << 40);
+            let p = position(SigningKind::Proposal, 2);
+            let b = binding(b"store-then-error");
+            let cap = admitted_publication_cap(&journal, &p, &b);
+            let sig = b"sig-ste".to_vec();
+            let out = admitted_output_bytes(&acct, &sig);
+            let mut ws = journal.admit_publish_workspace().unwrap();
+            store.set_store_then_error(true);
+            let applied_before = store.record_writes();
+            assert_eq!(
+                journal.publish_result_admitted(&cap, &out, &mut ws),
+                Err(AdmittedPublishError::Storage(BoundedDiag::WriteIo))
+            );
+            assert_eq!(
+                store.record_writes(),
+                applied_before + 1,
+                "store-then-error DID apply a record write (direct counter)"
+            );
+            // DIRECT stored-state proof: the Signed bytes survived.
+            let rec = stored_record(&store, &p).expect("record present");
+            assert_eq!(rec.stage, SigningRecordStage::Signed);
+            assert_eq!(rec.retained_signature.as_deref(), Some(&sig[..]));
+            store.set_store_then_error(false);
+            // Retry: identical bytes, still unacknowledged -> fresh successful write.
+            let applied = store.record_writes();
+            assert_eq!(
+                journal.publish_result_admitted(&cap, &out, &mut ws),
+                Ok(AdmittedPublishOutcome::Published)
+            );
+            assert_eq!(store.record_writes(), applied + 1, "retry re-established the barrier");
+        }
+    }
+
+    /// Workspace admission pressure, exact rollback, pressure relief, then an
+    /// ACTUAL successful publication afterward, on the real ledgers.
+    #[test]
+    fn publish_workspace_admission_pressure_rollback_then_success() {
+        let _serial = bounded_serial();
+        use crate::signing_journal_admission::publish_work_charge;
+        // Ceiling tight enough that the publish workspace cannot be admitted while
+        // the container + cap coverage stand, but generous once relieved.
+        let (journal, acct, _store) = envelope_journal(2, 1u128 << 20);
+        let p = position(SigningKind::Proposal, 1);
+        let b = binding(b"pressure");
+        let cap = admitted_publication_cap(&journal, &p, &b);
+        let before = acct.current();
+        let before_agg = acct.aggregate().current();
+
+        // Drive the operational ledger to just under the publish charge headroom by
+        // reserving a large block directly, then confirm admission refuses and the
+        // ledgers are EXACTLY rolled back (no partial charge retained).
+        let headroom = acct.cap().expect("ceiling bound") - acct.current();
+        let block = headroom - (publish_work_charge() - 1);
+        let filler = acct.reserve(block).expect("reserve filler");
+        assert!(
+            journal.admit_publish_workspace().is_err(),
+            "workspace admission refused under pressure"
+        );
+        assert_eq!(acct.current(), before + block, "exact rollback: only the filler stands");
+        assert_eq!(acct.aggregate().current(), before_agg + block);
+
+        // Relieve pressure and perform an ACTUAL successful publication.
+        drop(filler);
+        assert_eq!(acct.current(), before, "pressure relieved to baseline");
+        let out = admitted_output_bytes(&acct, b"sig-after-relief");
+        let mut ws = journal.admit_publish_workspace().expect("admit after relief");
+        assert_eq!(
+            journal.publish_result_admitted(&cap, &out, &mut ws),
+            Ok(AdmittedPublishOutcome::Published)
+        );
+    }
+
+    /// RUN 422 §7 — real coexistence and cleanup under the established N=4,
+    /// S_sig=2420 profile. A REAL `ValidatedRecord`, the standing bounded
+    /// container, the admitted publication capability, and the admitted signature
+    /// output are ALL live at baseline. Both ledgers are observed SEPARATELY across
+    /// every phase, the publish workspace charge is the ONLY admission delta,
+    /// publication returns WITHOUT releasing the borrowed workspace, and each
+    /// cleanup boundary restores its exact baseline under unchanged ceilings.
+    #[test]
+    fn publish_coexistence_within_profile_ceilings() {
+        let _serial = bounded_serial();
+        use crate::pqc_trust_bundle::TrustBundleEnvironment;
+        use crate::safety_record_store::{
+            SafetyBackend, SafetyBackendPolicy, SafetyRecordOwner, ValidatedRecord,
+        };
+        use crate::signing_journal_admission::{output_charge, publish_work_charge};
+
+        let dir = tempfile::tempdir().unwrap();
+        let backend = SafetyBackend::open_or_initialize(
+            dir.path(),
+            SafetyBackendPolicy::EnabledForTesting,
+            TrustBundleEnvironment::Devnet,
+        )
+        .unwrap();
+        let ctx = {
+            use qbind_consensus::ids::ValidatorId;
+            PinnedSafetyContext {
+                network_genesis_id: [1u8; 32],
+                authority_context_ref: [2u8; 32],
+                chain_id: 42,
+                epoch: 7,
+                qc_suite_id: 7,
+                timeout_suite_id: 100,
+                s_sig: 2420,
+                validators: (0..4u64).map(|i| (ValidatorId::new(i), 1u64)).collect(),
+                require_height_equals_round: false,
+            }
+        };
+        let owner = SafetyRecordOwner::attach(backend, ctx).unwrap();
+        owner.initialize(true).unwrap();
+        let validated: ValidatedRecord = owner
+            .read_validate(None::<&crate::safety_record_store::FixtureCommittedHistory>)
+            .expect("bootstrap record validates");
+
+        let be = owner.backend_for_test();
+        let op_cap = be.accounting_cap().expect("operational ceiling bound");
+        let agg_cap = be.accounting_aggregate_cap().expect("aggregate ceiling bound");
+        let acct = be.accounting_handle_for_test();
+
+        let store = Arc::new(EnvelopeModelStore::new());
+        let journal = SigningReservationJournal::initialize(
+            store.clone() as Arc<dyn SigningJournalStorage>,
+            DEFAULT_MAX_RESERVED_POSITIONS,
+        )
+        .expect("initialize envelope-capable backend");
+        journal.install_accountant_association(&acct).expect("install association");
+        journal.enter_bounded_live_mode(2).expect("enter bounded live mode");
+
+        // Baseline: retained proof/context + standing container + admitted
+        // publication capability + admitted signature output ALL live.
+        let p = position(SigningKind::Proposal, 1);
+        let b = binding(b"coexist-pub");
+        let cap = admitted_publication_cap(&journal, &p, &b);
+        let sig = vec![0x11u8; 2420];
+        let out = admitted_output_bytes(&acct, &sig);
+        let base_op = acct.current();
+        let base_agg = acct.aggregate().current();
+        assert!(base_agg >= base_op, "aggregate baseline includes distinct partitions");
+        assert!(base_op <= op_cap && base_agg <= agg_cap, "baselines within ceilings");
+
+        // Phase: publication workspace admitted -> the ONLY admission delta.
+        let mut ws = journal.admit_publish_workspace().expect("admit publish ws");
+        assert_eq!(ws.charge(), publish_work_charge(), "workspace charge == publish_work_charge()");
+        assert_eq!(acct.current(), base_op + publish_work_charge(), "op: baseline + workspace");
+        assert_eq!(acct.aggregate().current(), base_agg + publish_work_charge(), "agg: baseline + workspace");
+        assert!(acct.current() <= op_cap && acct.aggregate().current() <= agg_cap, "peak within ceilings");
+
+        // Phase: publication returns WITH capability/output/workspace still live.
+        // Publication takes no reservation, so the ledgers are unchanged; the
+        // return does NOT release the borrowed workspace.
+        assert_eq!(
+            journal.publish_result_admitted(&cap, &out, &mut ws),
+            Ok(AdmittedPublishOutcome::Published)
+        );
+        assert_eq!(acct.current(), base_op + publish_work_charge(), "workspace still covered after return");
+        assert_eq!(acct.aggregate().current(), base_agg + publish_work_charge());
+
+        // Phase: caller drops the workspace -> EXACT return to baseline.
+        drop(ws);
+        assert_eq!(acct.current(), base_op, "op restored to baseline on workspace drop");
+        assert_eq!(acct.aggregate().current(), base_agg, "agg restored to baseline on workspace drop");
+
+        // Phase: subsequent output then capability cleanup.
+        let out_charge = output_charge();
+        drop(out);
+        assert_eq!(acct.current(), base_op - out_charge, "output coverage released");
+        assert_eq!(acct.aggregate().current(), base_agg - out_charge);
+        let cap_charge = cap.coverage_charge();
+        drop(cap);
+        assert_eq!(acct.current(), base_op - out_charge - cap_charge, "capability coverage released");
+        assert_eq!(acct.aggregate().current(), base_agg - out_charge - cap_charge);
+
+        // Ceilings observed, never modified.
+        assert_eq!(be.accounting_cap(), Some(op_cap), "operational ceiling unchanged");
+        assert_eq!(be.accounting_aggregate_cap(), Some(agg_cap), "aggregate ceiling unchanged");
+
+        // Failure cleanup: a refused publication still releases the workspace on
+        // drop with exact restoration (here via an Unsupported backend fault).
+        let cap2 = admitted_publication_cap(&journal, &position(SigningKind::Proposal, 2), &binding(b"coexist-fail"));
+        let out2 = admitted_output_bytes(&acct, &sig);
+        let base2 = acct.current();
+        let mut ws2 = journal.admit_publish_workspace().unwrap();
+        assert_eq!(acct.current(), base2 + publish_work_charge());
+        store.set_force_unsupported(true);
+        assert_eq!(
+            journal.publish_result_admitted(&cap2, &out2, &mut ws2),
+            Err(AdmittedPublishError::Unsupported)
+        );
+        assert_eq!(acct.current(), base2 + publish_work_charge(), "failed publish keeps workspace covered");
+        drop(ws2);
+        assert_eq!(acct.current(), base2, "failure cleanup restores exact baseline");
+        store.set_force_unsupported(false);
+        drop(out2);
+        drop(cap2);
+
         drop(validated);
     }
 }

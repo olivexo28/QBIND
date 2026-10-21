@@ -733,6 +733,210 @@ impl ReserveWorkspaceOwner {
     }
 }
 
+// ============================================================================
+// RUN 422 — additive, isolated admitted SIGNED-RESULT PUBLICATION workspace.
+//
+// Backs the WRITE side of the isolated admitted publication route
+// ([`crate::signing_reservation_journal::SigningReservationJournal::publish_result_admitted`]):
+// it holds the non-allocating key buffer, the bounded stored-record classification-
+// read envelope buffer, and the outgoing PRE-FRAMED (outer-CRC-prefixed) signed-
+// record envelope handed to the EXISTING record-only synced storage primitive
+// ([`crate::signing_reservation_journal::SigningJournalStorage::put_signing_record_envelope_synced`]).
+//
+// Unlike the fresh-reservation workspace it carries ONE reservation (`res`): the
+// publication route borrows the workspace mutably and NOTHING is moved out, so no
+// continuation coverage is transferred. The outgoing signed record is framed IN
+// PLACE directly into the embedded `out_env` buffer from the BORROWED signature
+// bytes of the admitted output — there is NO separately owned signature `Vec`, no
+// standalone encode `Vec`, and no allocating legacy publication fallback. The
+// single encoding temporary IS the embedded `out_env` array, counted once in the
+// struct layout.
+//
+// Field order places every buffer BEFORE the `res` reservation; Rust drops fields
+// in declaration order, so covered bytes are destroyed before their coverage
+// releases and there is no custom `Drop`. Every field is private: because `res`
+// is NEVER exposed to the defining journal module, no crate caller can substitute
+// a genuine same-ledger but SMALLER reservation into it, so issuing-ledger pointer
+// identity ALONE establishes adequate coverage at use time (the undercharge-
+// substitution exposure that the fresh-reservation `cont_res` must guard against
+// by a separate charge check simply cannot arise here).
+// ============================================================================
+
+/// RUN 422 — the covered working set for one admitted publication attempt.
+///
+/// Mutably BORROWED by the admitted publication entrypoint and left caller-owned
+/// after return. All fields are private; the outgoing signed-record envelope is
+/// framed in place from borrowed signature bytes (no owned signature copy).
+#[derive(Debug)]
+#[cfg_attr(not(test), allow(dead_code))]
+pub(crate) struct AdmittedPublishWorkspace {
+    /// Non-allocating canonical journal key buffer.
+    key: [u8; JOURNAL_KEY_LEN],
+    /// Bounded stored-record classification-read envelope buffer.
+    read_env: [u8; ENVELOPE_CAP],
+    /// Outgoing pre-framed signed-record envelope (outer CRC + record body).
+    out_env: [u8; ENVELOPE_CAP],
+    /// Valid journal-key length.
+    jkey_len: usize,
+    /// Valid classification-read length.
+    read_used: usize,
+    /// Valid outgoing framed-record length.
+    out_used: usize,
+    /// The single transient working-set coverage, released when this workspace
+    /// drops. Private, so it can never be substituted from outside this module.
+    res: Reservation,
+}
+
+impl AdmittedPublishWorkspace {
+    fn new(res: Reservation) -> Self {
+        Self {
+            key: [0u8; JOURNAL_KEY_LEN],
+            read_env: [0u8; ENVELOPE_CAP],
+            out_env: [0u8; ENVELOPE_CAP],
+            jkey_len: 0,
+            read_used: 0,
+            out_used: 0,
+            res,
+        }
+    }
+
+    /// The fixed journal-key buffer, for the non-allocating key encoder.
+    pub(crate) fn journal_key_buf(&mut self) -> &mut [u8; JOURNAL_KEY_LEN] {
+        &mut self.key
+    }
+
+    /// Record the validated journal-key length after encoding.
+    pub(crate) fn set_jkey_len(&mut self, n: usize) {
+        self.jkey_len = n;
+    }
+
+    /// The encoded journal key bytes.
+    pub(crate) fn journal_key(&self) -> &[u8] {
+        &self.key[..self.jkey_len]
+    }
+
+    /// Disjoint borrows of the journal key (read) and the full mutable
+    /// classification-read envelope buffer (write), so a bounded stored-record
+    /// read can fill the envelope while referencing the key without a second
+    /// key allocation.
+    pub(crate) fn key_and_read_env(&mut self) -> (&[u8], &mut [u8]) {
+        (&self.key[..self.jkey_len], &mut self.read_env[..])
+    }
+
+    /// Record the validated classification-read length after a bounded read.
+    pub(crate) fn set_read_used(&mut self, n: usize) -> Result<(), WorkspaceCapacity> {
+        if n > ENVELOPE_CAP {
+            return Err(WorkspaceCapacity {
+                len: n,
+                capacity: ENVELOPE_CAP,
+            });
+        }
+        self.read_used = n;
+        Ok(())
+    }
+
+    /// The valid classification-read envelope bytes.
+    pub(crate) fn read_envelope(&self) -> &[u8] {
+        &self.read_env[..self.read_used]
+    }
+
+    /// The mutable outgoing RECORD region (everything after the 4-byte outer CRC
+    /// slot) for the journal's non-allocating signed-record encoder to write the
+    /// `[body | inner_crc]` into directly. Framing is finalized by
+    /// [`finalize_framed_record`](Self::finalize_framed_record).
+    pub(crate) fn record_region_mut(&mut self) -> &mut [u8] {
+        &mut self.out_env[OUTER_CRC_LEN..]
+    }
+
+    /// Finalize the outgoing envelope after `record_len` record bytes were written
+    /// into [`record_region_mut`](Self::record_region_mut): prepend the big-endian
+    /// outer storage CRC over exactly those bytes and record the total length.
+    /// Validates capacity BEFORE recording; on refusal `out_used` is unchanged.
+    pub(crate) fn finalize_framed_record(
+        &mut self,
+        record_len: usize,
+    ) -> Result<(), WorkspaceCapacity> {
+        let total = OUTER_CRC_LEN + record_len;
+        if total > ENVELOPE_CAP {
+            return Err(WorkspaceCapacity {
+                len: total,
+                capacity: ENVELOPE_CAP,
+            });
+        }
+        let crc =
+            crate::storage::signing_journal_crc32(&self.out_env[OUTER_CRC_LEN..total]);
+        self.out_env[..OUTER_CRC_LEN].copy_from_slice(&crc.to_be_bytes());
+        self.out_used = total;
+        Ok(())
+    }
+
+    /// The valid outgoing framed signed-record envelope bytes.
+    pub(crate) fn framed_record(&self) -> &[u8] {
+        &self.out_env[..self.out_used]
+    }
+
+    /// The charge this workspace's reservation holds (test/diagnostic observer).
+    pub(crate) fn charge(&self) -> u128 {
+        self.res.charge()
+    }
+
+    /// RUN 422 — true iff this workspace's LIVE covering reservation was issued by
+    /// `acct` (its exact operational partition AND aggregate authority). Because
+    /// `res` is a PRIVATE field constructed only by [`PublishWorkspaceOwner::admit`]
+    /// and released only on drop, a positive result establishes adequate, live,
+    /// `acct`-owned coverage — no same-ledger under-charged substitute can be
+    /// installed from outside this module, so no separate charge-adequacy check is
+    /// required. Non-allocating; acquires no accounting lock; exposes nothing.
+    pub(crate) fn is_covered_by(&self, acct: &SharedAccountant) -> bool {
+        self.res.is_issued_by(acct)
+    }
+}
+
+/// The compile-time charge admitted for one admitted publication attempt. It
+/// covers the actual workspace layout (the key buffer, the bounded classification-
+/// read envelope, AND the embedded outgoing signed-record envelope — the single
+/// in-place encoding temporary, counted once) PLUS the concrete transient objects
+/// used during the attempt: the backend-local fixed prefixed key
+/// (`[u8; BACKEND_KEY_LEN]`), the borrowing decoder, and the checksum accumulator.
+/// There is NO separately owned encode `Vec` and NO signature `Vec`: the signed
+/// record is framed in place from the borrowed output bytes, so no such term is
+/// charged. Conservative and unconditional: charged in full before any covered
+/// object is constructed.
+pub(crate) fn publish_work_charge() -> u128 {
+    (core::mem::size_of::<AdmittedPublishWorkspace>()
+        + BACKEND_KEY_LEN
+        + core::mem::size_of::<BorrowedRecordView<'static>>()
+        + core::mem::size_of::<u32>()) as u128
+}
+
+/// RUN 422 — the owner that admits and constructs the publication workspace. Like
+/// [`ReserveWorkspaceOwner`], it holds a clone of the EXISTING installed
+/// operational [`SharedAccountant`] (sharing its aggregate authority); it
+/// introduces no new ledger, ceiling, partition, or multiplicity.
+#[derive(Debug)]
+pub(crate) struct PublishWorkspaceOwner {
+    accountant: SharedAccountant,
+}
+
+impl PublishWorkspaceOwner {
+    /// Construct an owner from an accountant handle ALREADY INSTALLED in a signing
+    /// domain's association (cloned by the caller under the journal-domain guard
+    /// and moved in here). It reads no backend and selects no ledger, so no
+    /// caller-selected substitute backend can be introduced and no fresh ledger is
+    /// allocated.
+    pub(crate) fn from_installed(accountant: SharedAccountant) -> Self {
+        Self { accountant }
+    }
+
+    /// Admit the single working-set coverage ([`publish_work_charge()`]) through
+    /// the SAME installed operational accountant. On a reservation refusal nothing
+    /// is constructed and both ledgers are unchanged.
+    pub(crate) fn admit(&self) -> Result<AdmittedPublishWorkspace, SafetyStoreError> {
+        let res = self.accountant.reserve(publish_work_charge())?;
+        Ok(AdmittedPublishWorkspace::new(res))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
