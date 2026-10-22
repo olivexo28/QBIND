@@ -414,6 +414,16 @@ pub(crate) struct ModelCoordinationHook {
     /// The aggregate ledger charge sampled at the live signing phase, if a
     /// sampling backend was installed.
     pub(crate) observed_aggregate: Option<u128>,
+    /// The operational ledger charge sampled at the PRE-RESERVATION phase (after
+    /// every composition resource — control, work, crypto, output, reserve
+    /// workspace, continuation, and publish workspace — has been admitted but
+    /// immediately BEFORE `reserve_for_sign_admitted`), if a sampling backend was
+    /// installed. At this phase the reservation working set and its continuation
+    /// coverage are BOTH still live (RUN 422 §2).
+    pub(crate) observed_operational_pre_reserve: Option<u128>,
+    /// The aggregate ledger charge sampled at the PRE-RESERVATION phase, if a
+    /// sampling backend was installed.
+    pub(crate) observed_aggregate_pre_reserve: Option<u128>,
 }
 
 impl ModelCoordinationHook {
@@ -428,6 +438,8 @@ impl ModelCoordinationHook {
             failed: false,
             observed_operational: None,
             observed_aggregate: None,
+            observed_operational_pre_reserve: None,
+            observed_aggregate_pre_reserve: None,
         }
     }
 
@@ -445,6 +457,8 @@ impl ModelCoordinationHook {
             failed: false,
             observed_operational: None,
             observed_aggregate: None,
+            observed_operational_pre_reserve: None,
+            observed_aggregate_pre_reserve: None,
         }
     }
 
@@ -469,6 +483,22 @@ impl ModelCoordinationHook {
             failed: false,
             observed_operational: None,
             observed_aggregate: None,
+            observed_operational_pre_reserve: None,
+            observed_aggregate_pre_reserve: None,
+        }
+    }
+
+    /// Pre-reservation ledger observation (RUN 422 §2). Sampled AFTER every
+    /// composition resource has been admitted (control, work, crypto, output,
+    /// reserve workspace, continuation, publish workspace) but immediately BEFORE
+    /// `reserve_for_sign_admitted`, while the reservation working set (R) and its
+    /// continuation coverage (T) are BOTH still live. Reads a separate accounting
+    /// lock from the domain guard and charges nothing, so the measurement stays
+    /// distinct from the objects whose coverage it demonstrates.
+    fn on_pre_reservation(&mut self) {
+        if let Some(b) = &self.sample_backend {
+            self.observed_operational_pre_reserve = Some(b.accounting_current());
+            self.observed_aggregate_pre_reserve = Some(b.accounting_aggregate_current());
         }
     }
 
@@ -2115,6 +2145,13 @@ fn fresh_vote_sign_real_local<H: CommittedHistory + ?Sized>(
         Ok(w) => w,
         Err(_) => return RealFreshSignOutcome::PublishWorkspaceAdmitRefused,
     };
+
+    // 10b. Pre-reservation ledger observation (RUN 422 §2). Every composition
+    //      resource is now admitted and the reservation workspace (its working set
+    //      R and its continuation coverage T) is still intact; the admitted journal
+    //      reservation has NOT yet consumed it. Sample both ledgers here, before
+    //      `reserve_for_sign_admitted` releases R and moves T into the continuation.
+    coord.on_pre_reservation();
 
     // 11. Admitted reservation. Proceed ONLY on a fresh reservation; every
     //     existing-position classification is non-delivering in this helper.
@@ -6639,13 +6676,35 @@ mod tests {
             let _ = ledgers_before;
         }
 
-        /// §6 accounting: the SAME live-phase ledger sampling and exact cleanup as
-        /// the suite-0 fixture accounting test, but exercised on the ELIGIBLE REAL
-        /// suite-100 path. At the post-consume / pre-sign sample the model-owned
-        /// operational charge covers the resting baseline plus the reconciled
-        /// source-derived lower bound (control + real signing work + crypto-temp);
-        /// after the run BOTH ledgers return to the resting baseline and BOTH
-        /// ceilings are unchanged.
+        /// §2/§3 EXACT phase accounting on the ELIGIBLE REAL suite-100 path. Two
+        /// direct samples of BOTH ledgers are taken inside the protected sequence —
+        /// one at PRE-RESERVATION (every composition resource admitted, reservation
+        /// workspace and its continuation coverage both live, before
+        /// `reserve_for_sign_admitted`) and one at POST-CONSUME / PRE-SIGN (the
+        /// reservation workspace destroyed and its continuation coverage transferred
+        /// into the publication capability). The expected deltas above EACH ledger's
+        /// own resting baseline are reconciled from the actual charge functions:
+        ///
+        ///   C = control_charge()            (authorization/ticket control)
+        ///   W = real_sign_work_charge()     (composition working set)
+        ///   K = crypto_temp_charge()        (crypto temporaries)
+        ///   O = output_charge()             (admitted caller output)
+        ///   R = reserve_work_charge()       (reservation working set)
+        ///   T = cont_charge()               (continuation / publication capability)
+        ///   P = publish_work_charge()       (publication workspace)
+        ///
+        ///   pre-reservation delta  = C + W + K + O + R + T + P
+        ///   post-consume delta     = C + W + K + O + T + P      (R released)
+        ///
+        /// Exact equality is asserted for BOTH the operational and the aggregate
+        /// ledger at BOTH phases (each against its OWN observed baseline — the
+        /// aggregate is never inferred from the operational value), the release of R
+        /// between the two phases is asserted exactly, both ceilings are unchanged,
+        /// and after the run both ledgers restore exactly to their resting baselines
+        /// with the borrowed Vote and original pin provenance preserved and exactly
+        /// one real signer call. These are executed samples at two in-sequence
+        /// boundaries; they are NOT measurements inside the crypto implementation and
+        /// establish no process-stack or RSS bound.
         #[test]
         fn real100_accounting_live_phase_and_cleanup() {
             let dir = tempfile::tempdir().unwrap();
@@ -6674,38 +6733,97 @@ mod tests {
             );
             assert!(matches!(outcome, RealFreshSignOutcome::Published(_)));
 
-            // Live-phase sample (post-consume / pre-sign). The model-owned
-            // operational reservations above baseline include, at minimum, the
-            // control coverage, the real signing work set, and the crypto-temporary
-            // coverage; the journal continuation/publication coverage adds more, so
-            // this reconciled source-derived SUM is a strict LOWER BOUND. The
-            // consumed reservation workspace is gone (destroyed by
-            // `reserve_for_sign_admitted` before this sample), yet the transferred
-            // publication-capability coverage is still live.
+            // Reconcile the expected signing-resource terms from the ACTUAL charge
+            // functions and ownership scopes (RUN 422 §3).
+            let c = control_charge();
+            let w = real_sign_work_charge();
+            let k = crypto_temp_charge();
+            let o = crate::signing_journal_admission::output_charge();
+            let r = crate::signing_journal_admission::reserve_work_charge();
+            let t = crate::signing_journal_admission::cont_charge();
+            let p = crate::signing_journal_admission::publish_work_charge();
+            // Pre-reservation: reservation working set R and continuation coverage T
+            // are both still live, alongside C, W, K, O, P.
+            let pre_delta = c
+                .saturating_add(w)
+                .saturating_add(k)
+                .saturating_add(o)
+                .saturating_add(r)
+                .saturating_add(t)
+                .saturating_add(p);
+            // Post-consume / pre-sign: R has been released and T has transferred into
+            // the publication capability; C, W, K, O, T, P remain live.
+            let post_delta = c
+                .saturating_add(w)
+                .saturating_add(k)
+                .saturating_add(o)
+                .saturating_add(t)
+                .saturating_add(p);
+
+            // Pre-reservation sample — EXACT equality on each ledger's own baseline.
+            let pre_op = coord
+                .observed_operational_pre_reserve
+                .expect("pre-reservation operational sample");
+            let pre_agg = coord
+                .observed_aggregate_pre_reserve
+                .expect("pre-reservation aggregate sample");
+            assert_eq!(
+                pre_op,
+                ledgers_before.operational.saturating_add(pre_delta),
+                "pre-reservation operational charge == baseline {} + (C+W+K+O+R+T+P) {}",
+                ledgers_before.operational,
+                pre_delta
+            );
+            assert_eq!(
+                pre_agg,
+                ledgers_before.aggregate.saturating_add(pre_delta),
+                "pre-reservation aggregate charge == baseline {} + (C+W+K+O+R+T+P) {}",
+                ledgers_before.aggregate,
+                pre_delta
+            );
+
+            // Post-consume / pre-sign sample — EXACT equality on each ledger's own
+            // baseline. R is released; the transferred continuation coverage T lives.
             let live_op = coord.observed_operational.expect("operational sample");
             let live_agg = coord.observed_aggregate.expect("aggregate sample");
-            let model_owned_lower_bound = control_charge()
-                .saturating_add(real_sign_work_charge())
-                .saturating_add(crypto_temp_charge());
-            assert!(
-                live_op
-                    >= ledgers_before
-                        .operational
-                        .saturating_add(model_owned_lower_bound),
-                "live operational charge {} must cover the resting baseline {} plus the reconciled model-owned lower bound {} (control+work+crypto)",
+            assert_eq!(
                 live_op,
+                ledgers_before.operational.saturating_add(post_delta),
+                "post-consume operational charge == baseline {} + (C+W+K+O+T+P) {}",
                 ledgers_before.operational,
-                model_owned_lower_bound
+                post_delta
             );
-            assert!(
-                live_agg >= live_op,
-                "the aggregate authority sees at least the operational charge"
+            assert_eq!(
+                live_agg,
+                ledgers_before.aggregate.saturating_add(post_delta),
+                "post-consume aggregate charge == baseline {} + (C+W+K+O+T+P) {}",
+                ledgers_before.aggregate,
+                post_delta
             );
+
+            // The ONLY charge released between the two phases is the reservation
+            // working set R (its continuation coverage T persists, transferred).
+            assert_eq!(
+                pre_op.saturating_sub(live_op),
+                r,
+                "operational ledger releases exactly R ({}) between pre-reservation and post-consume",
+                r
+            );
+            assert_eq!(
+                pre_agg.saturating_sub(live_agg),
+                r,
+                "aggregate ledger releases exactly R ({}) between pre-reservation and post-consume",
+                r
+            );
+
+            // Both ceilings are fixed configuration and both samples stay within them.
             if let Some(cap) = op_cap_before {
-                assert!(live_op <= cap, "live operational charge within the ceiling");
+                assert!(pre_op <= cap, "pre-reservation operational charge within the ceiling");
+                assert!(live_op <= cap, "post-consume operational charge within the ceiling");
             }
             if let Some(cap) = agg_cap_before {
-                assert!(live_agg <= cap, "live aggregate charge within the ceiling");
+                assert!(pre_agg <= cap, "pre-reservation aggregate charge within the ceiling");
+                assert!(live_agg <= cap, "post-consume aggregate charge within the ceiling");
             }
 
             // Exact cleanup against the resting baseline; both ceilings unchanged.
