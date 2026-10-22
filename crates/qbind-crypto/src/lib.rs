@@ -24,7 +24,8 @@ pub use kdf::{derive_key_pbkdf2, DEFAULT_PBKDF2_ITERATIONS, PBKDF2_OUTPUT_SIZE, 
 pub use kem::KemSuite;
 pub use ml_dsa44::{
     BoundedMlDsa44SignError, MlDsa44Backend, ValidatorSigningKey, ML_DSA_44_PRIVATE_KEY_OBJECT_BYTES,
-    ML_DSA_44_PUBLIC_KEY_SIZE, ML_DSA_44_SECRET_KEY_SIZE, ML_DSA_44_SIGNATURE_SIZE,
+    ML_DSA_44_PUBLIC_KEY_OBJECT_BYTES, ML_DSA_44_PUBLIC_KEY_SIZE, ML_DSA_44_SECRET_KEY_SIZE,
+    ML_DSA_44_SIGNATURE_SIZE,
 };
 pub use ml_dsa44_signature_suite::{ml_dsa_44_sign_digest, MlDsa44SignatureSuite};
 pub use ml_kem768::{

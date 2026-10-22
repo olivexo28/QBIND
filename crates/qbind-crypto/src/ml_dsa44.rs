@@ -69,6 +69,39 @@ pub const ML_DSA_44_SIGNATURE_SIZE: usize = 2420;
 pub const ML_DSA_44_PRIVATE_KEY_OBJECT_BYTES: usize =
     core::mem::size_of::<fips204::ml_dsa_44::PrivateKey>();
 
+/// Compiler-derived inline size, in bytes, of the decoded ML-DSA-44
+/// public-key object (`fips204::ml_dsa_44::PublicKey`) as used by the existing
+/// [`MlDsa44Backend`] verification wrapper.
+///
+/// This is `core::mem::size_of::<fips204::ml_dsa_44::PublicKey>()` for the
+/// compiled target and the resolved `fips204` dependency; it is never a
+/// hard-coded measurement. It exists so an upstream caller that cannot name the
+/// `fips204` type directly (e.g. `qbind-node`, which does not depend on
+/// `fips204`) can still obtain a source-derived bound for the decoded
+/// public-key temporary that lives inside the verify path, which parses the
+/// serialized key via `ml_dsa_44::PublicKey::try_from_bytes` before calling
+/// `verify`.
+///
+/// # What this is NOT
+///
+/// - NOT the serialized public-key length ([`ML_DSA_44_PUBLIC_KEY_SIZE`]).
+/// - NOT a complete verification working-set bound; the verify path also holds
+///   an owned `[u8; ML_DSA_44_PUBLIC_KEY_SIZE]` key-byte copy and a fixed
+///   `[u8; ML_DSA_44_SIGNATURE_SIZE]` signature value.
+/// - NOT a bound on dependency-internal allocations, physical stack usage,
+///   process RSS, or execution time.
+/// - NOT verification, authorization, freshness, admission, or permission to
+///   reuse a signature.
+///
+/// For the resolved `fips204` dependency the decoded type is composed solely of
+/// fixed-size inline arrays, so it owns no transitively allocated heap backing;
+/// `size_of` alone cannot establish that absence, which is confirmed from the
+/// dependency source. A future `fips204` version could change that type's
+/// ownership shape, so the constant is recomputed from the resolved dependency
+/// at build time rather than frozen.
+pub const ML_DSA_44_PUBLIC_KEY_OBJECT_BYTES: usize =
+    core::mem::size_of::<fips204::ml_dsa_44::PublicKey>();
+
 // ============================================================================
 // Bounded signing error for the caller-buffer output path (RUN 422)
 // ============================================================================
