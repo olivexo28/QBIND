@@ -1246,6 +1246,22 @@ pub(crate) enum ModelRetainedUseOutcome {
     VerificationFailed,
     /// The original ticket failed its pre-consumption confirmation.
     AuthorizationConfirmRefused,
+    /// AssociationChecked only: the additional verification-backend coverage
+    /// (serialized public-key array + compiler-derived decoded public-key object +
+    /// signature array + inline owned dispatch handle) was refused BEFORE the
+    /// dispatch handle was constructed or verification was invoked.
+    VerifyBackendAdmitRefused,
+    /// AssociationChecked only: no operational accountant is installed in the
+    /// journal's ownership-domain association (checked route has no legacy
+    /// fallback). Surfaced from either `admit_retrieval_workspace` or
+    /// `retrieve_retained_checked`.
+    CheckedNoAssociation,
+    /// AssociationChecked only: the retrieval workspace is not covered by the
+    /// installed operational accountant. Defensive lower-level coverage: it is
+    /// unreachable through this composition (the model always feeds
+    /// installed-accountant workspaces into the checked retrieval), so it is
+    /// surfaced as a distinct typed outcome without a manufactured foreign input.
+    CheckedForeignWorkspace,
 }
 
 /// Accounting charge (bytes) for the retained-signature VERIFICATION working set,
@@ -1303,7 +1319,68 @@ fn verify_charge() -> u128 {
 enum RetainedAdmitStage {
     Lifecycle,
     Verify,
+    /// AssociationChecked only: the additional verification-backend coverage,
+    /// admitted BEFORE the owned dispatch handle is constructed or verification
+    /// is invoked.
+    VerifyBackend,
     Retrieval,
+}
+
+/// RUN 422 — private retained-retrieval route selection. The two routes share the
+/// entire protected sequence EXCEPT the retrieval-workspace admission, the
+/// retrieval call, and (checked only) the additional verification-backend
+/// coverage. There is NO automatic fallback between them: a route is chosen once
+/// by the caller and every refusal is surfaced as a typed outcome for that route.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum RetainedRetrievalRoute {
+    /// Existing seeded-test behavior: the model owns the retrieval workspace
+    /// (`RetrievalWorkspaceOwner::new(&owner.backend)`) and calls the unchanged
+    /// `retrieve_retained`. It admits NO verification-backend coverage; see the
+    /// honest limitation noted on `verify_backend_wrapper_charge`.
+    OwnerBacked,
+    /// Opt-in checked route: the workspace is admitted through
+    /// `journal.admit_retrieval_workspace()` (installed-accountant coverage) and
+    /// retrieved through `journal.retrieve_retained_checked()`, and the additional
+    /// verification-backend coverage is admitted before the dispatch handle.
+    AssociationChecked,
+}
+
+/// RUN 422 §2 — the ADDITIONAL verification-backend working-set coverage, admitted
+/// ONLY on the AssociationChecked route BEFORE the owned dispatch handle is
+/// constructed or any verification object is built, and held across the
+/// `verify_vote` call on every exit. It bounds the QBIND wrapper-owned objects the
+/// verifier materializes that `verify_charge()` does NOT already cover:
+///
+/// - the serialized public-key array decoded inside the backend
+///   (`ML_DSA_44_PUBLIC_KEY_SIZE`),
+/// - the compiler-derived decoded public-key object
+///   (`ML_DSA_44_PUBLIC_KEY_OBJECT_BYTES`, exported RUN 422 D7 — never the
+///   hard-coded 4,192-byte evaluation),
+/// - the fixed signature array handed to `verify`
+///   (`ML_DSA_44_SIGNATURE_SIZE`), and
+/// - the inline owned dispatch handle (`Arc<dyn ConsensusSigVerifier>`), charged
+///   for its fat-pointer INLINE footprint only; its Arc-shared backend backing is
+///   not re-charged here.
+///
+/// The constant automatically tracks the decoded object's INLINE size (a future
+/// `fips204` change to the type's ownership shape — e.g. transitive heap — is NOT
+/// reflected and would require rechecking). This term is kept SEPARATE from
+/// `verify_charge()` and shares no sub-term with it, so there is no double count.
+///
+/// Honest limitation: the OwnerBacked route admits NO equivalent coverage; its
+/// older accounting evidence therefore does NOT establish coverage for these
+/// verifier-internal objects and must not be presented as if it did.
+fn verify_backend_wrapper_charge() -> u128 {
+    let serialized_public_key = qbind_crypto::ml_dsa44::ML_DSA_44_PUBLIC_KEY_SIZE as u128;
+    let decoded_public_key_object = qbind_crypto::ML_DSA_44_PUBLIC_KEY_OBJECT_BYTES as u128;
+    let signature_array = qbind_crypto::ml_dsa44::ML_DSA_44_SIGNATURE_SIZE as u128;
+    let dispatch_handle = std::mem::size_of::<
+        std::sync::Arc<dyn qbind_crypto::consensus_sig::ConsensusSigVerifier>,
+    >() as u128;
+    serialized_public_key
+        .saturating_add(decoded_public_key_object)
+        .saturating_add(signature_array)
+        .saturating_add(dispatch_handle)
 }
 
 thread_local! {
@@ -1336,6 +1413,163 @@ fn fire_retained_admit_pressure(stage: RetainedAdmitStage) {
         }
     });
 }
+
+// ===========================================================================
+// RUN 422 §3 — bounded publication witness + thread-local RAII comparison probe.
+// Both are test-harness-owned and kept ENTIRELY separate from operational
+// accounting: neither reserves, releases, nor reads any ledger.
+// ===========================================================================
+
+/// A fixed-size, test-owned witness of the acknowledged publication's retained
+/// signature. It holds a fixed `[u8; ML_DSA_44_SIGNATURE_SIZE]` buffer (never an
+/// unbounded Vec) plus the validated length. It is prepared OUTSIDE the protected
+/// retained operation and BEFORE that operation's I/O-counter window, by reading
+/// the acknowledged `Signed` record for the exact position/binding through the
+/// existing bounded read + parse interfaces and copying its signature in.
+pub(crate) struct RetainedSliceWitness {
+    bytes: [u8; qbind_crypto::ml_dsa44::ML_DSA_44_SIGNATURE_SIZE],
+    len: usize,
+}
+
+impl RetainedSliceWitness {
+    /// Build a witness from already-validated signature bytes. The caller validates
+    /// framing/stage/binding/position before calling; this only enforces the fixed
+    /// capacity and copies into the owned array.
+    pub(crate) fn from_validated(sig: &[u8]) -> Self {
+        let mut bytes = [0u8; qbind_crypto::ml_dsa44::ML_DSA_44_SIGNATURE_SIZE];
+        let len = sig.len().min(bytes.len());
+        bytes[..len].copy_from_slice(&sig[..len]);
+        Self { bytes, len }
+    }
+
+    /// The validated witness slice (exactly `len` bytes).
+    pub(crate) fn slice(&self) -> &[u8] {
+        &self.bytes[..self.len]
+    }
+
+    /// The validated witness length.
+    pub(crate) fn len(&self) -> usize {
+        self.len
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+struct RetainedSliceProbeState {
+    invocations: u32,
+    last_matched: Option<bool>,
+    last_len: Option<usize>,
+}
+
+/// A read-only comparison probe. Fired by the model exactly once immediately
+/// BEFORE the scalar sink, with the SAME retrieved slice that passed cryptographic
+/// verification. It records ONLY fixed comparison results (a match flag and the
+/// observed length) and an invocation count; it never retains the retrieved slice
+/// and never panics inside the guarded observation (so a mismatch is surfaced via
+/// recorded state, asserted by the test AFTER the protected call returns).
+pub(crate) struct RetainedSliceProbe {
+    witness: RetainedSliceWitness,
+    state: std::cell::RefCell<RetainedSliceProbeState>,
+}
+
+impl RetainedSliceProbe {
+    pub(crate) fn new(witness: RetainedSliceWitness) -> Self {
+        Self {
+            witness,
+            state: std::cell::RefCell::new(RetainedSliceProbeState::default()),
+        }
+    }
+
+    fn observe(&self, slice: &[u8]) {
+        let mut st = self.state.borrow_mut();
+        st.invocations = st.invocations.saturating_add(1);
+        st.last_len = Some(slice.len());
+        st.last_matched = Some(slice == self.witness.slice());
+    }
+
+    pub(crate) fn invocations(&self) -> u32 {
+        self.state.borrow().invocations
+    }
+
+    pub(crate) fn last_matched(&self) -> Option<bool> {
+        self.state.borrow().last_matched
+    }
+
+    pub(crate) fn last_len(&self) -> Option<usize> {
+        self.state.borrow().last_len
+    }
+}
+
+thread_local! {
+    static RETAINED_SLICE_PROBE: std::cell::RefCell<Option<std::rc::Rc<RetainedSliceProbe>>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// RAII installer for the comparison probe on the current thread; clears the
+/// thread-local on drop so a panicking test cannot leak the probe onto a reused
+/// worker thread (reliable restoration, RUN 422 §3).
+pub(crate) struct RetainedSliceProbeGuard {
+    _private: (),
+}
+
+impl Drop for RetainedSliceProbeGuard {
+    fn drop(&mut self) {
+        RETAINED_SLICE_PROBE.with(|c| *c.borrow_mut() = None);
+    }
+}
+
+pub(crate) fn install_retained_slice_probe(
+    probe: std::rc::Rc<RetainedSliceProbe>,
+) -> RetainedSliceProbeGuard {
+    RETAINED_SLICE_PROBE.with(|c| *c.borrow_mut() = Some(probe));
+    RetainedSliceProbeGuard { _private: () }
+}
+
+/// Fire the comparison probe with the verified retrieved slice, if installed. A
+/// no-op when none is installed (every OwnerBacked path and every production
+/// mirror), so it adds no behavior to the existing seeded route.
+fn fire_retained_slice_probe(slice: &[u8]) {
+    RETAINED_SLICE_PROBE.with(|c| {
+        if let Some(p) = c.borrow().as_ref() {
+            p.observe(slice);
+        }
+    });
+}
+
+/// Map a `RetainedDelivery` into either the borrowed retained signature or the
+/// corresponding terminal `ModelRetainedUseOutcome`. Shared by BOTH retrieval
+/// routes so the delivery-class mapping (Blocked/Missing/Refused/PotentiallySigned/
+/// DeliverySuppressed) is identical; the routes differ only in their journal call
+/// and the association errors handled by the caller. `DeliverySuppressed` is the
+/// recovered-reissue outcome (RUN 422 §4) and stays distinct from
+/// `PotentiallySigned`, which remains the separate live-entry classification.
+fn map_retained_delivery(
+    delivery: crate::signing_reservation_journal::RetainedDelivery<'_>,
+) -> Result<&[u8], ModelRetainedUseOutcome> {
+    use crate::signing_reservation_journal::RetainedDelivery;
+    match delivery {
+        RetainedDelivery::Retained(sig) => Ok(sig),
+        RetainedDelivery::Blocked => Err(ModelRetainedUseOutcome::RetainedBlocked),
+        RetainedDelivery::Missing => Err(ModelRetainedUseOutcome::RetainedMissing),
+        RetainedDelivery::Refused(reason) => {
+            let class = match reason {
+                RefuseReason::PositionMismatch => RetainedRefuseClass::PositionMismatch,
+                RefuseReason::MalformedRecord => RetainedRefuseClass::MalformedRecord,
+                RefuseReason::BindingConflict => RetainedRefuseClass::BindingConflict,
+                RefuseReason::WorkspaceCapacityExceeded => {
+                    RetainedRefuseClass::WorkspaceCapacityExceeded
+                }
+            };
+            Err(ModelRetainedUseOutcome::RetainedRefused(class))
+        }
+        RetainedDelivery::PotentiallySigned => {
+            Err(ModelRetainedUseOutcome::RetainedPotentiallySigned)
+        }
+        RetainedDelivery::DeliverySuppressed => {
+            Err(ModelRetainedUseOutcome::DeliverySuppressed)
+        }
+    }
+}
+
 /// RUN 422 — the isolated protected retained-signature USE model. ONE ordered
 /// protected sequence under a SINGLE serialization-domain guard acquired FIRST
 /// (dropped LAST). It borrows `decided.vote()` exclusively, retrieves an
@@ -1352,8 +1586,17 @@ fn fire_retained_admit_pressure(stage: RetainedAdmitStage) {
 /// loader-owned validated record are destroyed and their coverage released at the
 /// end of the bounded lifecycle scope, while the SAME guard stays held into the
 /// verify/retrieval phase (no release-and-reacquire).
+///
+/// RUN 422 (checked composition) — this is the shared body for BOTH retrieval
+/// routes, selected by `route`. The OwnerBacked route reproduces the original
+/// seeded-test behavior exactly (model-owned workspace + `retrieve_retained`, no
+/// verification-backend coverage). The AssociationChecked route admits the
+/// additional verification-backend coverage BEFORE the dispatch handle, admits the
+/// workspace through `journal.admit_retrieval_workspace()`, and retrieves through
+/// `journal.retrieve_retained_checked()`. There is NO fallback between routes.
 #[allow(clippy::too_many_arguments)]
-fn retained_vote_use_model<H: CommittedHistory + ?Sized>(
+fn retained_vote_use_inner<H: CommittedHistory + ?Sized>(
+    route: RetainedRetrievalRoute,
     owner: &SafetyRecordOwner,
     engine: &qbind_consensus::BasicHotStuffEngine<[u8; 32]>,
     decided: &qbind_consensus::DecidedVote<OwningCapturePayload>,
@@ -1461,6 +1704,27 @@ fn retained_vote_use_model<H: CommittedHistory + ?Sized>(
         Err(_) => return ModelRetainedUseOutcome::VerifyAdmitRefused,
     };
 
+    // 7b. AssociationChecked ONLY — admit the additional verification-backend
+    //     coverage BEFORE the owned dispatch handle is constructed (step 8) or any
+    //     verification object is built (step 11). Declared AFTER `_verify_res` so
+    //     reverse-drop releases it BEFORE `_verify_res`, and AFTER every verify
+    //     object (which are declared later), so coverage survives the `verify_vote`
+    //     call on every exit. OwnerBacked admits none (honest limitation).
+    let _verify_backend_res = match route {
+        RetainedRetrievalRoute::OwnerBacked => None,
+        RetainedRetrievalRoute::AssociationChecked => {
+            fire_retained_admit_pressure(RetainedAdmitStage::VerifyBackend);
+            match owner
+                .backend
+                .accounting()
+                .reserve(verify_backend_wrapper_charge())
+            {
+                Ok(r) => Some(r),
+                Err(_) => return ModelRetainedUseOutcome::VerifyBackendAdmitRefused,
+            }
+        }
+    };
+
     // 8. Key/suite/backend selection and position/binding/preimage derivation,
     //    ALL from the SAME borrowed Vote and bound context. The owned public-key
     //    `Vec` the provider clones is model-owned and its backing capacity is
@@ -1526,38 +1790,60 @@ fn retained_vote_use_model<H: CommittedHistory + ?Sized>(
     // 9. Admit the retrieval workspace (output + envelope scratch) AFTER the
     //    verification inputs exist (RUN 422 §3). On refusal, those inputs are
     //    destroyed before `verify_res` releases (reverse-drop). The workspace
-    //    carries its own separate reservations.
+    //    carries its own separate reservations. OwnerBacked admits the workspace
+    //    directly through a model-owned `RetrievalWorkspaceOwner`; AssociationChecked
+    //    admits it through the journal's association-checked admission path.
     fire_retained_admit_pressure(RetainedAdmitStage::Retrieval);
-    let workspace = RetrievalWorkspaceOwner::new(&owner.backend).admit();
-    let (mut output, mut scratch) = match workspace {
-        Ok(ws) => ws,
-        Err(_) => return ModelRetainedUseOutcome::RetrievalAdmitRefused,
+    let (mut output, mut scratch) = match route {
+        RetainedRetrievalRoute::OwnerBacked => {
+            match RetrievalWorkspaceOwner::new(&owner.backend).admit() {
+                Ok(ws) => ws,
+                Err(_) => return ModelRetainedUseOutcome::RetrievalAdmitRefused,
+            }
+        }
+        RetainedRetrievalRoute::AssociationChecked => {
+            match journal.admit_retrieval_workspace() {
+                Ok(ws) => ws,
+                Err(crate::signing_reservation_journal::WorkspaceAdmissionError::NoAssociation) => {
+                    return ModelRetainedUseOutcome::CheckedNoAssociation
+                }
+                Err(_) => return ModelRetainedUseOutcome::RetrievalAdmitRefused,
+            }
+        }
     };
 
     // 10. Retrieve the already-retained signature (no fresh reservation, no
-    //     continuation, no publication capability, no signer).
-    let retrieved = match journal.retrieve_retained(&position, &binding, &mut scratch, &mut output) {
-        Ok(RetainedDelivery::Retained(sig)) => sig,
-        Ok(RetainedDelivery::Blocked) => return ModelRetainedUseOutcome::RetainedBlocked,
-        Ok(RetainedDelivery::Missing) => return ModelRetainedUseOutcome::RetainedMissing,
-        Ok(RetainedDelivery::Refused(reason)) => {
-            let class = match reason {
-                RefuseReason::PositionMismatch => RetainedRefuseClass::PositionMismatch,
-                RefuseReason::MalformedRecord => RetainedRefuseClass::MalformedRecord,
-                RefuseReason::BindingConflict => RetainedRefuseClass::BindingConflict,
-                RefuseReason::WorkspaceCapacityExceeded => {
-                    RetainedRefuseClass::WorkspaceCapacityExceeded
+    //     continuation, no publication capability, no signer). OwnerBacked uses the
+    //     unconditional retrieval; AssociationChecked uses the association-checked
+    //     retrieval, which additionally requires an installed ledger/workspace
+    //     association and rejects a foreign workspace.
+    let retrieved = match route {
+        RetainedRetrievalRoute::OwnerBacked => {
+            match journal.retrieve_retained(&position, &binding, &mut scratch, &mut output) {
+                Ok(delivery) => match map_retained_delivery(delivery) {
+                    Ok(sig) => sig,
+                    Err(o) => return o,
+                },
+                Err(_) => return ModelRetainedUseOutcome::RetrievalFailed,
+            }
+        }
+        RetainedRetrievalRoute::AssociationChecked => {
+            match journal
+                .retrieve_retained_checked(&position, &binding, &mut scratch, &mut output)
+            {
+                Ok(delivery) => match map_retained_delivery(delivery) {
+                    Ok(sig) => sig,
+                    Err(o) => return o,
+                },
+                Err(crate::signing_reservation_journal::CheckedRetrievalError::NoAssociation) => {
+                    return ModelRetainedUseOutcome::CheckedNoAssociation
                 }
-            };
-            return ModelRetainedUseOutcome::RetainedRefused(class);
+                Err(crate::signing_reservation_journal::CheckedRetrievalError::ForeignWorkspace) => {
+                    return ModelRetainedUseOutcome::CheckedForeignWorkspace
+                }
+                Err(_) => return ModelRetainedUseOutcome::RetrievalFailed,
+            }
         }
-        Ok(RetainedDelivery::PotentiallySigned) => {
-            return ModelRetainedUseOutcome::RetainedPotentiallySigned
-        }
-        Ok(RetainedDelivery::DeliverySuppressed) => {
-            return ModelRetainedUseOutcome::DeliverySuppressed
-        }
-        Err(_) => return ModelRetainedUseOutcome::RetrievalFailed,
     };
 
     // 11. Borrowed-signature cryptographic verification against the SAME Vote's
@@ -1592,11 +1878,87 @@ fn retained_vote_use_model<H: CommittedHistory + ?Sized>(
     //     handle observes `WouldBlock` here while this operation holds the guard.
     coord.on_post_consume_pre_sign();
 
+    // 13b. RUN 422 §3 — fire the bounded read-only comparison probe (if a test
+    //      installed one) with the SAME verified retrieved slice that is about to
+    //      be consumed. No-op on OwnerBacked and production mirrors. The probe only
+    //      records fixed results + an invocation count; it retains nothing and
+    //      never panics, so it cannot perturb the protected sequence.
+    fire_retained_slice_probe(retrieved);
+
     // 14. Scalar-only model consumption of the VERIFIED borrowed signature. The
     //     retrieval workspace, verify objects, reservations, ticket and guard are
     //     destroyed by reverse-drop order after this returns (guard LAST).
     let diag = sink.consume_verified(vote, retrieved, preimage_len);
     ModelRetainedUseOutcome::Consumed(diag)
+}
+
+/// OwnerBacked wrapper — preserves the EXACT original seeded-test behavior
+/// (model-owned retrieval workspace + unconditional `retrieve_retained`, and NO
+/// verification-backend coverage). All existing tests call this entry point and
+/// are unaffected by the checked composition.
+#[allow(clippy::too_many_arguments)]
+fn retained_vote_use_model<H: CommittedHistory + ?Sized>(
+    owner: &SafetyRecordOwner,
+    engine: &qbind_consensus::BasicHotStuffEngine<[u8; 32]>,
+    decided: &qbind_consensus::DecidedVote<OwningCapturePayload>,
+    proposal: &qbind_wire::consensus::BlockProposal,
+    limits: &PreparedDecisionInputLimits,
+    history: Option<&H>,
+    snapshot: &mut AuthorizedProposalVoteSnapshot,
+    sink: &mut RetainedUseRecordingSink,
+    journal: &SigningReservationJournal,
+    coord: &mut ModelCoordinationHook,
+    reconfirm: ReconfirmPerturbation,
+) -> ModelRetainedUseOutcome {
+    retained_vote_use_inner(
+        RetainedRetrievalRoute::OwnerBacked,
+        owner,
+        engine,
+        decided,
+        proposal,
+        limits,
+        history,
+        snapshot,
+        sink,
+        journal,
+        coord,
+        reconfirm,
+    )
+}
+
+/// AssociationChecked wrapper — the RUN 422 checked composition. It admits the
+/// additional verification-backend coverage before the dispatch handle, admits the
+/// retrieval workspace through `journal.admit_retrieval_workspace()`, and retrieves
+/// through `journal.retrieve_retained_checked()`. There is NO fallback to the
+/// OwnerBacked route: a missing association yields `CheckedNoAssociation`.
+#[allow(clippy::too_many_arguments)]
+fn retained_vote_use_checked_model<H: CommittedHistory + ?Sized>(
+    owner: &SafetyRecordOwner,
+    engine: &qbind_consensus::BasicHotStuffEngine<[u8; 32]>,
+    decided: &qbind_consensus::DecidedVote<OwningCapturePayload>,
+    proposal: &qbind_wire::consensus::BlockProposal,
+    limits: &PreparedDecisionInputLimits,
+    history: Option<&H>,
+    snapshot: &mut AuthorizedProposalVoteSnapshot,
+    sink: &mut RetainedUseRecordingSink,
+    journal: &SigningReservationJournal,
+    coord: &mut ModelCoordinationHook,
+    reconfirm: ReconfirmPerturbation,
+) -> ModelRetainedUseOutcome {
+    retained_vote_use_inner(
+        RetainedRetrievalRoute::AssociationChecked,
+        owner,
+        engine,
+        decided,
+        proposal,
+        limits,
+        history,
+        snapshot,
+        sink,
+        journal,
+        coord,
+        reconfirm,
+    )
 }
 
 // ===========================================================================
