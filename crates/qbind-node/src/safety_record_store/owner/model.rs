@@ -2019,11 +2019,13 @@ fn fresh_vote_sign_real_local<H: CommittedHistory + ?Sized>(
     // borrowed Vote's suite must equal the selected signer's suite; combined with
     // the signer<->authorized-key<->backend agreement enforced in step 9, this
     // closes the required four-way (Vote, signer, key, backend) suite agreement
-    // BEFORE any journal reservation, consumption, or signer call. The engine
-    // stamps the captured self-vote at DEFAULT_CONSENSUS_SUITE_ID (0) and no
-    // existing engine constructor produces a suite-100 engine Vote, so a real
-    // suite-100 signer over the suite-0 Vote is refused here with zero journal and
-    // zero signer activity (RUN 422 evidence: engine-side suite selection missing).
+    // BEFORE any journal reservation, consumption, or signer call. The default
+    // engine constructors stamp the self-vote at DEFAULT_CONSENSUS_SUITE_ID (0),
+    // so a real suite-100 signer over a default suite-0 Vote is refused here with
+    // zero journal and zero signer activity. The construction-only
+    // `with_state_limits_and_vote_suite` selector can instead stamp a suite-100
+    // outgoing Vote (metadata only, no authorization), letting this agreement HOLD
+    // for the resumed eligible real-signing path (RUN 422 §6).
     if vote.suite_id != signer.suite_id() {
         return RealFreshSignOutcome::SuiteMismatch;
     }
@@ -2454,9 +2456,33 @@ mod tests {
     /// view-1 proposal. A single local self-vote does NOT form a quorum at n=4,
     /// so the lock stays at L0 across the later view-1 capture: captured L0,
     /// current durable restriction, and engine lock therefore all AGREE.
+    ///
+    /// The default entrypoint keeps the engine's outgoing-Vote suite at
+    /// `DEFAULT_CONSENSUS_SUITE_ID` (0); existing suite-0 tests depend on this.
+    /// Retained as the suite-0 entrypoint even though `capture_multi` now routes
+    /// through the suite-selecting variant.
+    #[allow(dead_code)]
     fn engine_locked_l0_multi() -> (BasicHotStuffEngine<[u8; 32]>, BlockProposal, [u8; 32]) {
+        engine_locked_l0_multi_with_suite(qbind_wire::DEFAULT_CONSENSUS_SUITE_ID)
+    }
+
+    /// RUN 422 — suite-selecting variant of [`engine_locked_l0_multi`]. Builds
+    /// the SAME locked-L0 / safe-view-1 engine but stamps `vote_suite_id` on the
+    /// engine's own outgoing votes via the construction-only
+    /// `with_state_limits_and_vote_suite` constructor (default limits, so block
+    /// behaviour is identical to `new`). The selected suite is applied BEFORE any
+    /// engine event occurs, so the later captured self-vote carries it. The suite
+    /// is outgoing-Vote metadata only and grants no signing authorization.
+    fn engine_locked_l0_multi_with_suite(
+        suite_id: u16,
+    ) -> (BasicHotStuffEngine<[u8; 32]>, BlockProposal, [u8; 32]) {
         let mut engine: BasicHotStuffEngine<[u8; 32]> =
-            BasicHotStuffEngine::new(ValidatorId::new(1), engine_validator_set(4));
+            BasicHotStuffEngine::with_state_limits_and_vote_suite(
+                ValidatorId::new(1),
+                engine_validator_set(4),
+                qbind_consensus::vote_accumulator::ConsensusLimitsConfig::default(),
+                suite_id,
+            );
         let p0 = make_proposal(0, [0xFF; 32], 1);
         let a0 = engine.on_proposal_event(ValidatorId::new(1), &p0);
         assert!(matches!(a0, Some(ConsensusEngineAction::BroadcastVote(_))));
@@ -2494,7 +2520,30 @@ mod tests {
         PreparedDecisionInputLimits,
         u64,
     ) {
-        let (mut engine, p1, l0_block) = engine_locked_l0_multi();
+        // Default entrypoint: suite-0 captured self-vote (existing tests depend
+        // on this default).
+        capture_multi_with_suite(dir, ctx, qbind_wire::DEFAULT_CONSENSUS_SUITE_ID)
+    }
+
+    /// RUN 422 — suite-selecting variant of [`capture_multi`]. Identical capture
+    /// flow, but the engine is constructed with the selected outgoing-Vote suite
+    /// BEFORE any event, so the captured `DecidedVote` carries a self-vote whose
+    /// `suite_id` equals `suite_id`. Used by the resumed REAL suite-100 signing
+    /// path; the suite is metadata only and establishes no signing authorization.
+    #[allow(clippy::type_complexity)]
+    fn capture_multi_with_suite(
+        dir: &std::path::Path,
+        ctx: &PinnedSafetyContext,
+        suite_id: u16,
+    ) -> (
+        SafetyRecordOwner,
+        BasicHotStuffEngine<[u8; 32]>,
+        DecidedVote<OwningCapturePayload>,
+        BlockProposal,
+        PreparedDecisionInputLimits,
+        u64,
+    ) {
+        let (mut engine, p1, l0_block) = engine_locked_l0_multi_with_suite(suite_id);
         let owner = init_owner(dir, ctx);
         let rev = publish_qc(&owner, ctx, l0_block, 0, 0);
         let proof = owner
@@ -2526,6 +2575,10 @@ mod tests {
         assert_eq!(decided.vote().round, 1);
         assert_eq!(decided.vote().step, 0);
         assert_eq!(decided.vote().version, MODEL_WIRE_MESSAGE_VERSION);
+        assert_eq!(
+            decided.vote().suite_id, suite_id,
+            "the captured self-vote carries the engine's selected outgoing-Vote suite"
+        );
         (owner, engine, decided, p1, lim, rev)
     }
 
@@ -5359,17 +5412,19 @@ mod tests {
         // ------------------------------------------------------------------
         // RUN 422 §2 correction — suite-CONSISTENT FIXTURE signing context.
         //
-        // The engine stamps the captured self-vote at `DEFAULT_CONSENSUS_SUITE_ID`
-        // (0) and no existing engine interface produces a suite-100 engine Vote, so
-        // the REAL ML-DSA-44 `LocalKeySigner` (which requires suite 100) can never be
-        // suite-consistent with the borrowed Vote: the eligible REAL-signing positive
-        // path is BLOCKED. To still exercise the admitted journal reserve/consume/
-        // sign/publish/retry/retire MECHANICS under a suite-consistent relationship,
-        // these fixtures govern suite 0 for the signer, authorized key, and backend,
-        // matching the borrowed Vote's own wire suite. The signer below is an EXPLICIT
-        // FIXTURE: its `sign_vote_into` writes deterministic bytes, NOT a real
-        // ML-DSA-44 signature. No real cryptographic correspondence is claimed from
-        // this fixture path.
+        // The DEFAULT engine constructors stamp the captured self-vote at
+        // `DEFAULT_CONSENSUS_SUITE_ID` (0), so over a DEFAULT suite-0 capture the
+        // real ML-DSA-44 `LocalKeySigner` (which requires suite 100) is not
+        // suite-consistent with the borrowed Vote and the eligible REAL path
+        // refuses (see `real1_...`). To exercise the admitted journal reserve/
+        // consume/sign/publish/retry/retire MECHANICS under a suite-consistent
+        // relationship WITHOUT real crypto, these fixtures govern suite 0 for the
+        // signer, authorized key, and backend, matching a default suite-0 Vote. The
+        // signer below is an EXPLICIT FIXTURE: its `sign_vote_into` writes
+        // deterministic bytes, NOT a real ML-DSA-44 signature. No real cryptographic
+        // correspondence is claimed from this fixture path. The RESUMED eligible
+        // REAL suite-100 path (via `capture_multi_with_suite(.., 100)`) is tested
+        // separately in the `real100_*` cases below (RUN 422 §6).
         // ------------------------------------------------------------------
 
         /// A suite-0 authority whose governed key suite and registered backend both
@@ -5769,15 +5824,17 @@ mod tests {
         }
 
         // ==================================================================
-        // RUN 422 §2 CORRECTION — the eligible REAL-signing positive path is
-        // BLOCKED. The engine stamps the captured self-vote at suite 0 and no
-        // existing engine interface produces a suite-100 engine Vote, while the real
-        // `LocalKeySigner` requires suite 100. The required four-way suite agreement
-        // (Vote, signer, key, backend) therefore REFUSES the real suite-100 signer
-        // over the suite-0 Vote, with ZERO journal reservation/consumption and ZERO
-        // signer calls. (The earlier run signed suite-0 bytes with the suite-100
-        // signer; that proved a raw-byte signature but NOT a suite-consistent
-        // composition, so it is no longer credited as acceptance.)
+        // RUN 422 §2/§6 — the DEFAULT suite-0 capture still REFUSES the real
+        // suite-100 signer. The default engine constructors stamp the captured
+        // self-vote at suite 0, while the real `LocalKeySigner` requires suite 100.
+        // The required four-way suite agreement (Vote, signer, key, backend)
+        // therefore REFUSES the real suite-100 signer over the suite-0 Vote, with
+        // ZERO journal reservation/consumption and ZERO signer calls. This default
+        // refusal is preserved even though the suite-selecting constructor now
+        // enables an opt-in suite-100 capture (tested in `real100_*`). (The earlier
+        // run signed suite-0 bytes with the suite-100 signer; that proved a raw-byte
+        // signature but NOT a suite-consistent composition, so it is no longer
+        // credited as acceptance.)
         // ==================================================================
         #[test]
         fn real1_real_signer_suite_mismatch_blocked_zero_journal_zero_signing() {
@@ -6476,6 +6533,406 @@ mod tests {
                 "the aggregate ceiling is fixed configuration"
             );
             assert_eq!(signer.calls(), 1);
+        }
+
+        // ==================================================================
+        // RUN 422 §6 — RESUMED ELIGIBLE REAL suite-100 signing composition.
+        //
+        // Construction-time outgoing-Vote suite selection
+        // (`BasicHotStuffEngine::with_state_limits_and_vote_suite`) lets the owning
+        // capture carry a genuine suite-100 self-vote (`capture_multi_with_suite(..,
+        // 100)`). The four-way (Vote, signer, key, backend) suite agreement then
+        // HOLDS for the real ML-DSA-44 `LocalKeySigner`, so the previously refused
+        // eligible real-signing path executes end to end. These `real100_*` cases
+        // establish REAL cryptographic acceptance and the remaining phase/lifecycle/
+        // publication evidence on the eligible path — DISTINCT from the suite-0
+        // FIXTURE mechanics above, which claim no real cryptographic correspondence.
+        // The selected suite is outgoing-Vote metadata only; it grants no key
+        // availability, backend support, verification, or authorization.
+        // ==================================================================
+
+        /// §6 positive: the eligible suite-100 path performs EXACTLY ONE real
+        /// `LocalKeySigner::sign_vote_into`, commits 2,420 ML-DSA-44 signature bytes,
+        /// the published bytes VERIFY under the authorized public key and the exact
+        /// journal-bound preimage (genuine crypto, not fixture correspondence), the
+        /// admitted publication is acknowledged (`Published`), exactly one retirement
+        /// is attempted and reported separately, and the complete borrowed Vote and
+        /// original pin provenance are preserved.
+        #[test]
+        fn real100_eligible_published_retired_and_real_signature_verified() {
+            let dir = tempfile::tempdir().unwrap();
+            let ctx = retained_ctx(4);
+            // Opt-in suite-100 captured self-vote via construction-time selection.
+            let (owner, engine, decided, p1, lim, _rev) =
+                capture_multi_with_suite(dir.path(), &ctx, MODEL_SUITE_U16);
+            let (pv, sk) = make_real_signing_authority();
+            let mut snapshot = established_snapshot(&pv);
+            let journal = associated_bounded_journal(&owner, real_fresh_store(), 1);
+            let inner = real_local_signer(&sk);
+            let signer = CountingValidatorSigner::new(&inner);
+            let mut sink = RealSignRecordingSink::new();
+            let mut coord = ModelCoordinationHook::inert();
+            let base_vote = decided.vote().clone();
+            assert_eq!(
+                base_vote.suite_id, MODEL_SUITE_U16,
+                "the captured self-vote carries the selected suite 100"
+            );
+            assert_eq!(signer.suite_id(), 100, "the real ML-DSA-44 signer is suite 100");
+
+            let ledgers_before = snapshot_ledgers(&owner);
+            let prov_before = pin_provenance_now(&owner, &decided);
+
+            let outcome = fresh_vote_sign_real_local::<FixtureCommittedHistory>(
+                &owner, &engine, &decided, &p1, &lim, None, &mut snapshot,
+                &signer, &mut sink, &journal, &mut coord,
+                ReconfirmPerturbation::None,
+            );
+            let diag = match outcome {
+                RealFreshSignOutcome::Published(d) => d,
+                other => panic!("expected Published on the eligible real path, got {other:?}"),
+            };
+            assert_eq!(diag.validator_index, SIGNER_VID);
+            assert_eq!(diag.height, 1);
+            assert_eq!(diag.round, 1);
+            assert_eq!(diag.step, 0);
+            assert_eq!(diag.suite_id, MODEL_SUITE_U16, "the diagnostic records the suite-100 Vote");
+            assert_eq!(diag.sig_len, 2420, "ML-DSA-44 signature size");
+            assert!(!diag.republished, "the clean path performs no retry");
+            assert_eq!(diag.retirement, RetirementReport::Retired);
+            assert_eq!(
+                signer.calls(),
+                1,
+                "exactly one real LocalKeySigner::sign_vote_into invocation"
+            );
+            assert_eq!(sink.calls, 1, "exactly one completion sink call");
+            assert_eq!(coord.calls, 1, "the coordination point is reached once");
+
+            // GENUINE ML-DSA-44 verification against the fixture's AUTHORIZED public
+            // key and the EXACT journal-bound preimage (not fixture-byte equality).
+            let (pos, binding) = retained_pos_binding(&pv, &base_vote);
+            let preimage = pv.signing_domain.vote_preimage(&base_vote);
+            let published_sig = match journal.reserve_for_sign(&pos, &binding) {
+                Ok(ReservationOutcome::ExactRetryRetained(sig)) => sig,
+                other => panic!("expected the acknowledged signature, got {other:?}"),
+            };
+            assert_eq!(published_sig.len(), 2420, "the published record holds the 2,420-byte signature");
+            let (key_suite, pk) = pv
+                .key_provider
+                .get_suite_and_key(ValidatorId::new(SIGNER_VID))
+                .expect("the authorized public key is installed");
+            assert_eq!(
+                key_suite, SUITE_PQ_RESERVED_1,
+                "the authorized key is governed at suite 100"
+            );
+            MlDsa44Backend::verify(&pk, &preimage, &published_sig).expect(
+                "the published signature VERIFIES under the authorized suite-100 key and the journal-bound preimage",
+            );
+
+            // Preservation: the complete borrowed Vote and the original pin
+            // provenance are unchanged across the real signing run.
+            assert_eq!(decided.vote(), &base_vote, "the borrowed Vote is unchanged");
+            assert_eq!(
+                pin_provenance_now(&owner, &decided),
+                prov_before,
+                "the original pin provenance is preserved"
+            );
+            let _ = ledgers_before;
+        }
+
+        /// §6 accounting: the SAME live-phase ledger sampling and exact cleanup as
+        /// the suite-0 fixture accounting test, but exercised on the ELIGIBLE REAL
+        /// suite-100 path. At the post-consume / pre-sign sample the model-owned
+        /// operational charge covers the resting baseline plus the reconciled
+        /// source-derived lower bound (control + real signing work + crypto-temp);
+        /// after the run BOTH ledgers return to the resting baseline and BOTH
+        /// ceilings are unchanged.
+        #[test]
+        fn real100_accounting_live_phase_and_cleanup() {
+            let dir = tempfile::tempdir().unwrap();
+            let ctx = retained_ctx(4);
+            let (owner, engine, decided, p1, lim, _rev) =
+                capture_multi_with_suite(dir.path(), &ctx, MODEL_SUITE_U16);
+            let (pv, sk) = make_real_signing_authority();
+            let mut snapshot = established_snapshot(&pv);
+            let journal = associated_bounded_journal(&owner, real_fresh_store(), 1);
+            let inner = real_local_signer(&sk);
+            let signer = CountingValidatorSigner::new(&inner);
+            let mut sink = RealSignRecordingSink::new();
+            // Sampling hook reads BOTH ledgers at the live signing phase.
+            let mut coord = ModelCoordinationHook::sampling(owner.backend_for_test().clone());
+            let base_vote = decided.vote().clone();
+
+            let ledgers_before = snapshot_ledgers(&owner);
+            let prov_before = pin_provenance_now(&owner, &decided);
+            let op_cap_before = owner.backend_for_test().accounting_cap();
+            let agg_cap_before = owner.backend_for_test().accounting_aggregate_cap();
+
+            let outcome = fresh_vote_sign_real_local::<FixtureCommittedHistory>(
+                &owner, &engine, &decided, &p1, &lim, None, &mut snapshot,
+                &signer, &mut sink, &journal, &mut coord,
+                ReconfirmPerturbation::None,
+            );
+            assert!(matches!(outcome, RealFreshSignOutcome::Published(_)));
+
+            // Live-phase sample (post-consume / pre-sign). The model-owned
+            // operational reservations above baseline include, at minimum, the
+            // control coverage, the real signing work set, and the crypto-temporary
+            // coverage; the journal continuation/publication coverage adds more, so
+            // this reconciled source-derived SUM is a strict LOWER BOUND. The
+            // consumed reservation workspace is gone (destroyed by
+            // `reserve_for_sign_admitted` before this sample), yet the transferred
+            // publication-capability coverage is still live.
+            let live_op = coord.observed_operational.expect("operational sample");
+            let live_agg = coord.observed_aggregate.expect("aggregate sample");
+            let model_owned_lower_bound = control_charge()
+                .saturating_add(real_sign_work_charge())
+                .saturating_add(crypto_temp_charge());
+            assert!(
+                live_op
+                    >= ledgers_before
+                        .operational
+                        .saturating_add(model_owned_lower_bound),
+                "live operational charge {} must cover the resting baseline {} plus the reconciled model-owned lower bound {} (control+work+crypto)",
+                live_op,
+                ledgers_before.operational,
+                model_owned_lower_bound
+            );
+            assert!(
+                live_agg >= live_op,
+                "the aggregate authority sees at least the operational charge"
+            );
+            if let Some(cap) = op_cap_before {
+                assert!(live_op <= cap, "live operational charge within the ceiling");
+            }
+            if let Some(cap) = agg_cap_before {
+                assert!(live_agg <= cap, "live aggregate charge within the ceiling");
+            }
+
+            // Exact cleanup against the resting baseline; both ceilings unchanged.
+            assert_cleanup_preserved(
+                &owner, &decided, &base_vote, ledgers_before, prov_before,
+                "the successful real suite-100 signer run",
+            );
+            assert_eq!(
+                owner.backend_for_test().accounting_cap(),
+                op_cap_before,
+                "the operational ceiling is fixed configuration"
+            );
+            assert_eq!(
+                owner.backend_for_test().accounting_aggregate_cap(),
+                agg_cap_before,
+                "the aggregate ceiling is fixed configuration"
+            );
+            assert_eq!(signer.calls(), 1, "exactly one real signer call");
+        }
+
+        /// §6 lifecycle refusal: exercise the captured-versus-current lifecycle
+        /// agreement ITSELF (not an authorization-ticket failure, and distinct from
+        /// the retained-decision observation) on the eligible suite-100 path. Both
+        /// the ENGINE and the DURABLE restriction advance consistently L0 -> L1
+        /// (so step-5 observation still revalidates as safe), yet the CAPTURED pin
+        /// still references the retired L0 generation (revision 1). Step 6 therefore
+        /// refuses with `LifecycleAmbiguous`, ZERO signer calls, no journal
+        /// reservation, and exact cleanup against the post-advance baseline.
+        #[test]
+        fn real100_lifecycle_refused_after_consistent_generation_advance_zero_signing() {
+            let dir = tempfile::tempdir().unwrap();
+            let ctx = retained_ctx(4);
+            let (owner, mut engine, decided, p1, lim, _rev) =
+                capture_multi_with_suite(dir.path(), &ctx, MODEL_SUITE_U16);
+            let (pv, sk) = make_real_signing_authority();
+            let mut snapshot = established_snapshot(&pv);
+            let journal = associated_bounded_journal(&owner, real_fresh_store(), 1);
+            let inner = real_local_signer(&sk);
+            let signer = CountingValidatorSigner::new(&inner);
+            let mut sink = RealSignRecordingSink::new();
+            let mut coord = ModelCoordinationHook::inert();
+            let base_vote = decided.vote().clone();
+
+            // Advance the ENGINE to lock the view-1 block (L1): the local self-vote
+            // was already cast at capture, so validators 2 & 3 complete the quorum.
+            let l0_block = derive_block_id_local(1, 0, &[0xFF; 32]);
+            let l1_block = derive_block_id_local(2, 1, &l0_block);
+            assert!(
+                engine
+                    .on_vote_event(ValidatorId::new(2), &logical_vote(1, l1_block, 2))
+                    .expect("peer vote 2 for L1 ingests")
+                    .is_none(),
+                "two votes are short of the L1 quorum"
+            );
+            let r3 = engine
+                .on_vote_event(ValidatorId::new(3), &logical_vote(1, l1_block, 3))
+                .expect("peer vote 3 for L1 ingests");
+            assert!(r3.is_some(), "the third vote forms the L1 quorum");
+            let lk = engine.locked_qc().expect("engine now locks L1");
+            assert_eq!(lk.block_id, l1_block, "engine lock advanced to L1");
+            assert_eq!(lk.view, 1);
+
+            // Advance the DURABLE restriction to the SAME L1, moving the
+            // authoritative revision 1 -> 2 (consistent with the engine).
+            let new_rev = publish_qc(&owner, &ctx, l1_block, 1, 1);
+            assert_eq!(new_rev, 2, "the L1 publication advances the durable revision");
+
+            // Baseline taken AFTER the consistent advance, immediately before the call.
+            let ledgers_before = snapshot_ledgers(&owner);
+            let prov_before = pin_provenance_now(&owner, &decided);
+
+            let outcome = fresh_vote_sign_real_local::<FixtureCommittedHistory>(
+                &owner, &engine, &decided, &p1, &lim, None, &mut snapshot,
+                &signer, &mut sink, &journal, &mut coord,
+                ReconfirmPerturbation::None,
+            );
+            assert_eq!(
+                outcome,
+                RealFreshSignOutcome::LifecycleAmbiguous,
+                "the retained L0 generation no longer matches the advanced L1 state"
+            );
+            assert_eq!(signer.calls(), 0, "a lifecycle refusal performs zero signer calls");
+            assert_eq!(sink.calls, 0, "no completion sink on a lifecycle refusal");
+            assert_eq!(coord.calls, 0, "the coordination point is never reached");
+            assert_eq!(
+                journal.reserved_position_count(),
+                0,
+                "a lifecycle refusal reserves no journal position"
+            );
+            assert_cleanup_preserved(
+                &owner, &decided, &base_vote, ledgers_before, prov_before,
+                "the real-path lifecycle refusal",
+            );
+        }
+
+        /// §6 publication faults on the ELIGIBLE REAL path, distinguishing a stored
+        /// `Reserved` record from a stored `Signed` record through direct
+        /// applied-write inspection. A permanent BEFORE-write fault refuses WITHOUT
+        /// applying any publication write, so NO `Signed` record is stored and the
+        /// existing durable `Reserved` record (written by the admitted reservation,
+        /// a DIFFERENT storage method) is unchanged. A permanent write-THEN-error
+        /// APPLIES the `Signed` record before refusing. Both leave no fresh-signing
+        /// opportunity; both perform exactly one real signer call despite the retry.
+        #[test]
+        fn real100_publish_reserved_vs_signed_record_inspection() {
+            // Permanent before-write: Reserved record only (applied == 0).
+            {
+                let dir = tempfile::tempdir().unwrap();
+                let ctx = retained_ctx(4);
+                let (owner, engine, decided, p1, lim, _rev) =
+                    capture_multi_with_suite(dir.path(), &ctx, MODEL_SUITE_U16);
+                let (pv, sk) = make_real_signing_authority();
+                let mut snapshot = established_snapshot(&pv);
+                let store = Arc::new(AdmittedPublishFaultStore::new());
+                store.arm_write(1, u32::MAX); // mode 1 = before-write, permanent.
+                let journal = associated_bounded_journal(
+                    &owner,
+                    store.clone() as Arc<dyn SigningJournalStorage>,
+                    1,
+                );
+                let inner = real_local_signer(&sk);
+                let signer = CountingValidatorSigner::new(&inner);
+                let mut sink = RealSignRecordingSink::new();
+                let mut coord = ModelCoordinationHook::inert();
+                let base_vote = decided.vote().clone();
+                let outcome = fresh_vote_sign_real_local::<FixtureCommittedHistory>(
+                    &owner, &engine, &decided, &p1, &lim, None, &mut snapshot,
+                    &signer, &mut sink, &journal, &mut coord,
+                    ReconfirmPerturbation::None,
+                );
+                assert_eq!(outcome, RealFreshSignOutcome::PublishWriteIo);
+                assert_eq!(signer.calls(), 1, "exactly one real signer call despite the retry");
+                assert_eq!(
+                    store.applied_writes(),
+                    0,
+                    "a before-write failure applies NO publication (Signed) record; the record stays Reserved"
+                );
+                let (pos, binding) = retained_pos_binding(&pv, &base_vote);
+                assert!(
+                    !matches!(
+                        journal.reserve_for_sign(&pos, &binding),
+                        Ok(ReservationOutcome::FreshlyReserved(_))
+                    ),
+                    "the existing Reserved obligation persists: no fresh-signing opportunity"
+                );
+            }
+            // Permanent write-then-error: the Signed record IS applied (applied >= 1).
+            {
+                let dir = tempfile::tempdir().unwrap();
+                let ctx = retained_ctx(4);
+                let (owner, engine, decided, p1, lim, _rev) =
+                    capture_multi_with_suite(dir.path(), &ctx, MODEL_SUITE_U16);
+                let (pv, sk) = make_real_signing_authority();
+                let mut snapshot = established_snapshot(&pv);
+                let store = Arc::new(AdmittedPublishFaultStore::new());
+                store.arm_write(2, u32::MAX); // mode 2 = write-then-error, permanent.
+                let journal = associated_bounded_journal(
+                    &owner,
+                    store.clone() as Arc<dyn SigningJournalStorage>,
+                    1,
+                );
+                let inner = real_local_signer(&sk);
+                let signer = CountingValidatorSigner::new(&inner);
+                let mut sink = RealSignRecordingSink::new();
+                let mut coord = ModelCoordinationHook::inert();
+                let base_vote = decided.vote().clone();
+                let outcome = fresh_vote_sign_real_local::<FixtureCommittedHistory>(
+                    &owner, &engine, &decided, &p1, &lim, None, &mut snapshot,
+                    &signer, &mut sink, &journal, &mut coord,
+                    ReconfirmPerturbation::None,
+                );
+                assert_eq!(outcome, RealFreshSignOutcome::PublishWriteIo);
+                assert_eq!(signer.calls(), 1, "exactly one real signer call despite the retry");
+                assert!(
+                    store.applied_writes() >= 1,
+                    "write-then-error APPLIES the Signed record before failing"
+                );
+                let (pos, binding) = retained_pos_binding(&pv, &base_vote);
+                assert!(
+                    !matches!(
+                        journal.reserve_for_sign(&pos, &binding),
+                        Ok(ReservationOutcome::FreshlyReserved(_))
+                    ),
+                    "the applied Signed record preserves the obligation: no fresh-signing opportunity"
+                );
+            }
+        }
+
+        /// §6 publication retry on the ELIGIBLE REAL path: a one-shot `WriteIo`
+        /// before application refuses the first publish attempt; the SINGLE retry
+        /// (same capability/output/workspace, NO re-sign) succeeds and is
+        /// acknowledged `Published`. Exactly one real signer call across the retry.
+        #[test]
+        fn real100_publish_single_write_io_retry_succeeds_one_signer_call() {
+            let dir = tempfile::tempdir().unwrap();
+            let ctx = retained_ctx(4);
+            let (owner, engine, decided, p1, lim, _rev) =
+                capture_multi_with_suite(dir.path(), &ctx, MODEL_SUITE_U16);
+            let (pv, sk) = make_real_signing_authority();
+            let mut snapshot = established_snapshot(&pv);
+            let store = Arc::new(AdmittedPublishFaultStore::new());
+            // mode 1 = before-write; count 1 = one-shot, so the single retry succeeds.
+            store.arm_write(1, 1);
+            let journal = associated_bounded_journal(
+                &owner,
+                store.clone() as Arc<dyn SigningJournalStorage>,
+                1,
+            );
+            let inner = real_local_signer(&sk);
+            let signer = CountingValidatorSigner::new(&inner);
+            let mut sink = RealSignRecordingSink::new();
+            let mut coord = ModelCoordinationHook::inert();
+
+            let outcome = fresh_vote_sign_real_local::<FixtureCommittedHistory>(
+                &owner, &engine, &decided, &p1, &lim, None, &mut snapshot,
+                &signer, &mut sink, &journal, &mut coord,
+                ReconfirmPerturbation::None,
+            );
+            match outcome {
+                RealFreshSignOutcome::Published(d) => {
+                    assert!(d.republished, "the diagnostic records the single retry");
+                    assert_eq!(d.suite_id, MODEL_SUITE_U16);
+                    assert_eq!(d.retirement, RetirementReport::Retired);
+                }
+                other => panic!("expected Published after one retry, got {other:?}"),
+            }
+            assert_eq!(signer.calls(), 1, "the retry never re-signs");
         }
     }
 

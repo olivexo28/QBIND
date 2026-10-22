@@ -1187,6 +1187,24 @@ where
     /// silently dropped (no synthetic reconfig is emitted). See
     /// `on_leader_step` for the consumption site.
     pending_reconfig_next_epoch: Option<u64>,
+
+    /// Run 422 — suite identifier stamped on this engine's OWN outgoing
+    /// `Vote` messages (the leader's self-vote and the follower self-vote in
+    /// the shared ingestion body). It is OUTGOING-VOTE METADATA ONLY: it is
+    /// written verbatim into the `suite_id` field of the `Vote` this engine
+    /// constructs and establishes NO key availability, backend support,
+    /// verification, authorization, or permission to sign. It never touches
+    /// the proposal header's `suite_id` or the embedded QC's `suite_id`.
+    ///
+    /// The value is fixed at construction and is IMMUTABLE thereafter: there
+    /// is no setter and no consuming reconfiguration builder, so a running
+    /// engine's suite cannot be changed while preserving its consensus state.
+    /// Every existing constructor (`new`, `with_state_limits`) initializes it
+    /// to [`qbind_wire::DEFAULT_CONSENSUS_SUITE_ID`]; only the dedicated
+    /// [`Self::with_state_limits_and_vote_suite`] constructor selects a
+    /// different value, and only when building a fresh engine from
+    /// initialization inputs.
+    vote_suite_id: u16,
 }
 
 /// Peer-learned certified block material used by restore catchup.
@@ -1420,6 +1438,7 @@ where
             .field("timeout_accumulator", &self.timeout_accumulator)
             .field("timeout_emitted_in_view", &self.timeout_emitted_in_view)
             .field("pending_reconfig_next_epoch", &self.pending_reconfig_next_epoch)
+            .field("vote_suite_id", &self.vote_suite_id)
             .finish()
     }
 }
@@ -1433,26 +1452,14 @@ where
     /// The engine starts at view 0, epoch 0 with no blocks, no locked QC, and no commits.
     /// View timing starts from construction time.
     pub fn new(local_id: ValidatorId, validators: ConsensusValidatorSet) -> Self {
-        let mut ids: Vec<ValidatorId> = validators.iter().map(|v| v.id).collect();
-        ids.sort_by_key(|id| id.0);
-
-        BasicHotStuffEngine {
+        let leaders = Self::sorted_leader_ids(&validators);
+        let state = HotStuffStateEngine::new(validators);
+        Self::assemble(
             local_id,
-            state: HotStuffStateEngine::new(validators),
-            current_view: 0,
-            current_epoch: 0, // Default to epoch 0 (T101)
-            leaders: ids,
-            proposed_in_view: false,
-            voted_in_view: false,
-            last_view_start_instant: Some(Instant::now()),
-            view_duration_recorder: None,
-            progress_recorder: None,
-            validator_vote_recorder: None,
-            equivocation_recorder: None,
-            timeout_accumulator: TimeoutAccumulator::new(),
-            timeout_emitted_in_view: false,
-            pending_reconfig_next_epoch: None,
-        }
+            state,
+            leaders,
+            qbind_wire::DEFAULT_CONSENSUS_SUITE_ID,
+        )
     }
 
     /// Create a new `BasicHotStuffEngine` whose block-tree state engine uses
@@ -1467,15 +1474,69 @@ where
         validators: ConsensusValidatorSet,
         limits: crate::vote_accumulator::ConsensusLimitsConfig,
     ) -> Self {
+        let leaders = Self::sorted_leader_ids(&validators);
+        let state = HotStuffStateEngine::with_limits(validators, limits);
+        Self::assemble(
+            local_id,
+            state,
+            leaders,
+            qbind_wire::DEFAULT_CONSENSUS_SUITE_ID,
+        )
+    }
+
+    /// Run 422 — create a fresh `BasicHotStuffEngine` that uses the supplied
+    /// block-tree memory limits AND stamps `suite_id` on its own outgoing
+    /// `Vote` messages. This is the ONLY constructor that selects a non-default
+    /// outgoing-Vote suite.
+    ///
+    /// It takes exactly the [`Self::with_state_limits`] initialization inputs
+    /// plus `suite_id: u16`, and builds a brand-new engine from those inputs
+    /// (view 0, epoch 0, no blocks/QC/commits, timing from construction). It
+    /// deliberately does NOT accept an existing engine, so there is no way to
+    /// re-point a running engine's suite while preserving its consensus state;
+    /// combined with the absence of any setter or consuming reconfiguration
+    /// builder, outgoing-Vote-suite selection is construction-only.
+    ///
+    /// The selected suite is OUTGOING-VOTE METADATA ONLY. It establishes no key
+    /// availability, backend support, verification, authorization, or
+    /// permission to sign; downstream signing composition must still enforce
+    /// the four-way (Vote, signer, key, backend) suite agreement independently.
+    pub fn with_state_limits_and_vote_suite(
+        local_id: ValidatorId,
+        validators: ConsensusValidatorSet,
+        limits: crate::vote_accumulator::ConsensusLimitsConfig,
+        suite_id: u16,
+    ) -> Self {
+        let leaders = Self::sorted_leader_ids(&validators);
+        let state = HotStuffStateEngine::with_limits(validators, limits);
+        Self::assemble(local_id, state, leaders, suite_id)
+    }
+
+    /// Deterministic, ascending-sorted leader ordering for a validator set.
+    /// Shared by every constructor so leader selection is identical regardless
+    /// of limits or outgoing-Vote-suite selection.
+    fn sorted_leader_ids(validators: &ConsensusValidatorSet) -> Vec<ValidatorId> {
         let mut ids: Vec<ValidatorId> = validators.iter().map(|v| v.id).collect();
         ids.sort_by_key(|id| id.0);
+        ids
+    }
 
+    /// Shared engine assembly from already-constructed parts. Centralizes every
+    /// non-suite default so the public constructors differ ONLY in how `state`
+    /// is built and which `vote_suite_id` they supply; no unrelated default is
+    /// changed by adding the suite field.
+    fn assemble(
+        local_id: ValidatorId,
+        state: HotStuffStateEngine<BlockIdT>,
+        leaders: Vec<ValidatorId>,
+        vote_suite_id: u16,
+    ) -> Self {
         BasicHotStuffEngine {
             local_id,
-            state: HotStuffStateEngine::with_limits(validators, limits),
+            state,
             current_view: 0,
-            current_epoch: 0,
-            leaders: ids,
+            current_epoch: 0, // Default to epoch 0 (T101)
+            leaders,
             proposed_in_view: false,
             voted_in_view: false,
             last_view_start_instant: Some(Instant::now()),
@@ -1486,6 +1547,7 @@ where
             timeout_accumulator: TimeoutAccumulator::new(),
             timeout_emitted_in_view: false,
             pending_reconfig_next_epoch: None,
+            vote_suite_id,
         }
     }
 
@@ -2370,7 +2432,8 @@ impl BasicHotStuffEngine<[u8; 32]> {
             step: 0,
             block_id,
             validator_index: self.local_id.0 as u16,
-            suite_id: qbind_wire::DEFAULT_CONSENSUS_SUITE_ID,
+            // Run 422 — outgoing-Vote-suite metadata selected at construction.
+            suite_id: self.vote_suite_id,
             signature: vec![],
         };
 
@@ -2946,7 +3009,9 @@ impl BasicHotStuffEngine<[u8; 32]> {
             step: 0,
             block_id,
             validator_index: self.local_id.0 as u16,
-            suite_id: qbind_wire::DEFAULT_CONSENSUS_SUITE_ID,
+            // Run 422 — outgoing-Vote-suite metadata selected at construction.
+            // This is the self-vote the owning envelope (`DecidedVote`) carries.
+            suite_id: self.vote_suite_id,
             signature: vec![],
         };
 
