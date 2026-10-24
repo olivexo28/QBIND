@@ -60,10 +60,11 @@ jobs:
   full-tree-package-integrity:
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    env:
-      # Runner temp staging for the transient generated artifacts (never committed).
-      RUN407_OUTDIR: ${{ runner.temp }}/qbind-run407-anchor-drift-json-retention
     steps:
+      # Runner temp staging for the transient generated artifacts (never committed).
+      - name: Set runner-temp staging path
+        run: echo "RUN407_OUTDIR=$RUNNER_TEMP/qbind-run407-anchor-drift-json-retention" >> "$GITHUB_ENV"
+
       - name: Checkout
         uses: actions/checkout@v4
         with:

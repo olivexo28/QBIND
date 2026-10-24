@@ -72,9 +72,10 @@ jobs:
       id-token: write
       # Write the build-provenance attestation for the built artifact.
       attestations: write
-    env:
-      CI_STAGE_DIR: ${{ runner.temp }}/qbind-run386-ci-release-signing-attestation
     steps:
+      - name: Set runner-temp staging path
+        run: echo "CI_STAGE_DIR=$RUNNER_TEMP/qbind-run386-ci-release-signing-attestation" >> "$GITHUB_ENV"
+
       - name: Checkout (full history for short commit)
         uses: actions/checkout@v4
         with:
