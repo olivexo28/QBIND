@@ -46,10 +46,11 @@ jobs:
   release-artifact-manifest:
     runs-on: ubuntu-latest
     timeout-minutes: 45
-    env:
-      # CI staging directory for publish-safe artifacts only (never committed).
-      CI_STAGE_DIR: ${{ runner.temp }}/qbind-run385-ci-release-artifact-manifest
     steps:
+      # CI staging directory for publish-safe artifacts only (never committed).
+      - name: Set runner-temp staging path
+        run: echo "CI_STAGE_DIR=$RUNNER_TEMP/qbind-run385-ci-release-artifact-manifest" >> "$GITHUB_ENV"
+
       - name: Checkout (full history for short commit)
         uses: actions/checkout@v4
         with:
