@@ -9595,6 +9595,9 @@ mod tests {
                     &owner, &engine, &decided, &p1, &lim, &mut snapshot, &journal, &signer,
                 );
                 let _l1 = advance_engine_and_durable_to_l1(&owner, &mut engine, &ctx);
+                // §2 baselines taken AFTER the acknowledged lifecycle advance.
+                let ledgers_before = snapshot_ledgers(&owner);
+                let prov_before = pin_provenance_now(&owner, &decided);
 
                 let mut sink = RetainedUseRecordingSink::new();
                 let mut coord = ModelCoordinationHook::inert();
@@ -9607,6 +9610,15 @@ mod tests {
                 assert_eq!(outcome, ModelRetainedUseOutcome::AuthorizationConfirmRefused);
                 assert_eq!(sink.calls, 0, "no scalar sink on a confirm refusal");
                 assert_eq!(signer.calls(), 1, "zero additional signer calls on the refusal");
+
+                // §2 — independent operational AND aggregate cleanup on the retained
+                // confirm refusal: both ledgers restore to the post-advance baseline
+                // and the borrowed Vote and original pin provenance are unchanged,
+                // even though the stored Signed D10 obligation persists (below).
+                assert_cleanup_preserved(
+                    &owner, &decided, &base_vote, ledgers_before, prov_before,
+                    "the same-authority checked retained confirm refusal",
+                );
 
                 // The stored Signed obligation survives for a later retry.
                 let (pos, binding) = retained_pos_binding(&pv, &base_vote);
