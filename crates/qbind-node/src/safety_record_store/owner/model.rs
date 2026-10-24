@@ -2643,6 +2643,155 @@ fn fresh_vote_sign_real_local<H: CommittedHistory + ?Sized>(
     RealFreshSignOutcome::Published(diag)
 }
 
+/// RUN 422 §3 — the ISOLATED same-authority lifecycle RELATIONSHIP, factored out
+/// of the two sibling routes as a PURE scalar predicate so its defensive
+/// revision/identity branches can be exercised directly by model-only fixtures
+/// (no mutation of any closed production component). Both same-authority routes
+/// call this with values read under the held guard; the comparison below is the
+/// ONLY behavioral divergence from the strict-equality routes.
+///
+/// Same-incarnation and engine<->durable lock correspondence are REQUIRED on every
+/// accepted relationship. The captured->current revision relationship is monotonic:
+/// current below captured => refuse; equal => identical restriction identity
+/// required; greater => accepted whether or not the restriction identity changed.
+/// The relationship is NECESSARY BUT NEVER SUFFICIENT and establishes NO transition
+/// origin and NO durable anti-rollback: the exact original candidate's CURRENT
+/// safety is established SEPARATELY by the preceding `observe_checks_locked`
+/// Revalidated(SafeViewSufficiency|SafeAncestry).
+fn same_authority_lifecycle_relationship_holds(
+    captured: &PreparedProvenance,
+    current_identity: &GenerationIdentity,
+    current_revision: u64,
+    backend_incarnation: u64,
+    engine_lock_id: [u8; 32],
+    engine_lock_view: u64,
+) -> bool {
+    captured.recovery_backend_incarnation == backend_incarnation
+        && engine_lock_id == current_identity.lock_block_id
+        && engine_lock_view == current_identity.lock_view
+        && match current_revision.cmp(&captured.captured_revision) {
+            core::cmp::Ordering::Less => false,
+            core::cmp::Ordering::Equal => captured.identity == *current_identity,
+            core::cmp::Ordering::Greater => true,
+        }
+}
+
+/// RUN 422 §3 — MODEL-ONLY defensive unit coverage for the pure lifecycle
+/// RELATIONSHIP predicate. These tests construct `PreparedProvenance` /
+/// `GenerationIdentity` scalars DIRECTLY (both are `pub` + `Copy`); they drive NO
+/// engine, backend, journal or signer, mutate NO closed production component, and
+/// assert ONLY the predicate's revision/identity/incarnation/lock branches. They
+/// are deliberately SEPARATE from the engine-driven, real-crypto route tests in
+/// `mod tests`, which exercise the SAME predicate through the live composition
+/// after a genuine acknowledged advance. A `true` here is NECESSARY-NOT-SUFFICIENT:
+/// the live routes still require `observe_checks_locked` Revalidated(..).
+#[cfg(test)]
+mod same_authority_predicate_model_unit {
+    use super::{
+        same_authority_lifecycle_relationship_holds, GenerationIdentity, PreparedProvenance,
+    };
+
+    const ID_A: GenerationIdentity = GenerationIdentity {
+        lock_block_id: [0x11; 32],
+        lock_view: 5,
+    };
+    const ID_B: GenerationIdentity = GenerationIdentity {
+        lock_block_id: [0x22; 32],
+        lock_view: 5,
+    };
+    const CAP_INCARNATION: u64 = 7;
+    const CAP_REVISION: u64 = 10;
+
+    // Captured against identity A, revision 10, incarnation 7.
+    const CAP: PreparedProvenance = PreparedProvenance {
+        identity: ID_A,
+        captured_revision: CAP_REVISION,
+        recovery_backend_incarnation: CAP_INCARNATION,
+        origin_context_digest: [0x99; 32],
+    };
+
+    /// Evaluate the predicate with engine-lock inputs that, by default, AGREE with
+    /// `current_identity` and the captured incarnation, so each test perturbs
+    /// exactly ONE dimension.
+    fn holds(current_identity: &GenerationIdentity, current_revision: u64) -> bool {
+        same_authority_lifecycle_relationship_holds(
+            &CAP,
+            current_identity,
+            current_revision,
+            CAP_INCARNATION,
+            current_identity.lock_block_id,
+            current_identity.lock_view,
+        )
+    }
+
+    #[test]
+    fn equal_revision_matching_identity_holds() {
+        assert!(holds(&ID_A, CAP_REVISION));
+    }
+
+    #[test]
+    fn equal_revision_conflicting_identity_refuses() {
+        // The decisive defensive branch: at EQUAL revision a DIFFERENT restriction
+        // identity is NOT the captured candidate and is refused.
+        assert!(!holds(&ID_B, CAP_REVISION));
+    }
+
+    #[test]
+    fn greater_revision_unchanged_identity_holds() {
+        assert!(holds(&ID_A, CAP_REVISION + 1));
+    }
+
+    #[test]
+    fn greater_revision_changed_identity_holds() {
+        // Accepted at the RELATIONSHIP layer (greater revision); this establishes
+        // NO transition origin — the live route still revalidates the candidate.
+        assert!(holds(&ID_B, CAP_REVISION + 1));
+    }
+
+    #[test]
+    fn lower_revision_refuses() {
+        assert!(!holds(&ID_A, CAP_REVISION - 1));
+    }
+
+    #[test]
+    fn incarnation_mismatch_refuses() {
+        // A greater-revision relationship that would otherwise hold is refused when
+        // the backend incarnation differs from the captured one.
+        assert!(!same_authority_lifecycle_relationship_holds(
+            &CAP,
+            &ID_A,
+            CAP_REVISION + 1,
+            CAP_INCARNATION + 1,
+            ID_A.lock_block_id,
+            ID_A.lock_view,
+        ));
+    }
+
+    #[test]
+    fn engine_lock_block_mismatch_refuses() {
+        assert!(!same_authority_lifecycle_relationship_holds(
+            &CAP,
+            &ID_A,
+            CAP_REVISION + 1,
+            CAP_INCARNATION,
+            [0xAB; 32],
+            ID_A.lock_view,
+        ));
+    }
+
+    #[test]
+    fn engine_lock_view_mismatch_refuses() {
+        assert!(!same_authority_lifecycle_relationship_holds(
+            &CAP,
+            &ID_A,
+            CAP_REVISION + 1,
+            CAP_INCARNATION,
+            ID_A.lock_block_id,
+            ID_A.lock_view + 1,
+        ));
+    }
+}
+
 /// RUN 422 isolated SAME-AUTHORITY checked retained-reuse sibling (TEST-ONLY).
 ///
 /// Identical protected-use sequence to the AssociationChecked `retained_vote_use_inner`
@@ -2736,16 +2885,14 @@ fn retained_vote_use_checked_same_authority_model<H: CommittedHistory + ?Sized>(
         // REQUIRED. NECESSARY BUT NEVER SUFFICIENT; establishes no transition origin
         // and no durable anti-rollback. Exact-candidate current safety was already
         // established by the preceding observe_checks_locked Revalidated(Safe...).
-        Some(
-            captured.recovery_backend_incarnation == owner.backend.incarnation()
-                && engine_lock_id == current_identity.lock_block_id
-                && engine_lock_view == current_identity.lock_view
-                && match current_revision.cmp(&captured.captured_revision) {
-                    core::cmp::Ordering::Less => false,
-                    core::cmp::Ordering::Equal => captured.identity == current_identity,
-                    core::cmp::Ordering::Greater => true,
-                },
-        )
+        Some(same_authority_lifecycle_relationship_holds(
+            &captured,
+            &current_identity,
+            current_revision,
+            owner.backend.incarnation(),
+            engine_lock_id,
+            engine_lock_view,
+        ))
     })();
     drop(lifecycle_res);
     match agree {
@@ -3075,14 +3222,14 @@ fn fresh_vote_sign_real_local_same_authority<H: CommittedHistory + ?Sized>(
                 Some(qc) => (qc.block_id, qc.view),
                 None => return None,
             };
-            captured.recovery_backend_incarnation == owner.backend.incarnation()
-                && engine_lock_id == current_identity.lock_block_id
-                && engine_lock_view == current_identity.lock_view
-                && match current_revision.cmp(&captured.captured_revision) {
-                    core::cmp::Ordering::Less => false,
-                    core::cmp::Ordering::Equal => captured.identity == current_identity,
-                    core::cmp::Ordering::Greater => true,
-                }
+            same_authority_lifecycle_relationship_holds(
+                &captured,
+                &current_identity,
+                current_revision,
+                owner.backend.incarnation(),
+                engine_lock_id,
+                engine_lock_view,
+            )
         };
         drop(lifecycle_res);
         agree.then_some(())
@@ -8206,8 +8353,11 @@ mod tests {
             }
 
             // NEW ROUTE: the same acknowledged advance now resumes real signing.
+            // §2 baselines taken AFTER the acknowledged lifecycle advance (the
+            // control refusal above restored both ledgers to this point).
             let mut sink = RealSignRecordingSink::new();
             let mut coord = ModelCoordinationHook::inert();
+            let ledgers_before = snapshot_ledgers(&owner);
             let prov_before = pin_provenance_now(&owner, &decided);
             let outcome = fresh_vote_sign_real_local_same_authority::<FixtureCommittedHistory>(
                 &owner, &engine, &decided, &p1, &lim, None, &mut snapshot,
@@ -8240,19 +8390,26 @@ mod tests {
             MlDsa44Backend::verify(&pk, &preimage, &published_sig)
                 .expect("the published signature verifies under the original Vote preimage");
 
-            assert_eq!(decided.vote(), &base_vote, "the borrowed Vote is unchanged");
-            assert_eq!(
-                pin_provenance_now(&owner, &decided),
-                prov_before,
-                "the original pin provenance is preserved"
+            // §2 — independent operational AND aggregate cleanup after the real
+            // publish+retire: every transient working set AND the retained D10
+            // result reservation are released, restoring BOTH ledgers to the
+            // post-advance baseline, with the complete borrowed Vote and original
+            // pin provenance unchanged.
+            assert_cleanup_preserved(
+                &owner, &decided, &base_vote, ledgers_before, prov_before,
+                "the same-authority resumed-signing success",
             );
         }
 
-        /// §6 — an unavailable/mismatched candidate under the advance refuses at
-        /// the held-guard observation BEFORE the lifecycle relationship is reached
-        /// (the accepted monotonic relationship never bypasses safety).
+        /// §6 (§1 correction) — a COMMITMENT/SUBSTITUTION refusal: mutating the
+        /// borrowed proposal's `parent_block_id` breaks the retained proposal
+        /// commitment (observe step 9a `CommitmentMismatch`), so a SUBSTITUTED
+        /// candidate is refused at the held-guard observation BEFORE the lifecycle
+        /// relationship and before any signing. This is NOT a genuine unavailable-
+        /// candidate case — the inputs are mutated. The sibling test below covers
+        /// genuine candidate ABSENCE under unchanged captured inputs.
         #[test]
-        fn same_authority_unavailable_candidate_under_advance_refuses_zero_signing() {
+        fn same_authority_substituted_proposal_under_advance_refuses_zero_signing() {
             let dir = tempfile::tempdir().unwrap();
             let ctx = retained_ctx(4);
             let (owner, mut engine, decided, p1, lim, _rev) =
@@ -8267,8 +8424,9 @@ mod tests {
             let base_vote = decided.vote().clone();
 
             let _l1 = advance_engine_and_durable_to_l1(&owner, &mut engine, &ctx);
-            // Corrupt the proposal projection: the exact original candidate is no
-            // longer available/projectable under the advanced restriction.
+            // Mutate the borrowed proposal's parent: this breaks the retained
+            // proposal commitment (observe step 9a `CommitmentMismatch`) — a
+            // SUBSTITUTION refusal, not a genuine unavailable candidate.
             let mut wrong_proposal = p1.clone();
             wrong_proposal.header.parent_block_id = [0x11; 32];
 
@@ -8282,14 +8440,100 @@ mod tests {
             assert_eq!(
                 outcome,
                 RealFreshSignOutcome::ObservationRefused,
-                "an unavailable candidate refuses before the lifecycle relationship and before signing"
+                "a substituted proposal refuses before the lifecycle relationship and before signing"
             );
             assert_eq!(signer.calls(), 0);
             assert_eq!(sink.calls, 0);
             assert_eq!(journal.reserved_position_count(), 0);
             assert_cleanup_preserved(
                 &owner, &decided, &base_vote, ledgers_before, prov_before,
-                "the unavailable-candidate refusal",
+                "the substituted-proposal refusal",
+            );
+        }
+
+        /// §6 (§1 correction) — a GENUINE unavailable candidate under UNCHANGED
+        /// captured inputs: the acknowledged CURRENT engine/durable state locks a
+        /// REAL view-1 SIBLING (proposer 3) of the prepared candidate (proposer 2),
+        /// so the EXACT original candidate node is genuinely ABSENT from the current
+        /// engine. The borrowed proposal/decision are byte-for-byte unchanged (NO
+        /// substitution) and engine<->durable correspondence HOLDS (both lock the
+        /// sibling); the held-guard observation re-evaluates the captured candidate
+        /// and refuses it as `CandidateAbsent` BEFORE the lifecycle relationship and
+        /// before any signing. Distinct from the substitution refusal above and from
+        /// an engine<->durable disagreement.
+        #[test]
+        fn same_authority_genuine_unavailable_candidate_under_advance_refuses_zero_signing() {
+            let dir = tempfile::tempdir().unwrap();
+            let ctx = retained_ctx(4);
+            let (owner, _engine, decided, p1, lim, _rev) =
+                capture_multi_with_suite(dir.path(), &ctx, MODEL_SUITE_U16);
+            let (pv, sk) = make_real_signing_authority();
+            let mut snapshot = established_snapshot(&pv);
+            let journal = associated_bounded_journal(&owner, real_fresh_store(), 1);
+            let inner = real_local_signer(&sk);
+            let signer = CountingValidatorSigner::new(&inner);
+            let mut sink = RealSignRecordingSink::new();
+            let mut coord = ModelCoordinationHook::inert();
+            let base_vote = decided.vote().clone();
+
+            // A coherent CURRENT engine built the SAME way (locked L0, at view 1)
+            // that then locks a REAL view-1 sibling (proposer 3) through a genuine
+            // quorum. It never ingested the prepared candidate (proposer 2), so
+            // that node is genuinely ABSENT from its state.
+            let l0_block = derive_block_id_local(1, 0, &[0xFF; 32]);
+            let (mut cur, _p1b, cur_l0) = engine_locked_l0_multi_with_suite(MODEL_SUITE_U16);
+            assert_eq!(cur_l0, l0_block, "the deterministic L0 block matches the capture");
+            let sibling = derive_block_id_local(3, 1, &l0_block);
+            let prepared_candidate = derive_block_id_local(2, 1, &l0_block);
+            assert_ne!(
+                sibling, prepared_candidate,
+                "the current lock is a real sibling, not the prepared candidate"
+            );
+            // `cur` cast NO local view-1 vote (the local self-vote at view 1 was
+            // only ever cast for the ORIGINAL candidate during the capture on the
+            // other engine), so THREE peer votes (2, 3, 4) are required to form the
+            // sibling L1 quorum here.
+            assert!(cur
+                .on_vote_event(ValidatorId::new(2), &logical_vote(1, sibling, 2))
+                .expect("sibling vote 2 ingests")
+                .is_none());
+            assert!(cur
+                .on_vote_event(ValidatorId::new(3), &logical_vote(1, sibling, 3))
+                .expect("sibling vote 3 ingests")
+                .is_none());
+            assert!(cur
+                .on_vote_event(ValidatorId::new(4), &logical_vote(1, sibling, 4))
+                .expect("sibling vote 4 ingests")
+                .is_some());
+            let lk = cur.locked_qc().expect("the current engine locks the sibling L1");
+            assert_eq!(lk.block_id, sibling, "the current engine lock is the sibling");
+            assert!(
+                cur.state().get_block(&prepared_candidate).is_none(),
+                "the prepared candidate node is genuinely absent from the current engine"
+            );
+            // Durable advances to the SAME sibling so engine<->durable correspondence
+            // HOLDS; only the prepared candidate's availability differs.
+            let new_rev = publish_qc(&owner, &ctx, sibling, 1, 1);
+            assert_eq!(new_rev, 2, "the sibling L1 publication advances the durable revision");
+
+            let ledgers_before = snapshot_ledgers(&owner);
+            let prov_before = pin_provenance_now(&owner, &decided);
+            let outcome = fresh_vote_sign_real_local_same_authority::<FixtureCommittedHistory>(
+                &owner, &cur, &decided, &p1, &lim, None, &mut snapshot,
+                &signer, &mut sink, &journal, &mut coord,
+                ReconfirmPerturbation::None,
+            );
+            assert_eq!(
+                outcome,
+                RealFreshSignOutcome::ObservationRefused,
+                "the genuinely-absent prepared candidate refuses at observation before signing"
+            );
+            assert_eq!(signer.calls(), 0);
+            assert_eq!(sink.calls, 0);
+            assert_eq!(journal.reserved_position_count(), 0);
+            assert_cleanup_preserved(
+                &owner, &decided, &base_vote, ledgers_before, prov_before,
+                "the genuine unavailable-candidate refusal",
             );
         }
 
@@ -8374,6 +8618,9 @@ mod tests {
             let base_vote = decided.vote().clone();
 
             let _l1 = advance_engine_and_durable_to_l1(&owner, &mut engine, &ctx);
+            // §2 baselines taken AFTER the acknowledged lifecycle advance.
+            let ledgers_before = snapshot_ledgers(&owner);
+            let prov_before = pin_provenance_now(&owner, &decided);
 
             let outcome = fresh_vote_sign_real_local_same_authority::<FixtureCommittedHistory>(
                 &owner, &engine, &decided, &p1, &lim, None, &mut snapshot,
@@ -8384,6 +8631,15 @@ mod tests {
             assert_eq!(signer.calls(), 0, "a post-consume confirm refusal signs zero times");
             assert_eq!(sink.calls, 0);
             assert_eq!(coord.calls, 0, "the coordination point is after the confirm");
+
+            // §2 — independent operational AND aggregate cleanup: although the
+            // CONSUMED potentially-signed D10 obligation persists (asserted below),
+            // BOTH accounting ledgers are restored to the post-advance baseline and
+            // the borrowed Vote and original pin provenance are unchanged.
+            assert_cleanup_preserved(
+                &owner, &decided, &base_vote, ledgers_before, prov_before,
+                "the same-authority confirm refusal",
+            );
 
             // The consumed potentially-signed D10 obligation is PRESERVED: a retry
             // at the exact position/binding cannot obtain a FRESH reservation.
@@ -8416,6 +8672,8 @@ mod tests {
             let base_vote = decided.vote().clone();
 
             let _l1 = advance_engine_and_durable_to_l1(&owner, &mut engine, &ctx);
+            // §2 baselines taken AFTER the acknowledged lifecycle advance.
+            let ledgers_before = snapshot_ledgers(&owner);
             let prov_before = pin_provenance_now(&owner, &decided);
 
             let backend = owner.backend_for_test().clone();
@@ -8448,8 +8706,13 @@ mod tests {
             assert_eq!(signer.calls(), 0);
             assert_eq!(sink.calls, 0);
             assert_eq!(journal.reserved_position_count(), 0);
-            assert_eq!(decided.vote(), &base_vote);
-            assert_eq!(pin_provenance_now(&owner, &decided), prov_before);
+            // §2 — a pre-reservation refusal fully releases every admitted working
+            // set: BOTH ledgers restore to the post-advance baseline and the
+            // borrowed Vote and original pin provenance are unchanged.
+            assert_cleanup_preserved(
+                &owner, &decided, &base_vote, ledgers_before, prov_before,
+                "the WorkSet admission refusal",
+            );
 
             // Pressure relieved: the SAME envelope now signs exactly once.
             let mut sink2 = RealSignRecordingSink::new();
@@ -8464,7 +8727,12 @@ mod tests {
                 "the relieved retry resumes signing"
             );
             assert_eq!(signer.calls(), 1, "exactly one signer call across refusal + retry");
-            assert_eq!(decided.vote(), &base_vote);
+            // §2 — the relieved retry publishes+retires and restores BOTH ledgers
+            // to the post-advance baseline with the Vote and pin unchanged.
+            assert_cleanup_preserved(
+                &owner, &decided, &base_vote, ledgers_before, prov_before,
+                "the relieved-retry resumed-signing success",
+            );
         }
 
         // ==================================================================
