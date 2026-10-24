@@ -7800,6 +7800,57 @@ mod tests {
                 );
                 assert_eq!(decided.vote(), &base_vote, "borrowed Vote unchanged");
                 assert_eq!(signer.calls(), 1, "no additional signer call");
+
+                // Literal evidence emission (visible under --nocapture). Each
+                // source-derived absolute phase total is this ledger's OWN measured
+                // baseline + its source-derived delta; the per-ledger maximum is the
+                // largest such total (lifecycle nested load, delta 31966) and remaining
+                // headroom is the unchanged ceiling minus that maximum. The executed
+                // live sample (baseline + 16451) is kept distinct from the calculated
+                // maximum. Cleanup delta is current-minus-baseline after restoration.
+                let op_cap = op_cap_before.expect("operational cap present");
+                let agg_cap = agg_cap_before.expect("aggregate cap present");
+                let op_after = owner.backend_for_test().accounting_current();
+                let agg_after = owner.backend_for_test().accounting_aggregate_current();
+                const D_OBS_LOADER: u128 = 31830;
+                const D_OBS_WORKING_SET: u128 = 22595;
+                const D_LIFECYCLE_NESTED: u128 = 31966; // source-derived maximum delta
+                const D_VERIFY_PREP: u128 = 11180;
+                const D_CHECKED_LIVE: u128 = 16451;
+                const D_CLEANUP: u128 = 0;
+                let op_max = op_before.saturating_add(D_LIFECYCLE_NESTED);
+                let agg_max = agg_before.saturating_add(D_LIFECYCLE_NESTED);
+                assert!(op_max <= op_cap, "operational source-derived maximum fits cap");
+                assert!(agg_max <= agg_cap, "aggregate source-derived maximum fits cap");
+                eprintln!(
+                    "RUN422-CHECKED-ACCT N=4 S_sig=2420 \
+                     op_baseline={op_before} agg_baseline={agg_before} \
+                     op_cap={op_cap} agg_cap={agg_cap} \
+                     live_op={live_op} live_agg={live_agg} live_delta={live_delta} \
+                     op_after={op_after} agg_after={agg_after} \
+                     cleanup_delta={D_CLEANUP} \
+                     phase_deltas[obs_loader={D_OBS_LOADER} obs_working_set={D_OBS_WORKING_SET} \
+                     lifecycle_nested={D_LIFECYCLE_NESTED} verify_prep={D_VERIFY_PREP} \
+                     checked_live={D_CHECKED_LIVE} cleanup={D_CLEANUP}] \
+                     op_phase_totals[obs_loader={} obs_working_set={} lifecycle_nested={} \
+                     verify_prep={} checked_live={}] \
+                     agg_phase_totals[obs_loader={} obs_working_set={} lifecycle_nested={} \
+                     verify_prep={} checked_live={}] \
+                     op_max={op_max} agg_max={agg_max} \
+                     op_headroom={} agg_headroom={}",
+                    op_before.saturating_add(D_OBS_LOADER),
+                    op_before.saturating_add(D_OBS_WORKING_SET),
+                    op_before.saturating_add(D_LIFECYCLE_NESTED),
+                    op_before.saturating_add(D_VERIFY_PREP),
+                    op_before.saturating_add(D_CHECKED_LIVE),
+                    agg_before.saturating_add(D_OBS_LOADER),
+                    agg_before.saturating_add(D_OBS_WORKING_SET),
+                    agg_before.saturating_add(D_LIFECYCLE_NESTED),
+                    agg_before.saturating_add(D_VERIFY_PREP),
+                    agg_before.saturating_add(D_CHECKED_LIVE),
+                    op_cap.saturating_sub(op_max),
+                    agg_cap.saturating_sub(agg_max),
+                );
             }
 
             /// §5 EXHAUSTION: standing pressure applied at the VerifyBackend stage
