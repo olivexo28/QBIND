@@ -535,6 +535,165 @@ impl PostPublicationEvidence {
     }
 }
 
+const POST_SIGN_MARKER_LEN: usize = 4193;
+const POST_SIGN_PK_OFFSET: usize = 43;
+const POST_SIGN_VOTE_LEN_OFFSET: usize =
+    POST_SIGN_PK_OFFSET + qbind_crypto::ml_dsa44::ML_DSA_44_PUBLIC_KEY_SIZE;
+const POST_SIGN_VOTE_OFFSET: usize = POST_SIGN_VOTE_LEN_OFFSET + 2;
+const POST_SIGN_PREIMAGE_LEN_OFFSET: usize = POST_SIGN_VOTE_OFFSET + 69;
+const POST_SIGN_PREIMAGE_OFFSET: usize = POST_SIGN_PREIMAGE_LEN_OFFSET + 2;
+const POST_SIGN_POSITION_OFFSET: usize = POST_SIGN_PREIMAGE_OFFSET + MODEL_MAX_PREIMAGE_BYTES as usize;
+const POST_SIGN_BINDING_OFFSET: usize = POST_SIGN_POSITION_OFFSET + 55;
+const POST_SIGN_SIGNATURE_LEN_OFFSET: usize = POST_SIGN_BINDING_OFFSET + 32;
+const POST_SIGN_SIGNATURE_OFFSET: usize = POST_SIGN_SIGNATURE_LEN_OFFSET + 2;
+
+#[derive(Default)]
+struct PostSignStorageCounters {
+    combined_reservation_writes: std::sync::atomic::AtomicU64,
+    signed_record_only_writes: std::sync::atomic::AtomicU64,
+    reissue_attempts: std::sync::atomic::AtomicU64,
+    reissue_delegated_writes: std::sync::atomic::AtomicU64,
+    bounded_read_attempts: std::sync::atomic::AtomicU64,
+    bounded_present_reads: std::sync::atomic::AtomicU64,
+    other_mutations: std::sync::atomic::AtomicU64,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct PostSignStorageCounts {
+    combined_reservation_writes: u64,
+    signed_record_only_writes: u64,
+    reissue_attempts: u64,
+    reissue_delegated_writes: u64,
+    bounded_read_attempts: u64,
+    bounded_present_reads: u64,
+    other_mutations: u64,
+}
+
+impl PostSignStorageCounters {
+    fn snapshot(&self) -> PostSignStorageCounts {
+        use std::sync::atomic::Ordering;
+        PostSignStorageCounts {
+            combined_reservation_writes: self.combined_reservation_writes.load(Ordering::SeqCst),
+            signed_record_only_writes: self.signed_record_only_writes.load(Ordering::SeqCst),
+            reissue_attempts: self.reissue_attempts.load(Ordering::SeqCst),
+            reissue_delegated_writes: self.reissue_delegated_writes.load(Ordering::SeqCst),
+            bounded_read_attempts: self.bounded_read_attempts.load(Ordering::SeqCst),
+            bounded_present_reads: self.bounded_present_reads.load(Ordering::SeqCst),
+            other_mutations: self.other_mutations.load(Ordering::SeqCst),
+        }
+    }
+}
+
+/// Fixed witness for the isolated post-sign/pre-publication boundary. Its backing,
+/// marker file, and observers are owned by the test harness, not the composition.
+struct PostSignPrePublicationEvidence {
+    marker: Box<[u8; POST_SIGN_MARKER_LEN]>,
+    file: std::fs::File,
+    nonce: [u8; 16],
+    signer_obs: std::sync::Arc<std::sync::atomic::AtomicU32>,
+    sink_obs: std::sync::Arc<std::sync::atomic::AtomicU32>,
+    publication_calls: std::sync::Arc<std::sync::atomic::AtomicU32>,
+    storage_counters: std::sync::Arc<PostSignStorageCounters>,
+    storage_baseline: PostSignStorageCounts,
+    hook_calls: u32,
+    terminate: bool,
+}
+
+impl PostSignPrePublicationEvidence {
+    fn new(
+        marker: Box<[u8; POST_SIGN_MARKER_LEN]>,
+        file: std::fs::File,
+        nonce: [u8; 16],
+        signer_obs: std::sync::Arc<std::sync::atomic::AtomicU32>,
+        sink_obs: std::sync::Arc<std::sync::atomic::AtomicU32>,
+        publication_calls: std::sync::Arc<std::sync::atomic::AtomicU32>,
+        storage_counters: std::sync::Arc<PostSignStorageCounters>,
+        storage_baseline: PostSignStorageCounts,
+        terminate: bool,
+    ) -> Self {
+        Self {
+            marker,
+            file,
+            nonce,
+            signer_obs,
+            sink_obs,
+            publication_calls,
+            storage_counters,
+            storage_baseline,
+            hook_calls: 0,
+            terminate,
+        }
+    }
+
+    fn fire(&mut self, output: &crate::signing_journal_admission::AdmittedOutput, route_calls: u32) {
+        use std::io::Write as _;
+        use std::sync::atomic::Ordering;
+
+        self.hook_calls = self.hook_calls.saturating_add(1);
+        assert_eq!(self.hook_calls, 1, "post-sign hook must run exactly once");
+        assert_eq!(route_calls, 1, "the route reached its pre-sign hook exactly once");
+        assert_eq!(&self.marker[7..23], &self.nonce, "preconstructed nonce remains intact");
+        assert_eq!(self.signer_obs.load(Ordering::SeqCst), 1, "one actual signer call");
+        assert_eq!(self.sink_obs.load(Ordering::SeqCst), 0, "completion sink has not run");
+        assert_eq!(
+            self.publication_calls.load(Ordering::SeqCst),
+            0,
+            "publication callsite has not been entered"
+        );
+        let storage = self.storage_counters.snapshot();
+        assert_eq!(
+            storage.combined_reservation_writes
+                - self.storage_baseline.combined_reservation_writes,
+            1,
+            "one atomic record-plus-metadata reservation write completed"
+        );
+        assert_eq!(
+            storage.signed_record_only_writes
+                - self.storage_baseline.signed_record_only_writes,
+            0,
+            "no Signed-result record-only write occurred"
+        );
+        assert_eq!(
+            storage.reissue_attempts - self.storage_baseline.reissue_attempts,
+            0,
+            "no reissue occurred"
+        );
+        let signature = output.view();
+        assert_eq!(signature.len(), output.used(), "committed output view is the valid span");
+        assert_eq!(
+            signature.len(),
+            qbind_crypto::ml_dsa44::ML_DSA_44_SIGNATURE_SIZE,
+            "actual committed signature has the suite-100 length"
+        );
+        assert_eq!(
+            signature.len(),
+            crate::signing_journal_admission::OUTPUT_CAP,
+            "actual committed signature fills the admitted output"
+        );
+
+        self.marker[23..27].copy_from_slice(&self.hook_calls.to_le_bytes());
+        self.marker[27..31].copy_from_slice(&self.signer_obs.load(Ordering::SeqCst).to_le_bytes());
+        self.marker[31..35].copy_from_slice(&self.sink_obs.load(Ordering::SeqCst).to_le_bytes());
+        self.marker[35..39].copy_from_slice(&self.publication_calls.load(Ordering::SeqCst).to_le_bytes());
+        self.marker[39] = 1;
+        // This flag records the exact source position immediately before the loop.
+        // The connected callsite observer independently proves no API attempt yet.
+        self.marker[40] = 0;
+        self.marker[POST_SIGN_SIGNATURE_LEN_OFFSET..POST_SIGN_SIGNATURE_OFFSET]
+            .copy_from_slice(&(signature.len() as u16).to_le_bytes());
+        self.marker[POST_SIGN_SIGNATURE_OFFSET..].copy_from_slice(signature);
+        self.file
+            .write_all(self.marker.as_slice())
+            .expect("write complete post-sign boundary marker");
+        self.file.flush().expect("flush post-sign boundary marker");
+        self.file.sync_all().expect("sync post-sign boundary marker");
+        if self.terminate {
+            std::process::abort();
+        }
+    }
+
+}
+
 /// A fixed, bounded coordination point invoked AFTER the D10 reservation is
 /// consumed and the original ticket is reconfirmed, and BEFORE the signer is
 /// invoked. The probing variant drives a competing same-domain handle through a
@@ -570,12 +729,16 @@ pub(crate) struct ModelCoordinationHook {
     /// The aggregate ledger charge sampled at the PRE-RESERVATION phase, if a
     /// sampling backend was installed.
     pub(crate) observed_aggregate_pre_reserve: Option<u128>,
+    /// Optional model-only observer incremented immediately before the actual
+    /// admitted publication API callsite.
+    publication_attempts: Option<std::sync::Arc<std::sync::atomic::AtomicU32>>,
     /// RUN 422 — when `Some`, the hook terminates the process (SIGABRT) at the
     /// post-consume / pre-sign point after writing the preconstructed boundary
     /// marker. `None` (every existing constructor) is inert w.r.t. termination and
     /// preserves exact prior behavior.
     abort_before_sign: Option<AbortEvidence>,
     post_publication: Option<PostPublicationEvidence>,
+    post_sign_prepublication: Option<PostSignPrePublicationEvidence>,
 }
 
 impl ModelCoordinationHook {
@@ -592,8 +755,10 @@ impl ModelCoordinationHook {
             observed_aggregate: None,
             observed_operational_pre_reserve: None,
             observed_aggregate_pre_reserve: None,
+            publication_attempts: None,
             abort_before_sign: None,
             post_publication: None,
+            post_sign_prepublication: None,
         }
     }
 
@@ -613,8 +778,10 @@ impl ModelCoordinationHook {
             observed_aggregate: None,
             observed_operational_pre_reserve: None,
             observed_aggregate_pre_reserve: None,
+            publication_attempts: None,
             abort_before_sign: None,
             post_publication: None,
+            post_sign_prepublication: None,
         }
     }
 
@@ -641,8 +808,10 @@ impl ModelCoordinationHook {
             observed_aggregate: None,
             observed_operational_pre_reserve: None,
             observed_aggregate_pre_reserve: None,
+            publication_attempts: None,
             abort_before_sign: None,
             post_publication: None,
+            post_sign_prepublication: None,
         }
     }
 
@@ -663,14 +832,56 @@ impl ModelCoordinationHook {
             observed_aggregate: None,
             observed_operational_pre_reserve: None,
             observed_aggregate_pre_reserve: None,
+            publication_attempts: None,
             abort_before_sign: Some(evidence),
             post_publication: None,
+            post_sign_prepublication: None,
         }
     }
 
     fn with_post_publication_evidence(mut self, evidence: PostPublicationEvidence) -> Self {
         self.post_publication = Some(evidence);
         self
+    }
+
+    fn with_post_sign_prepublication_evidence(
+        mut self,
+        evidence: PostSignPrePublicationEvidence,
+    ) -> Self {
+        self.publication_attempts = Some(evidence.publication_calls.clone());
+        self.post_sign_prepublication = Some(evidence);
+        self
+    }
+
+    fn publication_observing(
+        publication_attempts: std::sync::Arc<std::sync::atomic::AtomicU32>,
+    ) -> Self {
+        let mut hook = Self::inert();
+        hook.publication_attempts = Some(publication_attempts);
+        hook
+    }
+
+    fn on_post_sign_pre_publication(
+        &mut self,
+        output: &crate::signing_journal_admission::AdmittedOutput,
+    ) {
+        if let Some(evidence) = self.post_sign_prepublication.as_mut() {
+            let publication_attempts = self
+                .publication_attempts
+                .as_ref()
+                .expect("armed post-sign evidence requires a connected publication observer");
+            assert!(
+                std::sync::Arc::ptr_eq(publication_attempts, &evidence.publication_calls),
+                "armed post-sign evidence shares the connected publication observer"
+            );
+            evidence.fire(output, self.calls);
+        }
+    }
+
+    fn on_publication_call_attempt(&self) {
+        if let Some(attempts) = &self.publication_attempts {
+            attempts.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        }
     }
 
     fn on_post_publication_pre_retire(
@@ -2839,11 +3050,16 @@ fn fresh_vote_sign_real_local<H: CommittedHistory + ?Sized>(
     };
     debug_assert_eq!(n, output.used(), "committed length equals the output's valid span");
 
+    // The optional model-only post-sign/pre-publication boundary observes the
+    // actual committed span while all protected resources and capabilities live.
+    coord.on_post_sign_pre_publication(&output);
+
     // 17. Admitted publication, with AT MOST one immediate retry and ONLY for the
     //     selected `Storage(WriteIo)` outcome. The same capability, output, and
     //     workspace are reused; nothing is re-signed, re-consumed, or re-covered.
     let mut republished = false;
     let publish_result = loop {
+        coord.on_publication_call_attempt();
         match journal.publish_result_admitted(&cap, &output, &mut publish_ws) {
             Err(AdmittedPublishError::Storage(BoundedDiag::WriteIo)) if !republished => {
                 republished = true;
@@ -9395,6 +9611,8 @@ mod tests {
             assert!(owner.recovery_required(), "a freshly reopened backend requires recovery before O5");
             let op_free = owner.backend_for_test().accounting_current();
             let agg_free = owner.backend_for_test().accounting_aggregate_current();
+            let op_ceiling = owner.backend_for_test().accounting_cap();
+            let agg_ceiling = owner.backend_for_test().accounting_aggregate_cap();
             let recovery = owner.read_validate(None::<&FixtureCommittedHistory>).expect("B O3 recovery proof");
             assert!(owner.recovery_required(), "O3 validation alone does not clear recovery");
             let op_held = owner.backend_for_test().accounting_current();
@@ -9416,6 +9634,8 @@ mod tests {
             assert!(!owner.recovery_required(), "successful O5 clears recovery");
             assert_eq!(owner.backend_for_test().accounting_current(), op_held, "O5 immediately restores proof-held operational baseline");
             assert_eq!(owner.backend_for_test().accounting_aggregate_current(), agg_held, "O5 immediately restores proof-held aggregate baseline");
+            assert_eq!(owner.backend_for_test().accounting_cap(), op_ceiling, "O5 preserves the proof-held operational ceiling");
+            assert_eq!(owner.backend_for_test().accounting_aggregate_cap(), agg_ceiling, "O5 preserves the proof-held aggregate ceiling");
             drop(recovery);
             assert_eq!(owner.backend_for_test().accounting_current(), op_free, "dropping O3 restores proof-free operational baseline");
             assert_eq!(owner.backend_for_test().accounting_aggregate_current(), agg_free, "dropping O3 restores proof-free aggregate baseline");
@@ -12878,6 +13098,780 @@ mod tests {
 
             /// The surviving process derives its OWN limits from the pinned context
             /// (the child's limits never cross the boundary).
+            mod postsign_prepublication {
+                use super::*;
+                use crate::signing_reservation_journal::{
+                    BoundedStorageError, SigningDecisionRecord, SigningJournalStorage,
+                    SigningOwnershipDomain, SigningRecordStage, SigningReservationJournal,
+                };
+                use crate::storage::StorageError;
+                use std::sync::atomic::{AtomicU32, Ordering};
+                use std::sync::Arc;
+
+                const MAGIC: [u8; 4] = *b"R4S2";
+                const VERSION: u16 = 1;
+                const PHASE: u8 = 0x17;
+                const NONCE_LEN: usize = 16;
+                const PK_LEN: usize = qbind_crypto::ml_dsa44::ML_DSA_44_PUBLIC_KEY_SIZE;
+                const VOTE_LEN: usize = 69;
+                const PREIMAGE_CAP: usize = MODEL_MAX_PREIMAGE_BYTES as usize;
+                const POSITION_LEN: usize = crate::signing_journal_admission::JOURNAL_KEY_LEN;
+                const SIGNATURE_LEN: usize = qbind_crypto::ml_dsa44::ML_DSA_44_SIGNATURE_SIZE;
+                const MARKER_LEN: usize = POST_SIGN_MARKER_LEN;
+                const MARKER_CHILD_PATH: &str = "safety_record_store::owner::model::tests::real_fresh_sign::postconsume_process_death::postsign_prepublication::postsign_child_entry";
+                const ENV_MODE: &str = "R422_PSP_CHILD_MODE";
+                const ENV_FIXTURE: &str = "R422_PSP_FIXTURE";
+                const ENV_MARKER: &str = "R422_PSP_MARKER";
+                const ENV_NONCE: &str = "R422_PSP_NONCE";
+                const ENV_SAFETY: &str = "R422_PSP_SAFETY";
+                const ENV_JOURNAL: &str = "R422_PSP_JOURNAL";
+
+                const STATUS_DEADLINE: Duration = Duration::from_secs(30);
+
+                #[derive(Debug, PartialEq, Eq)]
+                struct Witness {
+                    nonce: [u8; NONCE_LEN],
+                    hook_calls: u32,
+                    signer_calls: u32,
+                    sink_calls: u32,
+                    publication_calls: u32,
+                    public_key: Vec<u8>,
+                    unsigned_vote: Vec<u8>,
+                    preimage: Vec<u8>,
+                    position_key: Vec<u8>,
+                    binding: [u8; 32],
+                    signature: Vec<u8>,
+                }
+
+                fn write_u16(dst: &mut [u8], offset: usize, value: usize) {
+                    let value = u16::try_from(value).expect("fixed marker field fits u16");
+                    dst[offset..offset + 2].copy_from_slice(&value.to_le_bytes());
+                }
+
+                fn build_marker(
+                    nonce: &[u8; NONCE_LEN],
+                    public_key: &[u8],
+                    unsigned_vote: &[u8],
+                    preimage: &[u8],
+                    position_key: &[u8],
+                    binding: &[u8; 32],
+                ) -> Box<[u8; MARKER_LEN]> {
+                    assert_eq!(MARKER_LEN, 4193);
+                    assert_eq!(public_key.len(), PK_LEN);
+                    assert_eq!(unsigned_vote.len(), VOTE_LEN);
+                    assert!(!preimage.is_empty() && preimage.len() <= PREIMAGE_CAP);
+                    assert_eq!(position_key.len(), POSITION_LEN);
+                    assert_eq!(SIGNATURE_LEN, crate::signing_journal_admission::OUTPUT_CAP);
+                    let mut marker = Box::new([0u8; MARKER_LEN]);
+                    marker[..4].copy_from_slice(&MAGIC);
+                    marker[4..6].copy_from_slice(&VERSION.to_le_bytes());
+                    marker[6] = PHASE;
+                    marker[7..23].copy_from_slice(nonce);
+                    write_u16(&mut marker[..], POST_SIGN_PK_OFFSET - 2, PK_LEN);
+                    marker[POST_SIGN_PK_OFFSET..POST_SIGN_VOTE_LEN_OFFSET]
+                        .copy_from_slice(public_key);
+                    write_u16(&mut marker[..], POST_SIGN_VOTE_LEN_OFFSET, VOTE_LEN);
+                    marker[POST_SIGN_VOTE_OFFSET..POST_SIGN_PREIMAGE_LEN_OFFSET]
+                        .copy_from_slice(unsigned_vote);
+                    write_u16(&mut marker[..], POST_SIGN_PREIMAGE_LEN_OFFSET, preimage.len());
+                    marker[POST_SIGN_PREIMAGE_OFFSET..POST_SIGN_PREIMAGE_OFFSET + preimage.len()]
+                        .copy_from_slice(preimage);
+                    marker[POST_SIGN_POSITION_OFFSET..POST_SIGN_BINDING_OFFSET]
+                        .copy_from_slice(position_key);
+                    marker[POST_SIGN_BINDING_OFFSET..POST_SIGN_SIGNATURE_LEN_OFFSET]
+                        .copy_from_slice(binding);
+                    marker
+                }
+
+                fn decode_unsigned_suite_vote(bytes: &[u8]) -> Result<Vote, &'static str> {
+                    use qbind_wire::io::WireDecode as _;
+                    let mut input = bytes;
+                    let vote = Vote::decode(&mut input).map_err(|_| "Vote encoding")?;
+                    if !input.is_empty() {
+                        return Err("Vote trailing bytes");
+                    }
+                    if !vote.signature.is_empty() {
+                        return Err("Vote inline signature");
+                    }
+                    if vote.suite_id != MODEL_SUITE_U16 {
+                        return Err("Vote suite");
+                    }
+                    Ok(vote)
+                }
+
+                fn parse_marker(bytes: &[u8], expected_nonce: &[u8; NONCE_LEN]) -> Result<Witness, &'static str> {
+                    if bytes.len() != MARKER_LEN { return Err("marker length"); }
+                    if bytes[..4] != MAGIC { return Err("magic"); }
+                    if u16::from_le_bytes([bytes[4], bytes[5]]) != VERSION { return Err("version"); }
+                    if bytes[6] != PHASE { return Err("phase"); }
+                    let nonce: [u8; NONCE_LEN] = bytes[7..23].try_into().map_err(|_| "nonce")?;
+                    if &nonce != expected_nonce { return Err("invocation nonce"); }
+                    let u32_at = |offset: usize| {
+                        u32::from_le_bytes(bytes[offset..offset + 4].try_into().expect("fixed count"))
+                    };
+                    let hook_calls = u32_at(23);
+                    let signer_calls = u32_at(27);
+                    let sink_calls = u32_at(31);
+                    let publication_calls = u32_at(35);
+                    if (hook_calls, signer_calls, sink_calls, publication_calls) != (1, 1, 0, 0) {
+                        return Err("live observations");
+                    }
+                    if bytes[39] != 1 { return Err("committed output flag"); }
+                    if bytes[40] != 0 { return Err("publication source-position flag"); }
+                    let u16_at = |offset: usize| {
+                        u16::from_le_bytes([bytes[offset], bytes[offset + 1]]) as usize
+                    };
+                    if u16_at(41) != PK_LEN { return Err("public-key length"); }
+                    let public_key = bytes[POST_SIGN_PK_OFFSET..POST_SIGN_VOTE_LEN_OFFSET].to_vec();
+                    if u16_at(POST_SIGN_VOTE_LEN_OFFSET) != VOTE_LEN { return Err("Vote length"); }
+                    let unsigned_vote =
+                        bytes[POST_SIGN_VOTE_OFFSET..POST_SIGN_PREIMAGE_LEN_OFFSET].to_vec();
+                    decode_unsigned_suite_vote(&unsigned_vote)?;
+                    let preimage_len = u16_at(POST_SIGN_PREIMAGE_LEN_OFFSET);
+                    if preimage_len == 0 || preimage_len > PREIMAGE_CAP {
+                        return Err("preimage length");
+                    }
+                    let padded = &bytes[POST_SIGN_PREIMAGE_OFFSET..POST_SIGN_POSITION_OFFSET];
+                    if padded[preimage_len..].iter().any(|byte| *byte != 0) {
+                        return Err("preimage padding");
+                    }
+                    let preimage = padded[..preimage_len].to_vec();
+                    let position_key =
+                        bytes[POST_SIGN_POSITION_OFFSET..POST_SIGN_BINDING_OFFSET].to_vec();
+                    let binding = bytes[POST_SIGN_BINDING_OFFSET..POST_SIGN_SIGNATURE_LEN_OFFSET]
+                        .try_into().map_err(|_| "binding")?;
+                    if u16_at(POST_SIGN_SIGNATURE_LEN_OFFSET) != SIGNATURE_LEN {
+                        return Err("signature length");
+                    }
+                    let signature = bytes[POST_SIGN_SIGNATURE_OFFSET..].to_vec();
+                    Ok(Witness {
+                        nonce,
+                        hook_calls,
+                        signer_calls,
+                        sink_calls,
+                        publication_calls,
+                        public_key,
+                        unsigned_vote,
+                        preimage,
+                        position_key,
+                        binding,
+                        signature,
+                    })
+                }
+
+                fn read_marker_bounded(path: &std::path::Path) -> std::io::Result<Vec<u8>> {
+                    let file = std::fs::File::open(path)?;
+                    let mut limited = file.take((MARKER_LEN + 1) as u64);
+                    let mut bytes = Vec::with_capacity(MARKER_LEN + 1);
+                    limited.read_to_end(&mut bytes)?;
+                    Ok(bytes)
+                }
+
+                fn open_marker(path: &std::path::Path) -> std::fs::File {
+                    std::fs::OpenOptions::new()
+                        .write(true)
+                        .create_new(true)
+                        .mode(0o600)
+                        .open(path)
+                        .expect("exclusively create marker before protected operation")
+                }
+
+                fn accepts(class: TermClass, raw: &[u8], nonce: &[u8; NONCE_LEN]) -> bool {
+                    class == TermClass::Signaled(EXPECTED_ABORT_SIGNAL)
+                        && parse_marker(raw, nonce).is_ok()
+                }
+
+                #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+                struct StoreCounts(PostSignStorageCounts);
+
+                struct ObservedBoundaryRocksStore {
+                    inner: Arc<RocksDbConsensusStorage>,
+                    counters: Arc<PostSignStorageCounters>,
+                }
+
+                impl ObservedBoundaryRocksStore {
+                    fn new(inner: Arc<RocksDbConsensusStorage>) -> Self {
+                        Self { inner, counters: Arc::new(PostSignStorageCounters::default()) }
+                    }
+
+                    fn counts(&self) -> StoreCounts {
+                        StoreCounts(self.counters.snapshot())
+                    }
+                }
+
+                impl SigningJournalStorage for ObservedBoundaryRocksStore {
+                    fn get_signing_record(&self, key: &[u8]) -> Result<Option<Vec<u8>>, StorageError> {
+                        self.inner.get_signing_record(key)
+                    }
+                    fn put_signing_record_synced(&self, key: &[u8], value: &[u8]) -> Result<(), StorageError> {
+                        self.counters.other_mutations.fetch_add(1, Ordering::SeqCst);
+                        self.inner.put_signing_record_synced(key, value)
+                    }
+                    fn get_signing_metadata(&self) -> Result<Option<Vec<u8>>, StorageError> {
+                        self.inner.get_signing_metadata()
+                    }
+                    fn put_signing_metadata_synced(&self, value: &[u8]) -> Result<(), StorageError> {
+                        self.counters.other_mutations.fetch_add(1, Ordering::SeqCst);
+                        self.inner.put_signing_metadata_synced(value)
+                    }
+                    fn put_signing_record_and_metadata_synced(
+                        &self, key: &[u8], record: &[u8], metadata: &[u8],
+                    ) -> Result<(), StorageError> {
+                        self.counters.combined_reservation_writes.fetch_add(1, Ordering::SeqCst);
+                        self.inner.put_signing_record_and_metadata_synced(key, record, metadata)
+                    }
+                    fn for_each_signing_namespace_entry(
+                        &self, visitor: &mut dyn FnMut(&[u8], &[u8]) -> Result<(), StorageError>,
+                    ) -> Result<(), StorageError> {
+                        self.inner.for_each_signing_namespace_entry(visitor)
+                    }
+                    fn signing_ownership_domain(&self) -> Arc<SigningOwnershipDomain> {
+                        self.inner.signing_ownership_domain()
+                    }
+                    fn read_signing_envelope_into(
+                        &self, key: &[u8], dst: &mut [u8],
+                    ) -> Result<Option<usize>, BoundedStorageError> {
+                        self.counters.bounded_read_attempts.fetch_add(1, Ordering::SeqCst);
+                        let result = self.inner.read_signing_envelope_into(key, dst)?;
+                        if result.is_some() {
+                            self.counters.bounded_present_reads.fetch_add(1, Ordering::SeqCst);
+                        }
+                        Ok(result)
+                    }
+                    fn reissue_signing_envelope_synced(
+                        &self, key: &[u8], envelope: &[u8],
+                    ) -> Result<(), BoundedStorageError> {
+                        self.counters.reissue_attempts.fetch_add(1, Ordering::SeqCst);
+                        self.counters.reissue_delegated_writes.fetch_add(1, Ordering::SeqCst);
+                        self.inner.reissue_signing_envelope_synced(key, envelope)
+                    }
+                    fn put_signing_envelope_and_metadata_synced(
+                        &self, key: &[u8], record: &[u8], metadata: &[u8],
+                    ) -> Result<(), BoundedStorageError> {
+                        self.counters.combined_reservation_writes.fetch_add(1, Ordering::SeqCst);
+                        self.inner.put_signing_envelope_and_metadata_synced(key, record, metadata)
+                    }
+                    fn put_signing_record_envelope_synced(
+                        &self, key: &[u8], record: &[u8],
+                    ) -> Result<(), BoundedStorageError> {
+                        self.counters.signed_record_only_writes.fetch_add(1, Ordering::SeqCst);
+                        self.inner.put_signing_record_envelope_synced(key, record)
+                    }
+                }
+
+                fn verify_same_domain(
+                    observed: &ObservedBoundaryRocksStore,
+                    backend: &RocksDbConsensusStorage,
+                ) {
+                    let wrapped_domain = observed.signing_ownership_domain();
+                    let backend_domain = backend.signing_ownership_domain();
+                    assert!(Arc::ptr_eq(&wrapped_domain, &backend_domain));
+                    drop(wrapped_domain);
+                    drop(backend_domain);
+                }
+
+                fn fixture_journal(
+                    owner: &SafetyRecordOwner,
+                    store: Arc<ObservedBoundaryRocksStore>,
+                ) -> SigningReservationJournal {
+                    let journal = SigningReservationJournal::initialize(
+                        store as Arc<dyn SigningJournalStorage>,
+                        1,
+                    ).expect("initialize fresh child journal through observer");
+                    journal.install_accountant_association(owner.backend_for_test().accounting())
+                        .expect("install observer-backed accountant association");
+                    journal.enter_bounded_live_mode(1).expect("bounded journal mode");
+                    journal
+                }
+
+                fn spawn_child(
+                    mode: &str,
+                    fixture: &std::path::Path,
+                    marker: &std::path::Path,
+                    nonce: &[u8; NONCE_LEN],
+                    safety: &std::path::Path,
+                    journal: &std::path::Path,
+                ) -> OwnedChild {
+                    let nonce_hex = nonce_to_hex(nonce);
+                    let child = std::process::Command::new(std::env::current_exe().expect("test executable"))
+                        .args(["--exact", MARKER_CHILD_PATH, "--ignored", "--nocapture", "--test-threads=1"])
+                        .env(ENV_MODE, mode)
+                        .env(ENV_FIXTURE, fixture)
+                        .env(ENV_MARKER, marker)
+                        .env(ENV_NONCE, nonce_hex)
+                        .env(ENV_SAFETY, safety)
+                        .env(ENV_JOURNAL, journal)
+                        .stdin(std::process::Stdio::null())
+                        .stdout(std::process::Stdio::null())
+                        .stderr(std::process::Stdio::null())
+                        .spawn()
+                        .expect("spawn post-sign boundary child");
+                    OwnedChild::new(child)
+                }
+
+                #[test]
+                #[ignore = "re-executed child; only parent boundary tests drive it"]
+                fn postsign_child_entry() {
+                    let Some(mode) = std::env::var_os(ENV_MODE) else { return; };
+                    let mode = mode.to_string_lossy().into_owned();
+                    let fixture = std::path::PathBuf::from(std::env::var_os(ENV_FIXTURE).expect("fixture path"));
+                    let marker_path = std::path::PathBuf::from(std::env::var_os(ENV_MARKER).expect("marker path"));
+                    let safety_dir = std::path::PathBuf::from(std::env::var_os(ENV_SAFETY).expect("safety path"));
+                    let journal_dir = std::path::PathBuf::from(std::env::var_os(ENV_JOURNAL).expect("journal path"));
+                    let nonce = hex_to_nonce(&std::env::var(ENV_NONCE).expect("nonce"));
+                    let (pk, sk) = read_fixture_file(&fixture);
+                    let pv = authority_from_pk(pk.clone());
+                    let ctx = retained_ctx(4);
+                    let (owner, engine, decided, proposal, limits, _) =
+                        capture_multi_with_suite(&safety_dir, &ctx, MODEL_SUITE_U16);
+                    let concrete = reopen_open_journal_store(&journal_dir);
+                    let observed = Arc::new(ObservedBoundaryRocksStore::new(concrete.clone()));
+                    verify_same_domain(&observed, &concrete);
+                    let journal = fixture_journal(&owner, observed.clone());
+                    let vote = decided.vote();
+                    let unsigned_vote = unsigned_vote_wire(vote);
+                    let preimage = pv.signing_domain.vote_preimage(vote);
+                    let (position, binding) = retained_pos_binding(&pv, vote);
+                    let position_key = position.storage_key();
+                    let (_suite, authorized_key) = pv.key_provider
+                        .get_suite_and_key(ValidatorId::new(SIGNER_VID))
+                        .expect("shared suite-100 public key");
+                    let marker = build_marker(
+                        &nonce, &authorized_key, &unsigned_vote, &preimage, &position_key, &binding.0,
+                    );
+                    let marker_file = open_marker(&marker_path);
+                    let signer_obs = Arc::new(AtomicU32::new(0));
+                    let sink_obs = Arc::new(AtomicU32::new(0));
+                    let publication_calls = Arc::new(AtomicU32::new(0));
+                    let store_baseline = observed.counts().0;
+                    let inner = real_local_signer(&sk);
+                    let signer = CountingValidatorSigner::new_observed(&inner, signer_obs.clone());
+                    let mut sink = RealSignRecordingSink::new_observed(sink_obs.clone());
+                    let mut snapshot = established_snapshot(&pv);
+                    let mut coord = ModelCoordinationHook::inert()
+                        .with_post_sign_prepublication_evidence(PostSignPrePublicationEvidence::new(
+                            marker,
+                            marker_file,
+                            nonce,
+                            signer_obs,
+                            sink_obs,
+                            publication_calls,
+                            observed.counters.clone(),
+                            store_baseline,
+                            mode == "abort",
+                        ));
+                    if mode == "invalid_observation" {
+                        coord.post_sign_prepublication.as_mut().unwrap()
+                            .sink_obs.store(1, Ordering::SeqCst);
+                    }
+                    let outcome = fresh_vote_sign_real_local::<FixtureCommittedHistory>(
+                        &owner, &engine, &decided, &proposal, &limits, None, &mut snapshot,
+                        &signer, &mut sink, &journal, &mut coord, ReconfirmPerturbation::None,
+                    );
+                    if mode == "abort" {
+                        panic!("post-sign boundary hook returned unexpectedly: {outcome:?}");
+                    }
+                    assert!(matches!(outcome, RealFreshSignOutcome::Published(_)));
+                    assert_eq!(signer.calls(), 1);
+                    assert_eq!(sink.calls, 1);
+                }
+
+                #[test]
+                fn marker_layout_and_parser_rejections() {
+                    assert_eq!(MARKER_LEN, 4193);
+                    assert_eq!(POST_SIGN_SIGNATURE_OFFSET + SIGNATURE_LEN, MARKER_LEN);
+                    let vote = Vote {
+                        version: 1, chain_id: MODEL_WIRE_CHAIN_ID, epoch: 4, height: 1,
+                        round: 1, step: 0, block_id: [0xB2; 32], validator_index: SIGNER_VID as u16,
+                        suite_id: MODEL_SUITE_U16, signature: Vec::new(),
+                    };
+                    let unsigned = unsigned_vote_wire(&vote);
+                    let nonce = [7u8; NONCE_LEN];
+                    let marker = build_marker(&nonce, &[0xA1; PK_LEN], &unsigned, &[0xC3; 88], &[0xD4; POSITION_LEN], &[0xE5; 32]);
+                    let mut valid = marker.to_vec();
+                    valid[23..27].copy_from_slice(&1u32.to_le_bytes());
+                    valid[27..31].copy_from_slice(&1u32.to_le_bytes());
+                    valid[39] = 1;
+                    valid[POST_SIGN_SIGNATURE_LEN_OFFSET..POST_SIGN_SIGNATURE_OFFSET]
+                        .copy_from_slice(&(SIGNATURE_LEN as u16).to_le_bytes());
+                    valid[POST_SIGN_SIGNATURE_OFFSET..].fill(0x5A);
+                    // The fabricated signature is used only for parser-shape tests; it is never verified or delivered.
+                    assert!(parse_marker(&valid, &nonce).is_ok());
+                    assert!(parse_marker(&valid[..MARKER_LEN - 1], &nonce).is_err());
+                    let mut bad = valid.clone(); bad.push(0);
+                    assert!(parse_marker(&bad, &nonce).is_err());
+                    for offset in [
+                        0,
+                        4,
+                        6,
+                        23,
+                        27,
+                        31,
+                        35,
+                        39,
+                        40,
+                        41,
+                        POST_SIGN_VOTE_LEN_OFFSET,
+                        POST_SIGN_SIGNATURE_LEN_OFFSET,
+                    ] {
+                        let mut bad = valid.clone(); bad[offset] ^= 1;
+                        assert!(parse_marker(&bad, &nonce).is_err(), "corrupt marker offset {offset}");
+                    }
+                    assert!(parse_marker(&valid, &[8u8; NONCE_LEN]).is_err());
+                    let mut bad = valid.clone();
+                    bad[POST_SIGN_PREIMAGE_LEN_OFFSET..POST_SIGN_PREIMAGE_OFFSET]
+                        .copy_from_slice(&0u16.to_le_bytes());
+                    assert!(parse_marker(&bad, &nonce).is_err(), "empty preimage rejects");
+                    let mut bad = valid.clone();
+                    bad[POST_SIGN_PREIMAGE_LEN_OFFSET..POST_SIGN_PREIMAGE_OFFSET]
+                        .copy_from_slice(&((PREIMAGE_CAP + 1) as u16).to_le_bytes());
+                    assert!(parse_marker(&bad, &nonce).is_err(), "oversized preimage rejects");
+                    let mut bad = valid.clone(); bad[POST_SIGN_PREIMAGE_OFFSET + 88] = 1;
+                    assert!(parse_marker(&bad, &nonce).is_err());
+
+                    let mut wrong_suite = vote.clone();
+                    wrong_suite.suite_id = MODEL_SUITE_U16 + 1;
+                    let mut wire = Vec::new();
+                    qbind_wire::io::WireEncode::encode(&wrong_suite, &mut wire);
+                    assert_eq!(wire.len(), VOTE_LEN);
+                    let mut bad = valid.clone();
+                    bad[POST_SIGN_VOTE_OFFSET..POST_SIGN_PREIMAGE_LEN_OFFSET]
+                        .copy_from_slice(&wire);
+                    assert_eq!(
+                        parse_marker(&bad, &nonce),
+                        Err("Vote suite"),
+                        "the marker parser rejects a genuinely encoded wrong-suite Vote"
+                    );
+
+                    let mut malformed = valid.clone();
+                    malformed[POST_SIGN_VOTE_OFFSET] = 0;
+                    assert_eq!(
+                        parse_marker(&malformed, &nonce),
+                        Err("Vote encoding"),
+                        "the marker parser rejects malformed Vote bytes"
+                    );
+
+                    let mut inline_sig = vote;
+                    inline_sig.signature.push(0x5A);
+                    let mut wire = Vec::new();
+                    qbind_wire::io::WireEncode::encode(&inline_sig, &mut wire);
+                    assert_eq!(wire.len(), VOTE_LEN + 1);
+                    // This 70-byte encoding is helper-only; the fixed marker Vote
+                    // field remains exactly 69 bytes.
+                    assert_eq!(decode_unsigned_suite_vote(&wire), Err("Vote inline signature"));
+                    let mut trailing = unsigned;
+                    trailing.push(0);
+                    // Trailing input is likewise exercised at helper level, not
+                    // represented as a valid fixed-width marker Vote.
+                    assert_eq!(decode_unsigned_suite_vote(&trailing), Err("Vote trailing bytes"));
+                }
+
+                #[test]
+                fn hook_rejects_invalid_live_observation_without_complete_marker() {
+                    let temp = tempfile::tempdir().unwrap();
+                    let fixture = temp.path().join("keypair.bin");
+                    let marker = temp.path().join("marker.bin");
+                    let safety = temp.path().join("safety");
+                    let journal = temp.path().join("journal");
+                    std::fs::create_dir(&safety).unwrap();
+                    std::fs::create_dir(&journal).unwrap();
+                    let (pk, sk) = MlDsa44Backend::generate_keypair().expect("suite-100 keygen");
+                    write_fixture_file(&fixture, &pk, &sk);
+                    let nonce = urandom_nonce();
+                    let mut child = spawn_child("invalid_observation", &fixture, &marker, &nonce, &safety, &journal);
+                    let class = child.supervise(STATUS_DEADLINE).expect("invalid-observation child reaped");
+                    assert!(matches!(class, TermClass::Exited(code) if code != 0));
+                    let raw = read_marker_bounded(&marker).expect("child created marker before route");
+                    assert_eq!(raw.len(), 0, "invalid live observation writes no complete marker");
+                    assert!(!accepts(class, &raw, &nonce));
+                }
+
+                #[test]
+                fn valid_marker_with_ordinary_child_exit_is_rejected() {
+                    let temp = tempfile::tempdir().unwrap();
+                    let fixture = temp.path().join("keypair.bin");
+                    let marker = temp.path().join("marker.bin");
+                    let safety = temp.path().join("safety");
+                    let journal = temp.path().join("journal");
+                    std::fs::create_dir(&safety).unwrap();
+                    std::fs::create_dir(&journal).unwrap();
+                    let (pk, sk) = MlDsa44Backend::generate_keypair().expect("suite-100 keygen");
+                    write_fixture_file(&fixture, &pk, &sk);
+                    let nonce = urandom_nonce();
+                    let mut child = spawn_child("exit", &fixture, &marker, &nonce, &safety, &journal);
+                    let class = child.supervise(STATUS_DEADLINE).expect("normal child reaped");
+                    assert_eq!(class, TermClass::Exited(0));
+                    let raw = read_marker_bounded(&marker).expect("complete marker was produced");
+                    let witness = parse_marker(&raw, &nonce).expect("valid invocation marker");
+                    assert_eq!(witness.public_key, pk);
+                    assert!(!accepts(class, &raw, &nonce), "complete marker cannot replace intended signal");
+                    let _ = sk;
+                }
+
+                #[test]
+                fn postsign_prepublication_control_publishes_exact_witness() {
+                    let temp = tempfile::tempdir().unwrap();
+                    let fixture = temp.path().join("keypair.bin");
+                    let marker_path = temp.path().join("marker.bin");
+                    let safety_dir = temp.path().join("safety");
+                    let journal_dir = temp.path().join("journal");
+                    std::fs::create_dir(&safety_dir).unwrap();
+                    std::fs::create_dir(&journal_dir).unwrap();
+                    let (pk, sk) = MlDsa44Backend::generate_keypair().expect("suite-100 keygen");
+                    write_fixture_file(&fixture, &pk, &sk);
+                    let (rpk, rsk) = read_fixture_file(&fixture);
+                    assert!(rsk == sk, "fixture secret round-trip equality (contents redacted)");
+                    let nonce = urandom_nonce();
+                    let pv = authority_from_pk(rpk);
+                    let ctx = retained_ctx(4);
+                    let (owner, engine, decided, proposal, limits, _) =
+                        capture_multi_with_suite(&safety_dir, &ctx, MODEL_SUITE_U16);
+                    let base_vote = decided.vote().clone();
+                    let concrete = reopen_open_journal_store(&journal_dir);
+                    let observed = Arc::new(ObservedBoundaryRocksStore::new(concrete.clone()));
+                    verify_same_domain(&observed, &concrete);
+                    let journal = fixture_journal(&owner, observed.clone());
+                    let vote = decided.vote();
+                    let unsigned = unsigned_vote_wire(vote);
+                    let preimage = pv.signing_domain.vote_preimage(vote);
+                    let (position, binding) = retained_pos_binding(&pv, vote);
+                    let (_suite, authorized_key) = pv.key_provider
+                        .get_suite_and_key(ValidatorId::new(SIGNER_VID)).expect("authorized suite-100 key");
+                    let marker = build_marker(&nonce, &authorized_key, &unsigned, &preimage, &position.storage_key(), &binding.0);
+                    let file = open_marker(&marker_path);
+                    let baseline = observed.counts().0;
+                    let signer_obs = Arc::new(AtomicU32::new(0));
+                    let sink_obs = Arc::new(AtomicU32::new(0));
+                    let publication_calls = Arc::new(AtomicU32::new(0));
+                    let inner = real_local_signer(&rsk);
+                    let signer = CountingValidatorSigner::new_observed(&inner, signer_obs.clone());
+                    let mut sink = RealSignRecordingSink::new_observed(sink_obs.clone());
+                    let mut snapshot = established_snapshot(&pv);
+                    let mut coord = ModelCoordinationHook::inert()
+                        .with_post_sign_prepublication_evidence(PostSignPrePublicationEvidence::new(
+                            marker, file, nonce, signer_obs.clone(), sink_obs.clone(),
+                            publication_calls.clone(), observed.counters.clone(), baseline, false,
+                        ));
+                    let base_ledgers = snapshot_ledgers(&owner);
+                    let provenance = pin_provenance_now(&owner, &decided);
+                    let op_ceiling = owner.backend_for_test().accounting_cap();
+                    let agg_ceiling = owner.backend_for_test().accounting_aggregate_cap();
+                    let outcome = fresh_vote_sign_real_local::<FixtureCommittedHistory>(
+                        &owner, &engine, &decided, &proposal, &limits, None, &mut snapshot,
+                        &signer, &mut sink, &journal, &mut coord, ReconfirmPerturbation::None,
+                    );
+                    assert_cleanup_preserved(&owner, &decided, &base_vote, base_ledgers, provenance, "post-sign control");
+                    assert_eq!(owner.backend_for_test().accounting_cap(), op_ceiling);
+                    assert_eq!(owner.backend_for_test().accounting_aggregate_cap(), agg_ceiling);
+                    let diag = match outcome {
+                        RealFreshSignOutcome::Published(d) => d,
+                        other => panic!("same-hook control must publish: {other:?}"),
+                    };
+                    assert_eq!(diag.retirement, RetirementReport::Retired);
+                    assert_eq!((signer.calls(), sink.calls, publication_calls.load(Ordering::SeqCst)), (1, 1, 1));
+                    assert_eq!(signer_obs.load(Ordering::SeqCst), 1);
+                    assert_eq!(sink_obs.load(Ordering::SeqCst), 1);
+                    let counts = observed.counts().0;
+                    assert_eq!(counts.combined_reservation_writes - baseline.combined_reservation_writes, 1);
+                    assert_eq!(counts.signed_record_only_writes - baseline.signed_record_only_writes, 1);
+                    assert_eq!(counts.reissue_attempts - baseline.reissue_attempts, 0);
+                    let raw = read_marker_bounded(&marker_path).expect("hook witness exists");
+                    let witness = parse_marker(&raw, &nonce).expect("valid committed-span witness");
+                    assert_eq!(witness.public_key, authorized_key);
+                    assert_eq!(witness.signature.len(), SIGNATURE_LEN);
+                    MlDsa44Backend::verify(&witness.public_key, &witness.preimage, &witness.signature)
+                        .expect("original committed signature verifies under exact preimage");
+                    let stored = observed.get_signing_record(&position.storage_key())
+                        .expect("stored result read").expect("Signed record");
+                    let decoded = SigningDecisionRecord::decode(&stored).expect("decode Signed record");
+                    assert_eq!(decoded.stage, SigningRecordStage::Signed);
+                    assert!(
+                        decoded.retained_signature.as_deref() == Some(witness.signature.as_slice()),
+                        "stored Signed signature bytes exactly match the witnessed output (redacted)"
+                    );
+                    assert_eq!(decoded.binding, binding);
+
+                    let accountant = owner.backend_for_test().accounting_handle_for_test();
+                    drop(coord); drop(decided); drop(engine); drop(journal);
+                    drop(observed); drop(concrete); drop(owner); drop(snapshot); drop(sink);
+                    drop(signer); drop(inner); drop(pv); drop(ctx); drop(proposal);
+                    drop(base_vote); drop(witness); drop(raw);
+                    assert_eq!(accountant.current(), 0, "operational ledger returns to zero");
+                    assert_eq!(accountant.aggregate().current(), 0, "aggregate ledger returns to zero");
+                }
+
+                #[test]
+                fn postsign_prepublication_child_death_reopens_reserved() {
+                    let harness = tempfile::tempdir().unwrap();
+                    let fixture = harness.path().join("suite100_keypair.bin");
+                    let marker_path = harness.path().join("post-sign-marker.bin");
+                    let safety_dir = harness.path().join("safety");
+                    let journal_dir = harness.path().join("journal");
+                    std::fs::create_dir(&safety_dir).unwrap();
+                    std::fs::create_dir(&journal_dir).unwrap();
+                    let (pk, sk) = MlDsa44Backend::generate_keypair().expect("suite-100 keygen");
+                    write_fixture_file(&fixture, &pk, &sk);
+                    let nonce = urandom_nonce();
+                    let mut child = spawn_child("abort", &fixture, &marker_path, &nonce, &safety_dir, &journal_dir);
+                    let class = child.supervise(STATUS_DEADLINE).expect("boundary child reaped");
+                    assert_eq!(class, TermClass::Signaled(EXPECTED_ABORT_SIGNAL));
+                    let raw = read_marker_bounded(&marker_path).expect("boundary marker");
+                    assert!(accepts(class, &raw, &nonce), "only intended signal plus full matching witness is accepted");
+                    let witness = parse_marker(&raw, &nonce).expect("parse accepted post-sign witness");
+                    assert_eq!((witness.hook_calls, witness.signer_calls, witness.sink_calls, witness.publication_calls), (1, 1, 0, 0));
+                    assert_eq!(witness.public_key, pk);
+                    assert_eq!(witness.signature.len(), SIGNATURE_LEN);
+                    MlDsa44Backend::verify(&witness.public_key, &witness.preimage, &witness.signature)
+                        .expect("child's original signature verifies; this does not authorize delivery");
+
+                    let ctx = retained_ctx(4);
+                    let pv = authority_from_pk(pk.clone());
+                    let owner = reopen_attach(&safety_dir, &ctx);
+                    let concrete = reopen_open_journal_store(&journal_dir);
+                    let observed = Arc::new(ObservedBoundaryRocksStore::new(concrete.clone()));
+                    verify_same_domain(&observed, &concrete);
+                    let journal = reopen_assoc_journal_open(
+                        &owner, observed.clone() as Arc<dyn SigningJournalStorage>, 1,
+                    );
+                    assert_eq!(journal.reserved_position_count(), 1);
+                    let record_pre = observed.get_signing_record(&witness.position_key)
+                        .expect("read recovered journal record").expect("Reserved record");
+                    let metadata_pre = observed.get_signing_metadata()
+                        .expect("read recovered journal metadata").expect("metadata exists");
+                    let count_pre = journal.reserved_position_count();
+                    let decoded = SigningDecisionRecord::decode(&record_pre).expect("decode Reserved record");
+                    assert_eq!(decoded.stage, SigningRecordStage::Reserved);
+                    assert_eq!(decoded.position.storage_key(), witness.position_key);
+                    assert_eq!(decoded.binding.0, witness.binding);
+                    assert!(decoded.retained_signature.is_none());
+                    assert_eq!(count_pre, 1);
+
+                    let (mut engine, proposal, l0_block) =
+                        engine_locked_l0_multi_with_suite(MODEL_SUITE_U16);
+                    let limits = lim_b(&ctx);
+                    let op_ceiling = owner.backend_for_test().accounting_cap();
+                    let agg_ceiling = owner.backend_for_test().accounting_aggregate_cap();
+                    let op_before_recovery = owner.backend_for_test().accounting_current();
+                    let agg_before_recovery = owner.backend_for_test().accounting_aggregate_current();
+                    let revision = reopen_b_recover_only(&owner, &engine, l0_block);
+                    assert_eq!(owner.backend_for_test().accounting_current(), op_before_recovery);
+                    assert_eq!(owner.backend_for_test().accounting_aggregate_current(), agg_before_recovery);
+                    assert_eq!(owner.backend_for_test().accounting_cap(), op_ceiling);
+                    assert_eq!(owner.backend_for_test().accounting_aggregate_cap(), agg_ceiling);
+                    assert_eq!(observed.get_signing_record(&witness.position_key).unwrap().as_deref(), Some(record_pre.as_slice()));
+                    assert_eq!(observed.get_signing_metadata().unwrap().as_deref(), Some(metadata_pre.as_slice()));
+                    assert_eq!(journal.reserved_position_count(), count_pre);
+
+                    let capture_proof = owner.read_validate(None::<&FixtureCommittedHistory>)
+                        .expect("separate O3 capture proof");
+                    let decided = match owner.decide_and_capture_owned(
+                        &mut engine, ValidatorId::new(2), &proposal, &limits, revision, capture_proof,
+                    ) {
+                        OwnedDecisionOutcome::Decided(value) => value,
+                        other => panic!("derive new surviving decision: {other:?}"),
+                    };
+                    let vote = decided.vote();
+                    let vote_wire = unsigned_vote_wire(vote);
+                    let preimage = pv.signing_domain.vote_preimage(vote);
+                    let (position, binding) = retained_pos_binding(&pv, vote);
+                    let (_suite, authorized_key) = pv.key_provider
+                        .get_suite_and_key(ValidatorId::new(SIGNER_VID)).expect("authorized key");
+                    assert_eq!(vote_wire, witness.unsigned_vote);
+                    assert_eq!(preimage, witness.preimage);
+                    assert_eq!(position.storage_key(), witness.position_key);
+                    assert_eq!(binding.0, witness.binding);
+                    assert_eq!(authorized_key, witness.public_key);
+                    let base_vote = vote.clone();
+
+                    // Fresh refusal is measured independently from retained refusal.
+                    let mut fresh_snapshot = established_snapshot(&pv);
+                    let inner = real_local_signer(&sk);
+                    let signer_obs = Arc::new(AtomicU32::new(0));
+                    let sink_obs = Arc::new(AtomicU32::new(0));
+                    let signer = CountingValidatorSigner::new_observed(&inner, signer_obs.clone());
+                    let mut fresh_sink = RealSignRecordingSink::new_observed(sink_obs.clone());
+                    let publication_calls = Arc::new(AtomicU32::new(0));
+                    let mut fresh_coord = ModelCoordinationHook::publication_observing(publication_calls.clone());
+                    let fresh_ledgers = snapshot_ledgers(&owner);
+                    let fresh_provenance = pin_provenance_now(&owner, &decided);
+                    let fresh_op_ceiling = owner.backend_for_test().accounting_cap();
+                    let fresh_agg_ceiling = owner.backend_for_test().accounting_aggregate_cap();
+                    let fresh_record = observed.get_signing_record(&position.storage_key()).unwrap().unwrap();
+                    let fresh_metadata = observed.get_signing_metadata().unwrap().unwrap();
+                    let fresh_count = journal.reserved_position_count();
+                    let fresh_counts = observed.counts().0;
+                    let fresh = fresh_vote_sign_real_local::<FixtureCommittedHistory>(
+                        &owner, &engine, &decided, &proposal, &limits, None, &mut fresh_snapshot,
+                        &signer, &mut fresh_sink, &journal, &mut fresh_coord, ReconfirmPerturbation::None,
+                    );
+                    assert_eq!(fresh, RealFreshSignOutcome::ReservePotentiallySigned);
+                    assert_eq!((signer.calls(), fresh_sink.calls, publication_calls.load(Ordering::SeqCst)), (0, 0, 0));
+                    assert_eq!(signer_obs.load(Ordering::SeqCst), 0);
+                    assert_eq!(sink_obs.load(Ordering::SeqCst), 0);
+                    assert_cleanup_preserved(&owner, &decided, &base_vote, fresh_ledgers, fresh_provenance, "post-sign boundary fresh refusal");
+                    assert_eq!(owner.backend_for_test().accounting_cap(), fresh_op_ceiling);
+                    assert_eq!(owner.backend_for_test().accounting_aggregate_cap(), fresh_agg_ceiling);
+                    let fresh_after = observed.counts().0;
+                    assert_eq!(fresh_after.bounded_present_reads - fresh_counts.bounded_present_reads, 1);
+                    assert_eq!(fresh_after.combined_reservation_writes - fresh_counts.combined_reservation_writes, 0);
+                    assert_eq!(fresh_after.signed_record_only_writes - fresh_counts.signed_record_only_writes, 0);
+                    assert_eq!(fresh_after.reissue_attempts - fresh_counts.reissue_attempts, 0);
+                    assert_eq!(fresh_after.other_mutations - fresh_counts.other_mutations, 0);
+                    assert_eq!(observed.get_signing_record(&position.storage_key()).unwrap().as_deref(), Some(fresh_record.as_slice()));
+                    assert_eq!(observed.get_signing_metadata().unwrap().as_deref(), Some(fresh_metadata.as_slice()));
+                    assert_eq!(journal.reserved_position_count(), fresh_count);
+
+                    // AssociationChecked path: actual present bounded read, no delivery/reissue/sign route.
+                    let retained_ledgers = snapshot_ledgers(&owner);
+                    let retained_provenance = pin_provenance_now(&owner, &decided);
+                    let retained_op_ceiling = owner.backend_for_test().accounting_cap();
+                    let retained_agg_ceiling = owner.backend_for_test().accounting_aggregate_cap();
+                    let retained_record = observed.get_signing_record(&position.storage_key()).unwrap().unwrap();
+                    let retained_metadata = observed.get_signing_metadata().unwrap().unwrap();
+                    let retained_count = journal.reserved_position_count();
+                    let retained_counts = observed.counts().0;
+                    let witness_slice = &witness.signature;
+                    assert_eq!(witness_slice.len(), SIGNATURE_LEN);
+                    let probe_witness = RetainedSliceWitness::from_validated(witness_slice);
+                    let probe = std::rc::Rc::new(RetainedSliceProbe::new(probe_witness));
+                    let probe_guard = install_retained_slice_probe(probe.clone());
+                    let mut retained_sink = RetainedUseRecordingSink::new();
+                    let mut retained_coord = ModelCoordinationHook::inert();
+                    let retained = retained_vote_use_checked_model::<FixtureCommittedHistory>(
+                        &owner, &engine, &decided, &proposal, &limits, None, &mut fresh_snapshot,
+                        &mut retained_sink, &journal, &mut retained_coord, ReconfirmPerturbation::None,
+                    );
+                    assert_eq!(retained, ModelRetainedUseOutcome::RetainedPotentiallySigned);
+                    assert_eq!(retained_sink.calls, 0);
+                    assert_eq!(probe.invocations(), 0, "Reserved state is not delivered to the retained probe");
+                    drop(probe_guard);
+                    assert_cleanup_preserved(&owner, &decided, &base_vote, retained_ledgers, retained_provenance, "post-sign boundary checked-retained refusal");
+                    assert_eq!(owner.backend_for_test().accounting_cap(), retained_op_ceiling);
+                    assert_eq!(owner.backend_for_test().accounting_aggregate_cap(), retained_agg_ceiling);
+                    let retained_after = observed.counts().0;
+                    assert_eq!(retained_after.bounded_present_reads - retained_counts.bounded_present_reads, 1);
+                    assert_eq!(retained_after.reissue_attempts - retained_counts.reissue_attempts, 0);
+                    assert_eq!(retained_after.reissue_delegated_writes - retained_counts.reissue_delegated_writes, 0);
+                    assert_eq!(retained_after.combined_reservation_writes - retained_counts.combined_reservation_writes, 0);
+                    assert_eq!(retained_after.signed_record_only_writes - retained_counts.signed_record_only_writes, 0);
+                    assert_eq!(retained_after.other_mutations - retained_counts.other_mutations, 0);
+                    assert_eq!(observed.get_signing_record(&position.storage_key()).unwrap().as_deref(), Some(retained_record.as_slice()));
+                    assert_eq!(observed.get_signing_metadata().unwrap().as_deref(), Some(retained_metadata.as_slice()));
+                    assert_eq!(journal.reserved_position_count(), retained_count);
+                    let final_record = SigningDecisionRecord::decode(&retained_record).unwrap();
+                    assert_eq!(final_record.stage, SigningRecordStage::Reserved);
+                    assert!(final_record.retained_signature.is_none());
+
+                    let accountant = owner.backend_for_test().accounting_handle_for_test();
+                    drop(probe); drop(retained_sink); drop(retained_coord); drop(fresh_coord);
+                    drop(decided); drop(engine); drop(journal); drop(observed); drop(concrete);
+                    drop(owner); drop(fresh_snapshot); drop(fresh_sink); drop(signer); drop(inner);
+                    drop(pv); drop(ctx); drop(proposal); drop(base_vote); drop(witness); drop(raw);
+                    assert_eq!(accountant.current(), 0, "surviving operational ledger reaches zero");
+                    assert_eq!(accountant.aggregate().current(), 0, "surviving aggregate ledger reaches zero");
+                }
+            }
+
             fn lim_b(ctx: &PinnedSafetyContext) -> PreparedDecisionInputLimits {
                 PreparedDecisionInputLimits::from_pinned(ctx).expect("pinned context yields a policy")
             }
