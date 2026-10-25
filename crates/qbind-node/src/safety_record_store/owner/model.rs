@@ -8736,6 +8736,272 @@ mod tests {
         }
 
         // ==================================================================
+        // RUN 422 — Isolated O5 RECOVERY BARRIER for same-authority use.
+        //
+        // These cases EXTEND `same_authority_uncertain_safety_publication_blocks_
+        // zero_signing` (which proves only the initial refusal) through the full
+        // recovery composition using ONLY the existing public O2/O3/O5 API
+        // (`open` / `read_validate` / `reacknowledge`) and the existing fault
+        // injection — no new protected-use implementation, no lifecycle predicate
+        // change, no private mutation, and no manual clearing of the recovery
+        // requirement. O5 is a STORAGE recovery barrier, not signing authorization:
+        // a cleared recovery requirement is NEVER sufficient on its own. Labels:
+        // REAL ML-DSA-44 signing/verification, REAL durable-storage acknowledgements,
+        // model journal/authority fixtures. This is IN-PROCESS, fault-injected
+        // evidence, NOT process-death / power-loss durability.
+        // ==================================================================
+
+        /// Drive a COHERENT uncertain-publication fixture that AGREES at L1: the
+        /// engine locks the real view-1 successor (peers 2 & 3 complete the quorum)
+        /// and the durable restriction advances to the SAME L1 through an
+        /// acknowledgement-lost (uncertain) write, latching the shared recovery
+        /// requirement. The pinned context, authority and captured envelope/proposal
+        /// are UNCHANGED. Returns the L1 block id; the injected fault is cleared on
+        /// return so a subsequent O5 (or O5 fault) is controlled by the caller.
+        fn advance_engine_and_uncertain_durable_to_l1(
+            owner: &SafetyRecordOwner,
+            engine: &mut qbind_consensus::BasicHotStuffEngine<[u8; 32]>,
+            ctx: &PinnedSafetyContext,
+        ) -> [u8; 32] {
+            use crate::safety_record_store::backend::InjectFault;
+            let l0_block = derive_block_id_local(1, 0, &[0xFF; 32]);
+            let l1_block = derive_block_id_local(2, 1, &l0_block);
+            assert!(
+                engine
+                    .on_vote_event(ValidatorId::new(2), &logical_vote(1, l1_block, 2))
+                    .expect("peer vote 2 for L1 ingests")
+                    .is_none(),
+                "two votes are short of the L1 quorum"
+            );
+            assert!(
+                engine
+                    .on_vote_event(ValidatorId::new(3), &logical_vote(1, l1_block, 3))
+                    .expect("peer vote 3 for L1 ingests")
+                    .is_some(),
+                "the third vote forms the L1 quorum"
+            );
+            let lk = engine.locked_qc().expect("engine now locks L1");
+            assert_eq!(lk.block_id, l1_block, "engine lock advanced to L1");
+            assert_eq!(lk.view, 1);
+            // Durable advance of the SAME L1 restriction under an uncertain write.
+            owner
+                .backend_for_test()
+                .set_inject(InjectFault::UncertainAfterWrite);
+            let latch = owner.publish_locked(
+                make_locked_qc(ctx, l1_block, 1, valid_wire_qc(ctx, l1_block, 1), None).unwrap(),
+                1,
+                None::<&FixtureCommittedHistory>,
+            );
+            assert!(
+                matches!(latch, PublishResult::UncertainDurable),
+                "expected an uncertain durable outcome, got {latch:?}"
+            );
+            owner.backend_for_test().set_inject(InjectFault::None);
+            assert!(
+                owner.recovery_required(),
+                "the uncertain publication latched recovery-required"
+            );
+            l1_block
+        }
+
+        /// RUN 422 (stored-restriction establishment) - establish the surviving
+        /// stored restriction DIRECTLY from an O3 proof's read-only accessors:
+        /// assert it is `Locked` and return its exact restriction identity (lock
+        /// block id + lock view) and publication revision. A revision alone does
+        /// NOT establish lock identity, so the identity is read explicitly; no
+        /// mutation access is used and no substitute proof is reconstructed.
+        fn stored_locked_identity(proof: &ValidatedRecord) -> (GenerationIdentity, u64) {
+            assert!(
+                proof.retained().is_locked(),
+                "the surviving stored record is Locked"
+            );
+            let id = GenerationIdentity::from_retained(proof.retained())
+                .expect("a Locked record yields a restriction identity");
+            (id, proof.publication_revision())
+        }
+
+        /// §3/§4 — the FULL fresh-signing recovery sequence. A coherent uncertain
+        /// L1 publication latches recovery; the same-authority fresh route refuses
+        /// before recovery (zero signer/sink/D10) and STILL refuses after successful
+        /// O2 inspection and O3 validation; only a successful O5 (using the current
+        /// validated publication) clears the requirement, after which re-entering the
+        /// protected route performs its own observation/lifecycle/eligibility/
+        /// authorization checks and signs EXACTLY ONCE, publishing a signature that
+        /// VERIFIES against the UNCHANGED original Vote's journal-bound preimage. The
+        /// O3 proof is held across O5 and destroyed before the proof-free comparison.
+        #[test]
+        fn same_authority_fresh_signing_recovers_through_o5_barrier() {
+            let dir = tempfile::tempdir().unwrap();
+            let ctx = retained_ctx(4);
+            let (owner, mut engine, decided, p1, lim, _rev) =
+                capture_multi_with_suite(dir.path(), &ctx, MODEL_SUITE_U16);
+            let (pv, sk) = make_real_signing_authority();
+            let mut snapshot = established_snapshot(&pv);
+            let journal = associated_bounded_journal(&owner, real_fresh_store(), 1);
+            let inner = real_local_signer(&sk);
+            let signer = CountingValidatorSigner::new(&inner);
+            let base_vote = decided.vote().clone();
+
+            // Coherent uncertain-publication fixture (engine ↔ durable AGREE at L1).
+            let l1_block = advance_engine_and_uncertain_durable_to_l1(&owner, &mut engine, &ctx);
+
+            // Establish the asserted components SEPARATELY (never inferred from a
+            // label): the engine's ACTUAL lock, and the recovery requirement.
+            let lk = engine.locked_qc().expect("engine locks L1");
+            assert_eq!(lk.block_id, l1_block, "the engine's actual lock is the L1 successor");
+            assert_eq!(lk.view, 1);
+            assert!(owner.recovery_required(), "the asserted recovery requirement is set");
+
+            // Proof-FREE baseline, sampled with NO O3 proof held.
+            let ledgers_before = snapshot_ledgers(&owner);
+            let prov_before = pin_provenance_now(&owner, &decided);
+
+            // Phase 1 — BEFORE recovery: exact refusal, zero signer, zero sink, and
+            // no new D10 reservation.
+            {
+                let mut sink = RealSignRecordingSink::new();
+                let mut coord = ModelCoordinationHook::inert();
+                let refused = fresh_vote_sign_real_local_same_authority::<FixtureCommittedHistory>(
+                    &owner, &engine, &decided, &p1, &lim, None, &mut snapshot,
+                    &signer, &mut sink, &journal, &mut coord, ReconfirmPerturbation::None,
+                );
+                assert_eq!(
+                    refused,
+                    RealFreshSignOutcome::ObservationRefused,
+                    "recovery-required blocks the dependent fresh route before recovery"
+                );
+                assert_eq!(signer.calls(), 0, "zero signer calls before recovery");
+                assert_eq!(sink.calls, 0, "zero sink calls before recovery");
+                assert_eq!(journal.reserved_position_count(), 0, "no new D10 reservation");
+                assert_cleanup_preserved(
+                    &owner, &decided, &base_vote, ledgers_before, prov_before,
+                    "the pre-recovery fresh refusal",
+                );
+            }
+
+            // Phase 2 — O2 inspection + O3 validation SUCCEED but do NOT clear the
+            // recovery requirement. The surviving stored successor is at the L1
+            // revision (established directly from the validated proof, not a label).
+            let _meta = owner.open().expect("O2 open inspects the surviving established state");
+            assert!(owner.recovery_required(), "O2 inspection does not clear recovery");
+            let proof = owner
+                .read_validate::<FixtureCommittedHistory>(None)
+                .expect("O3 validates the surviving successor");
+            // Establish the surviving stored restriction DIRECTLY from the proof's
+            // read-only accessors: Locked, at the expected lock block id / view /
+            // revision. The engine's actual lock is read independently and must
+            // agree in this coherent case (a revision alone is not lock identity).
+            let (stored_id, stored_rev) = stored_locked_identity(&proof);
+            assert_eq!(stored_rev, 2, "the surviving stored successor is at the L1 revision");
+            assert_eq!(
+                stored_id.lock_block_id, l1_block,
+                "the stored lock block id is the L1 successor"
+            );
+            assert_eq!(stored_id.lock_view, 1, "the stored lock view is the L1 view");
+            assert_eq!(
+                (stored_id.lock_block_id, stored_id.lock_view),
+                (lk.block_id, lk.view),
+                "the stored restriction identity equals the engine's actual lock"
+            );
+            assert!(owner.recovery_required(), "O3 validation does not clear recovery");
+
+            // The held O3 proof carries a retained-holder reservation, so BOTH
+            // ledgers sit ABOVE the proof-free baseline (proof-HELD baseline).
+            let held = snapshot_ledgers(&owner);
+            assert!(
+                held.operational > ledgers_before.operational
+                    && held.aggregate > ledgers_before.aggregate,
+                "the held O3 proof raises both ledgers above the proof-free baseline"
+            );
+
+            {
+                let mut sink = RealSignRecordingSink::new();
+                let mut coord = ModelCoordinationHook::inert();
+                let still = fresh_vote_sign_real_local_same_authority::<FixtureCommittedHistory>(
+                    &owner, &engine, &decided, &p1, &lim, None, &mut snapshot,
+                    &signer, &mut sink, &journal, &mut coord, ReconfirmPerturbation::None,
+                );
+                assert_eq!(
+                    still,
+                    RealFreshSignOutcome::ObservationRefused,
+                    "inspection and validation do not clear the recovery requirement"
+                );
+                assert_eq!(signer.calls(), 0);
+                assert_eq!(sink.calls, 0);
+                assert_eq!(journal.reserved_position_count(), 0);
+            }
+
+            // Proof-HELD cleanup: with the O3 proof still live, the post-refusal
+            // ledgers return to the independently sampled proof-held baseline, and
+            // the borrowed Vote and original pin provenance are unchanged.
+            assert_cleanup_preserved(
+                &owner, &decided, &base_vote, held, prov_before,
+                "the post-O2/O3 fresh refusal (proof held)",
+            );
+
+            // Phase 3 — O5 recovery using the CURRENT validated publication clears it.
+            match owner.reacknowledge(&proof) {
+                PublishResult::DurableAcknowledged { new_revision } => {
+                    assert_eq!(new_revision, 2, "O5 re-acknowledges the surviving L1 revision");
+                }
+                other => panic!("expected O5 DurableAcknowledged, got {other:?}"),
+            }
+            assert!(
+                !owner.recovery_required(),
+                "a successful O5 clears the recovery requirement"
+            );
+
+            // Destroy the temporary O3 proof BEFORE comparing against the proof-free
+            // baseline; both ledgers return to that baseline.
+            drop(proof);
+            assert_eq!(
+                snapshot_ledgers(&owner),
+                ledgers_before,
+                "dropping the O3 proof restores BOTH ledgers to the proof-free baseline"
+            );
+
+            // Phases 4 & 5 — re-enter the protected route; it re-runs observation,
+            // lifecycle, eligibility and authorization and signs EXACTLY ONCE.
+            let mut sink = RealSignRecordingSink::new();
+            let mut coord = ModelCoordinationHook::inert();
+            let outcome = fresh_vote_sign_real_local_same_authority::<FixtureCommittedHistory>(
+                &owner, &engine, &decided, &p1, &lim, None, &mut snapshot,
+                &signer, &mut sink, &journal, &mut coord, ReconfirmPerturbation::None,
+            );
+            let diag = match outcome {
+                RealFreshSignOutcome::Published(d) => d,
+                other => panic!("expected Published after O5 recovery, got {other:?}"),
+            };
+            assert_eq!(diag.sig_len, 2420, "exactly one real ML-DSA-44 signature");
+            assert_eq!(diag.retirement, RetirementReport::Retired, "separately reported retirement");
+            assert_eq!(signer.calls(), 1, "exactly one real signer call across the whole sequence");
+            assert_eq!(sink.calls, 1, "one completion sink on the successful route");
+            assert_eq!(coord.calls, 1, "the coordination point is reached once");
+
+            // Verify the EXACT stored signature against the ORIGINAL Vote's
+            // journal-bound preimage under the authorized suite-100 key.
+            let (pos, binding) = retained_pos_binding(&pv, &base_vote);
+            let preimage = pv.signing_domain.vote_preimage(&base_vote);
+            let published_sig = match journal.reserve_for_sign(&pos, &binding) {
+                Ok(ReservationOutcome::ExactRetryRetained(sig)) => sig,
+                other => panic!("expected the acknowledged signature, got {other:?}"),
+            };
+            assert_eq!(published_sig.len(), 2420);
+            let (_ks, pk) = pv
+                .key_provider
+                .get_suite_and_key(ValidatorId::new(SIGNER_VID))
+                .expect("the authorized public key is installed");
+            MlDsa44Backend::verify(&pk, &preimage, &published_sig)
+                .expect("the published signature verifies under the original Vote preimage");
+
+            assert_cleanup_preserved(
+                &owner, &decided, &base_vote, ledgers_before, prov_before,
+                "the post-O5 resumed-signing success",
+            );
+        }
+
+
+        // ==================================================================
         // RUN 422 — Isolated CHECKED retained-use composition (AssociationChecked).
         //
         // Each case begins with a genuine suite-100 engine-produced envelope that is
@@ -9629,6 +9895,473 @@ mod tests {
                     other => panic!("expected the retained signature to persist, got {other:?}"),
                 }
                 assert_eq!(decided.vote(), &base_vote, "the borrowed Vote is unchanged");
+            }
+            /// §3/§5 — the FULL checked retained-use recovery sequence. A genuine
+            /// acknowledged Signed result is prepared BEFORE a coherent uncertain L1
+            /// publication latches recovery. Before O5 (including after successful
+            /// O2/O3) the same-authority checked route refuses with zero sink calls,
+            /// zero additional signer calls, and the existing Signed result preserved;
+            /// a successful O5 then clears recovery, after which a fresh protected
+            /// revalidation performs checked retrieval, cryptographic verification,
+            /// an EXACT retained-byte witness comparison, and one scalar sink call.
+            /// The signer count is unchanged throughout. D10 acknowledgement is kept
+            /// separate from the safety-record O5 barrier.
+            #[test]
+            fn same_authority_checked_retained_recovers_through_o5_barrier() {
+                let dir = tempfile::tempdir().unwrap();
+                let ctx = retained_ctx(4);
+                let (owner, mut engine, decided, p1, lim, _rev) =
+                    capture_multi_with_suite(dir.path(), &ctx, MODEL_SUITE_U16);
+                let (pv, sk) = make_real_signing_authority();
+                let mut snapshot = established_snapshot(&pv);
+                let store = Arc::new(InMemoryConsensusStorage::new());
+                let journal = associated_bounded_journal(
+                    &owner,
+                    store.clone() as Arc<dyn SigningJournalStorage>,
+                    1,
+                );
+                let inner = real_local_signer(&sk);
+                let signer = CountingValidatorSigner::new(&inner);
+                let base_vote = decided.vote().clone();
+
+                // Prepare a genuine acknowledged Signed result at the ORIGINAL state
+                // BEFORE inducing the uncertain safety advance.
+                genuine_fresh_published(
+                    &owner, &engine, &decided, &p1, &lim, &mut snapshot, &journal, &signer,
+                );
+                assert_eq!(signer.calls(), 1, "exactly one signer call during the seed");
+
+                // Coherent uncertain L1 publication latches recovery (engine ↔ durable
+                // AGREE at L1).
+                let l1_block = advance_engine_and_uncertain_durable_to_l1(&owner, &mut engine, &ctx);
+                assert!(owner.recovery_required(), "uncertain publication latched recovery");
+
+                let (pos, binding) = retained_pos_binding(&pv, &base_vote);
+                let record_before = store
+                    .get_signing_record(&pos.storage_key())
+                    .expect("read")
+                    .expect("the acknowledged Signed record persists");
+
+                let ledgers_before = snapshot_ledgers(&owner);
+                let prov_before = pin_provenance_now(&owner, &decided);
+
+                // Before O5 — refusal, zero sink, zero additional signer. (No probe
+                // installed: the route refuses before any retrieval/verify.)
+                {
+                    let mut sink = RetainedUseRecordingSink::new();
+                    let mut coord = ModelCoordinationHook::inert();
+                    let refused =
+                        retained_vote_use_checked_same_authority_model::<FixtureCommittedHistory>(
+                            &owner, &engine, &decided, &p1, &lim, None, &mut snapshot,
+                            &mut sink, &journal, &mut coord, ReconfirmPerturbation::None,
+                        );
+                    assert_eq!(
+                        refused,
+                        ModelRetainedUseOutcome::ObservationRefused,
+                        "recovery-required blocks the dependent retained route before recovery"
+                    );
+                    assert_eq!(sink.calls, 0, "zero sink calls before recovery");
+                    assert_eq!(signer.calls(), 1, "zero additional signer calls before recovery");
+                }
+
+                // Proof-FREE cleanup: no O3 proof is held yet, so the post-refusal
+                // ledgers return to the proof-free baseline; Vote and pin preserved.
+                assert_cleanup_preserved(
+                    &owner, &decided, &base_vote, ledgers_before, prov_before,
+                    "the pre-recovery checked refusal",
+                );
+
+                // O2 + O3 succeed but do NOT clear recovery; still refused.
+                let _meta = owner.open().expect("O2 open");
+                let proof = owner
+                    .read_validate::<FixtureCommittedHistory>(None)
+                    .expect("O3 read_validate");
+                // Establish the surviving stored restriction DIRECTLY from the proof,
+                // comparing with the engine's actual lock in this coherent case.
+                let (stored_id, stored_rev) = stored_locked_identity(&proof);
+                assert_eq!(stored_rev, 2, "surviving successor at the L1 revision");
+                assert_eq!(stored_id.lock_block_id, l1_block, "stored lock block id is the L1 successor");
+                assert_eq!(stored_id.lock_view, 1, "stored lock view is the L1 view");
+                let lk = engine.locked_qc().expect("engine locks L1");
+                assert_eq!(
+                    (stored_id.lock_block_id, stored_id.lock_view),
+                    (lk.block_id, lk.view),
+                    "the stored restriction identity equals the engine's actual lock"
+                );
+                assert!(owner.recovery_required(), "O2/O3 do not clear recovery");
+                // Proof-HELD baseline: the live O3 proof raises both ledgers.
+                let held = snapshot_ledgers(&owner);
+                assert!(
+                    held.operational > ledgers_before.operational
+                        && held.aggregate > ledgers_before.aggregate,
+                    "the held O3 proof raises both ledgers above the proof-free baseline"
+                );
+                {
+                    let mut sink = RetainedUseRecordingSink::new();
+                    let mut coord = ModelCoordinationHook::inert();
+                    let still =
+                        retained_vote_use_checked_same_authority_model::<FixtureCommittedHistory>(
+                            &owner, &engine, &decided, &p1, &lim, None, &mut snapshot,
+                            &mut sink, &journal, &mut coord, ReconfirmPerturbation::None,
+                        );
+                    assert_eq!(still, ModelRetainedUseOutcome::ObservationRefused);
+                    assert_eq!(sink.calls, 0);
+                    assert_eq!(signer.calls(), 1);
+                }
+
+                // Proof-HELD cleanup after the post-O2/O3 refusal, asserted BEFORE
+                // the unrelated store inspection below so attribution is unobscured.
+                assert_cleanup_preserved(
+                    &owner, &decided, &base_vote, held, prov_before,
+                    "the post-O2/O3 checked refusal (proof held)",
+                );
+                // The existing Signed result is byte-identical through the refusals.
+                let record_mid = store
+                    .get_signing_record(&pos.storage_key())
+                    .expect("read")
+                    .expect("present");
+                assert_eq!(record_before, record_mid, "the Signed result is preserved before O5");
+
+                // O5 recovery clears the requirement; destroy the proof before the
+                // proof-free comparison.
+                match owner.reacknowledge(&proof) {
+                    PublishResult::DurableAcknowledged { new_revision } => {
+                        assert_eq!(new_revision, 2)
+                    }
+                    other => panic!("expected O5 DurableAcknowledged, got {other:?}"),
+                }
+                assert!(!owner.recovery_required(), "O5 clears recovery");
+                drop(proof);
+                assert_eq!(
+                    snapshot_ledgers(&owner),
+                    ledgers_before,
+                    "dropping the O3 proof restores both ledgers to the proof-free baseline"
+                );
+
+                // After O5 + fresh protected revalidation: checked retrieval, crypto
+                // verify, exact retained-byte witness comparison, one scalar sink.
+                let witness = witness_from_store(&store, &pos, &binding);
+                let probe = std::rc::Rc::new(RetainedSliceProbe::new(witness));
+                let guard = install_retained_slice_probe(probe.clone());
+                let mut sink = RetainedUseRecordingSink::new();
+                let mut coord = ModelCoordinationHook::inert();
+                let outcome =
+                    retained_vote_use_checked_same_authority_model::<FixtureCommittedHistory>(
+                        &owner, &engine, &decided, &p1, &lim, None, &mut snapshot,
+                        &mut sink, &journal, &mut coord, ReconfirmPerturbation::None,
+                    );
+                drop(guard);
+                let diag = match outcome {
+                    ModelRetainedUseOutcome::Consumed(d) => d,
+                    other => panic!("expected Consumed after O5 recovery, got {other:?}"),
+                };
+                assert_eq!(diag.sig_len as usize, 2420, "consumed the 2,420-byte slice");
+                assert_eq!(sink.calls, 1, "exactly one scalar sink after recovery");
+                assert_eq!(coord.calls, 1, "the coordination point is reached once");
+                assert_eq!(probe.invocations(), 1, "the probe ran exactly once after recovery");
+                assert_eq!(probe.last_len(), Some(2420));
+                assert_eq!(
+                    probe.last_matched(),
+                    Some(true),
+                    "the verified retained slice matches the witness byte-for-byte"
+                );
+                assert_eq!(
+                    signer.calls(),
+                    1,
+                    "the signer count is unchanged throughout the retained attempts"
+                );
+                assert_cleanup_preserved(
+                    &owner, &decided, &base_vote, ledgers_before, prov_before,
+                    "the post-O5 checked retained consumption",
+                );
+            }
+
+            /// §6 — FAILED recovery controls. For each distinct O5 failure mode
+            /// (pre-write refusal, ambiguous write error, uncertain acknowledgement)
+            /// the ACTUAL result is asserted, the recovery requirement REMAINS set,
+            /// and dependent fresh AND retained use continue to refuse. Clearing the
+            /// injected fault then demonstrates a successful O5 retry through the
+            /// ordinary API. The exact outcome is used; a write error is NOT taken as
+            /// proof that no write occurred.
+            #[test]
+            fn o5_failed_recovery_variants_keep_recovery_and_block_dependent_use() {
+                use crate::safety_record_store::backend::InjectFault;
+                for mode in [
+                    InjectFault::FailBeforeSubmit,
+                    InjectFault::WriteErrors,
+                    InjectFault::UncertainAfterWrite,
+                ] {
+                    let dir = tempfile::tempdir().unwrap();
+                    let ctx = retained_ctx(4);
+                    let (owner, mut engine, decided, p1, lim, _rev) =
+                        capture_multi_with_suite(dir.path(), &ctx, MODEL_SUITE_U16);
+                    let (pv, sk) = make_real_signing_authority();
+                    let mut snapshot = established_snapshot(&pv);
+                    let store = Arc::new(InMemoryConsensusStorage::new());
+                    let journal = associated_bounded_journal(
+                        &owner,
+                        store.clone() as Arc<dyn SigningJournalStorage>,
+                        1,
+                    );
+                    let inner = real_local_signer(&sk);
+                    let signer = CountingValidatorSigner::new(&inner);
+                    let base_vote = decided.vote().clone();
+
+                    genuine_fresh_published(
+                        &owner, &engine, &decided, &p1, &lim, &mut snapshot, &journal, &signer,
+                    );
+                    let l1_block =
+                        advance_engine_and_uncertain_durable_to_l1(&owner, &mut engine, &ctx);
+                    assert!(owner.recovery_required());
+
+                    // Seeded Signed result + baselines, sampled after the fixture and
+                    // the uncertain advance.
+                    let (pos, _binding) = retained_pos_binding(&pv, &base_vote);
+                    let record_before = store
+                        .get_signing_record(&pos.storage_key())
+                        .expect("read")
+                        .expect("the seeded Signed record persists");
+                    let positions_before = journal.reserved_position_count();
+                    let ledgers_before = snapshot_ledgers(&owner);
+                    let prov_before = pin_provenance_now(&owner, &decided);
+
+                    let proof = owner
+                        .read_validate::<FixtureCommittedHistory>(None)
+                        .expect("O3 validates the surviving successor");
+                    // Establish the surviving stored restriction DIRECTLY from the
+                    // proof and compare with the engine's actual coherent L1 lock.
+                    let (stored_id, stored_rev) = stored_locked_identity(&proof);
+                    assert_eq!(stored_rev, 2, "surviving successor at the L1 revision");
+                    assert_eq!(stored_id.lock_block_id, l1_block, "stored lock id is the L1 successor");
+                    assert_eq!(stored_id.lock_view, 1, "stored lock view is the L1 view");
+                    let lk = engine.locked_qc().expect("engine locks L1");
+                    assert_eq!(
+                        (stored_id.lock_block_id, stored_id.lock_view),
+                        (lk.block_id, lk.view),
+                        "the stored identity equals the engine's actual lock"
+                    );
+                    // Proof-HELD baseline: the live O3 proof raises both ledgers.
+                    let held = snapshot_ledgers(&owner);
+                    assert!(
+                        held.operational > ledgers_before.operational
+                            && held.aggregate > ledgers_before.aggregate,
+                        "the held O3 proof raises both ledgers above the proof-free baseline"
+                    );
+
+                    // Inject the O5 fault and attempt recovery; assert the EXACT result.
+                    owner.backend_for_test().set_inject(mode);
+                    let failed = owner.reacknowledge(&proof);
+                    match mode {
+                        InjectFault::FailBeforeSubmit => assert!(
+                            matches!(failed, PublishResult::RefusedPreWrite(_)),
+                            "pre-write O5 refusal expected, got {failed:?}"
+                        ),
+                        InjectFault::WriteErrors => assert!(
+                            matches!(failed, PublishResult::WriteFailedAmbiguous(_)),
+                            "ambiguous O5 write error expected, got {failed:?}"
+                        ),
+                        InjectFault::UncertainAfterWrite => assert!(
+                            matches!(failed, PublishResult::UncertainDurable),
+                            "uncertain O5 acknowledgement expected, got {failed:?}"
+                        ),
+                        _ => unreachable!(),
+                    }
+                    owner.backend_for_test().set_inject(InjectFault::None);
+                    assert!(
+                        owner.recovery_required(),
+                        "a failed O5 leaves the recovery requirement set (mode {mode:?})"
+                    );
+
+                    // Proof-HELD cleanup at the FAILED-O5 boundary, before invoking
+                    // either dependent route: both ledgers hold at the proof-held
+                    // baseline with the borrowed Vote and original pin preserved.
+                    assert_cleanup_preserved(
+                        &owner, &decided, &base_vote, held, prov_before,
+                        "the failed O5 before any dependent route (proof held)",
+                    );
+
+                    // Dependent fresh AND retained use still refuse.
+                    let mut fsink = RealSignRecordingSink::new();
+                    let mut fcoord = ModelCoordinationHook::inert();
+                    let fresh =
+                        fresh_vote_sign_real_local_same_authority::<FixtureCommittedHistory>(
+                            &owner, &engine, &decided, &p1, &lim, None, &mut snapshot,
+                            &signer, &mut fsink, &journal, &mut fcoord,
+                            ReconfirmPerturbation::None,
+                        );
+                    assert_eq!(fresh, RealFreshSignOutcome::ObservationRefused);
+                    assert_eq!(fsink.calls, 0);
+                    // Proof-HELD cleanup at the FRESH-REFUSAL boundary, before the
+                    // retained route runs.
+                    assert_cleanup_preserved(
+                        &owner, &decided, &base_vote, held, prov_before,
+                        "the fresh refusal before the retained route (proof held)",
+                    );
+                    let mut rsink = RetainedUseRecordingSink::new();
+                    let mut rcoord = ModelCoordinationHook::inert();
+                    let retained =
+                        retained_vote_use_checked_same_authority_model::<FixtureCommittedHistory>(
+                            &owner, &engine, &decided, &p1, &lim, None, &mut snapshot,
+                            &mut rsink, &journal, &mut rcoord, ReconfirmPerturbation::None,
+                        );
+                    assert_eq!(retained, ModelRetainedUseOutcome::ObservationRefused);
+                    assert_eq!(rsink.calls, 0);
+                    assert_eq!(signer.calls(), 1, "no additional signer call during the failed recovery");
+
+                    // Proof-HELD cleanup across the failed O5 and the blocked dependent
+                    // attempts: both ledgers restore to the proof-held baseline and the
+                    // borrowed Vote + original pin provenance are unchanged. Asserted
+                    // before the seeded-record inspection so attribution is unobscured.
+                    assert_cleanup_preserved(
+                        &owner, &decided, &base_vote, held, prov_before,
+                        "the failed-O5 + blocked dependent use (proof held)",
+                    );
+                    // The seeded Signed result's bytes and durable-position count are
+                    // unchanged across the failed recovery and the blocked attempts.
+                    let record_after = store
+                        .get_signing_record(&pos.storage_key())
+                        .expect("read")
+                        .expect("the seeded Signed record still persists");
+                    assert_eq!(record_before, record_after, "the seeded Signed bytes are unchanged");
+                    assert_eq!(
+                        journal.reserved_position_count(),
+                        positions_before,
+                        "the durable-position count is unchanged across failed recovery"
+                    );
+
+                    // Clear the fault and demonstrate a successful O5 RETRY via the
+                    // ordinary API.
+                    let recovered = owner.reacknowledge(&proof);
+                    assert!(
+                        matches!(recovered, PublishResult::DurableAcknowledged { new_revision: 2 }),
+                        "the ordinary O5 retry succeeds after clearing the fault, got {recovered:?}"
+                    );
+                    assert!(!owner.recovery_required(), "the successful O5 retry clears recovery");
+                    // Proof-HELD cleanup at the SUCCESSFUL-RETRY boundary, with the O3
+                    // proof still held, before it is released.
+                    assert_cleanup_preserved(
+                        &owner, &decided, &base_vote, held, prov_before,
+                        "the successful O5 retry before releasing the proof (proof held)",
+                    );
+                    drop(proof);
+                    // Proof-FREE cleanup: dropping the O3 proof restores both ledgers to
+                    // the proof-free baseline, with the Vote and original pin preserved.
+                    assert_cleanup_preserved(
+                        &owner, &decided, &base_vote, ledgers_before, prov_before,
+                        "the post-retry proof-free baseline",
+                    );
+                }
+            }
+
+            /// §6 — INSUFFICIENT recovery control: O5 SUCCEEDS (clearing the recovery
+            /// requirement) but engine ↔ durable correspondence is WRONG. The engine
+            /// is deliberately NOT advanced (it still locks L0) while the durable
+            /// restriction advanced to L1. Dependent fresh AND retained use must still
+            /// refuse — a cleared recovery requirement ALONE cannot authorize use.
+            #[test]
+            fn cleared_recovery_with_wrong_engine_correspondence_still_refuses() {
+                use crate::safety_record_store::backend::InjectFault;
+                let dir = tempfile::tempdir().unwrap();
+                let ctx = retained_ctx(4);
+                let (owner, engine, decided, p1, lim, _rev) =
+                    capture_multi_with_suite(dir.path(), &ctx, MODEL_SUITE_U16);
+                let (pv, sk) = make_real_signing_authority();
+                let mut snapshot = established_snapshot(&pv);
+                let store = Arc::new(InMemoryConsensusStorage::new());
+                let journal = associated_bounded_journal(
+                    &owner,
+                    store.clone() as Arc<dyn SigningJournalStorage>,
+                    1,
+                );
+                let inner = real_local_signer(&sk);
+                let signer = CountingValidatorSigner::new(&inner);
+                let base_vote = decided.vote().clone();
+
+                genuine_fresh_published(
+                    &owner, &engine, &decided, &p1, &lim, &mut snapshot, &journal, &signer,
+                );
+
+                // Durable advances to L1 under an uncertain write; the engine is NOT
+                // advanced and still locks L0.
+                let l0_block = derive_block_id_local(1, 0, &[0xFF; 32]);
+                let l1_block = derive_block_id_local(2, 1, &l0_block);
+                owner
+                    .backend_for_test()
+                    .set_inject(InjectFault::UncertainAfterWrite);
+                let latch = owner.publish_locked(
+                    make_locked_qc(&ctx, l1_block, 1, valid_wire_qc(&ctx, l1_block, 1), None)
+                        .unwrap(),
+                    1,
+                    None::<&FixtureCommittedHistory>,
+                );
+                assert!(matches!(latch, PublishResult::UncertainDurable), "uncertain, got {latch:?}");
+                owner.backend_for_test().set_inject(InjectFault::None);
+                assert!(owner.recovery_required());
+                let lk = engine.locked_qc().expect("engine still locks L0");
+
+                // Proof-free baselines, sampled after the fixture and the uncertain
+                // advance (the refusals below occur after the proof is dropped).
+                let ledgers_before = snapshot_ledgers(&owner);
+                let prov_before = pin_provenance_now(&owner, &decided);
+
+                // O5 succeeds (it concerns only the safety record) and clears recovery.
+                let proof = owner
+                    .read_validate::<FixtureCommittedHistory>(None)
+                    .expect("O3");
+                // Establish stored L1 vs engine L0 EXPLICITLY before asserting refusal:
+                // the surviving durable restriction is the L1 successor while the engine
+                // still locks the L0 predecessor (the wrong-correspondence control).
+                let (stored_id, stored_rev) = stored_locked_identity(&proof);
+                assert_eq!(stored_rev, 2, "the durable restriction advanced to the L1 revision");
+                assert_eq!(stored_id.lock_block_id, l1_block, "stored lock id is the L1 successor");
+                assert_eq!(stored_id.lock_view, 1, "stored lock view is the L1 view");
+                assert_eq!(lk.block_id, l0_block, "engine still locks the L0 predecessor");
+                assert_eq!(lk.view, 0, "the engine lock view is the L0 view");
+                assert_ne!(
+                    stored_id.lock_block_id, lk.block_id,
+                    "stored L1 and engine L0 disagree (the wrong-correspondence control)"
+                );
+                assert!(matches!(
+                    owner.reacknowledge(&proof),
+                    PublishResult::DurableAcknowledged { .. }
+                ));
+                assert!(!owner.recovery_required(), "O5 cleared the recovery requirement");
+                drop(proof);
+
+                // Cleared recovery ALONE does not authorize use under wrong engine ↔
+                // durable correspondence.
+                let mut fsink = RealSignRecordingSink::new();
+                let mut fcoord = ModelCoordinationHook::inert();
+                let fresh = fresh_vote_sign_real_local_same_authority::<FixtureCommittedHistory>(
+                    &owner, &engine, &decided, &p1, &lim, None, &mut snapshot,
+                    &signer, &mut fsink, &journal, &mut fcoord, ReconfirmPerturbation::None,
+                );
+                assert_eq!(
+                    fresh,
+                    RealFreshSignOutcome::ObservationRefused,
+                    "a cleared recovery alone cannot authorize use under wrong correspondence"
+                );
+                assert_eq!(fsink.calls, 0);
+                assert_cleanup_preserved(
+                    &owner, &decided, &base_vote, ledgers_before, prov_before,
+                    "the wrong-correspondence fresh refusal",
+                );
+                let mut rsink = RetainedUseRecordingSink::new();
+                let mut rcoord = ModelCoordinationHook::inert();
+                let retained =
+                    retained_vote_use_checked_same_authority_model::<FixtureCommittedHistory>(
+                        &owner, &engine, &decided, &p1, &lim, None, &mut snapshot,
+                        &mut rsink, &journal, &mut rcoord, ReconfirmPerturbation::None,
+                    );
+                assert_eq!(retained, ModelRetainedUseOutcome::ObservationRefused);
+                assert_eq!(rsink.calls, 0);
+                assert_eq!(signer.calls(), 1, "no additional signer call");
+                // Both refusals leave both ledgers, the complete borrowed Vote, and the
+                // original pin provenance correct (proof-free baseline).
+                assert_cleanup_preserved(
+                    &owner, &decided, &base_vote, ledgers_before, prov_before,
+                    "the wrong-correspondence retained refusal",
+                );
             }
         }
     }
