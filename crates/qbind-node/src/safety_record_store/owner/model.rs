@@ -462,6 +462,79 @@ impl AbortEvidence {
     }
 }
 
+const POSTPUB_MARKER_LEN: usize = 4 + 2 + 1 + 16 + 16 + 1 + 1
+    + 2 + qbind_crypto::ml_dsa44::ML_DSA_44_PUBLIC_KEY_SIZE
+    + 2 + 69 + 2 + MODEL_MAX_PREIMAGE_BYTES as usize + 55 + 32
+    + 2 + qbind_crypto::ml_dsa44::ML_DSA_44_SIGNATURE_SIZE;
+const POSTPUB_PK_OFFSET: usize = 43;
+const POSTPUB_VOTE_LEN_OFFSET: usize = POSTPUB_PK_OFFSET + qbind_crypto::ml_dsa44::ML_DSA_44_PUBLIC_KEY_SIZE;
+const POSTPUB_VOTE_OFFSET: usize = POSTPUB_VOTE_LEN_OFFSET + 2;
+const POSTPUB_PREIMAGE_LEN_OFFSET: usize = POSTPUB_VOTE_OFFSET + 69;
+const POSTPUB_PREIMAGE_OFFSET: usize = POSTPUB_PREIMAGE_LEN_OFFSET + 2;
+const POSTPUB_POSITION_OFFSET: usize = POSTPUB_PREIMAGE_OFFSET + MODEL_MAX_PREIMAGE_BYTES as usize;
+const POSTPUB_BINDING_OFFSET: usize = POSTPUB_POSITION_OFFSET + 55;
+const POSTPUB_SIGNATURE_LEN_OFFSET: usize = POSTPUB_BINDING_OFFSET + 32;
+const POSTPUB_SIGNATURE_OFFSET: usize = POSTPUB_SIGNATURE_LEN_OFFSET + 2;
+
+/// Harness-owned fixed witness for the acknowledged-publication boundary. All
+/// storage is allocated and the marker file opened before entering the protected
+/// operation; only live scalar fields and the exact committed output are copied
+/// at the hook. It is not part of the model composition's accounting.
+struct PostPublicationEvidence {
+    marker: Box<[u8; POSTPUB_MARKER_LEN]>,
+    file: std::fs::File,
+    signer_obs: std::sync::Arc<std::sync::atomic::AtomicU32>,
+    sink_obs: std::sync::Arc<std::sync::atomic::AtomicU32>,
+    hook_calls: u32,
+    terminate: bool,
+}
+
+impl PostPublicationEvidence {
+    fn new(
+        marker: Box<[u8; POSTPUB_MARKER_LEN]>,
+        file: std::fs::File,
+        signer_obs: std::sync::Arc<std::sync::atomic::AtomicU32>,
+        sink_obs: std::sync::Arc<std::sync::atomic::AtomicU32>,
+        terminate: bool,
+    ) -> Self {
+        Self { marker, file, signer_obs, sink_obs, hook_calls: 0, terminate }
+    }
+
+    fn fire(
+        &mut self,
+        publication: &Result<AdmittedPublishOutcome, AdmittedPublishError>,
+        signature: &[u8],
+        republished: bool,
+        pre_sign_calls: u32,
+    ) {
+        use std::io::Write as _;
+        self.hook_calls = self.hook_calls.saturating_add(1);
+        assert_eq!(publication, &Ok(AdmittedPublishOutcome::Published), "boundary requires the actual first Published acknowledgement");
+        assert!(!republished, "boundary excludes publication retries");
+        assert_eq!(pre_sign_calls, 1, "the actual post-consume/pre-sign hook ran once");
+        assert_eq!(self.hook_calls, 1, "publication hook runs exactly once");
+        assert_eq!(self.signer_obs.load(std::sync::atomic::Ordering::SeqCst), 1, "exactly one actual signer invocation");
+        assert_eq!(self.sink_obs.load(std::sync::atomic::Ordering::SeqCst), 0, "completion sink has not run");
+        assert_eq!(signature.len(), qbind_crypto::ml_dsa44::ML_DSA_44_SIGNATURE_SIZE, "published signature has exact ML-DSA-44 length");
+        assert_eq!(signature.len(), crate::signing_journal_admission::OUTPUT_CAP, "published signature fits the admitted output exactly");
+        self.marker[23..27].copy_from_slice(&pre_sign_calls.to_le_bytes());
+        self.marker[27..31].copy_from_slice(&self.hook_calls.to_le_bytes());
+        self.marker[31..35].copy_from_slice(&1u32.to_le_bytes());
+        self.marker[35..39].copy_from_slice(&0u32.to_le_bytes());
+        self.marker[39] = 1;
+        self.marker[40] = 0;
+        self.marker[POSTPUB_SIGNATURE_LEN_OFFSET..POSTPUB_SIGNATURE_OFFSET]
+            .copy_from_slice(&(signature.len() as u16).to_le_bytes());
+        self.marker[POSTPUB_SIGNATURE_OFFSET..POSTPUB_MARKER_LEN].copy_from_slice(signature);
+        self.file.write_all(self.marker.as_slice()).expect("write complete publication marker");
+        self.file.flush().expect("flush publication marker");
+        self.file.sync_all().expect("sync publication marker");
+        if self.terminate {
+            std::process::abort();
+        }
+    }
+}
+
 /// A fixed, bounded coordination point invoked AFTER the D10 reservation is
 /// consumed and the original ticket is reconfirmed, and BEFORE the signer is
 /// invoked. The probing variant drives a competing same-domain handle through a
@@ -502,6 +575,7 @@ pub(crate) struct ModelCoordinationHook {
     /// marker. `None` (every existing constructor) is inert w.r.t. termination and
     /// preserves exact prior behavior.
     abort_before_sign: Option<AbortEvidence>,
+    post_publication: Option<PostPublicationEvidence>,
 }
 
 impl ModelCoordinationHook {
@@ -519,6 +593,7 @@ impl ModelCoordinationHook {
             observed_operational_pre_reserve: None,
             observed_aggregate_pre_reserve: None,
             abort_before_sign: None,
+            post_publication: None,
         }
     }
 
@@ -539,6 +614,7 @@ impl ModelCoordinationHook {
             observed_operational_pre_reserve: None,
             observed_aggregate_pre_reserve: None,
             abort_before_sign: None,
+            post_publication: None,
         }
     }
 
@@ -566,6 +642,7 @@ impl ModelCoordinationHook {
             observed_operational_pre_reserve: None,
             observed_aggregate_pre_reserve: None,
             abort_before_sign: None,
+            post_publication: None,
         }
     }
 
@@ -587,6 +664,23 @@ impl ModelCoordinationHook {
             observed_operational_pre_reserve: None,
             observed_aggregate_pre_reserve: None,
             abort_before_sign: Some(evidence),
+            post_publication: None,
+        }
+    }
+
+    fn with_post_publication_evidence(mut self, evidence: PostPublicationEvidence) -> Self {
+        self.post_publication = Some(evidence);
+        self
+    }
+
+    fn on_post_publication_pre_retire(
+        &mut self,
+        publication: &Result<AdmittedPublishOutcome, AdmittedPublishError>,
+        committed_signature: &[u8],
+        republished: bool,
+    ) {
+        if let Some(evidence) = self.post_publication.as_mut() {
+            evidence.fire(publication, committed_signature, republished, self.calls);
         }
     }
 
@@ -2758,6 +2852,7 @@ fn fresh_vote_sign_real_local<H: CommittedHistory + ?Sized>(
             other => break other,
         }
     };
+    coord.on_post_publication_pre_retire(&publish_result, output.view(), republished);
     match publish_result {
         Ok(AdmittedPublishOutcome::Published)
         | Ok(AdmittedPublishOutcome::AlreadyAcknowledged) => {}
@@ -9286,12 +9381,47 @@ mod tests {
             RetainedSliceWitness::from_validated(&sig)
         }
 
-        /// TEST-ONLY: B-era recovery + owning capture under the recovered
-        /// restriction. O2 inspection (distinct from O5 publication), O3 recovery
-        /// proof, a DIRECT comparison of the recovered Locked identity/revision with
-        /// the reconstructed engine lock, O5 with B's own proof, the recovery proof
-        /// dropped BEFORE a SEPARATE fresh capture proof is obtained, then the
-        /// existing owning capture route. Returns B's `DecidedVote`.
+        /// Test-only O2/O3/O5 recovery under the reopened restriction. Checks the
+        /// recovered Locked identity/revision against the reconstructed engine lock,
+        /// publishes O5 with the recovery proof, and returns the authoritative
+        /// revision. Capture stays separate so its caller obtains a fresh proof.
+        fn reopen_b_recover_only(
+            owner: &SafetyRecordOwner,
+            engine: &BasicHotStuffEngine<[u8; 32]>,
+            expected_lock_block: [u8; 32],
+        ) -> u64 {
+            let meta = owner.open().expect("B O2 open");
+            let rev = meta.current_revision;
+            assert!(owner.recovery_required(), "a freshly reopened backend requires recovery before O5");
+            let op_free = owner.backend_for_test().accounting_current();
+            let agg_free = owner.backend_for_test().accounting_aggregate_current();
+            let recovery = owner.read_validate(None::<&FixtureCommittedHistory>).expect("B O3 recovery proof");
+            assert!(owner.recovery_required(), "O3 validation alone does not clear recovery");
+            let op_held = owner.backend_for_test().accounting_current();
+            let agg_held = owner.backend_for_test().accounting_aggregate_current();
+            assert!(op_held > op_free, "O3 proof raises operational standing charge");
+            assert!(agg_held > agg_free, "O3 proof raises aggregate standing charge");
+            let durable = GenerationIdentity::from_retained(recovery.retained())
+                .expect("recovered Locked record yields restriction identity");
+            let lk = engine.locked_qc().expect("reconstructed engine lock is present");
+            assert_eq!(durable.lock_block_id, lk.block_id, "recovered id == engine lock id");
+            assert_eq!(durable.lock_block_id, expected_lock_block, "recovered id is the child-era L0 block");
+            assert_eq!(durable.lock_view, 0, "recovered restriction is L0");
+            assert_eq!(lk.view, 0, "engine lock view is L0");
+            assert_eq!(rev, recovery.publication_revision(), "O3 revision == authoritative revision");
+            match owner.reacknowledge(&recovery) {
+                PublishResult::DurableAcknowledged { new_revision } => assert_eq!(new_revision, rev),
+                other => panic!("B O5 must acknowledge, got {other:?}"),
+            }
+            assert!(!owner.recovery_required(), "successful O5 clears recovery");
+            assert_eq!(owner.backend_for_test().accounting_current(), op_held, "O5 immediately restores proof-held operational baseline");
+            assert_eq!(owner.backend_for_test().accounting_aggregate_current(), agg_held, "O5 immediately restores proof-held aggregate baseline");
+            drop(recovery);
+            assert_eq!(owner.backend_for_test().accounting_current(), op_free, "dropping O3 restores proof-free operational baseline");
+            assert_eq!(owner.backend_for_test().accounting_aggregate_current(), agg_free, "dropping O3 restores proof-free aggregate baseline");
+            rev
+        }
+
         fn reopen_b_recover_and_capture(
             owner: &SafetyRecordOwner,
             engine: &mut BasicHotStuffEngine<[u8; 32]>,
@@ -9299,54 +9429,7 @@ mod tests {
             lim: &PreparedDecisionInputLimits,
             expected_lock_block: [u8; 32],
         ) -> DecidedVote<OwningCapturePayload> {
-            let meta = owner.open().expect("B O2 open");
-            let rev = meta.current_revision;
-            assert!(
-                owner.recovery_required(),
-                "a freshly reopened backend requires recovery before O5"
-            );
-            // Proof-free standing baseline BEFORE O3 (after O2), sampled on BOTH
-            // ledgers independently.
-            let op_free = owner.backend_for_test().accounting_current();
-            let agg_free = owner.backend_for_test().accounting_aggregate_current();
-            let recovery = owner
-                .read_validate(None::<&FixtureCommittedHistory>)
-                .expect("B O3 recovery proof");
-            // Proof-held standing baseline AFTER O3: the recovery proof holds a
-            // reservation strictly above the proof-free baseline.
-            let op_held = owner.backend_for_test().accounting_current();
-            let agg_held = owner.backend_for_test().accounting_aggregate_current();
-            assert!(op_held > op_free, "holding B's O3 recovery proof raises the operational standing charge");
-            assert!(agg_held > agg_free, "holding B's O3 recovery proof raises the aggregate standing charge");
-            // Direct recovered-restriction / reconstructed-engine-lock comparison
-            // (NOT a lifecycle predicate requiring a B capture that does not exist).
-            let durable = GenerationIdentity::from_retained(recovery.retained())
-                .expect("the recovered Locked record yields a restriction identity");
-            let lk = engine.locked_qc().expect("the reconstructed engine lock is present");
-            assert_eq!(durable.lock_block_id, lk.block_id, "recovered id == engine lock id");
-            assert_eq!(durable.lock_block_id, expected_lock_block, "recovered id is the A-era L0 block");
-            assert_eq!(durable.lock_view, 0, "the reconstructed engine still locks L0");
-            assert_eq!(lk.view, 0, "the engine lock view is L0");
-            assert_eq!(rev, recovery.publication_revision(), "O3 revision == recovered authoritative revision");
-            match owner.reacknowledge(&recovery) {
-                PublishResult::DurableAcknowledged { new_revision } => {
-                    assert_eq!(new_revision, rev, "a clean reopen republishes the same revision");
-                }
-                other => panic!("B O5 must acknowledge, got {other:?}"),
-            }
-            assert!(!owner.recovery_required(), "a successful B O5 clears recovery");
-            // Immediately after the successful O5 (its proof still held) the standing
-            // charge is restored EXACTLY to the proof-held baseline: O5's additional
-            // working set is transient and released on return.
-            assert_eq!(owner.backend_for_test().accounting_current(), op_held, "successful O5 restores exactly to the proof-held operational baseline");
-            assert_eq!(owner.backend_for_test().accounting_aggregate_current(), agg_held, "successful O5 restores exactly to the proof-held aggregate baseline");
-            // Drop the recovery proof BEFORE obtaining the separate capture proof,
-            // preventing accidental overlap of two full proofs.
-            drop(recovery);
-            // After dropping the recovery proof, before obtaining the capture proof,
-            // the standing charge returns EXACTLY to the proof-free baseline.
-            assert_eq!(owner.backend_for_test().accounting_current(), op_free, "dropping the recovery proof restores the proof-free operational baseline");
-            assert_eq!(owner.backend_for_test().accounting_aggregate_current(), agg_free, "dropping the recovery proof restores the proof-free aggregate baseline");
+            let rev = reopen_b_recover_only(owner, engine, expected_lock_block);
             let cap_proof = owner
                 .read_validate(None::<&FixtureCommittedHistory>)
                 .expect("B O3 proof for capture");
@@ -12798,6 +12881,687 @@ mod tests {
             fn lim_b(ctx: &PinnedSafetyContext) -> PreparedDecisionInputLimits {
                 PreparedDecisionInputLimits::from_pinned(ctx).expect("pinned context yields a policy")
             }
+
+        mod postpublication {
+            use super::*;
+            use crate::signing_reservation_journal::{
+                BoundedStorageError, SigningOwnershipDomain, SigningJournalStorage,
+            };
+            use crate::storage::StorageError;
+            use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+
+            const MAGIC: [u8; 4] = *b"R4P2";
+            const VERSION: u16 = 2;
+            const PHASE: u8 = 0x18;
+            const NONCE_LEN: usize = 16;
+            const PK_LEN: usize = qbind_crypto::ml_dsa44::ML_DSA_44_PUBLIC_KEY_SIZE;
+            const VOTE_LEN: usize = 69;
+            const PREIMAGE_CAP: usize = MODEL_MAX_PREIMAGE_BYTES as usize;
+            const POSITION_LEN: usize = crate::signing_journal_admission::JOURNAL_KEY_LEN;
+            const SIG_LEN: usize = qbind_crypto::ml_dsa44::ML_DSA_44_SIGNATURE_SIZE;
+            const MARKER_LEN: usize = POSTPUB_MARKER_LEN;
+            const MARKER_CHILD_PATH: &str = "safety_record_store::owner::model::tests::real_fresh_sign::postconsume_process_death::postpublication::publication_child_entry";
+            const ENV_MODE_PUB: &str = "R422_PCPD_PUB_CHILD_MODE";
+            const ENV_FIXTURE_PUB: &str = "R422_PCPD_PUB_FIXTURE";
+            const ENV_MARKER_PUB: &str = "R422_PCPD_PUB_MARKER";
+            const ENV_NONCE_PUB: &str = "R422_PCPD_PUB_NONCE_HEX";
+            const ENV_SAFETY_PUB: &str = "R422_PCPD_PUB_SAFETY_DIR";
+            const ENV_JOURNAL_PUB: &str = "R422_PCPD_PUB_JOURNAL_DIR";
+
+            #[derive(Debug, PartialEq, Eq)]
+            struct PublicationWitness {
+                nonce: [u8; NONCE_LEN],
+                pre_sign_calls: u32,
+                publication_calls: u32,
+                signer_calls: u32,
+                sink_calls: u32,
+                public_key: Vec<u8>,
+                unsigned_vote: Vec<u8>,
+                preimage: Vec<u8>,
+                position_key: Vec<u8>,
+                binding: [u8; 32],
+                signature: Vec<u8>,
+            }
+
+            fn write_u16(dst: &mut [u8], offset: usize, value: usize) {
+                let value = u16::try_from(value).expect("bounded marker length fits u16");
+                dst[offset..offset + 2].copy_from_slice(&value.to_le_bytes());
+            }
+
+            fn build_marker(
+                nonce: &[u8; NONCE_LEN],
+                public_key: &[u8],
+                unsigned_vote: &[u8],
+                preimage: &[u8],
+                position_key: &[u8],
+                binding: &[u8; 32],
+            ) -> Box<[u8; MARKER_LEN]> {
+                assert_eq!(public_key.len(), PK_LEN);
+                assert_eq!(unsigned_vote.len(), VOTE_LEN);
+                assert!(!preimage.is_empty() && preimage.len() <= PREIMAGE_CAP);
+                assert_eq!(position_key.len(), POSITION_LEN);
+                assert_eq!(SIG_LEN, crate::signing_journal_admission::OUTPUT_CAP);
+                let mut marker = Box::new([0u8; MARKER_LEN]);
+                marker[0..4].copy_from_slice(&MAGIC);
+                marker[4..6].copy_from_slice(&VERSION.to_le_bytes());
+                marker[6] = PHASE;
+                marker[7..23].copy_from_slice(nonce);
+                write_u16(&mut marker[..], 41, PK_LEN);
+                marker[POSTPUB_PK_OFFSET..POSTPUB_VOTE_LEN_OFFSET].copy_from_slice(public_key);
+                write_u16(&mut marker[..], POSTPUB_VOTE_LEN_OFFSET, unsigned_vote.len());
+                marker[POSTPUB_VOTE_OFFSET..POSTPUB_PREIMAGE_LEN_OFFSET].copy_from_slice(unsigned_vote);
+                write_u16(&mut marker[..], POSTPUB_PREIMAGE_LEN_OFFSET, preimage.len());
+                marker[POSTPUB_PREIMAGE_OFFSET..POSTPUB_PREIMAGE_OFFSET + preimage.len()]
+                    .copy_from_slice(preimage);
+                marker[POSTPUB_POSITION_OFFSET..POSTPUB_BINDING_OFFSET].copy_from_slice(position_key);
+                marker[POSTPUB_BINDING_OFFSET..POSTPUB_SIGNATURE_LEN_OFFSET].copy_from_slice(binding);
+                marker
+            }
+
+            fn read_u16(bytes: &[u8], offset: usize) -> usize {
+                u16::from_le_bytes([bytes[offset], bytes[offset + 1]]) as usize
+            }
+
+            fn read_u32(bytes: &[u8], offset: usize) -> u32 {
+                u32::from_le_bytes(bytes[offset..offset + 4].try_into().expect("fixed marker field"))
+            }
+
+            fn parse_marker(bytes: &[u8]) -> Result<PublicationWitness, &'static str> {
+                if bytes.len() != MARKER_LEN { return Err("marker length"); }
+                if bytes[0..4] != MAGIC { return Err("magic"); }
+                if u16::from_le_bytes([bytes[4], bytes[5]]) != VERSION { return Err("version"); }
+                if bytes[6] != PHASE { return Err("phase"); }
+                let nonce = bytes[7..23].try_into().map_err(|_| "nonce")?;
+                let pre_sign_calls = read_u32(bytes, 23);
+                let publication_calls = read_u32(bytes, 27);
+                let signer_calls = read_u32(bytes, 31);
+                let sink_calls = read_u32(bytes, 35);
+                if (pre_sign_calls, publication_calls, signer_calls, sink_calls) != (1, 1, 1, 0) {
+                    return Err("live observations");
+                }
+                if bytes[39] != 1 || bytes[40] != 0 { return Err("outcome/retry"); }
+                if read_u16(bytes, 41) != PK_LEN { return Err("public-key length"); }
+                let public_key = bytes[POSTPUB_PK_OFFSET..POSTPUB_VOTE_LEN_OFFSET].to_vec();
+                if read_u16(bytes, POSTPUB_VOTE_LEN_OFFSET) != VOTE_LEN { return Err("Vote length"); }
+                let unsigned_vote = bytes[POSTPUB_VOTE_OFFSET..POSTPUB_PREIMAGE_LEN_OFFSET].to_vec();
+                let preimage_len = read_u16(bytes, POSTPUB_PREIMAGE_LEN_OFFSET);
+                if preimage_len == 0 || preimage_len > PREIMAGE_CAP { return Err("preimage length"); }
+                let padded = &bytes[POSTPUB_PREIMAGE_OFFSET..POSTPUB_POSITION_OFFSET];
+                if padded[preimage_len..].iter().any(|byte| *byte != 0) { return Err("preimage padding"); }
+                let preimage = padded[..preimage_len].to_vec();
+                let position_key = bytes[POSTPUB_POSITION_OFFSET..POSTPUB_BINDING_OFFSET].to_vec();
+                let binding = bytes[POSTPUB_BINDING_OFFSET..POSTPUB_SIGNATURE_LEN_OFFSET]
+                    .try_into().map_err(|_| "binding")?;
+                let sig_len = read_u16(bytes, POSTPUB_SIGNATURE_LEN_OFFSET);
+                if sig_len != SIG_LEN { return Err("signature length"); }
+                let signature = bytes[POSTPUB_SIGNATURE_OFFSET..].to_vec();
+                Ok(PublicationWitness {
+                    nonce, pre_sign_calls, publication_calls, signer_calls, sink_calls,
+                    public_key, unsigned_vote, preimage, position_key, binding, signature,
+                })
+            }
+
+            fn read_marker_bounded(path: &std::path::Path) -> std::io::Result<Vec<u8>> {
+                let file = std::fs::File::open(path)?;
+                let mut limited = file.take((MARKER_LEN + 1) as u64);
+                let mut bytes = Vec::with_capacity(MARKER_LEN + 1);
+                limited.read_to_end(&mut bytes)?;
+                Ok(bytes)
+            }
+
+            fn accepts(class: TermClass, raw: &[u8], nonce: &[u8; NONCE_LEN]) -> bool {
+                if class != TermClass::Signaled(EXPECTED_ABORT_SIGNAL) { return false; }
+                parse_marker(raw).map(|w| &w.nonce == nonce).unwrap_or(false)
+            }
+
+            fn make_nonce() -> [u8; NONCE_LEN] { urandom_nonce() }
+
+            fn open_marker(path: &std::path::Path) -> std::fs::File {
+                std::fs::OpenOptions::new().write(true).create_new(true).open(path)
+                    .expect("create empty publication marker before protected operation")
+            }
+
+            #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+            struct StoreCounts {
+                reissue_attempts: u64,
+                reissue_delegated: u64,
+                reissue_successes: u64,
+                other_mutations: u64,
+            }
+
+            struct ObservedReissueRocksStore {
+                inner: Arc<RocksDbConsensusStorage>,
+                fail_reissue: AtomicBool,
+                reissue_attempts: AtomicU64,
+                reissue_delegated: AtomicU64,
+                reissue_successes: AtomicU64,
+                other_mutations: AtomicU64,
+            }
+
+            impl ObservedReissueRocksStore {
+                fn new(inner: Arc<RocksDbConsensusStorage>) -> Self {
+                    Self {
+                        inner, fail_reissue: AtomicBool::new(false),
+                        reissue_attempts: AtomicU64::new(0), reissue_delegated: AtomicU64::new(0),
+                        reissue_successes: AtomicU64::new(0), other_mutations: AtomicU64::new(0),
+                    }
+                }
+                fn fault(&self, fail: bool) { self.fail_reissue.store(fail, Ordering::SeqCst); }
+                fn counts(&self) -> StoreCounts {
+                    StoreCounts {
+                        reissue_attempts: self.reissue_attempts.load(Ordering::SeqCst),
+                        reissue_delegated: self.reissue_delegated.load(Ordering::SeqCst),
+                        reissue_successes: self.reissue_successes.load(Ordering::SeqCst),
+                        other_mutations: self.other_mutations.load(Ordering::SeqCst),
+                    }
+                }
+            }
+
+            impl SigningJournalStorage for ObservedReissueRocksStore {
+                fn get_signing_record(&self, key: &[u8]) -> Result<Option<Vec<u8>>, StorageError> {
+                    self.inner.get_signing_record(key)
+                }
+                fn put_signing_record_synced(&self, key: &[u8], value: &[u8]) -> Result<(), StorageError> {
+                    self.other_mutations.fetch_add(1, Ordering::SeqCst);
+                    self.inner.put_signing_record_synced(key, value)
+                }
+                fn get_signing_metadata(&self) -> Result<Option<Vec<u8>>, StorageError> {
+                    self.inner.get_signing_metadata()
+                }
+                fn put_signing_metadata_synced(&self, value: &[u8]) -> Result<(), StorageError> {
+                    self.other_mutations.fetch_add(1, Ordering::SeqCst);
+                    self.inner.put_signing_metadata_synced(value)
+                }
+                fn put_signing_record_and_metadata_synced(
+                    &self, key: &[u8], record: &[u8], metadata: &[u8],
+                ) -> Result<(), StorageError> {
+                    self.other_mutations.fetch_add(1, Ordering::SeqCst);
+                    self.inner.put_signing_record_and_metadata_synced(key, record, metadata)
+                }
+                fn for_each_signing_namespace_entry(
+                    &self, visitor: &mut dyn FnMut(&[u8], &[u8]) -> Result<(), StorageError>,
+                ) -> Result<(), StorageError> {
+                    self.inner.for_each_signing_namespace_entry(visitor)
+                }
+                fn signing_ownership_domain(&self) -> Arc<SigningOwnershipDomain> {
+                    self.inner.signing_ownership_domain()
+                }
+                fn read_signing_envelope_into(
+                    &self, key: &[u8], dst: &mut [u8],
+                ) -> Result<Option<usize>, BoundedStorageError> {
+                    self.inner.read_signing_envelope_into(key, dst)
+                }
+                fn reissue_signing_envelope_synced(
+                    &self, key: &[u8], envelope: &[u8],
+                ) -> Result<(), BoundedStorageError> {
+                    self.reissue_attempts.fetch_add(1, Ordering::SeqCst);
+                    if self.fail_reissue.load(Ordering::SeqCst) {
+                        return Err(BoundedStorageError::Io(BoundedDiag::WriteIo));
+                    }
+                    self.reissue_delegated.fetch_add(1, Ordering::SeqCst);
+                    self.inner.reissue_signing_envelope_synced(key, envelope)?;
+                    self.reissue_successes.fetch_add(1, Ordering::SeqCst);
+                    Ok(())
+                }
+                fn put_signing_envelope_and_metadata_synced(
+                    &self, key: &[u8], record: &[u8], metadata: &[u8],
+                ) -> Result<(), BoundedStorageError> {
+                    self.other_mutations.fetch_add(1, Ordering::SeqCst);
+                    self.inner.put_signing_envelope_and_metadata_synced(key, record, metadata)
+                }
+                fn put_signing_record_envelope_synced(
+                    &self, key: &[u8], record: &[u8],
+                ) -> Result<(), BoundedStorageError> {
+                    self.other_mutations.fetch_add(1, Ordering::SeqCst);
+                    self.inner.put_signing_record_envelope_synced(key, record)
+                }
+            }
+
+            fn assert_store_unchanged(
+                store: &ObservedReissueRocksStore,
+                journal: &SigningReservationJournal,
+                key: &[u8],
+                record: &[u8],
+                metadata: &[u8],
+                count: u64,
+                label: &str,
+            ) {
+                assert_eq!(store.get_signing_record(key).expect("record read").as_deref(), Some(record), "record bytes {label}");
+                assert_eq!(store.get_signing_metadata().expect("metadata read").as_deref(), Some(metadata), "metadata bytes {label}");
+                assert_eq!(journal.reserved_position_count(), count, "reserved count {label}");
+            }
+
+            fn spawn_publication_child(
+                mode: &str,
+                fixture: &std::path::Path,
+                marker: &std::path::Path,
+                nonce: &str,
+                safety: &std::path::Path,
+                journal: &std::path::Path,
+            ) -> OwnedChild {
+                let exe = std::env::current_exe().expect("current test executable");
+                let child = std::process::Command::new(exe)
+                    .args(["--exact", MARKER_CHILD_PATH, "--ignored", "--nocapture", "--test-threads=1"])
+                    .env(ENV_MODE_PUB, mode).env(ENV_FIXTURE_PUB, fixture)
+                    .env(ENV_MARKER_PUB, marker).env(ENV_NONCE_PUB, nonce)
+                    .env(ENV_SAFETY_PUB, safety).env(ENV_JOURNAL_PUB, journal)
+                    .stdin(std::process::Stdio::null()).stdout(std::process::Stdio::null())
+                    .stderr(std::process::Stdio::null()).spawn().expect("spawn publication child");
+                OwnedChild::new(child)
+            }
+
+            fn prepare_publication_marker(
+                pv: &ProposalVoteAuthority,
+                vote: &Vote,
+                nonce: &[u8; NONCE_LEN],
+            ) -> Box<[u8; MARKER_LEN]> {
+                let unsigned = unsigned_vote_wire(vote);
+                let preimage = pv.signing_domain.vote_preimage(vote);
+                let (position, binding) = retained_pos_binding(pv, vote);
+                let (_suite, public_key) = pv.key_provider.get_suite_and_key(ValidatorId::new(SIGNER_VID))
+                    .expect("shared suite-100 public key");
+                assert_eq!(public_key.len(), PK_LEN);
+                prepare_marker_fields(nonce, &public_key, &unsigned, &preimage, &position.storage_key(), &binding.0)
+            }
+
+            fn prepare_marker_fields(
+                nonce: &[u8; NONCE_LEN], public_key: &[u8], unsigned: &[u8],
+                preimage: &[u8], position_key: &[u8], binding: &[u8; 32],
+            ) -> Box<[u8; MARKER_LEN]> {
+                build_marker(nonce, public_key, unsigned, preimage, position_key, binding)
+            }
+
+            #[test]
+            #[ignore = "re-executed child; driven only by publication parent tests"]
+            fn publication_child_entry() {
+                let Some(mode) = std::env::var_os(ENV_MODE_PUB) else { return; };
+                let mode = mode.to_string_lossy().into_owned();
+                if mode == "missing_marker" { std::process::exit(3); }
+                if mode == "wrong_signal" {
+                    unsafe { libc::raise(libc::SIGTERM); }
+                    std::process::exit(0);
+                }
+                let fixture = std::path::PathBuf::from(std::env::var_os(ENV_FIXTURE_PUB).expect("fixture"));
+                let marker_path = std::path::PathBuf::from(std::env::var_os(ENV_MARKER_PUB).expect("marker"));
+                let safety = std::path::PathBuf::from(std::env::var_os(ENV_SAFETY_PUB).expect("safety"));
+                let journal_dir = std::path::PathBuf::from(std::env::var_os(ENV_JOURNAL_PUB).expect("journal"));
+                let nonce = hex_to_nonce(&std::env::var(ENV_NONCE_PUB).expect("nonce"));
+                let (pv, sk, owner, engine, decided, proposal, limits, journal, old_marker) =
+                    child_prepare(&fixture, &safety, &journal_dir, &nonce);
+                drop(old_marker);
+                let marker = prepare_publication_marker(&pv, decided.vote(), &nonce);
+                let file = open_marker(&marker_path);
+                let signer_obs = Arc::new(std::sync::atomic::AtomicU32::new(0));
+                let sink_obs = Arc::new(std::sync::atomic::AtomicU32::new(0));
+                let inner = real_local_signer(&sk);
+                let signer = CountingValidatorSigner::new_observed(&inner, signer_obs.clone());
+                let mut sink = RealSignRecordingSink::new_observed(sink_obs.clone());
+                let mut snapshot = established_snapshot(&pv);
+                let evidence = PostPublicationEvidence::new(
+                    marker, file, signer_obs.clone(), sink_obs.clone(), mode == "publication_abort",
+                );
+                let mut coord = ModelCoordinationHook::inert().with_post_publication_evidence(evidence);
+                let outcome = fresh_vote_sign_real_local::<FixtureCommittedHistory>(
+                    &owner, &engine, &decided, &proposal, &limits, None, &mut snapshot,
+                    &signer, &mut sink, &journal, &mut coord, ReconfirmPerturbation::None,
+                );
+                assert!(matches!(outcome, RealFreshSignOutcome::Published(_)), "publication child completed route: {outcome:?}");
+                assert_eq!(signer.calls(), 1);
+                assert_eq!(sink.calls, 1);
+                assert_eq!(coord.calls, 1);
+                if mode == "publication_abort" { panic!("abort hook returned"); }
+            }
+
+            #[test]
+            fn publication_marker_layout_roundtrip_and_rejections() {
+                let nonce = [7u8; NONCE_LEN];
+                let pk = vec![0xA1; PK_LEN];
+                let vote = vec![0xB2; VOTE_LEN];
+                let preimage = vec![0xC3; 88];
+                let position = vec![0xD4; POSITION_LEN];
+                let binding = [0xE5; 32];
+                let mut marker = build_marker(&nonce, &pk, &vote, &preimage, &position, &binding);
+                assert_eq!(MARKER_LEN, 4193);
+                marker[23..27].copy_from_slice(&1u32.to_le_bytes());
+                marker[27..31].copy_from_slice(&1u32.to_le_bytes());
+                marker[31..35].copy_from_slice(&1u32.to_le_bytes());
+                marker[39] = 1;
+                marker[POSTPUB_SIGNATURE_LEN_OFFSET..POSTPUB_SIGNATURE_OFFSET]
+                    .copy_from_slice(&(SIG_LEN as u16).to_le_bytes());
+                marker[POSTPUB_SIGNATURE_OFFSET..].fill(0x5A);
+                assert_eq!(parse_marker(&marker[..]).expect("valid witness").signature.len(), SIG_LEN);
+                for malformed in [vec![0; MARKER_LEN - 1], vec![0; MARKER_LEN + 1]] {
+                    assert!(parse_marker(&malformed).is_err(), "short and long markers reject");
+                }
+                let mut bad = marker.clone(); bad[0] ^= 1; assert!(parse_marker(&bad[..]).is_err());
+                let mut bad = marker.clone(); bad[4] ^= 1; assert!(parse_marker(&bad[..]).is_err());
+                let mut bad = marker.clone(); bad[6] ^= 1; assert!(parse_marker(&bad[..]).is_err());
+                let mut bad = marker.clone(); bad[23] ^= 1; assert!(parse_marker(&bad[..]).is_err());
+                let mut bad = marker.clone(); bad[39] = 0; assert!(parse_marker(&bad[..]).is_err());
+                let mut bad = marker.clone(); bad[40] = 1; assert!(parse_marker(&bad[..]).is_err());
+                let mut bad = marker.clone(); bad[23] = 2; assert!(parse_marker(&bad[..]).is_err());
+                let mut bad = marker.clone(); bad[41] = 0; assert!(parse_marker(&bad[..]).is_err());
+                let mut bad = marker.clone(); bad[POSTPUB_PREIMAGE_LEN_OFFSET] = 0; bad[POSTPUB_PREIMAGE_LEN_OFFSET + 1] = 0; assert!(parse_marker(&bad[..]).is_err());
+                let mut bad = marker.clone(); bad[POSTPUB_PREIMAGE_OFFSET + preimage.len()] = 1; assert!(parse_marker(&bad[..]).is_err());
+                let mut bad = marker.clone(); bad[POSTPUB_SIGNATURE_LEN_OFFSET] = 1; assert!(parse_marker(&bad[..]).is_err());
+                let mut bad = marker.clone(); bad[POSTPUB_SIGNATURE_LEN_OFFSET..POSTPUB_SIGNATURE_OFFSET].copy_from_slice(&((SIG_LEN + 1) as u16).to_le_bytes()); assert!(parse_marker(&bad[..]).is_err());
+                marker[POSTPUB_PREIMAGE_LEN_OFFSET..POSTPUB_PREIMAGE_OFFSET].copy_from_slice(&257u16.to_le_bytes());
+                assert!(parse_marker(&marker[..]).is_err());
+            }
+
+            #[test]
+            fn publication_acceptance_requires_abort_and_complete_matching_marker() {
+                let nonce = [9u8; NONCE_LEN];
+                let marker = build_marker(&nonce, &[1; PK_LEN], &[2; VOTE_LEN], &[3; 32], &[4; POSITION_LEN], &[5; 32]);
+                let mut complete = marker.to_vec();
+                complete[23..27].copy_from_slice(&1u32.to_le_bytes());
+                complete[27..31].copy_from_slice(&1u32.to_le_bytes());
+                complete[31..35].copy_from_slice(&1u32.to_le_bytes());
+                complete[35..39].copy_from_slice(&0u32.to_le_bytes());
+                complete[39] = 1;
+                complete[POSTPUB_SIGNATURE_LEN_OFFSET..POSTPUB_SIGNATURE_OFFSET].copy_from_slice(&(SIG_LEN as u16).to_le_bytes());
+                assert!(accepts(TermClass::Signaled(EXPECTED_ABORT_SIGNAL), &complete, &nonce));
+                assert!(!accepts(TermClass::Exited(0), &complete, &nonce));
+                assert!(!accepts(TermClass::Signaled(libc::SIGTERM), &complete, &nonce));
+                assert!(!accepts(TermClass::TimedOutKilled { kill_confirmed: true }, &complete, &nonce));
+                assert!(!accepts(TermClass::Signaled(EXPECTED_ABORT_SIGNAL), &complete[..MARKER_LEN - 1], &nonce));
+                let other = [8u8; NONCE_LEN];
+                assert!(!accepts(TermClass::Signaled(EXPECTED_ABORT_SIGNAL), &complete, &other));
+            }
+
+            #[test]
+            fn publication_hook_rejects_invalid_live_observations_without_marker() {
+                let temp = tempfile::tempdir().unwrap();
+                let marker = build_marker(&[6; NONCE_LEN], &[1; PK_LEN], &[2; VOTE_LEN], &[3; 32], &[4; POSITION_LEN], &[5; 32]);
+                let cases = [
+                    (Ok(AdmittedPublishOutcome::AlreadyAcknowledged), false, 1, 1, 0, SIG_LEN),
+                    (Ok(AdmittedPublishOutcome::Published), true, 1, 1, 0, SIG_LEN),
+                    (Ok(AdmittedPublishOutcome::Published), false, 0, 1, 0, SIG_LEN),
+                    (Ok(AdmittedPublishOutcome::Published), false, 1, 0, 0, SIG_LEN),
+                    (Ok(AdmittedPublishOutcome::Published), false, 1, 1, 1, SIG_LEN),
+                    (Ok(AdmittedPublishOutcome::Published), false, 1, 1, 0, SIG_LEN - 1),
+                    (Ok(AdmittedPublishOutcome::Published), false, 1, 1, 0, SIG_LEN + 1),
+                ];
+                for (index, (outcome, retry, pre_sign, signer_count, sink_count, sig_len)) in cases.into_iter().enumerate() {
+                    let path = temp.path().join(format!("invalid-{index}.bin"));
+                    let file = open_marker(&path);
+                    let signer_obs = Arc::new(std::sync::atomic::AtomicU32::new(signer_count));
+                    let sink_obs = Arc::new(std::sync::atomic::AtomicU32::new(sink_count));
+                    let mut evidence = PostPublicationEvidence::new(
+                        marker.clone(), file, signer_obs, sink_obs, false,
+                    );
+                    let signature = vec![0xA5; sig_len];
+                    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                        evidence.fire(&outcome, &signature, retry, pre_sign);
+                    }));
+                    assert!(result.is_err(), "invalid boundary case {index} is rejected");
+                    drop(evidence);
+                    assert_eq!(std::fs::metadata(&path).unwrap().len(), 0, "invalid live observation writes no complete marker");
+                }
+            }
+
+            #[test]
+            fn postpublication_control_published_no_termination() {
+                let temp = tempfile::tempdir().unwrap();
+                let fixture = temp.path().join("keypair.bin");
+                let marker_path = temp.path().join("publication.bin");
+                let (pk, sk) = MlDsa44Backend::generate_keypair().expect("suite-100 keygen");
+                write_fixture_file(&fixture, &pk, &sk);
+                let nonce = make_nonce();
+                let (rpk, rsk) = read_fixture_file(&fixture);
+                assert!(rsk == sk, "fixture secret roundtrip matches (redacted)");
+                let pv = authority_from_pk(rpk);
+                let ctx = retained_ctx(4);
+                let safety_dir = temp.path().join("safety");
+                let journal_dir = temp.path().join("journal");
+                std::fs::create_dir(&safety_dir).expect("safety dir");
+                std::fs::create_dir(&journal_dir).expect("journal dir");
+                let (owner, engine, decided, proposal, limits, _) = capture_multi_with_suite(&safety_dir, &ctx, MODEL_SUITE_U16);
+                let base_vote = decided.vote().clone();
+                let store = reopen_open_journal_store(&journal_dir);
+                let journal = reopen_assoc_journal_init(&owner, store.clone() as Arc<dyn SigningJournalStorage>, 1);
+                let marker = prepare_publication_marker(&pv, decided.vote(), &nonce);
+                let file = open_marker(&marker_path);
+                let signer_obs = Arc::new(std::sync::atomic::AtomicU32::new(0));
+                let sink_obs = Arc::new(std::sync::atomic::AtomicU32::new(0));
+                let inner = real_local_signer(&rsk);
+                let signer = CountingValidatorSigner::new_observed(&inner, signer_obs.clone());
+                let mut sink = RealSignRecordingSink::new_observed(sink_obs.clone());
+                let mut snapshot = established_snapshot(&pv);
+                let mut coord = ModelCoordinationHook::inert().with_post_publication_evidence(
+                    PostPublicationEvidence::new(marker, file, signer_obs.clone(), sink_obs.clone(), false),
+                );
+                let ledgers = snapshot_ledgers(&owner);
+                let provenance = pin_provenance_now(&owner, &decided);
+                let outcome = fresh_vote_sign_real_local::<FixtureCommittedHistory>(
+                    &owner, &engine, &decided, &proposal, &limits, None, &mut snapshot,
+                    &signer, &mut sink, &journal, &mut coord, ReconfirmPerturbation::None,
+                );
+                let diag = match outcome { RealFreshSignOutcome::Published(d) => d, other => panic!("expected Published: {other:?}") };
+                assert_eq!(diag.retirement, RetirementReport::Retired);
+                assert_eq!((signer.calls(), sink.calls, coord.calls), (1, 1, 1));
+                assert_eq!(signer_obs.load(Ordering::SeqCst), 1);
+                assert_eq!(sink_obs.load(Ordering::SeqCst), 1);
+                assert_cleanup_preserved(&owner, &decided, &base_vote, ledgers, provenance, "postpublication no-termination control");
+                let witness = parse_marker(&read_marker_bounded(&marker_path).expect("marker read")).expect("complete publication marker");
+                assert_eq!(witness.nonce, nonce);
+                assert_eq!(witness.public_key, pk);
+                let (position, binding) = retained_pos_binding(&pv, &base_vote);
+                let record = store.get_signing_record(&position.storage_key()).expect("record read").expect("Signed record");
+                let decoded = SigningDecisionRecord::decode(&record).expect("decode Signed record");
+                let stored_sig = decoded.retained_signature.expect("stored signature");
+                assert_eq!(witness.signature, stored_sig, "boundary output equals stored signature");
+                MlDsa44Backend::verify(&witness.public_key, &witness.preimage, &witness.signature)
+                    .expect("the actual published signature verifies against the witnessed preimage");
+                assert_eq!(decoded.binding, binding);
+                assert_eq!(journal.reserved_position_count(), 1);
+                let acct = owner.backend_for_test().accounting_handle_for_test();
+                drop(coord); drop(decided); drop(engine); drop(journal); drop(store); drop(owner);
+                drop(snapshot); drop(sink); drop(signer); drop(inner); drop(pv);
+                drop(ctx); drop(proposal); drop(witness); drop(base_vote);
+                assert_eq!(acct.current(), 0, "operational ledger fully released");
+                assert_eq!(acct.aggregate().current(), 0, "aggregate ledger fully released");
+            }
+
+            #[test]
+            fn postpublication_marker_then_exit_rejected() {
+                let temp = tempfile::tempdir().unwrap();
+                let fixture = temp.path().join("keypair.bin");
+                let marker = temp.path().join("publication.bin");
+                let safety = temp.path().join("safety"); let journal = temp.path().join("journal");
+                std::fs::create_dir(&safety).unwrap(); std::fs::create_dir(&journal).unwrap();
+                let (pk, sk) = MlDsa44Backend::generate_keypair().expect("keygen");
+                write_fixture_file(&fixture, &pk, &sk);
+                let nonce = make_nonce(); let nonce_hex = nonce_to_hex(&nonce);
+                let mut child = spawn_publication_child("publication_exit", &fixture, &marker, &nonce_hex, &safety, &journal);
+                let class = child.supervise(STATUS_DEADLINE).expect("child reaped");
+                assert_eq!(class, TermClass::Exited(0));
+                let raw = read_marker_bounded(&marker).expect("valid marker exists");
+                assert!(parse_marker(&raw).is_ok());
+                assert!(!accepts(class, &raw, &nonce), "ordinary exit is not process-death evidence");
+            }
+
+            #[test]
+            fn postpublication_child_death_reopen_checked_retained() {
+                let harness = tempfile::tempdir().unwrap();
+                let fixture = harness.path().join("suite100_keypair.bin");
+                let marker_path = harness.path().join("publication_marker.bin");
+                let safety_dir = harness.path().join("safety"); let journal_dir = harness.path().join("journal");
+                std::fs::create_dir(&safety_dir).unwrap(); std::fs::create_dir(&journal_dir).unwrap();
+                let (pk, sk) = MlDsa44Backend::generate_keypair().expect("parent suite-100 keygen");
+                write_fixture_file(&fixture, &pk, &sk);
+                let nonce = make_nonce(); let nonce_hex = nonce_to_hex(&nonce);
+                let mut child = spawn_publication_child("publication_abort", &fixture, &marker_path, &nonce_hex, &safety_dir, &journal_dir);
+                let class = child.supervise(STATUS_DEADLINE).expect("child reaped");
+                assert_eq!(class, TermClass::Signaled(EXPECTED_ABORT_SIGNAL), "intended abort classification");
+                let raw = read_marker_bounded(&marker_path).expect("publication boundary marker");
+                assert!(accepts(class, &raw, &nonce), "only intended abort plus complete invocation marker is accepted");
+                let witness = parse_marker(&raw).expect("parse publication marker");
+                assert_eq!(witness.signature.len(), SIG_LEN);
+                assert_eq!((witness.pre_sign_calls, witness.publication_calls, witness.signer_calls, witness.sink_calls), (1, 1, 1, 0));
+                assert_eq!(witness.public_key, pk);
+
+                let ctx = retained_ctx(4);
+                let pv = authority_from_pk(pk.clone());
+                let owner = reopen_attach(&safety_dir, &ctx);
+                let concrete = reopen_open_journal_store(&journal_dir);
+                let wrapper = Arc::new(ObservedReissueRocksStore::new(concrete.clone()));
+                let wrapper_domain = wrapper.signing_ownership_domain();
+                let backend_domain = concrete.signing_ownership_domain();
+                assert!(Arc::ptr_eq(&wrapper_domain, &backend_domain), "wrapper forwards the real backend domain");
+                drop(wrapper_domain); drop(backend_domain);
+                let store: Arc<dyn SigningJournalStorage> = wrapper.clone();
+                let journal = reopen_assoc_journal_open(&owner, store.clone(), 1);
+                assert_eq!(journal.reserved_position_count(), 1);
+
+                // Identify and snapshot the actual Signed state before safety recovery.
+                let record_pre = wrapper.get_signing_record(&witness.position_key).expect("pre-O2 record read").expect("Signed record survived");
+                let metadata_pre = wrapper.get_signing_metadata().expect("pre-O2 metadata read").expect("metadata survived");
+                let count_pre = journal.reserved_position_count();
+                let decoded_pre = SigningDecisionRecord::decode(&record_pre).expect("decode surviving Signed record");
+                assert_eq!(decoded_pre.stage, SigningRecordStage::Signed);
+                assert_eq!(decoded_pre.position.storage_key(), witness.position_key);
+                assert_eq!(decoded_pre.binding.0, witness.binding);
+                let stored_signature = decoded_pre.retained_signature.as_ref().expect("Signed signature");
+                assert_eq!(stored_signature.len(), SIG_LEN);
+                assert_eq!(stored_signature.as_slice(), witness.signature.as_slice(), "surviving record preserves child output");
+                assert_eq!(count_pre, 1);
+
+                let (mut engine, proposal, l0_block) = engine_locked_l0_multi_with_suite(MODEL_SUITE_U16);
+                let limits = lim_b(&ctx);
+                let revision = reopen_b_recover_only(&owner, &engine, l0_block);
+                assert_eq!(wrapper.get_signing_record(&witness.position_key).expect("record after O5").as_deref(), Some(record_pre.as_slice()));
+                assert_eq!(wrapper.get_signing_metadata().expect("metadata after O5").as_deref(), Some(metadata_pre.as_slice()));
+                assert_eq!(journal.reserved_position_count(), count_pre);
+
+                // A separate fresh O3 proof feeds the existing owning capture route.
+                let capture_proof = owner.read_validate(None::<&FixtureCommittedHistory>).expect("separate capture O3 proof");
+                let decided = match owner.decide_and_capture_owned(&mut engine, ValidatorId::new(2), &proposal, &limits, revision, capture_proof) {
+                    OwnedDecisionOutcome::Decided(d) => d,
+                    other => panic!("surviving-process decision re-derivation: {other:?}"),
+                };
+                let vote = decided.vote();
+                let vote_wire = unsigned_vote_wire(vote);
+                let preimage = pv.signing_domain.vote_preimage(vote);
+                let (position, binding) = retained_pos_binding(&pv, vote);
+                let (_suite, authorized_pk) = pv.key_provider.get_suite_and_key(ValidatorId::new(SIGNER_VID)).expect("authorized key");
+                assert_eq!(vote_wire, witness.unsigned_vote);
+                assert_eq!(preimage, witness.preimage);
+                assert_eq!(position.storage_key(), witness.position_key);
+                assert_eq!(binding.0, witness.binding);
+                assert_eq!(authorized_pk, witness.public_key);
+                let base_vote = vote.clone();
+
+                // Fresh signing is a separate, independently snapshotted refusal.
+                let mut fresh_snapshot = established_snapshot(&pv);
+                let inner = real_local_signer(&sk);
+                let signer_obs = Arc::new(std::sync::atomic::AtomicU32::new(0));
+                let sink_obs = Arc::new(std::sync::atomic::AtomicU32::new(0));
+                let signer = CountingValidatorSigner::new_observed(&inner, signer_obs.clone());
+                let mut fresh_sink = RealSignRecordingSink::new_observed(sink_obs.clone());
+                let mut fresh_coord = ModelCoordinationHook::inert();
+                let fresh_ledgers = snapshot_ledgers(&owner);
+                let fresh_provenance = pin_provenance_now(&owner, &decided);
+                let fresh_counts = wrapper.counts();
+                let fresh_record = wrapper.get_signing_record(&witness.position_key).expect("fresh pre-record").expect("record");
+                let fresh_metadata = wrapper.get_signing_metadata().expect("fresh pre-metadata").expect("metadata");
+                let fresh_count = journal.reserved_position_count();
+                let fresh = fresh_vote_sign_real_local::<FixtureCommittedHistory>(
+                    &owner, &engine, &decided, &proposal, &limits, None, &mut fresh_snapshot,
+                    &signer, &mut fresh_sink, &journal, &mut fresh_coord, ReconfirmPerturbation::None,
+                );
+                assert_eq!(fresh, RealFreshSignOutcome::ReservePotentiallySigned);
+                assert_eq!((signer.calls(), fresh_sink.calls, fresh_coord.calls), (0, 0, 0));
+                assert_eq!(signer_obs.load(Ordering::SeqCst), 0);
+                assert_eq!(sink_obs.load(Ordering::SeqCst), 0);
+                let fresh_after_counts = wrapper.counts();
+                assert_eq!(fresh_after_counts.reissue_attempts - fresh_counts.reissue_attempts, 0);
+                assert_eq!(fresh_after_counts.other_mutations - fresh_counts.other_mutations, 0);
+                assert_cleanup_preserved(&owner, &decided, &base_vote, fresh_ledgers, fresh_provenance, "Signed-position fresh refusal");
+                assert_store_unchanged(&wrapper, &journal, &witness.position_key, &fresh_record, &fresh_metadata, fresh_count, "after fresh refusal");
+
+                let witnessed_slice = &witness.signature;
+                assert_eq!(witnessed_slice.len(), SIG_LEN);
+                assert_eq!(stored_signature.as_slice(), witnessed_slice.as_slice());
+
+                // Failed-before-write recovered reissue suppresses all delivery.
+                wrapper.fault(true);
+                let fail_ledgers = snapshot_ledgers(&owner);
+                let fail_provenance = pin_provenance_now(&owner, &decided);
+                let fail_record = wrapper.get_signing_record(&witness.position_key).expect("R1 record").expect("record");
+                let fail_metadata = wrapper.get_signing_metadata().expect("R1 metadata").expect("metadata");
+                let fail_count = journal.reserved_position_count();
+                let fail_counts = wrapper.counts();
+                let fail_witness = RetainedSliceWitness::from_validated(witnessed_slice);
+                assert_eq!(fail_witness.len(), SIG_LEN);
+                let fail_probe = std::rc::Rc::new(RetainedSliceProbe::new(fail_witness));
+                let fail_guard = install_retained_slice_probe(fail_probe.clone());
+                let mut fail_sink = RetainedUseRecordingSink::new();
+                let mut fail_coord = ModelCoordinationHook::inert();
+                let suppressed = retained_vote_use_checked_model::<FixtureCommittedHistory>(
+                    &owner, &engine, &decided, &proposal, &limits, None, &mut fresh_snapshot,
+                    &mut fail_sink, &journal, &mut fail_coord, ReconfirmPerturbation::None,
+                );
+                drop(fail_guard);
+                assert_eq!(suppressed, ModelRetainedUseOutcome::DeliverySuppressed);
+                assert_eq!(fail_sink.calls, 0);
+                assert_eq!(fail_probe.invocations(), 0);
+                let fail_after = wrapper.counts();
+                assert_eq!(fail_after.reissue_attempts - fail_counts.reissue_attempts, 1);
+                assert_eq!(fail_after.reissue_delegated - fail_counts.reissue_delegated, 0);
+                assert_eq!(fail_after.reissue_successes - fail_counts.reissue_successes, 0);
+                assert_eq!(fail_after.other_mutations - fail_counts.other_mutations, 0);
+                assert_eq!(signer.calls(), 0, "no signer was supplied to the checked route and no additional signing occurred");
+                assert_cleanup_preserved(&owner, &decided, &base_vote, fail_ledgers, fail_provenance, "failed recovered reissue suppression");
+                assert_store_unchanged(&wrapper, &journal, &witness.position_key, &fail_record, &fail_metadata, fail_count, "after failed reissue");
+
+                // Relieved retry uses the identical checked route, journal, backend,
+                // envelope, and witnessed signature; its own synced reissue precedes use.
+                wrapper.fault(false);
+                let ok_ledgers = snapshot_ledgers(&owner);
+                let ok_provenance = pin_provenance_now(&owner, &decided);
+                let ok_record = wrapper.get_signing_record(&witness.position_key).expect("R2 record").expect("record");
+                let ok_metadata = wrapper.get_signing_metadata().expect("R2 metadata").expect("metadata");
+                let ok_count = journal.reserved_position_count();
+                let ok_counts = wrapper.counts();
+                let ok_witness = RetainedSliceWitness::from_validated(witnessed_slice);
+                assert_eq!(ok_witness.len(), SIG_LEN);
+                let ok_probe = std::rc::Rc::new(RetainedSliceProbe::new(ok_witness));
+                let ok_guard = install_retained_slice_probe(ok_probe.clone());
+                let mut ok_sink = RetainedUseRecordingSink::new();
+                let mut ok_coord = ModelCoordinationHook::inert();
+                let consumed = retained_vote_use_checked_model::<FixtureCommittedHistory>(
+                    &owner, &engine, &decided, &proposal, &limits, None, &mut fresh_snapshot,
+                    &mut ok_sink, &journal, &mut ok_coord, ReconfirmPerturbation::None,
+                );
+                drop(ok_guard);
+                let diag = match consumed { ModelRetainedUseOutcome::Consumed(d) => d, other => panic!("checked retained retry: {other:?}") };
+                assert_eq!(diag.sig_len as usize, SIG_LEN);
+                assert_eq!(ok_sink.calls, 1);
+                assert_eq!(ok_probe.invocations(), 1);
+                assert_eq!(ok_probe.last_len(), Some(SIG_LEN));
+                assert_eq!(ok_probe.last_matched(), Some(true), "verified borrowed slice equals actual child publication bytes");
+                let ok_after = wrapper.counts();
+                assert_eq!(ok_after.reissue_attempts - ok_counts.reissue_attempts, 1);
+                assert_eq!(ok_after.reissue_delegated - ok_counts.reissue_delegated, 1);
+                assert_eq!(ok_after.reissue_successes - ok_counts.reissue_successes, 1);
+                assert_eq!(ok_after.other_mutations - ok_counts.other_mutations, 0);
+                assert_eq!(signer.calls(), 0, "retained path performed no signing");
+                assert_cleanup_preserved(&owner, &decided, &base_vote, ok_ledgers, ok_provenance, "successful checked retained use");
+                assert_store_unchanged(&wrapper, &journal, &witness.position_key, &ok_record, &ok_metadata, ok_count, "after checked retained success");
+
+                let acct = owner.backend_for_test().accounting_handle_for_test();
+                drop(fail_probe); drop(ok_probe); drop(fail_sink); drop(ok_sink);
+                drop(fresh_coord); drop(fail_coord); drop(ok_coord);
+                drop(witness); drop(raw); drop(decoded_pre);
+                drop(decided); drop(engine); drop(journal); drop(store); drop(wrapper); drop(concrete); drop(owner);
+                drop(fresh_snapshot); drop(fresh_sink); drop(signer); drop(inner); drop(pv);
+                drop(ctx); drop(proposal); drop(base_vote);
+                assert_eq!(acct.current(), 0, "surviving operational ledger reaches zero");
+                assert_eq!(acct.aggregate().current(), 0, "surviving aggregate ledger reaches zero");
+            }
+        }
+
         }
     }
 
