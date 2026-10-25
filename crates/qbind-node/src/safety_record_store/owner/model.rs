@@ -14191,10 +14191,11 @@ mod tests {
                     assert_eq!(snapshot_ledgers(&owner), recovery_free, "proof-free O5 recovery baseline restored");
                     assert_eq!(owner.backend_for_test().accounting_cap(), op_ceiling);
                     assert_eq!(owner.backend_for_test().accounting_aggregate_cap(), agg_ceiling);
-                    assert_eq!(
-                        observed.get_signing_record(&witness.position_key).expect("post-O5 record read").as_deref(),
-                        Some(record_pre.as_slice()),
-                        "O5 leaves the independent journal record bytes unchanged",
+                    let post_o5_record = observed.get_signing_record(&witness.position_key)
+                        .expect("post-O5 record read");
+                    assert!(
+                        post_o5_record.as_deref() == Some(record_pre.as_slice()),
+                        "O5 preserves the complete surviving journal record bytes",
                     );
                     assert_eq!(
                         observed.get_signing_metadata().expect("post-O5 metadata read").as_deref(),
@@ -14263,7 +14264,12 @@ mod tests {
                         bounded_read_attempts: 1, bounded_present_reads: 1,
                         ..Counts::default()
                     });
-                    assert_eq!(observed.get_signing_record(&position.storage_key()).unwrap().as_deref(), Some(fresh_record.as_slice()));
+                    let fresh_record_after = observed.get_signing_record(&position.storage_key())
+                        .expect("fresh-refusal record read");
+                    assert!(
+                        fresh_record_after.as_deref() == Some(fresh_record.as_slice()),
+                        "fresh refusal preserves the complete surviving journal record bytes",
+                    );
                     assert_eq!(observed.get_signing_metadata().unwrap().as_deref(), Some(fresh_metadata.as_slice()));
                     assert_eq!(journal.reserved_position_count(), fresh_count);
 
@@ -14299,7 +14305,12 @@ mod tests {
                         reissue_attempts: 1,
                         ..Counts::default()
                     });
-                    assert_eq!(observed.get_signing_record(&position.storage_key()).unwrap().as_deref(), Some(fail_record.as_slice()));
+                    let fail_record_after = observed.get_signing_record(&position.storage_key())
+                        .expect("failed-reissue record read");
+                    assert!(
+                        fail_record_after.as_deref() == Some(fail_record.as_slice()),
+                        "failed reissue preserves the complete surviving journal record bytes",
+                    );
                     assert_eq!(observed.get_signing_metadata().unwrap().as_deref(), Some(fail_metadata.as_slice()));
                     assert_eq!(journal.reserved_position_count(), fail_count);
 
@@ -14336,7 +14347,12 @@ mod tests {
                         ..Counts::default()
                     });
                     assert!(stored_signature == witness.signature, "checked result remains the same original Signed bytes");
-                    assert_eq!(observed.get_signing_record(&position.storage_key()).unwrap().as_deref(), Some(ok_record.as_slice()));
+                    let ok_record_after = observed.get_signing_record(&position.storage_key())
+                        .expect("successful-reissue record read");
+                    assert!(
+                        ok_record_after.as_deref() == Some(ok_record.as_slice()),
+                        "successful reissue preserves the complete surviving journal record bytes",
+                    );
                     assert_eq!(observed.get_signing_metadata().unwrap().as_deref(), Some(ok_metadata.as_slice()));
                     assert_eq!(journal.reserved_position_count(), ok_count);
 

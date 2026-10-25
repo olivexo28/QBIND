@@ -19853,3 +19853,15 @@ NEWLY EXECUTED on the final implementation source (`LIBCLANG_PATH=/usr/lib/llvm-
 - `cargo build -p qbind-node` — exit 0; `cargo test -p qbind-node --no-run` — exit 0, default test targets compiled (not lib-only).
 
 The initial build lacked `libclang.so`; installing the system `libclang-18-dev` prerequisite and setting the documented `LIBCLANG_PATH` resolved it. External review/security analysis: NOT-RUN. Starting/final commit and tree identifiers, push verification, and final worktree state are recorded in the task completion report. Preserved verdicts: `D7D14_STORAGE_COMPONENT=IMPLEMENTED-ISOLATED`; `D7D14_STORAGE_ACCEPTANCE=PASS-ACCEPTED-SUBSET`; §13.6 whole-lifecycle INCOMPLETE; activation DISABLED; public DevNet NO-GO; durable anti-rollback NOT-ESTABLISHED; C4/C5 OPEN. No production wiring/restart implementation, network delivery, activation, deployment, additional crash boundary, D15, or Run 423.
+
+### Post-write acceptance correction — redacted whole-record comparisons and integration target
+
+The four surviving Signed-record comparisons after O5, fresh refusal, failed checked reissue, and successful checked reissue now use Boolean complete-byte equality with fixed redacted diagnostics. Each lookup still explicitly rejects a missing record, and the comparison remains after the operation’s immediate ledger, ceiling, Vote, and pin-provenance checks. This changes only failure diagnostics: no length/hash substitution, metadata/count comparison change, signature comparison change, marker/counter change, recovery-order change, or outcome change.
+
+This pass’s validation (`LIBCLANG_PATH=/usr/lib/llvm-18/lib`; exact exit codes):
+
+- `cargo test -p qbind-node --features test-utils --test run_422_d7d14_safety_record_store_tests -- --quiet` — exit 0; 157 passed, 0 failed, 1 ignored. This target requires `test-utils` and was executed directly in this pass.
+- `cargo test -p qbind-node --lib --features test-utils safety_record_store::owner::model::tests::real_fresh_sign::postconsume_process_death::postwrite_prejournal_ack -- --quiet` — exit 0; 5 passed, 0 failed, 1 ignored (supervised child entrypoint).
+- `cargo test -p qbind-node --lib --features test-utils safety_record_store::owner::model:: -- --quiet` — exit 0; 130 passed, 0 failed, 4 ignored.
+
+Earlier focused regressions, other integration targets, `cargo build -p qbind-node`, and default `cargo test -p qbind-node --no-run` results remain attributed to implementation commit `6d9f7a7895749fa07ad646c4856adefad5dcae1a`; they were not rerun in this pass. External review/security tooling: NOT-RUN. Status remains `D7D14_STORAGE_COMPONENT=IMPLEMENTED-ISOLATED`; `D7D14_STORAGE_ACCEPTANCE=PASS-ACCEPTED-SUBSET`; §13.6 whole-lifecycle INCOMPLETE; activation DISABLED; public DevNet NO-GO; durable anti-rollback NOT-ESTABLISHED; C4/C5 OPEN. No production change, new boundary, activation, deployment, D15, or Run 423.
