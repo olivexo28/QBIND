@@ -9611,6 +9611,8 @@ mod tests {
             assert!(owner.recovery_required(), "a freshly reopened backend requires recovery before O5");
             let op_free = owner.backend_for_test().accounting_current();
             let agg_free = owner.backend_for_test().accounting_aggregate_current();
+            let op_ceiling = owner.backend_for_test().accounting_cap();
+            let agg_ceiling = owner.backend_for_test().accounting_aggregate_cap();
             let recovery = owner.read_validate(None::<&FixtureCommittedHistory>).expect("B O3 recovery proof");
             assert!(owner.recovery_required(), "O3 validation alone does not clear recovery");
             let op_held = owner.backend_for_test().accounting_current();
@@ -9632,6 +9634,8 @@ mod tests {
             assert!(!owner.recovery_required(), "successful O5 clears recovery");
             assert_eq!(owner.backend_for_test().accounting_current(), op_held, "O5 immediately restores proof-held operational baseline");
             assert_eq!(owner.backend_for_test().accounting_aggregate_current(), agg_held, "O5 immediately restores proof-held aggregate baseline");
+            assert_eq!(owner.backend_for_test().accounting_cap(), op_ceiling, "O5 preserves the proof-held operational ceiling");
+            assert_eq!(owner.backend_for_test().accounting_aggregate_cap(), agg_ceiling, "O5 preserves the proof-held aggregate ceiling");
             drop(recovery);
             assert_eq!(owner.backend_for_test().accounting_current(), op_free, "dropping O3 restores proof-free operational baseline");
             assert_eq!(owner.backend_for_test().accounting_aggregate_current(), agg_free, "dropping O3 restores proof-free aggregate baseline");
@@ -13530,15 +13534,35 @@ mod tests {
                     let mut wire = Vec::new();
                     qbind_wire::io::WireEncode::encode(&wrong_suite, &mut wire);
                     assert_eq!(wire.len(), VOTE_LEN);
-                    assert_eq!(decode_unsigned_suite_vote(&wire), Err("Vote suite"));
+                    let mut bad = valid.clone();
+                    bad[POST_SIGN_VOTE_OFFSET..POST_SIGN_PREIMAGE_LEN_OFFSET]
+                        .copy_from_slice(&wire);
+                    assert_eq!(
+                        parse_marker(&bad, &nonce),
+                        Err("Vote suite"),
+                        "the marker parser rejects a genuinely encoded wrong-suite Vote"
+                    );
+
+                    let mut malformed = valid.clone();
+                    malformed[POST_SIGN_VOTE_OFFSET] = 0;
+                    assert_eq!(
+                        parse_marker(&malformed, &nonce),
+                        Err("Vote encoding"),
+                        "the marker parser rejects malformed Vote bytes"
+                    );
+
                     let mut inline_sig = vote;
                     inline_sig.signature.push(0x5A);
                     let mut wire = Vec::new();
                     qbind_wire::io::WireEncode::encode(&inline_sig, &mut wire);
                     assert_eq!(wire.len(), VOTE_LEN + 1);
+                    // This 70-byte encoding is helper-only; the fixed marker Vote
+                    // field remains exactly 69 bytes.
                     assert_eq!(decode_unsigned_suite_vote(&wire), Err("Vote inline signature"));
                     let mut trailing = unsigned;
                     trailing.push(0);
+                    // Trailing input is likewise exercised at helper level, not
+                    // represented as a valid fixed-width marker Vote.
                     assert_eq!(decode_unsigned_suite_vote(&trailing), Err("Vote trailing bytes"));
                 }
 
@@ -13661,7 +13685,10 @@ mod tests {
                         .expect("stored result read").expect("Signed record");
                     let decoded = SigningDecisionRecord::decode(&stored).expect("decode Signed record");
                     assert_eq!(decoded.stage, SigningRecordStage::Signed);
-                    assert_eq!(decoded.retained_signature.as_deref(), Some(witness.signature.as_slice()));
+                    assert!(
+                        decoded.retained_signature.as_deref() == Some(witness.signature.as_slice()),
+                        "stored Signed signature bytes exactly match the witnessed output (redacted)"
+                    );
                     assert_eq!(decoded.binding, binding);
 
                     let accountant = owner.backend_for_test().accounting_handle_for_test();

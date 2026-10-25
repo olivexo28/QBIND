@@ -19809,3 +19809,16 @@ NEWLY EXECUTED on this source (`LIBCLANG_PATH=/usr/lib/llvm-18/lib`; all listed 
 - `cargo build -p qbind-node` — exit 0; `cargo test -p qbind-node --no-run` — exit 0, default test targets compiled.
 
 The initial native build attempt was blocked by missing `libclang.so`; installing the system `libclang-18-dev` prerequisite and setting the path above resolved it. The first parser-control execution exposed a test mutation that changed a valid nonempty preimage length from 88 to 89; the control now writes zero and rejects the empty preimage. External review/security analysis tooling: NOT-RUN. This is isolated model evidence, not production wiring, network delivery, authority reconstruction, power-loss/anti-rollback evidence, or activation. Verdicts retained: `D7D14_STORAGE_COMPONENT=IMPLEMENTED-ISOLATED`; `D7D14_STORAGE_ACCEPTANCE=PASS-ACCEPTED-SUBSET`; §13.6 whole-lifecycle INCOMPLETE; activation DISABLED; public DevNet NO-GO; durable anti-rollback NOT-ESTABLISHED; C4/C5 OPEN. No D15 or Run 423.
+
+### Post-sign boundary acceptance-evidence finishing pass
+
+The same-hook positive control still compares the complete stored Signed signature with the exact hook witness, but its assertion is now Boolean with a fixed redacted diagnostic so a failure cannot print signature bytes. A source check of the new boundary found no secret-key byte diagnostics. Parser controls now mutate the actual fixed-width marker Vote slice: malformed message type yields `Vote encoding`, and a genuinely encoded wrong-suite 69-byte Vote yields `Vote suite`; framing, counts, nonce, and lengths remain valid. Helper-only trailing-input and 70-byte inline-signature controls remain separately identified and are not treated as fixed 69-byte marker fields. The O5 recovery helper snapshots operational and aggregate ceilings independently and asserts both unchanged immediately after successful O5 while the recovery proof is still held; caller checks and proof-free cleanup assertions remain.
+
+NEWLY EXECUTED in this finishing pass (`LIBCLANG_PATH=/usr/lib/llvm-18/lib`; all exit 0):
+
+- `cargo test -p qbind-node --lib --features test-utils safety_record_store::owner::model::tests::real_fresh_sign::postconsume_process_death::postsign_prepublication -- --quiet` — 5 passed, 0 failed, 1 ignored (re-executed child entrypoint).
+- `cargo test -p qbind-node --lib --features test-utils safety_record_store::owner::model::tests::real_fresh_sign::postconsume_process_death:: -- --quiet` — 23 passed, 0 failed, 3 ignored.
+- `cargo test -p qbind-node --lib --features test-utils safety_record_store::owner::model:: -- --quiet` — 125 passed, 0 failed, 3 ignored.
+- `cargo build -p qbind-node` — exit 0; `cargo test -p qbind-node --no-run` — exit 0.
+
+Ignored re-executed child entrypoints are not counted as separate passes. Retained-decision observation (24 passed), owning-capture binding (19 passed), and D7-D10 journal integration (39 passed, 1 ignored) were not rerun; those counts remain attributed to commit `0e59a0ad5fc532a9b851ea9b172b6d7acf94f28b`. External review/security tooling: NOT-RUN. All preserved verdicts and scope limits remain unchanged.
