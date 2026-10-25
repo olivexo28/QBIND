@@ -12966,6 +12966,36 @@ mod tests {
                 u32::from_le_bytes(bytes[offset..offset + 4].try_into().expect("fixed marker field"))
             }
 
+            fn decode_unsigned_suite_vote(bytes: &[u8]) -> Result<Vote, &'static str> {
+                use qbind_wire::io::WireDecode as _;
+                let mut input = bytes;
+                let vote = Vote::decode(&mut input).map_err(|_| "Vote encoding")?;
+                if !input.is_empty() { return Err("Vote trailing bytes"); }
+                if !vote.signature.is_empty() { return Err("Vote inline signature"); }
+                if vote.suite_id != MODEL_SUITE_U16 { return Err("Vote suite"); }
+                Ok(vote)
+            }
+
+            fn valid_unsigned_suite_vote_wire() -> Vec<u8> {
+                use qbind_wire::io::WireEncode as _;
+                let vote = Vote {
+                    version: 1,
+                    chain_id: 7,
+                    epoch: 4,
+                    height: 1,
+                    round: 0,
+                    step: 1,
+                    block_id: [0xB2; 32],
+                    validator_index: 2,
+                    suite_id: MODEL_SUITE_U16,
+                    signature: Vec::new(),
+                };
+                let mut bytes = Vec::with_capacity(VOTE_LEN);
+                vote.encode(&mut bytes);
+                assert_eq!(bytes.len(), VOTE_LEN);
+                bytes
+            }
+
             fn parse_marker(bytes: &[u8]) -> Result<PublicationWitness, &'static str> {
                 if bytes.len() != MARKER_LEN { return Err("marker length"); }
                 if bytes[0..4] != MAGIC { return Err("magic"); }
@@ -12984,6 +13014,7 @@ mod tests {
                 let public_key = bytes[POSTPUB_PK_OFFSET..POSTPUB_VOTE_LEN_OFFSET].to_vec();
                 if read_u16(bytes, POSTPUB_VOTE_LEN_OFFSET) != VOTE_LEN { return Err("Vote length"); }
                 let unsigned_vote = bytes[POSTPUB_VOTE_OFFSET..POSTPUB_PREIMAGE_LEN_OFFSET].to_vec();
+                decode_unsigned_suite_vote(&unsigned_vote)?;
                 let preimage_len = read_u16(bytes, POSTPUB_PREIMAGE_LEN_OFFSET);
                 if preimage_len == 0 || preimage_len > PREIMAGE_CAP { return Err("preimage length"); }
                 let padded = &bytes[POSTPUB_PREIMAGE_OFFSET..POSTPUB_POSITION_OFFSET];
@@ -13216,7 +13247,7 @@ mod tests {
             fn publication_marker_layout_roundtrip_and_rejections() {
                 let nonce = [7u8; NONCE_LEN];
                 let pk = vec![0xA1; PK_LEN];
-                let vote = vec![0xB2; VOTE_LEN];
+                let vote = valid_unsigned_suite_vote_wire();
                 let preimage = vec![0xC3; 88];
                 let position = vec![0xD4; POSITION_LEN];
                 let binding = [0xE5; 32];
@@ -13245,6 +13276,30 @@ mod tests {
                 let mut bad = marker.clone(); bad[POSTPUB_PREIMAGE_OFFSET + preimage.len()] = 1; assert!(parse_marker(&bad[..]).is_err());
                 let mut bad = marker.clone(); bad[POSTPUB_SIGNATURE_LEN_OFFSET] = 1; assert!(parse_marker(&bad[..]).is_err());
                 let mut bad = marker.clone(); bad[POSTPUB_SIGNATURE_LEN_OFFSET..POSTPUB_SIGNATURE_OFFSET].copy_from_slice(&((SIG_LEN + 1) as u16).to_le_bytes()); assert!(parse_marker(&bad[..]).is_err());
+                let mut bad = marker.clone(); bad[POSTPUB_VOTE_OFFSET] ^= 0xFF;
+                assert_eq!(parse_marker(&bad[..]), Err("Vote encoding"), "malformed Vote encoding rejects");
+                let mut bad = marker.clone();
+                bad[POSTPUB_VOTE_OFFSET + 65..POSTPUB_VOTE_OFFSET + 67]
+                    .copy_from_slice(&(MODEL_SUITE_U16 + 1).to_le_bytes());
+                assert_eq!(parse_marker(&bad[..]), Err("Vote suite"), "decodable wrong-suite Vote rejects");
+                let mut trailing = vote.clone();
+                trailing.push(0);
+                assert_eq!(
+                    decode_unsigned_suite_vote(&trailing),
+                    Err("Vote trailing bytes"),
+                    "a valid Vote followed by unconsumed input rejects"
+                );
+
+                let mut signed_vote = decode_unsigned_suite_vote(&vote).expect("valid unsigned suite-100 Vote");
+                signed_vote.signature.push(0x5A);
+                let mut signed_vote_bytes = Vec::new();
+                qbind_wire::io::WireEncode::encode(&signed_vote, &mut signed_vote_bytes);
+                assert_eq!(signed_vote_bytes.len(), VOTE_LEN + 1);
+                assert_eq!(
+                    decode_unsigned_suite_vote(&signed_vote_bytes),
+                    Err("Vote inline signature"),
+                    "a valid inline-signature length is decoded and then refused"
+                );
                 marker[POSTPUB_PREIMAGE_LEN_OFFSET..POSTPUB_PREIMAGE_OFFSET].copy_from_slice(&257u16.to_le_bytes());
                 assert!(parse_marker(&marker[..]).is_err());
             }
@@ -13252,7 +13307,8 @@ mod tests {
             #[test]
             fn publication_acceptance_requires_abort_and_complete_matching_marker() {
                 let nonce = [9u8; NONCE_LEN];
-                let marker = build_marker(&nonce, &[1; PK_LEN], &[2; VOTE_LEN], &[3; 32], &[4; POSITION_LEN], &[5; 32]);
+                let vote = valid_unsigned_suite_vote_wire();
+                let marker = build_marker(&nonce, &[1; PK_LEN], &vote, &[3; 32], &[4; POSITION_LEN], &[5; 32]);
                 let mut complete = marker.to_vec();
                 complete[23..27].copy_from_slice(&1u32.to_le_bytes());
                 complete[27..31].copy_from_slice(&1u32.to_le_bytes());
@@ -13272,7 +13328,8 @@ mod tests {
             #[test]
             fn publication_hook_rejects_invalid_live_observations_without_marker() {
                 let temp = tempfile::tempdir().unwrap();
-                let marker = build_marker(&[6; NONCE_LEN], &[1; PK_LEN], &[2; VOTE_LEN], &[3; 32], &[4; POSITION_LEN], &[5; 32]);
+                let vote = valid_unsigned_suite_vote_wire();
+                let marker = build_marker(&[6; NONCE_LEN], &[1; PK_LEN], &vote, &[3; 32], &[4; POSITION_LEN], &[5; 32]);
                 let cases = [
                     (Ok(AdmittedPublishOutcome::AlreadyAcknowledged), false, 1, 1, 0, SIG_LEN),
                     (Ok(AdmittedPublishOutcome::Published), true, 1, 1, 0, SIG_LEN),
@@ -13333,10 +13390,14 @@ mod tests {
                 );
                 let ledgers = snapshot_ledgers(&owner);
                 let provenance = pin_provenance_now(&owner, &decided);
+                let operational_ceiling = owner.backend_for_test().accounting_cap().expect("operational ceiling");
+                let aggregate_ceiling = owner.backend_for_test().accounting_aggregate_cap().expect("aggregate ceiling");
                 let outcome = fresh_vote_sign_real_local::<FixtureCommittedHistory>(
                     &owner, &engine, &decided, &proposal, &limits, None, &mut snapshot,
                     &signer, &mut sink, &journal, &mut coord, ReconfirmPerturbation::None,
                 );
+                assert_eq!(owner.backend_for_test().accounting_cap(), Some(operational_ceiling), "publication control preserves operational ceiling");
+                assert_eq!(owner.backend_for_test().accounting_aggregate_cap(), Some(aggregate_ceiling), "publication control preserves aggregate ceiling");
                 let diag = match outcome { RealFreshSignOutcome::Published(d) => d, other => panic!("expected Published: {other:?}") };
                 assert_eq!(diag.retirement, RetirementReport::Retired);
                 assert_eq!((signer.calls(), sink.calls, coord.calls), (1, 1, 1));
@@ -13466,10 +13527,14 @@ mod tests {
                 let fresh_record = wrapper.get_signing_record(&witness.position_key).expect("fresh pre-record").expect("record");
                 let fresh_metadata = wrapper.get_signing_metadata().expect("fresh pre-metadata").expect("metadata");
                 let fresh_count = journal.reserved_position_count();
+                let fresh_operational_ceiling = owner.backend_for_test().accounting_cap().expect("fresh operational ceiling");
+                let fresh_aggregate_ceiling = owner.backend_for_test().accounting_aggregate_cap().expect("fresh aggregate ceiling");
                 let fresh = fresh_vote_sign_real_local::<FixtureCommittedHistory>(
                     &owner, &engine, &decided, &proposal, &limits, None, &mut fresh_snapshot,
                     &signer, &mut fresh_sink, &journal, &mut fresh_coord, ReconfirmPerturbation::None,
                 );
+                assert_eq!(owner.backend_for_test().accounting_cap(), Some(fresh_operational_ceiling), "fresh refusal preserves operational ceiling");
+                assert_eq!(owner.backend_for_test().accounting_aggregate_cap(), Some(fresh_aggregate_ceiling), "fresh refusal preserves aggregate ceiling");
                 assert_eq!(fresh, RealFreshSignOutcome::ReservePotentiallySigned);
                 assert_eq!((signer.calls(), fresh_sink.calls, fresh_coord.calls), (0, 0, 0));
                 assert_eq!(signer_obs.load(Ordering::SeqCst), 0);
@@ -13492,6 +13557,8 @@ mod tests {
                 let fail_metadata = wrapper.get_signing_metadata().expect("R1 metadata").expect("metadata");
                 let fail_count = journal.reserved_position_count();
                 let fail_counts = wrapper.counts();
+                let fail_operational_ceiling = owner.backend_for_test().accounting_cap().expect("failure operational ceiling");
+                let fail_aggregate_ceiling = owner.backend_for_test().accounting_aggregate_cap().expect("failure aggregate ceiling");
                 let fail_witness = RetainedSliceWitness::from_validated(witnessed_slice);
                 assert_eq!(fail_witness.len(), SIG_LEN);
                 let fail_probe = std::rc::Rc::new(RetainedSliceProbe::new(fail_witness));
@@ -13502,6 +13569,8 @@ mod tests {
                     &owner, &engine, &decided, &proposal, &limits, None, &mut fresh_snapshot,
                     &mut fail_sink, &journal, &mut fail_coord, ReconfirmPerturbation::None,
                 );
+                assert_eq!(owner.backend_for_test().accounting_cap(), Some(fail_operational_ceiling), "failed reissue preserves operational ceiling");
+                assert_eq!(owner.backend_for_test().accounting_aggregate_cap(), Some(fail_aggregate_ceiling), "failed reissue preserves aggregate ceiling");
                 drop(fail_guard);
                 assert_eq!(suppressed, ModelRetainedUseOutcome::DeliverySuppressed);
                 assert_eq!(fail_sink.calls, 0);
@@ -13524,6 +13593,8 @@ mod tests {
                 let ok_metadata = wrapper.get_signing_metadata().expect("R2 metadata").expect("metadata");
                 let ok_count = journal.reserved_position_count();
                 let ok_counts = wrapper.counts();
+                let ok_operational_ceiling = owner.backend_for_test().accounting_cap().expect("retry operational ceiling");
+                let ok_aggregate_ceiling = owner.backend_for_test().accounting_aggregate_cap().expect("retry aggregate ceiling");
                 let ok_witness = RetainedSliceWitness::from_validated(witnessed_slice);
                 assert_eq!(ok_witness.len(), SIG_LEN);
                 let ok_probe = std::rc::Rc::new(RetainedSliceProbe::new(ok_witness));
@@ -13534,6 +13605,8 @@ mod tests {
                     &owner, &engine, &decided, &proposal, &limits, None, &mut fresh_snapshot,
                     &mut ok_sink, &journal, &mut ok_coord, ReconfirmPerturbation::None,
                 );
+                assert_eq!(owner.backend_for_test().accounting_cap(), Some(ok_operational_ceiling), "successful retry preserves operational ceiling");
+                assert_eq!(owner.backend_for_test().accounting_aggregate_cap(), Some(ok_aggregate_ceiling), "successful retry preserves aggregate ceiling");
                 drop(ok_guard);
                 let diag = match consumed { ModelRetainedUseOutcome::Consumed(d) => d, other => panic!("checked retained retry: {other:?}") };
                 assert_eq!(diag.sig_len as usize, SIG_LEN);
