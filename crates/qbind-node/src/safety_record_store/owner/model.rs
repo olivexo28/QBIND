@@ -389,6 +389,79 @@ struct CoordinationProbe {
     timeout: std::time::Duration,
 }
 
+/// RUN 422 — harness-owned, PRECONSTRUCTED boundary evidence for the isolated
+/// post-consumption process-death composition. It carries the complete fixed
+/// binary marker bytes (built BEFORE the protected operation), an
+/// exclusively-created-and-already-open marker file, and shared clones of the
+/// signer/sink observers. When installed via [`ModelCoordinationHook::aborting`],
+/// the hook — at the fixed post-consume / pre-sign point, after exactly one hook
+/// invocation and with both observers still zero — writes the preconstructed
+/// bytes, flushes/syncs them, and raises SIGABRT via `std::process::abort()`
+/// BEFORE the signer runs. It never formats a String, grows a buffer, or reopens
+/// the path inside the hook. It is a caller-owned fixture, NOT part of the
+/// composition's charged working set.
+pub(crate) struct AbortEvidence {
+    /// The complete, fixed-length marker bytes, built outside the protected op.
+    marker: Vec<u8>,
+    /// The exclusively created (`create_new`) marker file, opened before the
+    /// protected operation; initially empty.
+    file: std::fs::File,
+    /// Shared live signer-invocation observer (asserted zero before abort).
+    signer_obs: std::sync::Arc<std::sync::atomic::AtomicU32>,
+    /// Shared live completion-sink observer (asserted zero before abort).
+    sink_obs: std::sync::Arc<std::sync::atomic::AtomicU32>,
+}
+
+impl AbortEvidence {
+    /// Construct the preconstructed evidence. `marker` and `file` MUST be built /
+    /// opened before entering the protected operation; `signer_obs` / `sink_obs`
+    /// MUST be the same shared counters installed on the observed signer and sink.
+    pub(crate) fn new(
+        marker: Vec<u8>,
+        file: std::fs::File,
+        signer_obs: std::sync::Arc<std::sync::atomic::AtomicU32>,
+        sink_obs: std::sync::Arc<std::sync::atomic::AtomicU32>,
+    ) -> Self {
+        Self {
+            marker,
+            file,
+            signer_obs,
+            sink_obs,
+        }
+    }
+
+    /// Assert the boundary invariants directly observed at the hook, then write
+    /// the preconstructed marker and abort. `hook_calls` is the hook's own live
+    /// invocation count (must be exactly 1). Never returns.
+    fn fire(mut self, hook_calls: u32) -> ! {
+        use std::io::Write as _;
+        // Directly observed at the hook: exactly one hook invocation, and the
+        // live shared observers show ZERO signer and ZERO sink calls. These
+        // assertions run BEFORE any complete marker is written, so a violated
+        // invariant unwinds (panic=unwind) without emitting boundary evidence.
+        assert_eq!(hook_calls, 1, "the coordination hook must fire exactly once");
+        assert_eq!(
+            self.signer_obs.load(std::sync::atomic::Ordering::SeqCst),
+            0,
+            "the signer must not have been invoked before the pre-sign boundary"
+        );
+        assert_eq!(
+            self.sink_obs.load(std::sync::atomic::Ordering::SeqCst),
+            0,
+            "the completion sink must not have been invoked before the pre-sign boundary"
+        );
+        // Write the COMPLETE preconstructed marker, flush and fsync it so the
+        // surviving parent reliably observes the full invocation-matched record,
+        // THEN abort before the signer executes.
+        self.file
+            .write_all(&self.marker)
+            .expect("write the preconstructed boundary marker");
+        self.file.flush().expect("flush the boundary marker");
+        self.file.sync_all().expect("fsync the boundary marker");
+        std::process::abort();
+    }
+}
+
 /// A fixed, bounded coordination point invoked AFTER the D10 reservation is
 /// consumed and the original ticket is reconfirmed, and BEFORE the signer is
 /// invoked. The probing variant drives a competing same-domain handle through a
@@ -424,6 +497,11 @@ pub(crate) struct ModelCoordinationHook {
     /// The aggregate ledger charge sampled at the PRE-RESERVATION phase, if a
     /// sampling backend was installed.
     pub(crate) observed_aggregate_pre_reserve: Option<u128>,
+    /// RUN 422 — when `Some`, the hook terminates the process (SIGABRT) at the
+    /// post-consume / pre-sign point after writing the preconstructed boundary
+    /// marker. `None` (every existing constructor) is inert w.r.t. termination and
+    /// preserves exact prior behavior.
+    abort_before_sign: Option<AbortEvidence>,
 }
 
 impl ModelCoordinationHook {
@@ -440,6 +518,7 @@ impl ModelCoordinationHook {
             observed_aggregate: None,
             observed_operational_pre_reserve: None,
             observed_aggregate_pre_reserve: None,
+            abort_before_sign: None,
         }
     }
 
@@ -459,6 +538,7 @@ impl ModelCoordinationHook {
             observed_aggregate: None,
             observed_operational_pre_reserve: None,
             observed_aggregate_pre_reserve: None,
+            abort_before_sign: None,
         }
     }
 
@@ -485,6 +565,28 @@ impl ModelCoordinationHook {
             observed_aggregate: None,
             observed_operational_pre_reserve: None,
             observed_aggregate_pre_reserve: None,
+            abort_before_sign: None,
+        }
+    }
+
+    /// RUN 422 — a hook ARMED to terminate the process at the fixed post-consume /
+    /// pre-sign boundary. It carries preconstructed [`AbortEvidence`]; at the
+    /// boundary it asserts exactly one hook invocation and zero live signer/sink
+    /// calls, writes the complete marker, and raises SIGABRT before the signer
+    /// runs. No sampling, no probe. Only this constructor arms termination; every
+    /// other constructor is inert w.r.t. the process boundary.
+    pub(crate) fn aborting(evidence: AbortEvidence) -> Self {
+        Self {
+            probe: None,
+            sample_backend: None,
+            calls: 0,
+            last_excluded: None,
+            failed: false,
+            observed_operational: None,
+            observed_aggregate: None,
+            observed_operational_pre_reserve: None,
+            observed_aggregate_pre_reserve: None,
+            abort_before_sign: Some(evidence),
         }
     }
 
@@ -504,6 +606,14 @@ impl ModelCoordinationHook {
 
     fn on_post_consume_pre_sign(&mut self) {
         self.calls = self.calls.saturating_add(1);
+        // RUN 422 — isolated post-consumption process-death boundary. If armed,
+        // this hook has observed a successful consume and original-ticket
+        // confirmation (by its exact control-flow position after step 14), asserts
+        // the directly-observed invariants, writes the preconstructed marker, and
+        // aborts BEFORE the signer executes. `fire` never returns.
+        if let Some(evidence) = self.abort_before_sign.take() {
+            evidence.fire(self.calls);
+        }
         // RUN 422 §5 — live signing-phase ledger observation. Sampled here, inside
         // the protected sequence, while the reservations/objects are live.
         if let Some(b) = &self.sample_backend {
@@ -2023,11 +2133,31 @@ pub(crate) struct RealSignDiag {
 pub(crate) struct RealSignRecordingSink {
     pub(crate) last: Option<RealSignDiag>,
     pub(crate) calls: u32,
+    /// RUN 422 — an OPTIONAL shared completion-sink observer. When present, each
+    /// real `record` call bumps this shared `AtomicU32` ALONGSIDE the owned
+    /// `calls` counter (never instead of it), so a borrow-correct external
+    /// observer (e.g. the abort hook) can read the live sink-invocation count
+    /// without aliasing the `&mut` sink. `None` leaves existing behavior exact.
+    pub(crate) observer: Option<std::sync::Arc<std::sync::atomic::AtomicU32>>,
 }
 
 impl RealSignRecordingSink {
     pub(crate) fn new() -> Self {
-        Self { last: None, calls: 0 }
+        Self {
+            last: None,
+            calls: 0,
+            observer: None,
+        }
+    }
+
+    /// As [`RealSignRecordingSink::new`] but wired to a shared observer that is
+    /// bumped in lock-step with the owned `calls` counter.
+    pub(crate) fn new_observed(observer: std::sync::Arc<std::sync::atomic::AtomicU32>) -> Self {
+        Self {
+            last: None,
+            calls: 0,
+            observer: Some(observer),
+        }
     }
 
     /// Copy only fixed scalars out of `vote` plus the lengths and the bounded
@@ -2052,6 +2182,9 @@ impl RealSignRecordingSink {
             retirement,
         };
         self.calls = self.calls.saturating_add(1);
+        if let Some(obs) = &self.observer {
+            obs.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        }
         self.last = Some(diag);
         diag
     }
@@ -2129,6 +2262,11 @@ pub(crate) enum RealFreshSignOutcome {
 pub(crate) struct CountingValidatorSigner<'a> {
     inner: &'a dyn ValidatorSigner,
     calls: std::sync::atomic::AtomicU32,
+    /// RUN 422 — an OPTIONAL shared signer observer, bumped in lock-step with the
+    /// owned `calls` counter inside `sign_vote_into` (never instead of it). Lets a
+    /// borrow-correct external observer read the live signer-invocation count
+    /// without aliasing this fixture. `None` preserves existing behavior exactly.
+    observer: Option<std::sync::Arc<std::sync::atomic::AtomicU32>>,
 }
 
 impl<'a> CountingValidatorSigner<'a> {
@@ -2136,6 +2274,20 @@ impl<'a> CountingValidatorSigner<'a> {
         Self {
             inner,
             calls: std::sync::atomic::AtomicU32::new(0),
+            observer: None,
+        }
+    }
+
+    /// As [`CountingValidatorSigner::new`] but wired to a shared observer bumped in
+    /// lock-step with the owned `calls` counter.
+    pub(crate) fn new_observed(
+        inner: &'a dyn ValidatorSigner,
+        observer: std::sync::Arc<std::sync::atomic::AtomicU32>,
+    ) -> Self {
+        Self {
+            inner,
+            calls: std::sync::atomic::AtomicU32::new(0),
+            observer: Some(observer),
         }
     }
 
@@ -2184,6 +2336,9 @@ impl ValidatorSigner for CountingValidatorSigner<'_> {
     ) -> Result<usize, crate::validator_signer::BoundedSignError> {
         self.calls
             .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        if let Some(obs) = &self.observer {
+            obs.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        }
         self.inner.sign_vote_into(preimage, out)
     }
 }
@@ -11449,6 +11604,1199 @@ mod tests {
                     &owner, &decided, &base_vote, ledgers_before, prov_before,
                     "the wrong-correspondence retained refusal",
                 );
+            }
+        }
+        // ===================================================================
+        // RUN 422 — ISOLATED post-consumption process-DEATH recovery boundary.
+        //
+        // A genuine child process drives the actual protected `fresh_vote_sign_
+        // real_local` route through its admitted reserve + consume + original-
+        // ticket confirmation, and at the FIXED post-consume / pre-sign
+        // coordination hook — after exactly one hook invocation and with the live
+        // signer/sink observers both zero — writes a complete fixed binary marker
+        // and raises SIGABRT (`std::process::abort`) BEFORE the signer executes.
+        // The surviving parent reopens BOTH persistent RocksDB backends through
+        // their ordinary APIs (never re-initializing over established state),
+        // recovers fresh O2/O3/O5 with NO inherited process-local capability, and
+        // requires the recovered `Reserved` obligation to refuse the protected
+        // fresh route (`ReservePotentiallySigned`, zero signer/sink), with durable
+        // non-mutation and surviving-process cleanup to zero.
+        //
+        // The ONLY test-key material shared across the process boundary is a
+        // parent-generated real suite-100 ML-DSA-44 keypair, transported through a
+        // parent-owned 0600 fixture file OUTSIDE both databases. No child-era
+        // authorization ticket, prepared pin, recovery proof, continuation, or
+        // publication capability ever crosses the boundary; every such capability
+        // is reconstructed only through its ordinary interface. Process death does
+        // NOT run Drop, so NO child ledger restoration is claimed.
+        //
+        // This whole slice is `#[cfg(all(unix, panic = "unwind"))]`: termination
+        // classification uses the Unix `ExitStatusExt::signal()` and the POSIX-
+        // fixed SIGABRT value (6), and a panic must NOT satisfy the termination
+        // predicate (only SIGABRT together with a complete invocation-matched
+        // marker is accepted). An unsupported panic configuration is rejected by
+        // absence of this evidence path.
+        // ===================================================================
+        #[cfg(all(unix, panic = "unwind"))]
+        mod postconsume_process_death {
+            use super::*;
+            use std::io::{Read as _, Write as _};
+            use std::os::unix::fs::OpenOptionsExt as _;
+            use std::os::unix::process::ExitStatusExt as _;
+            use std::time::{Duration, Instant};
+
+            use crate::signing_reservation_journal::{SigningDecisionRecord, SigningRecordStage};
+            use crate::storage::RocksDbConsensusStorage;
+
+            // ---- fixed fixture-transport format (parent-owned 0600 keyfile) ----
+            const FIXTURE_MAGIC: [u8; 4] = *b"R422";
+            const FIXTURE_VERSION: u16 = 1;
+            const FIXTURE_SUITE: u16 = MODEL_SUITE_U16; // 100
+            const FIXTURE_VALIDATOR: u32 = SIGNER_VID as u32; // 1
+            const PK_LEN: usize = qbind_crypto::ml_dsa44::ML_DSA_44_PUBLIC_KEY_SIZE; // 1312
+            const SK_LEN: usize = qbind_crypto::ml_dsa44::ML_DSA_44_SECRET_KEY_SIZE; // 2560
+            const FIXTURE_LEN: usize =
+                4 + 2 + 2 + 4 + 2 + PK_LEN + 2 + SK_LEN; // == 3888
+
+            // ---- fixed boundary-marker format ----
+            const MARKER_MAGIC: [u8; 4] = *b"R4M2";
+            const MARKER_VERSION: u16 = 1;
+            // Explicit post-consume / pre-sign phase tag (route step 15).
+            const PHASE_POST_CONSUME_PRE_SIGN: u8 = 0x15;
+            const NONCE_LEN: usize = 16;
+            // The UNSIGNED Vote wire encoding length (msg_type+version+chain_id+
+            // epoch+height+round+step+block_id+validator_index+suite_id+sig_len+
+            // empty sig == 69). Asserted at build time against the real encoder.
+            const UNSIGNED_VOTE_LEN: usize = 69;
+            const PREIMAGE_BUF_LEN: usize = MODEL_MAX_PREIMAGE_BYTES as usize; // 256
+            const POS_KEY_LEN: usize = crate::signing_journal_admission::JOURNAL_KEY_LEN; // 55
+            const BINDING_LEN: usize = 32;
+            const MARKER_LEN: usize = 4   // magic
+                + 2                        // version
+                + 1                        // phase
+                + NONCE_LEN
+                + 4 + 4 + 4                // hook / signer / sink counts (u32)
+                + 2 + PK_LEN               // pk_len (u16) + pk
+                + 2 + UNSIGNED_VOTE_LEN    // vote_len (u16) + vote
+                + 2 + PREIMAGE_BUF_LEN     // preimage_len (u16) + fixed zero-padded buffer
+                + POS_KEY_LEN
+                + BINDING_LEN;
+
+            // SIGABRT. `std::process::abort()` raises this on Unix; `std` exposes no
+            // constant and 6 is the POSIX-fixed value.
+            const EXPECTED_ABORT_SIGNAL: i32 = 6;
+
+            // Finite supervision budgets (hard budgets on a cooperating kernel; NOT
+            // a proof the kernel always completes termination).
+            const STATUS_DEADLINE: Duration = Duration::from_secs(30);
+            const REAP_BUDGET: Duration = Duration::from_secs(5);
+            const POLL_STEP: Duration = Duration::from_millis(10);
+
+            // Env keys for the re-executed child.
+            const ENV_MODE: &str = "R422_PCPD_CHILD_MODE";
+            const ENV_FIXTURE: &str = "R422_PCPD_FIXTURE";
+            const ENV_MARKER: &str = "R422_PCPD_MARKER";
+            const ENV_NONCE: &str = "R422_PCPD_NONCE_HEX";
+            const ENV_SAFETY_DIR: &str = "R422_PCPD_SAFETY_DIR";
+            const ENV_JOURNAL_DIR: &str = "R422_PCPD_JOURNAL_DIR";
+
+            const CHILD_TEST_PATH: &str = "safety_record_store::owner::model::tests::real_fresh_sign::postconsume_process_death::postconsume_child_entry";
+
+            // ---------------------------------------------------------------
+            // Fixture transport (fixed 3,888-byte, 0600, outside both DBs).
+            // ---------------------------------------------------------------
+
+            /// Serialize the fixed fixture bytes (little-endian integers). Never
+            /// printed/committed; the secret bytes live only inside this buffer and
+            /// the 0600 file.
+            fn encode_fixture(pk: &[u8], sk: &[u8]) -> Vec<u8> {
+                assert_eq!(pk.len(), PK_LEN, "fixture public key is the ML-DSA-44 size");
+                assert_eq!(sk.len(), SK_LEN, "fixture secret key is the ML-DSA-44 size");
+                let mut out = Vec::with_capacity(FIXTURE_LEN);
+                out.extend_from_slice(&FIXTURE_MAGIC);
+                out.extend_from_slice(&FIXTURE_VERSION.to_le_bytes());
+                out.extend_from_slice(&FIXTURE_SUITE.to_le_bytes());
+                out.extend_from_slice(&FIXTURE_VALIDATOR.to_le_bytes());
+                out.extend_from_slice(&(PK_LEN as u16).to_le_bytes());
+                out.extend_from_slice(pk);
+                out.extend_from_slice(&(SK_LEN as u16).to_le_bytes());
+                out.extend_from_slice(sk);
+                assert_eq!(out.len(), FIXTURE_LEN, "fixture length is fixed at 3,888 bytes");
+                out
+            }
+
+            /// Write the fixture EXCLUSIVELY with mode 0600 inside a parent-owned
+            /// directory (outside both RocksDB directories).
+            fn write_fixture_file(path: &std::path::Path, pk: &[u8], sk: &[u8]) {
+                let bytes = encode_fixture(pk, sk);
+                let mut f = std::fs::OpenOptions::new()
+                    .write(true)
+                    .create_new(true)
+                    .mode(0o600)
+                    .open(path)
+                    .expect("exclusively create the 0600 fixture file");
+                f.write_all(&bytes).expect("write fixture bytes");
+                f.flush().expect("flush fixture");
+                f.sync_all().expect("fsync fixture");
+            }
+
+            /// Read + fully validate the fixture into bounded storage (reject short,
+            /// long/trailing, or malformed content). Returns (pk, sk).
+            fn read_fixture_file(path: &std::path::Path) -> (Vec<u8>, Vec<u8>) {
+                let mut f = std::fs::File::open(path).expect("open fixture file");
+                let mut buf = vec![0u8; FIXTURE_LEN];
+                f.read_exact(&mut buf).expect("fixture has at least the fixed length");
+                // Reject any trailing bytes: a bounded one-byte probe must hit EOF.
+                let mut extra = [0u8; 1];
+                assert_eq!(
+                    f.read(&mut extra).expect("probe read"),
+                    0,
+                    "the fixture file carries no trailing bytes"
+                );
+                let mut off = 0usize;
+                let take = |off: &mut usize, n: usize| {
+                    let s = buf[*off..*off + n].to_vec();
+                    *off += n;
+                    s
+                };
+                let u16at = |off: &mut usize| {
+                    let mut a = [0u8; 2];
+                    a.copy_from_slice(&buf[*off..*off + 2]);
+                    *off += 2;
+                    u16::from_le_bytes(a)
+                };
+                let u32at = |off: &mut usize| {
+                    let mut a = [0u8; 4];
+                    a.copy_from_slice(&buf[*off..*off + 4]);
+                    *off += 4;
+                    u32::from_le_bytes(a)
+                };
+                assert_eq!(&take(&mut off, 4)[..], &FIXTURE_MAGIC[..], "fixture magic");
+                assert_eq!(u16at(&mut off), FIXTURE_VERSION, "fixture version");
+                assert_eq!(u16at(&mut off), FIXTURE_SUITE, "fixture suite");
+                assert_eq!(u32at(&mut off), FIXTURE_VALIDATOR, "fixture validator");
+                assert_eq!(u16at(&mut off) as usize, PK_LEN, "fixture pk length");
+                let pk = take(&mut off, PK_LEN);
+                assert_eq!(u16at(&mut off) as usize, SK_LEN, "fixture sk length");
+                let sk = take(&mut off, SK_LEN);
+                assert_eq!(off, FIXTURE_LEN, "consumed exactly the fixed fixture length");
+                (pk, sk)
+            }
+
+            /// Build a suite-100 authority from a shared public key (no randomness),
+            /// so both processes construct the IDENTICAL validator/suite/domain/
+            /// authorized-epoch fixture.
+            fn authority_from_pk(pk: Vec<u8>) -> ProposalVoteAuthority {
+                let mut pk = pk;
+                pk.shrink_to_fit();
+                assert!(
+                    pk.capacity() as u128 <= MODEL_MAX_PUBKEY_BYTES,
+                    "shared public-key backing fits the model bound"
+                );
+                let mut keys: HashMap<ValidatorId, (ConsensusSigSuiteId, Vec<u8>)> = HashMap::new();
+                keys.insert(ValidatorId::new(SIGNER_VID), (SUITE_PQ_RESERVED_1, pk));
+                let domain = ProposalVoteSigningDomainV2::try_new(
+                    ChainId(0xD5D5_0000_0000_0001),
+                    MODEL_WIRE_CHAIN_ID,
+                    [0x5Du8; 32],
+                    [0xA5u8; 32],
+                )
+                .expect("valid signing domain");
+                ProposalVoteAuthority {
+                    validators: Arc::new(authority_validators()),
+                    key_provider: Arc::new(TestKeyProvider { keys }),
+                    backend_registry: Arc::new(SimpleBackendRegistry::with_backend(
+                        SUITE_PQ_RESERVED_1,
+                        Arc::new(MlDsa44Backend),
+                    )),
+                    chain_id: QBIND_DEVNET_CHAIN_ID,
+                    signer: None,
+                    signing_domain: domain,
+                }
+            }
+
+            // ---------------------------------------------------------------
+            // Boundary-marker build / parse (fixed binary; no memory layouts).
+            // ---------------------------------------------------------------
+
+            /// The complete unsigned Vote wire encoding; asserts the input is
+            /// unsigned and that its length matches the existing encoder (69).
+            fn unsigned_vote_wire(vote: &Vote) -> Vec<u8> {
+                use qbind_wire::io::WireEncode as _;
+                assert!(vote.signature.is_empty(), "the captured self-vote is unsigned");
+                let mut buf = Vec::new();
+                vote.encode(&mut buf);
+                assert_eq!(
+                    buf.len(),
+                    UNSIGNED_VOTE_LEN,
+                    "the unsigned Vote wire encoding is exactly {UNSIGNED_VOTE_LEN} bytes"
+                );
+                buf
+            }
+
+            /// The fields an invocation-matched marker witnesses.
+            #[derive(Clone, Debug, PartialEq, Eq)]
+            struct MarkerWitness {
+                nonce: [u8; NONCE_LEN],
+                hook_count: u32,
+                signer_count: u32,
+                sink_count: u32,
+                public_key: Vec<u8>,
+                unsigned_vote: Vec<u8>,
+                preimage: Vec<u8>,
+                position_key: Vec<u8>,
+                binding: [u8; BINDING_LEN],
+            }
+
+            /// Build the complete fixed marker bytes from preconstructed fields.
+            #[allow(clippy::too_many_arguments)]
+            fn build_marker(
+                nonce: &[u8; NONCE_LEN],
+                hook_count: u32,
+                signer_count: u32,
+                sink_count: u32,
+                public_key: &[u8],
+                unsigned_vote: &[u8],
+                preimage: &[u8],
+                position_key: &[u8],
+                binding: &[u8; BINDING_LEN],
+            ) -> Vec<u8> {
+                assert_eq!(public_key.len(), PK_LEN, "marker pk length");
+                assert_eq!(unsigned_vote.len(), UNSIGNED_VOTE_LEN, "marker vote length");
+                assert_eq!(position_key.len(), POS_KEY_LEN, "marker position-key length");
+                assert!(
+                    preimage.len() <= PREIMAGE_BUF_LEN,
+                    "preimage fits the fixed {PREIMAGE_BUF_LEN}-byte buffer"
+                );
+                let mut out = Vec::with_capacity(MARKER_LEN);
+                out.extend_from_slice(&MARKER_MAGIC);
+                out.extend_from_slice(&MARKER_VERSION.to_le_bytes());
+                out.push(PHASE_POST_CONSUME_PRE_SIGN);
+                out.extend_from_slice(nonce);
+                out.extend_from_slice(&hook_count.to_le_bytes());
+                out.extend_from_slice(&signer_count.to_le_bytes());
+                out.extend_from_slice(&sink_count.to_le_bytes());
+                out.extend_from_slice(&(PK_LEN as u16).to_le_bytes());
+                out.extend_from_slice(public_key);
+                out.extend_from_slice(&(UNSIGNED_VOTE_LEN as u16).to_le_bytes());
+                out.extend_from_slice(unsigned_vote);
+                out.extend_from_slice(&(preimage.len() as u16).to_le_bytes());
+                let mut padded = vec![0u8; PREIMAGE_BUF_LEN];
+                padded[..preimage.len()].copy_from_slice(preimage);
+                out.extend_from_slice(&padded);
+                out.extend_from_slice(position_key);
+                out.extend_from_slice(binding);
+                assert_eq!(out.len(), MARKER_LEN, "marker length is fixed/derived");
+                out
+            }
+
+            /// Parse + fully validate a marker; reject bad length, magic, version,
+            /// phase, oversized preimage length, or nonzero padding.
+            fn parse_marker(bytes: &[u8]) -> MarkerWitness {
+                assert_eq!(bytes.len(), MARKER_LEN, "marker is exactly the fixed length");
+                let mut off = 0usize;
+                let takeb = |off: &mut usize, n: usize| {
+                    let s = &bytes[*off..*off + n];
+                    *off += n;
+                    s
+                };
+                let u16at = |off: &mut usize| {
+                    let mut a = [0u8; 2];
+                    a.copy_from_slice(&bytes[*off..*off + 2]);
+                    *off += 2;
+                    u16::from_le_bytes(a)
+                };
+                let u32at = |off: &mut usize| {
+                    let mut a = [0u8; 4];
+                    a.copy_from_slice(&bytes[*off..*off + 4]);
+                    *off += 4;
+                    u32::from_le_bytes(a)
+                };
+                assert_eq!(takeb(&mut off, 4), &MARKER_MAGIC[..], "marker magic");
+                assert_eq!(u16at(&mut off), MARKER_VERSION, "marker version");
+                assert_eq!(
+                    takeb(&mut off, 1)[0],
+                    PHASE_POST_CONSUME_PRE_SIGN,
+                    "marker records the post-consume / pre-sign phase"
+                );
+                let mut nonce = [0u8; NONCE_LEN];
+                nonce.copy_from_slice(takeb(&mut off, NONCE_LEN));
+                let hook_count = u32at(&mut off);
+                let signer_count = u32at(&mut off);
+                let sink_count = u32at(&mut off);
+                assert_eq!(u16at(&mut off) as usize, PK_LEN, "marker pk length field");
+                let public_key = takeb(&mut off, PK_LEN).to_vec();
+                assert_eq!(u16at(&mut off) as usize, UNSIGNED_VOTE_LEN, "marker vote length field");
+                let unsigned_vote = takeb(&mut off, UNSIGNED_VOTE_LEN).to_vec();
+                let preimage_len = u16at(&mut off) as usize;
+                assert!(preimage_len <= PREIMAGE_BUF_LEN, "preimage length within the fixed buffer");
+                let buf = takeb(&mut off, PREIMAGE_BUF_LEN);
+                assert!(
+                    buf[preimage_len..].iter().all(|&b| b == 0),
+                    "unused preimage padding is zeroed"
+                );
+                let preimage = buf[..preimage_len].to_vec();
+                let position_key = takeb(&mut off, POS_KEY_LEN).to_vec();
+                let mut binding = [0u8; BINDING_LEN];
+                binding.copy_from_slice(takeb(&mut off, BINDING_LEN));
+                assert_eq!(off, MARKER_LEN, "consumed exactly the fixed marker length");
+                MarkerWitness {
+                    nonce,
+                    hook_count,
+                    signer_count,
+                    sink_count,
+                    public_key,
+                    unsigned_vote,
+                    preimage,
+                    position_key,
+                    binding,
+                }
+            }
+
+            /// Bounded parent read: at most MARKER_LEN+1 bytes; reject
+            /// missing/short/long content. Returns the raw bytes.
+            fn read_marker_bounded(path: &std::path::Path) -> std::io::Result<Vec<u8>> {
+                let f = std::fs::File::open(path)?;
+                let mut limited = f.take((MARKER_LEN + 1) as u64);
+                let mut buf = Vec::with_capacity(MARKER_LEN + 1);
+                limited.read_to_end(&mut buf)?;
+                Ok(buf)
+            }
+
+            /// 16 fresh bytes from `/dev/urandom` (supported Linux profile). Used by
+            /// the parent to mint an invocation nonce BEFORE the protected op.
+            fn urandom_nonce() -> [u8; NONCE_LEN] {
+                let mut f = std::fs::File::open("/dev/urandom").expect("open /dev/urandom");
+                let mut n = [0u8; NONCE_LEN];
+                f.read_exact(&mut n).expect("read 16 nonce bytes");
+                n
+            }
+
+            fn nonce_to_hex(n: &[u8; NONCE_LEN]) -> String {
+                let mut s = String::with_capacity(NONCE_LEN * 2);
+                for b in n {
+                    s.push_str(&format!("{b:02x}"));
+                }
+                s
+            }
+
+            fn hex_to_nonce(s: &str) -> [u8; NONCE_LEN] {
+                assert_eq!(s.len(), NONCE_LEN * 2, "nonce hex is 32 chars");
+                let mut n = [0u8; NONCE_LEN];
+                for (i, slot) in n.iter_mut().enumerate() {
+                    *slot = u8::from_str_radix(&s[i * 2..i * 2 + 2], 16).expect("hex byte");
+                }
+                n
+            }
+
+            // ---------------------------------------------------------------
+            // Bounded, owned child supervision (Stdio::null; no pipe drain).
+            // ---------------------------------------------------------------
+
+            /// Observed termination classification for an owned child.
+            #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+            enum TermClass {
+                /// Exited via a terminating signal.
+                Signaled(i32),
+                /// Exited normally with this code (or -1 if unavailable).
+                Exited(i32),
+                /// The status deadline expired; the parent killed and reaped it.
+                /// `kill_confirmed` is true ONLY when the `kill` syscall itself
+                /// succeeded. A false value records a race in which the child had
+                /// already exited (so `kill` errored) but a later `try_wait` still
+                /// observed the exit — reported accurately, never labelled "killed".
+                TimedOutKilled { kill_confirmed: bool },
+            }
+
+            /// Pure classification of a reaped `ExitStatus` (no scheduling).
+            fn classify_status(status: std::process::ExitStatus) -> TermClass {
+                if let Some(sig) = status.signal() {
+                    TermClass::Signaled(sig)
+                } else {
+                    TermClass::Exited(status.code().unwrap_or(-1))
+                }
+            }
+
+            /// An owned child with explicit, bounded reaping. The normal path calls
+            /// [`OwnedChild::supervise`] (which reaps and classifies); any residual
+            /// live child is cleaned up on `Drop` with a bounded, NON-panicking
+            /// kill+reap so an assertion-unwind cannot leak it.
+            struct OwnedChild {
+                child: Option<std::process::Child>,
+            }
+
+            impl OwnedChild {
+                fn new(child: std::process::Child) -> Self {
+                    Self { child: Some(child) }
+                }
+
+                /// Wait (bounded, `try_wait` polling) for the child to terminate ON
+                /// ITS OWN within `status_deadline` (test-selected: the normal
+                /// budget for the boundary, a short budget for the timeout control).
+                /// On timeout, kill and reap within `REAP_BUDGET`. Returns the
+                /// classification or an explicit failure string (try_wait error,
+                /// kill error without an observed exit, or unreaped within budget).
+                /// On success the child is reaped and `Drop` becomes a no-op.
+                fn supervise(&mut self, status_deadline: Duration) -> Result<TermClass, String> {
+                    let child = self.child.as_mut().expect("child present");
+                    let deadline = Instant::now() + status_deadline;
+                    loop {
+                        match child.try_wait() {
+                            Ok(Some(status)) => {
+                                self.child = None;
+                                return Ok(classify_status(status));
+                            }
+                            Ok(None) => {
+                                if Instant::now() >= deadline {
+                                    break;
+                                }
+                                std::thread::sleep(POLL_STEP);
+                            }
+                            Err(e) => return Err(format!("try_wait error: {e}")),
+                        }
+                    }
+                    // Deadline path: kill, then reap within REAP_BUDGET. A kill
+                    // error is tolerated ONLY if a subsequent try_wait still
+                    // observes the exit; the resulting `kill_confirmed` flag records
+                    // whether the kill syscall itself actually succeeded.
+                    let kill_err = child.kill().err();
+                    let reap_deadline = Instant::now() + REAP_BUDGET;
+                    loop {
+                        match child.try_wait() {
+                            Ok(Some(_status)) => {
+                                self.child = None;
+                                return Ok(TermClass::TimedOutKilled {
+                                    kill_confirmed: kill_err.is_none(),
+                                });
+                            }
+                            Ok(None) => {
+                                if Instant::now() >= reap_deadline {
+                                    return Err(format!(
+                                        "child not reaped within budget (kill_err={kill_err:?})"
+                                    ));
+                                }
+                                std::thread::sleep(POLL_STEP);
+                            }
+                            Err(e) => {
+                                return Err(format!(
+                                    "try_wait error during reap: {e} (kill_err={kill_err:?})"
+                                ))
+                            }
+                        }
+                    }
+                }
+            }
+
+            impl Drop for OwnedChild {
+                fn drop(&mut self) {
+                    if let Some(mut c) = self.child.take() {
+                        // Bounded, NON-panicking cleanup (may run during unwind).
+                    // Diagnostic writes are fallible and their errors are
+                    // swallowed so a failed stderr write cannot panic here.
+                    let _ = c.kill();
+                    let deadline = Instant::now() + REAP_BUDGET;
+                    loop {
+                        match c.try_wait() {
+                            Ok(Some(_)) => break,
+                            Ok(None) => {
+                                if Instant::now() >= deadline {
+                                    let _ = writeln!(
+                                        std::io::stderr(),
+                                        "R422 PCPD: child unreaped within budget on drop"
+                                    );
+                                    break;
+                                }
+                                std::thread::sleep(POLL_STEP);
+                            }
+                            Err(e) => {
+                                let _ = writeln!(
+                                    std::io::stderr(),
+                                    "R422 PCPD: try_wait error on drop: {e}"
+                                );
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+            }
+
+            /// Spawn the re-executed child test in the given mode with all streams
+            /// null (no pipe-drain subsystem).
+            fn spawn_boundary_child(
+                mode: &str,
+                fixture: &std::path::Path,
+                marker: &std::path::Path,
+                nonce_hex: &str,
+                safety_dir: &std::path::Path,
+                journal_dir: &std::path::Path,
+            ) -> OwnedChild {
+                let exe = std::env::current_exe().expect("current test exe");
+                let child = std::process::Command::new(exe)
+                    .args([
+                        "--exact",
+                        CHILD_TEST_PATH,
+                        "--ignored",
+                        "--nocapture",
+                        "--test-threads=1",
+                    ])
+                    .env(ENV_MODE, mode)
+                    .env(ENV_FIXTURE, fixture)
+                    .env(ENV_MARKER, marker)
+                    .env(ENV_NONCE, nonce_hex)
+                    .env(ENV_SAFETY_DIR, safety_dir)
+                    .env(ENV_JOURNAL_DIR, journal_dir)
+                    .stdin(std::process::Stdio::null())
+                    .stdout(std::process::Stdio::null())
+                    .stderr(std::process::Stdio::null())
+                    .spawn()
+                    .expect("spawn re-executed boundary child");
+                OwnedChild::new(child)
+            }
+
+            // ---------------------------------------------------------------
+            // Child entrypoint (re-executed; a plain `--ignored` run is a no-op).
+            // ---------------------------------------------------------------
+
+            /// The child's shared fixture-construction path: read the transported
+            /// keypair, establish incarnation A over the PERSISTENT safety store,
+            /// open+associate the PERSISTENT journal, derive the base vote and the
+            /// preconstructed marker, and return everything the protected call
+            /// needs. All marker fields are built BEFORE entering the protected op.
+            #[allow(clippy::type_complexity)]
+            fn child_prepare(
+                fixture: &std::path::Path,
+                safety_dir: &std::path::Path,
+                journal_dir: &std::path::Path,
+                nonce: &[u8; NONCE_LEN],
+            ) -> (
+                ProposalVoteAuthority,
+                Vec<u8>, // sk
+                SafetyRecordOwner,
+                BasicHotStuffEngine<[u8; 32]>,
+                DecidedVote<OwningCapturePayload>,
+                BlockProposal,
+                PreparedDecisionInputLimits,
+                SigningReservationJournal,
+                Vec<u8>, // preconstructed marker bytes
+            ) {
+                let (pk, sk) = read_fixture_file(fixture);
+                let pv = authority_from_pk(pk.clone());
+                let ctx = retained_ctx(4);
+                let (owner, engine, decided, p1, lim, _rev) =
+                    capture_multi_with_suite(safety_dir, &ctx, MODEL_SUITE_U16);
+                let journal_store = reopen_open_journal_store(journal_dir);
+                let journal = reopen_assoc_journal_init(
+                    &owner,
+                    journal_store as Arc<dyn SigningJournalStorage>,
+                    1,
+                );
+                let base_vote = decided.vote().clone();
+                let (position, binding) = retained_pos_binding(&pv, &base_vote);
+                let preimage = pv.signing_domain.vote_preimage(&base_vote);
+                let unsigned_vote = unsigned_vote_wire(&base_vote);
+                let position_key = position.storage_key();
+                // Preconstruct the marker with the KNOWN boundary counts (one hook
+                // invocation, zero signer, zero sink); the hook re-asserts the live
+                // observers before writing.
+                let marker = build_marker(
+                    nonce,
+                    1,
+                    0,
+                    0,
+                    &pk,
+                    &unsigned_vote,
+                    &preimage,
+                    &position_key,
+                    &binding.0,
+                );
+                (pv, sk, owner, engine, decided, p1, lim, journal, marker)
+            }
+
+            #[test]
+            #[ignore = "re-executed child entrypoint; a plain --ignored run is a no-op"]
+            fn postconsume_child_entry() {
+                let Some(mode) = std::env::var_os(ENV_MODE) else {
+                    return; // not in child mode
+                };
+                let mode = mode.to_string_lossy().into_owned();
+                match mode.as_str() {
+                    "missing_marker" => {
+                        // Setup-failure control: exit nonzero without any marker.
+                        std::process::exit(3);
+                    }
+                    "wrong_signal" => {
+                        // Terminate via a NON-abort signal (SIGTERM) without a marker.
+                        unsafe {
+                            libc::raise(libc::SIGTERM);
+                        }
+                        std::process::exit(0);
+                    }
+                    "marker_then_exit" | "abort_boundary" => {
+                        let fixture =
+                            std::path::PathBuf::from(std::env::var_os(ENV_FIXTURE).expect("fixture"));
+                        let marker_path =
+                            std::path::PathBuf::from(std::env::var_os(ENV_MARKER).expect("marker"));
+                        let safety_dir = std::path::PathBuf::from(
+                            std::env::var_os(ENV_SAFETY_DIR).expect("safety dir"),
+                        );
+                        let journal_dir = std::path::PathBuf::from(
+                            std::env::var_os(ENV_JOURNAL_DIR).expect("journal dir"),
+                        );
+                        let nonce = hex_to_nonce(
+                            &std::env::var(ENV_NONCE).expect("nonce hex"),
+                        );
+
+                        let (pv, sk, owner, engine, decided, p1, lim, journal, marker) =
+                            child_prepare(&fixture, &safety_dir, &journal_dir, &nonce);
+
+                        // Open the EXCLUSIVELY created marker file (initially empty)
+                        // BEFORE entering the protected operation.
+                        let marker_file = std::fs::OpenOptions::new()
+                            .write(true)
+                            .create_new(true)
+                            .open(&marker_path)
+                            .expect("exclusively create the empty marker file");
+
+                        if mode == "marker_then_exit" {
+                            // Control: write the complete marker, then exit normally
+                            // (no abort). The parent must reject this (non-SIGABRT).
+                            let mut f = marker_file;
+                            f.write_all(&marker).expect("write marker");
+                            f.flush().expect("flush marker");
+                            f.sync_all().expect("sync marker");
+                            std::process::exit(0);
+                        }
+
+                        // abort_boundary: drive the ACTUAL protected route with the
+                        // armed hook. Shared observers connect the live signer/sink
+                        // counters to the abort evidence.
+                        let signer_obs = Arc::new(std::sync::atomic::AtomicU32::new(0));
+                        let sink_obs = Arc::new(std::sync::atomic::AtomicU32::new(0));
+                        let inner = real_local_signer(&sk);
+                        let signer = CountingValidatorSigner::new_observed(&inner, signer_obs.clone());
+                        let mut sink = RealSignRecordingSink::new_observed(sink_obs.clone());
+                        let mut snapshot = established_snapshot(&pv);
+                        let evidence = AbortEvidence::new(
+                            marker,
+                            marker_file,
+                            signer_obs.clone(),
+                            sink_obs.clone(),
+                        );
+                        let mut coord = ModelCoordinationHook::aborting(evidence);
+                        let outcome = fresh_vote_sign_real_local::<FixtureCommittedHistory>(
+                            &owner, &engine, &decided, &p1, &lim, None, &mut snapshot,
+                            &signer, &mut sink, &journal, &mut coord,
+                            ReconfirmPerturbation::None,
+                        );
+                        // The hook MUST abort inside step 15; reaching here means the
+                        // route never reached the boundary (setup failure).
+                        panic!(
+                            "boundary child did not abort at the pre-sign hook; outcome={outcome:?}"
+                        );
+                    }
+                    other => panic!("unknown child mode {other}"),
+                }
+            }
+
+            // ---------------------------------------------------------------
+            // Pure marker / classifier controls.
+            // ---------------------------------------------------------------
+
+            #[test]
+            fn marker_len_is_derived_constant() {
+                // 4(magic)+2(ver)+1(phase)+16(nonce)+12(counts)
+                //   + (2+1312)(pk) + (2+69)(vote) + (2+256)(preimage) + 55(key) + 32(binding)
+                assert_eq!(MARKER_LEN, 23 + 12 + 1314 + 71 + 258 + 55 + 32);
+                assert_eq!(MARKER_LEN, 1765);
+                assert_eq!(FIXTURE_LEN, 3888);
+                assert_eq!(POS_KEY_LEN, 55);
+            }
+
+            #[test]
+            fn marker_roundtrip_build_parse() {
+                let nonce = [7u8; NONCE_LEN];
+                let pk = vec![0xABu8; PK_LEN];
+                let vote = vec![0x11u8; UNSIGNED_VOTE_LEN];
+                let preimage = vec![0x22u8; 40];
+                let pos = vec![0x33u8; POS_KEY_LEN];
+                let binding = [0x44u8; BINDING_LEN];
+                let bytes = build_marker(&nonce, 1, 0, 0, &pk, &vote, &preimage, &pos, &binding);
+                assert_eq!(bytes.len(), MARKER_LEN);
+                let w = parse_marker(&bytes);
+                assert_eq!(w.nonce, nonce);
+                assert_eq!((w.hook_count, w.signer_count, w.sink_count), (1, 0, 0));
+                assert_eq!(w.public_key, pk);
+                assert_eq!(w.unsigned_vote, vote);
+                assert_eq!(w.preimage, preimage);
+                assert_eq!(w.position_key, pos);
+                assert_eq!(w.binding, binding);
+            }
+
+            #[test]
+            #[should_panic(expected = "unused preimage padding is zeroed")]
+            fn marker_rejects_nonzero_padding() {
+                let nonce = [0u8; NONCE_LEN];
+                let pk = vec![0u8; PK_LEN];
+                let vote = vec![0u8; UNSIGNED_VOTE_LEN];
+                let pos = vec![0u8; POS_KEY_LEN];
+                let binding = [0u8; BINDING_LEN];
+                let mut bytes = build_marker(&nonce, 1, 0, 0, &pk, &vote, &[0u8; 8], &pos, &binding);
+                // Corrupt a padding byte just past the 8-byte preimage.
+                let pad_start = 4 + 2 + 1 + NONCE_LEN + 12 + 2 + PK_LEN + 2 + UNSIGNED_VOTE_LEN + 2 + 8;
+                bytes[pad_start] = 0xFF;
+                let _ = parse_marker(&bytes);
+            }
+
+            #[test]
+            #[should_panic(expected = "marker is exactly the fixed length")]
+            fn marker_rejects_wrong_length() {
+                let mut bytes = vec![0u8; MARKER_LEN + 1];
+                bytes[..4].copy_from_slice(&MARKER_MAGIC);
+                let _ = parse_marker(&bytes);
+            }
+
+            #[test]
+            fn classify_status_table() {
+                use std::process::ExitStatus;
+                assert_eq!(
+                    classify_status(ExitStatus::from_raw(EXPECTED_ABORT_SIGNAL)),
+                    TermClass::Signaled(6)
+                );
+                assert_eq!(classify_status(ExitStatus::from_raw(15)), TermClass::Signaled(15));
+                assert_eq!(classify_status(ExitStatus::from_raw(3 << 8)), TermClass::Exited(3));
+                assert_eq!(classify_status(ExitStatus::from_raw(0)), TermClass::Exited(0));
+            }
+
+            // ---------------------------------------------------------------
+            // Supervision controls (real spawned processes).
+            // ---------------------------------------------------------------
+
+            #[test]
+            fn supervision_missing_marker_setup_failure() {
+                let tmp = tempfile::tempdir().unwrap();
+                let fixture = tmp.path().join("fx.bin");
+                let marker = tmp.path().join("marker.bin");
+                let safety = tempfile::tempdir().unwrap();
+                let journal = tempfile::tempdir().unwrap();
+                // Child exits nonzero without ever creating the marker.
+                let mut child = spawn_boundary_child(
+                    "missing_marker", &fixture, &marker, &"00".repeat(NONCE_LEN),
+                    safety.path(), journal.path(),
+                );
+                let class = child.supervise(STATUS_DEADLINE).expect("reaped");
+                assert_eq!(class, TermClass::Exited(3), "setup-failure child exits nonzero, no signal");
+                assert!(read_marker_bounded(&marker).is_err(), "no marker was produced");
+            }
+
+            #[test]
+            fn supervision_marker_then_ordinary_exit_rejected() {
+                let tmp = tempfile::tempdir().unwrap();
+                let fixture = tmp.path().join("fx.bin");
+                let marker = tmp.path().join("marker.bin");
+                let safety = tempfile::tempdir().unwrap();
+                let journal = tempfile::tempdir().unwrap();
+                let (pk, sk) = MlDsa44Backend::generate_keypair().expect("keygen");
+                write_fixture_file(&fixture, &pk, &sk);
+                let nonce = urandom_nonce();
+                let mut child = spawn_boundary_child(
+                    "marker_then_exit", &fixture, &marker, &nonce_to_hex(&nonce),
+                    safety.path(), journal.path(),
+                );
+                let class = child.supervise(STATUS_DEADLINE).expect("reaped");
+                // A COMPLETE marker was written, but the termination is an ordinary
+                // exit — NOT the intended SIGABRT crash evidence.
+                assert_eq!(class, TermClass::Exited(0), "marker-then-exit is not a crash");
+                assert_ne!(class, TermClass::Signaled(EXPECTED_ABORT_SIGNAL));
+                let raw = read_marker_bounded(&marker).expect("marker present");
+                let w = parse_marker(&raw);
+                assert_eq!(w.nonce, nonce, "marker nonce matches the invocation");
+            }
+
+            #[test]
+            fn supervision_wrong_signal_rejected() {
+                let tmp = tempfile::tempdir().unwrap();
+                let fixture = tmp.path().join("fx.bin");
+                let marker = tmp.path().join("marker.bin");
+                let safety = tempfile::tempdir().unwrap();
+                let journal = tempfile::tempdir().unwrap();
+                let mut child = spawn_boundary_child(
+                    "wrong_signal", &fixture, &marker, &"00".repeat(NONCE_LEN),
+                    safety.path(), journal.path(),
+                );
+                let class = child.supervise(STATUS_DEADLINE).expect("reaped");
+                assert_eq!(
+                    class,
+                    TermClass::Signaled(libc::SIGTERM),
+                    "a wrong terminating signal is not SIGABRT"
+                );
+                assert_ne!(class, TermClass::Signaled(EXPECTED_ABORT_SIGNAL));
+                assert!(read_marker_bounded(&marker).is_err(), "no marker for a wrong-signal exit");
+            }
+
+            #[test]
+            fn supervision_timeout_with_verified_reap() {
+                // A single OWNED long-running process (launched directly, NOT via
+                // `sh -c`, so no descendant is left behind). This drives the ACTUAL
+                // `OwnedChild::supervise` timeout branch via a short status budget,
+                // so a regression in that method's timeout/kill/reap path is caught.
+                let child = std::process::Command::new("sleep")
+                    .arg("600")
+                    .stdin(std::process::Stdio::null())
+                    .stdout(std::process::Stdio::null())
+                    .stderr(std::process::Stdio::null())
+                    .spawn()
+                    .expect("spawn sleep");
+                let mut owned = OwnedChild::new(child);
+                let class = owned
+                    .supervise(Duration::from_millis(200))
+                    .expect("the timed-out child is killed and reaped");
+                // The timeout path was reached (kill confirmed on a live process);
+                // this is cleanup, never the intended SIGABRT crash evidence.
+                match class {
+                    TermClass::TimedOutKilled { kill_confirmed } => {
+                        assert!(kill_confirmed, "the kill of the still-live sleep succeeded");
+                    }
+                    other => panic!("expected the supervisor timeout branch, got {other:?}"),
+                }
+                assert_ne!(
+                    class,
+                    TermClass::Signaled(EXPECTED_ABORT_SIGNAL),
+                    "a parent kill is cleanup, not SIGABRT crash evidence"
+                );
+                // Ownership is cleared only after the supervisor observed the exit.
+                assert!(owned.child.is_none(), "the child was actually reaped by the supervisor");
+            }
+
+            #[test]
+            fn supervision_parent_unwind_bounded_cleanup() {
+                // A raw Child must never be left unowned across a fallible assertion:
+                // wrap it in OwnedChild, force a parent unwind, and confirm the guard
+                // cleaned it up (no leak) via bounded non-panicking Drop.
+                let pid = {
+                    let child = std::process::Command::new("sleep")
+                        .arg("600")
+                        .stdin(std::process::Stdio::null())
+                        .stdout(std::process::Stdio::null())
+                        .stderr(std::process::Stdio::null())
+                        .spawn()
+                        .expect("spawn sleep");
+                    let pid = child.id();
+                    let owned = OwnedChild::new(child);
+                    let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                        let _guard = owned; // owned by the closure; dropped on unwind
+                        panic!("intentional parent unwind");
+                    }));
+                    assert!(r.is_err(), "the unwind was caught");
+                    pid
+                };
+                // After the guard's Drop, the child must be gone. Probe with
+                // `kill(pid, 0)` and capture its errno IMMEDIATELY: a reaped pid
+                // yields a failed probe whose error is EXACTLY ESRCH. EPERM (or any
+                // other error) must NOT count as evidence that the child is gone.
+                let probe = unsafe { libc::kill(pid as libc::pid_t, 0) };
+                let probe_err = std::io::Error::last_os_error();
+                assert_eq!(probe, -1, "probing a reaped pid fails");
+                assert_eq!(
+                    probe_err.raw_os_error(),
+                    Some(libc::ESRCH),
+                    "the owned child is gone (ESRCH), not merely inaccessible (EPERM)"
+                );
+            }
+
+            // ---------------------------------------------------------------
+            // Eligibility / positive control (in-process; NO termination).
+            // ---------------------------------------------------------------
+
+            #[test]
+            fn postconsume_eligibility_published_no_termination() {
+                // Same fixture-construction path and shared test identity as the
+                // boundary child, with the hook DISABLED and separate fresh DBs.
+                let fx_dir = tempfile::tempdir().unwrap();
+                let fixture = fx_dir.path().join("fx.bin");
+                let (pk, sk) = MlDsa44Backend::generate_keypair().expect("keygen");
+                write_fixture_file(&fixture, &pk, &sk);
+                let (rpk, rsk) = read_fixture_file(&fixture);
+                assert_eq!(rpk, pk, "transported public key round-trips");
+                // Redacted equality: a mismatch must NOT print any secret-key bytes.
+                assert!(rsk == sk, "transported secret key round-trips (contents redacted)");
+
+                let pv = authority_from_pk(rpk);
+                let ctx = retained_ctx(4);
+                let safety_dir = tempfile::tempdir().unwrap();
+                let journal_dir = tempfile::tempdir().unwrap();
+                let (owner, engine, decided, p1, lim, _rev) =
+                    capture_multi_with_suite(safety_dir.path(), &ctx, MODEL_SUITE_U16);
+                let base_vote = decided.vote().clone();
+                let store = reopen_open_journal_store(journal_dir.path());
+                let journal = reopen_assoc_journal_init(
+                    &owner,
+                    store.clone() as Arc<dyn SigningJournalStorage>,
+                    1,
+                );
+
+                let signer_obs = Arc::new(std::sync::atomic::AtomicU32::new(0));
+                let sink_obs = Arc::new(std::sync::atomic::AtomicU32::new(0));
+                let inner = real_local_signer(&rsk);
+                let signer = CountingValidatorSigner::new_observed(&inner, signer_obs.clone());
+                let mut sink = RealSignRecordingSink::new_observed(sink_obs.clone());
+                let mut snapshot = established_snapshot(&pv);
+                let mut coord = ModelCoordinationHook::inert();
+
+                let outcome = fresh_vote_sign_real_local::<FixtureCommittedHistory>(
+                    &owner, &engine, &decided, &p1, &lim, None, &mut snapshot,
+                    &signer, &mut sink, &journal, &mut coord, ReconfirmPerturbation::None,
+                );
+                let diag = match outcome {
+                    RealFreshSignOutcome::Published(d) => d,
+                    other => panic!("eligibility control must Publish, got {other:?}"),
+                };
+                assert_eq!(diag.retirement, RetirementReport::Retired, "published then retired");
+                assert_eq!(diag.sig_len, 2420, "ML-DSA-44 signature size");
+                // BOTH the original owned counters AND the shared observers report
+                // one signer / one sink: the observers are genuinely connected.
+                assert_eq!(signer.calls(), 1, "owned signer counter");
+                assert_eq!(sink.calls, 1, "owned sink counter");
+                assert_eq!(signer_obs.load(std::sync::atomic::Ordering::SeqCst), 1, "shared signer observer");
+                assert_eq!(sink_obs.load(std::sync::atomic::Ordering::SeqCst), 1, "shared sink observer");
+                assert_eq!(coord.calls, 1, "the coordination point was reached once (inert)");
+                assert_eq!(journal.reserved_position_count(), 1, "durable-position count 0 -> 1");
+
+                // The stored signature verifies against the exact journal-bound
+                // preimage under the shared authorized key.
+                let (pos, binding) = retained_pos_binding(&pv, &base_vote);
+                let preimage = pv.signing_domain.vote_preimage(&base_vote);
+                let published_sig = match journal.reserve_for_sign(&pos, &binding) {
+                    Ok(ReservationOutcome::ExactRetryRetained(sig)) => sig,
+                    other => panic!("expected the acknowledged signature, got {other:?}"),
+                };
+                assert_eq!(published_sig.len(), 2420, "stored full signature");
+                let (_suite, akey) = pv
+                    .key_provider
+                    .get_suite_and_key(ValidatorId::new(SIGNER_VID))
+                    .expect("authorized public key installed");
+                MlDsa44Backend::verify(&akey, &preimage, &published_sig)
+                    .expect("the stored signature verifies under the shared key and bound preimage");
+                assert_eq!(binding.0.len(), BINDING_LEN);
+            }
+
+            // ---------------------------------------------------------------
+            // THE isolated post-consumption process-death recovery boundary.
+            // ---------------------------------------------------------------
+
+            #[test]
+            fn postconsume_child_death_then_reopen_refuses() {
+                // Parent-owned fixture + marker directory OUTSIDE both databases.
+                let harness_dir = tempfile::tempdir().unwrap();
+                let fixture = harness_dir.path().join("suite100_keypair.bin");
+                let marker = harness_dir.path().join("boundary_marker.bin");
+                // Persistent store directories the child establishes and the parent
+                // reopens (NEVER re-initialized over).
+                let safety_dir = tempfile::tempdir().unwrap();
+                let journal_dir = tempfile::tempdir().unwrap();
+
+                // ONE real parent-generated suite-100 test keypair, transported via
+                // a 0600 fixture file. Build fixtures BEFORE the protected operation.
+                let (pk, sk) = MlDsa44Backend::generate_keypair().expect("keygen");
+                write_fixture_file(&fixture, &pk, &sk);
+                let nonce = urandom_nonce();
+                let nonce_hex = nonce_to_hex(&nonce);
+
+                // Drive the actual protected route to the pre-sign boundary in a real
+                // child process, then require SIGABRT + a complete invocation-matched
+                // marker.
+                let mut child = spawn_boundary_child(
+                    "abort_boundary", &fixture, &marker, &nonce_hex,
+                    safety_dir.path(), journal_dir.path(),
+                );
+                let class = child.supervise(STATUS_DEADLINE).expect("child reaped");
+                assert_eq!(
+                    class,
+                    TermClass::Signaled(EXPECTED_ABORT_SIGNAL),
+                    "the child terminated via the intended SIGABRT at the pre-sign boundary"
+                );
+
+                // Bounded marker read + full validation.
+                let raw = read_marker_bounded(&marker).expect("the child wrote a marker");
+                let witness = parse_marker(&raw);
+                assert_eq!(witness.nonce, nonce, "the marker is matched to THIS invocation");
+                assert_eq!(
+                    (witness.hook_count, witness.signer_count, witness.sink_count),
+                    (1, 0, 0),
+                    "one hook invocation; zero signer and zero sink at the boundary"
+                );
+                assert_eq!(witness.public_key, pk, "the marker carries the shared public key");
+
+                // ---- Surviving process: reopen BOTH stores (no re-init). ----
+                let ctx = retained_ctx(4);
+                let pv = authority_from_pk(pk.clone());
+                let owner_b = reopen_attach(safety_dir.path(), &ctx);
+                let store_b_concrete = reopen_open_journal_store(journal_dir.path());
+                let store_b = store_b_concrete.clone() as Arc<dyn SigningJournalStorage>;
+                let journal_b = reopen_assoc_journal_open(&owner_b, store_b.clone(), 1);
+                assert_eq!(
+                    journal_b.reserved_position_count(),
+                    1,
+                    "the reopened journal recovers exactly one Reserved position"
+                );
+
+                // ---- Durable snapshot taken IMMEDIATELY after reopen, BEFORE the
+                //      O2/O3/O5 recovery helper. The marker witness supplies the
+                //      read-only identification (position key + binding); all
+                //      readback allocations are outside the protected operation. ----
+                let rec_pre = store_b_concrete
+                    .get_signing_record(&witness.position_key)
+                    .expect("bounded record read immediately after reopen")
+                    .expect("the Reserved record survived the abrupt process death");
+                let meta_pre = store_b_concrete
+                    .get_signing_metadata()
+                    .expect("bounded journal-metadata read immediately after reopen");
+                let count_pre = journal_b.reserved_position_count();
+                {
+                    let record_pre =
+                        SigningDecisionRecord::decode(&rec_pre).expect("reopened record decodes");
+                    assert_eq!(
+                        record_pre.stage,
+                        SigningRecordStage::Reserved,
+                        "the reopened record is Reserved before recovery"
+                    );
+                    assert_eq!(
+                        record_pre.position.storage_key(),
+                        witness.position_key,
+                        "the reopened record sits at the witnessed position key"
+                    );
+                    assert_eq!(
+                        record_pre.binding.0, witness.binding,
+                        "the reopened record carries the witnessed binding digest"
+                    );
+                    assert!(
+                        record_pre.retained_signature.is_none(),
+                        "a Reserved record retains NO signature before recovery"
+                    );
+                }
+
+                // ---- Recover a surviving-process capture via fresh O2/O3/O5. ----
+                let (mut engine_b, p1_b, l0_block) = engine_locked_l0_multi_with_suite(MODEL_SUITE_U16);
+                let b_decided = reopen_b_recover_and_capture(&owner_b, &mut engine_b, &p1_b, &lim_b(&ctx), l0_block);
+                let b_base_vote = b_decided.vote().clone();
+
+                // Independently reconstruct and compare the marker witness against the
+                // surviving-process fixtures (test evidence, NOT authorization).
+                let (pos, binding) = retained_pos_binding(&pv, &b_base_vote);
+                let preimage_b = pv.signing_domain.vote_preimage(&b_base_vote);
+                let unsigned_vote_b = unsigned_vote_wire(&b_base_vote);
+                assert_eq!(witness.unsigned_vote, unsigned_vote_b, "unsigned Vote encodings correspond");
+                assert_eq!(witness.preimage, preimage_b, "signing preimages correspond");
+                assert_eq!(witness.position_key, pos.storage_key(), "position keys correspond");
+                assert_eq!(witness.binding, binding.0, "binding digests correspond");
+                let (_suite, akey) = pv
+                    .key_provider
+                    .get_suite_and_key(ValidatorId::new(SIGNER_VID))
+                    .expect("authorized public key installed");
+                assert_eq!(witness.public_key, akey, "public-key identity corresponds");
+
+                // Directly inspect the recovered journal record: Reserved, expected
+                // position/binding, no retained signature. O5 did NOT clear it.
+                let rec_raw = store_b_concrete
+                    .get_signing_record(&pos.storage_key())
+                    .expect("bounded record read after reopen")
+                    .expect("the Reserved record survived the abrupt process death");
+                let record = SigningDecisionRecord::decode(&rec_raw).expect("record decodes");
+                assert_eq!(record.stage, SigningRecordStage::Reserved, "the recovered record is Reserved");
+                assert_eq!(record.position, pos, "the recovered record is at the exact position");
+                assert_eq!(record.binding, binding, "the recovered record carries the exact binding");
+                assert!(
+                    record.retained_signature.is_none(),
+                    "a Reserved record retains NO signature (the signer never ran)"
+                );
+                assert_eq!(journal_b.reserved_position_count(), 1, "successful O5 leaves the D10 obligation intact");
+
+                // Compare the post-recovery durable state SEPARATELY against the
+                // pre-recovery snapshots: successful O5 mutates neither the record
+                // bytes, the journal metadata, nor the reserved-position count.
+                let meta_post_recover = store_b_concrete
+                    .get_signing_metadata()
+                    .expect("journal-metadata read after O5 recovery");
+                assert_eq!(rec_raw, rec_pre, "O5 recovery leaves the durable Reserved bytes unchanged");
+                assert_eq!(meta_post_recover, meta_pre, "O5 recovery leaves the journal metadata unchanged");
+                assert_eq!(journal_b.reserved_position_count(), count_pre, "O5 recovery leaves the reserved-position count unchanged");
+
+                // ---- Invoke the actual protected fresh route; require refusal. ----
+                let signer_obs = Arc::new(std::sync::atomic::AtomicU32::new(0));
+                let sink_obs = Arc::new(std::sync::atomic::AtomicU32::new(0));
+                let inner = real_local_signer(&sk);
+                let signer = CountingValidatorSigner::new_observed(&inner, signer_obs.clone());
+                let mut sink = RealSignRecordingSink::new_observed(sink_obs.clone());
+                let mut snapshot = established_snapshot(&pv);
+                let mut coord = ModelCoordinationHook::inert();
+
+                // Independent operational/aggregate baselines with the surviving
+                // Vote/pin live; plus original pin provenance, record bytes,
+                // metadata, durable-position count, and ceilings established
+                // IMMEDIATELY before the protected refused attempt.
+                let ledgers_before = snapshot_ledgers(&owner_b);
+                let prov_before = pin_provenance_now(&owner_b, &b_decided);
+                let op_cap_before = owner_b.backend_for_test().accounting_cap();
+                let agg_cap_before = owner_b.backend_for_test().accounting_aggregate_cap();
+                let rec_before = store_b_concrete
+                    .get_signing_record(&pos.storage_key())
+                    .expect("record read before the refused attempt")
+                    .expect("the Reserved record persists before the refused attempt");
+                let meta_before = store_b_concrete
+                    .get_signing_metadata()
+                    .expect("journal-metadata read before the refused attempt");
+                let count_before = journal_b.reserved_position_count();
+
+                let outcome = fresh_vote_sign_real_local::<FixtureCommittedHistory>(
+                    &owner_b, &engine_b, &b_decided, &p1_b, &lim_b(&ctx), None, &mut snapshot,
+                    &signer, &mut sink, &journal_b, &mut coord, ReconfirmPerturbation::None,
+                );
+                assert_eq!(
+                    outcome,
+                    RealFreshSignOutcome::ReservePotentiallySigned,
+                    "the recovered Reserved obligation refuses fresh signing after O5"
+                );
+                assert_eq!(signer.calls(), 0, "zero signer calls on the refused fresh attempt");
+                assert_eq!(sink.calls, 0, "zero sink calls on the refused fresh attempt");
+                assert_eq!(signer_obs.load(std::sync::atomic::Ordering::SeqCst), 0, "shared signer observer stays zero");
+                assert_eq!(sink_obs.load(std::sync::atomic::Ordering::SeqCst), 0, "shared sink observer stays zero");
+
+                // Immediately assert accounting/Vote/pin preservation and unchanged
+                // ceilings, THEN separately compare durable record/metadata/count.
+                assert_cleanup_preserved(
+                    &owner_b, &b_decided, &b_base_vote, ledgers_before, prov_before,
+                    "the recovered-Reserved fresh refusal",
+                );
+                assert_eq!(owner_b.backend_for_test().accounting_cap(), op_cap_before, "operational ceiling unchanged");
+                assert_eq!(owner_b.backend_for_test().accounting_aggregate_cap(), agg_cap_before, "aggregate ceiling unchanged");
+                let rec_after = store_b_concrete
+                    .get_signing_record(&pos.storage_key())
+                    .expect("read")
+                    .expect("the Reserved record still persists");
+                let meta_after = store_b_concrete
+                    .get_signing_metadata()
+                    .expect("journal-metadata read after the refusal");
+                assert_eq!(rec_after, rec_before, "the durable Reserved bytes are unchanged by the refusal");
+                assert_eq!(meta_after, meta_before, "the journal metadata is unchanged by the refusal");
+                assert_eq!(journal_b.reserved_position_count(), count_before, "durable-position count unchanged by the refusal");
+
+                // ---- Full surviving-process teardown to zero (abort ran no child
+                //      Drop, so NO child ledger restoration is claimed). ----
+                let b_acct = owner_b.backend_for_test().accounting_handle_for_test();
+                drop(b_decided); // the pin/envelope FIRST
+                drop(engine_b);
+                drop(journal_b);
+                drop(store_b);
+                drop(store_b_concrete);
+                drop(owner_b);
+                assert_eq!(b_acct.current(), 0, "surviving operational ledger returns to zero after full teardown");
+                assert_eq!(b_acct.aggregate().current(), 0, "surviving aggregate ledger returns to zero after full teardown");
+            }
+
+            /// The surviving process derives its OWN limits from the pinned context
+            /// (the child's limits never cross the boundary).
+            fn lim_b(ctx: &PinnedSafetyContext) -> PreparedDecisionInputLimits {
+                PreparedDecisionInputLimits::from_pinned(ctx).expect("pinned context yields a policy")
             }
         }
     }
