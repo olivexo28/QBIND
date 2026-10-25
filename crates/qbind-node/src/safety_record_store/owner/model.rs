@@ -690,6 +690,8 @@ impl PostSignPrePublicationEvidence {
         if self.terminate {
             std::process::abort();
         }
+
+
     }
 
 }
@@ -732,6 +734,9 @@ pub(crate) struct ModelCoordinationHook {
     /// Optional model-only observer incremented immediately before the actual
     /// admitted publication API callsite.
     publication_attempts: Option<std::sync::Arc<std::sync::atomic::AtomicU32>>,
+    /// Optional model-only observer incremented immediately after each actual
+    /// admitted publication API return, before outcome classification.
+    publication_returns: Option<std::sync::Arc<std::sync::atomic::AtomicU32>>,
     /// RUN 422 — when `Some`, the hook terminates the process (SIGABRT) at the
     /// post-consume / pre-sign point after writing the preconstructed boundary
     /// marker. `None` (every existing constructor) is inert w.r.t. termination and
@@ -756,6 +761,7 @@ impl ModelCoordinationHook {
             observed_operational_pre_reserve: None,
             observed_aggregate_pre_reserve: None,
             publication_attempts: None,
+            publication_returns: None,
             abort_before_sign: None,
             post_publication: None,
             post_sign_prepublication: None,
@@ -779,6 +785,7 @@ impl ModelCoordinationHook {
             observed_operational_pre_reserve: None,
             observed_aggregate_pre_reserve: None,
             publication_attempts: None,
+            publication_returns: None,
             abort_before_sign: None,
             post_publication: None,
             post_sign_prepublication: None,
@@ -809,6 +816,7 @@ impl ModelCoordinationHook {
             observed_operational_pre_reserve: None,
             observed_aggregate_pre_reserve: None,
             publication_attempts: None,
+            publication_returns: None,
             abort_before_sign: None,
             post_publication: None,
             post_sign_prepublication: None,
@@ -833,6 +841,7 @@ impl ModelCoordinationHook {
             observed_operational_pre_reserve: None,
             observed_aggregate_pre_reserve: None,
             publication_attempts: None,
+            publication_returns: None,
             abort_before_sign: Some(evidence),
             post_publication: None,
             post_sign_prepublication: None,
@@ -861,6 +870,14 @@ impl ModelCoordinationHook {
         hook
     }
 
+    fn with_publication_return_observer(
+        mut self,
+        publication_returns: std::sync::Arc<std::sync::atomic::AtomicU32>,
+    ) -> Self {
+        self.publication_returns = Some(publication_returns);
+        self
+    }
+
     fn on_post_sign_pre_publication(
         &mut self,
         output: &crate::signing_journal_admission::AdmittedOutput,
@@ -881,6 +898,12 @@ impl ModelCoordinationHook {
     fn on_publication_call_attempt(&self) {
         if let Some(attempts) = &self.publication_attempts {
             attempts.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        }
+    }
+
+    fn on_publication_call_return(&self) {
+        if let Some(returns) = &self.publication_returns {
+            returns.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         }
     }
 
@@ -3060,7 +3083,9 @@ fn fresh_vote_sign_real_local<H: CommittedHistory + ?Sized>(
     let mut republished = false;
     let publish_result = loop {
         coord.on_publication_call_attempt();
-        match journal.publish_result_admitted(&cap, &output, &mut publish_ws) {
+        let result = journal.publish_result_admitted(&cap, &output, &mut publish_ws);
+        coord.on_publication_call_return();
+        match result {
             Err(AdmittedPublishError::Storage(BoundedDiag::WriteIo)) if !republished => {
                 republished = true;
                 continue;
@@ -3909,7 +3934,9 @@ fn fresh_vote_sign_real_local_same_authority<H: CommittedHistory + ?Sized>(
     //     workspace are reused; nothing is re-signed, re-consumed, or re-covered.
     let mut republished = false;
     let publish_result = loop {
-        match journal.publish_result_admitted(&cap, &output, &mut publish_ws) {
+        let result = journal.publish_result_admitted(&cap, &output, &mut publish_ws);
+        coord.on_publication_call_return();
+        match result {
             Err(AdmittedPublishError::Storage(BoundedDiag::WriteIo)) if !republished => {
                 republished = true;
                 continue;
@@ -13098,6 +13125,1271 @@ mod tests {
 
             /// The surviving process derives its OWN limits from the pinned context
             /// (the child's limits never cross the boundary).
+            #[cfg(all(unix, panic = "unwind"))]
+            mod postwrite_prejournal_ack {
+                use super::*;
+                use crate::signing_reservation_journal::{
+                    BoundedDiag, BoundedStorageError, SigningDecisionRecord,
+                    SigningJournalStorage, SigningKind, SigningOwnershipDomain, SigningPosition,
+                    SigningRecordStage, SigningReservationJournal, SIGNING_RECORD_FORMAT_VERSION,
+                };
+                use crate::storage::{RocksDbConsensusStorage, StorageError};
+                use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
+                use std::sync::{Arc, Mutex};
+                use std::time::Duration;
+
+                const MAGIC: [u8; 4] = *b"R4W2";
+                const VERSION: u16 = 1;
+                const PHASE: u8 = 0x19;
+                const NONCE_LEN: usize = 16;
+                const PK_LEN: usize = qbind_crypto::ml_dsa44::ML_DSA_44_PUBLIC_KEY_SIZE;
+                const VOTE_LEN: usize = 69;
+                const PREIMAGE_CAP: usize = 256;
+                const POSITION_LEN: usize = crate::signing_journal_admission::JOURNAL_KEY_LEN;
+                const SIGNATURE_LEN: usize = qbind_crypto::ml_dsa44::ML_DSA_44_SIGNATURE_SIZE;
+                const SIGNATURE_OFFSET: usize = 1791;
+                const MARKER_LEN: usize = 4 + 2 + 1 + NONCE_LEN + 8 * 4 + 2 + 2 + 2 + PK_LEN
+                    + 2 + VOTE_LEN + 2 + PREIMAGE_CAP + POSITION_LEN + 32 + 2 + SIGNATURE_LEN;
+                const CHILD_PATH: &str = "safety_record_store::owner::model::tests::real_fresh_sign::postconsume_process_death::postwrite_prejournal_ack::child_entry";
+                const ENV_MODE: &str = "R422_PWPA_CHILD_MODE";
+                const ENV_FIXTURE: &str = "R422_PWPA_FIXTURE";
+                const ENV_MARKER: &str = "R422_PWPA_MARKER";
+                const ENV_NONCE: &str = "R422_PWPA_NONCE";
+                const ENV_SAFETY: &str = "R422_PWPA_SAFETY";
+                const ENV_JOURNAL: &str = "R422_PWPA_JOURNAL";
+
+                const OFF_NONCE: usize = 7;
+                const OFF_COUNTS: usize = 23;
+                const OFF_NATIVE_ACK: usize = 55;
+                const OFF_WRAPPER_RETURN: usize = 56;
+                const OFF_SUITE: usize = 57;
+                const OFF_PK_LEN: usize = 59;
+                const OFF_PK: usize = 61;
+                const OFF_VOTE_LEN: usize = 1373;
+                const OFF_VOTE: usize = 1375;
+                const OFF_PREIMAGE_LEN: usize = 1444;
+                const OFF_PREIMAGE: usize = 1446;
+                const OFF_POSITION: usize = 1702;
+                const OFF_BINDING: usize = 1757;
+                const OFF_SIGNATURE_LEN: usize = 1789;
+
+                #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+                struct Counts {
+                    boundary_callbacks: u64,
+                    combined_attempts: u64,
+                    combined_delegated: u64,
+                    combined_successes: u64,
+                    record_attempts: u64,
+                    record_delegated: u64,
+                    record_successes: u64,
+                    reissue_attempts: u64,
+                    reissue_delegated: u64,
+                    reissue_successes: u64,
+                    bounded_read_attempts: u64,
+                    bounded_present_reads: u64,
+                    other_mutation_attempts: u64,
+                    other_mutation_delegated: u64,
+                    other_mutation_successes: u64,
+                }
+
+                #[derive(Default)]
+                struct AtomicCounts {
+                    combined_attempts: AtomicU64,
+                    combined_delegated: AtomicU64,
+                    combined_successes: AtomicU64,
+                    record_attempts: AtomicU64,
+                    record_delegated: AtomicU64,
+                    record_successes: AtomicU64,
+                    reissue_attempts: AtomicU64,
+                    reissue_delegated: AtomicU64,
+                    reissue_successes: AtomicU64,
+                    bounded_read_attempts: AtomicU64,
+                    bounded_present_reads: AtomicU64,
+                    other_mutation_attempts: AtomicU64,
+                    other_mutation_delegated: AtomicU64,
+                    other_mutation_successes: AtomicU64,
+                    boundary_callbacks: AtomicU32,
+                }
+
+                impl AtomicCounts {
+                    fn snapshot(&self) -> Counts {
+                        Counts {
+                            boundary_callbacks: u64::from(self.boundary_callbacks.load(Ordering::SeqCst)),
+                            combined_attempts: self.combined_attempts.load(Ordering::SeqCst),
+                            combined_delegated: self.combined_delegated.load(Ordering::SeqCst),
+                            combined_successes: self.combined_successes.load(Ordering::SeqCst),
+                            record_attempts: self.record_attempts.load(Ordering::SeqCst),
+                            record_delegated: self.record_delegated.load(Ordering::SeqCst),
+                            record_successes: self.record_successes.load(Ordering::SeqCst),
+                            reissue_attempts: self.reissue_attempts.load(Ordering::SeqCst),
+                            reissue_delegated: self.reissue_delegated.load(Ordering::SeqCst),
+                            reissue_successes: self.reissue_successes.load(Ordering::SeqCst),
+                            bounded_read_attempts: self.bounded_read_attempts.load(Ordering::SeqCst),
+                            bounded_present_reads: self.bounded_present_reads.load(Ordering::SeqCst),
+                            other_mutation_attempts: self.other_mutation_attempts.load(Ordering::SeqCst),
+                            other_mutation_delegated: self.other_mutation_delegated.load(Ordering::SeqCst),
+                            other_mutation_successes: self.other_mutation_successes.load(Ordering::SeqCst),
+                        }
+                    }
+                }
+
+                #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+                enum BoundaryMode {
+                    AbortAfterWitness,
+                    ContinueAfterWitness,
+                }
+
+                struct Expected {
+                    nonce: [u8; NONCE_LEN],
+                    suite: u16,
+                    public_key: Vec<u8>,
+                    vote_wire: Vec<u8>,
+                    preimage: Vec<u8>,
+                    position: SigningPosition,
+                    position_key: [u8; POSITION_LEN],
+                    binding: BindingDigest,
+                }
+
+                struct BoundaryEvidence {
+                    mode: BoundaryMode,
+                    marker: Box<[u8; MARKER_LEN]>,
+                    file: std::fs::File,
+                    expected: Expected,
+                    baseline: Counts,
+                    signer: Arc<AtomicU32>,
+                    sink: Arc<AtomicU32>,
+                    publication_entries: Arc<AtomicU32>,
+                    publication_returns: Arc<AtomicU32>,
+                    fired: bool,
+                }
+
+                struct ObservedRocksStore {
+                    inner: Arc<RocksDbConsensusStorage>,
+                    counters: Arc<AtomicCounts>,
+                    boundary: Mutex<Option<BoundaryEvidence>>,
+                    fail_reissue: AtomicBool,
+                }
+
+                impl ObservedRocksStore {
+                    fn new(inner: Arc<RocksDbConsensusStorage>) -> Self {
+                        Self {
+                            inner,
+                            counters: Arc::new(AtomicCounts::default()),
+                            boundary: Mutex::new(None),
+                            fail_reissue: AtomicBool::new(false),
+                        }
+                    }
+
+                    fn arm_boundary(&self, evidence: BoundaryEvidence) {
+                        let mut slot = self.boundary.lock().expect("boundary mutex");
+                        assert!(slot.is_none(), "one boundary may be armed per wrapper");
+                        *slot = Some(evidence);
+                    }
+
+                    fn counts(&self) -> Counts {
+                        self.counters.snapshot()
+                    }
+
+                    fn fail_reissue(&self, fail: bool) {
+                        self.fail_reissue.store(fail, Ordering::SeqCst);
+                    }
+
+                    fn record_success_witness(&self, key: &[u8], envelope: &[u8]) {
+                        let mut guard = self.boundary.lock().expect("boundary mutex");
+                        let Some(evidence) = guard.as_mut() else {
+                            return;
+                        };
+                        if evidence.fired {
+                            return;
+                        }
+                        evidence.fired = true;
+                        self.counters.boundary_callbacks.fetch_add(1, Ordering::SeqCst);
+                        let now = self.counters.snapshot();
+                        assert_eq!(
+                            now.boundary_callbacks - evidence.baseline.boundary_callbacks,
+                            1,
+                            "one actual storage callback reached the armed boundary",
+                        );
+                        assert_eq!(key, &evidence.expected.position_key[..], "actual key matches independently prepared position");
+                        let view = crate::signing_journal_admission::BorrowedRecordView::parse(envelope)
+                            .expect("submitted record envelope structure and checksums");
+                        assert_eq!(view.magic, b"QSJ1", "record magic");
+                        assert_eq!(view.version, SIGNING_RECORD_FORMAT_VERSION, "record format");
+                        assert_eq!(view.kind_tag, 1, "Vote kind tag");
+                        assert_eq!(view.stage_tag, 2, "Signed stage tag");
+                        let mut genesis = [0u8; 32];
+                        genesis.copy_from_slice(view.network_genesis);
+                        let position = SigningPosition {
+                            validator_id: view.validator_id,
+                            network_genesis: genesis,
+                            kind: SigningKind::Vote,
+                            originating_view: view.originating_view,
+                        };
+                        let mut encoded_key = [0u8; POSITION_LEN];
+                        let encoded_len = position.encode_key_into(&mut encoded_key)
+                            .expect("fixed position key encoding");
+                        assert_eq!(encoded_len, POSITION_LEN, "fixed position key length");
+                        assert_eq!(key, &encoded_key[..], "record identity encodes to actual storage key");
+                        assert_eq!(encoded_key, evidence.expected.position_key, "record identity matches independent expected key");
+                        assert_eq!(view.binding, &evidence.expected.binding.0[..], "record binding matches prepared decision");
+                        assert_eq!(view.signature.len(), SIGNATURE_LEN, "submitted signature length");
+                        assert_eq!(
+                            evidence.signer.load(Ordering::SeqCst), 1,
+                            "one real signer invocation before publication",
+                        );
+                        assert_eq!(evidence.sink.load(Ordering::SeqCst), 0, "no completion sink before publication returns");
+                        assert_eq!(evidence.publication_entries.load(Ordering::SeqCst), 1, "publication API entered once");
+                        assert_eq!(evidence.publication_returns.load(Ordering::SeqCst), 0, "publication API has not returned");
+                        let delta = |value: u64, base: u64| value - base;
+                        assert_eq!(delta(now.combined_attempts, evidence.baseline.combined_attempts), 1, "one combined reservation attempt");
+                        assert_eq!(delta(now.combined_delegated, evidence.baseline.combined_delegated), 1, "one combined reservation delegate call");
+                        assert_eq!(delta(now.combined_successes, evidence.baseline.combined_successes), 1, "one successful combined reservation write");
+                        assert_eq!(delta(now.bounded_read_attempts, evidence.baseline.bounded_read_attempts), 2, "reservation plus publication validation perform two bounded reads");
+                        assert_eq!(delta(now.bounded_present_reads, evidence.baseline.bounded_present_reads), 1, "publication validation found the Reserved record");
+                        assert_eq!(delta(now.record_attempts, evidence.baseline.record_attempts), 1, "one record-only publication attempt");
+                        assert_eq!(delta(now.record_delegated, evidence.baseline.record_delegated), 1, "one real record-only delegate call");
+                        assert_eq!(delta(now.record_successes, evidence.baseline.record_successes), 1, "native synced write returned success");
+                        assert_eq!(delta(now.reissue_attempts, evidence.baseline.reissue_attempts), 0, "no reissue");
+                        assert_eq!(delta(now.reissue_delegated, evidence.baseline.reissue_delegated), 0, "no reissue delegation");
+                        assert_eq!(delta(now.reissue_successes, evidence.baseline.reissue_successes), 0, "no reissue acknowledgement");
+                        assert_eq!(delta(now.other_mutation_attempts, evidence.baseline.other_mutation_attempts), 0, "no other mutation");
+                        assert_eq!(delta(now.other_mutation_delegated, evidence.baseline.other_mutation_delegated), 0, "no other mutation delegation");
+                        assert_eq!(delta(now.other_mutation_successes, evidence.baseline.other_mutation_successes), 0, "no other mutation acknowledgement");
+
+                        let marker = &mut evidence.marker[..];
+                        for (i, value) in [
+                            u32::try_from(delta(now.boundary_callbacks, evidence.baseline.boundary_callbacks)).expect("bounded boundary count"),
+                            evidence.signer.load(Ordering::SeqCst),
+                            evidence.sink.load(Ordering::SeqCst),
+                            evidence.publication_entries.load(Ordering::SeqCst),
+                            evidence.publication_returns.load(Ordering::SeqCst),
+                            u32::try_from(delta(now.record_attempts, evidence.baseline.record_attempts)).expect("bounded count"),
+                            u32::try_from(delta(now.record_delegated, evidence.baseline.record_delegated)).expect("bounded count"),
+                            u32::try_from(delta(now.record_successes, evidence.baseline.record_successes)).expect("bounded count"),
+                        ].into_iter().enumerate() {
+                            let offset = OFF_COUNTS + i * 4;
+                            marker[offset..offset + 4].copy_from_slice(&value.to_le_bytes());
+                        }
+                        marker[OFF_NATIVE_ACK] = 1;
+                        marker[OFF_WRAPPER_RETURN] = 0;
+                        marker[OFF_POSITION..OFF_POSITION + POSITION_LEN].copy_from_slice(&encoded_key);
+                        marker[OFF_SIGNATURE_LEN..SIGNATURE_OFFSET]
+                            .copy_from_slice(&u16::try_from(view.signature.len()).expect("signature length fits u16").to_le_bytes());
+                        marker[SIGNATURE_OFFSET..].copy_from_slice(view.signature);
+                        use std::io::Write as _;
+                        evidence.file.write_all(marker).expect("write complete boundary marker");
+                        evidence.file.flush().expect("flush boundary marker");
+                        evidence.file.sync_all().expect("sync boundary marker");
+                        if evidence.mode == BoundaryMode::AbortAfterWitness {
+                            std::process::abort();
+                        }
+                    }
+                }
+
+                impl SigningJournalStorage for ObservedRocksStore {
+                    fn get_signing_record(&self, key: &[u8]) -> Result<Option<Vec<u8>>, StorageError> {
+                        self.inner.get_signing_record(key)
+                    }
+
+                    fn put_signing_record_synced(&self, key: &[u8], value: &[u8]) -> Result<(), StorageError> {
+                        self.counters.other_mutation_attempts.fetch_add(1, Ordering::SeqCst);
+                        self.counters.other_mutation_delegated.fetch_add(1, Ordering::SeqCst);
+                        let result = self.inner.put_signing_record_synced(key, value);
+                        if result.is_ok() {
+                            self.counters.other_mutation_successes.fetch_add(1, Ordering::SeqCst);
+                        }
+                        result
+                    }
+
+                    fn get_signing_metadata(&self) -> Result<Option<Vec<u8>>, StorageError> {
+                        self.inner.get_signing_metadata()
+                    }
+
+                    fn put_signing_metadata_synced(&self, value: &[u8]) -> Result<(), StorageError> {
+                        self.counters.other_mutation_attempts.fetch_add(1, Ordering::SeqCst);
+                        self.counters.other_mutation_delegated.fetch_add(1, Ordering::SeqCst);
+                        let result = self.inner.put_signing_metadata_synced(value);
+                        if result.is_ok() {
+                            self.counters.other_mutation_successes.fetch_add(1, Ordering::SeqCst);
+                        }
+                        result
+                    }
+
+                    fn put_signing_record_and_metadata_synced(
+                        &self, key: &[u8], record: &[u8], metadata: &[u8],
+                    ) -> Result<(), StorageError> {
+                        self.counters.combined_attempts.fetch_add(1, Ordering::SeqCst);
+                        self.counters.combined_delegated.fetch_add(1, Ordering::SeqCst);
+                        let result = self.inner.put_signing_record_and_metadata_synced(key, record, metadata);
+                        if result.is_ok() {
+                            self.counters.combined_successes.fetch_add(1, Ordering::SeqCst);
+                        }
+                        result
+                    }
+
+                    fn for_each_signing_namespace_entry(
+                        &self,
+                        visitor: &mut dyn FnMut(&[u8], &[u8]) -> Result<(), StorageError>,
+                    ) -> Result<(), StorageError> {
+                        self.inner.for_each_signing_namespace_entry(visitor)
+                    }
+
+                    fn signing_ownership_domain(&self) -> Arc<SigningOwnershipDomain> {
+                        self.inner.signing_ownership_domain()
+                    }
+
+                    fn read_signing_envelope_into(
+                        &self, key: &[u8], dst: &mut [u8],
+                    ) -> Result<Option<usize>, BoundedStorageError> {
+                        self.counters.bounded_read_attempts.fetch_add(1, Ordering::SeqCst);
+                        let result = self.inner.read_signing_envelope_into(key, dst)?;
+                        if result.is_some() {
+                            self.counters.bounded_present_reads.fetch_add(1, Ordering::SeqCst);
+                        }
+                        Ok(result)
+                    }
+
+                    fn reissue_signing_envelope_synced(
+                        &self, key: &[u8], envelope: &[u8],
+                    ) -> Result<(), BoundedStorageError> {
+                        self.counters.reissue_attempts.fetch_add(1, Ordering::SeqCst);
+                        if self.fail_reissue.load(Ordering::SeqCst) {
+                            return Err(BoundedStorageError::Io(BoundedDiag::WriteIo));
+                        }
+                        self.counters.reissue_delegated.fetch_add(1, Ordering::SeqCst);
+                        let result = self.inner.reissue_signing_envelope_synced(key, envelope);
+                        if result.is_ok() {
+                            self.counters.reissue_successes.fetch_add(1, Ordering::SeqCst);
+                        }
+                        result
+                    }
+
+                    fn put_signing_envelope_and_metadata_synced(
+                        &self, key: &[u8], record: &[u8], metadata: &[u8],
+                    ) -> Result<(), BoundedStorageError> {
+                        self.counters.combined_attempts.fetch_add(1, Ordering::SeqCst);
+                        self.counters.combined_delegated.fetch_add(1, Ordering::SeqCst);
+                        let result = self.inner.put_signing_envelope_and_metadata_synced(key, record, metadata);
+                        if result.is_ok() {
+                            self.counters.combined_successes.fetch_add(1, Ordering::SeqCst);
+                        }
+                        result
+                    }
+
+                    fn put_signing_record_envelope_synced(
+                        &self, key: &[u8], envelope: &[u8],
+                    ) -> Result<(), BoundedStorageError> {
+                        self.counters.record_attempts.fetch_add(1, Ordering::SeqCst);
+                        self.counters.record_delegated.fetch_add(1, Ordering::SeqCst);
+                        let result = self.inner.put_signing_record_envelope_synced(key, envelope);
+                        if result.is_ok() {
+                            self.counters.record_successes.fetch_add(1, Ordering::SeqCst);
+                            self.record_success_witness(key, envelope);
+                        }
+                        result
+                    }
+                }
+
+                struct Setup {
+                    pv: ProposalVoteAuthority,
+                    sk: Vec<u8>,
+                    owner: SafetyRecordOwner,
+                    engine: BasicHotStuffEngine<[u8; 32]>,
+                    decided: DecidedVote<OwningCapturePayload>,
+                    proposal: BlockProposal,
+                    limits: PreparedDecisionInputLimits,
+                    store: Arc<ObservedRocksStore>,
+                    journal: SigningReservationJournal,
+                }
+
+                fn setup(
+                    fixture: &std::path::Path,
+                    safety_dir: &std::path::Path,
+                    journal_dir: &std::path::Path,
+                    initialize_journal: bool,
+                ) -> Setup {
+                    let (pk, sk) = read_fixture_file(fixture);
+                    let pv = authority_from_pk(pk);
+                    let ctx = retained_ctx(4);
+                    let (owner, engine, decided, proposal, limits, _) =
+                        capture_multi_with_suite(safety_dir, &ctx, MODEL_SUITE_U16);
+                    let concrete = reopen_open_journal_store(journal_dir);
+                    let store = Arc::new(ObservedRocksStore::new(concrete.clone()));
+                    let wrapped_domain = store.signing_ownership_domain();
+                    let concrete_domain = concrete.signing_ownership_domain();
+                    assert!(Arc::ptr_eq(&wrapped_domain, &concrete_domain), "wrapper forwards the same ownership domain");
+                    drop(wrapped_domain);
+                    drop(concrete_domain);
+                    let journal = if initialize_journal {
+                        reopen_assoc_journal_init(
+                            &owner,
+                            store.clone() as Arc<dyn SigningJournalStorage>,
+                            1,
+                        )
+                    } else {
+                        reopen_assoc_journal_open(
+                            &owner,
+                            store.clone() as Arc<dyn SigningJournalStorage>,
+                            1,
+                        )
+                    };
+                    Setup { pv, sk, owner, engine, decided, proposal, limits, store, journal }
+                }
+
+                fn expected(setup: &Setup, nonce: [u8; NONCE_LEN]) -> Expected {
+                    let vote = setup.decided.vote();
+                    let vote_wire = unsigned_vote_wire(vote);
+                    let preimage = setup.pv.signing_domain.vote_preimage(vote);
+                    let (position, binding) = retained_pos_binding(&setup.pv, vote);
+                    let (suite, public_key) = setup.pv.key_provider
+                        .get_suite_and_key(ValidatorId::new(SIGNER_VID))
+                        .expect("fixture authorized key");
+                    assert_eq!(suite, SUITE_PQ_RESERVED_1, "authorized suite is 100");
+                    assert_eq!(public_key.len(), PK_LEN, "authorized key has fixed length");
+                    let mut position_key = [0u8; POSITION_LEN];
+                    assert_eq!(position.encode_key_into(&mut position_key).expect("position key"), POSITION_LEN);
+                    Expected {
+                        nonce,
+                        suite: MODEL_SUITE_U16,
+                        public_key,
+                        vote_wire,
+                        preimage,
+                        position,
+                        position_key,
+                        binding,
+                    }
+                }
+
+                fn build_marker(expected: &Expected) -> Box<[u8; MARKER_LEN]> {
+                    assert_eq!(MARKER_LEN, 4211);
+                    assert_eq!(expected.public_key.len(), PK_LEN);
+                    assert_eq!(expected.vote_wire.len(), VOTE_LEN);
+                    assert!(!expected.preimage.is_empty() && expected.preimage.len() <= PREIMAGE_CAP);
+                    let mut marker = Box::new([0u8; MARKER_LEN]);
+                    marker[0..4].copy_from_slice(&MAGIC);
+                    marker[4..6].copy_from_slice(&VERSION.to_le_bytes());
+                    marker[6] = PHASE;
+                    marker[OFF_NONCE..OFF_NONCE + NONCE_LEN].copy_from_slice(&expected.nonce);
+                    marker[OFF_SUITE..OFF_SUITE + 2].copy_from_slice(&expected.suite.to_le_bytes());
+                    marker[OFF_PK_LEN..OFF_PK_LEN + 2].copy_from_slice(&(PK_LEN as u16).to_le_bytes());
+                    marker[OFF_PK..OFF_PK + PK_LEN].copy_from_slice(&expected.public_key);
+                    marker[OFF_VOTE_LEN..OFF_VOTE_LEN + 2].copy_from_slice(&(VOTE_LEN as u16).to_le_bytes());
+                    marker[OFF_VOTE..OFF_VOTE + VOTE_LEN].copy_from_slice(&expected.vote_wire);
+                    marker[OFF_PREIMAGE_LEN..OFF_PREIMAGE_LEN + 2]
+                        .copy_from_slice(&(expected.preimage.len() as u16).to_le_bytes());
+                    marker[OFF_PREIMAGE..OFF_PREIMAGE + expected.preimage.len()]
+                        .copy_from_slice(&expected.preimage);
+                    marker[OFF_POSITION..OFF_POSITION + POSITION_LEN]
+                        .copy_from_slice(&expected.position_key);
+                    marker[OFF_BINDING..OFF_BINDING + 32].copy_from_slice(&expected.binding.0);
+                    marker[OFF_SIGNATURE_LEN..OFF_SIGNATURE_LEN + 2]
+                        .copy_from_slice(&(SIGNATURE_LEN as u16).to_le_bytes());
+                    marker
+                }
+
+                fn open_marker(path: &std::path::Path) -> std::fs::File {
+                    std::fs::OpenOptions::new()
+                        .write(true)
+                        .create_new(true)
+                        .mode(0o600)
+                        .open(path)
+                        .expect("exclusively create mode-0600 marker before protected route")
+                }
+
+                fn arm(
+                    setup: &Setup,
+                    expected: Expected,
+                    path: &std::path::Path,
+                    mode: BoundaryMode,
+                    signer: Arc<AtomicU32>,
+                    sink: Arc<AtomicU32>,
+                    entries: Arc<AtomicU32>,
+                    returns: Arc<AtomicU32>,
+                ) {
+                    let marker = build_marker(&expected);
+                    let file = open_marker(path);
+                    let baseline = setup.store.counts();
+                    setup.store.arm_boundary(BoundaryEvidence {
+                        mode,
+                        marker,
+                        file,
+                        expected,
+                        baseline,
+                        signer,
+                        sink,
+                        publication_entries: entries,
+                        publication_returns: returns,
+                        fired: false,
+                    });
+                }
+
+                struct Witness {
+                    nonce: [u8; NONCE_LEN],
+                    counts: [u32; 8],
+                    native_ack: u8,
+                    wrapper_return: u8,
+                    suite: u16,
+                    public_key: Vec<u8>,
+                    vote: Vote,
+                    vote_wire: Vec<u8>,
+                    preimage: Vec<u8>,
+                    position_key: [u8; POSITION_LEN],
+                    binding: [u8; 32],
+                    signature: Vec<u8>,
+                }
+
+                fn get_u16(bytes: &[u8], offset: usize) -> usize {
+                    u16::from_le_bytes([bytes[offset], bytes[offset + 1]]) as usize
+                }
+
+                fn get_u32(bytes: &[u8], offset: usize) -> u32 {
+                    u32::from_le_bytes(bytes[offset..offset + 4].try_into().expect("fixed marker count"))
+                }
+
+                fn decode_vote(bytes: &[u8]) -> Result<Vote, &'static str> {
+                    use qbind_wire::io::WireDecode as _;
+                    let mut input = bytes;
+                    let vote = Vote::decode(&mut input).map_err(|_| "Vote encoding")?;
+                    if !input.is_empty() {
+                        return Err("Vote trailing bytes");
+                    }
+                    if !vote.signature.is_empty() {
+                        return Err("Vote inline signature");
+                    }
+                    if vote.suite_id != MODEL_SUITE_U16 {
+                        return Err("Vote suite");
+                    }
+                    Ok(vote)
+                }
+
+                fn parse_marker(
+                    bytes: &[u8],
+                    expected_nonce: &[u8; NONCE_LEN],
+                ) -> Result<Witness, &'static str> {
+                    if bytes.len() != MARKER_LEN { return Err("marker length"); }
+                    if bytes[0..4] != MAGIC { return Err("magic"); }
+                    if get_u16(bytes, 4) != VERSION as usize { return Err("version"); }
+                    if bytes[6] != PHASE { return Err("phase"); }
+                    let nonce: [u8; NONCE_LEN] = bytes[OFF_NONCE..OFF_NONCE + NONCE_LEN]
+                        .try_into().map_err(|_| "nonce")?;
+                    if &nonce != expected_nonce { return Err("invocation nonce"); }
+                    let counts = std::array::from_fn(|i| get_u32(bytes, OFF_COUNTS + i * 4));
+                    if counts != [1, 1, 0, 1, 0, 1, 1, 1] { return Err("boundary counters"); }
+                    let native_ack = bytes[OFF_NATIVE_ACK];
+                    let wrapper_return = bytes[OFF_WRAPPER_RETURN];
+                    if (native_ack, wrapper_return) != (1, 0) { return Err("storage acknowledgement flags"); }
+                    let suite = get_u16(bytes, OFF_SUITE) as u16;
+                    if suite != MODEL_SUITE_U16 { return Err("authorized suite"); }
+                    if get_u16(bytes, OFF_PK_LEN) != PK_LEN { return Err("public-key length"); }
+                    let public_key = bytes[OFF_PK..OFF_PK + PK_LEN].to_vec();
+                    if get_u16(bytes, OFF_VOTE_LEN) != VOTE_LEN { return Err("Vote length"); }
+                    let vote_wire = bytes[OFF_VOTE..OFF_VOTE + VOTE_LEN].to_vec();
+                    let vote = decode_vote(&vote_wire)?;
+                    if vote.suite_id != suite { return Err("Vote and authorized suite disagreement"); }
+                    let preimage_len = get_u16(bytes, OFF_PREIMAGE_LEN);
+                    if preimage_len == 0 || preimage_len > PREIMAGE_CAP { return Err("preimage length"); }
+                    let padded = &bytes[OFF_PREIMAGE..OFF_PREIMAGE + PREIMAGE_CAP];
+                    if padded[preimage_len..].iter().any(|byte| *byte != 0) {
+                        return Err("preimage padding");
+                    }
+                    let preimage = padded[..preimage_len].to_vec();
+                    let position_key = bytes[OFF_POSITION..OFF_POSITION + POSITION_LEN]
+                        .try_into().map_err(|_| "position key")?;
+                    let binding = bytes[OFF_BINDING..OFF_BINDING + 32]
+                        .try_into().map_err(|_| "binding")?;
+                    if get_u16(bytes, OFF_SIGNATURE_LEN) != SIGNATURE_LEN { return Err("signature length"); }
+                    let signature = bytes[SIGNATURE_OFFSET..SIGNATURE_OFFSET + SIGNATURE_LEN].to_vec();
+                    Ok(Witness {
+                        nonce, counts, native_ack, wrapper_return, suite, public_key, vote,
+                        vote_wire, preimage, position_key, binding, signature,
+                    })
+                }
+
+                fn read_marker(path: &std::path::Path) -> std::io::Result<Vec<u8>> {
+                    let file = std::fs::File::open(path)?;
+                    let mut limited = file.take((MARKER_LEN + 1) as u64);
+                    let mut bytes = Vec::with_capacity(MARKER_LEN + 1);
+                    limited.read_to_end(&mut bytes)?;
+                    Ok(bytes)
+                }
+
+                fn accepts(class: TermClass, raw: &[u8], nonce: &[u8; NONCE_LEN]) -> bool {
+                    class == TermClass::Signaled(EXPECTED_ABORT_SIGNAL)
+                        && parse_marker(raw, nonce).is_ok()
+                }
+
+                fn spawn_child(
+                    mode: &str,
+                    fixture: &std::path::Path,
+                    marker: &std::path::Path,
+                    nonce: &[u8; NONCE_LEN],
+                    safety: &std::path::Path,
+                    journal: &std::path::Path,
+                ) -> OwnedChild {
+                    let child = std::process::Command::new(std::env::current_exe().expect("test executable"))
+                        .args(["--exact", CHILD_PATH, "--ignored", "--nocapture", "--test-threads=1"])
+                        .env(ENV_MODE, mode)
+                        .env(ENV_FIXTURE, fixture)
+                        .env(ENV_MARKER, marker)
+                        .env(ENV_NONCE, nonce_to_hex(nonce))
+                        .env(ENV_SAFETY, safety)
+                        .env(ENV_JOURNAL, journal)
+                        .stdin(std::process::Stdio::null())
+                        .stdout(std::process::Stdio::null())
+                        .stderr(std::process::Stdio::null())
+                        .spawn()
+                        .expect("spawn exact ignored child entrypoint");
+                    OwnedChild::new(child)
+                }
+
+                fn marker_vote() -> Vec<u8> {
+                    use qbind_wire::io::WireEncode as _;
+                    let vote = Vote {
+                        version: 1,
+                        chain_id: 7,
+                        epoch: 4,
+                        height: 1,
+                        round: 0,
+                        step: 1,
+                        block_id: [0xB2; 32],
+                        validator_index: 2,
+                        suite_id: MODEL_SUITE_U16,
+                        signature: Vec::new(),
+                    };
+                    let mut bytes = Vec::with_capacity(VOTE_LEN);
+                    vote.encode(&mut bytes);
+                    assert_eq!(bytes.len(), VOTE_LEN);
+                    bytes
+                }
+
+                fn parser_fixture(nonce: [u8; NONCE_LEN]) -> Box<[u8; MARKER_LEN]> {
+                    let expected = Expected {
+                        nonce,
+                        suite: MODEL_SUITE_U16,
+                        public_key: vec![0xA1; PK_LEN],
+                        vote_wire: marker_vote(),
+                        preimage: vec![0xC3; 32],
+                        position: SigningPosition {
+                            validator_id: 2,
+                            network_genesis: [0xD4; 32],
+                            kind: SigningKind::Vote,
+                            originating_view: 1,
+                        },
+                        position_key: {
+                            let mut key = [0u8; POSITION_LEN];
+                            let _ = SigningPosition {
+                                validator_id: 2,
+                                network_genesis: [0xD4; 32],
+                                kind: SigningKind::Vote,
+                                originating_view: 1,
+                            }.encode_key_into(&mut key);
+                            key
+                        },
+                        binding: BindingDigest([0xE5; 32]),
+                    };
+                    let mut marker = build_marker(&expected);
+                    for (i, count) in [1u32, 1, 0, 1, 0, 1, 1, 1].into_iter().enumerate() {
+                        marker[OFF_COUNTS + i * 4..OFF_COUNTS + i * 4 + 4]
+                            .copy_from_slice(&count.to_le_bytes());
+                    }
+                    marker[OFF_NATIVE_ACK] = 1;
+                    marker[OFF_WRAPPER_RETURN] = 0;
+                    marker[SIGNATURE_OFFSET..].fill(0x5A);
+                    marker
+                }
+
+                fn assert_domain_shared(store: &ObservedRocksStore, concrete: &RocksDbConsensusStorage) {
+                    let wrapped = store.signing_ownership_domain();
+                    let inner = concrete.signing_ownership_domain();
+                    assert!(Arc::ptr_eq(&wrapped, &inner), "observed wrapper preserves inner domain identity");
+                }
+
+                fn assert_counts_delta(after: Counts, before: Counts, expected: Counts) {
+                    assert_eq!(after.boundary_callbacks - before.boundary_callbacks, expected.boundary_callbacks);
+                    assert_eq!(after.combined_attempts - before.combined_attempts, expected.combined_attempts);
+                    assert_eq!(after.combined_delegated - before.combined_delegated, expected.combined_delegated);
+                    assert_eq!(after.combined_successes - before.combined_successes, expected.combined_successes);
+                    assert_eq!(after.record_attempts - before.record_attempts, expected.record_attempts);
+                    assert_eq!(after.record_delegated - before.record_delegated, expected.record_delegated);
+                    assert_eq!(after.record_successes - before.record_successes, expected.record_successes);
+                    assert_eq!(after.reissue_attempts - before.reissue_attempts, expected.reissue_attempts);
+                    assert_eq!(after.reissue_delegated - before.reissue_delegated, expected.reissue_delegated);
+                    assert_eq!(after.reissue_successes - before.reissue_successes, expected.reissue_successes);
+                    assert_eq!(after.bounded_read_attempts - before.bounded_read_attempts, expected.bounded_read_attempts);
+                    assert_eq!(after.bounded_present_reads - before.bounded_present_reads, expected.bounded_present_reads);
+                    assert_eq!(after.other_mutation_attempts - before.other_mutation_attempts, expected.other_mutation_attempts);
+                    assert_eq!(after.other_mutation_delegated - before.other_mutation_delegated, expected.other_mutation_delegated);
+                    assert_eq!(after.other_mutation_successes - before.other_mutation_successes, expected.other_mutation_successes);
+                }
+
+                #[test]
+                #[ignore = "re-executed only by the post-write process-death supervisor"]
+                fn child_entry() {
+                    let Some(mode) = std::env::var_os(ENV_MODE) else { return; };
+                    let mode = mode.to_string_lossy().into_owned();
+                    if mode == "setup_failure" {
+                        std::process::exit(3);
+                    }
+                    if mode == "wrong_signal" {
+                        unsafe { libc::raise(libc::SIGTERM); }
+                        std::process::exit(0);
+                    }
+                    let fixture = std::path::PathBuf::from(std::env::var_os(ENV_FIXTURE).expect("fixture"));
+                    let marker_path = std::path::PathBuf::from(std::env::var_os(ENV_MARKER).expect("marker"));
+                    let safety_dir = std::path::PathBuf::from(std::env::var_os(ENV_SAFETY).expect("safety store"));
+                    let journal_dir = std::path::PathBuf::from(std::env::var_os(ENV_JOURNAL).expect("journal store"));
+                    let nonce = hex_to_nonce(&std::env::var(ENV_NONCE).expect("nonce"));
+                    let setup = setup(&fixture, &safety_dir, &journal_dir, true);
+                    let expected = expected(&setup, nonce);
+                    let signer_obs = Arc::new(AtomicU32::new(0));
+                    let sink_obs = Arc::new(AtomicU32::new(0));
+                    let entries = Arc::new(AtomicU32::new(0));
+                    let returns = Arc::new(AtomicU32::new(0));
+                    let exit_normally = mode == "continue_then_exit";
+                    let boundary_mode = if exit_normally {
+                        BoundaryMode::ContinueAfterWitness
+                    } else {
+                        assert_eq!(mode, "abort_after_write", "recognized child mode");
+                        BoundaryMode::AbortAfterWitness
+                    };
+                    arm(
+                        &setup, expected, &marker_path, boundary_mode, signer_obs.clone(), sink_obs.clone(),
+                        entries.clone(), returns.clone(),
+                    );
+                    let inner = real_local_signer(&setup.sk);
+                    let signer = CountingValidatorSigner::new_observed(&inner, signer_obs.clone());
+                    let mut sink = RealSignRecordingSink::new_observed(sink_obs.clone());
+                    let mut snapshot = established_snapshot(&setup.pv);
+                    let mut coord = ModelCoordinationHook::publication_observing(entries.clone())
+                        .with_publication_return_observer(returns.clone());
+                    assert!(coord.publication_attempts.as_ref().is_some_and(|v| Arc::ptr_eq(v, &entries)));
+                    assert!(coord.publication_returns.as_ref().is_some_and(|v| Arc::ptr_eq(v, &returns)));
+                    let outcome = fresh_vote_sign_real_local::<FixtureCommittedHistory>(
+                        &setup.owner, &setup.engine, &setup.decided, &setup.proposal, &setup.limits,
+                        None, &mut snapshot, &signer, &mut sink, &setup.journal, &mut coord,
+                        ReconfirmPerturbation::None,
+                    );
+                    assert!(matches!(outcome, RealFreshSignOutcome::Published(_)), "unchanged protected route completed");
+                    assert_eq!(signer.calls(), 1);
+                    assert_eq!(sink.calls, 1);
+                    assert_eq!(entries.load(Ordering::SeqCst), 1);
+                    assert_eq!(returns.load(Ordering::SeqCst), 1);
+                    if exit_normally {
+                        std::process::exit(0);
+                    }
+                    panic!("abort-after-write hook returned unexpectedly");
+                }
+
+                #[test]
+                fn marker_parser_and_classifier_controls() {
+                    assert_eq!(MARKER_LEN, 4211);
+                    let nonce = [0x31; NONCE_LEN];
+                    let mut valid = parser_fixture(nonce);
+                    let parsed = parse_marker(&valid[..], &nonce).expect("valid complete marker");
+                    assert_eq!(parsed.counts, [1, 1, 0, 1, 0, 1, 1, 1]);
+                    assert_eq!((parsed.native_ack, parsed.wrapper_return), (1, 0));
+                    assert_eq!(parsed.signature.len(), SIGNATURE_LEN);
+                    assert!(accepts(TermClass::Signaled(EXPECTED_ABORT_SIGNAL), &valid[..], &nonce));
+                    assert!(!accepts(TermClass::Exited(0), &valid[..], &nonce));
+                    assert!(!accepts(TermClass::Signaled(libc::SIGTERM), &valid[..], &nonce));
+                    assert!(!accepts(TermClass::TimedOutKilled { kill_confirmed: true }, &valid[..], &nonce));
+                    assert!(!accepts(
+                        TermClass::Signaled(EXPECTED_ABORT_SIGNAL),
+                        &valid[..MARKER_LEN - 1],
+                        &nonce,
+                    ));
+                    let mut bad_magic = valid.clone();
+                    bad_magic[0] ^= 1;
+                    assert!(parse_marker(&bad_magic[..], &nonce).is_err());
+                    let mut bad_version = valid.clone();
+                    bad_version[4] ^= 1;
+                    assert!(parse_marker(&bad_version[..], &nonce).is_err());
+                    assert!(parse_marker(&valid[..], &[0x32; NONCE_LEN]).is_err());
+                    assert!(parse_marker(&valid[..MARKER_LEN - 1], &nonce).is_err());
+                    let mut long = valid.to_vec();
+                    long.push(0);
+                    assert!(parse_marker(&long, &nonce).is_err());
+
+                    for (offset, value) in [(6, 0u8), (55, 0u8), (56, 1u8)] {
+                        let mut bad = valid.clone();
+                        bad[offset] = value;
+                        assert!(parse_marker(&bad[..], &nonce).is_err(), "phase/ack flag is rejected");
+                    }
+                    for index in 0..8 {
+                        let mut bad = valid.clone();
+                        bad[OFF_COUNTS + index * 4] ^= 1;
+                        assert!(parse_marker(&bad[..], &nonce).is_err(), "counter field is rejected");
+                    }
+                    for (offset, bytes) in [
+                        (OFF_PK_LEN, 0u16.to_le_bytes()),
+                        (OFF_VOTE_LEN, 68u16.to_le_bytes()),
+                        (OFF_PREIMAGE_LEN, 0u16.to_le_bytes()),
+                        (OFF_PREIMAGE_LEN, ((PREIMAGE_CAP + 1) as u16).to_le_bytes()),
+                        (OFF_SIGNATURE_LEN, ((SIGNATURE_LEN - 1) as u16).to_le_bytes()),
+                    ] {
+                        let mut bad = valid.clone();
+                        bad[offset..offset + 2].copy_from_slice(&bytes);
+                        assert!(parse_marker(&bad[..], &nonce).is_err(), "invalid length is rejected");
+                    }
+                    let mut bad_padding = valid.clone();
+                    bad_padding[OFF_PREIMAGE + 32] = 1;
+                    assert!(parse_marker(&bad_padding[..], &nonce).is_err());
+                    let mut malformed = valid.clone();
+                    malformed[OFF_VOTE] = 0;
+                    assert_eq!(parse_marker(&malformed[..], &nonce).err(), Some("Vote encoding"));
+
+
+                    let wrong_suite_input = marker_vote();
+                    let mut wrong_suite_slice = wrong_suite_input.as_slice();
+                    let mut wrong_suite_vote =
+                        <Vote as qbind_wire::io::WireDecode>::decode(&mut wrong_suite_slice)
+                        .expect("valid fixture Vote decodes");
+                    wrong_suite_vote.suite_id = MODEL_SUITE_U16 + 1;
+                    let mut wrong_suite_wire = Vec::new();
+                    qbind_wire::io::WireEncode::encode(&wrong_suite_vote, &mut wrong_suite_wire);
+                    let mut wrong_suite = valid.clone();
+                    wrong_suite[OFF_VOTE..OFF_VOTE + VOTE_LEN].copy_from_slice(&wrong_suite_wire);
+                    assert_eq!(parse_marker(&wrong_suite[..], &nonce).err(), Some("Vote suite"));
+
+                    // These are helper-level controls, not valid fixed-width marker Votes.
+                    let mut trailing = marker_vote();
+                    trailing.push(0);
+                    assert_eq!(decode_vote(&trailing).err(), Some("Vote trailing bytes"));
+                    let valid_vote_wire = marker_vote();
+                    let mut input = valid_vote_wire.as_slice();
+                    let mut inline_signature =
+                        <Vote as qbind_wire::io::WireDecode>::decode(&mut input)
+                            .expect("fixture Vote decodes");
+                    inline_signature.signature.push(0x5A);
+                    let mut signed_vote = Vec::new();
+                    qbind_wire::io::WireEncode::encode(&inline_signature, &mut signed_vote);
+                    assert_eq!(signed_vote.len(), VOTE_LEN + 1);
+                    assert_eq!(decode_vote(&signed_vote).err(), Some("Vote inline signature"));
+                    valid[OFF_SIGNATURE_LEN..OFF_SIGNATURE_LEN + 2]
+                        .copy_from_slice(&((SIGNATURE_LEN + 1) as u16).to_le_bytes());
+                    assert!(parse_marker(&valid[..], &nonce).is_err());
+                }
+
+                #[test]
+                fn supervisor_rejects_valid_marker_ordinary_exit_and_setup_failures() {
+                    let harness = tempfile::tempdir().expect("harness directory");
+                    let fixture = harness.path().join("suite100.bin");
+                    let marker = harness.path().join("marker.bin");
+                    let safety = harness.path().join("safety");
+                    let journal = harness.path().join("journal");
+                    std::fs::create_dir(&safety).expect("safety directory");
+                    std::fs::create_dir(&journal).expect("journal directory");
+                    let (pk, sk) = MlDsa44Backend::generate_keypair().expect("suite-100 keypair");
+                    write_fixture_file(&fixture, &pk, &sk);
+                    let nonce = urandom_nonce();
+
+                    let mut child = spawn_child(
+                        "continue_then_exit", &fixture, &marker, &nonce, &safety, &journal,
+                    );
+                    let status = child.supervise(STATUS_DEADLINE).expect("ordinary child reaped");
+                    assert_eq!(status, TermClass::Exited(0));
+                    let bytes = read_marker(&marker).expect("real successful route wrote witness");
+                    assert!(parse_marker(&bytes, &nonce).is_ok(), "marker is valid independent of process status");
+                    assert!(!accepts(status, &bytes, &nonce), "ordinary exit cannot be classified as the boundary");
+
+                    let setup_marker = harness.path().join("setup-failure.bin");
+                    let mut setup_child = spawn_child(
+                        "setup_failure", &fixture, &setup_marker, &nonce, &safety, &journal,
+                    );
+                    assert_eq!(
+                        setup_child.supervise(STATUS_DEADLINE).expect("setup-failure child reaped"),
+                        TermClass::Exited(3),
+                    );
+                    assert!(read_marker(&setup_marker).is_err(), "setup failure has no witness");
+
+                    let wrong_signal_marker = harness.path().join("wrong-signal.bin");
+                    let mut wrong_signal = spawn_child(
+                        "wrong_signal", &fixture, &wrong_signal_marker, &nonce, &safety, &journal,
+                    );
+                    assert_eq!(
+                        wrong_signal.supervise(STATUS_DEADLINE).expect("wrong-signal child reaped"),
+                        TermClass::Signaled(libc::SIGTERM),
+                    );
+                    assert!(read_marker(&wrong_signal_marker).is_err(), "wrong signal has no witness");
+                }
+
+                #[test]
+                fn supervisor_timeout_uses_existing_bounded_kill_and_reap() {
+                    let child = std::process::Command::new("sleep")
+                        .arg("600")
+                        .stdin(std::process::Stdio::null())
+                        .stdout(std::process::Stdio::null())
+                        .stderr(std::process::Stdio::null())
+                        .spawn()
+                        .expect("spawn direct timeout fixture");
+                    let mut owned = OwnedChild::new(child);
+                    assert!(matches!(
+                        owned.supervise(Duration::from_millis(200)).expect("timeout kill and reap"),
+                        TermClass::TimedOutKilled { kill_confirmed: true }
+                    ));
+                }
+
+                #[test]
+                fn normal_control_publishes_and_retires_the_witnessed_signature() {
+                    let harness = tempfile::tempdir().expect("harness directory");
+                    let fixture = harness.path().join("suite100.bin");
+                    let marker_path = harness.path().join("marker.bin");
+                    let safety = harness.path().join("safety");
+                    let journal_dir = harness.path().join("journal");
+                    std::fs::create_dir(&safety).expect("safety directory");
+                    std::fs::create_dir(&journal_dir).expect("journal directory");
+                    let (pk, sk) = MlDsa44Backend::generate_keypair().expect("suite-100 keypair");
+                    write_fixture_file(&fixture, &pk, &sk);
+                    let nonce = urandom_nonce();
+                    let run = setup(&fixture, &safety, &journal_dir, true);
+                    let expected = expected(&run, nonce);
+                    let base_vote = run.decided.vote().clone();
+                    let signer_obs = Arc::new(AtomicU32::new(0));
+                    let sink_obs = Arc::new(AtomicU32::new(0));
+                    let entries = Arc::new(AtomicU32::new(0));
+                    let returns = Arc::new(AtomicU32::new(0));
+                    let expected_position = expected.position;
+                    arm(
+                        &run, expected, &marker_path, BoundaryMode::ContinueAfterWitness,
+                        signer_obs.clone(), sink_obs.clone(), entries.clone(), returns.clone(),
+                    );
+                    let inner = real_local_signer(&sk);
+                    let signer = CountingValidatorSigner::new_observed(&inner, signer_obs.clone());
+                    let mut sink = RealSignRecordingSink::new_observed(sink_obs.clone());
+                    let mut snapshot = established_snapshot(&run.pv);
+                    let mut coord = ModelCoordinationHook::publication_observing(entries.clone())
+                        .with_publication_return_observer(returns.clone());
+                    assert!(coord.publication_attempts.as_ref().is_some_and(|v| Arc::ptr_eq(v, &entries)));
+                    assert!(coord.publication_returns.as_ref().is_some_and(|v| Arc::ptr_eq(v, &returns)));
+                    let baseline = run.store.counts();
+                    let ledgers = snapshot_ledgers(&run.owner);
+                    let provenance = pin_provenance_now(&run.owner, &run.decided);
+                    let op_ceiling = run.owner.backend_for_test().accounting_cap();
+                    let agg_ceiling = run.owner.backend_for_test().accounting_aggregate_cap();
+                    let accountant = run.owner.backend_for_test().accounting_handle_for_test();
+                    let outcome = fresh_vote_sign_real_local::<FixtureCommittedHistory>(
+                        &run.owner, &run.engine, &run.decided, &run.proposal, &run.limits,
+                        None, &mut snapshot, &signer, &mut sink, &run.journal, &mut coord,
+                        ReconfirmPerturbation::None,
+                    );
+                    assert_cleanup_preserved(&run.owner, &run.decided, &base_vote, ledgers, provenance, "post-write normal control");
+                    assert_eq!(run.owner.backend_for_test().accounting_cap(), op_ceiling);
+                    assert_eq!(run.owner.backend_for_test().accounting_aggregate_cap(), agg_ceiling);
+                    let diag = match outcome {
+                        RealFreshSignOutcome::Published(diag) => diag,
+                        other => panic!("expected Published from unchanged route: {other:?}"),
+                    };
+                    assert_eq!(diag.retirement, RetirementReport::Retired);
+                    assert_eq!((signer.calls(), sink.calls), (1, 1));
+                    assert_eq!((entries.load(Ordering::SeqCst), returns.load(Ordering::SeqCst)), (1, 1));
+                    assert_eq!((signer_obs.load(Ordering::SeqCst), sink_obs.load(Ordering::SeqCst)), (1, 1));
+                    assert_counts_delta(run.store.counts(), baseline, Counts {
+                        boundary_callbacks: 1,
+                        combined_attempts: 1, combined_delegated: 1, combined_successes: 1,
+                        record_attempts: 1, record_delegated: 1, record_successes: 1,
+                        bounded_read_attempts: 2, bounded_present_reads: 1,
+                        ..Counts::default()
+                    });
+
+                    let raw = read_marker(&marker_path).expect("control witness file");
+                    let witness = parse_marker(&raw, &nonce).expect("complete control marker");
+                    assert_eq!((witness.counts, witness.native_ack, witness.wrapper_return),
+                        ([1, 1, 0, 1, 0, 1, 1, 1], 1, 0));
+                    let record_bytes = run.store.get_signing_record(&witness.position_key)
+                        .expect("stored result read").expect("Signed record");
+                    let record = SigningDecisionRecord::decode(&record_bytes).expect("Signed record decode");
+                    assert_eq!(record.stage, SigningRecordStage::Signed);
+                    assert_eq!(record.position, expected_position);
+                    assert!(record.retained_signature.as_deref()
+                        .is_some_and(|sig| sig == witness.signature.as_slice()), "submitted and stored signature bytes match");
+                    MlDsa44Backend::verify(&witness.public_key, &witness.preimage, &witness.signature)
+                        .expect("original submitted signature verifies");
+                    assert_eq!(run.journal.reserved_position_count(), 1);
+
+                    drop(coord);
+                    drop(snapshot);
+                    drop(sink);
+                    drop(signer);
+                    drop(inner);
+                    drop(record);
+                    drop(record_bytes);
+                    drop(witness);
+                    drop(raw);
+                    drop(base_vote);
+                    drop(run);
+                    assert_eq!(accountant.current(), 0, "normal control operational ledger returns to zero");
+                    assert_eq!(accountant.aggregate().current(), 0, "normal control aggregate ledger returns to zero");
+                }
+
+                #[test]
+                fn postwrite_death_reopens_signed_and_requires_checked_reissue() {
+                    let harness = tempfile::tempdir().expect("harness directory");
+                    let fixture = harness.path().join("suite100.bin");
+                    let marker_path = harness.path().join("marker.bin");
+                    let safety_dir = harness.path().join("safety");
+                    let journal_dir = harness.path().join("journal");
+                    std::fs::create_dir(&safety_dir).expect("safety directory");
+                    std::fs::create_dir(&journal_dir).expect("journal directory");
+                    let (pk, sk) = MlDsa44Backend::generate_keypair().expect("suite-100 keypair");
+                    write_fixture_file(&fixture, &pk, &sk);
+                    let nonce = urandom_nonce();
+
+                    let mut child = spawn_child(
+                        "abort_after_write", &fixture, &marker_path, &nonce, &safety_dir, &journal_dir,
+                    );
+                    let class = child.supervise(STATUS_DEADLINE).expect("boundary child reaped");
+                    assert_eq!(class, TermClass::Signaled(EXPECTED_ABORT_SIGNAL));
+                    let raw = read_marker(&marker_path).expect("boundary witness exists");
+                    assert!(accepts(class, &raw, &nonce), "only SIGABRT plus complete invocation-matched witness is accepted");
+                    let witness = parse_marker(&raw, &nonce).expect("complete submitted-record witness");
+                    assert_eq!(witness.nonce, nonce);
+                    assert_eq!((witness.counts, witness.native_ack, witness.wrapper_return),
+                        ([1, 1, 0, 1, 0, 1, 1, 1], 1, 0));
+                    assert!(witness.public_key == pk, "witness key matches transported authorized key");
+                    assert!(witness.vote.signature.is_empty(), "witness contains the complete unsigned Vote");
+                    assert_eq!(witness.suite, MODEL_SUITE_U16);
+                    MlDsa44Backend::verify(&witness.public_key, &witness.preimage, &witness.signature)
+                        .expect("original witnessed signature verifies; no second signing occurs");
+
+                    // Reopen both stores through attach/open only. The wrapper is
+                    // installed before open associates it with this process's journal.
+                    let ctx = retained_ctx(4);
+                    let pv = authority_from_pk(pk.clone());
+                    let owner = reopen_attach(&safety_dir, &ctx);
+                    let concrete = reopen_open_journal_store(&journal_dir);
+                    let observed = Arc::new(ObservedRocksStore::new(concrete.clone()));
+                    assert_domain_shared(&observed, &concrete);
+                    let journal = reopen_assoc_journal_open(
+                        &owner, observed.clone() as Arc<dyn SigningJournalStorage>, 1,
+                    );
+
+                    // Before O2/O3/O5, use the marker key only to identify the
+                    // actual surviving Signed record and its independent metadata.
+                    let record_pre = observed.get_signing_record(&witness.position_key)
+                        .expect("surviving record read").expect("synced Signed envelope survived");
+                    let metadata_pre = observed.get_signing_metadata()
+                        .expect("surviving metadata read").expect("reservation metadata survived");
+                    let count_pre = journal.reserved_position_count();
+                    let record = SigningDecisionRecord::decode(&record_pre).expect("surviving envelope decodes");
+                    assert_eq!(record.stage, SigningRecordStage::Signed);
+                    assert_eq!(record.position.storage_key(), witness.position_key);
+                    assert_eq!(record.binding.0, witness.binding);
+                    let stored_signature = record.retained_signature.as_ref().expect("Signed record retains signature").clone();
+                    assert!(stored_signature == witness.signature, "surviving signature equals exact child-submitted signature");
+                    assert_eq!(count_pre, 1, "the position remains reserved after process death");
+                    drop(record);
+
+                    // Ordinary O2/O3/O5 recovery applies only to safety state. O2/O3
+                    // leave recovery required; successful O5 acknowledges that state.
+                    let (mut engine, proposal, l0_block) =
+                        engine_locked_l0_multi_with_suite(MODEL_SUITE_U16);
+                    let limits = lim_b(&ctx);
+                    let recovery_free = snapshot_ledgers(&owner);
+                    let op_ceiling = owner.backend_for_test().accounting_cap();
+                    let agg_ceiling = owner.backend_for_test().accounting_aggregate_cap();
+                    let revision = reopen_b_recover_only(&owner, &engine, l0_block);
+                    assert_eq!(snapshot_ledgers(&owner), recovery_free, "proof-free O5 recovery baseline restored");
+                    assert_eq!(owner.backend_for_test().accounting_cap(), op_ceiling);
+                    assert_eq!(owner.backend_for_test().accounting_aggregate_cap(), agg_ceiling);
+                    let post_o5_record = observed.get_signing_record(&witness.position_key)
+                        .expect("post-O5 record read");
+                    assert!(
+                        post_o5_record.as_deref() == Some(record_pre.as_slice()),
+                        "O5 preserves the complete surviving journal record bytes",
+                    );
+                    assert_eq!(
+                        observed.get_signing_metadata().expect("post-O5 metadata read").as_deref(),
+                        Some(metadata_pre.as_slice()),
+                        "O5 leaves journal metadata unchanged",
+                    );
+                    assert_eq!(journal.reserved_position_count(), count_pre, "O5 preserves reserved-position count");
+
+                    let capture_proof = owner.read_validate(None::<&FixtureCommittedHistory>)
+                        .expect("new surviving O3 proof for fixture capture");
+                    let decided = match owner.decide_and_capture_owned(
+                        &mut engine, ValidatorId::new(2), &proposal, &limits, revision, capture_proof,
+                    ) {
+                        OwnedDecisionOutcome::Decided(value) => value,
+                        other => panic!("surviving fixture decision/capture: {other:?}"),
+                    };
+                    let vote = decided.vote();
+                    let vote_wire = unsigned_vote_wire(vote);
+                    let preimage = pv.signing_domain.vote_preimage(vote);
+                    let (position, binding) = retained_pos_binding(&pv, vote);
+                    let (authorized_suite, authorized_key) = pv.key_provider
+                        .get_suite_and_key(ValidatorId::new(SIGNER_VID))
+                        .expect("fixture authorized key");
+                    assert_eq!(authorized_suite, SUITE_PQ_RESERVED_1);
+                    assert!(vote_wire == witness.vote_wire, "surviving complete Vote matches child witness");
+                    assert!(preimage == witness.preimage, "surviving signing preimage matches child witness");
+                    assert!(position.storage_key() == witness.position_key, "surviving position matches child witness");
+                    assert!(binding.0 == witness.binding, "surviving binding matches child witness");
+                    assert!(authorized_key == witness.public_key, "surviving authorized key matches child witness");
+                    let base_vote = vote.clone();
+                    let accountant = owner.backend_for_test().accounting_handle_for_test();
+
+                    // Independent protected fresh-route refusal. The route itself
+                    // records its signer and sink calls; connected API observers
+                    // prove no publication entry or return occurred.
+                    let mut fresh_snapshot = established_snapshot(&pv);
+                    let inner = real_local_signer(&sk);
+                    let signer_obs = Arc::new(AtomicU32::new(0));
+                    let sink_obs = Arc::new(AtomicU32::new(0));
+                    let signer = CountingValidatorSigner::new_observed(&inner, signer_obs.clone());
+                    let mut fresh_sink = RealSignRecordingSink::new_observed(sink_obs.clone());
+                    let entries = Arc::new(AtomicU32::new(0));
+                    let returns = Arc::new(AtomicU32::new(0));
+                    let mut fresh_coord = ModelCoordinationHook::publication_observing(entries.clone())
+                        .with_publication_return_observer(returns.clone());
+                    let fresh_ledgers = snapshot_ledgers(&owner);
+                    let fresh_provenance = pin_provenance_now(&owner, &decided);
+                    let fresh_op_ceiling = owner.backend_for_test().accounting_cap();
+                    let fresh_agg_ceiling = owner.backend_for_test().accounting_aggregate_cap();
+                    let fresh_record = observed.get_signing_record(&position.storage_key()).unwrap().unwrap();
+                    let fresh_metadata = observed.get_signing_metadata().unwrap().unwrap();
+                    let fresh_count = journal.reserved_position_count();
+                    let fresh_counts = observed.counts();
+                    let fresh = fresh_vote_sign_real_local::<FixtureCommittedHistory>(
+                        &owner, &engine, &decided, &proposal, &limits, None, &mut fresh_snapshot,
+                        &signer, &mut fresh_sink, &journal, &mut fresh_coord, ReconfirmPerturbation::None,
+                    );
+                    assert_cleanup_preserved(&owner, &decided, &base_vote, fresh_ledgers, fresh_provenance, "fresh refusal after surviving post-write record");
+                    assert_eq!(owner.backend_for_test().accounting_cap(), fresh_op_ceiling);
+                    assert_eq!(owner.backend_for_test().accounting_aggregate_cap(), fresh_agg_ceiling);
+                    assert_eq!(fresh, RealFreshSignOutcome::ReservePotentiallySigned);
+                    assert_eq!((signer.calls(), fresh_sink.calls), (0, 0));
+                    assert_eq!((signer_obs.load(Ordering::SeqCst), sink_obs.load(Ordering::SeqCst)), (0, 0));
+                    assert_eq!((entries.load(Ordering::SeqCst), returns.load(Ordering::SeqCst)), (0, 0));
+                    assert_counts_delta(observed.counts(), fresh_counts, Counts {
+                        bounded_read_attempts: 1, bounded_present_reads: 1,
+                        ..Counts::default()
+                    });
+                    let fresh_record_after = observed.get_signing_record(&position.storage_key())
+                        .expect("fresh-refusal record read");
+                    assert!(
+                        fresh_record_after.as_deref() == Some(fresh_record.as_slice()),
+                        "fresh refusal preserves the complete surviving journal record bytes",
+                    );
+                    assert_eq!(observed.get_signing_metadata().unwrap().as_deref(), Some(fresh_metadata.as_slice()));
+                    assert_eq!(journal.reserved_position_count(), fresh_count);
+
+                    // AssociationChecked retained delivery: a failed reissue is
+                    // injected before delegation and suppresses both probe and sink.
+                    let fail_ledgers = snapshot_ledgers(&owner);
+                    let fail_provenance = pin_provenance_now(&owner, &decided);
+                    let fail_op_ceiling = owner.backend_for_test().accounting_cap();
+                    let fail_agg_ceiling = owner.backend_for_test().accounting_aggregate_cap();
+                    let fail_record = observed.get_signing_record(&position.storage_key()).unwrap().unwrap();
+                    let fail_metadata = observed.get_signing_metadata().unwrap().unwrap();
+                    let fail_count = journal.reserved_position_count();
+                    let fail_counts = observed.counts();
+                    observed.fail_reissue(true);
+                    let fail_probe = std::rc::Rc::new(RetainedSliceProbe::new(
+                        RetainedSliceWitness::from_validated(&witness.signature),
+                    ));
+                    let fail_probe_guard = install_retained_slice_probe(fail_probe.clone());
+                    let mut fail_sink = RetainedUseRecordingSink::new();
+                    let mut retained_coord = ModelCoordinationHook::inert();
+                    let failed_delivery = retained_vote_use_checked_model::<FixtureCommittedHistory>(
+                        &owner, &engine, &decided, &proposal, &limits, None, &mut fresh_snapshot,
+                        &mut fail_sink, &journal, &mut retained_coord, ReconfirmPerturbation::None,
+                    );
+                    drop(fail_probe_guard);
+                    assert_cleanup_preserved(&owner, &decided, &base_vote, fail_ledgers, fail_provenance, "failed checked reissue");
+                    assert_eq!(owner.backend_for_test().accounting_cap(), fail_op_ceiling);
+                    assert_eq!(owner.backend_for_test().accounting_aggregate_cap(), fail_agg_ceiling);
+                    assert_eq!(failed_delivery, ModelRetainedUseOutcome::DeliverySuppressed);
+                    assert_eq!((fail_probe.invocations(), fail_sink.calls), (0, 0));
+                    assert_counts_delta(observed.counts(), fail_counts, Counts {
+                        bounded_read_attempts: 1, bounded_present_reads: 1,
+                        reissue_attempts: 1,
+                        ..Counts::default()
+                    });
+                    let fail_record_after = observed.get_signing_record(&position.storage_key())
+                        .expect("failed-reissue record read");
+                    assert!(
+                        fail_record_after.as_deref() == Some(fail_record.as_slice()),
+                        "failed reissue preserves the complete surviving journal record bytes",
+                    );
+                    assert_eq!(observed.get_signing_metadata().unwrap().as_deref(), Some(fail_metadata.as_slice()));
+                    assert_eq!(journal.reserved_position_count(), fail_count);
+
+                    // Clear the fault and retry only the same checked retained route.
+                    observed.fail_reissue(false);
+                    let ok_ledgers = snapshot_ledgers(&owner);
+                    let ok_provenance = pin_provenance_now(&owner, &decided);
+                    let ok_op_ceiling = owner.backend_for_test().accounting_cap();
+                    let ok_agg_ceiling = owner.backend_for_test().accounting_aggregate_cap();
+                    let ok_record = observed.get_signing_record(&position.storage_key()).unwrap().unwrap();
+                    let ok_metadata = observed.get_signing_metadata().unwrap().unwrap();
+                    let ok_count = journal.reserved_position_count();
+                    let ok_counts = observed.counts();
+                    let ok_probe = std::rc::Rc::new(RetainedSliceProbe::new(
+                        RetainedSliceWitness::from_validated(&witness.signature),
+                    ));
+                    let ok_probe_guard = install_retained_slice_probe(ok_probe.clone());
+                    let mut ok_sink = RetainedUseRecordingSink::new();
+                    let delivered = retained_vote_use_checked_model::<FixtureCommittedHistory>(
+                        &owner, &engine, &decided, &proposal, &limits, None, &mut fresh_snapshot,
+                        &mut ok_sink, &journal, &mut retained_coord, ReconfirmPerturbation::None,
+                    );
+                    drop(ok_probe_guard);
+                    assert_cleanup_preserved(&owner, &decided, &base_vote, ok_ledgers, ok_provenance, "successful checked reissue");
+                    assert_eq!(owner.backend_for_test().accounting_cap(), ok_op_ceiling);
+                    assert_eq!(owner.backend_for_test().accounting_aggregate_cap(), ok_agg_ceiling);
+                    assert!(matches!(delivered, ModelRetainedUseOutcome::Consumed(_)));
+                    assert_eq!((ok_probe.invocations(), ok_probe.last_len()), (1, Some(SIGNATURE_LEN)));
+                    assert_eq!(ok_probe.last_matched(), Some(true), "the verified slice equals the child-submitted signature");
+                    assert_eq!(ok_sink.calls, 1);
+                    assert_counts_delta(observed.counts(), ok_counts, Counts {
+                        bounded_read_attempts: 1, bounded_present_reads: 1,
+                        reissue_attempts: 1, reissue_delegated: 1, reissue_successes: 1,
+                        ..Counts::default()
+                    });
+                    assert!(stored_signature == witness.signature, "checked result remains the same original Signed bytes");
+                    let ok_record_after = observed.get_signing_record(&position.storage_key())
+                        .expect("successful-reissue record read");
+                    assert!(
+                        ok_record_after.as_deref() == Some(ok_record.as_slice()),
+                        "successful reissue preserves the complete surviving journal record bytes",
+                    );
+                    assert_eq!(observed.get_signing_metadata().unwrap().as_deref(), Some(ok_metadata.as_slice()));
+                    assert_eq!(journal.reserved_position_count(), ok_count);
+
+                    drop(fail_probe);
+                    drop(ok_probe);
+                    drop(fail_sink);
+                    drop(ok_sink);
+                    drop(retained_coord);
+                    drop(fresh_coord);
+                    drop(fresh_snapshot);
+                    drop(signer);
+                    drop(inner);
+                    drop(decided);
+                    drop(engine);
+                    drop(journal);
+                    drop(observed);
+                    drop(concrete);
+                    drop(owner);
+                    drop(pv);
+                    drop(ctx);
+                    drop(proposal);
+                    drop(base_vote);
+                    drop(stored_signature);
+                    drop(witness);
+                    drop(raw);
+                    drop(record_pre);
+                    drop(metadata_pre);
+                    drop(fresh_record);
+                    drop(fresh_metadata);
+                    drop(fail_record);
+                    drop(fail_metadata);
+                    drop(ok_record);
+                    drop(ok_metadata);
+                    assert_eq!(accountant.current(), 0, "surviving operational ledger reaches exactly zero");
+                    assert_eq!(accountant.aggregate().current(), 0, "surviving aggregate ledger reaches exactly zero");
+                }
+            }
             mod postsign_prepublication {
                 use super::*;
                 use crate::signing_reservation_journal::{
