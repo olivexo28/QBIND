@@ -816,6 +816,10 @@ DevNet Evidence Run 040 (`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_040.md`) further
 | **Whitepaper Reference** | Section 7.1.1 (Mempool Ordering Semantics) |
 | **Description** | Mempool priority uses `arrival_id` which differs per node. Whitepaper Section 7.1.1 now documents: (1) batch selection deterministic per node but depends on local arrival order, (2) transaction ordering within blocks is proposer-determined, not globally canonical, (3) consensus safety unaffected—economic fairness (block inclusion) is proposer-local. |
 
+### Run 422 publication-retry marker finishing pass
+
+The isolated retry-exhaustion test's R4X2 v1/phase-`0x1a` marker now derives every offset and its 4,341-byte length from the fixed field widths and existing size constants. Those layout values were already numerically correct; the change makes their derivation explicit and adds actual-parser rejection controls for a mismatched fixture nonce, a completely decoded unsigned wrong-suite 69-byte Vote, and an incorrect signature-length field with unchanged marker size. Both fault-case marker formats are covered, while malformed Vote and the helper-only trailing-input/70-byte inline-signature controls remain separate. The focused module passed 3 tests (1 ignored child entrypoint), the complete owner model suite passed 133 tests (5 ignored), and default-feature `cargo test -p qbind-node --no-run` exited 0. This is isolated acceptance evidence, not a demonstrated production vulnerability; no production code or status label changed. Earlier integration/build results remain attributed to implementation HEAD `8b328b6423a63384c0bbbcb7860ad9bb0c86f751`. External review/security tooling: NOT-RUN.
+
 ### 7. Timeout Exponential Backoff Parameters
 
 | Field | Value |

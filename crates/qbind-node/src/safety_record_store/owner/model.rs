@@ -14560,9 +14560,58 @@ mod tests {
                 const MAGIC: [u8; 4] = *b"R4X2";
                 const VERSION: u16 = 1;
                 const PHASE: u8 = 0x1a;
-                const MARKER_LEN: usize = 4341;
                 const CASE_RESERVED: u8 = 1;
                 const CASE_SIGNED: u8 = 2;
+                const MARKER_MAGIC_LEN: usize = MAGIC.len();
+                const VERSION_LEN: usize = std::mem::size_of::<u16>();
+                const PHASE_LEN: usize = std::mem::size_of::<u8>();
+                const CASE_LEN: usize = std::mem::size_of::<u8>();
+                const NONCE_LEN: usize = 16;
+                const OUTCOME_LEN: usize = std::mem::size_of::<u8>();
+                const COUNTER_COUNT: usize = 13;
+                const COUNTER_WIDTH: usize = std::mem::size_of::<u32>();
+                const ACCOUNTING_SAMPLE_COUNT: usize = 6;
+                const ACCOUNTING_SAMPLE_WIDTH: usize = std::mem::size_of::<u128>();
+                const LENGTH_WIDTH: usize = std::mem::size_of::<u16>();
+                const PK_LEN: usize = qbind_crypto::ml_dsa44::ML_DSA_44_PUBLIC_KEY_SIZE;
+                const VOTE_LEN: usize = 69;
+                const PREIMAGE_CAP: usize = MODEL_MAX_PREIMAGE_BYTES as usize;
+                const POSITION_LEN: usize = crate::signing_journal_admission::JOURNAL_KEY_LEN;
+                const BINDING_LEN: usize = 32;
+                const SIGNATURE_LEN: usize = qbind_crypto::ml_dsa44::ML_DSA_44_SIGNATURE_SIZE;
+
+                const OFF_MAGIC: usize = 0;
+                const OFF_VERSION: usize = OFF_MAGIC + MARKER_MAGIC_LEN;
+                const OFF_PHASE: usize = OFF_VERSION + VERSION_LEN;
+                const OFF_CASE: usize = OFF_PHASE + PHASE_LEN;
+                const OFF_NONCE: usize = OFF_CASE + CASE_LEN;
+                const OFF_FIXTURE_NONCE: usize = OFF_NONCE + NONCE_LEN;
+                const OFF_OUTCOME: usize = OFF_FIXTURE_NONCE + NONCE_LEN;
+                const OFF_COUNTERS: usize = OFF_OUTCOME + OUTCOME_LEN;
+                const OFF_LEDGER_SAMPLES: usize =
+                    OFF_COUNTERS + COUNTER_COUNT * COUNTER_WIDTH;
+                const OFF_PK_LEN: usize =
+                    OFF_LEDGER_SAMPLES + ACCOUNTING_SAMPLE_COUNT * ACCOUNTING_SAMPLE_WIDTH;
+                const OFF_PK: usize = OFF_PK_LEN + LENGTH_WIDTH;
+                const OFF_VOTE_LEN: usize = OFF_PK + PK_LEN;
+                const OFF_VOTE: usize = OFF_VOTE_LEN + LENGTH_WIDTH;
+                const OFF_PREIMAGE_LEN: usize = OFF_VOTE + VOTE_LEN;
+                const OFF_PREIMAGE: usize = OFF_PREIMAGE_LEN + LENGTH_WIDTH;
+                const OFF_POSITION: usize = OFF_PREIMAGE + PREIMAGE_CAP;
+                const OFF_BINDING: usize = OFF_POSITION + POSITION_LEN;
+                const OFF_SIGNATURE_LEN: usize = OFF_BINDING + BINDING_LEN;
+                const OFF_SIGNATURE: usize = OFF_SIGNATURE_LEN + LENGTH_WIDTH;
+                const MARKER_LEN: usize = OFF_SIGNATURE + SIGNATURE_LEN;
+                const _: [(); 4_341] = [(); MARKER_LEN];
+                const _: [(); 41] = [(); OFF_COUNTERS];
+                const _: [(); 93] = [(); OFF_LEDGER_SAMPLES];
+                const _: [(); 189] = [(); OFF_PK_LEN];
+                const _: [(); 1_503] = [(); OFF_VOTE_LEN];
+                const _: [(); 1_574] = [(); OFF_PREIMAGE_LEN];
+                const _: [(); 1_832] = [(); OFF_POSITION];
+                const _: [(); 1_887] = [(); OFF_BINDING];
+                const _: [(); 1_919] = [(); OFF_SIGNATURE_LEN];
+                const _: [(); 1_921] = [(); OFF_SIGNATURE];
                 const ENV_CASE: &str = "R422_RPE_CASE";
                 const ENV_MODE: &str = "R422_RPE_MODE";
                 const ENV_FIXTURE_NONCE: &str = "R422_RPE_FIXTURE_NONCE";
@@ -14572,23 +14621,6 @@ mod tests {
                 const ENV_SAFETY: &str = "R422_RPE_SAFETY";
                 const ENV_JOURNAL: &str = "R422_RPE_JOURNAL";
                 const CHILD_PATH: &str = "safety_record_store::owner::model::tests::real_fresh_sign::postconsume_process_death::postwrite_prejournal_ack::publication_retry_exhaustion::child_entry";
-
-                const OFF_CASE: usize = 7;
-                const OFF_NONCE: usize = 8;
-                const OFF_FIXTURE_NONCE: usize = 24;
-                const OFF_OUTCOME: usize = 40;
-                const OFF_COUNTERS: usize = 41;
-                const OFF_LEDGER_SAMPLES: usize = 93;
-                const OFF_PK_LEN: usize = 189;
-                const OFF_PK: usize = 191;
-                const OFF_VOTE_LEN: usize = 1503;
-                const OFF_VOTE: usize = 1505;
-                const OFF_PREIMAGE_LEN: usize = 1574;
-                const OFF_PREIMAGE: usize = 1576;
-                const OFF_POSITION: usize = 1832;
-                const OFF_BINDING: usize = 1887;
-                const OFF_SIGNATURE_LEN: usize = 1919;
-                const OFF_SIGNATURE: usize = 1921;
 
                 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
                 enum Case {
@@ -14657,9 +14689,9 @@ mod tests {
                     assert_eq!(expected.position_key.len(), POSITION_LEN);
                     assert!(!expected.preimage.is_empty() && expected.preimage.len() <= PREIMAGE_CAP);
                     let mut bytes = Box::new([0u8; MARKER_LEN]);
-                    bytes[0..4].copy_from_slice(&MAGIC);
-                    bytes[4..6].copy_from_slice(&VERSION.to_le_bytes());
-                    bytes[6] = PHASE;
+                    bytes[OFF_MAGIC..OFF_VERSION].copy_from_slice(&MAGIC);
+                    bytes[OFF_VERSION..OFF_PHASE].copy_from_slice(&VERSION.to_le_bytes());
+                    bytes[OFF_PHASE] = PHASE;
                     bytes[OFF_CASE] = case.tag();
                     bytes[OFF_NONCE..OFF_NONCE + 16].copy_from_slice(&nonce);
                     bytes[OFF_FIXTURE_NONCE..OFF_FIXTURE_NONCE + 16].copy_from_slice(&fixture_nonce);
@@ -14749,9 +14781,9 @@ mod tests {
                     fixture_nonce: &[u8; 16],
                 ) -> Result<Witness, &'static str> {
                     if bytes.len() != MARKER_LEN { return Err("marker length"); }
-                    if bytes[0..4] != MAGIC { return Err("magic"); }
-                    if get_u16(bytes, 4) != VERSION as usize { return Err("version"); }
-                    if bytes[6] != PHASE { return Err("phase"); }
+                    if bytes[OFF_MAGIC..OFF_VERSION] != MAGIC { return Err("magic"); }
+                    if get_u16(bytes, OFF_VERSION) != VERSION as usize { return Err("version"); }
+                    if bytes[OFF_PHASE] != PHASE { return Err("phase"); }
                     if bytes[OFF_CASE] != case.tag() { return Err("case"); }
                     if &bytes[OFF_NONCE..OFF_NONCE + 16] != nonce { return Err("invocation nonce"); }
                     if &bytes[OFF_FIXTURE_NONCE..OFF_FIXTURE_NONCE + 16] != fixture_nonce {
@@ -15283,7 +15315,6 @@ mod tests {
 
                 #[test]
                 fn marker_parser_and_termination_controls() {
-                    assert_eq!(MARKER_LEN, 4341);
                     assert_eq!(OFF_SIGNATURE + SIGNATURE_LEN, MARKER_LEN);
                     let nonce = [0x31; 16];
                     let fixture_nonce = [0x42; 16];
@@ -15326,7 +15357,7 @@ mod tests {
                             &marker[..], &nonce, &fixture_nonce, case,
                         ));
                         for (offset, replacement) in [
-                            (6, 0u8), (OFF_OUTCOME, 0u8),
+                            (OFF_PHASE, 0u8), (OFF_OUTCOME, 0u8),
                         ] {
                             let mut bad = marker.clone();
                             bad[offset] = replacement;
@@ -15341,6 +15372,49 @@ mod tests {
                         let mut wrong_vote = marker.clone();
                         wrong_vote[OFF_VOTE] = 0;
                         assert!(parse_marker(&wrong_vote[..], case, &nonce, &fixture_nonce).is_err());
+                        let mut wrong_fixture_nonce = marker.clone();
+                        wrong_fixture_nonce[OFF_FIXTURE_NONCE] ^= 1;
+                        assert!(parse_marker(
+                            &wrong_fixture_nonce[..], case, &nonce, &fixture_nonce,
+                        ).is_err());
+                        let wrong_suite_vote = marker_vote();
+                        let mut vote_input = wrong_suite_vote.as_slice();
+                        let mut decoded_wrong_suite =
+                            <Vote as qbind_wire::io::WireDecode>::decode(&mut vote_input)
+                                .expect("unsigned Vote decodes before suite alteration");
+                        assert!(vote_input.is_empty());
+                        decoded_wrong_suite.suite_id = MODEL_SUITE_U16 - 1;
+                        assert_ne!(decoded_wrong_suite.suite_id, MODEL_SUITE_U16);
+                        let mut wrong_suite_wire = Vec::new();
+                        qbind_wire::io::WireEncode::encode(&decoded_wrong_suite, &mut wrong_suite_wire);
+                        assert_eq!(wrong_suite_wire.len(), VOTE_LEN);
+                        let mut wrong_suite_input = wrong_suite_wire.as_slice();
+                        let decoded_again =
+                            <Vote as qbind_wire::io::WireDecode>::decode(&mut wrong_suite_input)
+                                .expect("wrong-suite Vote remains a valid wire encoding");
+                        assert!(wrong_suite_input.is_empty());
+                        assert!(decoded_again.signature.is_empty());
+                        assert_eq!(decoded_again.suite_id, MODEL_SUITE_U16 - 1);
+                        let mut wrong_suite_marker = marker.clone();
+                        wrong_suite_marker[OFF_VOTE..OFF_VOTE + VOTE_LEN]
+                            .copy_from_slice(&wrong_suite_wire);
+                        assert_eq!(
+                            parse_marker(&wrong_suite_marker[..], case, &nonce, &fixture_nonce)
+                                .err(),
+                            Some("Vote suite"),
+                            "actual parser rejects a completely decoded, fixed-length wrong-suite Vote",
+                        );
+                        let mut wrong_signature_len = marker.clone();
+                        wrong_signature_len[OFF_SIGNATURE_LEN..OFF_SIGNATURE]
+                            .copy_from_slice(
+                                &u16::try_from(SIGNATURE_LEN - 1)
+                                    .expect("signature size fits u16")
+                                    .to_le_bytes(),
+                            );
+                        assert_eq!(wrong_signature_len.len(), MARKER_LEN);
+                        assert!(parse_marker(
+                            &wrong_signature_len[..], case, &nonce, &fixture_nonce,
+                        ).is_err());
                         let mut wrong_padding = marker.clone();
                         wrong_padding[OFF_PREIMAGE + 250] = 1;
                         assert!(parse_marker(&wrong_padding[..], case, &nonce, &fixture_nonce).is_err());
