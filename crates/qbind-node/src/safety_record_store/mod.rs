@@ -52,7 +52,7 @@ pub use decision_capture::{
     RetainedDecisionObservation, RetainedDecisionReject,
 };
 pub use error::SafetyStoreError;
-pub use owner::{PublishResult, SafetyMeta, SafetyRecordOwner};
+pub use owner::{LeaderRouteAdmission, PublishResult, SafetyMeta, SafetyRecordOwner};
 pub use prepared::{
     CaptureRefusal, GenerationIdentity, PreparedHandle, PreparedPin, PreparedProvenance,
     PreparedRegistry, ProvenanceRefusal, ReleaseOutcome,

@@ -4,7 +4,7 @@ use qbind_consensus::{
     ValidatorId, vote_accumulator::ConsensusLimitsConfig,
 };
 use qbind_consensus::validator_set::ValidatorSetEntry;
-use qbind_wire::consensus::{BlockHeader, BlockProposal};
+use qbind_wire::consensus::{BlockHeader, BlockProposal, QuorumCertificate as WireQc};
 
 fn validators(count: u64) -> ConsensusValidatorSet {
     ConsensusValidatorSet::new(
@@ -129,6 +129,7 @@ fn leader_route_returns_same_invocation_proposal_vote_and_advances_after_single_
     assert!(decided.effects().accumulator_inserted);
     assert!(decided.effects().qc_formed);
     assert!(decided.effects().qc_processed);
+    assert!(decided.effects().qc_processing_succeeded);
     assert!(decided.effects().view_advanced);
     assert_eq!(engine.current_view(), origin_view + 1);
 }
@@ -147,6 +148,46 @@ fn leader_route_refuses_nonleader_without_calling_capture_gate() {
     assert!(matches!(
         engine.try_propose_gated_owning(&mut gate),
         LeaderProposalRouteResult::Refused(qbind_consensus::LeaderRouteRefusal::NonLeader)
+    ));
+    assert_eq!(gate.calls, 0);
+}
+
+#[test]
+fn already_voted_refusal_is_distinct_from_already_proposed() {
+    let mut engine = engine_with_l0(4);
+    assert!(engine.is_leader_for_current_view());
+    let view = engine.current_view();
+    let locked = engine.locked_qc().expect("L0 lock").clone();
+    let mut inbound = genesis_proposal();
+    inbound.header.height = view;
+    inbound.header.round = view;
+    inbound.header.parent_block_id = locked.block_id;
+    inbound.header.proposer_index = 1;
+    inbound.qc = Some(WireQc {
+        version: 1,
+        chain_id: 1,
+        epoch: 0,
+        height: locked.view,
+        round: locked.view,
+        step: 0,
+        block_id: locked.block_id,
+        suite_id: qbind_wire::DEFAULT_CONSENSUS_SUITE_ID,
+        signer_bitmap: Vec::new(),
+        signatures: Vec::new(),
+    });
+    let action = engine
+        .on_proposal_event(ValidatorId::new(1), &inbound);
+    assert!(
+        matches!(action, Some(ConsensusEngineAction::BroadcastVote(_))),
+        "expected inbound self-vote, got {action:?}"
+    );
+    let mut gate = AcceptGate {
+        calls: 0,
+        max_signers: 4,
+    };
+    assert!(matches!(
+        engine.try_propose_gated_owning(&mut gate),
+        LeaderProposalRouteResult::Refused(qbind_consensus::LeaderRouteRefusal::AlreadyVoted)
     ));
     assert_eq!(gate.calls, 0);
 }

@@ -174,6 +174,7 @@ pub(crate) struct LeaderSelfVoteReport {
     pub accumulator_views_evicted: u64,
     pub qc_formed: bool,
     pub qc_processed: bool,
+    pub qc_processing_succeeded: bool,
     pub processing_error: Option<QcValidationError>,
 }
 
@@ -830,6 +831,7 @@ where
                     equivocation_recorded: true,
                     qc_formed: false,
                     qc_processed: false,
+                    qc_processing_succeeded: false,
                     processing_error: None,
                     history_entries_evicted: self
                         .evicted_votes_by_view_entries
@@ -854,6 +856,7 @@ where
                     equivocation_recorded,
                     qc_formed: false,
                     qc_processed: false,
+                    qc_processing_succeeded: false,
                     processing_error: Some(error),
                     history_entries_evicted: self
                         .evicted_votes_by_view_entries
@@ -872,6 +875,7 @@ where
                 equivocation_recorded,
                 qc_formed: false,
                 qc_processed: false,
+                qc_processing_succeeded: false,
                 processing_error: None,
                 history_entries_evicted: self
                     .evicted_votes_by_view_entries
@@ -890,6 +894,7 @@ where
                 equivocation_recorded,
                 qc_formed: false,
                 qc_processed: false,
+                qc_processing_succeeded: false,
                 processing_error: Some(error),
                 history_entries_evicted: self
                     .evicted_votes_by_view_entries
@@ -904,7 +909,8 @@ where
                 history_recorded,
                 equivocation_recorded,
                 qc_formed: false,
-                qc_processed: true,
+                qc_processed: false,
+                qc_processing_succeeded: true,
                 processing_error: None,
                 history_entries_evicted: self
                     .evicted_votes_by_view_entries
@@ -921,6 +927,7 @@ where
                     equivocation_recorded,
                     qc_formed: true,
                     qc_processed: true,
+                    qc_processing_succeeded: true,
                     processing_error: None,
                     history_entries_evicted: self
                         .evicted_votes_by_view_entries
@@ -936,6 +943,7 @@ where
                     equivocation_recorded,
                     qc_formed: true,
                     qc_processed: false,
+                    qc_processing_succeeded: false,
                     processing_error: Some(error),
                     history_entries_evicted: self
                         .evicted_votes_by_view_entries

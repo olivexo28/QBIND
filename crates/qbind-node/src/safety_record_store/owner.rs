@@ -1014,6 +1014,107 @@ pub enum PublishResult {
     DurableAcknowledged { new_revision: u64 },
 }
 
+/// A successful, proof-bound admission for one isolated leader route. The proof
+/// remains caller-owned until `propose_and_capture` consumes it.
+pub struct LeaderRouteAdmission<'owner> {
+    owner: &'owner SafetyRecordOwner,
+    identity: super::prepared::GenerationIdentity,
+    expected_revision: u64,
+    proof_publication_revision: u64,
+    proof_backend_incarnation: u64,
+    proof_context_digest: [u8; 32],
+    limits: super::decision_capture::PreparedDecisionInputLimits,
+    route: super::accounting::Reservation,
+}
+
+impl<'owner> LeaderRouteAdmission<'owner> {
+    /// Consume this admission, taking the proof only after admission/proof
+    /// correspondence is checked. Every returned owner outcome carries R.
+    pub fn propose_and_capture(
+        self,
+        engine: &mut qbind_consensus::BasicHotStuffEngine<[u8; 32]>,
+        proof: &mut Option<ValidatedRecord>,
+    ) -> super::decision_capture::LeaderOwnerOutcome {
+        use super::decision_capture::{
+            LeaderOwnerOutcome, LeaderOwnerRefusal,
+        };
+
+        let LeaderRouteAdmission {
+            owner,
+            identity,
+            expected_revision,
+            proof_publication_revision,
+            proof_backend_incarnation,
+            proof_context_digest,
+            limits,
+            route,
+        } = self;
+        let Some(candidate_proof) = proof.as_ref() else {
+            return LeaderOwnerOutcome::refused(
+                None,
+                LeaderOwnerRefusal::AdmissionProofMissing,
+                route,
+            );
+        };
+        let proof_matches = super::prepared::GenerationIdentity::from_retained(
+            candidate_proof.retained(),
+        ) == Some(identity)
+            && candidate_proof.publication_revision() == proof_publication_revision
+            && candidate_proof.recovery_backend_incarnation() == Some(proof_backend_incarnation)
+            && candidate_proof.origin_context_digest() == &proof_context_digest;
+        if !proof_matches {
+            return LeaderOwnerOutcome::refused(
+                proof.take(),
+                LeaderOwnerRefusal::AdmissionProofMismatch,
+                route,
+            );
+        }
+        let proof = proof.take().expect("proof was checked above");
+        let mut guard = owner.backend.lock_domain();
+        let mut gate = LeaderCaptureGate {
+            owner,
+            guard: &mut guard,
+            proof: Some(proof),
+            identity,
+            expected_revision,
+            limits,
+            proposer: engine.local_id(),
+            reason: None,
+        };
+
+        #[cfg(any(test, feature = "test-utils"))]
+        fire_pre_ingestion_hook();
+
+        let engine_result = engine.try_propose_gated_owning(&mut gate);
+        let LeaderCaptureGate {
+            proof: returned_proof,
+            reason,
+            ..
+        } = gate;
+        let outcome = match engine_result {
+            qbind_consensus::LeaderProposalRouteResult::PostCapture(failure) => {
+                let diagnostic = failure.into_diagnostic();
+                LeaderOwnerOutcome::refused(
+                    None,
+                    LeaderOwnerRefusal::PostCapture(diagnostic),
+                    route,
+                )
+            }
+            qbind_consensus::LeaderProposalRouteResult::Decided(decided) => {
+                LeaderOwnerOutcome::decided(decided, route)
+            }
+            qbind_consensus::LeaderProposalRouteResult::Refused(engine_reason) => {
+                let refusal = reason
+                    .map(LeaderOwnerRefusal::Capture)
+                    .unwrap_or(LeaderOwnerRefusal::Engine(engine_reason));
+                LeaderOwnerOutcome::refused(returned_proof, refusal, route)
+            }
+        };
+        drop(guard);
+        outcome
+    }
+}
+
 impl SafetyRecordOwner {
     /// Attach an owner handle to an open backend instance. Every handle attached
     /// to the same backend shares its single serialization domain.
@@ -2392,140 +2493,79 @@ impl SafetyRecordOwner {
         )
     }
 
-    /// Isolated leader Proposal/self-Vote owner route. It holds one serialization
-    /// domain over engine selection, L0 capture, self-vote processing, and result
-    /// transfer. No production caller is wired to this method.
-    pub fn propose_and_capture_leader_owned(
-        &self,
-        engine: &mut qbind_consensus::BasicHotStuffEngine<[u8; 32]>,
+    /// Admit a leader route without taking ownership of the proof. A refusal
+    /// returns only the small preparation error; the caller's proof slot remains
+    /// intact and no `LeaderOwnerOutcome` is constructed.
+    pub fn prepare_leader_route<'owner>(
+        &'owner self,
         limits: &super::decision_capture::PreparedDecisionInputLimits,
         expected_authoritative_revision: u64,
-        proof: ValidatedRecord,
-    ) -> super::decision_capture::LeaderOwnerOutcome {
+        proof: &ValidatedRecord,
+    ) -> Result<
+        LeaderRouteAdmission<'owner>,
+        super::decision_capture::LeaderRoutePreparationRefusal,
+    > {
         use super::decision_capture::{
-            LeaderCaptureRefusal, LeaderOwnerOutcome, LeaderOwnerRefusal,
+            LeaderCaptureRefusal, LeaderRoutePreparationRefusal,
         };
 
-        let identity = match self.capture_precheck(&proof) {
+        let identity = match self.capture_precheck(proof) {
             Ok(identity) => identity,
-            Err(reason) => {
-                return LeaderOwnerOutcome::refused(
-                    Some(proof),
-                    LeaderOwnerRefusal::Capture(LeaderCaptureRefusal::Precheck(reason)),
-                    None,
-                )
-            }
+            Err(reason) => return Err(LeaderRoutePreparationRefusal::Capture(
+                LeaderCaptureRefusal::Precheck(reason),
+            )),
         };
         let expected_limits =
             match super::decision_capture::PreparedDecisionInputLimits::from_pinned(self.pinned())
             {
                 Ok(expected) => expected,
-                Err(error) => {
-                    return LeaderOwnerOutcome::refused(
-                        Some(proof),
-                        LeaderOwnerRefusal::Capture(
-                            LeaderCaptureRefusal::OwnerPolicyUnavailable(error),
-                        ),
-                        None,
-                    )
-                }
+                Err(error) => return Err(LeaderRoutePreparationRefusal::Capture(
+                    LeaderCaptureRefusal::OwnerPolicyUnavailable(error),
+                )),
             };
         if *limits != expected_limits {
-            return LeaderOwnerOutcome::refused(
-                Some(proof),
-                LeaderOwnerRefusal::Capture(
-                    LeaderCaptureRefusal::EffectivePolicyMismatch,
-                ),
-                None,
-            );
+            return Err(LeaderRoutePreparationRefusal::Capture(
+                LeaderCaptureRefusal::EffectivePolicyMismatch,
+            ));
         }
 
-        let route_charge = match leader_route_charge::<LeaderCaptureGate<'static, 'static>>(
+        let charge_report = leader_route_charge::<LeaderCaptureGate<'static, 'static>>(
             limits.max_qc_sig_count() as usize,
-        ) {
-            Ok(charge) => charge,
-            Err(error) => {
-                return LeaderOwnerOutcome::refused(
-                    Some(proof),
-                    LeaderOwnerRefusal::RouteAdmission(error),
-                    None,
-                )
-            }
-        };
-        let route = match self.backend.accounting().reserve(route_charge) {
+        )
+        .map_err(LeaderRoutePreparationRefusal::RouteAdmission)?;
+        let route = match self.backend.accounting().reserve(charge_report.selected) {
             Ok(route) => route,
-            Err(error) => {
-                return LeaderOwnerOutcome::refused(
-                    Some(proof),
-                    LeaderOwnerRefusal::RouteAdmission(error),
-                    None,
-                )
-            }
+            Err(error) => return Err(LeaderRoutePreparationRefusal::RouteAdmission(error)),
         };
-
-        let mut guard = self.backend.lock_domain();
-        let mut gate = LeaderCaptureGate {
+        Ok(LeaderRouteAdmission {
             owner: self,
-            guard: &mut guard,
-            proof: Some(proof),
             identity,
             expected_revision: expected_authoritative_revision,
+            proof_publication_revision: proof.publication_revision(),
+            proof_backend_incarnation: proof
+                .recovery_backend_incarnation()
+                .expect("capture precheck established backend provenance"),
+            proof_context_digest: *proof.origin_context_digest(),
             limits: *limits,
-            proposer: engine.local_id(),
-            reason: None,
-            route: Some(route),
-        };
-
-        #[cfg(any(test, feature = "test-utils"))]
-        fire_pre_ingestion_hook();
-
-        let result = engine.try_propose_gated_owning(&mut gate);
-        let result = match result {
-            qbind_consensus::LeaderProposalRouteResult::PostCapture(failure) => {
-                // The gate still owns R while the closed carrier destroys all
-                // paired objects and the prepared pin in its consuming path.
-                let diagnostic = failure.into_diagnostic();
-                Err(diagnostic)
-            }
-            result => Ok(result),
-        };
-
-        let LeaderCaptureGate {
-            proof: returned_proof,
-            reason,
             route,
-            ..
-        } = gate;
-        let outcome = match result {
-            Err(diagnostic) => LeaderOwnerOutcome::refused(
-                None,
-                LeaderOwnerRefusal::PostCapture(diagnostic),
-                route,
-            ),
-            Ok(qbind_consensus::LeaderProposalRouteResult::Decided(decided)) => {
-                match route {
-                    Some(route) => LeaderOwnerOutcome::decided(decided, route),
-                    None => LeaderOwnerOutcome::refused(
-                        None,
-                        LeaderOwnerRefusal::RouteAdmission(SafetyStoreError::ArithmeticOverflow(
-                            ArithmeticOverflowSite::SizeSum,
-                        )),
-                        None,
-                    ),
-                }
-            }
-            Ok(qbind_consensus::LeaderProposalRouteResult::Refused(engine_reason)) => {
-                let refusal = reason
-                    .map(LeaderOwnerRefusal::Capture)
-                    .unwrap_or(LeaderOwnerRefusal::Engine(engine_reason));
-                LeaderOwnerOutcome::refused(returned_proof, refusal, route)
-            }
-            Ok(qbind_consensus::LeaderProposalRouteResult::PostCapture(_)) => {
-                unreachable!("post-capture result is consumed while route reservation is live")
-            }
-        };
-        drop(guard);
-        outcome
+        })
+    }
+
+    #[cfg(any(test, feature = "test-utils"))]
+    pub fn leader_route_charge_report_for_test(
+        &self,
+        limits: &super::decision_capture::PreparedDecisionInputLimits,
+    ) -> Result<LeaderRouteChargeReport, SafetyStoreError> {
+        leader_route_charge::<LeaderCaptureGate<'static, 'static>>(
+            limits.max_qc_sig_count() as usize,
+        )
+    }
+
+    #[cfg(any(test, feature = "test-utils"))]
+    pub fn leader_accounting_observer_for_test(
+        &self,
+    ) -> super::accounting::SharedAccountant {
+        self.backend.accounting().clone()
     }
 
     /// **§ 13.6 verified-Proposal decide-and-capture** (isolated, opt-in).
@@ -3630,7 +3670,6 @@ struct LeaderCaptureGate<'o, 'g> {
     limits: super::decision_capture::PreparedDecisionInputLimits,
     proposer: qbind_consensus::ValidatorId,
     reason: Option<super::decision_capture::LeaderCaptureRefusal>,
-    route: Option<super::accounting::Reservation>,
 }
 
 impl LeaderCaptureGate<'_, '_> {
@@ -3821,9 +3860,62 @@ impl qbind_consensus::LeaderProposalGate<super::decision_capture::LeaderCaptureP
     }
 }
 
-fn leader_route_charge<G>(signer_capacity: usize) -> Result<u128, SafetyStoreError> {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LeaderRouteChargeOperands {
+    pub gate: u128,
+    pub preflight: u128,
+    pub context: u128,
+    pub callback_input: u128,
+    pub registration_plan: u128,
+    pub signer_buffer: u128,
+    pub signer_backing: u128,
+    pub proposal_binding_metadata: u128,
+    pub proposal: u128,
+    pub vote: u128,
+    pub vote_report: u128,
+    pub payload: u128,
+    pub pin: u128,
+    pub proof: u128,
+    pub engine_result: u128,
+    pub envelope: u128,
+    pub owner_result: u128,
+    pub admission: u128,
+    pub admission_result: u128,
+    pub post_capture_failure: u128,
+    pub post_capture_diagnostic: u128,
+    pub conversion_excess: u128,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LeaderRouteChargePhases {
+    pub admitted_token: u128,
+    pub signer: u128,
+    pub registration_plan: u128,
+    pub binding: u128,
+    pub proof_conversion: u128,
+    pub captured_payload: u128,
+    pub self_vote_before_message: u128,
+    pub self_vote_after_message: u128,
+    pub engine_result: u128,
+    pub engine_to_owner_transfer: u128,
+    pub post_capture_cleanup: u128,
+    pub returned_proof_outcome: u128,
+    pub returned_success_outcome: u128,
+    pub returned_post_capture_outcome: u128,
+    pub proof_extraction: u128,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LeaderRouteChargeReport {
+    pub operands: LeaderRouteChargeOperands,
+    pub phases: LeaderRouteChargePhases,
+    pub selected: u128,
+}
+
+fn leader_route_charge<G>(signer_capacity: usize) -> Result<LeaderRouteChargeReport, SafetyStoreError> {
     use super::decision_capture::{
         DecisionMetadata, LeaderCapturePayload, LeaderOwnerOutcome,
+        LeaderRoutePreparationRefusal,
     };
     use super::prepared::PreparedPin;
     use qbind_wire::consensus::{BlockProposal, Vote};
@@ -3859,96 +3951,146 @@ fn leader_route_charge<G>(signer_capacity: usize) -> Result<u128, SafetyStoreErr
             ArithmeticOverflowSite::SizeSum,
         ))?;
     let outcome = size_of::<LeaderOwnerOutcome>() as u128;
+    let admission = size_of::<LeaderRouteAdmission<'static>>() as u128;
+    let admission_result =
+        size_of::<Result<LeaderRouteAdmission<'static>, LeaderRoutePreparationRefusal>>() as u128;
     let envelope = layout.envelope;
     let payload_residual = sub(layout.payload, pin)?;
     let gate_proof_residual = sub(gate, proof)?;
     let owner_proof_residual = sub(outcome, proof)?;
     let owner_pin_residual = sub(outcome, pin)?;
-    let post = size_of::<qbind_consensus::LeaderPostCaptureFailure<LeaderCapturePayload>>() as u128;
+    let post =
+        size_of::<qbind_consensus::LeaderPostCaptureFailure<LeaderCapturePayload>>() as u128;
     let diagnostic = size_of::<qbind_consensus::LeaderPostCaptureDiagnostic>() as u128;
     let report = layout.vote_report;
     let buffer = layout.signer_buffer;
     let registration = layout.registration_plan;
     let callback = layout.callback_input;
     let preflight = layout.preflight;
-    let r_signer = sum(&[
-        gate_proof_residual,
-        buffer,
-        signer_backing,
-    ])?;
-    let r_bind = sum(&[
-        gate_proof_residual,
-        preflight,
-        callback,
-        registration,
-        signer_backing,
-        proposal,
-        binding,
-    ])?;
-    let r_conversion = sum(&[
-        gate,
-        preflight,
-        callback,
-        registration,
-        signer_backing,
-        proposal,
-        binding,
-        sub(
-            size_of::<super::record::ConsumedForPrepared>() as u128,
-            size_of::<super::record::RetainedRecord>() as u128,
-        )?,
-    ])?;
-    let r_capture = sum(&[
-        gate,
-        preflight,
-        callback,
-        registration,
-        signer_backing,
-        proposal,
-        payload_residual,
-    ])?;
-    let r_vote_pre =
-        sum(&[gate, preflight, proposal, payload_residual, report])?;
-    let r_vote_post =
-        sum(&[gate, preflight, proposal, payload_residual, vote, report])?;
-    let r_engine = sum(&[gate, preflight, sub(layout.engine_result, pin)?])?;
-    let r_transfer = sum(&[
-        gate,
-        preflight,
-        sub(layout.engine_result, envelope)?,
-        owner_pin_residual,
-    ])?;
-    let r_post_capture = sum(&[gate, preflight, post])?
-        .max(sum(&[gate, preflight, diagnostic])?);
-    let r_owner_pre = owner_proof_residual;
-    let r_owner_success = owner_pin_residual;
-    let r_owner_post = outcome;
-    let r_extract = outcome;
-    let r_plan = sum(&[
-        gate_proof_residual,
-        preflight,
-        registration,
-        signer_backing,
-    ])?;
-    [
-        r_signer,
-        r_plan,
-        r_bind,
-        r_conversion,
-        r_capture,
-        r_vote_pre,
-        r_vote_post,
-        r_engine,
-        r_transfer,
-        r_post_capture,
-        r_owner_pre,
-        r_owner_success,
-        r_owner_post,
-        r_extract,
+    let phases = LeaderRouteChargePhases {
+        admitted_token: admission_result,
+        signer: sum(&[gate_proof_residual, buffer, signer_backing])?,
+        registration_plan: sum(&[
+            gate_proof_residual,
+            preflight,
+            registration,
+            buffer,
+            signer_backing,
+        ])?,
+        binding: sum(&[
+            gate_proof_residual,
+            preflight,
+            layout.context,
+            callback,
+            registration,
+            buffer,
+            signer_backing,
+            proposal,
+            binding,
+        ])?,
+        proof_conversion: sum(&[
+            gate,
+            preflight,
+            layout.context,
+            callback,
+            registration,
+            buffer,
+            signer_backing,
+            proposal,
+            binding,
+            sub(
+                size_of::<super::record::ConsumedForPrepared>() as u128,
+                size_of::<super::record::RetainedRecord>() as u128,
+            )?,
+        ])?,
+        captured_payload: sum(&[
+            gate,
+            preflight,
+            layout.context,
+            callback,
+            registration,
+            buffer,
+            signer_backing,
+            proposal,
+            payload_residual,
+        ])?,
+        self_vote_before_message: sum(&[gate, preflight, proposal, payload_residual, report])?,
+        self_vote_after_message: sum(&[
+            gate,
+            preflight,
+            proposal,
+            payload_residual,
+            vote,
+            report,
+        ])?,
+        engine_result: sum(&[gate, preflight, sub(layout.engine_result, pin)?])?,
+        engine_to_owner_transfer: sum(&[
+            gate,
+            preflight,
+            sub(layout.engine_result, envelope)?,
+            owner_pin_residual,
+        ])?,
+        post_capture_cleanup: sum(&[
+            gate,
+            preflight,
+            post,
+        ])?,
+        returned_proof_outcome: owner_proof_residual,
+        returned_success_outcome: owner_pin_residual,
+        returned_post_capture_outcome: outcome,
+        proof_extraction: outcome,
+    };
+    let selected = [
+        phases.admitted_token,
+        phases.signer,
+        phases.registration_plan,
+        phases.binding,
+        phases.proof_conversion,
+        phases.captured_payload,
+        phases.self_vote_before_message,
+        phases.self_vote_after_message,
+        phases.engine_result,
+        phases.engine_to_owner_transfer,
+        phases.post_capture_cleanup,
+        phases.returned_proof_outcome,
+        phases.returned_success_outcome,
+        phases.returned_post_capture_outcome,
+        phases.proof_extraction,
     ]
     .into_iter()
     .max()
     .ok_or(SafetyStoreError::ArithmeticOverflow(
         ArithmeticOverflowSite::SizeSum,
-    ))
+    ))?;
+    Ok(LeaderRouteChargeReport {
+        operands: LeaderRouteChargeOperands {
+            gate,
+            preflight,
+            context: layout.context,
+            callback_input: callback,
+            registration_plan: registration,
+            signer_buffer: buffer,
+            signer_backing,
+            proposal_binding_metadata: binding,
+            proposal,
+            vote,
+            vote_report: report,
+            payload: layout.payload,
+            pin,
+            proof,
+            engine_result: layout.engine_result,
+            envelope,
+            owner_result: outcome,
+            admission,
+            admission_result,
+            post_capture_failure: post,
+            post_capture_diagnostic: diagnostic,
+            conversion_excess: sub(
+                size_of::<super::record::ConsumedForPrepared>() as u128,
+                size_of::<super::record::RetainedRecord>() as u128,
+            )?,
+        },
+        phases,
+        selected,
+    })
 }

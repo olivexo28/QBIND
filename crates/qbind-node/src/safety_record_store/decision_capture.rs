@@ -641,23 +641,31 @@ pub enum LeaderOwnerRefusal {
     Engine(qbind_consensus::LeaderRouteRefusal),
     PostCapture(qbind_consensus::LeaderPostCaptureDiagnostic),
     RouteAdmission(super::error::SafetyStoreError),
+    AdmissionProofMismatch,
+    AdmissionProofMissing,
+}
+
+#[derive(Debug)]
+pub enum LeaderRoutePreparationRefusal {
+    Capture(LeaderCaptureRefusal),
+    RouteAdmission(super::error::SafetyStoreError),
 }
 
 /// Closed owner result for the leader Proposal/self-Vote handoff. The optional
-/// route reservation is declared last so safe field destruction releases it
-/// after the proof, paired envelope, and diagnostic have been dropped.
+/// proof/envelope/diagnostic slots are covered by the mandatory route
+/// reservation, declared last so field destruction releases it last.
 pub struct LeaderOwnerOutcome {
     proof: Option<ValidatedRecord>,
     decided: Option<qbind_consensus::DecidedLeaderProposal<LeaderCapturePayload>>,
     refusal: Option<LeaderOwnerRefusal>,
-    route_reservation: Option<super::accounting::Reservation>,
+    route_reservation: super::accounting::Reservation,
 }
 
 impl LeaderOwnerOutcome {
     pub(crate) fn refused(
         proof: Option<ValidatedRecord>,
         refusal: LeaderOwnerRefusal,
-        route_reservation: Option<super::accounting::Reservation>,
+        route_reservation: super::accounting::Reservation,
     ) -> Self {
         Self {
             proof,
@@ -675,7 +683,7 @@ impl LeaderOwnerOutcome {
             proof: None,
             decided: Some(decided),
             refusal: None,
-            route_reservation: Some(route_reservation),
+            route_reservation,
         }
     }
 
@@ -689,10 +697,8 @@ impl LeaderOwnerOutcome {
         self.refusal.as_ref()
     }
 
-    pub fn route_charge(&self) -> Option<u128> {
-        self.route_reservation
-            .as_ref()
-            .map(super::accounting::Reservation::charge)
+    pub fn route_charge(&self) -> u128 {
+        self.route_reservation.charge()
     }
 
     /// Consume the result and recover only a still-intact pre-consumption proof.

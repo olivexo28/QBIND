@@ -766,6 +766,7 @@ pub struct LeaderRouteEffects {
     pub equivocation_recorded: bool,
     pub qc_formed: bool,
     pub qc_processed: bool,
+    pub qc_processing_succeeded: bool,
     pub view_advanced: bool,
     pub reconfiguration_intent_consumed: bool,
 }
@@ -785,6 +786,7 @@ impl LeaderRouteEffects {
             equivocation_recorded: false,
             qc_formed: false,
             qc_processed: false,
+            qc_processing_succeeded: false,
             view_advanced: false,
             reconfiguration_intent_consumed: false,
         }
@@ -2336,6 +2338,33 @@ where
     }
 }
 
+#[cfg(test)]
+std::thread_local! {
+    static LEADER_SIGNER_ALLOC_FAIL: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    static LEADER_SIGNER_ALLOCATIONS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    static LEADER_SIGNER_DEALLOCATIONS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    static LEADER_SIGNER_TRANSFERS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+fn allocate_leader_signers(layout: std::alloc::Layout) -> *mut u8 {
+    #[cfg(test)]
+    {
+        if LEADER_SIGNER_ALLOC_FAIL.with(std::cell::Cell::get) {
+            return std::ptr::null_mut();
+        }
+        LEADER_SIGNER_ALLOCATIONS.with(|count| count.set(count.get() + 1));
+    }
+    // SAFETY: callers pass a checked Layout and handle a null result.
+    unsafe { std::alloc::alloc(layout) }
+}
+
+unsafe fn deallocate_leader_signers(ptr: *mut u8, layout: std::alloc::Layout) {
+    #[cfg(test)]
+    LEADER_SIGNER_DEALLOCATIONS.with(|count| count.set(count.get() + 1));
+    // SAFETY: the caller passes the original pointer and exact allocation layout.
+    unsafe { std::alloc::dealloc(ptr, layout) }
+}
+
 #[derive(Debug)]
 struct LeaderSignerBuffer {
     ptr: std::ptr::NonNull<ValidatorId>,
@@ -2354,9 +2383,7 @@ impl LeaderSignerBuffer {
         }
         let layout = std::alloc::Layout::array::<ValidatorId>(capacity)
             .map_err(|_| LeaderSignerBufferError::Layout)?;
-        // SAFETY: `layout` was checked for `ValidatorId`; a null result means
-        // allocation failed and no allocation exists to clean up.
-        let raw = unsafe { std::alloc::alloc(layout) }.cast::<ValidatorId>();
+        let raw = allocate_leader_signers(layout).cast::<ValidatorId>();
         let Some(ptr) = std::ptr::NonNull::new(raw) else {
             return Err(LeaderSignerBufferError::Allocation);
         };
@@ -2381,6 +2408,8 @@ impl LeaderSignerBuffer {
         let len = this.initialized;
         let capacity = this.capacity;
         this.initialized = 0;
+        #[cfg(test)]
+        LEADER_SIGNER_TRANSFERS.with(|count| count.set(count.get() + 1));
         // SAFETY: allocation used the global allocator and exact Layout for
         // `capacity` ValidatorIds; exactly `len` values were initialized; no
         // other owner can free this allocation; Vec uses the same allocator.
@@ -2396,7 +2425,7 @@ impl Drop for LeaderSignerBuffer {
                 self.ptr.as_ptr(),
                 self.initialized,
             ));
-            std::alloc::dealloc(self.ptr.as_ptr().cast::<u8>(), self.layout);
+            deallocate_leader_signers(self.ptr.as_ptr().cast::<u8>(), self.layout);
         }
     }
 }
@@ -2615,6 +2644,7 @@ impl BasicHotStuffEngine<[u8; 32]> {
         effects.equivocation_recorded = report.equivocation_recorded;
         effects.qc_formed = report.qc_formed;
         effects.qc_processed = report.qc_processed;
+        effects.qc_processing_succeeded = report.qc_processing_succeeded;
         if let Some(disposition) = report.insertion {
             match disposition {
                 crate::vote_accumulator::VoteAccumulatorDisposition::Inserted => {
@@ -2642,7 +2672,7 @@ impl BasicHotStuffEngine<[u8; 32]> {
         };
 
         let accepted = effects.accumulator_inserted
-            && effects.qc_processed
+            && effects.qc_processing_succeeded
             && report.processing_error.is_none()
             && !effects.equivocation_recorded;
         if !accepted {
@@ -4073,6 +4103,42 @@ mod tests {
             LeaderSignerBuffer::copy_from(&source, 0).unwrap_err(),
             LeaderSignerBufferError::Bound
         );
+    }
+
+    #[test]
+    fn leader_signer_buffer_null_injection_and_abandonment_have_exact_ownership() {
+        LEADER_SIGNER_ALLOCATIONS.with(|count| count.set(0));
+        LEADER_SIGNER_DEALLOCATIONS.with(|count| count.set(0));
+        LEADER_SIGNER_TRANSFERS.with(|count| count.set(0));
+        let source = [ValidatorId(4), ValidatorId(1)];
+
+        LEADER_SIGNER_ALLOC_FAIL.with(|fail| fail.set(true));
+        let null_result = LeaderSignerBuffer::copy_from(&source, 4);
+        LEADER_SIGNER_ALLOC_FAIL.with(|fail| fail.set(false));
+        assert!(matches!(
+            null_result,
+            Err(LeaderSignerBufferError::Allocation)
+        ));
+        LEADER_SIGNER_ALLOCATIONS.with(|count| assert_eq!(count.get(), 0));
+        LEADER_SIGNER_DEALLOCATIONS.with(|count| assert_eq!(count.get(), 0));
+        LEADER_SIGNER_TRANSFERS.with(|count| assert_eq!(count.get(), 0));
+
+        let abandoned = LeaderSignerBuffer::copy_from(&source, 4)
+            .expect("successful allocation");
+        LEADER_SIGNER_ALLOCATIONS.with(|count| assert_eq!(count.get(), 1));
+        drop(abandoned);
+        LEADER_SIGNER_DEALLOCATIONS.with(|count| assert_eq!(count.get(), 1));
+        LEADER_SIGNER_TRANSFERS.with(|count| assert_eq!(count.get(), 0));
+
+        let transferred = LeaderSignerBuffer::copy_from(&source, 4)
+            .expect("second successful allocation")
+            .into_vec();
+        assert_eq!(transferred.as_slice(), source);
+        assert_eq!(transferred.capacity(), 4);
+        LEADER_SIGNER_ALLOCATIONS.with(|count| assert_eq!(count.get(), 2));
+        LEADER_SIGNER_DEALLOCATIONS.with(|count| assert_eq!(count.get(), 1));
+        LEADER_SIGNER_TRANSFERS.with(|count| assert_eq!(count.get(), 1));
+        drop(transferred);
     }
 
     #[test]
