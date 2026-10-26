@@ -111,6 +111,11 @@ required-features = ["test-utils"]
 name = "run_422_owning_capture_binding_tests"
 path = "tests/run_422_owning_capture_binding_tests.rs"
 required-features = ["test-utils"]
+# RUN 422 §13.6 — isolated leader Proposal/self-Vote owning handoff.
+[[test]]
+name = "run_422_leader_proposal_owning_handoff_tests"
+path = "tests/run_422_leader_proposal_owning_handoff_tests.rs"
+required-features = ["test-utils"]
 # RUN 422 §13.6 — isolated non-consuming retained-decision observation. Gated
 # behind `test-utils`; no production caller; activation remains DISABLED.
 [[test]]

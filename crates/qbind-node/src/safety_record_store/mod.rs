@@ -46,6 +46,7 @@ pub use backend::{InjectFault, PublishOutcome, SafetyBackend, SafetyBackendPolic
 pub use decision_capture::{
     AncestryBinding, AncestryKind, AncestryRefusal, BoundedAncestryReject, CorrespondenceRefusal,
     CurrentLoadFailure, DecisionMetadata, EntrypointKind, InputBoundRefusal, InputPolicyError,
+    LeaderCapturePayload, LeaderCaptureRefusal, LeaderOwnerOutcome, LeaderOwnerRefusal,
     LoaderDiagnostic, MetaBranch, MetaField, OwnedCaptureRefusal, OwnedDecisionOutcome,
     OwningCapturePayload, PreparedDecisionInputLimits, ProjectionMismatch, RetainedDecisionBlocked,
     RetainedDecisionObservation, RetainedDecisionReject,

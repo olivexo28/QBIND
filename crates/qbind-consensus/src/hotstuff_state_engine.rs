@@ -28,7 +28,9 @@ use crate::ids::ValidatorId;
 use crate::qc::{QcValidationError, QuorumCertificate};
 use crate::qc_verify_domain::VerifiedQuorumCertificate;
 use crate::validator_set::ConsensusValidatorSet;
-use crate::vote_accumulator::{ConsensusLimitsConfig, VoteAccumulator};
+use crate::vote_accumulator::{
+    ConsensusLimitsConfig, VoteAccumulator, VoteAccumulatorDisposition,
+};
 
 /// Run 422 D7-C3F: default byte budget for retained embedded-QC verification
 /// evidence ([`BlockNode::verified_justification`]).
@@ -141,6 +143,38 @@ enum VoteHistoryOutcome<BlockIdT> {
         /// The block the validator previously voted for.
         previous_block: BlockIdT,
     },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum LeaderVoteHistoryStatus {
+    NonMember,
+    Clear,
+    SameCandidate,
+    ConflictingCandidate,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum LeaderRegistrationRefusal {
+    CandidateCollision,
+    Capacity,
+    Arithmetic,
+    Allocation,
+}
+
+pub(crate) struct LeaderRegistrationPlan<BlockIdT> {
+    node: BlockNode<BlockIdT>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct LeaderSelfVoteReport {
+    pub insertion: Option<VoteAccumulatorDisposition>,
+    pub history_recorded: bool,
+    pub equivocation_recorded: bool,
+    pub history_entries_evicted: u64,
+    pub accumulator_views_evicted: u64,
+    pub qc_formed: bool,
+    pub qc_processed: bool,
+    pub processing_error: Option<QcValidationError>,
 }
 
 /// HotStuff state machine managing block tree, locking, and commit tracking.
@@ -714,6 +748,206 @@ where
     // ========================================================================
     // Hook 1: Registering proposals into the block tree
     // ========================================================================
+
+    pub(crate) fn plan_leader_registration(
+        &mut self,
+        id: BlockIdT,
+        view: u64,
+        parent_id: Option<BlockIdT>,
+        justify_qc: Option<QuorumCertificate<BlockIdT>>,
+    ) -> Result<LeaderRegistrationPlan<BlockIdT>, LeaderRegistrationRefusal> {
+        if self.blocks.contains_key(&id) {
+            return Err(LeaderRegistrationRefusal::CandidateCollision);
+        }
+        if self.blocks.len() >= self.limits().max_pending_blocks {
+            return Err(LeaderRegistrationRefusal::Capacity);
+        }
+        let height = match parent_id.as_ref() {
+            None => 0,
+            Some(parent) => match self.blocks.get(parent) {
+                Some(node) => node
+                    .height
+                    .checked_add(1)
+                    .ok_or(LeaderRegistrationRefusal::Arithmetic)?,
+                None => 0,
+            },
+        };
+        self.blocks
+            .try_reserve(1)
+            .map_err(|_| LeaderRegistrationRefusal::Allocation)?;
+        self.pending_block_order
+            .try_reserve(1)
+            .map_err(|_| LeaderRegistrationRefusal::Allocation)?;
+        Ok(LeaderRegistrationPlan {
+            node: BlockNode::new(id, view, parent_id, justify_qc, height),
+        })
+    }
+
+    pub(crate) fn commit_leader_registration(
+        &mut self,
+        plan: LeaderRegistrationPlan<BlockIdT>,
+    ) {
+        let id = plan.node.id.clone();
+        debug_assert!(!self.blocks.contains_key(&id));
+        self.insert_block_node(plan.node);
+        self.pending_block_order.push_back(id);
+    }
+
+    pub(crate) fn leader_vote_history_status(
+        &self,
+        voter: ValidatorId,
+        view: u64,
+        block_id: &BlockIdT,
+    ) -> LeaderVoteHistoryStatus {
+        if !self.validators.contains(voter) {
+            return LeaderVoteHistoryStatus::NonMember;
+        }
+        match self.votes_by_view.get(&(view, voter)) {
+            None => LeaderVoteHistoryStatus::Clear,
+            Some(previous) if previous == block_id => LeaderVoteHistoryStatus::SameCandidate,
+            Some(_) => LeaderVoteHistoryStatus::ConflictingCandidate,
+        }
+    }
+
+    pub(crate) fn on_leader_self_vote_detailed(
+        &mut self,
+        voter: ValidatorId,
+        view: u64,
+        block_id: &BlockIdT,
+    ) -> LeaderSelfVoteReport {
+        let evicted_before = self.evicted_votes_by_view_entries;
+        let accumulator_evicted_before = self.votes.evicted_views();
+        let history = self.record_vote_history(voter, view, block_id);
+        let (history_recorded, equivocation_recorded) = match history {
+            VoteHistoryOutcome::FirstVote => (true, false),
+            VoteHistoryOutcome::DuplicateSameBlock => (false, false),
+            VoteHistoryOutcome::Equivocation { .. } => {
+                self.equivocations_detected += 1;
+                self.equivocating_validators.insert(voter);
+                return LeaderSelfVoteReport {
+                    insertion: None,
+                    history_recorded: false,
+                    equivocation_recorded: true,
+                    qc_formed: false,
+                    qc_processed: false,
+                    processing_error: None,
+                    history_entries_evicted: self
+                        .evicted_votes_by_view_entries
+                        .saturating_sub(evicted_before),
+                    accumulator_views_evicted: self
+                        .votes
+                        .evicted_views()
+                        .saturating_sub(accumulator_evicted_before),
+                };
+            }
+        };
+
+        let insertion = match self
+            .votes
+            .on_vote_detailed(&self.validators, voter, view, block_id)
+        {
+            Ok(disposition) => disposition,
+            Err(error) => {
+                return LeaderSelfVoteReport {
+                    insertion: None,
+                    history_recorded,
+                    equivocation_recorded,
+                    qc_formed: false,
+                    qc_processed: false,
+                    processing_error: Some(error),
+                    history_entries_evicted: self
+                        .evicted_votes_by_view_entries
+                        .saturating_sub(evicted_before),
+                    accumulator_views_evicted: self
+                        .votes
+                        .evicted_views()
+                        .saturating_sub(accumulator_evicted_before),
+                };
+            }
+        };
+        if !insertion.was_inserted() {
+            return LeaderSelfVoteReport {
+                insertion: Some(insertion),
+                history_recorded,
+                equivocation_recorded,
+                qc_formed: false,
+                qc_processed: false,
+                processing_error: None,
+                history_entries_evicted: self
+                    .evicted_votes_by_view_entries
+                    .saturating_sub(evicted_before),
+                accumulator_views_evicted: self
+                    .votes
+                    .evicted_views()
+                    .saturating_sub(accumulator_evicted_before),
+            };
+        }
+
+        match self.votes.maybe_qc_for(&self.validators, view, block_id) {
+            Err(error) => LeaderSelfVoteReport {
+                insertion: Some(insertion),
+                history_recorded,
+                equivocation_recorded,
+                qc_formed: false,
+                qc_processed: false,
+                processing_error: Some(error),
+                history_entries_evicted: self
+                    .evicted_votes_by_view_entries
+                    .saturating_sub(evicted_before),
+                accumulator_views_evicted: self
+                    .votes
+                    .evicted_views()
+                    .saturating_sub(accumulator_evicted_before),
+            },
+            Ok(None) => LeaderSelfVoteReport {
+                insertion: Some(insertion),
+                history_recorded,
+                equivocation_recorded,
+                qc_formed: false,
+                qc_processed: true,
+                processing_error: None,
+                history_entries_evicted: self
+                    .evicted_votes_by_view_entries
+                    .saturating_sub(evicted_before),
+                accumulator_views_evicted: self
+                    .votes
+                    .evicted_views()
+                    .saturating_sub(accumulator_evicted_before),
+            },
+            Ok(Some(qc)) => match self.on_qc(&qc) {
+                Ok(()) => LeaderSelfVoteReport {
+                    insertion: Some(insertion),
+                    history_recorded,
+                    equivocation_recorded,
+                    qc_formed: true,
+                    qc_processed: true,
+                    processing_error: None,
+                    history_entries_evicted: self
+                        .evicted_votes_by_view_entries
+                        .saturating_sub(evicted_before),
+                    accumulator_views_evicted: self
+                        .votes
+                        .evicted_views()
+                        .saturating_sub(accumulator_evicted_before),
+                },
+                Err(error) => LeaderSelfVoteReport {
+                    insertion: Some(insertion),
+                    history_recorded,
+                    equivocation_recorded,
+                    qc_formed: true,
+                    qc_processed: false,
+                    processing_error: Some(error),
+                    history_entries_evicted: self
+                        .evicted_votes_by_view_entries
+                        .saturating_sub(evicted_before),
+                    accumulator_views_evicted: self
+                        .votes
+                        .evicted_views()
+                        .saturating_sub(accumulator_evicted_before),
+                },
+            },
+        }
+    }
 
     /// Register a block node in the block tree.
     ///

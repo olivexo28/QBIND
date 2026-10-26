@@ -640,6 +640,232 @@ where
     ) -> Result<P, SafetyGateRefusal>;
 }
 
+/// Limits admitted by the owner before the isolated leader route constructs
+/// any covered candidate or signer storage.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LeaderRouteLimits {
+    max_qc_signers: usize,
+}
+
+impl LeaderRouteLimits {
+    pub const fn new(max_qc_signers: usize) -> Self {
+        Self { max_qc_signers }
+    }
+
+    pub const fn max_qc_signers(self) -> usize {
+        self.max_qc_signers
+    }
+}
+
+/// Immutable engine-selected values supplied with the actual leader proposal.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LeaderProposalContext {
+    proposer: ValidatorId,
+    origin_view: u64,
+    candidate_id: [u8; 32],
+    candidate_view: u64,
+    epoch: u64,
+    parent_block_id: [u8; 32],
+    justification: Option<LeaderJustification>,
+    proposal_suite_id: u16,
+    vote_suite_id: u16,
+    payload_kind: u8,
+    next_epoch: u64,
+}
+
+impl LeaderProposalContext {
+    pub fn proposer(&self) -> ValidatorId { self.proposer }
+    pub fn origin_view(&self) -> u64 { self.origin_view }
+    pub fn candidate_id(&self) -> &[u8; 32] { &self.candidate_id }
+    pub fn candidate_view(&self) -> u64 { self.candidate_view }
+    pub fn epoch(&self) -> u64 { self.epoch }
+    pub fn parent_block_id(&self) -> &[u8; 32] { &self.parent_block_id }
+    pub fn justification(&self) -> Option<LeaderJustification> { self.justification }
+    pub fn proposal_suite_id(&self) -> u16 { self.proposal_suite_id }
+    pub fn vote_suite_id(&self) -> u16 { self.vote_suite_id }
+    pub fn payload_kind(&self) -> u8 { self.payload_kind }
+    pub fn next_epoch(&self) -> u64 { self.next_epoch }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LeaderJustification {
+    pub block_id: [u8; 32],
+    pub view: u64,
+    pub signer_count: usize,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct LeaderPreflight {
+    candidate_id: [u8; 32],
+    parent_block_id: [u8; 32],
+    origin_view: u64,
+    epoch: u64,
+    reconfiguration_intent: Option<u64>,
+    justification: LeaderJustification,
+}
+
+/// Same-invocation callback input; the Proposal is the exact engine-created
+/// value that will be paired with the self-Vote.
+pub struct LeaderCaptureInput<'a> {
+    context: LeaderProposalContext,
+    proposal: &'a qbind_wire::consensus::BlockProposal,
+}
+
+impl<'a> LeaderCaptureInput<'a> {
+    pub fn context(&self) -> &LeaderProposalContext { &self.context }
+    pub fn proposal(&self) -> &'a qbind_wire::consensus::BlockProposal { self.proposal }
+}
+
+pub trait LeaderProposalGate<P> {
+    fn route_limits(&self) -> LeaderRouteLimits;
+    fn capture_l0(
+        &mut self,
+        input: &LeaderCaptureInput<'_>,
+    ) -> Result<P, SafetyGateRefusal>;
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LeaderVoteRefusal {
+    Duplicate,
+    CapacityDropped,
+    Equivocation,
+    NonMember,
+    Processing(QcValidationError),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LeaderRouteRefusal {
+    NonLeader,
+    AlreadyProposed,
+    AlreadyVoted,
+    NoLock,
+    ProposerIndexOverflow,
+    NonMember,
+    PriorSameCandidateVote,
+    ConflictingVoteHistory,
+    CandidateCollision,
+    BlockCapacity,
+    SignerBoundExceeded,
+    Arithmetic,
+    Allocation,
+    CaptureGateRefused,
+    VoteNotAccepted(LeaderVoteRefusal),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LeaderRouteEffects {
+    pub candidate_registered: bool,
+    pub proposed_flag_set: bool,
+    pub voted_flag_set: bool,
+    pub vote_history_recorded: bool,
+    pub history_entries_evicted: u64,
+    pub accumulator_views_evicted: u64,
+    pub accumulator_inserted: bool,
+    pub accumulator_duplicate: bool,
+    pub accumulator_capacity_dropped: bool,
+    pub equivocation_recorded: bool,
+    pub qc_formed: bool,
+    pub qc_processed: bool,
+    pub view_advanced: bool,
+    pub reconfiguration_intent_consumed: bool,
+}
+
+impl LeaderRouteEffects {
+    fn initial() -> Self {
+        Self {
+            candidate_registered: false,
+            proposed_flag_set: false,
+            voted_flag_set: false,
+            vote_history_recorded: false,
+            history_entries_evicted: 0,
+            accumulator_views_evicted: 0,
+            accumulator_inserted: false,
+            accumulator_duplicate: false,
+            accumulator_capacity_dropped: false,
+            equivocation_recorded: false,
+            qc_formed: false,
+            qc_processed: false,
+            view_advanced: false,
+            reconfiguration_intent_consumed: false,
+        }
+    }
+}
+
+/// Closed owner-independent envelope for the exact engine-created Proposal
+/// and Vote. Accessors never transfer either message or payload.
+pub struct DecidedLeaderProposal<P> {
+    proposal: qbind_wire::consensus::BlockProposal,
+    vote: qbind_wire::consensus::Vote,
+    payload: P,
+    effects: LeaderRouteEffects,
+}
+
+impl<P> DecidedLeaderProposal<P> {
+    pub fn proposal(&self) -> &qbind_wire::consensus::BlockProposal { &self.proposal }
+    pub fn vote(&self) -> &qbind_wire::consensus::Vote { &self.vote }
+    pub fn payload(&self) -> &P { &self.payload }
+    pub fn effects(&self) -> &LeaderRouteEffects { &self.effects }
+}
+
+pub struct LeaderPostCaptureFailure<P> {
+    proposal: qbind_wire::consensus::BlockProposal,
+    vote: qbind_wire::consensus::Vote,
+    payload: P,
+    reason: LeaderRouteRefusal,
+    effects: LeaderRouteEffects,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LeaderPostCaptureDiagnostic {
+    pub reason: LeaderRouteRefusal,
+    pub effects: LeaderRouteEffects,
+}
+
+impl<P> LeaderPostCaptureFailure<P> {
+    pub fn into_diagnostic(self) -> LeaderPostCaptureDiagnostic {
+        let Self { proposal, vote, payload, reason, effects } = self;
+        drop(proposal);
+        drop(vote);
+        drop(payload);
+        LeaderPostCaptureDiagnostic { reason, effects }
+    }
+}
+
+pub enum LeaderProposalRouteResult<P> {
+    Refused(LeaderRouteRefusal),
+    Decided(DecidedLeaderProposal<P>),
+    PostCapture(LeaderPostCaptureFailure<P>),
+}
+
+/// Concrete compiled-layout data for owner-side admission.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LeaderRouteLayout {
+    pub preflight: u128,
+    pub context: u128,
+    pub callback_input: u128,
+    pub payload: u128,
+    pub registration_plan: u128,
+    pub signer_buffer: u128,
+    pub vote_report: u128,
+    pub envelope: u128,
+    pub engine_result: u128,
+}
+
+pub fn leader_route_layout<P>() -> LeaderRouteLayout {
+    use std::mem::size_of;
+    LeaderRouteLayout {
+        preflight: size_of::<LeaderPreflight>() as u128,
+        context: size_of::<LeaderProposalContext>() as u128,
+        callback_input: size_of::<LeaderCaptureInput<'static>>() as u128,
+        payload: size_of::<P>() as u128,
+        registration_plan: size_of::<crate::hotstuff_state_engine::LeaderRegistrationPlan<[u8; 32]>>() as u128,
+        signer_buffer: size_of::<LeaderSignerBuffer>() as u128,
+        vote_report: size_of::<crate::hotstuff_state_engine::LeaderSelfVoteReport>() as u128,
+        envelope: size_of::<DecidedLeaderProposal<P>>() as u128,
+        engine_result: size_of::<LeaderProposalRouteResult<P>>() as u128,
+    }
+}
+
 /// Run 422 §13.6 — closed envelope pairing the engine's own emitted `Vote` with
 /// an opaque owning payload `P` produced by an [`OwningSafetyDecisionGate`].
 ///
@@ -2110,11 +2336,369 @@ where
     }
 }
 
+#[derive(Debug)]
+struct LeaderSignerBuffer {
+    ptr: std::ptr::NonNull<ValidatorId>,
+    layout: std::alloc::Layout,
+    initialized: usize,
+    capacity: usize,
+}
+
+impl LeaderSignerBuffer {
+    fn copy_from(
+        source: &[ValidatorId],
+        capacity: usize,
+    ) -> Result<Self, LeaderSignerBufferError> {
+        if capacity == 0 || source.len() > capacity {
+            return Err(LeaderSignerBufferError::Bound);
+        }
+        let layout = std::alloc::Layout::array::<ValidatorId>(capacity)
+            .map_err(|_| LeaderSignerBufferError::Layout)?;
+        // SAFETY: `layout` was checked for `ValidatorId`; a null result means
+        // allocation failed and no allocation exists to clean up.
+        let raw = unsafe { std::alloc::alloc(layout) }.cast::<ValidatorId>();
+        let Some(ptr) = std::ptr::NonNull::new(raw) else {
+            return Err(LeaderSignerBufferError::Allocation);
+        };
+        let mut buffer = Self {
+            ptr,
+            layout,
+            initialized: 0,
+            capacity,
+        };
+        for signer in source {
+            // SAFETY: initialized is strictly below the checked capacity, and
+            // this slot has not been initialized before.
+            unsafe { buffer.ptr.as_ptr().add(buffer.initialized).write(*signer) };
+            buffer.initialized += 1;
+        }
+        Ok(buffer)
+    }
+
+    fn into_vec(self) -> Vec<ValidatorId> {
+        let mut this = std::mem::ManuallyDrop::new(self);
+        let ptr = this.ptr.as_ptr();
+        let len = this.initialized;
+        let capacity = this.capacity;
+        this.initialized = 0;
+        // SAFETY: allocation used the global allocator and exact Layout for
+        // `capacity` ValidatorIds; exactly `len` values were initialized; no
+        // other owner can free this allocation; Vec uses the same allocator.
+        unsafe { Vec::from_raw_parts(ptr, len, capacity) }
+    }
+}
+
+impl Drop for LeaderSignerBuffer {
+    fn drop(&mut self) {
+        // SAFETY: exactly `initialized` elements were written in this allocation.
+        unsafe {
+            std::ptr::drop_in_place(std::ptr::slice_from_raw_parts_mut(
+                self.ptr.as_ptr(),
+                self.initialized,
+            ));
+            std::alloc::dealloc(self.ptr.as_ptr().cast::<u8>(), self.layout);
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum LeaderSignerBufferError {
+    Bound,
+    Layout,
+    Allocation,
+}
+
 // ============================================================================
 // BlockIdT = [u8; 32] specific implementation
 // ============================================================================
 
 impl BasicHotStuffEngine<[u8; 32]> {
+    /// Isolated, opt-in leader Proposal/self-Vote owning route. This is not
+    /// called by production networking or the legacy leader methods.
+    pub fn try_propose_gated_owning<P, G>(
+        &mut self,
+        gate: &mut G,
+    ) -> LeaderProposalRouteResult<P>
+    where
+        G: LeaderProposalGate<P>,
+    {
+        use crate::hotstuff_state_engine::{
+            LeaderRegistrationRefusal, LeaderVoteHistoryStatus,
+        };
+        use qbind_wire::consensus::{BlockHeader, BlockProposal, QuorumCertificate as WireQc, Vote};
+
+        if !self.is_leader_for_current_view() {
+            return LeaderProposalRouteResult::Refused(LeaderRouteRefusal::NonLeader);
+        }
+        if self.proposed_in_view {
+            return LeaderProposalRouteResult::Refused(LeaderRouteRefusal::AlreadyProposed);
+        }
+        if self.voted_in_view {
+            return LeaderProposalRouteResult::Refused(LeaderRouteRefusal::AlreadyVoted);
+        }
+        let proposer_index = match u16::try_from(self.local_id.as_u64()) {
+            Ok(index) => index,
+            Err(_) => {
+                return LeaderProposalRouteResult::Refused(
+                    LeaderRouteRefusal::ProposerIndexOverflow,
+                )
+            }
+        };
+        let view = self.current_view;
+        if view.checked_add(1).is_none() {
+            return LeaderProposalRouteResult::Refused(LeaderRouteRefusal::Arithmetic);
+        }
+        let Some(locked_qc) = self.state.locked_qc() else {
+            return LeaderProposalRouteResult::Refused(LeaderRouteRefusal::NoLock);
+        };
+        let parent_id = locked_qc.block_id;
+        let candidate_id =
+            Self::derive_block_id_from_header(self.local_id, view, &parent_id);
+
+        match self
+            .state
+            .leader_vote_history_status(self.local_id, view, &candidate_id)
+        {
+            LeaderVoteHistoryStatus::NonMember => {
+                return LeaderProposalRouteResult::Refused(LeaderRouteRefusal::NonMember)
+            }
+            LeaderVoteHistoryStatus::SameCandidate => {
+                return LeaderProposalRouteResult::Refused(
+                    LeaderRouteRefusal::PriorSameCandidateVote,
+                )
+            }
+            LeaderVoteHistoryStatus::ConflictingCandidate => {
+                return LeaderProposalRouteResult::Refused(
+                    LeaderRouteRefusal::ConflictingVoteHistory,
+                )
+            }
+            LeaderVoteHistoryStatus::Clear => {}
+        }
+
+        let limits = gate.route_limits();
+        let signer_capacity = limits.max_qc_signers();
+        let signer_buffer = match LeaderSignerBuffer::copy_from(
+            &locked_qc.signers,
+            signer_capacity,
+        ) {
+            Ok(buffer) => buffer,
+            Err(LeaderSignerBufferError::Bound) => {
+                return LeaderProposalRouteResult::Refused(
+                    LeaderRouteRefusal::SignerBoundExceeded,
+                )
+            }
+            Err(LeaderSignerBufferError::Layout) => {
+                return LeaderProposalRouteResult::Refused(LeaderRouteRefusal::Arithmetic)
+            }
+            Err(LeaderSignerBufferError::Allocation) => {
+                return LeaderProposalRouteResult::Refused(LeaderRouteRefusal::Allocation)
+            }
+        };
+        let logical_justify = QuorumCertificate::new(
+            locked_qc.block_id,
+            locked_qc.view,
+            signer_buffer.into_vec(),
+        );
+        let justification = LeaderJustification {
+            block_id: logical_justify.block_id,
+            view: logical_justify.view,
+            signer_count: logical_justify.signers.len(),
+        };
+        let epoch = self.current_epoch;
+        let intent = self.pending_reconfig_next_epoch;
+        let preflight = LeaderPreflight {
+            candidate_id,
+            parent_block_id: parent_id,
+            origin_view: view,
+            epoch,
+            reconfiguration_intent: intent,
+            justification,
+        };
+        let registration = match self.state.plan_leader_registration(
+            preflight.candidate_id,
+            preflight.origin_view,
+            Some(preflight.parent_block_id),
+            Some(logical_justify),
+        ) {
+            Ok(plan) => plan,
+            Err(LeaderRegistrationRefusal::CandidateCollision) => {
+                return LeaderProposalRouteResult::Refused(
+                    LeaderRouteRefusal::CandidateCollision,
+                )
+            }
+            Err(LeaderRegistrationRefusal::Capacity) => {
+                return LeaderProposalRouteResult::Refused(LeaderRouteRefusal::BlockCapacity)
+            }
+            Err(LeaderRegistrationRefusal::Arithmetic) => {
+                return LeaderProposalRouteResult::Refused(LeaderRouteRefusal::Arithmetic)
+            }
+            Err(LeaderRegistrationRefusal::Allocation) => {
+                return LeaderProposalRouteResult::Refused(LeaderRouteRefusal::Allocation)
+            }
+        };
+
+        let (payload_kind, next_epoch) = match preflight.reconfiguration_intent {
+            Some(target) if target > epoch => (qbind_wire::PAYLOAD_KIND_RECONFIG, target),
+            _ => (qbind_wire::PAYLOAD_KIND_NORMAL, 0),
+        };
+        let proposal = BlockProposal {
+            header: BlockHeader {
+                version: 1,
+                chain_id: 1,
+                epoch,
+                height: preflight.origin_view,
+                round: preflight.origin_view,
+                parent_block_id: preflight.parent_block_id,
+                payload_hash: [0; 32],
+                proposer_index,
+                suite_id: qbind_wire::DEFAULT_CONSENSUS_SUITE_ID,
+                tx_count: 0,
+                timestamp: 0,
+                payload_kind,
+                next_epoch,
+                batch_commitment: [0; 32],
+            },
+            qc: Some(WireQc {
+                version: 1,
+                chain_id: 1,
+                epoch,
+                height: preflight.justification.view,
+                round: preflight.justification.view,
+                step: 0,
+                block_id: preflight.justification.block_id,
+                suite_id: qbind_wire::DEFAULT_CONSENSUS_SUITE_ID,
+                signer_bitmap: Vec::new(),
+                signatures: Vec::new(),
+            }),
+            txs: Vec::new(),
+            signature: Vec::new(),
+        };
+        let context = LeaderProposalContext {
+            proposer: self.local_id,
+            origin_view: preflight.origin_view,
+            candidate_id: preflight.candidate_id,
+            candidate_view: preflight.origin_view,
+            epoch: preflight.epoch,
+            parent_block_id: preflight.parent_block_id,
+            justification: Some(preflight.justification),
+            proposal_suite_id: qbind_wire::DEFAULT_CONSENSUS_SUITE_ID,
+            vote_suite_id: self.vote_suite_id,
+            payload_kind,
+            next_epoch,
+        };
+        let input = LeaderCaptureInput {
+            context,
+            proposal: &proposal,
+        };
+        let payload = match gate.capture_l0(&input) {
+            Ok(payload) => payload,
+            Err(_) => {
+                return LeaderProposalRouteResult::Refused(
+                    LeaderRouteRefusal::CaptureGateRefused,
+                )
+            }
+        };
+
+        let mut effects = LeaderRouteEffects::initial();
+        self.state.commit_leader_registration(registration);
+        self.proposed_in_view = true;
+        effects.candidate_registered = true;
+        effects.proposed_flag_set = true;
+        let report = self
+            .state
+            .on_leader_self_vote_detailed(self.local_id, view, &candidate_id);
+        self.voted_in_view = true;
+        effects.voted_flag_set = true;
+        effects.vote_history_recorded = report.history_recorded;
+        effects.history_entries_evicted = report.history_entries_evicted;
+        effects.accumulator_views_evicted = report.accumulator_views_evicted;
+        effects.equivocation_recorded = report.equivocation_recorded;
+        effects.qc_formed = report.qc_formed;
+        effects.qc_processed = report.qc_processed;
+        if let Some(disposition) = report.insertion {
+            match disposition {
+                crate::vote_accumulator::VoteAccumulatorDisposition::Inserted => {
+                    effects.accumulator_inserted = true
+                }
+                crate::vote_accumulator::VoteAccumulatorDisposition::Duplicate => {
+                    effects.accumulator_duplicate = true
+                }
+                crate::vote_accumulator::VoteAccumulatorDisposition::CapacityDropped => {
+                    effects.accumulator_capacity_dropped = true
+                }
+            }
+        }
+        let vote = Vote {
+            version: 1,
+            chain_id: 1,
+            epoch,
+            height: view,
+            round: view,
+            step: 0,
+            block_id: preflight.candidate_id,
+            validator_index: proposer_index,
+            suite_id: self.vote_suite_id,
+            signature: Vec::new(),
+        };
+
+        let accepted = effects.accumulator_inserted
+            && effects.qc_processed
+            && report.processing_error.is_none()
+            && !effects.equivocation_recorded;
+        if !accepted {
+            let reason = match report.processing_error {
+                Some(error) => LeaderRouteRefusal::VoteNotAccepted(
+                    LeaderVoteRefusal::Processing(error),
+                ),
+                None if effects.accumulator_duplicate => LeaderRouteRefusal::VoteNotAccepted(
+                    LeaderVoteRefusal::Duplicate,
+                ),
+                None if effects.accumulator_capacity_dropped => {
+                    LeaderRouteRefusal::VoteNotAccepted(LeaderVoteRefusal::CapacityDropped)
+                }
+                None if effects.equivocation_recorded => LeaderRouteRefusal::VoteNotAccepted(
+                    LeaderVoteRefusal::Equivocation,
+                ),
+                None => LeaderRouteRefusal::VoteNotAccepted(LeaderVoteRefusal::NonMember),
+            };
+            return LeaderProposalRouteResult::PostCapture(LeaderPostCaptureFailure {
+                proposal,
+                vote,
+                payload,
+                reason,
+                effects,
+            });
+        }
+
+        if let Some(recorder) = self.progress_recorder.as_ref() {
+            recorder.record_vote_observed(true);
+            if effects.qc_formed {
+                if let Some(start) = self.last_view_start_instant {
+                    recorder.record_qc_formed_with_latency(start.elapsed());
+                } else {
+                    recorder.record_qc_formed();
+                }
+            }
+        }
+        if let Some(recorder) = self.validator_vote_recorder.as_ref() {
+            recorder.on_validator_vote(self.local_id, view);
+        }
+        if effects.qc_formed {
+            self.advance_view();
+            effects.view_advanced = true;
+        }
+        if self.pending_reconfig_next_epoch == preflight.reconfiguration_intent {
+            self.pending_reconfig_next_epoch = None;
+            effects.reconfiguration_intent_consumed = preflight.reconfiguration_intent.is_some();
+        }
+        LeaderProposalRouteResult::Decided(DecidedLeaderProposal {
+            proposal,
+            vote,
+            payload,
+            effects,
+        })
+    }
+
     /// Generate a deterministic block id based on proposal header fields.
     ///
     /// This creates a consistent block_id that both the proposer and followers
@@ -3462,6 +4046,173 @@ mod tests {
             })
             .collect();
         ConsensusValidatorSet::new(entries).expect("valid set")
+    }
+
+    #[test]
+    fn leader_signer_buffer_transfers_exact_values_and_length_for_both_bounds() {
+        let source = [ValidatorId(7), ValidatorId(2), ValidatorId(9)];
+        let underfilled = LeaderSignerBuffer::copy_from(&source, 5)
+            .expect("m less than N is supported")
+            .into_vec();
+        assert_eq!(underfilled.as_slice(), source);
+        assert_eq!(underfilled.len(), 3);
+        assert_eq!(underfilled.capacity(), 5);
+
+        let exact = LeaderSignerBuffer::copy_from(&source, 3)
+            .expect("m equal to N is supported")
+            .into_vec();
+        assert_eq!(exact.as_slice(), source);
+        assert_eq!(exact.len(), 3);
+        assert_eq!(exact.capacity(), 3);
+
+        assert_eq!(
+            LeaderSignerBuffer::copy_from(&source, 2).unwrap_err(),
+            LeaderSignerBufferError::Bound
+        );
+        assert_eq!(
+            LeaderSignerBuffer::copy_from(&source, 0).unwrap_err(),
+            LeaderSignerBufferError::Bound
+        );
+    }
+
+    #[test]
+    fn leader_route_candidate_collision_does_not_replace_existing_node() {
+        struct Gate {
+            calls: usize,
+        }
+        impl LeaderProposalGate<()> for Gate {
+            fn route_limits(&self) -> LeaderRouteLimits {
+                LeaderRouteLimits::new(1)
+            }
+            fn capture_l0(
+                &mut self,
+                _input: &LeaderCaptureInput<'_>,
+            ) -> Result<(), SafetyGateRefusal> {
+                self.calls += 1;
+                Ok(())
+            }
+        }
+
+        let mut engine = BasicHotStuffEngine::new(ValidatorId(1), make_validator_set(1));
+        let genesis = qbind_wire::consensus::BlockProposal {
+            header: qbind_wire::consensus::BlockHeader {
+                version: 1,
+                chain_id: 1,
+                epoch: 0,
+                height: 0,
+                round: 0,
+                parent_block_id: [0xff; 32],
+                payload_hash: [0; 32],
+                proposer_index: 1,
+                suite_id: qbind_wire::DEFAULT_CONSENSUS_SUITE_ID,
+                tx_count: 0,
+                timestamp: 0,
+                payload_kind: qbind_wire::PAYLOAD_KIND_NORMAL,
+                next_epoch: 0,
+                batch_commitment: [0; 32],
+            },
+            qc: None,
+            txs: Vec::new(),
+            signature: Vec::new(),
+        };
+        engine
+            .on_proposal_event(ValidatorId(1), &genesis)
+            .expect("genesis proposal accepted");
+        engine.advance_view();
+        let parent = engine.locked_qc().unwrap().block_id;
+        let view = engine.current_view();
+        let candidate = BasicHotStuffEngine::<[u8; 32]>::derive_block_id_from_header(
+            engine.local_id,
+            view,
+            &parent,
+        );
+        let justification = engine.locked_qc().unwrap().clone();
+        engine.state.register_block(
+            candidate,
+            view,
+            Some(parent),
+            Some(justification),
+        );
+        let before = engine.state.get_block(&candidate).unwrap();
+        let before_view = before.view;
+        let before_parent = before.parent_id;
+        let count = engine.state.block_count();
+        let mut gate = Gate { calls: 0 };
+
+        assert!(matches!(
+            engine.try_propose_gated_owning(&mut gate),
+            LeaderProposalRouteResult::Refused(LeaderRouteRefusal::CandidateCollision)
+        ));
+        assert_eq!(gate.calls, 0);
+        assert_eq!(engine.state.block_count(), count);
+        let after = engine.state.get_block(&candidate).unwrap();
+        assert_eq!(after.id, candidate);
+        assert_eq!(after.view, before_view);
+        assert_eq!(after.parent_id, before_parent);
+    }
+
+    #[test]
+    fn leader_vote_history_marks_nonmember_defensively() {
+        let engine = BasicHotStuffEngine::new(ValidatorId(1), make_validator_set(1));
+        assert_eq!(
+            engine
+                .state
+                .leader_vote_history_status(ValidatorId(99), 0, &[0; 32]),
+            crate::hotstuff_state_engine::LeaderVoteHistoryStatus::NonMember
+        );
+    }
+
+    #[test]
+    fn leader_post_capture_cleanup_returns_only_reason_and_effects() {
+        let mut effects = LeaderRouteEffects::initial();
+        effects.candidate_registered = true;
+        effects.vote_history_recorded = true;
+        let failure = LeaderPostCaptureFailure {
+            proposal: qbind_wire::consensus::BlockProposal {
+                header: qbind_wire::consensus::BlockHeader {
+                    version: 1,
+                    chain_id: 1,
+                    epoch: 0,
+                    height: 1,
+                    round: 1,
+                    parent_block_id: [7; 32],
+                    payload_hash: [0; 32],
+                    proposer_index: 1,
+                    suite_id: qbind_wire::DEFAULT_CONSENSUS_SUITE_ID,
+                    tx_count: 0,
+                    timestamp: 0,
+                    payload_kind: qbind_wire::PAYLOAD_KIND_NORMAL,
+                    next_epoch: 0,
+                    batch_commitment: [0; 32],
+                },
+                qc: None,
+                txs: Vec::new(),
+                signature: Vec::new(),
+            },
+            vote: qbind_wire::consensus::Vote {
+                version: 1,
+                chain_id: 1,
+                epoch: 0,
+                height: 1,
+                round: 1,
+                step: 0,
+                block_id: [8; 32],
+                validator_index: 1,
+                suite_id: qbind_wire::DEFAULT_CONSENSUS_SUITE_ID,
+                signature: Vec::new(),
+            },
+            payload: (),
+            reason: LeaderRouteRefusal::VoteNotAccepted(LeaderVoteRefusal::Duplicate),
+            effects,
+        };
+
+        let diagnostic = failure.into_diagnostic();
+        assert_eq!(
+            diagnostic.reason,
+            LeaderRouteRefusal::VoteNotAccepted(LeaderVoteRefusal::Duplicate)
+        );
+        assert!(diagnostic.effects.candidate_registered);
+        assert!(diagnostic.effects.vote_history_recorded);
     }
 
     #[test]

@@ -479,9 +479,21 @@ pub enum MetaBranch {
 pub enum EntrypointKind {
     /// The legacy/logical owning entrypoint (the only one used by this route).
     LegacyLogical,
+    /// The isolated leader Proposal/self-Vote owning route.
+    LeaderLogical,
     /// A verified-evidence entrypoint (not used by this route; retained for
     /// faithful metadata only).
     Verified,
+}
+
+pub(crate) fn leader_ancestry_not_applicable() -> AncestryBinding {
+    let mut hasher = Sha3_256::new();
+    hasher.update(ANCESTRY_DOMAIN);
+    hasher.update([0u8]);
+    AncestryBinding {
+        commitment: finalize(hasher),
+        kind: AncestryKind::NotApplicable,
+    }
 }
 
 /// Immutable, fixed-size decision metadata retained alongside the capture (§5),
@@ -578,7 +590,118 @@ impl OwningCapturePayload {
             _covering: covering,
         }
     }
+}
 
+/// Leader-specific L0 payload. Its pin is covered by the prepared-pin
+/// reservation; the route reservation is held by the outer owner result.
+pub struct LeaderCapturePayload {
+    proposal_binding: [u8; 32],
+    ancestry: AncestryBinding,
+    meta: DecisionMetadata,
+    pin: PreparedPin,
+}
+
+impl LeaderCapturePayload {
+    pub(crate) fn new(
+        proposal_binding: [u8; 32],
+        ancestry: AncestryBinding,
+        meta: DecisionMetadata,
+        pin: PreparedPin,
+    ) -> Self {
+        Self {
+            proposal_binding,
+            ancestry,
+            meta,
+            pin,
+        }
+    }
+
+    pub fn proposal_binding(&self) -> &[u8; 32] { &self.proposal_binding }
+    pub fn ancestry(&self) -> &AncestryBinding { &self.ancestry }
+    pub fn meta(&self) -> &DecisionMetadata { &self.meta }
+    pub fn pin(&self) -> &PreparedPin { &self.pin }
+}
+
+#[derive(Debug)]
+pub enum LeaderCaptureRefusal {
+    Precheck(super::prepared::CaptureRefusal),
+    EffectivePolicyMismatch,
+    OwnerPolicyUnavailable(InputPolicyError),
+    Correspondence(CorrespondenceRefusal),
+    Projection(ProjectionMismatch),
+    InputBound(InputBoundRefusal),
+    Admission(super::error::SafetyStoreError),
+    Capture(super::prepared::CaptureRefusal),
+    UnexpectedDecisionBranch,
+}
+
+#[derive(Debug)]
+pub enum LeaderOwnerRefusal {
+    Capture(LeaderCaptureRefusal),
+    Engine(qbind_consensus::LeaderRouteRefusal),
+    PostCapture(qbind_consensus::LeaderPostCaptureDiagnostic),
+    RouteAdmission(super::error::SafetyStoreError),
+}
+
+/// Closed owner result for the leader Proposal/self-Vote handoff. The optional
+/// route reservation is declared last so safe field destruction releases it
+/// after the proof, paired envelope, and diagnostic have been dropped.
+pub struct LeaderOwnerOutcome {
+    proof: Option<ValidatedRecord>,
+    decided: Option<qbind_consensus::DecidedLeaderProposal<LeaderCapturePayload>>,
+    refusal: Option<LeaderOwnerRefusal>,
+    route_reservation: Option<super::accounting::Reservation>,
+}
+
+impl LeaderOwnerOutcome {
+    pub(crate) fn refused(
+        proof: Option<ValidatedRecord>,
+        refusal: LeaderOwnerRefusal,
+        route_reservation: Option<super::accounting::Reservation>,
+    ) -> Self {
+        Self {
+            proof,
+            decided: None,
+            refusal: Some(refusal),
+            route_reservation,
+        }
+    }
+
+    pub(crate) fn decided(
+        decided: qbind_consensus::DecidedLeaderProposal<LeaderCapturePayload>,
+        route_reservation: super::accounting::Reservation,
+    ) -> Self {
+        Self {
+            proof: None,
+            decided: Some(decided),
+            refusal: None,
+            route_reservation: Some(route_reservation),
+        }
+    }
+
+    pub fn decided_envelope(
+        &self,
+    ) -> Option<&qbind_consensus::DecidedLeaderProposal<LeaderCapturePayload>> {
+        self.decided.as_ref()
+    }
+
+    pub fn refusal(&self) -> Option<&LeaderOwnerRefusal> {
+        self.refusal.as_ref()
+    }
+
+    pub fn route_charge(&self) -> Option<u128> {
+        self.route_reservation
+            .as_ref()
+            .map(super::accounting::Reservation::charge)
+    }
+
+    /// Consume the result and recover only a still-intact pre-consumption proof.
+    pub fn into_proof(mut self) -> Option<ValidatedRecord> {
+        self.proof.take()
+    }
+}
+
+impl OwningCapturePayload {
     /// The 32-byte proposal commitment.
     pub fn proposal_binding(&self) -> &[u8; 32] {
         &self.proposal_binding
@@ -634,6 +757,8 @@ pub enum ProjectionMismatch {
     JustifyBlockId,
     /// The justification logical view (wire QC `height`) did not match.
     JustifyView,
+    /// The engine-selected logical justification exceeded the owner's signer bound.
+    JustifySignerCount,
 }
 
 /// Why the owner-controlled route refused before consuming the proof (§4). Every

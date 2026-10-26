@@ -2392,6 +2392,142 @@ impl SafetyRecordOwner {
         )
     }
 
+    /// Isolated leader Proposal/self-Vote owner route. It holds one serialization
+    /// domain over engine selection, L0 capture, self-vote processing, and result
+    /// transfer. No production caller is wired to this method.
+    pub fn propose_and_capture_leader_owned(
+        &self,
+        engine: &mut qbind_consensus::BasicHotStuffEngine<[u8; 32]>,
+        limits: &super::decision_capture::PreparedDecisionInputLimits,
+        expected_authoritative_revision: u64,
+        proof: ValidatedRecord,
+    ) -> super::decision_capture::LeaderOwnerOutcome {
+        use super::decision_capture::{
+            LeaderCaptureRefusal, LeaderOwnerOutcome, LeaderOwnerRefusal,
+        };
+
+        let identity = match self.capture_precheck(&proof) {
+            Ok(identity) => identity,
+            Err(reason) => {
+                return LeaderOwnerOutcome::refused(
+                    Some(proof),
+                    LeaderOwnerRefusal::Capture(LeaderCaptureRefusal::Precheck(reason)),
+                    None,
+                )
+            }
+        };
+        let expected_limits =
+            match super::decision_capture::PreparedDecisionInputLimits::from_pinned(self.pinned())
+            {
+                Ok(expected) => expected,
+                Err(error) => {
+                    return LeaderOwnerOutcome::refused(
+                        Some(proof),
+                        LeaderOwnerRefusal::Capture(
+                            LeaderCaptureRefusal::OwnerPolicyUnavailable(error),
+                        ),
+                        None,
+                    )
+                }
+            };
+        if *limits != expected_limits {
+            return LeaderOwnerOutcome::refused(
+                Some(proof),
+                LeaderOwnerRefusal::Capture(
+                    LeaderCaptureRefusal::EffectivePolicyMismatch,
+                ),
+                None,
+            );
+        }
+
+        let route_charge = match leader_route_charge::<LeaderCaptureGate<'static, 'static>>(
+            limits.max_qc_sig_count() as usize,
+        ) {
+            Ok(charge) => charge,
+            Err(error) => {
+                return LeaderOwnerOutcome::refused(
+                    Some(proof),
+                    LeaderOwnerRefusal::RouteAdmission(error),
+                    None,
+                )
+            }
+        };
+        let route = match self.backend.accounting().reserve(route_charge) {
+            Ok(route) => route,
+            Err(error) => {
+                return LeaderOwnerOutcome::refused(
+                    Some(proof),
+                    LeaderOwnerRefusal::RouteAdmission(error),
+                    None,
+                )
+            }
+        };
+
+        let mut guard = self.backend.lock_domain();
+        let mut gate = LeaderCaptureGate {
+            owner: self,
+            guard: &mut guard,
+            proof: Some(proof),
+            identity,
+            expected_revision: expected_authoritative_revision,
+            limits: *limits,
+            proposer: engine.local_id(),
+            reason: None,
+            route: Some(route),
+        };
+
+        #[cfg(any(test, feature = "test-utils"))]
+        fire_pre_ingestion_hook();
+
+        let result = engine.try_propose_gated_owning(&mut gate);
+        let result = match result {
+            qbind_consensus::LeaderProposalRouteResult::PostCapture(failure) => {
+                // The gate still owns R while the closed carrier destroys all
+                // paired objects and the prepared pin in its consuming path.
+                let diagnostic = failure.into_diagnostic();
+                Err(diagnostic)
+            }
+            result => Ok(result),
+        };
+
+        let LeaderCaptureGate {
+            proof: returned_proof,
+            reason,
+            route,
+            ..
+        } = gate;
+        let outcome = match result {
+            Err(diagnostic) => LeaderOwnerOutcome::refused(
+                None,
+                LeaderOwnerRefusal::PostCapture(diagnostic),
+                route,
+            ),
+            Ok(qbind_consensus::LeaderProposalRouteResult::Decided(decided)) => {
+                match route {
+                    Some(route) => LeaderOwnerOutcome::decided(decided, route),
+                    None => LeaderOwnerOutcome::refused(
+                        None,
+                        LeaderOwnerRefusal::RouteAdmission(SafetyStoreError::ArithmeticOverflow(
+                            ArithmeticOverflowSite::SizeSum,
+                        )),
+                        None,
+                    ),
+                }
+            }
+            Ok(qbind_consensus::LeaderProposalRouteResult::Refused(engine_reason)) => {
+                let refusal = reason
+                    .map(LeaderOwnerRefusal::Capture)
+                    .unwrap_or(LeaderOwnerRefusal::Engine(engine_reason));
+                LeaderOwnerOutcome::refused(returned_proof, refusal, route)
+            }
+            Ok(qbind_consensus::LeaderProposalRouteResult::PostCapture(_)) => {
+                unreachable!("post-capture result is consumed while route reservation is live")
+            }
+        };
+        drop(guard);
+        outcome
+    }
+
     /// **§ 13.6 verified-Proposal decide-and-capture** (isolated, opt-in).
     /// Reuses the engine's verified-ingestion pre-checks, then captures the
     /// actual safe decision under the same serialization-domain guard before
@@ -3483,4 +3619,336 @@ impl qbind_consensus::OwningSafetyDecisionGate<[u8; 32], super::decision_capture
             }
         }
     }
+}
+
+struct LeaderCaptureGate<'o, 'g> {
+    owner: &'o SafetyRecordOwner,
+    guard: &'o mut std::sync::MutexGuard<'g, super::backend::SerializationDomain>,
+    proof: Option<ValidatedRecord>,
+    identity: super::prepared::GenerationIdentity,
+    expected_revision: u64,
+    limits: super::decision_capture::PreparedDecisionInputLimits,
+    proposer: qbind_consensus::ValidatorId,
+    reason: Option<super::decision_capture::LeaderCaptureRefusal>,
+    route: Option<super::accounting::Reservation>,
+}
+
+impl LeaderCaptureGate<'_, '_> {
+    fn refuse(
+        &mut self,
+        reason: super::decision_capture::LeaderCaptureRefusal,
+    ) -> Result<
+        super::decision_capture::LeaderCapturePayload,
+        qbind_consensus::SafetyGateRefusal,
+    > {
+        self.reason = Some(reason);
+        Err(qbind_consensus::SafetyGateRefusal)
+    }
+
+    fn validate_projection(
+        &self,
+        input: &qbind_consensus::LeaderCaptureInput<'_>,
+    ) -> Result<(), super::decision_capture::LeaderCaptureRefusal> {
+        use super::decision_capture::{
+            CorrespondenceRefusal, LeaderCaptureRefusal, ProjectionMismatch,
+        };
+        let context = input.context();
+        let proposal = input.proposal();
+        let identity = self.identity;
+        if context.proposer() != self.proposer
+            || u64::from(proposal.header.proposer_index) != self.proposer.as_u64()
+        {
+            return Err(LeaderCaptureRefusal::Projection(ProjectionMismatch::Proposer));
+        }
+        if context.candidate_view() != context.origin_view()
+            || proposal.header.height != context.candidate_view()
+            || proposal.header.round != context.origin_view()
+        {
+            return Err(LeaderCaptureRefusal::Projection(
+                ProjectionMismatch::CandidateView,
+            ));
+        }
+        if context.epoch() != self.owner.pinned().epoch
+            || proposal.header.epoch != context.epoch()
+            || proposal.header.chain_id != self.owner.pinned().chain_id
+        {
+            return Err(LeaderCaptureRefusal::Projection(
+                ProjectionMismatch::CandidateView,
+            ));
+        }
+        if context.proposal_suite_id() != qbind_wire::DEFAULT_CONSENSUS_SUITE_ID
+            || proposal.header.suite_id != context.proposal_suite_id()
+        {
+            return Err(LeaderCaptureRefusal::Projection(
+                ProjectionMismatch::Proposer,
+            ));
+        }
+        if proposal.header.parent_block_id != *context.parent_block_id() {
+            return Err(LeaderCaptureRefusal::Projection(ProjectionMismatch::Parent));
+        }
+        if proposal.header.payload_kind != context.payload_kind()
+            || proposal.header.next_epoch != context.next_epoch()
+            || (context.payload_kind() == qbind_wire::PAYLOAD_KIND_NORMAL
+                && context.next_epoch() != 0)
+            || (context.payload_kind() == qbind_wire::PAYLOAD_KIND_RECONFIG
+                && context.next_epoch() <= context.epoch())
+        {
+            return Err(LeaderCaptureRefusal::Projection(
+                ProjectionMismatch::CandidateView,
+            ));
+        }
+        let expected_id = {
+            let mut id = [0u8; 32];
+            id[..8].copy_from_slice(&context.proposer().as_u64().to_le_bytes());
+            id[8..16].copy_from_slice(&context.candidate_view().to_le_bytes());
+            id[16..32].copy_from_slice(&context.parent_block_id()[..16]);
+            id
+        };
+        if expected_id != *context.candidate_id() {
+            return Err(LeaderCaptureRefusal::Projection(
+                ProjectionMismatch::CandidateId,
+            ));
+        }
+        let justification = context.justification().ok_or(
+            LeaderCaptureRefusal::Correspondence(CorrespondenceRefusal::EngineNoLock),
+        )?;
+        if justification.signer_count > self.limits.max_qc_sig_count() as usize {
+            return Err(LeaderCaptureRefusal::Projection(
+                ProjectionMismatch::JustifySignerCount,
+            ));
+        }
+        if justification.block_id != identity.lock_block_id {
+            return Err(LeaderCaptureRefusal::Correspondence(
+                CorrespondenceRefusal::LockBlockMismatch,
+            ));
+        }
+        if justification.view != identity.lock_view {
+            return Err(LeaderCaptureRefusal::Correspondence(
+                CorrespondenceRefusal::LockViewMismatch,
+            ));
+        }
+        if *context.parent_block_id() != identity.lock_block_id {
+            return Err(LeaderCaptureRefusal::Projection(ProjectionMismatch::Parent));
+        }
+        match &proposal.qc {
+            Some(qc)
+                if qc.block_id == justification.block_id
+                    && qc.height == justification.view
+                    && qc.round == justification.view
+                    && qc.epoch == context.epoch()
+                    && qc.chain_id == self.owner.pinned().chain_id
+                    && qc.suite_id == qbind_wire::DEFAULT_CONSENSUS_SUITE_ID
+                    && qc.signer_bitmap.is_empty()
+                    && qc.signatures.is_empty() => {}
+            _ => {
+                return Err(LeaderCaptureRefusal::Projection(
+                    ProjectionMismatch::JustifyBlockId,
+                ))
+            }
+        }
+        if proposal.header.tx_count as usize != proposal.txs.len() {
+            return Err(LeaderCaptureRefusal::Projection(
+                ProjectionMismatch::CandidateView,
+            ));
+        }
+        Ok(())
+    }
+}
+
+impl qbind_consensus::LeaderProposalGate<super::decision_capture::LeaderCapturePayload>
+    for LeaderCaptureGate<'_, '_>
+{
+    fn route_limits(&self) -> qbind_consensus::LeaderRouteLimits {
+        qbind_consensus::LeaderRouteLimits::new(self.limits.max_qc_sig_count() as usize)
+    }
+
+    fn capture_l0(
+        &mut self,
+        input: &qbind_consensus::LeaderCaptureInput<'_>,
+    ) -> Result<
+        super::decision_capture::LeaderCapturePayload,
+        qbind_consensus::SafetyGateRefusal,
+    > {
+        use super::decision_capture::{
+            commit_proposal, leader_ancestry_not_applicable, scratch_charge,
+            DecisionMetadata, EntrypointKind, LeaderCapturePayload, LeaderCaptureRefusal,
+            MetaBranch,
+        };
+
+        if self.proof.is_none() {
+            return self.refuse(LeaderCaptureRefusal::UnexpectedDecisionBranch);
+        }
+        if let Err(reason) = self.validate_projection(input) {
+            return self.refuse(reason);
+        }
+        let context = input.context();
+        let proposal = input.proposal();
+        let (binding, ancestry) = {
+            let _scratch = match self.owner.backend.accounting().reserve(scratch_charge()) {
+                Ok(reservation) => reservation,
+                Err(error) => return self.refuse(LeaderCaptureRefusal::Admission(error)),
+            };
+            let binding = match commit_proposal(proposal, &self.limits) {
+                Ok(binding) => binding,
+                Err(error) => return self.refuse(LeaderCaptureRefusal::InputBound(error)),
+            };
+            (binding, leader_ancestry_not_applicable())
+        };
+        let metadata = DecisionMetadata::new(
+            context.proposer().as_u64(),
+            MetaBranch::ViewSufficiency,
+            EntrypointKind::LeaderLogical,
+            context.origin_view(),
+            *context.candidate_id(),
+            context.candidate_view(),
+        );
+        let proof = self
+            .proof
+            .take()
+            .expect("leader capture callback is invoked once with an intact proof");
+        match self.owner.capture_prepared_decision_locked(
+            &mut *self.guard,
+            proof,
+            self.expected_revision,
+            self.identity,
+        ) {
+            Ok(pin) => Ok(LeaderCapturePayload::new(binding, ancestry, metadata, pin)),
+            Err((proof, error)) => {
+                self.proof = Some(proof);
+                self.refuse(LeaderCaptureRefusal::Capture(error))
+            }
+        }
+    }
+}
+
+fn leader_route_charge<G>(signer_capacity: usize) -> Result<u128, SafetyStoreError> {
+    use super::decision_capture::{
+        DecisionMetadata, LeaderCapturePayload, LeaderOwnerOutcome,
+    };
+    use super::prepared::PreparedPin;
+    use qbind_wire::consensus::{BlockProposal, Vote};
+    use std::mem::size_of;
+
+    fn sum(values: &[u128]) -> Result<u128, SafetyStoreError> {
+        values.iter().try_fold(0u128, |total, value| {
+            total.checked_add(*value).ok_or(SafetyStoreError::ArithmeticOverflow(
+                ArithmeticOverflowSite::SizeSum,
+            ))
+        })
+    }
+    fn sub(left: u128, right: u128) -> Result<u128, SafetyStoreError> {
+        left.checked_sub(right).ok_or(SafetyStoreError::ArithmeticOverflow(
+            ArithmeticOverflowSite::SizeSum,
+        ))
+    }
+
+    let layout = qbind_consensus::leader_route_layout::<LeaderCapturePayload>();
+    let gate = size_of::<G>() as u128;
+    let proof = size_of::<ValidatedRecord>() as u128;
+    let pin = size_of::<PreparedPin>() as u128;
+    let proposal = size_of::<BlockProposal>() as u128;
+    let vote = size_of::<Vote>() as u128;
+    let binding = sum(&[
+        size_of::<[u8; 32]>() as u128,
+        size_of::<super::decision_capture::AncestryBinding>() as u128,
+        size_of::<DecisionMetadata>() as u128,
+    ])?;
+    let signer_backing = (signer_capacity as u128)
+        .checked_mul(size_of::<qbind_consensus::ValidatorId>() as u128)
+        .ok_or(SafetyStoreError::ArithmeticOverflow(
+            ArithmeticOverflowSite::SizeSum,
+        ))?;
+    let outcome = size_of::<LeaderOwnerOutcome>() as u128;
+    let envelope = layout.envelope;
+    let payload_residual = sub(layout.payload, pin)?;
+    let gate_proof_residual = sub(gate, proof)?;
+    let owner_proof_residual = sub(outcome, proof)?;
+    let owner_pin_residual = sub(outcome, pin)?;
+    let post = size_of::<qbind_consensus::LeaderPostCaptureFailure<LeaderCapturePayload>>() as u128;
+    let diagnostic = size_of::<qbind_consensus::LeaderPostCaptureDiagnostic>() as u128;
+    let report = layout.vote_report;
+    let buffer = layout.signer_buffer;
+    let registration = layout.registration_plan;
+    let callback = layout.callback_input;
+    let preflight = layout.preflight;
+    let r_signer = sum(&[
+        gate_proof_residual,
+        buffer,
+        signer_backing,
+    ])?;
+    let r_bind = sum(&[
+        gate_proof_residual,
+        preflight,
+        callback,
+        registration,
+        signer_backing,
+        proposal,
+        binding,
+    ])?;
+    let r_conversion = sum(&[
+        gate,
+        preflight,
+        callback,
+        registration,
+        signer_backing,
+        proposal,
+        binding,
+        sub(
+            size_of::<super::record::ConsumedForPrepared>() as u128,
+            size_of::<super::record::RetainedRecord>() as u128,
+        )?,
+    ])?;
+    let r_capture = sum(&[
+        gate,
+        preflight,
+        callback,
+        registration,
+        signer_backing,
+        proposal,
+        payload_residual,
+    ])?;
+    let r_vote_pre =
+        sum(&[gate, preflight, proposal, payload_residual, report])?;
+    let r_vote_post =
+        sum(&[gate, preflight, proposal, payload_residual, vote, report])?;
+    let r_engine = sum(&[gate, preflight, sub(layout.engine_result, pin)?])?;
+    let r_transfer = sum(&[
+        gate,
+        preflight,
+        sub(layout.engine_result, envelope)?,
+        owner_pin_residual,
+    ])?;
+    let r_post_capture = sum(&[gate, preflight, post])?
+        .max(sum(&[gate, preflight, diagnostic])?);
+    let r_owner_pre = owner_proof_residual;
+    let r_owner_success = owner_pin_residual;
+    let r_owner_post = outcome;
+    let r_extract = outcome;
+    let r_plan = sum(&[
+        gate_proof_residual,
+        preflight,
+        registration,
+        signer_backing,
+    ])?;
+    [
+        r_signer,
+        r_plan,
+        r_bind,
+        r_conversion,
+        r_capture,
+        r_vote_pre,
+        r_vote_post,
+        r_engine,
+        r_transfer,
+        r_post_capture,
+        r_owner_pre,
+        r_owner_success,
+        r_owner_post,
+        r_extract,
+    ]
+    .into_iter()
+    .max()
+    .ok_or(SafetyStoreError::ArithmeticOverflow(
+        ArithmeticOverflowSite::SizeSum,
+    ))
 }
