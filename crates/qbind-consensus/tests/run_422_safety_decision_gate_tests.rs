@@ -674,7 +674,14 @@ fn verified_owning_handoff_binds_engine_vote_and_retained_evidence() {
         .state()
         .verified_justification(&gate.witness.as_ref().unwrap().candidate_id)
         .expect("the accepted candidate retains its verified justification");
-    assert_eq!(retained.certificate(), &expected_certificate);
+    assert!(
+        std::ptr::eq(retained, evidence.as_ref()),
+        "engine retained the supplied verified-evidence object"
+    );
+    assert!(
+        retained.certificate() == &expected_certificate,
+        "retained certificate contents match (redacted)"
+    );
     assert_eq!(
         engine.state().retained_evidence_bytes(),
         expected_charge,

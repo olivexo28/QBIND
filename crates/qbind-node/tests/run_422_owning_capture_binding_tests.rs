@@ -157,12 +157,17 @@ fn agg_current(owner: &SafetyRecordOwner) -> u128 {
 struct LedgerSnapshot {
     operational: u128,
     aggregate: u128,
+    operational_ceiling: Option<u128>,
+    aggregate_ceiling: Option<u128>,
 }
 
 fn ledger_snapshot(owner: &SafetyRecordOwner) -> LedgerSnapshot {
+    let backend = owner.backend_for_test();
     LedgerSnapshot {
-        operational: op_current(owner),
-        aggregate: agg_current(owner),
+        operational: backend.accounting_current(),
+        aggregate: backend.accounting_aggregate_current(),
+        operational_ceiling: backend.accounting_cap(),
+        aggregate_ceiling: backend.accounting_aggregate_cap(),
     }
 }
 
@@ -343,6 +348,16 @@ fn fingerprint(proof: &qbind_node::safety_record_store::ValidatedRecord) -> Proo
     }
 }
 
+fn assert_same_proof_fingerprint(
+    proof: &qbind_node::safety_record_store::ValidatedRecord,
+    expected: &ProofFingerprint,
+) {
+    assert!(
+        &fingerprint(proof) == expected,
+        "returned proof differs from original bytes or provenance (redacted)"
+    );
+}
+
 // ===========================================================================
 // Consensus helpers
 // ===========================================================================
@@ -494,12 +509,18 @@ fn verified_owner_route_captures_before_self_vote_and_retains_evidence() {
     let owner = owner_with_matching_proof(dir.path(), &ctx, l0_block);
     let evidence = verified_parent_qc(l0_block, 0);
     proposal.qc = Some(evidence.certificate().clone());
+    let baseline_without_proof = ledger_snapshot(&owner);
     let proof = owner
         .read_validate(None::<&FixtureCommittedHistory>)
         .expect("O3 proof");
+    let baseline_with_proof = ledger_snapshot(&owner);
+    assert!(
+        baseline_with_proof.operational > baseline_without_proof.operational
+            && baseline_with_proof.aggregate > baseline_without_proof.aggregate,
+        "the live proof contributes to both pre-call ledgers"
+    );
     let limits = limits(&ctx);
-    let op_ceiling = owner.backend_for_test().accounting_cap();
-    let aggregate_ceiling = owner.backend_for_test().accounting_aggregate_cap();
+    let standing_cell = registry_cell_charge_bytes();
 
     let decided = match owner.decide_verified_and_capture_owned(
         &mut engine,
@@ -511,8 +532,20 @@ fn verified_owner_route_captures_before_self_vote_and_retains_evidence() {
         proof,
     ) {
         OwnedDecisionOutcome::Decided(decided) => decided,
-        other => panic!("verified owner route should decide and capture: {other:?}"),
+        _ => panic!("verified owner route should decide and capture"),
     };
+    let occupied = ledger_snapshot(&owner);
+    assert_eq!(
+        occupied.operational_ceiling,
+        baseline_with_proof.operational_ceiling
+    );
+    assert_eq!(occupied.aggregate_ceiling, baseline_with_proof.aggregate_ceiling);
+    assert!(
+        occupied.operational > baseline_without_proof.operational + standing_cell
+            && occupied.aggregate > baseline_without_proof.aggregate + standing_cell,
+        "captured pin/envelope and standing registry are charged above the proof-free base"
+    );
+    assert_eq!(registry_occupied(&owner), 1);
 
     let candidate_id = decided.vote().block_id;
     assert_eq!(decided.vote().height, 1);
@@ -544,7 +577,14 @@ fn verified_owner_route_captures_before_self_vote_and_retains_evidence() {
         .state()
         .verified_justification(&candidate_id)
         .expect("the candidate retains its verified justification");
-    assert_eq!(retained.certificate(), evidence.certificate());
+    assert!(
+        std::ptr::eq(retained, evidence.as_ref()),
+        "engine retained the supplied verified-evidence object"
+    );
+    assert!(
+        retained.certificate() == evidence.certificate(),
+        "retained certificate contents match the supplied evidence (redacted)"
+    );
     let identities = owner
         .backend_for_test()
         .prepared_registry_for_test()
@@ -555,14 +595,27 @@ fn verified_owner_route_captures_before_self_vote_and_retains_evidence() {
     assert_eq!(identities.len(), 1);
     assert_eq!(identities[0].lock_view, 0, "captured generation remains L0");
     assert_eq!(identities[0].lock_block_id, l0_block);
-    assert_eq!(owner.backend_for_test().accounting_cap(), op_ceiling);
-    assert_eq!(
-        owner.backend_for_test().accounting_aggregate_cap(),
-        aggregate_ceiling
-    );
-
     drop(decided);
+    let after_drop = ledger_snapshot(&owner);
     assert_eq!(registry_occupied(&owner), 0, "dropping the envelope releases its pin");
+    assert_eq!(
+        after_drop.operational,
+        baseline_without_proof.operational + standing_cell,
+        "proof-to-pin conversion and envelope destruction leave only the standing registry charge"
+    );
+    assert_eq!(
+        after_drop.aggregate,
+        baseline_without_proof.aggregate + standing_cell,
+        "aggregate ledger retains only the standing registry charge"
+    );
+    assert_eq!(
+        after_drop.operational_ceiling,
+        baseline_without_proof.operational_ceiling
+    );
+    assert_eq!(
+        after_drop.aggregate_ceiling,
+        baseline_without_proof.aggregate_ceiling
+    );
     assert!(
         engine.state().verified_justification(&candidate_id).is_some(),
         "engine retains the admitted evidence independently of envelope lifetime"
@@ -583,6 +636,7 @@ fn verified_owner_route_returns_proof_on_ingest_and_owner_refusals() {
         .read_validate(None::<&FixtureCommittedHistory>)
         .expect("O3 proof");
     let before = fingerprint(&proof);
+    let ledger_before = ledger_snapshot(&owner);
     let mut missing_qc_proposal = proposal.clone();
     missing_qc_proposal.qc = None;
     let outcome = owner.decide_verified_and_capture_owned(
@@ -594,6 +648,8 @@ fn verified_owner_route_returns_proof_on_ingest_and_owner_refusals() {
         1,
         proof,
     );
+    let ledger_after = ledger_snapshot(&owner);
+    assert_eq!(ledger_after, ledger_before, "ingest refusal restores both ledgers and ceilings");
     let returned = match outcome {
         OwnedDecisionOutcome::Refused {
             proof,
@@ -601,9 +657,9 @@ fn verified_owner_route_returns_proof_on_ingest_and_owner_refusals() {
                 qbind_consensus::VerifiedProposalIngestError::MissingEmbeddedQc,
             ),
         } => proof,
-        other => panic!("missing embedded QC should be a typed ingest refusal: {other:?}"),
+        _ => panic!("missing embedded QC should be a typed ingest refusal"),
     };
-    assert_eq!(fingerprint(&returned), before);
+    assert_same_proof_fingerprint(&returned, &before);
     assert_eq!(engine.current_view(), 1);
     assert_eq!(engine.locked_qc().map(|qc| qc.view), Some(0));
     assert_eq!(engine.state().retained_evidence_bytes(), 0);
@@ -620,6 +676,7 @@ fn verified_owner_route_returns_proof_on_ingest_and_owner_refusals() {
         .read_validate(None::<&FixtureCommittedHistory>)
         .expect("O3 proof");
     let before = fingerprint(&proof);
+    let ledger_before = ledger_snapshot(&owner);
     let outcome = owner.decide_verified_and_capture_owned(
         &mut engine,
         ValidatorId::new(1),
@@ -629,14 +686,19 @@ fn verified_owner_route_returns_proof_on_ingest_and_owner_refusals() {
         1,
         proof,
     );
+    let ledger_after = ledger_snapshot(&owner);
+    assert_eq!(
+        ledger_after, ledger_before,
+        "correspondence refusal restores both ledgers and ceilings"
+    );
     let returned = match outcome {
         OwnedDecisionOutcome::Refused {
             proof,
             reason: OwnedCaptureRefusal::Correspondence(_),
         } => proof,
-        other => panic!("owner correspondence gate should refuse: {other:?}"),
+        _ => panic!("owner correspondence gate should refuse"),
     };
-    assert_eq!(fingerprint(&returned), before);
+    assert_same_proof_fingerprint(&returned, &before);
     assert_eq!(engine.locked_qc().map(|qc| qc.view), Some(0));
     assert!(
         engine.state().retained_evidence_bytes() > 0,
@@ -663,31 +725,41 @@ fn verified_owner_route_distinguishes_ordinary_rejection_and_recovers_from_press
     assert_eq!(engine.current_view(), 1);
     let owner = owner_with_matching_proof(dir.path(), &ctx, l0_block);
     let limits = limits(&ctx);
+    let baseline_without_proof = ledger_snapshot(&owner);
 
-    let mut conflicting = make_proposal(1, [0x77u8; 32], 1);
-    let conflicting_evidence = verified_parent_qc([0x77u8; 32], 0);
-    conflicting.qc = Some(conflicting_evidence.certificate().clone());
+    // The engine has already self-voted in view 1 above. This same-view attempt
+    // demonstrates the engine's ordinary already-voted rejection, not an unsafe
+    // candidate evaluation.
+    let mut repeated_view = make_proposal(1, [0x77u8; 32], 1);
+    let repeated_evidence = verified_parent_qc([0x77u8; 32], 0);
+    repeated_view.qc = Some(repeated_evidence.certificate().clone());
     let proof = owner
         .read_validate(None::<&FixtureCommittedHistory>)
         .expect("O3 proof");
     let before = fingerprint(&proof);
+    let baseline_with_proof = ledger_snapshot(&owner);
     let outcome = owner.decide_verified_and_capture_owned(
         &mut engine,
         ValidatorId::new(1),
-        &conflicting,
-        conflicting_evidence,
+        &repeated_view,
+        repeated_evidence,
         &limits,
         1,
         proof,
+    );
+    let after_ordinary_rejection = ledger_snapshot(&owner);
+    assert_eq!(
+        after_ordinary_rejection, baseline_with_proof,
+        "ordinary rejection restores both ledgers with the original proof held"
     );
     let returned = match outcome {
         OwnedDecisionOutcome::Refused {
             proof,
             reason: OwnedCaptureRefusal::OrdinaryEngineRejection,
         } => proof,
-        other => panic!("unsafe proposal should be an ordinary engine rejection: {other:?}"),
+        _ => panic!("same-view already-voted attempt should refuse ordinarily"),
     };
-    assert_eq!(fingerprint(&returned), before);
+    assert_same_proof_fingerprint(&returned, &before);
     assert_eq!(engine.locked_qc().map(|qc| qc.view), Some(1));
     assert!(engine.state().retained_evidence_bytes() > 0);
 
@@ -695,6 +767,8 @@ fn verified_owner_route_distinguishes_ordinary_rejection_and_recovers_from_press
     let evidence = verified_parent_qc(l0_block, 0);
     proposal.qc = Some(evidence.certificate().clone());
     let with_proof = ledger_snapshot(&owner);
+    assert_eq!(with_proof, baseline_with_proof);
+    let standing_cell = registry_cell_charge_bytes();
     let backend = owner.backend_for_test();
     let op_headroom =
         backend.accounting_cap().expect("operational ceiling") - backend.accounting_current();
@@ -721,10 +795,11 @@ fn verified_owner_route_distinguishes_ordinary_rejection_and_recovers_from_press
             proof,
             reason: OwnedCaptureRefusal::Capture(CaptureRefusal::Admission(_)),
         } => proof,
-        other => panic!("expected a capture admission refusal: {other:?}"),
+        _ => panic!("expected a capture admission refusal"),
     };
-    assert_eq!(fingerprint(&returned), before);
-    assert_eq!(ledger_snapshot(&owner), starved);
+    assert_same_proof_fingerprint(&returned, &before);
+    let after_admission_refusal = ledger_snapshot(&owner);
+    assert_eq!(after_admission_refusal, starved);
     assert_eq!(engine.locked_qc().map(|qc| qc.view), Some(0));
     assert_eq!(registry_occupied(&owner), 0);
 
@@ -741,12 +816,35 @@ fn verified_owner_route_distinguishes_ordinary_rejection_and_recovers_from_press
     );
     let decided = match retry {
         OwnedDecisionOutcome::Decided(decided) => decided,
-        other => panic!("pressure relief permits retry with the returned proof: {other:?}"),
+        _ => panic!("pressure relief permits retry with the returned proof"),
     };
+    let retry_occupied = ledger_snapshot(&owner);
+    assert_eq!(
+        retry_occupied.operational_ceiling,
+        baseline_with_proof.operational_ceiling
+    );
+    assert_eq!(retry_occupied.aggregate_ceiling, baseline_with_proof.aggregate_ceiling);
     assert_eq!(decided.vote().height, 1);
     assert_eq!(registry_occupied(&owner), 1);
     drop(decided);
+    let after_retry_drop = ledger_snapshot(&owner);
     assert_eq!(registry_occupied(&owner), 0);
+    assert_eq!(
+        after_retry_drop.operational,
+        baseline_without_proof.operational + standing_cell
+    );
+    assert_eq!(
+        after_retry_drop.aggregate,
+        baseline_without_proof.aggregate + standing_cell
+    );
+    assert_eq!(
+        after_retry_drop.operational_ceiling,
+        baseline_without_proof.operational_ceiling
+    );
+    assert_eq!(
+        after_retry_drop.aggregate_ceiling,
+        baseline_without_proof.aggregate_ceiling
+    );
 }
 
 #[test]
@@ -763,6 +861,7 @@ fn verified_owner_route_refuses_stale_revision_and_recovery_required() {
         .read_validate(None::<&FixtureCommittedHistory>)
         .expect("O3 proof");
     let before = fingerprint(&proof);
+    let ledger_before_stale = ledger_snapshot(&owner);
     let stale = owner.decide_verified_and_capture_owned(
         &mut engine,
         ValidatorId::new(1),
@@ -771,6 +870,11 @@ fn verified_owner_route_refuses_stale_revision_and_recovery_required() {
         &limits,
         0,
         proof,
+    );
+    let ledger_after_stale = ledger_snapshot(&owner);
+    assert_eq!(
+        ledger_after_stale, ledger_before_stale,
+        "stale refusal restores both ledgers and ceilings"
     );
     let proof = match stale {
         OwnedDecisionOutcome::Refused {
@@ -781,9 +885,9 @@ fn verified_owner_route_refuses_stale_revision_and_recovery_required() {
                     found: 1,
                 }),
         } => proof,
-        other => panic!("expected exact stale-revision refusal: {other:?}"),
+        _ => panic!("expected exact stale-revision refusal"),
     };
-    assert_eq!(fingerprint(&proof), before);
+    assert_same_proof_fingerprint(&proof, &before);
     assert_eq!(engine.locked_qc().map(|qc| qc.view), Some(0));
 
     let mut next = valid_wire_qc(&ctx, [0x99u8; 32], 1);
@@ -801,6 +905,7 @@ fn verified_owner_route_refuses_stale_revision_and_recovery_required() {
         .set_inject(qbind_node::safety_record_store::backend::InjectFault::None);
     assert!(owner.recovery_required());
 
+    let ledger_before_recovery = ledger_snapshot(&owner);
     let recovery = owner.decide_verified_and_capture_owned(
         &mut engine,
         ValidatorId::new(1),
@@ -810,14 +915,19 @@ fn verified_owner_route_refuses_stale_revision_and_recovery_required() {
         1,
         proof,
     );
+    let ledger_after_recovery = ledger_snapshot(&owner);
+    assert_eq!(
+        ledger_after_recovery, ledger_before_recovery,
+        "recovery-required refusal restores both ledgers and ceilings"
+    );
     let returned = match recovery {
         OwnedDecisionOutcome::Refused {
             proof,
             reason: OwnedCaptureRefusal::Precheck(CaptureRefusal::RecoveryRequired),
         } => proof,
-        other => panic!("recovery-required state must block capture: {other:?}"),
+        _ => panic!("recovery-required state must block capture"),
     };
-    assert_eq!(fingerprint(&returned), before);
+    assert_same_proof_fingerprint(&returned, &before);
     assert_eq!(engine.locked_qc().map(|qc| qc.view), Some(0));
     assert_eq!(registry_occupied(&owner), 0);
 }
@@ -1385,20 +1495,31 @@ fn view_sufficiency_records_not_applicable_ancestry() {
 }
 
 // ===========================================================================
-// 10. Serialization: an observer against the SAME domain sees `WouldBlock` while
-//     the owner is paused holding the guard at the pre-ingestion semantic point,
-//     then `Acquired` after normal release (publication progress). Bounded
-//     coordination (channels), no timing sleeps.
+// 10. Serialization: independently exercise legacy and verified owner entrypoints.
+//     An observer against the SAME domain sees `WouldBlock` while paused at the
+//     existing capture-interval hook under the guard, then `Acquired` after release.
+//     Bounded coordination (channels), no timing sleeps.
 // ===========================================================================
 
 #[test]
-fn owner_route_holds_domain_until_release_observed_as_would_block() {
+fn legacy_owner_route_holds_domain_until_release_observed_as_would_block() {
+    exercise_owner_route_domain_serialization(false);
+}
+
+#[test]
+fn verified_owner_route_holds_domain_until_release_observed_as_would_block() {
+    exercise_owner_route_domain_serialization(true);
+}
+
+fn exercise_owner_route_domain_serialization(verified: bool) {
     let ctx = ctx_n(4);
     let dir = tempfile::tempdir().unwrap();
     let (mut engine, mut p1, l0_block) = engine_locked_and_safe_view1();
     let owner = owner_with_matching_proof(dir.path(), &ctx, l0_block);
-    let evidence = verified_parent_qc(l0_block, 0);
-    p1.qc = Some(evidence.certificate().clone());
+    let evidence = verified.then(|| verified_parent_qc(l0_block, 0));
+    if let Some(evidence) = evidence.as_ref() {
+        p1.qc = Some(evidence.certificate().clone());
+    }
     let proof = owner
         .read_validate(None::<&FixtureCommittedHistory>)
         .unwrap();
@@ -1432,15 +1553,19 @@ fn owner_route_holds_domain_until_release_observed_as_would_block() {
         // hook never panics (so a failed hand-off cannot poison the held domain
         // guard) and waits only under the bounded timeout.
         set_capture_interval_hook(move || owner_coord.signal_entry_and_await_release());
-        let outcome = owner.decide_verified_and_capture_owned(
-            &mut engine,
-            ValidatorId::new(1),
-            &p1,
-            evidence,
-            &lim,
-            1,
-            proof,
-        );
+        let outcome = if let Some(evidence) = evidence {
+            owner.decide_verified_and_capture_owned(
+                &mut engine,
+                ValidatorId::new(1),
+                &p1,
+                evidence,
+                &lim,
+                1,
+                proof,
+            )
+        } else {
+            owner.decide_and_capture_owned(&mut engine, ValidatorId::new(1), &p1, &lim, 1, proof)
+        };
         clear_capture_interval_hook();
 
         observer.join().expect("observer thread");
@@ -1458,7 +1583,7 @@ fn owner_route_holds_domain_until_release_observed_as_would_block() {
             *observed.lock().unwrap(),
             Some(DomainObservation::WouldBlock),
             "same-domain acquisition observed contention (not poisoning) while the \
-             owner held the guard at the capture interval"
+             owner held the guard at set_capture_interval_hook"
         );
         assert!(
             matches!(outcome, OwnedDecisionOutcome::Decided(_)),
@@ -2091,14 +2216,12 @@ fn captured_generation_retains_l0_provenance_after_self_vote_l1() {
     assert_eq!(registry_occupied(&owner), 0, "abandoning frees the slot");
 }
 // ===========================================================================
-// 17. §4 — Owner-route OrdinaryEngineRejection: an ACTUAL engine rejection taken
-//     BEFORE the gate is consulted. The engine decides it is NOT safe to vote on
-//     a conflicting-fork proposal (no justify QC, parent unregistered), so the
-//     fallible owning gate — and therefore every correspondence / projection /
-//     ancestry check — is never reached. The owner/proof is otherwise admissible
-//     (durable lock matches L0, policy derived from the pinned context). The SAME
-//     proof is returned intact, no dependent self-vote or capture occurs, and the
-//     charges return exactly to baseline. This is distinct from the gate
+// 17. §4 — Owner-route OrdinaryEngineRejection: the engine has already self-voted
+//     in this view, so the repeated same-view attempt is refused before the gate.
+//     This does not demonstrate unsafe-candidate evaluation. The owner/proof is
+//     otherwise admissible (durable lock matches L0, policy derived from pinned
+//     context). The SAME proof is returned intact, no dependent self-vote or
+//     capture occurs, and the charges return exactly to baseline. This is distinct from the gate
 //     `Correspondence` refusal in
 //     `lock_mismatch_refuses_with_proof_returned_and_no_self_vote`.
 // ===========================================================================
@@ -2107,16 +2230,12 @@ fn captured_generation_retains_l0_provenance_after_self_vote_l1() {
 fn ordinary_engine_rejection_refuses_with_proof_and_no_self_vote() {
     let ctx = ctx_n(4);
     let dir = tempfile::tempdir().unwrap();
-    // Engine locked at L0 (view 0). Build a CONFLICTING candidate: no justify QC
-    // (so the view-sufficiency short-circuit cannot apply) whose parent is an
-    // unregistered block (so the ancestry walk cannot reach the lock) -> the
-    // engine's safety predicate returns Unsafe BEFORE the gate is consulted.
+    // This helper has already accepted a view-1 proposal and self-voted. A second
+    // view-1 proposal is refused by the already-voted check before safety evaluation.
     let (mut engine, _safe_p1, l0_block) = engine_locked_and_safe_view1();
-    let mut conflicting = make_proposal(1, [0x77u8; 32], 1);
-    conflicting.qc = None;
+    let repeated_view = make_proposal(1, [0x77u8; 32], 1);
     // Admissible owner/proof: the durable lock matches the engine L0 and the
-    // policy is owner-derived. Correspondence WOULD pass, but the engine rejects
-    // first so the gate is never reached.
+    // policy is owner-derived. The already-voted check rejects before the gate.
     let owner = owner_with_matching_proof(dir.path(), &ctx, l0_block);
     // Proof-free paired (operational, aggregate) baseline.
     let baseline = ledger_snapshot(&owner);
@@ -2131,7 +2250,7 @@ fn ordinary_engine_rejection_refuses_with_proof_and_no_self_vote() {
     let outcome = owner.decide_and_capture_owned(
         &mut engine,
         ValidatorId::new(1),
-        &conflicting,
+        &repeated_view,
         &lim,
         1,
         proof,
