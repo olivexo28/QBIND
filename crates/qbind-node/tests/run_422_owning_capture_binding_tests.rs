@@ -2216,13 +2216,18 @@ fn captured_generation_retains_l0_provenance_after_self_vote_l1() {
     assert_eq!(registry_occupied(&owner), 0, "abandoning frees the slot");
 }
 // ===========================================================================
-// 17. §4 — Owner-route OrdinaryEngineRejection: the engine has already self-voted
-//     in this view, so the repeated same-view attempt is refused before the gate.
-//     This does not demonstrate unsafe-candidate evaluation. The owner/proof is
-//     otherwise admissible (durable lock matches L0, policy derived from pinned
-//     context). The SAME proof is returned intact, no dependent self-vote or
-//     capture occurs, and the charges return exactly to baseline. This is distinct from the gate
-//     `Correspondence` refusal in
+// 17. §4 — Owner-route OrdinaryEngineRejection: `engine_locked_and_safe_view1`
+//     first processes the view-0 proposal and establishes L0, then calls
+//     `advance_view()` (which clears `voted_in_view`) and returns a safe view-1
+//     proposal without ingesting it. This test discards that proposal and submits
+//     a view-1 proposal with no justification QC and an unregistered conflicting
+//     parent; the engine rejects it during unsafe-candidate evaluation before the
+//     owner gate. The owner/proof is otherwise admissible (durable lock matches
+//     L0, policy derived from pinned context). The SAME proof is returned intact,
+//     no dependent self-vote or capture occurs, and the charges return exactly to
+//     baseline. This differs from the already-voted refusal in
+//     `verified_owner_route_distinguishes_ordinary_rejection_and_recovers_from_pressure`
+//     and from the gate `Correspondence` refusal in
 //     `lock_mismatch_refuses_with_proof_returned_and_no_self_vote`.
 // ===========================================================================
 
@@ -2230,12 +2235,14 @@ fn captured_generation_retains_l0_provenance_after_self_vote_l1() {
 fn ordinary_engine_rejection_refuses_with_proof_and_no_self_vote() {
     let ctx = ctx_n(4);
     let dir = tempfile::tempdir().unwrap();
-    // This helper has already accepted a view-1 proposal and self-voted. A second
-    // view-1 proposal is refused by the already-voted check before safety evaluation.
+    // The helper only ingests the view-0 proposal. It establishes L0, advances to
+    // view 1 (clearing `voted_in_view`), and returns an un-ingested safe view-1
+    // proposal. This test discards that proposal.
     let (mut engine, _safe_p1, l0_block) = engine_locked_and_safe_view1();
+    // No justify QC and an unregistered conflicting parent reach unsafe-candidate
+    // evaluation, which rejects before the gate. The owner/proof is independently
+    // admissible: the durable lock matches L0 and policy is owner-derived.
     let repeated_view = make_proposal(1, [0x77u8; 32], 1);
-    // Admissible owner/proof: the durable lock matches the engine L0 and the
-    // policy is owner-derived. The already-voted check rejects before the gate.
     let owner = owner_with_matching_proof(dir.path(), &ctx, l0_block);
     // Proof-free paired (operational, aggregate) baseline.
     let baseline = ledger_snapshot(&owner);
