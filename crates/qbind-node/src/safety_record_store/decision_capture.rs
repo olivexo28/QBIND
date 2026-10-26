@@ -640,6 +640,9 @@ pub enum ProjectionMismatch {
 /// variant is returned alongside the intact [`ValidatedRecord`].
 #[derive(Debug)]
 pub enum OwnedCaptureRefusal {
+    /// A verified-ingestion pre-check rejected the proposal before the safety
+    /// decision. The original proof remains unconsumed.
+    VerifiedIngest(qbind_consensus::VerifiedProposalIngestError),
     /// The caller-supplied input policy's effective limits did not match the
     /// policy derived from the owner's pinned context (§2). A typed,
     /// allocation-free refusal raised before the engine decision, so no
