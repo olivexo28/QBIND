@@ -36,9 +36,10 @@ use qbind_consensus::qc_verify_domain::verify_quorum_certificate_with_domain;
 use qbind_consensus::validator_set::ValidatorSetEntry;
 use qbind_consensus::vote_accumulator::ConsensusLimitsConfig;
 use qbind_consensus::{
-    BasicHotStuffEngine, ConsensusEngineAction, ConsensusValidatorSet, GatedSelfVoteRefusal,
-    GatedVerifiedProposalError, SafetyBranch, SafetyDecisionGate, SafetyDecisionView,
-    SafetyGateRefusal, ValidatorId, VerifiedProposalIngestError,
+    BasicHotStuffEngine, ConsensusEngineAction, ConsensusValidatorSet, DecidedVote,
+    GatedSelfVoteRefusal, GatedVerifiedProposalError, OwningSafetyDecisionGate, SafetyBranch,
+    SafetyDecisionGate, SafetyDecisionView, SafetyGateRefusal, ValidatorId,
+    VerifiedProposalIngestError,
 };
 use qbind_crypto::ml_dsa44::MlDsa44Backend;
 use qbind_crypto::{ConsensusSigSuiteId, SUITE_PQ_RESERVED_1};
@@ -147,6 +148,39 @@ impl SafetyDecisionGate<[u8; 32]> for CountingGate {
             Err(SafetyGateRefusal)
         } else {
             Ok(())
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct DecisionWitness {
+    candidate_id: [u8; 32],
+    branch: SafetyBranch,
+    verified: bool,
+}
+
+#[derive(Default)]
+struct CountingOwningGate {
+    calls: usize,
+    reject: bool,
+    witness: Option<DecisionWitness>,
+}
+
+impl OwningSafetyDecisionGate<[u8; 32], DecisionWitness> for CountingOwningGate {
+    fn evaluate_owning(
+        &mut self,
+        decision: &SafetyDecisionView<'_, [u8; 32]>,
+    ) -> Result<DecisionWitness, SafetyGateRefusal> {
+        self.calls += 1;
+        self.witness = Some(DecisionWitness {
+            candidate_id: *decision.candidate_id(),
+            branch: decision.branch(),
+            verified: decision.is_verified_entrypoint(),
+        });
+        if self.reject {
+            Err(SafetyGateRefusal)
+        } else {
+            Ok(self.witness.as_ref().unwrap().clone())
         }
     }
 }
@@ -590,6 +624,175 @@ fn verified_gated_enforces_prechecks_before_gate() {
             "legacy entrypoint is not verified"
         );
     }
+}
+
+#[test]
+fn verified_owning_handoff_binds_engine_vote_and_retained_evidence() {
+    let f = verified_fixture(4);
+    let d = domain_for([3u8; 32]);
+    let qc = build_signed_qc(&f, &d, [0x55u8; 32], 0, &[1, 2, 3]);
+    let registry = SimpleBackendRegistry::with_backend(TEST_SUITE, Arc::new(MlDsa44Backend));
+    let verified =
+        verify_quorum_certificate_with_domain(&qc, &d, 0, &f.validators, &f.kp, &registry)
+            .expect("quorum verifies");
+    let evidence = Arc::new(verified);
+
+    let mut engine: BasicHotStuffEngine<[u8; 32]> =
+        BasicHotStuffEngine::new(ValidatorId(1), f.validators.clone());
+    let mut proposal = make_proposal(0, [0xFF; 32], 1);
+    proposal.qc = Some(evidence.certificate().clone());
+    let mut gate = CountingOwningGate::default();
+    let expected_charge = evidence
+        .retained_byte_size()
+        .expect("evidence charge is representable");
+    let expected_certificate = evidence.certificate().clone();
+
+    let decided: DecidedVote<DecisionWitness> = engine
+        .on_verified_proposal_event_gated_owning(
+            ValidatorId(1),
+            &proposal,
+            Arc::clone(&evidence),
+            &mut gate,
+        )
+        .expect("verified owning route succeeds")
+        .expect("safe proposal yields an owning vote");
+
+    assert_eq!(gate.calls, 1);
+    assert_eq!(
+        gate.witness,
+        Some(DecisionWitness {
+            candidate_id: decided.vote().block_id,
+            branch: SafetyBranch::NoLock,
+            verified: true,
+        }),
+        "gate observes the exact candidate at a verified decision"
+    );
+    assert_eq!(decided.payload(), gate.witness.as_ref().unwrap());
+    assert_eq!(decided.vote().height, 0);
+    assert_eq!(decided.vote().block_id, gate.witness.as_ref().unwrap().candidate_id);
+    let retained = engine
+        .state()
+        .verified_justification(&gate.witness.as_ref().unwrap().candidate_id)
+        .expect("the accepted candidate retains its verified justification");
+    assert_eq!(retained.certificate(), &expected_certificate);
+    assert_eq!(
+        engine.state().retained_evidence_bytes(),
+        expected_charge,
+        "the supplied evidence is retained under the existing evidence budget"
+    );
+}
+
+#[test]
+fn verified_owning_prechecks_refuse_before_gate_or_engine_mutation() {
+    let f = verified_fixture(4);
+    let d = domain_for([3u8; 32]);
+    let qc = build_signed_qc(&f, &d, [0x55u8; 32], 0, &[1, 2, 3]);
+    let registry = SimpleBackendRegistry::with_backend(TEST_SUITE, Arc::new(MlDsa44Backend));
+    let verified =
+        verify_quorum_certificate_with_domain(&qc, &d, 0, &f.validators, &f.kp, &registry)
+            .expect("quorum verifies");
+    let evidence = Arc::new(verified);
+
+    let run = |proposal: BlockProposal,
+               expected: VerifiedProposalIngestError,
+               limits: Option<ConsensusLimitsConfig>| {
+        let mut engine = match limits {
+            Some(limits) => BasicHotStuffEngine::with_state_limits(
+                ValidatorId(1),
+                f.validators.clone(),
+                limits,
+            ),
+            None => BasicHotStuffEngine::new(ValidatorId(1), f.validators.clone()),
+        };
+        if matches!(
+            &expected,
+            VerifiedProposalIngestError::RetentionBudgetExceeded { .. }
+        ) {
+            engine.state_mut().set_max_retained_evidence_bytes(0);
+        }
+        let mut gate = CountingOwningGate::default();
+        let result = engine.on_verified_proposal_event_gated_owning(
+            ValidatorId(1),
+            &proposal,
+            Arc::clone(&evidence),
+            &mut gate,
+        );
+        match result {
+            Err(GatedVerifiedProposalError::Ingest(error)) => assert_eq!(error, expected),
+            _ => panic!("verified owning route did not return its typed ingest error"),
+        }
+        assert_eq!(gate.calls, 0, "precheck rejection precedes owning gate");
+        assert_eq!(engine.current_view(), 0);
+        assert_eq!(engine.state().block_count(), 0);
+        assert!(engine.locked_qc().is_none(), "no self-vote or QC");
+        assert_eq!(engine.state().retained_evidence_bytes(), 0);
+    };
+
+    run(
+        make_proposal(0, [0xFF; 32], 1),
+        VerifiedProposalIngestError::MissingEmbeddedQc,
+        None,
+    );
+
+    let mut mismatch = make_proposal(0, [0xFF; 32], 1);
+    let mut mismatching_qc = qc.clone();
+    mismatching_qc.block_id = [0x66; 32];
+    mismatch.qc = Some(mismatching_qc);
+    run(
+        mismatch,
+        VerifiedProposalIngestError::EvidenceCertificateMismatch,
+        None,
+    );
+
+    let mut wrong_chain = make_proposal(0, [0xFF; 32], 1);
+    wrong_chain.header.chain_id = 7;
+    wrong_chain.qc = Some(qc.clone());
+    run(
+        wrong_chain,
+        VerifiedProposalIngestError::WireChainMismatch {
+            proposal_chain_id: 7,
+            evidence_chain_id: WIRE_CHAIN,
+        },
+        None,
+    );
+
+    let mut wrong_epoch = make_proposal(0, [0xFF; 32], 1);
+    wrong_epoch.header.epoch = 1;
+    wrong_epoch.qc = Some(qc.clone());
+    run(
+        wrong_epoch,
+        VerifiedProposalIngestError::EpochMismatch {
+            proposal_epoch: 1,
+            evidence_epoch: 0,
+        },
+        None,
+    );
+
+    let mut over_budget = make_proposal(0, [0xFF; 32], 1);
+    over_budget.qc = Some(qc.clone());
+    run(
+        over_budget,
+        VerifiedProposalIngestError::RetentionBudgetExceeded {
+            needed_bytes: evidence.retained_byte_size().unwrap(),
+            retained_bytes: 0,
+            max_bytes: 0,
+        },
+        None,
+    );
+
+    let mut no_slot = make_proposal(0, [0xFF; 32], 1);
+    no_slot.qc = Some(qc);
+    run(
+        no_slot,
+        VerifiedProposalIngestError::RetentionCapacityUnavailable {
+            block_count: 0,
+            max_pending_blocks: 0,
+        },
+        Some(ConsensusLimitsConfig {
+            max_pending_blocks: 0,
+            ..Default::default()
+        }),
+    );
 }
 
 /// Helper to keep the verified happy-path borrow of `evidence` tidy.

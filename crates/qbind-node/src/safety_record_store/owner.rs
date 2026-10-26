@@ -2392,6 +2392,111 @@ impl SafetyRecordOwner {
         )
     }
 
+    /// **§ 13.6 verified-Proposal decide-and-capture** (isolated, opt-in).
+    /// Reuses the engine's verified-ingestion pre-checks, then captures the
+    /// actual safe decision under the same serialization-domain guard before
+    /// its dependent self-vote. The supplied verified evidence is moved into
+    /// the engine's existing retention path; this route does not re-verify or
+    /// downgrade to logical ingestion.
+    #[allow(clippy::too_many_arguments)]
+    pub fn decide_verified_and_capture_owned(
+        &self,
+        engine: &mut qbind_consensus::BasicHotStuffEngine<[u8; 32]>,
+        from: qbind_consensus::ValidatorId,
+        proposal: &qbind_wire::consensus::BlockProposal,
+        evidence: std::sync::Arc<qbind_consensus::qc_verify_domain::VerifiedQuorumCertificate>,
+        limits: &super::decision_capture::PreparedDecisionInputLimits,
+        expected_authoritative_revision: u64,
+        proof: ValidatedRecord,
+    ) -> super::decision_capture::OwnedDecisionOutcome {
+        use super::decision_capture::{OwnedCaptureRefusal, OwnedDecisionOutcome};
+
+        let identity = match self.capture_precheck(&proof) {
+            Ok(id) => id,
+            Err(reason) => {
+                return OwnedDecisionOutcome::Refused {
+                    proof,
+                    reason: OwnedCaptureRefusal::Precheck(reason),
+                };
+            }
+        };
+
+        match super::decision_capture::PreparedDecisionInputLimits::from_pinned(self.pinned()) {
+            Ok(expected) if *limits == expected => {}
+            Ok(_) => {
+                return OwnedDecisionOutcome::Refused {
+                    proof,
+                    reason: OwnedCaptureRefusal::EffectivePolicyMismatch,
+                };
+            }
+            Err(error) => {
+                return OwnedDecisionOutcome::Refused {
+                    proof,
+                    reason: OwnedCaptureRefusal::OwnerPolicyUnavailable(error),
+                };
+            }
+        }
+
+        let mut guard = self.backend.lock_domain();
+        let mut gate = OwningCaptureGate {
+            owner: self,
+            guard: &mut guard,
+            proof: Some(proof),
+            limits,
+            expected_rev: expected_authoritative_revision,
+            proposer: from,
+            proposal,
+            identity,
+            reason: None,
+        };
+
+        #[cfg(any(test, feature = "test-utils"))]
+        fire_pre_ingestion_hook();
+
+        let result = engine.on_verified_proposal_event_gated_owning(
+            from,
+            proposal,
+            evidence,
+            &mut gate,
+        );
+
+        let OwningCaptureGate {
+            proof: returned_proof,
+            reason,
+            ..
+        } = gate;
+        drop(guard);
+
+        match result {
+            Ok(Some(decided)) => OwnedDecisionOutcome::Decided(decided),
+            Ok(None) => match returned_proof {
+                Some(proof) => OwnedDecisionOutcome::Refused {
+                    proof,
+                    reason: reason.unwrap_or(OwnedCaptureRefusal::OrdinaryEngineRejection),
+                },
+                None => OwnedDecisionOutcome::InvariantViolation,
+            },
+            Err(qbind_consensus::GatedVerifiedProposalError::Ingest(error)) => {
+                OwnedDecisionOutcome::Refused {
+                    proof: returned_proof.expect("verified pre-check does not consult the gate"),
+                    reason: OwnedCaptureRefusal::VerifiedIngest(error),
+                }
+            }
+            Err(qbind_consensus::GatedVerifiedProposalError::Gate(
+                qbind_consensus::GatedSelfVoteRefusal::GateRejected(_),
+            )) => OwnedDecisionOutcome::Refused {
+                proof: returned_proof.expect("owner gate refusal restores the proof"),
+                reason: reason.expect("owner gate refusal records its typed reason"),
+            },
+            Err(qbind_consensus::GatedVerifiedProposalError::Gate(
+                qbind_consensus::GatedSelfVoteRefusal::MissingCandidate,
+            )) => OwnedDecisionOutcome::Refused {
+                proof: returned_proof.expect("missing candidate does not consult the gate"),
+                reason: OwnedCaptureRefusal::MissingCandidate,
+            },
+        }
+    }
+
     /// Test-only mismatched-input seam (§9): the engine decides on
     /// `engine_proposal` while the gate projects and commits `gate_proposal`,
     /// so a substitution test can force a projection mismatch without any

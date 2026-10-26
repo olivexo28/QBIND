@@ -2713,6 +2713,61 @@ impl BasicHotStuffEngine<[u8; 32]> {
         Ok(action)
     }
 
+    /// Run 422 §13.6: verified ingestion with an opaque owning payload bound to
+    /// the engine-produced self-vote. All verified-ingestion pre-checks run
+    /// before the owning gate, and the supplied evidence is moved through the
+    /// existing verified path without re-verification or legacy fallback.
+    ///
+    /// Gate refusal prevents the self-vote and Vote action. Earlier permitted
+    /// bookkeeping in `ingest_proposal` (such as future-view advancement or
+    /// candidate registration/evidence retention) is not rolled back.
+    pub fn on_verified_proposal_event_gated_owning<P>(
+        &mut self,
+        from: ValidatorId,
+        proposal: &qbind_wire::consensus::BlockProposal,
+        evidence: Arc<VerifiedQuorumCertificate>,
+        gate: &mut dyn OwningSafetyDecisionGate<[u8; 32], P>,
+    ) -> Result<Option<DecidedVote<P>>, GatedVerifiedProposalError> {
+        let mut adapter = OwningGateAdapter {
+            gate,
+            captured: None,
+        };
+        let mut refusal: Option<GatedSelfVoteRefusal> = None;
+        let action = self
+            .ingest_verified_proposal(
+                from,
+                proposal,
+                evidence,
+                DecisionHook::Gate {
+                    gate: &mut adapter,
+                    refusal: &mut refusal,
+                },
+            )
+            .map_err(GatedVerifiedProposalError::Ingest)?;
+        if let Some(refusal) = refusal {
+            debug_assert!(action.is_none(), "refusal must not emit an action");
+            debug_assert!(
+                adapter.captured.is_none(),
+                "refusal must not capture a payload"
+            );
+            return Err(GatedVerifiedProposalError::Gate(refusal));
+        }
+        match (action, adapter.captured) {
+            (Some(ConsensusEngineAction::BroadcastVote(vote)), Some(payload)) => {
+                Ok(Some(DecidedVote::new(vote, payload)))
+            }
+            (None, None) => Ok(None),
+            (_other, captured) => {
+                debug_assert!(
+                    false,
+                    "owning allow path must yield BroadcastVote paired with a payload"
+                );
+                drop(captured);
+                Ok(None)
+            }
+        }
+    }
+
     /// Shared verified-ingestion body: runs the C3F pre-checks (present QC,
     /// exact evidence match, wire-chain/epoch, retention budget, block-slot)
     /// BEFORE any mutation, then delegates to [`Self::ingest_proposal`] with the
