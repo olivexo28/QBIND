@@ -919,23 +919,78 @@ impl PreReservationSnapshot {
     }
 }
 
-const PRE_RESERVATION_MARKER_LEN: usize = 1819;
+pub(super) mod pre_reservation_marker {
+    pub(super) const MAGIC: [u8; 4] = *b"R4B2";
+    pub(super) const VERSION: u16 = 1;
+    pub(super) const PHASE: u8 = 0x1b;
+    pub(super) const NONCE_LEN: usize = 16;
+    pub(super) const SUITE_LEN: usize = std::mem::size_of::<u16>();
+    pub(super) const VALIDATOR_LEN: usize = std::mem::size_of::<u32>();
+    pub(super) const U16_LEN: usize = std::mem::size_of::<u16>();
+    pub(super) const U32_LEN: usize = std::mem::size_of::<u32>();
+    pub(super) const U64_LEN: usize = std::mem::size_of::<u64>();
+    pub(super) const COUNT_FIELDS: usize = 7;
+    pub(super) const MUTATION_FIELDS: usize = 4;
+    pub(super) const PK_LEN: usize = qbind_crypto::ml_dsa44::ML_DSA_44_PUBLIC_KEY_SIZE;
+    pub(super) const VOTE_LEN: usize = 69;
+    pub(super) const PREIMAGE_CAP: usize = super::MODEL_MAX_PREIMAGE_BYTES as usize;
+    pub(super) const POSITION_LEN: usize = crate::signing_journal_admission::JOURNAL_KEY_LEN;
+    pub(super) const BINDING_LEN: usize = 32;
+
+    pub(super) const OFF_MAGIC: usize = 0;
+    pub(super) const OFF_VERSION: usize = OFF_MAGIC + MAGIC.len();
+    pub(super) const OFF_PHASE: usize = OFF_VERSION + U16_LEN;
+    pub(super) const OFF_NONCE: usize = OFF_PHASE + std::mem::size_of::<u8>();
+    pub(super) const OFF_SUITE: usize = OFF_NONCE + NONCE_LEN;
+    pub(super) const OFF_VALIDATOR: usize = OFF_SUITE + SUITE_LEN;
+    pub(super) const OFF_COUNTS: usize = OFF_VALIDATOR + VALIDATOR_LEN;
+    pub(super) const OFF_MUTATIONS: usize = OFF_COUNTS + COUNT_FIELDS * U32_LEN;
+    pub(super) const OFF_PK_LEN: usize = OFF_MUTATIONS + MUTATION_FIELDS * U64_LEN;
+    pub(super) const OFF_PK: usize = OFF_PK_LEN + U16_LEN;
+    pub(super) const OFF_VOTE_LEN: usize = OFF_PK + PK_LEN;
+    pub(super) const OFF_VOTE: usize = OFF_VOTE_LEN + U16_LEN;
+    pub(super) const OFF_PREIMAGE_LEN: usize = OFF_VOTE + VOTE_LEN;
+    pub(super) const OFF_PREIMAGE: usize = OFF_PREIMAGE_LEN + U16_LEN;
+    pub(super) const OFF_POSITION: usize = OFF_PREIMAGE + PREIMAGE_CAP;
+    pub(super) const OFF_BINDING: usize = OFF_POSITION + POSITION_LEN;
+    pub(super) const LEN: usize = OFF_BINDING + BINDING_LEN;
+
+    const _: [(); 1819] = [(); LEN];
+    const _: [(); 0] = [(); OFF_MAGIC];
+    const _: [(); 4] = [(); OFF_VERSION];
+    const _: [(); 6] = [(); OFF_PHASE];
+    const _: [(); 7] = [(); OFF_NONCE];
+    const _: [(); 23] = [(); OFF_SUITE];
+    const _: [(); 25] = [(); OFF_VALIDATOR];
+    const _: [(); 29] = [(); OFF_COUNTS];
+    const _: [(); 57] = [(); OFF_MUTATIONS];
+    const _: [(); 89] = [(); OFF_PK_LEN];
+    const _: [(); 91] = [(); OFF_PK];
+    const _: [(); 1403] = [(); OFF_VOTE_LEN];
+    const _: [(); 1405] = [(); OFF_VOTE];
+    const _: [(); 1474] = [(); OFF_PREIMAGE_LEN];
+    const _: [(); 1476] = [(); OFF_PREIMAGE];
+    const _: [(); 1732] = [(); OFF_POSITION];
+    const _: [(); 1787] = [(); OFF_BINDING];
+    const _: [(); LEN] = [(); OFF_BINDING + BINDING_LEN];
+}
 
 pub(crate) struct PreReservationEvidence {
     mode: PreReservationMode,
-    marker: Box<[u8; PRE_RESERVATION_MARKER_LEN]>,
+    marker: Box<[u8; pre_reservation_marker::LEN]>,
     file: std::fs::File,
     expected: PreReservationExpected,
     vote_buffer: Vec<u8>,
     observers: PreReservationObservers,
     baseline: PreReservationSnapshot,
+    callback_invocations: u32,
     fired: bool,
 }
 
 impl PreReservationEvidence {
     pub(crate) fn new(
         mode: PreReservationMode,
-        marker: Box<[u8; PRE_RESERVATION_MARKER_LEN]>,
+        marker: Box<[u8; pre_reservation_marker::LEN]>,
         file: std::fs::File,
         expected: PreReservationExpected,
         observers: PreReservationObservers,
@@ -954,6 +1009,7 @@ impl PreReservationEvidence {
             vote_buffer,
             observers,
             baseline,
+            callback_invocations: 0,
             fired: false,
         }
     }
@@ -969,6 +1025,14 @@ impl PreReservationEvidence {
         use std::io::Write as _;
         use std::sync::atomic::Ordering;
 
+        self.callback_invocations = self
+            .callback_invocations
+            .checked_add(1)
+            .expect("pre-reservation callback count");
+        assert_eq!(
+            self.callback_invocations, 1,
+            "pre-reservation callback fires exactly once"
+        );
         assert!(!self.fired, "pre-reservation evidence fires exactly once");
         assert!(vote.signature.is_empty(), "boundary Vote is unsigned");
         assert_eq!(vote.suite_id, 100, "boundary Vote uses suite 100");
@@ -1112,14 +1176,16 @@ impl PreReservationEvidence {
 
         let marker = &mut self.marker[..];
         marker.fill(0);
-        marker[0..4].copy_from_slice(b"R4B2");
-        marker[4..6].copy_from_slice(&1u16.to_le_bytes());
-        marker[6] = 0x1b;
-        marker[7..23].copy_from_slice(&self.expected.nonce);
-        marker[23..25].copy_from_slice(&100u16.to_le_bytes());
-        marker[25..29].copy_from_slice(&1u32.to_le_bytes());
+        use pre_reservation_marker as layout;
+        marker[layout::OFF_MAGIC..layout::OFF_VERSION].copy_from_slice(&layout::MAGIC);
+        marker[layout::OFF_VERSION..layout::OFF_PHASE]
+            .copy_from_slice(&layout::VERSION.to_le_bytes());
+        marker[layout::OFF_PHASE] = layout::PHASE;
+        marker[layout::OFF_NONCE..layout::OFF_SUITE].copy_from_slice(&self.expected.nonce);
+        marker[layout::OFF_SUITE..layout::OFF_VALIDATOR].copy_from_slice(&100u16.to_le_bytes());
+        marker[layout::OFF_VALIDATOR..layout::OFF_COUNTS].copy_from_slice(&1u32.to_le_bytes());
         for (index, value) in [
-            1,
+            self.callback_invocations,
             reservation_entries - self.baseline.reservation_entries,
             reservation_returns - self.baseline.reservation_returns,
             signer_calls - self.baseline.signer_calls,
@@ -1130,8 +1196,8 @@ impl PreReservationEvidence {
         .into_iter()
         .enumerate()
         {
-            let offset = 29 + index * 4;
-            marker[offset..offset + 4].copy_from_slice(&value.to_le_bytes());
+            let offset = layout::OFF_COUNTS + index * layout::U32_LEN;
+            marker[offset..offset + layout::U32_LEN].copy_from_slice(&value.to_le_bytes());
         }
         for (index, value) in [
             delta(
@@ -1151,17 +1217,21 @@ impl PreReservationEvidence {
         .into_iter()
         .enumerate()
         {
-            let offset = 57 + index * 8;
-            marker[offset..offset + 8].copy_from_slice(&value.to_le_bytes());
+            let offset = layout::OFF_MUTATIONS + index * layout::U64_LEN;
+            marker[offset..offset + layout::U64_LEN].copy_from_slice(&value.to_le_bytes());
         }
-        marker[89..91].copy_from_slice(&(authorized_public_key.len() as u16).to_le_bytes());
-        marker[91..1403].copy_from_slice(authorized_public_key);
-        marker[1403..1405].copy_from_slice(&(self.vote_buffer.len() as u16).to_le_bytes());
-        marker[1405..1474].copy_from_slice(&self.vote_buffer);
-        marker[1474..1476].copy_from_slice(&(preimage.len() as u16).to_le_bytes());
-        marker[1476..1476 + preimage.len()].copy_from_slice(preimage);
-        marker[1732..1787].copy_from_slice(&position_key);
-        marker[1787..1819].copy_from_slice(&binding.0);
+        marker[layout::OFF_PK_LEN..layout::OFF_PK]
+            .copy_from_slice(&(authorized_public_key.len() as u16).to_le_bytes());
+        marker[layout::OFF_PK..layout::OFF_VOTE_LEN].copy_from_slice(authorized_public_key);
+        marker[layout::OFF_VOTE_LEN..layout::OFF_VOTE]
+            .copy_from_slice(&(self.vote_buffer.len() as u16).to_le_bytes());
+        marker[layout::OFF_VOTE..layout::OFF_PREIMAGE_LEN].copy_from_slice(&self.vote_buffer);
+        marker[layout::OFF_PREIMAGE_LEN..layout::OFF_PREIMAGE]
+            .copy_from_slice(&(preimage.len() as u16).to_le_bytes());
+        marker[layout::OFF_PREIMAGE..layout::OFF_PREIMAGE + preimage.len()]
+            .copy_from_slice(preimage);
+        marker[layout::OFF_POSITION..layout::OFF_BINDING].copy_from_slice(&position_key);
+        marker[layout::OFF_BINDING..layout::LEN].copy_from_slice(&binding.0);
         self.file
             .write_all(marker)
             .expect("write complete pre-reservation marker");
@@ -14951,55 +15021,15 @@ mod tests {
                     PreReservationObservers, PreReservationSnapshot, PreReservationStorageCounts,
                     PreReservationStorageObserver,
                 };
+                use crate::safety_record_store::owner::model::pre_reservation_marker::{
+                    BINDING_LEN, COUNT_FIELDS, LEN as MARKER_LEN, MAGIC, MUTATION_FIELDS,
+                    NONCE_LEN, OFF_BINDING, OFF_COUNTS, OFF_MAGIC, OFF_MUTATIONS, OFF_NONCE,
+                    OFF_PHASE, OFF_PK, OFF_PK_LEN, OFF_POSITION, OFF_PREIMAGE, OFF_PREIMAGE_LEN,
+                    OFF_SUITE, OFF_VALIDATOR, OFF_VERSION, OFF_VOTE, OFF_VOTE_LEN, PHASE,
+                    POSITION_LEN, PREIMAGE_CAP, PK_LEN, U16_LEN, U32_LEN, U64_LEN, VALIDATOR_LEN,
+                    VERSION, VOTE_LEN,
+                };
                 use std::sync::atomic::{AtomicU32, Ordering};
-
-                const MAGIC: [u8; 4] = *b"R4B2";
-                const VERSION: u16 = 1;
-                const PHASE: u8 = 0x1b;
-                const NONCE_LEN: usize = 16;
-                const SUITE_LEN: usize = 2;
-                const VALIDATOR_LEN: usize = 4;
-                const U32_LEN: usize = 4;
-                const U64_LEN: usize = 8;
-                const COUNT_FIELDS: usize = 7;
-                const MUTATION_FIELDS: usize = 4;
-                const PK_LEN: usize = qbind_crypto::ml_dsa44::ML_DSA_44_PUBLIC_KEY_SIZE;
-                const VOTE_LEN: usize = 69;
-                const PREIMAGE_CAP: usize = MODEL_MAX_PREIMAGE_BYTES as usize;
-                const POSITION_LEN: usize = crate::signing_journal_admission::JOURNAL_KEY_LEN;
-                const BINDING_LEN: usize = 32;
-
-                const OFF_MAGIC: usize = 0;
-                const OFF_VERSION: usize = OFF_MAGIC + MAGIC.len();
-                const OFF_PHASE: usize = OFF_VERSION + 2;
-                const OFF_NONCE: usize = OFF_PHASE + 1;
-                const OFF_SUITE: usize = OFF_NONCE + NONCE_LEN;
-                const OFF_VALIDATOR: usize = OFF_SUITE + SUITE_LEN;
-                const OFF_COUNTS: usize = OFF_VALIDATOR + VALIDATOR_LEN;
-                const OFF_MUTATIONS: usize = OFF_COUNTS + COUNT_FIELDS * U32_LEN;
-                const OFF_PK_LEN: usize = OFF_MUTATIONS + MUTATION_FIELDS * U64_LEN;
-                const OFF_PK: usize = OFF_PK_LEN + 2;
-                const OFF_VOTE_LEN: usize = OFF_PK + PK_LEN;
-                const OFF_VOTE: usize = OFF_VOTE_LEN + 2;
-                const OFF_PREIMAGE_LEN: usize = OFF_VOTE + VOTE_LEN;
-                const OFF_PREIMAGE: usize = OFF_PREIMAGE_LEN + 2;
-                const OFF_POSITION: usize = OFF_PREIMAGE + PREIMAGE_CAP;
-                const OFF_BINDING: usize = OFF_POSITION + POSITION_LEN;
-                const MARKER_LEN: usize = OFF_BINDING + BINDING_LEN;
-                const _: [(); 1819] = [(); MARKER_LEN];
-                const _: [(); 7] = [(); OFF_NONCE];
-                const _: [(); 23] = [(); OFF_SUITE];
-                const _: [(); 29] = [(); OFF_COUNTS];
-                const _: [(); 57] = [(); OFF_MUTATIONS];
-                const _: [(); 89] = [(); OFF_PK_LEN];
-                const _: [(); 91] = [(); OFF_PK];
-                const _: [(); 1403] = [(); OFF_VOTE_LEN];
-                const _: [(); 1405] = [(); OFF_VOTE];
-                const _: [(); 1474] = [(); OFF_PREIMAGE_LEN];
-                const _: [(); 1476] = [(); OFF_PREIMAGE];
-                const _: [(); 1732] = [(); OFF_POSITION];
-                const _: [(); 1787] = [(); OFF_BINDING];
-                const _: [(); MARKER_LEN] = [(); OFF_BINDING + BINDING_LEN];
 
                 const CHILD_PATH: &str = "safety_record_store::owner::model::tests::real_fresh_sign::postconsume_process_death::postwrite_prejournal_ack::pre_reservation_process_death::child_entry";
                 const ENV_MODE: &str = "R422_PRESERVE_CHILD_MODE";
@@ -15148,11 +15178,19 @@ mod tests {
                 }
 
                 fn read_u16(bytes: &[u8], offset: usize) -> usize {
-                    u16::from_le_bytes(bytes[offset..offset + 2].try_into().expect("fixed u16")) as usize
+                    u16::from_le_bytes(
+                        bytes[offset..offset + U16_LEN]
+                            .try_into()
+                            .expect("fixed u16"),
+                    ) as usize
                 }
 
                 fn read_u32(bytes: &[u8], offset: usize) -> u32 {
-                    u32::from_le_bytes(bytes[offset..offset + 4].try_into().expect("fixed u32"))
+                    u32::from_le_bytes(
+                        bytes[offset..offset + U32_LEN]
+                            .try_into()
+                            .expect("fixed u32"),
+                    )
                 }
 
                 fn parse_marker(
@@ -15178,8 +15216,11 @@ mod tests {
                     if read_u16(bytes, OFF_SUITE) != MODEL_SUITE_U16 as usize {
                         return Err("suite");
                     }
-                    if u32::from_le_bytes(bytes[OFF_VALIDATOR..OFF_COUNTS].try_into().unwrap())
-                        != SIGNER_VID as u32
+                    if u32::from_le_bytes(
+                        bytes[OFF_VALIDATOR..OFF_VALIDATOR + VALIDATOR_LEN]
+                            .try_into()
+                            .unwrap(),
+                    ) != SIGNER_VID as u32
                     {
                         return Err("validator");
                     }
@@ -15254,7 +15295,8 @@ mod tests {
                     marker[OFF_PHASE] = PHASE;
                     marker[OFF_NONCE..OFF_SUITE].copy_from_slice(&identity.nonce);
                     marker[OFF_SUITE..OFF_VALIDATOR].copy_from_slice(&MODEL_SUITE_U16.to_le_bytes());
-                    marker[OFF_VALIDATOR..OFF_COUNTS].copy_from_slice(&(SIGNER_VID as u32).to_le_bytes());
+                    marker[OFF_VALIDATOR..OFF_VALIDATOR + VALIDATOR_LEN]
+                        .copy_from_slice(&(SIGNER_VID as u32).to_le_bytes());
                     marker[OFF_COUNTS..OFF_COUNTS + U32_LEN].copy_from_slice(&1u32.to_le_bytes());
                     marker[OFF_PK_LEN..OFF_PK].copy_from_slice(&(PK_LEN as u16).to_le_bytes());
                     marker[OFF_PK..OFF_VOTE_LEN].copy_from_slice(&identity.public_key);
@@ -15265,7 +15307,8 @@ mod tests {
                     marker[OFF_PREIMAGE..OFF_PREIMAGE + identity.preimage.len()]
                         .copy_from_slice(&identity.preimage);
                     marker[OFF_POSITION..OFF_BINDING].copy_from_slice(&identity.position_key);
-                    marker[OFF_BINDING..MARKER_LEN].copy_from_slice(&identity.binding);
+                    marker[OFF_BINDING..OFF_BINDING + BINDING_LEN]
+                        .copy_from_slice(&identity.binding);
                     marker
                 }
 
@@ -15368,6 +15411,15 @@ mod tests {
                             .fired
                     );
                     assert_eq!(
+                        coord
+                            .pre_reservation
+                            .as_ref()
+                            .expect("armed evidence")
+                            .callback_invocations,
+                        1,
+                        "continuing hook observed one actual pre-reservation callback"
+                    );
+                    assert_eq!(
                         (
                             reserve_entries.load(Ordering::SeqCst),
                             reserve_returns.load(Ordering::SeqCst)
@@ -15454,7 +15506,25 @@ mod tests {
                     drop(witness);
                     drop(raw);
                     drop(base_vote);
-                    drop(run);
+                    let Setup {
+                        pv,
+                        sk,
+                        owner,
+                        engine,
+                        decided,
+                        proposal,
+                        limits,
+                        store,
+                        journal,
+                    } = run;
+                    drop(decided);
+                    drop(engine);
+                    drop(proposal);
+                    drop(journal);
+                    drop(store);
+                    drop(owner);
+                    drop(pv);
+                    drop(sk);
                     assert_eq!(accountant.current(), 0);
                     assert_eq!(accountant.aggregate().current(), 0);
                     if mode == Mode::AbortAfterWitness {
