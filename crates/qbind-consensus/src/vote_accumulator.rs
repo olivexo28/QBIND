@@ -203,6 +203,19 @@ pub struct VoteAccumulator<BlockIdT> {
     evicted_views: u64,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum VoteAccumulatorDisposition {
+    Inserted,
+    Duplicate,
+    CapacityDropped,
+}
+
+impl VoteAccumulatorDisposition {
+    pub(crate) fn was_inserted(self) -> bool {
+        matches!(self, Self::Inserted)
+    }
+}
+
 impl<BlockIdT> Default for VoteAccumulator<BlockIdT>
 where
     BlockIdT: Eq + std::hash::Hash + Clone,
@@ -305,6 +318,17 @@ where
         view: u64,
         block_id: &BlockIdT,
     ) -> Result<bool, QcValidationError> {
+        self.on_vote_detailed(validators, voter, view, block_id)
+            .map(VoteAccumulatorDisposition::was_inserted)
+    }
+
+    pub(crate) fn on_vote_detailed(
+        &mut self,
+        validators: &ConsensusValidatorSet,
+        voter: ValidatorId,
+        view: u64,
+        block_id: &BlockIdT,
+    ) -> Result<VoteAccumulatorDisposition, QcValidationError> {
         // Reject non-members early.
         if !validators.contains(voter) {
             return Err(QcValidationError::NonMemberSigner(voter));
@@ -329,17 +353,21 @@ where
             if existing_votes.len() >= self.limits.max_votes_per_view {
                 // Check if this is a duplicate (already present)
                 if existing_votes.contains(&voter) {
-                    return Ok(false); // Duplicate, not dropped
+                    return Ok(VoteAccumulatorDisposition::Duplicate);
                 }
                 // Drop the new vote due to limit
                 self.dropped_votes += 1;
-                return Ok(false);
+                return Ok(VoteAccumulatorDisposition::CapacityDropped);
             }
         }
 
         let entry = self.entries.entry(key).or_default();
         // Returns true if the voter was newly inserted, false if already present
-        Ok(entry.insert(voter))
+        Ok(if entry.insert(voter) {
+            VoteAccumulatorDisposition::Inserted
+        } else {
+            VoteAccumulatorDisposition::Duplicate
+        })
     }
 
     /// Attempts to form a QC for the given (view, block_id) pair.
@@ -415,5 +443,72 @@ where
     /// This is useful for testing and diagnostics.
     pub fn entry_count(&self) -> usize {
         self.entries.len()
+    }
+}
+
+#[cfg(test)]
+mod run_422_detailed_insertion_tests {
+    use super::{ConsensusLimitsConfig, VoteAccumulator, VoteAccumulatorDisposition};
+    use crate::ids::ValidatorId;
+    use crate::validator_set::{ConsensusValidatorSet, ValidatorSetEntry};
+
+    fn validators() -> ConsensusValidatorSet {
+        ConsensusValidatorSet::new([
+            ValidatorSetEntry {
+                id: ValidatorId::new(0),
+                voting_power: 1,
+            },
+            ValidatorSetEntry {
+                id: ValidatorId::new(1),
+                voting_power: 1,
+            },
+        ])
+        .unwrap()
+    }
+
+    #[test]
+    fn detailed_insertion_distinguishes_duplicate_and_legacy_boolean_remains_false() {
+        let validators = validators();
+        let mut accumulator = VoteAccumulator::new();
+        let block = [7u8; 32];
+        assert_eq!(
+            accumulator
+                .on_vote_detailed(&validators, ValidatorId::new(0), 4, &block)
+                .unwrap(),
+            VoteAccumulatorDisposition::Inserted
+        );
+        assert_eq!(
+            accumulator
+                .on_vote_detailed(&validators, ValidatorId::new(0), 4, &block)
+                .unwrap(),
+            VoteAccumulatorDisposition::Duplicate
+        );
+        assert!(!accumulator
+            .on_vote(&validators, ValidatorId::new(0), 4, &block)
+            .unwrap());
+    }
+
+    #[test]
+    fn detailed_insertion_attributes_capacity_drop_and_boolean_wrapper() {
+        let validators = validators();
+        let limits = ConsensusLimitsConfig::new(1, 1, 8, 8);
+        let mut accumulator = VoteAccumulator::with_limits(limits);
+        let block = [9u8; 32];
+        assert_eq!(
+            accumulator
+                .on_vote_detailed(&validators, ValidatorId::new(0), 5, &block)
+                .unwrap(),
+            VoteAccumulatorDisposition::Inserted
+        );
+        assert_eq!(
+            accumulator
+                .on_vote_detailed(&validators, ValidatorId::new(1), 5, &block)
+                .unwrap(),
+            VoteAccumulatorDisposition::CapacityDropped
+        );
+        assert!(!accumulator
+            .on_vote(&validators, ValidatorId::new(1), 5, &block)
+            .unwrap());
+        assert_eq!(accumulator.dropped_votes(), 2);
     }
 }

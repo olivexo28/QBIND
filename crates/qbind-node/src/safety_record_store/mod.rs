@@ -46,12 +46,13 @@ pub use backend::{InjectFault, PublishOutcome, SafetyBackend, SafetyBackendPolic
 pub use decision_capture::{
     AncestryBinding, AncestryKind, AncestryRefusal, BoundedAncestryReject, CorrespondenceRefusal,
     CurrentLoadFailure, DecisionMetadata, EntrypointKind, InputBoundRefusal, InputPolicyError,
+    LeaderCapturePayload, LeaderCaptureRefusal, LeaderOwnerOutcome, LeaderOwnerRefusal,
     LoaderDiagnostic, MetaBranch, MetaField, OwnedCaptureRefusal, OwnedDecisionOutcome,
     OwningCapturePayload, PreparedDecisionInputLimits, ProjectionMismatch, RetainedDecisionBlocked,
     RetainedDecisionObservation, RetainedDecisionReject,
 };
 pub use error::SafetyStoreError;
-pub use owner::{PublishResult, SafetyMeta, SafetyRecordOwner};
+pub use owner::{LeaderRouteAdmission, PublishResult, SafetyMeta, SafetyRecordOwner};
 pub use prepared::{
     CaptureRefusal, GenerationIdentity, PreparedHandle, PreparedPin, PreparedProvenance,
     PreparedRegistry, ProvenanceRefusal, ReleaseOutcome,

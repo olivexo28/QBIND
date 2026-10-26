@@ -61,11 +61,16 @@ pub mod vote_accumulator;
 pub use adversarial_multi_sim::{AdversarialMultiNodeSim, InFlightMessage, PartitionConfig};
 pub use basic_hotstuff_engine::{
     AncestryRelation, BasicHotStuffEngine, ConsensusProgressRecorder, DecidedVote,
-    GatedSelfVoteRefusal, GatedVerifiedProposalError, NoopConsensusProgressRecorder,
+    DecidedLeaderProposal, GatedSelfVoteRefusal, GatedVerifiedProposalError,
+    LeaderCaptureInput, LeaderJustification, LeaderPostCaptureDiagnostic,
+    LeaderPostCaptureFailure, LeaderProposalContext, LeaderProposalGate,
+    LeaderProposalRouteResult, LeaderRouteEffects, LeaderRouteLayout, LeaderRouteLimits,
+    LeaderRouteRefusal, LeaderVoteRefusal, NoopConsensusProgressRecorder,
     NoopValidatorEquivocationRecorder, NoopValidatorVoteRecorder, NoopViewDurationRecorder,
-    OwningSafetyDecisionGate, PendingReconfigIntentError, SafetyAncestorView, SafetyDecisionGate,
-    SafetyDecisionObserver, SafetyDecisionView, SafetyGateRefusal, ValidatorEquivocationRecorder,
-    ValidatorVoteRecorder, VerifiedProposalIngestError, ViewDurationRecorder,
+    OwningSafetyDecisionGate, PendingReconfigIntentError, SafetyAncestorView,
+    SafetyDecisionGate, SafetyDecisionObserver, SafetyDecisionView, SafetyGateRefusal,
+    ValidatorEquivocationRecorder, ValidatorVoteRecorder, VerifiedProposalIngestError,
+    ViewDurationRecorder, leader_route_layout,
 };
 pub use block_state::BlockNode;
 pub use crypto_verifier::{
