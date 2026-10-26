@@ -32,6 +32,7 @@ enum LedgerError {
     Arithmetic,
     Quota,
     WrongReservationKind,
+    InsufficientCoverage,
     Invariant,
 }
 
@@ -51,8 +52,10 @@ thread_local! {
     static FAIL_ALLOCATION_AFTER: std::cell::Cell<Option<usize>> =
         const { std::cell::Cell::new(None) };
     static ALLOCATION_COUNT: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    static ALLOCATION_ATTEMPTS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
     static DEALLOCATION_COUNT: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
     static BUDGET_FINAL_DROPS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    static CONTEXT_FINAL_DROPS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
 #[cfg(test)]
@@ -80,6 +83,7 @@ fn try_alloc(layout: Layout) -> Result<NonNull<u8>, EvidenceAllocError> {
     }
     #[cfg(test)]
     {
+        ALLOCATION_ATTEMPTS.with(|count| count.set(count.get() + 1));
         let should_fail = FAIL_ALLOCATION_AFTER.with(|slot| match slot.get() {
             None => false,
             Some(0) => true,
@@ -265,6 +269,7 @@ enum ReservationClass {
 }
 
 #[derive(Debug)]
+#[cfg_attr(test, derive(Clone, Copy, PartialEq, Eq))]
 struct EvidenceLedger {
     cap: u64,
     committed_bytes: u64,
@@ -719,12 +724,14 @@ impl<T: EvidenceElement> ChargedBuffer<T> {
     }
 }
 
+#[cfg_attr(test, derive(Clone, Debug, PartialEq, Eq))]
 struct SnapshotMember {
     validator_id: u64,
     voting_power: u64,
     public_key: Vec<u8>,
 }
 
+#[cfg_attr(test, derive(Clone, Debug, PartialEq, Eq))]
 struct SnapshotPayload {
     runtime_chain_id: ChainId,
     authorized_epoch: u64,
@@ -824,6 +831,16 @@ impl ContextHandle {
         payload: SnapshotPayload,
         pending: PendingCharge,
     ) -> Result<Self, (SnapshotPayload, PendingCharge, LedgerError)> {
+        let required = match payload.checked_charge() {
+            Ok(required) => required,
+            Err(error) => return Err((payload, pending, error)),
+        };
+        if pending.class != ReservationClass::Context {
+            return Err((payload, pending, LedgerError::WrongReservationKind));
+        }
+        if pending.bytes < required {
+            return Err((payload, pending, LedgerError::InsufficientCoverage));
+        }
         let layout = Layout::new::<ContextCell>();
         let raw = match try_alloc(layout) {
             Ok(ptr) => ptr.cast::<ContextCell>(),
@@ -897,6 +914,8 @@ impl Drop for ContextHandle {
         }
         if previous == 1 {
             fence(Ordering::Acquire);
+            #[cfg(test)]
+            CONTEXT_FINAL_DROPS.with(|count| count.set(count.get() + 1));
             // Move the lease out before payload destruction. On unwind, local
             // drop order deallocates the cell before releasing the lease.
             let lease = unsafe {
@@ -951,6 +970,31 @@ mod tests {
             self.drops.fetch_add(1, Ordering::Relaxed);
             if self.panic_once.swap(false, Ordering::Relaxed) {
                 panic!("injected element destructor panic");
+            }
+        }
+    }
+
+    #[derive(Debug)]
+    struct ObserveRelease {
+        budget: BudgetHandle,
+        expected_bytes: u64,
+        drops: Arc<AtomicUsize>,
+        covered_drops: Arc<AtomicUsize>,
+        panic_once: Option<Arc<AtomicBool>>,
+    }
+
+    impl EvidenceElement for ObserveRelease {}
+
+    impl Drop for ObserveRelease {
+        fn drop(&mut self) {
+            self.drops.fetch_add(1, Ordering::Relaxed);
+            if self.budget.occupancy() == (self.expected_bytes, 0, 0, 0, 0, 0) {
+                self.covered_drops.fetch_add(1, Ordering::Relaxed);
+            }
+            if let Some(panic_once) = &self.panic_once {
+                if panic_once.swap(false, Ordering::Relaxed) {
+                    panic!("injected charged element destructor panic");
+                }
             }
         }
     }
@@ -1018,6 +1062,143 @@ mod tests {
             .with(std::cell::Cell::get)
             .saturating_sub(deallocations_before);
         (result, allocations, deallocations)
+    }
+
+    fn assert_context_refusal(
+        payload: SnapshotPayload,
+        bytes: u64,
+        class: ReservationClass,
+        expected_error: LedgerError,
+    ) {
+        let budget = budget(100_000);
+        let baseline = *budget.lock();
+        let pending = budget.reserve(bytes, class).unwrap();
+        let before = *budget.lock();
+        let original = payload.clone();
+        let members_ptr = payload.members.as_ptr();
+        let members_capacity = payload.members.capacity();
+        let keys: Vec<_> = payload
+            .members
+            .iter()
+            .map(|member| (member.public_key.as_ptr(), member.public_key.capacity()))
+            .collect();
+        let pending_identity = (
+            pending.budget.0,
+            pending.bytes,
+            pending.class,
+            pending.active,
+        );
+        let refs = unsafe { budget.0.as_ref().refs.load(Ordering::Relaxed) };
+        let attempts = ALLOCATION_ATTEMPTS.with(std::cell::Cell::get);
+        let (returned, pending, error) = ContextHandle::try_new(payload, pending).unwrap_err();
+        assert_eq!(error, expected_error);
+        assert_eq!(ALLOCATION_ATTEMPTS.with(std::cell::Cell::get), attempts);
+        assert_eq!(*budget.lock(), before);
+        assert_eq!(
+            unsafe { budget.0.as_ref().refs.load(Ordering::Relaxed) },
+            refs
+        );
+        assert_eq!(returned, original);
+        assert_eq!(returned.members.as_ptr(), members_ptr);
+        assert_eq!(returned.members.capacity(), members_capacity);
+        for (member, (ptr, capacity)) in returned.members.iter().zip(keys) {
+            assert_eq!(member.public_key.as_ptr(), ptr);
+            assert_eq!(member.public_key.capacity(), capacity);
+        }
+        assert_eq!(
+            (
+                pending.budget.0,
+                pending.bytes,
+                pending.class,
+                pending.active
+            ),
+            pending_identity,
+        );
+        drop(returned);
+        assert_eq!(*budget.lock(), before);
+        drop(pending);
+        assert_eq!(*budget.lock(), baseline);
+    }
+
+    #[test]
+    fn received_vote_evidence_context_constructor_refuses_zero_coverage() {
+        assert_context_refusal(
+            snapshot(1, 1),
+            0,
+            ReservationClass::Context,
+            LedgerError::InsufficientCoverage,
+        );
+    }
+
+    #[test]
+    fn received_vote_evidence_context_constructor_refuses_one_byte_short() {
+        let payload = snapshot(1, 1);
+        let required = payload.checked_charge().unwrap();
+        assert_context_refusal(
+            payload,
+            required - 1,
+            ReservationClass::Context,
+            LedgerError::InsufficientCoverage,
+        );
+    }
+
+    #[test]
+    fn received_vote_evidence_context_constructor_refuses_bytes_reservation() {
+        let payload = snapshot(1, 1);
+        let required = payload.checked_charge().unwrap();
+        assert_context_refusal(
+            payload,
+            required,
+            ReservationClass::Bytes,
+            LedgerError::WrongReservationKind,
+        );
+    }
+
+    #[test]
+    fn received_vote_evidence_context_constructor_refuses_report_reservation() {
+        let payload = snapshot(1, 1);
+        let required = payload.checked_charge().unwrap();
+        assert_context_refusal(
+            payload,
+            required,
+            ReservationClass::Report,
+            LedgerError::WrongReservationKind,
+        );
+    }
+
+    #[test]
+    fn received_vote_evidence_context_constructor_refuses_invalid_payload() {
+        let mut payload = snapshot(1, 1);
+        let required = payload.checked_charge().unwrap();
+        payload.members[0].voting_power = 0;
+        assert_context_refusal(
+            payload,
+            required,
+            ReservationClass::Context,
+            LedgerError::Admission,
+        );
+    }
+
+    #[test]
+    fn received_vote_evidence_context_constructor_commits_exact_coverage() {
+        let budget = budget(100_000);
+        let baseline = *budget.lock();
+        let payload = snapshot(1, 1);
+        let required = payload.checked_charge().unwrap();
+        let pending = budget.reserve(required, ReservationClass::Context).unwrap();
+        assert_eq!(
+            budget.occupancy(),
+            (budget_baseline(), required, 0, 1, 0, 0)
+        );
+        let attempts = ALLOCATION_ATTEMPTS.with(std::cell::Cell::get);
+        let context = ContextHandle::try_new(payload, pending).unwrap();
+        assert_eq!(ALLOCATION_ATTEMPTS.with(std::cell::Cell::get), attempts + 1);
+        assert_eq!(
+            budget.occupancy(),
+            (budget_baseline() + required, 0, 1, 0, 0, 0)
+        );
+        drop(context);
+        assert_eq!(*budget.lock(), baseline);
     }
 
     #[test]
@@ -1151,20 +1332,9 @@ mod tests {
 
     #[test]
     fn received_vote_evidence_charged_buffer_drops_backing_before_lease() {
-        #[derive(Debug)]
-        struct ObserveRelease {
-            budget: BudgetHandle,
-            saw_charge_live: Arc<AtomicBool>,
-        }
-        impl EvidenceElement for ObserveRelease {}
-        impl Drop for ObserveRelease {
-            fn drop(&mut self) {
-                self.saw_charge_live
-                    .store(self.budget.occupancy().0 > 0, Ordering::Relaxed);
-            }
-        }
         let budget = budget(4096);
-        let live = Arc::new(AtomicBool::new(false));
+        let drops = Arc::new(AtomicUsize::new(0));
+        let covered_drops = Arc::new(AtomicUsize::new(0));
         let capacity = 1;
         let layout = ExactBuffer::<ObserveRelease>::layout_for(capacity)
             .unwrap()
@@ -1175,7 +1345,10 @@ mod tests {
         backing
             .try_push(ObserveRelease {
                 budget: budget.try_clone().unwrap(),
-                saw_charge_live: Arc::clone(&live),
+                expected_bytes: budget_baseline() + charge,
+                drops: Arc::clone(&drops),
+                covered_drops: Arc::clone(&covered_drops),
+                panic_once: None,
             })
             .unwrap();
         let lease = pending.commit().unwrap();
@@ -1183,9 +1356,45 @@ mod tests {
             backing,
             _lease: lease,
         };
+        assert_eq!(
+            budget.occupancy(),
+            (budget_baseline() + charge, 0, 0, 0, 0, 0)
+        );
+        let before = DEALLOCATION_COUNT.with(std::cell::Cell::get);
         drop(owner);
-        assert!(live.load(Ordering::Relaxed));
-        assert_eq!(budget.occupancy().0, budget_baseline());
+        assert_eq!(drops.load(Ordering::Relaxed), 1);
+        assert_eq!(covered_drops.load(Ordering::Relaxed), 1);
+        assert_eq!(budget.occupancy(), (budget_baseline(), 0, 0, 0, 0, 0));
+        assert_eq!(DEALLOCATION_COUNT.with(std::cell::Cell::get), before + 1);
+    }
+
+    #[test]
+    fn received_vote_evidence_charged_buffer_unwind_destroys_before_release() {
+        let budget = budget(4096);
+        let drops = Arc::new(AtomicUsize::new(0));
+        let covered_drops = Arc::new(AtomicUsize::new(0));
+        let panic_once = Arc::new(AtomicBool::new(true));
+        let mut owner =
+            ChargedBuffer::<ObserveRelease>::try_new(&budget, 3, ReservationClass::Bytes).unwrap();
+        let expected_bytes = budget_baseline() + owner._lease.bytes;
+        for _ in 0..3 {
+            owner
+                .backing
+                .try_push(ObserveRelease {
+                    budget: budget.try_clone().unwrap(),
+                    expected_bytes,
+                    drops: Arc::clone(&drops),
+                    covered_drops: Arc::clone(&covered_drops),
+                    panic_once: Some(Arc::clone(&panic_once)),
+                })
+                .unwrap();
+        }
+        let before = DEALLOCATION_COUNT.with(std::cell::Cell::get);
+        assert!(catch_unwind(AssertUnwindSafe(|| drop(owner))).is_err());
+        assert_eq!(drops.load(Ordering::Relaxed), 3);
+        assert_eq!(covered_drops.load(Ordering::Relaxed), 3);
+        assert_eq!(DEALLOCATION_COUNT.with(std::cell::Cell::get), before + 1);
+        assert_eq!(budget.occupancy(), (budget_baseline(), 0, 0, 0, 0, 0));
     }
 
     #[test]
@@ -1361,6 +1570,121 @@ mod tests {
     }
 
     #[test]
+    fn received_vote_evidence_foundation_surviving_context_final_drop_on_worker() {
+        let budget = budget(100_000);
+        let active = install_context(&budget, snapshot(9, 1)).unwrap();
+        let survivor = active.try_clone().unwrap();
+        let expected = budget.occupancy();
+        let ready = Arc::new(std::sync::Barrier::new(2));
+        let worker_ready = Arc::clone(&ready);
+        let worker = thread::spawn(move || {
+            worker_ready.wait();
+            assert_eq!(survivor.epoch(), 9);
+            assert_eq!(
+                unsafe { survivor.0.as_ref().lease.budget.occupancy() },
+                expected
+            );
+            assert_eq!(
+                unsafe {
+                    survivor
+                        .0
+                        .as_ref()
+                        .lease
+                        .budget
+                        .0
+                        .as_ref()
+                        .refs
+                        .load(Ordering::Relaxed)
+                },
+                1
+            );
+            let contexts_before = CONTEXT_FINAL_DROPS.with(std::cell::Cell::get);
+            let budgets_before = BUDGET_FINAL_DROPS.with(std::cell::Cell::get);
+            let deallocations_before = DEALLOCATION_COUNT.with(std::cell::Cell::get);
+            drop(survivor);
+            assert_eq!(
+                CONTEXT_FINAL_DROPS.with(std::cell::Cell::get),
+                contexts_before + 1
+            );
+            assert_eq!(
+                BUDGET_FINAL_DROPS.with(std::cell::Cell::get),
+                budgets_before + 1
+            );
+            assert_eq!(
+                DEALLOCATION_COUNT.with(std::cell::Cell::get),
+                deallocations_before + 2
+            );
+        });
+        // Foundation ownership fixture, not engine invalidation integration.
+        drop(active);
+        drop(budget);
+        ready.wait();
+        worker.join().unwrap();
+    }
+
+    #[test]
+    fn received_vote_evidence_compiler_layouts_and_accounting_equations() {
+        macro_rules! layout {
+            ($ty:ty) => {
+                println!(
+                    "{}: size={} align={}",
+                    stringify!($ty),
+                    size_of::<$ty>(),
+                    std::mem::align_of::<$ty>()
+                );
+            };
+        }
+        layout!(BudgetCell);
+        layout!(EvidenceLedger);
+        layout!(BudgetHandle);
+        layout!(ContextCell);
+        layout!(SnapshotPayload);
+        layout!(SnapshotMember);
+        layout!(ContextHandle);
+        layout!(ExactBuffer<u8>);
+        layout!(ChargedBuffer<u8>);
+        layout!(PendingCharge);
+        layout!(CommittedCharge);
+        layout!(AllocationGuard);
+        layout!(CellDeallocationGuard<ContextCell>);
+        layout!(Result<ContextHandle, (SnapshotPayload, PendingCharge, LedgerError)>);
+        layout!(Option<TableTokenFixture>);
+
+        let budget = budget(100_000);
+        let payload = snapshot(1, 1);
+        let member_bytes = payload.members.capacity() * size_of::<SnapshotMember>();
+        let key_bytes: usize = payload
+            .members
+            .iter()
+            .map(|m| m.public_key.capacity())
+            .sum();
+        let required = payload.checked_charge().unwrap();
+        assert_eq!(
+            required,
+            (size_of::<ContextCell>() + member_bytes + key_bytes) as u64
+        );
+        println!(
+            "B={} context={} (cell={} members={} keys={})",
+            budget_baseline(),
+            required,
+            size_of::<ContextCell>(),
+            member_bytes,
+            key_bytes
+        );
+        let context = install_context(&budget, payload).unwrap();
+        let buffer = ChargedBuffer::<u8>::try_new(&budget, 32, ReservationClass::Bytes).unwrap();
+        let buffer_charge = (size_of::<ChargedBuffer<u8>>() + 32) as u64;
+        assert_eq!(buffer._lease.bytes, buffer_charge);
+        assert_eq!(
+            budget.occupancy(),
+            (budget_baseline() + required + buffer_charge, 0, 1, 0, 0, 0)
+        );
+        drop(buffer);
+        drop(context);
+        assert_eq!(budget.occupancy(), (budget_baseline(), 0, 0, 0, 0, 0));
+    }
+
+    #[test]
     fn received_vote_evidence_context_limit_and_same_budget_reinstall() {
         let budget = budget(2_000_000);
         let mut contexts = Vec::new();
@@ -1379,7 +1703,7 @@ mod tests {
     }
 
     #[test]
-    fn received_vote_evidence_slot_and_detached_owner_accounting_fixture() {
+    fn received_vote_evidence_slot_and_signature_backing_accounting_fixture() {
         let budget = budget(100_000);
         let table_bytes = Layout::array::<Option<TableTokenFixture>>(1024)
             .unwrap()
