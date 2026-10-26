@@ -27,6 +27,7 @@ use std::time::Duration;
 
 const QC_SUITE: u16 = 7;
 const TIMEOUT_SUITE: u8 = 100;
+const N4_PREPARED_GENERATION_CHARGE: u128 = 657;
 
 fn context(n: u64) -> PinnedSafetyContext {
     PinnedSafetyContext {
@@ -362,7 +363,7 @@ fn accepted_route_keeps_exact_pair_and_preserves_origin_view_without_qc() {
 }
 
 #[test]
-fn owner_single_validator_qc_advances_to_l1_while_pin_retains_l0_provenance() {
+fn owner_weighted_single_vote_quorum_advances_to_l1_while_pin_retains_l0_provenance() {
     let dir = tempfile::tempdir().unwrap();
     let mut ctx = context(2);
     ctx.validators[0].1 = 2;
@@ -460,6 +461,27 @@ fn owner_single_validator_qc_advances_to_l1_while_pin_retains_l0_provenance() {
         },
         "single-validator live success exact ledger identity [redacted]"
     );
+    drop(outcome);
+    assert_eq!(
+        owner
+            .backend_for_test()
+            .prepared_registry_for_test()
+            .unwrap()
+            .lock()
+            .unwrap()
+            .occupied(),
+        0,
+        "dropping weighted QC result releases prepared slot"
+    );
+    assert_eq!(
+        ledgers(&owner),
+        Ledgers {
+            operational: x.operational + registry_cell_charge_bytes(),
+            aggregate: x.aggregate + registry_cell_charge_bytes(),
+            ..x
+        },
+        "weighted QC result drop restores both ledgers, retaining registry [redacted]"
+    );
 }
 
 #[test]
@@ -523,6 +545,7 @@ fn stale_revision_refusal_returns_proof_for_successful_retry() {
     let (mut engine, l0) = engine_with_lock(4);
     let owner = owner_with_locked_context(dir.path(), &ctx, l0);
     let limits = PreparedDecisionInputLimits::from_pinned(&ctx).unwrap();
+    let proof_free = ledgers(&owner);
     let proof = owner
         .read_validate(None::<&FixtureCommittedHistory>)
         .expect("O3 proof");
@@ -560,7 +583,55 @@ fn stale_revision_refusal_returns_proof_for_successful_retry() {
     assert_ledgers_unchanged(&owner, proof_held);
 
     let retried = execute_leader_route(&owner, &mut engine, &limits, 1, proof);
-    assert!(retried.decided_envelope().is_some());
+    assert!(
+        retried.decided_envelope().is_some(),
+        "stale proof retry succeeds"
+    );
+    assert_eq!(
+        ledgers(&owner),
+        Ledgers {
+            operational: proof_free.operational
+                + retried.route_charge()
+                + registry_cell_charge_bytes()
+                + pin_charge_bytes()
+                + N4_PREPARED_GENERATION_CHARGE,
+            aggregate: proof_free.aggregate
+                + retried.route_charge()
+                + registry_cell_charge_bytes()
+                + pin_charge_bytes()
+                + N4_PREPARED_GENERATION_CHARGE,
+            ..proof_free
+        },
+        "successful stale-proof retry exact live-result identity [redacted]"
+    );
+    let registry = owner.backend_for_test().prepared_registry_for_test().unwrap();
+    let retained = registry
+        .lock()
+        .unwrap()
+        .inspect(
+            retried
+                .decided_envelope()
+                .expect("success remains paired")
+                .payload()
+                .pin()
+                .handle(),
+        )
+        .expect("retry pin remains registered");
+    assert_eq!(
+        retained.generation_core_charge + retained.generation_control_charge,
+        N4_PREPARED_GENERATION_CHARGE
+    );
+    drop(retried);
+    assert_eq!(registry.lock().unwrap().occupied(), 0);
+    assert_eq!(
+        ledgers(&owner),
+        Ledgers {
+            operational: proof_free.operational + registry_cell_charge_bytes(),
+            aggregate: proof_free.aggregate + registry_cell_charge_bytes(),
+            ..proof_free
+        },
+        "retry result drop restores exact baseline plus standing registry [redacted]"
+    );
 }
 
 #[test]
@@ -741,16 +812,10 @@ fn route_admission_refusal_preserves_proof_and_pressure_relief_allows_retry() {
         .prepare_leader_route(&limits, 1, proof.as_ref().unwrap())
         .expect("pressure relief permits admission");
     let retried = admission.propose_and_capture(&mut engine, &mut proof);
-    let decided = retried
-        .decided_envelope()
-        .expect("pressure-relieved route succeeds");
-    let registry = owner.backend_for_test().prepared_registry_for_test().unwrap();
-    let retained = registry
-        .lock()
-        .unwrap()
-        .inspect(decided.payload().pin().handle())
-        .expect("retry pin remains registered");
-    let generation = retained.generation_core_charge + retained.generation_control_charge;
+    assert!(
+        retried.decided_envelope().is_some(),
+        "pressure-relieved route succeeds"
+    );
     assert_eq!(
         ledgers(&owner),
         Ledgers {
@@ -758,15 +823,43 @@ fn route_admission_refusal_preserves_proof_and_pressure_relief_allows_retry() {
                 + retried.route_charge()
                 + registry_cell_charge_bytes()
                 + pin_charge_bytes()
-                + generation,
+                + N4_PREPARED_GENERATION_CHARGE,
             aggregate: proof_free.aggregate
                 + retried.route_charge()
                 + registry_cell_charge_bytes()
                 + pin_charge_bytes()
-                + generation,
+                + N4_PREPARED_GENERATION_CHARGE,
             ..proof_free
         },
         "relieved retry exact live-result identity [redacted]"
+    );
+    let registry = owner.backend_for_test().prepared_registry_for_test().unwrap();
+    let retained = registry
+        .lock()
+        .unwrap()
+        .inspect(
+            retried
+                .decided_envelope()
+                .expect("success remains paired")
+                .payload()
+                .pin()
+                .handle(),
+        )
+        .expect("retry pin remains registered");
+    assert_eq!(
+        retained.generation_core_charge + retained.generation_control_charge,
+        N4_PREPARED_GENERATION_CHARGE
+    );
+    drop(retried);
+    assert_eq!(registry.lock().unwrap().occupied(), 0);
+    assert_eq!(
+        ledgers(&owner),
+        Ledgers {
+            operational: proof_free.operational + registry_cell_charge_bytes(),
+            aggregate: proof_free.aggregate + registry_cell_charge_bytes(),
+            ..proof_free
+        },
+        "relieved retry result drop restores exact baseline plus standing registry [redacted]"
     );
 }
 
@@ -842,6 +935,204 @@ fn effective_policy_refusal_preserves_proof_without_constructing_route_result() 
     ));
     assert_ledgers_unchanged(&owner, before);
     assert_proof_unchanged(&proof, &original, original_identity);
+}
+
+#[test]
+fn admitted_route_with_missing_proof_refuses_before_engine_or_capture() {
+    let dir = tempfile::tempdir().unwrap();
+    let ctx = context(4);
+    let (mut engine, l0) = engine_with_lock(4);
+    let owner = owner_with_locked_context(dir.path(), &ctx, l0);
+    let limits = PreparedDecisionInputLimits::from_pinned(&ctx).unwrap();
+    let baseline = ledgers(&owner);
+    let proof = owner
+        .read_validate(None::<&FixtureCommittedHistory>)
+        .expect("O3 proof");
+    let mut proof = Some(proof);
+    let admission = owner
+        .prepare_leader_route(&limits, 1, proof.as_ref().unwrap())
+        .expect("valid route admission");
+    let route = owner
+        .leader_route_charge_report_for_test(&limits)
+        .unwrap()
+        .selected;
+    drop(proof.take());
+    assert_eq!(
+        ledgers(&owner),
+        Ledgers {
+            operational: baseline.operational + route,
+            aggregate: baseline.aggregate + route,
+            ..baseline
+        }
+    );
+
+    let view = engine.current_view();
+    let block_count = engine.state().block_count();
+    let outcome = admission.propose_and_capture(&mut engine, &mut proof);
+    assert!(matches!(
+        outcome.refusal(),
+        Some(LeaderOwnerRefusal::AdmissionProofMissing)
+    ));
+    assert_eq!(
+        ledgers(&owner),
+        Ledgers {
+            operational: baseline.operational + route,
+            aggregate: baseline.aggregate + route,
+            ..baseline
+        },
+        "missing-proof outcome holds R without changing ceilings [redacted]"
+    );
+    assert_eq!(engine.current_view(), view);
+    assert_eq!(engine.state().block_count(), block_count);
+    assert_eq!(
+        owner
+            .backend_for_test()
+            .prepared_registry_for_test()
+            .map(|registry| registry.lock().unwrap().occupied())
+            .unwrap_or(0),
+        0,
+        "missing proof does not capture or install a prepared slot"
+    );
+    assert!(outcome.into_proof().is_none());
+    assert_ledgers_unchanged(&owner, baseline);
+}
+
+#[test]
+fn admitted_route_rejects_foreign_backend_proof_and_releases_only_route_reservation() {
+    let dir_a = tempfile::tempdir().unwrap();
+    let dir_b = tempfile::tempdir().unwrap();
+    let ctx = context(4);
+    let (mut engine, l0) = engine_with_lock(4);
+    let owner_a = owner_with_locked_context(dir_a.path(), &ctx, l0);
+    let owner_b = owner_with_locked_context(dir_b.path(), &ctx, l0);
+    let limits = PreparedDecisionInputLimits::from_pinned(&ctx).unwrap();
+    let baseline_a = ledgers(&owner_a);
+    let baseline_b = ledgers(&owner_b);
+
+    let admission_proof = owner_a
+        .read_validate(None::<&FixtureCommittedHistory>)
+        .expect("admission proof from backend A");
+    let admission_identity = proof_identity(&admission_proof);
+    let mut proof = Some(admission_proof);
+    let admission = owner_a
+        .prepare_leader_route(&limits, 1, proof.as_ref().unwrap())
+        .expect("valid route admission for backend A");
+    let route = owner_a
+        .leader_route_charge_report_for_test(&limits)
+        .unwrap()
+        .selected;
+    drop(proof.take());
+    assert_eq!(
+        ledgers(&owner_a),
+        Ledgers {
+            operational: baseline_a.operational + route,
+            aggregate: baseline_a.aggregate + route,
+            ..baseline_a
+        }
+    );
+
+    let foreign_proof = owner_b
+        .read_validate(None::<&FixtureCommittedHistory>)
+        .expect("foreign proof from backend B");
+    let foreign_bytes = foreign_proof.encoded().to_vec();
+    let foreign_identity = proof_identity(&foreign_proof);
+    assert_eq!(foreign_identity.0, admission_identity.0);
+    assert_eq!(foreign_identity.1, admission_identity.1);
+    assert_eq!(foreign_identity.2, admission_identity.2);
+    assert_ne!(foreign_identity.3, admission_identity.3);
+    let foreign_held = ledgers(&owner_b);
+    assert_eq!(
+        foreign_held,
+        Ledgers {
+            operational: baseline_b.operational + 2_051,
+            aggregate: baseline_b.aggregate + 2_051,
+            ..baseline_b
+        },
+        "foreign proof remains charged to backend B's independent ledgers [redacted]"
+    );
+    proof = Some(foreign_proof);
+
+    let view = engine.current_view();
+    let block_count = engine.state().block_count();
+    let outcome = admission.propose_and_capture(&mut engine, &mut proof);
+    assert!(matches!(
+        outcome.refusal(),
+        Some(LeaderOwnerRefusal::AdmissionProofMismatch)
+    ));
+    assert_eq!(
+        ledgers(&owner_a),
+        Ledgers {
+            operational: baseline_a.operational + route,
+            aggregate: baseline_a.aggregate + route,
+            ..baseline_a
+        },
+        "foreign-proof refusal retains A's route reservation only [redacted]"
+    );
+    assert_ledgers_unchanged(&owner_b, foreign_held);
+    assert_eq!(engine.current_view(), view);
+    assert_eq!(engine.state().block_count(), block_count);
+    assert_eq!(
+        owner_a
+            .backend_for_test()
+            .prepared_registry_for_test()
+            .map(|registry| registry.lock().unwrap().occupied())
+            .unwrap_or(0),
+        0
+    );
+    assert_eq!(
+        owner_b
+            .backend_for_test()
+            .prepared_registry_for_test()
+            .map(|registry| registry.lock().unwrap().occupied())
+            .unwrap_or(0),
+        0
+    );
+
+    let returned = outcome
+        .into_proof()
+        .expect("mismatch returns the intact foreign proof");
+    assert_proof_unchanged(&returned, &foreign_bytes, foreign_identity);
+    assert_ledgers_unchanged(&owner_a, baseline_a);
+    assert_ledgers_unchanged(&owner_b, foreign_held);
+    drop(returned);
+    assert_ledgers_unchanged(&owner_b, baseline_b);
+}
+
+#[test]
+fn ten_validator_profile_selects_proof_conversion_after_signer_backing() {
+    let n4_dir = tempfile::tempdir().unwrap();
+    let n4_ctx = context(4);
+    let (_n4_engine, n4_l0) = engine_with_lock(4);
+    let n4_owner = owner_with_locked_context(n4_dir.path(), &n4_ctx, n4_l0);
+    let n4_limits = PreparedDecisionInputLimits::from_pinned(&n4_ctx).unwrap();
+    let n4_report = n4_owner
+        .leader_route_charge_report_for_test(&n4_limits)
+        .expect("supported n=4 profile charge");
+    assert_eq!(n4_report.operands.reservation_control, 48);
+    assert_eq!(n4_report.phases.proof_conversion, 2_112);
+    assert_eq!(n4_report.phases.engine_to_owner_transfer, 2_128);
+    assert_eq!(n4_report.selected, 2_128);
+
+    let dir = tempfile::tempdir().unwrap();
+    let ctx = context(10);
+    let (_engine, l0) = engine_with_lock(10);
+    let owner = owner_with_locked_context(dir.path(), &ctx, l0);
+    let limits = PreparedDecisionInputLimits::from_pinned(&ctx).unwrap();
+    let report = owner
+        .leader_route_charge_report_for_test(&limits)
+        .expect("supported n=10 profile charge");
+    assert_eq!(
+        report.operands.signer_backing,
+        10 * std::mem::size_of::<ValidatorId>() as u128
+    );
+    assert_eq!(report.operands.reservation_control, 48);
+    assert_eq!(report.phases.proof_conversion, 2_160);
+    assert_eq!(report.phases.engine_to_owner_transfer, 2_128);
+    assert!(
+        report.phases.proof_conversion > report.phases.engine_to_owner_transfer,
+        "signer backing makes proof conversion dominate: {report:#?}"
+    );
+    assert_eq!(report.selected, report.phases.proof_conversion);
 }
 
 #[test]

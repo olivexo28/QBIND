@@ -1069,8 +1069,8 @@ impl<'owner> LeaderRouteAdmission<'owner> {
                 route,
             );
         }
-        let proof = proof.take().expect("proof was checked above");
         let mut guard = owner.backend.lock_domain();
+        let proof = proof.take().expect("proof was checked above");
         let mut gate = LeaderCaptureGate {
             owner,
             guard: &mut guard,
@@ -3881,6 +3881,7 @@ pub struct LeaderRouteChargeOperands {
     pub owner_result: u128,
     pub admission: u128,
     pub admission_result: u128,
+    pub reservation_control: u128,
     pub post_capture_failure: u128,
     pub post_capture_diagnostic: u128,
     pub conversion_excess: u128,
@@ -3954,6 +3955,7 @@ fn leader_route_charge<G>(signer_capacity: usize) -> Result<LeaderRouteChargeRep
     let admission = size_of::<LeaderRouteAdmission<'static>>() as u128;
     let admission_result =
         size_of::<Result<LeaderRouteAdmission<'static>, LeaderRoutePreparationRefusal>>() as u128;
+    let reservation_control = size_of::<super::accounting::Reservation>() as u128;
     let envelope = layout.envelope;
     let payload_residual = sub(layout.payload, pin)?;
     let gate_proof_residual = sub(gate, proof)?;
@@ -3969,9 +3971,15 @@ fn leader_route_charge<G>(signer_capacity: usize) -> Result<LeaderRouteChargeRep
     let preflight = layout.preflight;
     let phases = LeaderRouteChargePhases {
         admitted_token: admission_result,
-        signer: sum(&[gate_proof_residual, buffer, signer_backing])?,
+        signer: sum(&[
+            gate_proof_residual,
+            reservation_control,
+            buffer,
+            signer_backing,
+        ])?,
         registration_plan: sum(&[
             gate_proof_residual,
+            reservation_control,
             preflight,
             registration,
             buffer,
@@ -3979,6 +3987,7 @@ fn leader_route_charge<G>(signer_capacity: usize) -> Result<LeaderRouteChargeRep
         ])?,
         binding: sum(&[
             gate_proof_residual,
+            reservation_control,
             preflight,
             layout.context,
             callback,
@@ -3990,6 +3999,7 @@ fn leader_route_charge<G>(signer_capacity: usize) -> Result<LeaderRouteChargeRep
         ])?,
         proof_conversion: sum(&[
             gate,
+            reservation_control,
             preflight,
             layout.context,
             callback,
@@ -4005,6 +4015,7 @@ fn leader_route_charge<G>(signer_capacity: usize) -> Result<LeaderRouteChargeRep
         ])?,
         captured_payload: sum(&[
             gate,
+            reservation_control,
             preflight,
             layout.context,
             callback,
@@ -4014,27 +4025,36 @@ fn leader_route_charge<G>(signer_capacity: usize) -> Result<LeaderRouteChargeRep
             proposal,
             payload_residual,
         ])?,
-        self_vote_before_message: sum(&[gate, preflight, proposal, payload_residual, report])?,
+        self_vote_before_message: sum(&[
+            gate,
+            reservation_control,
+            preflight,
+            proposal,
+            payload_residual,
+            report,
+        ])?,
         self_vote_after_message: sum(&[
             gate,
+            reservation_control,
             preflight,
             proposal,
             payload_residual,
             vote,
             report,
         ])?,
-        engine_result: sum(&[gate, preflight, sub(layout.engine_result, pin)?])?,
+        engine_result: sum(&[
+            gate,
+            reservation_control,
+            preflight,
+            sub(layout.engine_result, pin)?,
+        ])?,
         engine_to_owner_transfer: sum(&[
             gate,
             preflight,
             sub(layout.engine_result, envelope)?,
             owner_pin_residual,
         ])?,
-        post_capture_cleanup: sum(&[
-            gate,
-            preflight,
-            post,
-        ])?,
+        post_capture_cleanup: sum(&[gate, reservation_control, preflight, post])?,
         returned_proof_outcome: owner_proof_residual,
         returned_success_outcome: owner_pin_residual,
         returned_post_capture_outcome: outcome,
@@ -4083,6 +4103,7 @@ fn leader_route_charge<G>(signer_capacity: usize) -> Result<LeaderRouteChargeRep
             owner_result: outcome,
             admission,
             admission_result,
+            reservation_control,
             post_capture_failure: post,
             post_capture_diagnostic: diagnostic,
             conversion_excess: sub(
