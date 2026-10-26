@@ -47,6 +47,7 @@ pub mod multi_sim;
 pub mod network;
 pub mod pacemaker;
 pub mod proposal_vote_verify;
+mod received_vote_evidence;
 pub mod qc;
 pub mod qc_verify_domain;
 pub mod sim;
