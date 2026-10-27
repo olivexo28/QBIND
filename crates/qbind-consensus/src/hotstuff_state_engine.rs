@@ -632,6 +632,34 @@ where
             && self.votes.contains_vote(voter, view, block_id)
     }
 
+    #[cfg(test)]
+    pub(crate) fn has_vote_history_membership_for_test(
+        &self,
+        voter: ValidatorId,
+        view: u64,
+        block_id: &BlockIdT,
+    ) -> bool {
+        self.votes_by_view.get(&(view, voter)) == Some(block_id)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn remove_vote_history_membership_for_test(
+        &mut self,
+        voter: ValidatorId,
+        view: u64,
+    ) {
+        self.votes_by_view.remove(&(view, voter));
+    }
+
+    #[cfg(test)]
+    pub(crate) fn remove_accumulator_membership_for_test(
+        &mut self,
+        view: u64,
+        block_id: &BlockIdT,
+    ) {
+        self.votes.remove_entry(view, block_id);
+    }
+
     pub(crate) fn retain_received_vote_token(
         &mut self,
         slot: usize,

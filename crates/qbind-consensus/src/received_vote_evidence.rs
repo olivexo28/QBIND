@@ -62,6 +62,16 @@ thread_local! {
     static DEALLOCATION_COUNT: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
     static BUDGET_FINAL_DROPS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
     static CONTEXT_FINAL_DROPS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    static TABLE_STAGE_OBSERVATION: std::cell::Cell<Option<(Layout, (u64, u64, usize, usize, usize, usize))>> =
+        const { std::cell::Cell::new(None) };
+    static LAST_ALLOCATION_LAYOUT: std::cell::Cell<Option<Layout>> =
+        const { std::cell::Cell::new(None) };
+    static TABLE_INIT_PANIC_AFTER: std::cell::Cell<Option<usize>> =
+        const { std::cell::Cell::new(None) };
+    static TABLE_INIT_UNWIND_OCCUPANCY: std::cell::Cell<Option<(u64, u64, usize, usize, usize, usize)>> =
+        const { std::cell::Cell::new(None) };
+    static TABLE_TRANSFER_BEFORE_SHRINK: std::cell::Cell<Option<(usize, usize, u64, (u64, u64, usize, usize, usize, usize))>> =
+        const { std::cell::Cell::new(None) };
 }
 
 #[cfg(test)]
@@ -84,6 +94,11 @@ impl<BlockIdT> ReceivedVoteEvidenceEntry<BlockIdT> {
     pub(crate) fn logical_block_id(&self) -> &BlockIdT {
         &self.logical_block_id
     }
+
+    #[cfg(test)]
+    pub(crate) fn signature_lease_bytes_for_test(&self) -> u64 {
+        self.token_lease.bytes
+    }
 }
 
 #[cfg(test)]
@@ -103,8 +118,34 @@ pub(crate) fn with_allocation_failure_after<T>(
 }
 
 #[cfg(test)]
+struct TableInitializationPanicScope(Option<usize>);
+
+#[cfg(test)]
+impl TableInitializationPanicScope {
+    fn after(initialized_slots: usize) -> Self {
+        let previous = TABLE_INIT_PANIC_AFTER.with(|slot| {
+            slot.replace(Some(initialized_slots))
+        });
+        Self(previous)
+    }
+}
+
+#[cfg(test)]
+impl Drop for TableInitializationPanicScope {
+    fn drop(&mut self) {
+        TABLE_INIT_PANIC_AFTER.with(|slot| slot.set(self.0));
+    }
+}
+
+#[cfg(test)]
 pub(crate) fn budget_final_drop_count_for_test() -> usize {
     BUDGET_FINAL_DROPS.with(std::cell::Cell::get)
+}
+
+#[cfg(test)]
+pub(crate) fn table_transfer_before_shrink_for_test(
+) -> Option<(usize, usize, u64, (u64, u64, usize, usize, usize, usize))> {
+    TABLE_TRANSFER_BEFORE_SHRINK.with(std::cell::Cell::get)
 }
 
 fn try_alloc(layout: Layout) -> Result<NonNull<u8>, EvidenceAllocError> {
@@ -113,6 +154,7 @@ fn try_alloc(layout: Layout) -> Result<NonNull<u8>, EvidenceAllocError> {
     }
     #[cfg(test)]
     {
+        LAST_ALLOCATION_LAYOUT.with(|last| last.set(Some(layout)));
         ALLOCATION_ATTEMPTS.with(|count| count.set(count.get() + 1));
         let should_fail = FAIL_ALLOCATION_AFTER.with(|slot| match slot.get() {
             None => false,
@@ -800,6 +842,10 @@ impl<BlockIdT> ReceivedVoteEvidenceTable<BlockIdT> {
             .inner
             .reserve(total_bytes, ReservationClass::Bytes)
             .map_err(map_ledger_install_error)?;
+        #[cfg(test)]
+        TABLE_STAGE_OBSERVATION.with(|observation| {
+            observation.set(Some((layout, budget.inner.occupancy())));
+        });
         let raw = try_alloc(layout).map_err(|error| match error {
             EvidenceAllocError::Layout
             | EvidenceAllocError::ZeroSizedType
@@ -823,9 +869,21 @@ impl<BlockIdT> ReceivedVoteEvidenceTable<BlockIdT> {
                 Self::CAPACITY,
             )
         };
+        #[cfg(test)]
+        if TABLE_INIT_PANIC_AFTER.with(std::cell::Cell::get) == Some(0) {
+            TABLE_INIT_UNWIND_OCCUPANCY
+                .with(|observed| observed.set(Some(budget.inner.occupancy())));
+            panic!("controlled received-vote table initialization unwind");
+        }
         for _ in 0..Self::CAPACITY {
             debug_assert!(slots.len() < slots.capacity());
             slots.push(None);
+            #[cfg(test)]
+            if TABLE_INIT_PANIC_AFTER.with(std::cell::Cell::get) == Some(slots.len()) {
+                TABLE_INIT_UNWIND_OCCUPANCY
+                    .with(|observed| observed.set(Some(budget.inner.occupancy())));
+                panic!("controlled received-vote table initialization unwind");
+            }
         }
         if slots.len() != Self::CAPACITY || slots.capacity() != Self::CAPACITY {
             std::process::abort();
@@ -926,6 +984,15 @@ impl<BlockIdT> ReceivedVoteEvidenceTable<BlockIdT> {
             token_lease,
         });
         let entry = self.slots[index].as_mut().unwrap_or_else(|| std::process::abort());
+        #[cfg(test)]
+        TABLE_TRANSFER_BEFORE_SHRINK.with(|observed| {
+            observed.set(Some((
+                entry.vote.signature.as_ptr() as usize,
+                entry.vote.signature.capacity(),
+                entry.token_lease.bytes,
+                entry.token_lease.budget.occupancy(),
+            )));
+        });
         entry.token_lease.shrink_bytes_validated(shrink_to);
     }
 }
@@ -2492,6 +2559,18 @@ mod tests {
         layout!(CellDeallocationGuard<ContextCell>);
         layout!(Result<ContextHandle, (SnapshotPayload, PendingCharge, LedgerError)>);
         layout!(Option<TableTokenFixture>);
+        layout!(Vote);
+        layout!(ReceivedVoteEvidenceEntry<[u8; 32]>);
+        layout!(Option<ReceivedVoteEvidenceEntry<[u8; 32]>>);
+        layout!(ReceivedVoteEvidenceTable<[u8; 32]>);
+        layout!(Option<ReceivedVoteEvidenceTable<[u8; 32]>>);
+        layout!(Vec<Option<ReceivedVoteEvidenceEntry<[u8; 32]>>>);
+        layout!(EvidenceBudget);
+        layout!(Layout);
+        layout!(Option<PendingCharge>);
+        layout!(Result<ReceivedVoteEvidenceTable<[u8; 32]>, ContextInstallError>);
+        layout!(PendingCharge);
+        layout!(CommittedCharge);
 
         let budget = budget(100_000);
         let payload = snapshot(1, 1);
@@ -2701,5 +2780,129 @@ mod tests {
             .join()
             .expect("context owner thread completes");
         assert_eq!(budget.occupancy(), (budget_baseline(), 0, 0, 0, 0, 0));
+    }
+
+    #[test]
+    fn received_vote_table_reserves_full_charge_before_exact_allocation() {
+        type Table = ReceivedVoteEvidenceTable<[u8; 32]>;
+        let layout = Layout::array::<Option<ReceivedVoteEvidenceEntry<[u8; 32]>>>(1024).unwrap();
+        let control = size_of::<Option<Table>>();
+        let standing = u64::try_from(control + layout.size()).unwrap();
+        assert_eq!(
+            layout.size(),
+            size_of::<Option<ReceivedVoteEvidenceEntry<[u8; 32]>>>() * Table::CAPACITY
+        );
+        assert_eq!(control, size_of::<Table>());
+        assert_eq!(
+            std::mem::align_of::<Option<Table>>(),
+            std::mem::align_of::<Table>()
+        );
+        assert_eq!(Table::standing_charge().unwrap(), standing);
+        let baseline = budget_baseline();
+        let budget = EvidenceBudget::try_new(baseline + standing, 0).unwrap();
+        let observed_attempts = ALLOCATION_ATTEMPTS.with(std::cell::Cell::get);
+        let table = Table::try_stage(&budget).expect("exactly admitted table staging");
+        let (requested, pending_at_request) =
+            TABLE_STAGE_OBSERVATION.with(std::cell::Cell::get).unwrap();
+        let allocator_request = LAST_ALLOCATION_LAYOUT.with(std::cell::Cell::get).unwrap();
+        assert_eq!(requested.size(), layout.size());
+        assert_eq!(requested.align(), layout.align());
+        assert_eq!(allocator_request.size(), layout.size());
+        assert_eq!(allocator_request.align(), layout.align());
+        assert_eq!(table.slots.capacity(), 1024);
+        assert_eq!(table.slots.len(), 1024);
+        assert_eq!(table.occupied(), 0);
+        assert_eq!(
+            pending_at_request,
+            (baseline, standing, 0, 0, 0, 0),
+            "the complete standing charge is pending at the allocation boundary"
+        );
+        assert_eq!(ALLOCATION_ATTEMPTS.with(std::cell::Cell::get), observed_attempts + 1);
+        assert_eq!(budget.occupancy(), (baseline + standing, 0, 0, 0));
+        assert_eq!(budget.inner.lock().cap, baseline + standing);
+        drop(table);
+        assert_eq!(budget.occupancy(), (baseline, 0, 0, 0));
+    }
+
+    #[test]
+    fn received_vote_table_budget_refusal_precedes_allocation() {
+        type Table = ReceivedVoteEvidenceTable<[u8; 32]>;
+        let standing = Table::standing_charge().unwrap();
+        let baseline = budget_baseline();
+        let budget = EvidenceBudget::try_new(baseline + standing - 1, 0).unwrap();
+        let attempts = ALLOCATION_ATTEMPTS.with(std::cell::Cell::get);
+        assert_eq!(
+            Table::try_stage(&budget).unwrap_err(),
+            ContextInstallError::Budget
+        );
+        assert_eq!(ALLOCATION_ATTEMPTS.with(std::cell::Cell::get), attempts);
+        assert_eq!(budget.occupancy(), (baseline, 0, 0, 0));
+        assert_eq!(budget.inner.lock().cap, baseline + standing - 1);
+    }
+
+    #[test]
+    fn received_vote_table_injected_null_allocation_refusal_restores_ledger() {
+        type Table = ReceivedVoteEvidenceTable<[u8; 32]>;
+        let standing = Table::standing_charge().unwrap();
+        let baseline = budget_baseline();
+        let budget = EvidenceBudget::try_new(baseline + standing, 0).unwrap();
+        let attempts = ALLOCATION_ATTEMPTS.with(std::cell::Cell::get);
+        let result = {
+            let _fault = AllocationFaultScope::fail_after(0);
+            Table::try_stage(&budget)
+        };
+        assert_eq!(result.unwrap_err(), ContextInstallError::Allocation);
+        assert_eq!(ALLOCATION_ATTEMPTS.with(std::cell::Cell::get), attempts + 1);
+        assert_eq!(
+            TABLE_STAGE_OBSERVATION.with(std::cell::Cell::get).unwrap().1,
+            (baseline, standing, 0, 0, 0, 0)
+        );
+        assert_eq!(budget.occupancy(), (baseline, 0, 0, 0));
+        assert_eq!(budget.inner.lock().cap, baseline + standing);
+    }
+
+    #[test]
+    fn received_vote_table_partial_initialization_unwinds_before_commit() {
+        use std::panic::{catch_unwind, AssertUnwindSafe};
+
+        type Table = ReceivedVoteEvidenceTable<[u8; 32]>;
+        let standing = Table::standing_charge().unwrap();
+        let baseline = budget_baseline();
+
+        for initialized in [0, 513, Table::CAPACITY] {
+            let budget = EvidenceBudget::try_new(baseline + standing, 0).unwrap();
+            let before = budget.occupancy();
+            let result = {
+                let _fault = TableInitializationPanicScope::after(initialized);
+                catch_unwind(AssertUnwindSafe(|| {
+                    let _ = Table::try_stage(&budget);
+                }))
+            };
+            assert!(result.is_err(), "initialization count {initialized}");
+            assert_eq!(
+                TABLE_INIT_UNWIND_OCCUPANCY.with(std::cell::Cell::get),
+                Some((baseline, standing, 0, 0, 0, 0)),
+                "pending table lease remains live at controlled unwind point"
+            );
+            assert_eq!(budget.occupancy(), before);
+            assert_eq!(budget.occupancy().2, 0, "table owns no contexts");
+            assert_eq!(budget.inner.lock().cap, baseline + standing);
+        }
+    }
+
+    #[test]
+    fn received_vote_table_successful_stage_drop_releases_after_backing_drop() {
+        type Table = ReceivedVoteEvidenceTable<[u8; 32]>;
+        let standing = Table::standing_charge().unwrap();
+        let baseline = budget_baseline();
+        let budget = EvidenceBudget::try_new(baseline + standing, 0).unwrap();
+        let table = Table::try_stage(&budget).expect("stage fixed table");
+        assert_eq!(budget.occupancy(), (baseline + standing, 0, 0, 0));
+        drop(table);
+        assert_eq!(
+            budget.occupancy(),
+            (baseline, 0, 0, 0),
+            "completed Vec/table destruction releases standing lease"
+        );
     }
 }

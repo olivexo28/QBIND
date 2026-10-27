@@ -29,6 +29,16 @@ use crate::ids::ValidatorId;
 use crate::qc::{QcValidationError, QuorumCertificate};
 use crate::validator_set::ConsensusValidatorSet;
 
+#[cfg(test)]
+thread_local! {
+    static QC_FORMATION_ATTEMPTS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+#[cfg(test)]
+pub(crate) fn qc_formation_attempts_for_test() -> usize {
+    QC_FORMATION_ATTEMPTS.with(std::cell::Cell::get)
+}
+
 /// Configuration for consensus memory limits (T118, T122, T123).
 ///
 /// This struct configures bounds on data structures in the consensus layer
@@ -434,6 +444,8 @@ where
         view: u64,
         block_id: &BlockIdT,
     ) -> Result<Option<QuorumCertificate<BlockIdT>>, QcValidationError> {
+        #[cfg(test)]
+        QC_FORMATION_ATTEMPTS.with(|count| count.set(count.get() + 1));
         let key = VoteKey {
             view,
             block_id: block_id.clone(),
