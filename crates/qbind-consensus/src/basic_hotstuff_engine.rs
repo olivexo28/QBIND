@@ -20,10 +20,14 @@
 //! - Leader rotation policies beyond simple round-robin
 
 use crate::driver::{ConsensusEngineAction, HasCommitLog};
-use crate::hotstuff_state_engine::{CommittedEntry, HotStuffStateEngine};
+use crate::hotstuff_state_engine::{CommittedEntry, HotStuffStateEngine, VerifiedQcAdmission};
 use crate::ids::ValidatorId;
 use crate::qc::{QcValidationError, QuorumCertificate};
 use crate::qc_verify_domain::VerifiedQuorumCertificate;
+use crate::received_vote_evidence::{
+    ActiveVoteContext, ContextInstallError, ContextInstallRefusal, EvidenceBudget,
+    VerifiedVoteToken, VoteAdmissionError, VoteAdmissionRefusal, VoteContextInput,
+};
 use crate::timeout::{TimeoutAccumulator, TimeoutCertificate, TimeoutMsg, TimeoutValidationError};
 use crate::validator_set::ConsensusValidatorSet;
 
@@ -1433,6 +1437,12 @@ where
     /// different value, and only when building a fresh engine from
     /// initialization inputs.
     vote_suite_id: u16,
+
+    /// Isolated received-Vote context owner. No production route consumes it.
+    active_received_vote_context: Option<ActiveVoteContext>,
+
+    /// Terminal producer disable set before exposing mutable state access.
+    received_vote_producer_disabled: bool,
 }
 
 /// Peer-learned certified block material used by restore catchup.
@@ -1667,6 +1677,17 @@ where
             .field("timeout_emitted_in_view", &self.timeout_emitted_in_view)
             .field("pending_reconfig_next_epoch", &self.pending_reconfig_next_epoch)
             .field("vote_suite_id", &self.vote_suite_id)
+            .field(
+                "active_received_vote_context",
+                &self
+                    .active_received_vote_context
+                    .as_ref()
+                    .map(|_| "<installed>"),
+            )
+            .field(
+                "received_vote_producer_disabled",
+                &self.received_vote_producer_disabled,
+            )
             .finish()
     }
 }
@@ -1776,6 +1797,8 @@ where
             timeout_emitted_in_view: false,
             pending_reconfig_next_epoch: None,
             vote_suite_id,
+            active_received_vote_context: None,
+            received_vote_producer_disabled: false,
         }
     }
 
@@ -1905,7 +1928,18 @@ where
     ///
     /// * `epoch` - The epoch number to use for all consensus messages.
     pub fn set_current_epoch(&mut self, epoch: u64) {
+        if self.current_epoch != epoch {
+            self.invalidate_received_vote_context();
+        }
         self.current_epoch = epoch;
+    }
+
+    fn invalidate_received_vote_context(&mut self) {
+        self.active_received_vote_context = None;
+    }
+
+    pub fn set_max_retained_evidence_bytes(&mut self, max: u64) {
+        self.state.set_max_retained_evidence_bytes(max);
     }
 
     /// Run 096 — set the pending local-operator-gated reconfig proposal
@@ -2017,6 +2051,8 @@ where
             );
         }
 
+        self.invalidate_received_vote_context();
+
         // Update epoch atomically
         self.current_epoch = new_epoch.as_u64();
 
@@ -2062,6 +2098,8 @@ where
 
     /// Mutably access the underlying state engine.
     pub fn state_mut(&mut self) -> &mut HotStuffStateEngine<BlockIdT> {
+        self.invalidate_received_vote_context();
+        self.received_vote_producer_disabled = true;
         &mut self.state
     }
 
@@ -2442,6 +2480,117 @@ enum LeaderSignerBufferError {
 // ============================================================================
 
 impl BasicHotStuffEngine<[u8; 32]> {
+    pub(crate) fn install_received_vote_context(
+        &mut self,
+        input: VoteContextInput,
+    ) -> Result<(), ContextInstallRefusal> {
+        let refuse = |input, error| ContextInstallRefusal { input, error };
+        if self.received_vote_producer_disabled {
+            return Err(refuse(input, ContextInstallError::InvalidContext));
+        }
+        if self.active_received_vote_context.is_some() {
+            return Err(refuse(input, ContextInstallError::AlreadyInstalled));
+        }
+        if input.authorized_epoch() != self.current_epoch
+            || input.suite_id() != qbind_crypto::SUITE_PQ_RESERVED_1
+            || input.runtime_chain_id() != input.domain().runtime_chain_id()
+            || !input.within_profile_capacity()
+        {
+            return Err(refuse(input, ContextInstallError::InvalidContext));
+        }
+        if input.checked_charge().is_err() {
+            return Err(refuse(input, ContextInstallError::InvalidContext));
+        }
+        let validators = self.state.validators();
+        if input.members().len() != validators.len()
+            || input
+                .members()
+                .iter()
+                .zip(validators.iter())
+                .any(|(member, validator)| {
+                    member.validator_id() != validator.id.as_u64()
+                        || member.voting_power() != validator.voting_power
+                        || member.public_key().len() != qbind_crypto::ML_DSA_44_PUBLIC_KEY_SIZE
+                        || member.public_key_capacity() != qbind_crypto::ML_DSA_44_PUBLIC_KEY_SIZE
+                })
+        {
+            return Err(refuse(input, ContextInstallError::InvalidContext));
+        }
+
+        let (budget, staged_state_owner) = match self.state.received_vote_budget() {
+            Some(existing) => match existing.try_clone() {
+                Ok(handle) => (handle, None),
+                Err(error) => return Err(refuse(input, error)),
+            },
+            None => {
+                let map_bytes = match self.state.map_qc_charge_checked() {
+                    Ok(bytes) => bytes,
+                    Err(_) => {
+                        return Err(refuse(input, ContextInstallError::Arithmetic));
+                    }
+                };
+                let handle = match EvidenceBudget::try_new(
+                    self.state.max_retained_evidence_bytes(),
+                    map_bytes,
+                ) {
+                    Ok(handle) => handle,
+                    Err(error) => return Err(refuse(input, error)),
+                };
+                let state_owner = match handle.try_clone() {
+                    Ok(owner) => owner,
+                    Err(error) => return Err(refuse(input, error)),
+                };
+                (handle, Some(state_owner))
+            }
+        };
+
+        let active = match ActiveVoteContext::try_install(&budget, input) {
+            Ok(active) => active,
+            Err((input, error)) => return Err(refuse(input, error)),
+        };
+        if let Some(state_owner) = staged_state_owner {
+            if self
+                .state
+                .install_received_vote_budget(state_owner)
+                .is_err()
+            {
+                std::process::abort();
+            }
+        }
+        self.active_received_vote_context = Some(active);
+        Ok(())
+    }
+
+    pub(crate) fn admit_verified_received_vote(
+        &mut self,
+        claimed_sender: ValidatorId,
+        vote: qbind_wire::consensus::Vote,
+    ) -> Result<VerifiedVoteToken, VoteAdmissionRefusal> {
+        let Some(context) = self.active_received_vote_context.as_ref() else {
+            return Err(VoteAdmissionRefusal {
+                vote,
+                error: VoteAdmissionError::NoContext,
+            });
+        };
+        if self.received_vote_producer_disabled {
+            return Err(VoteAdmissionRefusal {
+                vote,
+                error: VoteAdmissionError::NoContext,
+            });
+        }
+        context
+            .try_admit_vote(claimed_sender.as_u64(), vote, self.current_epoch)
+            .map_err(|(vote, error)| VoteAdmissionRefusal { vote, error })
+    }
+
+    #[cfg(test)]
+    pub(crate) fn received_vote_evidence_aggregate_bytes(&self) -> Option<(u64, u64)> {
+        self.state
+            .received_vote_budget()
+            .map(|budget| budget.occupancy())
+            .map(|(committed, pending, _, _)| (committed, pending))
+    }
+
     /// Isolated, opt-in leader Proposal/self-Vote owning route. This is not
     /// called by production networking or the legacy leader methods.
     pub fn try_propose_gated_owning<P, G>(
@@ -3087,7 +3236,7 @@ impl BasicHotStuffEngine<[u8; 32]> {
         proposal: &qbind_wire::consensus::BlockProposal,
     ) -> Option<ConsensusEngineAction<ValidatorId>> {
         // Legacy / absent-QC / unverified path: no retained evidence.
-        self.ingest_proposal(from, proposal, None, DecisionHook::None)
+        self.ingest_proposal(from, proposal, None, None, DecisionHook::None)
     }
 
     /// Run 422 §13.6 spike: legacy ingestion entrypoint with scoped borrowed
@@ -3101,7 +3250,7 @@ impl BasicHotStuffEngine<[u8; 32]> {
         proposal: &qbind_wire::consensus::BlockProposal,
         observer: &mut dyn SafetyDecisionObserver<[u8; 32]>,
     ) -> Option<ConsensusEngineAction<ValidatorId>> {
-        self.ingest_proposal(from, proposal, None, DecisionHook::Observe(observer))
+        self.ingest_proposal(from, proposal, None, None, DecisionHook::Observe(observer))
     }
 
     /// Run 422 §13.6: legacy ingestion entrypoint with a scoped borrowed
@@ -3132,6 +3281,7 @@ impl BasicHotStuffEngine<[u8; 32]> {
         let action = self.ingest_proposal(
             from,
             proposal,
+            None,
             None,
             DecisionHook::Gate {
                 gate,
@@ -3184,6 +3334,7 @@ impl BasicHotStuffEngine<[u8; 32]> {
         let action = self.ingest_proposal(
             from,
             proposal,
+            None,
             None,
             DecisionHook::Gate {
                 gate: &mut adapter,
@@ -3426,11 +3577,8 @@ impl BasicHotStuffEngine<[u8; 32]> {
             });
         }
 
-        // (4) Reject an inadmissible retention BEFORE any engine mutation, so a
-        // rejected request advances no view, registers no block, records no
-        // vote and emits no action. Pre-check the exact block id the engine
-        // would register for this proposal, against BOTH byte pressure AND
-        // block-slot pressure, using a checked charge.
+        // (4) Reserve retention before any engine effects, so no permitted
+        // ledger admission can race between preflight and registration.
         let block_id = Self::derive_block_id_from_header(
             from,
             proposal.header.height,
@@ -3439,18 +3587,23 @@ impl BasicHotStuffEngine<[u8; 32]> {
         let needed = evidence
             .retained_byte_size()
             .map_err(|_| VerifiedProposalIngestError::RetentionChargeUnrepresentable)?;
-        if !self.state.can_retain_evidence(&block_id, needed) {
-            // Count this budget rejection exactly once on the preflight path
-            // (the direct state-registration path counts its own), then reject
-            // before mutation.
-            self.state.note_rejected_evidence_over_budget();
-            return Err(VerifiedProposalIngestError::RetentionBudgetExceeded {
-                needed_bytes: needed,
-                retained_bytes: self.state.retained_evidence_bytes(),
-                max_bytes: self.state.max_retained_evidence_bytes(),
-            });
-        }
+        let admission = self
+            .state
+            .reserve_verified_justification(block_id, needed)
+            .map_err(|error| match error {
+                crate::hotstuff_state_engine::EvidenceRetentionError::BudgetExceeded {
+                    needed_bytes,
+                    retained_bytes,
+                    max_bytes,
+                } => VerifiedProposalIngestError::RetentionBudgetExceeded {
+                    needed_bytes,
+                    retained_bytes,
+                    max_bytes,
+                },
+                _ => VerifiedProposalIngestError::RetentionChargeUnrepresentable,
+            })?;
         if !self.state.can_admit_block_slot(&block_id) {
+            drop(admission);
             return Err(VerifiedProposalIngestError::RetentionCapacityUnavailable {
                 block_count: self.state.block_count(),
                 max_pending_blocks: self.state.limits().max_pending_blocks,
@@ -3458,7 +3611,7 @@ impl BasicHotStuffEngine<[u8; 32]> {
         }
 
         // Delegate to the shared proposal-processing body with the evidence.
-        Ok(self.ingest_proposal(from, proposal, Some(evidence), hook))
+        Ok(self.ingest_proposal(from, proposal, Some(evidence), Some(admission), hook))
     }
 
     /// Shared proposal-processing body for [`Self::on_proposal_event`] (legacy,
@@ -3471,6 +3624,7 @@ impl BasicHotStuffEngine<[u8; 32]> {
         from: ValidatorId,
         proposal: &qbind_wire::consensus::BlockProposal,
         verified_evidence: Option<Arc<VerifiedQuorumCertificate>>,
+        admission: Option<VerifiedQcAdmission<[u8; 32]>>,
         hook: DecisionHook<'_>,
     ) -> Option<ConsensusEngineAction<ValidatorId>> {
         // T101: Epoch validation - reject proposals from wrong epoch
@@ -3540,20 +3694,21 @@ impl BasicHotStuffEngine<[u8; 32]> {
         // explicitly — never `let _ =`, a panic, or a post-effect rollback: on
         // failure we abort WITHOUT self-voting or emitting any action.
         let verified_entrypoint = verified_evidence.is_some();
-        match verified_evidence {
-            Some(evidence) => {
+        match (verified_evidence, admission) {
+            (Some(evidence), Some(admission)) => {
                 if self
                     .state
-                    .register_block_with_verified_justification(block_id, view, parent_id, evidence)
+                    .register_block_with_admission(block_id, view, parent_id, evidence, admission)
                     .is_err()
                 {
                     return None;
                 }
             }
-            None => {
+            (None, None) => {
                 self.state
                     .register_block(block_id, view, parent_id, justify_qc);
             }
+            _ => std::process::abort(),
         }
 
         // Enforce locked-block safety: only vote if this block is on a chain
@@ -4066,7 +4221,15 @@ impl BasicHotStuffEngine<[u8; 32]> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::key_registry::SuiteAwareValidatorKeyProvider;
+    use crate::received_vote_evidence::{SnapshotMember, VoteContextInput};
+    use crate::qc_verify_domain::verify_quorum_certificate_with_domain;
     use crate::validator_set::ValidatorSetEntry;
+    use qbind_crypto::ml_dsa44::MlDsa44Backend;
+    use std::collections::HashMap;
+    use std::sync::Arc;
+
+    const TEST_WIRE_CHAIN: u32 = 7;
 
     fn make_validator_set(num: u64) -> ConsensusValidatorSet {
         let entries: Vec<ValidatorSetEntry> = (1..=num)
@@ -4076,6 +4239,1373 @@ mod tests {
             })
             .collect();
         ConsensusValidatorSet::new(entries).expect("valid set")
+    }
+
+    fn dense_validator_set(num: u64) -> ConsensusValidatorSet {
+        ConsensusValidatorSet::new((0..num).map(|id| ValidatorSetEntry {
+            id: ValidatorId(id),
+            voting_power: 1,
+        }))
+        .expect("valid dense set")
+    }
+
+    fn signed_context_vote(
+        epoch: u64,
+        sk: &[u8],
+        domain: &qbind_wire::pv_signing_domain::ProposalVoteSigningDomainV2,
+    ) -> qbind_wire::consensus::Vote {
+        let mut vote = qbind_wire::consensus::Vote {
+            version: 1,
+            chain_id: domain.expected_wire_chain_id(),
+            epoch,
+            height: 7,
+            round: 9,
+            step: 0,
+            block_id: [0x73; 32],
+            validator_index: 0,
+            suite_id: qbind_crypto::SUITE_PQ_RESERVED_1.0,
+            signature: Vec::new(),
+        };
+        let signature =
+            MlDsa44Backend::sign(sk, &domain.vote_preimage(&vote)).expect("test vote signing");
+        vote.signature = signature.into_boxed_slice().into_vec();
+        vote
+    }
+
+    fn received_vote_context(
+        epoch: u64,
+        public_key: Vec<u8>,
+    ) -> (
+        VoteContextInput,
+        qbind_wire::pv_signing_domain::ProposalVoteSigningDomainV2,
+    ) {
+        let runtime_chain = qbind_types::QBIND_DEVNET_CHAIN_ID;
+        let domain = qbind_wire::pv_signing_domain::ProposalVoteSigningDomainV2::try_new(
+            runtime_chain,
+            TEST_WIRE_CHAIN,
+            [0x31; 32],
+            [0x42; 32],
+        )
+        .expect("valid test domain");
+        (
+            VoteContextInput::new(
+                runtime_chain,
+                epoch,
+                qbind_crypto::SUITE_PQ_RESERVED_1,
+                domain.clone(),
+                vec![SnapshotMember::new(
+                    0,
+                    1,
+                    public_key.into_boxed_slice().into_vec(),
+                )],
+            ),
+            domain,
+        )
+    }
+
+    #[derive(Debug)]
+    struct ContextTestKeys(HashMap<ValidatorId, (qbind_crypto::ConsensusSigSuiteId, Vec<u8>)>);
+
+    impl SuiteAwareValidatorKeyProvider for ContextTestKeys {
+        fn get_suite_and_key(
+            &self,
+            validator: ValidatorId,
+        ) -> Option<(qbind_crypto::ConsensusSigSuiteId, Vec<u8>)> {
+            self.0.get(&validator).cloned()
+        }
+    }
+
+    fn verified_test_qc(
+        keypairs: &[(Vec<u8>, Vec<u8>)],
+        signers: &[u16],
+    ) -> (
+        Arc<crate::qc_verify_domain::VerifiedQuorumCertificate>,
+        qbind_wire::pv_signing_domain::ProposalVoteSigningDomainV2,
+    ) {
+        let runtime_chain = qbind_types::QBIND_DEVNET_CHAIN_ID;
+        let domain = qbind_wire::pv_signing_domain::ProposalVoteSigningDomainV2::try_new(
+            runtime_chain,
+            TEST_WIRE_CHAIN,
+            [0x51; 32],
+            [0x62; 32],
+        )
+        .expect("valid QC test domain");
+        let validators = dense_validator_set(keypairs.len() as u64);
+        let mut keys = HashMap::new();
+        for (index, (public_key, _)) in keypairs.iter().enumerate() {
+            keys.insert(
+                ValidatorId(index as u64),
+                (qbind_crypto::SUITE_PQ_RESERVED_1, public_key.clone()),
+            );
+        }
+        let key_provider = ContextTestKeys(keys);
+        let mut certificate = qbind_wire::consensus::QuorumCertificate {
+            version: 1,
+            chain_id: TEST_WIRE_CHAIN,
+            epoch: 0,
+            height: 9,
+            round: 9,
+            step: 1,
+            block_id: [0x91; 32],
+            suite_id: qbind_crypto::SUITE_PQ_RESERVED_1.0,
+            signer_bitmap: vec![0; keypairs.len().div_ceil(8)],
+            signatures: Vec::new(),
+        };
+        for signer in signers {
+            certificate.signer_bitmap[usize::from(*signer) / 8] |=
+                1 << (usize::from(*signer) % 8);
+            let vote = qbind_wire::consensus::Vote {
+                version: certificate.version,
+                chain_id: certificate.chain_id,
+                epoch: certificate.epoch,
+                height: certificate.height,
+                round: certificate.round,
+                step: certificate.step,
+                block_id: certificate.block_id,
+                validator_index: *signer,
+                suite_id: certificate.suite_id,
+                signature: Vec::new(),
+            };
+            let secret_key = &keypairs[usize::from(*signer)].1;
+            certificate.signatures.push(
+                MlDsa44Backend::sign(secret_key, &domain.vote_preimage(&vote))
+                    .expect("test QC signing"),
+            );
+        }
+        let registry = crate::crypto_verifier::SimpleBackendRegistry::with_backend(
+            qbind_crypto::SUITE_PQ_RESERVED_1,
+            Arc::new(MlDsa44Backend),
+        );
+        let evidence = verify_quorum_certificate_with_domain(
+            &certificate,
+            &domain,
+            0,
+            &validators,
+            &key_provider,
+            &registry,
+        )
+        .expect("test QC verifies");
+        (Arc::new(evidence), domain)
+    }
+
+    fn proposal_for_test_evidence(
+        view: u64,
+        evidence: &crate::qc_verify_domain::VerifiedQuorumCertificate,
+        proposer: u16,
+    ) -> qbind_wire::consensus::BlockProposal {
+        qbind_wire::consensus::BlockProposal {
+            header: qbind_wire::consensus::BlockHeader {
+                version: 1,
+                chain_id: TEST_WIRE_CHAIN,
+                epoch: 0,
+                height: view,
+                round: view,
+                parent_block_id: [0xFF; 32],
+                payload_hash: [0; 32],
+                proposer_index: proposer,
+                suite_id: qbind_crypto::SUITE_PQ_RESERVED_1.0,
+                tx_count: 0,
+                timestamp: 0,
+                payload_kind: qbind_wire::PAYLOAD_KIND_NORMAL,
+                next_epoch: 0,
+                batch_commitment: [0; 32],
+            },
+            qc: Some(evidence.certificate().clone()),
+            txs: Vec::new(),
+            signature: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn received_vote_context_admission_verifies_borrowed_key_and_preserves_signature() {
+        let (public_key, secret_key) = MlDsa44Backend::generate_keypair().expect("test keygen");
+        let (input, domain) = received_vote_context(0, public_key);
+        let context_charge = input.checked_charge().expect("context charge");
+        let sizing = EvidenceBudget::try_new(u64::MAX, 0).expect("sizing ledger");
+        let standing_floor = sizing.occupancy().0;
+        drop(sizing);
+        let mut engine = BasicHotStuffEngine::new(ValidatorId(0), dense_validator_set(1));
+        assert!(engine.install_received_vote_context(input).is_ok());
+        let wrapper_charge = std::mem::size_of::<Option<ActiveVoteContext>>() as u64;
+        println!(
+            "received-vote accounting: standing={standing_floor} context={context_charge} active-wrapper={wrapper_charge}"
+        );
+        assert_eq!(
+            engine.received_vote_evidence_aggregate_bytes().unwrap().0,
+            standing_floor + context_charge + wrapper_charge
+        );
+        let vote = signed_context_vote(0, &secret_key, &domain);
+        let signature_ptr = vote.signature.as_ptr();
+        let signature_capacity = vote.signature.capacity();
+        assert_eq!(signature_capacity, qbind_crypto::ML_DSA_44_SIGNATURE_SIZE);
+        let token = engine
+            .admit_verified_received_vote(ValidatorId(0), vote)
+            .expect("valid signed Vote is admitted");
+        println!(
+            "received-vote token accounting: inline={} signature-capacity={signature_capacity}",
+            std::mem::size_of::<VerifiedVoteToken>()
+        );
+        assert_eq!(token.vote().signature.as_ptr(), signature_ptr);
+        assert_eq!(token.vote().signature.capacity(), signature_capacity);
+        assert_eq!(
+            engine.received_vote_evidence_aggregate_bytes().unwrap().1,
+            0
+        );
+        assert_eq!(
+            engine.received_vote_evidence_aggregate_bytes().unwrap().0,
+            standing_floor
+                + context_charge
+                + wrapper_charge
+                + std::mem::size_of::<VerifiedVoteToken>() as u64
+                + u64::try_from(signature_capacity).unwrap()
+        );
+        drop(token);
+        assert_eq!(
+            engine.received_vote_evidence_aggregate_bytes().unwrap().0,
+            standing_floor + context_charge + wrapper_charge
+        );
+    }
+
+    fn assert_vote_refusal_preserved(
+        refusal: VoteAdmissionRefusal,
+        expected_error: VoteAdmissionError,
+        expected_vote: &qbind_wire::consensus::Vote,
+        signature_ptr: *const u8,
+        signature_capacity: usize,
+        budget: &EvidenceBudget,
+        occupancy_before: (u64, u64, usize, usize),
+    ) -> qbind_wire::consensus::Vote {
+        assert_eq!(refusal.error, expected_error);
+        assert!(refusal.vote == *expected_vote, "returned Vote differs (redacted)");
+        assert_eq!(refusal.vote.signature.as_ptr(), signature_ptr);
+        assert_eq!(refusal.vote.signature.capacity(), signature_capacity);
+        assert_eq!(budget.occupancy(), occupancy_before);
+        refusal.vote
+    }
+
+    #[test]
+    fn received_vote_refusals_preserve_owned_backing_and_leave_no_token_charge() {
+        let (public_key, secret_key) = MlDsa44Backend::generate_keypair().expect("test keygen");
+        let (input, domain) = received_vote_context(0, public_key);
+        let mut engine = BasicHotStuffEngine::new(ValidatorId(0), dense_validator_set(1));
+        assert!(engine.install_received_vote_context(input).is_ok());
+        let observer = engine
+            .state
+            .received_vote_budget()
+            .expect("installed ledger")
+            .try_clone()
+            .expect("independent test observer");
+
+        macro_rules! refuse_vote {
+            ($vote:expr, $sender:expr, $error:expr) => {{
+                let vote = $vote;
+                let expected = vote.clone();
+                let signature_ptr = vote.signature.as_ptr();
+                let signature_capacity = vote.signature.capacity();
+                let occupancy_before = observer.occupancy();
+                let refusal = engine
+                    .admit_verified_received_vote($sender, vote)
+                    .expect_err("invalid Vote refuses");
+                assert_vote_refusal_preserved(
+                    refusal,
+                    $error,
+                    &expected,
+                    signature_ptr,
+                    signature_capacity,
+                    &observer,
+                    occupancy_before,
+                )
+            }};
+        }
+
+        let mut wrong_sender = signed_context_vote(0, &secret_key, &domain);
+        wrong_sender.block_id = [0x74; 32];
+        wrong_sender.signature =
+            MlDsa44Backend::sign(&secret_key, &domain.vote_preimage(&wrong_sender))
+                .expect("test Vote signing")
+                .into_boxed_slice()
+                .into_vec();
+        refuse_vote!(
+            wrong_sender,
+            ValidatorId(8),
+            VoteAdmissionError::SenderIndexMismatch
+        );
+
+        let mut wrong_epoch = signed_context_vote(0, &secret_key, &domain);
+        wrong_epoch.epoch = 1;
+        wrong_epoch.signature =
+            MlDsa44Backend::sign(&secret_key, &domain.vote_preimage(&wrong_epoch))
+                .expect("test Vote signing")
+                .into_boxed_slice()
+                .into_vec();
+        refuse_vote!(
+            wrong_epoch,
+            ValidatorId(0),
+            VoteAdmissionError::EpochMismatch
+        );
+
+        let mut wrong_wire_chain = signed_context_vote(0, &secret_key, &domain);
+        wrong_wire_chain.chain_id += 1;
+        refuse_vote!(
+            wrong_wire_chain,
+            ValidatorId(0),
+            VoteAdmissionError::DomainMismatch
+        );
+
+        let mut wrong_suite = signed_context_vote(0, &secret_key, &domain);
+        wrong_suite.suite_id = qbind_crypto::SUITE_PQ_RESERVED_2.0;
+        refuse_vote!(
+            wrong_suite,
+            ValidatorId(0),
+            VoteAdmissionError::SuiteMismatch
+        );
+
+        let mut wrong_signature = signed_context_vote(0, &secret_key, &domain);
+        wrong_signature.signature[0] ^= 1;
+        refuse_vote!(
+            wrong_signature,
+            ValidatorId(0),
+            VoteAdmissionError::InvalidSignature
+        );
+
+        let mut short_signature = signed_context_vote(0, &secret_key, &domain);
+        short_signature.signature.pop();
+        refuse_vote!(
+            short_signature,
+            ValidatorId(0),
+            VoteAdmissionError::SignatureShape
+        );
+
+        let mut over_capacity_signature = signed_context_vote(0, &secret_key, &domain);
+        let valid_signature = over_capacity_signature.signature.clone();
+        let mut oversized = Vec::with_capacity(qbind_crypto::ML_DSA_44_SIGNATURE_SIZE + 1);
+        oversized.extend_from_slice(&valid_signature);
+        assert!(oversized.capacity() > qbind_crypto::ML_DSA_44_SIGNATURE_SIZE);
+        over_capacity_signature.signature = oversized;
+        refuse_vote!(
+            over_capacity_signature,
+            ValidatorId(0),
+            VoteAdmissionError::SignatureShape
+        );
+
+        let alternate_domain =
+            qbind_wire::pv_signing_domain::ProposalVoteSigningDomainV2::try_new(
+                qbind_types::QBIND_DEVNET_CHAIN_ID,
+                TEST_WIRE_CHAIN,
+                [0x32; 32],
+                [0x42; 32],
+            )
+            .expect("same-chain alternate v2 domain");
+        assert_eq!(alternate_domain.expected_wire_chain_id(), domain.expected_wire_chain_id());
+        let wrong_full_domain = signed_context_vote(0, &secret_key, &alternate_domain);
+        refuse_vote!(
+            wrong_full_domain,
+            ValidatorId(0),
+            VoteAdmissionError::InvalidSignature
+        );
+
+        let valid_vote = signed_context_vote(0, &secret_key, &domain);
+        let expected = valid_vote.clone();
+        let signature_ptr = valid_vote.signature.as_ptr();
+        let signature_capacity = valid_vote.signature.capacity();
+        let bytes = std::mem::size_of::<VerifiedVoteToken>() as u64
+            + u64::try_from(signature_capacity).unwrap();
+        let occupancy_before = observer.occupancy();
+        let old_cap = engine.state.max_retained_evidence_bytes();
+        engine.set_max_retained_evidence_bytes(occupancy_before.0 + bytes - 1);
+        let refusal = engine
+            .admit_verified_received_vote(ValidatorId(0), valid_vote)
+            .expect_err("insufficient token budget refuses");
+        let returned_vote = assert_vote_refusal_preserved(
+            refusal,
+            VoteAdmissionError::Budget,
+            &expected,
+            signature_ptr,
+            signature_capacity,
+            &observer,
+            occupancy_before,
+        );
+        assert_eq!(
+            engine.state.max_retained_evidence_bytes(),
+            occupancy_before.0 + bytes - 1
+        );
+        engine.set_max_retained_evidence_bytes(occupancy_before.0 + bytes);
+        let token = engine
+            .admit_verified_received_vote(ValidatorId(0), returned_vote)
+            .expect("the original returned Vote verifies after budget relief");
+        assert_eq!(
+            observer.occupancy(),
+            (occupancy_before.0 + bytes, 0, occupancy_before.2, 0)
+        );
+        assert_eq!(engine.state.max_retained_evidence_bytes(), occupancy_before.0 + bytes);
+        drop(token);
+        assert_eq!(observer.occupancy(), occupancy_before);
+        engine.set_max_retained_evidence_bytes(old_cap);
+
+        let (other_public_key, _) = MlDsa44Backend::generate_keypair().expect("test keygen");
+        let (wrong_key_input, _) = received_vote_context(0, other_public_key);
+        let mut wrong_key_engine =
+            BasicHotStuffEngine::new(ValidatorId(0), dense_validator_set(1));
+        wrong_key_engine
+            .install_received_vote_context(wrong_key_input)
+            .expect("install context with a different valid key");
+        let wrong_key_observer = wrong_key_engine
+            .state
+            .received_vote_budget()
+            .unwrap()
+            .try_clone()
+            .unwrap();
+        let wrong_key_vote = signed_context_vote(0, &secret_key, &domain);
+        let expected = wrong_key_vote.clone();
+        let signature_ptr = wrong_key_vote.signature.as_ptr();
+        let signature_capacity = wrong_key_vote.signature.capacity();
+        let occupancy_before = wrong_key_observer.occupancy();
+        let refusal = wrong_key_engine
+            .admit_verified_received_vote(ValidatorId(0), wrong_key_vote)
+            .expect_err("signature under a different installed key refuses");
+        assert_vote_refusal_preserved(
+            refusal,
+            VoteAdmissionError::InvalidSignature,
+            &expected,
+            signature_ptr,
+            signature_capacity,
+            &wrong_key_observer,
+            occupancy_before,
+        );
+    }
+
+    #[test]
+    fn received_vote_context_refusal_keeps_input_and_does_not_publish_bootstrap() {
+        let (public_key, _) = MlDsa44Backend::generate_keypair().expect("test keygen");
+        let (input, _) = received_vote_context(0, public_key);
+        let roster_ptr = input.members().as_ptr();
+        let roster_capacity = input.members_capacity();
+        let key_ptr = input.members()[0].public_key().as_ptr();
+        let key_capacity = input.members()[0].public_key_capacity();
+
+        let sizing = EvidenceBudget::try_new(u64::MAX, 0).expect("sizing ledger");
+        let standing_floor = sizing.occupancy().0;
+        drop(sizing);
+        let mut engine = BasicHotStuffEngine::new(ValidatorId(0), dense_validator_set(1));
+        engine.set_max_retained_evidence_bytes(standing_floor + 1);
+        let refusal = engine
+            .install_received_vote_context(input)
+            .expect_err("context reservation refuses after local bootstrap");
+        assert_eq!(refusal.error, ContextInstallError::Budget);
+        assert_eq!(refusal.input.members().as_ptr(), roster_ptr);
+        assert_eq!(refusal.input.members_capacity(), roster_capacity);
+        assert_eq!(refusal.input.members()[0].public_key().as_ptr(), key_ptr);
+        assert_eq!(
+            refusal.input.members()[0].public_key_capacity(),
+            key_capacity
+        );
+        assert!(engine.state.received_vote_budget().is_none());
+        assert!(engine.active_received_vote_context.is_none());
+
+        let (keypair, _) = MlDsa44Backend::generate_keypair().expect("test keygen");
+        let runtime_chain = qbind_types::QBIND_DEVNET_CHAIN_ID;
+        let domain = qbind_wire::pv_signing_domain::ProposalVoteSigningDomainV2::try_new(
+            runtime_chain,
+            TEST_WIRE_CHAIN,
+            [0x31; 32],
+            [0x42; 32],
+        )
+        .expect("valid test domain");
+        let wrong_roster = VoteContextInput::new(
+            runtime_chain,
+            0,
+            qbind_crypto::SUITE_PQ_RESERVED_1,
+            domain,
+            vec![SnapshotMember::new(
+                0,
+                2,
+                keypair.into_boxed_slice().into_vec(),
+            )],
+        );
+        let refusal = engine
+            .install_received_vote_context(wrong_roster)
+            .expect_err("power mismatch refuses");
+        assert_eq!(refusal.error, ContextInstallError::InvalidContext);
+        assert!(engine.state.received_vote_budget().is_none());
+
+        let (suite_key, _) = MlDsa44Backend::generate_keypair().expect("test keygen");
+        let wrong_suite = VoteContextInput::new(
+            runtime_chain,
+            0,
+            qbind_crypto::SUITE_PQ_RESERVED_2,
+            qbind_wire::pv_signing_domain::ProposalVoteSigningDomainV2::try_new(
+                runtime_chain,
+                TEST_WIRE_CHAIN,
+                [0x31; 32],
+                [0x42; 32],
+            )
+            .expect("valid test domain"),
+            vec![SnapshotMember::new(
+                0,
+                1,
+                suite_key.into_boxed_slice().into_vec(),
+            )],
+        );
+        assert_eq!(
+            engine
+                .install_received_vote_context(wrong_suite)
+                .expect_err("non-suite-100 context refuses")
+                .error,
+            ContextInstallError::InvalidContext
+        );
+        assert!(engine.state.received_vote_budget().is_none());
+    }
+
+    #[test]
+    fn received_vote_context_enforces_roster_capacity_profile() {
+        let (public_key, _) = MlDsa44Backend::generate_keypair().expect("test keygen");
+        let member = SnapshotMember::new(0, 1, public_key);
+        let mut oversized_roster = Vec::with_capacity(1025);
+        oversized_roster.push(member);
+        let input = VoteContextInput::new(
+            qbind_types::QBIND_DEVNET_CHAIN_ID,
+            0,
+            qbind_crypto::SUITE_PQ_RESERVED_1,
+            qbind_wire::pv_signing_domain::ProposalVoteSigningDomainV2::try_new(
+                qbind_types::QBIND_DEVNET_CHAIN_ID,
+                TEST_WIRE_CHAIN,
+                [0x31; 32],
+                [0x42; 32],
+            )
+            .expect("valid test domain"),
+            oversized_roster,
+        );
+        assert_eq!(input.members().len(), 1);
+        assert!(input.members_capacity() > 1024);
+        let roster_ptr = input.members().as_ptr();
+        let roster_capacity = input.members_capacity();
+        let key_ptr = input.members()[0].public_key().as_ptr();
+        let key_capacity = input.members()[0].public_key_capacity();
+        let contents = input.members().to_vec();
+        let mut engine = BasicHotStuffEngine::new(ValidatorId(0), dense_validator_set(1));
+        engine.set_max_retained_evidence_bytes(u64::MAX);
+        let refusal = engine
+            .install_received_vote_context(input)
+            .expect_err("oversized roster capacity refuses at the opt-in boundary");
+        assert_eq!(refusal.error, ContextInstallError::InvalidContext);
+        assert_eq!(refusal.input.members().as_ptr(), roster_ptr);
+        assert_eq!(refusal.input.members_capacity(), roster_capacity);
+        assert_eq!(refusal.input.members()[0].public_key().as_ptr(), key_ptr);
+        assert_eq!(
+            refusal.input.members()[0].public_key_capacity(),
+            key_capacity
+        );
+        assert!(refusal.input.members() == contents.as_slice(), "public key payload differs");
+        assert!(engine.state.received_vote_budget().is_none());
+        assert!(engine.active_received_vote_context.is_none());
+        assert_eq!(engine.state.retained_evidence_bytes(), 0);
+
+        let (public_key, _) = MlDsa44Backend::generate_keypair().expect("test keygen");
+        let valid = received_vote_context(0, public_key).0;
+        assert!(valid.members_capacity() <= 1024);
+        engine
+            .install_received_vote_context(valid)
+            .expect("valid bounded-capacity roster installs");
+        assert!(engine.state.received_vote_budget().is_some());
+        assert!(engine.active_received_vote_context.is_some());
+    }
+
+    #[test]
+    fn received_vote_context_bootstrap_refusals_leave_no_partial_ownership() {
+        use crate::received_vote_evidence::{
+            budget_final_drop_count_for_test, with_allocation_failure_after,
+        };
+
+        fn assert_original_input(
+            refusal: ContextInstallRefusal,
+            roster_ptr: *const SnapshotMember,
+            roster_capacity: usize,
+            key_ptr: *const u8,
+            key_capacity: usize,
+            expected_members: &[SnapshotMember],
+        ) {
+            assert!(refusal.input.members() == expected_members, "context input differs");
+            assert_eq!(refusal.input.members().as_ptr(), roster_ptr);
+            assert_eq!(refusal.input.members_capacity(), roster_capacity);
+            assert_eq!(refusal.input.members()[0].public_key().as_ptr(), key_ptr);
+            assert_eq!(
+                refusal.input.members()[0].public_key_capacity(),
+                key_capacity
+            );
+        }
+
+        let (public_key, _) = MlDsa44Backend::generate_keypair().expect("test keygen");
+        let input = received_vote_context(0, public_key).0;
+        let roster_ptr = input.members().as_ptr();
+        let roster_capacity = input.members_capacity();
+        let key_ptr = input.members()[0].public_key().as_ptr();
+        let key_capacity = input.members()[0].public_key_capacity();
+        let members = input.members().to_vec();
+        let context_charge = input.checked_charge().unwrap();
+        let sizing = EvidenceBudget::try_new(u64::MAX, 0).unwrap();
+        let floor = sizing.occupancy().0;
+        drop(sizing);
+
+        let mut wrapper_pressure = BasicHotStuffEngine::new(ValidatorId(0), dense_validator_set(1));
+        wrapper_pressure.set_max_retained_evidence_bytes(floor + context_charge);
+        let final_drops_before = budget_final_drop_count_for_test();
+        let refusal = wrapper_pressure
+            .install_received_vote_context(input)
+            .expect_err("context reservation succeeds but wrapper admission is refused");
+        assert_eq!(refusal.error, ContextInstallError::Budget);
+        assert_original_input(
+            refusal,
+            roster_ptr,
+            roster_capacity,
+            key_ptr,
+            key_capacity,
+            &members,
+        );
+        assert!(wrapper_pressure.state.received_vote_budget().is_none());
+        assert!(wrapper_pressure.active_received_vote_context.is_none());
+        assert_eq!(
+            budget_final_drop_count_for_test(),
+            final_drops_before + 1,
+            "unpublished bootstrapped budget is destroyed after wrapper refusal"
+        );
+
+        let (public_key, _) = MlDsa44Backend::generate_keypair().expect("test keygen");
+        let input = received_vote_context(0, public_key).0;
+        let roster_ptr = input.members().as_ptr();
+        let roster_capacity = input.members_capacity();
+        let key_ptr = input.members()[0].public_key().as_ptr();
+        let key_capacity = input.members()[0].public_key_capacity();
+        let members = input.members().to_vec();
+        let context_charge = input.checked_charge().unwrap();
+        let mut allocation_failure =
+            BasicHotStuffEngine::new(ValidatorId(0), dense_validator_set(1));
+        allocation_failure.set_max_retained_evidence_bytes(
+            floor + context_charge + std::mem::size_of::<Option<ActiveVoteContext>>() as u64,
+        );
+        let final_drops_before = budget_final_drop_count_for_test();
+        let refusal = with_allocation_failure_after(1, || {
+            allocation_failure.install_received_vote_context(input)
+        })
+        .expect_err("ContextCell allocation failure returns original input");
+        assert_eq!(refusal.error, ContextInstallError::Allocation);
+        assert_original_input(
+            refusal,
+            roster_ptr,
+            roster_capacity,
+            key_ptr,
+            key_capacity,
+            &members,
+        );
+        assert!(allocation_failure.state.received_vote_budget().is_none());
+        assert!(allocation_failure.active_received_vote_context.is_none());
+        assert_eq!(
+            budget_final_drop_count_for_test(),
+            final_drops_before + 1,
+            "unpublished bootstrapped budget is destroyed after context allocation failure"
+        );
+    }
+
+    #[test]
+    fn received_vote_budget_bootstrap_imports_existing_map_qc_once() {
+        let keypairs: Vec<_> = (0..4)
+            .map(|_| MlDsa44Backend::generate_keypair().expect("test keygen"))
+            .collect();
+        let (evidence, domain) = verified_test_qc(&keypairs, &[0, 1, 2]);
+        let qc_charge = evidence.retained_byte_size().unwrap();
+        let members = keypairs
+            .iter()
+            .enumerate()
+            .map(|(index, (public_key, _))| {
+                SnapshotMember::new(
+                    index as u64,
+                    1,
+                    public_key.clone().into_boxed_slice().into_vec(),
+                )
+            })
+            .collect();
+        let input = VoteContextInput::new(
+            qbind_types::QBIND_DEVNET_CHAIN_ID,
+            0,
+            qbind_crypto::SUITE_PQ_RESERVED_1,
+            domain,
+            members,
+        );
+        let context_charge = input.checked_charge().unwrap();
+        let mut engine = BasicHotStuffEngine::new(ValidatorId(0), dense_validator_set(4));
+        engine
+            .state
+            .register_block_with_verified_justification(
+                [0xA0; 32],
+                7,
+                None,
+                evidence,
+            )
+            .expect("verified QC retained through scalar route");
+        assert_eq!(engine.state.retained_evidence_bytes(), qc_charge);
+        assert!(engine.state.received_vote_budget().is_none());
+        engine
+            .install_received_vote_context(input)
+            .expect("bootstrap imports existing map evidence");
+
+        let observer = engine
+            .state
+            .received_vote_budget()
+            .unwrap()
+            .try_clone()
+            .unwrap();
+        let floor = EvidenceBudget::try_new(u64::MAX, 0).unwrap().occupancy().0;
+        let wrapper_charge = std::mem::size_of::<Option<ActiveVoteContext>>() as u64;
+        assert_eq!(engine.state.retained_evidence_bytes(), qc_charge);
+        assert_eq!(
+            observer.occupancy(),
+            (floor + qc_charge + context_charge + wrapper_charge, 0, 1, 0),
+            "existing map-owned QC bytes are imported exactly once"
+        );
+    }
+
+    #[test]
+    fn shared_qc_accounting_enforces_verified_projection_and_allows_legacy_reclamation() {
+        let keypairs: Vec<_> = (0..4)
+            .map(|_| MlDsa44Backend::generate_keypair().expect("test keygen"))
+            .collect();
+        let (large_evidence, domain) = verified_test_qc(&keypairs, &[0, 1, 2, 3]);
+        let (small_evidence, _) = verified_test_qc(&keypairs, &[0, 1, 2]);
+        let large_charge = large_evidence.retained_byte_size().unwrap();
+        let small_charge = small_evidence.retained_byte_size().unwrap();
+        assert!(small_charge < large_charge);
+
+        let members = keypairs
+            .iter()
+            .enumerate()
+            .map(|(index, (public_key, _))| {
+                SnapshotMember::new(
+                    index as u64,
+                    1,
+                    public_key.clone().into_boxed_slice().into_vec(),
+                )
+            })
+            .collect();
+        let input = VoteContextInput::new(
+            qbind_types::QBIND_DEVNET_CHAIN_ID,
+            0,
+            qbind_crypto::SUITE_PQ_RESERVED_1,
+            domain,
+            members,
+        );
+        let mut engine = BasicHotStuffEngine::new(ValidatorId(0), dense_validator_set(4));
+        engine
+            .install_received_vote_context(input)
+            .expect("install context");
+        let baseline = engine
+            .received_vote_evidence_aggregate_bytes()
+            .expect("shared ledger installed")
+            .0;
+        let observer = engine
+            .state
+            .received_vote_budget()
+            .unwrap()
+            .try_clone()
+            .unwrap();
+        macro_rules! assert_shared_accounting {
+            ($map_bytes:expr, $aggregate_bytes:expr, $cap:expr) => {{
+                assert_eq!(engine.state.retained_evidence_bytes(), $map_bytes);
+                assert_eq!(
+                    observer.occupancy(),
+                    ($aggregate_bytes, 0, 1, 0),
+                    "shared committed/pending/context occupancy"
+                );
+                assert_eq!(engine.state.max_retained_evidence_bytes(), $cap);
+            }};
+        }
+        println!(
+            "shared QC accounting: baseline={baseline} four-signers={large_charge} three-signers={small_charge}"
+        );
+        let candidate = [0xA1; 32];
+        engine
+            .state
+            .register_block_with_verified_justification(
+                candidate,
+                7,
+                None,
+                large_evidence.clone(),
+            )
+            .expect("initial QC retention");
+        assert_eq!(
+            engine.state.retained_evidence_bytes(),
+            large_charge,
+            "the legacy scalar remains map-owned QC bytes"
+        );
+        assert_shared_accounting!(large_charge, baseline + large_charge, engine.state.max_retained_evidence_bytes());
+
+        let small_total = baseline + small_charge;
+        engine.set_max_retained_evidence_bytes(small_total - 1);
+        let rejections = engine.state.rejected_evidence_over_budget();
+        let refusal = engine
+            .state
+            .register_block_with_verified_justification(
+                candidate,
+                7,
+                None,
+                large_evidence.clone(),
+            )
+            .expect_err("equal verified replacement above cap refuses");
+        assert!(matches!(
+            refusal,
+            crate::hotstuff_state_engine::EvidenceRetentionError::BudgetExceeded { .. }
+        ));
+        assert_eq!(
+            engine.state.rejected_evidence_over_budget(),
+            rejections + 1,
+            "equal replacement is counted once"
+        );
+        assert_shared_accounting!(large_charge, baseline + large_charge, small_total - 1);
+
+        let rejections = engine.state.rejected_evidence_over_budget();
+        let refusal = engine
+            .state
+            .register_block_with_verified_justification(
+                candidate,
+                7,
+                None,
+                small_evidence.clone(),
+            )
+            .expect_err("shrinking replacement still over cap refuses");
+        assert!(matches!(
+            refusal,
+            crate::hotstuff_state_engine::EvidenceRetentionError::BudgetExceeded { .. }
+        ));
+        assert_eq!(
+            engine.state.rejected_evidence_over_budget(),
+            rejections + 1,
+            "a shrink still over cap is counted once"
+        );
+        assert_shared_accounting!(large_charge, baseline + large_charge, small_total - 1);
+
+        engine.set_max_retained_evidence_bytes(small_total);
+        engine
+            .state
+            .register_block_with_verified_justification(
+                candidate,
+                7,
+                None,
+                small_evidence.clone(),
+            )
+            .expect("shrink projected within cap");
+        assert_shared_accounting!(small_charge, small_total, small_total);
+
+        let second = [0xA2; 32];
+        let rejections = engine.state.rejected_evidence_over_budget();
+        let refusal = engine
+            .state
+            .register_block_with_verified_justification(
+                second,
+                8,
+                None,
+                small_evidence.clone(),
+            )
+            .expect_err("new evidence without headroom refuses");
+        assert!(matches!(
+            refusal,
+            crate::hotstuff_state_engine::EvidenceRetentionError::BudgetExceeded { .. }
+        ));
+        assert_eq!(engine.state.rejected_evidence_over_budget(), rejections + 1);
+        assert_shared_accounting!(small_charge, small_total, small_total);
+
+        let two_small_total = baseline + small_charge * 2;
+        engine.set_max_retained_evidence_bytes(two_small_total);
+        engine
+            .state
+            .register_block_with_verified_justification(
+                second,
+                8,
+                None,
+                small_evidence.clone(),
+            )
+            .expect("new evidence fits with headroom");
+        assert_shared_accounting!(small_charge * 2, two_small_total, two_small_total);
+
+        let growth_total = baseline + small_charge + large_charge;
+        engine.set_max_retained_evidence_bytes(growth_total - 1);
+        let rejections = engine.state.rejected_evidence_over_budget();
+        let refusal = engine
+            .state
+            .register_block_with_verified_justification(
+                candidate,
+                7,
+                None,
+                large_evidence.clone(),
+            )
+            .expect_err("growth without sufficient headroom refuses");
+        assert!(matches!(
+            refusal,
+            crate::hotstuff_state_engine::EvidenceRetentionError::BudgetExceeded { .. }
+        ));
+        assert_eq!(engine.state.rejected_evidence_over_budget(), rejections + 1);
+        assert_shared_accounting!(small_charge * 2, two_small_total, growth_total - 1);
+        engine.set_max_retained_evidence_bytes(growth_total);
+        engine
+            .state
+            .register_block_with_verified_justification(
+                candidate,
+                7,
+                None,
+                large_evidence,
+            )
+            .expect("growth fits with exact headroom");
+        assert_shared_accounting!(small_charge + large_charge, growth_total, growth_total);
+
+        engine.set_max_retained_evidence_bytes(baseline);
+        engine.state.register_block(candidate, 7, None, None);
+        assert_shared_accounting!(small_charge, baseline + small_charge, baseline);
+        engine.state.register_block(second, 8, None, None);
+        assert_shared_accounting!(0, baseline, baseline);
+    }
+
+    #[test]
+    fn verified_proposal_reservation_precedes_effects_and_cancels_on_ordinary_rejection() {
+        let keypairs: Vec<_> = (0..4)
+            .map(|_| MlDsa44Backend::generate_keypair().expect("test keygen"))
+            .collect();
+        let (evidence, domain) = verified_test_qc(&keypairs, &[0, 1, 2]);
+        let members = keypairs
+            .iter()
+            .enumerate()
+            .map(|(index, (public_key, _))| {
+                SnapshotMember::new(
+                    index as u64,
+                    1,
+                    public_key.clone().into_boxed_slice().into_vec(),
+                )
+            })
+            .collect();
+        let input = VoteContextInput::new(
+            qbind_types::QBIND_DEVNET_CHAIN_ID,
+            0,
+            qbind_crypto::SUITE_PQ_RESERVED_1,
+            domain,
+            members,
+        );
+        let mut engine = BasicHotStuffEngine::new(ValidatorId(0), dense_validator_set(4));
+        engine
+            .install_received_vote_context(input)
+            .expect("install context");
+        let baseline = engine
+            .received_vote_evidence_aggregate_bytes()
+            .unwrap()
+            .0;
+        let charge = evidence.retained_byte_size().unwrap();
+        let proposal = proposal_for_test_evidence(1, &evidence, 1);
+        let initial_blocks = engine.state.block_count();
+
+        engine.set_max_retained_evidence_bytes(baseline + charge - 1);
+        let rejected_before = engine.state.rejected_evidence_over_budget();
+        assert!(matches!(
+            engine.on_verified_proposal_event(ValidatorId(1), &proposal, evidence.clone()),
+            Err(VerifiedProposalIngestError::RetentionBudgetExceeded { .. })
+        ));
+        assert_eq!(
+            engine.state.rejected_evidence_over_budget(),
+            rejected_before + 1
+        );
+        assert_eq!(engine.current_view(), 0);
+        assert_eq!(engine.state.block_count(), initial_blocks);
+        assert_eq!(
+            engine.received_vote_evidence_aggregate_bytes().unwrap(),
+            (baseline, 0)
+        );
+
+        engine.set_max_retained_evidence_bytes(baseline + charge);
+        let rejected_before = engine.state.rejected_evidence_over_budget();
+        assert!(engine
+            .on_verified_proposal_event(ValidatorId(0), &proposal, evidence.clone())
+            .expect("ordinary leader rejection")
+            .is_none());
+        assert_eq!(engine.current_view(), 1);
+        assert_eq!(engine.state.block_count(), initial_blocks);
+        assert_eq!(
+            engine.received_vote_evidence_aggregate_bytes().unwrap(),
+            (baseline, 0),
+            "unused reservation is cancelled after allowed view advancement"
+        );
+        assert_eq!(engine.state.rejected_evidence_over_budget(), rejected_before);
+
+        assert!(matches!(
+            engine
+                .on_verified_proposal_event(ValidatorId(1), &proposal, evidence)
+                .expect("admitted verified proposal"),
+            Some(ConsensusEngineAction::BroadcastVote(_))
+        ));
+        assert_eq!(engine.current_view(), 1);
+        assert_eq!(engine.state.block_count(), initial_blocks + 1);
+        assert_eq!(
+            engine.received_vote_evidence_aggregate_bytes().unwrap(),
+            (baseline + charge, 0)
+        );
+    }
+
+    #[test]
+    fn verified_proposal_callback_controlled_unwind_keeps_map_charge_committed() {
+        use std::panic::{catch_unwind, AssertUnwindSafe};
+
+        struct PanicAfterRegistration;
+        impl SafetyDecisionObserver<[u8; 32]> for PanicAfterRegistration {
+            fn observe(&mut self, _: &SafetyDecisionView<'_, [u8; 32]>) {
+                panic!("controlled unwind from verified-Proposal observer");
+            }
+        }
+
+        let keypairs: Vec<_> = (0..4)
+            .map(|_| MlDsa44Backend::generate_keypair().expect("test keygen"))
+            .collect();
+        let (evidence, domain) = verified_test_qc(&keypairs, &[0, 1, 2]);
+        let members = keypairs
+            .iter()
+            .enumerate()
+            .map(|(index, (public_key, _))| {
+                SnapshotMember::new(
+                    index as u64,
+                    1,
+                    public_key.clone().into_boxed_slice().into_vec(),
+                )
+            })
+            .collect();
+        let input = VoteContextInput::new(
+            qbind_types::QBIND_DEVNET_CHAIN_ID,
+            0,
+            qbind_crypto::SUITE_PQ_RESERVED_1,
+            domain,
+            members,
+        );
+        let mut engine = BasicHotStuffEngine::new(ValidatorId(0), dense_validator_set(4));
+        engine.install_received_vote_context(input).unwrap();
+        let observer = engine
+            .state
+            .received_vote_budget()
+            .unwrap()
+            .try_clone()
+            .unwrap();
+        let baseline = observer.occupancy().0;
+        let charge = evidence.retained_byte_size().unwrap();
+        let proposal = proposal_for_test_evidence(1, &evidence, 1);
+        let candidate = BasicHotStuffEngine::<[u8; 32]>::derive_block_id_from_header(
+            ValidatorId(1),
+            1,
+            &proposal.header.parent_block_id,
+        );
+        let mut callback = PanicAfterRegistration;
+        let unwind = catch_unwind(AssertUnwindSafe(|| {
+            engine.on_verified_proposal_event_observed(
+                ValidatorId(1),
+                &proposal,
+                evidence,
+                &mut callback,
+            )
+        }));
+        assert!(unwind.is_err(), "observer panic is caught by the test");
+        assert!(engine.state.verified_justification(&candidate).is_some());
+        assert_eq!(engine.state.retained_evidence_bytes(), charge);
+        assert_eq!(observer.occupancy(), (baseline + charge, 0, 1, 0));
+    }
+
+    #[test]
+    fn shared_ledger_releases_eviction_and_final_map_ownership() {
+        let keypairs = vec![MlDsa44Backend::generate_keypair().expect("test keygen")];
+        let (evidence, _) = verified_test_qc(&keypairs, &[0]);
+        let charge = evidence.retained_byte_size().unwrap();
+        let limits = crate::vote_accumulator::ConsensusLimitsConfig {
+            max_pending_blocks: 1,
+            ..crate::vote_accumulator::ConsensusLimitsConfig::default()
+        };
+        let mut state = HotStuffStateEngine::with_limits(dense_validator_set(1), limits);
+        let budget = EvidenceBudget::try_new(
+            crate::hotstuff_state_engine::DEFAULT_MAX_RETAINED_EVIDENCE_BYTES,
+            0,
+        )
+        .expect("shared ledger");
+        let standing_floor = budget.occupancy().0;
+        state
+            .install_received_vote_budget(budget.try_clone().unwrap())
+            .expect("install ledger");
+
+        state
+            .register_block_with_verified_justification(
+                [0xA3; 32],
+                1,
+                None,
+                evidence.clone(),
+            )
+            .expect("first retained node");
+        state
+            .register_block_with_verified_justification(
+                [0xA4; 32],
+                2,
+                None,
+                evidence,
+            )
+            .expect("second node evicts the safe first node");
+        assert_eq!(state.block_count(), 1);
+        assert_eq!(state.retained_evidence_bytes(), charge);
+        assert_eq!(budget.occupancy().0, standing_floor + charge);
+
+        drop(state);
+        assert_eq!(
+            budget.occupancy(),
+            (standing_floor, 0, 0, 0),
+            "final map teardown releases QC ownership while the ledger observer remains"
+        );
+    }
+
+    #[test]
+    fn received_vote_context_detached_token_survives_reinstall_and_engine_drop() {
+        use crate::received_vote_evidence::budget_final_drop_count_for_test;
+
+        let (public_key, secret_key) = MlDsa44Backend::generate_keypair().expect("test keygen");
+        let (input, domain) = received_vote_context(0, public_key.clone());
+        let context_charge = input.checked_charge().unwrap();
+        let mut engine = BasicHotStuffEngine::new(ValidatorId(0), dense_validator_set(1));
+        engine.install_received_vote_context(input).expect("install context");
+        let observer = engine
+            .state
+            .received_vote_budget()
+            .unwrap()
+            .try_clone()
+            .unwrap();
+        let authority = engine.state.received_vote_budget().unwrap().try_clone().unwrap();
+        let floor = EvidenceBudget::try_new(u64::MAX, 0).unwrap().occupancy().0;
+        let wrapper_charge = std::mem::size_of::<Option<ActiveVoteContext>>() as u64;
+        let token_bytes = std::mem::size_of::<VerifiedVoteToken>() as u64
+            + qbind_crypto::ML_DSA_44_SIGNATURE_SIZE as u64;
+        let installed = floor + context_charge + wrapper_charge;
+        assert_eq!(observer.occupancy(), (installed, 0, 1, 0));
+        engine.set_current_epoch(0);
+        assert!(engine.active_received_vote_context.is_some());
+        assert_eq!(observer.occupancy(), (installed, 0, 1, 0));
+
+        let (duplicate, _) =
+            received_vote_context(0, MlDsa44Backend::generate_keypair().unwrap().0);
+        assert_eq!(
+            engine
+                .install_received_vote_context(duplicate)
+                .expect_err("same-epoch assignment preserves installed identity")
+                .error,
+            ContextInstallError::AlreadyInstalled
+        );
+        let failed_transition = engine
+            .transition_to_epoch(crate::validator_set::EpochId::new(2), dense_validator_set(1))
+            .is_err();
+        assert!(failed_transition);
+        assert!(engine.active_received_vote_context.is_some());
+        let vote = signed_context_vote(0, &secret_key, &domain);
+        let token = engine
+            .admit_verified_received_vote(ValidatorId(0), vote)
+            .expect("valid Vote");
+        assert_eq!(
+            observer.occupancy(),
+            (installed + token_bytes, 0, 1, 0)
+        );
+        engine
+            .transition_to_epoch(crate::validator_set::EpochId::new(1), dense_validator_set(1))
+            .expect("successful epoch transition invalidates active context");
+        assert!(engine.active_received_vote_context.is_none());
+        assert_eq!(
+            observer.occupancy(),
+            (floor + context_charge + token_bytes, 0, 1, 0)
+        );
+
+        let (new_input, _) = received_vote_context(1, public_key);
+        engine
+            .install_received_vote_context(new_input)
+            .expect("reinstallation reuses ledger while old token remains alive");
+        assert!(engine
+            .state
+            .received_vote_budget()
+            .unwrap()
+            .same_authority(&authority));
+        assert_eq!(
+            observer.occupancy(),
+            (
+                floor + 2 * context_charge + wrapper_charge + token_bytes,
+                0,
+                2,
+                0
+            )
+        );
+        drop(token);
+        assert_eq!(
+            observer.occupancy(),
+            (floor + context_charge + wrapper_charge, 0, 1, 0)
+        );
+        let token = engine
+            .admit_verified_received_vote(
+                ValidatorId(0),
+                signed_context_vote(1, &secret_key, &domain),
+            )
+            .expect("admit token from reinstalled context");
+        assert_eq!(
+            observer.occupancy(),
+            (floor + context_charge + wrapper_charge + token_bytes, 0, 1, 0)
+        );
+        drop(engine);
+        assert_eq!(
+            observer.occupancy(),
+            (floor + context_charge + token_bytes, 0, 1, 0),
+            "engine/state destruction leaves the detached token's context alive"
+        );
+        drop(authority);
+        std::thread::spawn(move || drop(token))
+            .join()
+            .expect("detached token final release completes on worker");
+        assert_eq!(
+            observer.occupancy(),
+            (floor, 0, 0, 0),
+            "token release restores standing floor while observer remains"
+        );
+        let final_drops_before = budget_final_drop_count_for_test();
+        drop(observer);
+        assert_eq!(
+            budget_final_drop_count_for_test(),
+            final_drops_before + 1,
+            "dropping the independent observer destroys the final budget owner"
+        );
+    }
+
+    #[test]
+    fn received_vote_context_quota_refuses_and_recovers_through_engine_installation() {
+        const CONTEXT_QUOTA: usize = 16;
+        let (public_key, secret_key) = MlDsa44Backend::generate_keypair().expect("test keygen");
+        let (_, domain) = received_vote_context(0, public_key.clone());
+        let mut engine = BasicHotStuffEngine::new(ValidatorId(0), dense_validator_set(1));
+        let mut tokens = Vec::new();
+        let mut observer = None;
+        let mut context_charge = 0u64;
+        let mut token_bytes = 0u64;
+        let mut floor = 0u64;
+        for epoch in 0..CONTEXT_QUOTA as u64 {
+            let input = received_vote_context(epoch, public_key.clone()).0;
+            if epoch == 0 {
+                context_charge = input.checked_charge().unwrap();
+                engine
+                    .install_received_vote_context(input)
+                    .expect("first context installs");
+                observer = Some(
+                    engine
+                        .state
+                        .received_vote_budget()
+                        .unwrap()
+                        .try_clone()
+                        .unwrap(),
+                );
+                floor = EvidenceBudget::try_new(u64::MAX, 0).unwrap().occupancy().0;
+                token_bytes = std::mem::size_of::<VerifiedVoteToken>() as u64
+                    + qbind_crypto::ML_DSA_44_SIGNATURE_SIZE as u64;
+            } else {
+                engine
+                    .install_received_vote_context(input)
+                    .expect("context installs while old token retains prior cell");
+            }
+            tokens.push(
+                engine
+                    .admit_verified_received_vote(
+                        ValidatorId(0),
+                        signed_context_vote(epoch, &secret_key, &domain),
+                    )
+                    .expect("signed vote is admitted"),
+            );
+            engine
+                .transition_to_epoch(
+                    crate::validator_set::EpochId::new(epoch + 1),
+                    dense_validator_set(1),
+                )
+                .expect("epoch transition detaches context");
+        }
+        let observer = observer.expect("first context created observer");
+        assert_eq!(
+            observer.occupancy(),
+            (
+                floor + CONTEXT_QUOTA as u64 * (context_charge + token_bytes),
+                0,
+                CONTEXT_QUOTA,
+                0
+            )
+        );
+
+        let input = received_vote_context(CONTEXT_QUOTA as u64, public_key).0;
+        let roster_ptr = input.members().as_ptr();
+        let roster_capacity = input.members_capacity();
+        let key_ptr = input.members()[0].public_key().as_ptr();
+        let key_capacity = input.members()[0].public_key_capacity();
+        let contents = input.members().to_vec();
+        let occupancy_before = observer.occupancy();
+        let refusal = engine
+            .install_received_vote_context(input)
+            .expect_err("sixteenth retained context exhausts integrated context quota");
+        assert_eq!(refusal.error, ContextInstallError::ContextQuota);
+        assert!(refusal.input.members() == contents.as_slice(), "context input differs");
+        assert_eq!(refusal.input.members().as_ptr(), roster_ptr);
+        assert_eq!(refusal.input.members_capacity(), roster_capacity);
+        assert_eq!(refusal.input.members()[0].public_key().as_ptr(), key_ptr);
+        assert_eq!(
+            refusal.input.members()[0].public_key_capacity(),
+            key_capacity
+        );
+        assert_eq!(observer.occupancy(), occupancy_before);
+        assert!(engine.active_received_vote_context.is_none());
+
+        tokens.clear();
+        assert_eq!(observer.occupancy(), (floor, 0, 0, 0));
+        engine
+            .install_received_vote_context(refusal.input)
+            .expect("context quota is released and installation retries");
+        let wrapper_charge = std::mem::size_of::<Option<ActiveVoteContext>>() as u64;
+        assert_eq!(
+            observer.occupancy(),
+            (floor + context_charge + wrapper_charge, 0, 1, 0)
+        );
+    }
+
+    #[test]
+    fn received_vote_state_mut_invalidation_stays_terminal_after_state_replacement() {
+        let (public_key, _) = MlDsa44Backend::generate_keypair().expect("test keygen");
+        let input = received_vote_context(0, public_key).0;
+        let context_charge = input.checked_charge().unwrap();
+        let mut engine = BasicHotStuffEngine::new(ValidatorId(0), dense_validator_set(1));
+        engine.install_received_vote_context(input).unwrap();
+        let observer = engine
+            .state
+            .received_vote_budget()
+            .unwrap()
+            .try_clone()
+            .unwrap();
+        let floor = EvidenceBudget::try_new(u64::MAX, 0).unwrap().occupancy().0;
+        let wrapper_charge = std::mem::size_of::<Option<ActiveVoteContext>>() as u64;
+        assert_eq!(
+            observer.occupancy(),
+            (floor + context_charge + wrapper_charge, 0, 1, 0)
+        );
+        let _ = engine.state_mut();
+        assert_eq!(observer.occupancy(), (floor, 0, 0, 0));
+        let refusal = engine
+            .install_received_vote_context(
+                received_vote_context(0, MlDsa44Backend::generate_keypair().unwrap().0).0,
+            )
+            .expect_err("state_mut permanently disables producer reinstallation");
+        assert_eq!(refusal.error, ContextInstallError::InvalidContext);
+        assert!(engine.state.received_vote_budget().is_some());
+
+        let moved_state = std::mem::replace(
+            &mut engine.state,
+            HotStuffStateEngine::new(dense_validator_set(1)),
+        );
+        drop(moved_state);
+        assert!(engine.state.received_vote_budget().is_none());
+        let refusal = engine
+            .install_received_vote_context(
+                received_vote_context(0, MlDsa44Backend::generate_keypair().unwrap().0).0,
+            )
+            .expect_err("replacing state does not reset terminal producer disable");
+        assert_eq!(refusal.error, ContextInstallError::InvalidContext);
+        assert!(engine.state.received_vote_budget().is_none());
+        assert_eq!(observer.occupancy(), (floor, 0, 0, 0));
     }
 
     #[test]
