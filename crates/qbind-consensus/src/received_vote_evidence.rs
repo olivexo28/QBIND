@@ -77,6 +77,57 @@ thread_local! {
         const { std::cell::Cell::new(None) };
     static TABLE_TRANSFER_BEFORE_SHRINK: std::cell::Cell<Option<(usize, usize, u64, (u64, u64, usize, usize, usize, usize))>> =
         const { std::cell::Cell::new(None) };
+    static QC_COMMIT_FAULT: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    static QC_CLEANUP_OBSERVATIONS: std::cell::RefCell<Vec<(&'static str, (u64, u64, usize, usize, usize, usize))>> =
+        const { std::cell::RefCell::new(Vec::new()) };
+    static QC_SIGNATURE_TRANSFERS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    static QC_DESCRIPTOR_SIGNATURE_DROPS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    static QC_RELEASE_TRACE: std::cell::RefCell<Option<Vec<(&'static str, u64, (u64, u64, usize, usize, usize, usize))>>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+#[cfg(test)]
+pub(crate) fn with_qc_commit_failure<T>(operation: impl FnOnce() -> T) -> T {
+    struct Restore(bool);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            QC_COMMIT_FAULT.with(|slot| slot.set(self.0));
+        }
+    }
+    let _restore = Restore(QC_COMMIT_FAULT.with(|slot| slot.replace(true)));
+    QC_CLEANUP_OBSERVATIONS.with(|events| events.borrow_mut().clear());
+    operation()
+}
+
+#[cfg(test)]
+pub(crate) fn qc_cleanup_observations(
+) -> Vec<(&'static str, (u64, u64, usize, usize, usize, usize))> {
+    QC_CLEANUP_OBSERVATIONS.with(|events| events.borrow().clone())
+}
+
+#[cfg(test)]
+pub(crate) fn qc_signature_transfers() -> usize {
+    QC_SIGNATURE_TRANSFERS.with(std::cell::Cell::get)
+}
+
+#[cfg(test)]
+pub(crate) fn qc_descriptor_signature_drops() -> usize {
+    QC_DESCRIPTOR_SIGNATURE_DROPS.with(std::cell::Cell::get)
+}
+
+#[cfg(test)]
+pub(crate) fn with_qc_release_trace(
+    operation: impl FnOnce(),
+) -> Vec<(&'static str, u64, (u64, u64, usize, usize, usize, usize))> {
+    struct Restore(Option<Vec<(&'static str, u64, (u64, u64, usize, usize, usize, usize))>>);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            QC_RELEASE_TRACE.with(|trace| *trace.borrow_mut() = self.0.take());
+        }
+    }
+    let _restore = Restore(QC_RELEASE_TRACE.with(|trace| trace.replace(Some(Vec::new()))));
+    operation();
+    QC_RELEASE_TRACE.with(|trace| trace.borrow_mut().take().expect("active release trace"))
 }
 
 #[cfg(test)]
@@ -339,6 +390,10 @@ impl<T: EvidenceElement> Drop for ExactBuffer<T> {
             }
         }
         drop(allocation);
+        #[cfg(test)]
+        if std::any::TypeId::of::<T>() == std::any::TypeId::of::<Vec<u8>>() {
+            QC_DESCRIPTOR_SIGNATURE_DROPS.with(|count| count.set(count.get() + initialized));
+        }
     }
 }
 
@@ -748,6 +803,10 @@ impl Drop for PendingCharge {
                 std::process::abort();
             }
             self.active = false;
+            #[cfg(test)]
+            if self.class == ReservationClass::Bytes && QC_COMMIT_FAULT.with(std::cell::Cell::get) {
+                record_qc_cleanup("after_pending_release", self);
+            }
         }
     }
 }
@@ -769,6 +828,17 @@ impl std::fmt::Debug for CommittedCharge {
 
 impl Drop for CommittedCharge {
     fn drop(&mut self) {
+        #[cfg(test)]
+        QC_RELEASE_TRACE.with(|trace| {
+            if let Some(events) = trace.borrow_mut().as_mut() {
+                let class = match self.class {
+                    ReservationClass::Bytes => "Bytes",
+                    ReservationClass::Context => "Context",
+                    ReservationClass::Report => "Report",
+                };
+                events.push((class, self.bytes, self.budget.occupancy()));
+            }
+        });
         if self
             .budget
             .lock()
@@ -1555,10 +1625,32 @@ pub(crate) struct ReceivedVoteQcWire {
     _bytes_lease: CommittedCharge,
 }
 
+struct QcVecTransferControlFrame<T: VecTransfer> {
+    source: ExactBuffer<T>,
+    transfer: ManuallyDrop<ExactBuffer<T>>,
+    pointer: *mut T,
+    initialized: usize,
+    capacity: usize,
+    destination: Vec<T>,
+}
+
 struct QcBufferBuildFrame<'a> {
     report_owner: Option<&'a ReceivedVoteQcReportOwner>,
     token: Option<&'a VerifiedVoteToken>,
     table: Option<&'a ReceivedVoteEvidenceTable<[u8; 32]>>,
+    membership: Option<&'a [u64; 16]>,
+    signer_count: usize,
+    roster_len: usize,
+    view: u64,
+    block_id: [u8; 32],
+    allow_incoming: bool,
+    validator: usize,
+    word: usize,
+    id: u16,
+    selected: Option<&'a Vote>,
+    source: Option<&'a Vote>,
+    byte: Option<&'a u8>,
+    metadata_result: Option<Result<(), ReceivedVoteQcStageError>>,
     common: Option<ReceivedVoteQcCommonFields>,
     fields: ReceivedVoteQcCommonFields,
     highest: Option<usize>,
@@ -1570,32 +1662,48 @@ struct QcBufferBuildFrame<'a> {
     p_bytes: u64,
     bitmap_allocation_result: Option<Result<ExactBuffer<u8>, EvidenceAllocError>>,
     bitmap: Option<ExactBuffer<u8>>,
-    bitmap_push_result: Option<Result<(), EvidenceAllocError>>,
+    bitmap_push_result: Option<Result<(), u8>>,
     bitmap_vec: Option<Vec<u8>>,
     descriptor_allocation_result: Option<Result<ExactBuffer<Vec<u8>>, EvidenceAllocError>>,
     descriptors: Option<ExactBuffer<Vec<u8>>>,
     signature_allocation_result: Option<Result<ExactBuffer<u8>, EvidenceAllocError>>,
     signature: Option<ExactBuffer<u8>>,
-    signature_push_result: Option<Result<(), EvidenceAllocError>>,
+    signature_push_result: Option<Result<(), u8>>,
     signature_vec: Option<Vec<u8>>,
-    descriptor_push_result: Option<Result<(), EvidenceAllocError>>,
+    descriptor_push_result: Option<Result<(), Vec<u8>>>,
     descriptors_vec: Option<Vec<Vec<u8>>>,
     pending: Option<PendingCharge>,
     pending_result: Option<Result<PendingCharge, ReceivedVoteQcStageError>>,
+    raw_pending_result: Option<Result<PendingCharge, LedgerError>>,
+    commit_argument: Option<PendingCharge>,
     commit_result: Option<Result<CommittedCharge, (PendingCharge, LedgerError)>>,
+    refused_pending: Option<PendingCharge>,
+    commit_error: Option<LedgerError>,
+    mapped_commit_error: Option<ReceivedVoteQcStageError>,
+    bytes_lease: Option<CommittedCharge>,
     qc: Option<qbind_wire::consensus::QuorumCertificate>,
     wire: Option<ReceivedVoteQcWire>,
     result: Option<Result<ReceivedVoteQcWirePreparation, ReceivedVoteQcStageError>>,
+    mapped_allocation_result: Option<Result<ExactBuffer<u8>, ReceivedVoteQcStageError>>,
+    mapped_descriptor_allocation_result:
+        Option<Result<ExactBuffer<Vec<u8>>, ReceivedVoteQcStageError>>,
+    mapped_push_result: Option<Result<(), ReceivedVoteQcStageError>>,
+    byte_transfer: QcVecTransferControlFrame<u8>,
+    descriptor_transfer: QcVecTransferControlFrame<Vec<u8>>,
 }
 
 struct QcAdmissionControlFrame {
     budget_result: Option<Result<BudgetHandle, LedgerError>>,
     budget: Option<BudgetHandle>,
     reserve_result: Option<Result<PendingCharge, ReceivedVoteQcStageError>>,
+    raw_reserve_result: Option<Result<PendingCharge, LedgerError>>,
     pending: Option<PendingCharge>,
     commit_result: Option<Result<CommittedCharge, (PendingCharge, LedgerError)>>,
+    mapped_commit_result: Option<Result<CommittedCharge, ReceivedVoteQcStageError>>,
     report_lease: Option<CommittedCharge>,
     context_result: Option<Result<ContextHandle, LedgerError>>,
+    source_context: Option<ContextHandle>,
+    mapped_context_result: Option<Result<ContextHandle, ReceivedVoteQcStageError>>,
     report_owner: Option<ReceivedVoteQcReportOwner>,
     result: Option<Result<ReceivedVoteQcReportOwner, ReceivedVoteQcStageError>>,
 }
@@ -1832,6 +1940,8 @@ impl ReceivedVoteQcReportOwner {
             descriptors
                 .try_push(signature.into_vec())
                 .map_err(|_| ReceivedVoteQcStageError::Invariant)?;
+            #[cfg(test)]
+            QC_SIGNATURE_TRANSFERS.with(|count| count.set(count.get() + 1));
         }
         let qc = qbind_wire::consensus::QuorumCertificate {
             version: fields.version,
@@ -1845,14 +1955,26 @@ impl ReceivedVoteQcReportOwner {
             signer_bitmap: bitmap.into_vec(),
             signatures: descriptors.into_vec(),
         };
-        let bytes_lease = pending.commit().map_err(|(_, error)| match error {
-            LedgerError::Admission => ReceivedVoteQcStageError::StageBytes,
-            LedgerError::Arithmetic => ReceivedVoteQcStageError::Arithmetic,
-            LedgerError::Invariant | LedgerError::WrongReservationKind => {
-                ReceivedVoteQcStageError::Invariant
+        let bytes_lease = match commit_qc_backing(pending) {
+            Ok(lease) => lease,
+            Err((pending, error)) => {
+                let error = match error {
+                    LedgerError::Admission => ReceivedVoteQcStageError::StageBytes,
+                    LedgerError::Arithmetic => ReceivedVoteQcStageError::Arithmetic,
+                    LedgerError::Invariant | LedgerError::WrongReservationKind => {
+                        ReceivedVoteQcStageError::Invariant
+                    }
+                    _ => ReceivedVoteQcStageError::Commit,
+                };
+                #[cfg(test)]
+                record_qc_cleanup("before_backing_drop", &pending);
+                drop(qc);
+                #[cfg(test)]
+                record_qc_cleanup("after_backing_drop", &pending);
+                drop(pending);
+                return Err(error);
             }
-            _ => ReceivedVoteQcStageError::Commit,
-        })?;
+        };
         Ok(ReceivedVoteQcWirePreparation::Complete(
             ReceivedVoteQcWire {
                 qc,
@@ -1860,6 +1982,24 @@ impl ReceivedVoteQcReportOwner {
             },
         ))
     }
+}
+
+fn commit_qc_backing(
+    pending: PendingCharge,
+) -> Result<CommittedCharge, (PendingCharge, LedgerError)> {
+    #[cfg(test)]
+    if QC_COMMIT_FAULT.with(std::cell::Cell::get) {
+        // Defensive control: return the valid reservation without changing the ledger.
+        return Err((pending, LedgerError::Allocation));
+    }
+    pending.commit()
+}
+
+#[cfg(test)]
+fn record_qc_cleanup(phase: &'static str, pending: &PendingCharge) {
+    QC_CLEANUP_OBSERVATIONS.with(|events| {
+        events.borrow_mut().push((phase, pending.budget.occupancy()));
+    });
 }
 
 fn map_qc_alloc_error(error: EvidenceAllocError) -> ReceivedVoteQcStageError {

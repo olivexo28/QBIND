@@ -2415,3 +2415,42 @@ and the required node build passed again; source and session history were preser
 §13.6 whole-lifecycle INCOMPLETE; activation DISABLED; public DevNet NO-GO; durable anti-rollback
 NOT-ESTABLISHED; C4/C5 OPEN. No O4, production caller/current-authority integration, signing/delivery,
 activation, deployment, D15, or Run 423 is included.
+
+#### Run 422 bounded signed-QC ownership and acceptance correction
+
+Starting from clean `d6e8bdb61173ff4fb3c8a454911da9dd45a3b0f3` (tree
+`1870829eb5b10fa633926e2e326002deedf0c8e0`), the four-path correction retains destination pending P
+through complete QC/nested-backing destruction on commit refusal, releasing P only afterward.
+A scoped test-only commit fault returns a valid untouched reservation into the real cleanup branch;
+this is defensive-error-path evidence, not an observed production exploit or ledger-corruption test.
+
+Returned reports are now opaque owners with private fields and borrowed `actual()`/`outcome()`
+inspection only. There is no owned-outcome extraction separating existing QC backing from its source
+context, A, or P. A detached complete report remains verifiable after engine/context teardown, and
+release observations show P, then source context, then A destruction. The independent final ledger
+baseline is `(80,0,0,0,0,0)`.
+
+The compiler-derived corrected A is `2096 + max(288,1600) = 3696` B. The inventory includes actual
+`Result<(),u8>` byte pushes and `Result<(),Vec<u8>>` descriptor pushes; partial signature owners,
+transferred Vecs, raw/mapped reservation/result carriers, pending-error cleanup, constructor overlap,
+and explicit byte/descriptor transfer controls. It conservatively sums some disjoint controls and
+retains full token-frame coverage despite the existing token charge; it is not an RSS bound. The old
+inventory mismatch alone does not establish a numerical bound violation. Earlier A=2848 and validation
+remain historical, not correction-revision results. P remains 7333/9777 B for three/four signers.
+
+All 14 signed-QC focused tests passed; the four new exact selectors each selected and passed 1 test.
+The full locked consensus suite passed 951, failed 0, ignored 21; overlapping focused results are not
+added to that total. The new controls cover P pressure after successful Report admission, allocation
+failure after one nested signature transfer, defensive commit cleanup, and detached opaque ownership.
+Literal Miri/downstream commands and results are reconciled in the corresponding D7 entry.
+Default-checking Miri passed the new commit-cleanup, nested partial-transfer, and detached-owner
+selectors (1 test each, 0 failed/ignored, no disabled checks or Miri-only crypto substitutes).
+The node build passed; default-feature node test compilation listed 343 executable targets and exited
+0 using the explicitly reported command-local `CARGO_PROFILE_TEST_STRIP=symbols` and
+`CARGO_BUILD_JOBS=2` override. This is compilation, not execution or an unmodified-profile pass.
+Scoped node artifact cleanup restored 5.2 GiB headroom, and the node build passed again afterward.
+
+`D7D14_STORAGE_COMPONENT=IMPLEMENTED-ISOLATED`; `D7D14_STORAGE_ACCEPTANCE=PASS-ACCEPTED-SUBSET`;
+§13.6 whole-lifecycle INCOMPLETE; activation DISABLED; public DevNet NO-GO; durable anti-rollback
+NOT-ESTABLISHED; C4/C5 OPEN. No production caller, O4, activation, deployment, D15, or Run 423.
+This correction is not independent source-review acceptance.

@@ -1537,11 +1537,42 @@ pub(crate) enum ReceivedVoteQcOutcome {
     LogicalError(QcValidationError),
 }
 
-pub(crate) struct ReceivedVoteQcReport {
-    pub(crate) actual: ReceivedVoteQcEventSummary,
-    pub(crate) outcome: ReceivedVoteQcOutcome,
-    pub(crate) _provenance: ReceivedVoteQcReportOwner,
+mod received_vote_qc_report {
+    use super::{
+        ReceivedVoteQcEventSummary, ReceivedVoteQcOutcome, ReceivedVoteQcReportOwner,
+    };
+
+    pub(crate) struct ReceivedVoteQcReport {
+        actual: ReceivedVoteQcEventSummary,
+        outcome: ReceivedVoteQcOutcome,
+        provenance: ReceivedVoteQcReportOwner,
+    }
+
+    impl ReceivedVoteQcReport {
+        pub(super) fn new(
+            actual: ReceivedVoteQcEventSummary,
+            outcome: ReceivedVoteQcOutcome,
+            provenance: ReceivedVoteQcReportOwner,
+        ) -> Self {
+            Self { actual, outcome, provenance }
+        }
+
+        pub(crate) fn actual(&self) -> &ReceivedVoteQcEventSummary {
+            &self.actual
+        }
+
+        pub(crate) fn outcome(&self) -> &ReceivedVoteQcOutcome {
+            &self.outcome
+        }
+
+        #[cfg(test)]
+        pub(super) fn report_charge_for_test(&self) -> u64 {
+            self.provenance.report_charge_for_test()
+        }
+    }
 }
+
+use received_vote_qc_report::ReceivedVoteQcReport;
 
 struct ReceivedVoteQcCandidateSeal {
     block_id: [u8; 32],
@@ -1566,6 +1597,27 @@ struct ReceivedVoteQcRouteControlFrame {
     report: Option<ReceivedVoteQcReport>,
     refusal: Option<ReceivedVoteQcRefusal>,
     return_carrier: Option<Result<ReceivedVoteQcReport, ReceivedVoteQcRefusal>>,
+    staged_incomplete: Option<ReceivedVoteQcIncomplete>,
+    mapped_incomplete: Option<ReceivedVoteQcIncomplete>,
+    logical_qc: Option<QuorumCertificate<[u8; 32]>>,
+    qc_summary: Option<ReceivedVoteQcSummary>,
+    voter: ValidatorId,
+    view: u64,
+    block_id: [u8; 32],
+    control_bytes: u64,
+    is_equivocation: bool,
+    projected_disposition: VoteAccumulatorDisposition,
+    cursor: Option<ValidatorId>,
+    signer: Option<ValidatorId>,
+    raw: usize,
+    roster_len: usize,
+    word: usize,
+    incoming_index: usize,
+    incoming_present: bool,
+    evidence: ReceivedVoteEvidenceDisposition,
+    still_retained: bool,
+    view_advanced: bool,
+    correspondence_matches: bool,
 }
 
 /// Peer-learned certified block material used by restore catchup.
@@ -3007,8 +3059,8 @@ impl BasicHotStuffEngine<[u8; 32]> {
                 }
             }
         };
-        Ok(ReceivedVoteQcReport {
-            actual: ReceivedVoteQcEventSummary {
+        Ok(ReceivedVoteQcReport::new(
+            ReceivedVoteQcEventSummary {
                 history: report.history,
                 accumulator: report.accumulator,
                 evidence,
@@ -3016,8 +3068,8 @@ impl BasicHotStuffEngine<[u8; 32]> {
                 qc: qc_summary,
             },
             outcome,
-            _provenance: provenance,
-        })
+            provenance,
+        ))
     }
 
     pub(crate) fn install_received_vote_context(
@@ -5329,9 +5381,9 @@ mod tests {
                 .invoke_verified_received_vote_qc(token)
                 .expect("invoke signed Vote");
             if index < 2 {
-                assert!(matches!(report.outcome, ReceivedVoteQcOutcome::NoQc));
+                assert!(matches!(report.outcome(), ReceivedVoteQcOutcome::NoQc));
             } else {
-                assert!(matches!(report.outcome, ReceivedVoteQcOutcome::Complete(_)));
+                assert!(matches!(report.outcome(), ReceivedVoteQcOutcome::Complete(_)));
             }
         }
 
@@ -5352,14 +5404,14 @@ mod tests {
             .invoke_verified_received_vote_qc(token)
             .expect("invoke conflicting duplicate");
         assert!(matches!(
-            report.actual.accumulator,
+            report.actual().accumulator,
             Some(Ok(VoteAccumulatorDisposition::Duplicate))
         ));
         assert_eq!(
-            report.actual.evidence,
+            report.actual().evidence,
             ReceivedVoteEvidenceDisposition::ExistingSignedFieldsConflict
         );
-        let ReceivedVoteQcOutcome::Complete(wire) = report.outcome else {
+        let ReceivedVoteQcOutcome::Complete(wire) = report.outcome() else {
             panic!("retained compatible evidence must produce a complete QC");
         };
         assert_eq!(wire.qc().round, 9);
@@ -5418,9 +5470,9 @@ mod tests {
         }
         let mixed_report = final_report.expect("third vote report");
         let before = final_before.expect("third vote pre-invocation ledger");
-        assert!(mixed_report.actual.qc.is_some());
+        assert!(mixed_report.actual().qc.is_some());
         assert!(matches!(
-            mixed_report.outcome,
+            mixed_report.outcome(),
             ReceivedVoteQcOutcome::Incomplete(
                 ReceivedVoteQcIncomplete::CommonFieldsMismatch(2)
             )
@@ -5429,7 +5481,7 @@ mod tests {
             mixed_observer.full_occupancy_for_test().0,
             before
                 .0
-                .checked_add(mixed_report._provenance.report_charge_for_test())
+                .checked_add(mixed_report.report_charge_for_test())
                 .and_then(|bytes| {
                     bytes.checked_sub(std::mem::size_of::<VerifiedVoteToken>() as u64)
                 })
@@ -5469,9 +5521,9 @@ mod tests {
         let report = legacy
             .invoke_verified_received_vote_qc(token)
             .expect("invoke final signed Vote");
-        assert!(report.actual.qc.is_some());
+        assert!(report.actual().qc.is_some());
         assert!(matches!(
-            report.outcome,
+            report.outcome(),
             ReceivedVoteQcOutcome::Incomplete(ReceivedVoteQcIncomplete::MissingEvidence(0))
         ));
     }
@@ -5522,14 +5574,14 @@ mod tests {
                 .invoke_verified_received_vote_qc(token)
                 .expect("invoke signed Vote");
             if index < 2 {
-                assert!(matches!(report.outcome, ReceivedVoteQcOutcome::NoQc));
+                assert!(matches!(report.outcome(), ReceivedVoteQcOutcome::NoQc));
             } else {
                 completed = Some(report);
             }
         }
         let report = completed.expect("third Vote report");
-        assert!(report.actual.qc.is_some());
-        let ReceivedVoteQcOutcome::Complete(wire) = &report.outcome else {
+        assert!(report.actual().qc.is_some());
+        let ReceivedVoteQcOutcome::Complete(wire) = report.outcome() else {
             panic!("certificate was copied before reconciliation removed source evidence");
         };
         assert_eq!(wire.qc().signatures.len(), 3);
@@ -5565,6 +5617,11 @@ mod tests {
             .expect("admit signed Vote");
         let token_ptr = token.vote().signature.as_ptr();
         let token_capacity = token.vote().signature.capacity();
+        let expected_vote = token.vote().clone();
+        let callbacks = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        engine.set_progress_recorder(Arc::new(QcCorrectionCallbacks(Arc::clone(&callbacks))));
+        engine.set_validator_vote_recorder(Arc::new(QcCorrectionCallbacks(Arc::clone(&callbacks))));
+        let invocations = RECEIVED_VOTE_LOGICAL_INVOCATIONS.with(std::cell::Cell::get);
         let before = observer.full_occupancy_for_test();
         engine.state.set_max_retained_evidence_bytes(before.0);
         let refusal = match engine.invoke_verified_received_vote_qc(token) {
@@ -5577,8 +5634,11 @@ mod tests {
         );
         assert_eq!(refusal.token.vote().signature.as_ptr(), token_ptr);
         assert_eq!(refusal.token.vote().signature.capacity(), token_capacity);
+        assert!(refusal.token.vote() == &expected_vote, "returned Vote differs (redacted)");
         assert_eq!(observer.full_occupancy_for_test(), before);
         assert_eq!(engine.state.max_retained_evidence_bytes(), before.0);
+        assert_eq!(RECEIVED_VOTE_LOGICAL_INVOCATIONS.with(std::cell::Cell::get), invocations);
+        assert_eq!(callbacks.load(std::sync::atomic::Ordering::Relaxed), 0);
 
         engine.state.set_max_retained_evidence_bytes(u64::MAX);
         let restored_cap = engine.state.max_retained_evidence_bytes();
@@ -5597,15 +5657,18 @@ mod tests {
             );
             assert_eq!(refusal.token.vote().signature.as_ptr(), token_ptr);
             assert_eq!(refusal.token.vote().signature.capacity(), token_capacity);
+            assert!(refusal.token.vote() == &expected_vote, "returned Vote differs (redacted)");
             assert_eq!(observer.full_occupancy_for_test(), before);
             assert_eq!(engine.state.max_retained_evidence_bytes(), restored_cap);
+            assert_eq!(RECEIVED_VOTE_LOGICAL_INVOCATIONS.with(std::cell::Cell::get), invocations);
+            assert_eq!(callbacks.load(std::sync::atomic::Ordering::Relaxed), 0);
             token = refusal.token;
         }
 
         let retry = engine
             .invoke_verified_received_vote_qc(token)
             .expect("retry after allocation refusal");
-        assert!(matches!(retry.outcome, ReceivedVoteQcOutcome::Complete(_)));
+        assert!(matches!(retry.outcome(), ReceivedVoteQcOutcome::Complete(_)));
     }
 
     #[test]
@@ -5628,6 +5691,12 @@ mod tests {
             .expect("admit signed Vote");
         let signature_ptr = token.vote().signature.as_ptr();
         let signature_capacity = token.vote().signature.capacity();
+        let expected_vote = token.vote().clone();
+        let cap = engine.state.max_retained_evidence_bytes();
+        let callbacks = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        engine.set_progress_recorder(Arc::new(QcCorrectionCallbacks(Arc::clone(&callbacks))));
+        engine.set_validator_vote_recorder(Arc::new(QcCorrectionCallbacks(Arc::clone(&callbacks))));
+        let invocations = RECEIVED_VOTE_LOGICAL_INVOCATIONS.with(std::cell::Cell::get);
         let control_bytes = received_vote_qc_control_charge().unwrap();
         let mut held_reports = Vec::with_capacity(1024);
         for _ in 0..1024 {
@@ -5653,15 +5722,270 @@ mod tests {
             signature_capacity
         );
         assert_eq!(observer.full_occupancy_for_test(), before);
+        assert!(refusal.token.vote() == &expected_vote, "returned Vote differs (redacted)");
+        assert_eq!(engine.state.max_retained_evidence_bytes(), cap);
+        assert_eq!(RECEIVED_VOTE_LOGICAL_INVOCATIONS.with(std::cell::Cell::get), invocations);
+        assert_eq!(callbacks.load(std::sync::atomic::Ordering::Relaxed), 0);
 
         drop(held_reports.pop());
         let report = engine
             .invoke_verified_received_vote_qc(refusal.token)
             .expect("retry after releasing one report slot");
-        assert!(matches!(report.outcome, ReceivedVoteQcOutcome::Complete(_)));
+        assert!(matches!(report.outcome(), ReceivedVoteQcOutcome::Complete(_)));
         drop(report);
         drop(held_reports);
         assert_eq!(observer.full_occupancy_for_test().4, 0);
+    }
+
+    #[derive(Debug)]
+    struct QcCorrectionCallbacks(Arc<std::sync::atomic::AtomicUsize>);
+
+    impl ConsensusProgressRecorder for QcCorrectionCallbacks {
+        fn record_qc_formed(&self) { self.bump(); }
+        fn record_vote_observed(&self, _: bool) { self.bump(); }
+        fn record_view_change(&self, _: u64, _: u64) { self.bump(); }
+        fn record_leader_change(&self) { self.bump(); }
+        fn reset_current_view_votes(&self) { self.bump(); }
+    }
+
+    impl ValidatorVoteRecorder for QcCorrectionCallbacks {
+        fn on_validator_vote(&self, _: ValidatorId, _: u64) { self.bump(); }
+    }
+
+    impl QcCorrectionCallbacks {
+        fn bump(&self) {
+            self.0.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        }
+    }
+
+    struct QcCorrectionFixture {
+        engine: BasicHotStuffEngine<[u8; 32]>,
+        token: Option<VerifiedVoteToken>,
+        observer: EvidenceBudget,
+        callbacks: Arc<std::sync::atomic::AtomicUsize>,
+        domain: qbind_wire::pv_signing_domain::ProposalVoteSigningDomainV2,
+        keys: ContextTestKeys,
+    }
+
+    impl QcCorrectionFixture {
+        fn new() -> Self {
+            let keypairs: Vec<_> = (0..4)
+                .map(|_| MlDsa44Backend::generate_keypair().expect("test keygen"))
+                .collect();
+            let domain = qbind_wire::pv_signing_domain::ProposalVoteSigningDomainV2::try_new(
+                qbind_types::QBIND_DEVNET_CHAIN_ID, TEST_WIRE_CHAIN, [0xD1; 32], [0xD2; 32],
+            ).unwrap();
+            let mut engine = BasicHotStuffEngine::new(ValidatorId(0), dense_validator_set(4));
+            engine.install_received_vote_context(
+                multi_member_vote_context(&keypairs, 0, &domain),
+            ).unwrap();
+            for index in 0usize..2 {
+                let vote = signed_member_vote(
+                    0, index as u16, 1, 9, [0xD3; 32], &keypairs[index].1, &domain,
+                );
+                let token = engine.admit_verified_received_vote(
+                    ValidatorId(index as u64), vote,
+                ).unwrap();
+                let report = engine.invoke_verified_received_vote_qc(token).unwrap();
+                assert!(matches!(report.outcome(), ReceivedVoteQcOutcome::NoQc));
+            }
+            let vote = signed_member_vote(0, 2, 1, 9, [0xD3; 32], &keypairs[2].1, &domain);
+            let token = engine.admit_verified_received_vote(ValidatorId(2), vote).unwrap();
+            let observer = engine.state.received_vote_budget().unwrap().try_clone().unwrap();
+            let callbacks = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+            engine.set_progress_recorder(Arc::new(QcCorrectionCallbacks(Arc::clone(&callbacks))));
+            engine.set_validator_vote_recorder(Arc::new(QcCorrectionCallbacks(Arc::clone(&callbacks))));
+            let keys = ContextTestKeys(keypairs.into_iter().enumerate().map(|(index, (key, _))| {
+                (ValidatorId(index as u64), (qbind_crypto::SUITE_PQ_RESERVED_1, key))
+            }).collect());
+            Self { engine, token: Some(token), observer, callbacks, domain, keys }
+        }
+
+        fn invoke(&mut self) -> Result<ReceivedVoteQcReport, ReceivedVoteQcRefusal> {
+            self.engine.invoke_verified_received_vote_qc(self.token.take().unwrap())
+        }
+
+        fn verify(&self, report: &ReceivedVoteQcReport) {
+            let ReceivedVoteQcOutcome::Complete(wire) = report.outcome() else {
+                panic!("expected a complete wire certificate");
+            };
+            let registry = crate::crypto_verifier::SimpleBackendRegistry::with_backend(
+                qbind_crypto::SUITE_PQ_RESERVED_1, Arc::new(MlDsa44Backend),
+            );
+            verify_quorum_certificate_with_domain(
+                wire.qc(), &self.domain, 0, self.engine.validators(), &self.keys, &registry,
+            ).expect("complete retry certificate verifies");
+        }
+    }
+
+    struct QcRefusalWitness {
+        vote: qbind_wire::consensus::Vote,
+        signature_ptr: *const u8,
+        signature_capacity: usize,
+        occupancy: (u64, u64, usize, usize, usize, usize),
+        cap: u64,
+        invocations: usize,
+        callbacks: usize,
+        current_view: u64,
+        vote_count: usize,
+    }
+
+    impl QcRefusalWitness {
+        fn capture(fixture: &QcCorrectionFixture) -> Self {
+            let vote = fixture.token.as_ref().unwrap().vote();
+            Self {
+                vote: vote.clone(),
+                signature_ptr: vote.signature.as_ptr(),
+                signature_capacity: vote.signature.capacity(),
+                occupancy: fixture.observer.full_occupancy_for_test(),
+                cap: fixture.engine.state.max_retained_evidence_bytes(),
+                invocations: RECEIVED_VOTE_LOGICAL_INVOCATIONS.with(std::cell::Cell::get),
+                callbacks: fixture.callbacks.load(std::sync::atomic::Ordering::Relaxed),
+                current_view: fixture.engine.current_view(),
+                vote_count: fixture.engine.state.vote_count(vote.height, &vote.block_id),
+            }
+        }
+
+        fn check(&self, fixture: &QcCorrectionFixture, refusal: &ReceivedVoteQcRefusal) {
+            assert!(refusal.token.vote() == &self.vote, "returned Vote differs (redacted)");
+            assert_eq!(refusal.token.vote().signature.as_ptr(), self.signature_ptr);
+            assert_eq!(refusal.token.vote().signature.capacity(), self.signature_capacity);
+            assert_eq!(fixture.observer.full_occupancy_for_test(), self.occupancy);
+            assert_eq!(fixture.engine.state.max_retained_evidence_bytes(), self.cap);
+            assert_eq!(
+                RECEIVED_VOTE_LOGICAL_INVOCATIONS.with(std::cell::Cell::get), self.invocations,
+            );
+            assert_eq!(
+                fixture.callbacks.load(std::sync::atomic::Ordering::Relaxed), self.callbacks,
+            );
+            assert_eq!(fixture.engine.current_view(), self.current_view);
+            assert_eq!(
+                fixture.engine.state.vote_count(self.vote.height, &self.vote.block_id),
+                self.vote_count,
+            );
+        }
+    }
+
+    #[test]
+    fn received_vote_qc_destination_bytes_refusal_after_report_admission_retries() {
+        let mut fixture = QcCorrectionFixture::new();
+        let before = fixture.observer.full_occupancy_for_test();
+        let cap = before.0.checked_add(received_vote_qc_control_charge().unwrap()).unwrap();
+        fixture.engine.state.set_max_retained_evidence_bytes(cap);
+        let witness = QcRefusalWitness::capture(&fixture);
+        let refusal = fixture.invoke().err().expect("destination Bytes pressure refuses");
+        assert_eq!(
+            refusal.reason,
+            ReceivedVoteQcRefusalReason::Stage(ReceivedVoteQcStageError::StageBytes),
+        );
+        witness.check(&fixture, &refusal);
+        fixture.token = Some(refusal.token);
+        fixture.engine.state.set_max_retained_evidence_bytes(u64::MAX);
+        let report = fixture.invoke().unwrap();
+        fixture.verify(&report);
+        assert_eq!(
+            RECEIVED_VOTE_LOGICAL_INVOCATIONS.with(std::cell::Cell::get), witness.invocations + 1,
+        );
+        assert!(fixture.callbacks.load(std::sync::atomic::Ordering::Relaxed) > witness.callbacks);
+    }
+
+    #[test]
+    fn received_vote_qc_nested_partial_transfer_allocation_refusal_retries() {
+        use crate::received_vote_evidence::{
+            qc_descriptor_signature_drops, qc_signature_transfers, with_allocation_failure_after,
+        };
+        let mut fixture = QcCorrectionFixture::new();
+        let witness = QcRefusalWitness::capture(&fixture);
+        let transfers = qc_signature_transfers();
+        let nested_drops = qc_descriptor_signature_drops();
+        // Bitmap, descriptors, and the first signature succeed; the next signature fails.
+        let refusal = with_allocation_failure_after(3, || fixture.invoke())
+            .err().expect("second signature allocation refuses");
+        assert_eq!(
+            refusal.reason,
+            ReceivedVoteQcRefusalReason::Stage(ReceivedVoteQcStageError::Allocation),
+        );
+        assert_eq!(qc_signature_transfers(), transfers + 1);
+        assert_eq!(qc_descriptor_signature_drops(), nested_drops + 1);
+        witness.check(&fixture, &refusal);
+        fixture.token = Some(refusal.token);
+        let report = fixture.invoke().unwrap();
+        fixture.verify(&report);
+    }
+
+    #[test]
+    fn received_vote_qc_defensive_commit_refusal_drops_backing_before_pending() {
+        use crate::received_vote_evidence::{
+            qc_cleanup_observations, qc_signature_transfers, with_qc_commit_failure,
+        };
+        let mut fixture = QcCorrectionFixture::new();
+        let witness = QcRefusalWitness::capture(&fixture);
+        let transfers = qc_signature_transfers();
+        let refusal = with_qc_commit_failure(|| fixture.invoke())
+            .err().expect("defensive commit failure returns the valid reservation");
+        assert_eq!(
+            refusal.reason,
+            ReceivedVoteQcRefusalReason::Stage(ReceivedVoteQcStageError::Commit),
+        );
+        assert_eq!(qc_signature_transfers(), transfers + 3);
+        let observations = qc_cleanup_observations();
+        let p = 1 + 3 * std::mem::size_of::<Vec<u8>>() as u64
+            + 3 * qbind_crypto::ML_DSA_44_SIGNATURE_SIZE as u64;
+        let staged = (
+            witness.occupancy.0 + received_vote_qc_control_charge().unwrap(),
+            p, witness.occupancy.2, 0, witness.occupancy.4 + 1, 0,
+        );
+        assert_eq!(observations, vec![
+            ("before_backing_drop", staged),
+            ("after_backing_drop", staged),
+            ("after_pending_release", (staged.0, 0, staged.2, 0, staged.4, 0)),
+        ]);
+        witness.check(&fixture, &refusal);
+        fixture.token = Some(refusal.token);
+        let report = fixture.invoke().unwrap();
+        fixture.verify(&report);
+    }
+
+    #[test]
+    fn received_vote_qc_detached_opaque_report_retains_all_owners_until_drop() {
+        use crate::received_vote_evidence::with_qc_release_trace;
+        let sizing = EvidenceBudget::try_new(u64::MAX, 0).unwrap();
+        let independent_baseline = sizing.full_occupancy_for_test();
+        drop(sizing);
+        let mut fixture = QcCorrectionFixture::new();
+        let report = fixture.invoke().unwrap();
+        fixture.verify(&report);
+        let a = report.report_charge_for_test();
+        let ReceivedVoteQcOutcome::Complete(wire) = report.outcome() else {
+            panic!("complete report");
+        };
+        let p = wire.bytes_charge_for_test();
+        let _ = fixture.engine.state_mut();
+        drop(fixture.engine);
+        let detached = fixture.observer.full_occupancy_for_test();
+        assert_eq!(detached.1, 0);
+        assert_eq!((detached.2, detached.3, detached.4, detached.5), (1, 0, 1, 0));
+        assert!(detached.0 > independent_baseline.0 + a + p);
+        let ReceivedVoteQcOutcome::Complete(wire) = report.outcome() else {
+            panic!("detached certificate remains borrowable");
+        };
+        let registry = crate::crypto_verifier::SimpleBackendRegistry::with_backend(
+            qbind_crypto::SUITE_PQ_RESERVED_1, Arc::new(MlDsa44Backend),
+        );
+        verify_quorum_certificate_with_domain(
+            wire.qc(), &fixture.domain, 0, &dense_validator_set(4), &fixture.keys, &registry,
+        ).expect("detached historical certificate verifies");
+        assert_eq!(fixture.observer.full_occupancy_for_test(), detached);
+        let releases = with_qc_release_trace(|| drop(report));
+        assert_eq!(releases.len(), 3);
+        assert_eq!((releases[0].0, releases[0].1, releases[0].2), ("Bytes", p, detached));
+        assert_eq!(releases[1].0, "Context");
+        assert_eq!(releases[1].2, (detached.0 - p, 0, 1, 0, 1, 0));
+        assert_eq!(releases[2].0, "Report");
+        assert_eq!(releases[2].1, a);
+        assert_eq!(releases[2].2, (independent_baseline.0 + a, 0, 0, 0, 1, 0));
+        assert_eq!(fixture.observer.full_occupancy_for_test(), independent_baseline);
+        println!("corrected QC owners: A={a} P={p} detached={detached:?} final={independent_baseline:?}");
     }
 
     #[test]
@@ -5701,7 +6025,7 @@ mod tests {
         let report = engine
             .invoke_verified_received_vote_qc(token)
             .expect("invoke first Vote");
-        assert!(matches!(report.outcome, ReceivedVoteQcOutcome::NoQc));
+        assert!(matches!(report.outcome(), ReceivedVoteQcOutcome::NoQc));
 
         let dropped = signed_member_vote(
             0,
@@ -5719,14 +6043,14 @@ mod tests {
             .invoke_verified_received_vote_qc(token)
             .expect("invoke capacity-dropped Vote");
         assert!(matches!(
-            report.actual.accumulator,
+            report.actual().accumulator,
             Some(Ok(VoteAccumulatorDisposition::CapacityDropped))
         ));
         assert_eq!(
-            report.actual.evidence,
+            report.actual().evidence,
             ReceivedVoteEvidenceDisposition::NotRetainedCapacityDropped
         );
-        assert!(matches!(report.outcome, ReceivedVoteQcOutcome::NoQc));
+        assert!(matches!(report.outcome(), ReceivedVoteQcOutcome::NoQc));
 
         let equivocation = signed_member_vote(
             0,
@@ -5743,12 +6067,12 @@ mod tests {
         let report = engine
             .invoke_verified_received_vote_qc(token)
             .expect("invoke equivocation");
-        assert!(report.actual.accumulator.is_none());
+        assert!(report.actual().accumulator.is_none());
         assert_eq!(
-            report.actual.evidence,
+            report.actual().evidence,
             ReceivedVoteEvidenceDisposition::NotRetainedEquivocation
         );
-        assert!(matches!(report.outcome, ReceivedVoteQcOutcome::NoQc));
+        assert!(matches!(report.outcome(), ReceivedVoteQcOutcome::NoQc));
         assert_eq!(
             RECEIVED_VOTE_LOGICAL_INVOCATIONS.with(std::cell::Cell::get),
             invocations + 3
@@ -5923,11 +6247,11 @@ mod tests {
             if index == 2 {
                 report = Some(event);
             } else {
-                assert!(matches!(event.outcome, ReceivedVoteQcOutcome::NoQc));
+                assert!(matches!(event.outcome(), ReceivedVoteQcOutcome::NoQc));
             }
         }
         let report = report.expect("weighted quorum report");
-        let ReceivedVoteQcOutcome::Complete(wire) = report.outcome else {
+        let ReceivedVoteQcOutcome::Complete(wire) = report.outcome() else {
             panic!("weighted quorum should yield a complete certificate");
         };
         assert_eq!(wire.qc().signatures.len(), 3);
@@ -6056,8 +6380,8 @@ mod tests {
                 retained.vote().signature.capacity(),
                 original_votes[index].signature.capacity()
             );
-            let report_bytes = report._provenance.report_charge_for_test();
-            let certificate_bytes = match &report.outcome {
+            let report_bytes = report.report_charge_for_test();
+            let certificate_bytes = match report.outcome() {
                 ReceivedVoteQcOutcome::Complete(wire) => wire.bytes_charge_for_test(),
                 _ => 0,
             };
@@ -6075,8 +6399,8 @@ mod tests {
             assert_eq!(observer.full_occupancy_for_test().1, 0);
             assert_eq!(observer.full_occupancy_for_test().3, 0);
             assert_eq!(observer.full_occupancy_for_test().4, 1);
-            assert_eq!(report.actual.qc.is_some(), index >= 2);
-            match &report.outcome {
+            assert_eq!(report.actual().qc.is_some(), index >= 2);
+            match report.outcome() {
                 ReceivedVoteQcOutcome::NoQc => assert!(index < 2),
                 ReceivedVoteQcOutcome::Complete(wire) => {
                     assert!(index >= 2);
