@@ -20,13 +20,17 @@
 //! - Leader rotation policies beyond simple round-robin
 
 use crate::driver::{ConsensusEngineAction, HasCommitLog};
-use crate::hotstuff_state_engine::{CommittedEntry, HotStuffStateEngine, VerifiedQcAdmission};
+use crate::hotstuff_state_engine::{
+    CommittedEntry, HotStuffStateEngine, VerifiedQcAdmission, VoteEvidencePlan,
+    VoteEvidencePreflightError, VoteHistoryOutcome, VoteMutationReport,
+};
 use crate::ids::ValidatorId;
 use crate::qc::{QcValidationError, QuorumCertificate};
 use crate::qc_verify_domain::VerifiedQuorumCertificate;
 use crate::received_vote_evidence::{
     ActiveVoteContext, ContextInstallError, ContextInstallRefusal, EvidenceBudget,
-    VerifiedVoteToken, VoteAdmissionError, VoteAdmissionRefusal, VoteContextInput,
+    ReceivedVoteEvidenceTable, VerifiedVoteToken, VoteAdmissionError, VoteAdmissionRefusal,
+    VoteContextInput,
 };
 use crate::timeout::{TimeoutAccumulator, TimeoutCertificate, TimeoutMsg, TimeoutValidationError};
 use crate::validator_set::ConsensusValidatorSet;
@@ -1445,7 +1449,48 @@ where
     received_vote_producer_disabled: bool,
 }
 
+pub(crate) enum VerifiedVoteInvocationRefusal {
+    ProducerDisabled,
+    NoContext,
+    NoTable,
+    StaleContext,
+    ForeignLedger,
+    EpochOrRosterMismatch,
+    InvalidLease,
+    TableFull,
+    AccountingInvariant,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ReceivedVoteEvidenceDisposition {
+    Retained,
+    ExistingExactDuplicate,
+    ExistingDifferentSignature,
+    ExistingSignedFieldsConflict,
+    NotRetainedEquivocation,
+    NotRetainedCapacityDropped,
+    NotRetainedMembershipLost,
+}
+
+pub(crate) enum VerifiedVoteInvocation {
+    Refused {
+        token: VerifiedVoteToken,
+        reason: VerifiedVoteInvocationRefusal,
+    },
+    Invoked {
+        report: VoteMutationReport<[u8; 32]>,
+        evidence: ReceivedVoteEvidenceDisposition,
+        view_advanced: bool,
+    },
+}
+
 /// Peer-learned certified block material used by restore catchup.
+struct VerifiedVotePreflight {
+    plan: VoteEvidencePlan,
+    shrink_to: u64,
+    existing: Option<ReceivedVoteEvidenceDisposition>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RestoreCatchupBlock<BlockIdT> {
     /// Block height in QBIND's current binary path (height == view).
@@ -1936,6 +1981,7 @@ where
 
     fn invalidate_received_vote_context(&mut self) {
         self.active_received_vote_context = None;
+        self.state.clear_received_vote_evidence();
     }
 
     pub fn set_max_retained_evidence_bytes(&mut self, max: u64) {
@@ -2100,6 +2146,7 @@ where
     pub fn state_mut(&mut self) -> &mut HotStuffStateEngine<BlockIdT> {
         self.invalidate_received_vote_context();
         self.received_vote_producer_disabled = true;
+        self.state.drop_received_vote_evidence_table();
         &mut self.state
     }
 
@@ -2475,9 +2522,30 @@ enum LeaderSignerBufferError {
     Allocation,
 }
 
+fn same_vote_signed_fields(
+    left: &qbind_wire::consensus::Vote,
+    right: &qbind_wire::consensus::Vote,
+) -> bool {
+    left.version == right.version
+        && left.chain_id == right.chain_id
+        && left.epoch == right.epoch
+        && left.height == right.height
+        && left.round == right.round
+        && left.step == right.step
+        && left.block_id == right.block_id
+        && left.validator_index == right.validator_index
+        && left.suite_id == right.suite_id
+}
+
 // ============================================================================
 // BlockIdT = [u8; 32] specific implementation
 // ============================================================================
+
+#[cfg(test)]
+thread_local! {
+    static PANIC_AFTER_RECEIVED_VOTE_TABLE_STAGE: std::cell::Cell<bool> =
+        const { std::cell::Cell::new(false) };
+}
 
 impl BasicHotStuffEngine<[u8; 32]> {
     pub(crate) fn install_received_vote_context(
@@ -2544,6 +2612,28 @@ impl BasicHotStuffEngine<[u8; 32]> {
             }
         };
 
+        if let Some(table) = self.state.received_vote_evidence_table() {
+            if table.occupied() != 0 {
+                return Err(refuse(input, ContextInstallError::InvalidContext));
+            }
+        }
+        let staged_table = if self.state.received_vote_evidence_table().is_none() {
+            match ReceivedVoteEvidenceTable::try_stage(&budget) {
+                Ok(table) => Some(table),
+                Err(error) => return Err(refuse(input, error)),
+            }
+        } else {
+            None
+        };
+
+        #[cfg(test)]
+        if PANIC_AFTER_RECEIVED_VOTE_TABLE_STAGE.with(|flag| flag.replace(false)) {
+            panic!("test panic after received-vote table staging");
+        }
+
+        // Context installation may adopt `input`; it is deliberately the last
+        // recoverable ownership operation. All attachments below are moves
+        // into prevalidated empty Options.
         let active = match ActiveVoteContext::try_install(&budget, input) {
             Ok(active) => active,
             Err((input, error)) => return Err(refuse(input, error)),
@@ -2552,6 +2642,15 @@ impl BasicHotStuffEngine<[u8; 32]> {
             if self
                 .state
                 .install_received_vote_budget(state_owner)
+                .is_err()
+            {
+                std::process::abort();
+            }
+        }
+        if let Some(table) = staged_table {
+            if self
+                .state
+                .install_received_vote_evidence_table(table)
                 .is_err()
             {
                 std::process::abort();
@@ -2581,6 +2680,183 @@ impl BasicHotStuffEngine<[u8; 32]> {
         context
             .try_admit_vote(claimed_sender.as_u64(), vote, self.current_epoch)
             .map_err(|(vote, error)| VoteAdmissionRefusal { vote, error })
+    }
+
+    pub(crate) fn invoke_verified_received_vote(
+        &mut self,
+        token: VerifiedVoteToken,
+    ) -> VerifiedVoteInvocation {
+        let preflight = match self.preflight_verified_received_vote(&token) {
+            Ok(preflight) => preflight,
+            Err(reason) => {
+                return VerifiedVoteInvocation::Refused { token, reason };
+            }
+        };
+
+        let (view, block_id, voter, vote_index) = {
+            let vote = token.vote();
+            (
+                vote.height,
+                vote.block_id,
+                ValidatorId(u64::from(vote.validator_index)),
+                vote.validator_index,
+            )
+        };
+
+        // This is the one and only logical consensus invocation. Its detailed
+        // report retains history/insertion distinctions even when QC processing
+        // returns an error after the history mutation.
+        let report = self.state.on_vote_detailed(voter, view, &block_id);
+        let evidence = match preflight.plan {
+            VoteEvidencePlan::NewEntry { slot } => {
+                if !report.is_equivocation()
+                    && self.state.has_vote_memberships(voter, view, &block_id)
+                {
+                    self.state.retain_received_vote_token(
+                        slot,
+                        block_id,
+                        token,
+                        preflight.shrink_to,
+                    );
+                    ReceivedVoteEvidenceDisposition::Retained
+                } else {
+                    drop(token);
+                    if report.is_equivocation() {
+                        ReceivedVoteEvidenceDisposition::NotRetainedEquivocation
+                    } else if matches!(
+                        report.accumulator.as_ref(),
+                        Some(Ok(crate::vote_accumulator::VoteAccumulatorDisposition::CapacityDropped))
+                    ) {
+                        ReceivedVoteEvidenceDisposition::NotRetainedCapacityDropped
+                    } else {
+                        ReceivedVoteEvidenceDisposition::NotRetainedMembershipLost
+                    }
+                }
+            }
+            VoteEvidencePlan::ExistingEvidence => {
+                let still_retained = self
+                    .state
+                    .received_vote_evidence_table()
+                    .and_then(|table| table.entry_for(view, vote_index))
+                    .is_some();
+                drop(token);
+                if still_retained {
+                    preflight
+                        .existing
+                        .unwrap_or(ReceivedVoteEvidenceDisposition::ExistingSignedFieldsConflict)
+                } else {
+                    ReceivedVoteEvidenceDisposition::NotRetainedMembershipLost
+                }
+            }
+            VoteEvidencePlan::DoNotRetain => {
+                drop(token);
+                if report.is_equivocation() {
+                    ReceivedVoteEvidenceDisposition::NotRetainedEquivocation
+                } else if matches!(
+                    report.accumulator.as_ref(),
+                    Some(Ok(crate::vote_accumulator::VoteAccumulatorDisposition::CapacityDropped))
+                ) {
+                    ReceivedVoteEvidenceDisposition::NotRetainedCapacityDropped
+                } else {
+                    ReceivedVoteEvidenceDisposition::NotRetainedMembershipLost
+                }
+            }
+        };
+
+        // A state error is an invoked outcome. Ownership is already settled,
+        // and the legacy event path skips all recorders and view advancement.
+        let view_advanced = if report.qc.is_ok() {
+            let qc = report.qc.as_ref().ok().and_then(Option::as_ref);
+            self.finish_successful_vote_event(voter, view, &report.history, qc)
+        } else {
+            false
+        };
+        VerifiedVoteInvocation::Invoked {
+            report,
+            evidence,
+            view_advanced,
+        }
+    }
+
+    fn preflight_verified_received_vote(
+        &self,
+        token: &VerifiedVoteToken,
+    ) -> Result<VerifiedVotePreflight, VerifiedVoteInvocationRefusal> {
+        if self.received_vote_producer_disabled {
+            return Err(VerifiedVoteInvocationRefusal::ProducerDisabled);
+        }
+        let active = self
+            .active_received_vote_context
+            .as_ref()
+            .ok_or(VerifiedVoteInvocationRefusal::NoContext)?;
+        let table = self
+            .state
+            .received_vote_evidence_table()
+            .ok_or(VerifiedVoteInvocationRefusal::NoTable)?;
+        let budget = self
+            .state
+            .received_vote_budget()
+            .ok_or(VerifiedVoteInvocationRefusal::ForeignLedger)?;
+        if !token.matches_ledger(budget)
+            || !active.same_ledger(budget)
+            || !table.matches_ledger(budget)
+        {
+            return Err(VerifiedVoteInvocationRefusal::ForeignLedger);
+        }
+        if !token.matches_context(active) {
+            return Err(VerifiedVoteInvocationRefusal::StaleContext);
+        }
+        let vote = token.vote();
+        if !active.matches_validators(self.state.validators())
+            || !active.validates_vote_metadata(vote, self.current_epoch)
+        {
+            return Err(VerifiedVoteInvocationRefusal::EpochOrRosterMismatch);
+        }
+        let (token_bytes, signature_bytes) = token
+            .token_charge_and_signature_bytes()
+            .ok_or(VerifiedVoteInvocationRefusal::InvalidLease)?;
+        if !token.has_exact_token_charge()
+            || token_bytes.checked_sub(signature_bytes).is_none()
+        {
+            return Err(VerifiedVoteInvocationRefusal::InvalidLease);
+        }
+        let voter = ValidatorId(u64::from(vote.validator_index));
+        if !self.state.validators().contains(voter) {
+            return Err(VerifiedVoteInvocationRefusal::EpochOrRosterMismatch);
+        }
+        let plan = self
+            .state
+            .prepare_received_vote_evidence(voter, vote.height, &vote.block_id)
+            .map_err(|error| match error {
+                VoteEvidencePreflightError::MissingTable => {
+                    VerifiedVoteInvocationRefusal::NoTable
+                }
+                VoteEvidencePreflightError::Full => VerifiedVoteInvocationRefusal::TableFull,
+                VoteEvidencePreflightError::Invariant => {
+                    VerifiedVoteInvocationRefusal::AccountingInvariant
+                }
+            })?;
+        let existing = match plan {
+            VoteEvidencePlan::ExistingEvidence => {
+                let retained = table
+                    .entry_for(vote.height, vote.validator_index)
+                    .ok_or(VerifiedVoteInvocationRefusal::AccountingInvariant)?
+                    .vote();
+                Some(if retained == vote {
+                    ReceivedVoteEvidenceDisposition::ExistingExactDuplicate
+                } else if same_vote_signed_fields(retained, vote) {
+                    ReceivedVoteEvidenceDisposition::ExistingDifferentSignature
+                } else {
+                    ReceivedVoteEvidenceDisposition::ExistingSignedFieldsConflict
+                })
+            }
+            _ => None,
+        };
+        Ok(VerifiedVotePreflight {
+            plan,
+            shrink_to: signature_bytes,
+            existing,
+        })
     }
 
     #[cfg(test)]
@@ -3882,16 +4158,28 @@ impl BasicHotStuffEngine<[u8; 32]> {
         let view = vote.height;
         let block_id = vote.block_id;
 
-        // Track equivocation count before vote ingestion for detection (T129)
-        let equivocations_before = self.state.equivocations_detected();
+        let report = self.state.on_vote_detailed(from, view, &block_id);
+        let VoteMutationReport {
+            history,
+            accumulator: _,
+            qc,
+        } = report;
+        let qc = match qc {
+            Ok(qc) => qc,
+            Err(error) => return Err(error),
+        };
+        self.finish_successful_vote_event(from, view, &history, qc.as_ref());
+        Ok(qc)
+    }
 
-        // Ingest the vote
-        let result = self.state.on_vote(from, view, &block_id)?;
-
-        // Check for new equivocation (T129)
-        // If equivocation count increased, the vote was an equivocating vote
-        let equivocations_after = self.state.equivocations_detected();
-        if equivocations_after > equivocations_before {
+    fn finish_successful_vote_event(
+        &mut self,
+        from: ValidatorId,
+        view: u64,
+        history: &VoteHistoryOutcome<[u8; 32]>,
+        qc: Option<&QuorumCertificate<[u8; 32]>>,
+    ) -> bool {
+        if matches!(history, VoteHistoryOutcome::Equivocation { .. }) {
             // Record equivocation event
             if let Some(recorder) = self.equivocation_recorder.as_ref() {
                 recorder.on_validator_equivocation(from, view);
@@ -3913,8 +4201,8 @@ impl BasicHotStuffEngine<[u8; 32]> {
             }
         }
 
-        // If a QC was formed, record and advance view
-        if let Some(_qc) = result.as_ref() {
+        let mut view_advanced = false;
+        if qc.is_some() {
             // Record QC formation with latency if available (T127)
             if let Some(recorder) = self.progress_recorder.as_ref() {
                 if let Some(start) = self.last_view_start_instant {
@@ -3928,10 +4216,10 @@ impl BasicHotStuffEngine<[u8; 32]> {
             // Advance view if the QC is for our current view or later
             if view >= self.current_view {
                 self.advance_view();
+                view_advanced = true;
             }
         }
-
-        Ok(result)
+        view_advanced
     }
 
     /// Process a single step of the engine.
@@ -4231,6 +4519,11 @@ mod tests {
 
     const TEST_WIRE_CHAIN: u32 = 7;
 
+    fn received_vote_table_charge() -> u64 {
+        ReceivedVoteEvidenceTable::<[u8; 32]>::standing_charge()
+            .expect("table charge is representable")
+    }
+
     fn make_validator_set(num: u64) -> ConsensusValidatorSet {
         let entries: Vec<ValidatorSetEntry> = (1..=num)
             .map(|i| ValidatorSetEntry {
@@ -4427,12 +4720,13 @@ mod tests {
         let mut engine = BasicHotStuffEngine::new(ValidatorId(0), dense_validator_set(1));
         assert!(engine.install_received_vote_context(input).is_ok());
         let wrapper_charge = std::mem::size_of::<Option<ActiveVoteContext>>() as u64;
+        let table_charge = received_vote_table_charge();
         println!(
-            "received-vote accounting: standing={standing_floor} context={context_charge} active-wrapper={wrapper_charge}"
+            "received-vote accounting: standing={standing_floor} context={context_charge} active-wrapper={wrapper_charge} table={table_charge}"
         );
         assert_eq!(
             engine.received_vote_evidence_aggregate_bytes().unwrap().0,
-            standing_floor + context_charge + wrapper_charge
+            standing_floor + context_charge + wrapper_charge + table_charge
         );
         let vote = signed_context_vote(0, &secret_key, &domain);
         let signature_ptr = vote.signature.as_ptr();
@@ -4456,13 +4750,14 @@ mod tests {
             standing_floor
                 + context_charge
                 + wrapper_charge
+                + table_charge
                 + std::mem::size_of::<VerifiedVoteToken>() as u64
                 + u64::try_from(signature_capacity).unwrap()
         );
         drop(token);
         assert_eq!(
             engine.received_vote_evidence_aggregate_bytes().unwrap().0,
-            standing_floor + context_charge + wrapper_charge
+            standing_floor + context_charge + wrapper_charge + table_charge
         );
     }
 
@@ -4842,12 +5137,13 @@ mod tests {
         let key_capacity = input.members()[0].public_key_capacity();
         let members = input.members().to_vec();
         let context_charge = input.checked_charge().unwrap();
+        let table_charge = received_vote_table_charge();
         let sizing = EvidenceBudget::try_new(u64::MAX, 0).unwrap();
         let floor = sizing.occupancy().0;
         drop(sizing);
 
         let mut wrapper_pressure = BasicHotStuffEngine::new(ValidatorId(0), dense_validator_set(1));
-        wrapper_pressure.set_max_retained_evidence_bytes(floor + context_charge);
+        wrapper_pressure.set_max_retained_evidence_bytes(floor + table_charge + context_charge);
         let final_drops_before = budget_final_drop_count_for_test();
         let refusal = wrapper_pressure
             .install_received_vote_context(input)
@@ -4876,14 +5172,54 @@ mod tests {
         let key_ptr = input.members()[0].public_key().as_ptr();
         let key_capacity = input.members()[0].public_key_capacity();
         let members = input.members().to_vec();
+        let mut table_allocation_failure =
+            BasicHotStuffEngine::new(ValidatorId(0), dense_validator_set(1));
+        table_allocation_failure.set_max_retained_evidence_bytes(
+            floor
+                + table_charge
+                + input.checked_charge().unwrap()
+                + std::mem::size_of::<Option<ActiveVoteContext>>() as u64,
+        );
+        let final_drops_before = budget_final_drop_count_for_test();
+        let refusal = with_allocation_failure_after(1, || {
+            table_allocation_failure.install_received_vote_context(input)
+        })
+        .expect_err("fixed-table allocation failure returns original context input");
+        assert_eq!(refusal.error, ContextInstallError::Allocation);
+        assert_original_input(
+            refusal,
+            roster_ptr,
+            roster_capacity,
+            key_ptr,
+            key_capacity,
+            &members,
+        );
+        assert!(table_allocation_failure.state.received_vote_budget().is_none());
+        assert!(table_allocation_failure.active_received_vote_context.is_none());
+        assert_eq!(
+            budget_final_drop_count_for_test(),
+            final_drops_before + 1,
+            "staged ledger owner is released after table allocation refusal"
+        );
+
+        let (public_key, _) = MlDsa44Backend::generate_keypair().expect("test keygen");
+        let input = received_vote_context(0, public_key).0;
+        let roster_ptr = input.members().as_ptr();
+        let roster_capacity = input.members_capacity();
+        let key_ptr = input.members()[0].public_key().as_ptr();
+        let key_capacity = input.members()[0].public_key_capacity();
+        let members = input.members().to_vec();
         let context_charge = input.checked_charge().unwrap();
         let mut allocation_failure =
             BasicHotStuffEngine::new(ValidatorId(0), dense_validator_set(1));
         allocation_failure.set_max_retained_evidence_bytes(
-            floor + context_charge + std::mem::size_of::<Option<ActiveVoteContext>>() as u64,
+            floor
+                + table_charge
+                + context_charge
+                + std::mem::size_of::<Option<ActiveVoteContext>>() as u64,
         );
         let final_drops_before = budget_final_drop_count_for_test();
-        let refusal = with_allocation_failure_after(1, || {
+        let refusal = with_allocation_failure_after(2, || {
             allocation_failure.install_received_vote_context(input)
         })
         .expect_err("ContextCell allocation failure returns original input");
@@ -4903,6 +5239,36 @@ mod tests {
             final_drops_before + 1,
             "unpublished bootstrapped budget is destroyed after context allocation failure"
         );
+    }
+
+    #[test]
+    fn received_vote_table_staging_unwind_releases_only_staged_ownership() {
+        let (public_key, _) = MlDsa44Backend::generate_keypair().expect("test keygen");
+        let mut engine = BasicHotStuffEngine::new(ValidatorId(0), dense_validator_set(1));
+        let budget = EvidenceBudget::try_new(
+            engine.state.max_retained_evidence_bytes(),
+            0,
+        )
+        .expect("shared ledger");
+        let observer = budget.try_clone().expect("ledger observer");
+        engine
+            .state
+            .install_received_vote_budget(budget)
+            .expect("install existing ledger");
+        let baseline = observer.occupancy();
+        let input = received_vote_context(0, public_key).0;
+
+        PANIC_AFTER_RECEIVED_VOTE_TABLE_STAGE.with(|flag| flag.set(true));
+        let unwind = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _ = engine.install_received_vote_context(input);
+        }));
+        PANIC_AFTER_RECEIVED_VOTE_TABLE_STAGE.with(|flag| flag.set(false));
+
+        assert!(unwind.is_err(), "test hook must unwind after table staging");
+        assert_eq!(observer.occupancy(), baseline);
+        assert!(engine.state.received_vote_budget().unwrap().same_authority(&observer));
+        assert!(engine.state.received_vote_evidence_table().is_none());
+        assert!(engine.active_received_vote_context.is_none());
     }
 
     #[test]
@@ -4954,11 +5320,17 @@ mod tests {
             .try_clone()
             .unwrap();
         let floor = EvidenceBudget::try_new(u64::MAX, 0).unwrap().occupancy().0;
+        let table_charge = received_vote_table_charge();
         let wrapper_charge = std::mem::size_of::<Option<ActiveVoteContext>>() as u64;
         assert_eq!(engine.state.retained_evidence_bytes(), qc_charge);
         assert_eq!(
             observer.occupancy(),
-            (floor + qc_charge + context_charge + wrapper_charge, 0, 1, 0),
+            (
+                floor + qc_charge + context_charge + wrapper_charge + table_charge,
+                0,
+                1,
+                0
+            ),
             "existing map-owned QC bytes are imported exactly once"
         );
     }
@@ -5373,9 +5745,10 @@ mod tests {
         let authority = engine.state.received_vote_budget().unwrap().try_clone().unwrap();
         let floor = EvidenceBudget::try_new(u64::MAX, 0).unwrap().occupancy().0;
         let wrapper_charge = std::mem::size_of::<Option<ActiveVoteContext>>() as u64;
+        let table_charge = received_vote_table_charge();
         let token_bytes = std::mem::size_of::<VerifiedVoteToken>() as u64
             + qbind_crypto::ML_DSA_44_SIGNATURE_SIZE as u64;
-        let installed = floor + context_charge + wrapper_charge;
+        let installed = floor + context_charge + wrapper_charge + table_charge;
         assert_eq!(observer.occupancy(), (installed, 0, 1, 0));
         engine.set_current_epoch(0);
         assert!(engine.active_received_vote_context.is_some());
@@ -5409,7 +5782,7 @@ mod tests {
         assert!(engine.active_received_vote_context.is_none());
         assert_eq!(
             observer.occupancy(),
-            (floor + context_charge + token_bytes, 0, 1, 0)
+            (floor + table_charge + context_charge + token_bytes, 0, 1, 0)
         );
 
         let (new_input, _) = received_vote_context(1, public_key);
@@ -5424,7 +5797,7 @@ mod tests {
         assert_eq!(
             observer.occupancy(),
             (
-                floor + 2 * context_charge + wrapper_charge + token_bytes,
+                floor + table_charge + 2 * context_charge + wrapper_charge + token_bytes,
                 0,
                 2,
                 0
@@ -5433,7 +5806,7 @@ mod tests {
         drop(token);
         assert_eq!(
             observer.occupancy(),
-            (floor + context_charge + wrapper_charge, 0, 1, 0)
+            (floor + context_charge + wrapper_charge + table_charge, 0, 1, 0)
         );
         let token = engine
             .admit_verified_received_vote(
@@ -5443,7 +5816,12 @@ mod tests {
             .expect("admit token from reinstalled context");
         assert_eq!(
             observer.occupancy(),
-            (floor + context_charge + wrapper_charge + token_bytes, 0, 1, 0)
+            (
+                floor + context_charge + wrapper_charge + table_charge + token_bytes,
+                0,
+                1,
+                0
+            )
         );
         drop(engine);
         assert_eq!(
@@ -5466,6 +5844,292 @@ mod tests {
             budget_final_drop_count_for_test(),
             final_drops_before + 1,
             "dropping the independent observer destroys the final budget owner"
+        );
+    }
+
+    #[test]
+    fn received_vote_token_invocation_transfers_original_and_keeps_first_evidence() {
+        let (public_key, secret_key) =
+            MlDsa44Backend::generate_keypair().expect("test keygen");
+        let (input, domain) = received_vote_context(0, public_key);
+        let context_charge = input.checked_charge().unwrap();
+        let mut engine = BasicHotStuffEngine::new(ValidatorId(0), dense_validator_set(1));
+        engine
+            .install_received_vote_context(input)
+            .expect("install context and fixed table");
+        let budget = engine.state.received_vote_budget().unwrap().try_clone().unwrap();
+        let floor = EvidenceBudget::try_new(u64::MAX, 0).unwrap().occupancy().0;
+        let table_charge = received_vote_table_charge();
+        let wrapper_charge = std::mem::size_of::<Option<ActiveVoteContext>>() as u64;
+        let vote = signed_context_vote(0, &secret_key, &domain);
+        let signature_ptr = vote.signature.as_ptr();
+        let signature_capacity = vote.signature.capacity();
+        let signature_charge = signature_capacity as u64;
+        let token = engine
+            .admit_verified_received_vote(ValidatorId(0), vote)
+            .expect("admit signed Vote");
+
+        match engine.invoke_verified_received_vote(token) {
+            VerifiedVoteInvocation::Invoked {
+                report,
+                evidence: ReceivedVoteEvidenceDisposition::Retained,
+                ..
+            } => {
+                assert!(matches!(report.history, VoteHistoryOutcome::FirstVote));
+                assert!(matches!(
+                    report.accumulator,
+                    Some(Ok(crate::vote_accumulator::VoteAccumulatorDisposition::Inserted))
+                ));
+            }
+            _ => panic!("first admitted token must be invoked and retained"),
+        }
+        let first = engine
+            .state
+            .received_vote_evidence_table()
+            .unwrap()
+            .entry_for(7, 0)
+            .expect("membership-backed evidence retained");
+        assert!(first.vote().signature.as_ptr() == signature_ptr);
+        assert_eq!(first.vote().signature.capacity(), signature_capacity);
+        assert_eq!(
+            budget.occupancy(),
+            (
+                floor + table_charge + context_charge + wrapper_charge + signature_charge,
+                0,
+                1,
+                0
+            ),
+            "token-inline coverage is released only after the original Vote is installed"
+        );
+
+        let duplicate_vote = first.vote().clone();
+        let duplicate = engine
+            .admit_verified_received_vote(
+                ValidatorId(0),
+                duplicate_vote,
+            )
+            .expect("admit a second token for the same Vote");
+        match engine.invoke_verified_received_vote(duplicate) {
+            VerifiedVoteInvocation::Invoked {
+                report,
+                evidence: ReceivedVoteEvidenceDisposition::ExistingExactDuplicate,
+                ..
+            } => {
+                assert!(matches!(
+                    report.history,
+                    VoteHistoryOutcome::DuplicateSameBlock
+                ));
+                assert!(matches!(
+                    report.accumulator,
+                    Some(Ok(crate::vote_accumulator::VoteAccumulatorDisposition::Duplicate))
+                ));
+            }
+            _ => panic!("duplicate token must be invoked without replacing evidence"),
+        }
+        let still_retained = engine
+            .state
+            .received_vote_evidence_table()
+            .unwrap()
+            .entry_for(7, 0)
+            .expect("duplicate preserves the first retained evidence");
+        assert!(still_retained.vote().signature.as_ptr() == signature_ptr);
+        assert_eq!(
+            budget.occupancy().0,
+            floor + table_charge + context_charge + wrapper_charge + signature_charge
+        );
+
+        let mut conflicting_vote = signed_context_vote(0, &secret_key, &domain);
+        conflicting_vote.block_id = [0x74; 32];
+        conflicting_vote.signature =
+            MlDsa44Backend::sign(&secret_key, &domain.vote_preimage(&conflicting_vote))
+                .expect("sign conflicting fields")
+                .into_boxed_slice()
+                .into_vec();
+        let conflicting_token = engine
+            .admit_verified_received_vote(ValidatorId(0), conflicting_vote)
+            .expect("admit valid conflicting Vote");
+        match engine.invoke_verified_received_vote(conflicting_token) {
+            VerifiedVoteInvocation::Invoked {
+                report,
+                evidence: ReceivedVoteEvidenceDisposition::NotRetainedEquivocation,
+                ..
+            } => assert!(matches!(
+                report.history,
+                VoteHistoryOutcome::Equivocation { .. }
+            )),
+            _ => panic!("a signed-field conflict must not replace retained evidence"),
+        }
+        let after_conflict = engine
+            .state
+            .received_vote_evidence_table()
+            .unwrap()
+            .entry_for(7, 0)
+            .expect("first evidence remains after equivocation");
+        assert!(after_conflict.vote().signature.as_ptr() == signature_ptr);
+        assert_eq!(
+            budget.occupancy().0,
+            floor + table_charge + context_charge + wrapper_charge + signature_charge
+        );
+
+        engine
+            .transition_to_epoch(crate::validator_set::EpochId::new(1), dense_validator_set(1))
+            .expect("epoch transition invalidates retained membership evidence");
+        assert!(
+            engine
+                .state
+                .received_vote_evidence_table()
+                .unwrap()
+                .entry_for(7, 0)
+                .is_none()
+        );
+        assert_eq!(
+            budget.occupancy(),
+            (floor + table_charge, 0, 0, 0),
+            "invalidation releases entry ownership but keeps standing table storage"
+        );
+    }
+
+    #[test]
+    fn received_vote_recorder_panic_follows_completed_evidence_transfer() {
+        #[derive(Debug)]
+        struct PanicOnVote;
+
+        impl ConsensusProgressRecorder for PanicOnVote {
+            fn record_qc_formed(&self) {}
+            fn record_vote_observed(&self, _is_for_current_view: bool) {
+                panic!("controlled progress-recorder panic");
+            }
+            fn record_view_change(&self, _from_view: u64, _to_view: u64) {}
+            fn record_leader_change(&self) {}
+            fn reset_current_view_votes(&self) {}
+        }
+
+        let (public_key, secret_key) =
+            MlDsa44Backend::generate_keypair().expect("test keygen");
+        let (input, domain) = received_vote_context(0, public_key);
+        let mut engine = BasicHotStuffEngine::new(ValidatorId(0), dense_validator_set(1));
+        engine
+            .install_received_vote_context(input)
+            .expect("install context");
+        engine.set_progress_recorder(Arc::new(PanicOnVote));
+        let budget = engine.state.received_vote_budget().unwrap().try_clone().unwrap();
+        let baseline = budget.occupancy().0;
+        let vote = signed_context_vote(0, &secret_key, &domain);
+        let view = vote.height;
+        let block_id = vote.block_id;
+        let token = engine
+            .admit_verified_received_vote(ValidatorId(0), vote)
+            .expect("admit signed Vote");
+
+        let unwind = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _ = engine.invoke_verified_received_vote(token);
+        }));
+        assert!(unwind.is_err(), "reachable recorder must unwind invocation");
+        assert!(engine
+            .state
+            .has_vote_memberships(ValidatorId(0), view, &block_id));
+        let entry = engine
+            .state
+            .received_vote_evidence_table()
+            .unwrap()
+            .entry_for(view, 0)
+            .expect("evidence disposition completed before recorder call");
+        assert_eq!(entry.vote().height, view);
+        let signature_charge = entry.vote().signature.capacity() as u64;
+        let expected = baseline + signature_charge;
+        assert_eq!(budget.occupancy().0, expected);
+    }
+
+    #[test]
+    fn received_vote_full_table_refuses_before_view_eviction_and_returns_token() {
+        let (public_key, secret_key) =
+            MlDsa44Backend::generate_keypair().expect("test keygen");
+        let (input, domain) = received_vote_context(0, public_key);
+        let limits = crate::vote_accumulator::ConsensusLimitsConfig {
+            max_tracked_views: ReceivedVoteEvidenceTable::<[u8; 32]>::CAPACITY,
+            ..crate::vote_accumulator::ConsensusLimitsConfig::default()
+        };
+        let mut engine =
+            BasicHotStuffEngine::with_state_limits(ValidatorId(0), dense_validator_set(1), limits);
+        engine
+            .install_received_vote_context(input)
+            .expect("install context and fixed table");
+
+        for view in 0..ReceivedVoteEvidenceTable::<[u8; 32]>::CAPACITY as u64 {
+            let mut vote = signed_context_vote(0, &secret_key, &domain);
+            vote.height = view;
+            vote.signature = MlDsa44Backend::sign(&secret_key, &domain.vote_preimage(&vote))
+                .expect("sign view-specific Vote")
+                .into_boxed_slice()
+                .into_vec();
+            let token = engine
+                .admit_verified_received_vote(ValidatorId(0), vote)
+                .expect("admit view-specific Vote");
+            match engine.invoke_verified_received_vote(token) {
+                VerifiedVoteInvocation::Invoked {
+                    evidence: ReceivedVoteEvidenceDisposition::Retained,
+                    ..
+                } => {}
+                _ => panic!("each live membership must occupy one table slot"),
+            }
+        }
+
+        let mut refused_vote = signed_context_vote(0, &secret_key, &domain);
+        refused_vote.height = ReceivedVoteEvidenceTable::<[u8; 32]>::CAPACITY as u64;
+        refused_vote.signature =
+            MlDsa44Backend::sign(&secret_key, &domain.vote_preimage(&refused_vote))
+                .expect("sign refusal-control Vote")
+                .into_boxed_slice()
+                .into_vec();
+        let token = engine
+            .admit_verified_received_vote(ValidatorId(0), refused_vote)
+            .expect("full-table control token is valid");
+        let signature_ptr = token.vote().signature.as_ptr();
+        let current_view = engine.current_view;
+        let token = match engine.invoke_verified_received_vote(token) {
+            VerifiedVoteInvocation::Refused {
+                token,
+                reason: VerifiedVoteInvocationRefusal::TableFull,
+            } => {
+                assert!(token.vote().signature.as_ptr() == signature_ptr);
+                token
+            }
+            _ => panic!("a full table must refuse before consensus mutation"),
+        };
+        let table = engine.state.received_vote_evidence_table().unwrap();
+        assert_eq!(table.occupied(), ReceivedVoteEvidenceTable::<[u8; 32]>::CAPACITY);
+        assert_eq!(engine.current_view, current_view);
+        assert!(!engine
+            .state
+            .has_vote_memberships(ValidatorId(0), 1024, &[0x73; 32]));
+        assert!(table.entry_for(0, 0).is_some());
+
+        engine
+            .state
+            .on_vote(ValidatorId(0), 1024, &[0x73; 32])
+            .expect("actual accumulator view eviction releases prior evidence");
+        assert_eq!(
+            engine
+                .state
+                .received_vote_evidence_table()
+                .unwrap()
+                .occupied(),
+            ReceivedVoteEvidenceTable::<[u8; 32]>::CAPACITY - 1
+        );
+        match engine.invoke_verified_received_vote(token) {
+            VerifiedVoteInvocation::Invoked {
+                evidence: ReceivedVoteEvidenceDisposition::Retained,
+                ..
+            } => {}
+            _ => panic!("a retry after actual reclamation must be invoked and retained"),
+        }
+        assert_eq!(
+            engine
+                .state
+                .received_vote_evidence_table()
+                .unwrap()
+                .occupied(),
+            ReceivedVoteEvidenceTable::<[u8; 32]>::CAPACITY
         );
     }
 
@@ -5519,10 +6183,13 @@ mod tests {
                 .expect("epoch transition detaches context");
         }
         let observer = observer.expect("first context created observer");
+        let table_charge = received_vote_table_charge();
         assert_eq!(
             observer.occupancy(),
             (
-                floor + CONTEXT_QUOTA as u64 * (context_charge + token_bytes),
+                floor
+                    + table_charge
+                    + CONTEXT_QUOTA as u64 * (context_charge + token_bytes),
                 0,
                 CONTEXT_QUOTA,
                 0
@@ -5552,14 +6219,14 @@ mod tests {
         assert!(engine.active_received_vote_context.is_none());
 
         tokens.clear();
-        assert_eq!(observer.occupancy(), (floor, 0, 0, 0));
+        assert_eq!(observer.occupancy(), (floor + table_charge, 0, 0, 0));
         engine
             .install_received_vote_context(refusal.input)
             .expect("context quota is released and installation retries");
         let wrapper_charge = std::mem::size_of::<Option<ActiveVoteContext>>() as u64;
         assert_eq!(
             observer.occupancy(),
-            (floor + context_charge + wrapper_charge, 0, 1, 0)
+            (floor + table_charge + context_charge + wrapper_charge, 0, 1, 0)
         );
     }
 
@@ -5578,9 +6245,10 @@ mod tests {
             .unwrap();
         let floor = EvidenceBudget::try_new(u64::MAX, 0).unwrap().occupancy().0;
         let wrapper_charge = std::mem::size_of::<Option<ActiveVoteContext>>() as u64;
+        let table_charge = received_vote_table_charge();
         assert_eq!(
             observer.occupancy(),
-            (floor + context_charge + wrapper_charge, 0, 1, 0)
+            (floor + context_charge + wrapper_charge + table_charge, 0, 1, 0)
         );
         let _ = engine.state_mut();
         assert_eq!(observer.occupancy(), (floor, 0, 0, 0));

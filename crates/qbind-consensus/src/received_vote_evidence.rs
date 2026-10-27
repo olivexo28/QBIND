@@ -1,6 +1,6 @@
 //! Private ownership and admission support for isolated received-Vote evidence.
-//! This module verifies borrowed Vote inputs but does not connect to consensus
-//! event execution.
+//! This module verifies borrowed Vote inputs and owns original signed evidence
+//! transferred by the isolated canonical received-Vote path.
 #![allow(dead_code)]
 
 use std::alloc::{alloc, dealloc, Layout};
@@ -16,6 +16,7 @@ use qbind_crypto::{
 };
 use qbind_types::ChainId;
 use qbind_wire::{consensus::Vote, pv_signing_domain::ProposalVoteSigningDomainV2};
+use crate::validator_set::ConsensusValidatorSet;
 
 const MAX_CONTEXTS: usize = 16;
 const MAX_REPORTS: usize = 1024;
@@ -72,6 +73,16 @@ impl AllocationFaultScope {
         let previous =
             FAIL_ALLOCATION_AFTER.with(|slot| slot.replace(Some(successful_allocations)));
         Self(previous)
+    }
+}
+
+impl<BlockIdT> ReceivedVoteEvidenceEntry<BlockIdT> {
+    pub(crate) fn vote(&self) -> &Vote {
+        &self.vote
+    }
+
+    pub(crate) fn logical_block_id(&self) -> &BlockIdT {
+        &self.logical_block_id
     }
 }
 
@@ -719,6 +730,227 @@ impl Drop for CommittedCharge {
     }
 }
 
+pub(crate) struct ReceivedVoteEvidenceEntry<BlockIdT> {
+    logical_block_id: BlockIdT,
+    vote: Vote,
+    context: ContextHandle,
+    token_lease: CommittedCharge,
+}
+
+impl<BlockIdT> std::fmt::Debug for ReceivedVoteEvidenceEntry<BlockIdT> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ReceivedVoteEvidenceEntry")
+            .field("view", &self.vote.height)
+            .field("validator_index", &self.vote.validator_index)
+            .field("vote", &"<redacted>")
+            .finish_non_exhaustive()
+    }
+}
+
+/// Fixed-capacity owner for original received-Vote evidence.
+///
+/// The Vec is built from one exact global-allocator allocation and is never
+/// exposed mutably, replaced, or grown. Its backing and inline control are
+/// covered by `_lease` from staging until final destruction.
+pub(crate) struct ReceivedVoteEvidenceTable<BlockIdT> {
+    slots: Vec<Option<ReceivedVoteEvidenceEntry<BlockIdT>>>,
+    _lease: CommittedCharge,
+}
+
+impl<BlockIdT> std::fmt::Debug for ReceivedVoteEvidenceTable<BlockIdT> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ReceivedVoteEvidenceTable")
+            .field("capacity", &self.slots.len())
+            .field("occupied", &self.occupied())
+            .finish()
+    }
+}
+
+impl<BlockIdT> ReceivedVoteEvidenceTable<BlockIdT> {
+    pub(crate) const CAPACITY: usize = 1024;
+
+    fn checked_layout() -> Result<(Layout, u64), ContextInstallError> {
+        let layout = Layout::array::<Option<ReceivedVoteEvidenceEntry<BlockIdT>>>(Self::CAPACITY)
+            .map_err(|_| ContextInstallError::Arithmetic)?;
+        if layout.size() == 0
+            || layout.size() > isize::MAX as usize
+            || layout.align() == 0
+            || !layout.align().is_power_of_two()
+        {
+            return Err(ContextInstallError::Arithmetic);
+        }
+        let bytes = u64::try_from(size_of::<Option<Self>>())
+            .ok()
+            .and_then(|control| {
+                u64::try_from(layout.size())
+                    .ok()
+                    .and_then(|backing| control.checked_add(backing))
+            })
+            .ok_or(ContextInstallError::Arithmetic)?;
+        Ok((layout, bytes))
+    }
+
+    pub(crate) fn standing_charge() -> Result<u64, ContextInstallError> {
+        Self::checked_layout().map(|(_, bytes)| bytes)
+    }
+
+    pub(crate) fn try_stage(budget: &EvidenceBudget) -> Result<Self, ContextInstallError> {
+        let (layout, total_bytes) = Self::checked_layout()?;
+        let pending = budget
+            .inner
+            .reserve(total_bytes, ReservationClass::Bytes)
+            .map_err(map_ledger_install_error)?;
+        let raw = try_alloc(layout).map_err(|error| match error {
+            EvidenceAllocError::Layout
+            | EvidenceAllocError::ZeroSizedType
+            | EvidenceAllocError::Arithmetic => {
+                ContextInstallError::Arithmetic
+            }
+            EvidenceAllocError::Allocation | EvidenceAllocError::Capacity => {
+                ContextInstallError::Allocation
+            }
+        })?;
+
+        // SAFETY: `raw` was allocated by the global allocator with exactly
+        // `layout`; this Vec records the matching capacity and starts with an
+        // empty initialized prefix. `pending` remains live until `slots` has
+        // been destroyed on every failure/unwind path.
+        let mut slots = unsafe {
+            Vec::from_raw_parts(
+                raw.cast::<Option<ReceivedVoteEvidenceEntry<BlockIdT>>>()
+                    .as_ptr(),
+                0,
+                Self::CAPACITY,
+            )
+        };
+        for _ in 0..Self::CAPACITY {
+            debug_assert!(slots.len() < slots.capacity());
+            slots.push(None);
+        }
+        if slots.len() != Self::CAPACITY || slots.capacity() != Self::CAPACITY {
+            std::process::abort();
+        }
+
+        let lease = match pending.commit() {
+            Ok(lease) => lease,
+            Err((pending, _error)) => {
+                drop(slots);
+                drop(pending);
+                return Err(ContextInstallError::Arithmetic);
+            }
+        };
+        Ok(Self {
+            slots,
+            _lease: lease,
+        })
+    }
+
+    pub(crate) fn occupied(&self) -> usize {
+        self.slots.iter().filter(|slot| slot.is_some()).count()
+    }
+
+    pub(crate) fn matches_ledger(&self, budget: &EvidenceBudget) -> bool {
+        self._lease.class == ReservationClass::Bytes
+            && self._lease.budget.0 == budget.inner.0
+            && Self::standing_charge().is_ok_and(|bytes| self._lease.bytes == bytes)
+    }
+
+    pub(crate) fn free_slot(&self) -> Option<usize> {
+        self.slots.iter().position(Option::is_none)
+    }
+
+    pub(crate) fn entry_for(
+        &self,
+        view: u64,
+        validator_index: u16,
+    ) -> Option<&ReceivedVoteEvidenceEntry<BlockIdT>> {
+        self.slots.iter().filter_map(Option::as_ref).find(|entry| {
+            entry.vote.height == view && entry.vote.validator_index == validator_index
+        })
+    }
+
+    pub(crate) fn validate_entry_block(
+        &self,
+        view: u64,
+        validator_index: u16,
+        block_id: &BlockIdT,
+    ) -> bool
+    where
+        BlockIdT: Eq,
+    {
+        match self.entry_for(view, validator_index) {
+            Some(entry) => &entry.logical_block_id == block_id,
+            None => true,
+        }
+    }
+
+    pub(crate) fn retain_memberships(
+        &mut self,
+        mut has_both_memberships: impl FnMut(&ReceivedVoteEvidenceEntry<BlockIdT>) -> bool,
+    ) {
+        for slot in &mut self.slots {
+            if slot
+                .as_ref()
+                .is_some_and(|entry| !has_both_memberships(entry))
+            {
+                drop(slot.take());
+            }
+        }
+    }
+
+    pub(crate) fn clear(&mut self) {
+        for slot in &mut self.slots {
+            drop(slot.take());
+        }
+    }
+
+    pub(crate) fn insert_token(
+        &mut self,
+        index: usize,
+        logical_block_id: BlockIdT,
+        token: VerifiedVoteToken,
+        shrink_to: u64,
+    ) {
+        if index >= self.slots.len() || self.slots[index].is_some() {
+            std::process::abort();
+        }
+        let VerifiedVoteToken {
+            vote,
+            context,
+            _charge: token_lease,
+        } = token;
+        self.slots[index] = Some(ReceivedVoteEvidenceEntry {
+            logical_block_id,
+            vote,
+            context,
+            token_lease,
+        });
+        let entry = self.slots[index].as_mut().unwrap_or_else(|| std::process::abort());
+        entry.token_lease.shrink_bytes_validated(shrink_to);
+    }
+}
+
+impl CommittedCharge {
+    fn shrink_bytes_validated(&mut self, new_bytes: u64) {
+        if self.class != ReservationClass::Bytes || new_bytes > self.bytes {
+            std::process::abort();
+        }
+        let Some(released) = self.bytes.checked_sub(new_bytes) else {
+            std::process::abort();
+        };
+        if released != 0
+            && self
+                .budget
+                .lock()
+                .release_committed(released, ReservationClass::Bytes)
+                .is_err()
+        {
+            std::process::abort();
+        }
+        self.bytes = new_bytes;
+    }
+}
+
 /// The backing field is declared before the lease: Rust drops fields in
 /// declaration order, so the allocation guard runs before the charge releases.
 #[derive(Debug)]
@@ -1130,9 +1362,35 @@ impl std::fmt::Debug for VerifiedVoteToken {
 }
 
 impl VerifiedVoteToken {
-    #[cfg(test)]
     pub(crate) fn vote(&self) -> &Vote {
         &self.vote
+    }
+
+    pub(crate) fn matches_context(&self, active: &ActiveVoteContext) -> bool {
+        self.context.ptr_eq(&active.context)
+    }
+
+    pub(crate) fn matches_ledger(&self, budget: &EvidenceBudget) -> bool {
+        self._charge.class == ReservationClass::Bytes
+            && self._charge.budget.0 == budget.inner.0
+            && context_budget(&self.context)
+                .is_ok_and(|context_budget| context_budget.0 == budget.inner.0)
+    }
+
+    pub(crate) fn token_charge_and_signature_bytes(&self) -> Option<(u64, u64)> {
+        let signature_bytes = u64::try_from(self.vote.signature.capacity()).ok()?;
+        let token_bytes = u64::try_from(size_of::<Self>())
+            .ok()?
+            .checked_add(signature_bytes)?;
+        Some((token_bytes, signature_bytes))
+    }
+
+    pub(crate) fn has_exact_token_charge(&self) -> bool {
+        self.token_charge_and_signature_bytes()
+            .is_some_and(|(token_bytes, _)| {
+                self._charge.class == ReservationClass::Bytes
+                    && self._charge.bytes == token_bytes
+            })
     }
 }
 
@@ -1267,6 +1525,45 @@ impl ActiveVoteContext {
             context,
             _charge: charge,
         })
+    }
+
+    pub(crate) fn matches_validators(&self, validators: &ConsensusValidatorSet) -> bool {
+        let payload = unsafe { &self.context.0.as_ref().payload };
+        payload.members.len() == validators.len()
+            && payload
+                .members
+                .iter()
+                .zip(validators.iter())
+                .all(|(member, validator)| {
+                    member.validator_id == validator.id.as_u64()
+                        && member.voting_power == validator.voting_power
+                })
+    }
+
+    pub(crate) fn authorized_epoch(&self) -> u64 {
+        unsafe { &self.context.0.as_ref().payload }.authorized_epoch
+    }
+
+    pub(crate) fn validates_vote_metadata(&self, vote: &Vote, current_epoch: u64) -> bool {
+        let payload = unsafe { &self.context.0.as_ref().payload };
+        let index = usize::from(vote.validator_index);
+        vote.epoch == payload.authorized_epoch
+            && vote.epoch == current_epoch
+            && vote.suite_id == SUITE_PQ_RESERVED_1.0
+            && payload.suite_id == SUITE_PQ_RESERVED_1
+            && vote.chain_id == payload.domain.expected_wire_chain_id()
+            && payload.members.get(index).is_some_and(|member| {
+                member.validator_id == u64::from(vote.validator_index)
+                    && member.public_key.len() == ML_DSA_44_PUBLIC_KEY_SIZE
+                    && member.public_key.capacity() == ML_DSA_44_PUBLIC_KEY_SIZE
+            })
+            && vote.signature.len() == ML_DSA_44_SIGNATURE_SIZE
+            && vote.signature.capacity() == ML_DSA_44_SIGNATURE_SIZE
+    }
+
+    pub(crate) fn same_ledger(&self, budget: &EvidenceBudget) -> bool {
+        context_budget(&self.context)
+            .is_ok_and(|context_budget| context_budget.0 == budget.inner.0)
     }
 }
 
