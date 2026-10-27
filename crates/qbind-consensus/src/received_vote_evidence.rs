@@ -33,6 +33,7 @@ enum EvidenceAllocError {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum LedgerError {
     Admission,
+    Allocation,
     Arithmetic,
     Quota,
     WrongReservationKind,
@@ -79,6 +80,20 @@ impl Drop for AllocationFaultScope {
     fn drop(&mut self) {
         FAIL_ALLOCATION_AFTER.with(|slot| slot.set(self.0));
     }
+}
+
+#[cfg(test)]
+pub(crate) fn with_allocation_failure_after<T>(
+    successful_allocations: usize,
+    operation: impl FnOnce() -> T,
+) -> T {
+    let _fault = AllocationFaultScope::fail_after(successful_allocations);
+    operation()
+}
+
+#[cfg(test)]
+pub(crate) fn budget_final_drop_count_for_test() -> usize {
+    BUDGET_FINAL_DROPS.with(std::cell::Cell::get)
 }
 
 fn try_alloc(layout: Layout) -> Result<NonNull<u8>, EvidenceAllocError> {
@@ -833,6 +848,10 @@ impl VoteContextInput {
         self.0.members.capacity()
     }
 
+    pub(crate) fn within_profile_capacity(&self) -> bool {
+        self.0.members.capacity() <= MAX_MEMBERS
+    }
+
     pub(crate) fn checked_charge(&self) -> Result<u64, ContextInstallError> {
         self.0.checked_charge().map_err(map_ledger_install_error)
     }
@@ -843,6 +862,7 @@ pub(crate) enum ContextInstallError {
     AlreadyInstalled,
     InvalidContext,
     Budget,
+    ContextQuota,
     Arithmetic,
     Allocation,
 }
@@ -1062,6 +1082,7 @@ impl Drop for QcReplacement {
 fn map_accounting_error(error: LedgerError) -> EvidenceAccountingError {
     match error {
         LedgerError::Admission | LedgerError::Quota => EvidenceAccountingError::Admission,
+        LedgerError::Allocation => EvidenceAccountingError::Invariant,
         LedgerError::Arithmetic | LedgerError::WrongReservationKind => {
             EvidenceAccountingError::Arithmetic
         }
@@ -1073,7 +1094,9 @@ fn map_accounting_error(error: LedgerError) -> EvidenceAccountingError {
 
 fn map_ledger_install_error(error: LedgerError) -> ContextInstallError {
     match error {
-        LedgerError::Admission | LedgerError::Quota => ContextInstallError::Budget,
+        LedgerError::Admission => ContextInstallError::Budget,
+        LedgerError::Quota => ContextInstallError::ContextQuota,
+        LedgerError::Allocation => ContextInstallError::Allocation,
         LedgerError::Arithmetic => ContextInstallError::Arithmetic,
         _ => ContextInstallError::Allocation,
     }
@@ -1256,6 +1279,7 @@ fn context_budget(context: &ContextHandle) -> Result<&BudgetHandle, LedgerError>
 fn map_vote_budget_error(error: LedgerError) -> VoteAdmissionError {
     match error {
         LedgerError::Admission | LedgerError::Quota => VoteAdmissionError::Budget,
+        LedgerError::Allocation => VoteAdmissionError::Arithmetic,
         _ => VoteAdmissionError::Arithmetic,
     }
 }
@@ -1364,7 +1388,7 @@ impl ContextHandle {
         let layout = Layout::new::<ContextCell>();
         let raw = match try_alloc(layout) {
             Ok(ptr) => ptr.cast::<ContextCell>(),
-            Err(_) => return Err((payload, pending, LedgerError::Admission)),
+            Err(_) => return Err((payload, pending, LedgerError::Allocation)),
         };
         let lease = match pending.commit() {
             Ok(lease) => lease,
@@ -1928,7 +1952,7 @@ mod tests {
         let failure = ContextHandle::try_new(payload, pending);
         drop(_fault);
         let (payload, pending, error) = failure.unwrap_err();
-        assert_eq!(error, LedgerError::Admission);
+        assert_eq!(error, LedgerError::Allocation);
         assert_eq!(payload.authorized_epoch, 3);
         drop(payload);
         drop(pending);
@@ -2316,6 +2340,22 @@ mod tests {
         let new = budget.reserve_qc_replacement(4, 0, 40).unwrap();
         budget.commit_qc_replacement(new, 4, 0, 40);
         assert_eq!(budget.occupancy().0, baseline + 40);
+    }
+
+    #[test]
+    fn qc_replacement_reservation_cancels_during_controlled_unwind() {
+        use std::panic::{catch_unwind, AssertUnwindSafe};
+
+        let baseline = budget_baseline() as u64;
+        let budget = EvidenceBudget::try_new(baseline + 256, 0).unwrap();
+        let initial = budget.occupancy();
+        let result = catch_unwind(AssertUnwindSafe(|| {
+            let _reservation = budget.reserve_qc_replacement(7, 0, 128).unwrap();
+            assert_eq!(budget.occupancy(), (baseline, 128, 0, 0));
+            panic!("controlled unwind with pending QC replacement");
+        }));
+        assert!(result.is_err());
+        assert_eq!(budget.occupancy(), initial);
     }
 
     #[test]
