@@ -20299,6 +20299,27 @@ test target; this is an environment capacity limitation, not a test failure. The
 were executed separately; no-run compilation is not test execution. Results are from the pinned working
 tree only.
 
+**Disk-pressure recovery.** The exhausted filesystem also prevented session-event persistence.
+`cargo clean --locked -p qbind-node --dry-run` was inspected before executing
+`cargo clean --locked -p qbind-node`; the latter removed 2,804 generated files (8.7 GiB reported by
+Cargo), restoring 6.3 GiB filesystem headroom. Source and session history were not deleted; the session
+event log resumed growing. No dependency manifest, Cargo profile, or consensus implementation changed.
+
+The disk-saving retry completed successfully:
+
+```
+CARGO_BUILD_JOBS=2 CARGO_PROFILE_TEST_STRIP=symbols LIBCLANG_PATH=/usr/lib/llvm-18/lib cargo test --locked -p qbind-node --no-run
+```
+
+Exit 0, 343 executable test targets compiled in 9m41s, with default features and existing warnings.
+`CARGO_PROFILE_TEST_STRIP=symbols` is an explicit command-local profile override, not a claim that the
+original unmodified-profile command passed. No tests were executed by this command. After preserving
+the compilation log, `cargo clean --locked -p qbind-node` removed the generated node artifacts
+(3,009 files, 5.1 GiB reported by Cargo), restoring 5.3 GiB filesystem headroom.
+`LIBCLANG_PATH=/usr/lib/llvm-18/lib cargo build --locked -p qbind-node` then passed again, exit 0.
+The prior consensus, Miri, and executed compatibility results remain unchanged; this follow-up changes
+only validation evidence and does not constitute independent source-review acceptance.
+
 ```
 D7D14_STORAGE_COMPONENT=IMPLEMENTED-ISOLATED
 D7D14_STORAGE_ACCEPTANCE=PASS-ACCEPTED-SUBSET

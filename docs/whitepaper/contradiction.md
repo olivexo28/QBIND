@@ -2406,6 +2406,11 @@ Focused tests executed with nonzero selections: projection 1; received-vote owne
 lease unwind, and the callback-unwind route (1 each). Full consensus, node compatibility/build, and node
 `--no-run` validation are recorded in the corresponding Run 422 D7 evidence entry; commands are not
 counted as test execution when they only compile. No independently reviewed acceptance is claimed.
+The disk-exhausted node test-compilation attempt was retried after scoped Cargo-artifact cleanup:
+343 default-feature executable test targets compiled successfully with the explicit command-local
+`CARGO_PROFILE_TEST_STRIP=symbols` override and `CARGO_BUILD_JOBS=2`. This is compilation, not execution
+or a pass of the original unmodified-profile attempt. Generated test artifacts were cleaned afterward,
+and the required node build passed again; source and session history were preserved.
 `D7D14_STORAGE_COMPONENT=IMPLEMENTED-ISOLATED`; `D7D14_STORAGE_ACCEPTANCE=PASS-ACCEPTED-SUBSET`;
 §13.6 whole-lifecycle INCOMPLETE; activation DISABLED; public DevNet NO-GO; durable anti-rollback
 NOT-ESTABLISHED; C4/C5 OPEN. No O4, production caller/current-authority integration, signing/delivery,
