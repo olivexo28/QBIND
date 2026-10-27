@@ -20190,3 +20190,123 @@ durable anti-rollback NOT-ESTABLISHED
 C4/C5 OPEN
 
 No certificate assembly, O4, production integration, signing/delivery, activation, deployment, D15, or Run 423 is included.
+
+## RUN 422 — Isolated received-Vote signed-QC staging (implemented, not independently accepted)
+
+This entry supersedes the preceding "No certificate assembly" statement only for the isolated
+received-Vote route described here. Starting baseline was `0525f772d11c0c67ce509fa43b8283f87bb39eb4`
+(`ecd0feac98c6d45fd66668d84ccde3fb863d211d` root tree), verified as the checkout HEAD/tree with a clean
+worktree; content correspondence and commit ancestry were checked separately. Work is confined to the
+six authorized paths. The implementation is opt-in and has no production caller, O4 connection, current
+authority, signing/delivery, activation, deployment, D15, or Run 423 surface.
+
+`VoteAccumulatorProjection` is bound by borrow to the accumulator, incoming voter, view, and block;
+the same insertion classifier drives projection and mutation. It remains non-`Clone`/non-`Copy`, and the
+borrow ends before mutation. The route then carries its private candidate seal without an intervening
+mutation or callback into exactly one `on_vote_detailed` call. The fixed `[u64; 16]` witness is filled
+from the pre-event projection with checked dense-roster bounds, retained through reconciliation, and
+compared against the actual QC by candidate, count, range, uniqueness, and exact membership. Evidence is
+copied before mutation in ascending validator order; the lowest-index selected retained Vote anchors the
+eight common signed fields. Existing evidence wins over a conflicting incoming duplicate, and only an
+absent selected incoming entry under `NewEntry` may use the token. Height maps to logical view; signed
+round is preserved. Missing/incompatible evidence yields Incomplete, never a partial certificate.
+
+The complete certificate is a plain wire QC with exact original signature bytes, minimal bitmap span,
+ascending signature-vector order, and a source-context handle in every invoked report. It is not a
+`VerifiedQuorumCertificate`, current authorization, publication permission, or durable acknowledgement.
+`NoQc`, `Incomplete`, `LogicalError`, and `Complete` remain distinct. The event summary preserves history,
+accumulator disposition (including skipped equivocation), evidence disposition, QC summary, and view
+advancement. Reconciliation and callbacks remain on the existing one-invocation path and retain their
+ordering/panic behavior.
+
+**Measured ownership contract (x86_64 test target).** Report-class A is reserved before stage controls
+or destination buffers are built:
+
+```
+A = checked_add(size_of::<ReceivedVoteQcRouteControlFrame>(),
+                max(size_of::<QcAdmissionControlFrame>(),
+                    size_of::<QcBufferBuildFrame>()))
+  = 1816 + max(216, 1032) = 2848 bytes
+```
+
+The route frame inventory is token/preflight, report/context owner, bound projection, candidate seal and
+membership witness, control-charge result, staged wire/result, logical mutation report, event summary,
+final outcome, refusal, and return `Result` carrier. The admission frame includes budget clone/result,
+pending/report reservation and commit result, temporary committed report lease, context clone result,
+report owner and return result. The buffer frame includes source refs; common fields and scan/layout
+scalars; allocation and push results; partial bitmap, descriptor, and signature `ExactBuffer`s; transferred
+Vecs; pending P reservation and commit result; logical wire-QC, wire owner, and preparation result.
+The nested admission and buffer helpers are lifetime-disjoint; their maximum is added to the persistent
+route frame. The route layout conservatively includes controls such as the incoming token that are also
+covered by its pre-existing Bytes-class token charge; this is intentional extra frame coverage, not a
+claim that the token payload charge was subtracted. These are component ownership bounds, not stack/RSS
+or allocator-overhead claims.
+
+For `n` selected signers and highest selected validator id `h`, complete preparation reserves
+`P = (h / 8 + 1) + n * size_of::<Vec<u8>>() + n * ML_DSA_44_SIGNATURE_SIZE`; every backing allocation
+uses the corresponding exact capacity and initialized length. On the measured target, three signers
+produce `P=1+72+7260=7333`; four produce `P=1+96+9680=9777`. A known-incomplete or equivocation
+preparation has `P=0`; prevalidation returns before any destination allocation. A candidate prepared
+before an actual `NoQc` is discarded and releases P before report return. Complete reports retain P;
+incomplete/no-QC reports retain no P. The report quota is committed separately from table capacity.
+On the three/four-signer route observations, A was 2848 bytes per report, P was respectively 7333/9777,
+pending bytes and pending contexts returned to zero, and report/context counts returned to baseline when
+the report was dropped.
+
+The inherited logical QC allocation produced by the engine's existing accumulator is outside this new
+staging budget; it is inspected, summarized, and dropped rather than retained by the report. Source Vote
+signature capacity, table, installed context, token, and ledger charges remain owned by their existing
+components. Drop order is destination backing before P lease, report outcome/backing and source context
+before A lease.
+
+**Executed evidence.** Nonzero selectors: bound accumulator projection 1 passed; received-vote ownership
+36 passed; signed-QC route 10 passed; existing retention regressions 4 passed. The route tests cover real
+domain-verified signatures, weighted quorum and minimal bitmap span, all actual signers including extra
+signers, first-retained duplicate conflict, mixed common fields, missing legacy evidence, source-entry
+eviction after pre-copy, capacity drop, equivocation, malformed actual-QC comparison controls, report
+quota and allocation refusal/retry, callback unwind, context lifetime, and exact backing/ledger deltas.
+Focused commands:
+
+```
+CARGO_BUILD_JOBS=1 cargo test --locked -p qbind-consensus projection_binds_incoming_signer_and_shares_insertion_classification --lib
+CARGO_BUILD_JOBS=1 cargo test --locked -p qbind-consensus received_vote_evidence --lib
+CARGO_BUILD_JOBS=1 cargo test --locked -p qbind-consensus received_vote_qc --lib
+CARGO_BUILD_JOBS=1 cargo test --locked -p qbind-consensus received_vote_token_invocation_transfers_original_and_keeps_first_evidence --lib
+CARGO_BUILD_JOBS=1 cargo test --locked -p qbind-consensus received_vote_missing_evidence_for_duplicate_is_retained --lib
+CARGO_BUILD_JOBS=1 cargo test --locked -p qbind-consensus received_vote_capacity_dropped_outcome_destroys_token_without_retention --lib
+CARGO_BUILD_JOBS=1 cargo test --locked -p qbind-consensus received_vote_recorder_panic_follows_completed_evidence_transfer --lib
+```
+
+Default-checking Miri passed 1 test each: `received_vote_evidence_partial_initialization_and_exact_vec_transfer`,
+`received_vote_evidence_charged_buffer_unwind_destroys_before_release`, and
+`received_vote_qc_stage_callback_unwind_keeps_engine_effects_and_releases_stage`; no `MIRIFLAGS` override
+or disabled checks were used.
+`cargo test --locked -p qbind-consensus` passed 947, failed 0, ignored 21 across 59 test targets. Focused
+selectors are reported separately and are not added to that total.
+
+The measured full occupancy tuple is `(committed_bytes, pending_bytes, committed_contexts,
+pending_contexts, committed_reports, pending_reports)`. The detached complete report observed
+`(18273, 0, 1, 0, 1, 0)` after engine destruction; final report release observed
+`(80, 0, 0, 0, 0, 0)`. Thus its source context and report slot remained charged through detachment, with
+no pending bytes/contexts/reports; report destruction released its backing/context before its final
+Report lease. The 80 committed bytes at final release are pre-existing, non-report ownership.
+
+`LIBCLANG_PATH=/usr/lib/llvm-18/lib cargo test --locked -p qbind-node --features test-utils --test run_422_owning_capture_binding_tests --test run_422_owning_decision_vote_handoff_node_tests --test run_422_leader_proposal_owning_handoff_tests` passed: capture binding 24, decision-vote handoff 5,
+leader proposal handoff 14 (43 passed, 0 failed/ignored). `LIBCLANG_PATH=/usr/lib/llvm-18/lib cargo build
+--locked -p qbind-node` passed. `LIBCLANG_PATH=/usr/lib/llvm-18/lib cargo test --locked -p qbind-node
+--no-run` did not complete: rustc/linker failed with `No space left on device` while compiling a node
+test target; this is an environment capacity limitation, not a test failure. The compatibility tests
+were executed separately; no-run compilation is not test execution. Results are from the pinned working
+tree only.
+
+```
+D7D14_STORAGE_COMPONENT=IMPLEMENTED-ISOLATED
+D7D14_STORAGE_ACCEPTANCE=PASS-ACCEPTED-SUBSET
+§13.6 whole-lifecycle INCOMPLETE
+activation DISABLED
+public DevNet NO-GO
+durable anti-rollback NOT-ESTABLISHED
+C4/C5 OPEN
+```
+
+This implementation delivery is not independent source-review acceptance.

@@ -34,7 +34,7 @@ use crate::received_vote_evidence::{
 };
 use crate::validator_set::ConsensusValidatorSet;
 use crate::vote_accumulator::{
-    ConsensusLimitsConfig, VoteAccumulator, VoteAccumulatorDisposition,
+    ConsensusLimitsConfig, VoteAccumulator, VoteAccumulatorDisposition, VoteAccumulatorProjection,
 };
 
 /// Run 422 D7-C3F: default byte budget for retained embedded-QC verification
@@ -620,6 +620,27 @@ where
             .free_slot()
             .map(|slot| VoteEvidencePlan::NewEntry { slot })
             .ok_or(VoteEvidencePreflightError::Full)
+    }
+
+    pub(crate) fn project_received_vote_accumulator<'a>(
+        &'a self,
+        voter: ValidatorId,
+        view: u64,
+        block_id: &'a BlockIdT,
+    ) -> Result<VoteAccumulatorProjection<'a, BlockIdT>, QcValidationError> {
+        self.votes
+            .project_vote(&self.validators, voter, view, block_id)
+    }
+
+    pub(crate) fn has_conflicting_vote_history(
+        &self,
+        voter: ValidatorId,
+        view: u64,
+        block_id: &BlockIdT,
+    ) -> bool {
+        self.votes_by_view
+            .get(&(view, voter))
+            .is_some_and(|previous| previous != block_id)
     }
 
     pub(crate) fn has_vote_memberships(
