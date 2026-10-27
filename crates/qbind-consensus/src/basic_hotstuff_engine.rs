@@ -5917,9 +5917,11 @@ mod tests {
         let table_charge = received_vote_table_charge();
         let wrapper_charge = std::mem::size_of::<Option<ActiveVoteContext>>() as u64;
         let vote = signed_context_vote(0, &secret_key, &domain);
+        let expected_vote = vote.clone();
         let signature_ptr = vote.signature.as_ptr();
         let signature_capacity = vote.signature.capacity();
         let signature_charge = signature_capacity as u64;
+        let byte_cap = engine.state.max_retained_evidence_bytes();
         let token = engine
             .admit_verified_received_vote(ValidatorId(0), vote)
             .expect("admit signed Vote");
@@ -6004,7 +6006,14 @@ mod tests {
             "token-inline coverage is released only after the original Vote is installed"
         );
 
-        let duplicate_vote = original_vote.clone();
+        let retained_occupancy = (
+            floor + table_charge + context_charge + wrapper_charge + signature_charge,
+            0,
+            1,
+            0,
+        );
+        assert!(original_vote == expected_vote, "retained Vote differs (redacted)");
+        let duplicate_vote = expected_vote.clone();
         let duplicate = engine
             .admit_verified_received_vote(
                 ValidatorId(0),
@@ -6041,16 +6050,14 @@ mod tests {
             .unwrap()
             .entry_for(7, 0)
             .expect("duplicate preserves the first retained evidence");
-        assert!(still_retained.vote() == &original_vote, "retained Vote differs");
+        assert!(still_retained.vote() == &expected_vote, "retained Vote differs");
         assert!(still_retained.vote().signature.as_ptr() == signature_ptr);
-        assert_eq!(
-            budget.occupancy().0,
-            floor + table_charge + context_charge + wrapper_charge + signature_charge
-        );
+        assert_eq!(budget.occupancy(), retained_occupancy);
+        assert_eq!(engine.state.max_retained_evidence_bytes(), byte_cap);
 
         let alternate_signature_vote = signed_context_vote(0, &secret_key, &domain);
         let different_valid_signature =
-            alternate_signature_vote.signature != original_vote.signature;
+            alternate_signature_vote.signature != expected_vote.signature;
         assert!(different_valid_signature, "test signatures unexpectedly matched");
         let alternate_signature_token = engine
             .admit_verified_received_vote(ValidatorId(0), alternate_signature_vote.clone())
@@ -6078,15 +6085,15 @@ mod tests {
             .unwrap()
             .entry_for(7, 0)
             .expect("first evidence remains");
-        assert!(after_alternate_signature.vote() == &original_vote, "retained Vote differs");
+        assert!(after_alternate_signature.vote() == &expected_vote, "retained Vote differs");
         assert!(
-            after_alternate_signature.vote().signature == original_vote.signature,
+            after_alternate_signature.vote().signature == expected_vote.signature,
             "retained signature changed"
         );
-        assert_eq!(
-            budget.occupancy().0,
-            floor + table_charge + context_charge + wrapper_charge + signature_charge
-        );
+        assert_eq!(after_alternate_signature.vote().signature.as_ptr(), signature_ptr);
+        assert_eq!(after_alternate_signature.vote().signature.capacity(), signature_capacity);
+        assert_eq!(budget.occupancy(), retained_occupancy);
+        assert_eq!(engine.state.max_retained_evidence_bytes(), byte_cap);
 
         let mut signed_field_conflict = signed_context_vote(0, &secret_key, &domain);
         signed_field_conflict.round += 1;
@@ -6096,11 +6103,11 @@ mod tests {
                 .into_boxed_slice()
                 .into_vec();
         assert!(
-            !same_vote_signed_fields(&original_vote, &signed_field_conflict),
+            !same_vote_signed_fields(&expected_vote, &signed_field_conflict),
             "round difference must be part of the signed-field comparison"
         );
-        assert_eq!(signed_field_conflict.height, original_vote.height);
-        assert_eq!(signed_field_conflict.round, original_vote.round + 1);
+        assert_eq!(signed_field_conflict.height, expected_vote.height);
+        assert_eq!(signed_field_conflict.round, expected_vote.round + 1);
         let conflicting_fields_token = engine
             .admit_verified_received_vote(ValidatorId(0), signed_field_conflict)
             .expect("admit valid same-key signed-field conflict");
@@ -6128,18 +6135,22 @@ mod tests {
             .entry_for(7, 0)
             .expect("first evidence remains after signed-field conflict");
         assert!(
-            after_signed_field_conflict.vote() == &original_vote,
+            after_signed_field_conflict.vote() == &expected_vote,
             "retained Vote differs"
         );
         assert!(after_signed_field_conflict.vote().signature.as_ptr() == signature_ptr);
-        assert_eq!(after_signed_field_conflict.vote().round, 9);
-        assert_eq!(
-            budget.occupancy().0,
-            floor + table_charge + context_charge + wrapper_charge + signature_charge
-        );
+        assert_eq!(after_signed_field_conflict.vote().signature.capacity(), signature_capacity);
+        assert_eq!(after_signed_field_conflict.vote().height, expected_vote.height);
+        assert_eq!(after_signed_field_conflict.vote().round, expected_vote.round);
+        assert_eq!(budget.occupancy(), retained_occupancy);
+        assert_eq!(engine.state.max_retained_evidence_bytes(), byte_cap);
 
         let mut conflicting_vote = signed_context_vote(0, &secret_key, &domain);
         conflicting_vote.block_id = [0x74; 32];
+        assert_eq!(conflicting_vote.height, expected_vote.height);
+        assert_eq!(conflicting_vote.round, expected_vote.round);
+        assert_eq!(conflicting_vote.validator_index, expected_vote.validator_index);
+        assert_ne!(conflicting_vote.block_id, expected_vote.block_id);
         conflicting_vote.signature =
             MlDsa44Backend::sign(&secret_key, &domain.vote_preimage(&conflicting_vote))
                 .expect("sign conflicting fields")
@@ -6165,12 +6176,11 @@ mod tests {
             .unwrap()
             .entry_for(7, 0)
             .expect("first evidence remains after equivocation");
-        assert!(after_conflict.vote() == &original_vote, "retained Vote differs");
+        assert!(after_conflict.vote() == &expected_vote, "retained Vote differs");
         assert!(after_conflict.vote().signature.as_ptr() == signature_ptr);
-        assert_eq!(
-            budget.occupancy().0,
-            floor + table_charge + context_charge + wrapper_charge + signature_charge
-        );
+        assert_eq!(after_conflict.vote().signature.capacity(), signature_capacity);
+        assert_eq!(budget.occupancy(), retained_occupancy);
+        assert_eq!(engine.state.max_retained_evidence_bytes(), byte_cap);
 
         engine
             .transition_to_epoch(crate::validator_set::EpochId::new(1), dense_validator_set(1))
@@ -6723,8 +6733,10 @@ mod tests {
         );
         let limits = crate::vote_accumulator::ConsensusLimitsConfig {
             max_votes_per_view: 1,
+            max_votes_by_view_entries: 1,
             ..crate::vote_accumulator::ConsensusLimitsConfig::default()
         };
+        let context_charge = input.checked_charge().unwrap();
         let mut engine = BasicHotStuffEngine::with_state_limits(
             ValidatorId(0),
             dense_validator_set(2),
@@ -6732,6 +6744,10 @@ mod tests {
         );
         engine.install_received_vote_context(input).unwrap();
         let observer = engine.state.received_vote_budget().unwrap().try_clone().unwrap();
+        let floor = EvidenceBudget::try_new(u64::MAX, 0).unwrap().occupancy().0;
+        let table_charge = received_vote_table_charge();
+        let wrapper_charge = std::mem::size_of::<Option<ActiveVoteContext>>() as u64;
+        let cap = engine.state.max_retained_evidence_bytes();
         let mut first = signed_context_vote(0, &secret0, &domain);
         first.block_id = [0x52; 32];
         first.signature = MlDsa44Backend::sign(&secret0, &domain.vote_preimage(&first))
@@ -6741,6 +6757,7 @@ mod tests {
         let token = engine
             .admit_verified_received_vote(ValidatorId(0), first.clone())
             .expect("admit first signer");
+        let signature_charge = first.signature.capacity() as u64;
         assert!(matches!(
             engine.invoke_verified_received_vote(token),
             VerifiedVoteInvocation::Invoked {
@@ -6748,15 +6765,39 @@ mod tests {
                 ..
             }
         ));
-        let retained_ptr = engine
+        let retained_occupancy = (
+            floor + table_charge + context_charge + wrapper_charge + signature_charge,
+            0,
+            1,
+            0,
+        );
+        assert_eq!(observer.occupancy(), retained_occupancy);
+        assert!(engine.state.has_vote_history_membership_for_test(
+            ValidatorId(0),
+            first.height,
+            &first.block_id
+        ));
+        assert_eq!(engine.state.vote_count(first.height, &first.block_id), 1);
+        let retained_vote = engine
             .state
             .received_vote_evidence_table()
             .unwrap()
             .entry_for(first.height, 0)
             .unwrap()
             .vote()
-            .signature
-            .as_ptr();
+            .clone();
+        let retained_entry = engine
+            .state
+            .received_vote_evidence_table()
+            .unwrap()
+            .entry_for(first.height, 0)
+            .unwrap();
+        assert!(retained_entry.vote() == &first);
+        assert!(
+            retained_entry.vote() == &retained_vote,
+            "retained Vote differs (redacted)"
+        );
+        assert_eq!(retained_entry.vote().signature.capacity() as u64, signature_charge);
         let qc_attempts_before = crate::vote_accumulator::qc_formation_attempts_for_test();
         let report = engine.state.on_leader_self_vote_detailed(
             ValidatorId(1),
@@ -6774,26 +6815,34 @@ mod tests {
             qc_attempts_before,
             "detailed leader route returns before QC formation on non-insertion"
         );
+        assert!(
+            !engine.state.has_vote_history_membership_for_test(
+                ValidatorId(0),
+                first.height,
+                &first.block_id
+            ),
+            "second history insertion evicts first validator membership"
+        );
         assert!(engine.state.has_vote_history_membership_for_test(
             ValidatorId(1),
             first.height,
             &first.block_id
         ));
         assert_eq!(engine.state.vote_count(first.height, &first.block_id), 1);
-        assert!(engine.state.received_vote_evidence_table().unwrap().entry_for(first.height, 0).is_some());
+        let table = engine.state.received_vote_evidence_table().unwrap();
+        assert_eq!(table.occupied(), 0, "stale evidence is reconciled before return");
+        assert!(table.entry_for(first.height, 0).is_none());
         assert_eq!(
-            engine
-                .state
-                .received_vote_evidence_table()
-                .unwrap()
-                .entry_for(first.height, 0)
-                .unwrap()
-                .vote()
-                .signature
-                .as_ptr(),
-            retained_ptr
+            observer.occupancy(),
+            (
+                retained_occupancy.0 - signature_charge,
+                retained_occupancy.1,
+                retained_occupancy.2,
+                retained_occupancy.3,
+            )
         );
-        assert_eq!(observer.occupancy().2, 1);
+        assert_eq!(engine.state.max_retained_evidence_bytes(), cap);
+        assert_eq!(retained_vote.signature.capacity() as u64, signature_charge);
     }
 
     #[test]
@@ -6830,10 +6879,24 @@ mod tests {
         let (public_key, secret_key) =
             MlDsa44Backend::generate_keypair().expect("test keygen");
         let (input, domain) = received_vote_context(0, public_key);
-        let mut engine = BasicHotStuffEngine::new(ValidatorId(0), dense_validator_set(1));
+        let context_charge = input.checked_charge().unwrap();
+        let limits = crate::vote_accumulator::ConsensusLimitsConfig {
+            max_votes_by_view_entries: 1,
+            ..crate::vote_accumulator::ConsensusLimitsConfig::default()
+        };
+        let mut engine = BasicHotStuffEngine::with_state_limits(
+            ValidatorId(0),
+            dense_validator_set(1),
+            limits,
+        );
         engine.install_received_vote_context(input).unwrap();
         let observer = engine.state.received_vote_budget().unwrap().try_clone().unwrap();
+        let floor = EvidenceBudget::try_new(u64::MAX, 0).unwrap().occupancy().0;
+        let table_charge = received_vote_table_charge();
+        let wrapper_charge = std::mem::size_of::<Option<ActiveVoteContext>>() as u64;
+        let cap = engine.state.max_retained_evidence_bytes();
         let vote = signed_context_vote(0, &secret_key, &domain);
+        let signature_charge = vote.signature.capacity() as u64;
         let token = engine
             .admit_verified_received_vote(ValidatorId(0), vote.clone())
             .expect("admit valid token");
@@ -6844,8 +6907,28 @@ mod tests {
                 ..
             }
         ));
+        let retained_occupancy = (
+            floor + table_charge + context_charge + wrapper_charge + signature_charge,
+            0,
+            1,
+            0,
+        );
+        assert_eq!(observer.occupancy(), retained_occupancy);
+        assert!(engine.state.has_vote_history_membership_for_test(
+            ValidatorId(0),
+            vote.height,
+            &vote.block_id
+        ));
+        assert_eq!(engine.state.vote_count(vote.height, &vote.block_id), 1);
+        let retained_entry = engine
+            .state
+            .received_vote_evidence_table()
+            .unwrap()
+            .entry_for(vote.height, 0)
+            .unwrap();
+        assert!(retained_entry.vote() == &vote);
+        assert_eq!(retained_entry.vote().signature.capacity() as u64, signature_charge);
         let table_before = engine.state.received_vote_evidence_table().unwrap().occupied();
-        let ledger_before = observer.occupancy();
         let current_view = engine.current_view;
         let callbacks = Arc::new(AtomicUsize::new(0));
         engine.set_progress_recorder(Arc::new(CountProgress(Arc::clone(&callbacks))));
@@ -6863,13 +6946,34 @@ mod tests {
             vote.height,
             &vote.block_id
         ));
-        assert_eq!(engine.state.vote_count(vote.height, &vote.block_id), 1);
-        assert!(engine.state.received_vote_evidence_table().unwrap().entry_for(vote.height, 0).is_some());
-        assert_eq!(
-            engine.state.received_vote_evidence_table().unwrap().occupied(),
-            table_before
+        assert!(
+            !engine.state.has_vote_history_membership_for_test(
+                ValidatorId(0),
+                vote.height,
+                &vote.block_id
+            ),
+            "nonmember insertion evicts original signer history at limit one"
         );
-        assert_eq!(observer.occupancy(), ledger_before);
+        assert_eq!(engine.state.vote_count(vote.height, &vote.block_id), 1);
+        assert_eq!(table_before, 1);
+        let table = engine.state.received_vote_evidence_table().unwrap();
+        assert_eq!(table.occupied(), 0, "Err return reconciles stale evidence");
+        assert!(table.entry_for(vote.height, 0).is_none());
+        assert_eq!(
+            observer.occupancy(),
+            (
+                retained_occupancy.0 - signature_charge,
+                retained_occupancy.1,
+                retained_occupancy.2,
+                retained_occupancy.3,
+            ),
+            "only retained signature capacity is released; table/context/wrapper remain"
+        );
+        assert_eq!(engine.state.max_retained_evidence_bytes(), cap);
+        assert_eq!(
+            observer.occupancy().0,
+            floor + table_charge + context_charge + wrapper_charge
+        );
         assert_eq!(callbacks.load(Ordering::Relaxed), 0);
         assert_eq!(engine.current_view, current_view);
     }
