@@ -21,12 +21,14 @@
 //! - Timeouts or view-change mechanics
 
 use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
 use crate::block_state::BlockNode;
 use crate::ids::ValidatorId;
 use crate::qc::{QcValidationError, QuorumCertificate};
 use crate::qc_verify_domain::VerifiedQuorumCertificate;
+use crate::received_vote_evidence::{EvidenceAccountingError, EvidenceBudget, QcReplacement};
 use crate::validator_set::ConsensusValidatorSet;
 use crate::vote_accumulator::{
     ConsensusLimitsConfig, VoteAccumulator, VoteAccumulatorDisposition,
@@ -46,6 +48,25 @@ use crate::vote_accumulator::{
 /// Semantics: this bounds only the bytes attributed to retained
 /// `VerifiedQuorumCertificate` evidence; it is not a process-wide memory audit.
 pub const DEFAULT_MAX_RETAINED_EVIDENCE_BYTES: u64 = 256 * 1024 * 1024;
+static NEXT_STATE_ACCOUNTING_ID: AtomicU64 = AtomicU64::new(1);
+
+fn next_state_accounting_id() -> u64 {
+    let mut current = NEXT_STATE_ACCOUNTING_ID.load(Ordering::Relaxed);
+    loop {
+        let next = current
+            .checked_add(1)
+            .unwrap_or_else(|| std::process::abort());
+        match NEXT_STATE_ACCOUNTING_ID.compare_exchange_weak(
+            current,
+            next,
+            Ordering::Relaxed,
+            Ordering::Relaxed,
+        ) {
+            Ok(_) => return current,
+            Err(observed) => current = observed,
+        }
+    }
+}
 
 /// An entry in the commit log recording a committed block.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -93,6 +114,22 @@ pub enum EvidenceRetentionError {
     /// representable / would break the accounting invariant. Rejected
     /// explicitly rather than saturated into an admissible total. No mutation.
     UnrepresentableCharge,
+}
+
+pub(crate) enum VerifiedQcAdmission<BlockIdT> {
+    Scalar {
+        state_id: u64,
+        candidate: BlockIdT,
+        old_bytes: u64,
+        new_bytes: u64,
+    },
+    Shared {
+        state_id: u64,
+        candidate: BlockIdT,
+        old_bytes: u64,
+        new_bytes: u64,
+        reservation: QcReplacement,
+    },
 }
 
 impl std::fmt::Display for EvidenceRetentionError {
@@ -262,6 +299,13 @@ where
     /// requests leave the block tree and byte accounting unchanged (no partial
     /// effect).
     rejected_evidence_over_budget: u64,
+
+    /// Optional shared component ledger installed only by the opt-in received
+    /// Vote evidence path.
+    received_vote_budget: Option<EvidenceBudget>,
+
+    /// Stable identity used to bind private admission witnesses to this state.
+    accounting_state_id: u64,
 }
 
 impl<BlockIdT> HotStuffStateEngine<BlockIdT>
@@ -306,6 +350,8 @@ where
             retained_evidence_bytes: 0,
             max_retained_evidence_bytes: DEFAULT_MAX_RETAINED_EVIDENCE_BYTES,
             rejected_evidence_over_budget: 0,
+            received_vote_budget: None,
+            accounting_state_id: next_state_accounting_id(),
         }
     }
 
@@ -461,6 +507,151 @@ where
     /// retained total falls back under the ceiling.
     pub fn set_max_retained_evidence_bytes(&mut self, max: u64) {
         self.max_retained_evidence_bytes = max;
+        if let Some(budget) = self.received_vote_budget.as_ref() {
+            budget.lower_cap(max);
+        }
+    }
+
+    pub(crate) fn received_vote_budget(&self) -> Option<&EvidenceBudget> {
+        self.received_vote_budget.as_ref()
+    }
+
+    pub(crate) fn map_qc_charge_checked(&self) -> Result<u64, EvidenceRetentionError> {
+        self.blocks.values().try_fold(0u64, |total, node| {
+            total
+                .checked_add(Self::evidence_bytes_of_node(node))
+                .ok_or(EvidenceRetentionError::UnrepresentableCharge)
+        })
+    }
+
+    pub(crate) fn install_received_vote_budget(
+        &mut self,
+        budget: EvidenceBudget,
+    ) -> Result<(), EvidenceBudget> {
+        if self.received_vote_budget.is_some() {
+            return Err(budget);
+        }
+        self.received_vote_budget = Some(budget);
+        Ok(())
+    }
+
+    pub(crate) fn reserve_verified_justification(
+        &mut self,
+        candidate: BlockIdT,
+        new_bytes: u64,
+    ) -> Result<VerifiedQcAdmission<BlockIdT>, EvidenceRetentionError> {
+        let id = candidate.clone();
+        let old_bytes = self
+            .blocks
+            .get(&id)
+            .map(Self::evidence_bytes_of_node)
+            .unwrap_or(0);
+        if let Some(budget) = self.received_vote_budget.as_ref() {
+            match budget.reserve_qc_replacement(self.accounting_state_id, old_bytes, new_bytes) {
+                Ok(reservation) => Ok(VerifiedQcAdmission::Shared {
+                    state_id: self.accounting_state_id,
+                    candidate,
+                    old_bytes,
+                    new_bytes,
+                    reservation,
+                }),
+                Err(EvidenceAccountingError::Admission) => {
+                    self.note_rejected_evidence_over_budget();
+                    Err(EvidenceRetentionError::BudgetExceeded {
+                        needed_bytes: new_bytes,
+                        retained_bytes: self.retained_evidence_bytes,
+                        max_bytes: self.max_retained_evidence_bytes,
+                    })
+                }
+                Err(_) => Err(EvidenceRetentionError::UnrepresentableCharge),
+            }
+        } else {
+            let projected = self
+                .retained_evidence_bytes
+                .checked_sub(old_bytes)
+                .and_then(|bytes| bytes.checked_add(new_bytes));
+            match projected {
+                Some(projected) if projected <= self.max_retained_evidence_bytes => {
+                    Ok(VerifiedQcAdmission::Scalar {
+                        state_id: self.accounting_state_id,
+                        candidate,
+                        old_bytes,
+                        new_bytes,
+                    })
+                }
+                Some(_) => {
+                    self.note_rejected_evidence_over_budget();
+                    Err(EvidenceRetentionError::BudgetExceeded {
+                        needed_bytes: new_bytes,
+                        retained_bytes: self.retained_evidence_bytes,
+                        max_bytes: self.max_retained_evidence_bytes,
+                    })
+                }
+                None => Err(EvidenceRetentionError::UnrepresentableCharge),
+            }
+        }
+    }
+
+    pub(crate) fn can_admit_verified_replacement(&self, id: &BlockIdT, needed: u64) -> bool {
+        let old = self
+            .blocks
+            .get(id)
+            .map(Self::evidence_bytes_of_node)
+            .unwrap_or(0);
+        if let Some(budget) = self.received_vote_budget.as_ref() {
+            return budget
+                .projected_qc_replacement(old, needed)
+                .unwrap_or(false);
+        }
+        self.retained_evidence_bytes
+            .checked_sub(old)
+            .and_then(|bytes| bytes.checked_add(needed))
+            .map(|projected| projected <= self.max_retained_evidence_bytes)
+            .unwrap_or(false)
+    }
+
+    fn verified_qc_admission_matches(
+        &self,
+        candidate: &BlockIdT,
+        old_bytes: u64,
+        new_bytes: u64,
+        admission: &VerifiedQcAdmission<BlockIdT>,
+    ) -> bool {
+        match admission {
+            VerifiedQcAdmission::Scalar {
+                state_id,
+                candidate: admitted_candidate,
+                old_bytes: admitted_old,
+                new_bytes: admitted_new,
+            } => {
+                self.received_vote_budget.is_none()
+                    && *state_id == self.accounting_state_id
+                    && admitted_candidate == candidate
+                    && *admitted_old == old_bytes
+                    && *admitted_new == new_bytes
+            }
+            VerifiedQcAdmission::Shared {
+                state_id,
+                candidate: admitted_candidate,
+                old_bytes: admitted_old,
+                new_bytes: admitted_new,
+                reservation,
+            } => self
+                .received_vote_budget
+                .as_ref()
+                .is_some_and(|budget| {
+                    *state_id == self.accounting_state_id
+                        && admitted_candidate == candidate
+                        && *admitted_old == old_bytes
+                        && *admitted_new == new_bytes
+                        && budget.qc_replacement_matches(
+                            reservation,
+                            self.accounting_state_id,
+                            old_bytes,
+                            new_bytes,
+                        )
+                }),
+        }
     }
 
     /// The byte footprint a node's retained evidence occupies: the **checked**
@@ -480,23 +671,7 @@ where
     /// projected total is not representable it is treated as **not** admissible
     /// (rejected), so overflow can never be saturated into an admissible total.
     pub fn can_retain_evidence(&self, id: &BlockIdT, needed: u64) -> bool {
-        let reclaimable = self
-            .blocks
-            .get(id)
-            .map(Self::evidence_bytes_of_node)
-            .unwrap_or(0);
-        // `reclaimable <= retained_evidence_bytes` by construction, so the
-        // subtraction cannot underflow; the addition is the only overflow risk
-        // and is checked explicitly.
-        let projected = match self
-            .retained_evidence_bytes
-            .saturating_sub(reclaimable)
-            .checked_add(needed)
-        {
-            Some(p) => p,
-            None => return false,
-        };
-        projected <= self.max_retained_evidence_bytes
+        self.can_admit_verified_replacement(id, needed)
     }
 
     /// Record that a retention request was rejected for exceeding the byte
@@ -602,13 +777,28 @@ where
     /// every block insert so accounting can never drift.
     fn insert_block_node(&mut self, node: BlockNode<BlockIdT>) {
         let id = node.id.clone();
-        if let Some(old) = self.blocks.get(&id) {
-            let old_bytes = Self::evidence_bytes_of_node(old);
-            self.retained_evidence_bytes = self.retained_evidence_bytes.saturating_sub(old_bytes);
-        }
+        let old_bytes = self
+            .blocks
+            .get(&id)
+            .map(Self::evidence_bytes_of_node)
+            .unwrap_or(0);
         let new_bytes = Self::evidence_bytes_of_node(&node);
-        self.retained_evidence_bytes = self.retained_evidence_bytes.saturating_add(new_bytes);
-        self.blocks.insert(id, node);
+        if self.received_vote_budget.is_some() && new_bytes > old_bytes {
+            std::process::abort();
+        }
+        let next_total = self
+            .retained_evidence_bytes
+            .checked_sub(old_bytes)
+            .and_then(|bytes| bytes.checked_add(new_bytes))
+            .unwrap_or_else(|| std::process::abort());
+        let removed = self.blocks.insert(id, node);
+        self.retained_evidence_bytes = next_total;
+        if let Some(budget) = self.received_vote_budget.as_ref() {
+            if old_bytes > new_bytes {
+                budget.release_qc_bytes(old_bytes - new_bytes);
+            }
+        }
+        drop(removed);
     }
 
     /// Remove a block, reclaiming any retained-evidence bytes it held.
@@ -616,9 +806,83 @@ where
         let removed = self.blocks.remove(id);
         if let Some(ref node) = removed {
             let bytes = Self::evidence_bytes_of_node(node);
-            self.retained_evidence_bytes = self.retained_evidence_bytes.saturating_sub(bytes);
+            self.retained_evidence_bytes = self
+                .retained_evidence_bytes
+                .checked_sub(bytes)
+                .unwrap_or_else(|| std::process::abort());
+            if let Some(budget) = self.received_vote_budget.as_ref() {
+                budget.release_qc_bytes(bytes);
+            }
         }
         removed
+    }
+
+    fn insert_verified_block_node(
+        &mut self,
+        node: BlockNode<BlockIdT>,
+        admission: VerifiedQcAdmission<BlockIdT>,
+    ) {
+        let id = node.id.clone();
+        let old_bytes = self
+            .blocks
+            .get(&id)
+            .map(Self::evidence_bytes_of_node)
+            .unwrap_or(0);
+        let new_bytes = Self::evidence_bytes_of_node(&node);
+        let state_id = self.accounting_state_id;
+        match admission {
+            VerifiedQcAdmission::Scalar {
+                state_id: admitted_state,
+                candidate: admitted_candidate,
+                old_bytes: admitted_old,
+                new_bytes: admitted_new,
+            } => {
+                if self.received_vote_budget.is_some()
+                    || admitted_state != state_id
+                    || admitted_candidate != id
+                    || admitted_old != old_bytes
+                    || admitted_new != new_bytes
+                {
+                    std::process::abort();
+                }
+            }
+            VerifiedQcAdmission::Shared {
+                state_id: admitted_state,
+                candidate: admitted_candidate,
+                old_bytes: admitted_old,
+                new_bytes: admitted_new,
+                reservation,
+            } => {
+                let Some(budget) = self.received_vote_budget.as_ref() else {
+                    std::process::abort();
+                };
+                if admitted_state != state_id
+                    || admitted_candidate != id
+                    || admitted_old != old_bytes
+                    || admitted_new != new_bytes
+                {
+                    std::process::abort();
+                }
+                let next_total = self
+                    .retained_evidence_bytes
+                    .checked_sub(old_bytes)
+                    .and_then(|bytes| bytes.checked_add(new_bytes))
+                    .unwrap_or_else(|| std::process::abort());
+                let removed = self.blocks.insert(id, node);
+                self.retained_evidence_bytes = next_total;
+                budget.commit_qc_replacement(reservation, state_id, old_bytes, new_bytes);
+                drop(removed);
+                return;
+            }
+        }
+        let next_total = self
+            .retained_evidence_bytes
+            .checked_sub(old_bytes)
+            .and_then(|bytes| bytes.checked_add(new_bytes))
+            .unwrap_or_else(|| std::process::abort());
+        let removed = self.blocks.insert(id, node);
+        self.retained_evidence_bytes = next_total;
+        drop(removed);
     }
 
     /// Check if a block is safe to evict.
@@ -784,10 +1048,7 @@ where
         })
     }
 
-    pub(crate) fn commit_leader_registration(
-        &mut self,
-        plan: LeaderRegistrationPlan<BlockIdT>,
-    ) {
+    pub(crate) fn commit_leader_registration(&mut self, plan: LeaderRegistrationPlan<BlockIdT>) {
         let id = plan.node.id.clone();
         debug_assert!(!self.blocks.contains_key(&id));
         self.insert_block_node(plan.node);
@@ -1069,15 +1330,31 @@ where
         let needed = evidence
             .retained_byte_size()
             .map_err(|_| EvidenceRetentionError::UnrepresentableCharge)?;
+        let admission = self.reserve_verified_justification(id.clone(), needed)?;
+        self.register_block_with_admission(id, view, parent_id, evidence, admission)
+    }
 
-        // Byte-budget admission (checked, no mutation on rejection).
-        if !self.can_retain_evidence(&id, needed) {
-            self.note_rejected_evidence_over_budget();
-            return Err(EvidenceRetentionError::BudgetExceeded {
-                needed_bytes: needed,
-                retained_bytes: self.retained_evidence_bytes,
-                max_bytes: self.max_retained_evidence_bytes,
-            });
+    pub(crate) fn register_block_with_admission(
+        &mut self,
+        id: BlockIdT,
+        view: u64,
+        parent_id: Option<BlockIdT>,
+        evidence: Arc<VerifiedQuorumCertificate>,
+        admission: VerifiedQcAdmission<BlockIdT>,
+    ) -> Result<(), EvidenceRetentionError>
+    where
+        BlockIdT: From<[u8; 32]>,
+    {
+        let needed = evidence
+            .retained_byte_size()
+            .map_err(|_| EvidenceRetentionError::UnrepresentableCharge)?;
+        let old_bytes = self
+            .blocks
+            .get(&id)
+            .map(Self::evidence_bytes_of_node)
+            .unwrap_or(0);
+        if !self.verified_qc_admission_matches(&id, old_bytes, needed, &admission) {
+            std::process::abort();
         }
 
         let is_new = !self.blocks.contains_key(&id);
@@ -1118,7 +1395,7 @@ where
         // followed by NO further eviction leaves `blocks.len() <=
         // max_pending_blocks` with the candidate retained. (Legacy
         // `register_block` keeps its insert-then-evict behavior unchanged.)
-        self.insert_block_node(node);
+        self.insert_verified_block_node(node, admission);
         if is_new {
             self.pending_block_order.push_back(id);
         }
@@ -1739,4 +2016,87 @@ pub enum BoundedSafetyOutcome {
     /// `max_hops` parent transitions were taken without reaching the lock (also
     /// the terminating outcome for a cyclically registered chain).
     BoundExhausted,
+}
+
+impl<BlockIdT> Drop for HotStuffStateEngine<BlockIdT>
+where
+    BlockIdT: Eq + std::hash::Hash + Clone,
+{
+    fn drop(&mut self) {
+        let qc_bytes = self.retained_evidence_bytes;
+        let blocks = std::mem::take(&mut self.blocks);
+        drop(blocks);
+        if let Some(budget) = self.received_vote_budget.as_ref() {
+            budget.release_qc_bytes(qc_bytes);
+        }
+        self.retained_evidence_bytes = 0;
+    }
+}
+
+#[cfg(test)]
+mod received_vote_admission_tests {
+    use super::*;
+    use crate::ids::ValidatorId;
+    use crate::received_vote_evidence::EvidenceBudget;
+    use crate::validator_set::ValidatorSetEntry;
+
+    fn new_state() -> HotStuffStateEngine<[u8; 32]> {
+        HotStuffStateEngine::new(
+            ConsensusValidatorSet::new(vec![ValidatorSetEntry {
+                id: ValidatorId(0),
+                voting_power: 1,
+            }])
+            .expect("valid validator set"),
+        )
+    }
+
+    #[test]
+    fn private_scalar_admission_rejects_state_candidate_and_charge_mismatch() {
+        let mut state = new_state();
+        let candidate = [0xA1; 32];
+        let admission = state
+            .reserve_verified_justification(candidate, 8)
+            .expect("scalar admission");
+        assert!(state.verified_qc_admission_matches(&candidate, 0, 8, &admission));
+        assert!(!state.verified_qc_admission_matches(&[0xA2; 32], 0, 8, &admission));
+        assert!(!state.verified_qc_admission_matches(&candidate, 1, 8, &admission));
+        assert!(!state.verified_qc_admission_matches(&candidate, 0, 9, &admission));
+        assert!(!new_state().verified_qc_admission_matches(&candidate, 0, 8, &admission));
+    }
+
+    #[test]
+    fn private_shared_admission_rejects_ledger_state_candidate_and_charge_mismatch() {
+        let mut state = new_state();
+        let budget = EvidenceBudget::try_new(u64::MAX, 0).expect("shared ledger");
+        state
+            .install_received_vote_budget(budget.try_clone().unwrap())
+            .expect("install shared ledger");
+        let candidate = [0xA3; 32];
+        let admission = state
+            .reserve_verified_justification(candidate, 8)
+            .expect("shared admission");
+        assert!(state.verified_qc_admission_matches(&candidate, 0, 8, &admission));
+        assert!(!state.verified_qc_admission_matches(&[0xA4; 32], 0, 8, &admission));
+        assert!(!state.verified_qc_admission_matches(&candidate, 1, 8, &admission));
+        assert!(!state.verified_qc_admission_matches(&candidate, 0, 9, &admission));
+        assert!(!new_state().verified_qc_admission_matches(&candidate, 0, 8, &admission));
+
+        let foreign = EvidenceBudget::try_new(u64::MAX, 0).expect("foreign ledger");
+        let reservation = foreign
+            .reserve_qc_replacement(state.accounting_state_id, 0, 8)
+            .expect("foreign reservation fixture");
+        let foreign_admission = VerifiedQcAdmission::Shared {
+            state_id: state.accounting_state_id,
+            candidate,
+            old_bytes: 0,
+            new_bytes: 8,
+            reservation,
+        };
+        assert!(!state.verified_qc_admission_matches(
+            &candidate,
+            0,
+            8,
+            &foreign_admission
+        ));
+    }
 }

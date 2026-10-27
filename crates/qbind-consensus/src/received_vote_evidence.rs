@@ -1,5 +1,6 @@
-//! Private memory-ownership foundation for the isolated received-Vote evidence
-//! design. This module does not verify Votes or connect to engine execution.
+//! Private ownership and admission support for isolated received-Vote evidence.
+//! This module verifies borrowed Vote inputs but does not connect to consensus
+//! event execution.
 #![allow(dead_code)]
 
 use std::alloc::{alloc, dealloc, Layout};
@@ -9,9 +10,12 @@ use std::ptr::NonNull;
 use std::sync::atomic::{fence, AtomicUsize, Ordering};
 use std::sync::{Mutex, MutexGuard};
 
-use qbind_crypto::{ConsensusSigSuiteId, ML_DSA_44_PUBLIC_KEY_SIZE, SUITE_PQ_RESERVED_1};
+use qbind_crypto::{
+    ml_dsa44::MlDsa44Backend, ConsensusSigSuiteId, ML_DSA_44_PUBLIC_KEY_SIZE,
+    ML_DSA_44_SIGNATURE_SIZE, SUITE_PQ_RESERVED_1,
+};
 use qbind_types::ChainId;
-use qbind_wire::pv_signing_domain::ProposalVoteSigningDomainV2;
+use qbind_wire::{consensus::Vote, pv_signing_domain::ProposalVoteSigningDomainV2};
 
 const MAX_CONTEXTS: usize = 16;
 const MAX_REPORTS: usize = 1024;
@@ -636,6 +640,23 @@ impl PendingCharge {
             class: this.class,
         })
     }
+
+    fn commit_unleased(self) -> Result<(), (Self, LedgerError)> {
+        if self.class != ReservationClass::Bytes {
+            return Err((self, LedgerError::WrongReservationKind));
+        }
+        let result = self.budget.lock().commit(self.bytes, self.class);
+        if let Err(error) = result {
+            return Err((self, error));
+        }
+        let mut this = ManuallyDrop::new(self);
+        this.active = false;
+        // SAFETY: successful commit transfers the byte ownership to the map;
+        // suppressing Drop prevents rollback, and this moves the sole handle.
+        let budget = unsafe { std::ptr::read(&this.budget) };
+        drop(budget);
+        Ok(())
+    }
 }
 
 impl Drop for PendingCharge {
@@ -725,10 +746,36 @@ impl<T: EvidenceElement> ChargedBuffer<T> {
 }
 
 #[cfg_attr(test, derive(Clone, Debug, PartialEq, Eq))]
-struct SnapshotMember {
+pub(crate) struct SnapshotMember {
     validator_id: u64,
     voting_power: u64,
     public_key: Vec<u8>,
+}
+
+impl SnapshotMember {
+    pub(crate) fn new(validator_id: u64, voting_power: u64, public_key: Vec<u8>) -> Self {
+        Self {
+            validator_id,
+            voting_power,
+            public_key,
+        }
+    }
+
+    pub(crate) fn validator_id(&self) -> u64 {
+        self.validator_id
+    }
+
+    pub(crate) fn voting_power(&self) -> u64 {
+        self.voting_power
+    }
+
+    pub(crate) fn public_key(&self) -> &[u8] {
+        &self.public_key
+    }
+
+    pub(crate) fn public_key_capacity(&self) -> usize {
+        self.public_key.capacity()
+    }
 }
 
 #[cfg_attr(test, derive(Clone, Debug, PartialEq, Eq))]
@@ -738,6 +785,479 @@ struct SnapshotPayload {
     suite_id: ConsensusSigSuiteId,
     domain: ProposalVoteSigningDomainV2,
     members: Vec<SnapshotMember>,
+}
+
+/// Owned, allocation-preserving facade over the exact snapshot payload used
+/// by the context cell. Refusal returns this same payload by move.
+#[cfg_attr(test, derive(Debug))]
+pub(crate) struct VoteContextInput(SnapshotPayload);
+
+impl VoteContextInput {
+    pub(crate) fn new(
+        runtime_chain_id: ChainId,
+        authorized_epoch: u64,
+        suite_id: ConsensusSigSuiteId,
+        domain: ProposalVoteSigningDomainV2,
+        members: Vec<SnapshotMember>,
+    ) -> Self {
+        Self(SnapshotPayload {
+            runtime_chain_id,
+            authorized_epoch,
+            suite_id,
+            domain,
+            members,
+        })
+    }
+
+    pub(crate) fn runtime_chain_id(&self) -> ChainId {
+        self.0.runtime_chain_id
+    }
+
+    pub(crate) fn authorized_epoch(&self) -> u64 {
+        self.0.authorized_epoch
+    }
+
+    pub(crate) fn suite_id(&self) -> ConsensusSigSuiteId {
+        self.0.suite_id
+    }
+
+    pub(crate) fn domain(&self) -> &ProposalVoteSigningDomainV2 {
+        &self.0.domain
+    }
+
+    pub(crate) fn members(&self) -> &[SnapshotMember] {
+        &self.0.members
+    }
+
+    pub(crate) fn members_capacity(&self) -> usize {
+        self.0.members.capacity()
+    }
+
+    pub(crate) fn checked_charge(&self) -> Result<u64, ContextInstallError> {
+        self.0.checked_charge().map_err(map_ledger_install_error)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ContextInstallError {
+    AlreadyInstalled,
+    InvalidContext,
+    Budget,
+    Arithmetic,
+    Allocation,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum VoteAdmissionError {
+    NoContext,
+    SenderIndexMismatch,
+    EpochMismatch,
+    DomainMismatch,
+    SuiteMismatch,
+    SignatureShape,
+    InvalidSignature,
+    Budget,
+    Arithmetic,
+}
+
+pub(crate) struct ContextInstallRefusal {
+    pub(crate) input: VoteContextInput,
+    pub(crate) error: ContextInstallError,
+}
+
+impl std::fmt::Debug for ContextInstallRefusal {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ContextInstallRefusal")
+            .field("error", &self.error)
+            .finish_non_exhaustive()
+    }
+}
+
+pub(crate) struct VoteAdmissionRefusal {
+    pub(crate) vote: Vote,
+    pub(crate) error: VoteAdmissionError,
+}
+
+impl std::fmt::Debug for VoteAdmissionRefusal {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("VoteAdmissionRefusal")
+            .field("error", &self.error)
+            .finish_non_exhaustive()
+    }
+}
+/// Opaque shared authority. Its raw handle and all unrestricted reservation
+/// operations remain private to this module.
+#[derive(Debug)]
+pub(crate) struct EvidenceBudget {
+    inner: BudgetHandle,
+}
+
+impl EvidenceBudget {
+    pub(crate) fn try_new(
+        cap: u64,
+        initial_map_qc_bytes: u64,
+    ) -> Result<Self, ContextInstallError> {
+        BudgetHandle::try_new(cap, initial_map_qc_bytes)
+            .map(|inner| Self { inner })
+            .map_err(map_ledger_install_error)
+    }
+
+    pub(crate) fn try_clone(&self) -> Result<Self, ContextInstallError> {
+        self.inner
+            .try_clone()
+            .map(|inner| Self { inner })
+            .map_err(map_ledger_install_error)
+    }
+
+    pub(crate) fn lower_cap(&self, cap: u64) {
+        self.inner.lower_cap(cap);
+    }
+
+    pub(crate) fn occupancy(&self) -> (u64, u64, usize, usize) {
+        let (committed, pending, contexts, pending_contexts, _, _) = self.inner.occupancy();
+        (committed, pending, contexts, pending_contexts)
+    }
+
+    pub(crate) fn same_authority(&self, other: &Self) -> bool {
+        self.inner.0 == other.inner.0
+    }
+
+    pub(crate) fn reserve_qc_replacement(
+        &self,
+        state_id: u64,
+        old_bytes: u64,
+        new_bytes: u64,
+    ) -> Result<QcReplacement, EvidenceAccountingError> {
+        let delta = if new_bytes > old_bytes {
+            new_bytes
+                .checked_sub(old_bytes)
+                .ok_or(EvidenceAccountingError::Arithmetic)?
+        } else {
+            0
+        };
+        let (committed, pending, _, _, _, _) = self.inner.occupancy();
+        let total = committed
+            .checked_add(pending)
+            .ok_or(EvidenceAccountingError::Arithmetic)?;
+        let projected = total
+            .checked_sub(old_bytes)
+            .and_then(|bytes| bytes.checked_add(new_bytes))
+            .ok_or(EvidenceAccountingError::Arithmetic)?;
+        let cap = self.inner.lock().cap;
+        if projected > cap {
+            return Err(EvidenceAccountingError::Admission);
+        }
+        let authority = self
+            .inner
+            .try_clone()
+            .map_err(|_| EvidenceAccountingError::Arithmetic)?;
+        let pending_charge = if delta == 0 {
+            None
+        } else {
+            Some(
+                self.inner
+                    .reserve(delta, ReservationClass::Bytes)
+                    .map_err(map_accounting_error)?,
+            )
+        };
+        Ok(QcReplacement {
+            authority,
+            state_id,
+            old_bytes,
+            new_bytes,
+            pending: pending_charge,
+        })
+    }
+
+    pub(crate) fn commit_qc_replacement(
+        &self,
+        mut replacement: QcReplacement,
+        state_id: u64,
+        old_bytes: u64,
+        new_bytes: u64,
+    ) {
+        if !self.qc_replacement_matches(&replacement, state_id, old_bytes, new_bytes) {
+            std::process::abort();
+        }
+        if let Some(pending) = replacement.pending.take() {
+            if pending.commit_unleased().is_err() {
+                std::process::abort();
+            }
+        } else if old_bytes > new_bytes {
+            if self
+                .inner
+                .lock()
+                .release_committed(old_bytes - new_bytes, ReservationClass::Bytes)
+                .is_err()
+            {
+                std::process::abort();
+            }
+        }
+    }
+
+    pub(crate) fn qc_replacement_matches(
+        &self,
+        replacement: &QcReplacement,
+        state_id: u64,
+        old_bytes: u64,
+        new_bytes: u64,
+    ) -> bool {
+        replacement.state_id == state_id
+            && replacement.old_bytes == old_bytes
+            && replacement.new_bytes == new_bytes
+            && replacement.authority.0 == self.inner.0
+    }
+
+    pub(crate) fn release_qc_bytes(&self, bytes: u64) {
+        if bytes != 0
+            && self
+                .inner
+                .lock()
+                .release_committed(bytes, ReservationClass::Bytes)
+                .is_err()
+        {
+            std::process::abort();
+        }
+    }
+
+    pub(crate) fn projected_qc_replacement(
+        &self,
+        old_bytes: u64,
+        new_bytes: u64,
+    ) -> Result<bool, EvidenceAccountingError> {
+        let (committed, pending, _, _, _, _) = self.inner.occupancy();
+        let total = committed
+            .checked_add(pending)
+            .ok_or(EvidenceAccountingError::Arithmetic)?;
+        let projected = total
+            .checked_sub(old_bytes)
+            .and_then(|bytes| bytes.checked_add(new_bytes))
+            .ok_or(EvidenceAccountingError::Arithmetic)?;
+        Ok(projected <= self.inner.lock().cap)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum EvidenceAccountingError {
+    Admission,
+    Arithmetic,
+    Invariant,
+}
+
+#[derive(Debug)]
+pub(crate) struct QcReplacement {
+    authority: BudgetHandle,
+    state_id: u64,
+    old_bytes: u64,
+    new_bytes: u64,
+    pending: Option<PendingCharge>,
+}
+
+impl Drop for QcReplacement {
+    fn drop(&mut self) {
+        // Any still-pending positive delta is cancelled by PendingCharge.
+    }
+}
+
+fn map_accounting_error(error: LedgerError) -> EvidenceAccountingError {
+    match error {
+        LedgerError::Admission | LedgerError::Quota => EvidenceAccountingError::Admission,
+        LedgerError::Arithmetic | LedgerError::WrongReservationKind => {
+            EvidenceAccountingError::Arithmetic
+        }
+        LedgerError::InsufficientCoverage | LedgerError::Invariant => {
+            EvidenceAccountingError::Invariant
+        }
+    }
+}
+
+fn map_ledger_install_error(error: LedgerError) -> ContextInstallError {
+    match error {
+        LedgerError::Admission | LedgerError::Quota => ContextInstallError::Budget,
+        LedgerError::Arithmetic => ContextInstallError::Arithmetic,
+        _ => ContextInstallError::Allocation,
+    }
+}
+
+pub(crate) struct ActiveVoteContext {
+    context: ContextHandle,
+    _wrapper_charge: CommittedCharge,
+}
+
+impl std::fmt::Debug for ActiveVoteContext {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ActiveVoteContext")
+            .field("context", &"<installed>")
+            .finish_non_exhaustive()
+    }
+}
+
+pub(crate) struct VerifiedVoteToken {
+    vote: Vote,
+    context: ContextHandle,
+    _charge: CommittedCharge,
+}
+
+impl std::fmt::Debug for VerifiedVoteToken {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("VerifiedVoteToken")
+            .field("vote", &"<redacted>")
+            .finish_non_exhaustive()
+    }
+}
+
+impl VerifiedVoteToken {
+    #[cfg(test)]
+    pub(crate) fn vote(&self) -> &Vote {
+        &self.vote
+    }
+}
+
+impl ActiveVoteContext {
+    pub(crate) fn try_install(
+        budget: &EvidenceBudget,
+        input: VoteContextInput,
+    ) -> Result<Self, (VoteContextInput, ContextInstallError)> {
+        let VoteContextInput(payload) = input;
+        let context_bytes = match payload.checked_charge() {
+            Ok(bytes) => bytes,
+            Err(error) => return Err((VoteContextInput(payload), map_ledger_install_error(error))),
+        };
+        let wrapper_bytes = match u64::try_from(size_of::<Option<Self>>()) {
+            Ok(bytes) => bytes,
+            Err(_) => return Err((VoteContextInput(payload), ContextInstallError::Arithmetic)),
+        };
+        let context_pending = match budget
+            .inner
+            .reserve(context_bytes, ReservationClass::Context)
+        {
+            Ok(pending) => pending,
+            Err(error) => return Err((VoteContextInput(payload), map_ledger_install_error(error))),
+        };
+        let wrapper_pending = match budget.inner.reserve(wrapper_bytes, ReservationClass::Bytes) {
+            Ok(pending) => pending,
+            Err(error) => {
+                drop(context_pending);
+                return Err((VoteContextInput(payload), map_ledger_install_error(error)));
+            }
+        };
+        let wrapper_charge = match wrapper_pending.commit() {
+            Ok(charge) => charge,
+            Err((pending, error)) => {
+                drop(pending);
+                drop(context_pending);
+                return Err((VoteContextInput(payload), map_ledger_install_error(error)));
+            }
+        };
+        match ContextHandle::try_new(payload, context_pending) {
+            Ok(context) => Ok(Self {
+                context,
+                _wrapper_charge: wrapper_charge,
+            }),
+            Err((payload, pending, error)) => {
+                drop(pending);
+                drop(wrapper_charge);
+                Err((VoteContextInput(payload), map_ledger_install_error(error)))
+            }
+        }
+    }
+
+    #[cfg(test)]
+    fn first_key_ptr(&self) -> *const u8 {
+        let payload = unsafe { &self.context.0.as_ref().payload };
+        payload.members[0].public_key.as_ptr()
+    }
+
+    pub(crate) fn try_admit_vote(
+        &self,
+        claimed_sender: u64,
+        vote: Vote,
+        current_engine_epoch: u64,
+    ) -> Result<VerifiedVoteToken, (Vote, VoteAdmissionError)> {
+        let payload = unsafe { &self.context.0.as_ref().payload };
+        if vote.validator_index as usize >= payload.members.len()
+            || payload.members[vote.validator_index as usize].validator_id != claimed_sender
+            || vote.validator_index as u64 != claimed_sender
+        {
+            return Err((vote, VoteAdmissionError::SenderIndexMismatch));
+        }
+        if vote.epoch != payload.authorized_epoch || vote.epoch != current_engine_epoch {
+            return Err((vote, VoteAdmissionError::EpochMismatch));
+        }
+        if vote.suite_id != SUITE_PQ_RESERVED_1.0 || payload.suite_id != SUITE_PQ_RESERVED_1 {
+            return Err((vote, VoteAdmissionError::SuiteMismatch));
+        }
+        if vote.chain_id != payload.domain.expected_wire_chain_id() {
+            return Err((vote, VoteAdmissionError::DomainMismatch));
+        }
+        let member = &payload.members[vote.validator_index as usize];
+        if member.public_key.len() != ML_DSA_44_PUBLIC_KEY_SIZE
+            || member.public_key.capacity() != ML_DSA_44_PUBLIC_KEY_SIZE
+            || vote.signature.len() != ML_DSA_44_SIGNATURE_SIZE
+            || vote.signature.capacity() != ML_DSA_44_SIGNATURE_SIZE
+        {
+            return Err((vote, VoteAdmissionError::SignatureShape));
+        }
+        let context = match self.context.try_clone() {
+            Ok(context) => context,
+            Err(_) => return Err((vote, VoteAdmissionError::Arithmetic)),
+        };
+        let token_bytes = match u64::try_from(size_of::<VerifiedVoteToken>())
+            .ok()
+            .and_then(|bytes| {
+                u64::try_from(vote.signature.capacity())
+                    .ok()
+                    .and_then(|signature_bytes| bytes.checked_add(signature_bytes))
+            })
+        {
+            Some(bytes) => bytes,
+            None => {
+                drop(context);
+                return Err((vote, VoteAdmissionError::Arithmetic));
+            }
+        };
+        let pending = match context_budget(&self.context)
+            .and_then(|budget| budget.reserve(token_bytes, ReservationClass::Bytes))
+        {
+            Ok(pending) => pending,
+            Err(error) => {
+                drop(context);
+                return Err((vote, map_vote_budget_error(error)));
+            }
+        };
+        let preimage = payload.domain.vote_preimage(&vote);
+        if MlDsa44Backend::verify(&member.public_key, &preimage, &vote.signature).is_err() {
+            drop(pending);
+            drop(context);
+            return Err((vote, VoteAdmissionError::InvalidSignature));
+        }
+        let charge = match pending.commit() {
+            Ok(charge) => charge,
+            Err((pending, _)) => {
+                drop(pending);
+                drop(context);
+                return Err((vote, VoteAdmissionError::Arithmetic));
+            }
+        };
+        Ok(VerifiedVoteToken {
+            vote,
+            context,
+            _charge: charge,
+        })
+    }
+}
+
+fn context_budget(context: &ContextHandle) -> Result<&BudgetHandle, LedgerError> {
+    // SAFETY: a live context keeps its cell and committed lease alive.
+    let lease = unsafe { &context.0.as_ref().lease };
+    Ok(&lease.budget)
+}
+
+fn map_vote_budget_error(error: LedgerError) -> VoteAdmissionError {
+    match error {
+        LedgerError::Admission | LedgerError::Quota => VoteAdmissionError::Budget,
+        _ => VoteAdmissionError::Arithmetic,
+    }
 }
 
 impl SnapshotPayload {
@@ -770,7 +1290,7 @@ impl SnapshotPayload {
             if member.validator_id != index as u64
                 || member.voting_power == 0
                 || member.public_key.len() != ML_DSA_44_PUBLIC_KEY_SIZE
-                || member.public_key.capacity() > ML_DSA_44_PUBLIC_KEY_SIZE
+                || member.public_key.capacity() != ML_DSA_44_PUBLIC_KEY_SIZE
             {
                 return Err(LedgerError::Admission);
             }
@@ -784,7 +1304,7 @@ impl SnapshotPayload {
                 )
                 .ok_or(LedgerError::Arithmetic)?;
         }
-        if power == 0 {
+        if power == 0 || power > u64::MAX / 2 {
             return Err(LedgerError::Admission);
         }
         Ok(bytes)
@@ -1641,6 +2161,8 @@ mod tests {
         layout!(SnapshotPayload);
         layout!(SnapshotMember);
         layout!(ContextHandle);
+        layout!(Option<ActiveVoteContext>);
+        layout!(VerifiedVoteToken);
         layout!(ExactBuffer<u8>);
         layout!(ChargedBuffer<u8>);
         layout!(PendingCharge);
@@ -1738,6 +2260,109 @@ mod tests {
         // The slot charge already covers the token's inline fields; only its
         // signature backing has its separate lease.
         drop(table);
+        assert_eq!(budget.occupancy(), (budget_baseline(), 0, 0, 0, 0, 0));
+    }
+
+    #[test]
+    fn qc_replacement_projection_obeys_cap_for_equal_and_shrinking_changes() {
+        let baseline = budget_baseline() as u64;
+        let budget = EvidenceBudget::try_new(baseline + 100, 0).unwrap();
+        let admission = budget
+            .reserve_qc_replacement(7, 0, 100)
+            .expect("new evidence fits");
+        budget.commit_qc_replacement(admission, 7, 0, 100);
+        assert_eq!(budget.occupancy().0, baseline + 100);
+
+        budget.lower_cap(baseline + 80);
+        assert_eq!(
+            budget.reserve_qc_replacement(7, 100, 100).unwrap_err(),
+            EvidenceAccountingError::Admission,
+            "equal replacement above cap refuses"
+        );
+        assert_eq!(
+            budget.reserve_qc_replacement(7, 100, 90).unwrap_err(),
+            EvidenceAccountingError::Admission,
+            "shrink that remains above cap refuses"
+        );
+        let admission = budget
+            .reserve_qc_replacement(7, 100, 80)
+            .expect("shrink projected within cap");
+        budget.commit_qc_replacement(admission, 7, 100, 80);
+        assert_eq!(budget.occupancy().0, baseline + 80);
+    }
+
+    #[test]
+    fn qc_growth_new_admission_and_reclamation_are_distinct() {
+        let baseline = budget_baseline() as u64;
+        let budget = EvidenceBudget::try_new(baseline + 150, 0).unwrap();
+        let first = budget.reserve_qc_replacement(3, 0, 100).unwrap();
+        budget.commit_qc_replacement(first, 3, 0, 100);
+        let growth = budget.reserve_qc_replacement(3, 100, 120).unwrap();
+        budget.commit_qc_replacement(growth, 3, 100, 120);
+        assert_eq!(budget.occupancy().0, baseline + 120);
+        assert_eq!(
+            budget.reserve_qc_replacement(4, 0, 40).unwrap_err(),
+            EvidenceAccountingError::Admission,
+            "new evidence refuses without headroom"
+        );
+
+        budget.lower_cap(baseline + 50);
+        budget.release_qc_bytes(120);
+        assert_eq!(
+            budget.occupancy().0,
+            baseline,
+            "legacy replacement/removal may reclaim while over cap"
+        );
+        let new = budget.reserve_qc_replacement(4, 0, 40).unwrap();
+        budget.commit_qc_replacement(new, 4, 0, 40);
+        assert_eq!(budget.occupancy().0, baseline + 40);
+    }
+
+    #[test]
+    fn context_adoption_preserves_allocations_and_refusal_restores_occupancy() {
+        let budget = budget(100_000);
+        let baseline = budget.occupancy();
+        let input = snapshot(1, 1);
+        let key_ptr = input.members[0].public_key.as_ptr();
+        let context = ActiveVoteContext::try_install(
+            &EvidenceBudget {
+                inner: budget.try_clone().unwrap(),
+            },
+            VoteContextInput(input),
+        )
+        .unwrap();
+        assert_eq!(context.first_key_ptr(), key_ptr);
+        drop(context);
+        assert_eq!(budget.occupancy(), baseline);
+
+        let input = snapshot(1, 1);
+        let roster_ptr = input.members.as_ptr();
+        let key_ptr = input.members[0].public_key.as_ptr();
+        let roster_capacity = input.members.capacity();
+        let key_capacity = input.members[0].public_key.capacity();
+        let _fault = AllocationFaultScope::fail_after(0);
+        let refusal = ActiveVoteContext::try_install(
+            &EvidenceBudget {
+                inner: budget.try_clone().unwrap(),
+            },
+            VoteContextInput(input),
+        )
+        .expect_err("context-cell allocation fault refuses");
+        assert_eq!(refusal.0 .0.members.as_ptr(), roster_ptr);
+        assert_eq!(refusal.0 .0.members.capacity(), roster_capacity);
+        assert_eq!(refusal.0 .0.members[0].public_key.as_ptr(), key_ptr);
+        assert_eq!(refusal.0 .0.members[0].public_key.capacity(), key_capacity);
+        assert_eq!(budget.occupancy(), baseline);
+    }
+
+    #[test]
+    fn context_owner_final_release_is_safe_on_another_thread() {
+        let budget = budget(100_000);
+        let context = install_context(&budget, snapshot(1, 1)).unwrap();
+        assert_eq!(budget.occupancy().2, 1);
+        std::thread::spawn(move || drop(context))
+            .join()
+            .expect("context owner thread completes");
         assert_eq!(budget.occupancy(), (budget_baseline(), 0, 0, 0, 0, 0));
     }
 }
