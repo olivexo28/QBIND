@@ -29,6 +29,16 @@ use crate::ids::ValidatorId;
 use crate::qc::{QcValidationError, QuorumCertificate};
 use crate::validator_set::ConsensusValidatorSet;
 
+#[cfg(test)]
+thread_local! {
+    static QC_FORMATION_ATTEMPTS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+#[cfg(test)]
+pub(crate) fn qc_formation_attempts_for_test() -> usize {
+    QC_FORMATION_ATTEMPTS.with(std::cell::Cell::get)
+}
+
 /// Configuration for consensus memory limits (T118, T122, T123).
 ///
 /// This struct configures bounds on data structures in the consensus layer
@@ -370,6 +380,52 @@ where
         })
     }
 
+    pub(crate) fn contains_vote(
+        &self,
+        voter: ValidatorId,
+        view: u64,
+        block_id: &BlockIdT,
+    ) -> bool {
+        let key = VoteKey {
+            view,
+            block_id: block_id.clone(),
+        };
+        self.entries
+            .get(&key)
+            .is_some_and(|signers| signers.contains(&voter))
+    }
+
+    /// Predicts only whether the target signer is present after the current
+    /// insertion rules, including old-view eviction. It does not reserve a
+    /// slot or mutate state.
+    pub(crate) fn will_contain_after_on_vote(
+        &self,
+        validators: &ConsensusValidatorSet,
+        voter: ValidatorId,
+        view: u64,
+        block_id: &BlockIdT,
+    ) -> bool {
+        if !validators.contains(voter) {
+            return false;
+        }
+
+        let key = VoteKey {
+            view,
+            block_id: block_id.clone(),
+        };
+        if self.tracked_views.contains(&view) {
+            if let Some(existing_votes) = self.entries.get(&key) {
+                if existing_votes.len() >= self.limits.max_votes_per_view {
+                    return existing_votes.contains(&voter);
+                }
+            }
+        }
+
+        // The current implementation inserts the first vote for an absent
+        // entry even when max_votes_per_view is zero.
+        true
+    }
+
     /// Attempts to form a QC for the given (view, block_id) pair.
     ///
     /// Returns `Ok(Some(qc))` if signers reach quorum; otherwise `Ok(None)`.
@@ -388,6 +444,8 @@ where
         view: u64,
         block_id: &BlockIdT,
     ) -> Result<Option<QuorumCertificate<BlockIdT>>, QcValidationError> {
+        #[cfg(test)]
+        QC_FORMATION_ATTEMPTS.with(|count| count.set(count.get() + 1));
         let key = VoteKey {
             view,
             block_id: block_id.clone(),
@@ -510,5 +568,32 @@ mod run_422_detailed_insertion_tests {
             .on_vote(&validators, ValidatorId::new(1), 5, &block)
             .unwrap());
         assert_eq!(accumulator.dropped_votes(), 2);
+    }
+
+    #[test]
+    fn zero_vote_limit_still_inserts_first_vote_for_absent_entry() {
+        let validators = validators();
+        let limits = ConsensusLimitsConfig::new(4, 0, 8, 8);
+        let mut accumulator = VoteAccumulator::with_limits(limits);
+        let block = [11u8; 32];
+        assert!(accumulator.will_contain_after_on_vote(
+            &validators,
+            ValidatorId::new(0),
+            3,
+            &block
+        ));
+        assert_eq!(
+            accumulator
+                .on_vote_detailed(&validators, ValidatorId::new(0), 3, &block)
+                .unwrap(),
+            VoteAccumulatorDisposition::Inserted
+        );
+        assert!(accumulator.contains_vote(ValidatorId::new(0), 3, &block));
+        assert_eq!(
+            accumulator
+                .on_vote_detailed(&validators, ValidatorId::new(1), 3, &block)
+                .unwrap(),
+            VoteAccumulatorDisposition::CapacityDropped
+        );
     }
 }

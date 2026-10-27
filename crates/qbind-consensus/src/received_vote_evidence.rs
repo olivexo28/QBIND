@@ -1,6 +1,6 @@
 //! Private ownership and admission support for isolated received-Vote evidence.
-//! This module verifies borrowed Vote inputs but does not connect to consensus
-//! event execution.
+//! This module verifies borrowed Vote inputs and owns original signed evidence
+//! transferred by the isolated canonical received-Vote path.
 #![allow(dead_code)]
 
 use std::alloc::{alloc, dealloc, Layout};
@@ -16,6 +16,7 @@ use qbind_crypto::{
 };
 use qbind_types::ChainId;
 use qbind_wire::{consensus::Vote, pv_signing_domain::ProposalVoteSigningDomainV2};
+use crate::validator_set::ConsensusValidatorSet;
 
 const MAX_CONTEXTS: usize = 16;
 const MAX_REPORTS: usize = 1024;
@@ -61,6 +62,16 @@ thread_local! {
     static DEALLOCATION_COUNT: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
     static BUDGET_FINAL_DROPS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
     static CONTEXT_FINAL_DROPS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    static TABLE_STAGE_OBSERVATION: std::cell::Cell<Option<(Layout, (u64, u64, usize, usize, usize, usize))>> =
+        const { std::cell::Cell::new(None) };
+    static LAST_ALLOCATION_LAYOUT: std::cell::Cell<Option<Layout>> =
+        const { std::cell::Cell::new(None) };
+    static TABLE_INIT_PANIC_AFTER: std::cell::Cell<Option<usize>> =
+        const { std::cell::Cell::new(None) };
+    static TABLE_INIT_UNWIND_OCCUPANCY: std::cell::Cell<Option<(u64, u64, usize, usize, usize, usize)>> =
+        const { std::cell::Cell::new(None) };
+    static TABLE_TRANSFER_BEFORE_SHRINK: std::cell::Cell<Option<(usize, usize, u64, (u64, u64, usize, usize, usize, usize))>> =
+        const { std::cell::Cell::new(None) };
 }
 
 #[cfg(test)]
@@ -72,6 +83,21 @@ impl AllocationFaultScope {
         let previous =
             FAIL_ALLOCATION_AFTER.with(|slot| slot.replace(Some(successful_allocations)));
         Self(previous)
+    }
+}
+
+impl<BlockIdT> ReceivedVoteEvidenceEntry<BlockIdT> {
+    pub(crate) fn vote(&self) -> &Vote {
+        &self.vote
+    }
+
+    pub(crate) fn logical_block_id(&self) -> &BlockIdT {
+        &self.logical_block_id
+    }
+
+    #[cfg(test)]
+    pub(crate) fn signature_lease_bytes_for_test(&self) -> u64 {
+        self.token_lease.bytes
     }
 }
 
@@ -92,8 +118,34 @@ pub(crate) fn with_allocation_failure_after<T>(
 }
 
 #[cfg(test)]
+struct TableInitializationPanicScope(Option<usize>);
+
+#[cfg(test)]
+impl TableInitializationPanicScope {
+    fn after(initialized_slots: usize) -> Self {
+        let previous = TABLE_INIT_PANIC_AFTER.with(|slot| {
+            slot.replace(Some(initialized_slots))
+        });
+        Self(previous)
+    }
+}
+
+#[cfg(test)]
+impl Drop for TableInitializationPanicScope {
+    fn drop(&mut self) {
+        TABLE_INIT_PANIC_AFTER.with(|slot| slot.set(self.0));
+    }
+}
+
+#[cfg(test)]
 pub(crate) fn budget_final_drop_count_for_test() -> usize {
     BUDGET_FINAL_DROPS.with(std::cell::Cell::get)
+}
+
+#[cfg(test)]
+pub(crate) fn table_transfer_before_shrink_for_test(
+) -> Option<(usize, usize, u64, (u64, u64, usize, usize, usize, usize))> {
+    TABLE_TRANSFER_BEFORE_SHRINK.with(std::cell::Cell::get)
 }
 
 fn try_alloc(layout: Layout) -> Result<NonNull<u8>, EvidenceAllocError> {
@@ -102,6 +154,7 @@ fn try_alloc(layout: Layout) -> Result<NonNull<u8>, EvidenceAllocError> {
     }
     #[cfg(test)]
     {
+        LAST_ALLOCATION_LAYOUT.with(|last| last.set(Some(layout)));
         ALLOCATION_ATTEMPTS.with(|count| count.set(count.get() + 1));
         let should_fail = FAIL_ALLOCATION_AFTER.with(|slot| match slot.get() {
             None => false,
@@ -719,6 +772,252 @@ impl Drop for CommittedCharge {
     }
 }
 
+pub(crate) struct ReceivedVoteEvidenceEntry<BlockIdT> {
+    logical_block_id: BlockIdT,
+    vote: Vote,
+    context: ContextHandle,
+    token_lease: CommittedCharge,
+}
+
+impl<BlockIdT> std::fmt::Debug for ReceivedVoteEvidenceEntry<BlockIdT> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ReceivedVoteEvidenceEntry")
+            .field("view", &self.vote.height)
+            .field("validator_index", &self.vote.validator_index)
+            .field("vote", &"<redacted>")
+            .finish_non_exhaustive()
+    }
+}
+
+/// Fixed-capacity owner for original received-Vote evidence.
+///
+/// The Vec is built from one exact global-allocator allocation and is never
+/// exposed mutably, replaced, or grown. Its backing and inline control are
+/// covered by `_lease` from staging until final destruction.
+pub(crate) struct ReceivedVoteEvidenceTable<BlockIdT> {
+    slots: Vec<Option<ReceivedVoteEvidenceEntry<BlockIdT>>>,
+    _lease: CommittedCharge,
+}
+
+impl<BlockIdT> std::fmt::Debug for ReceivedVoteEvidenceTable<BlockIdT> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ReceivedVoteEvidenceTable")
+            .field("capacity", &self.slots.len())
+            .field("occupied", &self.occupied())
+            .finish()
+    }
+}
+
+impl<BlockIdT> ReceivedVoteEvidenceTable<BlockIdT> {
+    pub(crate) const CAPACITY: usize = 1024;
+
+    fn checked_layout() -> Result<(Layout, u64), ContextInstallError> {
+        let layout = Layout::array::<Option<ReceivedVoteEvidenceEntry<BlockIdT>>>(Self::CAPACITY)
+            .map_err(|_| ContextInstallError::Arithmetic)?;
+        if layout.size() == 0
+            || layout.size() > isize::MAX as usize
+            || layout.align() == 0
+            || !layout.align().is_power_of_two()
+        {
+            return Err(ContextInstallError::Arithmetic);
+        }
+        let bytes = u64::try_from(size_of::<Option<Self>>())
+            .ok()
+            .and_then(|control| {
+                u64::try_from(layout.size())
+                    .ok()
+                    .and_then(|backing| control.checked_add(backing))
+            })
+            .ok_or(ContextInstallError::Arithmetic)?;
+        Ok((layout, bytes))
+    }
+
+    pub(crate) fn standing_charge() -> Result<u64, ContextInstallError> {
+        Self::checked_layout().map(|(_, bytes)| bytes)
+    }
+
+    pub(crate) fn try_stage(budget: &EvidenceBudget) -> Result<Self, ContextInstallError> {
+        let (layout, total_bytes) = Self::checked_layout()?;
+        let pending = budget
+            .inner
+            .reserve(total_bytes, ReservationClass::Bytes)
+            .map_err(map_ledger_install_error)?;
+        #[cfg(test)]
+        TABLE_STAGE_OBSERVATION.with(|observation| {
+            observation.set(Some((layout, budget.inner.occupancy())));
+        });
+        let raw = try_alloc(layout).map_err(|error| match error {
+            EvidenceAllocError::Layout
+            | EvidenceAllocError::ZeroSizedType
+            | EvidenceAllocError::Arithmetic => {
+                ContextInstallError::Arithmetic
+            }
+            EvidenceAllocError::Allocation | EvidenceAllocError::Capacity => {
+                ContextInstallError::Allocation
+            }
+        })?;
+
+        // SAFETY: `raw` was allocated by the global allocator with exactly
+        // `layout`; this Vec records the matching capacity and starts with an
+        // empty initialized prefix. `pending` remains live until `slots` has
+        // been destroyed on every failure/unwind path.
+        let mut slots = unsafe {
+            Vec::from_raw_parts(
+                raw.cast::<Option<ReceivedVoteEvidenceEntry<BlockIdT>>>()
+                    .as_ptr(),
+                0,
+                Self::CAPACITY,
+            )
+        };
+        #[cfg(test)]
+        if TABLE_INIT_PANIC_AFTER.with(std::cell::Cell::get) == Some(0) {
+            TABLE_INIT_UNWIND_OCCUPANCY
+                .with(|observed| observed.set(Some(budget.inner.occupancy())));
+            panic!("controlled received-vote table initialization unwind");
+        }
+        for _ in 0..Self::CAPACITY {
+            debug_assert!(slots.len() < slots.capacity());
+            slots.push(None);
+            #[cfg(test)]
+            if TABLE_INIT_PANIC_AFTER.with(std::cell::Cell::get) == Some(slots.len()) {
+                TABLE_INIT_UNWIND_OCCUPANCY
+                    .with(|observed| observed.set(Some(budget.inner.occupancy())));
+                panic!("controlled received-vote table initialization unwind");
+            }
+        }
+        if slots.len() != Self::CAPACITY || slots.capacity() != Self::CAPACITY {
+            std::process::abort();
+        }
+
+        let lease = match pending.commit() {
+            Ok(lease) => lease,
+            Err((pending, _error)) => {
+                drop(slots);
+                drop(pending);
+                return Err(ContextInstallError::Arithmetic);
+            }
+        };
+        Ok(Self {
+            slots,
+            _lease: lease,
+        })
+    }
+
+    pub(crate) fn occupied(&self) -> usize {
+        self.slots.iter().filter(|slot| slot.is_some()).count()
+    }
+
+    pub(crate) fn matches_ledger(&self, budget: &EvidenceBudget) -> bool {
+        self._lease.class == ReservationClass::Bytes
+            && self._lease.budget.0 == budget.inner.0
+            && Self::standing_charge().is_ok_and(|bytes| self._lease.bytes == bytes)
+    }
+
+    pub(crate) fn free_slot(&self) -> Option<usize> {
+        self.slots.iter().position(Option::is_none)
+    }
+
+    pub(crate) fn entry_for(
+        &self,
+        view: u64,
+        validator_index: u16,
+    ) -> Option<&ReceivedVoteEvidenceEntry<BlockIdT>> {
+        self.slots.iter().filter_map(Option::as_ref).find(|entry| {
+            entry.vote.height == view && entry.vote.validator_index == validator_index
+        })
+    }
+
+    pub(crate) fn validate_entry_block(
+        &self,
+        view: u64,
+        validator_index: u16,
+        block_id: &BlockIdT,
+    ) -> bool
+    where
+        BlockIdT: Eq,
+    {
+        match self.entry_for(view, validator_index) {
+            Some(entry) => &entry.logical_block_id == block_id,
+            None => true,
+        }
+    }
+
+    pub(crate) fn retain_memberships(
+        &mut self,
+        mut has_both_memberships: impl FnMut(&ReceivedVoteEvidenceEntry<BlockIdT>) -> bool,
+    ) {
+        for slot in &mut self.slots {
+            if slot
+                .as_ref()
+                .is_some_and(|entry| !has_both_memberships(entry))
+            {
+                drop(slot.take());
+            }
+        }
+    }
+
+    pub(crate) fn clear(&mut self) {
+        for slot in &mut self.slots {
+            drop(slot.take());
+        }
+    }
+
+    pub(crate) fn insert_token(
+        &mut self,
+        index: usize,
+        logical_block_id: BlockIdT,
+        token: VerifiedVoteToken,
+        shrink_to: u64,
+    ) {
+        if index >= self.slots.len() || self.slots[index].is_some() {
+            std::process::abort();
+        }
+        let VerifiedVoteToken {
+            vote,
+            context,
+            _charge: token_lease,
+        } = token;
+        self.slots[index] = Some(ReceivedVoteEvidenceEntry {
+            logical_block_id,
+            vote,
+            context,
+            token_lease,
+        });
+        let entry = self.slots[index].as_mut().unwrap_or_else(|| std::process::abort());
+        #[cfg(test)]
+        TABLE_TRANSFER_BEFORE_SHRINK.with(|observed| {
+            observed.set(Some((
+                entry.vote.signature.as_ptr() as usize,
+                entry.vote.signature.capacity(),
+                entry.token_lease.bytes,
+                entry.token_lease.budget.occupancy(),
+            )));
+        });
+        entry.token_lease.shrink_bytes_validated(shrink_to);
+    }
+}
+
+impl CommittedCharge {
+    fn shrink_bytes_validated(&mut self, new_bytes: u64) {
+        if self.class != ReservationClass::Bytes || new_bytes > self.bytes {
+            std::process::abort();
+        }
+        let Some(released) = self.bytes.checked_sub(new_bytes) else {
+            std::process::abort();
+        };
+        if released != 0
+            && self
+                .budget
+                .lock()
+                .release_committed(released, ReservationClass::Bytes)
+                .is_err()
+        {
+            std::process::abort();
+        }
+        self.bytes = new_bytes;
+    }
+}
+
 /// The backing field is declared before the lease: Rust drops fields in
 /// declaration order, so the allocation guard runs before the charge releases.
 #[derive(Debug)]
@@ -1130,9 +1429,35 @@ impl std::fmt::Debug for VerifiedVoteToken {
 }
 
 impl VerifiedVoteToken {
-    #[cfg(test)]
     pub(crate) fn vote(&self) -> &Vote {
         &self.vote
+    }
+
+    pub(crate) fn matches_context(&self, active: &ActiveVoteContext) -> bool {
+        self.context.ptr_eq(&active.context)
+    }
+
+    pub(crate) fn matches_ledger(&self, budget: &EvidenceBudget) -> bool {
+        self._charge.class == ReservationClass::Bytes
+            && self._charge.budget.0 == budget.inner.0
+            && context_budget(&self.context)
+                .is_ok_and(|context_budget| context_budget.0 == budget.inner.0)
+    }
+
+    pub(crate) fn token_charge_and_signature_bytes(&self) -> Option<(u64, u64)> {
+        let signature_bytes = u64::try_from(self.vote.signature.capacity()).ok()?;
+        let token_bytes = u64::try_from(size_of::<Self>())
+            .ok()?
+            .checked_add(signature_bytes)?;
+        Some((token_bytes, signature_bytes))
+    }
+
+    pub(crate) fn has_exact_token_charge(&self) -> bool {
+        self.token_charge_and_signature_bytes()
+            .is_some_and(|(token_bytes, _)| {
+                self._charge.class == ReservationClass::Bytes
+                    && self._charge.bytes == token_bytes
+            })
     }
 }
 
@@ -1267,6 +1592,45 @@ impl ActiveVoteContext {
             context,
             _charge: charge,
         })
+    }
+
+    pub(crate) fn matches_validators(&self, validators: &ConsensusValidatorSet) -> bool {
+        let payload = unsafe { &self.context.0.as_ref().payload };
+        payload.members.len() == validators.len()
+            && payload
+                .members
+                .iter()
+                .zip(validators.iter())
+                .all(|(member, validator)| {
+                    member.validator_id == validator.id.as_u64()
+                        && member.voting_power == validator.voting_power
+                })
+    }
+
+    pub(crate) fn authorized_epoch(&self) -> u64 {
+        unsafe { &self.context.0.as_ref().payload }.authorized_epoch
+    }
+
+    pub(crate) fn validates_vote_metadata(&self, vote: &Vote, current_epoch: u64) -> bool {
+        let payload = unsafe { &self.context.0.as_ref().payload };
+        let index = usize::from(vote.validator_index);
+        vote.epoch == payload.authorized_epoch
+            && vote.epoch == current_epoch
+            && vote.suite_id == SUITE_PQ_RESERVED_1.0
+            && payload.suite_id == SUITE_PQ_RESERVED_1
+            && vote.chain_id == payload.domain.expected_wire_chain_id()
+            && payload.members.get(index).is_some_and(|member| {
+                member.validator_id == u64::from(vote.validator_index)
+                    && member.public_key.len() == ML_DSA_44_PUBLIC_KEY_SIZE
+                    && member.public_key.capacity() == ML_DSA_44_PUBLIC_KEY_SIZE
+            })
+            && vote.signature.len() == ML_DSA_44_SIGNATURE_SIZE
+            && vote.signature.capacity() == ML_DSA_44_SIGNATURE_SIZE
+    }
+
+    pub(crate) fn same_ledger(&self, budget: &EvidenceBudget) -> bool {
+        context_budget(&self.context)
+            .is_ok_and(|context_budget| context_budget.0 == budget.inner.0)
     }
 }
 
@@ -2195,6 +2559,18 @@ mod tests {
         layout!(CellDeallocationGuard<ContextCell>);
         layout!(Result<ContextHandle, (SnapshotPayload, PendingCharge, LedgerError)>);
         layout!(Option<TableTokenFixture>);
+        layout!(Vote);
+        layout!(ReceivedVoteEvidenceEntry<[u8; 32]>);
+        layout!(Option<ReceivedVoteEvidenceEntry<[u8; 32]>>);
+        layout!(ReceivedVoteEvidenceTable<[u8; 32]>);
+        layout!(Option<ReceivedVoteEvidenceTable<[u8; 32]>>);
+        layout!(Vec<Option<ReceivedVoteEvidenceEntry<[u8; 32]>>>);
+        layout!(EvidenceBudget);
+        layout!(Layout);
+        layout!(Option<PendingCharge>);
+        layout!(Result<ReceivedVoteEvidenceTable<[u8; 32]>, ContextInstallError>);
+        layout!(PendingCharge);
+        layout!(CommittedCharge);
 
         let budget = budget(100_000);
         let payload = snapshot(1, 1);
@@ -2404,5 +2780,129 @@ mod tests {
             .join()
             .expect("context owner thread completes");
         assert_eq!(budget.occupancy(), (budget_baseline(), 0, 0, 0, 0, 0));
+    }
+
+    #[test]
+    fn received_vote_table_reserves_full_charge_before_exact_allocation() {
+        type Table = ReceivedVoteEvidenceTable<[u8; 32]>;
+        let layout = Layout::array::<Option<ReceivedVoteEvidenceEntry<[u8; 32]>>>(1024).unwrap();
+        let control = size_of::<Option<Table>>();
+        let standing = u64::try_from(control + layout.size()).unwrap();
+        assert_eq!(
+            layout.size(),
+            size_of::<Option<ReceivedVoteEvidenceEntry<[u8; 32]>>>() * Table::CAPACITY
+        );
+        assert_eq!(control, size_of::<Table>());
+        assert_eq!(
+            std::mem::align_of::<Option<Table>>(),
+            std::mem::align_of::<Table>()
+        );
+        assert_eq!(Table::standing_charge().unwrap(), standing);
+        let baseline = budget_baseline();
+        let budget = EvidenceBudget::try_new(baseline + standing, 0).unwrap();
+        let observed_attempts = ALLOCATION_ATTEMPTS.with(std::cell::Cell::get);
+        let table = Table::try_stage(&budget).expect("exactly admitted table staging");
+        let (requested, pending_at_request) =
+            TABLE_STAGE_OBSERVATION.with(std::cell::Cell::get).unwrap();
+        let allocator_request = LAST_ALLOCATION_LAYOUT.with(std::cell::Cell::get).unwrap();
+        assert_eq!(requested.size(), layout.size());
+        assert_eq!(requested.align(), layout.align());
+        assert_eq!(allocator_request.size(), layout.size());
+        assert_eq!(allocator_request.align(), layout.align());
+        assert_eq!(table.slots.capacity(), 1024);
+        assert_eq!(table.slots.len(), 1024);
+        assert_eq!(table.occupied(), 0);
+        assert_eq!(
+            pending_at_request,
+            (baseline, standing, 0, 0, 0, 0),
+            "the complete standing charge is pending at the allocation boundary"
+        );
+        assert_eq!(ALLOCATION_ATTEMPTS.with(std::cell::Cell::get), observed_attempts + 1);
+        assert_eq!(budget.occupancy(), (baseline + standing, 0, 0, 0));
+        assert_eq!(budget.inner.lock().cap, baseline + standing);
+        drop(table);
+        assert_eq!(budget.occupancy(), (baseline, 0, 0, 0));
+    }
+
+    #[test]
+    fn received_vote_table_budget_refusal_precedes_allocation() {
+        type Table = ReceivedVoteEvidenceTable<[u8; 32]>;
+        let standing = Table::standing_charge().unwrap();
+        let baseline = budget_baseline();
+        let budget = EvidenceBudget::try_new(baseline + standing - 1, 0).unwrap();
+        let attempts = ALLOCATION_ATTEMPTS.with(std::cell::Cell::get);
+        assert_eq!(
+            Table::try_stage(&budget).unwrap_err(),
+            ContextInstallError::Budget
+        );
+        assert_eq!(ALLOCATION_ATTEMPTS.with(std::cell::Cell::get), attempts);
+        assert_eq!(budget.occupancy(), (baseline, 0, 0, 0));
+        assert_eq!(budget.inner.lock().cap, baseline + standing - 1);
+    }
+
+    #[test]
+    fn received_vote_table_injected_null_allocation_refusal_restores_ledger() {
+        type Table = ReceivedVoteEvidenceTable<[u8; 32]>;
+        let standing = Table::standing_charge().unwrap();
+        let baseline = budget_baseline();
+        let budget = EvidenceBudget::try_new(baseline + standing, 0).unwrap();
+        let attempts = ALLOCATION_ATTEMPTS.with(std::cell::Cell::get);
+        let result = {
+            let _fault = AllocationFaultScope::fail_after(0);
+            Table::try_stage(&budget)
+        };
+        assert_eq!(result.unwrap_err(), ContextInstallError::Allocation);
+        assert_eq!(ALLOCATION_ATTEMPTS.with(std::cell::Cell::get), attempts + 1);
+        assert_eq!(
+            TABLE_STAGE_OBSERVATION.with(std::cell::Cell::get).unwrap().1,
+            (baseline, standing, 0, 0, 0, 0)
+        );
+        assert_eq!(budget.occupancy(), (baseline, 0, 0, 0));
+        assert_eq!(budget.inner.lock().cap, baseline + standing);
+    }
+
+    #[test]
+    fn received_vote_table_partial_initialization_unwinds_before_commit() {
+        use std::panic::{catch_unwind, AssertUnwindSafe};
+
+        type Table = ReceivedVoteEvidenceTable<[u8; 32]>;
+        let standing = Table::standing_charge().unwrap();
+        let baseline = budget_baseline();
+
+        for initialized in [0, 513, Table::CAPACITY] {
+            let budget = EvidenceBudget::try_new(baseline + standing, 0).unwrap();
+            let before = budget.occupancy();
+            let result = {
+                let _fault = TableInitializationPanicScope::after(initialized);
+                catch_unwind(AssertUnwindSafe(|| {
+                    let _ = Table::try_stage(&budget);
+                }))
+            };
+            assert!(result.is_err(), "initialization count {initialized}");
+            assert_eq!(
+                TABLE_INIT_UNWIND_OCCUPANCY.with(std::cell::Cell::get),
+                Some((baseline, standing, 0, 0, 0, 0)),
+                "pending table lease remains live at controlled unwind point"
+            );
+            assert_eq!(budget.occupancy(), before);
+            assert_eq!(budget.occupancy().2, 0, "table owns no contexts");
+            assert_eq!(budget.inner.lock().cap, baseline + standing);
+        }
+    }
+
+    #[test]
+    fn received_vote_table_successful_stage_drop_releases_after_backing_drop() {
+        type Table = ReceivedVoteEvidenceTable<[u8; 32]>;
+        let standing = Table::standing_charge().unwrap();
+        let baseline = budget_baseline();
+        let budget = EvidenceBudget::try_new(baseline + standing, 0).unwrap();
+        let table = Table::try_stage(&budget).expect("stage fixed table");
+        assert_eq!(budget.occupancy(), (baseline + standing, 0, 0, 0));
+        drop(table);
+        assert_eq!(
+            budget.occupancy(),
+            (baseline, 0, 0, 0),
+            "completed Vec/table destruction releases standing lease"
+        );
     }
 }

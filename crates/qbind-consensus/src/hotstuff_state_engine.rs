@@ -28,7 +28,10 @@ use crate::block_state::BlockNode;
 use crate::ids::ValidatorId;
 use crate::qc::{QcValidationError, QuorumCertificate};
 use crate::qc_verify_domain::VerifiedQuorumCertificate;
-use crate::received_vote_evidence::{EvidenceAccountingError, EvidenceBudget, QcReplacement};
+use crate::received_vote_evidence::{
+    EvidenceAccountingError, EvidenceBudget, QcReplacement, ReceivedVoteEvidenceEntry,
+    ReceivedVoteEvidenceTable, VerifiedVoteToken,
+};
 use crate::validator_set::ConsensusValidatorSet;
 use crate::vote_accumulator::{
     ConsensusLimitsConfig, VoteAccumulator, VoteAccumulatorDisposition,
@@ -170,7 +173,7 @@ impl std::error::Error for EvidenceRetentionError {}
 /// - Duplicate vote for the same block (benign)
 /// - Equivocation: different block in the same view
 #[derive(Debug, Clone, PartialEq, Eq)]
-enum VoteHistoryOutcome<BlockIdT> {
+pub(crate) enum VoteHistoryOutcome<BlockIdT> {
     /// First time we see this (view, validator) pair.
     FirstVote,
     /// Duplicate vote for the same block_id (benign duplicate).
@@ -180,6 +183,33 @@ enum VoteHistoryOutcome<BlockIdT> {
         /// The block the validator previously voted for.
         previous_block: BlockIdT,
     },
+}
+
+pub(crate) struct VoteMutationReport<BlockIdT> {
+    pub(crate) history: VoteHistoryOutcome<BlockIdT>,
+    pub(crate) accumulator:
+        Option<Result<VoteAccumulatorDisposition, QcValidationError>>,
+    pub(crate) qc: Result<Option<QuorumCertificate<BlockIdT>>, QcValidationError>,
+}
+
+impl<BlockIdT> VoteMutationReport<BlockIdT> {
+    pub(crate) fn is_equivocation(&self) -> bool {
+        matches!(self.history, VoteHistoryOutcome::Equivocation { .. })
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum VoteEvidencePreflightError {
+    MissingTable,
+    Full,
+    Invariant,
+}
+
+#[derive(Clone, Copy)]
+pub(crate) enum VoteEvidencePlan {
+    DoNotRetain,
+    ExistingEvidence,
+    NewEntry { slot: usize },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -300,6 +330,10 @@ where
     /// effect).
     rejected_evidence_over_budget: u64,
 
+    /// Optional fixed received-Vote evidence slots, attached only by the
+    /// canonical opt-in context installation path.
+    received_vote_evidence: Option<ReceivedVoteEvidenceTable<BlockIdT>>,
+
     /// Optional shared component ledger installed only by the opt-in received
     /// Vote evidence path.
     received_vote_budget: Option<EvidenceBudget>,
@@ -350,6 +384,7 @@ where
             retained_evidence_bytes: 0,
             max_retained_evidence_bytes: DEFAULT_MAX_RETAINED_EVIDENCE_BYTES,
             rejected_evidence_over_budget: 0,
+            received_vote_evidence: None,
             received_vote_budget: None,
             accounting_state_id: next_state_accounting_id(),
         }
@@ -419,6 +454,7 @@ where
         self.votes = VoteAccumulator::with_limits(limits);
         // Clear vote history for the new epoch
         self.votes_by_view.clear();
+        self.reconcile_received_vote_evidence();
     }
 
     /// Get the count of detected equivocations (double-votes per view).
@@ -514,6 +550,143 @@ where
 
     pub(crate) fn received_vote_budget(&self) -> Option<&EvidenceBudget> {
         self.received_vote_budget.as_ref()
+    }
+
+    pub(crate) fn received_vote_evidence_table(
+        &self,
+    ) -> Option<&ReceivedVoteEvidenceTable<BlockIdT>> {
+        self.received_vote_evidence.as_ref()
+    }
+
+    pub(crate) fn install_received_vote_evidence_table(
+        &mut self,
+        table: ReceivedVoteEvidenceTable<BlockIdT>,
+    ) -> Result<(), ReceivedVoteEvidenceTable<BlockIdT>> {
+        if self.received_vote_evidence.is_some() {
+            return Err(table);
+        }
+        self.received_vote_evidence = Some(table);
+        Ok(())
+    }
+
+    pub(crate) fn clear_received_vote_evidence(&mut self) {
+        if let Some(table) = self.received_vote_evidence.as_mut() {
+            table.clear();
+        }
+    }
+
+    pub(crate) fn drop_received_vote_evidence_table(&mut self) {
+        self.received_vote_evidence = None;
+    }
+
+    pub(crate) fn prepare_received_vote_evidence(
+        &self,
+        voter: ValidatorId,
+        view: u64,
+        block_id: &BlockIdT,
+    ) -> Result<VoteEvidencePlan, VoteEvidencePreflightError> {
+        let table = self
+            .received_vote_evidence
+            .as_ref()
+            .ok_or(VoteEvidencePreflightError::MissingTable)?;
+
+        match self.votes_by_view.get(&(view, voter)) {
+            Some(previous) if previous != block_id => {
+                return Ok(VoteEvidencePlan::DoNotRetain);
+            }
+            _ => {}
+        }
+
+        if !self
+            .votes
+            .will_contain_after_on_vote(&self.validators, voter, view, block_id)
+        {
+            return Ok(VoteEvidencePlan::DoNotRetain);
+        }
+
+        let validator_index =
+            u16::try_from(voter.0).map_err(|_| VoteEvidencePreflightError::Invariant)?;
+        if let Some(entry) = table.entry_for(view, validator_index) {
+            if entry.logical_block_id() != block_id
+                || self.votes_by_view.get(&(view, voter)) != Some(block_id)
+                || !self.votes.contains_vote(voter, view, block_id)
+            {
+                return Err(VoteEvidencePreflightError::Invariant);
+            }
+            return Ok(VoteEvidencePlan::ExistingEvidence);
+        }
+
+        table
+            .free_slot()
+            .map(|slot| VoteEvidencePlan::NewEntry { slot })
+            .ok_or(VoteEvidencePreflightError::Full)
+    }
+
+    pub(crate) fn has_vote_memberships(
+        &self,
+        voter: ValidatorId,
+        view: u64,
+        block_id: &BlockIdT,
+    ) -> bool {
+        self.votes_by_view.get(&(view, voter)) == Some(block_id)
+            && self.votes.contains_vote(voter, view, block_id)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn has_vote_history_membership_for_test(
+        &self,
+        voter: ValidatorId,
+        view: u64,
+        block_id: &BlockIdT,
+    ) -> bool {
+        self.votes_by_view.get(&(view, voter)) == Some(block_id)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn remove_vote_history_membership_for_test(
+        &mut self,
+        voter: ValidatorId,
+        view: u64,
+    ) {
+        self.votes_by_view.remove(&(view, voter));
+    }
+
+    #[cfg(test)]
+    pub(crate) fn remove_accumulator_membership_for_test(
+        &mut self,
+        view: u64,
+        block_id: &BlockIdT,
+    ) {
+        self.votes.remove_entry(view, block_id);
+    }
+
+    pub(crate) fn retain_received_vote_token(
+        &mut self,
+        slot: usize,
+        block_id: BlockIdT,
+        token: VerifiedVoteToken,
+        shrink_to: u64,
+    ) {
+        self.received_vote_evidence
+            .as_mut()
+            .unwrap_or_else(|| std::process::abort())
+            .insert_token(slot, block_id, token, shrink_to);
+    }
+
+    pub(crate) fn reconcile_received_vote_evidence(&mut self) {
+        let (Some(table), votes_by_view, votes) = (
+            self.received_vote_evidence.as_mut(),
+            &self.votes_by_view,
+            &self.votes,
+        ) else {
+            return;
+        };
+        table.retain_memberships(|entry: &ReceivedVoteEvidenceEntry<BlockIdT>| {
+            let vote = entry.vote();
+            let voter = ValidatorId(u64::from(vote.validator_index));
+            votes_by_view.get(&(vote.height, voter)) == Some(entry.logical_block_id())
+                && votes.contains_vote(voter, vote.height, entry.logical_block_id())
+        });
     }
 
     pub(crate) fn map_qc_charge_checked(&self) -> Result<u64, EvidenceRetentionError> {
@@ -1077,6 +1250,17 @@ where
         view: u64,
         block_id: &BlockIdT,
     ) -> LeaderSelfVoteReport {
+        let report = self.on_leader_self_vote_detailed_inner(voter, view, block_id);
+        self.reconcile_received_vote_evidence();
+        report
+    }
+
+    fn on_leader_self_vote_detailed_inner(
+        &mut self,
+        voter: ValidatorId,
+        view: u64,
+        block_id: &BlockIdT,
+    ) -> LeaderSelfVoteReport {
         let evicted_before = self.evicted_votes_by_view_entries;
         let accumulator_evicted_before = self.votes.evicted_views();
         let history = self.record_vote_history(voter, view, block_id);
@@ -1474,35 +1658,50 @@ where
         view: u64,
         block_id: &BlockIdT,
     ) -> Result<Option<QuorumCertificate<BlockIdT>>, QcValidationError> {
-        // 1. Equivocation detection.
-        match self.record_vote_history(voter, view, block_id) {
-            VoteHistoryOutcome::Equivocation { previous_block: _ } => {
-                // Record metrics and ignore this vote for QC formation.
+        self.on_vote_detailed(voter, view, block_id).qc
+    }
+
+    pub(crate) fn on_vote_detailed(
+        &mut self,
+        voter: ValidatorId,
+        view: u64,
+        block_id: &BlockIdT,
+    ) -> VoteMutationReport<BlockIdT> {
+        let history = self.record_vote_history(voter, view, block_id);
+        let (accumulator, qc) = match &history {
+            VoteHistoryOutcome::Equivocation { .. } => {
                 self.equivocations_detected += 1;
                 self.equivocating_validators.insert(voter);
-                // For now we silently ignore; later we may want to expose this
-                // via a separate error or event.
-                return Ok(None);
+                (None, Ok(None))
             }
             VoteHistoryOutcome::FirstVote | VoteHistoryOutcome::DuplicateSameBlock => {
-                // Proceed to feed vote into accumulator.
+                match self
+                    .votes
+                    .on_vote_detailed(&self.validators, voter, view, block_id)
+                {
+                    Err(error) => (Some(Err(error.clone())), Err(error)),
+                    Ok(disposition) => {
+                        let accumulator = Some(Ok(disposition));
+                        let qc = match self.votes.maybe_qc_for(&self.validators, view, block_id) {
+                            Err(error) => Err(error),
+                            Ok(Some(qc)) => match self.on_qc(&qc) {
+                                Ok(()) => Ok(Some(qc)),
+                                Err(error) => Err(error),
+                            },
+                            Ok(None) => Ok(None),
+                        };
+                        (accumulator, qc)
+                    }
+                }
             }
-        }
-
-        // 2. Ingest vote into accumulator (membership & duplicate checks).
-        let _is_new = self
-            .votes
-            .on_vote(&self.validators, voter, view, block_id)?;
-
-        // 3. Attempt to form QC for this (view, block_id).
-        let qc = self.votes.maybe_qc_for(&self.validators, view, block_id)?;
-
-        if let Some(ref qc) = qc {
-            // 4. Apply locking logic with the new QC.
-            self.on_qc(qc)?;
-        }
-
-        Ok(qc)
+        };
+        let report = VoteMutationReport {
+            history,
+            accumulator,
+            qc,
+        };
+        self.reconcile_received_vote_evidence();
+        report
     }
 
     /// Handle a newly formed QC.
