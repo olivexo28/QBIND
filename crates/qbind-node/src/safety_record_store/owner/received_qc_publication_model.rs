@@ -814,7 +814,10 @@ fn publication_failure(fault: InjectFault, outcome: Publication, newer: bool) {
     let SafetyRecord::Locked(lock) = &proof.retained().record else {
         panic!("locked");
     };
-    assert_eq!(lock.lock_view, if newer { 3 } else { 2 });
+    assert_eq!(
+        (lock.lock_block_id, lock.lock_view),
+        if newer { (IDS[2], 3) } else { (IDS[1], 2) },
+    );
     drop(proof);
     if newer {
         f.revision += 1;
@@ -1115,6 +1118,7 @@ fn consensus_preparation_pressure_returns_original_token_and_restores_ledgers() 
     let capacity = token.vote().signature.capacity();
     let ledger = support::ledger(&f.engine);
     let before = ledger.sample();
+    let original_cap = f.engine.state().max_retained_evidence_bytes();
     let apps = support::applications(&f.engine);
     support::set_cap(&mut f.engine, before.0);
     let result = f.run(token);
@@ -1137,7 +1141,8 @@ fn consensus_preparation_pressure_returns_original_token_and_restores_ledgers() 
     let token = route.err().unwrap().into_token();
     drop(_coverage);
     assert_eq!(f.owner.backend.accounting_current(), 0);
-    support::set_cap(&mut f.engine, u64::MAX);
+    support::set_cap(&mut f.engine, original_cap);
+    assert_eq!(f.engine.state().max_retained_evidence_bytes(), original_cap);
     let result = f.run(token);
     assert_eq!(
         result.route.as_ref().ok().unwrap().application(),
