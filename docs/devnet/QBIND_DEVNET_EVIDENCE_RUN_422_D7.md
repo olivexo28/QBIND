@@ -21052,3 +21052,205 @@ public DevNet NO-GO
 durable anti-rollback NOT-ESTABLISHED
 C4/C5 OPEN
 ```
+
+## RUN 422 isolated uncertain-O4 recovery and exact-QC resumption
+
+### Baseline, ownership and scope
+
+Starting main was exactly `1f7ddd1c78ca99be86c0c3697c17cdec04fd823a`,
+root tree `443f63606263e81747166d8c36b0e6955accfaec`. Commit availability
+(`git cat-file -e ...^{commit}`), content correspondence (`rev-parse` of HEAD
+and tree plus `git diff --exit-code <baseline> --`), ancestry
+(`git merge-base --is-ancestor <baseline> main`), and clean worktree
+(`git status --porcelain=v1`, empty) were checked separately, all exit 0.
+Local main and the independently read remote main tip both equaled that
+baseline. Work is confined to `copilot/run-422-received-qc-o5-resumption`.
+
+The private model now retains the actual interrupted route/report, its complete
+consensus-charged staged QC, original immutable Authority and independent
+FixtureCommittedHistory borrows, backend incarnation, attempted predecessor
+revision, and engine predecessor. The latter includes the entire logical lock's
+signer vector in a fixed four-member inline representation, engine address,
+target effects, application count, committed position/log length and view.
+It is a same-process immutable-fixture fence, not general engine restoration.
+The existing producer's token/context admission and occupied evidence table
+retain source-context correspondence; the fixture roster/domain comparison is
+also repeated under the domain. No consensus facade change was needed.
+
+Only successful ordinary `reacknowledge(&ValidatedRecord)` constructs the
+private borrowed Acknowledged owner. It borrows the actual Interrupted owner
+and genuine O3 proof; neither is cloned, retargeted or sealed by the model.
+Ordinary O5 retains its context/incarnation and complete-publication checks.
+O2/O3 inspection cannot construct Acknowledged or clear recovery. There is no
+caller acknowledgement Boolean and no authority derived just from identity,
+revision or a clear latch. Acknowledged is neither production authorization nor
+a VerifiedQuorumCertificate. Storage EvidenceStatus remains Unverified;
+domain-aware ML-DSA verification is independently executed fixture evidence.
+
+The resumption gate re-reads with the existing charged loader under one owner
+serialization guard. It checks recovery is no longer required, incarnation and
+pinned context, exact current revision and complete original encoded bytes,
+unchanged predecessor, strict engine-lock advancement, logical signer/bitmap
+correspondence, and complete wire-QC equality with both stored proof and
+interrupted report. Equality includes every signed field, bitmap, signature
+descriptor/order and signature byte; round is not normalized to height.
+The guard remains held across comparison, gate return, ordinary on_qc,
+synchronous success callbacks, engine-route return and model result construction.
+No held operation reacquires it. The resumption gate performs neither O4 nor
+O5. Its result has no publication acknowledgement and zero submissions, while
+certificate completeness, O5 outcome, refusal and actual Application are
+separately asserted. The original advancing route and all fifteen historical
+tests, including equal/lower refusals, remain byte-identical.
+
+### Executable requirement mapping and actual outcomes
+
+All names below are in
+`safety_record_store::owner::received_qc_publication_model`.
+
+| Requirement | Executed test(s) | Observed result |
+|---|---|---|
+| A: real three-chain recovery, first-retained exactness | `uncertain_o4_explicit_o5_exact_three_chain_resumption_and_repeated_use` | Actual UncertainAfterWrite leaves stored QC/lock 3 and engine lock 2, no dependent effects. O3 alone leaves recovery required and original route blocked. Explicit O5 preserves complete bytes/revision. A genuinely admitted duplicate signed at round 19 resumes the original round-9 three-signer QC, preserving first Vote pointer/capacity. Exactly one ordinary application installs target QC/lock 3, commits IDS[0] at height 0, advances view once and emits the ordinary notifications. |
+| B: actual ordinary O5 failures and retry | `ordinary_o5_fault_outcomes_cleanup_and_acknowledged_retry` | FailBeforeSubmit -> RefusedPreWrite; WriteErrors -> WriteFailedAmbiguous; UncertainAfterWrite -> UncertainDurable. Each retains recovery-required, original proof provenance, independent ledger occupancy/ceilings and zero QC/commit/view-success effects. Cleared-fault O5 genuinely acknowledges before successful resumption. No unchanged-storage claim is inferred from ambiguous failure. |
+| C: genuine proof/publication fences | `ordinary_foreign_and_stale_o5_proofs_and_changed_publication_are_fenced` | Same-pinned-context foreign-incarnation O3 proof receives ordinary O5 SemanticRefusal. After successful O5, ordinary valid advancing O4 publishes real QC 4 without applying it to the engine. Earlier recovery state receives PublicationChanged; ordinary O5 with the now-stale proof receives PublicationMismatch. No sealed proof is mutated. |
+| D: exact certificate, not block/view identity | `genuine_alternative_complete_signer_membership_is_not_exact_resumption` | The fourth genuine Vote yields a cryptographically verified four-signer QC with the same block/view/round as the stored three-signer QC. The actual accepted gate refuses Certificate; new evidence is retained, no QC effects occur. Historical incomplete/mixed-round helper controls remain separate from this real admitted route. |
+| E: predecessor and repeated-use fences | `independently_advanced_engine_cannot_resume_interrupted_predecessor`; A | Ordinary engine processing of real view-4 votes advances its lock, then resumption refuses Predecessor. A repeats successful resumption and is refused, with no second application or duplicate commit/view-success callbacks. Nothing removes retained evidence or rolls the engine back. |
+| F: real pressure and ownership | `interruption_admission_preserves_original_vote_under_real_pressure`; `recovery_admission_and_ordinary_o5_working_set_pressure_preserve_borrowed_proofs`; `resumption_admission_loader_and_consensus_pressure_restore_before_retry` | Actual aggregate reservations pressure interruption admission, recovery admission, ordinary O5 working set, resumption admission and charged loader. Consensus preparation uses its independent actual ceiling. Pre-consumption refusals preserve complete redacted Vote equality, signature pointer/capacity and proof provenance. Consumed duplicate reports assert actual report/retention bookkeeping instead of token preservation. All pressure cases relieve pressure and reach genuine explicit-O5/Applied success. |
+| Re-established recovery requirement | `renewed_recovery_requirement_blocks_a_previously_acknowledged_attempt` | A later actual uncertain ordinary O5 invalidates effectiveness; an existing Acknowledged owner cannot bypass RecoveryRequired. A fresh explicit successful ordinary O5 permits recovery. |
+| Serialization, phase coverage and teardown | A; `recovery_phase_inventory_and_independent_ledger_maxima` | Bounded five-second contention observations immediately after authoritative comparison and after engine-route return both see WouldBlock; application and notification counts distinguish the two phases. Synchronous callbacks independently observe the held domain. Independent ledger samples and every storage ceiling are asserted before readback; result/proof/owner destruction and final fixture floors are checked. |
+
+### Additional owners and complete phase inventory
+
+The source-derived coverage below is for N=4, S_sig=2420, B_span=1 on this
+executing target. These are ledger coverage bounds, not physical-memory
+measurements or claims about all compiler stack temporaries.
+
+Existing source functions give R=`max_safety_record_bytes`=10459,
+G=`max_retained_generation_bytes`=10752, T=`max_transient_decoded_working_set`
+=10760, H=`retained_holder_charge`=21347, metadata=42, and publication staging
+=10509. Thus charged fresh loader L=H+(T-G)+R=31814,
+ordinary O4=2T+3R+42=52939, ordinary O5=R+42+T+10509=31770.
+QC-generation maximum is 10177 and maximum decoded evidence backing 10352.
+The unchanged four-signature candidate charge C is 10137. The changed-publication
+test reserves exact C3=`size_of::<LockedRecord>() + 1 +
+3*(size_of::<Vec<u8>>() + 2420)`=7693 before its necessary O4 candidate copy,
+and checks all clone capacities before submission.
+
+Actual inline layouts: Interrupted=624, InterruptedRoute=336,
+Predecessor=200, InterruptionAdmission=112 (and its Result=112);
+RecoveryAdmission=64 (Result=64), Acknowledged=64
+(Result<Acknowledged,RecoveryOutcome>=64), RecoveryOutcome=1;
+ResumptionAdmission=64 (Result=64), ResumptionGate=256,
+Result<(),Refused>=1. Existing ModelResult=432, route Result=312,
+PublishResult=80, Reservation=48, reservation Result=80,
+StorageSnapshot=144, loader Result=496 and facade controls=1032.
+References and Option<&WireQc> are 8; Option<&dyn Fn()> is 16.
+No new heap-backed predecessor, certificate copy, encoded-record comparison
+buffer, uncharged Box or large pre-admission failure carrier is introduced.
+
+| Coverage | Source-sized inventory | Bytes |
+|---|---|---|
+| A, unchanged original adapter | Existing admission/invocation/returned maximum; includes facade/report/loader controls, four storage snapshots and O4 controls | 3552 |
+| I, interruption ownership | 2 Interrupted + 2 InterruptionAdmission + admission Result + reservation Result + pre-call Predecessor | 1864 |
+| K, recovery/O5 conversion | 2 RecoveryAdmission + admission Result + 2 acknowledgement Result + 2 PublishResult + attempt/proof references + 2 borrowed QC results + reservation Result | 592 |
+| S, resumption route/result | A + 2 ResumptionGate + 2 ResumptionAdmission + admission Result + 2 Predecessor + 2 optional probe references + 2 proof references + 2 attempt references + 4 borrowed QC results + gate check Result | 4753 |
+
+Admission reserves before transferring the token or borrowing the caller-owned
+proof into the applicable owner. I and original A overlap during interrupted O4.
+At conversion, the report moves out of ModelResult under both reservations;
+the original A then releases, while I covers the two Interrupted conversion
+slots and retained controls. The report's own consensus leases remain live.
+The genuine O3 proof retains its existing H reservation until destruction.
+Acknowledged borrows that proof and Interrupted without additional backing or
+consensus handles; K covers the O5 invocation/results and returned owner.
+S precedes engine preparation and stays with the returned ModelResult.
+Fresh loader H/scratch coexist with acknowledged proof H, interrupted report
+and new route/report owners during the authoritative comparison. No full QC or
+encoded publication is cloned for comparison. Backing fields precede their
+coverage in drop order. Test-harness diagnostic witnesses and contention
+threads are outside component-owned backing; their samples are not physical
+memory accounting.
+
+| Phase | Simultaneous aggregate coverage, including context P=240 | Bound |
+|---|---|---|
+| Interrupted O4 | P+I+A+C+O4 | 68732 |
+| Interrupted authoritative loader | P+I+A+C+L | 47607 |
+| Original interrupted report retained | P+I | 2104 |
+| Fresh O3 proof construction | P+I+L | 33918 |
+| Proof retained | P+I+H | 23451 |
+| Explicit ordinary O5 | P+I+H+K+O5 | 55813 |
+| Successful O5, proof and owner live | P+I+H+K | 24043 |
+| Resumption authoritative loader | P+I+H+K+S+L | 60610 |
+| Returned resumption report and original report/proof live | P+I+H+K+S | 28796 |
+| Ordinary changed-publication O4 with acknowledged proof live | P+I+H+K+C3+O4 | 84675 |
+
+The unchanged independent operational and combined aggregate ceilings are both
+84956; context sub-cap is 960 with actual occupancy 240. The maximum source
+bound here is 84675, leaving 281, not an enlarged ceiling. The main recovery
+inventory executes operational current/peak 28556/68492 and aggregate
+current/peak 28796/68732. The changed-publication test separately executes
+operational/aggregate peaks 84435/84675.
+
+Consensus is sampled separately: resumed tuple
+`(215214, 0, 1, 0, 2, 0)`, independently recorded ceiling 268435456.
+The two reports are the interrupted and resumed certificates, not a leak.
+Each has ordinary report/wire coverage A/P=4600/7333. Duplicate consumption
+subtracts the token inline charge and its 2420-byte signature capacity while
+preserving first-retained evidence. Release assertions check all tuple
+components rather than forcing unchanged totals across legitimate retention.
+Ordinary failed/successful O5 itself leaves consensus occupancy and ceiling
+unchanged. Immediate storage restoration checks include occupancy and each
+ceiling at O5 failure, successful O5 with proof live, resumption refusals and
+success, each result/proof/owner destruction and final teardown, before unrelated
+diagnostic readback. Final storage operational/context/aggregate floors are zero;
+consensus reaches the existing observer-only empty floor.
+
+### Fresh validation attribution and limits
+
+The following literal test commands ran successfully at producing source commit
+`09f884b6643688b1ed39094309cd48813947cace`, tree
+`ae9270b1e6281a4f1f60c1bbc9308557c937a4b7`, with a clean worktree.
+The subsequent delivery commit only appends these evidence documents; its Rust
+source is identical. The selected suites overlap and are not additive.
+The whitespace command also ran at that HEAD with only evidence-document
+appends, and over the complete baseline-to-delivery change.
+
+| Literal command | Fresh result | Exit |
+|---|---|---|
+| `LIBCLANG_PATH=/usr/lib/llvm-18/lib cargo test --locked -p qbind-node --lib --features test-utils safety_record_store::owner::received_qc_publication_model -- --nocapture` | 25 passed, 0 failed/ignored, 2145 filtered | 0 |
+| `LIBCLANG_PATH=/usr/lib/llvm-18/lib cargo test --locked -p qbind-node --lib --features test-utils safety_record_store::owner:: -- --quiet` | 168 selected: 162 passed, 0 failed, 6 ignored, 2002 filtered | 0 |
+| `LIBCLANG_PATH=/usr/lib/llvm-18/lib cargo test --locked -p qbind-node --features test-utils --test run_422_d7d14_safety_record_store_tests` | 158 selected: 157 passed, 0 failed, 1 ignored, 0 filtered | 0 |
+| `git -c core.whitespace=cr-at-eol diff --check` | No whitespace errors; also repeated over the complete baseline-to-delivery change | 0 |
+
+The first development attempt exited 101 because libclang was absent at the
+required path; installing libclang-18-dev restored the dependency without any
+manifest/lockfile change. Intermediate development runs exposed and corrected
+test insertion scope, nondeterministic logical-signer ordering assumptions,
+duplicate validator-notification expectations and publication-overlap pressure.
+They are not substituted for the final successful commands above. Existing
+warnings and the historical deliberately caught post-ack hook panic remain
+non-failures. An earlier source checkpoint also passed the requested selections;
+the final producing revision above additionally checks independent consensus
+ceilings/occupancy across ordinary O5.
+
+The consensus facade is unchanged, so the conditional consensus command was
+not required or run. No previous full-suite/build/compilation/Miri result is
+relabeled fresh. Historical documentation byte prefixes, file modes, and each
+file's EOL/EOF conventions are preserved. Only the private model and these
+append-only documents change.
+
+This stops at same-process immutable-fixture composition: no production caller,
+current-authority integration, restoration/reopen/restart integration, automatic
+O5, replay loop, TC/signing/delivery integration, new process-death boundary,
+activation, deployment, D15 or Run 423. Engine-address and complete logical
+predecessor observations are not a general engine-incarnation/restore protocol.
+Delivery is not independent source-review acceptance.
+
+```
+D7D14_STORAGE_COMPONENT=IMPLEMENTED-ISOLATED
+D7D14_STORAGE_ACCEPTANCE=PASS-ACCEPTED-SUBSET
+§13.6 whole-lifecycle INCOMPLETE
+activation DISABLED
+public DevNet NO-GO
+durable anti-rollback NOT-ESTABLISHED
+C4/C5 OPEN
+```
