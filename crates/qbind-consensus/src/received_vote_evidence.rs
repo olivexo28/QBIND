@@ -50,6 +50,11 @@ impl EvidenceElement for u8 {}
 impl EvidenceElement for Vec<u8> {}
 impl EvidenceElement for SnapshotMember {}
 
+trait VecTransfer: EvidenceElement {}
+
+impl VecTransfer for u8 {}
+impl VecTransfer for Vec<u8> {}
+
 #[cfg(test)]
 impl EvidenceElement for () {}
 
@@ -72,6 +77,57 @@ thread_local! {
         const { std::cell::Cell::new(None) };
     static TABLE_TRANSFER_BEFORE_SHRINK: std::cell::Cell<Option<(usize, usize, u64, (u64, u64, usize, usize, usize, usize))>> =
         const { std::cell::Cell::new(None) };
+    static QC_COMMIT_FAULT: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    static QC_CLEANUP_OBSERVATIONS: std::cell::RefCell<Vec<(&'static str, (u64, u64, usize, usize, usize, usize))>> =
+        const { std::cell::RefCell::new(Vec::new()) };
+    static QC_SIGNATURE_TRANSFERS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    static QC_DESCRIPTOR_SIGNATURE_DROPS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    static QC_RELEASE_TRACE: std::cell::RefCell<Option<Vec<(&'static str, u64, (u64, u64, usize, usize, usize, usize))>>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+#[cfg(test)]
+pub(crate) fn with_qc_commit_failure<T>(operation: impl FnOnce() -> T) -> T {
+    struct Restore(bool);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            QC_COMMIT_FAULT.with(|slot| slot.set(self.0));
+        }
+    }
+    let _restore = Restore(QC_COMMIT_FAULT.with(|slot| slot.replace(true)));
+    QC_CLEANUP_OBSERVATIONS.with(|events| events.borrow_mut().clear());
+    operation()
+}
+
+#[cfg(test)]
+pub(crate) fn qc_cleanup_observations(
+) -> Vec<(&'static str, (u64, u64, usize, usize, usize, usize))> {
+    QC_CLEANUP_OBSERVATIONS.with(|events| events.borrow().clone())
+}
+
+#[cfg(test)]
+pub(crate) fn qc_signature_transfers() -> usize {
+    QC_SIGNATURE_TRANSFERS.with(std::cell::Cell::get)
+}
+
+#[cfg(test)]
+pub(crate) fn qc_descriptor_signature_drops() -> usize {
+    QC_DESCRIPTOR_SIGNATURE_DROPS.with(std::cell::Cell::get)
+}
+
+#[cfg(test)]
+pub(crate) fn with_qc_release_trace(
+    operation: impl FnOnce(),
+) -> Vec<(&'static str, u64, (u64, u64, usize, usize, usize, usize))> {
+    struct Restore(Option<Vec<(&'static str, u64, (u64, u64, usize, usize, usize, usize))>>);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            QC_RELEASE_TRACE.with(|trace| *trace.borrow_mut() = self.0.take());
+        }
+    }
+    let _restore = Restore(QC_RELEASE_TRACE.with(|trace| trace.replace(Some(Vec::new()))));
+    operation();
+    QC_RELEASE_TRACE.with(|trace| trace.borrow_mut().take().expect("active release trace"))
 }
 
 #[cfg(test)]
@@ -93,6 +149,10 @@ impl<BlockIdT> ReceivedVoteEvidenceEntry<BlockIdT> {
 
     pub(crate) fn logical_block_id(&self) -> &BlockIdT {
         &self.logical_block_id
+    }
+
+    pub(crate) fn has_same_context_as(&self, token: &VerifiedVoteToken) -> bool {
+        self.context.ptr_eq(&token.context)
     }
 
     #[cfg(test)]
@@ -280,10 +340,10 @@ impl<T: EvidenceElement> ExactBuffer<T> {
         Ok(())
     }
 
-    /// Test-only proof of exact allocator ownership transfer; production never
-    /// exposes a growth-capable `Vec` for admitted evidence backing.
-    #[cfg(test)]
-    fn into_vec(self) -> Vec<T> {
+    fn into_vec(self) -> Vec<T>
+    where
+        T: VecTransfer,
+    {
         if self.capacity == 0 {
             return Vec::new();
         }
@@ -330,6 +390,10 @@ impl<T: EvidenceElement> Drop for ExactBuffer<T> {
             }
         }
         drop(allocation);
+        #[cfg(test)]
+        if std::any::TypeId::of::<T>() == std::any::TypeId::of::<Vec<u8>>() {
+            QC_DESCRIPTOR_SIGNATURE_DROPS.with(|count| count.set(count.get() + initialized));
+        }
     }
 }
 
@@ -739,6 +803,10 @@ impl Drop for PendingCharge {
                 std::process::abort();
             }
             self.active = false;
+            #[cfg(test)]
+            if self.class == ReservationClass::Bytes && QC_COMMIT_FAULT.with(std::cell::Cell::get) {
+                record_qc_cleanup("after_pending_release", self);
+            }
         }
     }
 }
@@ -760,6 +828,17 @@ impl std::fmt::Debug for CommittedCharge {
 
 impl Drop for CommittedCharge {
     fn drop(&mut self) {
+        #[cfg(test)]
+        QC_RELEASE_TRACE.with(|trace| {
+            if let Some(events) = trace.borrow_mut().as_mut() {
+                let class = match self.class {
+                    ReservationClass::Bytes => "Bytes",
+                    ReservationClass::Context => "Context",
+                    ReservationClass::Report => "Report",
+                };
+                events.push((class, self.bytes, self.budget.occupancy()));
+            }
+        });
         if self
             .budget
             .lock()
@@ -1237,6 +1316,11 @@ impl EvidenceBudget {
         (committed, pending, contexts, pending_contexts)
     }
 
+    #[cfg(test)]
+    pub(crate) fn full_occupancy_for_test(&self) -> (u64, u64, usize, usize, usize, usize) {
+        self.inner.occupancy()
+    }
+
     pub(crate) fn same_authority(&self, other: &Self) -> bool {
         self.inner.0 == other.inner.0
     }
@@ -1458,6 +1542,475 @@ impl VerifiedVoteToken {
                 self._charge.class == ReservationClass::Bytes
                     && self._charge.bytes == token_bytes
             })
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ReceivedVoteQcStageError {
+    ReportBytes,
+    ReportQuota,
+    StageBytes,
+    ContextAcquire,
+    BudgetAcquire,
+    Layout,
+    Arithmetic,
+    Allocation,
+    Commit,
+    Invariant,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ReceivedVoteQcIncompleteReason {
+    MissingEvidence(u16),
+    ContextMismatch(u16),
+    SignerMismatch(u16),
+    CandidateMismatch(u16),
+    CommonFieldsMismatch(u16),
+    SignatureShapeMismatch(u16),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct ReceivedVoteQcCommonFields {
+    pub(crate) version: u8,
+    pub(crate) chain_id: u32,
+    pub(crate) epoch: u64,
+    pub(crate) height: u64,
+    pub(crate) round: u64,
+    pub(crate) step: u8,
+    pub(crate) block_id: [u8; 32],
+    pub(crate) suite_id: u16,
+}
+
+impl ReceivedVoteQcCommonFields {
+    fn from_vote(vote: &Vote) -> Self {
+        Self {
+            version: vote.version,
+            chain_id: vote.chain_id,
+            epoch: vote.epoch,
+            height: vote.height,
+            round: vote.round,
+            step: vote.step,
+            block_id: vote.block_id,
+            suite_id: vote.suite_id,
+        }
+    }
+
+    fn matches_vote(self, vote: &Vote) -> bool {
+        self == Self::from_vote(vote)
+    }
+}
+
+pub(crate) struct ReceivedVoteQcReportOwner {
+    source_context: ContextHandle,
+    _report_lease: CommittedCharge,
+}
+
+impl ReceivedVoteQcReportOwner {
+    #[cfg(test)]
+    pub(crate) fn report_charge_for_test(&self) -> u64 {
+        self._report_lease.bytes
+    }
+}
+
+impl std::fmt::Debug for ReceivedVoteQcReportOwner {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ReceivedVoteQcReportOwner")
+            .field("source_context", &"<retained>")
+            .finish_non_exhaustive()
+    }
+}
+
+pub(crate) struct ReceivedVoteQcWire {
+    qc: qbind_wire::consensus::QuorumCertificate,
+    _bytes_lease: CommittedCharge,
+}
+
+struct QcVecTransferControlFrame<T: VecTransfer> {
+    source: ExactBuffer<T>,
+    transfer: ManuallyDrop<ExactBuffer<T>>,
+    pointer: *mut T,
+    initialized: usize,
+    capacity: usize,
+    destination: Vec<T>,
+}
+
+struct QcBufferBuildFrame<'a> {
+    report_owner: Option<&'a ReceivedVoteQcReportOwner>,
+    token: Option<&'a VerifiedVoteToken>,
+    table: Option<&'a ReceivedVoteEvidenceTable<[u8; 32]>>,
+    membership: Option<&'a [u64; 16]>,
+    signer_count: usize,
+    roster_len: usize,
+    view: u64,
+    block_id: [u8; 32],
+    allow_incoming: bool,
+    validator: usize,
+    word: usize,
+    id: u16,
+    selected: Option<&'a Vote>,
+    source: Option<&'a Vote>,
+    byte: Option<&'a u8>,
+    metadata_result: Option<Result<(), ReceivedVoteQcStageError>>,
+    common: Option<ReceivedVoteQcCommonFields>,
+    fields: ReceivedVoteQcCommonFields,
+    highest: Option<usize>,
+    observed: usize,
+    bitmap_len: usize,
+    descriptor_layout_result: Option<Result<Layout, std::alloc::LayoutError>>,
+    descriptor_layout: Option<Layout>,
+    signature_bytes: u64,
+    p_bytes: u64,
+    bitmap_allocation_result: Option<Result<ExactBuffer<u8>, EvidenceAllocError>>,
+    bitmap: Option<ExactBuffer<u8>>,
+    bitmap_push_result: Option<Result<(), u8>>,
+    bitmap_vec: Option<Vec<u8>>,
+    descriptor_allocation_result: Option<Result<ExactBuffer<Vec<u8>>, EvidenceAllocError>>,
+    descriptors: Option<ExactBuffer<Vec<u8>>>,
+    signature_allocation_result: Option<Result<ExactBuffer<u8>, EvidenceAllocError>>,
+    signature: Option<ExactBuffer<u8>>,
+    signature_push_result: Option<Result<(), u8>>,
+    signature_vec: Option<Vec<u8>>,
+    descriptor_push_result: Option<Result<(), Vec<u8>>>,
+    descriptors_vec: Option<Vec<Vec<u8>>>,
+    pending: Option<PendingCharge>,
+    pending_result: Option<Result<PendingCharge, ReceivedVoteQcStageError>>,
+    raw_pending_result: Option<Result<PendingCharge, LedgerError>>,
+    commit_argument: Option<PendingCharge>,
+    commit_result: Option<Result<CommittedCharge, (PendingCharge, LedgerError)>>,
+    refused_pending: Option<PendingCharge>,
+    commit_error: Option<LedgerError>,
+    mapped_commit_error: Option<ReceivedVoteQcStageError>,
+    bytes_lease: Option<CommittedCharge>,
+    qc: Option<qbind_wire::consensus::QuorumCertificate>,
+    wire: Option<ReceivedVoteQcWire>,
+    result: Option<Result<ReceivedVoteQcWirePreparation, ReceivedVoteQcStageError>>,
+    mapped_allocation_result: Option<Result<ExactBuffer<u8>, ReceivedVoteQcStageError>>,
+    mapped_descriptor_allocation_result:
+        Option<Result<ExactBuffer<Vec<u8>>, ReceivedVoteQcStageError>>,
+    mapped_push_result: Option<Result<(), ReceivedVoteQcStageError>>,
+    byte_transfer: QcVecTransferControlFrame<u8>,
+    descriptor_transfer: QcVecTransferControlFrame<Vec<u8>>,
+}
+
+struct QcAdmissionControlFrame {
+    budget_result: Option<Result<BudgetHandle, LedgerError>>,
+    budget: Option<BudgetHandle>,
+    reserve_result: Option<Result<PendingCharge, ReceivedVoteQcStageError>>,
+    raw_reserve_result: Option<Result<PendingCharge, LedgerError>>,
+    pending: Option<PendingCharge>,
+    commit_result: Option<Result<CommittedCharge, (PendingCharge, LedgerError)>>,
+    mapped_commit_result: Option<Result<CommittedCharge, ReceivedVoteQcStageError>>,
+    report_lease: Option<CommittedCharge>,
+    context_result: Option<Result<ContextHandle, LedgerError>>,
+    source_context: Option<ContextHandle>,
+    mapped_context_result: Option<Result<ContextHandle, ReceivedVoteQcStageError>>,
+    report_owner: Option<ReceivedVoteQcReportOwner>,
+    result: Option<Result<ReceivedVoteQcReportOwner, ReceivedVoteQcStageError>>,
+}
+
+impl std::fmt::Debug for ReceivedVoteQcWire {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ReceivedVoteQcWire")
+            .field("signers", &self.qc.signatures.len())
+            .finish_non_exhaustive()
+    }
+}
+
+impl ReceivedVoteQcWire {
+    pub(crate) fn qc(&self) -> &qbind_wire::consensus::QuorumCertificate {
+        &self.qc
+    }
+
+    #[cfg(test)]
+    pub(crate) fn bytes_charge_for_test(&self) -> u64 {
+        self._bytes_lease.bytes
+    }
+}
+
+pub(crate) enum ReceivedVoteQcWirePreparation {
+    Complete(ReceivedVoteQcWire),
+    Incomplete(ReceivedVoteQcIncompleteReason),
+}
+
+pub(crate) fn qc_buffer_control_frame_bytes() -> Result<u64, ReceivedVoteQcStageError> {
+    u64::try_from(size_of::<QcBufferBuildFrame<'static>>())
+        .map_err(|_| ReceivedVoteQcStageError::Arithmetic)
+}
+
+pub(crate) fn qc_admission_control_frame_bytes() -> Result<u64, ReceivedVoteQcStageError> {
+    u64::try_from(size_of::<QcAdmissionControlFrame>())
+        .map_err(|_| ReceivedVoteQcStageError::Arithmetic)
+}
+
+fn map_qc_ledger_error(error: LedgerError) -> ReceivedVoteQcStageError {
+    match error {
+        LedgerError::Admission => ReceivedVoteQcStageError::ReportBytes,
+        LedgerError::Quota => ReceivedVoteQcStageError::ReportQuota,
+        LedgerError::Allocation => ReceivedVoteQcStageError::Allocation,
+        LedgerError::Arithmetic => ReceivedVoteQcStageError::Arithmetic,
+        _ => ReceivedVoteQcStageError::Invariant,
+    }
+}
+
+impl VerifiedVoteToken {
+    pub(crate) fn begin_qc_report(
+        &self,
+        control_bytes: u64,
+    ) -> Result<ReceivedVoteQcReportOwner, ReceivedVoteQcStageError> {
+        let budget = self
+            ._charge
+            .budget
+            .try_clone()
+            .map_err(|_| ReceivedVoteQcStageError::BudgetAcquire)?;
+        let pending = budget
+            .reserve(control_bytes, ReservationClass::Report)
+            .map_err(map_qc_ledger_error)?;
+        let report_lease = pending.commit().map_err(|(_, error)| match error {
+            LedgerError::Admission => ReceivedVoteQcStageError::ReportBytes,
+            LedgerError::Quota => ReceivedVoteQcStageError::ReportQuota,
+            LedgerError::Arithmetic => ReceivedVoteQcStageError::Arithmetic,
+            LedgerError::Invariant | LedgerError::WrongReservationKind => {
+                ReceivedVoteQcStageError::Invariant
+            }
+            _ => ReceivedVoteQcStageError::Commit,
+        })?;
+        let source_context = self
+            .context
+            .try_clone()
+            .map_err(|_| ReceivedVoteQcStageError::ContextAcquire)?;
+        Ok(ReceivedVoteQcReportOwner {
+            source_context,
+            _report_lease: report_lease,
+        })
+    }
+}
+
+impl ReceivedVoteQcReportOwner {
+    pub(crate) fn build_wire(
+        &self,
+        token: &VerifiedVoteToken,
+        table: &ReceivedVoteEvidenceTable<[u8; 32]>,
+        membership: &[u64; 16],
+        signer_count: usize,
+        roster_len: usize,
+        view: u64,
+        block_id: [u8; 32],
+        allow_incoming: bool,
+    ) -> Result<ReceivedVoteQcWirePreparation, ReceivedVoteQcStageError> {
+        let mut observed = 0usize;
+        let mut highest = None;
+        let mut common = None;
+        for validator in 0..roster_len {
+            if validator >= MAX_MEMBERS || validator >= 1024 {
+                return Err(ReceivedVoteQcStageError::Invariant);
+            }
+            let word = validator / 64;
+            if word >= membership.len() {
+                return Err(ReceivedVoteQcStageError::Invariant);
+            }
+            if membership[word] & (1u64 << (validator % 64)) == 0 {
+                continue;
+            }
+            observed = observed
+                .checked_add(1)
+                .ok_or(ReceivedVoteQcStageError::Arithmetic)?;
+            highest = Some(validator);
+            let id = u16::try_from(validator).map_err(|_| ReceivedVoteQcStageError::Invariant)?;
+            let selected = match table.entry_for(view, id) {
+                Some(entry) => {
+                    if !entry.has_same_context_as(token) {
+                        return Ok(ReceivedVoteQcWirePreparation::Incomplete(
+                            ReceivedVoteQcIncompleteReason::ContextMismatch(id),
+                        ));
+                    }
+                    if entry.logical_block_id() != &block_id {
+                        return Ok(ReceivedVoteQcWirePreparation::Incomplete(
+                            ReceivedVoteQcIncompleteReason::CandidateMismatch(id),
+                        ));
+                    }
+                    entry.vote()
+                }
+                None if allow_incoming && validator == usize::from(token.vote.validator_index) => {
+                    token.vote()
+                }
+                None => {
+                    return Ok(ReceivedVoteQcWirePreparation::Incomplete(
+                        ReceivedVoteQcIncompleteReason::MissingEvidence(id),
+                    ))
+                }
+            };
+            if usize::from(selected.validator_index) != validator {
+                return Ok(ReceivedVoteQcWirePreparation::Incomplete(
+                    ReceivedVoteQcIncompleteReason::SignerMismatch(id),
+                ));
+            }
+            if selected.height != view || selected.block_id != block_id {
+                return Ok(ReceivedVoteQcWirePreparation::Incomplete(
+                    ReceivedVoteQcIncompleteReason::CandidateMismatch(id),
+                ));
+            }
+            if selected.signature.len() != ML_DSA_44_SIGNATURE_SIZE
+                || selected.signature.capacity() != ML_DSA_44_SIGNATURE_SIZE
+            {
+                return Ok(ReceivedVoteQcWirePreparation::Incomplete(
+                    ReceivedVoteQcIncompleteReason::SignatureShapeMismatch(id),
+                ));
+            }
+            match common {
+                None => common = Some(ReceivedVoteQcCommonFields::from_vote(selected)),
+                Some(fields) if !fields.matches_vote(selected) => {
+                    return Ok(ReceivedVoteQcWirePreparation::Incomplete(
+                        ReceivedVoteQcIncompleteReason::CommonFieldsMismatch(id),
+                    ))
+                }
+                _ => {}
+            }
+        }
+        if observed != signer_count {
+            return Err(ReceivedVoteQcStageError::Invariant);
+        }
+        if signer_count == 0 {
+            return Ok(ReceivedVoteQcWirePreparation::Incomplete(
+                ReceivedVoteQcIncompleteReason::MissingEvidence(0),
+            ));
+        }
+        let fields = common.ok_or(ReceivedVoteQcStageError::Invariant)?;
+        let bitmap_len = highest.map(|value| value / 8 + 1).unwrap_or(0);
+        let descriptor_layout =
+            Layout::array::<Vec<u8>>(signer_count).map_err(|_| ReceivedVoteQcStageError::Layout)?;
+        let signature_bytes = u64::try_from(signer_count)
+            .map_err(|_| ReceivedVoteQcStageError::Arithmetic)?
+            .checked_mul(
+                u64::try_from(ML_DSA_44_SIGNATURE_SIZE)
+                    .map_err(|_| ReceivedVoteQcStageError::Arithmetic)?,
+            )
+            .ok_or(ReceivedVoteQcStageError::Arithmetic)?;
+        let p_bytes = u64::try_from(bitmap_len)
+            .map_err(|_| ReceivedVoteQcStageError::Arithmetic)?
+            .checked_add(
+                u64::try_from(descriptor_layout.size())
+                    .map_err(|_| ReceivedVoteQcStageError::Arithmetic)?,
+            )
+            .and_then(|value| value.checked_add(signature_bytes))
+            .ok_or(ReceivedVoteQcStageError::Arithmetic)?;
+        let pending = self
+            ._report_lease
+            .budget
+            .reserve(p_bytes, ReservationClass::Bytes)
+            .map_err(|error| match error {
+                LedgerError::Admission => ReceivedVoteQcStageError::StageBytes,
+                other => map_qc_ledger_error(other),
+            })?;
+
+        let mut bitmap =
+            ExactBuffer::<u8>::try_with_capacity(bitmap_len).map_err(map_qc_alloc_error)?;
+        for _ in 0..bitmap_len {
+            bitmap
+                .try_push(0)
+                .map_err(|_| ReceivedVoteQcStageError::Invariant)?;
+        }
+        let mut descriptors =
+            ExactBuffer::<Vec<u8>>::try_with_capacity(signer_count).map_err(map_qc_alloc_error)?;
+        for validator in 0..roster_len {
+            let word = validator / 64;
+            if membership[word] & (1u64 << (validator % 64)) == 0 {
+                continue;
+            }
+            let id = u16::try_from(validator).map_err(|_| ReceivedVoteQcStageError::Invariant)?;
+            let source = match table.entry_for(view, id) {
+                Some(entry) => entry.vote(),
+                None if allow_incoming && validator == usize::from(token.vote.validator_index) => {
+                    token.vote()
+                }
+                None => return Err(ReceivedVoteQcStageError::Invariant),
+            };
+            bitmap.as_mut_slice()[validator / 8] |= 1u8 << (validator % 8);
+            let mut signature = ExactBuffer::<u8>::try_with_capacity(ML_DSA_44_SIGNATURE_SIZE)
+                .map_err(map_qc_alloc_error)?;
+            for byte in &source.signature {
+                signature
+                    .try_push(*byte)
+                    .map_err(|_| ReceivedVoteQcStageError::Invariant)?;
+            }
+            if signature.len() != ML_DSA_44_SIGNATURE_SIZE
+                || signature.capacity() != ML_DSA_44_SIGNATURE_SIZE
+            {
+                return Err(ReceivedVoteQcStageError::Invariant);
+            }
+            descriptors
+                .try_push(signature.into_vec())
+                .map_err(|_| ReceivedVoteQcStageError::Invariant)?;
+            #[cfg(test)]
+            QC_SIGNATURE_TRANSFERS.with(|count| count.set(count.get() + 1));
+        }
+        let qc = qbind_wire::consensus::QuorumCertificate {
+            version: fields.version,
+            chain_id: fields.chain_id,
+            epoch: fields.epoch,
+            height: fields.height,
+            round: fields.round,
+            step: fields.step,
+            block_id: fields.block_id,
+            suite_id: fields.suite_id,
+            signer_bitmap: bitmap.into_vec(),
+            signatures: descriptors.into_vec(),
+        };
+        let bytes_lease = match commit_qc_backing(pending) {
+            Ok(lease) => lease,
+            Err((pending, error)) => {
+                let error = match error {
+                    LedgerError::Admission => ReceivedVoteQcStageError::StageBytes,
+                    LedgerError::Arithmetic => ReceivedVoteQcStageError::Arithmetic,
+                    LedgerError::Invariant | LedgerError::WrongReservationKind => {
+                        ReceivedVoteQcStageError::Invariant
+                    }
+                    _ => ReceivedVoteQcStageError::Commit,
+                };
+                #[cfg(test)]
+                record_qc_cleanup("before_backing_drop", &pending);
+                drop(qc);
+                #[cfg(test)]
+                record_qc_cleanup("after_backing_drop", &pending);
+                drop(pending);
+                return Err(error);
+            }
+        };
+        Ok(ReceivedVoteQcWirePreparation::Complete(
+            ReceivedVoteQcWire {
+                qc,
+                _bytes_lease: bytes_lease,
+            },
+        ))
+    }
+}
+
+fn commit_qc_backing(
+    pending: PendingCharge,
+) -> Result<CommittedCharge, (PendingCharge, LedgerError)> {
+    #[cfg(test)]
+    if QC_COMMIT_FAULT.with(std::cell::Cell::get) {
+        // Defensive control: return the valid reservation without changing the ledger.
+        return Err((pending, LedgerError::Allocation));
+    }
+    pending.commit()
+}
+
+#[cfg(test)]
+fn record_qc_cleanup(phase: &'static str, pending: &PendingCharge) {
+    QC_CLEANUP_OBSERVATIONS.with(|events| {
+        events.borrow_mut().push((phase, pending.budget.occupancy()));
+    });
+}
+
+fn map_qc_alloc_error(error: EvidenceAllocError) -> ReceivedVoteQcStageError {
+    match error {
+        EvidenceAllocError::Layout | EvidenceAllocError::ZeroSizedType => {
+            ReceivedVoteQcStageError::Layout
+        }
+        EvidenceAllocError::Arithmetic | EvidenceAllocError::Capacity => {
+            ReceivedVoteQcStageError::Arithmetic
+        }
+        EvidenceAllocError::Allocation => ReceivedVoteQcStageError::Allocation,
     }
 }
 

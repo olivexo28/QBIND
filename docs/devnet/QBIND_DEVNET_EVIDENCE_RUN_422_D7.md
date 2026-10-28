@@ -20190,3 +20190,289 @@ durable anti-rollback NOT-ESTABLISHED
 C4/C5 OPEN
 
 No certificate assembly, O4, production integration, signing/delivery, activation, deployment, D15, or Run 423 is included.
+
+## RUN 422 — Isolated received-Vote signed-QC staging (implemented, not independently accepted)
+
+This entry supersedes the preceding "No certificate assembly" statement only for the isolated
+received-Vote route described here. Starting baseline was `0525f772d11c0c67ce509fa43b8283f87bb39eb4`
+(`ecd0feac98c6d45fd66668d84ccde3fb863d211d` root tree), verified as the checkout HEAD/tree with a clean
+worktree; content correspondence and commit ancestry were checked separately. Work is confined to the
+six authorized paths. The implementation is opt-in and has no production caller, O4 connection, current
+authority, signing/delivery, activation, deployment, D15, or Run 423 surface.
+
+`VoteAccumulatorProjection` is bound by borrow to the accumulator, incoming voter, view, and block;
+the same insertion classifier drives projection and mutation. It remains non-`Clone`/non-`Copy`, and the
+borrow ends before mutation. The route then carries its private candidate seal without an intervening
+mutation or callback into exactly one `on_vote_detailed` call. The fixed `[u64; 16]` witness is filled
+from the pre-event projection with checked dense-roster bounds, retained through reconciliation, and
+compared against the actual QC by candidate, count, range, uniqueness, and exact membership. Evidence is
+copied before mutation in ascending validator order; the lowest-index selected retained Vote anchors the
+eight common signed fields. Existing evidence wins over a conflicting incoming duplicate, and only an
+absent selected incoming entry under `NewEntry` may use the token. Height maps to logical view; signed
+round is preserved. Missing/incompatible evidence yields Incomplete, never a partial certificate.
+
+The complete certificate is a plain wire QC with exact original signature bytes, minimal bitmap span,
+ascending signature-vector order, and a source-context handle in every invoked report. It is not a
+`VerifiedQuorumCertificate`, current authorization, publication permission, or durable acknowledgement.
+`NoQc`, `Incomplete`, `LogicalError`, and `Complete` remain distinct. The event summary preserves history,
+accumulator disposition (including skipped equivocation), evidence disposition, QC summary, and view
+advancement. Reconciliation and callbacks remain on the existing one-invocation path and retain their
+ordering/panic behavior.
+
+**Measured ownership contract (x86_64 test target).** Report-class A is reserved before stage controls
+or destination buffers are built:
+
+```
+A = checked_add(size_of::<ReceivedVoteQcRouteControlFrame>(),
+                max(size_of::<QcAdmissionControlFrame>(),
+                    size_of::<QcBufferBuildFrame>()))
+  = 1816 + max(216, 1032) = 2848 bytes
+```
+
+The route frame inventory is token/preflight, report/context owner, bound projection, candidate seal and
+membership witness, control-charge result, staged wire/result, logical mutation report, event summary,
+final outcome, refusal, and return `Result` carrier. The admission frame includes budget clone/result,
+pending/report reservation and commit result, temporary committed report lease, context clone result,
+report owner and return result. The buffer frame includes source refs; common fields and scan/layout
+scalars; allocation and push results; partial bitmap, descriptor, and signature `ExactBuffer`s; transferred
+Vecs; pending P reservation and commit result; logical wire-QC, wire owner, and preparation result.
+The nested admission and buffer helpers are lifetime-disjoint; their maximum is added to the persistent
+route frame. The route layout conservatively includes controls such as the incoming token that are also
+covered by its pre-existing Bytes-class token charge; this is intentional extra frame coverage, not a
+claim that the token payload charge was subtracted. These are component ownership bounds, not stack/RSS
+or allocator-overhead claims.
+
+For `n` selected signers and highest selected validator id `h`, complete preparation reserves
+`P = (h / 8 + 1) + n * size_of::<Vec<u8>>() + n * ML_DSA_44_SIGNATURE_SIZE`; every backing allocation
+uses the corresponding exact capacity and initialized length. On the measured target, three signers
+produce `P=1+72+7260=7333`; four produce `P=1+96+9680=9777`. A known-incomplete or equivocation
+preparation has `P=0`; prevalidation returns before any destination allocation. A candidate prepared
+before an actual `NoQc` is discarded and releases P before report return. Complete reports retain P;
+incomplete/no-QC reports retain no P. The report quota is committed separately from table capacity.
+On the three/four-signer route observations, A was 2848 bytes per report, P was respectively 7333/9777,
+pending bytes and pending contexts returned to zero, and report/context counts returned to baseline when
+the report was dropped.
+
+The inherited logical QC allocation produced by the engine's existing accumulator is outside this new
+staging budget; it is inspected, summarized, and dropped rather than retained by the report. Source Vote
+signature capacity, table, installed context, token, and ledger charges remain owned by their existing
+components. Drop order is destination backing before P lease, report outcome/backing and source context
+before A lease.
+
+**Executed evidence.** Nonzero selectors: bound accumulator projection 1 passed; received-vote ownership
+36 passed; signed-QC route 10 passed; existing retention regressions 4 passed. The route tests cover real
+domain-verified signatures, weighted quorum and minimal bitmap span, all actual signers including extra
+signers, first-retained duplicate conflict, mixed common fields, missing legacy evidence, source-entry
+eviction after pre-copy, capacity drop, equivocation, malformed actual-QC comparison controls, report
+quota and allocation refusal/retry, callback unwind, context lifetime, and exact backing/ledger deltas.
+Focused commands:
+
+```
+CARGO_BUILD_JOBS=1 cargo test --locked -p qbind-consensus projection_binds_incoming_signer_and_shares_insertion_classification --lib
+CARGO_BUILD_JOBS=1 cargo test --locked -p qbind-consensus received_vote_evidence --lib
+CARGO_BUILD_JOBS=1 cargo test --locked -p qbind-consensus received_vote_qc --lib
+CARGO_BUILD_JOBS=1 cargo test --locked -p qbind-consensus received_vote_token_invocation_transfers_original_and_keeps_first_evidence --lib
+CARGO_BUILD_JOBS=1 cargo test --locked -p qbind-consensus received_vote_missing_evidence_for_duplicate_is_retained --lib
+CARGO_BUILD_JOBS=1 cargo test --locked -p qbind-consensus received_vote_capacity_dropped_outcome_destroys_token_without_retention --lib
+CARGO_BUILD_JOBS=1 cargo test --locked -p qbind-consensus received_vote_recorder_panic_follows_completed_evidence_transfer --lib
+```
+
+Default-checking Miri passed 1 test each: `received_vote_evidence_partial_initialization_and_exact_vec_transfer`,
+`received_vote_evidence_charged_buffer_unwind_destroys_before_release`, and
+`received_vote_qc_stage_callback_unwind_keeps_engine_effects_and_releases_stage`; no `MIRIFLAGS` override
+or disabled checks were used.
+`cargo test --locked -p qbind-consensus` passed 947, failed 0, ignored 21 across 59 test targets. Focused
+selectors are reported separately and are not added to that total.
+
+The measured full occupancy tuple is `(committed_bytes, pending_bytes, committed_contexts,
+pending_contexts, committed_reports, pending_reports)`. The detached complete report observed
+`(18273, 0, 1, 0, 1, 0)` after engine destruction; final report release observed
+`(80, 0, 0, 0, 0, 0)`. Thus its source context and report slot remained charged through detachment, with
+no pending bytes/contexts/reports; report destruction released its backing/context before its final
+Report lease. The 80 committed bytes at final release are pre-existing, non-report ownership.
+
+`LIBCLANG_PATH=/usr/lib/llvm-18/lib cargo test --locked -p qbind-node --features test-utils --test run_422_owning_capture_binding_tests --test run_422_owning_decision_vote_handoff_node_tests --test run_422_leader_proposal_owning_handoff_tests` passed: capture binding 24, decision-vote handoff 5,
+leader proposal handoff 14 (43 passed, 0 failed/ignored). `LIBCLANG_PATH=/usr/lib/llvm-18/lib cargo build
+--locked -p qbind-node` passed. `LIBCLANG_PATH=/usr/lib/llvm-18/lib cargo test --locked -p qbind-node
+--no-run` did not complete: rustc/linker failed with `No space left on device` while compiling a node
+test target; this is an environment capacity limitation, not a test failure. The compatibility tests
+were executed separately; no-run compilation is not test execution. Results are from the pinned working
+tree only.
+
+**Disk-pressure recovery.** The exhausted filesystem also prevented session-event persistence.
+`cargo clean --locked -p qbind-node --dry-run` was inspected before executing
+`cargo clean --locked -p qbind-node`; the latter removed 2,804 generated files (8.7 GiB reported by
+Cargo), restoring 6.3 GiB filesystem headroom. Source and session history were not deleted; the session
+event log resumed growing. No dependency manifest, Cargo profile, or consensus implementation changed.
+
+The disk-saving retry completed successfully:
+
+```
+CARGO_BUILD_JOBS=2 CARGO_PROFILE_TEST_STRIP=symbols LIBCLANG_PATH=/usr/lib/llvm-18/lib cargo test --locked -p qbind-node --no-run
+```
+
+Exit 0, 343 executable test targets compiled in 9m41s, with default features and existing warnings.
+`CARGO_PROFILE_TEST_STRIP=symbols` is an explicit command-local profile override, not a claim that the
+original unmodified-profile command passed. No tests were executed by this command. After preserving
+the compilation log, `cargo clean --locked -p qbind-node` removed the generated node artifacts
+(3,009 files, 5.1 GiB reported by Cargo), restoring 5.3 GiB filesystem headroom.
+`LIBCLANG_PATH=/usr/lib/llvm-18/lib cargo build --locked -p qbind-node` then passed again, exit 0.
+The prior consensus, Miri, and executed compatibility results remain unchanged; this follow-up changes
+only validation evidence and does not constitute independent source-review acceptance.
+
+```
+D7D14_STORAGE_COMPONENT=IMPLEMENTED-ISOLATED
+D7D14_STORAGE_ACCEPTANCE=PASS-ACCEPTED-SUBSET
+§13.6 whole-lifecycle INCOMPLETE
+activation DISABLED
+public DevNet NO-GO
+durable anti-rollback NOT-ESTABLISHED
+C4/C5 OPEN
+```
+
+This implementation delivery is not independent source-review acceptance.
+
+### Run 422 bounded signed-QC ownership and acceptance correction
+
+**Starting revision and scope.** The checkout was clean on
+`copilot/run-422-received-vote-signed-qc-staging` at
+`d6e8bdb61173ff4fb3c8a454911da9dd45a3b0f3`, root tree
+`1870829eb5b10fa633926e2e326002deedf0c8e0`. This correction changes only
+`basic_hotstuff_engine.rs`, `received_vote_evidence.rs`, and the two authorized evidence documents.
+Earlier validation and the 2848-byte A measurement above remain historical evidence for their producing
+source revision; they are not results for this correction.
+
+**Backing-before-reservation cleanup.** `ReceivedVoteQcReportOwner::build_wire` now matches the complete
+commit Result. On refusal it retains the returned valid `PendingCharge`, explicitly destroys the
+complete wire QC (including nested signature/descriptor/bitmap backing), then releases that reservation.
+Typed refusal returns the original token without logical invocation or callbacks. The scoped test-only
+commit fault returns the untouched valid reservation before the ledger commit, without modifying ledger
+state or relaxing production invariants. It exercises the real error-cleanup branch; it is
+defensive-error-path evidence, not an observed production exploit or reachable ordinary `on_qc` error.
+Observations immediately before and after QC destruction retain the same full pending P; a third
+observation records pending P becoming zero only after cancellation.
+
+**Opaque returned owner.** `ReceivedVoteQcReport` is defined in a private child module with private
+actual/outcome/provenance fields. Its route-only constructor transfers all owners together. Callers and
+tests inspect `actual()` and `outcome()` through shared borrows; there is no mutable accessor or
+owned-outcome extraction. Field destruction order remains actual summary, outcome/QC backing and P,
+source context, then Report-class A. Thus the QC backing cannot be moved out of a returned report while
+discarding its required provenance/A. This remains a plain wire QC with historical provenance, not a
+verified/current-authority capability.
+
+**Reconciled compiler-derived inventory (x86_64).**
+
+```
+A = checked_add(size_of::<ReceivedVoteQcRouteControlFrame>(),
+                max(size_of::<QcAdmissionControlFrame>(),
+                    size_of::<QcBufferBuildFrame>()))
+  = 2096 + max(288, 1600)
+  = 3696 bytes, Report class, one report-quota slot
+```
+
+| Inventory | Simultaneously covered controls and conservative overlap |
+|---|---|
+| Persistent route, 2096 B | Complete token/preflight, Report/context owner, bound projection, fixed candidate/membership seal, stage/result/wire controls, logical mutation result and moved logical QC, saved incomplete reason, event/QC summaries, outcome, report/refusal/full return carrier, candidate/cursor/count/boolean scalars. Source and destination report-constructor controls are both covered. |
+| Admission, 288 B | Budget clone result and handle; raw and mapped reserve Results; pending owner; commit Result and mapped Result; committed Report lease; raw/mapped context clone Results and source handle; owner and owner-return Result. The persistent route inventory is added, not replaced. |
+| Build/conversion/cleanup, 1600 B | Report/token/table/membership/source borrows; common fields, arguments and scan/layout scalars/results; allocation Results and mapped Results; partial bitmap, descriptor, signature ExactBuffers; copied Vecs and descriptor Vec; raw/mapped reservation Results and pending controls; commit argument/result, returned pending owner, raw/mapped errors, committed lease; complete QC, wire/preparation/return carriers. Both byte and descriptor transfer inventories are included conservatively even though their helper calls do not overlap. |
+| Each transfer inventory | `ExactBuffer<T>` source, `ManuallyDrop<ExactBuffer<T>>` transfer control, `*mut T`, initialized length, capacity, destination `Vec<T>`, for reviewed `T=u8` and `T=Vec<u8>`. These are layout inventories, not artificial runtime frame allocations. |
+
+The push carriers now use their actual expression types: bitmap/signature
+`Option<Result<(), u8>>`, descriptor `Option<Result<(), Vec<u8>>>`; the latter carries the owned
+signature Vec on refusal. The partial signature ExactBuffer, transferred signature Vec, and push Result
+are separately included, without assuming move elision or stack-slot reuse. Raw and mapped carriers and
+the new pending-refusal cleanup controls are included. The admission and build helpers are disjoint,
+which justifies their maximum; caller-held owners remain in the common route term during both.
+The inventory deliberately sums additional nonoverlapping conversion controls and includes the incoming
+token in full despite its existing token charge. This is conservative component ownership coverage,
+not an RSS/physical-stack bound. The old inventory mismatch alone does not demonstrate a numerical
+budget-bound violation.
+
+P is unchanged: minimal bitmap span plus exact `Vec<u8>` descriptor backing plus exact original-signature
+copies. Three signers use `1+72+7260=7333` B; four use `1+96+9680=9777` B. Known-incomplete/equivocation
+preparation still has P=0. Existing context/table/token charges and inherited engine logical-QC backing
+remain separate; no new ledger or engine allocation boundary is claimed.
+
+**Discriminating ownership/refusal controls.** Three real-signature refusal tests independently assert
+the complete ledger tuple, unchanged configured cap, complete Vote equality with redacted diagnostics,
+original signature pointer/capacity, unchanged logical-invocation count, current view/membership count,
+and zero callback delta. Destination Bytes pressure sets the cap to exactly existing committed bytes+A:
+Report admission succeeds but P admission refuses, then cap relief permits a verified complete retry.
+The multi-signer allocation fault allows bitmap, descriptors, and one signature allocation/transfer
+before the second signature allocation fails; observations require one transferred signature and one
+nested signature destruction before exact ledger restoration and verified retry. The commit control
+copies all three signatures and retains pending P through complete QC destruction before cancellation.
+
+The detached opaque-report control independently measures the empty-ledger baseline `(80,0,0,0,0,0)`,
+invalidates the active context, destroys the engine, then verifies the complete wire QC through a report
+borrow. Its live tuple is `(16677,0,1,0,1,0)` with A=3696, P=7333, and context charge=5568. Scoped
+release observations show P at `(16677,0,1,0,1,0)`, context at `(9344,0,1,0,1,0)`, then A at
+`(3776,0,0,0,1,0)`; final report destruction restores the full independent baseline tuple.
+The existing four-signer control now observes `(19121,0,1,0,1,0)` detached and the same final baseline.
+Fault/observation storage is test-only and is not included in production A/P.
+
+**Correction validation.** `cargo test --locked -p qbind-consensus --lib received_vote_qc -- --nocapture`
+selected 14 tests, all passed (0 failed/ignored). Each of the four new exact selectors also selected
+1 test, all passed (0 failed/ignored):
+
+```
+received_vote_qc_destination_bytes_refusal_after_report_admission_retries
+received_vote_qc_nested_partial_transfer_allocation_refusal_retries
+received_vote_qc_defensive_commit_refusal_drops_backing_before_pending
+received_vote_qc_detached_opaque_report_retains_all_owners_until_drop
+```
+
+The per-selector command was `cargo test --locked -p qbind-consensus --lib
+basic_hotstuff_engine::tests::<selector> -- --exact`.
+`cargo test --locked -p qbind-consensus` passed 951, failed 0, ignored 21 across 59 test targets.
+Focused selections overlap that suite and are not added to its total. Initial local fixture-development
+attempts failed compilation (index conversion) or assertions (sender-index/quorum/roster setup); these
+were corrected before the successful focused/full runs. The callback-unwind test intentionally catches
+its injected panic; its panic output is not an uncaught test failure.
+
+Default-checking Miri also passed each of the three new ownership selectors, with checks enabled and
+`MIRIFLAGS` removed from the command environment:
+
+```
+env -u MIRIFLAGS cargo +nightly miri test --locked -p qbind-consensus --lib <selector> -- --exact basic_hotstuff_engine::tests::<selector>
+```
+
+| Selector | Literal result | Interpreter test duration |
+|---|---|---|
+| `received_vote_qc_defensive_commit_refusal_drops_backing_before_pending` | 1 passed; 0 failed; 0 ignored; 273 filtered out; exit 0 | 1300.35s |
+| `received_vote_qc_nested_partial_transfer_allocation_refusal_retries` | 1 passed; 0 failed; 0 ignored; 273 filtered out; exit 0 | 1145.95s |
+| `received_vote_qc_detached_opaque_report_retains_all_owners_until_drop` | 1 passed; 0 failed; 0 ignored; 273 filtered out; exit 0 | 1577.03s |
+
+These are the same real-signature tests, not Miri-only crypto substitutes. No Miri checks were disabled;
+each selector was verified nonzero. Existing dead-code warnings remained; there were no Miri errors.
+These executions overlap the ordinary focused tests and are not added to the full-suite total.
+
+Downstream correction commands/results (existing LLVM 18 prerequisite retained):
+
+```
+LIBCLANG_PATH=/usr/lib/llvm-18/lib cargo build --locked -p qbind-node
+CARGO_BUILD_JOBS=2 CARGO_PROFILE_TEST_STRIP=symbols LIBCLANG_PATH=/usr/lib/llvm-18/lib cargo test --locked -p qbind-node --no-run
+```
+
+Both exited 0. The first build finished in 21.04s; default-feature test-target compilation finished in
+5m01s and listed 343 executable targets. This is compilation, not test execution, and the explicit
+command-local symbol-stripping override is not an unmodified-profile pass. The earlier owning-route
+execution results remain attributed to their producing source revision, not rerun or relabeled here.
+Before compilation, the inspected scoped Cargo cleanup removed 33 node artifacts (306.5 MiB reported).
+After preserving its log, scoped cleanup removed 3009 generated node artifacts (5.1 GiB reported);
+the exact node build command then passed again in 21.68s. Filesystem headroom returned to 5.2 GiB.
+Source, dependency manifests, tracked profiles, and session history were not deleted or changed by
+cleanup; no new tooling/dependency installation was needed for this correction.
+
+```
+D7D14_STORAGE_COMPONENT=IMPLEMENTED-ISOLATED
+D7D14_STORAGE_ACCEPTANCE=PASS-ACCEPTED-SUBSET
+§13.6 whole-lifecycle INCOMPLETE
+activation DISABLED
+public DevNet NO-GO
+durable anti-rollback NOT-ESTABLISHED
+C4/C5 OPEN
+```
+
+No O4, production caller/current-authority integration, signing/delivery, activation, deployment, D15,
+or Run 423. This correction is not independent source-review acceptance.

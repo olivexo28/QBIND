@@ -220,6 +220,50 @@ pub(crate) enum VoteAccumulatorDisposition {
     CapacityDropped,
 }
 
+pub(crate) struct VoteAccumulatorProjection<'a, BlockIdT> {
+    accumulator: &'a VoteAccumulator<BlockIdT>,
+    voter: ValidatorId,
+    view: u64,
+    block_id: &'a BlockIdT,
+    disposition: VoteAccumulatorDisposition,
+    projected_count: usize,
+}
+
+impl<BlockIdT> VoteAccumulatorProjection<'_, BlockIdT>
+where
+    BlockIdT: Eq + std::hash::Hash + Clone,
+{
+    pub(crate) fn disposition(&self) -> VoteAccumulatorDisposition {
+        self.disposition
+    }
+
+    pub(crate) fn projected_count(&self) -> usize {
+        self.projected_count
+    }
+
+    pub(crate) fn next_signer(&self, after: Option<ValidatorId>) -> Option<ValidatorId> {
+        let key = VoteKey {
+            view: self.view,
+            block_id: self.block_id.clone(),
+        };
+        let signers = self.accumulator.entries.get(&key);
+        let existing = signers
+            .into_iter()
+            .flat_map(|ids| ids.iter().copied())
+            .filter(|id| after.is_none_or(|previous| *id > previous))
+            .min();
+        let incoming = (self.disposition == VoteAccumulatorDisposition::Inserted
+            && after.is_none_or(|previous| self.voter > previous)
+            && !signers.is_some_and(|ids| ids.contains(&self.voter)))
+        .then_some(self.voter);
+        match (existing, incoming) {
+            (Some(left), Some(right)) => Some(left.min(right)),
+            (Some(id), None) | (None, Some(id)) => Some(id),
+            (None, None) => None,
+        }
+    }
+}
+
 impl VoteAccumulatorDisposition {
     pub(crate) fn was_inserted(self) -> bool {
         matches!(self, Self::Inserted)
@@ -357,26 +401,70 @@ where
             view,
             block_id: block_id.clone(),
         };
+        let disposition = Self::classify_insertion(
+            voter,
+            self.entries.get(&key),
+            self.limits.max_votes_per_view,
+        );
 
-        // Check per-view vote limit
-        if let Some(existing_votes) = self.entries.get(&key) {
-            if existing_votes.len() >= self.limits.max_votes_per_view {
-                // Check if this is a duplicate (already present)
-                if existing_votes.contains(&voter) {
-                    return Ok(VoteAccumulatorDisposition::Duplicate);
-                }
-                // Drop the new vote due to limit
+        match disposition {
+            VoteAccumulatorDisposition::Inserted => {
+                self.entries.entry(key).or_default().insert(voter);
+            }
+            VoteAccumulatorDisposition::Duplicate => {}
+            VoteAccumulatorDisposition::CapacityDropped => {
                 self.dropped_votes += 1;
-                return Ok(VoteAccumulatorDisposition::CapacityDropped);
             }
         }
+        Ok(disposition)
+    }
 
-        let entry = self.entries.entry(key).or_default();
-        // Returns true if the voter was newly inserted, false if already present
-        Ok(if entry.insert(voter) {
-            VoteAccumulatorDisposition::Inserted
-        } else {
-            VoteAccumulatorDisposition::Duplicate
+    fn classify_insertion(
+        voter: ValidatorId,
+        existing: Option<&HashSet<ValidatorId>>,
+        max_votes_per_view: usize,
+    ) -> VoteAccumulatorDisposition {
+        if let Some(existing) = existing {
+            if existing.contains(&voter) {
+                return VoteAccumulatorDisposition::Duplicate;
+            }
+            if existing.len() >= max_votes_per_view {
+                return VoteAccumulatorDisposition::CapacityDropped;
+            }
+        }
+        VoteAccumulatorDisposition::Inserted
+    }
+
+    pub(crate) fn project_vote<'a>(
+        &'a self,
+        validators: &ConsensusValidatorSet,
+        voter: ValidatorId,
+        view: u64,
+        block_id: &'a BlockIdT,
+    ) -> Result<VoteAccumulatorProjection<'a, BlockIdT>, QcValidationError> {
+        if !validators.contains(voter) {
+            return Err(QcValidationError::NonMemberSigner(voter));
+        }
+        let key = VoteKey {
+            view,
+            block_id: block_id.clone(),
+        };
+        let disposition = Self::classify_insertion(
+            voter,
+            self.entries.get(&key),
+            self.limits.max_votes_per_view,
+        );
+        let existing_count = self.entries.get(&key).map_or(0, HashSet::len);
+        let projected_count = existing_count + usize::from(
+            disposition == VoteAccumulatorDisposition::Inserted,
+        );
+        Ok(VoteAccumulatorProjection {
+            accumulator: self,
+            voter,
+            view,
+            block_id,
+            disposition,
+            projected_count,
         })
     }
 
@@ -405,25 +493,10 @@ where
         view: u64,
         block_id: &BlockIdT,
     ) -> bool {
-        if !validators.contains(voter) {
-            return false;
-        }
-
-        let key = VoteKey {
-            view,
-            block_id: block_id.clone(),
-        };
-        if self.tracked_views.contains(&view) {
-            if let Some(existing_votes) = self.entries.get(&key) {
-                if existing_votes.len() >= self.limits.max_votes_per_view {
-                    return existing_votes.contains(&voter);
-                }
-            }
-        }
-
-        // The current implementation inserts the first vote for an absent
-        // entry even when max_votes_per_view is zero.
-        true
+        self.project_vote(validators, voter, view, block_id)
+            .is_ok_and(|projection| {
+                projection.disposition != VoteAccumulatorDisposition::CapacityDropped
+            })
     }
 
     /// Attempts to form a QC for the given (view, block_id) pair.
@@ -595,5 +668,51 @@ mod run_422_detailed_insertion_tests {
                 .unwrap(),
             VoteAccumulatorDisposition::CapacityDropped
         );
+    }
+
+    #[test]
+    fn projection_binds_incoming_signer_and_shares_insertion_classification() {
+        let validators = validators();
+        let block = [0xA5; 32];
+        let limits = ConsensusLimitsConfig::new(4, 0, 8, 8);
+        let mut accumulator = VoteAccumulator::with_limits(limits);
+
+        let projection = accumulator
+            .project_vote(&validators, ValidatorId::new(0), 3, &block)
+            .expect("project member vote");
+        assert_eq!(
+            projection.disposition(),
+            VoteAccumulatorDisposition::Inserted
+        );
+        assert_eq!(projection.projected_count(), 1);
+        assert_eq!(projection.next_signer(None), Some(ValidatorId::new(0)));
+        assert_eq!(projection.next_signer(Some(ValidatorId::new(0))), None);
+        drop(projection);
+        assert_eq!(
+            accumulator
+                .on_vote_detailed(&validators, ValidatorId::new(0), 3, &block)
+                .unwrap(),
+            VoteAccumulatorDisposition::Inserted
+        );
+
+        let duplicate = accumulator
+            .project_vote(&validators, ValidatorId::new(0), 3, &block)
+            .expect("project duplicate");
+        assert_eq!(
+            duplicate.disposition(),
+            VoteAccumulatorDisposition::Duplicate
+        );
+        assert_eq!(duplicate.projected_count(), 1);
+        assert_eq!(duplicate.next_signer(None), Some(ValidatorId::new(0)));
+
+        let capacity_drop = accumulator
+            .project_vote(&validators, ValidatorId::new(1), 3, &block)
+            .expect("project capacity drop");
+        assert_eq!(
+            capacity_drop.disposition(),
+            VoteAccumulatorDisposition::CapacityDropped
+        );
+        assert_eq!(capacity_drop.projected_count(), 1);
+        assert_eq!(capacity_drop.next_signer(None), Some(ValidatorId::new(0)));
     }
 }

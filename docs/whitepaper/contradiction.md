@@ -2378,4 +2378,79 @@ Direct x86_64 test observations from the defining module: Vote 96/align 8; `Rece
 
 The prior acceptance pass's preservation-only nonmember error assertion did not demonstrate stale-entry reclamation: its inserted history key did not evict the retained signer's history. This correction uses `max_votes_by_view_entries=1` and requires the actual legacy `on_vote_event` error return to evict that membership while the accumulator membership remains, remove the entry, and release exactly its signature-capacity charge. The detailed leader self-vote control similarly uses `max_votes_per_view=1` and `max_votes_by_view_entries=1`; the second validator's history insertion evicts the retained first signer while its accumulator vote survives, the second is `CapacityDropped`, QC formation is skipped, and reconciliation removes the old entry before return. Both assert complete ledger occupancy and unchanged cap. These are separate from the helper-driven controlled membership-removal test, which demonstrates the two-membership predicate but not mutator return-path behavior. The duplicate/conflict control now starts from a pre-invocation complete Vote witness and checks the full occupancy tuple, cap, and unchanged original evidence after each disposition. Exact test and default-checking Miri results are recorded in D7. Shared Proposal and restore/catch-up are source-established call paths, not newly executed outer-route coverage.
 
-`D7D14_STORAGE_COMPONENT=IMPLEMENTED-ISOLATED`; `D7D14_STORAGE_ACCEPTANCE=PASS-ACCEPTED-SUBSET`; §13.6 whole-lifecycle INCOMPLETE; activation DISABLED; public DevNet NO-GO; durable anti-rollback NOT-ESTABLISHED; C4/C5 OPEN. No certificate assembly, O4, production integration, signing/delivery, activation, deployment, D15, or Run 423 is included. This is not independent source-review acceptance.
+`D7D14_STORAGE_COMPONENT=IMPLEMENTED-ISOLATED`; `D7D14_STORAGE_ACCEPTANCE=PASS-ACCEPTED-SUBSET`; §13.6 whole-lifecycle INCOMPLETE; activation DISABLED; public DevNet NO-GO; durable anti-rollback NOT-ESTABLISHED; C4/C5 OPEN. No production certificate integration, O4, production caller/current-authority integration, signing/delivery, activation, deployment, D15, or Run 423 is included. This is not independent source-review acceptance.
+
+#### Run 422 received-Vote signed-QC staging — isolated, opt-in, no production caller
+
+The six-path isolated implementation adds a non-`Clone` accumulator projection, a fixed
+`[u64; 16]` pre-event membership seal, pre-mutation wire-certificate staging from first-retained signed
+evidence, and one `on_vote_detailed` invocation followed by the existing reconciliation/callback route.
+The actual logical QC must match the sealed block/view and complete signer set (count, bounds, uniqueness,
+and exact membership) before a plain wire QC is exposed. Original signatures and all eight common signed
+fields are preserved; wire `height` supplies logical view while signed `round` remains unchanged.
+Incomplete and equivocation preparations reserve no destination backing. Complete staging uses the
+minimal bitmap span and ascending validator-index signature order. Every invoked report retains its
+immutable source context; this is historical provenance, not current authorization.
+
+On the x86_64 test target, `A = size_of::<ReceivedVoteQcRouteControlFrame>() +
+max(size_of::<QcAdmissionControlFrame>(), size_of::<QcBufferBuildFrame>()) = 1816 + max(216,1032) =
+2848` report bytes. `P = minimal_bitmap_bytes + signer_count * size_of::<Vec<u8>>() +
+signer_count * ML_DSA_44_SIGNATURE_SIZE`; observed three-/four-signer values were 7333/9777 bytes.
+Nested admission/buffer frames are disjoint; route-held owners persist across both. The layout inventory
+covers partial `ExactBuffer`s, transferred Vecs, pending/committed reservation controls, conversion
+carriers, report/context handles, and unwind cleanup. It is an ownership budget, not RSS or allocator
+overhead; existing engine logical-QC backing remains outside the new staging boundary.
+
+Focused tests executed with nonzero selections: projection 1; received-vote ownership 36; signed-QC route
+10; existing retention regressions 4. Default-checking Miri passed exact Vec transfer, buffer destruction-before-
+lease unwind, and the callback-unwind route (1 each). Full consensus, node compatibility/build, and node
+`--no-run` validation are recorded in the corresponding Run 422 D7 evidence entry; commands are not
+counted as test execution when they only compile. No independently reviewed acceptance is claimed.
+The disk-exhausted node test-compilation attempt was retried after scoped Cargo-artifact cleanup:
+343 default-feature executable test targets compiled successfully with the explicit command-local
+`CARGO_PROFILE_TEST_STRIP=symbols` override and `CARGO_BUILD_JOBS=2`. This is compilation, not execution
+or a pass of the original unmodified-profile attempt. Generated test artifacts were cleaned afterward,
+and the required node build passed again; source and session history were preserved.
+`D7D14_STORAGE_COMPONENT=IMPLEMENTED-ISOLATED`; `D7D14_STORAGE_ACCEPTANCE=PASS-ACCEPTED-SUBSET`;
+§13.6 whole-lifecycle INCOMPLETE; activation DISABLED; public DevNet NO-GO; durable anti-rollback
+NOT-ESTABLISHED; C4/C5 OPEN. No O4, production caller/current-authority integration, signing/delivery,
+activation, deployment, D15, or Run 423 is included.
+
+#### Run 422 bounded signed-QC ownership and acceptance correction
+
+Starting from clean `d6e8bdb61173ff4fb3c8a454911da9dd45a3b0f3` (tree
+`1870829eb5b10fa633926e2e326002deedf0c8e0`), the four-path correction retains destination pending P
+through complete QC/nested-backing destruction on commit refusal, releasing P only afterward.
+A scoped test-only commit fault returns a valid untouched reservation into the real cleanup branch;
+this is defensive-error-path evidence, not an observed production exploit or ledger-corruption test.
+
+Returned reports are now opaque owners with private fields and borrowed `actual()`/`outcome()`
+inspection only. There is no owned-outcome extraction separating existing QC backing from its source
+context, A, or P. A detached complete report remains verifiable after engine/context teardown, and
+release observations show P, then source context, then A destruction. The independent final ledger
+baseline is `(80,0,0,0,0,0)`.
+
+The compiler-derived corrected A is `2096 + max(288,1600) = 3696` B. The inventory includes actual
+`Result<(),u8>` byte pushes and `Result<(),Vec<u8>>` descriptor pushes; partial signature owners,
+transferred Vecs, raw/mapped reservation/result carriers, pending-error cleanup, constructor overlap,
+and explicit byte/descriptor transfer controls. It conservatively sums some disjoint controls and
+retains full token-frame coverage despite the existing token charge; it is not an RSS bound. The old
+inventory mismatch alone does not establish a numerical bound violation. Earlier A=2848 and validation
+remain historical, not correction-revision results. P remains 7333/9777 B for three/four signers.
+
+All 14 signed-QC focused tests passed; the four new exact selectors each selected and passed 1 test.
+The full locked consensus suite passed 951, failed 0, ignored 21; overlapping focused results are not
+added to that total. The new controls cover P pressure after successful Report admission, allocation
+failure after one nested signature transfer, defensive commit cleanup, and detached opaque ownership.
+Literal Miri/downstream commands and results are reconciled in the corresponding D7 entry.
+Default-checking Miri passed the new commit-cleanup, nested partial-transfer, and detached-owner
+selectors (1 test each, 0 failed/ignored, no disabled checks or Miri-only crypto substitutes).
+The node build passed; default-feature node test compilation listed 343 executable targets and exited
+0 using the explicitly reported command-local `CARGO_PROFILE_TEST_STRIP=symbols` and
+`CARGO_BUILD_JOBS=2` override. This is compilation, not execution or an unmodified-profile pass.
+Scoped node artifact cleanup restored 5.2 GiB headroom, and the node build passed again afterward.
+
+`D7D14_STORAGE_COMPONENT=IMPLEMENTED-ISOLATED`; `D7D14_STORAGE_ACCEPTANCE=PASS-ACCEPTED-SUBSET`;
+§13.6 whole-lifecycle INCOMPLETE; activation DISABLED; public DevNet NO-GO; durable anti-rollback
+NOT-ESTABLISHED; C4/C5 OPEN. No production caller, O4, activation, deployment, D15, or Run 423.
+This correction is not independent source-review acceptance.

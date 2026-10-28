@@ -28,12 +28,15 @@ use crate::ids::ValidatorId;
 use crate::qc::{QcValidationError, QuorumCertificate};
 use crate::qc_verify_domain::VerifiedQuorumCertificate;
 use crate::received_vote_evidence::{
-    ActiveVoteContext, ContextInstallError, ContextInstallRefusal, EvidenceBudget,
-    ReceivedVoteEvidenceTable, VerifiedVoteToken, VoteAdmissionError, VoteAdmissionRefusal,
-    VoteContextInput,
+    qc_admission_control_frame_bytes, qc_buffer_control_frame_bytes, ActiveVoteContext,
+    ContextInstallError, ContextInstallRefusal, EvidenceBudget, ReceivedVoteEvidenceTable,
+    ReceivedVoteQcIncompleteReason, ReceivedVoteQcReportOwner, ReceivedVoteQcStageError,
+    ReceivedVoteQcWire, ReceivedVoteQcWirePreparation, VerifiedVoteToken, VoteAdmissionError,
+    VoteAdmissionRefusal, VoteContextInput,
 };
 use crate::timeout::{TimeoutAccumulator, TimeoutCertificate, TimeoutMsg, TimeoutValidationError};
 use crate::validator_set::ConsensusValidatorSet;
+use crate::vote_accumulator::VoteAccumulatorDisposition;
 
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -1449,6 +1452,7 @@ where
     received_vote_producer_disabled: bool,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum VerifiedVoteInvocationRefusal {
     ProducerDisabled,
     NoContext,
@@ -1482,6 +1486,138 @@ pub(crate) enum VerifiedVoteInvocation {
         evidence: ReceivedVoteEvidenceDisposition,
         view_advanced: bool,
     },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum ReceivedVoteQcRefusalReason {
+    Invocation(VerifiedVoteInvocationRefusal),
+    Stage(ReceivedVoteQcStageError),
+}
+
+#[derive(Debug)]
+pub(crate) struct ReceivedVoteQcRefusal {
+    pub(crate) token: VerifiedVoteToken,
+    pub(crate) reason: ReceivedVoteQcRefusalReason,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ReceivedVoteQcIncomplete {
+    MissingEvidence(u16),
+    ContextMismatch(u16),
+    SignerMismatch(u16),
+    CandidateMismatch(u16),
+    CommonFieldsMismatch(u16),
+    SignatureShapeMismatch(u16),
+    ActualCandidateMismatch,
+    ActualSignerCountMismatch,
+    ActualSignerOutOfRange(u64),
+    ActualSignerDuplicate(u64),
+    ActualSignerMembershipMismatch(u64),
+}
+
+pub(crate) struct ReceivedVoteQcEventSummary {
+    pub(crate) history: VoteHistoryOutcome<[u8; 32]>,
+    pub(crate) accumulator: Option<Result<VoteAccumulatorDisposition, QcValidationError>>,
+    pub(crate) evidence: ReceivedVoteEvidenceDisposition,
+    pub(crate) view_advanced: bool,
+    pub(crate) qc: Option<ReceivedVoteQcSummary>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct ReceivedVoteQcSummary {
+    pub(crate) block_id: [u8; 32],
+    pub(crate) view: u64,
+    pub(crate) signer_count: usize,
+}
+
+pub(crate) enum ReceivedVoteQcOutcome {
+    NoQc,
+    Incomplete(ReceivedVoteQcIncomplete),
+    Complete(ReceivedVoteQcWire),
+    LogicalError(QcValidationError),
+}
+
+mod received_vote_qc_report {
+    use super::{
+        ReceivedVoteQcEventSummary, ReceivedVoteQcOutcome, ReceivedVoteQcReportOwner,
+    };
+
+    pub(crate) struct ReceivedVoteQcReport {
+        actual: ReceivedVoteQcEventSummary,
+        outcome: ReceivedVoteQcOutcome,
+        provenance: ReceivedVoteQcReportOwner,
+    }
+
+    impl ReceivedVoteQcReport {
+        pub(super) fn new(
+            actual: ReceivedVoteQcEventSummary,
+            outcome: ReceivedVoteQcOutcome,
+            provenance: ReceivedVoteQcReportOwner,
+        ) -> Self {
+            Self { actual, outcome, provenance }
+        }
+
+        pub(crate) fn actual(&self) -> &ReceivedVoteQcEventSummary {
+            &self.actual
+        }
+
+        pub(crate) fn outcome(&self) -> &ReceivedVoteQcOutcome {
+            &self.outcome
+        }
+
+        #[cfg(test)]
+        pub(super) fn report_charge_for_test(&self) -> u64 {
+            self.provenance.report_charge_for_test()
+        }
+    }
+}
+
+use received_vote_qc_report::ReceivedVoteQcReport;
+
+struct ReceivedVoteQcCandidateSeal {
+    block_id: [u8; 32],
+    view: u64,
+    incoming_validator: ValidatorId,
+    projected_count: usize,
+    membership: [u64; 16],
+}
+
+struct ReceivedVoteQcRouteControlFrame {
+    token: Option<VerifiedVoteToken>,
+    preflight: Option<VerifiedVotePreflight>,
+    report_owner: Option<ReceivedVoteQcReportOwner>,
+    projection: Option<crate::vote_accumulator::VoteAccumulatorProjection<'static, [u8; 32]>>,
+    candidate: Option<ReceivedVoteQcCandidateSeal>,
+    control_charge: Option<Result<u64, ReceivedVoteQcStageError>>,
+    wire_preparation: Option<Result<ReceivedVoteQcWirePreparation, ReceivedVoteQcStageError>>,
+    wire: Option<ReceivedVoteQcWire>,
+    mutation: Option<VoteMutationReport<[u8; 32]>>,
+    actual: Option<ReceivedVoteQcEventSummary>,
+    outcome: Option<ReceivedVoteQcOutcome>,
+    report: Option<ReceivedVoteQcReport>,
+    refusal: Option<ReceivedVoteQcRefusal>,
+    return_carrier: Option<Result<ReceivedVoteQcReport, ReceivedVoteQcRefusal>>,
+    staged_incomplete: Option<ReceivedVoteQcIncomplete>,
+    mapped_incomplete: Option<ReceivedVoteQcIncomplete>,
+    logical_qc: Option<QuorumCertificate<[u8; 32]>>,
+    qc_summary: Option<ReceivedVoteQcSummary>,
+    voter: ValidatorId,
+    view: u64,
+    block_id: [u8; 32],
+    control_bytes: u64,
+    is_equivocation: bool,
+    projected_disposition: VoteAccumulatorDisposition,
+    cursor: Option<ValidatorId>,
+    signer: Option<ValidatorId>,
+    raw: usize,
+    roster_len: usize,
+    word: usize,
+    incoming_index: usize,
+    incoming_present: bool,
+    evidence: ReceivedVoteEvidenceDisposition,
+    still_retained: bool,
+    view_advanced: bool,
+    correspondence_matches: bool,
 }
 
 /// Peer-learned certified block material used by restore catchup.
@@ -2537,6 +2673,108 @@ fn same_vote_signed_fields(
         && left.suite_id == right.suite_id
 }
 
+fn map_received_vote_qc_incomplete(
+    reason: ReceivedVoteQcIncompleteReason,
+) -> ReceivedVoteQcIncomplete {
+    match reason {
+        ReceivedVoteQcIncompleteReason::MissingEvidence(id) => {
+            ReceivedVoteQcIncomplete::MissingEvidence(id)
+        }
+
+        ReceivedVoteQcIncompleteReason::ContextMismatch(id) => {
+            ReceivedVoteQcIncomplete::ContextMismatch(id)
+        }
+        ReceivedVoteQcIncompleteReason::SignerMismatch(id) => {
+            ReceivedVoteQcIncomplete::SignerMismatch(id)
+        }
+        ReceivedVoteQcIncompleteReason::CandidateMismatch(id) => {
+            ReceivedVoteQcIncomplete::CandidateMismatch(id)
+        }
+        ReceivedVoteQcIncompleteReason::CommonFieldsMismatch(id) => {
+            ReceivedVoteQcIncomplete::CommonFieldsMismatch(id)
+        }
+        ReceivedVoteQcIncompleteReason::SignatureShapeMismatch(id) => {
+            ReceivedVoteQcIncomplete::SignatureShapeMismatch(id)
+        }
+    }
+}
+
+fn received_vote_qc_control_charge() -> Result<u64, ReceivedVoteQcStageError> {
+    let route = u64::try_from(std::mem::size_of::<ReceivedVoteQcRouteControlFrame>())
+        .map_err(|_| ReceivedVoteQcStageError::Arithmetic)?;
+    let buffer = qc_buffer_control_frame_bytes()?;
+    let admission = qc_admission_control_frame_bytes()?;
+    route
+        .checked_add(admission.max(buffer))
+        .ok_or(ReceivedVoteQcStageError::Arithmetic)
+}
+
+fn qc_matches_projected_membership(
+    qc: &QuorumCertificate<[u8; 32]>,
+    membership: &[u64; 16],
+    projected_count: usize,
+    roster_len: usize,
+    view: u64,
+    block_id: [u8; 32],
+) -> bool {
+    if qc.view != view || qc.block_id != block_id || qc.signers.len() != projected_count {
+        return false;
+    }
+    for (index, signer) in qc.signers.iter().enumerate() {
+        let raw = match usize::try_from(signer.as_u64()) {
+            Ok(value) if value < roster_len && value < 1024 => value,
+            _ => return false,
+        };
+        let word = raw / 64;
+        if word >= membership.len() || membership[word] & (1u64 << (raw % 64)) == 0 {
+            return false;
+        }
+        if qc.signers[..index]
+            .iter()
+            .any(|previous| previous == signer)
+        {
+            return false;
+        }
+    }
+    true
+}
+
+fn compare_actual_qc_failure(
+    qc: &QuorumCertificate<[u8; 32]>,
+    membership: &[u64; 16],
+    projected_count: usize,
+    roster_len: usize,
+    view: u64,
+    block_id: [u8; 32],
+) -> ReceivedVoteQcIncomplete {
+    if qc.view != view || qc.block_id != block_id {
+        return ReceivedVoteQcIncomplete::ActualCandidateMismatch;
+    }
+    if qc.signers.len() != projected_count {
+        return ReceivedVoteQcIncomplete::ActualSignerCountMismatch;
+    }
+    for (index, signer) in qc.signers.iter().enumerate() {
+        let raw = signer.as_u64();
+        let Ok(index_value) = usize::try_from(raw) else {
+            return ReceivedVoteQcIncomplete::ActualSignerOutOfRange(raw);
+        };
+        if index_value >= roster_len || index_value >= 1024 {
+            return ReceivedVoteQcIncomplete::ActualSignerOutOfRange(raw);
+        }
+        if qc.signers[..index]
+            .iter()
+            .any(|previous| previous == signer)
+        {
+            return ReceivedVoteQcIncomplete::ActualSignerDuplicate(raw);
+        }
+        let word = index_value / 64;
+        if word >= membership.len() || membership[word] & (1u64 << (index_value % 64)) == 0 {
+            return ReceivedVoteQcIncomplete::ActualSignerMembershipMismatch(raw);
+        }
+    }
+    ReceivedVoteQcIncomplete::ActualSignerCountMismatch
+}
+
 // ============================================================================
 // BlockIdT = [u8; 32] specific implementation
 // ============================================================================
@@ -2550,6 +2788,290 @@ thread_local! {
 }
 
 impl BasicHotStuffEngine<[u8; 32]> {
+    pub(crate) fn invoke_verified_received_vote_qc(
+        &mut self,
+        token: VerifiedVoteToken,
+    ) -> Result<ReceivedVoteQcReport, ReceivedVoteQcRefusal> {
+        let preflight = match self.preflight_verified_received_vote(&token) {
+            Ok(preflight) => preflight,
+            Err(reason) => {
+                return Err(ReceivedVoteQcRefusal {
+                    token,
+                    reason: ReceivedVoteQcRefusalReason::Invocation(reason),
+                });
+            }
+        };
+        let voter = ValidatorId(u64::from(token.vote().validator_index));
+        let view = token.vote().height;
+        let block_id = token.vote().block_id;
+        let control_bytes = match received_vote_qc_control_charge() {
+            Ok(bytes) => bytes,
+            Err(error) => {
+                return Err(ReceivedVoteQcRefusal {
+                    token,
+                    reason: ReceivedVoteQcRefusalReason::Stage(error),
+                });
+            }
+        };
+        let provenance = match token.begin_qc_report(control_bytes) {
+            Ok(owner) => owner,
+            Err(error) => {
+                return Err(ReceivedVoteQcRefusal {
+                    token,
+                    reason: ReceivedVoteQcRefusalReason::Stage(error),
+                });
+            }
+        };
+
+        let is_equivocation = self
+            .state
+            .has_conflicting_vote_history(voter, view, &block_id);
+        let mut candidate = ReceivedVoteQcCandidateSeal {
+            block_id,
+            view,
+            incoming_validator: voter,
+            projected_count: 0,
+            membership: [0u64; 16],
+        };
+        let mut wire = None;
+        let mut staged_incomplete = None;
+        if !is_equivocation {
+            let projection = match self
+                .state
+                .project_received_vote_accumulator(voter, view, &block_id)
+            {
+                Ok(projection) => projection,
+                Err(_) => {
+                    return Err(ReceivedVoteQcRefusal {
+                        token,
+                        reason: ReceivedVoteQcRefusalReason::Invocation(
+                            VerifiedVoteInvocationRefusal::EpochOrRosterMismatch,
+                        ),
+                    });
+                }
+            };
+            candidate.projected_count = projection.projected_count();
+            let projected_disposition = projection.disposition();
+            let mut cursor = None;
+            while let Some(signer) = projection.next_signer(cursor) {
+                let raw = usize::try_from(signer.as_u64()).unwrap_or(usize::MAX);
+                let roster_len = self.state.validators().len();
+                if raw >= roster_len || raw >= 1024 {
+                    drop(projection);
+                    return Err(ReceivedVoteQcRefusal {
+                        token,
+                        reason: ReceivedVoteQcRefusalReason::Stage(
+                            ReceivedVoteQcStageError::Invariant,
+                        ),
+                    });
+                }
+                let word = raw / 64;
+                if word >= candidate.membership.len() {
+                    drop(projection);
+                    return Err(ReceivedVoteQcRefusal {
+                        token,
+                        reason: ReceivedVoteQcRefusalReason::Stage(
+                            ReceivedVoteQcStageError::Invariant,
+                        ),
+                    });
+                }
+                candidate.membership[word] |= 1u64 << (raw % 64);
+                cursor = Some(signer);
+            }
+            let incoming_index =
+                usize::try_from(candidate.incoming_validator.as_u64()).unwrap_or(usize::MAX);
+            let incoming_present = incoming_index < 1024
+                && candidate.membership[incoming_index / 64]
+                    & (1u64 << (incoming_index % 64))
+                    != 0;
+            if candidate.projected_count
+                != candidate
+                    .membership
+                    .iter()
+                    .map(|word| word.count_ones() as usize)
+                    .sum::<usize>()
+                || (projected_disposition == VoteAccumulatorDisposition::Inserted
+                    && !incoming_present)
+                || (projected_disposition == VoteAccumulatorDisposition::Duplicate
+                    && !incoming_present)
+                || (projected_disposition == VoteAccumulatorDisposition::CapacityDropped
+                    && incoming_present)
+            {
+                drop(projection);
+                return Err(ReceivedVoteQcRefusal {
+                    token,
+                    reason: ReceivedVoteQcRefusalReason::Stage(ReceivedVoteQcStageError::Invariant),
+                });
+            }
+            if candidate.projected_count > 0 {
+                let table = self
+                    .state
+                    .received_vote_evidence_table()
+                    .unwrap_or_else(|| std::process::abort());
+                match provenance.build_wire(
+                    &token,
+                    table,
+                    &candidate.membership,
+                    candidate.projected_count,
+                    self.state.validators().len(),
+                    candidate.view,
+                    candidate.block_id,
+                    matches!(preflight.plan, VoteEvidencePlan::NewEntry { .. }),
+                ) {
+                    Ok(ReceivedVoteQcWirePreparation::Complete(candidate)) => {
+                        wire = Some(candidate)
+                    }
+                    Ok(ReceivedVoteQcWirePreparation::Incomplete(reason)) => {
+                        staged_incomplete = Some(map_received_vote_qc_incomplete(reason))
+                    }
+                    Err(error) => {
+                        drop(provenance);
+                        return Err(ReceivedVoteQcRefusal {
+                            token,
+                            reason: ReceivedVoteQcRefusalReason::Stage(error),
+                        });
+                    }
+                }
+            } else {
+                staged_incomplete = Some(ReceivedVoteQcIncomplete::MissingEvidence(
+                    token.vote().validator_index,
+                ));
+            }
+            drop(projection);
+        }
+
+        #[cfg(test)]
+        RECEIVED_VOTE_LOGICAL_INVOCATIONS.with(|count| count.set(count.get() + 1));
+        let report = self.state.on_vote_detailed(voter, view, &block_id);
+        let evidence = match preflight.plan {
+            VoteEvidencePlan::NewEntry { slot } => {
+                if !report.is_equivocation()
+                    && self.state.has_vote_memberships(voter, view, &block_id)
+                {
+                    self.state.retain_received_vote_token(
+                        slot,
+                        block_id,
+                        token,
+                        preflight.shrink_to,
+                    );
+                    ReceivedVoteEvidenceDisposition::Retained
+                } else {
+                    drop(token);
+                    if report.is_equivocation() {
+                        ReceivedVoteEvidenceDisposition::NotRetainedEquivocation
+                    } else if matches!(
+                        report.accumulator.as_ref(),
+                        Some(Ok(VoteAccumulatorDisposition::CapacityDropped))
+                    ) {
+                        ReceivedVoteEvidenceDisposition::NotRetainedCapacityDropped
+                    } else {
+                        ReceivedVoteEvidenceDisposition::NotRetainedMembershipLost
+                    }
+                }
+            }
+            VoteEvidencePlan::ExistingEvidence => {
+                let still_retained = self
+                    .state
+                    .received_vote_evidence_table()
+                    .and_then(|table| table.entry_for(view, token.vote().validator_index))
+                    .is_some();
+                drop(token);
+                if still_retained {
+                    preflight
+                        .existing
+                        .unwrap_or(ReceivedVoteEvidenceDisposition::ExistingSignedFieldsConflict)
+                } else {
+                    ReceivedVoteEvidenceDisposition::NotRetainedMembershipLost
+                }
+            }
+            VoteEvidencePlan::DoNotRetain => {
+                drop(token);
+                if report.is_equivocation() {
+                    ReceivedVoteEvidenceDisposition::NotRetainedEquivocation
+                } else if matches!(
+                    report.accumulator.as_ref(),
+                    Some(Ok(VoteAccumulatorDisposition::CapacityDropped))
+                ) {
+                    ReceivedVoteEvidenceDisposition::NotRetainedCapacityDropped
+                } else {
+                    ReceivedVoteEvidenceDisposition::NotRetainedMembershipLost
+                }
+            }
+        };
+
+        let view_advanced = if report.qc.is_ok() {
+            self.finish_successful_vote_event(
+                voter,
+                view,
+                &report.history,
+                report.qc.as_ref().ok().and_then(Option::as_ref),
+            )
+        } else {
+            false
+        };
+
+        let qc_summary =
+            report
+                .qc
+                .as_ref()
+                .ok()
+                .and_then(Option::as_ref)
+                .map(|qc| ReceivedVoteQcSummary {
+                    block_id: qc.block_id,
+                    view: qc.view,
+                    signer_count: qc.signers.len(),
+                });
+        let outcome = match report.qc {
+            Err(error) => {
+                drop(wire);
+                ReceivedVoteQcOutcome::LogicalError(error)
+            }
+            Ok(None) => {
+                drop(wire);
+                ReceivedVoteQcOutcome::NoQc
+            }
+            Ok(Some(qc)) => {
+                let matches = qc_matches_projected_membership(
+                    &qc,
+                    &candidate.membership,
+                    candidate.projected_count,
+                    self.state.validators().len(),
+                    candidate.view,
+                    candidate.block_id,
+                );
+                if !matches {
+                    drop(wire);
+                    ReceivedVoteQcOutcome::Incomplete(compare_actual_qc_failure(
+                        &qc,
+                        &candidate.membership,
+                        candidate.projected_count,
+                        self.state.validators().len(),
+                        candidate.view,
+                        candidate.block_id,
+                    ))
+                } else if let Some(reason) = staged_incomplete {
+                    drop(wire);
+                    ReceivedVoteQcOutcome::Incomplete(reason)
+                } else if let Some(candidate) = wire {
+                    ReceivedVoteQcOutcome::Complete(candidate)
+                } else {
+                    ReceivedVoteQcOutcome::Incomplete(ReceivedVoteQcIncomplete::MissingEvidence(0))
+                }
+            }
+        };
+        Ok(ReceivedVoteQcReport::new(
+            ReceivedVoteQcEventSummary {
+                history: report.history,
+                accumulator: report.accumulator,
+                evidence,
+                view_advanced,
+                qc: qc_summary,
+            },
+            outcome,
+            provenance,
+        ))
+    }
+
     pub(crate) fn install_received_vote_context(
         &mut self,
         input: VoteContextInput,
@@ -4569,6 +5091,60 @@ mod tests {
         vote
     }
 
+    fn signed_member_vote(
+        epoch: u64,
+        validator_index: u16,
+        height: u64,
+        round: u64,
+        block_id: [u8; 32],
+        secret_key: &[u8],
+        domain: &qbind_wire::pv_signing_domain::ProposalVoteSigningDomainV2,
+    ) -> qbind_wire::consensus::Vote {
+        let mut vote = qbind_wire::consensus::Vote {
+            version: 1,
+            chain_id: domain.expected_wire_chain_id(),
+            epoch,
+            height,
+            round,
+            step: 0,
+            block_id,
+            validator_index,
+            suite_id: qbind_crypto::SUITE_PQ_RESERVED_1.0,
+            signature: Vec::new(),
+        };
+        vote.signature =
+            MlDsa44Backend::sign(secret_key, &domain.vote_preimage(&vote))
+                .expect("test vote signing")
+                .into_boxed_slice()
+                .into_vec();
+        vote
+    }
+
+    fn multi_member_vote_context(
+        keypairs: &[(Vec<u8>, Vec<u8>)],
+        epoch: u64,
+        domain: &qbind_wire::pv_signing_domain::ProposalVoteSigningDomainV2,
+    ) -> VoteContextInput {
+        let members = keypairs
+            .iter()
+            .enumerate()
+            .map(|(index, (public_key, _))| {
+                SnapshotMember::new(
+                    index as u64,
+                    1,
+                    public_key.clone().into_boxed_slice().into_vec(),
+                )
+            })
+            .collect();
+        VoteContextInput::new(
+            qbind_types::QBIND_DEVNET_CHAIN_ID,
+            epoch,
+            qbind_crypto::SUITE_PQ_RESERVED_1,
+            domain.clone(),
+            members,
+        )
+    }
+
     fn received_vote_context(
         epoch: u64,
         public_key: Vec<u8>,
@@ -4762,6 +5338,1153 @@ mod tests {
         assert_eq!(
             engine.received_vote_evidence_aggregate_bytes().unwrap().0,
             standing_floor + context_charge + wrapper_charge + table_charge
+        );
+    }
+
+    #[test]
+    fn received_vote_qc_stage_uses_first_retained_evidence_for_conflicting_duplicate() {
+        let keypairs: Vec<_> = (0..4)
+            .map(|_| MlDsa44Backend::generate_keypair().expect("test keygen"))
+            .collect();
+        let domain = qbind_wire::pv_signing_domain::ProposalVoteSigningDomainV2::try_new(
+            qbind_types::QBIND_DEVNET_CHAIN_ID,
+            TEST_WIRE_CHAIN,
+            [0xA1; 32],
+            [0xB2; 32],
+        )
+        .expect("valid test domain");
+        let mut engine = BasicHotStuffEngine::new(ValidatorId(0), dense_validator_set(4));
+        engine
+            .install_received_vote_context(multi_member_vote_context(&keypairs, 0, &domain))
+            .expect("context install");
+        let mut retained_votes = Vec::new();
+        for (index, (_, secret_key)) in keypairs.iter().take(3).enumerate() {
+            let vote = signed_member_vote(
+                0,
+                index as u16,
+                1,
+                9,
+                [0xC3; 32],
+                secret_key,
+                &domain,
+            );
+            retained_votes.push(vote.clone());
+            let token = engine
+                .admit_verified_received_vote(ValidatorId(index as u64), vote)
+                .expect("admit signed Vote");
+            if index == 2 {
+                let table = engine.state.received_vote_evidence_table().unwrap();
+                assert!(table.entry_for(1, 0).is_some());
+                assert!(table.entry_for(1, 1).is_some());
+            }
+            let report = engine
+                .invoke_verified_received_vote_qc(token)
+                .expect("invoke signed Vote");
+            if index < 2 {
+                assert!(matches!(report.outcome(), ReceivedVoteQcOutcome::NoQc));
+            } else {
+                assert!(matches!(report.outcome(), ReceivedVoteQcOutcome::Complete(_)));
+            }
+        }
+
+        let conflicting = signed_member_vote(
+            0,
+            0,
+            1,
+            10,
+            [0xC3; 32],
+            &keypairs[0].1,
+            &domain,
+        );
+        assert_ne!(conflicting.signature, retained_votes[0].signature);
+        let token = engine
+            .admit_verified_received_vote(ValidatorId(0), conflicting.clone())
+            .expect("admit valid conflicting duplicate");
+        let report = engine
+            .invoke_verified_received_vote_qc(token)
+            .expect("invoke conflicting duplicate");
+        assert!(matches!(
+            report.actual().accumulator,
+            Some(Ok(VoteAccumulatorDisposition::Duplicate))
+        ));
+        assert_eq!(
+            report.actual().evidence,
+            ReceivedVoteEvidenceDisposition::ExistingSignedFieldsConflict
+        );
+        let ReceivedVoteQcOutcome::Complete(wire) = report.outcome() else {
+            panic!("retained compatible evidence must produce a complete QC");
+        };
+        assert_eq!(wire.qc().round, 9);
+        assert_eq!(wire.qc().signatures.len(), retained_votes.len());
+        for (signature, retained) in wire.qc().signatures.iter().zip(&retained_votes) {
+            assert_eq!(signature, &retained.signature);
+        }
+        assert_ne!(wire.qc().signatures[0], conflicting.signature);
+    }
+
+    #[test]
+    fn received_vote_qc_stage_reports_mixed_fields_and_missing_legacy_evidence() {
+        let keypairs: Vec<_> = (0..3)
+            .map(|_| MlDsa44Backend::generate_keypair().expect("test keygen"))
+            .collect();
+        let domain = qbind_wire::pv_signing_domain::ProposalVoteSigningDomainV2::try_new(
+            qbind_types::QBIND_DEVNET_CHAIN_ID,
+            TEST_WIRE_CHAIN,
+            [0xA1; 32],
+            [0xB2; 32],
+        )
+        .expect("valid test domain");
+        let mut mixed = BasicHotStuffEngine::new(ValidatorId(0), dense_validator_set(3));
+        mixed
+            .install_received_vote_context(multi_member_vote_context(&keypairs, 0, &domain))
+            .expect("context install");
+        let mixed_observer = mixed
+            .state
+            .received_vote_budget()
+            .expect("installed ledger")
+            .try_clone()
+            .expect("ledger observer");
+        let mut final_report = None;
+        let mut final_before = None;
+        for (index, (_, secret_key)) in keypairs.iter().enumerate() {
+            let vote = signed_member_vote(
+                0,
+                index as u16,
+                1,
+                if index == 2 { 10 } else { 9 },
+                [0xD4; 32],
+                secret_key,
+                &domain,
+            );
+            let token = mixed
+                .admit_verified_received_vote(ValidatorId(index as u64), vote)
+                .expect("admit signed Vote");
+            let before = mixed_observer.full_occupancy_for_test();
+            let report = mixed
+                .invoke_verified_received_vote_qc(token)
+                .expect("invoke signed Vote");
+            if index == 2 {
+                final_before = Some(before);
+                final_report = Some(report);
+            }
+        }
+        let mixed_report = final_report.expect("third vote report");
+        let before = final_before.expect("third vote pre-invocation ledger");
+        assert!(mixed_report.actual().qc.is_some());
+        assert!(matches!(
+            mixed_report.outcome(),
+            ReceivedVoteQcOutcome::Incomplete(
+                ReceivedVoteQcIncomplete::CommonFieldsMismatch(2)
+            )
+        ));
+        assert_eq!(
+            mixed_observer.full_occupancy_for_test().0,
+            before
+                .0
+                .checked_add(mixed_report.report_charge_for_test())
+                .and_then(|bytes| {
+                    bytes.checked_sub(std::mem::size_of::<VerifiedVoteToken>() as u64)
+                })
+                .expect("incomplete report ledger delta")
+        );
+        assert_eq!(mixed_observer.full_occupancy_for_test().1, 0);
+        let _ = mixed.state_mut();
+        drop(mixed);
+        assert_eq!(mixed_observer.full_occupancy_for_test().2, 1);
+        assert_eq!(mixed_observer.full_occupancy_for_test().4, 1);
+        drop(mixed_report);
+        assert_eq!(mixed_observer.full_occupancy_for_test().2, 0);
+        assert_eq!(mixed_observer.full_occupancy_for_test().4, 0);
+
+        let mut legacy = BasicHotStuffEngine::new(ValidatorId(0), dense_validator_set(3));
+        legacy
+            .install_received_vote_context(multi_member_vote_context(&keypairs, 0, &domain))
+            .expect("context install");
+        for index in 0..2 {
+            legacy
+                .state
+                .on_vote(ValidatorId(index), 1, &[0xE5; 32])
+                .expect("seed legacy logical membership");
+        }
+        let vote = signed_member_vote(
+            0,
+            2,
+            1,
+            9,
+            [0xE5; 32],
+            &keypairs[2].1,
+            &domain,
+        );
+        let token = legacy
+            .admit_verified_received_vote(ValidatorId(2), vote)
+            .expect("admit final signed Vote");
+        let report = legacy
+            .invoke_verified_received_vote_qc(token)
+            .expect("invoke final signed Vote");
+        assert!(report.actual().qc.is_some());
+        assert!(matches!(
+            report.outcome(),
+            ReceivedVoteQcOutcome::Incomplete(ReceivedVoteQcIncomplete::MissingEvidence(0))
+        ));
+    }
+
+    #[test]
+    fn received_vote_qc_stage_keeps_precopied_evidence_after_history_eviction() {
+        let keypairs: Vec<_> = (0..4)
+            .map(|_| MlDsa44Backend::generate_keypair().expect("test keygen"))
+            .collect();
+        let domain = qbind_wire::pv_signing_domain::ProposalVoteSigningDomainV2::try_new(
+            qbind_types::QBIND_DEVNET_CHAIN_ID,
+            TEST_WIRE_CHAIN,
+            [0xA1; 32],
+            [0xB2; 32],
+        )
+        .expect("valid test domain");
+        let limits = crate::vote_accumulator::ConsensusLimitsConfig {
+            max_votes_by_view_entries: 2,
+            ..crate::vote_accumulator::ConsensusLimitsConfig::default()
+        };
+        let mut engine =
+            BasicHotStuffEngine::with_state_limits(ValidatorId(0), dense_validator_set(4), limits);
+        engine
+            .install_received_vote_context(multi_member_vote_context(&keypairs, 0, &domain))
+            .expect("context install");
+        let mut completed = None;
+        let mut expected_signatures = Vec::new();
+        for (index, (_, secret_key)) in keypairs.iter().take(3).enumerate() {
+            let vote = signed_member_vote(
+                0,
+                index as u16,
+                1,
+                9,
+                [0xC9; 32],
+                secret_key,
+                &domain,
+            );
+            expected_signatures.push(vote.signature.clone());
+            let token = engine
+                .admit_verified_received_vote(ValidatorId(index as u64), vote)
+                .expect("admit signed Vote");
+            if index == 2 {
+                let table = engine.state.received_vote_evidence_table().unwrap();
+                assert!(table.entry_for(1, 0).is_some());
+                assert!(table.entry_for(1, 1).is_some());
+            }
+            let report = engine
+                .invoke_verified_received_vote_qc(token)
+                .expect("invoke signed Vote");
+            if index < 2 {
+                assert!(matches!(report.outcome(), ReceivedVoteQcOutcome::NoQc));
+            } else {
+                completed = Some(report);
+            }
+        }
+        let report = completed.expect("third Vote report");
+        assert!(report.actual().qc.is_some());
+        let ReceivedVoteQcOutcome::Complete(wire) = report.outcome() else {
+            panic!("certificate was copied before reconciliation removed source evidence");
+        };
+        assert_eq!(wire.qc().signatures.len(), 3);
+        assert_eq!(wire.qc().signer_bitmap, vec![0b0000_0111]);
+        let table = engine.state.received_vote_evidence_table().unwrap();
+        assert!(table.entry_for(1, 0).is_none());
+        assert!(table.entry_for(1, 1).is_none());
+        assert!(table.entry_for(1, 2).is_some());
+        for (signature, expected) in wire.qc().signatures.iter().zip(&expected_signatures) {
+            assert_eq!(signature, expected);
+        }
+    }
+
+    #[test]
+    fn received_vote_qc_stage_refusals_restore_ledger_and_preserve_token() {
+        use crate::received_vote_evidence::with_allocation_failure_after;
+
+        let (public_key, secret_key) = MlDsa44Backend::generate_keypair().expect("test keygen");
+        let (input, domain) = received_vote_context(0, public_key);
+        let mut engine = BasicHotStuffEngine::new(ValidatorId(0), dense_validator_set(1));
+        engine
+            .install_received_vote_context(input)
+            .expect("context install");
+        let observer = engine
+            .state
+            .received_vote_budget()
+            .expect("installed ledger")
+            .try_clone()
+            .expect("ledger observer");
+        let vote = signed_context_vote(0, &secret_key, &domain);
+        let token = engine
+            .admit_verified_received_vote(ValidatorId(0), vote)
+            .expect("admit signed Vote");
+        let token_ptr = token.vote().signature.as_ptr();
+        let token_capacity = token.vote().signature.capacity();
+        let expected_vote = token.vote().clone();
+        let callbacks = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        engine.set_progress_recorder(Arc::new(QcCorrectionCallbacks(Arc::clone(&callbacks))));
+        engine.set_validator_vote_recorder(Arc::new(QcCorrectionCallbacks(Arc::clone(&callbacks))));
+        let invocations = RECEIVED_VOTE_LOGICAL_INVOCATIONS.with(std::cell::Cell::get);
+        let before = observer.full_occupancy_for_test();
+        engine.state.set_max_retained_evidence_bytes(before.0);
+        let refusal = match engine.invoke_verified_received_vote_qc(token) {
+            Err(refusal) => refusal,
+            Ok(_) => panic!("report admission exceeds lowered cap"),
+        };
+        assert_eq!(
+            refusal.reason,
+            ReceivedVoteQcRefusalReason::Stage(ReceivedVoteQcStageError::ReportBytes)
+        );
+        assert_eq!(refusal.token.vote().signature.as_ptr(), token_ptr);
+        assert_eq!(refusal.token.vote().signature.capacity(), token_capacity);
+        assert!(refusal.token.vote() == &expected_vote, "returned Vote differs (redacted)");
+        assert_eq!(observer.full_occupancy_for_test(), before);
+        assert_eq!(engine.state.max_retained_evidence_bytes(), before.0);
+        assert_eq!(RECEIVED_VOTE_LOGICAL_INVOCATIONS.with(std::cell::Cell::get), invocations);
+        assert_eq!(callbacks.load(std::sync::atomic::Ordering::Relaxed), 0);
+
+        engine.state.set_max_retained_evidence_bytes(u64::MAX);
+        let restored_cap = engine.state.max_retained_evidence_bytes();
+        let mut token = refusal.token;
+        for successful_allocations in 0..3 {
+            let refusal = with_allocation_failure_after(successful_allocations, || {
+                engine.invoke_verified_received_vote_qc(token)
+            });
+            let refusal = match refusal {
+                Err(refusal) => refusal,
+                Ok(_) => panic!("injected destination allocation must fail"),
+            };
+            assert_eq!(
+                refusal.reason,
+                ReceivedVoteQcRefusalReason::Stage(ReceivedVoteQcStageError::Allocation)
+            );
+            assert_eq!(refusal.token.vote().signature.as_ptr(), token_ptr);
+            assert_eq!(refusal.token.vote().signature.capacity(), token_capacity);
+            assert!(refusal.token.vote() == &expected_vote, "returned Vote differs (redacted)");
+            assert_eq!(observer.full_occupancy_for_test(), before);
+            assert_eq!(engine.state.max_retained_evidence_bytes(), restored_cap);
+            assert_eq!(RECEIVED_VOTE_LOGICAL_INVOCATIONS.with(std::cell::Cell::get), invocations);
+            assert_eq!(callbacks.load(std::sync::atomic::Ordering::Relaxed), 0);
+            token = refusal.token;
+        }
+
+        let retry = engine
+            .invoke_verified_received_vote_qc(token)
+            .expect("retry after allocation refusal");
+        assert!(matches!(retry.outcome(), ReceivedVoteQcOutcome::Complete(_)));
+    }
+
+    #[test]
+    fn received_vote_qc_stage_report_quota_refuses_and_recovers() {
+        let (public_key, secret_key) = MlDsa44Backend::generate_keypair().expect("test keygen");
+        let (input, domain) = received_vote_context(0, public_key);
+        let mut engine = BasicHotStuffEngine::new(ValidatorId(0), dense_validator_set(1));
+        engine
+            .install_received_vote_context(input)
+            .expect("context install");
+        let observer = engine
+            .state
+            .received_vote_budget()
+            .expect("installed ledger")
+            .try_clone()
+            .expect("ledger observer");
+        let vote = signed_context_vote(0, &secret_key, &domain);
+        let token = engine
+            .admit_verified_received_vote(ValidatorId(0), vote)
+            .expect("admit signed Vote");
+        let signature_ptr = token.vote().signature.as_ptr();
+        let signature_capacity = token.vote().signature.capacity();
+        let expected_vote = token.vote().clone();
+        let cap = engine.state.max_retained_evidence_bytes();
+        let callbacks = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        engine.set_progress_recorder(Arc::new(QcCorrectionCallbacks(Arc::clone(&callbacks))));
+        engine.set_validator_vote_recorder(Arc::new(QcCorrectionCallbacks(Arc::clone(&callbacks))));
+        let invocations = RECEIVED_VOTE_LOGICAL_INVOCATIONS.with(std::cell::Cell::get);
+        let control_bytes = received_vote_qc_control_charge().unwrap();
+        let mut held_reports = Vec::with_capacity(1024);
+        for _ in 0..1024 {
+            held_reports.push(
+                token
+                    .begin_qc_report(control_bytes)
+                    .expect("hold one report reservation"),
+            );
+        }
+        let before = observer.full_occupancy_for_test();
+        assert_eq!(before.4, 1024);
+        let refusal = match engine.invoke_verified_received_vote_qc(token) {
+            Err(refusal) => refusal,
+            Ok(_) => panic!("full report quota refuses before invocation"),
+        };
+        assert_eq!(
+            refusal.reason,
+            ReceivedVoteQcRefusalReason::Stage(ReceivedVoteQcStageError::ReportQuota)
+        );
+        assert_eq!(refusal.token.vote().signature.as_ptr(), signature_ptr);
+        assert_eq!(
+            refusal.token.vote().signature.capacity(),
+            signature_capacity
+        );
+        assert_eq!(observer.full_occupancy_for_test(), before);
+        assert!(refusal.token.vote() == &expected_vote, "returned Vote differs (redacted)");
+        assert_eq!(engine.state.max_retained_evidence_bytes(), cap);
+        assert_eq!(RECEIVED_VOTE_LOGICAL_INVOCATIONS.with(std::cell::Cell::get), invocations);
+        assert_eq!(callbacks.load(std::sync::atomic::Ordering::Relaxed), 0);
+
+        drop(held_reports.pop());
+        let report = engine
+            .invoke_verified_received_vote_qc(refusal.token)
+            .expect("retry after releasing one report slot");
+        assert!(matches!(report.outcome(), ReceivedVoteQcOutcome::Complete(_)));
+        drop(report);
+        drop(held_reports);
+        assert_eq!(observer.full_occupancy_for_test().4, 0);
+    }
+
+    #[derive(Debug)]
+    struct QcCorrectionCallbacks(Arc<std::sync::atomic::AtomicUsize>);
+
+    impl ConsensusProgressRecorder for QcCorrectionCallbacks {
+        fn record_qc_formed(&self) { self.bump(); }
+        fn record_vote_observed(&self, _: bool) { self.bump(); }
+        fn record_view_change(&self, _: u64, _: u64) { self.bump(); }
+        fn record_leader_change(&self) { self.bump(); }
+        fn reset_current_view_votes(&self) { self.bump(); }
+    }
+
+    impl ValidatorVoteRecorder for QcCorrectionCallbacks {
+        fn on_validator_vote(&self, _: ValidatorId, _: u64) { self.bump(); }
+    }
+
+    impl QcCorrectionCallbacks {
+        fn bump(&self) {
+            self.0.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        }
+    }
+
+    struct QcCorrectionFixture {
+        engine: BasicHotStuffEngine<[u8; 32]>,
+        token: Option<VerifiedVoteToken>,
+        observer: EvidenceBudget,
+        callbacks: Arc<std::sync::atomic::AtomicUsize>,
+        domain: qbind_wire::pv_signing_domain::ProposalVoteSigningDomainV2,
+        keys: ContextTestKeys,
+    }
+
+    impl QcCorrectionFixture {
+        fn new() -> Self {
+            let keypairs: Vec<_> = (0..4)
+                .map(|_| MlDsa44Backend::generate_keypair().expect("test keygen"))
+                .collect();
+            let domain = qbind_wire::pv_signing_domain::ProposalVoteSigningDomainV2::try_new(
+                qbind_types::QBIND_DEVNET_CHAIN_ID, TEST_WIRE_CHAIN, [0xD1; 32], [0xD2; 32],
+            ).unwrap();
+            let mut engine = BasicHotStuffEngine::new(ValidatorId(0), dense_validator_set(4));
+            engine.install_received_vote_context(
+                multi_member_vote_context(&keypairs, 0, &domain),
+            ).unwrap();
+            for index in 0usize..2 {
+                let vote = signed_member_vote(
+                    0, index as u16, 1, 9, [0xD3; 32], &keypairs[index].1, &domain,
+                );
+                let token = engine.admit_verified_received_vote(
+                    ValidatorId(index as u64), vote,
+                ).unwrap();
+                let report = engine.invoke_verified_received_vote_qc(token).unwrap();
+                assert!(matches!(report.outcome(), ReceivedVoteQcOutcome::NoQc));
+            }
+            let vote = signed_member_vote(0, 2, 1, 9, [0xD3; 32], &keypairs[2].1, &domain);
+            let token = engine.admit_verified_received_vote(ValidatorId(2), vote).unwrap();
+            let observer = engine.state.received_vote_budget().unwrap().try_clone().unwrap();
+            let callbacks = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+            engine.set_progress_recorder(Arc::new(QcCorrectionCallbacks(Arc::clone(&callbacks))));
+            engine.set_validator_vote_recorder(Arc::new(QcCorrectionCallbacks(Arc::clone(&callbacks))));
+            let keys = ContextTestKeys(keypairs.into_iter().enumerate().map(|(index, (key, _))| {
+                (ValidatorId(index as u64), (qbind_crypto::SUITE_PQ_RESERVED_1, key))
+            }).collect());
+            Self { engine, token: Some(token), observer, callbacks, domain, keys }
+        }
+
+        fn invoke(&mut self) -> Result<ReceivedVoteQcReport, ReceivedVoteQcRefusal> {
+            self.engine.invoke_verified_received_vote_qc(self.token.take().unwrap())
+        }
+
+        fn verify(&self, report: &ReceivedVoteQcReport) {
+            let ReceivedVoteQcOutcome::Complete(wire) = report.outcome() else {
+                panic!("expected a complete wire certificate");
+            };
+            let registry = crate::crypto_verifier::SimpleBackendRegistry::with_backend(
+                qbind_crypto::SUITE_PQ_RESERVED_1, Arc::new(MlDsa44Backend),
+            );
+            verify_quorum_certificate_with_domain(
+                wire.qc(), &self.domain, 0, self.engine.validators(), &self.keys, &registry,
+            ).expect("complete retry certificate verifies");
+        }
+    }
+
+    struct QcRefusalWitness {
+        vote: qbind_wire::consensus::Vote,
+        signature_ptr: *const u8,
+        signature_capacity: usize,
+        occupancy: (u64, u64, usize, usize, usize, usize),
+        cap: u64,
+        invocations: usize,
+        callbacks: usize,
+        current_view: u64,
+        vote_count: usize,
+    }
+
+    impl QcRefusalWitness {
+        fn capture(fixture: &QcCorrectionFixture) -> Self {
+            let vote = fixture.token.as_ref().unwrap().vote();
+            Self {
+                vote: vote.clone(),
+                signature_ptr: vote.signature.as_ptr(),
+                signature_capacity: vote.signature.capacity(),
+                occupancy: fixture.observer.full_occupancy_for_test(),
+                cap: fixture.engine.state.max_retained_evidence_bytes(),
+                invocations: RECEIVED_VOTE_LOGICAL_INVOCATIONS.with(std::cell::Cell::get),
+                callbacks: fixture.callbacks.load(std::sync::atomic::Ordering::Relaxed),
+                current_view: fixture.engine.current_view(),
+                vote_count: fixture.engine.state.vote_count(vote.height, &vote.block_id),
+            }
+        }
+
+        fn check(&self, fixture: &QcCorrectionFixture, refusal: &ReceivedVoteQcRefusal) {
+            assert!(refusal.token.vote() == &self.vote, "returned Vote differs (redacted)");
+            assert_eq!(refusal.token.vote().signature.as_ptr(), self.signature_ptr);
+            assert_eq!(refusal.token.vote().signature.capacity(), self.signature_capacity);
+            assert_eq!(fixture.observer.full_occupancy_for_test(), self.occupancy);
+            assert_eq!(fixture.engine.state.max_retained_evidence_bytes(), self.cap);
+            assert_eq!(
+                RECEIVED_VOTE_LOGICAL_INVOCATIONS.with(std::cell::Cell::get), self.invocations,
+            );
+            assert_eq!(
+                fixture.callbacks.load(std::sync::atomic::Ordering::Relaxed), self.callbacks,
+            );
+            assert_eq!(fixture.engine.current_view(), self.current_view);
+            assert_eq!(
+                fixture.engine.state.vote_count(self.vote.height, &self.vote.block_id),
+                self.vote_count,
+            );
+        }
+    }
+
+    #[test]
+    fn received_vote_qc_destination_bytes_refusal_after_report_admission_retries() {
+        let mut fixture = QcCorrectionFixture::new();
+        let before = fixture.observer.full_occupancy_for_test();
+        let cap = before.0.checked_add(received_vote_qc_control_charge().unwrap()).unwrap();
+        fixture.engine.state.set_max_retained_evidence_bytes(cap);
+        let witness = QcRefusalWitness::capture(&fixture);
+        let refusal = fixture.invoke().err().expect("destination Bytes pressure refuses");
+        assert_eq!(
+            refusal.reason,
+            ReceivedVoteQcRefusalReason::Stage(ReceivedVoteQcStageError::StageBytes),
+        );
+        witness.check(&fixture, &refusal);
+        fixture.token = Some(refusal.token);
+        fixture.engine.state.set_max_retained_evidence_bytes(u64::MAX);
+        let report = fixture.invoke().unwrap();
+        fixture.verify(&report);
+        assert_eq!(
+            RECEIVED_VOTE_LOGICAL_INVOCATIONS.with(std::cell::Cell::get), witness.invocations + 1,
+        );
+        assert!(fixture.callbacks.load(std::sync::atomic::Ordering::Relaxed) > witness.callbacks);
+    }
+
+    #[test]
+    fn received_vote_qc_nested_partial_transfer_allocation_refusal_retries() {
+        use crate::received_vote_evidence::{
+            qc_descriptor_signature_drops, qc_signature_transfers, with_allocation_failure_after,
+        };
+        let mut fixture = QcCorrectionFixture::new();
+        let witness = QcRefusalWitness::capture(&fixture);
+        let transfers = qc_signature_transfers();
+        let nested_drops = qc_descriptor_signature_drops();
+        // Bitmap, descriptors, and the first signature succeed; the next signature fails.
+        let refusal = with_allocation_failure_after(3, || fixture.invoke())
+            .err().expect("second signature allocation refuses");
+        assert_eq!(
+            refusal.reason,
+            ReceivedVoteQcRefusalReason::Stage(ReceivedVoteQcStageError::Allocation),
+        );
+        assert_eq!(qc_signature_transfers(), transfers + 1);
+        assert_eq!(qc_descriptor_signature_drops(), nested_drops + 1);
+        witness.check(&fixture, &refusal);
+        fixture.token = Some(refusal.token);
+        let report = fixture.invoke().unwrap();
+        fixture.verify(&report);
+    }
+
+    #[test]
+    fn received_vote_qc_defensive_commit_refusal_drops_backing_before_pending() {
+        use crate::received_vote_evidence::{
+            qc_cleanup_observations, qc_signature_transfers, with_qc_commit_failure,
+        };
+        let mut fixture = QcCorrectionFixture::new();
+        let witness = QcRefusalWitness::capture(&fixture);
+        let transfers = qc_signature_transfers();
+        let refusal = with_qc_commit_failure(|| fixture.invoke())
+            .err().expect("defensive commit failure returns the valid reservation");
+        assert_eq!(
+            refusal.reason,
+            ReceivedVoteQcRefusalReason::Stage(ReceivedVoteQcStageError::Commit),
+        );
+        assert_eq!(qc_signature_transfers(), transfers + 3);
+        let observations = qc_cleanup_observations();
+        let p = 1 + 3 * std::mem::size_of::<Vec<u8>>() as u64
+            + 3 * qbind_crypto::ML_DSA_44_SIGNATURE_SIZE as u64;
+        let staged = (
+            witness.occupancy.0 + received_vote_qc_control_charge().unwrap(),
+            p, witness.occupancy.2, 0, witness.occupancy.4 + 1, 0,
+        );
+        assert_eq!(observations, vec![
+            ("before_backing_drop", staged),
+            ("after_backing_drop", staged),
+            ("after_pending_release", (staged.0, 0, staged.2, 0, staged.4, 0)),
+        ]);
+        witness.check(&fixture, &refusal);
+        fixture.token = Some(refusal.token);
+        let report = fixture.invoke().unwrap();
+        fixture.verify(&report);
+    }
+
+    #[test]
+    fn received_vote_qc_detached_opaque_report_retains_all_owners_until_drop() {
+        use crate::received_vote_evidence::with_qc_release_trace;
+        let sizing = EvidenceBudget::try_new(u64::MAX, 0).unwrap();
+        let independent_baseline = sizing.full_occupancy_for_test();
+        drop(sizing);
+        let mut fixture = QcCorrectionFixture::new();
+        let report = fixture.invoke().unwrap();
+        fixture.verify(&report);
+        let a = report.report_charge_for_test();
+        let ReceivedVoteQcOutcome::Complete(wire) = report.outcome() else {
+            panic!("complete report");
+        };
+        let p = wire.bytes_charge_for_test();
+        let _ = fixture.engine.state_mut();
+        drop(fixture.engine);
+        let detached = fixture.observer.full_occupancy_for_test();
+        assert_eq!(detached.1, 0);
+        assert_eq!((detached.2, detached.3, detached.4, detached.5), (1, 0, 1, 0));
+        assert!(detached.0 > independent_baseline.0 + a + p);
+        let ReceivedVoteQcOutcome::Complete(wire) = report.outcome() else {
+            panic!("detached certificate remains borrowable");
+        };
+        let registry = crate::crypto_verifier::SimpleBackendRegistry::with_backend(
+            qbind_crypto::SUITE_PQ_RESERVED_1, Arc::new(MlDsa44Backend),
+        );
+        verify_quorum_certificate_with_domain(
+            wire.qc(), &fixture.domain, 0, &dense_validator_set(4), &fixture.keys, &registry,
+        ).expect("detached historical certificate verifies");
+        assert_eq!(fixture.observer.full_occupancy_for_test(), detached);
+        let releases = with_qc_release_trace(|| drop(report));
+        assert_eq!(releases.len(), 3);
+        assert_eq!((releases[0].0, releases[0].1, releases[0].2), ("Bytes", p, detached));
+        assert_eq!(releases[1].0, "Context");
+        assert_eq!(releases[1].2, (detached.0 - p, 0, 1, 0, 1, 0));
+        assert_eq!(releases[2].0, "Report");
+        assert_eq!(releases[2].1, a);
+        assert_eq!(releases[2].2, (independent_baseline.0 + a, 0, 0, 0, 1, 0));
+        assert_eq!(fixture.observer.full_occupancy_for_test(), independent_baseline);
+        println!("corrected QC owners: A={a} P={p} detached={detached:?} final={independent_baseline:?}");
+    }
+
+    #[test]
+    fn received_vote_qc_stage_preserves_capacity_drop_and_equivocation_outcomes() {
+        let keypairs: Vec<_> = (0..2)
+            .map(|_| MlDsa44Backend::generate_keypair().expect("test keygen"))
+            .collect();
+        let domain = qbind_wire::pv_signing_domain::ProposalVoteSigningDomainV2::try_new(
+            qbind_types::QBIND_DEVNET_CHAIN_ID,
+            TEST_WIRE_CHAIN,
+            [0xA1; 32],
+            [0xB2; 32],
+        )
+        .expect("valid test domain");
+        let limits = crate::vote_accumulator::ConsensusLimitsConfig {
+            max_votes_per_view: 1,
+            ..crate::vote_accumulator::ConsensusLimitsConfig::default()
+        };
+        let mut engine =
+            BasicHotStuffEngine::with_state_limits(ValidatorId(0), dense_validator_set(2), limits);
+        engine
+            .install_received_vote_context(multi_member_vote_context(&keypairs, 0, &domain))
+            .expect("context install");
+        let invocations = RECEIVED_VOTE_LOGICAL_INVOCATIONS.with(std::cell::Cell::get);
+        let first = signed_member_vote(
+            0,
+            0,
+            1,
+            9,
+            [0xA7; 32],
+            &keypairs[0].1,
+            &domain,
+        );
+        let token = engine
+            .admit_verified_received_vote(ValidatorId(0), first)
+            .expect("admit first Vote");
+        let report = engine
+            .invoke_verified_received_vote_qc(token)
+            .expect("invoke first Vote");
+        assert!(matches!(report.outcome(), ReceivedVoteQcOutcome::NoQc));
+
+        let dropped = signed_member_vote(
+            0,
+            1,
+            1,
+            9,
+            [0xA7; 32],
+            &keypairs[1].1,
+            &domain,
+        );
+        let token = engine
+            .admit_verified_received_vote(ValidatorId(1), dropped)
+            .expect("admit capacity-dropped Vote");
+        let report = engine
+            .invoke_verified_received_vote_qc(token)
+            .expect("invoke capacity-dropped Vote");
+        assert!(matches!(
+            report.actual().accumulator,
+            Some(Ok(VoteAccumulatorDisposition::CapacityDropped))
+        ));
+        assert_eq!(
+            report.actual().evidence,
+            ReceivedVoteEvidenceDisposition::NotRetainedCapacityDropped
+        );
+        assert!(matches!(report.outcome(), ReceivedVoteQcOutcome::NoQc));
+
+        let equivocation = signed_member_vote(
+            0,
+            0,
+            1,
+            9,
+            [0xB8; 32],
+            &keypairs[0].1,
+            &domain,
+        );
+        let token = engine
+            .admit_verified_received_vote(ValidatorId(0), equivocation)
+            .expect("admit valid equivocation");
+        let report = engine
+            .invoke_verified_received_vote_qc(token)
+            .expect("invoke equivocation");
+        assert!(report.actual().accumulator.is_none());
+        assert_eq!(
+            report.actual().evidence,
+            ReceivedVoteEvidenceDisposition::NotRetainedEquivocation
+        );
+        assert!(matches!(report.outcome(), ReceivedVoteQcOutcome::NoQc));
+        assert_eq!(
+            RECEIVED_VOTE_LOGICAL_INVOCATIONS.with(std::cell::Cell::get),
+            invocations + 3
+        );
+    }
+
+    #[test]
+    fn received_vote_qc_stage_callback_unwind_keeps_engine_effects_and_releases_stage() {
+        #[derive(Debug)]
+        struct PanicProgress;
+        impl ConsensusProgressRecorder for PanicProgress {
+            fn record_qc_formed(&self) {
+                panic!("injected callback panic");
+            }
+            fn record_vote_observed(&self, _is_for_current_view: bool) {}
+            fn record_view_change(&self, _from_view: u64, _to_view: u64) {}
+            fn record_leader_change(&self) {}
+            fn reset_current_view_votes(&self) {}
+        }
+
+        let (public_key, secret_key) = MlDsa44Backend::generate_keypair().expect("test keygen");
+        let (input, domain) = received_vote_context(0, public_key);
+        let mut engine = BasicHotStuffEngine::new(ValidatorId(0), dense_validator_set(1));
+        engine
+            .install_received_vote_context(input)
+            .expect("context install");
+        let observer = engine
+            .state
+            .received_vote_budget()
+            .expect("installed ledger")
+            .try_clone()
+            .expect("ledger observer");
+        engine.set_progress_recorder(Arc::new(PanicProgress));
+        let vote = signed_context_vote(0, &secret_key, &domain);
+        let view = vote.height;
+        let block_id = vote.block_id;
+        let token = engine
+            .admit_verified_received_vote(ValidatorId(0), vote)
+            .expect("admit signed Vote");
+        let before = observer.full_occupancy_for_test();
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            engine.invoke_verified_received_vote_qc(token)
+        }));
+        assert!(result.is_err());
+        assert!(engine.state.has_vote_history_membership_for_test(
+            ValidatorId(0),
+            view,
+            &block_id
+        ));
+        assert_eq!(engine.state.vote_count(view, &block_id), 1);
+        assert!(engine
+            .state
+            .received_vote_evidence_table()
+            .unwrap()
+            .entry_for(view, 0)
+            .is_some());
+        let after = observer.full_occupancy_for_test();
+        assert_eq!(after.4, before.4);
+        assert_eq!(after.1, 0);
+        assert_eq!(after.2, before.2);
+        assert_eq!(
+            after.0,
+            before.0
+                .checked_sub(std::mem::size_of::<VerifiedVoteToken>() as u64)
+                .expect("bounded callback-unwind ledger")
+        );
+    }
+
+    #[test]
+    fn received_vote_qc_membership_comparison_rejects_malformed_actual_qcs() {
+        let mut membership = [0u64; 16];
+        membership[0] = 0b0011;
+        let make_qc = |signers: Vec<ValidatorId>, block_id| QuorumCertificate {
+            signers,
+            block_id,
+            view: 7,
+        };
+        let same_count_different_set = make_qc(vec![ValidatorId(0), ValidatorId(2)], [0x11; 32]);
+        assert!(!qc_matches_projected_membership(
+            &same_count_different_set,
+            &membership,
+            2,
+            4,
+            7,
+            [0x11; 32]
+        ));
+        assert_eq!(
+            compare_actual_qc_failure(
+                &same_count_different_set,
+                &membership,
+                2,
+                4,
+                7,
+                [0x11; 32]
+            ),
+            ReceivedVoteQcIncomplete::ActualSignerMembershipMismatch(2)
+        );
+
+        let duplicate = make_qc(vec![ValidatorId(0), ValidatorId(0)], [0x11; 32]);
+        assert_eq!(
+            compare_actual_qc_failure(&duplicate, &membership, 2, 4, 7, [0x11; 32]),
+            ReceivedVoteQcIncomplete::ActualSignerDuplicate(0)
+        );
+        let out_of_range = make_qc(vec![ValidatorId(0), ValidatorId(4)], [0x11; 32]);
+        assert_eq!(
+            compare_actual_qc_failure(&out_of_range, &membership, 2, 4, 7, [0x11; 32]),
+            ReceivedVoteQcIncomplete::ActualSignerOutOfRange(4)
+        );
+        let wrong_candidate = make_qc(vec![ValidatorId(0), ValidatorId(1)], [0x22; 32]);
+        assert_eq!(
+            compare_actual_qc_failure(&wrong_candidate, &membership, 2, 4, 7, [0x11; 32]),
+            ReceivedVoteQcIncomplete::ActualCandidateMismatch
+        );
+    }
+
+    #[test]
+    fn received_vote_qc_stage_uses_minimal_bitmap_span_for_weighted_quorum() {
+        let keypairs: Vec<_> = (0..9)
+            .map(|_| MlDsa44Backend::generate_keypair().expect("test keygen"))
+            .collect();
+        let domain = qbind_wire::pv_signing_domain::ProposalVoteSigningDomainV2::try_new(
+            qbind_types::QBIND_DEVNET_CHAIN_ID,
+            TEST_WIRE_CHAIN,
+            [0xA1; 32],
+            [0xB2; 32],
+        )
+        .expect("valid test domain");
+        let validators = ConsensusValidatorSet::new((0..9).map(|id| ValidatorSetEntry {
+            id: ValidatorId(id),
+            voting_power: if id < 3 { 10 } else { 1 },
+        }))
+        .expect("valid weighted set");
+        let members = keypairs
+            .iter()
+            .enumerate()
+            .map(|(index, (public_key, _))| {
+                SnapshotMember::new(
+                    index as u64,
+                    if index < 3 { 10 } else { 1 },
+                    public_key.clone().into_boxed_slice().into_vec(),
+                )
+            })
+            .collect();
+        let input = VoteContextInput::new(
+            qbind_types::QBIND_DEVNET_CHAIN_ID,
+            0,
+            qbind_crypto::SUITE_PQ_RESERVED_1,
+            domain.clone(),
+            members,
+        );
+        let mut engine = BasicHotStuffEngine::new(ValidatorId(0), validators);
+        engine
+            .install_received_vote_context(input)
+            .expect("context install");
+        let mut report = None;
+        for (index, (_, secret_key)) in keypairs.iter().take(3).enumerate() {
+            let vote = signed_member_vote(
+                0,
+                index as u16,
+                1,
+                9,
+                [0xF6; 32],
+                secret_key,
+                &domain,
+            );
+            let token = engine
+                .admit_verified_received_vote(ValidatorId(index as u64), vote)
+                .expect("admit signed Vote");
+            let event = engine
+                .invoke_verified_received_vote_qc(token)
+                .expect("invoke signed Vote");
+            if index == 2 {
+                report = Some(event);
+            } else {
+                assert!(matches!(event.outcome(), ReceivedVoteQcOutcome::NoQc));
+            }
+        }
+        let report = report.expect("weighted quorum report");
+        let ReceivedVoteQcOutcome::Complete(wire) = report.outcome() else {
+            panic!("weighted quorum should yield a complete certificate");
+        };
+        assert_eq!(wire.qc().signatures.len(), 3);
+        assert_eq!(wire.qc().signer_bitmap, vec![0b0000_0111]);
+        let mut keys = HashMap::new();
+        for (index, (public_key, _)) in keypairs.iter().enumerate() {
+            keys.insert(
+                ValidatorId(index as u64),
+                (qbind_crypto::SUITE_PQ_RESERVED_1, public_key.clone()),
+            );
+        }
+        let registry = crate::crypto_verifier::SimpleBackendRegistry::with_backend(
+            qbind_crypto::SUITE_PQ_RESERVED_1,
+            Arc::new(MlDsa44Backend),
+        );
+        verify_quorum_certificate_with_domain(
+            wire.qc(),
+            &domain,
+            0,
+            engine.validators(),
+            &ContextTestKeys(keys),
+            &registry,
+        )
+        .expect("minimal-span weighted QC verifies");
+    }
+
+    #[test]
+    fn received_vote_qc_stage_returns_every_actual_signer_and_verifies_wire_qc() {
+        let keypairs: Vec<_> = (0..4)
+            .map(|_| MlDsa44Backend::generate_keypair().expect("test keygen"))
+            .collect();
+        let runtime_chain = qbind_types::QBIND_DEVNET_CHAIN_ID;
+        let domain = qbind_wire::pv_signing_domain::ProposalVoteSigningDomainV2::try_new(
+            runtime_chain,
+            TEST_WIRE_CHAIN,
+            [0xA1; 32],
+            [0xB2; 32],
+        )
+        .expect("valid test domain");
+        let members = keypairs
+            .iter()
+            .enumerate()
+            .map(|(index, (public_key, _))| {
+                SnapshotMember::new(
+                    index as u64,
+                    1,
+                    public_key.clone().into_boxed_slice().into_vec(),
+                )
+            })
+            .collect();
+        let input = VoteContextInput::new(
+            runtime_chain,
+            0,
+            qbind_crypto::SUITE_PQ_RESERVED_1,
+            domain.clone(),
+            members,
+        );
+        let context_charge = input.checked_charge().expect("context charge");
+        let mut engine = BasicHotStuffEngine::new(ValidatorId(0), dense_validator_set(4));
+        engine
+            .install_received_vote_context(input)
+            .expect("context install");
+        let observer = engine
+            .state
+            .received_vote_budget()
+            .expect("installed ledger")
+            .try_clone()
+            .expect("ledger observer");
+        let wrapper_charge = std::mem::size_of::<Option<ActiveVoteContext>>() as u64;
+        let table_charge = received_vote_table_charge();
+        let installed_occupancy = observer.full_occupancy_for_test();
+        let route_control =
+            u64::try_from(std::mem::size_of::<ReceivedVoteQcRouteControlFrame>()).unwrap();
+        let admission_control =
+            crate::received_vote_evidence::qc_admission_control_frame_bytes().unwrap();
+        let buffer_control = qc_buffer_control_frame_bytes().unwrap();
+        println!(
+            "received-vote QC control layouts: route={route_control} admission={admission_control} buffer={buffer_control} A={}",
+            received_vote_qc_control_charge().unwrap()
+        );
+        assert_eq!(
+            received_vote_qc_control_charge().unwrap(),
+            route_control + admission_control.max(buffer_control)
+        );
+
+        let mut original_votes = Vec::new();
+        let mut source_signature_ptrs = Vec::new();
+        let mut detached_report = None;
+        for (index, (_, secret_key)) in keypairs.iter().enumerate() {
+            let mut vote = qbind_wire::consensus::Vote {
+                version: 1,
+                chain_id: TEST_WIRE_CHAIN,
+                epoch: 0,
+                height: 1,
+                round: 9,
+                step: 0,
+                block_id: [0xC3; 32],
+                validator_index: index as u16,
+                suite_id: qbind_crypto::SUITE_PQ_RESERVED_1.0,
+                signature: Vec::new(),
+            };
+            vote.signature = MlDsa44Backend::sign(secret_key, &domain.vote_preimage(&vote))
+                .expect("sign received vote")
+                .into_boxed_slice()
+                .into_vec();
+            source_signature_ptrs.push(vote.signature.as_ptr());
+            original_votes.push(vote.clone());
+            let token = engine
+                .admit_verified_received_vote(ValidatorId(index as u64), vote)
+                .expect("admit signed vote");
+            let before_invocation = observer.full_occupancy_for_test();
+            let report = engine
+                .invoke_verified_received_vote_qc(token)
+                .expect("stage and invoke vote");
+            let retained = engine
+                .state
+                .received_vote_evidence_table()
+                .unwrap()
+                .entry_for(1, index as u16)
+                .expect("retained source evidence");
+            assert_eq!(
+                retained.vote().signature.as_ptr(),
+                source_signature_ptrs[index]
+            );
+            assert_eq!(
+                retained.vote().signature.capacity(),
+                original_votes[index].signature.capacity()
+            );
+            let report_bytes = report.report_charge_for_test();
+            let certificate_bytes = match report.outcome() {
+                ReceivedVoteQcOutcome::Complete(wire) => wire.bytes_charge_for_test(),
+                _ => 0,
+            };
+            let released_token_control =
+                u64::try_from(std::mem::size_of::<VerifiedVoteToken>()).unwrap();
+            assert_eq!(
+                observer.full_occupancy_for_test().0,
+                before_invocation
+                    .0
+                    .checked_add(report_bytes)
+                    .and_then(|value| value.checked_add(certificate_bytes))
+                    .and_then(|value| value.checked_sub(released_token_control))
+                    .expect("expected ledger delta")
+            );
+            assert_eq!(observer.full_occupancy_for_test().1, 0);
+            assert_eq!(observer.full_occupancy_for_test().3, 0);
+            assert_eq!(observer.full_occupancy_for_test().4, 1);
+            assert_eq!(report.actual().qc.is_some(), index >= 2);
+            match report.outcome() {
+                ReceivedVoteQcOutcome::NoQc => assert!(index < 2),
+                ReceivedVoteQcOutcome::Complete(wire) => {
+                    assert!(index >= 2);
+                    let certificate = wire.qc();
+                    println!(
+                        "received-vote QC backing: signer_count={} bitmap={} descriptors={} signature_bytes={} P={}",
+                        certificate.signatures.len(),
+                        certificate.signer_bitmap.len(),
+                        certificate.signatures.len() * std::mem::size_of::<Vec<u8>>(),
+                        certificate.signatures.iter().map(Vec::len).sum::<usize>(),
+                        wire.bytes_charge_for_test()
+                    );
+                    assert_eq!(certificate.signatures.len(), index + 1);
+                    assert_eq!(
+                        certificate.signer_bitmap,
+                        vec![((1u16 << (index + 1)) - 1) as u8]
+                    );
+                    for (signer_index, (signature, original)) in certificate
+                        .signatures
+                        .iter()
+                        .zip(original_votes.iter())
+                        .enumerate()
+                    {
+                        assert_eq!(signature, &original.signature);
+                        assert_ne!(signature.as_ptr(), source_signature_ptrs[signer_index]);
+                        assert_eq!(original.signature.capacity(), signature.capacity());
+                    }
+                    let mut keys = HashMap::new();
+                    for (member, (public_key, _)) in keypairs.iter().enumerate() {
+                        keys.insert(
+                            ValidatorId(member as u64),
+                            (qbind_crypto::SUITE_PQ_RESERVED_1, public_key.clone()),
+                        );
+                    }
+                    let registry = crate::crypto_verifier::SimpleBackendRegistry::with_backend(
+                        qbind_crypto::SUITE_PQ_RESERVED_1,
+                        Arc::new(MlDsa44Backend),
+                    );
+                    verify_quorum_certificate_with_domain(
+                        certificate,
+                        &domain,
+                        0,
+                        engine.validators(),
+                        &ContextTestKeys(keys),
+                        &registry,
+                    )
+                    .expect("returned wire QC independently verifies");
+                }
+                ReceivedVoteQcOutcome::Incomplete(reason) => {
+                    panic!("unexpected incomplete result: {reason:?}");
+                }
+                ReceivedVoteQcOutcome::LogicalError(error) => {
+                    panic!("unexpected logical error: {error:?}");
+                }
+            }
+            if index == 3 {
+                detached_report = Some(report);
+            } else {
+                drop(report);
+                assert_eq!(observer.full_occupancy_for_test().4, 0);
+            }
+        }
+        let detached_report = detached_report.expect("final complete report retained");
+        assert_eq!(observer.full_occupancy_for_test().2, 1);
+        assert_eq!(observer.full_occupancy_for_test().4, 1);
+        let _ = engine.state_mut();
+        assert_eq!(observer.full_occupancy_for_test().2, 1);
+        assert_eq!(observer.full_occupancy_for_test().4, 1);
+        drop(engine);
+        assert_eq!(observer.full_occupancy_for_test().2, 1);
+        println!(
+            "received-vote QC detached report occupancy: {:?}",
+            observer.full_occupancy_for_test()
+        );
+        drop(detached_report);
+        assert_eq!(observer.full_occupancy_for_test().2, 0);
+        assert_eq!(observer.full_occupancy_for_test().4, 0);
+        println!(
+            "received-vote QC final release occupancy: {:?}",
+            observer.full_occupancy_for_test()
+        );
+        assert_eq!(
+            observer.full_occupancy_for_test().0,
+            installed_occupancy.0 - context_charge - wrapper_charge - table_charge
         );
     }
 
