@@ -2640,3 +2640,47 @@ deployment, D15 or Run 423. `D7D14_STORAGE_COMPONENT=IMPLEMENTED-ISOLATED`;
 `D7D14_STORAGE_ACCEPTANCE=PASS-ACCEPTED-SUBSET`; §13.6 whole-lifecycle INCOMPLETE;
 activation DISABLED; public DevNet NO-GO; durable anti-rollback NOT-ESTABLISHED;
 C4/C5 OPEN. Implementation delivery is not independent source-review acceptance.
+
+### RUN 422: isolated uncertain-O4 recovery is not general recovery
+
+The private received-QC model now retains the actual uncertain O4 report and
+its complete staged certificate, original immutable fixture/history, backend
+incarnation and exact logical engine predecessor. Genuine O3 inspection alone
+still cannot resume QC effects. Only successful explicit ordinary O5 constructs
+the private borrowed recovery owner; O5 preserves publication bytes/revision.
+A separate accepted pre-on_qc gate revalidates current complete publication,
+context/incarnation, predecessor and every staged wire-QC field/signature under
+one serialization interval through ordinary QC effects and synchronous callbacks.
+No acknowledgement Boolean, clear-latch shortcut, identity-only QC match, new
+O4 during resumption, or automatic O5 is introduced. Storage evidence remains
+Unverified; real-signature fixture verification is not production authority.
+
+Fresh executable evidence covers real three-chain exact resumption once,
+distinct FailBeforeSubmit/WriteErrors/UncertainAfterWrite O5 outcomes and genuine
+acknowledged retries, ordinary foreign/stale proof refusals, changed publication,
+a genuinely valid alternative four-signer certificate, advanced engine and
+repeat-use refusals, real storage/consensus admission pressure, immediate
+ownership restoration and bounded deterministic serialization contention.
+All fifteen historical model tests, including equal/lower refusals, are unchanged.
+New control coverage is independently derived: I=1864, K=592, S=4753, not an
+assumption that the old 3552-byte adapter covers new owners. For N=4/S_sig=2420,
+the largest overlap is 84675 below the unchanged 84956 combined ceiling.
+Consensus occupancy/ceiling is separately sampled, not merged into storage.
+
+At source `09f884b6643688b1ed39094309cd48813947cace` (tree
+`ae9270b1e6281a4f1f60c1bbc9308557c937a4b7`), the requested literal node
+selections passed 25, 162 (168 selected, 6 ignored), and 157 (158 selected,
+1 ignored), all exit 0. Whitespace checks exited 0. The appended D7 evidence
+contains exact commands, requirement mapping, proof/owner layouts, complete
+phase overlaps, executed ledger samples and limitations. Only documentation
+appends follow that producing source revision. The consensus facade is unchanged;
+no conditional consensus run or older full-suite/build/Miri claim is implied.
+
+This is same-process immutable-fixture evidence, not restoration/restart,
+production current-authority integration, replay, activation or independent
+source-review acceptance. No TC/signing/delivery integration, new process-death
+boundary, deployment, D15 or Run 423 is added.
+`D7D14_STORAGE_COMPONENT=IMPLEMENTED-ISOLATED`;
+`D7D14_STORAGE_ACCEPTANCE=PASS-ACCEPTED-SUBSET`; §13.6 whole-lifecycle INCOMPLETE;
+activation DISABLED; public DevNet NO-GO; durable anti-rollback NOT-ESTABLISHED;
+C4/C5 OPEN.
