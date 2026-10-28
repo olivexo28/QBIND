@@ -233,6 +233,27 @@ struct ModelResult {
     _coverage: Reservation,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AdmissionRefusal {
+    Capacity,
+}
+
+// Like the accepted leader-route admission: no token or large outcome is
+// transferred until this opaque owner has admitted the route's coverage.
+struct Admission<'owner> {
+    owner: &'owner SafetyRecordOwner,
+    coverage: Reservation,
+}
+
+fn admit_composition(owner: &SafetyRecordOwner) -> Result<Admission<'_>, AdmissionRefusal> {
+    let coverage = owner
+        .backend
+        .accounting()
+        .reserve(adapter_charge())
+        .map_err(|_| AdmissionRefusal::Capacity)?;
+    Ok(Admission { owner, coverage })
+}
+
 struct Gate<'o, 'g> {
     owner: &'o SafetyRecordOwner,
     guard: &'o std::sync::MutexGuard<'g, super::super::backend::SerializationDomain>,
@@ -363,69 +384,83 @@ fn candidate_charge(ctx: &PinnedSafetyContext) -> u128 {
 }
 
 // Source-derived inventory, NOT physical memory inferred from reservation sums.
-// Includes both gate control copies, caller/result carriers and by-value
-// conversion/binding control temporaries; nested QC backing is charged separately.
-fn adapter_charge() -> u128 {
-    support::control_bytes()
-        + (2 * size_of::<Gate<'static, 'static>>()
-            + 2 * size_of::<ModelResult>()
-            + 2 * size_of::<PublishResult>()
-            + size_of::<WireQc>()
-            + size_of::<LockedRecord>()
-            + 2 * size_of::<Option<CommittedAnchor>>()
-            + size_of::<Result<ValidatedRecord, super::super::decision_capture::CurrentLoadFailure>>(
-            )
-            + size_of::<std::sync::MutexGuard<'static, super::super::backend::SerializationDomain>>(
-            )
-            + 4 * size_of::<Reservation>()) as u128
+// Admission, active invocation and returned-owner conversion are disjoint
+// phases. Embedded route results/reservations are not charged a second time.
+fn adapter_phase_charges() -> (u128, u128, u128) {
+    let admission = size_of::<Admission<'static>>()
+        + size_of::<Result<Admission<'static>, AdmissionRefusal>>()
+        + size_of::<Result<Reservation, SafetyStoreError>>();
+    let invocation = support::control_bytes() as usize
+        + size_of::<Admission<'static>>()
+        // The large invocation return slot exists only AFTER admission.
+        + size_of::<ModelResult>()
+        + 2 * size_of::<Gate<'static, 'static>>()
+        + 2 * size_of::<PublishResult>()
+        + size_of::<Result<Publication, Refused>>()
+        + size_of::<WireQc>()
+        + size_of::<LockedRecord>()
+        + 2 * size_of::<Option<CommittedAnchor>>()
+        + size_of::<Result<ValidatedRecord, super::super::decision_capture::CurrentLoadFailure>>()
+        + size_of::<std::sync::MutexGuard<'static, super::super::backend::SerializationDomain>>()
+        // Only the standalone candidate lease. Admission and loader-result
+        // reservation controls are already embedded in their whole layouts.
+        + size_of::<Reservation>();
+    // Both complete owner layouts include their route and coverage. The
+    // partially consumed admission is bounded separately during conversion.
+    let returned = 2 * size_of::<ModelResult>() + size_of::<Admission<'static>>();
+    (admission as u128, invocation as u128, returned as u128)
 }
 
-fn compose(
-    owner: &SafetyRecordOwner,
-    engine: &mut BasicHotStuffEngine<[u8; 32]>,
-    authority: &Authority,
-    token: support::Token,
-    expected: u64,
-    history: &FixtureCommittedHistory,
-) -> Result<ModelResult, support::Token> {
-    let coverage = match owner.backend.accounting().reserve(adapter_charge()) {
-        Ok(lease) => lease,
-        Err(_) => return Err(token), // pre-consumption pressure, exact token returned
-    };
-    let guard = owner.backend.lock_domain();
-    let mut gate = Gate {
-        owner,
-        guard: &guard,
-        history,
-        expected,
-        context_matches: authority.corresponds(owner.pinned())
-            && support::context_matches(engine, &authority.domain, 0, &authority.members),
-        publication: None,
-        refused: None,
-        calls: 0,
-        submitted: 0,
-    };
-    let route = support::invoke(engine, token, &mut |input| gate.evaluate(input));
-    let publication = gate.publication;
-    let refused = gate.refused;
-    let gate_calls = gate.calls;
-    let submitted = gate.submitted;
-    // The domain covers the synchronous QC application AND success callbacks.
-    drop(gate);
-    drop(guard);
-    let after_route = (
-        owner.backend.accounting_current(),
-        owner.backend.accounting_aggregate_current(),
-    );
-    Ok(ModelResult {
-        route,
-        publication,
-        refused,
-        gate_calls,
-        submitted,
-        after_route,
-        _coverage: coverage,
-    })
+fn adapter_charge() -> u128 {
+    let (admission, invocation, returned) = adapter_phase_charges();
+    admission.max(invocation).max(returned)
+}
+
+impl Admission<'_> {
+    fn invoke(
+        self,
+        engine: &mut BasicHotStuffEngine<[u8; 32]>,
+        authority: &Authority,
+        token: support::Token,
+        expected: u64,
+        history: &FixtureCommittedHistory,
+    ) -> ModelResult {
+        let Self { owner, coverage } = self;
+        let guard = owner.backend.lock_domain();
+        let mut gate = Gate {
+            owner,
+            guard: &guard,
+            history,
+            expected,
+            context_matches: authority.corresponds(owner.pinned())
+                && support::context_matches(engine, &authority.domain, 0, &authority.members),
+            publication: None,
+            refused: None,
+            calls: 0,
+            submitted: 0,
+        };
+        let route = support::invoke(engine, token, &mut |input| gate.evaluate(input));
+        let publication = gate.publication;
+        let refused = gate.refused;
+        let gate_calls = gate.calls;
+        let submitted = gate.submitted;
+        // The domain covers the synchronous QC application AND success callbacks.
+        drop(gate);
+        drop(guard);
+        let after_route = (
+            owner.backend.accounting_current(),
+            owner.backend.accounting_aggregate_current(),
+        );
+        ModelResult {
+            route,
+            publication,
+            refused,
+            gate_calls,
+            submitted,
+            after_route,
+            _coverage: coverage,
+        }
+    }
 }
 
 #[derive(Debug, Default)]
@@ -434,9 +469,23 @@ struct Notifications {
     validator: AtomicUsize,
     qc: AtomicUsize,
     view: AtomicUsize,
+    leader: AtomicUsize,
+    reset: AtomicUsize,
     guarded_backend: Mutex<Option<SafetyBackend>>,
 }
 impl Notifications {
+    fn sample(&self) -> [usize; 6] {
+        [
+            &self.vote,
+            &self.validator,
+            &self.qc,
+            &self.view,
+            &self.leader,
+            &self.reset,
+        ]
+        .map(|counter| counter.load(Ordering::SeqCst))
+    }
+
     fn observe_interval(&self) {
         if let Some(backend) = self.guarded_backend.lock().unwrap().as_ref() {
             assert!(
@@ -462,12 +511,188 @@ impl ConsensusProgressRecorder for Notifications {
         self.observe_interval();
         self.view.fetch_add(1, Ordering::SeqCst);
     }
-    fn record_leader_change(&self) {}
-    fn reset_current_view_votes(&self) {}
+    fn record_leader_change(&self) {
+        self.observe_interval();
+        self.leader.fetch_add(1, Ordering::SeqCst);
+    }
+    fn reset_current_view_votes(&self) {
+        self.observe_interval();
+        self.reset.fetch_add(1, Ordering::SeqCst);
+    }
 }
 impl ValidatorVoteRecorder for Notifications {
     fn on_validator_vote(&self, _: ValidatorId, _: u64) {
         self.validator.fetch_add(1, Ordering::SeqCst);
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct StorageSnapshot {
+    operational: u128,
+    aggregate: u128,
+    context: u128,
+    operational_cap: Option<u128>,
+    aggregate_cap: Option<u128>,
+    context_cap: Option<u128>,
+}
+
+impl StorageSnapshot {
+    fn capture(owner: &SafetyRecordOwner) -> Self {
+        Self::capture_backend(&owner.backend)
+    }
+
+    fn capture_backend(backend: &SafetyBackend) -> Self {
+        Self {
+            operational: backend.accounting_current(),
+            aggregate: backend.accounting_aggregate_current(),
+            context: backend.context_accounting_current(),
+            operational_cap: backend.accounting_cap(),
+            aggregate_cap: backend.accounting_aggregate_cap(),
+            context_cap: backend.context_accounting_cap(),
+        }
+    }
+
+    fn assert_occupancy(&self, owner: &SafetyRecordOwner, operational: u128, aggregate: u128) {
+        assert_eq!(
+            Self::capture(owner),
+            Self {
+                operational,
+                aggregate,
+                ..*self
+            }
+        );
+    }
+
+    fn assert_unchanged(&self, owner: &SafetyRecordOwner) {
+        self.assert_occupancy(owner, self.operational, self.aggregate);
+    }
+
+    fn assert_returned(&self, owner: &SafetyRecordOwner, result: &ModelResult) {
+        let expected = (
+            self.operational + adapter_charge(),
+            self.aggregate + adapter_charge(),
+        );
+        assert_eq!(result.after_route, expected);
+        self.assert_occupancy(owner, expected.0, expected.1);
+    }
+}
+
+struct VoteWitness {
+    vote: Vote,
+    signature_ptr: *const u8,
+    signature_capacity: usize,
+}
+
+impl VoteWitness {
+    fn capture(vote: &Vote) -> Self {
+        Self {
+            vote: vote.clone(),
+            signature_ptr: vote.signature.as_ptr(),
+            signature_capacity: vote.signature.capacity(),
+        }
+    }
+
+    fn assert_original(&self, actual: &Vote) {
+        assert!(actual == &self.vote, "complete Vote differs (redacted)");
+        assert_eq!(actual.signature.as_ptr(), self.signature_ptr);
+        assert_eq!(actual.signature.capacity(), self.signature_capacity);
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct EngineWitness {
+    effects: Effects,
+    applications: usize,
+    votes: usize,
+    notifications: [usize; 6],
+    cap: u64,
+}
+
+impl EngineWitness {
+    fn capture(f: &Fixture, vote: &Vote) -> Self {
+        Self {
+            effects: Effects::capture(&f.engine, vote.block_id),
+            applications: support::applications(&f.engine),
+            votes: support::vote_count(&f.engine, vote.height, &vote.block_id),
+            notifications: f.notifications.sample(),
+            cap: f.engine.state().max_retained_evidence_bytes(),
+        }
+    }
+
+    fn assert_unchanged(&self, f: &Fixture, vote: &Vote) {
+        assert_eq!(Self::capture(f, vote), *self);
+    }
+
+    fn assert_retained_refusal(
+        &self,
+        f: &Fixture,
+        witness: &VoteWitness,
+        report: &support::Report,
+    ) {
+        assert_eq!(report.application(), support::Application::Refused);
+        assert!(report.logical_quorum() && report.retained() && !report.duplicate());
+        assert!(!report.view_advanced());
+        let mut expected = *self;
+        expected.votes += 1;
+        expected.notifications[0] += 1;
+        expected.notifications[1] += 1;
+        assert_eq!(Self::capture(f, &witness.vote), expected);
+        witness.assert_original(
+            support::retained_vote(&f.engine, witness.vote.height, witness.vote.validator_index)
+                .unwrap(),
+        );
+    }
+
+    fn assert_success(
+        &self,
+        f: &Fixture,
+        witness: &VoteWitness,
+        result: &ModelResult,
+        duplicate: bool,
+    ) {
+        assert_eq!(
+            result.publication,
+            Some(Publication::DurableAcknowledged(f.revision + 1))
+        );
+        assert_eq!((result.gate_calls, result.submitted), (1, 1));
+        assert!(result.refused.is_none());
+        let report = result.route.as_ref().ok().unwrap();
+        assert_eq!(report.application(), support::Application::Applied);
+        assert!(report.logical_quorum() && report.view_advanced());
+        assert_eq!(report.duplicate(), duplicate);
+        assert_eq!(report.retained(), !duplicate);
+        // Consumed-Vote retries deliberately use a different genuinely signed
+        // round; the retained first Vote, not the incoming duplicate, wins.
+        assert_eq!(report.first_retained_conflict(), duplicate);
+        assert_eq!(report.wire().unwrap().round, witness.vote.round);
+        let actual = Self::capture(f, &witness.vote);
+        assert_eq!(actual.applications, self.applications + 1);
+        assert_eq!(
+            actual.votes,
+            if duplicate {
+                self.votes
+            } else {
+                self.votes + 1
+            }
+        );
+        assert_eq!(actual.cap, self.cap);
+        assert_eq!(
+            actual.notifications,
+            self.notifications.map(|count| count + 1)
+        );
+        assert_eq!(
+            actual.effects,
+            Effects {
+                lock: Some((witness.vote.block_id, witness.vote.height)),
+                own_qc: true,
+                view: self.effects.view + 1,
+                ..self.effects
+            }
+        );
+        witness.assert_original(
+            support::retained_vote(&f.engine, witness.vote.height, witness.vote.validator_index)
+                .unwrap(),
+        );
     }
 }
 
@@ -520,17 +745,17 @@ impl Fixture {
         support::admit(&mut self.engine, ValidatorId(signer as u64), vote).unwrap()
     }
     fn run(&mut self, token: support::Token) -> ModelResult {
-        match compose(
-            &self.owner,
+        let storage = StorageSnapshot::capture(&self.owner);
+        let admission = admit_composition(&self.owner).expect("adapter admission");
+        let result = admission.invoke(
             &mut self.engine,
             &self.authority,
             token,
             self.revision,
             &self.history,
-        ) {
-            Ok(result) => result,
-            Err(_) => panic!("unexpected adapter admission refusal"),
-        }
+        );
+        storage.assert_returned(&self.owner, &result);
+        result
     }
     fn seed(&mut self, view: u64) {
         for signer in 0..3 {
@@ -550,8 +775,7 @@ impl Fixture {
                 assert_eq!(report.application(), support::Application::NotAttempted);
                 assert_eq!(result.gate_calls, 0);
             }
-            drop(result);
-            assert_eq!(self.owner.backend.accounting_current(), 0);
+            self.assert_released(result);
         }
     }
     fn ready(&mut self, view: u64, mixed: bool) -> support::Token {
@@ -563,15 +787,15 @@ impl Fixture {
         self.token(2, view, 9)
     }
     fn assert_released(&self, result: ModelResult) {
-        let context = self.owner.backend.context_accounting_current();
+        let storage = StorageSnapshot::capture(&self.owner);
         assert_eq!(
-            result.after_route,
-            (adapter_charge(), context + adapter_charge())
+            (storage.operational, storage.aggregate),
+            (adapter_charge(), storage.context + adapter_charge())
         );
+        assert_eq!(result.after_route, (storage.operational, storage.aggregate));
         drop(result);
         // Before any diagnostic readback allocation.
-        assert_eq!(self.owner.backend.accounting_current(), 0);
-        assert_eq!(self.owner.backend.accounting_aggregate_current(), context);
+        storage.assert_occupancy(&self.owner, 0, storage.context);
     }
     fn read(&self) -> ValidatedRecord {
         self.owner.read_validate(Some(&self.history)).unwrap()
@@ -856,8 +1080,8 @@ fn stale_revision_context_and_durable_engine_mismatch_refuse_before_submission()
         let bad_authority = Authority::new();
         let apps = support::applications(&f.engine);
         let effects = Effects::capture(&f.engine, IDS[1]);
-        let result = compose(
-            &f.owner,
+        let storage = StorageSnapshot::capture(&f.owner);
+        let result = admit_composition(&f.owner).unwrap().invoke(
             &mut f.engine,
             if mode == 2 {
                 &bad_authority
@@ -867,9 +1091,8 @@ fn stale_revision_context_and_durable_engine_mismatch_refuse_before_submission()
             token,
             f.revision,
             &f.history,
-        )
-        .ok()
-        .unwrap();
+        );
+        storage.assert_returned(&f.owner, &result);
         assert_eq!(
             result.refused,
             Some([Refused::Revision, Refused::Lock, Refused::Context][mode])
@@ -966,22 +1189,29 @@ fn bootstrap_storage_does_not_hide_an_existing_engine_lock() {
     let owner = SafetyRecordOwner::attach(backend, f.authority.pinned()).unwrap();
     let revision = owner.initialize(true).unwrap();
     let before = Effects::capture(&f.engine, IDS[1]);
-    let result = compose(
-        &owner,
+    let ledger = support::ledger(&f.engine);
+    let consensus_before = ledger.sample();
+    let storage = StorageSnapshot::capture(&owner);
+    let result = admit_composition(&owner).unwrap().invoke(
         &mut f.engine,
         &f.authority,
         token,
         revision,
         &f.history,
-    )
-    .ok()
-    .unwrap();
+    );
+    storage.assert_returned(&owner, &result);
     assert_eq!(result.refused, Some(Refused::Lock));
     assert_eq!(result.submitted, 0);
     assert!(result.publication.is_none());
     assert_eq!(Effects::capture(&f.engine, IDS[1]), before);
+    assert_report_ledger(
+        &ledger,
+        consensus_before,
+        result.route.as_ref().ok().unwrap(),
+    );
     drop(result);
-    assert_eq!(owner.backend.accounting_current(), 0);
+    storage.assert_unchanged(&owner);
+    assert_retained_ledger(&ledger, consensus_before);
 }
 
 #[test]
@@ -1011,22 +1241,29 @@ fn incompatible_pinned_profile_fields_refuse_before_submission() {
         let revision = owner.initialize(true).unwrap();
         let token = f.ready(1, false);
         let apps = support::applications(&f.engine);
-        let result = compose(
-            &owner,
+        let ledger = support::ledger(&f.engine);
+        let consensus_before = ledger.sample();
+        let storage = StorageSnapshot::capture(&owner);
+        let result = admit_composition(&owner).unwrap().invoke(
             &mut f.engine,
             &f.authority,
             token,
             revision,
             &f.history,
-        )
-        .ok()
-        .unwrap();
+        );
+        storage.assert_returned(&owner, &result);
         assert_eq!(result.refused, Some(Refused::Context));
         assert_eq!(result.submitted, 0);
         assert!(result.publication.is_none());
         assert_eq!(support::applications(&f.engine), apps);
+        assert_report_ledger(
+            &ledger,
+            consensus_before,
+            result.route.as_ref().ok().unwrap(),
+        );
         drop(result);
-        assert_eq!(owner.backend.accounting_current(), 0);
+        storage.assert_unchanged(&owner);
+        assert_retained_ledger(&ledger, consensus_before);
     }
 }
 
@@ -1087,13 +1324,35 @@ fn existing_anchor_is_preserved_and_requires_independent_history() {
     assert_eq!(refused.submitted, 0);
     f.assert_released(refused);
     f.history = FixtureCommittedHistory::new().with(IDS[0], 0);
+    let storage = StorageSnapshot::capture(&f.owner);
+    let ledger = support::ledger(&f.engine);
+    let retained_before = ledger.sample();
     let token = f.token(2, 4, 9);
+    let token_bytes = support::token_inline_bytes() + token.vote().signature.capacity() as u64;
+    let consensus_before = ledger.sample();
     let result = f.run(token);
+    // Both storage ledgers and their independently sampled ceilings are checked
+    // at return, BEFORE diagnostic readback admits any loader objects.
+    storage.assert_returned(&f.owner, &result);
     assert_eq!(
         result.route.as_ref().ok().unwrap().application(),
         support::Application::Applied
     );
     assert_eq!(f.engine.committed_block(), Some(&IDS[1]));
+    let report = result.route.as_ref().ok().unwrap();
+    assert!(report.duplicate());
+    let (a, p) = report.charges();
+    assert_eq!(
+        ledger.sample(),
+        (
+            consensus_before.0 + a + p - token_bytes,
+            0,
+            consensus_before.2,
+            0,
+            consensus_before.4 + 1,
+            0,
+        )
+    );
     let proof = f.read();
     let SafetyRecord::Locked(lock) = &proof.retained().record else {
         panic!("locked");
@@ -1107,48 +1366,53 @@ fn existing_anchor_is_preserved_and_requires_independent_history() {
     );
     assert_eq!(proof.evidence_status(), EvidenceStatus::Unverified);
     drop(proof);
+    storage.assert_returned(&f.owner, &result);
     f.assert_released(result);
+    storage.assert_unchanged(&f.owner);
+    assert_eq!(ledger.sample(), retained_before);
 }
 
 #[test]
 fn consensus_preparation_pressure_returns_original_token_and_restores_ledgers() {
     let mut f = Fixture::new();
     let token = f.ready(1, false);
-    let ptr = token.vote().signature.as_ptr();
-    let capacity = token.vote().signature.capacity();
+    let witness = VoteWitness::capture(token.vote());
     let ledger = support::ledger(&f.engine);
     let before = ledger.sample();
+    let storage = StorageSnapshot::capture(&f.owner);
     let original_cap = f.engine.state().max_retained_evidence_bytes();
-    let apps = support::applications(&f.engine);
     support::set_cap(&mut f.engine, before.0);
+    let engine = EngineWitness::capture(&f, &witness.vote);
     let result = f.run(token);
+    storage.assert_returned(&f.owner, &result);
     assert_eq!((result.gate_calls, result.submitted), (0, 0));
+    assert!(result.publication.is_none() && result.refused.is_none());
     let refusal = result.route.as_ref().err().unwrap();
     assert!(refusal.preparation_pressure());
-    assert_eq!(
-        (
-            refusal.vote().signature.as_ptr(),
-            refusal.vote().signature.capacity()
-        ),
-        (ptr, capacity)
-    );
+    witness.assert_original(refusal.vote());
     assert_eq!(ledger.sample(), before);
-    assert_eq!(support::applications(&f.engine), apps);
-    assert_eq!(support::vote_count(&f.engine, 1, &IDS[0]), 2);
+    engine.assert_unchanged(&f, &witness.vote);
+    assert!(support::retained_vote(&f.engine, 1, 2).is_none());
     let ModelResult {
         route, _coverage, ..
     } = result;
     let token = route.err().unwrap().into_token();
     drop(_coverage);
-    assert_eq!(f.owner.backend.accounting_current(), 0);
+    witness.assert_original(token.vote());
+    storage.assert_unchanged(&f.owner);
+    assert_eq!(ledger.sample(), before);
+    engine.assert_unchanged(&f, &witness.vote);
     support::set_cap(&mut f.engine, original_cap);
     assert_eq!(f.engine.state().max_retained_evidence_bytes(), original_cap);
+    let retry_engine = EngineWitness::capture(&f, &witness.vote);
     let result = f.run(token);
-    assert_eq!(
-        result.route.as_ref().ok().unwrap().application(),
-        support::Application::Applied
-    );
+    storage.assert_returned(&f.owner, &result);
+    retry_engine.assert_success(&f, &witness, &result, false);
+    assert_report_ledger(&ledger, before, result.route.as_ref().ok().unwrap());
     f.assert_released(result);
+    storage.assert_unchanged(&f.owner);
+    assert_retained_ledger(&ledger, before);
+    assert_eq!(f.engine.state().max_retained_evidence_bytes(), original_cap);
 }
 
 #[test]
@@ -1156,12 +1420,12 @@ fn adapter_candidate_and_o4_pressure_are_distinct_and_cleanup_is_immediate() {
     for boundary in 0..3 {
         let mut f = Fixture::new();
         let token = f.ready(1, false);
-        let ptr = token.vote().signature.as_ptr();
-        let capacity = token.vote().signature.capacity();
+        let witness = VoteWitness::capture(token.vote());
         let ledger = support::ledger(&f.engine);
         let before = ledger.sample();
-        let context = f.owner.backend.context_accounting_current();
-        let cap = f.owner.backend.accounting_aggregate_cap().unwrap();
+        let storage = StorageSnapshot::capture(&f.owner);
+        let engine = EngineWitness::capture(&f, &witness.vote);
+        let cap = storage.aggregate_cap.unwrap();
         // Leave exact space for successively deeper real admissions.
         let loader = f.owner.retained_holder_charge().unwrap()
             + max_transient_decoded_working_set(f.owner.pinned())
@@ -1179,45 +1443,57 @@ fn adapter_candidate_and_o4_pressure_are_distinct_and_cleanup_is_immediate() {
             .owner
             .backend
             .accounting()
-            .reserve(cap - context - leave)
+            .reserve(cap - storage.aggregate - leave)
             .unwrap();
-        let result = compose(
+        storage.assert_occupancy(
             &f.owner,
-            &mut f.engine,
-            &f.authority,
-            token,
-            f.revision,
-            &f.history,
+            storage.operational + held.charge(),
+            storage.aggregate + held.charge(),
         );
+        let pressure_storage = StorageSnapshot::capture(&f.owner);
+        // The token stays in this caller's slot during admission. In
+        // particular the failure carrier cannot contain a ModelResult.
+        let admission = admit_composition(&f.owner);
         if boundary == 0 {
-            let token = result.err().expect("adapter must refuse");
-            assert_eq!(
-                (
-                    token.vote().signature.as_ptr(),
-                    token.vote().signature.capacity()
-                ),
-                (ptr, capacity)
-            );
+            assert!(matches!(admission, Err(AdmissionRefusal::Capacity)));
+            witness.assert_original(token.vote());
             assert_eq!(ledger.sample(), before);
+            pressure_storage.assert_unchanged(&f.owner);
+            engine.assert_unchanged(&f, &witness.vote);
+            assert!(support::retained_vote(&f.engine, 1, 2).is_none());
             drop(held);
-            assert_eq!(f.owner.backend.accounting_current(), 0);
-            let result = f.run(token);
-            f.assert_released(result);
-        } else {
-            let result = result.ok().unwrap();
-            let report = result.route.as_ref().ok().unwrap();
-            let (a, p) = report.charges();
-            assert_eq!(
-                ledger.sample(),
-                (
-                    before.0 + a + p - support::token_inline_bytes(),
-                    0,
-                    before.2,
-                    0,
-                    before.4 + 1,
-                    0,
-                )
+            storage.assert_unchanged(&f.owner);
+            engine.assert_unchanged(&f, &witness.vote);
+            assert_eq!(ledger.sample(), before);
+            let admission = admit_composition(&f.owner).unwrap();
+            storage.assert_occupancy(
+                &f.owner,
+                storage.operational + adapter_charge(),
+                storage.aggregate + adapter_charge(),
             );
+            witness.assert_original(token.vote());
+            engine.assert_unchanged(&f, &witness.vote);
+            assert_eq!(ledger.sample(), before);
+            let result =
+                admission.invoke(&mut f.engine, &f.authority, token, f.revision, &f.history);
+            storage.assert_returned(&f.owner, &result);
+            engine.assert_success(&f, &witness, &result, false);
+            assert_report_ledger(&ledger, before, result.route.as_ref().ok().unwrap());
+            f.assert_released(result);
+            storage.assert_unchanged(&f.owner);
+            assert_retained_ledger(&ledger, before);
+        } else {
+            let result = admission.unwrap().invoke(
+                &mut f.engine,
+                &f.authority,
+                token,
+                f.revision,
+                &f.history,
+            );
+            pressure_storage.assert_returned(&f.owner, &result);
+            let report = result.route.as_ref().ok().unwrap();
+            assert_report_ledger(&ledger, before, report);
+            engine.assert_retained_refusal(&f, &witness, report);
             if boundary == 1 {
                 assert!(result.publication.is_none());
                 assert_eq!(result.refused, Some(Refused::CandidatePressure));
@@ -1228,30 +1504,73 @@ fn adapter_candidate_and_o4_pressure_are_distinct_and_cleanup_is_immediate() {
                 assert_eq!(result.submitted, 1);
             }
             drop(result);
+            assert_retained_ledger(&ledger, before);
+            pressure_storage.assert_unchanged(&f.owner);
+            drop(held);
+            storage.assert_unchanged(&f.owner);
+            let retry_engine = EngineWitness::capture(&f, &witness.vote);
+            let token = f.token(2, 1, 19);
+            let retry_ledger = ledger.sample();
+            let result = f.run(token);
+            storage.assert_returned(&f.owner, &result);
+            retry_engine.assert_success(&f, &witness, &result, true);
+            // A duplicate consumes its own token/signature, while the
+            // original retained Vote remains. Report coverage is independent.
+            let (a, p) = result.route.as_ref().ok().unwrap().charges();
             assert_eq!(
                 ledger.sample(),
                 (
-                    before.0 - support::token_inline_bytes(),
+                    retry_ledger.0 + a + p
+                        - support::token_inline_bytes()
+                        - witness.signature_capacity as u64,
                     0,
-                    before.2,
+                    retry_ledger.2,
                     0,
-                    before.4,
+                    retry_ledger.4 + 1,
                     0,
                 )
             );
-            assert_eq!(f.owner.backend.accounting_current(), held.charge());
-            assert_eq!(
-                f.owner.backend.accounting_aggregate_current(),
-                context + held.charge()
-            );
-            assert_eq!(ledger.sample().1, 0);
-            assert_eq!(ledger.sample().4, 0);
-            drop(held);
-            let token = f.token(2, 1, 9);
-            let result = f.run(token);
             f.assert_released(result);
+            storage.assert_unchanged(&f.owner);
+            assert_retained_ledger(&ledger, before);
         }
     }
+}
+
+fn assert_report_ledger(
+    ledger: &support::Ledger,
+    before: (u64, u64, usize, usize, usize, usize),
+    report: &support::Report,
+) {
+    let (a, p) = report.charges();
+    assert_eq!(
+        ledger.sample(),
+        (
+            before.0 + a + p - support::token_inline_bytes(),
+            0,
+            before.2,
+            0,
+            before.4 + 1,
+            0,
+        )
+    );
+}
+
+fn assert_retained_ledger(
+    ledger: &support::Ledger,
+    before: (u64, u64, usize, usize, usize, usize),
+) {
+    assert_eq!(
+        ledger.sample(),
+        (
+            before.0 - support::token_inline_bytes(),
+            0,
+            before.2,
+            0,
+            before.4,
+            0,
+        )
+    );
 }
 
 #[test]
@@ -1259,21 +1578,28 @@ fn existing_post_ack_hook_unwind_releases_both_ledgers() {
     let mut f = Fixture::new();
     let token = f.ready(1, false);
     let ledger = support::ledger(&f.engine);
-    let context = f.owner.backend.context_accounting_current();
+    let storage = StorageSnapshot::capture(&f.owner);
     f.owner.backend.set_pre_effective_hook(Arc::new(|_, _| {
         panic!("existing post-ack hook test unwind")
     }));
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| f.run(token)));
     assert!(result.is_err());
-    assert_eq!(f.owner.backend.accounting_current(), 0);
-    assert_eq!(f.owner.backend.accounting_aggregate_current(), context);
+    storage.assert_unchanged(&f.owner);
     let sample = ledger.sample();
     assert_eq!((sample.1, sample.3, sample.4, sample.5), (0, 0, 0, 0));
     // Poisoned owner is not reused or silently recovered.
     let backend = f.owner.backend.clone();
     drop(f);
     assert_eq!(ledger.sample(), support::empty_ledger_floor());
-    assert_eq!(backend.accounting_aggregate_current(), 0);
+    assert_eq!(
+        StorageSnapshot::capture_backend(&backend),
+        StorageSnapshot {
+            operational: 0,
+            aggregate: 0,
+            context: 0,
+            ..storage
+        }
+    );
 }
 
 #[test]
@@ -1301,6 +1627,14 @@ fn ownership_phase_operands_and_independent_final_floors() {
         size_of::<Result<ValidatedRecord, super::super::decision_capture::CurrentLoadFailure>>(),
         size_of::<std::sync::MutexGuard<'static, super::super::backend::SerializationDomain>>(),
         size_of::<Reservation>());
+    let (admission, invocation, returned) = adapter_phase_charges();
+    println!("corrected carrier layouts: admission_owner={} admission_result={} admission_diagnostic={} reserve_result={} invocation_result={} route_result={} returned_owner={}",
+        size_of::<Admission<'static>>(), size_of::<Result<Admission<'static>, AdmissionRefusal>>(),
+        size_of::<AdmissionRefusal>(), size_of::<Result<Reservation, SafetyStoreError>>(),
+        size_of::<ModelResult>(), size_of::<Result<support::Report, support::Refusal>>(),
+        size_of::<ModelResult>());
+    println!("corrected control phase bounds: admission={admission} invocation={invocation} returned_conversion={returned} selected={a}");
+    assert!(size_of::<Result<Admission<'static>, AdmissionRefusal>>() < size_of::<ModelResult>());
     println!(
         "source phase bounds: loader={} candidate={} O4={} returned={} aggregate_cap={}",
         context + a + c + loader,
@@ -1311,7 +1645,9 @@ fn ownership_phase_operands_and_independent_final_floors() {
     );
     let token = f.ready(1, false);
     let ledger = support::ledger(&f.engine);
+    let storage = StorageSnapshot::capture(&f.owner);
     let result = f.run(token);
+    storage.assert_returned(&f.owner, &result);
     let report_live = ledger.sample();
     let charges = result.route.as_ref().ok().unwrap().charges();
     assert_eq!(
@@ -1328,6 +1664,7 @@ fn ownership_phase_operands_and_independent_final_floors() {
         o4_live.total()
     );
     f.assert_released(result);
+    storage.assert_unchanged(&f.owner);
     let standing = ledger.sample();
     assert_eq!(
         (standing.1, standing.3, standing.4, standing.5),
@@ -1338,7 +1675,13 @@ fn ownership_phase_operands_and_independent_final_floors() {
     assert_eq!(ledger.sample(), support::empty_ledger_floor());
     println!("independent consensus floors: standing={standing:?} observer_only={:?}; storage final=0 context final=0 aggregate final=0",
         ledger.sample());
-    assert_eq!(backend.accounting_current(), 0);
-    assert_eq!(backend.context_accounting_current(), 0);
-    assert_eq!(backend.accounting_aggregate_current(), 0);
+    assert_eq!(
+        StorageSnapshot::capture_backend(&backend),
+        StorageSnapshot {
+            operational: 0,
+            aggregate: 0,
+            context: 0,
+            ..storage
+        }
+    );
 }
