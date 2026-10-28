@@ -1521,6 +1521,118 @@ pub(crate) struct ReceivedVoteQcEventSummary {
     pub(crate) evidence: ReceivedVoteEvidenceDisposition,
     pub(crate) view_advanced: bool,
     pub(crate) qc: Option<ReceivedVoteQcSummary>,
+    pub(crate) application: ReceivedQcApplication,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ReceivedQcGateRefusal {
+    PublicationUnavailable,
+    PolicyRefused,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ReceivedQcGateDecision {
+    Allow,
+    Refuse(ReceivedQcGateRefusal),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum ReceivedQcApplication {
+    Ungated,
+    NotAttempted,
+    Suppressed(ReceivedVoteQcIncomplete),
+    Refused(ReceivedQcGateRefusal),
+    Attempted(Result<(), QcValidationError>),
+}
+
+/// Invocation-bound historical evidence; Allow is not a durable acknowledgement.
+pub(crate) struct ReceivedQcEffectView<'a> {
+    logical: &'a QuorumCertificate<[u8; 32]>,
+    wire: &'a qbind_wire::consensus::QuorumCertificate,
+    locked: Option<ReceivedVoteQcSummary>,
+    target_own_qc: Option<&'a QuorumCertificate<[u8; 32]>>,
+    committed_block: Option<&'a [u8; 32]>,
+    committed_height: Option<u64>,
+    commit_log: &'a [CommittedEntry<[u8; 32]>],
+    current_view: u64,
+}
+
+impl ReceivedQcEffectView<'_> {
+    pub(crate) fn logical(&self) -> &QuorumCertificate<[u8; 32]> { self.logical }
+    pub(crate) fn wire(&self) -> &qbind_wire::consensus::QuorumCertificate { self.wire }
+    pub(crate) fn locked(&self) -> Option<ReceivedVoteQcSummary> { self.locked }
+    pub(crate) fn target_own_qc(&self) -> Option<&QuorumCertificate<[u8; 32]>> {
+        self.target_own_qc
+    }
+    pub(crate) fn committed_block(&self) -> Option<&[u8; 32]> { self.committed_block }
+    pub(crate) fn committed_height(&self) -> Option<u64> { self.committed_height }
+    pub(crate) fn commit_log(&self) -> &[CommittedEntry<[u8; 32]>] { self.commit_log }
+    pub(crate) fn current_view(&self) -> u64 { self.current_view }
+}
+
+pub(crate) trait ReceivedQcEffectGate {
+    fn evaluate(&mut self, input: ReceivedQcEffectView<'_>) -> ReceivedQcGateDecision;
+}
+
+struct ReceivedQcGateAdapter<'a> {
+    gate: &'a mut dyn ReceivedQcEffectGate,
+    candidate: &'a ReceivedVoteQcCandidateSeal,
+    wire: Option<&'a ReceivedVoteQcWire>,
+    incomplete: Option<ReceivedVoteQcIncomplete>,
+    roster_len: usize,
+    current_view: u64,
+    application: ReceivedQcApplication,
+}
+
+impl crate::hotstuff_state_engine::VoteQcEffectGate<[u8; 32]> for ReceivedQcGateAdapter<'_> {
+    fn allow(
+        &mut self,
+        state: &HotStuffStateEngine<[u8; 32]>,
+        qc: &QuorumCertificate<[u8; 32]>,
+    ) -> bool {
+        let incomplete = if !qc_matches_projected_membership(
+            qc, &self.candidate.membership, self.candidate.projected_count,
+            self.roster_len, self.candidate.view, self.candidate.block_id,
+        ) {
+            Some(compare_actual_qc_failure(
+                qc, &self.candidate.membership, self.candidate.projected_count,
+                self.roster_len, self.candidate.view, self.candidate.block_id,
+            ))
+        } else {
+            self.incomplete
+        };
+        if let Some(reason) = incomplete {
+            self.application = ReceivedQcApplication::Suppressed(reason);
+            return false;
+        }
+        let Some(wire) = self.wire else {
+            self.application = ReceivedQcApplication::Suppressed(
+                ReceivedVoteQcIncomplete::MissingEvidence(0),
+            );
+            return false;
+        };
+        let input = ReceivedQcEffectView {
+            logical: qc,
+            wire: wire.qc(),
+            locked: state.locked_qc().map(|locked| ReceivedVoteQcSummary {
+                block_id: locked.block_id,
+                view: locked.view,
+                signer_count: locked.signers.len(),
+            }),
+            target_own_qc: state.get_block(&qc.block_id).and_then(|block| block.own_qc.as_ref()),
+            committed_block: state.committed_block(),
+            committed_height: state.committed_height(),
+            commit_log: state.commit_log(),
+            current_view: self.current_view,
+        };
+        match self.gate.evaluate(input) {
+            ReceivedQcGateDecision::Allow => true,
+            ReceivedQcGateDecision::Refuse(reason) => {
+                self.application = ReceivedQcApplication::Refused(reason);
+                false
+            }
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1618,6 +1730,25 @@ struct ReceivedVoteQcRouteControlFrame {
     still_retained: bool,
     view_advanced: bool,
     correspondence_matches: bool,
+}
+
+struct ReceivedQcGateControlFrame {
+    borrowed_gate: Option<&'static mut dyn ReceivedQcEffectGate>,
+    adapter: Option<ReceivedQcGateAdapter<'static>>,
+    adapter_borrow: Option<&'static mut ReceivedQcGateAdapter<'static>>,
+    state_gate: Option<&'static mut dyn crate::hotstuff_state_engine::VoteQcEffectGate<[u8; 32]>>,
+    state_borrow: Option<&'static HotStuffStateEngine<[u8; 32]>>,
+    input: Option<ReceivedQcEffectView<'static>>,
+    input_argument: Option<ReceivedQcEffectView<'static>>,
+    logical_borrow: Option<&'static QuorumCertificate<[u8; 32]>>,
+    application: ReceivedQcApplication,
+    application_return: Option<Result<(), QcValidationError>>,
+    state_result: Option<(VoteMutationReport<[u8; 32]>, Option<Result<(), QcValidationError>>)>,
+    route_result: Option<(VoteMutationReport<[u8; 32]>, ReceivedQcApplication)>,
+    lock_summary: Option<ReceivedVoteQcSummary>,
+    incomplete: Option<ReceivedVoteQcIncomplete>,
+    decision: Option<ReceivedQcGateDecision>,
+    allow_result: bool,
 }
 
 /// Peer-learned certified block material used by restore catchup.
@@ -2706,6 +2837,11 @@ fn received_vote_qc_control_charge() -> Result<u64, ReceivedVoteQcStageError> {
     let admission = qc_admission_control_frame_bytes()?;
     route
         .checked_add(admission.max(buffer))
+        .and_then(|bytes| {
+            u64::try_from(std::mem::size_of::<ReceivedQcGateControlFrame>())
+                .ok()
+                .and_then(|gate| bytes.checked_add(gate))
+        })
         .ok_or(ReceivedVoteQcStageError::Arithmetic)
 }
 
@@ -2791,6 +2927,22 @@ impl BasicHotStuffEngine<[u8; 32]> {
     pub(crate) fn invoke_verified_received_vote_qc(
         &mut self,
         token: VerifiedVoteToken,
+    ) -> Result<ReceivedVoteQcReport, ReceivedVoteQcRefusal> {
+        self.invoke_received_vote_qc_inner(token, None)
+    }
+
+    pub(crate) fn invoke_verified_received_vote_qc_effect_gated(
+        &mut self,
+        token: VerifiedVoteToken,
+        gate: &mut dyn ReceivedQcEffectGate,
+    ) -> Result<ReceivedVoteQcReport, ReceivedVoteQcRefusal> {
+        self.invoke_received_vote_qc_inner(token, Some(gate))
+    }
+
+    fn invoke_received_vote_qc_inner(
+        &mut self,
+        token: VerifiedVoteToken,
+        gate: Option<&mut dyn ReceivedQcEffectGate>,
     ) -> Result<ReceivedVoteQcReport, ReceivedVoteQcRefusal> {
         let preflight = match self.preflight_verified_received_vote(&token) {
             Ok(preflight) => preflight,
@@ -2942,7 +3094,27 @@ impl BasicHotStuffEngine<[u8; 32]> {
 
         #[cfg(test)]
         RECEIVED_VOTE_LOGICAL_INVOCATIONS.with(|count| count.set(count.get() + 1));
-        let report = self.state.on_vote_detailed(voter, view, &block_id);
+        let (report, application) = if let Some(gate) = gate {
+            let mut adapter = ReceivedQcGateAdapter {
+                gate,
+                candidate: &candidate,
+                wire: wire.as_ref(),
+                incomplete: staged_incomplete,
+                roster_len: self.state.validators().len(),
+                current_view: self.current_view,
+                application: ReceivedQcApplication::NotAttempted,
+            };
+            let (report, attempted) = self.state.on_vote_detailed_effect_gated(
+                voter, view, &block_id, &mut adapter,
+            );
+            let application = match attempted {
+                Some(result) => ReceivedQcApplication::Attempted(result),
+                None => adapter.application,
+            };
+            (report, application)
+        } else {
+            (self.state.on_vote_detailed(voter, view, &block_id), ReceivedQcApplication::Ungated)
+        };
         let evidence = match preflight.plan {
             VoteEvidencePlan::NewEntry { slot } => {
                 if !report.is_equivocation()
@@ -2999,12 +3171,17 @@ impl BasicHotStuffEngine<[u8; 32]> {
             }
         };
 
-        let view_advanced = if report.qc.is_ok() {
+        let qc_success = matches!(
+            &application, ReceivedQcApplication::Ungated | ReceivedQcApplication::Attempted(Ok(())),
+        );
+        let view_advanced = if report.qc.is_ok()
+            && !matches!(&application, ReceivedQcApplication::Attempted(Err(_)))
+        {
             self.finish_successful_vote_event(
                 voter,
                 view,
                 &report.history,
-                report.qc.as_ref().ok().and_then(Option::as_ref),
+                if qc_success { report.qc.as_ref().ok().and_then(Option::as_ref) } else { None },
             )
         } else {
             false
@@ -3066,6 +3243,7 @@ impl BasicHotStuffEngine<[u8; 32]> {
                 evidence,
                 view_advanced,
                 qc: qc_summary,
+                application,
             },
             outcome,
             provenance,
@@ -5041,7 +5219,7 @@ mod tests {
     use crate::validator_set::ValidatorSetEntry;
     use qbind_crypto::ml_dsa44::MlDsa44Backend;
     use std::collections::HashMap;
-    use std::sync::Arc;
+    use std::sync::{Arc, Mutex};
 
     const TEST_WIRE_CHAIN: u32 = 7;
 
@@ -5765,23 +5943,62 @@ mod tests {
         callbacks: Arc<std::sync::atomic::AtomicUsize>,
         domain: qbind_wire::pv_signing_domain::ProposalVoteSigningDomainV2,
         keys: ContextTestKeys,
+        incoming_secret: Vec<u8>,
     }
 
     impl QcCorrectionFixture {
         fn new() -> Self {
+            Self::with_effect_options(false, false, false)
+        }
+
+        fn with_effect_options(chain: bool, mixed: bool, evict_history: bool) -> Self {
+            Self::with_effect_seed(chain, mixed, evict_history, false)
+        }
+
+        fn with_effect_seed(chain: bool, mixed: bool, evict_history: bool, legacy: bool) -> Self {
             let keypairs: Vec<_> = (0..4)
                 .map(|_| MlDsa44Backend::generate_keypair().expect("test keygen"))
                 .collect();
             let domain = qbind_wire::pv_signing_domain::ProposalVoteSigningDomainV2::try_new(
                 qbind_types::QBIND_DEVNET_CHAIN_ID, TEST_WIRE_CHAIN, [0xD1; 32], [0xD2; 32],
             ).unwrap();
-            let mut engine = BasicHotStuffEngine::new(ValidatorId(0), dense_validator_set(4));
+            let limits = crate::vote_accumulator::ConsensusLimitsConfig {
+                max_votes_by_view_entries: if evict_history { 2 } else { 1024 },
+                ..crate::vote_accumulator::ConsensusLimitsConfig::default()
+            };
+            let mut engine = BasicHotStuffEngine::with_state_limits(
+                ValidatorId(0), dense_validator_set(4), limits,
+            );
             engine.install_received_vote_context(
                 multi_member_vote_context(&keypairs, 0, &domain),
             ).unwrap();
+            let target_view = if chain { 3 } else { 1 };
+            if chain {
+                let grandparent = [0xD1; 32];
+                let parent = [0xD2; 32];
+                engine.state.register_block(grandparent, 1, None, None);
+                engine.state.register_block(parent, 2, Some(grandparent), None);
+                engine.state.register_block([0xD3; 32], 3, Some(parent), None);
+                for (id, view) in [(grandparent, 1), (parent, 2)] {
+                    for (index, (_, secret)) in keypairs.iter().enumerate().take(3) {
+                        let vote = signed_member_vote(0, index as u16, view, 9, id, secret, &domain);
+                        let token = engine.admit_verified_received_vote(
+                            ValidatorId(index as u64), vote,
+                        ).unwrap();
+                        let _ = engine.invoke_verified_received_vote_qc(token).unwrap();
+                    }
+                }
+                assert_eq!(engine.locked_qc().unwrap().view, 2);
+                assert!(engine.committed_block().is_none());
+            }
             for index in 0usize..2 {
+                if legacy && index == 0 {
+                    let _ = engine.state.on_vote_detailed(ValidatorId(0), target_view, &[0xD3; 32]);
+                    continue;
+                }
                 let vote = signed_member_vote(
-                    0, index as u16, 1, 9, [0xD3; 32], &keypairs[index].1, &domain,
+                    0, index as u16, target_view, if mixed && index == 0 { 10 } else { 9 },
+                    [0xD3; 32], &keypairs[index].1, &domain,
                 );
                 let token = engine.admit_verified_received_vote(
                     ValidatorId(index as u64), vote,
@@ -5789,16 +6006,17 @@ mod tests {
                 let report = engine.invoke_verified_received_vote_qc(token).unwrap();
                 assert!(matches!(report.outcome(), ReceivedVoteQcOutcome::NoQc));
             }
-            let vote = signed_member_vote(0, 2, 1, 9, [0xD3; 32], &keypairs[2].1, &domain);
+            let vote = signed_member_vote(0, 2, target_view, 9, [0xD3; 32], &keypairs[2].1, &domain);
             let token = engine.admit_verified_received_vote(ValidatorId(2), vote).unwrap();
             let observer = engine.state.received_vote_budget().unwrap().try_clone().unwrap();
             let callbacks = Arc::new(std::sync::atomic::AtomicUsize::new(0));
             engine.set_progress_recorder(Arc::new(QcCorrectionCallbacks(Arc::clone(&callbacks))));
             engine.set_validator_vote_recorder(Arc::new(QcCorrectionCallbacks(Arc::clone(&callbacks))));
+            let incoming_secret = keypairs[2].1.clone();
             let keys = ContextTestKeys(keypairs.into_iter().enumerate().map(|(index, (key, _))| {
                 (ValidatorId(index as u64), (qbind_crypto::SUITE_PQ_RESERVED_1, key))
             }).collect());
-            Self { engine, token: Some(token), observer, callbacks, domain, keys }
+            Self { engine, token: Some(token), observer, callbacks, domain, keys, incoming_secret }
         }
 
         fn invoke(&mut self) -> Result<ReceivedVoteQcReport, ReceivedVoteQcRefusal> {
@@ -5986,6 +6204,456 @@ mod tests {
         assert_eq!(releases[2].2, (independent_baseline.0 + a, 0, 0, 0, 1, 0));
         assert_eq!(fixture.observer.full_occupancy_for_test(), independent_baseline);
         println!("corrected QC owners: A={a} P={p} detached={detached:?} final={independent_baseline:?}");
+    }
+
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    struct QcEffectSnapshot {
+        lock: Option<QuorumCertificate<[u8; 32]>>,
+        own_qc: Option<QuorumCertificate<[u8; 32]>>,
+        committed: Option<[u8; 32]>,
+        height: Option<u64>,
+        log: Vec<CommittedEntry<[u8; 32]>>,
+        view: u64,
+    }
+
+    impl QcEffectSnapshot {
+        fn capture(engine: &BasicHotStuffEngine<[u8; 32]>) -> Self {
+            Self {
+                lock: engine.locked_qc().cloned(),
+                own_qc: engine.state.get_block(&[0xD3; 32]).and_then(|b| b.own_qc.clone()),
+                committed: engine.committed_block().copied(),
+                height: engine.committed_height(),
+                log: engine.commit_log().to_vec(),
+                view: engine.current_view(),
+            }
+        }
+    }
+
+    struct EffectProbe<'a> {
+        before: QcEffectSnapshot,
+        decision: ReceivedQcGateDecision,
+        calls: usize,
+        panic: bool,
+        keys: &'a ContextTestKeys,
+        domain: &'a qbind_wire::pv_signing_domain::ProposalVoteSigningDomainV2,
+    }
+
+    impl ReceivedQcEffectGate for EffectProbe<'_> {
+        fn evaluate(&mut self, input: ReceivedQcEffectView<'_>) -> ReceivedQcGateDecision {
+            self.calls += 1;
+            assert_eq!(input.locked(), self.before.lock.as_ref().map(|q| ReceivedVoteQcSummary {
+                block_id: q.block_id, view: q.view, signer_count: q.signers.len(),
+            }));
+            assert_eq!(input.target_own_qc(), self.before.own_qc.as_ref());
+            assert_eq!(input.committed_block(), self.before.committed.as_ref());
+            assert_eq!(input.committed_height(), self.before.height);
+            assert_eq!(input.commit_log(), self.before.log);
+            assert_eq!(input.current_view(), self.before.view);
+            assert_eq!(input.logical().block_id, input.wire().block_id);
+            assert_eq!(input.logical().view, input.wire().height);
+            assert_eq!(input.logical().signers.len(), input.wire().signatures.len());
+            assert_eq!(input.wire().round, 9);
+            let registry = crate::crypto_verifier::SimpleBackendRegistry::with_backend(
+                qbind_crypto::SUITE_PQ_RESERVED_1, Arc::new(MlDsa44Backend),
+            );
+            verify_quorum_certificate_with_domain(
+                input.wire(), self.domain, 0, &dense_validator_set(4), self.keys, &registry,
+            ).expect("gate receives a genuine complete corresponding certificate");
+            assert!(!self.panic, "injected effect gate panic");
+            self.decision
+        }
+    }
+
+    #[derive(Debug)]
+    struct EffectCallbackOrder(Arc<Mutex<Vec<&'static str>>>);
+
+    impl ConsensusProgressRecorder for EffectCallbackOrder {
+        fn record_vote_observed(&self, _: bool) { self.0.lock().unwrap().push("vote"); }
+        fn record_qc_formed(&self) { self.0.lock().unwrap().push("qc"); }
+        fn record_view_change(&self, _: u64, _: u64) { self.0.lock().unwrap().push("view"); }
+        fn record_leader_change(&self) { self.0.lock().unwrap().push("leader"); }
+        fn reset_current_view_votes(&self) { self.0.lock().unwrap().push("reset"); }
+    }
+
+    impl ValidatorVoteRecorder for EffectCallbackOrder {
+        fn on_validator_vote(&self, _: ValidatorId, _: u64) {
+            self.0.lock().unwrap().push("validator");
+        }
+    }
+
+    impl ValidatorEquivocationRecorder for EffectCallbackOrder {
+        fn on_validator_equivocation(&self, _: ValidatorId, _: u64) {
+            self.0.lock().unwrap().push("equivocation");
+        }
+    }
+
+    fn effect_callback_order(engine: &mut BasicHotStuffEngine<[u8; 32]>) -> Arc<Mutex<Vec<&'static str>>> {
+        let order = Arc::new(Mutex::new(Vec::new()));
+        engine.set_progress_recorder(Arc::new(EffectCallbackOrder(Arc::clone(&order))));
+        engine.set_validator_vote_recorder(Arc::new(EffectCallbackOrder(Arc::clone(&order))));
+        engine.set_equivocation_recorder(Arc::new(EffectCallbackOrder(Arc::clone(&order))));
+        order
+    }
+
+    fn independent_qc_ledger_baseline() -> (u64, u64, usize, usize, usize, usize) {
+        let sizing = EvidenceBudget::try_new(u64::MAX, 0).unwrap();
+        sizing.full_occupancy_for_test()
+    }
+
+    #[test]
+    fn received_qc_effect_gate_allow_observes_absent_lock_before_one_application() {
+        let mut fixture = QcCorrectionFixture::new();
+        let before = QcEffectSnapshot::capture(&fixture.engine);
+        assert!(before.lock.is_none());
+        let applications = fixture.engine.state.qc_applications_for_test();
+        let invocations = RECEIVED_VOTE_LOGICAL_INVOCATIONS.with(std::cell::Cell::get);
+        let order = effect_callback_order(&mut fixture.engine);
+        let mut gate = EffectProbe {
+            before, decision: ReceivedQcGateDecision::Allow, calls: 0, panic: false,
+            keys: &fixture.keys, domain: &fixture.domain,
+        };
+        let report = fixture.engine.invoke_verified_received_vote_qc_effect_gated(
+            fixture.token.take().unwrap(), &mut gate,
+        ).unwrap();
+        assert_eq!(gate.calls, 1);
+        assert_eq!(report.actual().application, ReceivedQcApplication::Attempted(Ok(())));
+        assert_eq!(fixture.engine.state.qc_applications_for_test(), applications + 1);
+        assert_eq!(RECEIVED_VOTE_LOGICAL_INVOCATIONS.with(std::cell::Cell::get), invocations + 1);
+        assert_eq!(fixture.engine.locked_qc().unwrap().view, 1);
+        assert_eq!(&order.lock().unwrap()[..3], ["vote", "validator", "qc"]);
+        fixture.verify(&report);
+        let baseline = independent_qc_ledger_baseline();
+        drop(fixture.engine);
+        drop(report);
+        assert_eq!(fixture.observer.full_occupancy_for_test(), baseline);
+    }
+
+    #[test]
+    fn received_qc_effect_gate_refusal_retry_duplicate_preserves_three_chain() {
+        let baseline = independent_qc_ledger_baseline();
+        let mut fixture = QcCorrectionFixture::with_effect_options(true, false, false);
+        let before = QcEffectSnapshot::capture(&fixture.engine);
+        assert_eq!(before.lock.as_ref().unwrap().view, 2);
+        assert!(before.own_qc.is_none() && before.committed.is_none() && before.log.is_empty());
+        let vote = fixture.token.as_ref().unwrap().vote().clone();
+        let source_ptr = fixture.token.as_ref().unwrap().vote().signature.as_ptr();
+        let source_capacity = fixture.token.as_ref().unwrap().vote().signature.capacity();
+        let occupancy = fixture.observer.full_occupancy_for_test();
+        let cap = fixture.engine.state.max_retained_evidence_bytes();
+        let applications = fixture.engine.state.qc_applications_for_test();
+        let invocations = RECEIVED_VOTE_LOGICAL_INVOCATIONS.with(std::cell::Cell::get);
+        let order = effect_callback_order(&mut fixture.engine);
+        let mut gate = EffectProbe {
+            before: before.clone(),
+            decision: ReceivedQcGateDecision::Refuse(ReceivedQcGateRefusal::PublicationUnavailable),
+            calls: 0, panic: false, keys: &fixture.keys, domain: &fixture.domain,
+        };
+        let refused = fixture.engine.invoke_verified_received_vote_qc_effect_gated(
+            fixture.token.take().unwrap(), &mut gate,
+        ).unwrap();
+        assert_eq!(gate.calls, 1);
+        assert_eq!(QcEffectSnapshot::capture(&fixture.engine), before);
+        assert_eq!(fixture.engine.state.qc_applications_for_test(), applications);
+        assert_eq!(refused.actual().application, ReceivedQcApplication::Refused(
+            ReceivedQcGateRefusal::PublicationUnavailable,
+        ));
+        assert!(refused.actual().qc.is_some());
+        assert!(!refused.actual().view_advanced);
+        fixture.verify(&refused);
+        assert_eq!(*order.lock().unwrap(), ["vote", "validator"]);
+        let p = match refused.outcome() {
+            ReceivedVoteQcOutcome::Complete(wire) => wire.bytes_charge_for_test(),
+            _ => panic!("a complete certificate does not imply application"),
+        };
+        assert_eq!(fixture.observer.full_occupancy_for_test(), (
+            occupancy.0 + refused.report_charge_for_test() + p
+                - std::mem::size_of::<VerifiedVoteToken>() as u64,
+            0, occupancy.2, 0, occupancy.4 + 1, 0,
+        ));
+        drop(refused);
+        let mut conflicting = vote.clone();
+        conflicting.round = 19;
+        conflicting.signature = MlDsa44Backend::sign(
+            &fixture.incoming_secret, &fixture.domain.vote_preimage(&conflicting),
+        ).unwrap().into_boxed_slice().into_vec();
+        let token = fixture.engine.admit_verified_received_vote(ValidatorId(2), conflicting).unwrap();
+        order.lock().unwrap().clear();
+        gate.decision = ReceivedQcGateDecision::Allow;
+        let allowed = fixture.engine.invoke_verified_received_vote_qc_effect_gated(token, &mut gate).unwrap();
+        assert_eq!(gate.calls, 2);
+        assert_eq!(allowed.actual().application, ReceivedQcApplication::Attempted(Ok(())));
+        assert_eq!(allowed.actual().history, VoteHistoryOutcome::DuplicateSameBlock);
+        assert_eq!(allowed.actual().accumulator, Some(Ok(VoteAccumulatorDisposition::Duplicate)));
+        assert_eq!(allowed.actual().evidence, ReceivedVoteEvidenceDisposition::ExistingSignedFieldsConflict);
+        assert_eq!(fixture.engine.state.qc_applications_for_test(), applications + 1);
+        assert_eq!(RECEIVED_VOTE_LOGICAL_INVOCATIONS.with(std::cell::Cell::get), invocations + 2);
+        let retained = fixture.engine.state.received_vote_evidence_table().unwrap().entry_for(3, 2).unwrap();
+        assert!(retained.vote() == &vote, "first-retained Vote differs (redacted)");
+        assert_eq!(retained.vote().signature.as_ptr(), source_ptr);
+        assert_eq!(retained.vote().signature.capacity(), source_capacity);
+        assert_eq!(fixture.engine.state.vote_count(3, &[0xD3; 32]), 3);
+        assert_eq!(fixture.engine.locked_qc().unwrap().view, 3);
+        assert!(fixture.engine.state.get_block(&[0xD3; 32]).unwrap().own_qc.is_some());
+        assert_eq!(fixture.engine.committed_block(), Some(&[0xD1; 32]));
+        assert_eq!(fixture.engine.committed_height(), Some(0));
+        assert_eq!(fixture.engine.commit_log().len(), 1);
+        assert!(allowed.actual().view_advanced);
+        assert_eq!(&order.lock().unwrap()[..3], ["vote", "validator", "qc"]);
+        assert_eq!(fixture.engine.state.max_retained_evidence_bytes(), cap);
+        fixture.verify(&allowed);
+        drop(fixture.engine);
+        drop(allowed);
+        assert_eq!(fixture.observer.full_occupancy_for_test(), baseline);
+    }
+
+    #[test]
+    fn received_qc_effect_gate_mixed_and_missing_evidence_suppress_application() {
+        for missing in [false, true] {
+            let mut fixture = QcCorrectionFixture::with_effect_seed(true, !missing, false, missing);
+            let before = QcEffectSnapshot::capture(&fixture.engine);
+            let applications = fixture.engine.state.qc_applications_for_test();
+            let order = effect_callback_order(&mut fixture.engine);
+            let mut gate = EffectProbe {
+                before: before.clone(), decision: ReceivedQcGateDecision::Allow, calls: 0,
+                panic: false, keys: &fixture.keys, domain: &fixture.domain,
+            };
+            let report = fixture.engine.invoke_verified_received_vote_qc_effect_gated(
+                fixture.token.take().unwrap(), &mut gate,
+            ).unwrap();
+            assert_eq!(gate.calls, 0);
+            assert_eq!(QcEffectSnapshot::capture(&fixture.engine), before);
+            assert_eq!(fixture.engine.state.qc_applications_for_test(), applications);
+            assert!(report.actual().qc.is_some());
+            assert!(matches!(report.actual().application, ReceivedQcApplication::Suppressed(_)));
+            assert!(matches!(report.outcome(), ReceivedVoteQcOutcome::Incomplete(_)));
+            assert_eq!(*order.lock().unwrap(), ["vote", "validator"]);
+            let baseline = independent_qc_ledger_baseline();
+            drop(fixture.engine);
+            drop(report);
+            assert_eq!(fixture.observer.full_occupancy_for_test(), baseline);
+        }
+    }
+
+    #[test]
+    fn received_qc_effect_gate_no_qc_and_equivocation_never_call_gate() {
+        let mut fixture = QcCorrectionFixture::new();
+        let mut vote = fixture.token.take().unwrap().vote().clone();
+        vote.block_id = [0xE1; 32];
+        vote.signature = MlDsa44Backend::sign(
+            &fixture.incoming_secret, &fixture.domain.vote_preimage(&vote),
+        ).unwrap().into_boxed_slice().into_vec();
+        let token = fixture.engine.admit_verified_received_vote(ValidatorId(2), vote.clone()).unwrap();
+        let before = QcEffectSnapshot::capture(&fixture.engine);
+        let applications = fixture.engine.state.qc_applications_for_test();
+        let order = effect_callback_order(&mut fixture.engine);
+        let mut gate = EffectProbe {
+            before: before.clone(), decision: ReceivedQcGateDecision::Allow, calls: 0,
+            panic: false, keys: &fixture.keys, domain: &fixture.domain,
+        };
+        let first = fixture.engine.invoke_verified_received_vote_qc_effect_gated(token, &mut gate).unwrap();
+        assert_eq!(first.actual().application, ReceivedQcApplication::NotAttempted);
+        assert!(first.actual().qc.is_none());
+        assert!(matches!(first.outcome(), ReceivedVoteQcOutcome::NoQc));
+        vote.block_id = [0xE2; 32];
+        vote.signature = MlDsa44Backend::sign(
+            &fixture.incoming_secret, &fixture.domain.vote_preimage(&vote),
+        ).unwrap().into_boxed_slice().into_vec();
+        let token = fixture.engine.admit_verified_received_vote(ValidatorId(2), vote).unwrap();
+        let second = fixture.engine.invoke_verified_received_vote_qc_effect_gated(token, &mut gate).unwrap();
+        assert_eq!(second.actual().application, ReceivedQcApplication::NotAttempted);
+        assert!(second.actual().accumulator.is_none());
+        assert_eq!(gate.calls, 0);
+        assert_eq!(QcEffectSnapshot::capture(&fixture.engine), before);
+        assert_eq!(fixture.engine.state.qc_applications_for_test(), applications);
+        assert_eq!(*order.lock().unwrap(), ["vote", "validator", "equivocation"]);
+    }
+
+    #[test]
+    fn received_qc_effect_gate_equal_and_lower_qcs_cannot_bypass_refusal() {
+        for lock_view in [3, 9] {
+            let mut fixture = QcCorrectionFixture::with_effect_options(true, false, false);
+            fixture.engine.state.set_locked_qc(QuorumCertificate::new(
+                [0xE9; 32], lock_view, vec![ValidatorId(0), ValidatorId(1), ValidatorId(2)],
+            ));
+            let before = QcEffectSnapshot::capture(&fixture.engine);
+            let applications = fixture.engine.state.qc_applications_for_test();
+            let mut gate = EffectProbe {
+                before: before.clone(), decision: ReceivedQcGateDecision::Refuse(
+                    ReceivedQcGateRefusal::PolicyRefused,
+                ), calls: 0, panic: false, keys: &fixture.keys, domain: &fixture.domain,
+            };
+            let report = fixture.engine.invoke_verified_received_vote_qc_effect_gated(
+                fixture.token.take().unwrap(), &mut gate,
+            ).unwrap();
+            assert_eq!(gate.calls, 1);
+            assert_eq!(QcEffectSnapshot::capture(&fixture.engine), before);
+            assert_eq!(fixture.engine.state.qc_applications_for_test(), applications);
+            assert!(matches!(report.actual().application, ReceivedQcApplication::Refused(_)));
+            fixture.verify(&report);
+        }
+    }
+
+    #[test]
+    fn received_qc_effect_gate_panic_reconciles_evicted_history_and_drops_stage() {
+        let baseline = independent_qc_ledger_baseline();
+        let mut fixture = QcCorrectionFixture::with_effect_options(false, false, true);
+        fixture.engine.state.register_block([0xD3; 32], 1, None, None);
+        assert!(fixture.engine.state.received_vote_evidence_table().unwrap().entry_for(1, 0).is_some());
+        assert!(fixture.engine.state.received_vote_evidence_table().unwrap().entry_for(1, 1).is_some());
+        let before = QcEffectSnapshot::capture(&fixture.engine);
+        let occupancy = fixture.observer.full_occupancy_for_test();
+        let token_bytes = fixture.token.as_ref().unwrap().token_charge_and_signature_bytes().unwrap().0;
+        let applications = fixture.engine.state.qc_applications_for_test();
+        let invocations = RECEIVED_VOTE_LOGICAL_INVOCATIONS.with(std::cell::Cell::get);
+        let order = effect_callback_order(&mut fixture.engine);
+        let mut gate = EffectProbe {
+            before: before.clone(), decision: ReceivedQcGateDecision::Allow, calls: 0, panic: true,
+            keys: &fixture.keys, domain: &fixture.domain,
+        };
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            fixture.engine.invoke_verified_received_vote_qc_effect_gated(
+                fixture.token.take().unwrap(), &mut gate,
+            )
+        }));
+        assert!(result.is_err());
+        assert_eq!(gate.calls, 1);
+        assert_eq!(QcEffectSnapshot::capture(&fixture.engine), before);
+        assert_eq!(fixture.engine.state.qc_applications_for_test(), applications);
+        assert_eq!(RECEIVED_VOTE_LOGICAL_INVOCATIONS.with(std::cell::Cell::get), invocations + 1);
+        assert!(order.lock().unwrap().is_empty());
+        assert_eq!(fixture.engine.state.vote_count(1, &[0xD3; 32]), 3);
+        let table = fixture.engine.state.received_vote_evidence_table().unwrap();
+        assert!(table.entry_for(1, 0).is_none());
+        assert!(table.entry_for(1, 1).is_none());
+        assert!(table.entry_for(1, 2).is_none());
+        assert!(fixture.engine.state.has_vote_history_membership_for_test(
+            ValidatorId(2), 1, &[0xD3; 32],
+        ));
+        assert_eq!(fixture.observer.full_occupancy_for_test(), (
+            occupancy.0 - token_bytes - 2 * qbind_crypto::ML_DSA_44_SIGNATURE_SIZE as u64,
+            0, occupancy.2, 0, occupancy.4, 0,
+        ));
+        drop(fixture.engine);
+        assert_eq!(fixture.observer.full_occupancy_for_test(), baseline);
+    }
+
+    #[test]
+    fn received_qc_effect_gate_preparation_pressure_preserves_token_and_all_observations() {
+        use crate::received_vote_evidence::with_allocation_failure_after;
+        let mut fixture = QcCorrectionFixture::new();
+        let before = QcEffectSnapshot::capture(&fixture.engine);
+        let applications = fixture.engine.state.qc_applications_for_test();
+        let mut gate = EffectProbe {
+            before: before.clone(), decision: ReceivedQcGateDecision::Allow, calls: 0,
+            panic: false, keys: &fixture.keys, domain: &fixture.domain,
+        };
+        let occupancy = fixture.observer.full_occupancy_for_test();
+        for phase in 0..3 {
+            fixture.engine.state.set_max_retained_evidence_bytes(match phase {
+                0 => occupancy.0,
+                1 => occupancy.0 + received_vote_qc_control_charge().unwrap(),
+                _ => u64::MAX,
+            });
+            let witness = QcRefusalWitness::capture(&fixture);
+            let token = fixture.token.take().unwrap();
+            let result = if phase == 2 {
+                with_allocation_failure_after(3, || {
+                    fixture.engine.invoke_verified_received_vote_qc_effect_gated(token, &mut gate)
+                })
+            } else {
+                fixture.engine.invoke_verified_received_vote_qc_effect_gated(token, &mut gate)
+            };
+            let refusal = result.err().expect("pre-ingestion preparation refuses");
+            let expected = [ReceivedVoteQcStageError::ReportBytes,
+                ReceivedVoteQcStageError::StageBytes, ReceivedVoteQcStageError::Allocation][phase];
+            assert_eq!(refusal.reason, ReceivedVoteQcRefusalReason::Stage(expected));
+            witness.check(&fixture, &refusal);
+            assert_eq!(gate.calls, 0);
+            assert_eq!(QcEffectSnapshot::capture(&fixture.engine), before);
+            assert_eq!(fixture.engine.state.qc_applications_for_test(), applications);
+            fixture.token = Some(refusal.token);
+        }
+    }
+
+    #[test]
+    fn received_qc_effect_gate_later_callback_panic_keeps_applied_effects_and_releases_stage() {
+        #[derive(Debug)]
+        struct PanicOnQc;
+        impl ConsensusProgressRecorder for PanicOnQc {
+            fn record_qc_formed(&self) { panic!("injected post-application callback panic"); }
+            fn record_vote_observed(&self, _: bool) {}
+            fn record_view_change(&self, _: u64, _: u64) {}
+            fn record_leader_change(&self) {}
+            fn reset_current_view_votes(&self) {}
+        }
+        let baseline = independent_qc_ledger_baseline();
+        let mut fixture = QcCorrectionFixture::with_effect_options(true, false, false);
+        let before = QcEffectSnapshot::capture(&fixture.engine);
+        let occupancy = fixture.observer.full_occupancy_for_test();
+        let applications = fixture.engine.state.qc_applications_for_test();
+        fixture.engine.set_progress_recorder(Arc::new(PanicOnQc));
+        let mut gate = EffectProbe {
+            before, decision: ReceivedQcGateDecision::Allow, calls: 0, panic: false,
+            keys: &fixture.keys, domain: &fixture.domain,
+        };
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            fixture.engine.invoke_verified_received_vote_qc_effect_gated(
+                fixture.token.take().unwrap(), &mut gate,
+            )
+        }));
+        assert!(result.is_err());
+        assert_eq!(gate.calls, 1);
+        assert_eq!(fixture.engine.state.qc_applications_for_test(), applications + 1);
+        assert_eq!(fixture.engine.locked_qc().unwrap().view, 3);
+        assert_eq!(fixture.engine.committed_block(), Some(&[0xD1; 32]));
+        assert_eq!(fixture.engine.commit_log().len(), 1);
+        assert!(fixture.engine.state.received_vote_evidence_table().unwrap().entry_for(3, 2).is_some());
+        assert_eq!(fixture.observer.full_occupancy_for_test(), (
+            occupancy.0 - std::mem::size_of::<VerifiedVoteToken>() as u64,
+            0, occupancy.2, 0, occupancy.4, 0,
+        ));
+        drop(fixture.engine);
+        assert_eq!(fixture.observer.full_occupancy_for_test(), baseline);
+    }
+
+    #[test]
+    fn received_qc_effect_gate_defensive_correspondence_and_logical_error_controls() {
+        let mut fixture = QcCorrectionFixture::new();
+        let report = fixture.invoke().unwrap();
+        let ReceivedVoteQcOutcome::Complete(wire) = report.outcome() else {
+            panic!("complete source");
+        };
+        let logical = fixture.engine.locked_qc().unwrap().clone();
+        let mut membership = [0u64; 16];
+        membership[0] = 0b1011; // Same count, different set: helper-only malformed seal.
+        let seal = ReceivedVoteQcCandidateSeal {
+            block_id: logical.block_id, view: logical.view, incoming_validator: ValidatorId(2),
+            projected_count: 3, membership,
+        };
+        let before = QcEffectSnapshot::capture(&fixture.engine);
+        let mut gate = EffectProbe {
+            before: before.clone(), decision: ReceivedQcGateDecision::Allow, calls: 0,
+            panic: false, keys: &fixture.keys, domain: &fixture.domain,
+        };
+        let mut adapter = ReceivedQcGateAdapter {
+            gate: &mut gate, candidate: &seal, wire: Some(wire), incomplete: None,
+            roster_len: 4, current_view: fixture.engine.current_view(),
+            application: ReceivedQcApplication::NotAttempted,
+        };
+        assert!(!crate::hotstuff_state_engine::VoteQcEffectGate::allow(
+            &mut adapter, &fixture.engine.state, &logical,
+        ));
+        assert!(matches!(adapter.application, ReceivedQcApplication::Suppressed(
+            ReceivedVoteQcIncomplete::ActualSignerMembershipMismatch(2),
+        )));
+        // A nonmember is a state-helper control, not a reachable admitted-token route.
+        let (error, application) = fixture.engine.state.on_vote_detailed_effect_gated(
+            ValidatorId(999), logical.view, &logical.block_id, &mut adapter,
+        );
+        assert!(error.qc.is_err());
+        assert!(application.is_none());
+        assert_eq!(gate.calls, 0);
+        assert_eq!(QcEffectSnapshot::capture(&fixture.engine), before);
     }
 
     #[test]
@@ -6328,13 +6996,14 @@ mod tests {
         let admission_control =
             crate::received_vote_evidence::qc_admission_control_frame_bytes().unwrap();
         let buffer_control = qc_buffer_control_frame_bytes().unwrap();
+        let gate_control = std::mem::size_of::<ReceivedQcGateControlFrame>() as u64;
         println!(
-            "received-vote QC control layouts: route={route_control} admission={admission_control} buffer={buffer_control} A={}",
+            "received-vote QC control layouts: route={route_control} admission={admission_control} buffer={buffer_control} gate={gate_control} A={}",
             received_vote_qc_control_charge().unwrap()
         );
         assert_eq!(
             received_vote_qc_control_charge().unwrap(),
-            route_control + admission_control.max(buffer_control)
+            route_control + admission_control.max(buffer_control) + gate_control
         );
 
         let mut original_votes = Vec::new();

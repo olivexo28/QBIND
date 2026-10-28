@@ -192,6 +192,19 @@ pub(crate) struct VoteMutationReport<BlockIdT> {
     pub(crate) qc: Result<Option<QuorumCertificate<BlockIdT>>, QcValidationError>,
 }
 
+pub(crate) trait VoteQcEffectGate<BlockIdT: Eq + std::hash::Hash + Clone> {
+    fn allow(
+        &mut self,
+        state: &HotStuffStateEngine<BlockIdT>,
+        qc: &QuorumCertificate<BlockIdT>,
+    ) -> bool;
+}
+
+#[cfg(test)]
+thread_local! {
+    static QC_APPLICATIONS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 impl<BlockIdT> VoteMutationReport<BlockIdT> {
     pub(crate) fn is_equivocation(&self) -> bool {
         matches!(self.history, VoteHistoryOutcome::Equivocation { .. })
@@ -1688,6 +1701,42 @@ where
         view: u64,
         block_id: &BlockIdT,
     ) -> VoteMutationReport<BlockIdT> {
+        let mut report = self.ingest_vote_and_form_qc(voter, view, block_id);
+        if let Ok(Some(qc)) = &report.qc {
+            if let Err(error) = self.on_qc(qc) {
+                report.qc = Err(error);
+            }
+        }
+        self.reconcile_received_vote_evidence();
+        report
+    }
+
+    pub(crate) fn on_vote_detailed_effect_gated(
+        &mut self,
+        voter: ValidatorId,
+        view: u64,
+        block_id: &BlockIdT,
+        gate: &mut dyn VoteQcEffectGate<BlockIdT>,
+    ) -> (
+        VoteMutationReport<BlockIdT>,
+        Option<Result<(), QcValidationError>>,
+    ) {
+        let report = self.ingest_vote_and_form_qc(voter, view, block_id);
+        // Bookkeeping is already effective. Reclaim stale evidence even if the gate panics.
+        self.reconcile_received_vote_evidence();
+        let application = match &report.qc {
+            Ok(Some(qc)) if gate.allow(self, qc) => Some(self.on_qc(qc)),
+            _ => None,
+        };
+        (report, application)
+    }
+
+    fn ingest_vote_and_form_qc(
+        &mut self,
+        voter: ValidatorId,
+        view: u64,
+        block_id: &BlockIdT,
+    ) -> VoteMutationReport<BlockIdT> {
         let history = self.record_vote_history(voter, view, block_id);
         let (accumulator, qc) = match &history {
             VoteHistoryOutcome::Equivocation { .. } => {
@@ -1705,10 +1754,7 @@ where
                         let accumulator = Some(Ok(disposition));
                         let qc = match self.votes.maybe_qc_for(&self.validators, view, block_id) {
                             Err(error) => Err(error),
-                            Ok(Some(qc)) => match self.on_qc(&qc) {
-                                Ok(()) => Ok(Some(qc)),
-                                Err(error) => Err(error),
-                            },
+                            Ok(Some(qc)) => Ok(Some(qc)),
                             Ok(None) => Ok(None),
                         };
                         (accumulator, qc)
@@ -1721,7 +1767,6 @@ where
             accumulator,
             qc,
         };
-        self.reconcile_received_vote_evidence();
         report
     }
 
@@ -1732,6 +1777,8 @@ where
     /// - Attaches the QC to the corresponding block node as `own_qc`
     /// - Attempts the 3-chain commit rule
     fn on_qc(&mut self, qc: &QuorumCertificate<BlockIdT>) -> Result<(), QcValidationError> {
+        #[cfg(test)]
+        QC_APPLICATIONS.with(|count| count.set(count.get() + 1));
         // Minimal HotStuff-style locking:
         // - Update locked_qc to the highest-view QC.
         let replace_lock = match &self.locked_qc {
@@ -1752,6 +1799,11 @@ where
         self.try_commit_with_qc(qc);
 
         Ok(())
+    }
+
+    #[cfg(test)]
+    pub(crate) fn qc_applications_for_test(&self) -> usize {
+        QC_APPLICATIONS.with(std::cell::Cell::get)
     }
 
     /// Attempt to commit a block using the 3-chain commit rule.
