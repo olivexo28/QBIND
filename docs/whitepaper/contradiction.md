@@ -2588,3 +2588,55 @@ Run 423 is included. `D7D14_STORAGE_COMPONENT=IMPLEMENTED-ISOLATED`;
 `D7D14_STORAGE_ACCEPTANCE=PASS-ACCEPTED-SUBSET`; §13.6 whole-lifecycle INCOMPLETE;
 activation DISABLED; public DevNet NO-GO; durable anti-rollback NOT-ESTABLISHED;
 C4/C5 OPEN. Implementation delivery is not independent source-review acceptance.
+
+### RUN 422 received-QC/O4 isolated ownership correction
+
+Starting from `c51c4be4363fd805be30ee5f3f98535ed4ccc501` (tree
+`6718d2dc9f25867e6df010099f1a4ddb8d9b5732`), the private composition now
+explicitly admits node coverage before consuming the caller-owned token.
+Admission failure returns a bounded diagnostic, not a large token/outcome enum.
+Only the opaque admitted owner invokes the route; its large returned owner
+keeps coverage until report/backing destruction. No fixture wrapper hides that
+boundary. This corrects isolated model accounting, not a production exploit.
+
+At source revision `1853e695755e71047a412bcfc77b875d8dd4d4fe`, measured
+admission owner/result layouts are 64/64 bytes, unit diagnostic 0, reservation
+result 80, invocation/returned owner 432 (embedded route result 312), and
+independent storage snapshot 144. Disjoint control bounds are admission 208,
+active invocation 3552, return conversion 1072: selected adapter coverage 3552.
+This includes component-owned snapshot/comparison controls and conversion
+overlap without double-counting embedded reservation controls. Earlier
+measurements above retain their original producing-revision attribution.
+
+Unchanged N=4/S_sig=2420 operands are candidate 10137, loader 31814, O4 52939
+and context 240. Recalculated aggregate phase bounds are admitted 3792,
+candidate 13929, loader 45743, O4 66868 and synchronous return 3792; diagnostic
+overlap reaches 77399, below the unchanged 84956 ceiling. Executed independent
+operational current/peak is 3552/66628 and aggregate 3792/66868. Consensus
+report A/P remains 4600/7333, independently restored; coverage sums are not
+physical-memory measurements.
+
+Both pressure tests now check complete redacted Vote equality and original
+signature pointer/capacity, full consensus tuples, independent storage occupancy
+and ceilings, engine/bookkeeping/notification effects, and real acknowledged/
+Applied success after relief. Consumed-Vote refusals report actual Refused
+outcomes and first-retained evidence; genuine duplicates retain the original
+round/signature and cause exactly one QC application. Alternate-owner mismatch/
+profile cleanup samples the actual backend, and anchored return checks precede
+readback. Cleanup includes aggregate and operational observations independently.
+
+Fresh requested node selections at that producing revision passed 15 and
+152 tests (owner selection: 158 selected, 6 ignored); both exited 0.
+`git -c core.whitespace=cr-at-eol diff --check` exited 0. Literal commands,
+requirement mapping and complete phase inventory are appended in the D7
+evidence. The consensus facade is unchanged; previous full suites/build/default
+test-compilation/Miri are not relabeled fresh. Only evidence appends follow
+the producing source revision.
+
+Accepted consensus/O4 semantics, the single serialization interval, all
+publication outcomes and production callers remain unchanged. No production
+integration, automatic O5/replay/catch-up, new crash boundary, activation,
+deployment, D15 or Run 423. `D7D14_STORAGE_COMPONENT=IMPLEMENTED-ISOLATED`;
+`D7D14_STORAGE_ACCEPTANCE=PASS-ACCEPTED-SUBSET`; §13.6 whole-lifecycle INCOMPLETE;
+activation DISABLED; public DevNet NO-GO; durable anti-rollback NOT-ESTABLISHED;
+C4/C5 OPEN. Implementation delivery is not independent source-review acceptance.
