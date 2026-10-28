@@ -2843,6 +2843,16 @@ impl SafetyRecordOwner {
         history: Option<&H>,
     ) -> PublishResult {
         let guard = self.backend.lock_domain();
+        self.publish_locked_held(&guard, candidate, expected_revision, history)
+    }
+
+    fn publish_locked_held<H: CommittedHistory + ?Sized>(
+        &self,
+        guard: &std::sync::MutexGuard<'_, super::backend::SerializationDomain>,
+        candidate: LockedRecord,
+        expected_revision: u64,
+        history: Option<&H>,
+    ) -> PublishResult {
 
         // A fresh durability acknowledgement is required before dependent
         // publication: a newly opened established store (no inherited
@@ -3036,7 +3046,7 @@ impl SafetyRecordOwner {
         let meta_encoded_capacity = meta_encoded.capacity();
         match self
             .backend
-            .publish_atomic(&guard, &meta_encoded, validated.encoded())
+            .publish_atomic(guard, &meta_encoded, validated.encoded())
         {
             PublishOutcome::DurableAcknowledged => {
                 // Deterministic post-acknowledgement / pre-effectiveness crash
@@ -3347,6 +3357,9 @@ pub fn make_locked_qc(
         evidence,
     })
 }
+#[cfg(all(test, feature = "test-utils"))]
+mod received_qc_publication_model;
+
 // ---------------------------------------------------------------------------
 // §13.6 owner-controlled capture gate (isolated, no production caller)
 // ---------------------------------------------------------------------------

@@ -3,6 +3,9 @@ name = "qbind-consensus"
 version = "0.1.0"
 edition = "2021"
 
+[features]
+test-utils = []
+
 [dependencies]
 qbind-types  = { path = "../qbind-types" }
 qbind-wire   = { path = "../qbind-wire" }

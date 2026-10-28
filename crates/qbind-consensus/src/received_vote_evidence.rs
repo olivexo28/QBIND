@@ -1316,7 +1316,7 @@ impl EvidenceBudget {
         (committed, pending, contexts, pending_contexts)
     }
 
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-utils"))]
     pub(crate) fn full_occupancy_for_test(&self) -> (u64, u64, usize, usize, usize, usize) {
         self.inner.occupancy()
     }
@@ -1606,7 +1606,7 @@ pub(crate) struct ReceivedVoteQcReportOwner {
 }
 
 impl ReceivedVoteQcReportOwner {
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-utils"))]
     pub(crate) fn report_charge_for_test(&self) -> u64 {
         self._report_lease.bytes
     }
@@ -1721,7 +1721,7 @@ impl ReceivedVoteQcWire {
         &self.qc
     }
 
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-utils"))]
     pub(crate) fn bytes_charge_for_test(&self) -> u64 {
         self._bytes_lease.bytes
     }
@@ -2015,6 +2015,15 @@ fn map_qc_alloc_error(error: EvidenceAllocError) -> ReceivedVoteQcStageError {
 }
 
 impl ActiveVoteContext {
+    #[cfg(feature = "test-utils")]
+    pub(crate) fn inspect_for_test(
+        &self,
+    ) -> (&ProposalVoteSigningDomainV2, u64, ConsensusSigSuiteId, &[SnapshotMember]) {
+        // SAFETY: this live handle retains the immutable payload and its lease.
+        let payload = unsafe { &self.context.0.as_ref().payload };
+        (&payload.domain, payload.authorized_epoch, payload.suite_id, &payload.members)
+    }
+
     pub(crate) fn try_install(
         budget: &EvidenceBudget,
         input: VoteContextInput,

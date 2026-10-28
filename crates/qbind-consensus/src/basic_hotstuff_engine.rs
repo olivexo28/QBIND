@@ -1677,7 +1677,7 @@ mod received_vote_qc_report {
             &self.outcome
         }
 
-        #[cfg(test)]
+        #[cfg(any(test, feature = "test-utils"))]
         pub(super) fn report_charge_for_test(&self) -> u64 {
             self.provenance.report_charge_for_test()
         }
@@ -5209,6 +5209,9 @@ impl BasicHotStuffEngine<[u8; 32]> {
         self.timeout_accumulator.timeout_count(view)
     }
 }
+
+#[cfg(feature = "test-utils")]
+pub mod received_qc_effect_test_support;
 
 #[cfg(test)]
 mod tests {
