@@ -2331,6 +2331,8 @@ fn uncertain_o4_explicit_o5_exact_three_chain_resumption_and_repeated_use() {
     drop(blocked);
     assert!(f.owner.recovery_required());
     let before_o5 = StorageSnapshot::capture(&f.owner);
+    let consensus_o5 = ledger.sample();
+    let consensus_cap = f.engine.state().max_retained_evidence_bytes();
     let pointer = proof.encoded().as_ptr();
     let acknowledged = acknowledged_checked(&f.owner, &attempt, &proof);
     before_o5.assert_occupancy(
@@ -2339,6 +2341,8 @@ fn uncertain_o4_explicit_o5_exact_three_chain_resumption_and_repeated_use() {
         before_o5.aggregate + recovery_charge(),
     );
     assert!(!f.owner.recovery_required());
+    assert_eq!(ledger.sample(), consensus_o5);
+    assert_eq!(f.engine.state().max_retained_evidence_bytes(), consensus_cap);
     assert_recovery_provenance(&proof, &f.owner, pointer);
     // Diagnostic loader only AFTER the immediate O5 restoration assertion.
     let readback = f.read();
@@ -2501,8 +2505,12 @@ fn ordinary_o5_fault_outcomes_cleanup_and_acknowledged_retry() {
         );
         let proof = f.read();
         let before = StorageSnapshot::capture(&f.owner);
+        let ledger = support::ledger(&f.engine);
+        let consensus = ledger.sample();
+        let consensus_cap = f.engine.state().max_retained_evidence_bytes();
         let effects = Effects::capture(&f.engine, IDS[2]);
         let apps = support::applications(&f.engine);
+        let successes = f.notifications.successes();
         let pointer = proof.encoded().as_ptr();
         f.owner.backend.set_inject(fault);
         let failed = admit_recovery(&f.owner)
@@ -2510,9 +2518,12 @@ fn ordinary_o5_fault_outcomes_cleanup_and_acknowledged_retry() {
             .acknowledge(&attempt, &proof);
         assert!(matches!(failed, Err(actual) if actual == outcome));
         before.assert_unchanged(&f.owner);
+        assert_eq!(ledger.sample(), consensus);
+        assert_eq!(f.engine.state().max_retained_evidence_bytes(), consensus_cap);
         assert!(f.owner.recovery_required());
         assert_eq!(Effects::capture(&f.engine, IDS[2]), effects);
         assert_eq!(support::applications(&f.engine), apps);
+        assert_eq!(f.notifications.successes(), successes);
         assert_recovery_provenance(&proof, &f.owner, pointer);
         drop(failed);
         before.assert_unchanged(&f.owner);
@@ -2525,7 +2536,8 @@ fn ordinary_o5_fault_outcomes_cleanup_and_acknowledged_retry() {
             before.aggregate + recovery_charge(),
         );
         assert!(!f.owner.recovery_required());
-        let ledger = support::ledger(&f.engine);
+        assert_eq!(ledger.sample(), consensus);
+        assert_eq!(f.engine.state().max_retained_evidence_bytes(), consensus_cap);
         let token = duplicate(&mut f.engine, &f.authority, 2, 19);
         let consensus = ledger.sample();
         let storage = StorageSnapshot::capture(&f.owner);
@@ -3149,6 +3161,7 @@ fn recovery_phase_inventory_and_independent_ledger_maxima() {
         );
     }
     let ledger = support::ledger(&f.engine);
+    let consensus_cap = f.engine.state().max_retained_evidence_bytes();
     f.owner.backend.set_inject(InjectFault::UncertainAfterWrite);
     let attempt = admit_interruption(&f.owner).unwrap().invoke(
         &mut f.engine,
@@ -3158,8 +3171,12 @@ fn recovery_phase_inventory_and_independent_ledger_maxima() {
         &f.history,
     );
     f.owner.backend.set_inject(InjectFault::None);
+    let consensus_standing = ledger.sample();
     let proof = f.read();
+    assert_eq!(ledger.sample(), consensus_standing);
     let ack = acknowledged_checked(&f.owner, &attempt, &proof);
+    assert_eq!(ledger.sample(), consensus_standing);
+    assert_eq!(f.engine.state().max_retained_evidence_bytes(), consensus_cap);
     let before = StorageSnapshot::capture(&f.owner);
     before.assert_occupancy(&f.owner, i + h + k, storage.context + i + h + k);
     let token = duplicate(&mut f.engine, &f.authority, 2, 19);
@@ -3171,7 +3188,7 @@ fn recovery_phase_inventory_and_independent_ledger_maxima() {
         result.route.as_ref().ok().unwrap().application(),
         support::Application::Applied
     );
-    println!("O5 executed independent ledgers: consensus={:?} storage_op={} storage_op_peak={} storage_aggregate={} storage_aggregate_peak={} context={}",
+    println!("O5 executed independent ledgers: consensus={:?} consensus_cap={consensus_cap} storage_op={} storage_op_peak={} storage_aggregate={} storage_aggregate_peak={} context={}",
         ledger.sample(), f.owner.backend.accounting_current(), f.owner.backend.accounting_peak(),
         f.owner.backend.accounting_aggregate_current(), f.owner.backend.accounting_aggregate_peak(),
         f.owner.backend.context_accounting_current());
