@@ -20476,3 +20476,190 @@ C4/C5 OPEN
 
 No O4, production caller/current-authority integration, signing/delivery, activation, deployment, D15,
 or Run 423. This correction is not independent source-review acceptance.
+
+### Run 422 isolated received-QC effect gate
+
+**Baseline and scope.** The clean starting checkout was content-equal to, but not descended from,
+the required `dc782786a4c477295f6be5e567d5c45740b89698`. That pinned object was fetched and verified
+separately: root tree `f486d8ce00a277c0ae83767c3d984592c68d8512`, parent
+`0525f772d11c0c67ce509fa43b8283f87bb39eb4`. The new
+`copilot/run-422-received-qc-effect-gate` branch was created from the exact pinned commit before
+editing. Equal content with the prior local correction commit did not establish ancestry or justify
+substituting that commit. Changes are confined to Basic/state-engine Rust modules and these two
+evidence documents; the received-Vote ownership foundation is reused unchanged.
+
+**Source-established ordering.** `HotStuffStateEngine::ingest_vote_and_form_qc` now holds the one
+shared history/accumulator/QC-formation path. Existing `on_vote_detailed` still applies every formed
+QC and then reconciles evidence. Its opt-in sibling `on_vote_detailed_effect_gated` instead reconciles
+completed bookkeeping first, consults the adapter for every actual QC, and calls `on_qc` only on
+allowance. There is no lock-view shortcut: duplicate, equal-view, and lower-view QCs all encounter
+the seam. No completed-route replay, rollback, second accumulator, or duplicate callback path exists.
+Ordinary duplicate/capacity-drop QC attempts and the separate leader self-vote policy are unchanged.
+
+Basic's `invoke_verified_received_vote_qc_effect_gated` shares pre-mutation staging with the existing
+signed-QC route. Before the caller gate, `ReceivedQcGateAdapter` checks actual block/view, signer
+count, index bounds, uniqueness, and full projected membership. Only complete corresponding signed
+evidence reaches `ReceivedQcEffectGate::evaluate`. Missing/mixed evidence or correspondence failure
+suppresses application while retaining the honest logical-QC summary. NoQc, equivocation, and
+logical errors do not invoke the gate. First-retained original signatures and all signed fields,
+including round independent of logical height/view, remain authoritative.
+
+The private-constructed `ReceivedQcEffectView` borrows the actual logical QC and staged plain wire
+QC. It exposes explicit optional pre-application lock identity, target own-QC, committed block/height,
+borrowed commit log, and current Basic view for narrow boundary observations. It gives no mutable
+engine access, owned-QC extraction, verified-QC capability, or current authorization. The caller owns
+the borrowed gate and its arbitrary implementation/storage. `Allow` is an isolated decision, not a
+durable acknowledgement, publication/release permission, or signing/delivery authorization.
+
+`ReceivedVoteQcEventSummary.application` separates Ungated, NotAttempted, Suppressed(reason),
+Refused(reason), and Attempted(actual processing result). Complete signed evidence does not imply
+application success. `on_qc` still returns success on its ordinary source-established paths; the
+typed attempted-error carrier is future defensive representation, not an observed reachable failure.
+Refusal/suppression preserves lock, target own-QC, committed block/height, commit log, and QC-driven
+view state. Ordinary Vote/equivocation notifications retain their existing once-only behavior; no
+QC-success/view-advance callback runs on refusal/suppression. Allowance preserves successful callback
+ordering. Vote history/accumulator bookkeeping is not rolled back and the consumed token is not
+returned as unconsumed.
+
+**Ownership and accounting.** The report remains an opaque owner with borrowed `actual()` and
+`outcome()` only; context, Report quota/A, and QC backing/P cannot be independently extracted.
+Backing-before-lease destruction and the earlier defensive commit-refusal cleanup remain unchanged.
+Reconciliation now precedes the fallible/panicking gate boundary. A gate panic therefore leaves
+completed logical bookkeeping but reclaims history-evicted source evidence, drops staging and the
+incoming token, applies no QC effects, runs no later callbacks, and returns no successful report.
+The later QC-callback-panic case instead preserves already applied QC/commit effects and retained
+incoming evidence while releasing staging. Neither case claims transaction rollback.
+
+Compiler-evaluated x86_64 controls now measure:
+
+```
+route = 2168 B; admission = 288 B; buffer = 1600 B; gate = 832 B
+A = checked_add(route, max(admission, buffer), gate) = 4600 B
+P = minimal bitmap + exact signature Vec descriptors + exact original signature allocations
+P(3 signers) = 7333 B; P(4 signers) = 9777 B
+```
+
+`ReceivedQcGateControlFrame` inventories the borrowed gate, embedded adapter, adapter/state-gate/state
+borrows, input and by-value input argument controls, logical-QC borrow, application and return
+carriers, state/route tuple results, lock summary, incomplete reason, decision, and bool return.
+The route frame compiler-sizes the enlarged summary/report/result carriers. The frame sum is
+conservative across some disjoint lifetimes; embedded adapter/borrowed input fields are not charged
+as separate heap allocations. Existing full token-control coverage is retained conservatively.
+Actual byte/descriptor push-result types and nested cleanup controls remain in the accepted buffer
+inventory. The shared staging route uses the revised A; nongated logical/callback behavior is
+unchanged. No additional ledger, quota, generic reference-counting framework, or owned callback
+budget was introduced.
+
+A/Report admission precedes staging allocation and ingestion; destination P admission precedes all
+bitmap/descriptor/signature allocations. During staging, source ownership, A, and reserved P overlap;
+after P commit, complete backing retains its lease through gate execution/report lifetime. The
+returned owner retains A and context for every invoked outcome; P survives only with complete
+backing. The existing separate report quota is not evidence-table capacity. Gate inputs borrow
+inherited backing; engine logical-QC/signer allocations, lock/block-QC clones, and commit-log storage
+remain inherited engine allocations outside this new component bound. This is not an RSS bound.
+
+Executed regression observations: detached three-signer report tuple `(17581,0,1,0,1,0)`,
+four-signer tuple `(20025,0,1,0,1,0)`, and independent final baseline `(80,0,0,0,0,0)`.
+Tuples mean committed bytes, pending bytes, committed contexts, pending contexts, committed reports,
+pending reports. Gate refusal accounts for retained incoming evidence instead of claiming restoration
+to the pre-call baseline. Gate-unwind history eviction checks pre-call bytes minus the full incoming
+token charge minus two evicted signature charges, with zero pending/report counts. Final teardown
+independently restores the empty-ledger baseline. Earlier A=3696 observations and validation remain
+historical, attributed to their producing revision rather than relabeled here.
+
+**Requirement-to-test mapping.** All names below have prefix `received_qc_effect_gate_` in Basic's
+authorized test module. Principal allow/refuse tests use genuine admitted ML-DSA-44 Votes and verify
+the staged QC through `verify_quorum_certificate_with_domain` inside the gate itself.
+
+| Test suffix | Discriminating observation |
+|---|---|
+| `allow_observes_absent_lock_before_one_application` | Explicit absent lock and all effect state observed at gate boundary; one ingestion and one subsequent QC application; Vote/validator/QC callback order. |
+| `refusal_retry_duplicate_preserves_three_chain` | Genuine ancestor QCs; refused target would advance lock and complete a three-chain. All effects remain unchanged; ordinary valid duplicate with conflicting round is admitted, first-retained bytes win, later allow attaches QC/locks/commits/advances view exactly once. |
+| `mixed_and_missing_evidence_suppress_application` | Real mixed signed rounds and a legacy unsigned constituent each form logical quorum but invoke neither gate nor QC application. |
+| `no_qc_and_equivocation_never_call_gate` | Zero gate/application calls; ordinary Vote/validator/equivocation notifications exactly once. |
+| `equal_and_lower_qcs_cannot_bypass_refusal` | Real admitted target quorum is gated despite equal/higher preinstalled lock; effects remain unchanged. The initial lock is a synthetic fixture, not the principal genuine three-chain setup. |
+| `panic_reconciles_evicted_history_and_drops_stage` | Gate boundary verified before injected panic; completed history/accumulator survive, evicted signed entries are absent, effects/callbacks suppressed, exact post-mutation ledger delta and independent teardown baseline. |
+| `preparation_pressure_preserves_token_and_all_observations` | Report pressure, P pressure after Report admission, and partial-transfer allocation refusal preserve full redacted Vote equality, original signature pointer/capacity, complete ledger tuple, cap, and zero ingestion/gate/callback/effect deltas. |
+| `later_callback_panic_keeps_applied_effects_and_releases_stage` | Allowed application/commit and incoming retention survive later QC callback panic; A/P release and final independent baseline. |
+| `defensive_correspondence_and_logical_error_controls` | Helper-only same-count/different-membership seal suppresses caller gate; state-helper nonmember error never calls gate. These are explicitly not canonical admitted-token reachable controls. |
+
+The panic-history fixture registers the target with no ancestor chain; the genuine eligible
+three-chain obligation is exercised separately by refusal/retry. Preparation allocation faults,
+malformed seals, and helper-only logical errors are controls, not observed production exploits.
+Initial development attempts exposed trait/import compilation mistakes and an incorrectly prepared
+tiny-history ancestor fixture; those were corrected before successful validation. A later node
+compatibility retry omitted required `test-utils` and was rejected before execution; the corrected
+feature-explicit command is the acceptance command.
+
+**Executed ordinary validation.** Final-source commands and literal results:
+
+```
+cargo test --locked -p qbind-consensus --lib received_qc_effect_gate -- --nocapture
+9 passed; 0 failed; 0 ignored; 274 filtered out; exit 0
+cargo test --locked -p qbind-consensus --lib received_vote_qc -- --nocapture
+14 passed; 0 failed; 0 ignored; 269 filtered out; exit 0
+cargo test --locked -p qbind-consensus
+960 passed; 0 failed; 21 ignored across 59 target results; exit 0
+```
+
+Both focused selections are nonzero and overlap the full suite; they are not added to its total.
+Earlier 951-test validation remains attributed to the ownership-correction source revision.
+
+```
+LIBCLANG_PATH=/usr/lib/llvm-18/lib cargo test --locked -p qbind-node --features test-utils --test run_422_owning_capture_binding_tests --test run_422_owning_decision_vote_handoff_node_tests --test run_422_leader_proposal_owning_handoff_tests
+```
+
+The existing targets executed successfully: capture-binding 24 passed; decision-vote handoff 5 passed;
+leader-proposal handoff 14 passed; each 0 failed/ignored and exit 0 (43 executed tests total).
+This executed feature-explicit compatibility command is distinct from default-feature compilation.
+
+```
+LIBCLANG_PATH=/usr/lib/llvm-18/lib cargo build --locked -p qbind-node
+CARGO_BUILD_JOBS=2 CARGO_PROFILE_TEST_STRIP=symbols LIBCLANG_PATH=/usr/lib/llvm-18/lib cargo test --locked -p qbind-node --no-run
+```
+
+Both exited 0: build 19.54s; default-feature test-target compilation 4m59s with 343 executable targets.
+The latter is compilation only with an explicit command-local profile override, not test execution
+or an unmodified-profile pass. After an inspected scoped `cargo clean --locked -p qbind-node`
+removed 3084 generated files (5.6 GiB reported), the exact build command passed again in 19.37s.
+Filesystem headroom returned to 5.2 GiB. Earlier cleanup before the final command set removed 3041
+generated files (5.4 GiB reported). Source/session history, dependency manifests, and tracked profiles
+were not deleted or changed; no new dependencies or tooling were installed.
+
+**Executed default-checking Miri.** Both meaningful new ownership selectors passed with genuine
+cryptography, no Miri-only crypto substitute, `MIRIFLAGS` removed, and no checks disabled:
+
+```
+env -u MIRIFLAGS cargo +nightly miri test --locked -p qbind-consensus --lib <selector> -- --exact basic_hotstuff_engine::tests::<selector>
+```
+
+| Selector | Literal result | Interpreter test duration |
+|---|---|---|
+| `received_qc_effect_gate_refusal_retry_duplicate_preserves_three_chain` | 1 passed; 0 failed; 0 ignored; 282 filtered out; exit 0 | 3600.44s |
+| `received_qc_effect_gate_panic_reconciles_evicted_history_and_drops_stage` | 1 passed; 0 failed; 0 ignored; 282 filtered out; exit 0 | 1174.56s |
+
+These are nonzero executions of the same accepted tests, not additional full-suite totals.
+Intentional caught gate/callback panics are test controls, not uncaught failures. Compiler dead-code
+warnings remain; neither interpreter execution reported a Miri error. In the control inventory,
+the gate's bool return slot conservatively also covers the later, disjoint-lifetime `qc_success`
+bool; it does not represent an uncharged simultaneously owned callback or allocation.
+
+**Remaining boundary.** This is an opt-in isolated gate with no production caller, not global
+enforcement over existing entrypoints. Publication persistence/acknowledgement, O4 integration,
+current-authority checks, storage/journal changes, signing/delivery, and restart/anti-rollback
+obligations remain unimplemented here. No `VerifiedQuorumCertificate` is manufactured. The new
+gate does not change whole-lifecycle acceptance, activation, deployment, or public DevNet readiness.
+Historical evidence and its producing-revision attribution are preserved.
+
+```
+D7D14_STORAGE_COMPONENT=IMPLEMENTED-ISOLATED
+D7D14_STORAGE_ACCEPTANCE=PASS-ACCEPTED-SUBSET
+§13.6 whole-lifecycle INCOMPLETE
+activation DISABLED
+public DevNet NO-GO
+durable anti-rollback NOT-ESTABLISHED
+C4/C5 OPEN
+```
+
+No O4 implementation, production caller/current-authority integration, signing/delivery, activation,
+deployment, D15, or Run 423. This evidence is not independent source-review acceptance.

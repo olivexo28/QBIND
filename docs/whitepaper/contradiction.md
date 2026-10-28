@@ -2454,3 +2454,70 @@ Scoped node artifact cleanup restored 5.2 GiB headroom, and the node build passe
 §13.6 whole-lifecycle INCOMPLETE; activation DISABLED; public DevNet NO-GO; durable anti-rollback
 NOT-ESTABLISHED; C4/C5 OPEN. No production caller, O4, activation, deployment, D15, or Run 423.
 This correction is not independent source-review acceptance.
+
+#### Run 422 isolated received-QC effect gate reconciliation
+
+The task branch was created from exact `dc782786a4c477295f6be5e567d5c45740b89698`, tree
+`f486d8ce00a277c0ae83767c3d984592c68d8512`, after separately verifying object availability,
+content equality, ancestry, and a clean checkout. The previous local correction was content-equal,
+not an ancestor; it was not silently substituted for the pin.
+
+One shared history/accumulator/QC-formation path now has an isolated pre-`on_qc` sibling seam.
+Every actual QC, including duplicate/equal/lower-view applications, must pass complete signed-evidence
+and exact actual-membership checks before the borrowed caller gate is invoked. Missing/mixed evidence
+or correspondence failure suppresses application; gate refusal suppresses application too. Neither
+case rolls back completed Vote bookkeeping. Existing nongated logical/callback ordering is retained;
+this is not global enforcement over existing routes.
+
+The private-constructed gate view borrows the actual logical QC, corresponding plain wire QC,
+explicit optional lock identity, and narrow pre-application block-QC/commit/view observations.
+It exposes no engine mutation, owned extraction, verified-QC/current-authority capability, durable
+acknowledgement, or release permission. Report application status is independent of certificate
+completeness: a complete certificate may accompany Refused or a defensive future Attempted error.
+There is no reachable ordinary `on_qc` error asserted by this evidence.
+
+Evidence reconciliation precedes the caller gate, including panic. Executed tests distinguish
+surviving history/accumulator bookkeeping with no QC effects after gate unwind from already applied
+lock/commit effects and retained incoming evidence after a later callback panic. No unconsumed token
+or transaction rollback is claimed. Opaque report ownership, first-retained signed-field/signature
+precedence, context/A/P inseparability, and backing-before-lease cleanup are retained unchanged.
+
+The compiler-evaluated control bound is now `2168 + max(288,1600) + 832 = 4600` B for A.
+The additional gate frame covers the borrowed adapter/input/result/reference controls, not arbitrary
+caller-owned callback storage. P remains 7333/9777 B for three/four signers. Shared-ledger/report-quota
+admission still precedes staging allocation and ingestion; destination bytes precede backing
+allocation. Inherited engine QC/signer backing, lock/block-QC clones, and commit-log allocations
+remain outside the new component bound. Detached three/four-signer tuples are
+`(17581,0,1,0,1,0)` / `(20025,0,1,0,1,0)`; final independently observed baseline is
+`(80,0,0,0,0,0)`. Earlier A=3696 and validation remain historical.
+
+Nine new acceptance tests cover actual boundary observations, genuine three-chain refusal/valid
+duplicate retry, incomplete/mixed evidence, NoQc/equivocation, equal/lower QCs, gate-history unwind,
+preparation pressure, later callback panic, and distinct helper-only malformed/error controls.
+Principal tests use genuinely admitted ML-DSA-44 Votes and domain-aware verification inside the gate.
+The tiny-history unwind fixture is target-only; equal/lower initial locks and malformed helper seals
+are explicitly distinguished from the principal engine-reachable three-chain route. Detailed commands,
+literal validation outcomes, and remaining obligations follow in the corresponding D7 entry.
+
+Final ordinary validation passed: 9 new focused gate tests; 14 signed-QC focused regressions;
+the full locked consensus suite 960 passed, 0 failed, 21 ignored across 59 target results.
+Overlapping focused selections are not added to the suite total. The three existing feature-explicit
+node compatibility targets executed 24 capture-binding, 5 decision-vote handoff, and 14 leader-proposal
+handoff tests, all passing. The node build passed. Default-feature node test-target compilation
+exited 0 with 343 executable targets using the explicit command-local
+`CARGO_BUILD_JOBS=2 CARGO_PROFILE_TEST_STRIP=symbols` override and established
+`LIBCLANG_PATH=/usr/lib/llvm-18/lib`. This is compilation, not execution or an unmodified-profile pass.
+Scoped node artifact cleanup restored 5.2 GiB headroom; the node build passed again afterward.
+
+Default-checking Miri passed both new refusal/duplicate-retry and gate-history-unwind tests:
+1 passed, 0 failed/ignored, 282 filtered out, exit 0 each (3600.44s and 1174.56s respectively).
+No checks were disabled, `MIRIFLAGS` was removed, and real cryptography was retained. These overlap
+ordinary tests and are not added to the suite total. No Miri error was reported.
+
+The gate remains opt-in and has no production caller. O4 publication, durability acknowledgement,
+current-authority integration, storage/journal changes, signing/delivery, and restart/anti-rollback
+obligations remain outside this task; no verified-QC capability or global enforcement is claimed.
+`D7D14_STORAGE_COMPONENT=IMPLEMENTED-ISOLATED`; `D7D14_STORAGE_ACCEPTANCE=PASS-ACCEPTED-SUBSET`;
+§13.6 whole-lifecycle INCOMPLETE; activation DISABLED; public DevNet NO-GO; durable anti-rollback
+NOT-ESTABLISHED; C4/C5 OPEN. No activation, deployment, D15, or Run 423.
+This isolated-gate evidence is not independent source-review acceptance.
