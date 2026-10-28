@@ -392,6 +392,8 @@ fn adapter_phase_charges() -> (u128, u128, u128) {
         + size_of::<Result<Reservation, SafetyStoreError>>();
     let invocation = support::control_bytes() as usize
         + size_of::<Admission<'static>>()
+        // Baseline, actual/expected comparison and by-value snapshot return.
+        + 4 * size_of::<StorageSnapshot>()
         // The large invocation return slot exists only AFTER admission.
         + size_of::<ModelResult>()
         + 2 * size_of::<Gate<'static, 'static>>()
@@ -407,7 +409,9 @@ fn adapter_phase_charges() -> (u128, u128, u128) {
         + size_of::<Reservation>();
     // Both complete owner layouts include their route and coverage. The
     // partially consumed admission is bounded separately during conversion.
-    let returned = 2 * size_of::<ModelResult>() + size_of::<Admission<'static>>();
+    let returned = 2 * size_of::<ModelResult>()
+        + size_of::<Admission<'static>>()
+        + size_of::<StorageSnapshot>();
     (admission as u128, invocation as u128, returned as u128)
 }
 
@@ -426,6 +430,7 @@ impl Admission<'_> {
         history: &FixtureCommittedHistory,
     ) -> ModelResult {
         let Self { owner, coverage } = self;
+        let storage = StorageSnapshot::capture(owner);
         let guard = owner.backend.lock_domain();
         let mut gate = Gate {
             owner,
@@ -451,6 +456,7 @@ impl Admission<'_> {
             owner.backend.accounting_current(),
             owner.backend.accounting_aggregate_current(),
         );
+        storage.assert_unchanged(owner);
         ModelResult {
             route,
             publication,
@@ -744,23 +750,17 @@ impl Fixture {
         let vote = self.authority.vote(signer, view, round);
         support::admit(&mut self.engine, ValidatorId(signer as u64), vote).unwrap()
     }
-    fn run(&mut self, token: support::Token) -> ModelResult {
-        let storage = StorageSnapshot::capture(&self.owner);
-        let admission = admit_composition(&self.owner).expect("adapter admission");
-        let result = admission.invoke(
-            &mut self.engine,
-            &self.authority,
-            token,
-            self.revision,
-            &self.history,
-        );
-        storage.assert_returned(&self.owner, &result);
-        result
-    }
     fn seed(&mut self, view: u64) {
         for signer in 0..3 {
             let token = self.token(signer, view, 9);
-            let result = self.run(token);
+            let admission = admit_composition(&self.owner).unwrap();
+            let result = admission.invoke(
+                &mut self.engine,
+                &self.authority,
+                token,
+                self.revision,
+                &self.history,
+            );
             let report = result
                 .route
                 .as_ref()
@@ -781,7 +781,14 @@ impl Fixture {
     fn ready(&mut self, view: u64, mixed: bool) -> support::Token {
         for signer in 0..2 {
             let token = self.token(signer, view, if mixed && signer == 0 { 10 } else { 9 });
-            let result = self.run(token);
+            let admission = admit_composition(&self.owner).unwrap();
+            let result = admission.invoke(
+                &mut self.engine,
+                &self.authority,
+                token,
+                self.revision,
+                &self.history,
+            );
             assert_eq!(result.gate_calls, 0);
         }
         self.token(2, view, 9)
@@ -837,7 +844,8 @@ fn acknowledged_three_chain_post_ack_order_and_serialization() {
         }));
     let old_view = f.engine.current_view();
     *f.notifications.guarded_backend.lock().unwrap() = Some(f.owner.backend.clone());
-    let result = f.run(token);
+    let admission = admit_composition(&f.owner).unwrap();
+    let result = admission.invoke(&mut f.engine, &f.authority, token, f.revision, &f.history);
     *f.notifications.guarded_backend.lock().unwrap() = None;
     f.owner.backend.set_pre_effective_hook(Arc::new(|_, _| {}));
     assert_eq!(f.owner.backend.accounting_current(), adapter_charge());
@@ -931,7 +939,8 @@ fn prewrite_refusal_and_genuine_duplicate_retry_first_retained() {
     let votes = f.notifications.vote.load(Ordering::SeqCst);
     let qcs = f.notifications.qc.load(Ordering::SeqCst);
     f.owner.backend.set_inject(InjectFault::FailBeforeSubmit);
-    let refused = f.run(token);
+    let admission = admit_composition(&f.owner).unwrap();
+    let refused = admission.invoke(&mut f.engine, &f.authority, token, f.revision, &f.history);
     assert_eq!(refused.publication, Some(Publication::RefusedPreWrite));
     let report = refused
         .route
@@ -972,7 +981,8 @@ fn prewrite_refusal_and_genuine_duplicate_retry_first_retained() {
     assert_eq!(f.owner.backend.accounting_current(), 0);
     f.owner.backend.set_inject(InjectFault::None);
     let token = f.token(2, 3, 19);
-    let result = f.run(token);
+    let admission = admit_composition(&f.owner).unwrap();
+    let result = admission.invoke(&mut f.engine, &f.authority, token, f.revision, &f.history);
     let report = result
         .route
         .as_ref()
@@ -1018,7 +1028,8 @@ fn publication_failure(fault: InjectFault, outcome: Publication, newer: bool) {
     let qcs = f.notifications.qc.load(Ordering::SeqCst);
     let view = f.engine.current_view();
     f.owner.backend.set_inject(fault);
-    let result = f.run(token);
+    let admission = admit_composition(&f.owner).unwrap();
+    let result = admission.invoke(&mut f.engine, &f.authority, token, f.revision, &f.history);
     assert_eq!(result.publication, Some(outcome));
     assert_eq!(
         result.route.as_ref().ok().unwrap().application(),
@@ -1047,7 +1058,8 @@ fn publication_failure(fault: InjectFault, outcome: Publication, newer: bool) {
         f.revision += 1;
     }
     let token = f.token(2, 3, 9);
-    let retry = f.run(token);
+    let admission = admit_composition(&f.owner).unwrap();
+    let retry = admission.invoke(&mut f.engine, &f.authority, token, f.revision, &f.history);
     if newer {
         assert_eq!(retry.refused, Some(Refused::Lock));
         assert_eq!(retry.submitted, 0);
@@ -1114,7 +1126,8 @@ fn equal_and_lower_real_candidates_refuse_without_publication() {
     for view in [2, 1] {
         let effects = Effects::capture(&f.engine, IDS[(view - 1) as usize]);
         let token = f.token(2, view, 9);
-        let result = f.run(token);
+        let admission = admit_composition(&f.owner).unwrap();
+        let result = admission.invoke(&mut f.engine, &f.authority, token, f.revision, &f.history);
         assert_eq!(result.refused, Some(Refused::NonAdvancing));
         assert_eq!(result.submitted, 0);
         assert!(result.publication.is_none());
@@ -1132,7 +1145,8 @@ fn inconsistent_complete_evidence_never_calls_publication_gate() {
     let mut f = Fixture::new();
     let token = f.ready(1, true);
     let apps = support::applications(&f.engine);
-    let result = f.run(token);
+    let admission = admit_composition(&f.owner).unwrap();
+    let result = admission.invoke(&mut f.engine, &f.authority, token, f.revision, &f.history);
     let report = result.route.as_ref().ok().unwrap();
     assert!(report.logical_quorum() && report.incomplete() && report.retained());
     assert!(report.wire().is_none());
@@ -1157,12 +1171,14 @@ fn missing_retained_evidence_from_ordinary_legacy_vote_never_calls_gate() {
         .unwrap()
         .is_none());
     let token = f.token(1, 1, 9);
-    let result = f.run(token);
+    let admission = admit_composition(&f.owner).unwrap();
+    let result = admission.invoke(&mut f.engine, &f.authority, token, f.revision, &f.history);
     assert_eq!(result.gate_calls, 0);
     f.assert_released(result);
     let token = f.token(2, 1, 9);
     let apps = support::applications(&f.engine);
-    let result = f.run(token);
+    let admission = admit_composition(&f.owner).unwrap();
+    let result = admission.invoke(&mut f.engine, &f.authority, token, f.revision, &f.history);
     let report = result.route.as_ref().ok().unwrap();
     assert!(report.logical_quorum() && report.incomplete() && report.retained());
     assert_eq!(report.application(), support::Application::Suppressed);
@@ -1276,7 +1292,8 @@ fn existing_anchor_is_preserved_and_requires_independent_history() {
     assert_eq!(f.engine.committed_block(), Some(&IDS[0]));
     f.history = FixtureCommittedHistory::new().with(IDS[0], 0);
     let token = f.token(2, 3, 9);
-    let report = f.run(token);
+    let admission = admit_composition(&f.owner).unwrap();
+    let report = admission.invoke(&mut f.engine, &f.authority, token, f.revision, &f.history);
     assert_eq!(report.refused, Some(Refused::NonAdvancing));
     // Independent anchored predecessor fixture, published with ordinary O4
     // using the genuinely staged certificate AFTER the grandparent commit exists.
@@ -1319,7 +1336,8 @@ fn existing_anchor_is_preserved_and_requires_independent_history() {
     f.revision = new_revision;
     f.history = FixtureCommittedHistory::new();
     let token = f.ready(4, false);
-    let refused = f.run(token);
+    let admission = admit_composition(&f.owner).unwrap();
+    let refused = admission.invoke(&mut f.engine, &f.authority, token, f.revision, &f.history);
     assert_eq!(refused.refused, Some(Refused::Loader));
     assert_eq!(refused.submitted, 0);
     f.assert_released(refused);
@@ -1330,7 +1348,8 @@ fn existing_anchor_is_preserved_and_requires_independent_history() {
     let token = f.token(2, 4, 9);
     let token_bytes = support::token_inline_bytes() + token.vote().signature.capacity() as u64;
     let consensus_before = ledger.sample();
-    let result = f.run(token);
+    let admission = admit_composition(&f.owner).unwrap();
+    let result = admission.invoke(&mut f.engine, &f.authority, token, f.revision, &f.history);
     // Both storage ledgers and their independently sampled ceilings are checked
     // at return, BEFORE diagnostic readback admits any loader objects.
     storage.assert_returned(&f.owner, &result);
@@ -1383,7 +1402,8 @@ fn consensus_preparation_pressure_returns_original_token_and_restores_ledgers() 
     let original_cap = f.engine.state().max_retained_evidence_bytes();
     support::set_cap(&mut f.engine, before.0);
     let engine = EngineWitness::capture(&f, &witness.vote);
-    let result = f.run(token);
+    let admission = admit_composition(&f.owner).unwrap();
+    let result = admission.invoke(&mut f.engine, &f.authority, token, f.revision, &f.history);
     storage.assert_returned(&f.owner, &result);
     assert_eq!((result.gate_calls, result.submitted), (0, 0));
     assert!(result.publication.is_none() && result.refused.is_none());
@@ -1405,7 +1425,8 @@ fn consensus_preparation_pressure_returns_original_token_and_restores_ledgers() 
     support::set_cap(&mut f.engine, original_cap);
     assert_eq!(f.engine.state().max_retained_evidence_bytes(), original_cap);
     let retry_engine = EngineWitness::capture(&f, &witness.vote);
-    let result = f.run(token);
+    let admission = admit_composition(&f.owner).unwrap();
+    let result = admission.invoke(&mut f.engine, &f.authority, token, f.revision, &f.history);
     storage.assert_returned(&f.owner, &result);
     retry_engine.assert_success(&f, &witness, &result, false);
     assert_report_ledger(&ledger, before, result.route.as_ref().ok().unwrap());
@@ -1511,7 +1532,9 @@ fn adapter_candidate_and_o4_pressure_are_distinct_and_cleanup_is_immediate() {
             let retry_engine = EngineWitness::capture(&f, &witness.vote);
             let token = f.token(2, 1, 19);
             let retry_ledger = ledger.sample();
-            let result = f.run(token);
+            let admission = admit_composition(&f.owner).unwrap();
+            let result =
+                admission.invoke(&mut f.engine, &f.authority, token, f.revision, &f.history);
             storage.assert_returned(&f.owner, &result);
             retry_engine.assert_success(&f, &witness, &result, true);
             // A duplicate consumes its own token/signature, while the
@@ -1582,7 +1605,10 @@ fn existing_post_ack_hook_unwind_releases_both_ledgers() {
     f.owner.backend.set_pre_effective_hook(Arc::new(|_, _| {
         panic!("existing post-ack hook test unwind")
     }));
-    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| f.run(token)));
+    let admission = admit_composition(&f.owner).unwrap();
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        admission.invoke(&mut f.engine, &f.authority, token, f.revision, &f.history)
+    }));
     assert!(result.is_err());
     storage.assert_unchanged(&f.owner);
     let sample = ledger.sample();
@@ -1628,11 +1654,11 @@ fn ownership_phase_operands_and_independent_final_floors() {
         size_of::<std::sync::MutexGuard<'static, super::super::backend::SerializationDomain>>(),
         size_of::<Reservation>());
     let (admission, invocation, returned) = adapter_phase_charges();
-    println!("corrected carrier layouts: admission_owner={} admission_result={} admission_diagnostic={} reserve_result={} invocation_result={} route_result={} returned_owner={}",
+    println!("corrected carrier layouts: admission_owner={} admission_result={} admission_diagnostic={} reserve_result={} invocation_result={} route_result={} returned_owner={} storage_snapshot={}",
         size_of::<Admission<'static>>(), size_of::<Result<Admission<'static>, AdmissionRefusal>>(),
         size_of::<AdmissionRefusal>(), size_of::<Result<Reservation, SafetyStoreError>>(),
         size_of::<ModelResult>(), size_of::<Result<support::Report, support::Refusal>>(),
-        size_of::<ModelResult>());
+        size_of::<ModelResult>(), size_of::<StorageSnapshot>());
     println!("corrected control phase bounds: admission={admission} invocation={invocation} returned_conversion={returned} selected={a}");
     assert!(size_of::<Result<Admission<'static>, AdmissionRefusal>>() < size_of::<ModelResult>());
     println!(
@@ -1646,7 +1672,8 @@ fn ownership_phase_operands_and_independent_final_floors() {
     let token = f.ready(1, false);
     let ledger = support::ledger(&f.engine);
     let storage = StorageSnapshot::capture(&f.owner);
-    let result = f.run(token);
+    let admission = admit_composition(&f.owner).unwrap();
+    let result = admission.invoke(&mut f.engine, &f.authority, token, f.revision, &f.history);
     storage.assert_returned(&f.owner, &result);
     let report_live = ledger.sample();
     let charges = result.route.as_ref().ok().unwrap().charges();
