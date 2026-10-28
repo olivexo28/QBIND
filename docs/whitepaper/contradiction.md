@@ -2521,3 +2521,122 @@ obligations remain outside this task; no verified-QC capability or global enforc
 §13.6 whole-lifecycle INCOMPLETE; activation DISABLED; public DevNet NO-GO; durable anti-rollback
 NOT-ESTABLISHED; C4/C5 OPEN. No activation, deployment, D15, or Run 423.
 This isolated-gate evidence is not independent source-review acceptance.
+
+### RUN 422 - received-QC / O4 acknowledgement / QC-effect composition (isolated)
+
+Producing source `12c39541bd00f93f5e9cf7e8940ec7c5c13ec7ff`, tree
+`387174be19432615115ed99f2e1540b6c7cee1aa`, starts exactly at main
+`00a73da0fb30d50478b2b462d902f85323944e54` / tree
+`73626cfea1365f52e1776e31c631a8af09875af7`; clean worktree, availability,
+tree equality and ancestry were checked separately.
+
+The private node test/test-utils composition now connects genuinely admitted
+ML-DSA-44 received Votes, complete staged QC evidence, authoritative
+engine/storage/context correspondence, ordinary O4 and its ACTUAL durable
+acknowledgement, then the accepted route's ordinary QC application and success
+callbacks. One owner-domain guard spans the whole interval; the existing O4 body
+is factored once into a private held-guard helper, not copied. Only
+`DurableAcknowledged` allows application. Pre-write, ambiguous and uncertain
+outcomes remain distinct; completed Vote bookkeeping is not rolled back.
+Uncertain newer storage with an older engine remains a correspondence refusal.
+Equal/lower candidates never use an "already stored" allowance.
+
+Fifteen executable tests cover genuine three-chain commit/view effects,
+post-ack/pre-effective absence of effects, bounded deterministic lock contention,
+exact staged certificate readback, original retained signature/round on genuine
+duplicate retry, both non-acknowledged backend faults and recovery latches,
+revision/lock/absence/context/profile mismatch, independent committed-history
+anchors, missing/inconsistent complete evidence, four independent pressure
+boundaries, immediate ledger restoration and unwind/final release.
+
+Authority is an immutable independently constructed TEST FIXTURE (four dense
+power-1 validators, suite 100, signature length 2420), not production current
+authority. The actual admission snapshot and pinned storage profile are checked
+against that fixture's domain/genesis/chain/epoch/suite/membership/power/keys and
+signature size. Logical view binds wire height, not round. Storage stage-2
+verification stays unwired and evidence stays `Unverified`; domain-aware
+cryptographic assertions are test evidence, not minted authorization capability.
+
+The source-derived coverage operands are `R=10459`, `G=10752`, `T=10760`,
+node adapter 3472, candidate 10137, charged loader 31814, O4 52939 and context
+240. Main publication-phase aggregate coverage is 66788; the exact-byte
+diagnostic overlap bound is 77319, both below the unchanged 84956 ceiling.
+Executed main-fixture storage current/peak observations are operational
+3472/66548 and aggregate 3712/66788. Consensus accounting is independently
+sampled (report A=4600, complete backing P=7333) and independently restored;
+coexisting coverage is NOT claimed as summed physical memory. The detailed
+ownership/phase table, requirement-to-test mapping, literal command results and
+qualifications are appended in the corresponding D7 evidence entry.
+
+Locked consensus validation passed 960 tests (21 ignored); the focused gate
+selection passed 9. New composition selection passed 15; owner selection passed
+152 (6 ignored); storage acceptance passed 157 (1 ignored); existing capture,
+decision-vote and leader handoffs passed 24, 5 and 14 respectively. These
+overlapping selections are not added into a combined total. The default node
+build passed. These executions all exited 0 at the producing source revision.
+`CARGO_BUILD_JOBS=2 CARGO_PROFILE_TEST_STRIP=symbols LIBCLANG_PATH=/usr/lib/llvm-18/lib cargo test --locked -p qbind-node --no-run`
+also exited 0 with 343 executable targets (3m45s): explicitly DEFAULT-feature
+compilation with a COMMAND-LOCAL profile override, not execution or an
+unmodified-profile pass. Only evidence-document appends were uncommitted during
+the final validation set; maintained Rust/Cargo matched the producing commit.
+No fresh Miri claim is made.
+
+Production callers and activation remain unchanged. No global enforcement,
+trusted-current-authority/restart integration, TC path, journal/signing/delivery
+integration, new crash boundary, automatic O5, activation, deployment, D15 or
+Run 423 is included. `D7D14_STORAGE_COMPONENT=IMPLEMENTED-ISOLATED`;
+`D7D14_STORAGE_ACCEPTANCE=PASS-ACCEPTED-SUBSET`; §13.6 whole-lifecycle INCOMPLETE;
+activation DISABLED; public DevNet NO-GO; durable anti-rollback NOT-ESTABLISHED;
+C4/C5 OPEN. Implementation delivery is not independent source-review acceptance.
+
+### RUN 422 received-QC/O4 isolated ownership correction
+
+Starting from `c51c4be4363fd805be30ee5f3f98535ed4ccc501` (tree
+`6718d2dc9f25867e6df010099f1a4ddb8d9b5732`), the private composition now
+explicitly admits node coverage before consuming the caller-owned token.
+Admission failure returns a bounded diagnostic, not a large token/outcome enum.
+Only the opaque admitted owner invokes the route; its large returned owner
+keeps coverage until report/backing destruction. No fixture wrapper hides that
+boundary. This corrects isolated model accounting, not a production exploit.
+
+At source revision `1853e695755e71047a412bcfc77b875d8dd4d4fe`, measured
+admission owner/result layouts are 64/64 bytes, unit diagnostic 0, reservation
+result 80, invocation/returned owner 432 (embedded route result 312), and
+independent storage snapshot 144. Disjoint control bounds are admission 208,
+active invocation 3552, return conversion 1072: selected adapter coverage 3552.
+This includes component-owned snapshot/comparison controls and conversion
+overlap without double-counting embedded reservation controls. Earlier
+measurements above retain their original producing-revision attribution.
+
+Unchanged N=4/S_sig=2420 operands are candidate 10137, loader 31814, O4 52939
+and context 240. Recalculated aggregate phase bounds are admitted 3792,
+candidate 13929, loader 45743, O4 66868 and synchronous return 3792; diagnostic
+overlap reaches 77399, below the unchanged 84956 ceiling. Executed independent
+operational current/peak is 3552/66628 and aggregate 3792/66868. Consensus
+report A/P remains 4600/7333, independently restored; coverage sums are not
+physical-memory measurements.
+
+Both pressure tests now check complete redacted Vote equality and original
+signature pointer/capacity, full consensus tuples, independent storage occupancy
+and ceilings, engine/bookkeeping/notification effects, and real acknowledged/
+Applied success after relief. Consumed-Vote refusals report actual Refused
+outcomes and first-retained evidence; genuine duplicates retain the original
+round/signature and cause exactly one QC application. Alternate-owner mismatch/
+profile cleanup samples the actual backend, and anchored return checks precede
+readback. Cleanup includes aggregate and operational observations independently.
+
+Fresh requested node selections at that producing revision passed 15 and
+152 tests (owner selection: 158 selected, 6 ignored); both exited 0.
+`git -c core.whitespace=cr-at-eol diff --check` exited 0. Literal commands,
+requirement mapping and complete phase inventory are appended in the D7
+evidence. The consensus facade is unchanged; previous full suites/build/default
+test-compilation/Miri are not relabeled fresh. Only evidence appends follow
+the producing source revision.
+
+Accepted consensus/O4 semantics, the single serialization interval, all
+publication outcomes and production callers remain unchanged. No production
+integration, automatic O5/replay/catch-up, new crash boundary, activation,
+deployment, D15 or Run 423. `D7D14_STORAGE_COMPONENT=IMPLEMENTED-ISOLATED`;
+`D7D14_STORAGE_ACCEPTANCE=PASS-ACCEPTED-SUBSET`; §13.6 whole-lifecycle INCOMPLETE;
+activation DISABLED; public DevNet NO-GO; durable anti-rollback NOT-ESTABLISHED;
+C4/C5 OPEN. Implementation delivery is not independent source-review acceptance.

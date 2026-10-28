@@ -20663,3 +20663,392 @@ C4/C5 OPEN
 
 No O4 implementation, production caller/current-authority integration, signing/delivery, activation,
 deployment, D15, or Run 423. This evidence is not independent source-review acceptance.
+
+## RUN 422 - isolated received-QC / O4 acknowledgement / QC-effect composition
+
+**Producing source revision:** `12c39541bd00f93f5e9cf7e8940ec7c5c13ec7ff`;
+root tree `387174be19432615115ed99f2e1540b6c7cee1aa`.
+The starting main was exactly `00a73da0fb30d50478b2b462d902f85323944e54`,
+tree `73626cfea1365f52e1776e31c631a8af09875af7`. The worktree was clean;
+commit availability (`cat-file`), exact tree correspondence (`rev-parse`), and
+ancestry (`merge-base --is-ancestor`) were checked separately. No baseline fetch
+or substitution was needed. Work is confined to `copilot/run-422-received-qc-o4-model`.
+
+**Implemented, isolated only.** An opt-in consensus `test-utils` facade beneath
+`basic_hotstuff_engine` executes the accepted private admission, original-token
+retention, complete wire-QC staging, and pre-`on_qc` effect-gated route. Node's
+existing feature forwards this feature; its composition module is private and
+requires BOTH `test` and `test-utils`. Tokens, evidence internals, and gate/report
+implementation remain crate-private. Reports retain their original ownership
+and destruction contract; wire inspection is borrowed, not an extracted clone.
+There is no unchecked token constructor, mutable context access, raw ledger
+mutation, fabricated verified certificate, duplicate ingestion, or manual
+`on_qc` invocation.
+
+`publish_locked` is now a thin domain-locking wrapper around its one private
+held-guard body. The body retains the existing preflight, revision fence,
+authoritative predecessor validation, strictly increasing lock rule, accounting,
+publication results, and effectiveness transition. The model acquires that SAME
+domain once before the consensus invocation, checks the immutable context and
+authoritative charged loader result, calls ordinary O4 without re-acquiring the
+domain, and holds it through gate return, QC application, success callbacks,
+and synchronous route return. Only the actual `DurableAcknowledged` return maps
+to Allow. A post-ack/pre-effective hook observes zero new QC applications and
+QC/view success callbacks; a competing thread's nonblocking acquisition reports
+WouldBlock over a bounded channel (5-second failure deadline, no sleep).
+Synchronous ordinary callbacks also observe contention; acquisition succeeds
+after return. These callbacks never invoke owner operations re-entrantly.
+
+**Authority assumption, not current-authority integration.** An independently
+constructed immutable fixture has four dense validators, power 1 each, genuine
+suite-100 ML-DSA-44 keys and 2420-byte signatures. Its commitment hashes runtime
+chain, wire chain 7, genesis, epoch 0, indices, powers, suite and length-prefixed
+public keys. Both the actual admission snapshot and pinned storage context derive
+from it. Borrowed snapshot inspection checks the domain, epoch, suite, exact
+membership/power/keys and key shape; the node checks pinned genesis, authority
+reference, chain, epoch, suites, signature size and storage profile. Shared epoch
+or count alone is insufficient. This fixture does NOT establish production
+current authority.
+
+The candidate uses the actual gate-supplied logical identity and complete staged
+wire certificate, including every original signature and signed wire field.
+Logical view binds wire height; wire round remains 9, not height. A genuinely
+admitted duplicate signed with round 19 uses the FIRST retained round-9 evidence.
+Under the held domain, the existing charged loader validates stored content and
+independent history; expected revision and exact engine/storage lock identity
+must agree, including honest bootstrap absence. Equal/lower candidates refuse
+before O4. The caller-owned candidate is reserved before its copy. Ordinary O4
+recomputes the evidence binding and validates it. Existing committed anchors are
+preserved and require independent history; an anchor is NOT inferred from a
+commit that the later `on_qc` will produce. In this registered-chain fixture the
+first committed grandparent has actual height 0, not a coerced absent anchor.
+Storage stage-2 verification remains unwired and readback remains `Unverified`.
+Domain-aware cryptographic verification in these tests is TEST EVIDENCE only.
+
+### Executable requirement mapping
+
+All names below are in
+`safety_record_store::owner::received_qc_publication_model`; 15 tests execute.
+
+| Requirement | Test(s) | Discriminating observation |
+|---|---|---|
+| A: acknowledgement, serialization, genuine three-chain | `acknowledged_three_chain_post_ack_order_and_serialization` | Existing post-ack hook precedes effects; one application, target own-QC, actual commit and view advancement; exact staged-QC readback; competitor/callback contention |
+| B: pre-write refusal and duplicate | `prewrite_refusal_and_genuine_duplicate_retry_first_retained` | Exact predecessor bytes/revision, no effects, honest retained Vote/ordinary notifications; different-round genuine duplicate uses original signature pointer/capacity and applies once |
+| C: distinct non-acknowledged writes | `ambiguous_publication_latches_without_assuming_unchanged`; `uncertain_publication_survives_and_lock_mismatch_stays_blocked` | Actual latch and surviving revision/lock inspected; no effects or success notifications; retry blocked, no invented acknowledgement/O5 |
+| D: correspondence and eligibility | `stale_revision_context_and_durable_engine_mismatch_refuse_before_submission`; `bootstrap_storage_does_not_hide_an_existing_engine_lock`; `incompatible_pinned_profile_fields_refuse_before_submission`; `equal_and_lower_real_candidates_refuse_without_publication` | Zero O4 submission/application; both absence mismatches, independent-authority mismatch, nine pinned-profile mismatches, equal/lower real duplicate QCs |
+| D: anchored predecessor/history | `existing_anchor_is_preserved_and_requires_independent_history` | Missing independent history refuses load; valid history permits duplicate retry and preserves the existing anchor, not the later commit |
+| E: missing/inconsistent completeness | `missing_retained_evidence_from_ordinary_legacy_vote_never_calls_gate`; `inconsistent_complete_evidence_never_calls_publication_gate` | Logical quorum is not complete evidence; zero publication-gate calls/writes/application; truthful completed Vote handling |
+| F: independent pressure/cleanup | `consensus_preparation_pressure_returns_original_token_and_restores_ledgers`; `adapter_candidate_and_o4_pressure_are_distinct_and_cleanup_is_immediate`; `ownership_phase_operands_and_independent_final_floors`; `existing_post_ack_hook_unwind_releases_both_ledgers` | Real ledger admissions distinguish consensus preparation, adapter, candidate and O4 pressure; exact permitted token/pointer/capacity preservation, immediate independent restoration and final floors |
+
+The missing-evidence test uses the reachable ordinary legacy Vote entrypoint
+ONCE for one signer; it does not fabricate a token or duplicate ingestion.
+All publication-pressure cases use real shared-accountant reservations, not
+Boolean O4 substitutes or allocation-failure mocks. The unwind control uses the
+EXISTING post-ack hook and catches its intentional panic; it adds no crash
+boundary and never reuses or silently unpoisons that owner. Inherited
+consensus helper-only malformed/error controls are not relabelled as node routes.
+
+| Actual O4 outcome | Observed state and effect rule |
+|---|---|
+| `DurableAcknowledged` | New revision effective before Allow; then exactly one ordinary QC application and success notifications |
+| `RefusedPreWrite` (existing pre-submit fault) | Predecessor bytes/revision unchanged, recovery latch not set; Vote bookkeeping retained; clearing fault permits genuinely admitted duplicate retry |
+| `WriteFailedAmbiguous` (existing write-error fault) | This injection actually leaves predecessor revision/lock; recovery latch SET. This is not a claim that arbitrary ambiguous failures leave bytes unchanged. Retry reaches ordinary O4's recovery-required refusal |
+| `UncertainDurable` (existing after-write fault) | Newer revision/lock survives, recovery latch SET, engine remains older; retry at surviving revision is an engine/storage correspondence refusal BEFORE O4 |
+
+Certificate completeness, publication outcome, and application outcome are
+separate returned observations. No refusal rolls back completed Vote history,
+accumulator insertion/duplicate disposition, retention, or ordinary Vote
+notifications. No equal/stored shortcut, catch-up, replay, recovery-latch clearing
+or automatic O5 is supplied.
+
+### Ownership inventory and phase bounds (64-bit, N=4/S_sig=2420)
+
+The source inventory in `adapter_charge`, `candidate_charge` and facade
+`control_bytes` precedes all adapter/candidate copies and uses existing
+`Reservation` ownership patterns; it is not a new allocator or refcount system.
+All returned diagnostics are bounded scalars. Field order destroys the opaque
+report before node coverage; the report's existing backing/context/report-owner
+drop order is unchanged. Loader objects/scratch use the existing charged
+held-guard loader, are destroyed before candidate copying, and remain covered
+while live. The caller's candidate lease persists across O4's independent
+working-set reservation, including refusal and unwind.
+
+Derived operands, NOT the small-signature profile:
+`N=4`, `S_sig=2420`, `B_span=1`, `sizeof(TimeoutMsg)=112`,
+QC serialized cap `269+1+4*(2+2420)=9958`, TC cap `10459`, hence `R=10459`.
+QC backing `1+4*24+4*2420=9777`; cross-variant backing `10352`;
+QC generation `384+9777+16=10177`, whole-generation `G=10752`;
+transient `T=408+10352=10760`. Holder handle is 136, hence loader coverage
+`(R+G+136)+(T-G+R)=31814`. Ordinary O4 coverage is
+`2*T+3*R+42=52939`.
+
+Node adapter coverage is
+`A_node = 1032 + 2*72 + 2*432 + 2*80 + 112 + 360 + 2*48 + 496 + 16 + 4*48
+= 3472`: facade controls; gate copies; result/return carriers; publication
+carriers; wire conversion control; LockedRecord conversion control; anchor
+temporaries; loader-result carrier; held guard; reservation controls, respectively.
+The separately reserved caller-owned candidate is
+`C_node=360+1+4*24+4*2420=10137`. Its lease is admitted BEFORE the loader and
+candidate copy, permitting real independent candidate-pressure admission refusal.
+Pinned context standing charge is 240.
+
+| Phase | Ownership/lease lifetime | Source-derived aggregate coverage bound |
+|---|---|---|
+| Adapter admitted | Context + node controls/results | `240+3472=3712` |
+| Candidate admitted, before load/copy | Adapter + candidate coverage | `240+3472+10137=13849` |
+| Charged authoritative load/validation | Candidate coverage overlaps loader objects/scratch | `13849+31814=45663` |
+| Loader destroyed, candidate copied | Caller-owned LockedRecord and nested QC backing | `13849` |
+| Ordinary O4 | Candidate coverage overlaps O4 working set | `13849+52939=66788` |
+| Synchronous return, report live | O4/candidate backing and leases released; report retained separately | `3712` |
+| Report/result destroyed | Node coverage released after report destruction | `240` |
+| Remaining fixture/context destroyed | Independent storage partitions released | `0` |
+
+These are conservative COEXISTING COVERAGE bounds, NOT sums claimed as physical
+memory. In particular, O4 consumes the candidate backing; the two covering
+reservations overlap deliberately, not two asserted live candidate graphs.
+The B test's exact-byte diagnostic has its OWN prior reservation
+`R+sizeof(Vec)+sizeof(Reservation)=10531`, retained until that diagnostic backing
+is destroyed. Its complete publication-phase coverage bound is
+`66788+10531=77319`, still below the unchanged aggregate ceiling `84956`.
+The anchored-predecessor fixture's separate backend has setup candidate/binding
+coverage `10137+10459`; with context and O4 its bound is `73775`.
+Pressure fixtures deliberately fill available space with separately admitted
+standing reservations; no profile or accounting ceiling was raised.
+
+Executed independent observations in the ownership test:
+storage operational current/peak `3472/66548`, aggregate current/peak
+`3712/66788`; context current `240`. Consensus report coverage is
+`A_consensus=4600`, actual complete QC backing `P=1+3*24+3*2420=7333`;
+consensus occupancy `(188761,0,1,0,1,0)` while report is live, standing floor
+`(176828,0,1,0,0,0)` after report destruction, independent observer-only floor
+`(80,0,0,0,0,0)` after remaining fixtures are destroyed. The observer's own
+final drop releases that remaining budget cell. Storage operational, context and
+aggregate are independently asserted zero. Consensus evidence is NOT charged
+to, or added to, the storage aggregate.
+
+The existing in-place O4 post-ack object sampler measured inline proof 496,
+evidence capacity 7333, encoded capacity 9958 and metadata capacity 42:
+actual named O4 objects total 17829. This is a phase-specific live-object sample,
+not the reservation peak or a claim about backend/RocksDB/cryptographic memory.
+Immediate refusal/return checks precede diagnostic readback allocations; returned
+reports are destroyed before their covering lease. Exact consensus committed/
+pending/context/report tuples are checked at preparation and consumed-Vote
+pressure boundaries, independently of storage operational/aggregate restoration.
+
+### Literal validation and producing revision
+
+Commands 1-10 below ran on producing source revision
+`12c39541bd00f93f5e9cf7e8940ec7c5c13ec7ff`. All exited 0.
+Maintained Rust/Cargo source matched that commit exactly; only these appended
+evidence documents were uncommitted during the final command set.
+Focused selections overlap larger suites and are NOT added to their totals.
+
+| # | Literal command | Result |
+|---|---|---|
+| 1 | `cargo test --locked -p qbind-consensus` | 960 passed, 0 failed, 21 ignored, 0 filtered; 59 target summaries |
+| 2 | `cargo test --locked -p qbind-consensus --lib received_qc_effect_gate -- --nocapture` | 9 passed, 0 failed/ignored, 274 filtered |
+| 3 | `LIBCLANG_PATH=/usr/lib/llvm-18/lib cargo test --locked -p qbind-node --lib --features test-utils safety_record_store::owner::received_qc_publication_model -- --nocapture` | 15 passed, 0 failed/ignored, 2145 filtered |
+| 4 | `LIBCLANG_PATH=/usr/lib/llvm-18/lib cargo test --locked -p qbind-node --lib --features test-utils safety_record_store::owner:: -- --quiet` | 152 passed, 0 failed, 6 ignored, 2002 filtered |
+| 5 | `LIBCLANG_PATH=/usr/lib/llvm-18/lib cargo test --locked -p qbind-node --features test-utils --test run_422_d7d14_safety_record_store_tests` | 157 passed, 0 failed, 1 ignored, 0 filtered |
+| 6 | `LIBCLANG_PATH=/usr/lib/llvm-18/lib cargo test --locked -p qbind-node --features test-utils --test run_422_owning_capture_binding_tests` | 24 passed, 0 failed/ignored/filtered |
+| 7 | `LIBCLANG_PATH=/usr/lib/llvm-18/lib cargo test --locked -p qbind-node --features test-utils --test run_422_owning_decision_vote_handoff_node_tests` | 5 passed, 0 failed/ignored/filtered |
+| 8 | `LIBCLANG_PATH=/usr/lib/llvm-18/lib cargo test --locked -p qbind-node --features test-utils --test run_422_leader_proposal_owning_handoff_tests` | 14 passed, 0 failed/ignored/filtered |
+| 9 | `LIBCLANG_PATH=/usr/lib/llvm-18/lib cargo build --locked -p qbind-node` | Build passed; 17.44s; not test execution |
+| 10 | `CARGO_BUILD_JOBS=2 CARGO_PROFILE_TEST_STRIP=symbols LIBCLANG_PATH=/usr/lib/llvm-18/lib cargo test --locked -p qbind-node --no-run` | Exit 0; 343 executable targets; 3m45s; default-feature compilation ONLY |
+
+Command 10 explicitly uses DEFAULT features and a COMMAND-LOCAL test-profile
+strip override. It is not test execution or an unmodified-profile pass. No
+RocksDB/Miri substitution or ignored-test execution is implied. The final source
+revision's Rust/Cargo blobs are unchanged by the subsequent evidence-only commit.
+The CRLF-aware check is `git -c core.whitespace=cr-at-eol diff --check` (exit 0);
+the baseline-to-delivery check uses the same setting. Historical documentation
+prefixes are byte-identical to baseline, existing modes and exact per-file
+EOL/EOF conventions are retained, and new Rust files are LF/final-newline.
+
+Bring-up initially encountered missing `libclang.so` (exit 101); after this
+missing-dependency failure, `libclang-18-dev` was installed, providing the
+requested `/usr/lib/llvm-18/lib` path. One early test assumed the fixture's first
+committed height was 1; the actual engine height is 0 and the assertion and
+independent anchored-history fixture were corrected before the producing commit.
+Final inspection also strengthened the surviving-lock identity assertion and
+restored the exact ORIGINAL consensus ceiling after the preparation-pressure
+test (rather than an unlimited test ceiling). The full command set was rerun at
+the producing revision above. A scoped `cargo clean --locked -p qbind-node`
+removed 3099 identified generated package artifacts (5.7 GiB reported) between
+the initial and final command sets; sources, session evidence, native dependency
+artifacts and repository configuration were preserved.
+Final executions above are distinct from those exploratory attempts. Existing
+compiler warnings remain. Caught intentional hook/gate panics are controls, not
+uncaught failures. No Miri execution is claimed here; inherited Miri evidence
+retains its original attribution and RocksDB was not required under Miri.
+
+**Remaining limitations.** Implementation delivery is not independent
+source-review acceptance. This composition has no production caller, global gate
+enforcement, production trusted-current-authority or restart integration, TC
+path, journal/signing/delivery integration, new crash boundary, activation or
+deployment. No automatic O5/catch-up/replay/anti-rollback capability is added.
+Backend, codec, validator, journal, cryptographic verifier, production dispatch,
+accounting ceilings and workspace profiles are unchanged.
+
+```
+D7D14_STORAGE_COMPONENT=IMPLEMENTED-ISOLATED
+D7D14_STORAGE_ACCEPTANCE=PASS-ACCEPTED-SUBSET
+§13.6 whole-lifecycle INCOMPLETE
+activation DISABLED
+public DevNet NO-GO
+durable anti-rollback NOT-ESTABLISHED
+C4/C5 OPEN
+```
+
+Stop after this isolated composition: no D15 or Run 423.
+
+## RUN 422 received-QC/O4 composition: bounded admission/accounting correction
+
+Starting task revision `c51c4be4363fd805be30ee5f3f98535ed4ccc501`, root tree
+`6718d2dc9f25867e6df010099f1a4ddb8d9b5732`, on the existing
+`copilot/run-422-received-qc-o4-model` branch. Starting commit, exact tree,
+branch and clean worktree were verified separately. This entry corrects the
+isolated model's ownership inventory and executable observations, not a
+production exploit. All preceding entries, measurements and producing-revision
+attributions remain historical and unchanged.
+
+### Two-stage ownership and measured layouts
+
+`admit_composition` leaves the original token caller-owned and returns only a
+bounded admission diagnostic or an opaque admitted owner. Every call site
+explicitly admits before invoking; no combined fixture wrapper returns a large
+outcome while doing its own admission. Only `Admission::invoke` consumes the
+token and produces `ModelResult`. Its report/backing is destroyed before the
+returned owner's covering reservation. No uncharged Box, new allocator,
+unchecked evidence, ceiling change or fixture-memory reclassification is used.
+The existing held-domain interval, accepted consensus gate, ordinary O4 body,
+publication outcomes and subsequent ordinary QC effects are unchanged.
+
+Executed 64-bit layouts at producing source revision
+`1853e695755e71047a412bcfc77b875d8dd4d4fe`:
+
+| Carrier/control | Bytes |
+|---|---|
+| Opaque admission owner | 64 |
+| Admission result, `Result<Admission, AdmissionRefusal>` | 64 |
+| Bounded unit admission diagnostic | 0 |
+| Reservation result, `Result<Reservation, SafetyStoreError>` | 80 |
+| Invocation result / returned owner, `ModelResult` | 432 |
+| Embedded consensus route result | 312 |
+| Independent storage snapshot (counts and ceilings) | 144 |
+| Reservation control | 48 |
+
+Disjoint control-phase bounds are admission `64+64+80=208`, active invocation
+`1032+64+4*144+432+2*72+2*80+16+112+360+2*48+496+16+48=3552`,
+and returned-owner conversion `2*432+64+144=1072`.
+Thus admitted node coverage is `A_node=max(208,3552,1072)=3552`.
+The four snapshot controls bound the baseline, actual/expected comparison and
+by-value snapshot return; these are component-owned controls, not fixture
+memory. Conversion includes simultaneous source/destination owners and the
+partially consumed admission. Whole owner/result layouts already contain their
+route and reservation controls; those embedded controls are not charged again.
+Only the separate candidate lease adds a standalone reservation control.
+The facade's unchanged 1032-byte inventory covers its own controls.
+
+For the unchanged N=4, suite-100, S_sig=2420, B_span=1 profile, operands remain
+`R=10459`, `G=10752`, `T=10760`, QC generation `10177`, cross-variant backing
+`10352`, caller candidate `C_node=10137`, pinned context `240`, charged loader
+`31814`, and ordinary O4 reservation `52939`.
+
+| Phase | Complete source-derived aggregate coverage bound |
+|---|---|
+| Adapter admitted | `240+3552=3792` |
+| Candidate admitted, before load/copy | `3792+10137=13929` |
+| Charged loader live, candidate coverage already admitted | `13929+31814=45743` |
+| Loader destroyed, caller candidate copied | `13929` |
+| Candidate coverage overlaps ordinary O4 working set | `13929+52939=66868` |
+| Synchronous return, report live | `3792` |
+| Report/backing then returned coverage destroyed | `240` |
+| Remaining context/fixtures destroyed | `0` |
+
+The separately leased exact-byte diagnostic remains `B=10531`; its complete
+publication overlap bound is `66868+10531=77399`. The anchored setup's separate
+backend bound remains `73775`. All fit the unchanged aggregate ceiling `84956`.
+These are coexisting coverage bounds, not summed physical-memory claims;
+candidate/O4 reservations deliberately overlap ownership transfer.
+
+Executed independent main-fixture samples: operational current/peak
+`3552/66628`, aggregate current/peak `3792/66868`, context `240`. Consensus
+report A/P remain `4600/7333`, with report-live tuple
+`(188761,0,1,0,1,0)`, post-report standing floor
+`(176828,0,1,0,0,0)` and observer-only floor `(80,0,0,0,0,0)`.
+The observer's final destruction releases its remaining coverage. Storage
+operational, context and aggregate are independently zero after final releases.
+The unchanged O4 post-ack named-object sample is `496+7333+9958+42=17829`,
+not a reservation peak or a claim about backend/cryptographic memory.
+
+### Requirement-to-test correction mapping
+
+| Requirement | Executed evidence |
+|---|---|
+| Pre-consumption consensus preparation refusal | `consensus_preparation_pressure_returns_original_token_and_restores_ledgers`: full redacted Boolean Vote equality, original signature pointer/capacity, complete ledger tuple, independent storage occupancy/ceilings, engine effects/application/bookkeeping/notifications unchanged; original consensus cap restored before actual acknowledged/Applied retry |
+| Bounded adapter-admission failure | `adapter_candidate_and_o4_pressure_are_distinct_and_cleanup_is_immediate`, adapter boundary: token stays caller-owned, same complete witness and independent unchanged-state checks; after relief, revision+1 acknowledgement, Applied, one new application and ordinary success effects |
+| Consumed-Vote candidate and O4 pressure | Same test, distinct deeper boundaries: actual Refused report; candidate refusal submits zero O4 operations, O4 capacity refusal submits one and returns RefusedPreWrite; zero QC effects/success notifications, truthful ordinary Vote notifications/retention; original retained Vote equality/pointer/capacity preserved |
+| Genuine duplicate success after relief | Candidate/O4 pressure retries admit a real signed round-19 duplicate; first-retained round-9 evidence remains unchanged, revision+1 is DurableAcknowledged, report Applied, exactly one application and expected success callbacks/effects |
+| Alternate owner cleanup | `bootstrap_storage_does_not_hide_an_existing_engine_lock` and `incompatible_pinned_profile_fields_refuse_before_submission`: occupancy and ceilings sampled on the actual alternate owner/backend, consensus changes observed independently |
+| Anchored predecessor return/readback order | `existing_anchor_is_preserved_and_requires_independent_history`: immediate operational/aggregate return-state and ceiling assertions precede `f.read()`; cleanup checked again after result destruction |
+| Conversion, unwind and final release | `ownership_phase_operands_and_independent_final_floors`, `existing_post_ack_hook_unwind_releases_both_ledgers`, and per-invocation snapshot checks: exact independent restoration and unchanged ceilings; poisoned unwind owner is not reused |
+
+With `before` the pre-consumption consensus tuple, report-live occupancy is
+`before.bytes + report_A + wire_P - token_inline`; after report destruction it
+is `before.bytes - token_inline`. A genuine duplicate's report-live equation
+also subtracts that duplicate's signature capacity, without discarding the
+first-retained signature. All remaining tuple components are checked explicitly.
+No unchanged consensus-total assertion masks legitimate report/retention
+ownership, and no consumed-token preservation is claimed. Storage operational
+and aggregate are independently sampled immediately at refusal/return/drop
+boundaries, before diagnostic readback; each ceiling is independently checked.
+
+The fifteen cases retain genuine three-chain success and all four distinct
+publication outcomes. DurableAcknowledged alone allows QC application;
+RefusedPreWrite, WriteFailedAmbiguous and UncertainDurable suppress it.
+The existing ambiguity injection leaves the predecessor with recovery required;
+uncertain-after-write leaves the newer durable restriction and old engine,
+with recovery required and subsequent correspondence refusal. No automatic O5,
+invented acknowledgement, replay or catch-up is added.
+
+### Fresh correction validation and producing revision
+
+All commands below ran at source revision
+`1853e695755e71047a412bcfc77b875d8dd4d4fe` (tree
+`ef6bbaf18858f1c3cfea543a3f6d0797568de78e`) with a clean worktree.
+The subsequent delivery commit only appends evidence documents; its Rust source
+is identical. Both selected test sets are nonzero and overlap, not additive.
+
+| Literal command | Result | Exit |
+|---|---|---|
+| `LIBCLANG_PATH=/usr/lib/llvm-18/lib cargo test --locked -p qbind-node --lib --features test-utils safety_record_store::owner::received_qc_publication_model -- --nocapture` | 15 passed, 0 failed/ignored, 2145 filtered | 0 |
+| `LIBCLANG_PATH=/usr/lib/llvm-18/lib cargo test --locked -p qbind-node --lib --features test-utils safety_record_store::owner:: -- --quiet` | 158 selected: 152 passed, 0 failed, 6 ignored, 2002 filtered | 0 |
+| `git -c core.whitespace=cr-at-eol diff --check` | No whitespace errors; repeated over evidence appends and starting-to-delivery changes | 0 |
+
+The consensus facade is unchanged, so the conditional consensus command was
+not rerun. Earlier full-suite/build/default test-compilation/Miri results remain
+historical, not fresh correction validation. Existing warnings and the caught
+intentional post-ack-hook panic are not test failures. An intermediate correction
+at `dad9a3889eae4195a46b6a6ee6d923d17d5f37db` also passed these two selections;
+its 2976-byte adapter inventory predates the final explicit call-site staging
+and admitted storage-snapshot controls and is not the final measurement.
+No dependencies, profiles, ceilings or generated-artifact cleanup changed here.
+
+Only the private model and these append-only evidence documents change.
+Modes and per-file EOL/EOF conventions are preserved, with byte-identical
+historical document prefixes. This remains an implementation delivery, not
+independent source-review acceptance. Storage evidence remains Unverified;
+authority remains an independent immutable test fixture, not production
+current authority. No production integration, new crash boundary, activation,
+deployment, D15 or Run 423 is included.
+
+```
+D7D14_STORAGE_COMPONENT=IMPLEMENTED-ISOLATED
+D7D14_STORAGE_ACCEPTANCE=PASS-ACCEPTED-SUBSET
+§13.6 whole-lifecycle INCOMPLETE
+activation DISABLED
+public DevNet NO-GO
+durable anti-rollback NOT-ESTABLISHED
+C4/C5 OPEN
+```

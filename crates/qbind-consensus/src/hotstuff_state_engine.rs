@@ -200,7 +200,7 @@ pub(crate) trait VoteQcEffectGate<BlockIdT: Eq + std::hash::Hash + Clone> {
     ) -> bool;
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "test-utils"))]
 thread_local! {
     static QC_APPLICATIONS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
@@ -1777,7 +1777,7 @@ where
     /// - Attaches the QC to the corresponding block node as `own_qc`
     /// - Attempts the 3-chain commit rule
     fn on_qc(&mut self, qc: &QuorumCertificate<BlockIdT>) -> Result<(), QcValidationError> {
-        #[cfg(test)]
+        #[cfg(any(test, feature = "test-utils"))]
         QC_APPLICATIONS.with(|count| count.set(count.get() + 1));
         // Minimal HotStuff-style locking:
         // - Update locked_qc to the highest-view QC.
@@ -1801,8 +1801,13 @@ where
         Ok(())
     }
 
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-utils"))]
     pub(crate) fn qc_applications_for_test(&self) -> usize {
+        Self::qc_application_count_for_test()
+    }
+
+    #[cfg(any(test, feature = "test-utils"))]
+    pub(crate) fn qc_application_count_for_test() -> usize {
         QC_APPLICATIONS.with(std::cell::Cell::get)
     }
 
