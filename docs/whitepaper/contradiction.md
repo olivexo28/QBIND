@@ -2760,3 +2760,43 @@ delivery integration, new crash boundary, D15 or Run 423 is added.
 `D7D14_STORAGE_ACCEPTANCE=PASS-ACCEPTED-SUBSET`; §13.6 whole-lifecycle INCOMPLETE;
 activation DISABLED; public DevNet NO-GO; durable anti-rollback NOT-ESTABLISHED;
 C4/C5 OPEN.
+
+## RUN 422 — exact-layout captured-Vote lifecycle correction
+
+The private, test-only exact-copy owner and captured-Vote bridge are implemented
+in source commit `8abb2ff2bfa87c55059d8c0995e955ad71d320b3`. Historical
+accounting-stop and discarded-prototype evidence above remains intact and
+historical. Exact `u8`/`Vec<u8>` destination owners validate the checked array
+layout before allocation, admit coverage first, track initialized descriptor
+prefixes, and destroy nested backing before releasing coverage. The candidate
+control proof is 929/1,024 bytes (exact local-Vote controls 536/1,024);
+three-signature backing is 7,693 bytes, while valid four-signature interrupted
+O4 coexistence is refused for capacity under the unchanged 84,956-byte ceiling.
+
+The combined private lifecycle now covers genuine owning capture, one real
+signing call and journal acknowledgement/retirement, exact signed-Vote reuse,
+acknowledged O4 and checked same-authority consumption, plus uncertain O4 →
+genuine O3 → explicit O5 → exact-QC resumption. A separate lifecycle branch
+proves that a genuinely signed four-member QC with different complete
+membership reaches the exact-correspondence gate and is refused without QC
+effects or protected-use consumption. Pressure/refusal/retry, authorization
+invalidation, bounded serialization and owner teardown are directly observed.
+
+The reconciled unpressured high-water is 83,426 operational + 240 context =
+83,666 aggregate, determined by interrupted O4. The distinct deliberate
+pressure-test peak is 84,716 + 240 = 84,956; it is not the successful lifecycle
+peak. The historical proposed equation used 17,570 standing aggregate bytes;
+the measured implementation standing term is 16,594. The former 1,032-byte
+prototype control charge is still included in the transient 3,552-byte adapter
+invocation inventory, not separately retained as standing ownership. All
+limits and existing ordinary O3/O4/O5 behavior remain unchanged.
+
+Fresh final-source validation passed: candidate-copy native and default-checking
+Miri selections 9/9 each; captured-Vote lifecycle 3/3; owner selection 174
+passed, 6 ignored; required five integration targets 224 passed, 1 ignored.
+No production caller, current-authority/restart authorization, durable
+anti-rollback, activation, public DevNet approval, or independent source-review
+acceptance is claimed. `D7D14_STORAGE_COMPONENT=IMPLEMENTED-ISOLATED`;
+`D7D14_STORAGE_ACCEPTANCE=PASS-ACCEPTED-SUBSET`; §13.6 whole-lifecycle
+INCOMPLETE; activation DISABLED; public DevNet NO-GO; durable anti-rollback
+NOT-ESTABLISHED; C4/C5 OPEN. Implementation delivery is not independent source-review acceptance.

@@ -21535,3 +21535,128 @@ public DevNet NO-GO
 durable anti-rollback NOT-ESTABLISHED
 C4/C5 OPEN
 ```
+
+### RUN 422 — exact-layout and captured-Vote lifecycle correction
+
+This correction follows the complete prior evidence, including the original
+accounting-stop report; that report and the discarded prototype remain
+historical. Producing source is commit
+`8abb2ff2bfa87c55059d8c0995e955ad71d320b3`, tree
+`2389c74fd2c4319adc929582f2089f66cd2aae7c`. The four authorized files are
+the only changed paths. The implementation remains private and test-only.
+
+**Exact destination ownership.** `ExactBufferElement` permits only `u8` and
+`Vec<u8>`. `ExactBuffer::allocate` checks the caller layout against checked
+`Layout::array::<T>(capacity)` before allocation and rejects zero/invalid
+layouts. It admits the workspace and candidate before allocation, holds one
+RAII pointer/layout owner immediately after a non-null allocation, tracks the
+initialized descriptor prefix, and destroys nested signature backing before
+deallocation and coverage release. Each in-flight signature has its own owner
+until transfer. `into_vec` transfers only the original pointer, exact element
+layout/capacity, and fully initialized length. Partial initialization, injected
+allocation faults, unwind, and O4 refusal all destroy backing once. Faults are
+explicitly injected; they are not observations of system OOM. Source QC/report
+bytes, pointers, capacities, and ownership remain unchanged.
+
+The compiler-derived candidate control inventory is 929 bytes within the
+admitted 1,024-byte workspace. Executable sizes include candidate owner 704,
+plan 112, byte/descriptor `ExactBuffer` 40 each, allocation result 16,
+`ExactBuffer<Vec<u8>>` result 40, raw-to-Vec receiver 40, and `LockedRecord`
+360. The inventory includes checked-layout results, reservation/result carriers,
+builder state, initialized-prefix cleanup, and transfer overlap; compile-time
+and executable bounds both pass. Exact signed-Vote copy controls are separately
+536/1,024 bytes. Three signatures require exact candidate backing
+`360 + 1 + 3*(24 + 2420) = 7693` bytes; four require 10,137 bytes and are
+never truncated or called invalid. With all required O4 coexistence, four
+signatures require 86,110 bytes, 1,154 above the unchanged 84,956 ceiling, so
+the valid candidate is refused for capacity.
+
+`admit_bridge_vote` now reserves route coverage before moving the caller's
+verified token; only the opaque admitted `Admission` invokes the route.
+`retain_route` preserves independent consensus-report ownership while the
+node-control owner covers the move/return conversion. The pressure case proves
+that admission refusal leaves the same complete Vote and signature pointer and
+capacity with the caller, keeps both storage and consensus ledgers/ceilings
+unchanged, invokes no ingestion/gate/publication/callback, and retries with
+that same token after only temporary pressure is released.
+
+**Combined-lifecycle requirement mapping.** The three tests selected by
+`received_qc_captured_vote_lifecycle` use separate fresh fixtures for the
+unpressured success, deliberate-pressure branch, and alternative-membership
+resumption branch.
+
+| Requirement | Executed source/test observation |
+|---|---|
+| Owning capture and signing | Genuine verified capture preserves the original unsigned envelope, complete Proposal, and pin provenance. A real signer runs once; Signed acknowledgement and retirement are separately observed. Checked retrieval supplies the exact journal signature to received-Vote admission; the actual local duplicate is retained without another sign. |
+| Acknowledged O4 and protected reuse | Peer quorum forms a genuine complete QC; ordinary O4 acknowledges before engine QC effects. The successor captured Vote is consumed through checked same-authority retained use after those effects, with the original captured Proposal/envelope live, no re-sign, unchanged Signed bytes/metadata/position count, and bounded contention observation. |
+| Uncertain O4, O3, O5, resumption | Actual uncertain O4 leaves durable and engine restrictions divergent. Retained use refuses both before and after genuine O2/O3. Only explicit ordinary O5 of the actual proof acknowledges the exact attempt; O5 pressure/refusal/retry retains pin, journal, interruption, proof, and report. Exact three-signer QC resumption then applies effects once; protected use succeeds only after resumption and does not sign again. |
+| Alternative complete QC | The combined alternative branch admits a genuine fourth-member Vote and forms a cryptographically verified four-signature QC with different complete membership but the same block/view/round. The intended exact-correspondence gate returns `Certificate`; no QC/lock/view effect, O4 submission, unauthorized retained use, or additional signing occurs. Ordinary Vote bookkeeping and genuine evidence retention remain visible. |
+| Authorization/journal controls | Substituted Proposal and incompatible fresh-sign membership refuse before signing. An already-Signed position cannot sign again. Authorization invalidation between checked-route observation and confirmation produces the specific confirmation refusal, no sink delivery/additional signing, and preserves Signed record bytes, metadata bytes, and position count. |
+| Serialization and accounting | Bounded five-second same-domain observers establish capture, O4 pre-effect, and protected-confirmation intervals. Storage operational/context/aggregate ledgers and ceilings are sampled independently; consensus evidence/report bytes remain separate. Refusal and success checks precede readback. Owner drops check exact proposal, acknowledgement, proof, interruption/report, captured-envelope/pin/generation/control, and final journal-domain/backend/registry release. |
+
+**Control and accounting reconciliation.** The historical prototype's
+standing 17,330 operational + 240 context = 17,570 aggregate included Proposal
+7,645, prototype bridge controls 1,032, and other standing owners 8,653.
+Current direct standing observation is 16,354 operational + 240 context =
+16,594 aggregate: Proposal 7,701, no separate persistent bridge-control owner,
+and the same other 8,653. The old 1,032 was not made free: current
+`support::control_bytes()` remains included in the transient adapter invocation
+inventory. `adapter_phase_charges()` measures admission 208, invocation 3,552,
+and returned conversion 1,072 bytes; the admitted charge is their maximum,
+3,552. Thus the standing reduction is exactly 1,032 removed from the former
+persistent classification minus the actual Proposal increase of 56, or 976;
+the control work remains covered during its actual invocation lifetime.
+
+The proposed historical three-signature equation is re-established as
+`17,570 + 1,864 + 3,552 + 7,693 + 1,024 + 52,939 = 84,642` (314 below cap)
+for the prototype standing term. Replacing it with the implemented standing
+16,594 gives the directly observed unpressured interrupted-O4 bound
+`16,594 + 1,864 + 3,552 + 7,693 + 1,024 + 52,939 = 83,666` (1,290 below cap).
+The acknowledged-O4 bound is 81,802. Source operands remain
+`R=10,459`, `G=10,752`, `T=10,760`, `H=21,347`, charged loader
+`L=H+(T-G)+R=31,814`, `I=1,864`, `A=3,552`, `K=592`, resumption
+`S=4,753`, and ordinary O5 `31,770`.
+
+The fresh unpressured fixture directly observed current aggregate occupancy:
+acknowledged O4 16,594; interrupted O4 18,458; O3 proof 39,805; O5 40,397;
+exact resumption 45,150; checked retained use 40,397. Source-derived
+coexistence bounds are O3 loader `16,594+I+L=50,272`, retained O3
+`16,594+I+H=39,805`, O5 `16,594+I+H+K+O5=72,167`, and resumption loader
+`16,594+I+H+K+S+L=76,964`; the returned resumption controls/report phase is
+45,150. The measured unpressured whole-lifecycle high-water is
+83,426 operational + 240 context = 83,666 aggregate, determined by interrupted
+O4. This run uses a separate fresh fixture from the deliberate pressure test.
+The pressure fixture intentionally fills capacity and observes 84,716
+operational + 240 context = 84,956 aggregate; this is a pressure-test peak, not
+the successful unpressured peak. Context cap remains 960 and aggregate/
+operational caps remain 84,956.
+
+**Fresh validation on the producing Rust source** (all selectors nonzero):
+
+| Literal command | Result | Exit |
+|---|---|---|
+| `LIBCLANG_PATH=/usr/lib/llvm-18/lib cargo test --locked -p qbind-node --lib --features test-utils safety_record_store::owner::received_qc_publication_model::candidate_copy_tests:: -- --nocapture` | 9 passed, 0 failed, 0 ignored | 0 |
+| `env -u MIRIFLAGS LIBCLANG_PATH=/usr/lib/llvm-18/lib cargo +nightly miri test --locked -p qbind-node --lib --features test-utils safety_record_store::owner::received_qc_publication_model::candidate_copy_tests:: -- --nocapture` | 9 passed, 0 failed, 0 ignored; 675.94s; default checks enabled | 0 |
+| `LIBCLANG_PATH=/usr/lib/llvm-18/lib cargo test --locked -p qbind-node --lib --features test-utils received_qc_captured_vote_lifecycle -- --nocapture` | 3 passed, 0 failed, 0 ignored | 0 |
+| `LIBCLANG_PATH=/usr/lib/llvm-18/lib cargo test --locked -p qbind-node --lib --features test-utils safety_record_store::owner:: -- --quiet` | 180 selected: 174 passed, 0 failed, 6 ignored | 0 |
+| `LIBCLANG_PATH=/usr/lib/llvm-18/lib cargo test --locked -p qbind-node --features test-utils --test run_422_owning_capture_binding_tests --test run_422_owning_decision_vote_handoff_node_tests --test run_422_leader_proposal_owning_handoff_tests --test run_422_retained_decision_observation_tests --test run_422_d7d14_safety_record_store_tests` | 224 passed, 0 failed, 1 ignored across five targets (24, 5, 24, 14, and 157 passed) | 0 |
+
+Existing compiler warnings remain. Injected panics in ownership tests are
+expected cleanup controls. The final source-validation commands above ran
+against the exact Rust blobs in the producing commit. CRLF-aware working-change
+and starting-to-delivery whitespace checks are recorded for this delivery.
+
+This remains a private test composition, not production integration or
+independent source-review acceptance. Current production authority/restart
+authorization, durable anti-rollback, TC integration, broad entrypoint
+enforcement, activation, and release remain unresolved. Preserved statuses:
+
+```text
+D7D14_STORAGE_COMPONENT=IMPLEMENTED-ISOLATED
+D7D14_STORAGE_ACCEPTANCE=PASS-ACCEPTED-SUBSET
+§13.6 whole-lifecycle INCOMPLETE
+activation DISABLED
+public DevNet NO-GO
+durable anti-rollback NOT-ESTABLISHED
+C4/C5 OPEN
+```
