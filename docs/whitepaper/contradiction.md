@@ -2829,3 +2829,19 @@ All standing statuses remain unchanged: `D7D14_STORAGE_COMPONENT=IMPLEMENTED-ISO
 activation DISABLED; public DevNet NO-GO; durable anti-rollback NOT-ESTABLISHED;
 C4/C5 OPEN. This remains isolated test evidence, not production integration or
 independent source-review acceptance.
+
+### Run 422 F5 — executable Timeout/NewView verification
+
+**Status: BOUNDED ENFORCEMENT IMPLEMENTED; broader lifecycle claims remain OPEN.** P2P consensus startup now requires a validated Timeout/NewView verification context independent of the legacy `--require-timeout-verification` flag. Runtime Timeout and NewView handlers reject absent context and verify signatures/evidence before engine admission; local Timeout signing self-verifies before local ingestion/broadcast, and both locally formed TC paths verify complete Timeout evidence before certificate application or NewView publication. Authenticated-origin checks and bounded decode limits remain in place. The local timeout timer does not disable inbound verification.
+
+This establishes neither Proposal/Vote authority nor whole-lifecycle safety, signing continuity across restart, rollback resistance, current-authority freshness, O4 publication, RS1 closure, or release readiness. The signing reservation journal remains for Proposal/Vote only; timeout signing positions were not added to its contract. No cryptographic preimage, wire format, membership, trust root, or genesis-authority activation behavior changed. Validation used real ML-DSA-44 fixtures and bounded child-process startup tests; the exact default-feature unit-test selectors remain blocked by existing unit tests that import `test-utils`-gated modules. Full library tests with `test-utils`, affected integration tests, the default executable build, and CRLF-aware whitespace checks passed.
+
+All standing verdicts remain unchanged: `D7D14_STORAGE_COMPONENT=IMPLEMENTED-ISOLATED`; `D7D14_STORAGE_ACCEPTANCE=PASS-ACCEPTED-SUBSET`; §13.6 whole-lifecycle INCOMPLETE; activation DISABLED; public DevNet NO-GO; durable anti-rollback NOT-ESTABLISHED; C4/C5 OPEN.
+
+#### Run 422 F5 acceptance-evidence clarification
+
+LocalMesh is a consensus execution mode, not a non-consensus CLI operation; genesis-hash printing is a separate non-consensus operation. Disabling the local timeout timer suppresses locally timer-originated Timeout emission; it neither originates timeouts nor makes inbound Timeout/NewView verification optional. The pre-existing default-feature lifecycle-test compilation mismatch in `safety_record_store/owner/model.rs` was a test-configuration defect: only the feature-dependent lifecycle helpers/tests are gated, and they remain selectable with `test-utils`. The earlier statement above that default-feature selectors remain blocked describes the prior source revision; the mismatch is corrected here, and current default-feature selectors plus node test-target compilation pass. Fresh, bounded F5 follow-up results and their exact source-tree attribution are appended in `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_422_D7.md`; the positive startup control demonstrates acceptance at the Timeout/NewView ACTIVE preflight, not a running transport. No runtime policy or readiness verdict changed.
+
+#### Run 422 startup marker exit-race correction
+
+The bounded startup-test helper now rechecks stderr after observing child exit and joining the readers, accepting a marker present in the completed capture or reporting `UnexpectedEof` with that final capture. The ACTIVE preflight marker remains distinct from transport readiness. The ordering gap was corrected by inspection, not claimed as experimentally reproduced. The mandatory-timeout policy target passed all 3 tests on the follow-up based on `f338cdc89ef11c686e3f835f8d0e5afaf8b34ebc`; full command and result are recorded in the Run 422 D7 evidence document. No production policy or readiness verdict changed.

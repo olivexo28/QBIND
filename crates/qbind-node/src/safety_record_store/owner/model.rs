@@ -7717,6 +7717,7 @@ mod tests {
             )
         }
 
+        #[cfg(feature = "test-utils")]
         fn received_qc_signing_authority(
             authority: &super::super::super::received_qc_publication_model::Authority,
         ) -> ProposalVoteAuthority {
@@ -9370,21 +9371,25 @@ mod tests {
             assert_eq!(signer.calls(), 1, "the retry never re-signs");
         }
 
+        #[cfg(feature = "test-utils")]
         #[test]
         fn received_qc_captured_vote_lifecycle() {
             run_received_qc_captured_vote_lifecycle(false, false);
         }
 
+        #[cfg(feature = "test-utils")]
         #[test]
         fn received_qc_captured_vote_lifecycle_pressure() {
             run_received_qc_captured_vote_lifecycle(true, false);
         }
 
+        #[cfg(feature = "test-utils")]
         #[test]
         fn received_qc_captured_vote_lifecycle_alternative_membership() {
             run_received_qc_captured_vote_lifecycle(false, true);
         }
 
+        #[cfg(feature = "test-utils")]
         #[derive(Debug)]
         struct LifecycleEffectRecorder {
             qc: std::sync::atomic::AtomicUsize,
@@ -9393,6 +9398,7 @@ mod tests {
             validator_votes: std::sync::atomic::AtomicUsize,
         }
 
+        #[cfg(feature = "test-utils")]
         impl LifecycleEffectRecorder {
             fn new() -> Self {
                 Self {
@@ -9404,6 +9410,7 @@ mod tests {
             }
         }
 
+        #[cfg(feature = "test-utils")]
         impl qbind_consensus::basic_hotstuff_engine::ConsensusProgressRecorder
             for LifecycleEffectRecorder
         {
@@ -9420,6 +9427,7 @@ mod tests {
             fn reset_current_view_votes(&self) {}
         }
 
+        #[cfg(feature = "test-utils")]
         impl qbind_consensus::basic_hotstuff_engine::ValidatorVoteRecorder
             for LifecycleEffectRecorder
         {
@@ -9429,11 +9437,13 @@ mod tests {
             }
         }
 
+        #[cfg(feature = "test-utils")]
         struct BoundedProtectedUseObserver {
             shutdown: Arc<std::sync::atomic::AtomicBool>,
             peer: Option<std::thread::JoinHandle<()>>,
         }
 
+        #[cfg(feature = "test-utils")]
         impl BoundedProtectedUseObserver {
             fn start(
                 backend: SafetyBackend,
@@ -9490,12 +9500,14 @@ mod tests {
             }
         }
 
+        #[cfg(feature = "test-utils")]
         impl Drop for BoundedProtectedUseObserver {
             fn drop(&mut self) {
                 let _ = self.shutdown_and_join();
             }
         }
 
+        #[cfg(feature = "test-utils")]
         fn run_received_qc_captured_vote_lifecycle(
             exercise_pressure: bool,
             exercise_alternative_membership: bool,

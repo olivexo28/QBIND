@@ -47,9 +47,8 @@ use qbind_consensus::ids::ValidatorId;
 use qbind_consensus::network::NetworkError;
 use qbind_consensus::timeout::TimeoutCertificate;
 use qbind_node::binary_consensus_loop::{
-    ConsensusVerificationPolicy,
     run_binary_consensus_loop_with_io, BinaryConsensusLoopConfig, BinaryConsensusLoopIo,
-    BinaryConsensusLoopProgress,
+    BinaryConsensusLoopProgress, ConsensusVerificationPolicy,
 };
 use qbind_node::consensus_network_facade::ConsensusNetworkFacade;
 use qbind_node::metrics::NodeMetrics;
@@ -830,14 +829,14 @@ async fn run418_newview_conflicting_pair_rejected() {
 }
 
 // Test 6: A correctly mapped authenticated origin passes transport-origin
-// admission and then remains subject to the existing F5/engine rules.
+// admission, then fails closed because this test intentionally has no F5
+// verification context.
 #[tokio::test]
 async fn run418_newview_authenticated_origin_admitted_then_engine_rules_apply() {
     let gate = two_validator_gate();
     // Authenticated peer B (validator 1), correctly mapped. Local is validator
-    // 0. verification_ctx is None in `drive_one`, so F5 does not run here; the
-    // frame passes origin admission and then reaches the engine, which applies
-    // its own (unchanged) quorum/view rules.
+    // 0. verification_ctx is None in `drive_one`; the frame passes origin
+    // admission, then F5 refuses it before NewView delivery or application.
     let origin = AuthenticatedConsensusOrigin::new(node_b(), ValidatorId::new(1));
     let bytes = make_new_view(0, vec![ValidatorId::new(0), ValidatorId::new(1)]);
     let env = InboundConsensusEnvelope::new(Some(origin), ConsensusNetMsg::NewView(bytes));
@@ -849,10 +848,15 @@ async fn run418_newview_authenticated_origin_admitted_then_engine_rules_apply() 
         "correctly mapped authenticated origin must pass transport-origin admission"
     );
     assert_eq!(
-        out.progress.inbound.inbound_new_views_delivered, 1,
-        "admitted NewView must reach the delivered counter and remain subject to \
-         the existing F5/engine rules"
+        out.progress.inbound.inbound_newview_verify_rejected_total,
+        1
     );
+    assert_eq!(
+        out.progress.inbound.inbound_new_views_delivered, 0,
+        "missing verification context must refuse before delivery"
+    );
+    assert_eq!(out.progress.inbound.view_timeout_advances, 0);
+    assert_eq!(out.progress.inbound.inbound_newview_engine_accepted, 0);
     // Exactly one accepted binding decision for the admitted NewView.
     assert_eq!(
         gate.metrics().accepted(),
