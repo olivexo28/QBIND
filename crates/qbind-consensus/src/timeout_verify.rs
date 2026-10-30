@@ -54,12 +54,17 @@ use crate::crypto_verifier::ConsensusSigBackendRegistry;
 use crate::ids::ValidatorId;
 use crate::key_registry::SuiteAwareValidatorKeyProvider;
 use crate::qc::QuorumCertificate;
-use crate::timeout::{timeout_signing_bytes_with_chain_id, TimeoutMsg};
+use crate::timeout::{
+    timeout_signing_bytes_with_chain_id, TimeoutMsg, TimeoutTargetViewError,
+};
 use crate::validator_set::ConsensusValidatorSet;
 
 /// Errors produced by the timeout cryptographic verification primitives.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TimeoutVerifyError {
+    /// The TC target view is not the checked immediate successor authenticated
+    /// by `timeout_view`.
+    InvalidTargetView(TimeoutTargetViewError),
     /// The signer is not a member of the active validator set.
     UnknownValidator(ValidatorId),
     /// No public key is registered for the signer (governance gap).
@@ -120,6 +125,9 @@ pub enum TimeoutVerifyError {
 impl std::fmt::Display for TimeoutVerifyError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            TimeoutVerifyError::InvalidTargetView(error) => {
+                write!(f, "invalid timeout certificate target view: {}", error)
+            }
             TimeoutVerifyError::UnknownValidator(id) => {
                 write!(f, "unknown validator: {:?}", id)
             }
@@ -324,15 +332,18 @@ where
 ///
 /// Verification steps (fail-closed at the first failure):
 ///
-/// 1. `evidence` is non-empty and every entry's `validator_id` is in
+/// 1. `tc.view == tc.timeout_view.checked_add(1)`; terminal overflow and any
+///    equal, lower, or skipped target are rejected before signer allocation or
+///    cryptographic work.
+/// 2. `evidence` is non-empty and every entry's `validator_id` is in
 ///    `tc.signers`. The evidence set must be a permutation of `tc.signers`
 ///    (no extras, no missing). Duplicate signers are rejected.
-/// 2. Every evidence timeout has `timeout.view == tc.timeout_view`.
-/// 3. Each evidence timeout passes [`verify_timeout_msg`] (which itself
+/// 3. Every evidence timeout has `timeout.view == tc.timeout_view`.
+/// 4. Each evidence timeout passes [`verify_timeout_msg`] (which itself
 ///    enforces membership + suite + signature + chain-ID).
-/// 4. The accumulated voting power of the verified signers is
+/// 5. The accumulated voting power of the verified signers is
 ///    ≥ `validators.two_thirds_vp()`.
-/// 5. The deterministic max-`high_qc` over the verified evidence (by
+/// 6. The deterministic max-`high_qc` over the verified evidence (by
 ///    `qc.view`) matches `tc.high_qc` (`None == None` and `Some(qc) ==
 ///    Some(qc')` iff their `view` and `block_id` match).
 ///
@@ -361,6 +372,9 @@ where
     B: ConsensusSigBackendRegistry + ?Sized,
 {
     use std::collections::HashSet;
+
+    tc.validate_target_view()
+        .map_err(TimeoutVerifyError::InvalidTargetView)?;
 
     // Step 1a: Reject empty evidence outright.
     if evidence.is_empty() || tc.signers.is_empty() {
@@ -457,6 +471,7 @@ mod tests {
     use qbind_crypto::{ConsensusSigSuiteId, SUITE_PQ_RESERVED_1};
     use qbind_types::QBIND_DEVNET_CHAIN_ID;
     use std::collections::HashMap;
+    use std::sync::atomic::{AtomicUsize, Ordering};
 
     /// Suite ID used in these tests (governance suite for ML-DSA-44).
     const TEST_SUITE: ConsensusSigSuiteId = SUITE_PQ_RESERVED_1; // u16 100
@@ -688,6 +703,174 @@ mod tests {
         let (acc_vp, max_high) = res.unwrap();
         assert!(acc_vp >= validators.two_thirds_vp());
         assert!(max_high.is_none());
+    }
+
+    #[test]
+    fn run422_tc_target_view_valid_successor_is_accepted() {
+        let validators = make_validator_set(4);
+        let (kp, br, sks) = make_fixture(4);
+        let timeout_view = 11u64;
+        let evidence: Vec<_> = (1..=3)
+            .map(|i| signed_timeout(timeout_view, ValidatorId(i), &sks))
+            .collect();
+        let signers: Vec<_> = evidence.iter().map(|e| e.validator_id).collect();
+        let tc = TimeoutCertificate::<[u8; 32]>::new(timeout_view, None, signers);
+        assert_eq!(tc.view, timeout_view + 1);
+        assert!(verify_timeout_certificate_with_evidence(
+            &tc,
+            &evidence,
+            &validators,
+            &kp,
+            &br,
+            QBIND_DEVNET_CHAIN_ID,
+        )
+        .is_ok());
+    }
+
+    #[test]
+    fn run422_tc_target_view_rejects_signed_evidence_with_substituted_target() {
+        let validators = make_validator_set(4);
+        let (kp, br, sks) = make_fixture(4);
+        let timeout_view = 11u64;
+        let evidence: Vec<_> = (1..=3)
+            .map(|i| signed_timeout(timeout_view, ValidatorId(i), &sks))
+            .collect();
+        let original_signatures: Vec<_> =
+            evidence.iter().map(|timeout| timeout.signature.clone()).collect();
+        let signers: Vec<_> = evidence.iter().map(|e| e.validator_id).collect();
+        let mut tc = TimeoutCertificate::<[u8; 32]>::new(timeout_view, None, signers);
+        tc.view += 1;
+
+        assert_eq!(
+            original_signatures,
+            evidence.iter().map(|timeout| timeout.signature.clone()).collect::<Vec<_>>(),
+            "the target substitution must leave genuine timeout signatures unchanged"
+        );
+        assert!(matches!(
+            verify_timeout_certificate_with_evidence(
+                &tc,
+                &evidence,
+                &validators,
+                &kp,
+                &br,
+                QBIND_DEVNET_CHAIN_ID,
+            ),
+            Err(TimeoutVerifyError::InvalidTargetView(
+                TimeoutTargetViewError::NotImmediateSuccessor { .. }
+            ))
+        ));
+    }
+
+    #[test]
+    fn run422_tc_target_view_rejects_before_signature_backend_calls() {
+        struct CountingVerifier(Arc<AtomicUsize>);
+
+        impl qbind_crypto::consensus_sig::ConsensusSigVerifier for CountingVerifier {
+            fn verify_vote(
+                &self,
+                _validator_id: u64,
+                _pk: &[u8],
+                _preimage: &[u8],
+                _signature: &[u8],
+            ) -> Result<(), qbind_crypto::consensus_sig::ConsensusSigError> {
+                self.0.fetch_add(1, Ordering::SeqCst);
+                Ok(())
+            }
+
+            fn verify_proposal(
+                &self,
+                _validator_id: u64,
+                _pk: &[u8],
+                _preimage: &[u8],
+                _signature: &[u8],
+            ) -> Result<(), qbind_crypto::consensus_sig::ConsensusSigError> {
+                self.0.fetch_add(1, Ordering::SeqCst);
+                Ok(())
+            }
+        }
+
+        let validators = make_validator_set(4);
+        let (kp, _real_backend, sks) = make_fixture(4);
+        let calls = Arc::new(AtomicUsize::new(0));
+        let backend: Arc<dyn qbind_crypto::consensus_sig::ConsensusSigVerifier> =
+            Arc::new(CountingVerifier(Arc::clone(&calls)));
+        let br = SimpleBackendRegistry::with_backend(TEST_SUITE, backend);
+        let timeout_view = 11u64;
+        let evidence: Vec<_> = (1..=3)
+            .map(|i| signed_timeout(timeout_view, ValidatorId(i), &sks))
+            .collect();
+        let signers: Vec<_> = evidence.iter().map(|e| e.validator_id).collect();
+        let original_signatures: Vec<_> =
+            evidence.iter().map(|timeout| timeout.signature.clone()).collect();
+
+        for target_view in [timeout_view, timeout_view - 1, timeout_view + 2, u64::MAX] {
+            let mut tc =
+                TimeoutCertificate::<[u8; 32]>::new(timeout_view, None, signers.clone());
+            tc.view = target_view;
+            assert!(matches!(
+                verify_timeout_certificate_with_evidence(
+                    &tc,
+                    &evidence,
+                    &validators,
+                    &kp,
+                    &br,
+                    QBIND_DEVNET_CHAIN_ID,
+                ),
+                Err(TimeoutVerifyError::InvalidTargetView(
+                    TimeoutTargetViewError::NotImmediateSuccessor { .. }
+                ))
+            ));
+        }
+
+        let mut overflow_tc =
+            TimeoutCertificate::<[u8; 32]>::new(u64::MAX, None, signers);
+        overflow_tc.view = u64::MAX;
+        let overflow_evidence: Vec<_> = (1..=3)
+            .map(|i| signed_timeout(u64::MAX, ValidatorId(i), &sks))
+            .collect();
+        assert!(matches!(
+            verify_timeout_certificate_with_evidence(
+                &overflow_tc,
+                &overflow_evidence,
+                &validators,
+                &kp,
+                &br,
+                QBIND_DEVNET_CHAIN_ID,
+            ),
+            Err(TimeoutVerifyError::InvalidTargetView(
+                TimeoutTargetViewError::SuccessorOverflow { .. }
+            ))
+        ));
+        assert_eq!(calls.load(Ordering::SeqCst), 0);
+        assert_eq!(
+            original_signatures,
+            evidence
+                .iter()
+                .map(|timeout| timeout.signature.clone())
+                .collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn run422_tc_target_view_accepts_largest_representable_successor() {
+        let validators = make_validator_set(4);
+        let (kp, br, sks) = make_fixture(4);
+        let timeout_view = u64::MAX - 1;
+        let evidence: Vec<_> = (1..=3)
+            .map(|i| signed_timeout(timeout_view, ValidatorId(i), &sks))
+            .collect();
+        let signers: Vec<_> = evidence.iter().map(|e| e.validator_id).collect();
+        let mut tc = TimeoutCertificate::<[u8; 32]>::new(timeout_view, None, signers);
+        tc.view = u64::MAX;
+        assert!(verify_timeout_certificate_with_evidence(
+            &tc,
+            &evidence,
+            &validators,
+            &kp,
+            &br,
+            QBIND_DEVNET_CHAIN_ID,
+        )
+        .is_ok());
     }
 
     #[test]
