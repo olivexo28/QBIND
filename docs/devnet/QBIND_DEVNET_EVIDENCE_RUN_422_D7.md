@@ -22231,3 +22231,7 @@ results are not repeated or reattributed. Preserve:
 `D7D14_STORAGE_ACCEPTANCE=PASS-ACCEPTED-SUBSET`; §13.6 whole-lifecycle
 INCOMPLETE; activation DISABLED; public DevNet NO-GO; durable anti-rollback
 NOT-ESTABLISHED; C4/C5 OPEN.
+
+### Baseline ancestry correction (2026-10-30)
+
+Withdraw the preceding claim that baseline `18d71a549d868ed33d352e9fc70a9d060f75e03b` is a root commit or has no parent. Its raw `git cat-file -p` commit header records parent `18b4e8d8db03a481bb73eee6af2d3d32c065634e`; that exact object was fetched and verified as a commit. Separately, `git rev-parse --is-shallow-repository` returned `true`. The earlier no-parent statement was incorrect; no explanation is inferred for its omission. Source validation remains attributed to `fdfdd37619a18109e7d08ae0bce3efa9d176466c`; no tests or builds were rerun, and all scope and release verdicts above remain unchanged.
