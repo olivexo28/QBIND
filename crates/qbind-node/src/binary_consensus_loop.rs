@@ -77,6 +77,7 @@
 //! restore-from-snapshot (B3). Both remain out of scope.
 
 use std::collections::{HashMap, HashSet};
+use std::mem::size_of;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -98,7 +99,8 @@ use qbind_consensus::proposal_vote_verify::{
 // reused (not re-implemented) to admit PRESENT embedded wire QCs before any
 // inbound Proposal effect.
 use qbind_consensus::qc_verify_domain::{
-    verify_quorum_certificate_with_domain, VerifiedQuorumCertificate,
+    reverify_quorum_certificate_with_domain, verify_quorum_certificate_with_domain,
+    VerifiedQuorumCertificate, MAX_SIGNATURE_LEN,
 };
 use qbind_consensus::timeout::{TimeoutCertificate, TimeoutMsg};
 use qbind_consensus::timeout_verify::{
@@ -1349,6 +1351,321 @@ fn validator_membership_matches(
     a.len() == b.len() && a.iter().zip(b.iter()).all(|(x, y)| x == y)
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum F7HighQcOperation {
+    InboundTimeout,
+    InboundNewView,
+    LocalTimeout,
+    LocalTimeoutCertificate,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum F7RetainedQcRefusal {
+    AuthorityUnavailable,
+    EngineOrTimeoutContextMismatch,
+    MissingRetainedProof,
+    AmbiguousRetainedProof,
+    ScanLimitExceeded,
+    TemporaryWorkingSetExceeded,
+    ReverificationFailed,
+    AuthorizationInvalidated,
+    OperationSubstituted,
+}
+
+enum F7HighQcAdmission<'a> {
+    NoQc,
+    Present(F7PresentQcAdmission<'a>),
+}
+
+const MAX_F7_QC_WORKING_SET_BYTES: u64 = 1024 * 1024;
+const F7_VOTE_BODY_BYTES: usize = 1 + 4 + 8 + 8 + 8 + 1 + 32 + 2 + 2;
+const F7_VOTE_PREIMAGE_BYTES: usize =
+    qbind_wire::pv_signing_domain::PV_SIGNING_DOMAIN_V2_TAG.len()
+        + 1
+        + 1
+        + 8
+        + 4
+        + 32
+        + 32
+        + 8
+        + F7_VOTE_BODY_BYTES;
+
+/// Component inventory for the synchronous revalidation interval, not the
+/// subsequent signing/serialization/ingestion/TC-formation phases.
+#[derive(Debug, PartialEq, Eq)]
+struct F7QcWorkingSet {
+    retained_source: u64,
+    control: u64,
+    vote_and_preimages: u64,
+    carriers: u64,
+    total: u64,
+}
+
+fn f7_qc_working_set(
+    evidence: &VerifiedQuorumCertificate,
+    control: Option<u64>,
+) -> Option<F7QcWorkingSet> {
+    let retained_source = evidence.retained_byte_size().ok()?;
+    let control = control?;
+    let signature = evidence
+        .certificate()
+        .signatures
+        .iter()
+        .map(Vec::len)
+        .max()
+        .unwrap_or(0);
+    if signature > MAX_SIGNATURE_LEN {
+        return None;
+    }
+    // Vote owns its signature descriptor already; body and preimage are
+    // separate Vec owners, each constructed with its exact fixed capacity.
+    let vote_and_preimages = size_of::<Vote>()
+        .checked_add(signature)?
+        .checked_add(2usize.checked_mul(size_of::<Vec<u8>>())?)?
+        .checked_add(F7_VOTE_BODY_BYTES)?
+        .checked_add(F7_VOTE_PREIMAGE_BYTES)?;
+    // Conservative simultaneous transfer slots: the standalone ticket, guard,
+    // enum and inner/outer return Results are each charged once. Nested fields
+    // are already included in their enclosing slot, not charged again.
+    let carriers = size_of::<AuthorizationTicket>()
+        .checked_add(size_of::<F7PresentQcAdmission<'_>>())?
+        .checked_add(size_of::<F7HighQcAdmission<'_>>())?
+        .checked_add(
+            2usize.checked_mul(
+                size_of::<Result<F7HighQcAdmission<'_>, F7RetainedQcRefusal>>(),
+            )?,
+        )?
+        .checked_add(size_of::<Result<
+            AuthorizationTicket,
+            crate::genesis_consensus_authority::FreshnessError,
+        >>())?
+        .checked_add(size_of::<F7QcWorkingSet>())?
+        .checked_add(size_of::<Option<F7QcWorkingSet>>())?
+        .checked_add(qbind_consensus::qc_verify_domain::REVERIFY_QC_FIXED_RESULT_BYTES)?;
+    let vote_and_preimages = u64::try_from(vote_and_preimages).ok()?;
+    let carriers = u64::try_from(carriers).ok()?;
+    let total = retained_source
+        .checked_add(control)?
+        .checked_add(vote_and_preimages)?
+        .checked_add(carriers)?;
+    Some(F7QcWorkingSet {
+        retained_source,
+        control,
+        vote_and_preimages,
+        carriers,
+        total,
+    })
+}
+
+struct F7PresentQcAdmission<'a> {
+    logical_qc: &'a qbind_consensus::qc::QuorumCertificate<[u8; 32]>,
+    timeout_context: &'a TimeoutVerificationContext,
+    snapshot: &'a AuthorizedProposalVoteSnapshot,
+    operation: F7HighQcOperation,
+    ticket: AuthorizationTicket,
+}
+
+impl F7PresentQcAdmission<'_> {
+    fn confirm_before_effect(
+        &self,
+        logical_qc: &qbind_consensus::qc::QuorumCertificate<[u8; 32]>,
+        timeout_context: &TimeoutVerificationContext,
+        snapshot: &AuthorizedProposalVoteSnapshot,
+        operation: F7HighQcOperation,
+    ) -> Result<(), F7RetainedQcRefusal> {
+        if !std::ptr::eq(self.logical_qc, logical_qc)
+            || !std::ptr::eq(self.timeout_context, timeout_context)
+            || !std::ptr::eq(self.snapshot, snapshot)
+            || self.operation != operation
+        {
+            return Err(F7RetainedQcRefusal::OperationSubstituted);
+        }
+        snapshot
+            .owner()
+            .confirm(&self.ticket)
+            .map_err(|_| F7RetainedQcRefusal::AuthorizationInvalidated)
+    }
+}
+
+fn confirm_f7_high_qc_before_effect(
+    admission: &F7HighQcAdmission<'_>,
+    logical_qc: Option<&qbind_consensus::qc::QuorumCertificate<[u8; 32]>>,
+    timeout_context: &TimeoutVerificationContext,
+    snapshot: Option<&AuthorizedProposalVoteSnapshot>,
+    operation: F7HighQcOperation,
+) -> Result<(), F7RetainedQcRefusal> {
+    match (admission, logical_qc, snapshot) {
+        (F7HighQcAdmission::NoQc, None, _) => Ok(()),
+        (F7HighQcAdmission::Present(present), Some(qc), Some(snapshot)) => {
+            present.confirm_before_effect(qc, timeout_context, snapshot, operation)
+        }
+        _ => Err(F7RetainedQcRefusal::OperationSubstituted),
+    }
+}
+
+/// Run 422 F7: reverify only complete evidence already attached to the engine's
+/// block tree. The returned guard is private, borrows the exact logical claim,
+/// timeout context, snapshot and operation, and carries the original admission
+/// ticket. No verifier result or certificate clone escapes this synchronous
+/// function. The runtime callers keep the claim immutable and synchronously
+/// confirm before the corresponding engine effect; no intervening callback is
+/// given mutable engine access. Local timeout signing uses that same immutable
+/// message and reconfirms the original ticket immediately before ingestion.
+fn admit_f7_retained_high_qc<'a>(
+    engine: &BasicHotStuffEngine<[u8; 32]>,
+    logical_qc: Option<&'a qbind_consensus::qc::QuorumCertificate<[u8; 32]>>,
+    timeout_context: &'a TimeoutVerificationContext,
+    snapshot: Option<&'a AuthorizedProposalVoteSnapshot>,
+    operation: F7HighQcOperation,
+    control_bytes: Option<u64>,
+    stats: &mut BinaryConsensusLoopInboundStats,
+) -> Result<F7HighQcAdmission<'a>, F7RetainedQcRefusal> {
+    admit_f7_retained_high_qc_with_budget(
+        engine,
+        logical_qc,
+        timeout_context,
+        snapshot,
+        operation,
+        control_bytes,
+        stats,
+        MAX_F7_QC_WORKING_SET_BYTES,
+    )
+}
+
+// Runtime always supplies the unchanged ceiling above. Tests can lower it
+// through this same calculation, but no caller can enlarge the component bound.
+fn admit_f7_retained_high_qc_with_budget<'a>(
+    engine: &BasicHotStuffEngine<[u8; 32]>,
+    logical_qc: Option<&'a qbind_consensus::qc::QuorumCertificate<[u8; 32]>>,
+    timeout_context: &'a TimeoutVerificationContext,
+    snapshot: Option<&'a AuthorizedProposalVoteSnapshot>,
+    operation: F7HighQcOperation,
+    control_bytes: Option<u64>,
+    stats: &mut BinaryConsensusLoopInboundStats,
+    budget: u64,
+) -> Result<F7HighQcAdmission<'a>, F7RetainedQcRefusal> {
+    let Some(logical_qc) = logical_qc else {
+        return Ok(F7HighQcAdmission::NoQc);
+    };
+    let refuse = |stats: &mut BinaryConsensusLoopInboundStats, reason| {
+        stats.retained_qc_admission_rejected_total =
+            stats.retained_qc_admission_rejected_total.saturating_add(1);
+        eprintln!("[binary-consensus] Run 422 F7: present high-QC refused ({reason:?})");
+        reason
+    };
+    let Some(snapshot) = snapshot else {
+        return Err(refuse(stats, F7RetainedQcRefusal::AuthorityUnavailable));
+    };
+    let ticket = match snapshot.owner().admit() {
+        Ok(ticket) => ticket,
+        Err(_) => return Err(refuse(stats, F7RetainedQcRefusal::AuthorityUnavailable)),
+    };
+    let verifier = snapshot.verifier();
+    if engine.current_epoch() != snapshot.authorized_epoch()
+        || !validator_membership_matches(engine.validators(), &verifier.validators)
+        || !validator_membership_matches(engine.validators(), timeout_context.validators.as_ref())
+        || timeout_context.chain_id != verifier.signing_domain.runtime_chain_id()
+    {
+        return Err(refuse(
+            stats,
+            F7RetainedQcRefusal::EngineOrTimeoutContextMismatch,
+        ));
+    }
+
+    let evidence = match engine
+        .state()
+        .retained_qc_for_timeout_projection(logical_qc)
+    {
+        Ok(Some(evidence)) => evidence,
+        Ok(None) => return Err(refuse(stats, F7RetainedQcRefusal::MissingRetainedProof)),
+        Err(qbind_consensus::hotstuff_state_engine::RetainedQcLookupError::Ambiguous) => {
+            return Err(refuse(stats, F7RetainedQcRefusal::AmbiguousRetainedProof))
+        }
+        Err(qbind_consensus::hotstuff_state_engine::RetainedQcLookupError::ScanLimitExceeded {
+            ..
+        }) => return Err(refuse(stats, F7RetainedQcRefusal::ScanLimitExceeded)),
+    };
+
+    // The source is still covered by the existing retained-evidence ledger;
+    // also include it in this operation's stricter component inventory.
+    let certificate = evidence.certificate();
+    let working_set = f7_qc_working_set(evidence, control_bytes);
+    if working_set.is_none_or(|inventory| inventory.total > budget.min(MAX_F7_QC_WORKING_SET_BYTES))
+        || engine.state().retained_evidence_bytes() > engine.state().max_retained_evidence_bytes()
+    {
+        return Err(refuse(
+            stats,
+            F7RetainedQcRefusal::TemporaryWorkingSetExceeded,
+        ));
+    }
+
+    if reverify_quorum_certificate_with_domain(
+        certificate,
+        &verifier.signing_domain,
+        snapshot.authorized_epoch(),
+        &verifier.validators,
+        verifier.key_provider.as_ref(),
+        verifier.backend_registry.as_ref(),
+    )
+    .is_err()
+    {
+        return Err(refuse(stats, F7RetainedQcRefusal::ReverificationFailed));
+    }
+
+    Ok(F7HighQcAdmission::Present(F7PresentQcAdmission {
+        logical_qc,
+        timeout_context,
+        snapshot,
+        operation,
+        ticket,
+    }))
+}
+
+fn f7_timeout_control_bytes(timeout: &TimeoutMsg<[u8; 32]>) -> Option<u64> {
+    let mut total = u64::try_from(size_of::<TimeoutMsg<[u8; 32]>>()).ok()?;
+    total = total.checked_add(u64::try_from(timeout.signature.capacity()).ok()?)?;
+    if let Some(qc) = timeout.high_qc.as_ref() {
+        let signer_bytes = qc
+            .signers
+            .capacity()
+            .checked_mul(size_of::<ValidatorId>())?;
+        total = total.checked_add(u64::try_from(signer_bytes).ok()?)?;
+    }
+    Some(total)
+}
+
+fn f7_timeout_certificate_control_bytes(tc: &TimeoutCertificate<[u8; 32]>) -> Option<u64> {
+    let mut total = u64::try_from(size_of::<TimeoutCertificate<[u8; 32]>>()).ok()?;
+    let signer_bytes = tc
+        .signers
+        .capacity()
+        .checked_mul(size_of::<ValidatorId>())?;
+    total = total.checked_add(u64::try_from(signer_bytes).ok()?)?;
+    if let Some(qc) = tc.high_qc.as_ref() {
+        let signer_bytes = qc
+            .signers
+            .capacity()
+            .checked_mul(size_of::<ValidatorId>())?;
+        total = total.checked_add(u64::try_from(signer_bytes).ok()?)?;
+    }
+    let timeout_slots = tc
+        .signed_timeouts
+        .capacity()
+        .checked_mul(size_of::<TimeoutMsg<[u8; 32]>>())?;
+    total = total.checked_add(u64::try_from(timeout_slots).ok()?)?;
+    for timeout in &tc.signed_timeouts {
+        total = total.checked_add(u64::try_from(timeout.signature.capacity()).ok()?)?;
+        if let Some(qc) = timeout.high_qc.as_ref() {
+            let signer_bytes = qc
+                .signers
+                .capacity()
+                .checked_mul(size_of::<ValidatorId>())?;
+            total = total.checked_add(u64::try_from(signer_bytes).ok()?)?;
+        }
+    }
+    Some(total)
+}
+
 impl std::fmt::Debug for AuthorizedProposalVoteSnapshot {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("AuthorizedProposalVoteSnapshot")
@@ -1609,6 +1926,10 @@ pub struct BinaryConsensusLoopInboundStats {
     pub view_advances_due_to_verified_tc: u64,
     pub timeout_crypto_verify_latency_ns_total: u64,
     pub timeout_crypto_verify_latency_observations_total: u64,
+    /// Run 422 F7: present Timeout/NewView high-QCs refused by the independent
+    /// retained-proof admission gate. Kept separate from outer timeout/TC
+    /// signature and quorum verification counters.
+    pub retained_qc_admission_rejected_total: u64,
     // ----------------------------------------------------------------------
     // Run 420 (F3/F4/F8): per-message Proposal/Vote signature + suite
     // verification outcomes. These are DISTINCT from the Run 418 F6
@@ -2958,7 +3279,7 @@ pub async fn run_binary_consensus_loop_with_io(
                     // ingest it, broadcast it, and apply any resulting
                     // `TimeoutCertificate` so a present quorum can
                     // leave an absent-leader view.
-                    maybe_emit_view_timeout(
+                    maybe_emit_view_timeout_with_auth(
                         &mut engine,
                         &mut view_timeout_state,
                         ticks,
@@ -2966,6 +3287,7 @@ pub async fn run_binary_consensus_loop_with_io(
                         restore_mode.is_active(),
                         outbound_facade.as_deref(),
                         &mut inbound_stats,
+                        None, // Production current Proposal/Vote authority is not activated.
                         verification_ctx.as_deref(),
                     );
                     let committed_anchor = update_state_metrics(
@@ -3105,7 +3427,7 @@ pub async fn run_binary_consensus_loop_with_io(
                     // path so a single-validator loop with an
                     // outbound facade can still record timeout
                     // emissions for testing.
-                    maybe_emit_view_timeout(
+                    maybe_emit_view_timeout_with_auth(
                         &mut engine,
                         &mut view_timeout_state,
                         ticks,
@@ -3113,6 +3435,7 @@ pub async fn run_binary_consensus_loop_with_io(
                         restore_mode.is_active(),
                         outbound_facade.as_deref(),
                         &mut inbound_stats,
+                        None, // Production current Proposal/Vote authority is not activated.
                         verification_ctx.as_deref(),
                     );
                     let committed_anchor = update_state_metrics(
@@ -6639,16 +6962,9 @@ pub(crate) fn handle_inbound_consensus_msg(
             //   - engine validation error → `view_timeout_engine_rejects`
             //     incremented; no engine state change.
             //
-            // We do NOT verify the timeout's signature here. This is
-            // consistent with the existing binary-path inbound handlers
-            // for `Proposal` and `Vote`, which today also flow through
-            // `engine.on_proposal_event` / `engine.on_vote_event`
-            // without independent signature verification at the loop
-            // level (see `BasicHotStuffEngine::on_vote_event`, which
-            // does no per-vote crypto). Production crypto verification
-            // for timeout messages is a separate hardening step that
-            // the engine surface (`on_timeout_msg` doc) explicitly
-            // defers to its caller.
+            // F5's required timeout-signature verification runs below before
+            // engine ingestion. It authenticates only the outer Timeout; F7
+            // separately admits any present high-QC from retained Vote evidence.
             // Defense-in-depth: bound bincode's allocation budget via
             // `bincode::options().with_limit(N)` and additionally short-circuit
             // any frame whose byte length already exceeds the cap, so a
@@ -6675,6 +6991,9 @@ pub(crate) fn handle_inbound_consensus_msg(
                 .deserialize::<TimeoutMsg<[u8; 32]>>(&bytes)
             {
                 Ok(timeout) => {
+                    // Avoid overlapping the encoded frame with F7's decoded
+                    // control/evidence working-set admission.
+                    drop(bytes);
                     // Run 418: bind the self-declared timeout sender to the
                     // authenticated transport origin BEFORE delivery counting,
                     // crypto verification, or engine ingestion.
@@ -6743,6 +7062,39 @@ pub(crate) fn handle_inbound_consensus_msg(
                         }
                     }
 
+                    let f7_admission = match admit_f7_retained_high_qc(
+                        engine,
+                        timeout.high_qc.as_ref(),
+                        ctx,
+                        current_auth,
+                        F7HighQcOperation::InboundTimeout,
+                        f7_timeout_control_bytes(&timeout),
+                        stats,
+                    ) {
+                        Ok(admission) => admission,
+                        Err(_) => {
+                            update_binary_view_timeout_metrics(metrics, stats);
+                            return;
+                        }
+                    };
+                    if confirm_f7_high_qc_before_effect(
+                        &f7_admission,
+                        timeout.high_qc.as_ref(),
+                        ctx,
+                        current_auth,
+                        F7HighQcOperation::InboundTimeout,
+                    )
+                    .is_err()
+                    {
+                        stats.retained_qc_admission_rejected_total = stats
+                            .retained_qc_admission_rejected_total
+                            .saturating_add(1);
+                        eprintln!(
+                            "[binary-consensus] Run 422 F7: timeout high-QC authorization invalidated before accumulator insertion"
+                        );
+                        update_binary_view_timeout_metrics(metrics, stats);
+                        return;
+                    }
                     stats.inbound_timeouts_delivered =
                         stats.inbound_timeouts_delivered.saturating_add(1);
                     match engine.on_timeout_msg(from, timeout) {
@@ -6752,12 +7104,13 @@ pub(crate) fn handle_inbound_consensus_msg(
                             stats.inbound_timeout_engine_accepted =
                                 stats.inbound_timeout_engine_accepted.saturating_add(1);
                             if let Some(tc) = maybe_tc {
-                                apply_local_tc_and_broadcast_new_view(
+                                apply_local_tc_and_broadcast_new_view_with_auth(
                                     engine,
                                     &tc,
                                     stats,
                                     outbound,
                                     ctx,
+                                    current_auth,
                                 );
                             }
                         }
@@ -6795,7 +7148,7 @@ pub(crate) fn handle_inbound_consensus_msg(
             // transport session that submitted this frame is an authenticated,
             // authorized member of the one-to-one binding map via
             // `PeerConsensusBindingGate::authorize_origin`. This runs BEFORE the
-            // delivered counter, BEFORE optional F5 cryptographic verification,
+            // delivered counter, BEFORE F5 cryptographic verification,
             // BEFORE `engine.on_timeout_certificate`, and before any view/state
             // mutation or outbound/rebroadcast action. Missing/unknown/ambiguous
             // authenticated origin fails closed. When no gate is installed
@@ -6847,6 +7200,9 @@ pub(crate) fn handle_inbound_consensus_msg(
                 .deserialize::<TimeoutCertificate<[u8; 32]>>(&bytes)
             {
                 Ok(tc) => {
+                    // Avoid overlapping the encoded frame with F7's decoded
+                    // control/evidence working-set admission.
+                    drop(bytes);
                     let from_view = engine.current_view();
 
                     let Some(ctx) = verification_ctx else {
@@ -6935,6 +7291,39 @@ pub(crate) fn handle_inbound_consensus_msg(
                         }
                     }
 
+                    let f7_admission = match admit_f7_retained_high_qc(
+                        engine,
+                        tc.high_qc.as_ref(),
+                        ctx,
+                        current_auth,
+                        F7HighQcOperation::InboundNewView,
+                        f7_timeout_certificate_control_bytes(&tc),
+                        stats,
+                    ) {
+                        Ok(admission) => admission,
+                        Err(_) => {
+                            update_binary_view_timeout_metrics(metrics, stats);
+                            return;
+                        }
+                    };
+                    if confirm_f7_high_qc_before_effect(
+                        &f7_admission,
+                        tc.high_qc.as_ref(),
+                        ctx,
+                        current_auth,
+                        F7HighQcOperation::InboundNewView,
+                    )
+                    .is_err()
+                    {
+                        stats.retained_qc_admission_rejected_total = stats
+                            .retained_qc_admission_rejected_total
+                            .saturating_add(1);
+                        eprintln!(
+                            "[binary-consensus] Run 422 F7: NewView high-QC authorization invalidated before engine application"
+                        );
+                        update_binary_view_timeout_metrics(metrics, stats);
+                        return;
+                    }
                     stats.inbound_new_views_delivered =
                         stats.inbound_new_views_delivered.saturating_add(1);
                     match engine.on_timeout_certificate(&tc) {
@@ -7129,6 +7518,30 @@ fn maybe_emit_view_timeout(
     stats: &mut BinaryConsensusLoopInboundStats,
     verification_ctx: Option<&TimeoutVerificationContext>,
 ) {
+    maybe_emit_view_timeout_with_auth(
+        engine,
+        view_state,
+        ticks,
+        backoff,
+        restore_mode_active,
+        outbound,
+        stats,
+        None,
+        verification_ctx,
+    );
+}
+
+fn maybe_emit_view_timeout_with_auth(
+    engine: &mut BasicHotStuffEngine<[u8; 32]>,
+    view_state: &mut ViewTimeoutState,
+    ticks: u64,
+    backoff: &mut ViewTimeoutBackoffState,
+    restore_mode_active: bool,
+    outbound: Option<&dyn ConsensusNetworkFacade>,
+    stats: &mut BinaryConsensusLoopInboundStats,
+    current_auth: Option<&AuthorizedProposalVoteSnapshot>,
+    verification_ctx: Option<&TimeoutVerificationContext>,
+) {
     // Always observe progress, even if the primitive is disabled — so
     // re-enabling later starts from a current baseline.
     let prog = view_state.observe(
@@ -7233,6 +7646,36 @@ fn maybe_emit_view_timeout(
         return;
     }
 
+    let f7_admission = match admit_f7_retained_high_qc(
+        engine,
+        timeout_msg.high_qc.as_ref(),
+        ctx,
+        current_auth,
+        F7HighQcOperation::LocalTimeout,
+        f7_timeout_control_bytes(&timeout_msg),
+        stats,
+    ) {
+        Ok(admission) => admission,
+        Err(_) => return,
+    };
+    if confirm_f7_high_qc_before_effect(
+        &f7_admission,
+        timeout_msg.high_qc.as_ref(),
+        ctx,
+        current_auth,
+        F7HighQcOperation::LocalTimeout,
+    )
+    .is_err()
+    {
+        stats.retained_qc_admission_rejected_total = stats
+            .retained_qc_admission_rejected_total
+            .saturating_add(1);
+        eprintln!(
+            "[binary-consensus] Run 422 F7: local timeout high-QC authorization invalidated before signing"
+        );
+        return;
+    }
+
     // Run 030: sign locally-emitted `TimeoutMsg` BEFORE local engine
     // ingestion, BEFORE broadcast, and BEFORE inclusion in any
     // locally-formed `TimeoutCertificate.signed_timeouts`.
@@ -7262,7 +7705,7 @@ fn maybe_emit_view_timeout(
     ) {
         Ok(sig) => {
             timeout_msg.suite_id = wire_suite;
-            timeout_msg.set_signature(sig);
+            timeout_msg.signature = sig;
         }
         Err(e) => {
             stats.outbound_timeout_signing_failure =
@@ -7315,6 +7758,24 @@ fn maybe_emit_view_timeout(
             return;
         }
     };
+
+    if confirm_f7_high_qc_before_effect(
+        &f7_admission,
+        timeout_msg.high_qc.as_ref(),
+        ctx,
+        current_auth,
+        F7HighQcOperation::LocalTimeout,
+    )
+    .is_err()
+    {
+        stats.retained_qc_admission_rejected_total = stats
+            .retained_qc_admission_rejected_total
+            .saturating_add(1);
+        eprintln!(
+            "[binary-consensus] Run 422 F7: local timeout high-QC authorization invalidated before timeout consumption"
+        );
+        return;
+    }
 
     // Mark before locally ingesting so a self-fire that produces a TC
     // does not re-enter this branch.
@@ -7369,7 +7830,14 @@ fn maybe_emit_view_timeout(
     }
 
     if let Some(tc) = formed_tc {
-        apply_local_tc_and_broadcast_new_view(engine, &tc, stats, outbound, ctx);
+        apply_local_tc_and_broadcast_new_view_with_auth(
+            engine,
+            &tc,
+            stats,
+            outbound,
+            ctx,
+            current_auth,
+        );
     }
 }
 
@@ -7394,6 +7862,24 @@ fn apply_local_tc_and_broadcast_new_view(
     outbound: Option<&dyn ConsensusNetworkFacade>,
     verification_ctx: &TimeoutVerificationContext,
 ) {
+    apply_local_tc_and_broadcast_new_view_with_auth(
+        engine,
+        tc,
+        stats,
+        outbound,
+        verification_ctx,
+        None,
+    );
+}
+
+fn apply_local_tc_and_broadcast_new_view_with_auth(
+    engine: &mut BasicHotStuffEngine<[u8; 32]>,
+    tc: &TimeoutCertificate<[u8; 32]>,
+    stats: &mut BinaryConsensusLoopInboundStats,
+    outbound: Option<&dyn ConsensusNetworkFacade>,
+    verification_ctx: &TimeoutVerificationContext,
+    current_auth: Option<&AuthorizedProposalVoteSnapshot>,
+) {
     stats.timeout_certificates_formed =
         stats.timeout_certificates_formed.saturating_add(1);
     let verify_started = std::time::Instant::now();
@@ -7416,6 +7902,35 @@ fn apply_local_tc_and_broadcast_new_view(
             "[binary-consensus] locally formed NewView rejected by configured verifier \
              (timeout_view={}): {}",
             tc.timeout_view, e
+        );
+        return;
+    }
+    let f7_admission = match admit_f7_retained_high_qc(
+        engine,
+        tc.high_qc.as_ref(),
+        verification_ctx,
+        current_auth,
+        F7HighQcOperation::LocalTimeoutCertificate,
+        f7_timeout_certificate_control_bytes(tc),
+        stats,
+    ) {
+        Ok(admission) => admission,
+        Err(_) => return,
+    };
+    if confirm_f7_high_qc_before_effect(
+        &f7_admission,
+        tc.high_qc.as_ref(),
+        verification_ctx,
+        current_auth,
+        F7HighQcOperation::LocalTimeoutCertificate,
+    )
+    .is_err()
+    {
+        stats.retained_qc_admission_rejected_total = stats
+            .retained_qc_admission_rejected_total
+            .saturating_add(1);
+        eprintln!(
+            "[binary-consensus] Run 422 F7: locally formed TC high-QC authorization invalidated before engine application"
         );
         return;
     }
@@ -23141,6 +23656,1451 @@ mod tests {
                             "control holds anchor, parent and candidate within the limit"
                         );
                     }
+                mod run422_f7_retained_qc {
+                    use super::*;
+                    use crate::validator_signer::{LocalKeySigner, SignError};
+                    use qbind_consensus::timeout::{TimeoutCertificate, TimeoutMsg};
+                    use qbind_consensus::validator_set::{ConsensusValidatorSet, ValidatorSetEntry};
+                    use std::sync::atomic::{AtomicUsize, Ordering};
+                    use std::sync::Mutex;
+
+                    struct Fixture {
+                        keys: super::super::super::Fixture,
+                        pv: ProposalVoteAuthority,
+                        snapshot: AuthorizedProposalVoteSnapshot,
+                        timeout_context: TimeoutVerificationContext,
+                        engine: BasicHotStuffEngine<[u8; 32]>,
+                        logical_qc: qbind_consensus::qc::QuorumCertificate<[u8; 32]>,
+                        qc_counts: QcCallCounts,
+                        proof: qbind_consensus::qc_verify_domain::VerifiedQuorumCertificate,
+                    }
+
+                    fn make_f7_fixture() -> Fixture {
+                        make_f7_fixture_with_slots(ConsensusLimitsConfig::default().max_pending_blocks)
+                    }
+
+                    fn make_f7_fixture_with_slots(max_pending_blocks: usize) -> Fixture {
+                        let keys = make_fixture(4);
+                        let (registry, qc_counts) = counting_registry();
+                        let pv = c3e_pv(&keys, c3e_domain(), registry, Some(ValidatorId(0)));
+                        let snapshot = coherent_snapshot_for(&pv);
+                        let base_timeout_context = make_timeout_ctx(&keys, Some(ValidatorId(0)));
+                        let timeout_context = TimeoutVerificationContext {
+                            validators: keys.validators.clone(),
+                            key_provider: keys.kp.clone(),
+                            backend_registry: keys.br.clone(),
+                            chain_id: pv.signing_domain.runtime_chain_id(),
+                            signer: base_timeout_context.signer.clone(),
+                        };
+                        let mut engine = BasicHotStuffEngine::with_state_limits(
+                            ValidatorId(0),
+                            keys.validators.as_ref().clone(),
+                            ConsensusLimitsConfig {
+                                max_pending_blocks,
+                                ..ConsensusLimitsConfig::default()
+                            },
+                        );
+                        let wire_qc = valid_quorum(&keys);
+                        let verified = verify_qc_epoch(&pv, snapshot.authorized_epoch(), &wire_qc);
+                        let logical_qc = qbind_consensus::qc::QuorumCertificate::new(
+                            wire_qc.block_id,
+                            wire_qc.height,
+                            verified.signers().to_vec(),
+                        );
+                        engine
+                            .state_mut()
+                            .register_block_with_verified_justification(
+                                [0xCC; 32],
+                                2,
+                                None,
+                                Arc::new(verified.clone()),
+                            )
+                            .expect("retain genuinely verified QC evidence");
+                        Fixture {
+                            keys,
+                            pv,
+                            snapshot,
+                            timeout_context,
+                            engine,
+                            logical_qc,
+                            qc_counts,
+                            proof: verified,
+                        }
+                    }
+
+                    fn retain_lower_qc(
+                        fixture: &mut Fixture,
+                    ) -> qbind_consensus::qc::QuorumCertificate<[u8; 32]> {
+                        let mut qc = unsigned_qc(C3E_WIRE, 0);
+                        qc.block_id = [8; 32];
+                        qc.height = 0;
+                        qc.round = 0;
+                        for index in 0..3 {
+                            set_bit(&mut qc.signer_bitmap, index);
+                            let vote = constituent_vote(&qc, index);
+                            let preimage = fixture.pv.signing_domain.vote_preimage(&vote);
+                            qc.signatures.push(MlDsa44Backend::sign(
+                                fixture.keys.sks.get(&ValidatorId(index as u64)).expect("key"),
+                                &preimage,
+                            ).expect("genuine lower-QC Vote signature"));
+                        }
+                        let proof = verify_qc_epoch(&fixture.pv, 0, &qc);
+                        let logical = qbind_consensus::qc::QuorumCertificate::new(
+                            qc.block_id, qc.height, proof.signers().to_vec(),
+                        );
+                        fixture.engine.state_mut().register_block_with_verified_justification(
+                            [0xDD; 32], 2, None, Arc::new(proof),
+                        ).expect("retain different genuine projection");
+                        logical
+                    }
+
+                    #[derive(Debug, PartialEq, Eq)]
+                    struct EngineObservations {
+                        view: u64,
+                        epoch: u64,
+                        lock: Option<qbind_consensus::qc::QuorumCertificate<[u8; 32]>>,
+                        committed: Option<([u8; 32], u64)>,
+                        blocks: usize,
+                        retained_bytes: u64,
+                        evictions: u64,
+                        rejected_evidence: u64,
+                        timeouts: usize,
+                        latch: bool,
+                    }
+
+                    fn observe(engine: &BasicHotStuffEngine<[u8; 32]>) -> EngineObservations {
+                        EngineObservations {
+                            view: engine.current_view(),
+                            epoch: engine.current_epoch(),
+                            lock: engine.state().locked_qc().cloned(),
+                            committed: engine.state().committed_block().copied()
+                                .zip(engine.state().committed_height()),
+                            blocks: engine.state().block_count(),
+                            retained_bytes: engine.state().retained_evidence_bytes(),
+                            evictions: engine.state().evicted_blocks(),
+                            rejected_evidence: engine.state().rejected_evidence_over_budget(),
+                            timeouts: engine.timeout_count(0),
+                            latch: engine.timeout_emitted_in_view(),
+                        }
+                    }
+
+                    fn signed_timeout(
+                        fixture: &Fixture,
+                        validator: u16,
+                        view: u64,
+                        high_qc: Option<qbind_consensus::qc::QuorumCertificate<[u8; 32]>>,
+                    ) -> TimeoutMsg<[u8; 32]> {
+                        let id = ValidatorId(validator as u64);
+                        let signer = LocalKeySigner::new(
+                            id,
+                            TEST_SUITE_U16,
+                            fixture.keys.sk_objs.get(&id).expect("fixture key").clone(),
+                        );
+                        let mut timeout = TimeoutMsg::new(view, high_qc, id);
+                        timeout.suite_id = u8::try_from(signer.suite_id()).expect("wire suite");
+                        timeout.signature = signer
+                            .sign_timeout_with_chain_id(
+                                fixture.timeout_context.chain_id,
+                                view,
+                                timeout.high_qc.as_ref(),
+                            )
+                            .expect("genuine timeout signature");
+                        timeout
+                    }
+
+                    fn signed_tc(
+                        fixture: &Fixture,
+                        high_qc: Option<qbind_consensus::qc::QuorumCertificate<[u8; 32]>>,
+                    ) -> TimeoutCertificate<[u8; 32]> {
+                        let signed_timeouts: Vec<_> = (0..3)
+                            .map(|validator| signed_timeout(fixture, validator, 0, high_qc.clone()))
+                            .collect();
+                        TimeoutCertificate {
+                            view: 1,
+                            high_qc,
+                            signers: vec![ValidatorId(0), ValidatorId(1), ValidatorId(2)],
+                            signed_timeouts,
+                            timeout_view: 0,
+                        }
+                    }
+
+                    #[derive(Default)]
+                    struct RecordingFacade {
+                        messages: Mutex<Vec<ConsensusNetMsg>>,
+                    }
+
+                    impl ConsensusNetworkFacade for RecordingFacade {
+                        fn send_vote_to(
+                            &self,
+                            _target: ValidatorId,
+                            _vote: &Vote,
+                        ) -> Result<(), qbind_consensus::network::NetworkError> {
+                            Ok(())
+                        }
+
+                        fn broadcast_vote(
+                            &self,
+                            _vote: &Vote,
+                        ) -> Result<(), qbind_consensus::network::NetworkError> {
+                            Ok(())
+                        }
+
+                        fn broadcast_proposal(
+                            &self,
+                            _proposal: &BlockProposal,
+                        ) -> Result<(), qbind_consensus::network::NetworkError> {
+                            Ok(())
+                        }
+
+                        fn broadcast_consensus_msg(
+                            &self,
+                            msg: &ConsensusNetMsg,
+                        ) -> Result<(), qbind_consensus::network::NetworkError> {
+                            self.messages.lock().unwrap().push(msg.clone());
+                            Ok(())
+                        }
+                    }
+
+                    fn deliver_timeout(
+                        fixture: &mut Fixture,
+                        timeout: TimeoutMsg<[u8; 32]>,
+                        stats: &mut BinaryConsensusLoopInboundStats,
+                        facade: &RecordingFacade,
+                    ) {
+                        let mut restore = RestoreCatchupModeState::from_config(None);
+                        let mut detector = BinaryReconfigDetector::default();
+                        let gate = pv_binding_gate(4);
+                        let origin = origin_for(timeout.validator_id.0 as u16);
+                        handle_inbound_consensus_msg(
+                            &mut fixture.engine,
+                            ConsensusNetMsg::Timeout(
+                                bincode::serialize(&timeout).expect("encode timeout"),
+                            ),
+                            stats,
+                            Some(facade),
+                            &make_metrics(),
+                            ValidatorId(0),
+                            &mut restore,
+                            Some(&fixture.timeout_context),
+                            Some(&fixture.pv),
+                            Some(&fixture.snapshot),
+                            &mut detector,
+                            Some(&origin),
+                            Some(&gate),
+                            None,
+                            ConsensusVerificationPolicy::Required,
+                        );
+                    }
+
+                    fn deliver_timeout_without_proposal_vote_authority(
+                        fixture: &mut Fixture,
+                        timeout: TimeoutMsg<[u8; 32]>,
+                        stats: &mut BinaryConsensusLoopInboundStats,
+                        facade: &RecordingFacade,
+                    ) {
+                        let mut restore = RestoreCatchupModeState::from_config(None);
+                        let mut detector = BinaryReconfigDetector::default();
+                        let gate = pv_binding_gate(4);
+                        let origin = origin_for(timeout.validator_id.0 as u16);
+                        handle_inbound_consensus_msg(
+                            &mut fixture.engine,
+                            ConsensusNetMsg::Timeout(
+                                bincode::serialize(&timeout).expect("encode timeout"),
+                            ),
+                            stats,
+                            Some(facade),
+                            &make_metrics(),
+                            ValidatorId(0),
+                            &mut restore,
+                            Some(&fixture.timeout_context),
+                            None,
+                            None,
+                            &mut detector,
+                            Some(&origin),
+                            Some(&gate),
+                            None,
+                            ConsensusVerificationPolicy::Required,
+                        );
+                    }
+
+                    fn deliver_newview(
+                        fixture: &mut Fixture,
+                        tc: &TimeoutCertificate<[u8; 32]>,
+                        stats: &mut BinaryConsensusLoopInboundStats,
+                        facade: &RecordingFacade,
+                    ) {
+                        let mut restore = RestoreCatchupModeState::from_config(None);
+                        let mut detector = BinaryReconfigDetector::default();
+                        let gate = pv_binding_gate(4);
+                        let origin = origin_for(0);
+                        handle_inbound_consensus_msg(
+                            &mut fixture.engine,
+                            ConsensusNetMsg::NewView(
+                                bincode::serialize(tc).expect("encode NewView"),
+                            ),
+                            stats,
+                            Some(facade),
+                            &make_metrics(),
+                            ValidatorId(0),
+                            &mut restore,
+                            Some(&fixture.timeout_context),
+                            Some(&fixture.pv),
+                            Some(&fixture.snapshot),
+                            &mut detector,
+                            Some(&origin),
+                            Some(&gate),
+                            None,
+                            ConsensusVerificationPolicy::Required,
+                        );
+                    }
+
+                    struct CountingTimeoutSigner {
+                        inner: LocalKeySigner,
+                        timeout_calls: AtomicUsize,
+                    }
+
+                    impl ValidatorSigner for CountingTimeoutSigner {
+                        fn validator_id(&self) -> &ValidatorId {
+                            self.inner.validator_id()
+                        }
+
+                        fn suite_id(&self) -> u16 {
+                            self.inner.suite_id()
+                        }
+
+                        fn sign_proposal(&self, preimage: &[u8]) -> Result<Vec<u8>, SignError> {
+                            self.inner.sign_proposal(preimage)
+                        }
+
+                        fn sign_vote(&self, preimage: &[u8]) -> Result<Vec<u8>, SignError> {
+                            self.inner.sign_vote(preimage)
+                        }
+
+                        fn sign_timeout(
+                            &self,
+                            view: u64,
+                            high_qc: Option<&qbind_consensus::qc::QuorumCertificate<[u8; 32]>>,
+                        ) -> Result<Vec<u8>, SignError> {
+                            self.timeout_calls.fetch_add(1, Ordering::SeqCst);
+                            self.inner.sign_timeout(view, high_qc)
+                        }
+
+                        fn sign_timeout_with_chain_id(
+                            &self,
+                            chain_id: qbind_types::ChainId,
+                            view: u64,
+                            high_qc: Option<&qbind_consensus::qc::QuorumCertificate<[u8; 32]>>,
+                        ) -> Result<Vec<u8>, SignError> {
+                            self.timeout_calls.fetch_add(1, Ordering::SeqCst);
+                            self.inner.sign_timeout_with_chain_id(chain_id, view, high_qc)
+                        }
+                    }
+
+                    #[test]
+                    fn run422_f7_retained_qc_inbound_timeout_accepts_exact_proof_and_rejects_projection_substitution() {
+                        let mut fixture = make_f7_fixture();
+                        let facade = RecordingFacade::default();
+                        let mut stats = BinaryConsensusLoopInboundStats::default();
+                        let exact = signed_timeout(
+                            &fixture,
+                            0,
+                            0,
+                            Some(fixture.logical_qc.clone()),
+                        );
+                        deliver_timeout(&mut fixture, exact, &mut stats, &facade);
+                        assert_eq!(stats.inbound_timeout_verify_accepted, 1);
+                        assert_eq!(stats.inbound_timeouts_engine_accepted, 1);
+                        assert_eq!(stats.retained_qc_admission_rejected_total, 0);
+                        assert_eq!(fixture.engine.timeout_count(0), 1);
+
+                        let mut rejected = make_f7_fixture();
+                        let mut altered = rejected.logical_qc.clone();
+                        altered.signers.swap(0, 1);
+                        let before_view = rejected.engine.current_view();
+                        let before_blocks = rejected.engine.state().block_count();
+                        let timeout = signed_timeout(&rejected, 1, 0, Some(altered));
+                        let mut rejected_stats = BinaryConsensusLoopInboundStats::default();
+                        deliver_timeout(&mut rejected, timeout, &mut rejected_stats, &facade);
+                        assert_eq!(rejected_stats.inbound_timeout_verify_accepted, 1);
+                        assert_eq!(rejected_stats.retained_qc_admission_rejected_total, 1);
+                        assert_eq!(rejected_stats.inbound_timeouts_delivered, 0);
+                        assert_eq!(rejected.engine.timeout_count(0), 0);
+                        assert_eq!(rejected.engine.current_view(), before_view);
+                        assert_eq!(rejected.engine.state().block_count(), before_blocks);
+                    }
+
+                    #[test]
+                    fn run422_f7_retained_qc_timeout_context_does_not_promote_proposal_vote_authority() {
+                        let mut fixture = make_f7_fixture();
+                        let timeout = signed_timeout(
+                            &fixture,
+                            0,
+                            0,
+                            Some(fixture.logical_qc.clone()),
+                        );
+                        let mut stats = BinaryConsensusLoopInboundStats::default();
+                        let facade = RecordingFacade::default();
+                        deliver_timeout_without_proposal_vote_authority(
+                            &mut fixture,
+                            timeout,
+                            &mut stats,
+                            &facade,
+                        );
+                        assert_eq!(stats.inbound_timeout_verify_accepted, 1);
+                        assert_eq!(stats.retained_qc_admission_rejected_total, 1);
+                        assert_eq!(stats.inbound_timeouts_delivered, 0);
+                        assert_eq!(fixture.engine.timeout_count(0), 0);
+                        assert!(facade.messages.lock().unwrap().is_empty());
+                    }
+
+                    #[test]
+                    fn run422_f7_retained_qc_inbound_newview_rejects_before_view_lock_and_accumulator_effects() {
+                        let mut fixture = make_f7_fixture();
+                        let facade = RecordingFacade::default();
+                        let seed = signed_timeout(&fixture, 3, 0, None);
+                        fixture
+                            .engine
+                            .on_timeout_msg(seed.validator_id, seed)
+                            .expect("seed existing timeout accumulator");
+                        assert_eq!(fixture.engine.timeout_count(0), 1);
+                        let before_view = fixture.engine.current_view();
+                        let before_lock = fixture.engine.state().locked_qc().cloned();
+                        let mut unsupported = fixture.logical_qc.clone();
+                        unsupported.block_id = [0x44; 32];
+                        let tc = signed_tc(&fixture, Some(unsupported));
+                        let mut stats = BinaryConsensusLoopInboundStats::default();
+                        deliver_newview(&mut fixture, &tc, &mut stats, &facade);
+                        assert_eq!(stats.inbound_newview_verify_accepted, 1);
+                        assert_eq!(stats.retained_qc_admission_rejected_total, 1);
+                        assert_eq!(stats.inbound_new_views_delivered, 0);
+                        assert_eq!(fixture.engine.current_view(), before_view);
+                        assert_eq!(fixture.engine.state().locked_qc(), before_lock.as_ref());
+                        assert_eq!(fixture.engine.timeout_count(0), 1);
+                        assert!(facade.messages.lock().unwrap().is_empty());
+
+                        let mut accepted = make_f7_fixture();
+                        let tc = signed_tc(&accepted, Some(accepted.logical_qc.clone()));
+                        let mut accepted_stats = BinaryConsensusLoopInboundStats::default();
+                        deliver_newview(&mut accepted, &tc, &mut accepted_stats, &facade);
+                        assert_eq!(accepted_stats.inbound_newview_verify_accepted, 1);
+                        assert_eq!(accepted_stats.retained_qc_admission_rejected_total, 0);
+                        assert_eq!(accepted.engine.current_view(), 1);
+                        assert_eq!(
+                            accepted.engine.state().locked_qc(),
+                            Some(&accepted.logical_qc)
+                        );
+                    }
+
+                    #[test]
+                    fn run422_f7_retained_qc_local_timeout_refusal_preserves_signing_and_consumption_state() {
+                        let mut fixture = make_f7_fixture();
+                        fixture
+                            .engine
+                            .state_mut()
+                            .set_locked_qc(fixture.logical_qc.clone());
+                        let id = ValidatorId(0);
+                        let signer = Arc::new(CountingTimeoutSigner {
+                            inner: LocalKeySigner::new(
+                                id,
+                                TEST_SUITE_U16,
+                                fixture.keys.sk_objs.get(&id).expect("key").clone(),
+                            ),
+                            timeout_calls: AtomicUsize::new(0),
+                        });
+                        let timeout_context = TimeoutVerificationContext {
+                            validators: fixture.keys.validators.clone(),
+                            key_provider: fixture.keys.kp.clone(),
+                            backend_registry: fixture.keys.br.clone(),
+                            chain_id: fixture.pv.signing_domain.runtime_chain_id(),
+                            signer: Some(signer.clone()),
+                        };
+                        let facade = RecordingFacade::default();
+                        let mut state = ViewTimeoutState::new(0, 0);
+                        let mut backoff = ViewTimeoutBackoffState::new(Some(5), 2, 40)
+                            .expect("enabled growing pacer");
+                        let mut stats = BinaryConsensusLoopInboundStats::default();
+                        maybe_emit_view_timeout_with_auth(
+                            &mut fixture.engine,
+                            &mut state,
+                            5,
+                            &mut backoff,
+                            false,
+                            Some(&facade),
+                            &mut stats,
+                            None,
+                            Some(&timeout_context),
+                        );
+                        assert_eq!(signer.timeout_calls.load(Ordering::SeqCst), 0);
+                        assert_eq!(fixture.engine.timeout_emitted_in_view(), false);
+                        assert_eq!(fixture.engine.timeout_count(0), 0);
+                        assert_eq!(stats.view_timeouts_emitted, 0);
+                        assert_eq!(stats.retained_qc_admission_rejected_total, 1);
+                        assert_eq!(backoff.threshold(), Some(5));
+                        assert_eq!(backoff.current_level(), 0);
+                        assert!(facade.messages.lock().unwrap().is_empty());
+
+                        let votes_before_retry = fixture.qc_counts.votes();
+                        maybe_emit_view_timeout_with_auth(
+                            &mut fixture.engine,
+                            &mut state,
+                            5,
+                            &mut backoff,
+                            false,
+                            Some(&facade),
+                            &mut stats,
+                            Some(&fixture.snapshot),
+                            Some(&timeout_context),
+                        );
+                        assert_eq!(fixture.qc_counts.votes(), votes_before_retry + 3);
+                        assert_eq!(signer.timeout_calls.load(Ordering::SeqCst), 1);
+                        assert!(fixture.engine.timeout_emitted_in_view());
+                        assert_eq!(fixture.engine.timeout_count(0), 1);
+                        assert_eq!(stats.retained_qc_admission_rejected_total, 1);
+                        assert_eq!(stats.view_timeouts_emitted, 1);
+                        assert_eq!(backoff.threshold(), Some(10));
+                        assert_eq!(backoff.current_level(), 1);
+                        assert_eq!(facade.messages.lock().unwrap().len(), 1);
+                        assert!(facade
+                            .messages
+                            .lock()
+                            .unwrap()
+                            .iter()
+                            .any(|msg| matches!(msg, ConsensusNetMsg::Timeout(_))));
+                    }
+
+                    #[test]
+                    fn run422_f7_retained_qc_local_timeout_accepts_exact_lock_before_consumption() {
+                        let mut fixture = make_f7_fixture();
+                        fixture
+                            .engine
+                            .state_mut()
+                            .set_locked_qc(fixture.logical_qc.clone());
+                        let facade = RecordingFacade::default();
+                        let mut state = ViewTimeoutState::new(0, 0);
+                        let mut backoff = ViewTimeoutBackoffState::no_growth(Some(5));
+                        let mut stats = BinaryConsensusLoopInboundStats::default();
+                        let votes_before = fixture.qc_counts.votes();
+                        maybe_emit_view_timeout_with_auth(
+                            &mut fixture.engine,
+                            &mut state,
+                            5,
+                            &mut backoff,
+                            false,
+                            Some(&facade),
+                            &mut stats,
+                            Some(&fixture.snapshot),
+                            Some(&fixture.timeout_context),
+                        );
+                        assert_eq!(fixture.qc_counts.votes(), votes_before + 3);
+                        assert_eq!(stats.retained_qc_admission_rejected_total, 0);
+                        assert_eq!(stats.outbound_timeout_signing_success, 1);
+                        assert_eq!(stats.view_timeouts_emitted, 1);
+                        assert!(fixture.engine.timeout_emitted_in_view());
+                        assert_eq!(fixture.engine.timeout_count(0), 1);
+                        assert!(facade
+                            .messages
+                            .lock()
+                            .unwrap()
+                            .iter()
+                            .any(|msg| matches!(msg, ConsensusNetMsg::Timeout(_))));
+                    }
+
+                    #[test]
+                    fn run422_f7_retained_qc_local_timeout_formed_tc_is_rechecked_before_apply_and_publication() {
+                        let mut fixture = make_f7_fixture();
+                        let lower = retain_lower_qc(&mut fixture);
+                        fixture.engine.state_mut().set_locked_qc(lower.clone());
+                        let facade = RecordingFacade::default();
+                        let mut stats = BinaryConsensusLoopInboundStats::default();
+                        for validator in 1..3 {
+                            let timeout = signed_timeout(
+                                &fixture,
+                                validator,
+                                0,
+                                Some(fixture.logical_qc.clone()),
+                            );
+                            deliver_timeout(&mut fixture, timeout, &mut stats, &facade);
+                        }
+                        assert_eq!(fixture.engine.timeout_count(0), 2);
+                        let mut state = ViewTimeoutState::new(0, 0);
+                        let mut backoff = ViewTimeoutBackoffState::no_growth(Some(5));
+                        let votes_before_tc = fixture.qc_counts.votes();
+                        maybe_emit_view_timeout_with_auth(
+                            &mut fixture.engine,
+                            &mut state,
+                            5,
+                            &mut backoff,
+                            false,
+                            Some(&facade),
+                            &mut stats,
+                            Some(&fixture.snapshot),
+                            Some(&fixture.timeout_context),
+                        );
+                        assert_eq!(fixture.qc_counts.votes(), votes_before_tc + 6);
+                        assert_eq!(fixture.engine.current_view(), 1);
+                        assert_eq!(fixture.engine.timeout_count(0), 0);
+                        assert_eq!(stats.timeout_certificates_formed, 1);
+                        assert_eq!(stats.retained_qc_admission_rejected_total, 0);
+                        assert_eq!(stats.outbound_new_views_sent, 1);
+                        let messages = facade.messages.lock().unwrap();
+                        let timeout = messages.iter().find_map(|msg| match msg {
+                            ConsensusNetMsg::Timeout(bytes) => {
+                                Some(bincode::deserialize::<TimeoutMsg<[u8; 32]>>(bytes).unwrap())
+                            }
+                            _ => None,
+                        }).expect("present-QC triggering local timeout");
+                        assert_eq!(timeout.high_qc, Some(lower));
+                        let tc = messages.iter().find_map(|msg| match msg {
+                            ConsensusNetMsg::NewView(bytes) => {
+                                Some(bincode::deserialize::<TimeoutCertificate<[u8; 32]>>(bytes).unwrap())
+                            }
+                            _ => None,
+                        }).expect("present-QC resulting TC");
+                        assert_eq!(tc.high_qc, Some(fixture.logical_qc.clone()));
+                        drop(messages);
+                        assert!(facade
+                            .messages
+                            .lock()
+                            .unwrap()
+                            .iter()
+                            .any(|msg| matches!(msg, ConsensusNetMsg::NewView(_))));
+                    }
+
+                    #[test]
+                    fn run422_f7_retained_qc_local_tc_helper_refuses_before_state_and_delivery() {
+                        let mut fixture = make_f7_fixture();
+                        let seed = signed_timeout(&fixture, 3, 0, None);
+                        fixture
+                            .engine
+                            .on_timeout_msg(seed.validator_id, seed)
+                            .expect("seed existing timeout accumulator");
+                        let before_view = fixture.engine.current_view();
+                        let before_lock = fixture.engine.state().locked_qc().cloned();
+                        let mut unsupported = fixture.logical_qc.clone();
+                        unsupported.block_id = [0x55; 32];
+                        let tc = signed_tc(&fixture, Some(unsupported));
+                        let facade = RecordingFacade::default();
+                        let mut stats = BinaryConsensusLoopInboundStats::default();
+                        apply_local_tc_and_broadcast_new_view_with_auth(
+                            &mut fixture.engine,
+                            &tc,
+                            &mut stats,
+                            Some(&facade),
+                            &fixture.timeout_context,
+                            Some(&fixture.snapshot),
+                        );
+                        assert_eq!(stats.retained_qc_admission_rejected_total, 1);
+                        assert_eq!(fixture.engine.current_view(), before_view);
+                        assert_eq!(fixture.engine.state().locked_qc(), before_lock.as_ref());
+                        assert_eq!(fixture.engine.timeout_count(0), 1);
+                        assert!(facade.messages.lock().unwrap().is_empty());
+                    }
+
+                    #[test]
+                    fn run422_f7_retained_qc_unsupported_timeout_does_not_poison_quorum_then_admissible_tc_progresses() {
+                        let mut fixture = make_f7_fixture();
+                        let facade = RecordingFacade::default();
+                        let mut wrong = fixture.logical_qc.clone();
+                        wrong.signers[0] = ValidatorId(3);
+                        let mut stats = BinaryConsensusLoopInboundStats::default();
+                        let bad_timeout = signed_timeout(&fixture, 0, 0, Some(wrong));
+                        deliver_timeout(&mut fixture, bad_timeout, &mut stats, &facade);
+                        assert_eq!(fixture.engine.timeout_count(0), 0);
+                        assert_eq!(stats.inbound_timeout_verify_accepted, 1);
+                        assert_eq!(stats.retained_qc_admission_rejected_total, 1);
+
+                        for validator in 0..3 {
+                            let timeout = signed_timeout(
+                                &fixture,
+                                validator,
+                                0,
+                                Some(fixture.logical_qc.clone()),
+                            );
+                            deliver_timeout(&mut fixture, timeout, &mut stats, &facade);
+                        }
+                        assert_eq!(fixture.engine.current_view(), 1);
+                        assert_eq!(fixture.engine.timeout_count(0), 0);
+                        assert_eq!(stats.retained_qc_admission_rejected_total, 1);
+                        assert_eq!(stats.timeout_certificates_formed, 1);
+                        assert_eq!(stats.outbound_new_views_sent, 1);
+                        assert!(facade
+                            .messages
+                            .lock()
+                            .unwrap()
+                            .iter()
+                            .any(|msg| matches!(msg, ConsensusNetMsg::NewView(_))));
+                    }
+
+                    #[test]
+                    fn run422_f7_retained_qc_context_disagreements_refuse_before_crypto_and_reverification_uses_snapshot_keys() {
+                        let mut engine_mismatch = make_f7_fixture();
+                        let qc_calls_before = engine_mismatch.qc_counts.votes();
+                        engine_mismatch.engine.set_current_epoch(1);
+                        let mut stats = BinaryConsensusLoopInboundStats::default();
+                        assert!(matches!(
+                            admit_f7_retained_high_qc(
+                                &engine_mismatch.engine,
+                                Some(&engine_mismatch.logical_qc),
+                                &engine_mismatch.timeout_context,
+                                Some(&engine_mismatch.snapshot),
+                                F7HighQcOperation::InboundTimeout,
+                                Some(0),
+                                &mut stats,
+                            ),
+                            Err(F7RetainedQcRefusal::EngineOrTimeoutContextMismatch)
+                        ));
+                        assert_eq!(engine_mismatch.qc_counts.votes(), qc_calls_before);
+                        assert_eq!(stats.retained_qc_admission_rejected_total, 1);
+
+                        let epoch_fixture = make_f7_fixture();
+                        let epoch_qc = super::build_signed_qc(
+                            &epoch_fixture.keys,
+                            &epoch_fixture.pv.signing_domain,
+                            C3E_WIRE,
+                            1,
+                            &[0, 1, 2],
+                        );
+                        let epoch_proof =
+                            super::verify_qc_epoch(&epoch_fixture.pv, 1, &epoch_qc);
+                        let epoch_logical = qbind_consensus::qc::QuorumCertificate::new(
+                            epoch_qc.block_id,
+                            epoch_qc.height,
+                            epoch_proof.signers().to_vec(),
+                        );
+                        let mut epoch_engine = make_engine(ValidatorId(0), 4);
+                        epoch_engine
+                            .state_mut()
+                            .register_block_with_verified_justification(
+                                [0xCD; 32],
+                                2,
+                                None,
+                                Arc::new(epoch_proof),
+                            )
+                            .expect("retain genuine QC signed for a foreign epoch");
+                        let qc_calls_before = epoch_fixture.qc_counts.votes();
+                        assert!(matches!(
+                            admit_f7_retained_high_qc(
+                                &epoch_engine,
+                                Some(&epoch_logical),
+                                &epoch_fixture.timeout_context,
+                                Some(&epoch_fixture.snapshot),
+                                F7HighQcOperation::InboundTimeout,
+                                Some(0),
+                                &mut BinaryConsensusLoopInboundStats::default(),
+                            ),
+                            Err(F7RetainedQcRefusal::ReverificationFailed)
+                        ));
+                        assert_eq!(epoch_fixture.qc_counts.votes(), qc_calls_before);
+
+                        let weighted_engine = engine_with_entries(
+                            (0..4)
+                                .map(|id| ValidatorSetEntry {
+                                    id: ValidatorId(id),
+                                    voting_power: if id == 0 { 2 } else { 1 },
+                                })
+                                .collect(),
+                        );
+                        let mut weighted_engine = weighted_engine;
+                        weighted_engine
+                            .state_mut()
+                            .register_block_with_verified_justification(
+                                [0xCC; 32],
+                                2,
+                                None,
+                                Arc::new(engine_mismatch.proof.clone()),
+                            )
+                            .expect("retain the same genuine evidence under mismatched weights");
+                        let qc_calls_before = engine_mismatch.qc_counts.votes();
+                        let mut stats = BinaryConsensusLoopInboundStats::default();
+                        assert!(matches!(
+                            admit_f7_retained_high_qc(
+                                &weighted_engine,
+                                Some(&engine_mismatch.logical_qc),
+                                &engine_mismatch.timeout_context,
+                                Some(&engine_mismatch.snapshot),
+                                F7HighQcOperation::InboundTimeout,
+                                Some(0),
+                                &mut stats,
+                            ),
+                            Err(F7RetainedQcRefusal::EngineOrTimeoutContextMismatch)
+                        ));
+                        assert_eq!(engine_mismatch.qc_counts.votes(), qc_calls_before);
+
+                        let mut timeout_membership_mismatch = make_f7_fixture();
+                        timeout_membership_mismatch.timeout_context.validators = Arc::new(
+                            ConsensusValidatorSet::new(
+                                (0..4)
+                                    .map(|id| ValidatorSetEntry {
+                                        id: ValidatorId(id),
+                                        voting_power: if id == 0 { 2 } else { 1 },
+                                    })
+                                    .collect::<Vec<_>>(),
+                            )
+                            .expect("weighted timeout membership"),
+                        );
+                        let qc_calls_before = timeout_membership_mismatch.qc_counts.votes();
+                        let mut stats = BinaryConsensusLoopInboundStats::default();
+                        assert!(matches!(
+                            admit_f7_retained_high_qc(
+                                &timeout_membership_mismatch.engine,
+                                Some(&timeout_membership_mismatch.logical_qc),
+                                &timeout_membership_mismatch.timeout_context,
+                                Some(&timeout_membership_mismatch.snapshot),
+                                F7HighQcOperation::InboundTimeout,
+                                Some(0),
+                                &mut stats,
+                            ),
+                            Err(F7RetainedQcRefusal::EngineOrTimeoutContextMismatch)
+                        ));
+                        assert_eq!(
+                            timeout_membership_mismatch.qc_counts.votes(),
+                            qc_calls_before
+                        );
+
+                        let wrong_keys = make_f7_fixture();
+                        let alternate_keys = make_fixture(4);
+                        let (registry, wrong_key_counts) = counting_registry();
+                        let alternate_pv =
+                            c3e_pv(&alternate_keys, c3e_domain(), registry, None);
+                        let alternate_snapshot = coherent_snapshot_for(&alternate_pv);
+                        let mut stats = BinaryConsensusLoopInboundStats::default();
+                        assert!(matches!(
+                            admit_f7_retained_high_qc(
+                                &wrong_keys.engine,
+                                Some(&wrong_keys.logical_qc),
+                                &wrong_keys.timeout_context,
+                                Some(&alternate_snapshot),
+                                F7HighQcOperation::InboundTimeout,
+                                Some(0),
+                                &mut stats,
+                            ),
+                            Err(F7RetainedQcRefusal::ReverificationFailed)
+                        ));
+                        assert!(wrong_key_counts.votes() > 0);
+
+                        let foreign_domain =
+                            ProposalVoteSigningDomainV2::try_new(
+                                c3e_domain().runtime_chain_id(),
+                                C3E_WIRE,
+                                [0xA7; 32],
+                                [0xB8; 32],
+                            )
+                            .expect("same-chain foreign domain");
+                        let (registry, foreign_counts) = counting_registry();
+                        let foreign_pv =
+                            c3e_pv(&wrong_keys.keys, foreign_domain, registry, None);
+                        let foreign_snapshot = coherent_snapshot_for(&foreign_pv);
+                        let mut stats = BinaryConsensusLoopInboundStats::default();
+                        assert!(matches!(
+                            admit_f7_retained_high_qc(
+                                &wrong_keys.engine,
+                                Some(&wrong_keys.logical_qc),
+                                &wrong_keys.timeout_context,
+                                Some(&foreign_snapshot),
+                                F7HighQcOperation::InboundTimeout,
+                                Some(0),
+                                &mut stats,
+                            ),
+                            Err(F7RetainedQcRefusal::ReverificationFailed)
+                        ));
+                        assert!(foreign_counts.votes() > 0);
+                    }
+
+                    #[test]
+                    fn run422_f7_retained_qc_distinguishes_none_zero_and_original_ticket_confirmation() {
+                        let fixture = make_f7_fixture();
+                        let none = admit_f7_retained_high_qc(
+                            &fixture.engine,
+                            None,
+                            &fixture.timeout_context,
+                            None,
+                            F7HighQcOperation::InboundTimeout,
+                            Some(0),
+                            &mut BinaryConsensusLoopInboundStats::default(),
+                        )
+                        .expect("None is the existing no-QC case");
+                        assert!(matches!(none, F7HighQcAdmission::NoQc));
+
+                        assert!(matches!(
+                            admit_f7_retained_high_qc(
+                                &fixture.engine,
+                                Some(&fixture.logical_qc),
+                                &fixture.timeout_context,
+                                None,
+                                F7HighQcOperation::InboundTimeout,
+                                Some(0),
+                                &mut BinaryConsensusLoopInboundStats::default(),
+                            ),
+                            Err(F7RetainedQcRefusal::AuthorityUnavailable)
+                        ));
+
+                        let zero = qbind_consensus::qc::QuorumCertificate::new(
+                            [0; 32],
+                            0,
+                            Vec::new(),
+                        );
+                        assert!(matches!(
+                            admit_f7_retained_high_qc(
+                                &fixture.engine,
+                                Some(&zero),
+                                &fixture.timeout_context,
+                                Some(&fixture.snapshot),
+                                F7HighQcOperation::InboundTimeout,
+                                Some(0),
+                                &mut BinaryConsensusLoopInboundStats::default(),
+                            ),
+                            Err(F7RetainedQcRefusal::MissingRetainedProof)
+                        ));
+
+                        let mut stats = BinaryConsensusLoopInboundStats::default();
+                        // Arithmetic-overflow control only; the actual capacity
+                        // boundary is exercised separately, without synthetic totals.
+                        let admitted = admit_f7_retained_high_qc(
+                            &fixture.engine,
+                            Some(&fixture.logical_qc),
+                            &fixture.timeout_context,
+                            Some(&fixture.snapshot),
+                            F7HighQcOperation::InboundTimeout,
+                            Some(u64::MAX),
+                            &mut stats,
+                        );
+                        assert!(matches!(
+                            admitted,
+                            Err(F7RetainedQcRefusal::TemporaryWorkingSetExceeded)
+                        ));
+                        assert_eq!(stats.retained_qc_admission_rejected_total, 1);
+
+                        let admitted = admit_f7_retained_high_qc(
+                            &fixture.engine,
+                            Some(&fixture.logical_qc),
+                            &fixture.timeout_context,
+                            Some(&fixture.snapshot),
+                            F7HighQcOperation::InboundTimeout,
+                            Some(0),
+                            &mut BinaryConsensusLoopInboundStats::default(),
+                        )
+                        .expect("relieved retry succeeds");
+                        let substituted = coherent_snapshot_for(&fixture.pv);
+                        let copied_claim = fixture.logical_qc.clone();
+                        assert_eq!(
+                            confirm_f7_high_qc_before_effect(
+                                &admitted,
+                                Some(&copied_claim),
+                                &fixture.timeout_context,
+                                Some(&fixture.snapshot),
+                                F7HighQcOperation::InboundTimeout,
+                            ),
+                            Err(F7RetainedQcRefusal::OperationSubstituted)
+                        );
+                        assert_eq!(
+                            confirm_f7_high_qc_before_effect(
+                                &admitted,
+                                Some(&fixture.logical_qc),
+                                &fixture.timeout_context,
+                                Some(&substituted),
+                                F7HighQcOperation::InboundTimeout,
+                            ),
+                            Err(F7RetainedQcRefusal::OperationSubstituted)
+                        );
+                        assert_eq!(
+                            confirm_f7_high_qc_before_effect(
+                                &admitted,
+                                Some(&fixture.logical_qc),
+                                &fixture.timeout_context,
+                                Some(&fixture.snapshot),
+                                F7HighQcOperation::InboundTimeout,
+                            ),
+                            Ok(())
+                        );
+                        let mut unavailable = make_f7_fixture();
+                        unavailable.snapshot.owner_mut().replace_for_fixture(
+                            crate::genesis_consensus_authority::LocalAuthorizationState::MissingStorage,
+                        );
+                        assert!(matches!(
+                            admit_f7_retained_high_qc(
+                                &unavailable.engine,
+                                Some(&unavailable.logical_qc),
+                                &unavailable.timeout_context,
+                                Some(&unavailable.snapshot),
+                                F7HighQcOperation::InboundTimeout,
+                                Some(0),
+                                &mut BinaryConsensusLoopInboundStats::default(),
+                            ),
+                            Err(F7RetainedQcRefusal::AuthorityUnavailable)
+                        ));
+
+                        let mut exhausted = make_f7_fixture();
+                        exhausted
+                            .snapshot
+                            .owner_mut()
+                            .set_generation_for_exhaustion_fixture(u64::MAX);
+                        let current = exhausted
+                            .snapshot
+                            .owner()
+                            .candidate()
+                            .config_identity();
+                        exhausted.snapshot.owner_mut().replace_for_fixture(
+                            crate::genesis_consensus_authority::LocalAuthorizationState::Established(
+                                current,
+                            ),
+                        );
+                        assert!(exhausted.snapshot.owner().is_exhausted());
+                        assert!(matches!(
+                            admit_f7_retained_high_qc(
+                                &exhausted.engine,
+                                Some(&exhausted.logical_qc),
+                                &exhausted.timeout_context,
+                                Some(&exhausted.snapshot),
+                                F7HighQcOperation::InboundTimeout,
+                                Some(0),
+                                &mut BinaryConsensusLoopInboundStats::default(),
+                            ),
+                            Err(F7RetainedQcRefusal::AuthorityUnavailable)
+                        ));
+                    }
+
+                    #[test]
+                    fn run422_f7_retained_qc_actual_capacity_boundary_and_relief() {
+                        for is_tc in [false, true] {
+                            let fixture = make_f7_fixture();
+                            let mut timeout = signed_timeout(
+                                &fixture, 0, 0, Some(fixture.logical_qc.clone()),
+                            );
+                            let mut tc = signed_tc(&fixture, Some(fixture.logical_qc.clone()));
+                            let control = if is_tc {
+                                f7_timeout_certificate_control_bytes(&tc)
+                            } else {
+                                f7_timeout_control_bytes(&timeout)
+                            };
+                            let evidence = fixture.engine.state()
+                                .retained_qc_for_timeout_projection(&fixture.logical_qc)
+                                .unwrap().unwrap();
+                            let inventory = f7_qc_working_set(evidence, control).unwrap();
+                            println!("F7 actual-capacity boundary: TC={is_tc}, {inventory:?}");
+                            let operation = if is_tc {
+                                F7HighQcOperation::InboundNewView
+                            } else {
+                                F7HighQcOperation::InboundTimeout
+                            };
+                            assert_eq!(
+                                inventory.total,
+                                inventory.retained_source + inventory.control
+                                    + inventory.vote_and_preimages + inventory.carriers,
+                            );
+                            assert!(inventory.total < MAX_F7_QC_WORKING_SET_BYTES);
+                            let before = observe(&fixture.engine);
+                            let calls = fixture.qc_counts.votes();
+                            let mut stats = BinaryConsensusLoopInboundStats::default();
+                            {
+                                let admission = admit_f7_retained_high_qc_with_budget(
+                                    &fixture.engine, if is_tc { tc.high_qc.as_ref() } else { timeout.high_qc.as_ref() },
+                                    &fixture.timeout_context, Some(&fixture.snapshot),
+                                    operation, control,
+                                    &mut stats, inventory.total,
+                                ).expect("exact calculated boundary is admitted");
+                                assert!(matches!(admission, F7HighQcAdmission::Present(_)));
+                            }
+                            assert_eq!(fixture.qc_counts.votes(), calls + 3);
+
+                            // Change capacity, not signed contents: the actual inventory
+                            // is now exactly one byte above the same lowered ceiling.
+                            let backing = if is_tc {
+                                &mut tc.signed_timeouts[0].signature
+                            } else {
+                                &mut timeout.signature
+                            };
+                            let original_capacity = backing.capacity();
+                            let mut larger = Vec::with_capacity(original_capacity + 1);
+                            larger.extend_from_slice(backing);
+                            *backing = larger;
+                            assert_eq!(backing.capacity(), original_capacity + 1);
+                            let control = if is_tc {
+                                f7_timeout_certificate_control_bytes(&tc)
+                            } else {
+                                f7_timeout_control_bytes(&timeout)
+                            };
+                            assert_eq!(
+                                f7_qc_working_set(evidence, control).unwrap().total,
+                                inventory.total + 1,
+                            );
+                            let timeout_before = timeout.clone();
+                            let tc_before = tc.clone();
+                            let encoded_timeout = bincode::serialize(&timeout).unwrap();
+                            let encoded_tc = bincode::serialize(&tc).unwrap();
+                            let calls = fixture.qc_counts.votes();
+                            assert!(matches!(
+                                admit_f7_retained_high_qc_with_budget(
+                                    &fixture.engine, if is_tc { tc.high_qc.as_ref() } else { timeout.high_qc.as_ref() },
+                                    &fixture.timeout_context, Some(&fixture.snapshot),
+                                    operation, control,
+                                    &mut stats, inventory.total,
+                                ),
+                                Err(F7RetainedQcRefusal::TemporaryWorkingSetExceeded)
+                            ));
+                            assert_eq!(fixture.qc_counts.votes(), calls);
+                            assert_eq!(observe(&fixture.engine), before);
+                            assert_eq!(timeout, timeout_before);
+                            assert_eq!(tc, tc_before);
+                            assert_eq!(bincode::serialize(&timeout).unwrap(), encoded_timeout);
+                            assert_eq!(bincode::serialize(&tc).unwrap(), encoded_tc);
+                            assert_eq!(if is_tc {
+                                f7_timeout_certificate_control_bytes(&tc)
+                            } else {
+                                f7_timeout_control_bytes(&timeout)
+                            }, control);
+                            assert_eq!(if is_tc {
+                                tc.signed_timeouts[0].signature.capacity()
+                            } else {
+                                timeout.signature.capacity()
+                            }, original_capacity + 1);
+
+                            let backing = if is_tc {
+                                &mut tc.signed_timeouts[0].signature
+                            } else {
+                                &mut timeout.signature
+                            };
+                            let mut relieved = Vec::with_capacity(original_capacity);
+                            relieved.extend_from_slice(backing);
+                            *backing = relieved;
+                            let control = if is_tc {
+                                f7_timeout_certificate_control_bytes(&tc)
+                            } else {
+                                f7_timeout_control_bytes(&timeout)
+                            };
+                            drop(admit_f7_retained_high_qc_with_budget(
+                                &fixture.engine, if is_tc { tc.high_qc.as_ref() } else { timeout.high_qc.as_ref() },
+                                &fixture.timeout_context, Some(&fixture.snapshot),
+                                operation, control,
+                                &mut stats, inventory.total,
+                            ).expect("same production calculation accepts relieved retry"));
+                            assert_eq!(fixture.qc_counts.votes(), calls + 3);
+                            assert_eq!(stats.retained_qc_admission_rejected_total, 1);
+                            assert_eq!(observe(&fixture.engine), before);
+                        }
+                    }
+
+                    #[test]
+                    fn run422_f7_retained_qc_preimage_inventory_matches_constructors() {
+                        let fixture = make_f7_fixture();
+                        let vote = constituent_vote(fixture.proof.certificate(), 0);
+                        let body = vote.canonical_body();
+                        let preimage = fixture.pv.signing_domain.vote_preimage(&vote);
+                        assert_eq!(body.len(), F7_VOTE_BODY_BYTES);
+                        assert_eq!(body.capacity(), F7_VOTE_BODY_BYTES);
+                        assert_eq!(preimage.len(), F7_VOTE_PREIMAGE_BYTES);
+                        assert_eq!(preimage.capacity(), F7_VOTE_PREIMAGE_BYTES);
+                        let timeout = signed_timeout(
+                            &fixture, 0, 0, Some(fixture.logical_qc.clone()),
+                        );
+                        let inventory = f7_qc_working_set(
+                            &fixture.proof, f7_timeout_control_bytes(&timeout),
+                        ).unwrap();
+                        let max_sig = fixture.proof.certificate().signatures.iter()
+                            .map(Vec::len).max().unwrap();
+                        assert_eq!(inventory.vote_and_preimages as usize,
+                            size_of::<Vote>() + max_sig + 2 * size_of::<Vec<u8>>()
+                                + body.capacity() + preimage.capacity());
+                        // The Timeout inline slot owns its QC and signature descriptors.
+                        // Only their heap capacities are added, never another QC value.
+                        assert_eq!(inventory.control as usize,
+                            size_of::<TimeoutMsg<[u8; 32]>>() + timeout.signature.capacity()
+                                + timeout.high_qc.as_ref().unwrap().signers.capacity()
+                                    * size_of::<ValidatorId>());
+                        let tc = signed_tc(&fixture, Some(fixture.logical_qc.clone()));
+                        let nested_backing: usize = tc.signed_timeouts.iter().map(|timeout| {
+                            timeout.signature.capacity()
+                                + timeout.high_qc.as_ref().unwrap().signers.capacity()
+                                    * size_of::<ValidatorId>()
+                        }).sum();
+                        assert_eq!(f7_timeout_certificate_control_bytes(&tc).unwrap() as usize,
+                            size_of::<TimeoutCertificate<[u8; 32]>>()
+                                + tc.signers.capacity() * size_of::<ValidatorId>()
+                                + tc.high_qc.as_ref().unwrap().signers.capacity()
+                                    * size_of::<ValidatorId>()
+                                + tc.signed_timeouts.capacity() * size_of::<TimeoutMsg<[u8; 32]>>()
+                                + nested_backing);
+                    }
+
+                    #[test]
+                    fn run422_f7_retained_qc_formed_tc_handlers_refuse_evicted_selected_proof_then_recover() {
+                        for local_trigger in [false, true] {
+                            let mut fixture = make_f7_fixture_with_slots(2);
+                            let lower = retain_lower_qc(&mut fixture);
+                            fixture.engine.state_mut().set_locked_qc(lower.clone());
+                            let signer = Arc::new(CountingTimeoutSigner {
+                                inner: LocalKeySigner::new(
+                                    ValidatorId(0), TEST_SUITE_U16,
+                                    fixture.keys.sk_objs.get(&ValidatorId(0)).unwrap().clone(),
+                                ),
+                                timeout_calls: AtomicUsize::new(0),
+                            });
+                            fixture.timeout_context.signer = Some(signer.clone());
+                            let facade = RecordingFacade::default();
+                            let mut stats = BinaryConsensusLoopInboundStats::default();
+                            for id in 1..3 {
+                                let timeout = signed_timeout(
+                                    &fixture, id, 0, Some(fixture.logical_qc.clone()),
+                                );
+                                deliver_timeout(&mut fixture, timeout, &mut stats, &facade);
+                            }
+                            assert_eq!(fixture.engine.timeout_count(0), 2);
+                            assert_eq!(stats.retained_qc_admission_rejected_total, 0);
+                            let evictions = fixture.engine.state().evicted_blocks();
+                            fixture.engine.state_mut().register_block([0xEE; 32], 3, None, None);
+                            assert_eq!(fixture.engine.state().evicted_blocks(), evictions + 1);
+                            assert!(fixture.engine.state().get_block(&[0xCC; 32]).is_none());
+                            assert!(fixture.engine.state()
+                                .retained_qc_for_timeout_projection(&fixture.logical_qc)
+                                .unwrap().is_none());
+                            assert!(fixture.engine.state()
+                                .retained_qc_for_timeout_projection(&lower).unwrap().is_some());
+                            if !local_trigger {
+                                fixture.engine.mark_timeout_emitted();
+                            }
+                            let before = observe(&fixture.engine);
+                            let calls = fixture.qc_counts.votes();
+                            let mut state = ViewTimeoutState::new(0, 0);
+                            let mut pacer = ViewTimeoutBackoffState::new(Some(5), 2, 40).unwrap();
+                            if local_trigger {
+                                maybe_emit_view_timeout_with_auth(
+                                    &mut fixture.engine, &mut state, 5, &mut pacer, false,
+                                    Some(&facade), &mut stats, Some(&fixture.snapshot),
+                                    Some(&fixture.timeout_context),
+                                );
+                            } else {
+                                let timeout = signed_timeout(&fixture, 0, 0, Some(lower.clone()));
+                                deliver_timeout(&mut fixture, timeout, &mut stats, &facade);
+                            }
+                            // The lower triggering QC is admissible, but cannot prove
+                            // the higher QC selected from the earlier genuine timeouts.
+                            assert_eq!(fixture.qc_counts.votes(), calls + 3);
+                            assert_eq!(stats.retained_qc_admission_rejected_total, 1);
+                            assert_eq!(stats.timeout_certificates_formed, 1);
+                            assert_eq!(stats.outbound_new_views_sent, 0);
+                            let mut expected = before;
+                            expected.timeouts = 3; // permitted trigger insertion
+                            expected.latch = true; // preserved or permitted local consumption
+                            assert_eq!(observe(&fixture.engine), expected);
+                            assert_eq!(signer.timeout_calls.load(Ordering::SeqCst),
+                                usize::from(local_trigger));
+                            assert_eq!(stats.view_timeouts_emitted, u64::from(local_trigger));
+                            assert_eq!(pacer.threshold(), Some(if local_trigger { 10 } else { 5 }));
+                            assert_eq!(pacer.current_level(), u32::from(local_trigger));
+                            let messages = facade.messages.lock().unwrap();
+                            assert_eq!(messages.len(), usize::from(local_trigger));
+                            assert!(messages.iter().all(|msg| matches!(msg, ConsensusNetMsg::Timeout(_))));
+                            drop(messages);
+
+                            fixture.engine.state_mut().register_block_with_verified_justification(
+                                [0xCC; 32], 2, None, Arc::new(fixture.proof.clone()),
+                            ).expect("restore the same genuinely verified evidence");
+                            let calls = fixture.qc_counts.votes();
+                            let recovery = signed_timeout(&fixture, 3, 0, None);
+                            deliver_timeout(&mut fixture, recovery, &mut stats, &facade);
+                            assert_eq!(fixture.qc_counts.votes(), calls + 3);
+                            assert_eq!(fixture.engine.current_view(), 1);
+                            assert_eq!(fixture.engine.state().locked_qc(), Some(&fixture.logical_qc));
+                            assert_eq!(fixture.engine.timeout_count(0), 0);
+                            assert!(!fixture.engine.timeout_emitted_in_view());
+                            assert_eq!(stats.outbound_new_views_sent, 1);
+                            assert_eq!(stats.retained_qc_admission_rejected_total, 1);
+                            assert!(facade.messages.lock().unwrap().iter()
+                                .any(|msg| matches!(msg, ConsensusNetMsg::NewView(_))));
+                        }
+                    }
+
+                    #[test]
+                    fn run422_f7_retained_qc_inbound_trigger_and_selected_distinct_present_qcs_revalidate_twice() {
+                        let mut fixture = make_f7_fixture();
+                        let lower = retain_lower_qc(&mut fixture);
+                        let facade = RecordingFacade::default();
+                        let mut stats = BinaryConsensusLoopInboundStats::default();
+                        for id in 1..3 {
+                            let timeout = signed_timeout(
+                                &fixture, id, 0, Some(fixture.logical_qc.clone()),
+                            );
+                            deliver_timeout(&mut fixture, timeout, &mut stats, &facade);
+                        }
+                        let calls = fixture.qc_counts.votes();
+                        let trigger = signed_timeout(&fixture, 0, 0, Some(lower));
+                        deliver_timeout(&mut fixture, trigger, &mut stats, &facade);
+                        assert_eq!(fixture.qc_counts.votes(), calls + 6);
+                        assert_eq!(stats.retained_qc_admission_rejected_total, 0);
+                        assert_eq!(stats.timeout_certificates_formed, 1);
+                        assert_eq!(stats.outbound_new_views_sent, 1);
+                        assert_eq!(fixture.engine.current_view(), 1);
+                        assert_eq!(fixture.engine.state().locked_qc(), Some(&fixture.logical_qc));
+                    }
+
+                    #[test]
+                    fn run422_f7_retained_qc_newview_signer_substitution_equal_lower_and_stale_refuse() {
+                        for scenario in 0..4 {
+                            let mut fixture = make_f7_fixture();
+                            let mut claim = fixture.logical_qc.clone();
+                            if scenario == 0 {
+                                claim.signers.swap(0, 1);
+                            } else {
+                                claim.block_id = [0x44; 32]; // unsupported complete projection
+                                if scenario == 2 {
+                                    claim.view = 0; // claimed QC lower than the genuine existing lock
+                                }
+                                fixture.engine.state_mut().set_locked_qc(fixture.logical_qc.clone());
+                            }
+                            if scenario == 3 {
+                                let valid = signed_tc(&fixture, Some(fixture.logical_qc.clone()));
+                                fixture.engine.on_timeout_certificate(&valid).unwrap();
+                                assert_eq!(fixture.engine.current_view(), 1);
+                            }
+                            let tc = if scenario == 0 {
+                                let mut tc = signed_tc(&fixture, Some(fixture.logical_qc.clone()));
+                                // Substitute only the applied projection; keep the
+                                // genuine, original signed timeout evidence intact.
+                                tc.high_qc = Some(claim);
+                                assert_ne!(tc.high_qc.as_ref().unwrap().signers,
+                                    tc.signed_timeouts[0].high_qc.as_ref().unwrap().signers);
+                                tc
+                            } else {
+                                signed_tc(&fixture, Some(claim))
+                            };
+                            let seed = signed_timeout(&fixture, 3, 0, None);
+                            fixture.engine.on_timeout_msg(seed.validator_id, seed).unwrap();
+                            let before = observe(&fixture.engine);
+                            let calls = fixture.qc_counts.votes();
+                            let facade = RecordingFacade::default();
+                            let mut stats = BinaryConsensusLoopInboundStats::default();
+                            deliver_newview(&mut fixture, &tc, &mut stats, &facade);
+                            assert_eq!(stats.inbound_newview_verify_accepted, 1);
+                            assert_eq!(stats.inbound_newview_verify_rejected_total, 0);
+                            assert_eq!(stats.retained_qc_admission_rejected_total, 1);
+                            assert_eq!(stats.inbound_new_views_delivered, 0);
+                            assert_eq!(fixture.qc_counts.votes(), calls);
+                            assert_eq!(observe(&fixture.engine), before);
+                            assert!(facade.messages.lock().unwrap().is_empty());
+                        }
+                    }
+
+                    #[test]
+                    fn run422_f7_retained_qc_private_guard_operation_context_and_confirmation_exhaustion() {
+                        let fixture = make_f7_fixture();
+                        let timeout = signed_timeout(
+                            &fixture, 0, 0, Some(fixture.logical_qc.clone()),
+                        );
+                        let admitted = admit_f7_retained_high_qc(
+                            &fixture.engine, timeout.high_qc.as_ref(),
+                            &fixture.timeout_context, Some(&fixture.snapshot),
+                            F7HighQcOperation::InboundTimeout, f7_timeout_control_bytes(&timeout),
+                            &mut BinaryConsensusLoopInboundStats::default(),
+                        ).unwrap();
+                        let alternate_context = TimeoutVerificationContext {
+                            validators: fixture.timeout_context.validators.clone(),
+                            key_provider: fixture.timeout_context.key_provider.clone(),
+                            backend_registry: fixture.timeout_context.backend_registry.clone(),
+                            chain_id: fixture.timeout_context.chain_id,
+                            signer: fixture.timeout_context.signer.clone(),
+                        };
+                        let before = observe(&fixture.engine);
+                        for (context, operation) in [
+                            (&fixture.timeout_context, F7HighQcOperation::InboundNewView),
+                            (&alternate_context, F7HighQcOperation::InboundTimeout),
+                        ] {
+                            assert_eq!(confirm_f7_high_qc_before_effect(
+                                &admitted, timeout.high_qc.as_ref(), context,
+                                Some(&fixture.snapshot), operation,
+                            ), Err(F7RetainedQcRefusal::OperationSubstituted));
+                            assert_eq!(observe(&fixture.engine), before);
+                        }
+
+                        // Borrowing prevents owner mutation while a real guard is
+                        // live. Model that unreachable interleaving directly using
+                        // an original ticket, never by constructing verified QC proof.
+                        let mut exhausted = make_f7_fixture();
+                        exhausted.snapshot.owner_mut()
+                            .set_generation_for_exhaustion_fixture(u64::MAX);
+                        let ticket = exhausted.snapshot.owner().admit().unwrap();
+                        let current = exhausted.snapshot.owner().candidate().config_identity();
+                        exhausted.snapshot.owner_mut().replace_for_fixture(
+                            crate::genesis_consensus_authority::LocalAuthorizationState::Established(current),
+                        );
+                        assert!(exhausted.snapshot.owner().is_exhausted());
+                        assert!(matches!(
+                            exhausted.snapshot.owner().confirm(&ticket),
+                            Err(crate::genesis_consensus_authority::ConfirmError::Exhausted),
+                        ));
+                        let original = F7PresentQcAdmission {
+                            logical_qc: &exhausted.logical_qc,
+                            timeout_context: &exhausted.timeout_context,
+                            snapshot: &exhausted.snapshot,
+                            operation: F7HighQcOperation::InboundTimeout,
+                            ticket,
+                        };
+                        let before = observe(&exhausted.engine);
+                        assert_eq!(original.confirm_before_effect(
+                            &exhausted.logical_qc, &exhausted.timeout_context,
+                            &exhausted.snapshot, F7HighQcOperation::InboundTimeout,
+                        ), Err(F7RetainedQcRefusal::AuthorizationInvalidated));
+                        assert_eq!(observe(&exhausted.engine), before);
+                    }
+
+                    #[test]
+                    fn run422_f7_retained_qc_original_stale_and_foreign_tickets_refuse() {
+                        let mut stale = make_f7_fixture();
+                        let ticket = stale
+                            .snapshot
+                            .owner()
+                            .admit()
+                            .expect("capture original ticket");
+                        let current = stale
+                            .snapshot
+                            .owner()
+                            .candidate()
+                            .config_identity();
+                        stale.snapshot.owner_mut().replace_for_fixture(
+                            crate::genesis_consensus_authority::LocalAuthorizationState::Established(
+                                current,
+                            ),
+                        );
+                        let stale_guard = F7PresentQcAdmission {
+                            logical_qc: &stale.logical_qc,
+                            timeout_context: &stale.timeout_context,
+                            snapshot: &stale.snapshot,
+                            operation: F7HighQcOperation::InboundTimeout,
+                            ticket,
+                        };
+                        assert_eq!(
+                            stale_guard.confirm_before_effect(
+                                &stale.logical_qc,
+                                &stale.timeout_context,
+                                &stale.snapshot,
+                                F7HighQcOperation::InboundTimeout,
+                            ),
+                            Err(F7RetainedQcRefusal::AuthorizationInvalidated)
+                        );
+
+                        let foreign = make_f7_fixture();
+                        let foreign_ticket = foreign
+                            .snapshot
+                            .owner()
+                            .admit()
+                            .expect("capture issuer-A ticket");
+                        let different_issuer = coherent_snapshot_for(&foreign.pv);
+                        let foreign_guard = F7PresentQcAdmission {
+                            logical_qc: &foreign.logical_qc,
+                            timeout_context: &foreign.timeout_context,
+                            snapshot: &different_issuer,
+                            operation: F7HighQcOperation::InboundTimeout,
+                            ticket: foreign_ticket,
+                        };
+                        assert_eq!(
+                            foreign_guard.confirm_before_effect(
+                                &foreign.logical_qc,
+                                &foreign.timeout_context,
+                                &different_issuer,
+                                F7HighQcOperation::InboundTimeout,
+                            ),
+                            Err(F7RetainedQcRefusal::AuthorizationInvalidated)
+                        );
+                    }
+                }
                 }
             }
 

@@ -45,7 +45,7 @@
 //! for `ValidatorId`; ids are never reordered, renumbered, truncated, or
 //! wrapped. Because a bitmap cannot repeat a bit, every signer id is distinct.
 //!
-//! # Size bounds (all validated before any clone or cryptographic work)
+//! # Size bounds
 //!
 //! The structural preflight is **complete before the cryptographic loop**: no
 //! signature buffer is cloned and **no backend is invoked** until every one of
@@ -78,15 +78,10 @@
 //!   members that fall *within* the span continue to reject at the membership
 //!   check. Because every `max_id <= u16::MAX`, the span is always
 //!   `<= MAX_BITMAP_LEN`.
-//! * `popcount(bitmap) == signatures.len()` is required; `collect_signers`
-//!   builds the temporary ascending-bit-order signer vector that this
-//!   correspondence is checked against. That temporary vector is bounded by the
-//!   bitmap capacity — before correspondence succeeds it can hold up to `65536`
-//!   entries (a full 8192-byte bitmap's popcount), and only after successful
-//!   correspondence is it bounded by [`MAX_SIGNATURE_COUNT`]. The per-signature
-//!   and aggregate size checks below therefore run *after* this temporary
-//!   allocation; they precede only the signature-buffer clone and any backend
-//!   invocation, not every allocation.
+//! * `popcount(bitmap) == signatures.len()` is required. Set bits are counted
+//!   without allocation. The owning API materializes the ascending signer
+//!   vector only after this correspondence and all signature-size checks pass;
+//!   the borrowed revalidation API does not materialize it.
 //! * **Per-signature size.** Each signature length ≤ [`MAX_SIGNATURE_LEN`] (the
 //!   wire u16 length bound), validated for *every* signature before the crypto
 //!   loop.
@@ -100,10 +95,10 @@
 //!   bound and is **deliberately distinct** from transport limits such as
 //!   `qbind_wire::net::MAX_NET_MESSAGE_BYTES`. Establishing it does not change
 //!   transport policy.
-//! * The only per-signer allocation is a single clone of that signer's
-//!   signature into the reconstructed `Vote` (bounded by `MAX_SIGNATURE_LEN`);
-//!   all sizes above are validated *before* that clone and before any
-//!   cryptographic work.
+//! * The per-signer input clone is one signature in the reconstructed `Vote`
+//!   (bounded by [`MAX_SIGNATURE_LEN`]). The canonical Vote preimage and
+//!   backend work are additional temporaries; borrowed revalidation avoids a
+//!   complete certificate clone and signer-vector backing.
 //!
 //! This is **not** a complete transport-level DoS audit.
 //!
@@ -791,18 +786,9 @@ where
     Ok(aggregate)
 }
 
-/// Collect the signer identities implied by the set bits of a validated bitmap,
-/// in ascending-bit order. Bit `i` -> wire `validator_index = i` ->
-/// `ValidatorId(i)`, matching D6. Each index is checked representable as a u16
-/// (fail-closed), though the prior bitmap-length bounds already guarantee it.
-///
-/// The returned length equals `popcount(bitmap)`.
-fn collect_signers(bitmap: &[u8]) -> Result<Vec<ValidatorId>, QcDomainVerifyError> {
-    let mut signers: Vec<ValidatorId> = Vec::new();
+fn count_signers(bitmap: &[u8]) -> Result<usize, QcDomainVerifyError> {
+    let mut count = 0usize;
     for (byte_index, byte) in bitmap.iter().enumerate() {
-        if *byte == 0 {
-            continue;
-        }
         for bit in 0..8u32 {
             if (byte & (1u8 << bit)) == 0 {
                 continue;
@@ -811,7 +797,35 @@ fn collect_signers(bitmap: &[u8]) -> Result<Vec<ValidatorId>, QcDomainVerifyErro
             if index_u32 > u16::MAX as u32 {
                 return Err(QcDomainVerifyError::SignerIndexNotRepresentable { index: index_u32 });
             }
-            signers.push(ValidatorId::new(index_u32 as u64));
+            count = count
+                .checked_add(1)
+                .ok_or(QcDomainVerifyError::SignatureCountNotRepresentable {
+                    count: usize::MAX,
+                    max: MAX_SIGNATURE_COUNT,
+                })?;
+        }
+    }
+    Ok(count)
+}
+
+/// Collect the signer identities implied by the set bits of a validated bitmap,
+/// in ascending-bit order. Bit `i` -> wire `validator_index = i` ->
+/// `ValidatorId(i)`, matching D6. Each index is checked representable as a u16
+/// (fail-closed), though the prior bitmap-length bounds already guarantee it.
+///
+/// The returned length equals `popcount(bitmap)`.
+fn collect_signers(bitmap: &[u8]) -> Result<Vec<ValidatorId>, QcDomainVerifyError> {
+    let mut signers = Vec::new();
+    for (byte_index, byte) in bitmap.iter().enumerate() {
+        for bit in 0..8u32 {
+            if (byte & (1u8 << bit)) == 0 {
+                continue;
+            }
+            let index = (byte_index as u32) * 8 + bit;
+            if index > u16::MAX as u32 {
+                return Err(QcDomainVerifyError::SignerIndexNotRepresentable { index });
+            }
+            signers.push(ValidatorId::new(index as u64));
         }
     }
     Ok(signers)
@@ -873,6 +887,88 @@ where
     K: SuiteAwareValidatorKeyProvider + ?Sized,
     B: ConsensusSigBackendRegistry + ?Sized,
 {
+    let verified = verify_quorum_certificate_core(
+        qc,
+        domain,
+        authorized_epoch,
+        validators,
+        key_provider,
+        backend_registry,
+        true,
+    )?;
+    let signers = verified
+        .signers
+        .expect("owning verifier requested signer identities");
+    Ok(VerifiedQuorumCertificate {
+        certificate: qc.clone(),
+        signers,
+        verified_voting_power: verified.verified_voting_power,
+        threshold: verified.threshold,
+        expected_wire_chain_id: verified.expected_wire_chain_id,
+        authorized_epoch,
+        domain: domain.clone(),
+    })
+}
+
+/// Reverify a complete QC without retaining a duplicate certificate or a
+/// signer-identity vector. This is for synchronous checks over already-retained
+/// evidence; it returns no reusable proof or authorization token.
+pub fn reverify_quorum_certificate_with_domain<K, B>(
+    qc: &WireQuorumCertificate,
+    domain: &ProposalVoteSigningDomainV2,
+    authorized_epoch: u64,
+    validators: &ConsensusValidatorSet,
+    key_provider: &K,
+    backend_registry: &B,
+) -> Result<(), QcDomainVerifyError>
+where
+    K: SuiteAwareValidatorKeyProvider + ?Sized,
+    B: ConsensusSigBackendRegistry + ?Sized,
+{
+    verify_quorum_certificate_core(
+        qc,
+        domain,
+        authorized_epoch,
+        validators,
+        key_provider,
+        backend_registry,
+        false,
+    )
+    .map(|_| ())
+}
+
+struct QcVerificationSummary {
+    signers: Option<Vec<ValidatorId>>,
+    verified_voting_power: u64,
+    threshold: u64,
+    expected_wire_chain_id: u32,
+}
+
+/// Conservative named owner/return slots for borrowed revalidation, including
+/// transfer overlap (not a compiler stack-frame or physical-memory bound).
+/// The summary includes its signer Vec descriptor, with no backing on this
+/// path. Error strings and key-provider/backend work remain inherited.
+pub const REVERIFY_QC_FIXED_RESULT_BYTES: usize =
+    std::mem::size_of::<Option<Vec<ValidatorId>>>()
+        + std::mem::size_of::<QcVerificationSummary>()
+        + std::mem::size_of::<Result<QcVerificationSummary, QcDomainVerifyError>>()
+        + std::mem::size_of::<Result<(), QcDomainVerifyError>>()
+        + std::mem::size_of::<Result<(), ProposalVoteVerifyError>>();
+
+#[allow(clippy::too_many_arguments)]
+fn verify_quorum_certificate_core<K, B>(
+    qc: &WireQuorumCertificate,
+    domain: &ProposalVoteSigningDomainV2,
+    authorized_epoch: u64,
+    validators: &ConsensusValidatorSet,
+    key_provider: &K,
+    backend_registry: &B,
+    retain_signers: bool,
+) -> Result<QcVerificationSummary, QcDomainVerifyError>
+where
+    K: SuiteAwareValidatorKeyProvider + ?Sized,
+    B: ConsensusSigBackendRegistry + ?Sized,
+{
     // Step 1: domain wire-chain gate (before any crypto or buffer clone).
     let expected_wire_chain_id = domain.expected_wire_chain_id();
     if qc.chain_id != expected_wire_chain_id {
@@ -927,17 +1023,11 @@ where
         });
     }
 
-    // Step 4d: collect_signers materializes the ascending-bit-order signer
-    // vector, then popcount(bitmap) == signatures.len() is checked against it.
-    // The temporary vector is bounded by the bitmap's capacity: before this
-    // correspondence succeeds it can hold up to 65536 entries (a full 8192-byte
-    // bitmap's popcount, one more than MAX_SIGNATURE_COUNT). Only after the
-    // correspondence succeeds is it bounded by MAX_SIGNATURE_COUNT, because the
-    // count was already checked representable and popcount must equal it.
-    let signers = collect_signers(&qc.signer_bitmap)?;
-    if signers.len() != qc.signatures.len() {
+    // Count and validate indices without allocating a signer vector.
+    let signer_count = count_signers(&qc.signer_bitmap)?;
+    if signer_count != qc.signatures.len() {
         return Err(QcDomainVerifyError::SignatureCountMismatch {
-            popcount: signers.len(),
+            popcount: signer_count,
             signatures: qc.signatures.len(),
         });
     }
@@ -948,9 +1038,17 @@ where
     // position (including after quorum would be reached) rejects here — before
     // any backend invocation. (Empty signatures are left to the reused D6
     // MissingSignature check for a precise diagnostic.)
-    for (signer, signature) in signers.iter().zip(qc.signatures.iter()) {
-        if signature.len() > MAX_SIGNATURE_LEN {
-            return Err(QcDomainVerifyError::MalformedSignature(*signer));
+    let mut signature_index = 0usize;
+    for (byte_index, byte) in qc.signer_bitmap.iter().enumerate() {
+        for bit in 0..8u32 {
+            if (byte & (1u8 << bit)) == 0 {
+                continue;
+            }
+            let signer = ValidatorId::new(((byte_index as u32) * 8 + bit) as u64);
+            if qc.signatures[signature_index].len() > MAX_SIGNATURE_LEN {
+                return Err(QcDomainVerifyError::MalformedSignature(signer));
+            }
+            signature_index += 1;
         }
     }
 
@@ -961,58 +1059,56 @@ where
     // Step 5: verify each declared signature, associating signatures with set
     // bits in ascending-bit order. ALL signatures are verified — quorum is
     // checked only after the loop, so an invalid extra signature still rejects.
+    let signers = if retain_signers {
+        Some(collect_signers(&qc.signer_bitmap)?)
+    } else {
+        None
+    };
     let mut accumulated: u64 = 0;
+    let mut signature_index = 0usize;
 
-    for (signer, signature) in signers.iter().zip(qc.signatures.iter()) {
-        let signer = *signer;
-        // Bit → wire validator_index, matching D6's
-        // ValidatorId::new(vote.validator_index as u64). The bitmap bounds
-        // guarantee this fits u16.
-        let validator_index = signer.as_u64() as u16;
+    for (byte_index, byte) in qc.signer_bitmap.iter().enumerate() {
+        for bit in 0..8u32 {
+            if (byte & (1u8 << bit)) == 0 {
+                continue;
+            }
+            let signer = ValidatorId::new(((byte_index as u32) * 8 + bit) as u64);
+            let signature = &qc.signatures[signature_index];
+            signature_index += 1;
+            let validator_index = signer.as_u64() as u16;
+            let vote = Vote {
+                version: qc.version,
+                chain_id: qc.chain_id,
+                epoch: qc.epoch,
+                height: qc.height,
+                round: qc.round,
+                step: qc.step,
+                block_id: qc.block_id,
+                validator_index,
+                suite_id: qc.suite_id,
+                signature: signature.clone(),
+            };
 
-        // Reconstruct the Vote from the QC's ACTUAL fields — never
-        // substituting trusted values to make a signature pass — plus the
-        // bit-derived signer index and its associated signature.
-        let vote = Vote {
-            version: qc.version,
-            chain_id: qc.chain_id,
-            epoch: qc.epoch,
-            height: qc.height,
-            round: qc.round,
-            step: qc.step,
-            block_id: qc.block_id,
-            validator_index,
-            suite_id: qc.suite_id,
-            signature: signature.clone(),
-        };
+            verify_vote_msg_with_domain(
+                &vote,
+                signer,
+                validators,
+                key_provider,
+                backend_registry,
+                domain,
+            )
+            .map_err(|e| QcDomainVerifyError::from_pv(signer, e))?;
 
-        // Reuse the D6 message-bound Vote verifier: membership, missing
-        // signature, governed key, suite match (QC suite vs governed
-        // suite), backend dispatch, and the cryptographic check over the
-        // recomputed v2 preimage. `claimed == signer` by construction.
-        verify_vote_msg_with_domain(
-            &vote,
-            signer,
-            validators,
-            key_provider,
-            backend_registry,
-            domain,
-        )
-        .map_err(|e| QcDomainVerifyError::from_pv(signer, e))?;
-
-        // Accumulate this verified signer's voting power exactly once, by
-        // ValidatorId lookup and checked arithmetic. Membership was proven
-        // by the successful verify above; a present index is therefore
-        // expected, but the lookup stays fail-closed.
-        let idx = validators
-            .index_of(signer)
-            .ok_or(QcDomainVerifyError::UnknownSigner(signer))?;
-        let entry = validators
-            .get(idx)
-            .ok_or(QcDomainVerifyError::UnknownSigner(signer))?;
-        accumulated = accumulated
-            .checked_add(entry.voting_power)
-            .ok_or(QcDomainVerifyError::VerifiedPowerOverflow)?;
+            let idx = validators
+                .index_of(signer)
+                .ok_or(QcDomainVerifyError::UnknownSigner(signer))?;
+            let entry = validators
+                .get(idx)
+                .ok_or(QcDomainVerifyError::UnknownSigner(signer))?;
+            accumulated = accumulated
+                .checked_add(entry.voting_power)
+                .ok_or(QcDomainVerifyError::VerifiedPowerOverflow)?;
+        }
     }
 
     // Step 6: quorum. ceil(2W/3) preserved (compatibility behavior).
@@ -1023,14 +1119,11 @@ where
         });
     }
 
-    Ok(VerifiedQuorumCertificate {
-        certificate: qc.clone(),
+    Ok(QcVerificationSummary {
         signers,
         verified_voting_power: accumulated,
         threshold,
         expected_wire_chain_id,
-        authorized_epoch,
-        domain: domain.clone(),
     })
 }
 // ===========================================================================
@@ -1131,12 +1224,21 @@ mod c3f_expected_charge_tests {
         d: &ProposalVoteSigningDomainV2,
         signers: &[u16],
     ) -> WireQuorumCertificate {
+        build_signed_qc_at_round(f, d, signers, 9)
+    }
+
+    fn build_signed_qc_at_round(
+        f: &Fixture,
+        d: &ProposalVoteSigningDomainV2,
+        signers: &[u16],
+        round: u64,
+    ) -> WireQuorumCertificate {
         let mut qc = WireQuorumCertificate {
             version: 1,
             chain_id: WIRE_CHAIN,
             epoch: EPOCH,
             height: 9,
-            round: 9,
+            round,
             step: 1,
             block_id: [7u8; 32],
             suite_id: TEST_SUITE_U16,
@@ -1297,5 +1399,230 @@ mod c3f_expected_charge_tests {
             actual, length_model,
             "the charge uses allocation capacity, not length"
         );
+    }
+
+    #[test]
+    fn run422_f7_retained_qc_borrowed_revalidation_uses_genuine_signatures() {
+        let fixture = uniform_fixture(4);
+        let domain = base_domain();
+        let qc = build_signed_qc(&fixture, &domain, &[0, 1, 2]);
+        let backend = real_registry();
+
+        let owned = verify_quorum_certificate_with_domain(
+            &qc,
+            &domain,
+            EPOCH,
+            &fixture.validators,
+            &fixture.kp,
+            &backend,
+        )
+        .expect("genuine QC verifies through the owning API");
+        assert_eq!(owned.certificate(), &qc);
+
+        reverify_quorum_certificate_with_domain(
+            &qc,
+            &domain,
+            EPOCH,
+            &fixture.validators,
+            &fixture.kp,
+            &backend,
+        )
+        .expect("borrowed revalidation accepts the same complete certificate");
+
+        let mut wrong_epoch = qc;
+        wrong_epoch.epoch = EPOCH + 1;
+        assert!(matches!(
+            reverify_quorum_certificate_with_domain(
+                &wrong_epoch,
+                &domain,
+                EPOCH,
+                &fixture.validators,
+                &fixture.kp,
+                &backend,
+            ),
+            Err(QcDomainVerifyError::EpochMismatch { .. })
+        ));
+
+        let mut wrong_suite = wrong_epoch;
+        wrong_suite.epoch = EPOCH;
+        wrong_suite.suite_id = TEST_SUITE_U16.wrapping_add(1);
+        assert!(matches!(
+            reverify_quorum_certificate_with_domain(
+                &wrong_suite,
+                &domain,
+                EPOCH,
+                &fixture.validators,
+                &fixture.kp,
+                &backend,
+            ),
+            Err(QcDomainVerifyError::SuiteMismatch { .. })
+        ));
+    }
+
+    #[test]
+    fn run422_f7_retained_qc_lookup_projection_and_ambiguity_are_deterministic() {
+        use crate::hotstuff_state_engine::{HotStuffStateEngine, RetainedQcLookupError};
+        use crate::qc::QuorumCertificate;
+        use crate::vote_accumulator::ConsensusLimitsConfig;
+
+        let fixture = uniform_fixture(4);
+        let domain = base_domain();
+        let backend = real_registry();
+        let first = build_signed_qc_at_round(&fixture, &domain, &[0, 1, 2], 9);
+        let second = build_signed_qc_at_round(&fixture, &domain, &[0, 1, 2], 10);
+        let first_evidence = Arc::new(
+            verify_quorum_certificate_with_domain(
+                &first,
+                &domain,
+                EPOCH,
+                &fixture.validators,
+                &fixture.kp,
+                &backend,
+            )
+            .expect("first genuine QC"),
+        );
+        let second_evidence = Arc::new(
+            verify_quorum_certificate_with_domain(
+                &second,
+                &domain,
+                EPOCH,
+                &fixture.validators,
+                &fixture.kp,
+                &backend,
+            )
+            .expect("second genuine QC"),
+        );
+        let logical = QuorumCertificate::new(
+            first.block_id,
+            first.height,
+            first_evidence.signers().to_vec(),
+        );
+
+        let mut unique = HotStuffStateEngine::new(fixture.validators.clone());
+        unique
+            .register_block_with_verified_justification(
+                [0xA1; 32],
+                10,
+                None,
+                Arc::clone(&first_evidence),
+            )
+            .expect("retain first evidence");
+        let unique_block_count = unique.block_count();
+        let unique_retained_bytes = unique.retained_evidence_bytes();
+        let unique_evictions = unique.evicted_blocks();
+        assert!(std::ptr::eq(
+            unique
+                .retained_qc_for_timeout_projection(&logical)
+                .expect("bounded lookup")
+                .expect("matching retained evidence"),
+            first_evidence.as_ref()
+        ));
+        assert_eq!(unique.block_count(), unique_block_count);
+        assert_eq!(unique.retained_evidence_bytes(), unique_retained_bytes);
+        assert_eq!(unique.evicted_blocks(), unique_evictions);
+
+        let mut identical = HotStuffStateEngine::new(fixture.validators.clone());
+        for id in [[0xA2; 32], [0xA3; 32]] {
+            identical
+                .register_block_with_verified_justification(
+                    id,
+                    10,
+                    None,
+                    Arc::clone(&first_evidence),
+                )
+                .expect("retain identical evidence");
+        }
+        assert_eq!(
+            identical
+                .retained_qc_for_timeout_projection(&logical)
+                .expect("identical complete certificates are one candidate")
+                .expect("matching retained evidence")
+                .certificate(),
+            &first
+        );
+
+        let mut ambiguous = HotStuffStateEngine::new(fixture.validators.clone());
+        let eviction_evidence = Arc::clone(&first_evidence);
+        ambiguous
+            .register_block_with_verified_justification([0xA4; 32], 10, None, first_evidence)
+            .expect("retain first projection");
+        ambiguous
+            .register_block_with_verified_justification([0xA5; 32], 10, None, second_evidence)
+            .expect("retain conflicting complete certificate");
+        assert!(matches!(
+            ambiguous.retained_qc_for_timeout_projection(&logical),
+            Err(RetainedQcLookupError::Ambiguous)
+        ));
+
+        let mut eviction_limits = ConsensusLimitsConfig::default();
+        eviction_limits.max_pending_blocks = 1;
+        let mut evicted =
+            HotStuffStateEngine::with_limits(fixture.validators.clone(), eviction_limits);
+        evicted
+            .register_block_with_verified_justification([0xA6; 32], 10, None, eviction_evidence)
+            .expect("retain evidence before eviction");
+        evicted.register_block([0xA7; 32], 11, None, None);
+        assert!(evicted.get_block(&[0xA6; 32]).is_none());
+        assert!(evicted
+            .retained_qc_for_timeout_projection(&logical)
+            .expect("evicted proof lookup")
+            .is_none());
+
+        let reordered = QuorumCertificate::new(
+            logical.block_id,
+            logical.view,
+            vec![ValidatorId(2), ValidatorId(1), ValidatorId(0)],
+        );
+        assert!(unique
+            .retained_qc_for_timeout_projection(&reordered)
+            .expect("a signer-list substitution is not ambiguous")
+            .is_none());
+        let duplicated = QuorumCertificate::new(
+            logical.block_id,
+            logical.view,
+            vec![ValidatorId(0), ValidatorId(0), ValidatorId(1)],
+        );
+        assert!(unique
+            .retained_qc_for_timeout_projection(&duplicated)
+            .expect("duplicate signer identities do not select evidence")
+            .is_none());
+        let wrong_height =
+            QuorumCertificate::new(logical.block_id, second.round, logical.signers.clone());
+        assert_ne!(second.round, second.height);
+        assert!(ambiguous
+            .retained_qc_for_timeout_projection(&wrong_height)
+            .expect("logical view is compared with wire height, not round")
+            .is_none());
+    }
+
+    #[test]
+    fn run422_f7_retained_qc_lookup_refuses_over_limit_before_scan() {
+        use crate::hotstuff_state_engine::{
+            HotStuffStateEngine, RetainedQcLookupError, MAX_RETAINED_QC_LOOKUP_BLOCKS,
+        };
+        use crate::qc::QuorumCertificate;
+        use crate::vote_accumulator::ConsensusLimitsConfig;
+
+        let fixture = uniform_fixture(1);
+        let mut limits = ConsensusLimitsConfig::default();
+        limits.max_pending_blocks = MAX_RETAINED_QC_LOOKUP_BLOCKS + 1;
+        let mut state = HotStuffStateEngine::with_limits(fixture.validators, limits);
+        for index in 0..=MAX_RETAINED_QC_LOOKUP_BLOCKS {
+            let mut id = [0; 32];
+            id[..8].copy_from_slice(&(index as u64).to_le_bytes());
+            state.register_block(id, index as u64, None, None);
+        }
+        assert_eq!(state.block_count(), MAX_RETAINED_QC_LOOKUP_BLOCKS + 1);
+        assert!(matches!(
+            state.retained_qc_for_timeout_projection(&QuorumCertificate::new(
+                [7; 32],
+                9,
+                vec![],
+            )),
+            Err(RetainedQcLookupError::ScanLimitExceeded {
+                block_count: count,
+                max_scan_blocks: MAX_RETAINED_QC_LOOKUP_BLOCKS,
+            }) if count == MAX_RETAINED_QC_LOOKUP_BLOCKS + 1
+        ));
     }
 }
