@@ -2845,3 +2845,21 @@ LocalMesh is a consensus execution mode, not a non-consensus CLI operation; gene
 #### Run 422 startup marker exit-race correction
 
 The bounded startup-test helper now rechecks stderr after observing child exit and joining the readers, accepting a marker present in the completed capture or reporting `UnexpectedEof` with that final capture. The ACTIVE preflight marker remains distinct from transport readiness. The ordering gap was corrected by inspection, not claimed as experimentally reproduced. The mandatory-timeout policy target passed all 3 tests on the follow-up based on `f338cdc89ef11c686e3f835f8d0e5afaf8b34ebc`; full command and result are recorded in the Run 422 D7 evidence document. No production policy or readiness verdict changed.
+
+#### Run 422 TimeoutCertificate target-view binding
+
+The TimeoutCertificate target is now required to equal
+`timeout_view.checked_add(1)` in both shared timeout-evidence verification and
+logical TC validation. The shared structural gate precedes signer-set
+allocation, signature-backend work, and engine effects; terminal overflow is
+typed and rejected. The existing saturating constructors and wire shape are
+unchanged. Genuine signed-timeout target-substitution, largest-successor,
+terminal-overflow, authenticated inbound refusal/retry, local helper
+publication, and stale-TC compatibility tests passed at source commit
+`f5aeb09e9761eeca4ee3b37275d7776731b6b028`.
+
+This is not constituent high-QC Vote verification and does not establish
+current authority/freshness, O4 acknowledgement, or restart safety. F7
+high-QC proof and authority gaps remain open; the correction does not change
+activation DISABLED, public DevNet NO-GO, or the other standing Run 422
+verdicts.
