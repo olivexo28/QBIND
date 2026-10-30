@@ -295,6 +295,10 @@ pub(super) struct ModelResult {
 pub(super) fn retain_route(
     result: ModelResult,
 ) -> Result<support::Report, support::Refusal> {
+    // The returned report owns its independent consensus-ledger reservation.
+    // `result` keeps node-control coverage through this move/return conversion;
+    // the remaining ModelResult fields (including that lease) are dropped only
+    // as the converted route leaves this function.
     result.route
 }
 
@@ -305,18 +309,24 @@ pub(super) enum AdmissionRefusal {
 
 // Like the accepted leader-route admission: no token or large outcome is
 // transferred until this opaque owner has admitted the route's coverage.
-struct Admission<'owner> {
+pub(super) struct Admission<'owner> {
     owner: &'owner SafetyRecordOwner,
     coverage: Reservation,
 }
 
-fn admit_composition(owner: &SafetyRecordOwner) -> Result<Admission<'_>, AdmissionRefusal> {
+pub(super) fn admit_bridge_vote(
+    owner: &SafetyRecordOwner,
+) -> Result<Admission<'_>, AdmissionRefusal> {
     let coverage = owner
         .backend
         .accounting()
         .reserve(adapter_charge())
         .map_err(|_| AdmissionRefusal::Capacity)?;
     Ok(Admission { owner, coverage })
+}
+
+fn admit_composition(owner: &SafetyRecordOwner) -> Result<Admission<'_>, AdmissionRefusal> {
+    admit_bridge_vote(owner)
 }
 
 struct Gate<'o, 'g> {
@@ -509,7 +519,9 @@ const CANDIDATE_COPY_CONTROL_BYTES: usize =
         + size_of::<Result<CandidateCopyPlan, CandidateCopyError>>()
         + 3 * size_of::<Result<Layout, std::alloc::LayoutError>>()
         + size_of::<Result<NonNull<u8>, CandidateCopyError>>()
+        + size_of::<Result<ExactBuffer<Vec<u8>>, CandidateCopyError>>()
         + size_of::<Result<(), CandidateCopyError>>()
+        + size_of::<ExactBuffer<Vec<u8>>>()
         + size_of::<Layout>()
         + 2 * size_of::<NonNull<u8>>()
         + 3 * size_of::<Vec<u8>>()
@@ -648,7 +660,34 @@ impl CandidateCopyPlan {
     }
 }
 
-struct ExactBuffer<T> {
+trait ExactBufferElement: Sized {
+    fn allocation_layout(capacity: usize) -> Result<Layout, CandidateCopyError>;
+}
+
+impl ExactBufferElement for u8 {
+    fn allocation_layout(capacity: usize) -> Result<Layout, CandidateCopyError> {
+        Layout::array::<u8>(capacity).map_err(|_| CandidateCopyError::Layout)
+    }
+}
+
+impl ExactBufferElement for Vec<u8> {
+    fn allocation_layout(capacity: usize) -> Result<Layout, CandidateCopyError> {
+        Layout::array::<Vec<u8>>(capacity).map_err(|_| CandidateCopyError::Layout)
+    }
+}
+
+fn validate_exact_layout<T: ExactBufferElement>(
+    supplied: Layout,
+    capacity: usize,
+) -> Result<Layout, CandidateCopyError> {
+    let expected = T::allocation_layout(capacity)?;
+    if expected != supplied || expected.size() == 0 || expected.size() > isize::MAX as usize {
+        return Err(CandidateCopyError::Layout);
+    }
+    Ok(expected)
+}
+
+struct ExactBuffer<T: ExactBufferElement> {
     pointer: NonNull<T>,
     layout: Option<Layout>,
     initialized: usize,
@@ -656,7 +695,7 @@ struct ExactBuffer<T> {
     marker: PhantomData<T>,
 }
 
-impl<T> ExactBuffer<T> {
+impl<T: ExactBufferElement> ExactBuffer<T> {
     fn allocate(
         layout: Layout,
         capacity: usize,
@@ -682,9 +721,8 @@ impl<T> ExactBuffer<T> {
         accountant: &super::super::accounting::SharedAccountant,
         expected_workspace_charge: u128,
     ) -> Result<Self, CandidateCopyError> {
-        if layout.size() == 0
-            || layout.size() > isize::MAX as usize
-            || !workspace.is_issued_by(accountant)
+        let layout = validate_exact_layout::<T>(layout, capacity)?;
+        if !workspace.is_issued_by(accountant)
             || !candidate.is_issued_by(accountant)
             || workspace.charge() != expected_workspace_charge
         {
@@ -733,7 +771,7 @@ impl<T> ExactBuffer<T> {
     }
 }
 
-impl<T> Drop for ExactBuffer<T> {
+impl<T: ExactBufferElement> Drop for ExactBuffer<T> {
     fn drop(&mut self) {
         if let Some(layout) = self.layout.take() {
             // SAFETY: initialized is the exact initialized prefix, and layout
@@ -1281,6 +1319,31 @@ mod candidate_copy_tests {
             ),
             Err(CandidateCopyError::Layout)
         ));
+        assert_eq!(
+            validate_exact_layout::<u8>(Layout::array::<u8>(8).unwrap(), 9),
+            Err(CandidateCopyError::Layout),
+            "byte allocation rejects a size/capacity mismatch before allocation"
+        );
+        assert_eq!(
+            validate_exact_layout::<Vec<u8>>(
+                Layout::array::<Vec<u8>>(2).unwrap(),
+                3,
+            ),
+            Err(CandidateCopyError::Layout),
+            "descriptor allocation rejects a size/capacity mismatch before allocation"
+        );
+        assert_eq!(
+            validate_exact_layout::<Vec<u8>>(
+                Layout::from_size_align(
+                    Layout::array::<Vec<u8>>(2).unwrap().size(),
+                    1,
+                )
+                .unwrap(),
+                2,
+            ),
+            Err(CandidateCopyError::Layout),
+            "descriptor allocation rejects incorrect alignment before allocation"
+        );
         assert!(Layout::array::<Vec<u8>>(usize::MAX).is_err());
         assert_eq!(candidate_copy_faults::disarm().0, 0);
         assert_eq!(validate_candidate_shape(&wire, &logical, &ctx), Ok(3));
@@ -1382,13 +1445,15 @@ mod candidate_copy_tests {
             EXACT_VOTE_COPY_CONTROL_BYTES as u128 <= EXACT_VOTE_COPY_WORKSPACE_BYTES
         );
         println!(
-            "candidate-copy controls={controls} workspace={} owner={} plan={} exact-byte={} exact-descriptors={} allocation-result={} candidate={}; exact-vote controls={} workspace={}",
+            "candidate-copy controls={controls} workspace={} owner={} plan={} exact-byte={} exact-descriptors={} allocation-result={} exact-buffer-result={} into-vec-receiver={} candidate={}; exact-vote controls={} workspace={}",
             candidate_copy_workspace_charge(),
             size_of::<CandidateCopyOwner<'static>>(),
             size_of::<CandidateCopyPlan>(),
             size_of::<ExactBuffer<u8>>(),
             size_of::<ExactBuffer<Vec<u8>>>(),
             size_of::<Result<NonNull<u8>, CandidateCopyError>>(),
+            size_of::<Result<ExactBuffer<Vec<u8>>, CandidateCopyError>>(),
+            size_of::<ExactBuffer<Vec<u8>>>(),
             size_of::<LockedRecord>(),
             EXACT_VOTE_COPY_CONTROL_BYTES,
             EXACT_VOTE_COPY_WORKSPACE_BYTES,
@@ -1496,9 +1561,14 @@ fn adapter_phase_charges() -> (u128, u128, u128) {
         + size_of::<Reservation>();
     // Both complete owner layouts include their route and coverage. The
     // partially consumed admission is bounded separately during conversion.
-    let returned = 2 * size_of::<ModelResult>()
+    let returned = (2 * size_of::<ModelResult>()
         + size_of::<Admission<'static>>()
-        + size_of::<StorageSnapshot>();
+        + size_of::<StorageSnapshot>())
+        .max(
+            size_of::<ModelResult>()
+                + size_of::<Result<support::Report, support::Refusal>>()
+                + size_of::<Result<ModelResult, AdmissionRefusal>>(),
+        );
     (admission as u128, invocation as u128, returned as u128)
 }
 
@@ -1508,18 +1578,18 @@ fn adapter_charge() -> u128 {
 }
 
 pub(super) fn invoke_bridge_vote(
-    owner: &SafetyRecordOwner,
+    admission: Admission<'_>,
     engine: &mut BasicHotStuffEngine<[u8; 32]>,
     authority: &Authority,
     token: support::Token,
     expected: u64,
     history: &FixtureCommittedHistory,
-) -> Result<ModelResult, AdmissionRefusal> {
-    Ok(admit_composition(owner)?.invoke(engine, authority, token, expected, history))
+) -> ModelResult {
+    admission.invoke(engine, authority, token, expected, history)
 }
 
 impl Admission<'_> {
-    fn invoke(
+    pub(super) fn invoke(
         self,
         engine: &mut BasicHotStuffEngine<[u8; 32]>,
         authority: &Authority,
@@ -1618,7 +1688,7 @@ pub(super) struct InterruptionAdmission<'a> {
     coverage: Reservation,
 }
 
-fn interruption_charge() -> u128 {
+pub(super) fn interruption_charge() -> u128 {
     // Separate from the unchanged adapter charge. Includes both conversion
     // slots and the pre-call snapshot; all backing remains in the charged report.
     (2 * size_of::<Interrupted<'static>>()
@@ -1636,7 +1706,7 @@ pub(super) fn admit_interruption(
         .accounting()
         .reserve(interruption_charge())
         .map_err(|_| AdmissionRefusal::Capacity)?;
-    let route = admit_composition(owner)?;
+    let route = admit_bridge_vote(owner)?;
     Ok(InterruptionAdmission { route, coverage })
 }
 
@@ -1702,7 +1772,7 @@ pub(super) enum RecoveryOutcome {
     UncertainDurable,
 }
 
-fn recovery_charge() -> u128 {
+pub(super) fn recovery_charge() -> u128 {
     (2 * size_of::<RecoveryAdmission<'static>>()
         + size_of::<Result<RecoveryAdmission<'static>, AdmissionRefusal>>()
         + 2 * size_of::<Result<Acknowledged<'static>, RecoveryOutcome>>()
