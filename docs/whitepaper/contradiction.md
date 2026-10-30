@@ -2976,3 +2976,121 @@ D15, Run 423 or full F7/RS1 closure is claimed. Preserve:
 `D7D14_STORAGE_ACCEPTANCE=PASS-ACCEPTED-SUBSET`; §13.6 whole-lifecycle
 INCOMPLETE; activation DISABLED; public DevNet NO-GO; durable anti-rollback
 NOT-ESTABLISHED; C4/C5 OPEN.
+
+## RUN 422 - Timeout/TC numeric exhaustion correction (2026-10-30)
+
+The verified clean starting `main` HEAD was
+`18d71a549d868ed33d352e9fc70a9d060f75e03b`, root tree
+`5b6c543435ac017dd8372c93f48be397899db14a`. Availability (`git cat-file -t`),
+exact HEAD/tree/worktree content, and ancestry (`git merge-base --is-ancestor`
+plus parent inspection) were checked separately, all exit 0. The baseline
+has no parent. Work is on `copilot/run-422-timeout-view-exhaustion`, with no
+main push or PR. Source validation belongs exclusively to
+`fdfdd37619a18109e7d08ae0bce3efa9d176466c`, tree
+`781029ec2edd5f96a8e7f6e6b1eb1ed626f42482`; these two documentation appends
+are a subsequent documentation-only commit.
+
+Before correction, the baseline plus a temporary inline characterization
+patch (LF SHA-256
+`36e47cdfc83cb1bb9ae5c51e86933bf11e748fe79f5b46f7c2c5edead2b908ed`,
+reproduced in the matching D7 evidence append) showed actual component
+behavior, not a demonstrated production exploit:
+
+| Literal baseline-plus-patch command | Observation | Exit |
+|---|---|---:|
+| `cargo test --locked -p qbind-consensus --lib run422_timeout_view_exhaustion -- --nocapture` | 1 characterization passed, 292 filtered; caught overflow panic after accumulator insertion, with eligible MAX-1 quorum | 0 |
+| `cargo test --locked -p qbind-consensus --lib --release run422_timeout_view_exhaustion -- --nocapture` | 1 characterization passed, 292 filtered; no panic but returned `Ok(None)` and skipped that eligible quorum | 0 |
+
+Both also demonstrated accumulator admission at MAX and formation of an
+invalid same-view terminal TC, rejected by the existing target validator.
+Those passing assertions characterize the defect; they are not final-source
+passing-fix evidence.
+
+The corrected search clips only its inclusive current..current+10 upper bound
+(eleven candidates maximum), never the required successor. A shared checked
+successor contract refuses terminal Timeout admission before entry creation,
+eviction, insertion or duplicate bookkeeping, with typed
+`NoRepresentableSuccessor`; the public formation API independently returns no
+terminal TC. Existing checked TC target validation remains enforced. MAX-1 ->
+MAX is valid; MAX -> MAX is not. Constructors, wire encoding/preimages,
+membership/quorum, voting powers and high-QC selection remain unchanged.
+
+The real local handler preflights this contract before signing, latch,
+accumulator ingestion and broadcast. A fixed-shape diagnostic and saturating
+engine-contract rejection count do not misattribute it to signature or F7
+failure. Existing progress observation is not consumption: view observation
+still updates its baseline, and commit progress retains its existing pacer
+reset behavior. Timeout refusal itself does not grow/reset the pacer.
+
+All mapping entries below have prefix `run422_timeout_view_exhaustion`:
+
+| Surface / test suffix | Requirement established |
+|---|---|
+| Direct engine `_engine_search_boundaries` | Ordinary current/+10 preserved, +11 excluded; MAX-10/MAX-9/MAX-1 search; MAX-1 quorum forms/applies target MAX |
+| Direct engine `_engine_terminal_and_stale_preserve_state` | Supported setup; full nonempty accumulator contents/counters preserved; terminal refusal, stale ignore and sender mismatch; unchanged view/latch/lock/commits |
+| Direct accumulator `_accumulator_terminal_preserves_full_state` | Full-capacity nonempty state after a real eviction; exact Timeout/QC/signature maps, tracking set, eviction counter and limits preserved on repeated refusal; defensive terminal-quorum formation request returns None |
+| Direct accumulator `_accumulator_quorum_and_final_successor` | Ordinary/boundary membership, duplicate, quorum and evidence inventory controls |
+| Actual inbound `_inbound_authenticated_terminal_and_final_transition` | Genuine ML-DSA evidence, authenticated origin binding, `Required` policy; wrong-origin refusal; outer verification accepts terminal Timeout twice while engine refuses; valid MAX-1 quorum forms/applies/publishes TC targeting MAX; another actual NewView handler verifies/applies it |
+| Actual local `_local_handler_preserves_consumption_and_control` | Counting genuine signer and enabled already-grown pacer; observation versus consumption; repeated terminal refusal preserves nonempty accumulator/latch/all pacer state with zero signing/delivery; separate ordinary/MAX-10/MAX-9/MAX-1 controls sign once, form/apply valid TC, advance and grow normally |
+
+Handler fixtures carry no high-QC and do not fabricate verified-QC authority.
+Existing F5, authenticated binding, decoding limits, F7 retained-QC admission
+and original-ticket confirmation remain intact, also exercised by regression
+selectors and the full suites.
+
+Fresh results on the committed source above, with zero test failures:
+
+| Literal command | Passed / ignored / filtered | Exit |
+|---|---|---:|
+| `cargo test --locked -p qbind-consensus --lib run422_timeout_view_exhaustion -- --nocapture` | 4 / 0 / 292 | 0 |
+| `LIBCLANG_PATH=/usr/lib/llvm-18/lib cargo test --locked -p qbind-node --lib run422_timeout_view_exhaustion -- --nocapture` | 2 / 0 / 2170 | 0 |
+| `cargo test --locked -p qbind-consensus --lib --release run422_timeout_view_exhaustion -- --nocapture` | 4 / 0 / 292 | 0 |
+| `LIBCLANG_PATH=/usr/lib/llvm-18/lib CARGO_PROFILE_RELEASE_STRIP=symbols cargo test --locked -p qbind-node --lib --release run422_timeout_view_exhaustion -- --nocapture` | 2 / 0 / 2171 | 0 |
+| `cargo test --locked -p qbind-consensus` | 973 / 21 / 0 across 59 targets | 0 |
+| `LIBCLANG_PATH=/usr/lib/llvm-18/lib cargo test --locked -p qbind-node --lib --features test-utils` | 2203 / 6 / 0 | 0 |
+| `cargo test --locked -p qbind-consensus run422_tc_target_view -- --nocapture` | 6 / 0 / 955 across 58 targets | 0 |
+| `LIBCLANG_PATH=/usr/lib/llvm-18/lib cargo test --locked -p qbind-node --lib run422_tc_target_view -- --nocapture` | 3 / 0 / 2169 | 0 |
+| `LIBCLANG_PATH=/usr/lib/llvm-18/lib cargo test --locked -p qbind-node --lib run030 -- --nocapture` | 30 / 0 / 2142 | 0 |
+| `LIBCLANG_PATH=/usr/lib/llvm-18/lib cargo test --locked -p qbind-node --lib run422_f7_retained_qc -- --nocapture` | 17 / 0 / 2155 | 0 |
+
+Selectors are nonzero and counts overlap broader suites; `run030` includes
+the new handler tests. Rustc 1.99.1/Cargo 1.99.1 were used. The existing
+dev/test profiles retain debug=0, strip="debuginfo", incremental=false.
+There is no repository release or explicit overflow-check override, nor any
+RUSTFLAGS/profile overflow environment override. Ordinary tests were
+unoptimized, debug assertions/overflow checks enabled; release tests were
+optimized, assertions/overflow checks disabled, corroborated by the actual
+baseline panic/wrap behavior. The literal node symbol-stripping override
+above affects symbols only. Release-profile tests are not deployed
+release-binary evidence.
+
+Before the committed-source table, draft focused consensus validation passed
+4 tests (exit 0); initial draft focused node validation failed at build time
+with missing libclang (exit 101, zero tests selected). Installing
+`libclang-18-dev` restored `/usr/lib/llvm-18/lib`; a development retry passed
+2 tests (exit 0) while formatting/commit overlapped, and is excluded from
+final-source attribution. D7 records the literal commands/setup warning.
+No historical build, Miri or security-review result is reattributed here.
+
+CRLF-aware nonempty working-diff and baseline-to-final checks use
+`git -c core.whitespace=cr-at-eol diff --check` and
+`git -c core.whitespace=cr-at-eol diff 18d71a549d868ed33d352e9fc70a9d060f75e03b HEAD --check`
+(both exit 0). Original documentation bytes remain exact prefixes, modes
+100644 and original CRLF/LF/no-final-newline conventions are preserved.
+Only the five authorized paths change; final tree/blob/remote-tip metadata
+is reported separately from the source-validation commit.
+
+Separate source scope remains: public `BasicHotStuffEngine::advance_view`
+still uses `current_view + 1` at `basic_hotstuff_engine.rs:2455`. Leader/QC
+formation and Vote QC-formation paths call it (lines 3846, 4194, 4922 at the
+source-validation revision). This is source-level logical reachability, not
+terminal-view production reproduction; these Proposal/Vote/QC paths were
+not corrected or proved safe by this task.
+
+No view reset/wrap/restart workaround, activation bypass, production authority
+activation, new cryptography, wire or journal/storage change, deployment,
+D15, Run 423 or full F7/RS1 closure. Preserve:
+`D7D14_STORAGE_COMPONENT=IMPLEMENTED-ISOLATED`;
+`D7D14_STORAGE_ACCEPTANCE=PASS-ACCEPTED-SUBSET`; §13.6 whole-lifecycle
+INCOMPLETE; activation DISABLED; public DevNet NO-GO; durable anti-rollback
+NOT-ESTABLISHED; C4/C5 OPEN.
