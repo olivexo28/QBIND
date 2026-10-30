@@ -2451,8 +2451,18 @@ where
     /// If a progress recorder is attached, records view change and leader
     /// change events.
     pub fn advance_view(&mut self) {
+        let _ = self.try_advance_view();
+    }
+
+    /// Advance exactly one view when a representable successor exists.
+    ///
+    /// Returns `false` at `u64::MAX` without changing view state or recording
+    /// transition callbacks.
+    pub fn try_advance_view(&mut self) -> bool {
+        let Some(to_view) = self.current_view.checked_add(1) else {
+            return false;
+        };
         let from_view = self.current_view;
-        let to_view = self.current_view + 1;
 
         // Compute and record view duration if we have a start timestamp
         self.record_view_duration_internal(from_view, to_view);
@@ -2467,6 +2477,7 @@ where
 
         // Start timing for the new view
         self.last_view_start_instant = Some(Instant::now());
+        true
     }
 
     /// Internal helper to compute and record view duration (T90.5).
@@ -3843,8 +3854,7 @@ impl BasicHotStuffEngine<[u8; 32]> {
             recorder.on_validator_vote(self.local_id, view);
         }
         if effects.qc_formed {
-            self.advance_view();
-            effects.view_advanced = true;
+            effects.view_advanced = self.try_advance_view();
         }
         if self.pending_reconfig_next_epoch == preflight.reconfiguration_intent {
             self.pending_reconfig_next_epoch = None;
@@ -4056,6 +4066,10 @@ impl BasicHotStuffEngine<[u8; 32]> {
             return Vec::new();
         }
 
+        if self.current_view.checked_add(1).is_none() {
+            return Vec::new();
+        }
+
         let view = self.current_view;
 
         // Parent is the locked block or committed block or none.
@@ -4191,7 +4205,7 @@ impl BasicHotStuffEngine<[u8; 32]> {
                     recorder.record_qc_formed();
                 }
             }
-            self.advance_view();
+            let _ = self.try_advance_view();
         }
 
         // Return both actions: broadcast proposal and broadcast leader's vote
@@ -4919,8 +4933,7 @@ impl BasicHotStuffEngine<[u8; 32]> {
 
             // Advance view if the QC is for our current view or later
             if view >= self.current_view {
-                self.advance_view();
-                view_advanced = true;
+                view_advanced = self.try_advance_view();
             }
         }
         view_advanced
@@ -10086,6 +10099,502 @@ mod tests {
         let engine2: BasicHotStuffEngine<[u8; 32]> =
             BasicHotStuffEngine::new(ValidatorId(2), validators);
         assert!(!engine2.is_leader_for_current_view());
+    }
+
+    #[test]
+    fn run422_qc_view_exhaustion_checked_advance_and_terminal_refusal() {
+        let duration = Arc::new(TestViewDurationRecorder::default());
+        let progress = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let mut engine =
+            BasicHotStuffEngine::<[u8; 32]>::new(ValidatorId(1), make_validator_set(1))
+                .with_view_duration_recorder(duration.clone());
+        engine.set_progress_recorder(Arc::new(QcCorrectionCallbacks(Arc::clone(&progress))));
+        engine.current_view = u64::MAX - 2;
+
+        engine.proposed_in_view = true;
+        engine.voted_in_view = true;
+        engine.timeout_emitted_in_view = true;
+        assert!(engine.try_advance_view());
+        assert_eq!(engine.current_view, u64::MAX - 1);
+        assert!(!engine.proposed_in_view);
+        assert!(!engine.voted_in_view);
+        assert!(!engine.timeout_emitted_in_view);
+
+        engine.proposed_in_view = true;
+        engine.voted_in_view = true;
+        engine.timeout_emitted_in_view = true;
+        assert!(engine.try_advance_view());
+        assert_eq!(engine.current_view, u64::MAX);
+        assert!(!engine.proposed_in_view);
+        assert!(!engine.voted_in_view);
+        assert!(!engine.timeout_emitted_in_view);
+        assert_eq!(duration.call_count(), 2);
+        assert_eq!(progress.load(std::sync::atomic::Ordering::Relaxed), 4);
+
+        engine.proposed_in_view = true;
+        engine.voted_in_view = true;
+        engine.timeout_emitted_in_view = true;
+        let terminal_start = Some(std::time::Instant::now());
+        engine.last_view_start_instant = terminal_start;
+        assert!(!engine.try_advance_view());
+        assert!(!engine.try_advance_view());
+        engine.advance_view();
+        engine.advance_view();
+
+        assert_eq!(engine.current_view, u64::MAX);
+        assert!(engine.proposed_in_view);
+        assert!(engine.voted_in_view);
+        assert!(engine.timeout_emitted_in_view);
+        assert_eq!(engine.last_view_start_instant, terminal_start);
+        assert_eq!(duration.call_count(), 2);
+        assert_eq!(progress.load(std::sync::atomic::Ordering::Relaxed), 4);
+    }
+
+    #[test]
+    fn run422_qc_view_exhaustion_legacy_leader_preflight_preserves_intent() {
+        let mut engine =
+            BasicHotStuffEngine::<[u8; 32]>::new(ValidatorId(1), make_validator_set(1));
+        engine.set_view(u64::MAX);
+        engine
+            .set_pending_reconfig_next_epoch(1)
+            .expect("valid pending reconfiguration intent");
+        let timestamp = engine.last_view_start_instant;
+        let blocks = engine.state.block_count();
+
+        let actions = engine.on_leader_step();
+
+        assert!(actions.is_empty());
+        assert_eq!(engine.state.block_count(), blocks);
+        assert!(!engine.proposed_in_view);
+        assert!(!engine.voted_in_view);
+        assert_eq!(engine.last_view_start_instant, timestamp);
+        assert_eq!(engine.pending_reconfig_next_epoch(), Some(1));
+        assert_eq!(engine.state.vote_count(u64::MAX, &[0; 32]), 0);
+    }
+
+    #[test]
+    fn run422_qc_view_exhaustion_owning_leader_refusal_and_final_successor() {
+        struct CaptureGate {
+            calls: usize,
+        }
+        impl LeaderProposalGate<()> for CaptureGate {
+            fn route_limits(&self) -> LeaderRouteLimits {
+                LeaderRouteLimits::new(1)
+            }
+
+            fn capture_l0(
+                &mut self,
+                _input: &LeaderCaptureInput<'_>,
+            ) -> Result<(), SafetyGateRefusal> {
+                self.calls += 1;
+                Ok(())
+            }
+        }
+
+        let parent = [0xA1; 32];
+        let mut terminal =
+            BasicHotStuffEngine::<[u8; 32]>::new(ValidatorId(1), make_validator_set(1));
+        terminal.state.register_block(parent, 0, None, None);
+        terminal.state.set_locked_qc(QuorumCertificate::new(
+            parent,
+            0,
+            vec![ValidatorId(1)],
+        ));
+        terminal.set_view(u64::MAX);
+        terminal
+            .set_pending_reconfig_next_epoch(1)
+            .expect("valid pending reconfiguration intent");
+        let terminal_blocks = terminal.state.block_count();
+        let mut terminal_gate = CaptureGate { calls: 0 };
+        assert!(matches!(
+            terminal.try_propose_gated_owning(&mut terminal_gate),
+            LeaderProposalRouteResult::Refused(LeaderRouteRefusal::Arithmetic)
+        ));
+        assert_eq!(terminal_gate.calls, 0);
+        assert_eq!(terminal.state.block_count(), terminal_blocks);
+        assert!(!terminal.proposed_in_view);
+        assert!(!terminal.voted_in_view);
+        assert_eq!(terminal.pending_reconfig_next_epoch(), Some(1));
+
+        let mut final_successor =
+            BasicHotStuffEngine::<[u8; 32]>::new(ValidatorId(1), make_validator_set(1));
+        final_successor.state.register_block(parent, 0, None, None);
+        final_successor.state.set_locked_qc(QuorumCertificate::new(
+            parent,
+            0,
+            vec![ValidatorId(1)],
+        ));
+        final_successor.set_view(u64::MAX - 1);
+        final_successor
+            .set_pending_reconfig_next_epoch(1)
+            .expect("valid pending reconfiguration intent");
+        let mut successful_gate = CaptureGate { calls: 0 };
+        let LeaderProposalRouteResult::Decided(decided) =
+            final_successor.try_propose_gated_owning(&mut successful_gate)
+        else {
+            panic!("final representable successor should be accepted");
+        };
+        assert_eq!(successful_gate.calls, 1);
+        assert!(decided.effects.qc_formed);
+        assert!(decided.effects.view_advanced);
+        assert_eq!(final_successor.current_view, u64::MAX);
+        assert_eq!(final_successor.pending_reconfig_next_epoch(), None);
+    }
+
+    #[test]
+    fn run422_qc_view_exhaustion_legacy_logical_vote_keeps_terminal_qc_effect() {
+        let mut engine =
+            BasicHotStuffEngine::<[u8; 32]>::new(ValidatorId(1), make_validator_set(1));
+        let block = [0xA3; 32];
+        engine.current_view = u64::MAX;
+        engine.state.register_block(block, u64::MAX, None, None);
+        engine.proposed_in_view = true;
+        engine.voted_in_view = true;
+        engine.timeout_emitted_in_view = true;
+        let timestamp = Some(std::time::Instant::now());
+        engine.last_view_start_instant = timestamp;
+        let order = effect_callback_order(&mut engine);
+        let vote = qbind_wire::consensus::Vote {
+            version: 1,
+            chain_id: 1,
+            epoch: 0,
+            height: u64::MAX,
+            round: 9,
+            step: 0,
+            block_id: block,
+            validator_index: 1,
+            suite_id: qbind_wire::DEFAULT_CONSENSUS_SUITE_ID,
+            signature: Vec::new(),
+        };
+
+        let qc = engine
+            .on_vote_event(ValidatorId(1), &vote)
+            .expect("logical Vote accepted")
+            .expect("single-member QC formed");
+
+        assert_eq!(qc.view, u64::MAX);
+        assert_eq!(engine.current_view, u64::MAX);
+        assert!(engine.proposed_in_view);
+        assert!(engine.voted_in_view);
+        assert!(engine.timeout_emitted_in_view);
+        assert_eq!(engine.last_view_start_instant, timestamp);
+        assert_eq!(*order.lock().unwrap(), ["vote", "validator", "qc"]);
+    }
+
+    #[test]
+    fn run422_qc_view_exhaustion_received_vote_invocation_reports_refusal_truthfully() {
+        let (public_key, secret_key) = MlDsa44Backend::generate_keypair().expect("test keygen");
+        let (input, domain) = received_vote_context(0, public_key);
+        let mut engine =
+            BasicHotStuffEngine::<[u8; 32]>::new(ValidatorId(0), dense_validator_set(1));
+        engine
+            .install_received_vote_context(input)
+            .expect("context install");
+        let block = [0xA4; 32];
+        engine.current_view = u64::MAX;
+        engine.state.register_block(block, u64::MAX, None, None);
+        engine.proposed_in_view = true;
+        engine.voted_in_view = true;
+        engine.timeout_emitted_in_view = true;
+        let timestamp = Some(std::time::Instant::now());
+        engine.last_view_start_instant = timestamp;
+        let vote = signed_member_vote(
+            0,
+            0,
+            u64::MAX,
+            9,
+            block,
+            &secret_key,
+            &domain,
+        );
+        let token = engine
+            .admit_verified_received_vote(ValidatorId(0), vote)
+            .expect("genuinely signed Vote admitted by verifier");
+
+        let VerifiedVoteInvocation::Invoked {
+            report,
+            evidence,
+            view_advanced,
+        } = engine.invoke_verified_received_vote(token)
+        else {
+            panic!("admitted Vote invocation should produce a report");
+        };
+
+        assert_eq!(evidence, ReceivedVoteEvidenceDisposition::Retained);
+        assert!(matches!(report.qc, Ok(Some(_))));
+        assert!(!view_advanced);
+        assert_eq!(engine.state.vote_count(u64::MAX, &block), 1);
+        assert_eq!(engine.current_view, u64::MAX);
+        assert!(engine.proposed_in_view);
+        assert!(engine.voted_in_view);
+        assert!(engine.timeout_emitted_in_view);
+        assert_eq!(engine.last_view_start_instant, timestamp);
+    }
+
+    #[test]
+    fn run422_qc_view_exhaustion_signed_qc_gate_refusal_and_retry_preserve_effects() {
+        let keypairs: Vec<_> = (0..4)
+            .map(|_| MlDsa44Backend::generate_keypair().expect("test keygen"))
+            .collect();
+        let domain = qbind_wire::pv_signing_domain::ProposalVoteSigningDomainV2::try_new(
+            qbind_types::QBIND_DEVNET_CHAIN_ID,
+            TEST_WIRE_CHAIN,
+            [0xC1; 32],
+            [0xC2; 32],
+        )
+        .expect("valid test domain");
+        let keys = ContextTestKeys(
+            keypairs
+                .iter()
+                .enumerate()
+                .map(|(index, (public, _))| {
+                    (
+                        ValidatorId(index as u64),
+                        (qbind_crypto::SUITE_PQ_RESERVED_1, public.clone()),
+                    )
+                })
+                .collect(),
+        );
+        let mut engine =
+            BasicHotStuffEngine::<[u8; 32]>::new(ValidatorId(0), dense_validator_set(4));
+        engine
+            .install_received_vote_context(multi_member_vote_context(&keypairs, 0, &domain))
+            .expect("context install");
+        let observer = engine
+            .state
+            .received_vote_budget()
+            .expect("installed evidence budget")
+            .try_clone()
+            .expect("independent ownership observer");
+        let cap = engine.state.max_retained_evidence_bytes();
+        let grandparent = [0xD1; 32];
+        let parent = [0xD2; 32];
+        let block = [0xD3; 32];
+        let views = [u64::MAX - 2, u64::MAX - 1, u64::MAX];
+        engine.state.register_block(grandparent, views[0], None, None);
+        engine.state.register_block(parent, views[1], Some(grandparent), None);
+        engine.state.register_block(block, views[2], Some(parent), None);
+        engine.set_view(views[0]);
+
+        for (view, block_id) in [(views[0], grandparent), (views[1], parent)] {
+            for index in 0..3 {
+                let vote = signed_member_vote(
+                    0,
+                    index,
+                    view,
+                    9,
+                    block_id,
+                    &keypairs[index as usize].1,
+                    &domain,
+                );
+                let token = engine
+                    .admit_verified_received_vote(ValidatorId(index as u64), vote)
+                    .expect("genuinely signed setup Vote admitted");
+                let report = engine
+                    .invoke_verified_received_vote_qc(token)
+                    .expect("setup Vote invoked through report-owning route");
+                if index == 2 {
+                    assert!(report.actual().qc.is_some());
+                    assert_eq!(
+                        report.actual().application,
+                        ReceivedQcApplication::Ungated
+                    );
+                } else {
+                    assert!(matches!(report.outcome(), ReceivedVoteQcOutcome::NoQc));
+                }
+                drop(report);
+            }
+        }
+        assert_eq!(engine.current_view, u64::MAX);
+        assert_eq!(engine.locked_qc().expect("second setup QC applied").view, views[1]);
+        assert!(engine.committed_block().is_none());
+        assert!(engine.commit_log().is_empty());
+
+        for index in 0..2 {
+            let vote = signed_member_vote(
+                0,
+                index,
+                views[2],
+                9,
+                block,
+                &keypairs[index as usize].1,
+                &domain,
+            );
+            let token = engine
+                .admit_verified_received_vote(ValidatorId(index as u64), vote)
+                .expect("genuinely signed pre-quorum Vote admitted");
+            let report = engine
+                .invoke_verified_received_vote_qc(token)
+                .expect("pre-quorum Vote invoked");
+            assert!(matches!(report.outcome(), ReceivedVoteQcOutcome::NoQc));
+            drop(report);
+        }
+
+        engine.proposed_in_view = true;
+        engine.voted_in_view = true;
+        engine.timeout_emitted_in_view = true;
+        let timestamp = Some(std::time::Instant::now());
+        engine.last_view_start_instant = timestamp;
+        let order = effect_callback_order(&mut engine);
+        let before = QcEffectSnapshot::capture(&engine);
+        let applications = engine.state.qc_applications_for_test();
+        let incoming = signed_member_vote(
+            0,
+            2,
+            views[2],
+            9,
+            block,
+            &keypairs[2].1,
+            &domain,
+        );
+        let token = engine
+            .admit_verified_received_vote(ValidatorId(2), incoming.clone())
+            .expect("genuinely signed quorum Vote admitted");
+        let mut gate = EffectProbe {
+            before: before.clone(),
+            decision: ReceivedQcGateDecision::Refuse(
+                ReceivedQcGateRefusal::PublicationUnavailable,
+            ),
+            calls: 0,
+            panic: false,
+            keys: &keys,
+            domain: &domain,
+        };
+
+        let refused = engine
+            .invoke_verified_received_vote_qc_effect_gated(token, &mut gate)
+            .expect("gate refusal is a reported invocation");
+        assert_eq!(gate.calls, 1);
+        assert_eq!(refused.actual().history, VoteHistoryOutcome::FirstVote);
+        assert!(refused.actual().qc.is_some());
+        assert!(!refused.actual().view_advanced);
+        assert_eq!(
+            refused.actual().application,
+            ReceivedQcApplication::Refused(ReceivedQcGateRefusal::PublicationUnavailable)
+        );
+        assert_eq!(QcEffectSnapshot::capture(&engine), before);
+        assert_eq!(engine.state.qc_applications_for_test(), applications);
+        assert_eq!(engine.state.vote_count(views[2], &block), 3);
+        assert_eq!(engine.current_view, u64::MAX);
+        assert!(engine.proposed_in_view);
+        assert!(engine.voted_in_view);
+        assert!(engine.timeout_emitted_in_view);
+        assert_eq!(engine.last_view_start_instant, timestamp);
+        assert_eq!(*order.lock().unwrap(), ["vote", "validator"]);
+        assert_eq!(engine.state.max_retained_evidence_bytes(), cap);
+        let ReceivedVoteQcOutcome::Complete(wire) = refused.outcome() else {
+            panic!("complete signed QC expected after refusal");
+        };
+        let registry = crate::crypto_verifier::SimpleBackendRegistry::with_backend(
+            qbind_crypto::SUITE_PQ_RESERVED_1,
+            Arc::new(MlDsa44Backend),
+        );
+        verify_quorum_certificate_with_domain(
+            wire.qc(),
+            &domain,
+            0,
+            engine.validators(),
+            &keys,
+            &registry,
+        )
+        .expect("refused route's genuine signed QC verifies independently");
+        drop(refused);
+
+        let conflicting = signed_member_vote(
+            0,
+            2,
+            views[2],
+            19,
+            block,
+            &keypairs[2].1,
+            &domain,
+        );
+        let token = engine
+            .admit_verified_received_vote(ValidatorId(2), conflicting.clone())
+            .expect("genuinely signed duplicate Vote admitted");
+        order.lock().unwrap().clear();
+        let mut allow_gate = EffectProbe {
+            before: before.clone(),
+            decision: ReceivedQcGateDecision::Allow,
+            calls: 0,
+            panic: false,
+            keys: &keys,
+            domain: &domain,
+        };
+        let allowed = engine
+            .invoke_verified_received_vote_qc_effect_gated(token, &mut allow_gate)
+            .expect("allowed QC application is reported");
+        assert_eq!(allow_gate.calls, 1);
+        assert_eq!(allowed.actual().history, VoteHistoryOutcome::DuplicateSameBlock);
+        assert_eq!(
+            allowed.actual().accumulator,
+            Some(Ok(VoteAccumulatorDisposition::Duplicate))
+        );
+        assert_eq!(
+            allowed.actual().evidence,
+            ReceivedVoteEvidenceDisposition::ExistingSignedFieldsConflict
+        );
+        assert!(allowed.actual().qc.is_some());
+        assert!(!allowed.actual().view_advanced);
+        assert_eq!(
+            allowed.actual().application,
+            ReceivedQcApplication::Attempted(Ok(()))
+        );
+        assert_eq!(engine.state.qc_applications_for_test(), applications + 1);
+        assert_eq!(engine.state.vote_count(views[2], &block), 3);
+        assert_eq!(engine.locked_qc().expect("terminal QC applied").view, views[2]);
+        assert!(engine.state.get_block(&block).unwrap().own_qc.is_some());
+        assert_eq!(engine.committed_block(), Some(&grandparent));
+        assert_eq!(engine.committed_height(), Some(0));
+        assert_eq!(engine.commit_log().len(), 1);
+        assert_eq!(engine.current_view, u64::MAX);
+        assert!(engine.proposed_in_view);
+        assert!(engine.voted_in_view);
+        assert!(engine.timeout_emitted_in_view);
+        assert_eq!(engine.last_view_start_instant, timestamp);
+        assert_eq!(*order.lock().unwrap(), ["vote", "validator", "qc"]);
+        assert_eq!(engine.state.max_retained_evidence_bytes(), cap);
+        let ReceivedVoteQcOutcome::Complete(wire) = allowed.outcome() else {
+            panic!("allowed retry retains complete signed QC");
+        };
+        verify_quorum_certificate_with_domain(
+            wire.qc(),
+            &domain,
+            0,
+            engine.validators(),
+            &keys,
+            &registry,
+        )
+        .expect("allowed route's genuine signed QC verifies independently");
+        drop(allowed);
+
+        let token = engine
+            .admit_verified_received_vote(ValidatorId(2), conflicting)
+            .expect("duplicate retry remains admissible");
+        let before_duplicate = QcEffectSnapshot::capture(&engine);
+        let mut duplicate_gate = EffectProbe {
+            before: before_duplicate,
+            decision: ReceivedQcGateDecision::Allow,
+            calls: 0,
+            panic: false,
+            keys: &keys,
+            domain: &domain,
+        };
+        let duplicate = engine
+            .invoke_verified_received_vote_qc_effect_gated(token, &mut duplicate_gate)
+            .expect("duplicate retry application is reported");
+        assert_eq!(duplicate_gate.calls, 1);
+        assert!(!duplicate.actual().view_advanced);
+        assert_eq!(engine.commit_log().len(), 1);
+        assert_eq!(engine.current_view, u64::MAX);
+        assert_eq!(engine.last_view_start_instant, timestamp);
+        assert_eq!(engine.state.max_retained_evidence_bytes(), cap);
+        drop(duplicate);
+        drop(engine);
+        assert_eq!(
+            observer.full_occupancy_for_test(),
+            independent_qc_ledger_baseline()
+        );
     }
 
     #[test]
