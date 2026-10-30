@@ -11737,13 +11737,127 @@ mod tests {
         }
 
         #[test]
-        fn run030_no_ctx_local_timeout_refusal_preserves_engine_latch_and_backoff() {
-            let mut engine = make_engine(ValidatorId(0), 1);
+        fn run422_mandatory_timeout_refusals_preserve_retry_state_and_allow_retry() {
+            use crate::validator_signer::SignError;
+
+            struct CountingSigner {
+                inner: Arc<dyn ValidatorSigner>,
+                calls: std::sync::atomic::AtomicUsize,
+                successes: std::sync::atomic::AtomicUsize,
+            }
+
+            impl ValidatorSigner for CountingSigner {
+                fn validator_id(&self) -> &ValidatorId {
+                    self.inner.validator_id()
+                }
+
+                fn suite_id(&self) -> u16 {
+                    self.inner.suite_id()
+                }
+
+                fn sign_proposal(&self, preimage: &[u8]) -> Result<Vec<u8>, SignError> {
+                    self.inner.sign_proposal(preimage)
+                }
+
+                fn sign_vote(&self, preimage: &[u8]) -> Result<Vec<u8>, SignError> {
+                    self.inner.sign_vote(preimage)
+                }
+
+                fn sign_timeout(
+                    &self,
+                    view: u64,
+                    high_qc: Option<&QuorumCertificate<[u8; 32]>>,
+                ) -> Result<Vec<u8>, SignError> {
+                    self.inner.sign_timeout(view, high_qc)
+                }
+
+                fn sign_timeout_with_chain_id(
+                    &self,
+                    chain_id: ChainId,
+                    view: u64,
+                    high_qc: Option<&QuorumCertificate<[u8; 32]>>,
+                ) -> Result<Vec<u8>, SignError> {
+                    self.calls
+                        .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                    let result = self
+                        .inner
+                        .sign_timeout_with_chain_id(chain_id, view, high_qc);
+                    if result.is_ok() {
+                        self.successes
+                            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                    }
+                    result
+                }
+            }
+
+            let fixture = make_fixture(4);
+            let local = ValidatorId(0);
+            let mut engine = make_engine(local, 4);
             let mut view_state = ViewTimeoutState::new(engine.current_view(), 0);
             let mut stats = BinaryConsensusLoopInboundStats::default();
             let facade = CapturingFacade::new();
-            let mut backoff = ViewTimeoutBackoffState::no_growth(Some(1));
+            let mut backoff = ViewTimeoutBackoffState::new(Some(1), 2, 8).unwrap();
+            let view_state_before = (
+                view_state.last_observed_view,
+                view_state.last_observed_commits,
+                view_state.last_progress_tick,
+            );
+            let lock_before = engine
+                .locked_qc()
+                .map(|qc| (qc.view, qc.block_id));
+            let pacer_before = (
+                backoff.threshold(),
+                backoff.current_level(),
+                backoff.backoff_increases_total(),
+                backoff.backoff_resets_total(),
+                backoff.max_cap_hits_total(),
+            );
+            let outbound_before = facade.captured.lock().unwrap().len();
 
+            macro_rules! assert_refusal_unchanged {
+                () => {{
+                    assert_eq!(
+                        (
+                            backoff.threshold(),
+                            backoff.current_level(),
+                            backoff.backoff_increases_total(),
+                            backoff.backoff_resets_total(),
+                            backoff.max_cap_hits_total(),
+                        ),
+                        pacer_before
+                    );
+                    assert_eq!(
+                        (
+                            view_state.last_observed_view,
+                            view_state.last_observed_commits,
+                            view_state.last_progress_tick,
+                        ),
+                        view_state_before
+                    );
+                    assert_eq!(engine.current_view(), 0);
+                    assert_eq!(
+                        engine
+                            .locked_qc()
+                            .map(|qc| (qc.view, qc.block_id)),
+                        lock_before
+                    );
+                    assert!(!engine.timeout_emitted_in_view());
+                    assert_eq!(engine.timeout_accumulator().timeout_count(0), 0);
+                    assert_eq!(facade.captured.lock().unwrap().len(), outbound_before);
+                    assert_eq!(stats.view_timeouts_emitted, 0);
+                    assert_eq!(stats.timeout_certificates_formed, 0);
+                }};
+            }
+
+            // Absent verification context.
+            maybe_emit_view_timeout(
+                &mut engine, &mut view_state, 1, &mut backoff, false, Some(&facade), &mut stats,
+                None,
+            );
+            assert_refusal_unchanged!();
+
+            // Context exists, but no local signer is configured.
+            let missing_signer_ctx = make_ctx(&fixture, None);
             maybe_emit_view_timeout(
                 &mut engine,
                 &mut view_state,
@@ -11752,16 +11866,166 @@ mod tests {
                 false,
                 Some(&facade),
                 &mut stats,
-                None,
+                Some(&missing_signer_ctx),
+            );
+            assert_refusal_unchanged!();
+
+            // A signer configured for the local identity, but unable to sign.
+            let mut signer_failure_ctx = make_ctx(&fixture, None);
+            signer_failure_ctx.signer = Some(Arc::new(LocalKeySigner::new(
+                local,
+                TEST_SUITE_U16,
+                Arc::new(ValidatorSigningKey::new(vec![0])),
+            )));
+            maybe_emit_view_timeout(
+                &mut engine,
+                &mut view_state,
+                1,
+                &mut backoff,
+                false,
+                Some(&facade),
+                &mut stats,
+                Some(&signer_failure_ctx),
+            );
+            assert_refusal_unchanged!();
+
+            // A valid ML-DSA signer for the expected identity and suite, but
+            // backed by a different key from the configured verification key.
+            let (_wrong_public_key, wrong_secret_key) =
+                MlDsa44Backend::generate_keypair().expect("generate mismatch keypair");
+            let mut mismatch_ctx = make_ctx(&fixture, None);
+            mismatch_ctx.signer = Some(Arc::new(LocalKeySigner::new(
+                local,
+                TEST_SUITE_U16,
+                Arc::new(ValidatorSigningKey::new(wrong_secret_key)),
+            )));
+            let counting_signer = Arc::new(CountingSigner {
+                inner: mismatch_ctx.signer.take().unwrap(),
+                calls: std::sync::atomic::AtomicUsize::new(0),
+                successes: std::sync::atomic::AtomicUsize::new(0),
+            });
+            mismatch_ctx.signer = Some(counting_signer.clone());
+            maybe_emit_view_timeout(
+                &mut engine,
+                &mut view_state,
+                1,
+                &mut backoff,
+                false,
+                Some(&facade),
+                &mut stats,
+                Some(&mismatch_ctx),
+            );
+            assert_eq!(
+                counting_signer.calls.load(std::sync::atomic::Ordering::SeqCst),
+                1
+            );
+            assert_eq!(
+                counting_signer
+                    .successes
+                    .load(std::sync::atomic::Ordering::SeqCst),
+                1,
+                "valid signer returned a signature before self-verification rejected its configured-key mismatch"
+            );
+            assert_refusal_unchanged!();
+
+            assert_eq!(stats.outbound_timeout_signing_failure, 4);
+            assert_eq!(stats.outbound_timeout_signing_success, 0);
+
+            // Restore valid prerequisites and retry on the exact same
+            // engine, timeout state, pacer, and outbound facade.
+            let valid_ctx = make_ctx(&fixture, Some(local));
+            maybe_emit_view_timeout(
+                &mut engine,
+                &mut view_state,
+                1,
+                &mut backoff,
+                false,
+                Some(&facade),
+                &mut stats,
+                Some(&valid_ctx),
             );
 
-            assert_eq!(stats.outbound_timeout_signing_failure, 1);
-            assert_eq!(stats.outbound_timeout_signing_success, 0);
-            assert_eq!(stats.view_timeouts_emitted, 0);
-            assert_eq!(stats.timeout_certificates_formed, 0);
-            assert_eq!(backoff.current_level(), 0);
-            assert!(!engine.timeout_emitted_in_view());
-            assert!(facade.captured.lock().unwrap().is_empty());
+            assert_eq!(stats.outbound_timeout_signing_success, 1);
+            assert_eq!(stats.view_timeouts_emitted, 1);
+            assert!(engine.timeout_emitted_in_view());
+            assert_eq!(engine.current_view(), 0);
+            assert_eq!(
+                engine.locked_qc().map(|qc| (qc.view, qc.block_id)),
+                lock_before
+            );
+            assert_eq!(backoff.threshold(), Some(2));
+            assert_eq!(backoff.current_level(), 1);
+            assert_eq!(backoff.backoff_increases_total(), 1);
+            assert_eq!(backoff.backoff_resets_total(), 0);
+            assert_eq!(backoff.max_cap_hits_total(), 0);
+            assert!(matches!(
+                facade.captured.lock().unwrap().as_slice(),
+                [ConsensusNetMsg::Timeout(_)]
+            ));
+        }
+
+        #[test]
+        fn run422_mandatory_timeout_local_tc_invalid_evidence_refused() {
+            let fixture = make_fixture(4);
+            let ctx = make_ctx(&fixture, None);
+
+            let mut invalid_tc = build_valid_tc(&fixture, 0);
+            let mut invalid_signature = invalid_tc.signed_timeouts[0].signature.clone();
+            invalid_signature[0] ^= 1;
+            invalid_tc.signed_timeouts[0].set_signature(invalid_signature);
+
+            // This directly exercises the private locally-formed-TC helper;
+            // it is not evidence of a network-reachable attack. It verifies
+            // Timeout evidence only, not the constituent Votes of high_qc,
+            // current-authority freshness, or O4 publication.
+            let mut rejected_engine = make_engine(ValidatorId(0), 4);
+            let rejected_view = rejected_engine.current_view();
+            let rejected_lock = rejected_engine
+                .locked_qc()
+                .map(|qc| (qc.view, qc.block_id));
+            let mut rejected_stats = BinaryConsensusLoopInboundStats::default();
+            let rejected_facade = CapturingFacade::new();
+            apply_local_tc_and_broadcast_new_view(
+                &mut rejected_engine,
+                &invalid_tc,
+                &mut rejected_stats,
+                Some(&rejected_facade),
+                &ctx,
+            );
+            assert_eq!(rejected_stats.timeout_certificates_formed, 1);
+            assert_eq!(
+                rejected_stats.view_advances_due_to_verified_tc,
+                0,
+                "invalid timeout evidence must not authorize TC application"
+            );
+            assert_eq!(rejected_engine.current_view(), rejected_view);
+            assert_eq!(
+                rejected_engine
+                    .locked_qc()
+                    .map(|qc| (qc.view, qc.block_id)),
+                rejected_lock
+            );
+            assert!(rejected_facade.captured.lock().unwrap().is_empty());
+
+            // Positive control: the same private helper accepts a genuinely
+            // signed, evidence-bearing TC and publishes its NewView.
+            let valid_tc = build_valid_tc(&fixture, 0);
+            let mut accepted_engine = make_engine(ValidatorId(0), 4);
+            let mut accepted_stats = BinaryConsensusLoopInboundStats::default();
+            let accepted_facade = CapturingFacade::new();
+            apply_local_tc_and_broadcast_new_view(
+                &mut accepted_engine,
+                &valid_tc,
+                &mut accepted_stats,
+                Some(&accepted_facade),
+                &ctx,
+            );
+            assert_eq!(accepted_stats.view_advances_due_to_verified_tc, 1);
+            assert_eq!(accepted_engine.current_view(), valid_tc.timeout_view + 1);
+            assert!(matches!(
+                accepted_facade.captured.lock().unwrap().as_slice(),
+                [ConsensusNetMsg::NewView(_)]
+            ));
         }
 
         // -----------------------------------------------------------------
