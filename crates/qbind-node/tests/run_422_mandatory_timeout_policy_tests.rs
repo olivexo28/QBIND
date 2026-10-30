@@ -144,12 +144,16 @@ impl SupervisedChild {
                 return Ok(stderr);
             }
             if let Some(status) = self.observe_exit()? {
+                let final_stderr = self.stderr_snapshot();
+                if final_stderr.contains(marker) {
+                    return Ok(final_stderr);
+                }
                 return Err(io::Error::new(
                     io::ErrorKind::UnexpectedEof,
                     format!(
                         "child exited ({:?}) before marker {marker:?}; stderr:\n{}",
                         status.code(),
-                        self.stderr_snapshot()
+                        final_stderr
                     ),
                 ));
             }
