@@ -9,6 +9,7 @@ use super::super::{
     record::{CommittedAnchor, WireQc},
     validate::FixtureCommittedHistory,
 };
+pub(super) use super::super::record::LogicalQc;
 use super::*;
 use crate::pqc_trust_bundle::TrustBundleEnvironment;
 use qbind_consensus::{
@@ -23,9 +24,15 @@ use qbind_consensus::{
     BasicHotStuffEngine, ValidatorId,
 };
 use qbind_crypto::{ml_dsa44::MlDsa44Backend, ConsensusSigSuiteId, SUITE_PQ_RESERVED_1};
-use qbind_wire::{consensus::Vote, pv_signing_domain::ProposalVoteSigningDomainV2};
+use qbind_wire::{
+    consensus::{BlockProposal, Vote},
+    pv_signing_domain::ProposalVoteSigningDomainV2,
+};
 use std::{
+    alloc::{alloc, dealloc, Layout},
+    marker::PhantomData,
     mem::size_of,
+    ptr::NonNull,
     sync::atomic::{AtomicUsize, Ordering},
     time::Duration,
 };
@@ -33,9 +40,9 @@ use std::{
 const SIG: usize = qbind_crypto::ML_DSA_44_SIGNATURE_SIZE;
 const IDS: [[u8; 32]; 4] = [[0xA1; 32], [0xA2; 32], [0xA3; 32], [0xA4; 32]];
 
-struct Authority {
-    domain: ProposalVoteSigningDomainV2,
-    members: [(ValidatorId, u64, Vec<u8>); 4],
+pub(super) struct Authority {
+    pub(super) domain: ProposalVoteSigningDomainV2,
+    pub(super) members: [(ValidatorId, u64, Vec<u8>); 4],
     secrets: [Vec<u8>; 4],
 }
 
@@ -47,11 +54,15 @@ impl std::fmt::Debug for Authority {
 
 impl Authority {
     fn new() -> Self {
+        Self::new_for_wire_chain(7)
+    }
+
+    pub(super) fn new_for_wire_chain(wire_chain_id: u32) -> Self {
         let pairs = std::array::from_fn::<_, 4, _>(|_| MlDsa44Backend::generate_keypair().unwrap());
         let mut digest = Sha3_256::new();
         digest.update(b"RUN422-independent-received-QC-fixture-v1");
         digest.update(qbind_types::QBIND_DEVNET_CHAIN_ID.0.to_le_bytes());
-        digest.update(7u32.to_le_bytes());
+        digest.update(wire_chain_id.to_le_bytes());
         digest.update([0x71; 32]);
         digest.update(0u64.to_le_bytes());
         for (i, (pk, _)) in pairs.iter().enumerate() {
@@ -64,7 +75,7 @@ impl Authority {
         let commitment = digest.finalize().into();
         let domain = ProposalVoteSigningDomainV2::try_new(
             qbind_types::QBIND_DEVNET_CHAIN_ID,
-            7,
+            wire_chain_id,
             [0x71; 32],
             commitment,
         )
@@ -78,7 +89,7 @@ impl Authority {
         }
     }
 
-    fn pinned(&self) -> PinnedSafetyContext {
+    pub(super) fn pinned(&self) -> PinnedSafetyContext {
         PinnedSafetyContext {
             network_genesis_id: *self.domain.genesis_identity(),
             authority_context_ref: *self.domain.authority_commitment(),
@@ -151,7 +162,27 @@ impl Authority {
                 })
     }
 
-    fn verify_test_evidence(&self, wire: &WireQc) {
+    pub(super) fn sign_like_vote(&self, source: &Vote, index: usize) -> Vote {
+        let mut vote = source.clone();
+        vote.validator_index = index as u16;
+        vote.signature.clear();
+        vote.signature = MlDsa44Backend::sign(
+            &self.secrets[index],
+            &self.domain.vote_preimage(&vote),
+        )
+        .unwrap()
+        .into_boxed_slice()
+        .into_vec();
+        assert_eq!(vote.signature.len(), SIG);
+        assert_eq!(vote.signature.capacity(), SIG);
+        vote
+    }
+
+    pub(super) fn secret(&self, index: usize) -> &[u8] {
+        &self.secrets[index]
+    }
+
+    pub(super) fn verify_test_evidence(&self, wire: &WireQc) {
         let registry =
             SimpleBackendRegistry::with_backend(SUITE_PQ_RESERVED_1, Arc::new(MlDsa44Backend));
         assert!(
@@ -167,6 +198,25 @@ impl Authority {
             "domain-aware test evidence verification failed (redacted)"
         );
     }
+
+    pub(super) fn verified_test_evidence(
+        &self,
+        wire: &WireQc,
+    ) -> std::sync::Arc<qbind_consensus::qc_verify_domain::VerifiedQuorumCertificate> {
+        let registry =
+            SimpleBackendRegistry::with_backend(SUITE_PQ_RESERVED_1, Arc::new(MlDsa44Backend));
+        std::sync::Arc::new(
+            verify_quorum_certificate_with_domain(
+                wire,
+                &self.domain,
+                0,
+                &self.set(),
+                self,
+                &registry,
+            )
+            .expect("domain-aware verified test evidence (redacted)"),
+        )
+    }
 }
 
 impl SuiteAwareValidatorKeyProvider for Authority {
@@ -179,20 +229,24 @@ impl SuiteAwareValidatorKeyProvider for Authority {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Publication {
+pub(super) enum Publication {
     RefusedPreWrite,
     WriteFailedAmbiguous,
     UncertainDurable,
     DurableAcknowledged(u64),
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Refused {
+pub(super) enum Refused {
     Context,
     Loader,
     Revision,
     Lock,
     NonAdvancing,
     CandidatePressure,
+    CandidateWorkspacePressure,
+    CandidateShape,
+    CandidateLayout,
+    CandidateAllocation,
     O4Capacity,
     RecoveryRequired,
     PublicationChanged,
@@ -228,35 +282,51 @@ impl Effects {
 }
 
 // Field order is intentional: report/backing is destroyed before coverage.
-struct ModelResult {
-    route: Result<support::Report, support::Refusal>,
-    publication: Option<Publication>,
-    refused: Option<Refused>,
-    gate_calls: usize,
-    submitted: usize,
-    after_route: (u128, u128),
+pub(super) struct ModelResult {
+    pub(super) route: Result<support::Report, support::Refusal>,
+    pub(super) publication: Option<Publication>,
+    pub(super) refused: Option<Refused>,
+    pub(super) gate_calls: usize,
+    pub(super) submitted: usize,
+    pub(super) after_route: (u128, u128),
     _coverage: Reservation,
 }
 
+pub(super) fn retain_route(
+    result: ModelResult,
+) -> Result<support::Report, support::Refusal> {
+    // The returned report owns its independent consensus-ledger reservation.
+    // `result` keeps node-control coverage through this move/return conversion;
+    // the remaining ModelResult fields (including that lease) are dropped only
+    // as the converted route leaves this function.
+    result.route
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum AdmissionRefusal {
+pub(super) enum AdmissionRefusal {
     Capacity,
 }
 
 // Like the accepted leader-route admission: no token or large outcome is
 // transferred until this opaque owner has admitted the route's coverage.
-struct Admission<'owner> {
+pub(super) struct Admission<'owner> {
     owner: &'owner SafetyRecordOwner,
     coverage: Reservation,
 }
 
-fn admit_composition(owner: &SafetyRecordOwner) -> Result<Admission<'_>, AdmissionRefusal> {
+pub(super) fn admit_bridge_vote(
+    owner: &SafetyRecordOwner,
+) -> Result<Admission<'_>, AdmissionRefusal> {
     let coverage = owner
         .backend
         .accounting()
         .reserve(adapter_charge())
         .map_err(|_| AdmissionRefusal::Capacity)?;
     Ok(Admission { owner, coverage })
+}
+
+fn admit_composition(owner: &SafetyRecordOwner) -> Result<Admission<'_>, AdmissionRefusal> {
+    admit_bridge_vote(owner)
 }
 
 struct Gate<'o, 'g> {
@@ -300,20 +370,33 @@ impl Gate<'_, '_> {
             || wire.epoch != ctx.epoch
             || wire.suite_id != ctx.qc_suite_id
             || wire.signatures.len() != logical.signers.len()
-            || wire.signatures.iter().any(|sig| sig.len() != ctx.s_sig)
         {
-            return Err(Refused::Context);
+            return Err(Refused::CandidateShape);
         }
 
-        // Admit the caller-owned candidate before any candidate copy, including
-        // the loader interval. Early admission makes independent candidate
-        // pressure a pre-loader boundary, not a simulated allocation failure.
+        let signature_count = validate_candidate_shape(wire, logical, ctx)
+            .map_err(|_| Refused::CandidateShape)?;
+        let workspace_lease = self
+            .owner
+            .backend
+            .accounting()
+            .reserve(candidate_copy_workspace_charge())
+            .map_err(|_| Refused::CandidateWorkspacePressure)?;
+        let plan = CandidateCopyPlan::new(wire, signature_count, ctx)
+            .map_err(|_| Refused::CandidateLayout)?;
         let candidate_lease = self
             .owner
             .backend
             .accounting()
-            .reserve(candidate_charge(ctx))
+            .reserve(plan.candidate_charge)
             .map_err(|_| Refused::CandidatePressure)?;
+        let mut candidate_owner = CandidateCopyOwner::new(
+            plan,
+            candidate_lease,
+            workspace_lease,
+            self.owner.backend.accounting(),
+        );
+
         let current = self
             .owner
             .load_current_validated_locked(self.guard, Some(self.history))
@@ -345,21 +428,22 @@ impl Gate<'_, '_> {
         // Do NOT infer an anchor from the commit on_qc has not produced yet.
         drop(current);
 
-        // Before the only node-owned QC copy. This caller-owned candidate is
-        // not covered by O4's later working-set admission.
-        let candidate = LockedRecord {
-            lock_block_id: logical.block_id,
-            lock_view: logical.view,
-            evidence_lock_binding: [0; 32],
-            authority_context_ref: ctx.authority_context_ref,
-            committed_anchor: anchor,
-            predecessor_ref: Some(self.expected),
-            evidence: SupportingEvidence::QcDerived(wire.clone()),
-        };
+        candidate_owner
+            .copy_from(wire, logical, ctx, anchor, self.expected)
+            .map_err(|error| match error {
+                CandidateCopyError::Admission => Refused::CandidatePressure,
+                CandidateCopyError::Allocation => Refused::CandidateAllocation,
+                CandidateCopyError::Layout | CandidateCopyError::SourceChanged => {
+                    Refused::CandidateLayout
+                }
+            })?;
         self.submitted += 1;
         let result = self.owner.publish_locked_held(
             self.guard,
-            candidate,
+            candidate_owner
+                .candidate
+                .take()
+                .expect("candidate copy completed before O4"),
             self.expected,
             Some(self.history),
         );
@@ -376,16 +460,1079 @@ impl Gate<'_, '_> {
                 Publication::RefusedPreWrite
             }
         };
-        // O4 consumed and destroyed its candidate, then its working-set lease.
-        drop(candidate_lease);
+        // The builder retains both leases until O4 has destroyed the moved
+        // candidate and all temporary controls have been released.
+        drop(candidate_owner);
         Ok(outcome)
     }
 }
 
-fn candidate_charge(ctx: &PinnedSafetyContext) -> u128 {
+pub(super) fn copy_wire_qc_exact(
+    accountant: &super::super::accounting::SharedAccountant,
+    wire: &WireQc,
+    logical: &LogicalQc,
+    ctx: &PinnedSafetyContext,
+) -> Result<CopiedWireQcOwner, CandidateCopyError> {
+    let signature_count = validate_candidate_shape(wire, logical, ctx)?;
+    let workspace_lease = accountant
+        .reserve(candidate_copy_workspace_charge())
+        .map_err(|_| CandidateCopyError::Admission)?;
+    let plan = CandidateCopyPlan::new(wire, signature_count, ctx)?;
+    let output_charge = size_of::<Result<CopiedWireQcOwner, CandidateCopyError>>() as u128;
+    let inline_charge = (size_of::<LockedRecord>() as u128)
+        .max(size_of::<CoveredProposal>() as u128)
+        .max(output_charge);
+    let candidate_charge = inline_charge
+        .checked_add(plan.backing_charge)
+        .ok_or(CandidateCopyError::Layout)?;
+    let candidate_lease = accountant
+        .reserve(candidate_charge)
+        .map_err(|_| CandidateCopyError::Admission)?;
+    let mut owner = CandidateCopyOwner::new(plan, candidate_lease, workspace_lease, accountant);
+    owner.copy_from(wire, logical, ctx, None, 0)?;
+
+    let record = owner
+        .candidate
+        .take()
+        .ok_or(CandidateCopyError::Layout)?;
+    let SupportingEvidence::QcDerived(wire) = record.evidence else {
+        return Err(CandidateCopyError::Layout);
+    };
+    let coverage = owner
+        .candidate_lease
+        .take()
+        .ok_or(CandidateCopyError::Layout)?;
+    drop(owner);
+    Ok(CopiedWireQcOwner {
+        wire,
+        coverage,
+        backing_charge: plan.backing_charge,
+    })
+}
+
+const CANDIDATE_COPY_WORKSPACE_BYTES: u128 = 1024;
+const CANDIDATE_COPY_CONTROL_BYTES: usize =
+    size_of::<CandidateCopyOwner<'static>>()
+        - size_of::<Option<LockedRecord>>()
+        - 2 * size_of::<Option<Reservation>>()
+        + size_of::<CandidateCopyPlan>()
+        + size_of::<Result<CandidateCopyPlan, CandidateCopyError>>()
+        + 3 * size_of::<Result<Layout, std::alloc::LayoutError>>()
+        + size_of::<Result<NonNull<u8>, CandidateCopyError>>()
+        + size_of::<Result<ExactBuffer<Vec<u8>>, CandidateCopyError>>()
+        + size_of::<Result<(), CandidateCopyError>>()
+        + size_of::<ExactBuffer<Vec<u8>>>()
+        + size_of::<Layout>()
+        + 2 * size_of::<NonNull<u8>>()
+        + 3 * size_of::<Vec<u8>>()
+        + 2 * size_of::<Reservation>()
+        + size_of::<Option<CommittedAnchor>>()
+        + 8 * size_of::<usize>();
+const _: () = assert!(CANDIDATE_COPY_CONTROL_BYTES as u128 <= CANDIDATE_COPY_WORKSPACE_BYTES);
+
+#[derive(Clone, Copy)]
+struct CandidateCopyPlan {
+    bitmap_layout: Layout,
+    descriptors_layout: Layout,
+    signature_layout: Layout,
+    backing_charge: u128,
+    bitmap_len: usize,
+    signature_count: usize,
+    signature_len: usize,
+    candidate_charge: u128,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum CandidateCopyError {
+    Admission,
+    Layout,
+    Allocation,
+    SourceChanged,
+}
+
+fn validate_candidate_shape(
+    wire: &WireQc,
+    logical: &LogicalQc,
+    ctx: &PinnedSafetyContext,
+) -> Result<usize, CandidateCopyError> {
+    let count = logical.signers.len();
+    let bitmap_len =
+        usize::try_from(ctx.b_span()).map_err(|_| CandidateCopyError::SourceChanged)?;
+    if count == 0
+        || count > ctx.n()
+        || wire.version != 1
+        || wire.chain_id != ctx.chain_id
+        || wire.epoch != ctx.epoch
+        || wire.height != logical.view
+        || wire.block_id != logical.block_id
+        || wire.suite_id != ctx.qc_suite_id
+        || count != wire.signatures.len()
+        || wire.signer_bitmap.len() != bitmap_len
+        || wire.signer_bitmap.capacity() != wire.signer_bitmap.len()
+        || wire.signatures.capacity() != wire.signatures.len()
+        || wire.signatures.iter().any(|sig| {
+            sig.len() != ctx.s_sig || sig.capacity() != sig.len()
+        })
+    {
+        return Err(CandidateCopyError::SourceChanged);
+    }
+
+    for (index, signer) in logical.signers.iter().enumerate() {
+        let roster_index = ctx
+            .validators
+            .iter()
+            .position(|(member, _)| member == signer)
+            .ok_or(CandidateCopyError::SourceChanged)?;
+        if logical.signers[..index].contains(signer) {
+            return Err(CandidateCopyError::SourceChanged);
+        }
+        let byte = roster_index / 8;
+        let bit = roster_index % 8;
+        if wire
+            .signer_bitmap
+            .get(byte)
+            .map_or(true, |value| value & (1 << bit) == 0)
+        {
+            return Err(CandidateCopyError::SourceChanged);
+        }
+    }
+    for (byte_index, actual) in wire.signer_bitmap.iter().copied().enumerate() {
+        let mut expected = 0u8;
+        for (roster_index, (member, _)) in ctx.validators.iter().enumerate() {
+            if logical.signers.contains(member) && roster_index / 8 == byte_index {
+                expected |= 1 << (roster_index % 8);
+            }
+        }
+        if actual != expected {
+            return Err(CandidateCopyError::SourceChanged);
+        }
+    }
+    Ok(count)
+}
+
+impl CandidateCopyPlan {
+    fn new(
+        wire: &WireQc,
+        signature_count: usize,
+        ctx: &PinnedSafetyContext,
+    ) -> Result<Self, CandidateCopyError> {
+        let bitmap_len =
+            usize::try_from(ctx.b_span()).map_err(|_| CandidateCopyError::Layout)?;
+        let signature_len = ctx.s_sig;
+        let bitmap_layout =
+            Layout::array::<u8>(bitmap_len).map_err(|_| CandidateCopyError::Layout)?;
+        let descriptors_layout =
+            Layout::array::<Vec<u8>>(signature_count).map_err(|_| CandidateCopyError::Layout)?;
+        let signature_layout =
+            Layout::array::<u8>(signature_len).map_err(|_| CandidateCopyError::Layout)?;
+        let descriptor_bytes = signature_count
+            .checked_mul(size_of::<Vec<u8>>())
+            .ok_or(CandidateCopyError::Layout)?;
+        if bitmap_layout.size() != wire.signer_bitmap.len()
+            || descriptors_layout.size() != descriptor_bytes
+            || signature_layout.size() != signature_len
+            || bitmap_layout.size() == 0
+            || descriptors_layout.size() == 0
+            || signature_layout.size() == 0
+        {
+            return Err(CandidateCopyError::Layout);
+        }
+        let backing = bitmap_layout
+            .size()
+            .checked_add(descriptors_layout.size())
+            .and_then(|bytes| bytes.checked_add(signature_count.checked_mul(signature_layout.size())?))
+            .ok_or(CandidateCopyError::Layout)?;
+        let backing_charge =
+            u128::try_from(backing).map_err(|_| CandidateCopyError::Layout)?;
+        let candidate_charge = (size_of::<LockedRecord>() as u128)
+            .checked_add(backing_charge)
+            .ok_or(CandidateCopyError::Layout)?;
+        Ok(Self {
+            bitmap_layout,
+            descriptors_layout,
+            signature_layout,
+            backing_charge,
+            bitmap_len,
+            signature_count,
+            signature_len,
+            candidate_charge,
+        })
+    }
+}
+
+trait ExactBufferElement: Sized {
+    fn allocation_layout(capacity: usize) -> Result<Layout, CandidateCopyError>;
+}
+
+impl ExactBufferElement for u8 {
+    fn allocation_layout(capacity: usize) -> Result<Layout, CandidateCopyError> {
+        Layout::array::<u8>(capacity).map_err(|_| CandidateCopyError::Layout)
+    }
+}
+
+impl ExactBufferElement for Vec<u8> {
+    fn allocation_layout(capacity: usize) -> Result<Layout, CandidateCopyError> {
+        Layout::array::<Vec<u8>>(capacity).map_err(|_| CandidateCopyError::Layout)
+    }
+}
+
+fn validate_exact_layout<T: ExactBufferElement>(
+    supplied: Layout,
+    capacity: usize,
+) -> Result<Layout, CandidateCopyError> {
+    let expected = T::allocation_layout(capacity)?;
+    if expected != supplied || expected.size() == 0 || expected.size() > isize::MAX as usize {
+        return Err(CandidateCopyError::Layout);
+    }
+    Ok(expected)
+}
+
+struct ExactBuffer<T: ExactBufferElement> {
+    pointer: NonNull<T>,
+    layout: Option<Layout>,
+    initialized: usize,
+    capacity: usize,
+    marker: PhantomData<T>,
+}
+
+impl<T: ExactBufferElement> ExactBuffer<T> {
+    fn allocate(
+        layout: Layout,
+        capacity: usize,
+        workspace: &Reservation,
+        candidate: &Reservation,
+        accountant: &super::super::accounting::SharedAccountant,
+    ) -> Result<Self, CandidateCopyError> {
+        Self::allocate_with_workspace_charge(
+            layout,
+            capacity,
+            workspace,
+            candidate,
+            accountant,
+            candidate_copy_workspace_charge(),
+        )
+    }
+
+    fn allocate_with_workspace_charge(
+        layout: Layout,
+        capacity: usize,
+        workspace: &Reservation,
+        candidate: &Reservation,
+        accountant: &super::super::accounting::SharedAccountant,
+        expected_workspace_charge: u128,
+    ) -> Result<Self, CandidateCopyError> {
+        let layout = validate_exact_layout::<T>(layout, capacity)?;
+        if !workspace.is_issued_by(accountant)
+            || !candidate.is_issued_by(accountant)
+            || workspace.charge() != expected_workspace_charge
+        {
+            return Err(CandidateCopyError::Layout);
+        }
+        #[cfg(test)]
+        if candidate_copy_faults::fail_next_allocation() {
+            return Err(CandidateCopyError::Allocation);
+        }
+        // SAFETY: the checked nonzero layout is the exact allocation layout
+        // later used by `Drop` and by `into_vec`.
+        let raw = unsafe { alloc(layout) };
+        let pointer = NonNull::new(raw.cast::<T>()).ok_or(CandidateCopyError::Allocation)?;
+        Ok(Self {
+            pointer,
+            layout: Some(layout),
+            initialized: 0,
+            capacity,
+            marker: PhantomData,
+        })
+    }
+
+    fn push(&mut self, value: T) -> Result<(), T> {
+        if self.initialized == self.capacity {
+            return Err(value);
+        }
+        // SAFETY: `initialized < capacity`; the allocation is aligned for T,
+        // and this slot has not been initialized before.
+        unsafe { self.pointer.as_ptr().add(self.initialized).write(value) };
+        self.initialized += 1;
+        Ok(())
+    }
+
+    fn into_vec(mut self) -> Vec<T> {
+        assert_eq!(self.initialized, self.capacity);
+        let pointer = self.pointer.as_ptr();
+        let capacity = self.capacity;
+        self.initialized = 0;
+        self.capacity = 0;
+        self.layout = None;
+        std::mem::forget(self);
+        // SAFETY: allocation originated from the global allocator using the
+        // exact `Layout::array::<T>(capacity)` layout; all elements are
+        // initialized and ownership is transferred exactly once.
+        unsafe { Vec::from_raw_parts(pointer, capacity, capacity) }
+    }
+}
+
+impl<T: ExactBufferElement> Drop for ExactBuffer<T> {
+    fn drop(&mut self) {
+        if let Some(layout) = self.layout.take() {
+            // SAFETY: initialized is the exact initialized prefix, and layout
+            // is the original allocation layout.
+            unsafe {
+                std::ptr::drop_in_place(std::slice::from_raw_parts_mut(
+                    self.pointer.as_ptr(),
+                    self.initialized,
+                ));
+                dealloc(self.pointer.as_ptr().cast::<u8>(), layout);
+            }
+        }
+    }
+}
+
+const EXACT_VOTE_COPY_WORKSPACE_BYTES: u128 = 1024;
+const EXACT_VOTE_COPY_CONTROL_BYTES: usize =
+    size_of::<ExactBuffer<u8>>()
+        + 2 * size_of::<Reservation>()
+        + size_of::<Result<Layout, std::alloc::LayoutError>>()
+        + size_of::<Layout>()
+        + size_of::<Result<NonNull<u8>, CandidateCopyError>>()
+        + size_of::<Result<support::Token, &'static str>>()
+        + size_of::<Result<support::Token, ExactVoteCopyError>>()
+        + size_of::<&Vote>()
+        + size_of::<&[u8]>()
+        + size_of::<ValidatorId>()
+        + 8 * size_of::<usize>();
+const _: () = assert!(EXACT_VOTE_COPY_CONTROL_BYTES as u128 <= EXACT_VOTE_COPY_WORKSPACE_BYTES);
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum ExactVoteCopyError {
+    SourceShape,
+    Layout,
+    Allocation,
+    Admission,
+}
+
+/// Copy a complete captured Vote's journal signature into an exact destination,
+/// then hand the Vote directly to the independently charged verified-token
+/// admission. Storage coverage remains live until that transfer completes.
+pub(super) fn admit_exact_signed_vote(
+    accountant: &super::super::accounting::SharedAccountant,
+    engine: &mut BasicHotStuffEngine<[u8; 32]>,
+    from: ValidatorId,
+    source: &Vote,
+    signature: &[u8],
+    ctx: &PinnedSafetyContext,
+) -> Result<support::Token, ExactVoteCopyError> {
+    if !source.signature.is_empty()
+        || source.signature.capacity() != 0
+        || source.validator_index as u64 != from.as_u64()
+        || source.chain_id != ctx.chain_id
+        || source.epoch != ctx.epoch
+        || source.suite_id != ctx.qc_suite_id
+        || signature.len() != ctx.s_sig
+        || signature.is_empty()
+    {
+        return Err(ExactVoteCopyError::SourceShape);
+    }
+
+    let workspace = accountant
+        .reserve(EXACT_VOTE_COPY_WORKSPACE_BYTES)
+        .map_err(|_| ExactVoteCopyError::Admission)?;
+    let signature_layout =
+        Layout::array::<u8>(signature.len()).map_err(|_| ExactVoteCopyError::Layout)?;
+    if signature_layout.size() == 0 || signature_layout.size() > isize::MAX as usize {
+        return Err(ExactVoteCopyError::Layout);
+    }
+    let candidate_charge = (size_of::<Vote>() as u128)
+        .checked_add(signature_layout.size() as u128)
+        .ok_or(ExactVoteCopyError::Layout)?;
+    let candidate = accountant
+        .reserve(candidate_charge)
+        .map_err(|_| ExactVoteCopyError::Admission)?;
+
+    let mut signature_owner = ExactBuffer::allocate_with_workspace_charge(
+        signature_layout,
+        signature.len(),
+        &workspace,
+        &candidate,
+        accountant,
+        EXACT_VOTE_COPY_WORKSPACE_BYTES,
+    )
+    .map_err(|error| match error {
+        CandidateCopyError::Allocation => ExactVoteCopyError::Allocation,
+        CandidateCopyError::Admission => ExactVoteCopyError::Admission,
+        CandidateCopyError::Layout | CandidateCopyError::SourceChanged => {
+            ExactVoteCopyError::Layout
+        }
+    })?;
+    for byte in signature.iter().copied() {
+        signature_owner
+            .push(byte)
+            .map_err(|_| ExactVoteCopyError::Layout)?;
+        #[cfg(test)]
+        candidate_copy_faults::panic_after_transfer();
+    }
+    let signature = signature_owner.into_vec();
+    assert_eq!(signature.capacity(), signature.len());
+    let vote = Vote {
+        version: source.version,
+        chain_id: source.chain_id,
+        epoch: source.epoch,
+        height: source.height,
+        round: source.round,
+        step: source.step,
+        block_id: source.block_id,
+        validator_index: source.validator_index,
+        suite_id: source.suite_id,
+        signature,
+    };
+    let token = support::admit(engine, from, vote).map_err(|_| ExactVoteCopyError::Admission)?;
+    drop(candidate);
+    drop(workspace);
+    Ok(token)
+}
+
+struct CandidateCopyOwner<'a> {
+    candidate: Option<LockedRecord>,
+    bitmap: Option<ExactBuffer<u8>>,
+    descriptors: Option<ExactBuffer<Vec<u8>>>,
+    in_flight_signature: Option<ExactBuffer<u8>>,
+    plan: CandidateCopyPlan,
+    candidate_lease: Option<Reservation>,
+    workspace_lease: Option<Reservation>,
+    accountant: &'a super::super::accounting::SharedAccountant,
+}
+
+pub(super) struct CopiedWireQcOwner {
+    pub(super) wire: WireQc,
+    pub(super) coverage: Reservation,
+    backing_charge: u128,
+}
+
+pub(super) struct CoveredProposal {
+    pub(super) proposal: BlockProposal,
+    pub(super) _coverage: Reservation,
+}
+
+impl CoveredProposal {
+    pub(super) fn new(proposal: BlockProposal, copied: CopiedWireQcOwner) -> Self {
+        let needed = (size_of::<Self>() as u128)
+            .checked_add(copied.backing_charge)
+            .expect("covered Proposal layout is bounded");
+        assert!(
+            needed <= copied.coverage.charge(),
+            "exact proposal backing exceeds transferred coverage"
+        );
+        let mut proposal = proposal;
+        assert!(proposal.qc.is_none());
+        proposal.qc = Some(copied.wire);
+        Self {
+            proposal,
+            _coverage: copied.coverage,
+        }
+    }
+}
+
+impl std::ops::Deref for CoveredProposal {
+    type Target = BlockProposal;
+
+    fn deref(&self) -> &Self::Target {
+        &self.proposal
+    }
+}
+
+impl Drop for CoveredProposal {
+    fn drop(&mut self) {
+        drop(self.proposal.qc.take());
+    }
+}
+
+impl<'a> CandidateCopyOwner<'a> {
+    fn new(
+        plan: CandidateCopyPlan,
+        candidate_lease: Reservation,
+        workspace_lease: Reservation,
+        accountant: &'a super::super::accounting::SharedAccountant,
+    ) -> Self {
+        Self {
+            candidate: None,
+            bitmap: None,
+            descriptors: None,
+            in_flight_signature: None,
+            plan,
+            candidate_lease: Some(candidate_lease),
+            workspace_lease: Some(workspace_lease),
+            accountant,
+        }
+    }
+
+    fn copy_from(
+        &mut self,
+        wire: &WireQc,
+        logical: &LogicalQc,
+        ctx: &PinnedSafetyContext,
+        anchor: Option<CommittedAnchor>,
+        predecessor: u64,
+    ) -> Result<(), CandidateCopyError> {
+        if validate_candidate_shape(wire, logical, ctx)? != self.plan.signature_count {
+            return Err(CandidateCopyError::SourceChanged);
+        }
+        let workspace = self.workspace_lease.as_ref().unwrap();
+        let candidate = self.candidate_lease.as_ref().unwrap();
+        self.bitmap = Some(ExactBuffer::allocate(
+            self.plan.bitmap_layout,
+            self.plan.bitmap_len,
+            workspace,
+            candidate,
+            self.accountant,
+        )?);
+        self.descriptors = Some(ExactBuffer::allocate(
+            self.plan.descriptors_layout,
+            self.plan.signature_count,
+            workspace,
+            candidate,
+            self.accountant,
+        )?);
+        for byte in wire.signer_bitmap.iter().copied() {
+            self.bitmap.as_mut().unwrap().push(byte).map_err(|_| CandidateCopyError::Layout)?;
+            #[cfg(test)]
+            candidate_copy_faults::panic_after_transfer();
+        }
+        for source_signature in &wire.signatures {
+            self.in_flight_signature = Some(ExactBuffer::allocate(
+                self.plan.signature_layout,
+                self.plan.signature_len,
+                workspace,
+                candidate,
+                self.accountant,
+            )?);
+            for byte in source_signature.iter().copied() {
+                self.in_flight_signature
+                    .as_mut()
+                    .unwrap()
+                    .push(byte)
+                    .map_err(|_| CandidateCopyError::Layout)?;
+                #[cfg(test)]
+                candidate_copy_faults::panic_after_transfer();
+            }
+            let signature = self.in_flight_signature.take().unwrap().into_vec();
+            self.descriptors
+                .as_mut()
+                .unwrap()
+                .push(signature)
+                .map_err(|signature| {
+                    drop(signature);
+                    CandidateCopyError::Layout
+                })?;
+            #[cfg(test)]
+            candidate_copy_faults::panic_after_transfer();
+        }
+        let signer_bitmap = self.bitmap.take().unwrap().into_vec();
+        let signatures = self.descriptors.take().unwrap().into_vec();
+        self.candidate = Some(LockedRecord {
+            lock_block_id: logical.block_id,
+            lock_view: logical.view,
+            evidence_lock_binding: [0; 32],
+            authority_context_ref: ctx.authority_context_ref,
+            committed_anchor: anchor,
+            predecessor_ref: Some(predecessor),
+            evidence: SupportingEvidence::QcDerived(WireQc {
+                version: wire.version,
+                chain_id: wire.chain_id,
+                epoch: wire.epoch,
+                height: wire.height,
+                round: wire.round,
+                step: wire.step,
+                block_id: wire.block_id,
+                suite_id: wire.suite_id,
+                signer_bitmap,
+                signatures,
+            }),
+        });
+        Ok(())
+    }
+}
+
+fn candidate_copy_workspace_charge() -> u128 {
+    CANDIDATE_COPY_WORKSPACE_BYTES
+}
+
+fn candidate_charge(ctx: &PinnedSafetyContext, signature_count: usize) -> u128 {
     size_of::<LockedRecord>() as u128
         + ctx.b_span()
-        + ctx.n() as u128 * (size_of::<Vec<u8>>() + ctx.s_sig) as u128
+        + signature_count as u128 * (size_of::<Vec<u8>>() as u128 + ctx.s_sig as u128)
+}
+
+pub(super) fn admit_o4_pressure_for_bridge(owner: &SafetyRecordOwner) -> Reservation {
+    let ctx = owner.pinned();
+    let aggregate = owner.backend.accounting_aggregate_current();
+    let cap = owner
+        .backend
+        .accounting_aggregate_cap()
+        .expect("bridge fixture has an aggregate ceiling");
+    let r = max_safety_record_bytes(ctx).expect("profile record bound");
+    let g = max_retained_generation_bytes(ctx, size_of_timeout_msg())
+        .expect("profile generation bound");
+    let t = max_transient_decoded_working_set(ctx).expect("profile transient bound");
+    let loader = owner
+        .retained_holder_charge()
+        .expect("retained-holder charge")
+        + t.saturating_sub(g)
+        + r;
+    let leave = adapter_charge()
+        + candidate_copy_workspace_charge()
+        + candidate_charge(ctx, 3)
+        + loader;
+    let pressure = cap
+        .checked_sub(aggregate)
+        .and_then(|remaining| remaining.checked_sub(leave))
+        .expect("three-signature pre-O4 phase fits the shared ceiling");
+    owner
+        .backend
+        .accounting()
+        .reserve(pressure)
+        .expect("admit pressure leaving only the three-signature pre-O4 phase")
+}
+
+#[cfg(test)]
+mod candidate_copy_faults {
+    use std::cell::RefCell;
+
+    #[derive(Default)]
+    struct Faults {
+        allocations: usize,
+        fail_allocation: Option<usize>,
+        transfers: usize,
+        panic_transfer: Option<usize>,
+    }
+
+    thread_local! {
+        static FAULTS: RefCell<Faults> = RefCell::new(Faults::default());
+    }
+
+    pub(super) fn arm(fail_allocation: Option<usize>, panic_transfer: Option<usize>) {
+        FAULTS.with(|faults| {
+            *faults.borrow_mut() = Faults {
+                allocations: 0,
+                fail_allocation,
+                transfers: 0,
+                panic_transfer,
+            };
+        });
+    }
+
+    pub(super) fn disarm() -> (usize, usize) {
+        FAULTS.with(|faults| {
+            let mut faults = faults.borrow_mut();
+            let counts = (faults.allocations, faults.transfers);
+            *faults = Faults::default();
+            counts
+        })
+    }
+
+    pub(super) fn fail_next_allocation() -> bool {
+        FAULTS.with(|faults| {
+            let mut faults = faults.borrow_mut();
+            faults.allocations += 1;
+            faults.fail_allocation == Some(faults.allocations)
+        })
+    }
+
+    pub(super) fn panic_after_transfer() {
+        FAULTS.with(|faults| {
+            let mut faults = faults.borrow_mut();
+            faults.transfers += 1;
+            if faults.panic_transfer == Some(faults.transfers) {
+                panic!("injected candidate-copy unwind");
+            }
+        });
+    }
+}
+
+#[cfg(test)]
+mod candidate_copy_tests {
+    use super::*;
+    use crate::safety_record_store::accounting::{AggregateAuthority, SharedAccountant};
+
+    fn context() -> PinnedSafetyContext {
+        PinnedSafetyContext {
+            network_genesis_id: [1; 32],
+            authority_context_ref: [2; 32],
+            chain_id: 7,
+            epoch: 0,
+            qc_suite_id: 9,
+            timeout_suite_id: 10,
+            s_sig: 8,
+            validators: (0..4).map(|id| (ValidatorId(id), 1)).collect(),
+            require_height_equals_round: false,
+        }
+    }
+
+    fn source(count: usize) -> (WireQc, LogicalQc) {
+        let mut bitmap = vec![0; 1];
+        let mut signatures = Vec::with_capacity(count);
+        let mut signers = Vec::with_capacity(count);
+        for index in 0..count {
+            bitmap[0] |= 1 << index;
+            signers.push(ValidatorId(index as u64));
+            let mut signature = Vec::with_capacity(8);
+            signature.extend_from_slice(&[index as u8; 8]);
+            signatures.push(signature);
+        }
+        (
+            WireQc {
+                version: 1,
+                chain_id: 7,
+                epoch: 0,
+                height: 3,
+                round: 9,
+                step: 0,
+                block_id: [3; 32],
+                suite_id: 9,
+                signer_bitmap: bitmap,
+                signatures,
+            },
+            LogicalQc::new([3; 32], 3, signers),
+        )
+    }
+
+    fn accountant(ctx: &PinnedSafetyContext) -> SharedAccountant {
+        let accountant = SharedAccountant::new(AggregateAuthority::new());
+        accountant.bind_aggregate(32_768).unwrap();
+        accountant.bind(ctx, 32_768).unwrap();
+        accountant
+    }
+
+    fn make_owner<'a>(
+        ctx: &PinnedSafetyContext,
+        wire: &WireQc,
+        logical: &LogicalQc,
+        accountant: &'a SharedAccountant,
+    ) -> CandidateCopyOwner<'a> {
+        let count = validate_candidate_shape(wire, logical, ctx).unwrap();
+        let plan = CandidateCopyPlan::new(wire, count, ctx).unwrap();
+        let workspace = accountant
+            .reserve(candidate_copy_workspace_charge())
+            .unwrap();
+        let candidate = accountant.reserve(plan.candidate_charge).unwrap();
+        CandidateCopyOwner::new(plan, candidate, workspace, accountant)
+    }
+
+    fn finish_copy(owner: &mut CandidateCopyOwner<'_>, wire: &WireQc, logical: &LogicalQc, ctx: &PinnedSafetyContext) {
+        owner.copy_from(wire, logical, ctx, None, 0).unwrap();
+    }
+
+    #[test]
+    fn three_and_four_signature_copies_have_exact_backings_and_preserve_sources() {
+        for count in [3, 4] {
+            let ctx = context();
+            let (wire, logical) = source(count);
+            let source_bitmap = (wire.signer_bitmap.as_ptr(), wire.signer_bitmap.capacity(), wire.signer_bitmap.clone());
+            let source_signatures = wire.signatures.iter()
+                .map(|signature| (signature.as_ptr(), signature.capacity(), signature.clone()))
+                .collect::<Vec<_>>();
+            let accountant = accountant(&ctx);
+            let mut owner = make_owner(&ctx, &wire, &logical, &accountant);
+            let expected = size_of::<LockedRecord>() as u128 + 1 + count as u128 * (24 + 8);
+            assert_eq!(owner.plan.candidate_charge, expected);
+            finish_copy(&mut owner, &wire, &logical, &ctx);
+            let locked = owner.candidate.as_ref().unwrap();
+            let SupportingEvidence::QcDerived(copy) = &locked.evidence else { panic!("QC"); };
+            assert_eq!((copy.signer_bitmap.len(), copy.signer_bitmap.capacity()), (1, 1));
+            assert_eq!((copy.signatures.len(), copy.signatures.capacity()), (count, count));
+            for signature in &copy.signatures {
+                assert_eq!((signature.len(), signature.capacity()), (8, 8));
+            }
+            assert_eq!((wire.signer_bitmap.as_ptr(), wire.signer_bitmap.capacity(), wire.signer_bitmap.clone()), source_bitmap);
+            for (actual, (pointer, capacity, bytes)) in wire.signatures.iter().zip(source_signatures) {
+                assert_eq!((actual.as_ptr(), actual.capacity(), actual.clone()), (pointer, capacity, bytes));
+            }
+            let counts = candidate_copy_faults::disarm();
+            assert_eq!(counts.0, count + 2);
+            drop(owner);
+            assert_eq!(accountant.current(), 0);
+        }
+    }
+
+    #[test]
+    fn exact_proposal_qc_copy_transfers_coverage_with_the_backing() {
+        let ctx = context();
+        let (wire, logical) = source(3);
+        let source_bitmap = (wire.signer_bitmap.as_ptr(), wire.signer_bitmap.capacity());
+        let source_signatures = wire.signatures.iter()
+            .map(|signature| (signature.as_ptr(), signature.capacity(), signature.clone()))
+            .collect::<Vec<_>>();
+        let accountant = accountant(&ctx);
+        let copied = copy_wire_qc_exact(&accountant, &wire, &logical, &ctx).unwrap();
+        let backing = 1 + 3 * (24 + 8);
+        let inline = (size_of::<LockedRecord>() as u128)
+            .max(size_of::<CoveredProposal>() as u128)
+            .max(size_of::<Result<CopiedWireQcOwner, CandidateCopyError>>() as u128);
+        assert_eq!(copied.coverage.charge(), inline + backing);
+        assert_eq!((copied.wire.signer_bitmap.len(), copied.wire.signer_bitmap.capacity()), (1, 1));
+        assert_eq!((copied.wire.signatures.len(), copied.wire.signatures.capacity()), (3, 3));
+        for signature in &copied.wire.signatures {
+            assert_eq!((signature.len(), signature.capacity()), (8, 8));
+        }
+        assert_eq!(
+            (wire.signer_bitmap.as_ptr(), wire.signer_bitmap.capacity()),
+            source_bitmap
+        );
+        for (actual, (pointer, capacity, bytes)) in wire.signatures.iter().zip(source_signatures) {
+            assert_eq!((actual.as_ptr(), actual.capacity(), actual.clone()), (pointer, capacity, bytes));
+        }
+        drop(copied);
+        assert_eq!(accountant.current(), 0);
+    }
+
+    #[test]
+    fn admission_refusal_precedes_destination_allocation_and_zero_layout_is_refused() {
+        let ctx = context();
+        let (wire, logical) = source(3);
+        let accountant = accountant(&ctx);
+        let full = accountant.reserve(32_768).unwrap();
+        candidate_copy_faults::arm(None, None);
+        assert!(matches!(
+            copy_wire_qc_exact(&accountant, &wire, &logical, &ctx),
+            Err(CandidateCopyError::Admission)
+        ));
+        assert_eq!(candidate_copy_faults::disarm().0, 0);
+        drop(full);
+
+        let workspace_only = accountant.reserve(32_768 - candidate_copy_workspace_charge()).unwrap();
+        candidate_copy_faults::arm(None, None);
+        assert!(matches!(
+            copy_wire_qc_exact(&accountant, &wire, &logical, &ctx),
+            Err(CandidateCopyError::Admission)
+        ));
+        assert_eq!(candidate_copy_faults::disarm().0, 0);
+        assert_eq!(accountant.current(), workspace_only.charge());
+        drop(workspace_only);
+
+        candidate_copy_faults::arm(None, None);
+        let invalid = Layout::array::<u8>(0).unwrap();
+        assert!(matches!(
+            ExactBuffer::<u8>::allocate(
+                invalid,
+                0,
+                &accountant.reserve(candidate_copy_workspace_charge()).unwrap(),
+                &accountant.reserve(candidate_charge(&ctx, 3)).unwrap(),
+                &accountant,
+            ),
+            Err(CandidateCopyError::Layout)
+        ));
+        assert_eq!(
+            validate_exact_layout::<u8>(Layout::array::<u8>(8).unwrap(), 9),
+            Err(CandidateCopyError::Layout),
+            "byte allocation rejects a size/capacity mismatch before allocation"
+        );
+        assert_eq!(
+            validate_exact_layout::<Vec<u8>>(
+                Layout::array::<Vec<u8>>(2).unwrap(),
+                3,
+            ),
+            Err(CandidateCopyError::Layout),
+            "descriptor allocation rejects a size/capacity mismatch before allocation"
+        );
+        assert_eq!(
+            validate_exact_layout::<Vec<u8>>(
+                Layout::from_size_align(
+                    Layout::array::<Vec<u8>>(2).unwrap().size(),
+                    1,
+                )
+                .unwrap(),
+                2,
+            ),
+            Err(CandidateCopyError::Layout),
+            "descriptor allocation rejects incorrect alignment before allocation"
+        );
+        assert!(Layout::array::<Vec<u8>>(usize::MAX).is_err());
+        assert_eq!(candidate_copy_faults::disarm().0, 0);
+        assert_eq!(validate_candidate_shape(&wire, &logical, &ctx), Ok(3));
+    }
+
+    #[test]
+    fn invalid_source_shape_is_rejected_before_workspace_or_copy() {
+        let ctx = context();
+        let (mut wire, logical) = source(3);
+        wire.height += 1;
+        let accountant = accountant(&ctx);
+        candidate_copy_faults::arm(None, None);
+        assert!(matches!(
+            copy_wire_qc_exact(&accountant, &wire, &logical, &ctx),
+            Err(CandidateCopyError::SourceChanged)
+        ));
+        assert_eq!(candidate_copy_faults::disarm(), (0, 0));
+        assert_eq!(accountant.current(), 0);
+    }
+
+    #[test]
+    fn three_signature_candidate_fits_while_valid_four_signature_is_capacity_refused() {
+        let ctx = context();
+        let (three_wire, three_logical) = source(3);
+        let (four_wire, four_logical) = source(4);
+        let accountant = accountant(&ctx);
+        let three_count = validate_candidate_shape(&three_wire, &three_logical, &ctx).unwrap();
+        let three_plan = CandidateCopyPlan::new(&three_wire, three_count, &ctx).unwrap();
+        let three_inline = (size_of::<LockedRecord>() as u128)
+            .max(size_of::<CoveredProposal>() as u128)
+            .max(size_of::<Result<CopiedWireQcOwner, CandidateCopyError>>() as u128);
+        let three_charge = three_inline + three_plan.backing_charge;
+        let occupied = accountant
+            .reserve(32_768 - candidate_copy_workspace_charge() - three_charge)
+            .unwrap();
+
+        let three = copy_wire_qc_exact(&accountant, &three_wire, &three_logical, &ctx)
+            .expect("three-signature candidate fits exact remaining coverage");
+        assert_eq!(accountant.current(), occupied.charge() + three_charge);
+        assert_eq!(three.wire.signatures.len(), 3);
+        drop(three);
+        assert_eq!(accountant.current(), occupied.charge());
+
+        candidate_copy_faults::arm(None, None);
+        assert!(matches!(
+            copy_wire_qc_exact(&accountant, &four_wire, &four_logical, &ctx),
+            Err(CandidateCopyError::Admission)
+        ), "complete four-signature evidence is refused for capacity, not invalidated");
+        assert_eq!(candidate_copy_faults::disarm().0, 0);
+        assert_eq!(accountant.current(), occupied.charge());
+        drop(occupied);
+        assert_eq!(accountant.current(), 0);
+    }
+
+    #[test]
+    fn every_destination_allocation_failure_releases_candidate_and_workspace() {
+        let ctx = context();
+        for count in [3, 4] {
+            let (wire, logical) = source(count);
+            for ordinal in 1..=count + 2 {
+                let accountant = accountant(&ctx);
+                let mut owner = make_owner(&ctx, &wire, &logical, &accountant);
+                candidate_copy_faults::arm(Some(ordinal), None);
+                assert_eq!(
+                    owner.copy_from(&wire, &logical, &ctx, None, 0),
+                    Err(CandidateCopyError::Allocation)
+                );
+                let counts = candidate_copy_faults::disarm();
+                assert_eq!(counts.0, ordinal);
+                drop(owner);
+                assert_eq!(accountant.current(), 0);
+            }
+        }
+    }
+
+    #[test]
+    fn partial_initialization_and_unwind_drop_each_allocation_once() {
+        let ctx = context();
+        let (wire, logical) = source(3);
+        for transfer in 1..=28 {
+            let accountant = accountant(&ctx);
+            candidate_copy_faults::arm(None, Some(transfer));
+            let unwind = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                let mut owner = make_owner(&ctx, &wire, &logical, &accountant);
+                let _ = owner.copy_from(&wire, &logical, &ctx, None, 0);
+            }));
+            let counts = candidate_copy_faults::disarm();
+            assert!(unwind.is_err(), "transfer injection {transfer} was not reached");
+            assert_eq!(counts.1, transfer);
+            assert_eq!(accountant.current(), 0);
+        }
+    }
+
+    #[test]
+    fn control_inventory_fits_the_admitted_workspace() {
+        let controls = CANDIDATE_COPY_CONTROL_BYTES;
+        assert!(controls as u128 <= candidate_copy_workspace_charge(), "{controls}");
+        assert!(
+            EXACT_VOTE_COPY_CONTROL_BYTES as u128 <= EXACT_VOTE_COPY_WORKSPACE_BYTES
+        );
+        println!(
+            "candidate-copy controls={controls} workspace={} owner={} plan={} exact-byte={} exact-descriptors={} allocation-result={} exact-buffer-result={} into-vec-receiver={} candidate={}; exact-vote controls={} workspace={}",
+            candidate_copy_workspace_charge(),
+            size_of::<CandidateCopyOwner<'static>>(),
+            size_of::<CandidateCopyPlan>(),
+            size_of::<ExactBuffer<u8>>(),
+            size_of::<ExactBuffer<Vec<u8>>>(),
+            size_of::<Result<NonNull<u8>, CandidateCopyError>>(),
+            size_of::<Result<ExactBuffer<Vec<u8>>, CandidateCopyError>>(),
+            size_of::<ExactBuffer<Vec<u8>>>(),
+            size_of::<LockedRecord>(),
+            EXACT_VOTE_COPY_CONTROL_BYTES,
+            EXACT_VOTE_COPY_WORKSPACE_BYTES,
+        );
+    }
+
+    #[test]
+    fn exact_local_vote_copy_is_covered_until_verified_token_transfer() {
+        let authority = Authority::new();
+        let ctx = authority.pinned();
+        let accountant = accountant(&ctx);
+        let mut engine = BasicHotStuffEngine::new(ValidatorId(0), authority.set());
+        support::install(&mut engine, &authority.domain, 0, &authority.members);
+
+        let signed_source = authority.vote(1, 1, 1);
+        let source_signature = signed_source.signature.clone();
+        let source = Vote {
+            version: signed_source.version,
+            chain_id: signed_source.chain_id,
+            epoch: signed_source.epoch,
+            height: signed_source.height,
+            round: signed_source.round,
+            step: signed_source.step,
+            block_id: signed_source.block_id,
+            validator_index: signed_source.validator_index,
+            suite_id: signed_source.suite_id,
+            signature: Vec::new(),
+        };
+        assert_eq!(source.signature.capacity(), 0);
+
+        candidate_copy_faults::arm(Some(1), None);
+        assert!(matches!(
+            admit_exact_signed_vote(
+                &accountant,
+                &mut engine,
+                ValidatorId(1),
+                &source,
+                &source_signature,
+                &ctx,
+            ),
+            Err(ExactVoteCopyError::Allocation)
+        ));
+        assert_eq!(candidate_copy_faults::disarm(), (1, 0));
+        assert_eq!(accountant.current(), 0);
+
+        candidate_copy_faults::arm(None, Some(1));
+        let unwind = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _ = admit_exact_signed_vote(
+                &accountant,
+                &mut engine,
+                ValidatorId(1),
+                &source,
+                &source_signature,
+                &ctx,
+            );
+        }));
+        assert!(unwind.is_err());
+        assert_eq!(candidate_copy_faults::disarm(), (1, 1));
+        assert_eq!(accountant.current(), 0);
+
+        let before = support::ledger(&engine).sample();
+        let token = admit_exact_signed_vote(
+            &accountant,
+            &mut engine,
+            ValidatorId(1),
+            &source,
+            &source_signature,
+            &ctx,
+        )
+        .unwrap();
+        assert_eq!(accountant.current(), 0, "storage coverage releases only after token admission");
+        assert_eq!(token.vote().signature.capacity(), SIG);
+        assert_eq!(token.vote().signature.as_slice(), source_signature);
+        assert_eq!(source_signature.capacity(), SIG);
+        assert_eq!(source.signature.capacity(), 0);
+        assert!(support::ledger(&engine).sample().0 > before.0);
+        drop(token);
+        assert_eq!(support::ledger(&engine).sample(), before);
+    }
 }
 
 // Source-derived inventory, NOT physical memory inferred from reservation sums.
@@ -414,9 +1561,14 @@ fn adapter_phase_charges() -> (u128, u128, u128) {
         + size_of::<Reservation>();
     // Both complete owner layouts include their route and coverage. The
     // partially consumed admission is bounded separately during conversion.
-    let returned = 2 * size_of::<ModelResult>()
+    let returned = (2 * size_of::<ModelResult>()
         + size_of::<Admission<'static>>()
-        + size_of::<StorageSnapshot>();
+        + size_of::<StorageSnapshot>())
+        .max(
+            size_of::<ModelResult>()
+                + size_of::<Result<support::Report, support::Refusal>>()
+                + size_of::<Result<ModelResult, AdmissionRefusal>>(),
+        );
     (admission as u128, invocation as u128, returned as u128)
 }
 
@@ -425,8 +1577,19 @@ fn adapter_charge() -> u128 {
     admission.max(invocation).max(returned)
 }
 
+pub(super) fn invoke_bridge_vote(
+    admission: Admission<'_>,
+    engine: &mut BasicHotStuffEngine<[u8; 32]>,
+    authority: &Authority,
+    token: support::Token,
+    expected: u64,
+    history: &FixtureCommittedHistory,
+) -> ModelResult {
+    admission.invoke(engine, authority, token, expected, history)
+}
+
 impl Admission<'_> {
-    fn invoke(
+    pub(super) fn invoke(
         self,
         engine: &mut BasicHotStuffEngine<[u8; 32]>,
         authority: &Authority,
@@ -476,8 +1639,8 @@ impl Admission<'_> {
 
 // Recovery retains the actual failed report (including its consensus-charged
 // staged certificate), rather than reconstructing an attempt from QC identity.
-struct Interrupted<'a> {
-    result: InterruptedRoute,
+pub(super) struct Interrupted<'a> {
+    pub(super) result: InterruptedRoute,
     predecessor: Predecessor,
     authority: &'a Authority,
     history: &'a FixtureCommittedHistory,
@@ -486,10 +1649,10 @@ struct Interrupted<'a> {
     _coverage: Reservation,
 }
 
-struct InterruptedRoute {
-    route: Result<support::Report, support::Refusal>,
-    publication: Option<Publication>,
-    submitted: usize,
+pub(super) struct InterruptedRoute {
+    pub(super) route: Result<support::Report, support::Refusal>,
+    pub(super) publication: Option<Publication>,
+    pub(super) submitted: usize,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -520,12 +1683,12 @@ impl Predecessor {
     }
 }
 
-struct InterruptionAdmission<'a> {
+pub(super) struct InterruptionAdmission<'a> {
     route: Admission<'a>,
     coverage: Reservation,
 }
 
-fn interruption_charge() -> u128 {
+pub(super) fn interruption_charge() -> u128 {
     // Separate from the unchanged adapter charge. Includes both conversion
     // slots and the pre-call snapshot; all backing remains in the charged report.
     (2 * size_of::<Interrupted<'static>>()
@@ -535,7 +1698,7 @@ fn interruption_charge() -> u128 {
         + size_of::<Predecessor>()) as u128
 }
 
-fn admit_interruption(
+pub(super) fn admit_interruption(
     owner: &SafetyRecordOwner,
 ) -> Result<InterruptionAdmission<'_>, AdmissionRefusal> {
     let coverage = owner
@@ -543,12 +1706,12 @@ fn admit_interruption(
         .accounting()
         .reserve(interruption_charge())
         .map_err(|_| AdmissionRefusal::Capacity)?;
-    let route = admit_composition(owner)?;
+    let route = admit_bridge_vote(owner)?;
     Ok(InterruptionAdmission { route, coverage })
 }
 
 impl InterruptionAdmission<'_> {
-    fn invoke<'a>(
+    pub(super) fn invoke<'a>(
         self,
         engine: &mut BasicHotStuffEngine<[u8; 32]>,
         authority: &'a Authority,
@@ -588,28 +1751,28 @@ impl InterruptionAdmission<'_> {
     }
 }
 
-struct RecoveryAdmission<'a> {
+pub(super) struct RecoveryAdmission<'a> {
     owner: &'a SafetyRecordOwner,
     coverage: Reservation,
 }
 
 // A borrowed, private model owner, not a certificate-verification capability.
 // Neither the original attempt nor the genuine O3 proof is copied or consumed.
-struct Acknowledged<'a> {
+pub(super) struct Acknowledged<'a> {
     attempt: &'a Interrupted<'a>,
     proof: &'a ValidatedRecord,
     _coverage: Reservation,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum RecoveryOutcome {
+pub(super) enum RecoveryOutcome {
     AttemptMismatch,
     RefusedPreWrite,
     WriteFailedAmbiguous,
     UncertainDurable,
 }
 
-fn recovery_charge() -> u128 {
+pub(super) fn recovery_charge() -> u128 {
     (2 * size_of::<RecoveryAdmission<'static>>()
         + size_of::<Result<RecoveryAdmission<'static>, AdmissionRefusal>>()
         + 2 * size_of::<Result<Acknowledged<'static>, RecoveryOutcome>>()
@@ -620,7 +1783,9 @@ fn recovery_charge() -> u128 {
         + size_of::<Result<Reservation, SafetyStoreError>>()) as u128
 }
 
-fn admit_recovery(owner: &SafetyRecordOwner) -> Result<RecoveryAdmission<'_>, AdmissionRefusal> {
+pub(super) fn admit_recovery(
+    owner: &SafetyRecordOwner,
+) -> Result<RecoveryAdmission<'_>, AdmissionRefusal> {
     let coverage = owner
         .backend
         .accounting()
@@ -639,8 +1804,26 @@ fn stored_qc(proof: &ValidatedRecord) -> Option<&WireQc> {
     }
 }
 
+pub(super) fn proof_contains_wire_qc(
+    proof: &ValidatedRecord,
+    wire: &qbind_wire::consensus::QuorumCertificate,
+) -> bool {
+    stored_qc(proof).is_some_and(|stored| {
+        stored.version == wire.version
+            && stored.chain_id == wire.chain_id
+            && stored.epoch == wire.epoch
+            && stored.height == wire.height
+            && stored.round == wire.round
+            && stored.step == wire.step
+            && stored.block_id == wire.block_id
+            && stored.suite_id == wire.suite_id
+            && stored.signer_bitmap == wire.signer_bitmap
+            && stored.signatures == wire.signatures
+    })
+}
+
 impl RecoveryAdmission<'_> {
-    fn acknowledge<'a>(
+    pub(super) fn acknowledge<'a>(
         self,
         attempt: &'a Interrupted<'a>,
         proof: &'a ValidatedRecord,
@@ -669,7 +1852,7 @@ impl RecoveryAdmission<'_> {
     }
 }
 
-struct ResumptionAdmission<'a> {
+pub(super) struct ResumptionAdmission<'a> {
     owner: &'a SafetyRecordOwner,
     coverage: Reservation,
 }
@@ -700,7 +1883,7 @@ fn resumption_charge() -> u128 {
             + size_of::<Result<(), Refused>>()) as u128
 }
 
-fn admit_resumption(
+pub(super) fn admit_resumption(
     owner: &SafetyRecordOwner,
 ) -> Result<ResumptionAdmission<'_>, AdmissionRefusal> {
     let coverage = owner
@@ -807,7 +1990,7 @@ impl ResumptionGate<'_, '_> {
 }
 
 impl ResumptionAdmission<'_> {
-    fn invoke(
+    pub(super) fn invoke(
         self,
         engine: &mut BasicHotStuffEngine<[u8; 32]>,
         token: support::Token,
@@ -816,7 +1999,7 @@ impl ResumptionAdmission<'_> {
         self.invoke_observed(engine, token, acknowledged, None)
     }
 
-    fn invoke_observed(
+    pub(super) fn invoke_observed(
         self,
         engine: &mut BasicHotStuffEngine<[u8; 32]>,
         token: support::Token,
@@ -1712,7 +2895,9 @@ fn existing_anchor_is_preserved_and_requires_independent_history() {
         .backend
         .accounting()
         .reserve(
-            candidate_charge(owner.pinned()) + max_safety_record_bytes(owner.pinned()).unwrap(),
+            candidate_charge(owner.pinned(), 3)
+                + candidate_copy_workspace_charge()
+                + max_safety_record_bytes(owner.pinned()).unwrap(),
         )
         .unwrap();
     let qc = report.route.as_ref().ok().unwrap().wire().unwrap();
@@ -1859,8 +3044,18 @@ fn adapter_candidate_and_o4_pressure_are_distinct_and_cleanup_is_immediate() {
             + max_safety_record_bytes(f.owner.pinned()).unwrap();
         let leave = match boundary {
             0 => adapter_charge() - 1,
-            1 => adapter_charge() + candidate_charge(f.owner.pinned()) - 1,
-            _ => adapter_charge() + loader + candidate_charge(f.owner.pinned()),
+            1 => {
+                adapter_charge()
+                    + candidate_copy_workspace_charge()
+                    + candidate_charge(f.owner.pinned(), 3)
+                    - 1
+            }
+            _ => {
+                adapter_charge()
+                    + loader
+                    + candidate_copy_workspace_charge()
+                    + candidate_charge(f.owner.pinned(), 3)
+            }
         };
         let held = f
             .owner
@@ -2040,7 +3235,7 @@ fn ownership_phase_operands_and_independent_final_floors() {
     let o4 = 2 * t + 3 * r + super::super::backend::META_ENCODED_LEN;
     let loader = f.owner.retained_holder_charge().unwrap() + t.saturating_sub(g) + r;
     let a = adapter_charge();
-    let c = candidate_charge(ctx);
+    let c = candidate_charge(ctx, 3) + candidate_copy_workspace_charge();
     let context = f.owner.backend.context_accounting_current();
     assert_eq!(ctx.s_sig, 2420);
     assert_eq!(ctx.n(), 4);
@@ -3120,7 +4315,7 @@ fn recovery_phase_inventory_and_independent_ledger_maxima() {
     let i = interruption_charge();
     let k = recovery_charge();
     let s = resumption_charge();
-    let c = candidate_charge(ctx);
+    let c = candidate_charge(ctx, 3) + candidate_copy_workspace_charge();
     let c3 = size_of::<LockedRecord>() as u128
         + ctx.b_span()
         + 3 * (size_of::<Vec<u8>>() + ctx.s_sig) as u128;

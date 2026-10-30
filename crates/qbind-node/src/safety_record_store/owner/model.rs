@@ -6519,8 +6519,6 @@ mod tests {
     use crate::signing_reservation_journal::{
         SigningDecisionRecord, SigningRecordStage, SIGNING_RECORD_FORMAT_VERSION,
     };
-    use crate::signing_journal_admission::{envelope_charge, output_charge};
-
     /// The wire suite id the real engine stamps on the captured self-vote
     /// (`DEFAULT_CONSENSUS_SUITE_ID == 0`). The retained model NEVER reassigns the
     /// Vote's suite, so the positive authority must govern exactly this suite.
@@ -7717,6 +7715,27 @@ mod tests {
                 MODEL_SUITE_U16,
                 Arc::new(ValidatorSigningKey::new(sk.to_vec())),
             )
+        }
+
+        fn received_qc_signing_authority(
+            authority: &super::super::super::received_qc_publication_model::Authority,
+        ) -> ProposalVoteAuthority {
+            let keys = authority
+                .members
+                .iter()
+                .map(|(id, _, key)| (*id, (SUITE_PQ_RESERVED_1, key.clone())))
+                .collect();
+            ProposalVoteAuthority {
+                validators: Arc::new(authority_validators()),
+                key_provider: Arc::new(TestKeyProvider { keys }),
+                backend_registry: Arc::new(SimpleBackendRegistry::with_backend(
+                    SUITE_PQ_RESERVED_1,
+                    Arc::new(MlDsa44Backend),
+                )),
+                chain_id: QBIND_DEVNET_CHAIN_ID,
+                signer: None,
+                signing_domain: authority.domain.clone(),
+            }
         }
 
         /// Establish + associate (to the OWNER's accountant, by Arc identity) +
@@ -9349,6 +9368,2469 @@ mod tests {
                 other => panic!("expected Published after one retry, got {other:?}"),
             }
             assert_eq!(signer.calls(), 1, "the retry never re-signs");
+        }
+
+        #[test]
+        fn received_qc_captured_vote_lifecycle() {
+            run_received_qc_captured_vote_lifecycle(false, false);
+        }
+
+        #[test]
+        fn received_qc_captured_vote_lifecycle_pressure() {
+            run_received_qc_captured_vote_lifecycle(true, false);
+        }
+
+        #[test]
+        fn received_qc_captured_vote_lifecycle_alternative_membership() {
+            run_received_qc_captured_vote_lifecycle(false, true);
+        }
+
+        #[derive(Debug)]
+        struct LifecycleEffectRecorder {
+            qc: std::sync::atomic::AtomicUsize,
+            view: std::sync::atomic::AtomicUsize,
+            votes: std::sync::atomic::AtomicUsize,
+            validator_votes: std::sync::atomic::AtomicUsize,
+        }
+
+        impl LifecycleEffectRecorder {
+            fn new() -> Self {
+                Self {
+                    qc: std::sync::atomic::AtomicUsize::new(0),
+                    view: std::sync::atomic::AtomicUsize::new(0),
+                    votes: std::sync::atomic::AtomicUsize::new(0),
+                    validator_votes: std::sync::atomic::AtomicUsize::new(0),
+                }
+            }
+        }
+
+        impl qbind_consensus::basic_hotstuff_engine::ConsensusProgressRecorder
+            for LifecycleEffectRecorder
+        {
+            fn record_vote_observed(&self, _: bool) {
+                self.votes.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            }
+            fn record_qc_formed(&self) {
+                self.qc.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            }
+            fn record_view_change(&self, _: u64, _: u64) {
+                self.view.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            }
+            fn record_leader_change(&self) {}
+            fn reset_current_view_votes(&self) {}
+        }
+
+        impl qbind_consensus::basic_hotstuff_engine::ValidatorVoteRecorder
+            for LifecycleEffectRecorder
+        {
+            fn on_validator_vote(&self, _: ValidatorId, _: u64) {
+                self.validator_votes
+                    .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            }
+        }
+
+        struct BoundedProtectedUseObserver {
+            shutdown: Arc<std::sync::atomic::AtomicBool>,
+            peer: Option<std::thread::JoinHandle<()>>,
+        }
+
+        impl BoundedProtectedUseObserver {
+            fn start(
+                backend: SafetyBackend,
+            ) -> (
+                Self,
+                std::sync::mpsc::Sender<()>,
+                std::sync::mpsc::Receiver<PeerDomainObservation>,
+            ) {
+                let (request_tx, request_rx) = std::sync::mpsc::channel::<()>();
+                let (result_tx, result_rx) =
+                    std::sync::mpsc::channel::<PeerDomainObservation>();
+                let shutdown = Arc::new(std::sync::atomic::AtomicBool::new(false));
+                let peer_shutdown = shutdown.clone();
+                let peer = std::thread::spawn(move || {
+                    while !peer_shutdown.load(std::sync::atomic::Ordering::SeqCst) {
+                        match request_rx.recv_timeout(std::time::Duration::from_millis(25)) {
+                            Ok(()) => {
+                                let observation = match backend.try_lock_domain_for_test() {
+                                    TryLockDomainOutcome::WouldBlock => {
+                                        PeerDomainObservation::WouldBlock
+                                    }
+                                    TryLockDomainOutcome::Acquired(_guard) => {
+                                        PeerDomainObservation::Acquired
+                                    }
+                                    TryLockDomainOutcome::Poisoned => {
+                                        PeerDomainObservation::Poisoned
+                                    }
+                                };
+                                let _ = result_tx.send(observation);
+                                return;
+                            }
+                            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
+                            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => return,
+                        }
+                    }
+                });
+                (
+                    Self {
+                        shutdown,
+                        peer: Some(peer),
+                    },
+                    request_tx,
+                    result_rx,
+                )
+            }
+
+            fn shutdown_and_join(&mut self) -> std::thread::Result<()> {
+                self.shutdown
+                    .store(true, std::sync::atomic::Ordering::SeqCst);
+                match self.peer.take() {
+                    Some(peer) => peer.join(),
+                    None => Ok(()),
+                }
+            }
+        }
+
+        impl Drop for BoundedProtectedUseObserver {
+            fn drop(&mut self) {
+                let _ = self.shutdown_and_join();
+            }
+        }
+
+        fn run_received_qc_captured_vote_lifecycle(
+            exercise_pressure: bool,
+            exercise_alternative_membership: bool,
+        ) {
+            use crate::safety_record_store::owner::received_qc_publication_model as received;
+            use qbind_consensus::basic_hotstuff_engine::received_qc_effect_test_support as qc_support;
+
+            const SIG_LEN: usize = qbind_crypto::ml_dsa44::ML_DSA_44_SIGNATURE_SIZE;
+            let bridge_authority =
+                received::Authority::new_for_wire_chain(MODEL_WIRE_CHAIN_ID);
+            let ctx = bridge_authority.pinned();
+            let dir = tempfile::tempdir().unwrap();
+            let bridge_set = ConsensusValidatorSet::new(
+                (0..4)
+                    .map(|id| ValidatorSetEntry {
+                        id: ValidatorId::new(id),
+                        voting_power: 1,
+                    })
+                    .collect::<Vec<_>>(),
+            )
+            .expect("four-member bridge validator set");
+            let mut engine: BasicHotStuffEngine<[u8; 32]> =
+                BasicHotStuffEngine::with_state_limits_and_vote_suite(
+                    ValidatorId::new(SIGNER_VID),
+                    bridge_set,
+                    qbind_consensus::vote_accumulator::ConsensusLimitsConfig::default(),
+                    MODEL_SUITE_U16,
+                );
+            let p0 = make_proposal(0, [0xFF; 32], 0);
+            assert!(matches!(
+                engine.on_proposal_event(ValidatorId::new(0), &p0),
+                Some(ConsensusEngineAction::BroadcastVote(_))
+            ));
+            let l0_block = derive_block_id_local(0, 0, &[0xFF; 32]);
+            assert!(engine
+                .on_vote_event(ValidatorId::new(2), &logical_vote(0, l0_block, 2))
+                .expect("bridge L0 peer 2 vote")
+                .is_none());
+            assert!(engine
+                .on_vote_event(ValidatorId::new(3), &logical_vote(0, l0_block, 3))
+                .expect("bridge L0 peer 3 vote")
+                .is_some());
+            let mut p1 = make_proposal(1, l0_block, 1);
+            p1.header.chain_id = ctx.chain_id;
+            let owner = init_owner(dir.path(), &ctx);
+            let mut qc_template = logical_vote(0, l0_block, 1);
+            qc_template.chain_id = ctx.chain_id;
+            qc_template.suite_id = ctx.qc_suite_id;
+            let signed_qc_votes = [0usize, 1, 2]
+                .map(|index| bridge_authority.sign_like_vote(&qc_template, index));
+            let mut bitmap = vec![0u8; ((ctx.n() + 7) / 8).max(1) as usize];
+            bitmap[0] = 0b0000_0111;
+            let initial_qc = StoreWireQc {
+                version: 1,
+                chain_id: ctx.chain_id,
+                epoch: ctx.epoch,
+                height: 0,
+                round: 0,
+                step: 0,
+                block_id: l0_block,
+                suite_id: ctx.qc_suite_id,
+                signer_bitmap: bitmap,
+                signatures: signed_qc_votes
+                    .into_iter()
+                    .map(|vote| vote.signature)
+                    .collect(),
+            };
+            bridge_authority.verify_test_evidence(&initial_qc);
+            let initial_logical = received::LogicalQc::new(
+                l0_block,
+                0,
+                [0u64, 1, 2]
+                    .into_iter()
+                    .map(ValidatorId::new)
+                    .collect(),
+            );
+            let proposal_qc = received::copy_wire_qc_exact(
+                &owner.backend_for_test().accounting(),
+                &initial_qc,
+                &initial_logical,
+                &ctx,
+            )
+            .expect("exact proposal-QC destination admitted before copying");
+            let p1 = received::CoveredProposal::new(p1, proposal_qc);
+            assert_eq!(p1.qc.as_ref(), Some(&initial_qc));
+            let initial_evidence = bridge_authority.verified_test_evidence(&initial_qc);
+            let initial_lock = make_locked_qc(&ctx, l0_block, 0, initial_qc, None)
+                .expect("verified bridge bootstrap QC shape");
+            let mut revision = match owner.publish_locked(
+                initial_lock,
+                0,
+                None::<&FixtureCommittedHistory>,
+            ) {
+                PublishResult::DurableAcknowledged { new_revision } => new_revision,
+                other => panic!("bridge bootstrap QC refused: {other:?}"),
+            };
+            let proof = owner
+                .read_validate(None::<&FixtureCommittedHistory>)
+                .expect("initial lifecycle authority proof");
+            let limits = limits(&ctx);
+            let decided = match owner.decide_verified_and_capture_owned(
+                &mut engine,
+                ValidatorId::new(1),
+                &p1,
+                initial_evidence,
+                &limits,
+                revision,
+                proof,
+            ) {
+                OwnedDecisionOutcome::Decided(decided) => decided,
+                other => panic!("initial lifecycle capture refused: {other:?}"),
+            };
+            assert_eq!(decided.vote().chain_id, ctx.chain_id);
+            assert_eq!(engine.locked_qc().map(|qc| (qc.block_id, qc.view)), Some((l0_block, 0)));
+            qc_support::install(
+                &mut engine,
+                &bridge_authority.domain,
+                0,
+                &bridge_authority.members,
+            );
+            let pv = received_qc_signing_authority(&bridge_authority);
+            let mut snapshot = established_snapshot(&pv);
+            let journal_store = real_fresh_store();
+            let journal =
+                associated_bounded_journal(&owner, journal_store.clone(), 1);
+            let inner = real_local_signer(bridge_authority.secret(SIGNER_VID as usize));
+            let signer = CountingValidatorSigner::new(&inner);
+            let history = FixtureCommittedHistory::new();
+            let base_vote = decided.vote().clone();
+            let base_provenance = pin_provenance_now(&owner, &decided);
+            let original_proposal = p1.proposal.clone();
+            let proposal_address = &p1.proposal as *const _;
+            let position_binding = retained_pos_binding(&pv, &base_vote);
+            let (position, binding) = position_binding;
+            let ledger = qc_support::ledger(&engine);
+            let ledger_baseline = ledger.sample();
+            let consensus_cap = engine.state().max_retained_evidence_bytes();
+            let storage_cap = owner
+                .backend_for_test()
+                .accounting_aggregate_cap()
+                .expect("aggregate cap");
+
+            // A substituted complete proposal is refused before reservation or
+            // signing; the same original envelope remains eligible for the real run.
+            let substituted = make_proposal(
+                p1.header.height,
+                p1.header.parent_block_id,
+                p1.header.proposer_index,
+            );
+            let mut substituted_sink = RealSignRecordingSink::new();
+            let mut substituted_coord = ModelCoordinationHook::inert();
+            assert_eq!(
+                fresh_vote_sign_real_local::<FixtureCommittedHistory>(
+                    &owner,
+                    &engine,
+                    &decided,
+                    &substituted,
+                    &limits,
+                    Some(&history),
+                    &mut snapshot,
+                    &signer,
+                    &mut substituted_sink,
+                    &journal,
+                    &mut substituted_coord,
+                    ReconfirmPerturbation::None,
+                ),
+                RealFreshSignOutcome::ObservationRefused
+            );
+            assert_eq!((signer.calls(), substituted_sink.calls), (0, 0));
+            assert_eq!(journal.reserved_position_count(), 0);
+            assert_eq!(ledger.sample(), ledger_baseline, "no consensus evidence was admitted");
+            assert_eq!(&p1.proposal as *const _, proposal_address);
+            assert_eq!(decided.vote(), &base_vote);
+
+            let mut alternative_authority = pv.clone();
+            alternative_authority.validators = Arc::new(
+                ConsensusValidatorSet::new(
+                    [0u64, 2, 3, 4]
+                        .into_iter()
+                        .map(|id| ValidatorSetEntry {
+                            id: ValidatorId::new(id),
+                            voting_power: 1,
+                        }),
+                )
+                .expect("alternative complete four-member set"),
+            );
+            let mut alternative_snapshot = established_snapshot(&alternative_authority);
+            let membership_baseline = snapshot_ledgers(&owner);
+            let membership_provenance = pin_provenance_now(&owner, &decided);
+            let mut membership_sink = RealSignRecordingSink::new();
+            let mut membership_coord = ModelCoordinationHook::inert();
+            assert_eq!(
+                fresh_vote_sign_real_local::<FixtureCommittedHistory>(
+                    &owner,
+                    &engine,
+                    &decided,
+                    &p1,
+                    &limits,
+                    Some(&history),
+                    &mut alternative_snapshot,
+                    &signer,
+                    &mut membership_sink,
+                    &journal,
+                    &mut membership_coord,
+                    ReconfirmPerturbation::None,
+                ),
+                RealFreshSignOutcome::MembershipRefused
+            );
+            assert_eq!((signer.calls(), membership_sink.calls, membership_coord.calls), (0, 0, 0));
+            assert_eq!(journal.reserved_position_count(), 0);
+            assert_eq!(snapshot_ledgers(&owner), membership_baseline);
+            assert_eq!(pin_provenance_now(&owner, &decided), membership_provenance);
+
+            let mut invalidation_snapshot = established_snapshot(&pv);
+            let invalidation_journal =
+                associated_bounded_journal(&owner, real_fresh_store(), 1);
+            let invalidation_baseline = snapshot_ledgers(&owner);
+            let invalidation_provenance = pin_provenance_now(&owner, &decided);
+            let mut invalidation_sink = RealSignRecordingSink::new();
+            let mut invalidation_coord = ModelCoordinationHook::inert();
+            assert_eq!(
+                fresh_vote_sign_real_local::<FixtureCommittedHistory>(
+                    &owner,
+                    &engine,
+                    &decided,
+                    &p1,
+                    &limits,
+                    Some(&history),
+                    &mut invalidation_snapshot,
+                    &signer,
+                    &mut invalidation_sink,
+                    &invalidation_journal,
+                    &mut invalidation_coord,
+                    ReconfirmPerturbation::AdvanceGenerationBeforeConfirm,
+                ),
+                RealFreshSignOutcome::AuthorizationConfirmRefused
+            );
+            assert_eq!((signer.calls(), invalidation_sink.calls, invalidation_coord.calls), (0, 0, 0));
+            assert_eq!(invalidation_journal.reserved_position_count(), 1);
+            assert_eq!(snapshot_ledgers(&owner), invalidation_baseline);
+            assert_eq!(pin_provenance_now(&owner, &decided), invalidation_provenance);
+            match invalidation_journal.reserve_for_sign(&position_binding.0, &position_binding.1) {
+                Ok(ReservationOutcome::PotentiallySigned) => {}
+                other => panic!("invalidation preserves consumed journal obligation: {other:?}"),
+            }
+            drop(invalidation_journal);
+            drop(invalidation_snapshot);
+            drop(alternative_snapshot);
+            drop(alternative_authority);
+            assert_eq!(snapshot_ledgers(&owner), membership_baseline);
+
+            // Genuine owner-captured unsigned Vote: one admitted real signer call,
+            // acknowledged Signed result, and a distinct retirement outcome.
+            let mut sign_sink = RealSignRecordingSink::new();
+            let mut sign_coord = ModelCoordinationHook::inert();
+            let sign_baseline = snapshot_ledgers(&owner);
+            let registry = owner
+                .backend_for_test()
+                .prepared_registry_for_test()
+                .expect("captured prepared registry");
+            let (registry_charge, prepared_entry) = {
+                let registry = registry.lock().expect("prepared registry");
+                (
+                    registry.registry_reservation_charge(),
+                    registry
+                        .inspect(decided.payload().pin().handle())
+                        .expect("captured pin entry"),
+                )
+            };
+            drop(registry);
+            let proposal_charge = p1._coverage.charge();
+            let envelope_charge = crate::safety_record_store::decision_capture::covering_charge_for_test()
+                .expect("owning capture envelope charge");
+            let pin_charge = crate::safety_record_store::prepared::pin_charge_bytes();
+            let journal_charge = journal
+                .live_backing_charge_for_test()
+                .expect("bounded journal backing charge");
+            let standing_operational = [
+                proposal_charge,
+                envelope_charge,
+                pin_charge,
+                registry_charge,
+                prepared_entry.generation_core_charge,
+                prepared_entry.generation_control_charge,
+                journal_charge,
+            ]
+            .into_iter()
+            .try_fold(0u128, u128::checked_add)
+            .expect("standing owner inventory is representable");
+            assert_eq!(sign_baseline.operational, standing_operational);
+            let context_charge = owner.backend_for_test().context_accounting_current();
+            assert_eq!(context_charge, 240);
+            assert_eq!(
+                sign_baseline.aggregate,
+                sign_baseline.operational + context_charge
+            );
+            println!(
+                "captured-Vote standing owners: operational={} context={} aggregate={} ceilings=({:?},{:?},{:?}) proposal={} envelope={} pin={} registry={} generation_core={} generation_control={} generation_evidence_backing={} journal={} journal_shape={:?} bridge_control=0",
+                sign_baseline.operational,
+                context_charge,
+                sign_baseline.aggregate,
+                owner.backend_for_test().accounting_cap(),
+                owner.backend_for_test().accounting_aggregate_cap(),
+                owner.backend_for_test().context_accounting_cap(),
+                proposal_charge,
+                envelope_charge,
+                pin_charge,
+                registry_charge,
+                prepared_entry.generation_core_charge,
+                prepared_entry.generation_control_charge,
+                prepared_entry.evidence_backing_capacity,
+                journal_charge,
+                journal.live_backing_shape_for_test(),
+            );
+            let sign_outcome = fresh_vote_sign_real_local::<FixtureCommittedHistory>(
+                &owner,
+                &engine,
+                &decided,
+                &p1,
+                &limits,
+                Some(&history),
+                &mut snapshot,
+                &signer,
+                &mut sign_sink,
+                &journal,
+                &mut sign_coord,
+                ReconfirmPerturbation::None,
+            );
+            let signed = match sign_outcome {
+                RealFreshSignOutcome::Published(diag) => diag,
+                other => panic!("captured Vote signing refused: {other:?}"),
+            };
+            assert_eq!(signed.retirement, RetirementReport::Retired);
+            assert_eq!(signed.sig_len, SIG_LEN as u32);
+            assert_eq!((signer.calls(), sign_sink.calls, sign_coord.calls), (1, 1, 1));
+            assert_eq!(journal.reserved_position_count(), 1);
+            assert_eq!(snapshot_ledgers(&owner), sign_baseline);
+            assert_eq!(decided.vote(), &base_vote);
+            assert_eq!(pin_provenance_now(&owner, &decided), base_provenance);
+            assert_eq!(&p1.proposal as *const _, proposal_address);
+
+            // An actually Signed position cannot be freshly signed again. It remains
+            // retrievable as the exact acknowledged signature for received admission.
+            let mut signed_control_sink = RealSignRecordingSink::new();
+            let mut signed_control_coord = ModelCoordinationHook::inert();
+            assert_eq!(
+                fresh_vote_sign_real_local::<FixtureCommittedHistory>(
+                    &owner,
+                    &engine,
+                    &decided,
+                    &p1,
+                    &limits,
+                    Some(&history),
+                    &mut snapshot,
+                    &signer,
+                    &mut signed_control_sink,
+                    &journal,
+                    &mut signed_control_coord,
+                    ReconfirmPerturbation::None,
+                ),
+                RealFreshSignOutcome::ReservePotentiallySigned
+            );
+            assert_eq!((signer.calls(), signed_control_sink.calls), (1, 0));
+            assert_eq!(snapshot_ledgers(&owner), sign_baseline);
+
+
+            let (mut output, mut scratch) = journal
+                .admit_retrieval_workspace()
+                .expect("checked journal output and envelope workspace");
+            let retained = journal
+                .retrieve_retained_checked(&position, &binding, &mut scratch, &mut output)
+                .expect("checked exact journal retrieval");
+            let signature = match retained {
+                crate::signing_reservation_journal::RetainedDelivery::Retained(bytes) => bytes,
+                other => panic!("expected retained exact journal signature: {other:?}"),
+            };
+            assert_eq!(signature.len(), SIG_LEN);
+            let local_token = received::admit_exact_signed_vote(
+                &owner.backend_for_test().accounting(),
+                &mut engine,
+                ValidatorId::new(SIGNER_VID),
+                &base_vote,
+                signature,
+                &ctx,
+            )
+            .expect("exact journal bytes admitted as a verified Vote");
+            assert!(
+                local_token.vote().signature.as_slice() == signature,
+                "local received Vote has the exact journal signature (redacted)"
+            );
+            assert_eq!(local_token.vote().signature.capacity(), SIG_LEN);
+            drop(scratch);
+            drop(output);
+            assert_eq!(snapshot_ledgers(&owner), sign_baseline);
+
+            let before_local = ledger.sample();
+            let local_admission = received::admit_bridge_vote(&owner)
+                .expect("relief admits the original token's route coverage");
+            let local_result = received::invoke_bridge_vote(
+                local_admission,
+                &mut engine,
+                &bridge_authority,
+                local_token,
+                revision,
+                &history,
+            );
+            let local_gate_calls = local_result.gate_calls;
+            let local_route = received::retain_route(local_result);
+            let local_report = local_route
+                .as_ref()
+                .unwrap_or_else(|_| panic!("local vote route refused"));
+            assert!(local_report.duplicate() && local_report.retained());
+            assert!(!local_report.logical_quorum());
+            assert!(local_report.wire().is_none());
+            assert_eq!(local_gate_calls, 0);
+            let local_after = ledger.sample();
+            assert!(local_after.0 <= consensus_cap);
+            assert_eq!(local_after.1, 0, "route returned no pending evidence charge");
+            let local_charges = local_report.charges();
+            assert_eq!(
+                local_after.0,
+                before_local.0 + local_charges.0 + local_charges.1
+                    - qc_support::token_inline_bytes(),
+                "the admitted signature charge transfers; token inline controls are released"
+            );
+            println!(
+                "captured-Vote local evidence: before={before_local:?} after={local_after:?} report_charges={:?}",
+                local_charges
+            );
+
+            let peer_2 = bridge_authority.sign_like_vote(&base_vote, 2);
+            let peer_2_token =
+                qc_support::admit(&mut engine, ValidatorId::new(2), peer_2)
+                    .expect("genuine peer 2 signature verifies");
+            let peer_2_admission =
+                received::admit_bridge_vote(&owner).expect("peer 2 route admission");
+            let peer_2_result = received::invoke_bridge_vote(
+                peer_2_admission,
+                &mut engine,
+                &bridge_authority,
+                peer_2_token,
+                revision,
+                &history,
+            );
+            let peer_2_gate_calls = peer_2_result.gate_calls;
+            let peer_2_route = received::retain_route(peer_2_result);
+            let peer_2_report = peer_2_route
+                .as_ref()
+                .unwrap_or_else(|_| panic!("peer 2 vote route refused"));
+            assert!(!peer_2_report.logical_quorum());
+            assert!(peer_2_report.wire().is_none());
+            assert_eq!(peer_2_gate_calls, 0);
+
+            let pressure_vote = bridge_authority.sign_like_vote(&base_vote, 3);
+            let pressure_token =
+                qc_support::admit(&mut engine, ValidatorId::new(3), pressure_vote)
+                    .expect("genuine peer 3 signature verifies");
+            let effects = Arc::new(LifecycleEffectRecorder::new());
+            engine.set_progress_recorder(effects.clone());
+            engine.set_validator_vote_recorder(effects.clone());
+            let views_before_o4 = effects
+                .view
+                .load(std::sync::atomic::Ordering::SeqCst);
+            let o4_probe_count = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+            let o4_probe_count_hook = o4_probe_count.clone();
+            let o4_backend = owner.backend_for_test().clone();
+            let o4_effects = effects.clone();
+            owner.backend_for_test().set_pre_effective_hook(Arc::new(move |op, _| {
+                assert_eq!(op, "O4");
+                assert_eq!(
+                    o4_effects
+                        .view
+                        .load(std::sync::atomic::Ordering::SeqCst),
+                    views_before_o4,
+                    "view effects have not run at the pre-effect boundary"
+                );
+                let backend = o4_backend.clone();
+                let (tx, rx) = std::sync::mpsc::sync_channel(1);
+                let peer = std::thread::spawn(move || {
+                    let blocked = matches!(
+                        backend.try_lock_domain_for_test(),
+                        TryLockDomainOutcome::WouldBlock
+                    );
+                    tx.send(blocked).unwrap();
+                });
+                assert!(rx
+                    .recv_timeout(std::time::Duration::from_secs(5))
+                    .unwrap());
+                peer.join().unwrap();
+                o4_probe_count_hook.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            }));
+            let (pressure_route, retry_route, retry_gate_calls) = if exercise_pressure {
+                let pressure = received::admit_o4_pressure_for_bridge(&owner);
+                let pressure_aggregate = owner
+                    .backend_for_test()
+                    .accounting_aggregate_current();
+                let lock_before_pressure =
+                    engine.locked_qc().map(|qc| (qc.block_id, qc.view));
+                let view_before_pressure = engine.current_view();
+                let pressure_admission = received::admit_bridge_vote(&owner)
+                    .expect("adapter admission fits through the pre-O4 phase");
+                let pressure_result = received::invoke_bridge_vote(
+                    pressure_admission,
+                    &mut engine,
+                    &bridge_authority,
+                    pressure_token,
+                    revision,
+                    &history,
+                );
+                let pressure_publication = pressure_result.publication;
+                let pressure_refused = pressure_result.refused;
+                let pressure_gate_calls = pressure_result.gate_calls;
+                let pressure_route = received::retain_route(pressure_result);
+                let pressure_report = pressure_route
+                    .as_ref()
+                    .unwrap_or_else(|_| panic!("pressure vote route refused"));
+                assert!(pressure_report.logical_quorum() && pressure_report.retained());
+                bridge_authority.verify_test_evidence(pressure_report.wire().unwrap());
+                assert_eq!(
+                    pressure_publication,
+                    Some(received::Publication::RefusedPreWrite)
+                );
+                assert_eq!(pressure_refused, Some(received::Refused::O4Capacity));
+                assert_eq!(
+                    pressure_report.application(),
+                    qc_support::Application::Refused
+                );
+                assert_eq!(pressure_gate_calls, 1);
+                assert_eq!(
+                    engine.locked_qc().map(|qc| (qc.block_id, qc.view)),
+                    lock_before_pressure
+                );
+                assert_eq!(engine.current_view(), view_before_pressure);
+                assert_eq!(
+                    owner.backend_for_test().accounting_aggregate_current(),
+                    pressure_aggregate
+                );
+                drop(pressure);
+                assert_eq!(snapshot_ledgers(&owner), sign_baseline);
+
+                let retry_vote = bridge_authority.sign_like_vote(&base_vote, 3);
+                let retry_token =
+                    qc_support::admit(&mut engine, ValidatorId::new(3), retry_vote)
+                        .expect("genuine duplicate peer signature verifies");
+                let retry_admission =
+                    received::admit_bridge_vote(&owner).expect("relieved retry admission");
+                let retry_result = received::invoke_bridge_vote(
+                    retry_admission,
+                    &mut engine,
+                    &bridge_authority,
+                    retry_token,
+                    revision,
+                    &history,
+                );
+                assert_eq!(
+                    retry_result.publication,
+                    Some(received::Publication::DurableAcknowledged(revision + 1))
+                );
+                assert_eq!(retry_result.refused, None);
+                (
+                    Some(pressure_route),
+                    received::retain_route(retry_result),
+                    1,
+                )
+            } else {
+                let admission = received::admit_bridge_vote(&owner)
+                    .expect("unpressured acknowledged O4 admission");
+                let result = received::invoke_bridge_vote(
+                    admission,
+                    &mut engine,
+                    &bridge_authority,
+                    pressure_token,
+                    revision,
+                    &history,
+                );
+                (
+                    None,
+                    received::retain_route(result),
+                    1,
+                )
+            };
+            owner
+                .backend_for_test()
+                .set_pre_effective_hook(Arc::new(|_, _| {}));
+            assert_eq!(
+                o4_probe_count.load(std::sync::atomic::Ordering::SeqCst),
+                1,
+                "genuine O4 reached the serialized pre-effect hook exactly once"
+            );
+            assert_eq!(
+                effects.view.load(std::sync::atomic::Ordering::SeqCst),
+                views_before_o4 + 1,
+                "engine view effect follows the pre-effect observation"
+            );
+            let retry_report = retry_route
+                .as_ref()
+                .unwrap_or_else(|_| panic!("acknowledged vote route refused"));
+            let acknowledged_o4_storage = snapshot_ledgers(&owner);
+            println!(
+                "captured-Vote acknowledged O4 current ledgers={acknowledged_o4_storage:?}"
+            );
+            assert!(retry_report.logical_quorum());
+            assert_eq!(retry_report.duplicate(), exercise_pressure);
+            assert_eq!(retry_report.application(), qc_support::Application::Applied);
+            assert_eq!(retry_report.wire().unwrap().signatures.len(), 3);
+            bridge_authority.verify_test_evidence(retry_report.wire().unwrap());
+            let acknowledged_o4_peak =
+                owner.backend_for_test().accounting_aggregate_peak();
+            println!("captured-Vote peak after acknowledged O4={acknowledged_o4_peak}");
+            revision += 1;
+            assert_eq!(
+                engine.locked_qc().map(|qc| (qc.block_id, qc.view)),
+                Some((base_vote.block_id, base_vote.height))
+            );
+            assert_eq!(engine.current_view(), 2);
+            assert_eq!(signer.calls(), 1, "QC publication does not re-sign the captured Vote");
+            assert_eq!(owner.backend_for_test().accounting_aggregate_cap(), Some(storage_cap));
+            assert_eq!(retry_gate_calls, 1);
+            drop(pressure_route);
+            drop(peer_2_route);
+            drop(local_route);
+
+            let current_durable_proof = owner
+                .read_validate(Some(&history))
+                .expect("current durable authority after acknowledged first O4");
+            let current_durable_revision = current_durable_proof.publication_revision();
+            assert_eq!(current_durable_revision, revision);
+            assert!(
+                current_durable_revision > base_provenance.captured_revision,
+                "original capture predates acknowledged durable advancement"
+            );
+            drop(current_durable_proof);
+
+            let original_signed_record_key = position.storage_key();
+            let original_signed_record_before = journal_store
+                .get_signing_record(&original_signed_record_key)
+                .expect("read original Signed record before acknowledged-advance use")
+                .expect("original Signed position remains present");
+            let original_signed_metadata_before = journal_store
+                .get_signing_metadata()
+                .expect("read metadata before acknowledged-advance use")
+                .expect("journal metadata remains present");
+            let original_signed_count_before = journal.reserved_position_count();
+            let (mut original_output, mut original_scratch) = journal
+                .admit_retrieval_workspace()
+                .expect("original checked signature witness workspace");
+            let original_retained = journal
+                .retrieve_retained_checked(
+                    &position,
+                    &binding,
+                    &mut original_scratch,
+                    &mut original_output,
+                )
+                .expect("retrieve exact original Signed signature for witness");
+            let original_signature = match original_retained {
+                crate::signing_reservation_journal::RetainedDelivery::Retained(bytes) => bytes,
+                other => panic!("original Signed signature is not retained: {other:?}"),
+            };
+            let original_signature_witness =
+                RetainedSliceWitness::from_validated(original_signature);
+            assert_eq!(original_signature_witness.len(), SIG_LEN);
+            drop(original_scratch);
+            drop(original_output);
+
+            let original_o4_ledgers = snapshot_ledgers(&owner);
+            let original_o4_vote = decided.vote().clone();
+            let original_o4_provenance = pin_provenance_now(&owner, &decided);
+            let original_o4_proposal = p1.proposal.clone();
+            let original_o4_consensus = ledger.sample();
+            let original_o4_caps = (
+                owner.backend_for_test().accounting_cap(),
+                owner.backend_for_test().accounting_aggregate_cap(),
+                owner.backend_for_test().context_accounting_cap(),
+            );
+            let original_o4_probe =
+                std::rc::Rc::new(RetainedSliceProbe::new(original_signature_witness));
+            let original_o4_probe_guard =
+                install_retained_slice_probe(original_o4_probe.clone());
+            let mut original_o4_sink = RetainedUseRecordingSink::new();
+            let mut original_o4_coord = ModelCoordinationHook::inert();
+            let original_o4_use =
+                super::retained_vote_use_checked_same_authority_model::<
+                    FixtureCommittedHistory,
+                >(
+                    &owner,
+                    &engine,
+                    &decided,
+                    &p1,
+                    &limits,
+                    Some(&history),
+                    &mut snapshot,
+                    &mut original_o4_sink,
+                    &journal,
+                    &mut original_o4_coord,
+                    ReconfirmPerturbation::None,
+                );
+            assert_eq!(snapshot_ledgers(&owner), original_o4_ledgers);
+            assert_eq!(decided.vote(), &base_vote);
+            assert_eq!(decided.vote(), &original_o4_vote);
+            assert_eq!(p1.proposal, original_proposal);
+            assert_eq!(p1.proposal, original_o4_proposal);
+            assert_eq!(&p1.proposal as *const _, proposal_address);
+            assert_eq!(
+                pin_provenance_now(&owner, &decided),
+                base_provenance
+            );
+            assert_eq!(
+                pin_provenance_now(&owner, &decided),
+                original_o4_provenance
+            );
+            assert_eq!(ledger.sample(), original_o4_consensus);
+            assert_eq!(
+                (
+                    owner.backend_for_test().accounting_cap(),
+                    owner.backend_for_test().accounting_aggregate_cap(),
+                    owner.backend_for_test().context_accounting_cap(),
+                ),
+                original_o4_caps
+            );
+            assert_eq!(signer.calls(), 1, "original retained use does not re-sign");
+            let original_o4_diag = match original_o4_use {
+                ModelRetainedUseOutcome::Consumed(diag) => diag,
+                other => panic!(
+                    "original capture remains consumable after acknowledged O4: {other:?}"
+                ),
+            };
+            assert_eq!(original_o4_diag.sig_len as usize, SIG_LEN);
+            assert_eq!((original_o4_sink.calls, original_o4_coord.calls), (1, 1));
+            assert_eq!(original_o4_probe.invocations(), 1);
+            assert_eq!(original_o4_probe.last_len(), Some(SIG_LEN));
+            assert_eq!(original_o4_probe.last_matched(), Some(true));
+            drop(original_o4_probe_guard);
+            let original_signed_record_after = journal_store
+                .get_signing_record(&original_signed_record_key)
+                .expect("read original Signed record after acknowledged-advance use")
+                .expect("original Signed record remains present");
+            let original_signed_metadata_after = journal_store
+                .get_signing_metadata()
+                .expect("read metadata after acknowledged-advance use")
+                .expect("journal metadata remains present");
+            assert!(
+                original_signed_record_after.as_slice()
+                    == original_signed_record_before.as_slice(),
+                "original acknowledged use preserves Signed bytes (contents redacted)"
+            );
+            assert!(
+                original_signed_metadata_after.as_slice()
+                    == original_signed_metadata_before.as_slice(),
+                "original acknowledged use preserves metadata bytes (contents redacted)"
+            );
+            assert_eq!(
+                journal.reserved_position_count(),
+                original_signed_count_before
+            );
+            drop(original_signed_record_after);
+            drop(original_signed_metadata_after);
+            drop(original_signed_record_before);
+            drop(original_signed_metadata_before);
+
+            let p1_coverage_charge = p1._coverage.charge();
+            let before_decided_drop = snapshot_ledgers(&owner);
+            drop(decided);
+            let after_decided_drop = snapshot_ledgers(&owner);
+            let decided_operational_charge = before_decided_drop
+                .operational
+                .checked_sub(after_decided_drop.operational)
+                .expect("dropping the completed captured Vote releases operational coverage");
+            let decided_aggregate_charge = before_decided_drop
+                .aggregate
+                .checked_sub(after_decided_drop.aggregate)
+                .expect("dropping the completed captured Vote releases aggregate coverage");
+            assert_eq!(decided_operational_charge, decided_aggregate_charge);
+            drop(p1);
+
+            // Copy the next Proposal's QC while the first route still owns its
+            // report, then release that report before measuring retained
+            // consensus evidence. The equal-sized Proposal owner replaces p1.
+            let mut p2 = make_proposal(2, base_vote.block_id, 2);
+            p2.header.chain_id = ctx.chain_id;
+            let retry_wire = retry_report
+                .wire()
+                .expect("acknowledged first complete QC");
+            let successor_logical = received::LogicalQc::new(
+                base_vote.block_id,
+                base_vote.height,
+                [1u64, 2, 3]
+                    .into_iter()
+                    .map(ValidatorId::new)
+                    .collect(),
+            );
+            let proposal_qc = received::copy_wire_qc_exact(
+                &owner.backend_for_test().accounting(),
+                retry_wire,
+                &successor_logical,
+                &ctx,
+            )
+            .expect("exact successor Proposal-QC destination admitted before copying");
+            let p2 = received::CoveredProposal::new(p2, proposal_qc);
+            assert_eq!(p2.qc.as_ref(), Some(retry_wire));
+            let p2_coverage_charge = p2._coverage.charge();
+            drop(retry_route);
+
+            let first_qc_ledger = ledger.sample();
+            assert_eq!(first_qc_ledger.0, ledger_baseline.0 + 3 * SIG_LEN as u64);
+            assert_eq!(first_qc_ledger.1, 0);
+            assert_eq!(first_qc_ledger.4, ledger_baseline.4);
+            let expected_after_proposal_replacement = LedgerSnapshot {
+                operational: sign_baseline
+                    .operational
+                    .checked_sub(decided_operational_charge)
+                    .and_then(|value| value.checked_sub(p1_coverage_charge))
+                    .and_then(|value| value.checked_add(p2_coverage_charge))
+                    .expect("successor Proposal operational delta is representable"),
+                aggregate: sign_baseline
+                    .aggregate
+                    .checked_sub(decided_aggregate_charge)
+                    .and_then(|value| value.checked_sub(p1_coverage_charge))
+                    .and_then(|value| value.checked_add(p2_coverage_charge))
+                    .expect("successor Proposal aggregate delta is representable"),
+            };
+            assert_eq!(snapshot_ledgers(&owner), expected_after_proposal_replacement);
+
+            // Capture a second genuine decision at the acknowledged successor.
+            // This distinct Vote drives the uncertain-O4/O3/O5/exact-resumption
+            // branch while reusing the same immutable four-member authority.
+            let proof_for_capture = owner
+                .read_validate(Some(&history))
+                .expect("acknowledged O4 proof for successor capture");
+            let revision_before_capture = proof_for_capture.publication_revision();
+            let first_evidence = bridge_authority.verified_test_evidence(
+                p2.qc.as_ref().expect("successor Proposal has verified QC"),
+            );
+            let capture_probe_count = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+            let capture_probe_count_hook = capture_probe_count.clone();
+            let capture_backend = owner.backend_for_test().clone();
+            crate::safety_record_store::owner::set_capture_interval_hook(move || {
+                let backend = capture_backend.clone();
+                let (tx, rx) = std::sync::mpsc::sync_channel(1);
+                let peer = std::thread::spawn(move || {
+                    let blocked = matches!(
+                        backend.try_lock_domain_for_test(),
+                        TryLockDomainOutcome::WouldBlock
+                    );
+                    tx.send(blocked).unwrap();
+                });
+                assert!(rx
+                    .recv_timeout(std::time::Duration::from_secs(5))
+                    .unwrap());
+                peer.join().unwrap();
+                capture_probe_count_hook.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            });
+            let decided_2 = match owner.decide_verified_and_capture_owned(
+                &mut engine,
+                ValidatorId::new(2),
+                &p2,
+                first_evidence,
+                &limits,
+                revision_before_capture,
+                proof_for_capture,
+            ) {
+                OwnedDecisionOutcome::Decided(decided) => decided,
+                other => panic!("successor proposal capture refused: {other:?}"),
+            };
+            crate::safety_record_store::owner::clear_capture_interval_hook();
+            assert_eq!(
+                capture_probe_count.load(std::sync::atomic::Ordering::SeqCst),
+                1,
+                "genuine capture interval was serialized against same-domain acquisition"
+            );
+            assert_eq!(decided_2.vote().height, 2);
+            assert_eq!(decided_2.vote().suite_id, MODEL_SUITE_U16);
+            let base_vote_2 = decided_2.vote().clone();
+            let provenance_2 = pin_provenance_now(&owner, &decided_2);
+            let mut sign_sink_2 = RealSignRecordingSink::new();
+            let mut sign_coord_2 = ModelCoordinationHook::inert();
+            let sign_2 = fresh_vote_sign_real_local::<FixtureCommittedHistory>(
+                &owner,
+                &engine,
+                &decided_2,
+                &p2,
+                &limits,
+                Some(&history),
+                &mut snapshot,
+                &signer,
+                &mut sign_sink_2,
+                &journal,
+                &mut sign_coord_2,
+                ReconfirmPerturbation::None,
+            );
+            let signed_2 = match sign_2 {
+                RealFreshSignOutcome::Published(diag) => diag,
+                other => panic!("second captured Vote signing refused: {other:?}"),
+            };
+            assert_eq!(signed_2.retirement, RetirementReport::Retired);
+            assert_eq!((signer.calls(), sign_sink_2.calls), (2, 1));
+            assert_eq!(decided_2.vote(), &base_vote_2);
+            assert_eq!(pin_provenance_now(&owner, &decided_2), provenance_2);
+
+            let (position_2, binding_2) = retained_pos_binding(&pv, &base_vote_2);
+            let signed_record_key = position_2.storage_key();
+            let signed_record_before = journal_store
+                .get_signing_record(&signed_record_key)
+                .expect("read Signed record before protected use")
+                .expect("Signed journal record exists");
+            let signed_metadata_before = journal_store
+                .get_signing_metadata()
+                .expect("read journal metadata before protected use")
+                .expect("journal metadata exists");
+            let signed_count_before = journal.reserved_position_count();
+            let retained_before = snapshot_ledgers(&owner);
+            let retained_provenance = pin_provenance_now(&owner, &decided_2);
+            let retained_consensus_before = ledger.sample();
+            let mut retained_sink_ack = RetainedUseRecordingSink::new();
+            let (mut protected_observer, protected_req_tx, protected_res_rx) =
+                BoundedProtectedUseObserver::start(owner.backend_for_test().clone());
+            let mut retained_coord_ack = ModelCoordinationHook::probing(
+                protected_req_tx,
+                protected_res_rx,
+                std::time::Duration::from_secs(5),
+            );
+            let retained_ack = super::retained_vote_use_checked_same_authority_model::<
+                FixtureCommittedHistory,
+            >(
+                &owner,
+                &engine,
+                &decided_2,
+                &p2,
+                &limits,
+                Some(&history),
+                &mut snapshot,
+                &mut retained_sink_ack,
+                &journal,
+                &mut retained_coord_ack,
+                ReconfirmPerturbation::None,
+            );
+            let retained_ack_diag = match retained_ack {
+                ModelRetainedUseOutcome::Consumed(diag) => diag,
+                other => panic!(
+                    "checked same-authority use after acknowledged QC effects refused: {other:?}"
+                ),
+            };
+            assert_eq!(retained_ack_diag.sig_len as usize, SIG_LEN);
+            assert_eq!((retained_sink_ack.calls, retained_coord_ack.calls), (1, 1));
+            assert!(!retained_coord_ack.failed);
+            assert_eq!(retained_coord_ack.last_excluded, Some(true));
+            assert_eq!(signer.calls(), 2, "retained use does not sign again");
+            assert_eq!(snapshot_ledgers(&owner), retained_before);
+            assert_eq!(pin_provenance_now(&owner, &decided_2), retained_provenance);
+            assert_eq!(decided_2.vote(), &base_vote_2);
+            assert_eq!(ledger.sample(), retained_consensus_before);
+            assert_eq!(
+                (
+                    owner.backend_for_test().accounting_cap(),
+                    owner.backend_for_test().accounting_aggregate_cap(),
+                    owner.backend_for_test().context_accounting_cap(),
+                ),
+                (Some(84_956), Some(84_956), Some(960))
+            );
+            let signed_record_after = journal_store
+                .get_signing_record(&signed_record_key)
+                .expect("read Signed record after protected use")
+                .expect("Signed journal record remains");
+            let signed_metadata_after = journal_store
+                .get_signing_metadata()
+                .expect("read journal metadata after protected use")
+                .expect("journal metadata remains");
+            assert!(
+                signed_record_after.as_slice() == signed_record_before.as_slice(),
+                "protected use leaves Signed record bytes unchanged (contents redacted)"
+            );
+            assert!(
+                signed_metadata_after.as_slice() == signed_metadata_before.as_slice(),
+                "protected use leaves metadata bytes unchanged (contents redacted)"
+            );
+            assert_eq!(journal.reserved_position_count(), signed_count_before);
+            drop(retained_coord_ack);
+            protected_observer
+                .shutdown_and_join()
+                .expect("protected-use observer exits after successful contention probe");
+            drop(signed_record_after);
+            drop(signed_metadata_after);
+            drop(signed_record_before);
+            drop(signed_metadata_before);
+
+            let (mut skipped_observer, skipped_req_tx, skipped_res_rx) =
+                BoundedProtectedUseObserver::start(owner.backend_for_test().clone());
+            let skipped_hook = ModelCoordinationHook::probing(
+                skipped_req_tx,
+                skipped_res_rx,
+                std::time::Duration::from_secs(5),
+            );
+            assert_eq!(skipped_hook.calls, 0);
+            drop(skipped_hook);
+            skipped_observer
+                .shutdown_and_join()
+                .expect("observer exits when protected hook is deliberately skipped");
+
+            let (mut output_2, mut scratch_2) = journal
+                .admit_retrieval_workspace()
+                .expect("second checked journal retrieval workspace");
+            let retained_2 = journal
+                .retrieve_retained_checked(
+                    &position_2,
+                    &binding_2,
+                    &mut scratch_2,
+                    &mut output_2,
+                )
+                .expect("second acknowledged signature retrieval");
+            let signature_2 = match retained_2 {
+                crate::signing_reservation_journal::RetainedDelivery::Retained(bytes) => bytes,
+                other => panic!("expected second acknowledged signature: {other:?}"),
+            };
+            let local_token_2 = received::admit_exact_signed_vote(
+                &owner.backend_for_test().accounting(),
+                &mut engine,
+                ValidatorId::new(SIGNER_VID),
+                &base_vote_2,
+                signature_2,
+                &ctx,
+            )
+            .expect("second journal signature admitted exactly");
+            assert!(
+                local_token_2.vote().signature.as_slice() == signature_2,
+                "second local received Vote has the exact journal signature (redacted)"
+            );
+            drop(scratch_2);
+            drop(output_2);
+            let local_2_admission =
+                received::admit_bridge_vote(&owner).expect("second local duplicate admission");
+            let local_2_result = received::invoke_bridge_vote(
+                local_2_admission,
+                &mut engine,
+                &bridge_authority,
+                local_token_2,
+                revision,
+                &history,
+            );
+            assert!(local_2_result
+                .route
+                .as_ref()
+                .unwrap_or_else(|_| panic!("second local vote route refused"))
+                .duplicate());
+            assert!(local_2_result
+                .route
+                .as_ref()
+                .unwrap_or_else(|_| panic!("second local vote route refused"))
+                .retained());
+            drop(local_2_result);
+
+            let peer_2_vote = bridge_authority.sign_like_vote(&base_vote_2, 2);
+            let peer_2_token =
+                qc_support::admit(&mut engine, ValidatorId::new(2), peer_2_vote)
+                    .expect("second peer 2 signature verifies");
+            let peer_2_admission_2 =
+                received::admit_bridge_vote(&owner).expect("second peer 2 route admission");
+            let peer_2_result = received::invoke_bridge_vote(
+                peer_2_admission_2,
+                &mut engine,
+                &bridge_authority,
+                peer_2_token,
+                revision,
+                &history,
+            );
+            let peer_2_report = peer_2_result
+                .route
+                .as_ref()
+                .unwrap_or_else(|_| panic!("second peer 2 vote route refused"));
+            assert!(!peer_2_report.logical_quorum());
+            assert!(peer_2_report.wire().is_none());
+            drop(peer_2_result);
+
+            owner.backend_for_test().set_inject(
+                crate::safety_record_store::backend::InjectFault::UncertainAfterWrite,
+            );
+            let peer_3_vote = bridge_authority.sign_like_vote(&base_vote_2, 3);
+            let peer_3_token =
+                qc_support::admit(&mut engine, ValidatorId::new(3), peer_3_vote)
+                    .expect("second peer 3 signature verifies");
+            let lock_before_uncertain = engine.locked_qc().map(|qc| (qc.block_id, qc.view));
+            let view_before_uncertain = engine.current_view();
+            let attempt = received::admit_interruption(&owner)
+                .expect("interruption coverage admitted")
+                .invoke(
+                    &mut engine,
+                    &bridge_authority,
+                    peer_3_token,
+                    revision,
+                    &history,
+                );
+            owner
+                .backend_for_test()
+                .set_inject(crate::safety_record_store::backend::InjectFault::None);
+            assert_eq!(
+                attempt.result.publication,
+                Some(received::Publication::UncertainDurable)
+            );
+            assert_eq!(attempt.result.submitted, 1);
+            let interrupted_report = attempt
+                .result
+                .route
+                .as_ref()
+                .unwrap_or_else(|_| panic!("interrupted vote route refused"));
+            assert!(interrupted_report.logical_quorum() && interrupted_report.retained());
+            bridge_authority.verify_test_evidence(interrupted_report.wire().unwrap());
+            assert_eq!(
+                interrupted_report.application(),
+                qc_support::Application::Refused
+            );
+            assert_eq!(engine.locked_qc().map(|qc| (qc.block_id, qc.view)), lock_before_uncertain);
+            assert_eq!(engine.current_view(), view_before_uncertain);
+            assert!(owner.recovery_required());
+            let uncertain_revision = revision + 1;
+            assert_eq!(
+                interrupted_report.wire().unwrap().signatures.len(),
+                3
+            );
+            let interrupted_o4_storage = snapshot_ledgers(&owner);
+            println!(
+                "captured-Vote interrupted O4 current ledgers={interrupted_o4_storage:?}"
+            );
+            let interrupted_o4_peak =
+                owner.backend_for_test().accounting_aggregate_peak();
+            println!("captured-Vote peak after interrupted O4={interrupted_o4_peak}");
+
+            // The live original pin, bounded journal, and Interrupted route remain
+            // held. Checked retained use is refused while current durable state and
+            // engine lock disagree; no additional signer or sink call is allowed.
+            let before_pre_o5 = snapshot_ledgers(&owner);
+            let before_pre_o5_provenance = pin_provenance_now(&owner, &decided_2);
+            let before_pre_o5_vote = decided_2.vote().clone();
+            let before_pre_o5_consensus = ledger.sample();
+            let before_pre_o5_caps = (
+                owner.backend_for_test().accounting_cap(),
+                owner.backend_for_test().accounting_aggregate_cap(),
+                owner.backend_for_test().context_accounting_cap(),
+            );
+            let before_pre_o5_record = journal_store
+                .get_signing_record(&signed_record_key)
+                .expect("read Signed record before pre-O5 refusal")
+                .expect("Signed journal record remains");
+            let before_pre_o5_metadata = journal_store
+                .get_signing_metadata()
+                .expect("read metadata before pre-O5 refusal")
+                .expect("journal metadata remains");
+            let before_pre_o5_count = journal.reserved_position_count();
+            let mut retained_sink_before = RetainedUseRecordingSink::new();
+            let mut retained_coord_before = ModelCoordinationHook::inert();
+            let pre_o5 = super::retained_vote_use_checked_same_authority_model::<
+                FixtureCommittedHistory,
+            >(
+                &owner,
+                &engine,
+                &decided_2,
+                &p2,
+                &limits,
+                Some(&history),
+                &mut snapshot,
+                &mut retained_sink_before,
+                &journal,
+                &mut retained_coord_before,
+                ReconfirmPerturbation::None,
+            );
+            assert_eq!(pre_o5, ModelRetainedUseOutcome::ObservationRefused);
+            assert_eq!(snapshot_ledgers(&owner), before_pre_o5);
+            assert_eq!(
+                (
+                    owner.backend_for_test().accounting_cap(),
+                    owner.backend_for_test().accounting_aggregate_cap(),
+                    owner.backend_for_test().context_accounting_cap(),
+                ),
+                before_pre_o5_caps
+            );
+            assert_eq!(decided_2.vote(), &before_pre_o5_vote);
+            assert_eq!(
+                pin_provenance_now(&owner, &decided_2),
+                before_pre_o5_provenance
+            );
+            assert_eq!(ledger.sample(), before_pre_o5_consensus);
+            assert_eq!(
+                (signer.calls(), retained_sink_before.calls, retained_coord_before.calls),
+                (2, 0, 0)
+            );
+            let after_pre_o5_record = journal_store
+                .get_signing_record(&signed_record_key)
+                .expect("read Signed record after pre-O5 refusal")
+                .expect("Signed record remains after pre-O5 refusal");
+            let after_pre_o5_metadata = journal_store
+                .get_signing_metadata()
+                .expect("read metadata after pre-O5 refusal")
+                .expect("metadata remains after pre-O5 refusal");
+            assert!(
+                after_pre_o5_record.as_slice() == before_pre_o5_record.as_slice(),
+                "pre-O5 refusal preserves Signed bytes (contents redacted)"
+            );
+            assert!(
+                after_pre_o5_metadata.as_slice() == before_pre_o5_metadata.as_slice(),
+                "pre-O5 refusal preserves metadata bytes (contents redacted)"
+            );
+            assert_eq!(journal.reserved_position_count(), before_pre_o5_count);
+            drop(after_pre_o5_record);
+            drop(after_pre_o5_metadata);
+            drop(before_pre_o5_record);
+            drop(before_pre_o5_metadata);
+
+            let proof = owner
+                .read_validate(Some(&history))
+                .expect("genuine O3 proof for uncertain received QC");
+            let o3_storage = snapshot_ledgers(&owner);
+            println!("captured-Vote O3 proof current ledgers={o3_storage:?}");
+            assert_eq!(proof.publication_revision(), uncertain_revision);
+            assert!(received::proof_contains_wire_qc(
+                &proof,
+                interrupted_report.wire().unwrap(),
+            ));
+            let o3_peak = owner.backend_for_test().accounting_aggregate_peak();
+            println!("captured-Vote peak after O3 proof={o3_peak}");
+
+            let before_o3_refusal = snapshot_ledgers(&owner);
+            let before_o3_provenance = pin_provenance_now(&owner, &decided_2);
+            let before_o3_vote = decided_2.vote().clone();
+            let before_o3_consensus = ledger.sample();
+            let before_o3_caps = (
+                owner.backend_for_test().accounting_cap(),
+                owner.backend_for_test().accounting_aggregate_cap(),
+                owner.backend_for_test().context_accounting_cap(),
+            );
+            let before_o3_record = journal_store
+                .get_signing_record(&signed_record_key)
+                .expect("read Signed record before O3 refusal")
+                .expect("Signed journal record remains");
+            let before_o3_metadata = journal_store
+                .get_signing_metadata()
+                .expect("read metadata before O3 refusal")
+                .expect("journal metadata remains");
+            let before_o3_count = journal.reserved_position_count();
+            let mut retained_sink_o3 = RetainedUseRecordingSink::new();
+            let mut retained_coord_o3 = ModelCoordinationHook::inert();
+            let after_o3_refusal = super::retained_vote_use_checked_same_authority_model::<
+                FixtureCommittedHistory,
+            >(
+                &owner,
+                &engine,
+                &decided_2,
+                &p2,
+                &limits,
+                Some(&history),
+                &mut snapshot,
+                &mut retained_sink_o3,
+                &journal,
+                &mut retained_coord_o3,
+                ReconfirmPerturbation::None,
+            );
+            assert_eq!(
+                after_o3_refusal,
+                ModelRetainedUseOutcome::ObservationRefused,
+                "genuine O2/O3 does not clear recovery or authorize protected use"
+            );
+            assert_eq!(snapshot_ledgers(&owner), before_o3_refusal);
+            assert_eq!(pin_provenance_now(&owner, &decided_2), before_o3_provenance);
+            assert_eq!(decided_2.vote(), &before_o3_vote);
+            assert_eq!(ledger.sample(), before_o3_consensus);
+            assert_eq!((retained_sink_o3.calls, retained_coord_o3.calls), (0, 0));
+            assert_eq!(signer.calls(), 2);
+            assert_eq!(
+                (
+                    owner.backend_for_test().accounting_cap(),
+                    owner.backend_for_test().accounting_aggregate_cap(),
+                    owner.backend_for_test().context_accounting_cap(),
+                ),
+                before_o3_caps
+            );
+            assert!(owner.recovery_required());
+            let after_o3_record = journal_store
+                .get_signing_record(&signed_record_key)
+                .expect("read Signed record after O3 refusal")
+                .expect("Signed record remains after O3 refusal");
+            let after_o3_metadata = journal_store
+                .get_signing_metadata()
+                .expect("read metadata after O3 refusal")
+                .expect("metadata remains after O3 refusal");
+            assert!(
+                after_o3_record.as_slice() == before_o3_record.as_slice(),
+                "O3 refusal preserves Signed bytes (contents redacted)"
+            );
+            assert!(
+                after_o3_metadata.as_slice() == before_o3_metadata.as_slice(),
+                "O3 refusal preserves metadata bytes (contents redacted)"
+            );
+            assert_eq!(journal.reserved_position_count(), before_o3_count);
+            drop(after_o3_record);
+            drop(after_o3_metadata);
+            drop(before_o3_record);
+            drop(before_o3_metadata);
+
+            let acknowledged = if exercise_pressure {
+                // Genuine shared-ledger pressure refuses O5 admission while the
+                // proof, interruption owner, pin, and journal all remain live.
+                let o5_baseline = snapshot_ledgers(&owner);
+                let aggregate_current = owner
+                    .backend_for_test()
+                    .accounting_aggregate_current();
+                let aggregate_ceiling = owner
+                    .backend_for_test()
+                    .accounting_aggregate_cap()
+                    .expect("aggregate ceiling");
+                let pressure = owner
+                    .backend_for_test()
+                    .accounting()
+                    .reserve(aggregate_ceiling - aggregate_current)
+                    .expect("fill remaining aggregate capacity");
+                let pressure_ledgers = snapshot_ledgers(&owner);
+                assert!(received::admit_recovery(&owner).is_err());
+                assert_eq!(snapshot_ledgers(&owner), pressure_ledgers);
+                drop(pressure);
+                assert_eq!(snapshot_ledgers(&owner), o5_baseline);
+                received::admit_recovery(&owner)
+                    .expect("relieved O5 admission")
+                    .acknowledge(&attempt, &proof)
+                    .expect("exact O3 proof acknowledges uncertain O4")
+            } else {
+                received::admit_recovery(&owner)
+                    .expect("unpressured O5 admission")
+                    .acknowledge(&attempt, &proof)
+                    .expect("exact O3 proof acknowledges uncertain O4")
+            };
+            assert!(!owner.recovery_required());
+            revision = uncertain_revision;
+            let o5_storage = snapshot_ledgers(&owner);
+            println!("captured-Vote O5 current ledgers={o5_storage:?}");
+            let o5_peak = owner.backend_for_test().accounting_aggregate_peak();
+            println!("captured-Vote peak after O5={o5_peak}");
+
+            let before_post_o5 = snapshot_ledgers(&owner);
+            let before_post_o5_provenance = pin_provenance_now(&owner, &decided_2);
+            let before_post_o5_vote = decided_2.vote().clone();
+            let before_post_o5_consensus = ledger.sample();
+            let before_post_o5_caps = (
+                owner.backend_for_test().accounting_cap(),
+                owner.backend_for_test().accounting_aggregate_cap(),
+                owner.backend_for_test().context_accounting_cap(),
+            );
+            let before_post_o5_record = journal_store
+                .get_signing_record(&signed_record_key)
+                .expect("read Signed record before post-O5 refusal")
+                .expect("Signed journal record remains");
+            let before_post_o5_metadata = journal_store
+                .get_signing_metadata()
+                .expect("read metadata before post-O5 refusal")
+                .expect("journal metadata remains");
+            let before_post_o5_count = journal.reserved_position_count();
+            let mut retained_sink_post = RetainedUseRecordingSink::new();
+            let mut retained_coord_post = ModelCoordinationHook::inert();
+            let post_o5 = super::retained_vote_use_checked_same_authority_model::<
+                FixtureCommittedHistory,
+            >(
+                &owner,
+                &engine,
+                &decided_2,
+                &p2,
+                &limits,
+                Some(&history),
+                &mut snapshot,
+                &mut retained_sink_post,
+                &journal,
+                &mut retained_coord_post,
+                ReconfirmPerturbation::None,
+            );
+            assert_eq!(post_o5, ModelRetainedUseOutcome::ObservationRefused);
+            assert_eq!(snapshot_ledgers(&owner), before_post_o5);
+            assert_eq!(
+                (
+                    owner.backend_for_test().accounting_cap(),
+                    owner.backend_for_test().accounting_aggregate_cap(),
+                    owner.backend_for_test().context_accounting_cap(),
+                ),
+                before_post_o5_caps
+            );
+            assert_eq!(decided_2.vote(), &before_post_o5_vote);
+            assert_eq!(
+                pin_provenance_now(&owner, &decided_2),
+                before_post_o5_provenance
+            );
+            assert_eq!(ledger.sample(), before_post_o5_consensus);
+            assert_eq!(
+                (signer.calls(), retained_sink_post.calls, retained_coord_post.calls),
+                (2, 0, 0)
+            );
+            let after_post_o5_record = journal_store
+                .get_signing_record(&signed_record_key)
+                .expect("read Signed record after post-O5 refusal")
+                .expect("Signed record remains after post-O5 refusal");
+            let after_post_o5_metadata = journal_store
+                .get_signing_metadata()
+                .expect("read metadata after post-O5 refusal")
+                .expect("metadata remains after post-O5 refusal");
+            assert!(
+                after_post_o5_record.as_slice() == before_post_o5_record.as_slice(),
+                "post-O5 refusal preserves Signed bytes (contents redacted)"
+            );
+            assert!(
+                after_post_o5_metadata.as_slice() == before_post_o5_metadata.as_slice(),
+                "post-O5 refusal preserves metadata bytes (contents redacted)"
+            );
+            assert_eq!(journal.reserved_position_count(), before_post_o5_count);
+            drop(after_post_o5_record);
+            drop(after_post_o5_metadata);
+            drop(before_post_o5_record);
+            drop(before_post_o5_metadata);
+
+            if exercise_alternative_membership {
+                let storage_before = snapshot_ledgers(&owner);
+                let context_before = owner
+                    .backend_for_test()
+                    .context_accounting_current();
+                let alternative_record_before = journal_store
+                    .get_signing_record(&signed_record_key)
+                    .expect("read Signed record before alternative-QC refusal")
+                    .expect("Signed journal record remains");
+                let alternative_metadata_before = journal_store
+                    .get_signing_metadata()
+                    .expect("read metadata before alternative-QC refusal")
+                    .expect("journal metadata remains");
+                let lock_before = engine.locked_qc().map(|qc| (qc.block_id, qc.view));
+                let view_before = engine.current_view();
+                let applications_before = qc_support::applications(&engine);
+                let effects_before = (
+                    effects.qc.load(std::sync::atomic::Ordering::SeqCst),
+                    effects.view.load(std::sync::atomic::Ordering::SeqCst),
+                    effects.votes.load(std::sync::atomic::Ordering::SeqCst),
+                    effects
+                        .validator_votes
+                        .load(std::sync::atomic::Ordering::SeqCst),
+                );
+                let o4_hooks_before =
+                    o4_probe_count.load(std::sync::atomic::Ordering::SeqCst);
+                let alternative_vote = bridge_authority.sign_like_vote(&base_vote_2, 0);
+                let alternative_token =
+                    qc_support::admit(&mut engine, ValidatorId::new(0), alternative_vote)
+                        .expect("genuine fourth-member Vote verifies");
+                let consensus_before = ledger.sample();
+                let alternative_result = received::admit_resumption(&owner)
+                    .expect("alternative-QC resumption admission")
+                    .invoke(&mut engine, alternative_token, &acknowledged);
+                assert_eq!(
+                    alternative_result.refused,
+                    Some(received::Refused::Certificate)
+                );
+                assert_eq!(alternative_result.publication, None);
+                assert_eq!(alternative_result.submitted, 0);
+                assert_eq!(alternative_result.gate_calls, 1);
+                let storage_during = snapshot_ledgers(&owner);
+                let resumption_charge = storage_during
+                    .operational
+                    .checked_sub(storage_before.operational)
+                    .expect("resumption control reservation remains live");
+                assert_eq!(
+                    alternative_result.after_route,
+                    (storage_during.operational, storage_during.aggregate)
+                );
+                assert_eq!(
+                    storage_during.aggregate.checked_sub(storage_before.aggregate),
+                    Some(resumption_charge)
+                );
+                assert_eq!(
+                    owner
+                        .backend_for_test()
+                        .context_accounting_current(),
+                    context_before
+                );
+                assert!(
+                    storage_during.operational
+                        <= owner.backend_for_test().accounting_cap().expect("operational cap")
+                );
+                assert!(
+                    storage_during.aggregate
+                        <= owner.backend_for_test()
+                            .accounting_aggregate_cap()
+                            .expect("aggregate cap")
+                );
+                {
+                    let report = alternative_result
+                        .route
+                        .as_ref()
+                        .unwrap_or_else(|_| panic!("alternative resumption route refused"));
+                    assert_eq!(report.application(), qc_support::Application::Refused);
+                    assert!(report.logical_quorum() && report.retained());
+                    assert!(!report.duplicate());
+                    let alternative_qc = report
+                        .wire()
+                        .expect("complete alternative QC reaches exact-correspondence gate");
+                    bridge_authority.verify_test_evidence(alternative_qc);
+                    let original_qc = interrupted_report.wire().unwrap();
+                    assert_eq!(
+                        (
+                            alternative_qc.block_id,
+                            alternative_qc.height,
+                            alternative_qc.round,
+                        ),
+                        (original_qc.block_id, original_qc.height, original_qc.round)
+                    );
+                    assert_ne!(
+                        alternative_qc.signer_bitmap,
+                        original_qc.signer_bitmap,
+                        "complete alternative membership must differ (redacted)"
+                    );
+                    assert_eq!(
+                        (alternative_qc.signatures.len(), original_qc.signatures.len()),
+                        (4, 3)
+                    );
+                    assert!(received::proof_contains_wire_qc(&proof, original_qc));
+                    let (report_control, report_backing) = report.charges();
+                    assert_eq!(
+                        ledger.sample(),
+                        (
+                            consensus_before.0 + report_control + report_backing
+                                - qc_support::token_inline_bytes(),
+                            0,
+                            consensus_before.2,
+                            0,
+                            consensus_before.4 + 1,
+                            0,
+                        ),
+                        "alternative evidence and report are independently charged"
+                    );
+                }
+                assert_eq!(
+                    engine.locked_qc().map(|qc| (qc.block_id, qc.view)),
+                    lock_before
+                );
+                assert_eq!(engine.current_view(), view_before);
+                assert_eq!(qc_support::applications(&engine), applications_before);
+                assert_eq!(
+                    (
+                        effects.qc.load(std::sync::atomic::Ordering::SeqCst),
+                        effects.view.load(std::sync::atomic::Ordering::SeqCst),
+                        effects.votes.load(std::sync::atomic::Ordering::SeqCst),
+                        effects
+                            .validator_votes
+                            .load(std::sync::atomic::Ordering::SeqCst),
+                    ),
+                    (
+                        effects_before.0,
+                        effects_before.1,
+                        effects_before.2 + 1,
+                        effects_before.3 + 1,
+                    ),
+                    "Vote callbacks occur once while QC/view effects remain suppressed"
+                );
+                assert_eq!(
+                    o4_probe_count.load(std::sync::atomic::Ordering::SeqCst),
+                    o4_hooks_before,
+                    "resumption refusal does not invoke O4"
+                );
+                assert!(!owner.recovery_required());
+                assert_eq!(signer.calls(), 2);
+
+                let protected_storage_before = snapshot_ledgers(&owner);
+                let protected_consensus_before = ledger.sample();
+                let protected_vote_before = decided_2.vote().clone();
+                let protected_provenance_before = pin_provenance_now(&owner, &decided_2);
+                let mut alternative_sink = RetainedUseRecordingSink::new();
+                let mut alternative_coord = ModelCoordinationHook::inert();
+                let retained_use = super::retained_vote_use_checked_same_authority_model::<
+                    FixtureCommittedHistory,
+                >(
+                    &owner,
+                    &engine,
+                    &decided_2,
+                    &p2,
+                    &limits,
+                    Some(&history),
+                    &mut snapshot,
+                    &mut alternative_sink,
+                    &journal,
+                    &mut alternative_coord,
+                    ReconfirmPerturbation::None,
+                );
+                assert_eq!(retained_use, ModelRetainedUseOutcome::ObservationRefused);
+                assert_eq!(snapshot_ledgers(&owner), protected_storage_before);
+                assert_eq!(ledger.sample(), protected_consensus_before);
+                assert_eq!((alternative_sink.calls, alternative_coord.calls), (0, 0));
+                assert_eq!(signer.calls(), 2);
+                assert_eq!(decided_2.vote(), &protected_vote_before);
+                assert_eq!(
+                    pin_provenance_now(&owner, &decided_2),
+                    protected_provenance_before
+                );
+                let record_after_alternative = journal_store
+                    .get_signing_record(&signed_record_key)
+                    .expect("read Signed record after alternative-QC refusal")
+                    .expect("Signed journal record remains");
+                let metadata_after_alternative = journal_store
+                    .get_signing_metadata()
+                    .expect("read metadata after alternative-QC refusal")
+                    .expect("journal metadata remains");
+                assert!(
+                    record_after_alternative.as_slice() == alternative_record_before.as_slice(),
+                    "alternative-QC refusal preserves Signed bytes (redacted)"
+                );
+                assert!(
+                    metadata_after_alternative.as_slice()
+                        == alternative_metadata_before.as_slice(),
+                    "alternative-QC refusal preserves metadata (redacted)"
+                );
+                assert_eq!(journal.reserved_position_count(), signed_count_before);
+                drop(record_after_alternative);
+                drop(metadata_after_alternative);
+                drop(alternative_record_before);
+                drop(alternative_metadata_before);
+                drop(alternative_result);
+                assert_eq!(snapshot_ledgers(&owner), storage_before);
+                assert_eq!(
+                    ledger.sample(),
+                    (
+                        consensus_before.0 - qc_support::token_inline_bytes(),
+                        0,
+                        consensus_before.2,
+                        0,
+                        consensus_before.4,
+                        0,
+                    ),
+                    "after report destruction only genuine incoming evidence remains"
+                );
+
+                drop(acknowledged);
+                drop(proof);
+                drop(attempt);
+                let before_proposal_drop = snapshot_ledgers(&owner);
+                drop(p2);
+                assert_eq!(
+                    snapshot_ledgers(&owner),
+                    LedgerSnapshot {
+                        operational: before_proposal_drop
+                            .operational
+                            .checked_sub(p2_coverage_charge)
+                            .expect("successor Proposal charge is retained"),
+                        aggregate: before_proposal_drop
+                            .aggregate
+                            .checked_sub(p2_coverage_charge)
+                            .expect("successor Proposal aggregate charge is retained"),
+                    }
+                );
+                let before_capture_drop = snapshot_ledgers(&owner);
+                let capture_pin = decided_2.payload().pin();
+                let capture_registry = owner
+                    .backend_for_test()
+                    .prepared_registry_for_test()
+                    .expect("captured prepared registry");
+                let capture_generation = {
+                    let registry = capture_registry.lock().expect("prepared registry");
+                    registry
+                        .inspect(capture_pin.handle())
+                        .expect("captured generation entry")
+                };
+                let expected_capture_release = envelope_charge
+                    .checked_add(crate::safety_record_store::prepared::pin_charge_bytes())
+                    .and_then(|charge| {
+                        charge.checked_add(capture_generation.generation_core_charge)
+                    })
+                    .and_then(|charge| {
+                        charge.checked_add(capture_generation.generation_control_charge)
+                    })
+                    .expect("captured owner release sum is representable");
+                drop(capture_registry);
+                drop(decided_2);
+                let after_capture_drop = snapshot_ledgers(&owner);
+                assert_eq!(
+                    before_capture_drop
+                        .operational
+                        .checked_sub(after_capture_drop.operational),
+                    Some(expected_capture_release),
+                    "captured vote releases envelope, pin, generation core and control"
+                );
+                assert_eq!(
+                    before_capture_drop
+                        .aggregate
+                        .checked_sub(after_capture_drop.aggregate),
+                    Some(expected_capture_release)
+                );
+                let before_journal_drop = snapshot_ledgers(&owner);
+                let journal_release = journal
+                    .live_backing_charge_for_test()
+                    .expect("bounded journal charge remains");
+                drop(journal);
+                assert_eq!(snapshot_ledgers(&owner), before_journal_drop);
+                drop(journal_store);
+                assert_eq!(
+                    snapshot_ledgers(&owner),
+                    LedgerSnapshot {
+                        operational: before_journal_drop
+                            .operational
+                            .checked_sub(journal_release)
+                            .expect("journal owner charge is retained"),
+                        aggregate: before_journal_drop
+                            .aggregate
+                            .checked_sub(journal_release)
+                            .expect("journal aggregate charge is retained"),
+                    }
+                );
+                drop(engine);
+                let accountant = owner.backend_for_test().accounting_handle_for_test();
+                drop(owner);
+                drop(snapshot);
+                drop(signer);
+                drop(inner);
+                drop(pv);
+                drop(bridge_authority);
+                assert_eq!(accountant.current(), 0);
+                assert_eq!(accountant.aggregate().current(), 0);
+                assert_eq!(ledger.sample(), qc_support::empty_ledger_floor());
+                return;
+            }
+
+            // Exact-QC resumption re-admits the journal signature through the
+            // exact-layout vote-copy owner. No O4 is repeated; the gate compares
+            // the complete retained QC against the O3/O5 proof before effects.
+            let (mut output_resume, mut scratch_resume) = journal
+                .admit_retrieval_workspace()
+                .expect("resumption checked retrieval workspace");
+            let retained_resume = journal
+                .retrieve_retained_checked(
+                    &position_2,
+                    &binding_2,
+                    &mut scratch_resume,
+                    &mut output_resume,
+                )
+                .expect("resumption retrieves exact signed result");
+            let resume_signature = match retained_resume {
+                crate::signing_reservation_journal::RetainedDelivery::Retained(bytes) => bytes,
+                other => panic!("expected retained signature for exact resumption: {other:?}"),
+            };
+            let resume_token = received::admit_exact_signed_vote(
+                &owner.backend_for_test().accounting(),
+                &mut engine,
+                ValidatorId::new(SIGNER_VID),
+                &base_vote_2,
+                resume_signature,
+                &ctx,
+            )
+            .expect("exact retained signature admitted for resumption");
+            assert!(
+                resume_token.vote().signature.as_slice() == resume_signature,
+                "resumption Vote has the exact journal signature (redacted)"
+            );
+            drop(scratch_resume);
+            drop(output_resume);
+            let before_resume_ledger = ledger.sample();
+            let before_resume_storage = snapshot_ledgers(&owner);
+            let resumed = received::admit_resumption(&owner)
+                .expect("exact resumption admission")
+                .invoke(&mut engine, resume_token, &acknowledged);
+            let resumption_storage = snapshot_ledgers(&owner);
+            println!(
+                "captured-Vote exact-resumption current ledgers={resumption_storage:?}"
+            );
+            let resumed_report = resumed
+                .route
+                .as_ref()
+                .unwrap_or_else(|_| panic!("exact resumption route refused"));
+            assert_eq!(resumed.refused, None);
+            assert_eq!(resumed.gate_calls, 1);
+            assert_eq!(resumed_report.application(), qc_support::Application::Applied);
+            assert!(
+                resumed_report.wire() == Some(interrupted_report.wire().unwrap()),
+                "resumption preserves exact QC correspondence (redacted)"
+            );
+            let after_resume_ledger = ledger.sample();
+            assert!(after_resume_ledger.0 <= consensus_cap);
+            assert_eq!(after_resume_ledger.1, 0);
+            println!(
+                "captured-Vote resumed QC evidence: before={before_resume_ledger:?} after={after_resume_ledger:?} report_charges={:?}",
+                resumed_report.charges()
+            );
+            assert_eq!(engine.current_view(), view_before_uncertain + 1);
+            assert_eq!(
+                engine.locked_qc().map(|qc| (qc.block_id, qc.view)),
+                Some((base_vote_2.block_id, base_vote_2.height))
+            );
+            assert_eq!(signer.calls(), 2, "resumption does not invoke a signer");
+            drop(resumed);
+            assert_eq!(snapshot_ledgers(&owner), before_resume_storage);
+            let resumption_peak = owner.backend_for_test().accounting_aggregate_peak();
+            println!("captured-Vote peak after exact resumption={resumption_peak}");
+
+            let retained_use_before = snapshot_ledgers(&owner);
+            let retained_use_vote_before = decided_2.vote().clone();
+            let retained_use_provenance_before = pin_provenance_now(&owner, &decided_2);
+            let retained_use_consensus_before = ledger.sample();
+            let retained_use_caps_before = (
+                owner.backend_for_test().accounting_cap(),
+                owner.backend_for_test().accounting_aggregate_cap(),
+                owner.backend_for_test().context_accounting_cap(),
+            );
+            let retained_use_record_before = journal_store
+                .get_signing_record(&signed_record_key)
+                .expect("read Signed record before post-resumption use")
+                .expect("Signed journal record remains");
+            let retained_use_metadata_before = journal_store
+                .get_signing_metadata()
+                .expect("read metadata before post-resumption use")
+                .expect("journal metadata remains");
+            let retained_use_count_before = journal.reserved_position_count();
+            let mut retained_sink = RetainedUseRecordingSink::new();
+            let mut retained_coord = ModelCoordinationHook::inert();
+            let retained = super::retained_vote_use_checked_same_authority_model::<
+                FixtureCommittedHistory,
+            >(
+                &owner,
+                &engine,
+                &decided_2,
+                &p2,
+                &limits,
+                Some(&history),
+                &mut snapshot,
+                &mut retained_sink,
+                &journal,
+                &mut retained_coord,
+                ReconfirmPerturbation::None,
+            );
+            let retained_diag = match retained {
+                ModelRetainedUseOutcome::Consumed(diag) => diag,
+                other => panic!("checked retained use after exact resumption refused: {other:?}"),
+            };
+            let retained_use_storage = snapshot_ledgers(&owner);
+            assert_eq!(retained_use_storage, retained_use_before);
+            assert_eq!(ledger.sample(), retained_use_consensus_before);
+            assert_eq!(
+                (
+                    owner.backend_for_test().accounting_cap(),
+                    owner.backend_for_test().accounting_aggregate_cap(),
+                    owner.backend_for_test().context_accounting_cap(),
+                ),
+                retained_use_caps_before
+            );
+            assert_eq!(decided_2.vote(), &retained_use_vote_before);
+            assert_eq!(
+                pin_provenance_now(&owner, &decided_2),
+                retained_use_provenance_before
+            );
+            assert_eq!(retained_diag.sig_len as usize, SIG_LEN);
+            assert_eq!((retained_sink.calls, retained_coord.calls), (1, 1));
+            assert_eq!(signer.calls(), 2, "checked retained use performs no signing");
+            assert_eq!(decided_2.vote(), &base_vote_2);
+            assert_eq!(pin_provenance_now(&owner, &decided_2), provenance_2);
+            let retained_use_record_after = journal_store
+                .get_signing_record(&signed_record_key)
+                .expect("read Signed record after post-resumption use")
+                .expect("Signed record remains after post-resumption use");
+            let retained_use_metadata_after = journal_store
+                .get_signing_metadata()
+                .expect("read metadata after post-resumption use")
+                .expect("metadata remains after post-resumption use");
+            assert!(
+                retained_use_record_after.as_slice()
+                    == retained_use_record_before.as_slice(),
+                "post-resumption use preserves Signed bytes (contents redacted)"
+            );
+            assert!(
+                retained_use_metadata_after.as_slice()
+                    == retained_use_metadata_before.as_slice(),
+                "post-resumption use preserves metadata bytes (contents redacted)"
+            );
+            assert_eq!(journal.reserved_position_count(), retained_use_count_before);
+            drop(retained_use_record_after);
+            drop(retained_use_metadata_after);
+            drop(retained_use_record_before);
+            drop(retained_use_metadata_before);
+            println!(
+                "captured-Vote checked-retained-use current ledgers={retained_use_storage:?}"
+            );
+            let retained_use_peak = owner.backend_for_test().accounting_aggregate_peak();
+            println!("captured-Vote peak after checked retained use={retained_use_peak}");
+            let successful_phase_peaks = if exercise_pressure {
+                None
+            } else {
+                let (determining_phase, aggregate_peak) = [
+                    ("acknowledged O4", acknowledged_o4_peak),
+                    ("interrupted O4", interrupted_o4_peak),
+                    ("O3 proof", o3_peak),
+                    ("O5", o5_peak),
+                    ("exact resumption", resumption_peak),
+                    ("checked retained use", retained_use_peak),
+                ]
+                .into_iter()
+                .reduce(|first, next| if next.1 > first.1 { next } else { first })
+                .expect("successful phase checkpoints are nonempty");
+                let peaks = (
+                    owner.backend_for_test().accounting_peak(),
+                    owner.backend_for_test().context_accounting_peak(),
+                    aggregate_peak,
+                );
+                println!(
+                    "captured-Vote unpressured successful peak={peaks:?} (operational, context, aggregate); determining phase={determining_phase}"
+                );
+                Some(peaks)
+            };
+            if !exercise_pressure {
+                assert!(successful_phase_peaks.is_some());
+            }
+
+            let invalidation_baseline = snapshot_ledgers(&owner);
+            let invalidation_vote = decided_2.vote().clone();
+            let invalidation_provenance = pin_provenance_now(&owner, &decided_2);
+            let invalidation_consensus = ledger.sample();
+            let invalidation_lock = engine.locked_qc().map(|qc| (qc.block_id, qc.view));
+            let invalidation_view = engine.current_view();
+            let invalidation_qc_callbacks =
+                effects.qc.load(std::sync::atomic::Ordering::SeqCst);
+            let invalidation_view_callbacks =
+                effects.view.load(std::sync::atomic::Ordering::SeqCst);
+            let invalidation_record_before = journal_store
+                .get_signing_record(&signed_record_key)
+                .expect("read Signed record before authorization invalidation")
+                .expect("Signed journal record remains");
+            let invalidation_metadata_before = journal_store
+                .get_signing_metadata()
+                .expect("read metadata before authorization invalidation")
+                .expect("journal metadata remains");
+            let invalidation_positions = journal.reserved_position_count();
+            let mut invalidation_sink = RetainedUseRecordingSink::new();
+            let mut invalidation_coord = ModelCoordinationHook::inert();
+            let invalidated = super::retained_vote_use_checked_same_authority_model::<
+                FixtureCommittedHistory,
+            >(
+                &owner,
+                &engine,
+                &decided_2,
+                &p2,
+                &limits,
+                Some(&history),
+                &mut snapshot,
+                &mut invalidation_sink,
+                &journal,
+                &mut invalidation_coord,
+                ReconfirmPerturbation::AdvanceGenerationBeforeConfirm,
+            );
+            assert_eq!(
+                invalidated,
+                ModelRetainedUseOutcome::AuthorizationConfirmRefused,
+                "authorization invalidation after observation refuses at confirmation"
+            );
+            assert_eq!(snapshot_ledgers(&owner), invalidation_baseline);
+            assert!(decided_2.vote() == &invalidation_vote, "Vote preserved (redacted)");
+            assert_eq!(
+                pin_provenance_now(&owner, &decided_2),
+                invalidation_provenance
+            );
+            assert_eq!(ledger.sample(), invalidation_consensus);
+            assert_eq!(
+                engine.locked_qc().map(|qc| (qc.block_id, qc.view)),
+                invalidation_lock
+            );
+            assert_eq!(engine.current_view(), invalidation_view);
+            assert_eq!(
+                effects.qc.load(std::sync::atomic::Ordering::SeqCst),
+                invalidation_qc_callbacks
+            );
+            assert_eq!(
+                effects.view.load(std::sync::atomic::Ordering::SeqCst),
+                invalidation_view_callbacks
+            );
+            assert_eq!(
+                (invalidation_sink.calls, invalidation_coord.calls, signer.calls()),
+                (0, 0, 2),
+                "failed confirmation does not consume, deliver, or sign"
+            );
+            let invalidation_record_after = journal_store
+                .get_signing_record(&signed_record_key)
+                .expect("read Signed record after authorization invalidation")
+                .expect("Signed record remains");
+            let invalidation_metadata_after = journal_store
+                .get_signing_metadata()
+                .expect("read metadata after authorization invalidation")
+                .expect("journal metadata remains");
+            assert!(
+                invalidation_record_after.as_slice()
+                    == invalidation_record_before.as_slice(),
+                "authorization invalidation preserves Signed bytes (redacted)"
+            );
+            assert!(
+                invalidation_metadata_after.as_slice()
+                    == invalidation_metadata_before.as_slice(),
+                "authorization invalidation preserves metadata (redacted)"
+            );
+            assert_eq!(
+                journal.reserved_position_count(),
+                invalidation_positions,
+                "authorization invalidation preserves journal position count"
+            );
+            drop(invalidation_record_after);
+            drop(invalidation_metadata_after);
+            drop(invalidation_record_before);
+            drop(invalidation_metadata_before);
+            let pre_pressure_lifecycle_peaks = (
+                owner.backend_for_test().accounting_peak(),
+                owner.backend_for_test().context_accounting_peak(),
+                owner.backend_for_test().accounting_aggregate_peak(),
+            );
+
+            // Separate fresh pressure attempt: all successful unpressured phases
+            // have completed. The complete token remains caller-owned until
+            // adapter coverage is admitted; failure cannot consume or rebuild it.
+            let final_consensus_pre_token = ledger.sample();
+            let final_vote = bridge_authority
+                .sign_like_vote(&base_vote_2, SIGNER_VID as usize);
+            let final_token =
+                qc_support::admit(&mut engine, ValidatorId::new(SIGNER_VID), final_vote)
+                    .expect("genuine already-retained duplicate token");
+            let final_token_vote = final_token.vote().clone();
+            let final_signature_ptr = final_token.vote().signature.as_ptr();
+            let final_signature_capacity = final_token.vote().signature.capacity();
+            let final_storage_baseline = snapshot_ledgers(&owner);
+            let final_consensus_baseline = ledger.sample();
+            let final_lock = engine.locked_qc().map(|qc| (qc.block_id, qc.view));
+            let final_view = engine.current_view();
+            let final_ceiling = (
+                owner.backend_for_test().accounting_cap(),
+                owner.backend_for_test().accounting_aggregate_cap(),
+                owner.backend_for_test().context_accounting_cap(),
+                engine.state().max_retained_evidence_bytes(),
+            );
+            let final_callback_counts = (
+                effects.qc.load(std::sync::atomic::Ordering::SeqCst),
+                effects.view.load(std::sync::atomic::Ordering::SeqCst),
+                effects.votes.load(std::sync::atomic::Ordering::SeqCst),
+                effects
+                    .validator_votes
+                    .load(std::sync::atomic::Ordering::SeqCst),
+                o4_probe_count.load(std::sync::atomic::Ordering::SeqCst),
+            );
+            let final_record_before = journal_store
+                .get_signing_record(&signed_record_key)
+                .expect("read Signed record before route-admission pressure")
+                .expect("Signed record remains");
+            let final_metadata_before = journal_store
+                .get_signing_metadata()
+                .expect("read metadata before route-admission pressure")
+                .expect("journal metadata remains");
+            let final_pressure = owner
+                .backend_for_test()
+                .accounting()
+                .reserve(storage_cap - final_storage_baseline.aggregate)
+                .expect("fill only remaining aggregate capacity");
+            let final_pressure_baseline = snapshot_ledgers(&owner);
+            let final_pressure_consensus = ledger.sample();
+            assert_eq!(
+                received::admit_bridge_vote(&owner).err(),
+                Some(received::AdmissionRefusal::Capacity),
+                "bridge admission refusal occurs before token transfer"
+            );
+            assert!(
+                final_token.vote() == &final_token_vote,
+                "caller-owned Vote remains unchanged (redacted)"
+            );
+            assert_eq!(final_token.vote().signature.as_ptr(), final_signature_ptr);
+            assert_eq!(
+                final_token.vote().signature.capacity(),
+                final_signature_capacity
+            );
+            assert_eq!(snapshot_ledgers(&owner), final_pressure_baseline);
+            assert_eq!(ledger.sample(), final_pressure_consensus);
+            assert_eq!(
+                (
+                    effects.qc.load(std::sync::atomic::Ordering::SeqCst),
+                    effects.view.load(std::sync::atomic::Ordering::SeqCst),
+                    effects.votes.load(std::sync::atomic::Ordering::SeqCst),
+                    effects
+                        .validator_votes
+                        .load(std::sync::atomic::Ordering::SeqCst),
+                    o4_probe_count.load(std::sync::atomic::Ordering::SeqCst),
+                ),
+                final_callback_counts,
+                "admission refusal invokes no vote/QC/view callback or pre-effect hook"
+            );
+            assert_eq!(engine.locked_qc().map(|qc| (qc.block_id, qc.view)), final_lock);
+            assert_eq!(engine.current_view(), final_view);
+            assert_eq!(
+                (
+                    owner.backend_for_test().accounting_cap(),
+                    owner.backend_for_test().accounting_aggregate_cap(),
+                    owner.backend_for_test().context_accounting_cap(),
+                    engine.state().max_retained_evidence_bytes(),
+                ),
+                final_ceiling
+            );
+            drop(final_pressure);
+            assert_eq!(snapshot_ledgers(&owner), final_storage_baseline);
+            assert_eq!(ledger.sample(), final_consensus_baseline);
+            assert!(
+                final_token.vote() == &final_token_vote,
+                "retry token Vote remains unchanged (redacted)"
+            );
+            assert_eq!(final_token.vote().signature.as_ptr(), final_signature_ptr);
+            assert_eq!(
+                final_token.vote().signature.capacity(),
+                final_signature_capacity
+            );
+            let final_admission = received::admit_bridge_vote(&owner)
+                .expect("relief admits a retry with the same token");
+            let final_result = received::invoke_bridge_vote(
+                final_admission,
+                &mut engine,
+                &bridge_authority,
+                final_token,
+                revision,
+                &history,
+            );
+            assert_eq!(final_result.publication, None);
+            assert_eq!(
+                final_result.refused,
+                Some(received::Refused::NonAdvancing),
+                "after pressure relief the same token reaches the real safety gate"
+            );
+            assert_eq!(final_result.gate_calls, 1);
+            assert_eq!(final_result.submitted, 0);
+            let final_route = received::retain_route(final_result);
+            let final_report = final_route
+                .as_ref()
+                .unwrap_or_else(|_| panic!("same-token retry route refused"));
+            assert!(final_report.duplicate());
+            assert_eq!(snapshot_ledgers(&owner), final_storage_baseline);
+            assert_eq!(engine.locked_qc().map(|qc| (qc.block_id, qc.view)), final_lock);
+            assert_eq!(engine.current_view(), final_view);
+            drop(final_route);
+            assert_eq!(ledger.sample(), final_consensus_pre_token);
+            let final_record_after = journal_store
+                .get_signing_record(&signed_record_key)
+                .expect("read Signed record after same-token retry")
+                .expect("Signed record remains");
+            let final_metadata_after = journal_store
+                .get_signing_metadata()
+                .expect("read metadata after same-token retry")
+                .expect("journal metadata remains");
+            assert!(
+                final_record_after.as_slice() == final_record_before.as_slice(),
+                "admission refusal and duplicate retry preserve Signed bytes (redacted)"
+            );
+            assert!(
+                final_metadata_after.as_slice() == final_metadata_before.as_slice(),
+                "admission refusal and duplicate retry preserve metadata (redacted)"
+            );
+            assert_eq!(journal.reserved_position_count(), signed_count_before);
+            drop(final_record_after);
+            drop(final_metadata_after);
+            drop(final_record_before);
+            drop(final_metadata_before);
+
+            let before_p2_drop = snapshot_ledgers(&owner);
+            drop(p2);
+            let after_p2_drop = snapshot_ledgers(&owner);
+            assert_eq!(
+                after_p2_drop,
+                LedgerSnapshot {
+                    operational: before_p2_drop
+                        .operational
+                        .checked_sub(p2_coverage_charge)
+                        .expect("successor Proposal operational charge is retained"),
+                    aggregate: before_p2_drop
+                        .aggregate
+                        .checked_sub(p2_coverage_charge)
+                        .expect("successor Proposal aggregate charge is retained"),
+                }
+            );
+            let recovery_release = received::recovery_charge();
+            let before_ack_drop = snapshot_ledgers(&owner);
+            drop(acknowledged);
+            assert_eq!(
+                snapshot_ledgers(&owner),
+                LedgerSnapshot {
+                        operational: before_ack_drop
+                            .operational
+                            .checked_sub(recovery_release)
+                            .expect("acknowledgement owner charge is retained"),
+                        aggregate: before_ack_drop
+                            .aggregate
+                            .checked_sub(recovery_release)
+                            .expect("acknowledgement aggregate charge is retained"),
+                },
+                "dropping O5 acknowledgement releases exactly its control coverage"
+            );
+            let proof_release = owner
+                .retained_holder_charge()
+                .expect("validated proof holder charge");
+            let before_proof_drop = snapshot_ledgers(&owner);
+            drop(proof);
+            assert_eq!(
+                snapshot_ledgers(&owner),
+                LedgerSnapshot {
+                        operational: before_proof_drop
+                            .operational
+                            .checked_sub(proof_release)
+                            .expect("O3 proof holder is retained"),
+                        aggregate: before_proof_drop
+                            .aggregate
+                            .checked_sub(proof_release)
+                            .expect("O3 proof aggregate holder is retained"),
+                },
+                "dropping O3 proof releases its exact retained-holder charge"
+            );
+            let interrupted_release = received::interruption_charge();
+            let report_release = interrupted_report
+                .charges()
+                .0
+                .checked_add(interrupted_report.charges().1)
+                .expect("interrupted report charge sum is representable");
+            let before_attempt_drop = snapshot_ledgers(&owner);
+            let before_attempt_consensus = ledger.sample();
+            drop(attempt);
+            assert_eq!(
+                snapshot_ledgers(&owner),
+                LedgerSnapshot {
+                        operational: before_attempt_drop
+                            .operational
+                            .checked_sub(interrupted_release)
+                            .expect("interruption owner charge is retained"),
+                        aggregate: before_attempt_drop
+                            .aggregate
+                            .checked_sub(interrupted_release)
+                            .expect("interruption aggregate charge is retained"),
+                },
+                "dropping interrupted O4 releases exactly its charged controls"
+            );
+            let mut expected_after_report_drop = before_attempt_consensus;
+            expected_after_report_drop.0 = expected_after_report_drop
+                .0
+                .checked_sub(report_release)
+                .expect("interrupted consensus report charge is retained");
+            expected_after_report_drop.4 = expected_after_report_drop
+                .4
+                .checked_sub(1)
+                .expect("interrupted consensus report count is retained");
+            assert_eq!(
+                ledger.sample(),
+                expected_after_report_drop,
+                "interrupted QC report backing releases independently from storage owners"
+            );
+            let before_decided_2_drop = snapshot_ledgers(&owner);
+            let capture_pin = decided_2.payload().pin();
+            let capture_registry = owner
+                .backend_for_test()
+                .prepared_registry_for_test()
+                .expect("captured prepared registry");
+            let capture_generation = {
+                let registry = capture_registry.lock().expect("prepared registry");
+                registry
+                        .inspect(capture_pin.handle())
+                        .expect("captured generation entry")
+            };
+            let expected_decided_2_release = envelope_charge
+                .checked_add(crate::safety_record_store::prepared::pin_charge_bytes())
+                .and_then(|charge| charge.checked_add(capture_generation.generation_core_charge))
+                .and_then(|charge| {
+                        charge.checked_add(capture_generation.generation_control_charge)
+                })
+                .expect("captured owner release sum is representable");
+            drop(capture_registry);
+            drop(decided_2);
+            let after_decided_2_drop = snapshot_ledgers(&owner);
+            assert_eq!(
+                before_decided_2_drop
+                        .operational
+                        .checked_sub(after_decided_2_drop.operational),
+                Some(expected_decided_2_release),
+                "captured Vote teardown releases envelope, pin, generation core and control"
+            );
+            assert_eq!(
+                before_decided_2_drop
+                        .aggregate
+                        .checked_sub(after_decided_2_drop.aggregate),
+                Some(expected_decided_2_release)
+            );
+            let before_journal_drop = snapshot_ledgers(&owner);
+            let journal_release = journal
+                .live_backing_charge_for_test()
+                .expect("current journal backing charge");
+            drop(journal);
+            assert_eq!(
+                snapshot_ledgers(&owner),
+                before_journal_drop,
+                "dropping a facade does not destroy the storage-owned signing domain"
+            );
+            let before_journal_domain_drop = snapshot_ledgers(&owner);
+            assert_eq!(
+                before_journal_domain_drop,
+                before_journal_drop,
+                "shared signing-domain reservation remains until its storage owner drops"
+            );
+            drop(journal_store);
+            assert_eq!(
+                snapshot_ledgers(&owner),
+                LedgerSnapshot {
+                        operational: before_journal_domain_drop
+                            .operational
+                            .checked_sub(journal_release)
+                            .expect("bounded journal charge is retained"),
+                        aggregate: before_journal_domain_drop
+                            .aggregate
+                            .checked_sub(journal_release)
+                            .expect("bounded journal aggregate charge is retained"),
+                },
+                "dropping the final storage/domain owner releases bounded journal coverage"
+            );
+            let storage_peaks = (
+                owner.backend_for_test().accounting_peak(),
+                owner.backend_for_test().context_accounting_peak(),
+                owner.backend_for_test().accounting_aggregate_peak(),
+            );
+            let storage_ceilings = (
+                owner.backend_for_test().accounting_cap().expect("operational ceiling"),
+                owner.backend_for_test().context_accounting_cap().expect("context ceiling"),
+                owner.backend_for_test()
+                    .accounting_aggregate_cap()
+                    .expect("aggregate ceiling"),
+            );
+            assert!(storage_peaks.0 <= storage_ceilings.0);
+            assert!(storage_peaks.1 <= storage_ceilings.1);
+            assert!(storage_peaks.2 <= storage_ceilings.2);
+            assert_eq!(
+                storage_peaks.2, storage_ceilings.2,
+                "the deliberate admission-pressure probe reaches but does not exceed cap"
+            );
+            println!(
+                "captured-Vote deliberate pressure-test storage high-water={storage_peaks:?} ceilings={storage_ceilings:?}; pre-final-pressure lifecycle high-water={pre_pressure_lifecycle_peaks:?}; successful phase peak={successful_phase_peaks:?}"
+            );
+            drop(engine);
+            let accountant = owner.backend_for_test().accounting_handle_for_test();
+            drop(owner);
+            drop(snapshot);
+            drop(signer);
+            drop(inner);
+            drop(pv);
+            drop(bridge_authority);
+            assert_eq!(accountant.current(), 0);
+            assert_eq!(accountant.aggregate().current(), 0);
+            assert_eq!(ledger.sample(), qc_support::empty_ledger_floor());
         }
 
         // ==================================================================

@@ -2684,3 +2684,148 @@ boundary, deployment, D15 or Run 423 is added.
 `D7D14_STORAGE_ACCEPTANCE=PASS-ACCEPTED-SUBSET`; §13.6 whole-lifecycle INCOMPLETE;
 activation DISABLED; public DevNet NO-GO; durable anti-rollback NOT-ESTABLISHED;
 C4/C5 OPEN.
+
+### RUN 422 — exact candidate ownership and captured-Vote lifecycle implementation
+
+The preceding accounting-stop report is preserved as historical evidence. The
+bounded private exact-layout candidate owner and test-only captured-Vote bridge
+are now implemented in source commit `401180640fae79e762e0e0dab4d21345ed8fcda7`; no ordinary O3/O4/O5,
+production, restart, journal, storage-format or consensus behavior was changed.
+Three-signature candidate backing is 7,693 bytes plus a separately admitted
+1,024-byte workspace. A complete four-signature candidate remains intact and
+fails closed when the full interrupted-O4 coexistence exceeds the unchanged
+84,956-byte aggregate limit.
+
+The private genuine-fixture lifecycle composes owner-captured Vote, one real
+local signing operation, acknowledged journal retrieval as received Vote,
+peer quorum, acknowledged O4, uncertain O4, genuine O3, explicit O5, exact-QC
+resumption and checked retained reuse only after resumption. It also exercises
+pressure/refusal/retry, membership/Proposal/authorization controls and an
+already-Signed journal control. Direct ledger samples report standing
+16,354 operational + 240 context = 16,594 aggregate bytes and a complete
+lifecycle high-water of 84,956 aggregate bytes (84,716 operational + 240
+context); the measured high-water reaches but does not exceed the unchanged
+ceiling. The four-signature full coexistence bound is 86,110 and is a capacity
+refusal, not invalid evidence.
+
+Validation on the implementation source: native exact-copy tests 9/9;
+lifecycle 1/1; owner selection 172 passed, 6 ignored; required integration
+selections 224 passed, 1 ignored; each of two phase-inventory selections 1/1;
+default-checking Miri exact-copy selection 9/9. The Miri run covered the exact
+candidate-copy implementation bytes committed in `401180640fae79e762e0e0dab4d21345ed8fcda7`; only lifecycle
+diagnostic/assertion changes followed that run, and the lifecycle selector was
+rerun after them. This remains private test evidence, not production
+integration, restart authorization or independent source-review acceptance.
+
+`D7D14_STORAGE_COMPONENT=IMPLEMENTED-ISOLATED`;
+`D7D14_STORAGE_ACCEPTANCE=PASS-ACCEPTED-SUBSET`; §13.6 whole-lifecycle INCOMPLETE;
+activation DISABLED; public DevNet NO-GO; durable anti-rollback NOT-ESTABLISHED;
+C4/C5 OPEN. No D15 or Run 423 work.
+
+### RUN 422 -- captured-Vote / received-QC composition stopped on accounting
+
+The requested combined lifecycle was **not delivered**. At the exact required
+baseline `f63198ee61c009cefe381f95d1a35a22e57885d6`, an uncommitted private
+prototype retained the original verified-capture envelope/pin, full
+three-signature predecessor Proposal and associated bounded journal on the
+same four-equal-power engine. The genuine local journal signature was admitted
+as received evidence; ordinary acknowledged O4 had one exploratory passing
+round-trip test. This is discarded exploratory evidence, not accepted source.
+
+With the required interrupted owner also admitted, existing charged operands
+were 17570 standing aggregate + 1864 interruption + 3552 adapter + 10137
+candidate + 52939 ordinary O4 = **86062**, above the unchanged **84956**
+ceiling by **1106**. Actual O4 refused before writing rather than producing the
+required uncertain publication. Even omitting all 1032 prototype bridge-control
+bytes from that conservative overlap leaves 85030. Consensus evidence/report
+quotas are independent and cannot fund this storage deficit.
+
+The literal focused command selected 4 exploratory tests: 1 passed, 3 failed,
+exit 101, after installing initially missing libclang. The D7 stop appendix
+records the full command, operands, source/prototype provenance, environmental
+qualification and requirement disposition. No commit-qualified bridge validation
+revision exists; both Rust files were restored to baseline. The broader requested
+suites were not run after the accounting stop. No acceptance count, full-build,
+Miri or security result is imported from history.
+
+A reviewed bounded ownership/working-set contract fitting the required
+coexistence under the existing ceiling is still needed. This report authorizes
+no lowered charge, altered voting powers, dropped pin/journal/recovery owner,
+reconstructed authority or weakened lifecycle check. It does not prove that all
+future accounting implementations are impossible. Recovery, authorization,
+pressure and serialization acceptance for the combined lifecycle remain absent.
+Only documentation is delivered; no activation, production/restart/TC/leader/
+delivery integration, new crash boundary, D15 or Run 423 is added.
+`D7D14_STORAGE_COMPONENT=IMPLEMENTED-ISOLATED`;
+`D7D14_STORAGE_ACCEPTANCE=PASS-ACCEPTED-SUBSET`; §13.6 whole-lifecycle INCOMPLETE;
+activation DISABLED; public DevNet NO-GO; durable anti-rollback NOT-ESTABLISHED;
+C4/C5 OPEN.
+
+## RUN 422 — exact-layout captured-Vote lifecycle correction
+
+The private, test-only exact-copy owner and captured-Vote bridge are implemented
+in source commit `8abb2ff2bfa87c55059d8c0995e955ad71d320b3`. Historical
+accounting-stop and discarded-prototype evidence above remains intact and
+historical. Exact `u8`/`Vec<u8>` destination owners validate the checked array
+layout before allocation, admit coverage first, track initialized descriptor
+prefixes, and destroy nested backing before releasing coverage. The candidate
+control proof is 929/1,024 bytes (exact local-Vote controls 536/1,024);
+three-signature backing is 7,693 bytes, while valid four-signature interrupted
+O4 coexistence is refused for capacity under the unchanged 84,956-byte ceiling.
+
+The combined private lifecycle now covers genuine owning capture, one real
+signing call and journal acknowledgement/retirement, exact signed-Vote reuse,
+acknowledged O4 and checked same-authority consumption, plus uncertain O4 →
+genuine O3 → explicit O5 → exact-QC resumption. A separate lifecycle branch
+proves that a genuinely signed four-member QC with different complete
+membership reaches the exact-correspondence gate and is refused without QC
+effects or protected-use consumption. Pressure/refusal/retry, authorization
+invalidation, bounded serialization and owner teardown are directly observed.
+
+The reconciled unpressured high-water is 83,426 operational + 240 context =
+83,666 aggregate, determined by interrupted O4. The distinct deliberate
+pressure-test peak is 84,716 + 240 = 84,956; it is not the successful lifecycle
+peak. The historical proposed equation used 17,570 standing aggregate bytes;
+the measured implementation standing term is 16,594. The former 1,032-byte
+prototype control charge is still included in the transient 3,552-byte adapter
+invocation inventory, not separately retained as standing ownership. All
+limits and existing ordinary O3/O4/O5 behavior remain unchanged.
+
+Fresh final-source validation passed: candidate-copy native and default-checking
+Miri selections 9/9 each; captured-Vote lifecycle 3/3; owner selection 174
+passed, 6 ignored; required five integration targets 224 passed, 1 ignored.
+No production caller, current-authority/restart authorization, durable
+anti-rollback, activation, public DevNet approval, or independent source-review
+acceptance is claimed. `D7D14_STORAGE_COMPONENT=IMPLEMENTED-ISOLATED`;
+`D7D14_STORAGE_ACCEPTANCE=PASS-ACCEPTED-SUBSET`; §13.6 whole-lifecycle
+INCOMPLETE; activation DISABLED; public DevNet NO-GO; durable anti-rollback
+NOT-ESTABLISHED; C4/C5 OPEN. Implementation delivery is not independent source-review acceptance.
+
+## RUN 422 — captured-Vote lifecycle acceptance gap closure
+
+The original captured Vote now survives a checked same-authority use after the
+first acknowledged O4 advances durable revision beyond its captured revision.
+Before dropping the original `decided` and `p1`, the lifecycle checks exact
+Signed-signature correspondence, one delivery/no additional signing, and
+preservation of the Vote, Proposal, pin provenance, storage and consensus
+ledgers, ceilings, journal record/metadata bytes, and position count. This
+advance case is distinct from the existing successor-capture equality case.
+
+The contention observer now has finite receive polling, explicit atomic
+shutdown, and RAII join cleanup. A deliberately skipped-hook control proves
+bounded completion while the positive path still verifies same-domain
+`WouldBlock`. Each pre-O5, post-O3, post-O5, and post-resumption boundary now
+checks its live-owner baseline immediately, including independent ledgers,
+ceilings, Vote/pin, consensus, signer/sink/probe, and separate exact journal
+record, metadata, and count comparisons. Post-resumption occupancy is asserted
+equal to its captured baseline. Fresh validation was produced by source commit
+`57948f56db346ca9f9d56af1e6ce16d3347335ae`: lifecycle and owner selections passed
+3/3 and 174/180 (6 ignored); lifecycle-only changes do not replace or relabel
+prior exact-copy/Miri validation. The unpressured high-water remains 83,666
+aggregate bytes; the separate pressure peak remains 84,956.
+
+All standing statuses remain unchanged: `D7D14_STORAGE_COMPONENT=IMPLEMENTED-ISOLATED`;
+`D7D14_STORAGE_ACCEPTANCE=PASS-ACCEPTED-SUBSET`; §13.6 whole-lifecycle INCOMPLETE;
+activation DISABLED; public DevNet NO-GO; durable anti-rollback NOT-ESTABLISHED;
+C4/C5 OPEN. This remains isolated test evidence, not production integration or
+independent source-review acceptance.
