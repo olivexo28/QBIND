@@ -5111,13 +5111,9 @@ impl BasicHotStuffEngine<[u8; 32]> {
             .timeout_accumulator
             .on_timeout(self.state.validators(), timeout)?;
 
-        // Check if we can form a TC for this view
-        let view = from; // Use the timeout's view for TC check
-        let _ = view; // Unused, we use the timeout's view below
-
         // Try to form TC for any view where we have enough timeouts
-        // Start from current_view and check upward
-        for check_view in self.current_view..=self.current_view + 10 {
+        // Clip the search window, not the successor required for a valid TC.
+        for check_view in self.current_view..=self.current_view.saturating_add(10) {
             if let Some(tc) = self
                 .timeout_accumulator
                 .maybe_tc_for(self.state.validators(), check_view)
@@ -5216,6 +5212,105 @@ pub mod received_qc_effect_test_support;
 #[cfg(test)]
 mod tests {
     use super::*;
+    // Direct engine tests; signature and authenticated-origin gates are node tests.
+    #[test]
+    fn run422_timeout_view_exhaustion_engine_search_boundaries() {
+        for (current, timeout_view) in [
+            (7, 7),
+            (7, 17),
+            (u64::MAX - 10, u64::MAX - 1),
+            (u64::MAX - 9, u64::MAX - 1),
+            (u64::MAX - 1, u64::MAX - 1),
+        ] {
+            let mut engine =
+                BasicHotStuffEngine::<[u8; 32]>::new(ValidatorId(1), make_validator_set(4));
+            assert!(engine.try_advance_to_view(current));
+            for id in 1..=2 {
+                assert!(engine
+                    .on_timeout_msg(
+                        ValidatorId(id),
+                        TimeoutMsg::new(timeout_view, None, ValidatorId(id)),
+                    )
+                    .unwrap()
+                    .is_none());
+            }
+            let tc = engine
+                .on_timeout_msg(
+                    ValidatorId(3),
+                    TimeoutMsg::new(timeout_view, None, ValidatorId(3)),
+                )
+                .unwrap()
+                .expect("search must include eligible representable view");
+            assert_eq!(tc.timeout_view, timeout_view);
+            assert_eq!(tc.view, timeout_view.checked_add(1).unwrap());
+            assert!(tc.validate_target_view().is_ok());
+            assert_eq!(engine.on_timeout_certificate(&tc), Ok(tc.view));
+            assert_eq!(engine.current_view(), tc.view);
+            assert_eq!(engine.timeout_count(timeout_view), 0);
+        }
+        let mut engine = BasicHotStuffEngine::<[u8; 32]>::new(ValidatorId(1), make_validator_set(1));
+        assert!(engine.try_advance_to_view(7));
+        assert!(
+            engine
+                .on_timeout_msg(ValidatorId(1), TimeoutMsg::new(18, None, ValidatorId(1)),)
+                .unwrap()
+                .is_none(),
+            "ordinary search must not widen beyond current+10"
+        );
+        assert!(engine
+            .timeout_accumulator()
+            .maybe_tc_for(engine.state.validators(), 18)
+            .is_some());
+        assert!(engine.try_advance_to_view(8));
+        assert_eq!(
+            engine
+                .on_timeout_msg(ValidatorId(1), TimeoutMsg::new(18, None, ValidatorId(1)),)
+                .unwrap()
+                .unwrap()
+                .view,
+            19
+        );
+    }
+
+    #[test]
+    fn run422_timeout_view_exhaustion_engine_terminal_and_stale_preserve_state() {
+        let mut engine = BasicHotStuffEngine::<[u8; 32]>::new(ValidatorId(1), make_validator_set(4));
+        engine
+            .on_timeout_msg(ValidatorId(1), TimeoutMsg::new(0, None, ValidatorId(1)))
+            .unwrap();
+        assert!(engine.try_advance_to_view(u64::MAX));
+        engine.mark_timeout_emitted();
+        let before = format!("{:?}", engine.timeout_accumulator());
+        assert_eq!(
+            engine.on_timeout_msg(
+                ValidatorId(2),
+                TimeoutMsg::new(u64::MAX, None, ValidatorId(2)),
+            ),
+            Err(TimeoutValidationError::NoRepresentableSuccessor {
+                timeout_view: u64::MAX
+            })
+        );
+        assert_eq!(
+            engine.on_timeout_msg(
+                ValidatorId(2),
+                TimeoutMsg::new(u64::MAX - 1, None, ValidatorId(2)),
+            ),
+            Ok(None)
+        );
+        assert_eq!(
+            engine.on_timeout_msg(
+                ValidatorId(3),
+                TimeoutMsg::new(u64::MAX, None, ValidatorId(2)),
+            ),
+            Err(TimeoutValidationError::InvalidSignature(ValidatorId(3)))
+        );
+        assert_eq!(format!("{:?}", engine.timeout_accumulator()), before);
+        assert_eq!(engine.current_view(), u64::MAX);
+        assert!(engine.timeout_emitted_in_view());
+        assert!(engine.locked_qc().is_none());
+        assert!(engine.commit_log().is_empty());
+    }
+
     use crate::key_registry::SuiteAwareValidatorKeyProvider;
     use crate::received_vote_evidence::{SnapshotMember, VoteContextInput};
     use crate::qc_verify_domain::verify_quorum_certificate_with_domain;

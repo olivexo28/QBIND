@@ -1860,8 +1860,9 @@ pub struct BinaryConsensusLoopInboundStats {
     /// for B14-specific test assertions. Fail-closed: no engine state
     /// change occurs on such frames.
     pub view_timeout_decode_failures: u64,
-    /// Inbound `Timeout` / `NewView` frames the engine rejected after
-    /// successful decode (e.g. `TimeoutValidationError::NonMemberSigner`,
+    /// Inbound `Timeout` / `NewView` frames or local timeouts rejected by
+    /// the engine validation contract (including local successor preflight;
+    /// e.g. `TimeoutValidationError::NonMemberSigner`,
     /// `InsufficientQuorum`, `ViewMismatch`). Fail-closed: engine state
     /// is unchanged.
     pub view_timeout_engine_rejects: u64,
@@ -7589,6 +7590,16 @@ fn maybe_emit_view_timeout_with_auth(
         return;
     }
 
+    if let Err(error) = qbind_consensus::timeout::timeout_successor_view(engine.current_view()) {
+        stats.view_timeout_engine_rejects =
+            stats.view_timeout_engine_rejects.saturating_add(1);
+        eprintln!(
+            "[binary-consensus] local timeout refused by engine successor contract: {}",
+            error
+        );
+        return;
+    }
+
     let Some(ctx) = verification_ctx else {
         stats.outbound_timeout_signing_failure =
             stats.outbound_timeout_signing_failure.saturating_add(1);
@@ -12014,6 +12025,334 @@ mod tests {
                 .collect();
             let signers: Vec<_> = signed.iter().map(|t| t.validator_id).collect();
             TimeoutCertificate::new_with_evidence(timeout_view, None, signers, signed)
+        }
+
+        mod run422_timeout_view_exhaustion {
+            use super::*;
+            use crate::validator_signer::SignError;
+            use std::sync::atomic::{AtomicUsize, Ordering};
+
+            struct CountingSigner {
+                inner: Arc<dyn ValidatorSigner>,
+                calls: AtomicUsize,
+            }
+
+            impl ValidatorSigner for CountingSigner {
+                fn validator_id(&self) -> &ValidatorId {
+                    self.inner.validator_id()
+                }
+                fn suite_id(&self) -> u16 {
+                    self.inner.suite_id()
+                }
+                fn sign_proposal(&self, bytes: &[u8]) -> Result<Vec<u8>, SignError> {
+                    self.inner.sign_proposal(bytes)
+                }
+                fn sign_vote(&self, bytes: &[u8]) -> Result<Vec<u8>, SignError> {
+                    self.inner.sign_vote(bytes)
+                }
+                fn sign_timeout(
+                    &self,
+                    view: u64,
+                    qc: Option<&QuorumCertificate<[u8; 32]>>,
+                ) -> Result<Vec<u8>, SignError> {
+                    self.calls.fetch_add(1, Ordering::SeqCst);
+                    self.inner.sign_timeout(view, qc)
+                }
+                fn sign_timeout_with_chain_id(
+                    &self,
+                    chain: ChainId,
+                    view: u64,
+                    qc: Option<&QuorumCertificate<[u8; 32]>>,
+                ) -> Result<Vec<u8>, SignError> {
+                    self.calls.fetch_add(1, Ordering::SeqCst);
+                    self.inner.sign_timeout_with_chain_id(chain, view, qc)
+                }
+            }
+
+            fn deliver(
+                engine: &mut BasicHotStuffEngine<[u8; 32]>,
+                stats: &mut BinaryConsensusLoopInboundStats,
+                ctx: &TimeoutVerificationContext,
+                message: ConsensusNetMsg,
+                sender: ValidatorId,
+                gate: &PeerConsensusBindingGate,
+                facade: &CapturingFacade,
+            ) {
+                let origin = AuthenticatedConsensusOrigin::new(run422_node_id_for(sender), sender);
+                handle_inbound_consensus_msg(
+                    engine,
+                    message,
+                    stats,
+                    Some(facade),
+                    &make_metrics(),
+                    ValidatorId(0),
+                    &mut RestoreCatchupModeState::from_config(None),
+                    Some(ctx),
+                    None,
+                    None,
+                    &mut BinaryReconfigDetector::default(),
+                    Some(&origin),
+                    Some(gate),
+                    None,
+                    ConsensusVerificationPolicy::Required,
+                );
+            }
+
+            fn assert_valid_tc(tc: &TimeoutCertificate<[u8; 32]>, ctx: &TimeoutVerificationContext) {
+                verify_timeout_certificate_with_evidence(
+                    tc,
+                    &tc.signed_timeouts,
+                    ctx.validators.as_ref(),
+                    ctx.key_provider.as_ref(),
+                    ctx.backend_registry.as_ref(),
+                    ctx.chain_id,
+                )
+                .expect("genuinely signed evidence and checked target");
+            }
+
+            #[test]
+            fn run422_timeout_view_exhaustion_inbound_authenticated_terminal_and_final_transition() {
+                let fixture = make_fixture(4);
+                let ctx = make_ctx(&fixture, None);
+                let mut engine = make_engine(ValidatorId(0), 4);
+                let seed = signed_timeout(0, ValidatorId(3), &fixture.sks);
+                engine
+                    .on_timeout_msg(seed.validator_id, seed.clone())
+                    .unwrap();
+                assert!(engine.try_advance_to_view(u64::MAX - 1));
+                engine.mark_timeout_emitted();
+                let before = format!("{:?}", engine.timeout_accumulator());
+                let mut stats = BinaryConsensusLoopInboundStats::default();
+                let facade = CapturingFacade::new();
+                let gate = run422_newview_binding_gate(4);
+                let terminal = signed_timeout(u64::MAX, ValidatorId(2), &fixture.sks);
+                let message = ConsensusNetMsg::Timeout(bincode::serialize(&terminal).unwrap());
+                deliver(
+                    &mut engine,
+                    &mut stats,
+                    &ctx,
+                    message.clone(),
+                    ValidatorId(1),
+                    &gate,
+                    &facade,
+                );
+                assert_eq!(stats.inbound_sender_binding_rejected_total, 1);
+                assert_eq!(stats.inbound_timeout_verify_accepted, 0);
+                for _ in 0..2 {
+                    deliver(
+                        &mut engine,
+                        &mut stats,
+                        &ctx,
+                        message.clone(),
+                        ValidatorId(2),
+                        &gate,
+                        &facade,
+                    );
+                    assert_eq!(format!("{:?}", engine.timeout_accumulator()), before);
+                    assert_eq!(engine.current_view(), u64::MAX - 1);
+                    assert!(engine.timeout_emitted_in_view());
+                    assert!(engine.locked_qc().is_none());
+                    assert!(engine.commit_log().is_empty());
+                }
+                assert_eq!(gate.metrics().accepted(), 2);
+                assert_eq!(stats.inbound_timeout_verify_accepted, 2);
+                assert_eq!(stats.inbound_timeout_verify_rejected_total, 0);
+                assert_eq!(stats.inbound_timeouts_delivered, 2);
+                assert_eq!(stats.inbound_timeout_engine_rejected, 2);
+                assert_eq!(stats.view_timeout_engine_rejects, 2);
+                assert_eq!(stats.inbound_timeout_engine_accepted, 0);
+                assert_eq!(stats.inbound_timeouts_engine_accepted, 0);
+                assert_eq!(stats.retained_qc_admission_rejected_total, 0);
+                assert!(facade.captured.lock().unwrap().is_empty());
+
+                for id in 0..3 {
+                    let timeout = signed_timeout(u64::MAX - 1, ValidatorId(id), &fixture.sks);
+                    deliver(
+                        &mut engine,
+                        &mut stats,
+                        &ctx,
+                        ConsensusNetMsg::Timeout(bincode::serialize(&timeout).unwrap()),
+                        ValidatorId(id),
+                        &gate,
+                        &facade,
+                    );
+                }
+                assert_eq!(engine.current_view(), u64::MAX);
+                assert_eq!(engine.timeout_count(u64::MAX - 1), 0);
+                assert_eq!(
+                    engine
+                        .timeout_accumulator()
+                        .get_timeouts(0)
+                        .unwrap()
+                        .get(&ValidatorId(3)),
+                    Some(&seed)
+                );
+                assert_eq!(stats.inbound_timeout_engine_accepted, 3);
+                assert_eq!(stats.timeout_certificates_formed, 1);
+                assert_eq!(stats.view_advances_due_to_verified_tc, 1);
+                let captured = facade.captured.lock().unwrap();
+                let [ConsensusNetMsg::NewView(bytes)] = captured.as_slice() else {
+                    panic!("one TC broadcast")
+                };
+                let tc: TimeoutCertificate<[u8; 32]> = bincode::deserialize(bytes).unwrap();
+                assert_valid_tc(&tc, &ctx);
+                assert_eq!((tc.timeout_view, tc.view), (u64::MAX - 1, u64::MAX));
+
+                let mut receiver = make_engine(ValidatorId(0), 4);
+                let mut received = BinaryConsensusLoopInboundStats::default();
+                deliver(
+                    &mut receiver,
+                    &mut received,
+                    &ctx,
+                    ConsensusNetMsg::NewView(bytes.clone()),
+                    ValidatorId(1),
+                    &gate,
+                    &CapturingFacade::new(),
+                );
+                assert_eq!(receiver.current_view(), u64::MAX);
+                assert_eq!(received.inbound_newview_verify_accepted, 1);
+                assert_eq!(received.inbound_newview_engine_accepted, 1);
+            }
+
+            #[test]
+            fn run422_timeout_view_exhaustion_local_handler_preserves_consumption_and_control() {
+                let fixture = make_fixture(4);
+                let mut ctx = make_ctx(&fixture, Some(ValidatorId(0)));
+                let signer = Arc::new(CountingSigner {
+                    inner: ctx.signer.take().unwrap(),
+                    calls: AtomicUsize::new(0),
+                });
+                ctx.signer = Some(signer.clone());
+                let mut engine = make_engine(ValidatorId(0), 4);
+                let seed = signed_timeout(0, ValidatorId(3), &fixture.sks);
+                engine.on_timeout_msg(seed.validator_id, seed).unwrap();
+                let before = format!("{:?}", engine.timeout_accumulator());
+                let mut state = ViewTimeoutState::new(0, 0);
+                let mut backoff = ViewTimeoutBackoffState::new(Some(1), 2, 8).unwrap();
+                backoff.increase_after_timeout();
+                let pacer = (
+                    backoff.threshold(),
+                    backoff.current_level(),
+                    backoff.backoff_increases_total(),
+                    backoff.backoff_resets_total(),
+                    backoff.max_cap_hits_total(),
+                );
+                let mut stats = BinaryConsensusLoopInboundStats::default();
+                let facade = CapturingFacade::new();
+                assert!(engine.try_advance_to_view(u64::MAX));
+                // Progress observation is allowed; it is not timeout consumption.
+                maybe_emit_view_timeout(
+                    &mut engine,
+                    &mut state,
+                    10,
+                    &mut backoff,
+                    false,
+                    Some(&facade),
+                    &mut stats,
+                    Some(&ctx),
+                );
+                assert_eq!(state.last_observed_view, u64::MAX);
+                assert_eq!(state.last_progress_tick, 10);
+                assert_eq!(stats.view_timeout_engine_rejects, 0);
+                for tick in [12, 13] {
+                    maybe_emit_view_timeout(
+                        &mut engine,
+                        &mut state,
+                        tick,
+                        &mut backoff,
+                        false,
+                        Some(&facade),
+                        &mut stats,
+                        Some(&ctx),
+                    );
+                    assert_eq!(format!("{:?}", engine.timeout_accumulator()), before);
+                    assert!(!engine.timeout_emitted_in_view());
+                    assert_eq!(engine.current_view(), u64::MAX);
+                    assert_eq!(state.last_progress_tick, 10);
+                    assert_eq!(
+                        (
+                            backoff.threshold(),
+                            backoff.current_level(),
+                            backoff.backoff_increases_total(),
+                            backoff.backoff_resets_total(),
+                            backoff.max_cap_hits_total(),
+                        ),
+                        pacer
+                    );
+                }
+                assert_eq!(signer.calls.load(Ordering::SeqCst), 0);
+                assert!(facade.captured.lock().unwrap().is_empty());
+                assert_eq!(stats.view_timeout_engine_rejects, 2);
+                assert_eq!(stats.outbound_timeout_signing_failure, 0);
+                assert_eq!(stats.outbound_timeout_signing_success, 0);
+                assert_eq!(stats.view_timeouts_emitted, 0);
+                assert_eq!(stats.timeout_certificates_formed, 0);
+                assert_eq!(stats.retained_qc_admission_rejected_total, 0);
+
+                // Separate nonterminal engines: no reset or terminal-view workaround.
+                for view in [7, u64::MAX - 10, u64::MAX - 9, u64::MAX - 1] {
+                    let mut control = make_engine(ValidatorId(0), 4);
+                    assert!(control.try_advance_to_view(view));
+                    for id in 1..=2 {
+                        control
+                            .on_timeout_msg(
+                                ValidatorId(id),
+                                signed_timeout(view, ValidatorId(id), &fixture.sks),
+                            )
+                            .unwrap();
+                    }
+                    let mut state = ViewTimeoutState::new(view, 0);
+                    let mut backoff = ViewTimeoutBackoffState::new(Some(1), 2, 8).unwrap();
+                    let mut stats = BinaryConsensusLoopInboundStats::default();
+                    let facade = CapturingFacade::new();
+                    let calls = signer.calls.load(Ordering::SeqCst);
+                    maybe_emit_view_timeout(
+                        &mut control,
+                        &mut state,
+                        1,
+                        &mut backoff,
+                        false,
+                        Some(&facade),
+                        &mut stats,
+                        Some(&ctx),
+                    );
+                    assert_eq!(signer.calls.load(Ordering::SeqCst), calls + 1);
+                    assert_eq!(control.current_view(), view.checked_add(1).unwrap());
+                    assert!(
+                        !control.timeout_emitted_in_view(),
+                        "TC application clears latch"
+                    );
+                    assert_eq!(control.timeout_count(view), 0);
+                    assert_eq!(stats.outbound_timeout_signing_success, 1);
+                    assert_eq!(stats.outbound_timeout_signing_failure, 0);
+                    assert_eq!(stats.view_timeouts_emitted, 1);
+                    assert_eq!(stats.view_advances_due_to_verified_tc, 1);
+                    assert_eq!(stats.timeout_certificates_formed, 1);
+                    assert_eq!(backoff.threshold(), Some(2));
+                    assert_eq!(backoff.current_level(), 1);
+                    let captured = facade.captured.lock().unwrap();
+                    let [ConsensusNetMsg::Timeout(timeout), ConsensusNetMsg::NewView(bytes)] =
+                        captured.as_slice()
+                    else {
+                        panic!("signed Timeout followed by verified TC")
+                    };
+                    let timeout: TimeoutMsg<[u8; 32]> = bincode::deserialize(timeout).unwrap();
+                    verify_timeout_msg(
+                        &timeout,
+                        ctx.validators.as_ref(),
+                        ctx.key_provider.as_ref(),
+                        ctx.backend_registry.as_ref(),
+                        ctx.chain_id,
+                    )
+                    .unwrap();
+                    let tc: TimeoutCertificate<[u8; 32]> = bincode::deserialize(bytes).unwrap();
+                    assert_eq!(
+                        (tc.timeout_view, tc.view),
+                        (view, view.checked_add(1).unwrap())
+                    );
+                    assert_valid_tc(&tc, &ctx);
+                }
+            }
         }
 
         #[test]
