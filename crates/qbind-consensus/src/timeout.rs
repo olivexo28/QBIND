@@ -295,9 +295,8 @@ pub fn validate_timeout_target_view(
     timeout_view: u64,
     target_view: u64,
 ) -> Result<(), TimeoutTargetViewError> {
-    let expected_view = timeout_view
-        .checked_add(1)
-        .ok_or(TimeoutTargetViewError::SuccessorOverflow {
+    let expected_view =
+        timeout_successor_view(timeout_view).map_err(|_| TimeoutTargetViewError::SuccessorOverflow {
             timeout_view,
             target_view,
         })?;
@@ -311,9 +310,18 @@ pub fn validate_timeout_target_view(
     Ok(())
 }
 
+/// Return the only usable target for a timeout, without constructing a TC.
+pub fn timeout_successor_view(timeout_view: u64) -> Result<u64, TimeoutValidationError> {
+    timeout_view
+        .checked_add(1)
+        .ok_or(TimeoutValidationError::NoRepresentableSuccessor { timeout_view })
+}
+
 /// Errors that can occur during timeout message/certificate validation.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TimeoutValidationError {
+    /// A timeout at this view cannot authorize a successor certificate.
+    NoRepresentableSuccessor { timeout_view: u64 },
     /// The target view is not the checked immediate successor of
     /// `timeout_view`.
     InvalidTargetView(TimeoutTargetViewError),
@@ -337,6 +345,13 @@ pub enum TimeoutValidationError {
 impl std::fmt::Display for TimeoutValidationError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            TimeoutValidationError::NoRepresentableSuccessor { timeout_view } => {
+                write!(
+                    f,
+                    "timeout view {} has no representable successor",
+                    timeout_view
+                )
+            }
             TimeoutValidationError::InvalidTargetView(error) => {
                 write!(f, "invalid timeout certificate target view: {}", error)
             }
@@ -610,7 +625,8 @@ where
     /// # Errors
     ///
     /// Returns `Err(TimeoutValidationError::NonMemberSigner)` if the signer
-    /// is not in the validator set.
+    /// is not in the validator set, or `NoRepresentableSuccessor` before
+    /// any accumulator mutation if the timeout view is terminal.
     ///
     /// # Note
     ///
@@ -621,6 +637,8 @@ where
         validators: &ConsensusValidatorSet,
         timeout: TimeoutMsg<BlockIdT>,
     ) -> Result<bool, TimeoutValidationError> {
+        timeout_successor_view(timeout.view)?;
+
         // Check membership
         if !validators.contains(timeout.validator_id) {
             return Err(TimeoutValidationError::NonMemberSigner(
@@ -676,6 +694,7 @@ where
         validators: &ConsensusValidatorSet,
         view: u64,
     ) -> Option<TimeoutCertificate<BlockIdT>> {
+        timeout_successor_view(view).ok()?;
         let view_entries = self.entries.get(&view)?;
 
         // Accumulate voting power for validator-set members represented in this view.
@@ -736,6 +755,88 @@ where
 mod tests {
     use super::*;
     use crate::validator_set::ValidatorSetEntry;
+
+    // Direct accumulator tests, not signature-verification or handler tests.
+    #[test]
+    fn run422_timeout_view_exhaustion_accumulator_terminal_preserves_full_state() {
+        let validators = make_validator_set(4);
+        let mut acc = TimeoutAccumulator::<[u8; 32]>::with_limits(2, 3);
+        for view in 2..=4 {
+            for id in 1..=2 {
+                let qc = QuorumCertificate::new([id as u8; 32], view - 1, vec![ValidatorId(id)]);
+                let mut timeout = TimeoutMsg::new(view, Some(qc), ValidatorId(id));
+                timeout.set_signature(vec![view as u8, id as u8]);
+                assert_eq!(acc.on_timeout(&validators, timeout), Ok(true));
+            }
+        }
+        assert_eq!(acc.evicted_views, 1);
+        assert_eq!(acc.tracked_views.len(), 2);
+        let entries = acc.entries.clone();
+        let tracked = acc.tracked_views.clone();
+        let evicted = acc.evicted_views;
+        for _ in 0..2 {
+            assert_eq!(
+                acc.on_timeout(&validators, TimeoutMsg::new(u64::MAX, None, ValidatorId(1)),),
+                Err(TimeoutValidationError::NoRepresentableSuccessor {
+                    timeout_view: u64::MAX
+                })
+            );
+            assert_eq!(acc.entries, entries);
+            assert_eq!(acc.tracked_views, tracked);
+            assert_eq!(acc.evicted_views, evicted);
+            assert_eq!((acc.max_tracked_views, acc.max_timeouts_per_view), (2, 3));
+        }
+        assert!(acc.maybe_tc_for(&validators, u64::MAX).is_none());
+        // Even a preexisting/internal terminal quorum cannot escape via the public formation API.
+        acc.entries.insert(
+            u64::MAX,
+            (1..=3)
+                .map(|id| {
+                    (
+                        ValidatorId(id),
+                        TimeoutMsg::new(u64::MAX, None, ValidatorId(id)),
+                    )
+                })
+                .collect(),
+        );
+        let before = acc.entries.clone();
+        assert!(acc.maybe_tc_for(&validators, u64::MAX).is_none());
+        assert_eq!(acc.entries, before);
+        assert_eq!(acc.evicted_views, evicted);
+        assert_eq!(acc.tracked_views, tracked);
+    }
+
+    #[test]
+    fn run422_timeout_view_exhaustion_accumulator_quorum_and_final_successor() {
+        let validators = make_validator_set(4);
+        for view in [5, u64::MAX - 10, u64::MAX - 9, u64::MAX - 1] {
+            let mut acc = TimeoutAccumulator::<[u8; 32]>::new();
+            assert_eq!(
+                acc.on_timeout(&validators, TimeoutMsg::new(view, None, ValidatorId(99)),),
+                Err(TimeoutValidationError::NonMemberSigner(ValidatorId(99)))
+            );
+            assert_eq!(acc.tracked_view_count(), 0);
+            for id in 1..=3 {
+                assert_eq!(
+                    acc.on_timeout(&validators, TimeoutMsg::new(view, None, ValidatorId(id)),),
+                    Ok(true)
+                );
+                assert_eq!(
+                    acc.on_timeout(&validators, TimeoutMsg::new(view, None, ValidatorId(id)),),
+                    Ok(false)
+                );
+                assert_eq!(acc.maybe_tc_for(&validators, view).is_some(), id == 3);
+            }
+            let tc = acc.maybe_tc_for(&validators, view).unwrap();
+            assert_eq!(tc.view, view.checked_add(1).unwrap());
+            assert_eq!(tc.signed_timeouts.len(), 3);
+            assert_eq!(
+                tc.signers,
+                vec![ValidatorId(1), ValidatorId(2), ValidatorId(3)]
+            );
+            assert!(tc.validate(&validators).is_ok());
+        }
+    }
 
     fn make_validator_set(num: u64) -> ConsensusValidatorSet {
         let entries: Vec<ValidatorSetEntry> = (1..=num)
