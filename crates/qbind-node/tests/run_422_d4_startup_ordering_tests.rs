@@ -502,7 +502,7 @@ fn require_or_fail_missing_local_signer_refused_before_p2p() {
     assert_refused_before_p2p(&r);
     assert!(
         r.stderr
-            .contains("--require-timeout-verification was set but the local validator")
+            .contains("P2P consensus requires timeout verification, but the local validator")
             && r.stderr.contains("signer could not be loaded"),
         "expected signer-load FATAL diagnostic; stderr=\n{}",
         r.stderr

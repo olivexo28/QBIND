@@ -2829,3 +2829,11 @@ All standing statuses remain unchanged: `D7D14_STORAGE_COMPONENT=IMPLEMENTED-ISO
 activation DISABLED; public DevNet NO-GO; durable anti-rollback NOT-ESTABLISHED;
 C4/C5 OPEN. This remains isolated test evidence, not production integration or
 independent source-review acceptance.
+
+### Run 422 F5 — executable Timeout/NewView verification
+
+**Status: BOUNDED ENFORCEMENT IMPLEMENTED; broader lifecycle claims remain OPEN.** P2P consensus startup now requires a validated Timeout/NewView verification context independent of the legacy `--require-timeout-verification` flag. Runtime Timeout and NewView handlers reject absent context and verify signatures/evidence before engine admission; local Timeout signing self-verifies before local ingestion/broadcast, and both locally formed TC paths verify complete Timeout evidence before certificate application or NewView publication. Authenticated-origin checks and bounded decode limits remain in place. The local timeout timer does not disable inbound verification.
+
+This establishes neither Proposal/Vote authority nor whole-lifecycle safety, signing continuity across restart, rollback resistance, current-authority freshness, O4 publication, RS1 closure, or release readiness. The signing reservation journal remains for Proposal/Vote only; timeout signing positions were not added to its contract. No cryptographic preimage, wire format, membership, trust root, or genesis-authority activation behavior changed. Validation used real ML-DSA-44 fixtures and bounded child-process startup tests; the exact default-feature unit-test selectors remain blocked by existing unit tests that import `test-utils`-gated modules. Full library tests with `test-utils`, affected integration tests, the default executable build, and CRLF-aware whitespace checks passed.
+
+All standing verdicts remain unchanged: `D7D14_STORAGE_COMPONENT=IMPLEMENTED-ISOLATED`; `D7D14_STORAGE_ACCEPTANCE=PASS-ACCEPTED-SUBSET`; §13.6 whole-lifecycle INCOMPLETE; activation DISABLED; public DevNet NO-GO; durable anti-rollback NOT-ESTABLISHED; C4/C5 OPEN.

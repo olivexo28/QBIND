@@ -5678,12 +5678,9 @@ fn run_p2p_consensus_security_preflight(
     // never happens in this run — `try_build_timeout_verification_context`
     // is **not** called with empty / fake key-provider input.
     //
-    // Policy:
-    //  * `--require-timeout-verification` ⇒ `RequireOrFail` (refuse
-    //    to start under any `Disabled` outcome — including
-    //    "signer loaded but key-provider missing");
-    //  * otherwise ⇒ `OptionalActivate` (log the precise reason,
-    //    fall back to `verification_ctx: None`).
+    // Timeout/NewView messages can arrive on every P2P consensus route,
+    // independently of whether local timeout emission is enabled. Therefore
+    // the executable never starts that route without the validated context.
     // ------------------------------------------------------------------
     use qbind_node::peer_key_provider::{
         build_validator_set_and_key_provider, PeerKeyProviderError,
@@ -5695,15 +5692,10 @@ fn run_p2p_consensus_security_preflight(
         TimeoutVerificationDisabledReason, TimeoutVerificationPolicy,
     };
 
-    let timeout_verification_policy = if args.require_timeout_verification {
-        TimeoutVerificationPolicy::RequireOrFail
-    } else {
-        TimeoutVerificationPolicy::OptionalActivate
-    };
+    let timeout_verification_policy = TimeoutVerificationPolicy::RequireOrFail;
 
-    // Attempt signer load. Honest "no" is reportable but does NOT
-    // by itself fail closed — the `RequireOrFail` policy only
-    // triggers below when the bridge outcome stays `Disabled`.
+    // Load the configured signer so refusal can report the precise missing
+    // prerequisite; the mandatory P2P policy is enforced immediately below.
     let signer_load_result = load_validator_signer_from_config(config, local_validator_id);
     let (signer_for_bridge, local_signer_pk, signer_log_summary): (
         Option<std::sync::Arc<dyn qbind_node::validator_signer::ValidatorSigner>>,
@@ -5736,8 +5728,8 @@ fn run_p2p_consensus_security_preflight(
         Err(SignerLoadError::KeystorePathNotConfigured) => {
             eprintln!(
                 "[binary] Run 032: validator signer not loaded — \
-                 config.signer_keystore_path is not set; Run 030 bit-equivalent path \
-                 (no outbound timeout signing). See \
+                 config.signer_keystore_path is not set; mandatory P2P timeout \
+                 verification cannot start without the local signer. See \
                  docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_032.md."
             );
             (
@@ -5758,20 +5750,16 @@ fn run_p2p_consensus_security_preflight(
 
     node_metrics.set_timeout_verification_signer_loaded(signer_for_bridge.is_some());
 
-    // If the operator declared `--require-timeout-verification` and
-    // the signer half was not even loaded, fail closed *before* we
-    // ask the bridge anything: the operator's intent is unambiguous,
-    // and the bridge's `SignerPresentKeyProviderUnavailable` /
-    // `ProductionPiecesUnavailable` narrowing is informational. We
-    // surface a precise, signer-specific error here.
+    // A P2P consensus route always requires a usable local signer because it
+    // can originate Timeout messages even when the local timer is disabled.
     if matches!(
         timeout_verification_policy,
         TimeoutVerificationPolicy::RequireOrFail
     ) {
         if let Err(err) = &signer_load_result {
             eprintln!(
-                "[binary] FATAL: --require-timeout-verification was set but the local validator \
-                 signer could not be loaded: {}. qbind-node refuses to start. See \
+                "[binary] FATAL: P2P consensus requires timeout verification, but the local \
+                 validator signer could not be loaded: {}. qbind-node refuses to start. See \
                  docs/whitepaper/contradiction.md C5 and \
                  docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_032.md.",
                 err
@@ -5992,9 +5980,9 @@ fn run_p2p_consensus_security_preflight(
                 TimeoutVerificationPolicy::RequireOrFail
             ) {
                 eprintln!(
-                    "[binary] FATAL: --require-timeout-verification was set but the \
-                     peer-side SuiteAwareValidatorKeyProvider could not be built \
-                     honestly: {}. qbind-node refuses to start.",
+                    "[binary] FATAL: P2P consensus requires timeout verification, but the \
+                     peer-side SuiteAwareValidatorKeyProvider could not be built honestly: \
+                     {}. qbind-node refuses to start.",
                     e
                 );
                 std::process::exit(1);
@@ -6089,11 +6077,18 @@ fn run_p2p_consensus_security_preflight(
     );
     let verification_ctx =
         match enforce_policy(timeout_verification_policy, timeout_verification_outcome) {
-            Ok(opt) => opt,
+            Ok(Some(ctx)) => Some(ctx),
+            Ok(None) => {
+                eprintln!(
+                    "[binary] FATAL: P2P timeout-verification policy returned no context; \
+                 qbind-node refuses to start."
+                );
+                std::process::exit(1);
+            }
             Err(e) => {
                 eprintln!(
-                    "[binary] FATAL: --require-timeout-verification was set but timeout \
-                 verification cannot be activated honestly: {}",
+                    "[binary] FATAL: P2P consensus requires timeout verification, but it \
+                 cannot be activated honestly: {}",
                     e
                 );
                 eprintln!(
@@ -6130,31 +6125,12 @@ fn run_p2p_consensus_security_preflight(
                 .or_else(|| genesis_authority.as_ref().map(|a| a.validator_count as u64))
                 .unwrap_or(0)
         );
-    } else if loaded_kp.is_some() && signer_for_bridge.is_some() {
-        // Both halves present but bridge still refused — surface
-        // the precise reason. (Should not normally happen under
-        // OptionalActivate without a deeper invariant violation;
-        // RequireOrFail would have already exited above.)
-        eprintln!(
-            "[binary] Run 033: timeout verification DISABLED — both halves present but \
-             bridge refused. See probe-line above for reason."
-        );
-    } else if signer_for_bridge.is_some() {
-        eprintln!(
-            "[binary] Run 033: timeout verification DISABLED — signer half wired honestly \
-             but peer-side SuiteAwareValidatorKeyProvider not configured (set \
-             --validator-consensus-key for every active validator). \
-             BinaryConsensusLoopIo::verification_ctx=None. See \
-             docs/whitepaper/contradiction.md C5."
-        );
     } else {
         eprintln!(
-            "[binary] Run 033: timeout verification DISABLED — \
-             BinaryConsensusLoopIo::verification_ctx=None (Run 030 bit-equivalent path). \
-             Inbound timeout/new-view crypto verification and outbound timeout signing \
-             remain off until production pieces land. See \
-             docs/whitepaper/contradiction.md C5."
+            "[binary] FATAL: required P2P timeout-verification context is absent; \
+             refusing to start."
         );
+        std::process::exit(1);
     }
     // Suppress unused-variant lint when the bridge currently can't
     // produce certain disabled reasons in this binary path.

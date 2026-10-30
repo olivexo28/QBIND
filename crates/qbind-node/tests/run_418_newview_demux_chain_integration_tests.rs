@@ -10,10 +10,8 @@
 //! KEMTLS handshake, or drive `TcpKemTlsP2pService`, so it is NOT and is not
 //! described as end-to-end transport evidence. It proves the demux/handler
 //! layer faithfully carries (or omits) the authenticated origin into the
-//! `NewView` origin-admission gate, and that an unauthenticated
-//! (Optional/Disabled) session is rejected fail-closed. The `NewView`
-//! admission is transport-origin admission only; F5 (`TimeoutCertificate`
-//! signer verification) remains independently unresolved.
+//! `NewView` origin-admission gate. F5 verification then independently rejects
+//! traffic when no validated verification context is supplied.
 
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -24,11 +22,10 @@ use tokio::time::timeout;
 
 use qbind_consensus::ids::ValidatorId;
 use qbind_consensus::network::NetworkError;
-use qbind_consensus::timeout::TimeoutCertificate;
+use qbind_consensus::timeout::{TimeoutCertificate, TimeoutMsg};
 use qbind_node::binary_consensus_loop::{
-    ConsensusVerificationPolicy,
     run_binary_consensus_loop_with_io, BinaryConsensusLoopConfig, BinaryConsensusLoopIo,
-    BinaryConsensusLoopProgress,
+    BinaryConsensusLoopProgress, ConsensusVerificationPolicy,
 };
 use qbind_node::consensus_network_facade::ConsensusNetworkFacade;
 use qbind_node::metrics::NodeMetrics;
@@ -136,6 +133,9 @@ async fn drive_through_demux(
     drop(demuxer);
 
     let cfg = BinaryConsensusLoopConfig::new(local, n)
+        // The local timer is disabled; inbound traffic must still reach the
+        // authenticated-origin and mandatory verification gates.
+        .with_view_timeout_ticks(None)
         .with_tick_interval(Duration::from_millis(50))
         .with_max_ticks(10);
     let (_shutdown_tx, shutdown_rx) = watch::channel(());
@@ -200,9 +200,9 @@ async fn run418_demux_newview_missing_origin_rejected() {
     );
 }
 
-// An authenticated, correctly mapped origin flows through the demux chain,
-// passes NewView transport-origin admission, and reaches the delivered counter
-// (remaining subject to the existing F5/engine rules).
+// An authenticated, correctly mapped origin flows through the demux chain and
+// passes NewView transport-origin admission. With no verification context, F5
+// rejects it before delivery or engine application.
 #[tokio::test]
 async fn run418_demux_newview_authenticated_origin_admitted() {
     let gate = two_validator_gate();
@@ -221,8 +221,44 @@ async fn run418_demux_newview_authenticated_origin_admitted() {
         out.progress.inbound.inbound_sender_binding_rejected_total,
         0
     );
-    assert_eq!(out.progress.inbound.inbound_new_views_delivered, 1);
     assert_eq!(gate.metrics().accepted(), 1);
+    assert_eq!(
+        out.progress.inbound.inbound_newview_verify_rejected_total,
+        1
+    );
+    assert_eq!(out.progress.inbound.inbound_new_views_delivered, 0);
+    assert_eq!(out.progress.inbound.view_timeout_advances, 0);
+    assert_eq!(out.progress.inbound.inbound_newview_engine_accepted, 0);
+}
+
+#[tokio::test]
+async fn run422_timeout_ingress_reaches_verification_gate_with_timer_disabled() {
+    let gate = two_validator_gate();
+    let origin = AuthenticatedConsensusOrigin::new(node_b(), ValidatorId::new(1));
+    let timeout = TimeoutMsg::<[u8; 32]>::new(0, None, ValidatorId::new(1));
+    let bytes = bincode::serialize(&timeout).expect("serialize timeout");
+    let out = drive_through_demux(
+        ValidatorId::new(0),
+        2,
+        gate.clone(),
+        Some(origin),
+        ConsensusNetMsg::Timeout(bytes),
+    )
+    .await;
+
+    assert_eq!(gate.metrics().accepted(), 1);
+    assert_eq!(
+        out.progress.inbound.inbound_sender_binding_rejected_total,
+        0
+    );
+    assert_eq!(
+        out.progress.inbound.inbound_timeout_verify_rejected_total,
+        1
+    );
+    assert_eq!(out.progress.inbound.inbound_timeouts_delivered, 0);
+    assert_eq!(out.progress.inbound.inbound_timeout_engine_accepted, 0);
+    assert_eq!(out.progress.inbound.view_timeout_advances, 0);
+    assert_eq!(out.progress.inbound.view_timeouts_emitted, 0);
 }
 
 // Cross-check that an unauthenticated Proposal is ALSO rejected through the
