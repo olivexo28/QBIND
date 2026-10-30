@@ -944,11 +944,16 @@ struct QcVerificationSummary {
     expected_wire_chain_id: u32,
 }
 
-/// Fixed result/control storage occupied by borrowed revalidation. It has no
-/// owned signer or certificate backing; callers can include the inline result
-/// in a bounded working-set calculation without exposing verifier internals.
+/// Conservative named owner/return slots for borrowed revalidation, including
+/// transfer overlap (not a compiler stack-frame or physical-memory bound).
+/// The summary includes its signer Vec descriptor, with no backing on this
+/// path. Error strings and key-provider/backend work remain inherited.
 pub const REVERIFY_QC_FIXED_RESULT_BYTES: usize =
-    std::mem::size_of::<Result<QcVerificationSummary, QcDomainVerifyError>>();
+    std::mem::size_of::<Option<Vec<ValidatorId>>>()
+        + std::mem::size_of::<QcVerificationSummary>()
+        + std::mem::size_of::<Result<QcVerificationSummary, QcDomainVerifyError>>()
+        + std::mem::size_of::<Result<(), QcDomainVerifyError>>()
+        + std::mem::size_of::<Result<(), ProposalVoteVerifyError>>();
 
 #[allow(clippy::too_many_arguments)]
 fn verify_quorum_certificate_core<K, B>(
