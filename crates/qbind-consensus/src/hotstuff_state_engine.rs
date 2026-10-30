@@ -51,6 +51,9 @@ use crate::vote_accumulator::{
 /// Semantics: this bounds only the bytes attributed to retained
 /// `VerifiedQuorumCertificate` evidence; it is not a process-wide memory audit.
 pub const DEFAULT_MAX_RETAINED_EVIDENCE_BYTES: u64 = 256 * 1024 * 1024;
+/// Hard ceiling on block-tree entries scanned by the Run 422 F7 retained-QC
+/// lookup. Legacy insertion paths can temporarily exceed configured limits.
+pub const MAX_RETAINED_QC_LOOKUP_BLOCKS: usize = 4096;
 static NEXT_STATE_ACCOUNTING_ID: AtomicU64 = AtomicU64::new(1);
 
 fn next_state_accounting_id() -> u64 {
@@ -2293,6 +2296,66 @@ pub enum BoundedSafetyOutcome {
     /// `max_hops` parent transitions were taken without reaching the lock (also
     /// the terminating outcome for a cyclically registered chain).
     BoundExhausted,
+}
+
+/// Run 422 F7 — bounded result of a read-only retained-QC projection lookup.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RetainedQcLookupError {
+    /// The block tree is larger than the supported scan bound.
+    ScanLimitExceeded {
+        block_count: usize,
+        max_scan_blocks: usize,
+    },
+    /// More than one distinct complete wire certificate matches the projection.
+    Ambiguous,
+}
+
+impl HotStuffStateEngine<[u8; 32]> {
+    /// Find complete retained QC evidence matching the exact logical QC
+    /// projection used by Timeout/NewView. Evidence is associated with its
+    /// child node's justification, while `evidence.certificate().block_id`
+    /// names the parent certified by that justification.
+    ///
+    /// The scan does not clone or mutate evidence, does not allocate candidate
+    /// storage, and refuses an over-limit tree before iterating it. Logical
+    /// signer identities must exactly equal the retained verifier's
+    /// ascending-bit signer order, which also rejects duplicates and
+    /// reordering.
+    pub fn retained_qc_for_timeout_projection(
+        &self,
+        logical: &QuorumCertificate<[u8; 32]>,
+    ) -> Result<Option<&VerifiedQuorumCertificate>, RetainedQcLookupError> {
+        let configured_bound = self.limits().max_pending_blocks;
+        let max_scan_blocks = configured_bound.min(MAX_RETAINED_QC_LOOKUP_BLOCKS);
+        if self.blocks.len() > max_scan_blocks {
+            return Err(RetainedQcLookupError::ScanLimitExceeded {
+                block_count: self.blocks.len(),
+                max_scan_blocks,
+            });
+        }
+
+        let mut matched: Option<&VerifiedQuorumCertificate> = None;
+        for node in self.blocks.values() {
+            let Some(evidence) = node.verified_justification.as_deref() else {
+                continue;
+            };
+            let certificate = evidence.certificate();
+            if node.justify_qc.as_ref() != Some(logical)
+                || certificate.block_id != logical.block_id
+                || certificate.height != logical.view
+                || evidence.signers() != logical.signers.as_slice()
+            {
+                continue;
+            }
+
+            match matched {
+                None => matched = Some(evidence),
+                Some(previous) if previous.certificate() == certificate => {}
+                Some(_) => return Err(RetainedQcLookupError::Ambiguous),
+            }
+        }
+        Ok(matched)
+    }
 }
 
 impl<BlockIdT> Drop for HotStuffStateEngine<BlockIdT>
