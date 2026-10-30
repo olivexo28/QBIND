@@ -22263,3 +22263,77 @@ Scope remains limited: this does not establish safety for every terminal-view op
 ## RUN 422 evidence clarification
 
 Test attribution: `run422_qc_view_exhaustion_checked_advance_and_terminal_refusal` starts at `MAX-2` and covers `MAX-2 -> MAX-1 -> MAX` plus repeated terminal refusals. Ordinary `0 -> 1 -> 2` advancement is covered by the existing `basic_engine_advance_view` test in the full consensus suite. Both results are attributed to tested source revision `8d82989e41e7f841e0c601e868aded37a451deb7`.
+
+## RUN 422 - public-DevNet critical-path reconciliation (documentation only)
+
+Inspected baseline HEAD `de05c009a130d7d044a0c896b8a8559b00b411e4`,
+root tree `4fcb30ffd7b387aefdf647dc7725f78fa61fb287`; starting branch
+`main`, clean worktree, origin `https://github.com/olivexo28/QBIND`, remote
+main equal to baseline. Work uses only
+`copilot/run-422-devnet-critical-path-reconciliation`. Required commit/tree
+objects and exact starting file content were verified independently of ancestry.
+The shallow HEAD's raw parent is `b17bb2beb8baa106eadfcd163fe6c5c1387a8f51`,
+not absent parentage; that initially unavailable parent was recovered by a
+depth extension and its ancestry verified. The engine's current blob
+`ba95124764cc3c88ee9bdd71da540acf0392aad4`, mode `100755`, matches the
+preceding QC-exhaustion evidence's engine blob only, not a whole-tree identity.
+
+`docs/devnet/QBIND_PUBLIC_DEVNET_CRITICAL_PATH.md` now contains the source/caller
+map, producing-revision evidence ledger and P1-P8 prerequisite matrix. It
+withdraws the obsolete "implement the local journal next" recommendation and
+the blanket resettable/no-value continuity deferral, with exact baseline
+statements attributed. D10 local reservation, process-death boundaries, owning
+inbound/leader handoffs, received-Vote retention/signed-QC staging, actual O4/O5
+composition and original captured-Vote reuse are implemented isolated inputs,
+not wholly missing and not production wiring. Mandatory F5, TC target binding,
+bounded F7 retained-QC gates and the reviewed timeout/QC exhaustion corrections
+are current code/test results, not configured-authority deployed-binary proof.
+
+Execution remains attributed to the earlier producing revisions: D10 aggregate
+`2cf125ccd2ee9b4af29280095b48461ec0eae975`; O4/O5 resumption
+`09f884b6643688b1ed39094309cd48813947cace`; captured-Vote acceptance
+`57948f56db346ca9f9d56af1e6ce16d3347335ae`; TC target
+`f5aeb09e9761eeca4ee3b37275d7776731b6b028`; F7 accounting/handler acceptance
+`efa76f08134792d754a0a25fae7898df6579592e`; timeout exhaustion
+`fdfdd37619a18109e7d08ae0bce3efa9d176466c`; QC exhaustion
+`8d82989e41e7f841e0c601e868aded37a451deb7`. The planning ledger explicitly
+retains attribution gaps where a finishing entry lacks a final source SHA;
+starting revisions are not invented as producing revisions. No inherited
+test/build/Miri/security result was rerun or relabelled current validation.
+
+Canonical launch remains M1-M20 Green + RS1 deployed-path fail-closed evidence
++ explicit launch in scope. Proposed Profile A is not approved operating
+policy; if adopted for public-DevNet signing, its activation authorization,
+freshness, signing-history continuity and lock-recovery requirements apply
+before signing. Copied-key exclusivity stays separate. Epoch equality, an old
+valid QC, a reset label or a wiped DB supplies no missing authority/history.
+The operational reset policy is unchanged. Full C4/C5 closure and S5/S7
+should-haves are not imported as launch must-haves. RS1 F1/F2 before transaction
+ingress and M4/M6 operational blockers remain separate.
+
+**Exactly one next bounded implementation task is specified, not performed:**
+isolated TC-derived lock/O4 pre-effect composition, with an opt-in engine gate,
+one held owner domain, actual acknowledged O4 before TC lock/view effects,
+Unverified TC carry, capacity admission and discriminating failure/ownership
+tests. The plan gives its narrow proposed file allowlist and exclusions.
+The selected storage design already permits this non-authorizing slice;
+activation root, bootstrap and domain-external freshness/history mechanisms
+remain independent unresolved decisions, not fixture-supplied permissions.
+
+Validation in this documentation task: source/test references inspected;
+three-path allowlist, exact evidence-document starting-byte prefixes, modes,
+per-file EOL and absent-final-newline conventions checked; CRLF-aware working
+and baseline-to-final whitespace checks. No Cargo commands, node startup,
+deployment, seeds, runtime/config/wire/preimage/ceiling/guard changes, reset
+procedure changes, D15, Run 423 or PR. This reconciliation does not close RS1
+or authorize launch.
+
+```text
+D7D14_STORAGE_COMPONENT=IMPLEMENTED-ISOLATED
+D7D14_STORAGE_ACCEPTANCE=PASS-ACCEPTED-SUBSET
+§13.6 whole-lifecycle INCOMPLETE
+activation DISABLED
+public DevNet NO-GO
+durable anti-rollback NOT-ESTABLISHED
+C4/C5 OPEN
+```
