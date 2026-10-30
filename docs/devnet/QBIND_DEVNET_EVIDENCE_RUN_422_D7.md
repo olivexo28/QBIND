@@ -21900,3 +21900,139 @@ unchanged: `D7D14_STORAGE_COMPONENT=IMPLEMENTED-ISOLATED`;
 `D7D14_STORAGE_ACCEPTANCE=PASS-ACCEPTED-SUBSET`; §13.6 whole-lifecycle
 INCOMPLETE; activation DISABLED; public DevNet NO-GO; durable anti-rollback
 NOT-ESTABLISHED; C4/C5 OPEN.
+
+#### Run 422 F7 — accounting and handler acceptance reconciliation
+
+Finishing-pass source revision:
+`efa76f08134792d754a0a25fae7898df6579592e`. The starting task branch was
+`copilot/run-422-f7-retained-qc-admission`, clean at
+`bb31df0ab8fdd6259359f441c9a0bbe7a10187a8`, whose available commit/tree
+objects corresponded exactly to root tree
+`105f0726e588b02f7203e82cf95372e57a41c6a1`; original baseline
+`18b4e8d8db03a481bb73eee6af2d3d32c065634e` was an ancestor. The retained
+lookup and four runtime gate placements are unchanged. Only the node
+accounting/helper tests and QC verifier's fixed accounting constant changed;
+the shared cryptographic verification algorithm is unchanged.
+
+This reconciles the preceding accounting claim: 1 MiB is an enforced,
+checked, named-component envelope for synchronous admission/revalidation and
+its return transfers, NOT a whole-handler or physical-memory bound. The
+production wrapper still supplies exactly 1,048,576 bytes; the internal
+calculation clamps any supplied budget to that ceiling. Tests lower the budget
+through the same production calculation, with real capacity-bearing inputs.
+No runtime setting, generic allocator, wire/preimage change, or enlarged
+existing ceiling was added.
+
+The phase inventory in `f7_qc_working_set` is:
+
+| Phase / component | Charged ownership and backing |
+|---|---|
+| Selected source (R) | `retained_byte_size()` of the engine-selected evidence: complete certificate, bitmap, outer signature-vector capacity, each signature capacity, and retained signer-vector capacity. It remains covered by the existing retained ledger; including R in this smaller operation envelope is not a second reservation or a larger ledger allowance. |
+| Actual input (C) | Timeout inline size plus signature capacity and logical-QC signer capacity; or TC inline size, TC signer/high-QC backing, signed-timeout vector capacity times Timeout inline size, and each live nested signature/QC-signer capacity. Inline parent slots already include their nested QC and Vec descriptors, so those descriptors are not added a second time. |
+| Reconstructed Vote | `size_of::<Vote>()` plus the largest constituent signature length, bounding the single cloned signature backing at one time. The signature Vec descriptor is already inside Vote. |
+| Body/preimage overlap | Fixed canonical-body backing plus fixed v2 preimage backing AND two separate `Vec<u8>` descriptors. Tests cross-check both lengths AND capacities against `Vote::canonical_body()` and the snapshot domain's `vote_preimage()`. |
+| Admission/return slots (S) | Standalone ticket and its admission Result, present guard, admission enum, inner/outer return Results, and inventory value/Option return slots. Each enclosing slot includes its nested fields. Separate slots conservatively cover source/destination move overlap; this does not assert multiple certificate allocations or multiply-charge heap backing. |
+| Verifier/return slots (part of S) | Local optional signer descriptor (no backing on borrowed revalidation), summary, core Result, borrowed unit Result, and Proposal/Vote verifier Result, including conservative transfer overlap. The summary already contains its optional signer descriptor. No returned certificate or signer-vector backing exists on this path. |
+| Later local signing/serialization | OUTSIDE this envelope: signing, completed timeout signatures, encoded output, and their temporaries. Original-ticket confirmation still occurs before signing and again before consumption. |
+| Engine ingestion/TC formation/application | OUTSIDE the preceding boundary: accumulator clones, TC formation and serialization are not claimed covered by it. The selected TC gets a separate admission/revalidation boundary using its actual capacities; no previous triggering Timeout guard proves the selected TC. |
+
+The checked envelope is R + C + single-Vote/body/preimage component + S.
+It conservatively sums the named owner slots across admission, revalidation,
+and return phases rather than relying on compiler slot reuse. It is not a
+stack-frame inventory. Verification temporaries are destroyed synchronously
+before the private guard returns; no new retained proof, cache, owned
+certificate result, or asynchronous allocator coverage is introduced.
+Inherited key-provider/backend work, returned backend error-string backing,
+allocator metadata/rounding, stack-frame layout, global engine/process memory,
+and physical memory/RSS remain excluded. No RSS observation, fresh Miri run,
+or independent security review is claimed.
+
+`run422_f7_retained_qc_actual_capacity_boundary_and_relief` is a direct
+admission-helper test, not a lowered-budget handler test. Both a genuinely
+signed Timeout and a TC with genuine signed evidence are admitted exactly at
+their calculated boundary. Enlarging a signature's actual capacity by ONE byte
+without changing its contents makes the same calculation refuse at boundary
++ 1, before any QC-backend call. Assertions preserve all message contents,
+serialized input, the enlarged capacity/control charge, and engine view,
+epoch, lock, committed baseline, latch, accumulator count, block count,
+retained-byte accounting, evidence-rejection count, and evictions. Relieving
+capacity pressure admits the same input again with three constituent checks.
+On this target the observed component totals were:
+
+| Input | R | C | Vote/body/preimage | S | Accepted ceiling / refused total |
+|---|---:|---:|---:|---:|---:|
+| Timeout | 7,605 | 2,556 | 2,799 | 536 | 13,496 / 13,497 |
+| TC | 7,605 | 7,844 | 2,799 | 536 | 18,784 / 18,785 |
+
+These are component-calculation observations, not physical allocation/RSS
+measurements. The earlier `Some(u64::MAX)` control is retained and explicitly
+identified ONLY as checked-arithmetic refusal, not budget-boundary evidence.
+
+Executed handler coverage is now distinct from helper-only controls:
+
+- The local timeout refusal/retry uses an enabled multiplier-2 pacer. Missing
+  Proposal/Vote authority leaves threshold 5, level 0, latch, accumulator,
+  signer count and outbound messages unchanged; admitted retry on the SAME
+  state signs/emits exactly once and grows to threshold 10, level 1.
+- Both an inbound quorum-forming Timeout and a locally emitted quorum-forming
+  Timeout are executed after two genuine high-QC timeouts passed the actual
+  handler. Supported block-cap eviction removes their selected QC's child
+  evidence. The triggering Timeout carries a DIFFERENT, genuinely verified
+  retained lower QC: its three Vote checks pass, but cannot authorize the
+  selected higher TC QC. TC admission refuses before application/publication.
+  The pre-set inbound latch and locally consumed latch remain set; lock/view/commit and retention
+  observations do not change, the three accumulated timeouts are not cleared,
+  and no NewView is sent. Local signing, Timeout broadcast, latch consumption
+  and pacer growth are earlier permitted effects, asserted separately rather
+  than incorrectly rolled into the TC refusal boundary.
+- Restoring the genuine selected proof through the supported retention API,
+  then delivering a fourth genuine Timeout with `None` through the actual
+  inbound handler, re-admits the selected TC: view/lock advance, accumulator
+  and latch clear, and one NewView is published. Both refusal scenarios use
+  this actual-handler recovery, not direct TC-helper application.
+- Positive local AND inbound quorum triggers carry a retained lower QC while
+  the resulting TC selects the distinct retained higher QC. Backend counters
+  increase by SIX: three constituent Vote checks at each independent boundary.
+- An actual NewView retains its original genuine signed timeout evidence but
+  substitutes only the applied high-QC signer order. F5 accepts; F7 refuses
+  before application. Equal and lower unsupported high-QCs, plus a stale TC,
+  likewise cannot bypass F7; full engine observations remain unchanged.
+- Direct private-guard controls reject operation substitution and a different
+  timeout-context object with identical credentials. Terminal exhaustion is
+  tested at original-ticket confirmation, separately from pre-admission
+  exhaustion. The direct original-ticket test models the interleaving because
+  safe borrowed guards prevent mutating their owner during a real live guard;
+  no production mutation hook or manufactured verified-QC value was added.
+
+Fresh validation of source `efa76f08134792d754a0a25fae7898df6579592e`
+(counts overlap; every focused selector selected nonzero tests):
+
+| Literal command | Selected result | Exit |
+|---|---|---:|
+| `cargo test --locked -p qbind-consensus --lib run422_f7_retained_qc -- --nocapture` | 3 passed; 289 filtered | 0 |
+| `cargo test --locked -p qbind-consensus` | 969 passed, 21 ignored across 59 targets | 0 |
+| `LIBCLANG_PATH=/usr/lib/llvm-18/lib cargo test --locked -p qbind-node --lib run422_f7_retained_qc -- --nocapture` | 17 passed; 2,153 filtered | 0 |
+| `LIBCLANG_PATH=/usr/lib/llvm-18/lib cargo test --locked -p qbind-node --lib run030 -- --nocapture` | 28 passed; 2,142 filtered | 0 |
+| `LIBCLANG_PATH=/usr/lib/llvm-18/lib cargo test --locked -p qbind-node --lib run422_tc_target_view -- --nocapture` | 3 passed; 2,167 filtered | 0 |
+| `LIBCLANG_PATH=/usr/lib/llvm-18/lib cargo test --locked -p qbind-node --lib --features test-utils` | 2,201 passed, 6 ignored | 0 |
+| `LIBCLANG_PATH=/usr/lib/llvm-18/lib cargo test --locked -p qbind-node --test run_422_mandatory_timeout_policy_tests` | 3 passed | 0 |
+| `LIBCLANG_PATH=/usr/lib/llvm-18/lib cargo test --locked -p qbind-node --test run_418_newview_demux_chain_integration_tests` | 4 passed | 0 |
+| `LIBCLANG_PATH=/usr/lib/llvm-18/lib cargo test --locked -p qbind-node --test run_418_authenticated_peer_consensus_sender_binding_tests` | 18 passed | 0 |
+
+The earlier standalone node build and 344-target default-feature no-run
+compilation belong to `d17a4db2a24c682f988594e6c3347f24adeffcae`; they were
+NOT repeated or reattributed to this finishing pass. CRLF-aware working-diff
+and complete starting-to-final range checks use
+`git -c core.whitespace=cr-at-eol diff --check` and
+`git -c core.whitespace=cr-at-eol diff bb31df0ab8fdd6259359f441c9a0bbe7a10187a8 HEAD --check`.
+Both checks exited 0.
+Both document appends preserve the starting byte streams as exact prefixes,
+their modes, original CRLF/LF conventions, and absent final newlines.
+
+The availability limits and historical None/zero preimage ambiguity are
+unchanged. This is not activation, currentness, O4/restart integration,
+deployment, D15, Run 423, or complete F7/RS1 closure. Preserve:
+`D7D14_STORAGE_COMPONENT=IMPLEMENTED-ISOLATED`;
+`D7D14_STORAGE_ACCEPTANCE=PASS-ACCEPTED-SUBSET`; §13.6 whole-lifecycle
+INCOMPLETE; activation DISABLED; public DevNet NO-GO; durable anti-rollback
+NOT-ESTABLISHED; C4/C5 OPEN.

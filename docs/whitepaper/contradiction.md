@@ -2903,3 +2903,76 @@ overlap; standing verdicts remain unchanged:
 `D7D14_STORAGE_ACCEPTANCE=PASS-ACCEPTED-SUBSET`; §13.6 whole-lifecycle
 INCOMPLETE; activation DISABLED; public DevNet NO-GO; durable anti-rollback
 NOT-ESTABLISHED; C4/C5 OPEN.
+
+#### Run 422 F7 — finishing-pass accounting and acceptance reconciliation
+
+Source `efa76f08134792d754a0a25fae7898df6579592e`, based on required
+`bb31df0ab8fdd6259359f441c9a0bbe7a10187a8` / tree
+`105f0726e588b02f7203e82cf95372e57a41c6a1`, retains the lookup and four
+runtime gates while completing the checked component calculation and executed
+handler acceptance mapping. The preceding 1 MiB claim is specifically an
+admission/revalidation and return-transfer component envelope, NOT a
+whole-handler, compiler-stack, global engine, RSS, or physical-memory bound.
+Its unchanged production ceiling is 1,048,576 bytes.
+
+The envelope includes selected retained evidence and actual Timeout/TC vector
+capacities, the reconstructed Vote and its single signature backing, canonical
+body/preimage backing AND their two Vec descriptors, admission ticket/guard/
+enum/Result slots, and verifier/inventory result-transfer overlap. Nested
+descriptors already inside Vote, Timeout, TC and result slots are not added
+again to those slots; separate transfer slots are conservatively charged
+without duplicating heap backing. The source remains covered by the existing
+retention ledger, not a second reservation. Body/preimage lengths and
+capacities are cross-checked against the actual constructors. Later signing,
+serialization, engine ingestion and TC formation are separate phases outside
+that envelope; a selected TC receives a separate revalidation boundary.
+Inherited key-provider/backend work, error-string backing, allocator overhead,
+stack layout and physical memory remain excluded.
+
+Actual-capacity helper tests accept calculated lowered boundaries of 13,496
+bytes (Timeout) and 18,784 bytes (TC), refuse one-byte capacity increases before
+QC-backend calls with inputs/engine/accounting preserved, then accept relieved
+retries. These are component observations, not physical measurements. The old
+`Some(u64::MAX)` case establishes checked-arithmetic refusal ONLY, not budget
+enforcement; helper/guard controls are distinct from executed handler coverage.
+
+An enabled growing pacer now preserves threshold/level, latch, accumulator,
+signer count and messages on local refusal, then emits once on the same state
+and grows 5/level-0 to 10/level-1. Both inbound and local quorum-forming Timeout
+handlers are exercised after supported eviction removes a previously admitted
+selected high-QC proof. The valid lower-QC trigger passes but the TC refuses:
+earlier permitted Timeout bookkeeping/signing/broadcast stays separate from
+forbidden TC lock/view/latch-clearing/accumulator-clearing and NewView effects.
+Restoring genuine evidence and using an actual inbound handler recovers both
+cases. Positive inbound AND local triggers with distinct present QCs require
+six constituent checks, three at each revalidation boundary.
+
+Actual NewView evidence remains genuinely signed when only applied high-QC
+signer order is substituted: F5 accepts, F7 refuses. Equal/lower unsupported
+QCs and stale TCs cannot bypass F7. Direct private-guard tests cover operation/
+identical-credential-context substitution and original-ticket confirmation
+exhaustion, distinguished from pre-admission exhaustion. The confirmation
+interleaving is modeled directly because a real borrowed guard prevents
+mutating its owner while live; no production mutation hook or fabricated
+verified-QC value was introduced.
+
+Fresh results from the source above: focused consensus F7 3 passed; focused
+node F7 17 passed; node `run030` 28 passed; target-view 3 passed; full consensus
+969 passed / 21 ignored; full node `test-utils` 2,201 passed / 6 ignored; startup,
+demux and authenticated-sender integration suites 3, 4 and 18 passed.
+All exits were 0; selectors were nonzero and counts overlap. Literal commands,
+selected/filtered counts, phase inventory and CRLF-aware working/range checks
+are recorded in the appended D7 evidence reconciliation. Earlier standalone
+build and 344-target no-run evidence remains attributable only to
+`d17a4db2a24c682f988594e6c3347f24adeffcae`, not this finishing pass.
+No fresh Miri, independent security review or RSS measurement is claimed.
+Both documents preserve all starting bytes, modes and EOL/EOF conventions.
+
+Production authority remains unavailable; missing/cold-start/remote/evicted
+proof fails closed, and None/zero preimage ambiguity is unchanged. No wire
+change, authority activation, currentness, O4/restart integration, deployment,
+D15, Run 423 or full F7/RS1 closure is claimed. Preserve:
+`D7D14_STORAGE_COMPONENT=IMPLEMENTED-ISOLATED`;
+`D7D14_STORAGE_ACCEPTANCE=PASS-ACCEPTED-SUBSET`; §13.6 whole-lifecycle
+INCOMPLETE; activation DISABLED; public DevNet NO-GO; durable anti-rollback
+NOT-ESTABLISHED; C4/C5 OPEN.
