@@ -3112,3 +3112,69 @@ This change does not establish every terminal-view operation, Proposal/Vote rout
 ## RUN 422 evidence clarification
 
 Test attribution: `run422_qc_view_exhaustion_checked_advance_and_terminal_refusal` starts at `MAX-2` and covers `MAX-2 -> MAX-1 -> MAX` plus repeated terminal refusals. Ordinary `0 -> 1 -> 2` advancement is covered by the existing `basic_engine_advance_view` test in the full consensus suite. Both results are attributed to tested source revision `8d82989e41e7f841e0c601e868aded37a451deb7`.
+
+## RUN 422 - public-DevNet planning/lifecycle reconciliation (documentation only)
+
+Source inspected at `de05c009a130d7d044a0c896b8a8559b00b411e4`, root tree
+`4fcb30ffd7b387aefdf647dc7725f78fa61fb287`, from clean `main`; task branch
+`copilot/run-422-devnet-critical-path-reconciliation`. Object availability,
+exact baseline content and ancestry were checked separately: shallow HEAD
+names parent `b17bb2beb8baa106eadfcd163fe6c5c1387a8f51` in its raw header;
+the initially missing parent was recovered and verified as an ancestor.
+No shallow boundary is described as a parentless commit.
+
+The corrected planning artifact is
+`docs/devnet/QBIND_PUBLIC_DEVNET_CRITICAL_PATH.md`, sections 2-5: current
+source/callers, historical producing-revision ledger, prerequisite matrix,
+exact conflicting baseline statements and one bounded successor specification.
+The old section-3 assertion that continuity/anti-rollback are "open, not
+launch-gating for DevNet" because DevNet is resettable/no-value is withdrawn.
+The canonical M1-M20 + RS1 + explicit-launch gate is unchanged; it does not
+silently waive Lifecycle sections 3.3/3.3.1/7 requirements before signing under
+the proposed Profile A. Profile A remains a proposal, not approved policy.
+Authorization, current-authority freshness, preserved signing history,
+consensus-lock recovery and copied-key exclusivity are separate obligations.
+A matching epoch or valid historical QC establishes neither latestness nor
+uncommitted signing-history continuity. Existing reset operations are not
+authorization to forget history and reuse the same consensus identity/domain.
+
+The old journal-as-next-task and wholly-dormant/unverified-Timeout descriptions
+are also superseded. The local D10 journal and process-death recovery, owning
+handoffs, received-Vote retention and complete signed-QC staging, real O4/O5
+composition and captured-Vote lifecycle are implemented isolated inputs.
+Mandatory F5, checked TC target binding, bounded F7 retained-QC admission and
+reviewed view-exhaustion corrections are present. These are not whole-lifecycle
+acceptance, production owner/journal wiring, approved activation or configured-
+authority release-binary assurance. Execution remains historical at the
+producing revisions in the plan/D7 evidence; no Cargo or security-tool
+execution occurred in this reconciliation.
+
+The single recommended bounded implementation is an **isolated TC-derived
+lock/O4 pre-effect composition** using the already selected storage design.
+It requires the actual durable acknowledgement, one owner domain, unchanged
+resource bounds, unverified TC restriction carry and negative acceptance cases.
+It grants no activation/freshness authority and does not choose an anchor.
+Production signing stays unavailable pending independently approved A/B/C
+mechanisms; resettable/no-value is not a continuity waiver.
+
+C4/C5 stay OPEN; their full closure is not imported into the DevNet launch
+gate. S5/S7 remain should-haves. RS1 F1/F2 transaction-authentication obligations
+before ingress, and M4/M6 operational blockers, are retained separately.
+Only the three authorized planning/evidence paths change; the two evidence
+documents retain their exact starting bytes as prefixes, modes, per-file
+EOL/EOF conventions. Validation is documentation/source-reference and
+CRLF-aware whitespace validation only. No runtime, configuration, wire,
+preimage, ceiling, activation guard, readiness status or reset procedure is
+changed; no node, deployment, seed publication, D15, Run 423 or PR.
+
+```text
+D7D14_STORAGE_COMPONENT=IMPLEMENTED-ISOLATED
+D7D14_STORAGE_ACCEPTANCE=PASS-ACCEPTED-SUBSET
+§13.6 whole-lifecycle INCOMPLETE
+activation DISABLED
+public DevNet NO-GO
+durable anti-rollback NOT-ESTABLISHED
+C4/C5 OPEN
+```
+
+Documentation reconciliation does not close RS1 or authorize launch.
