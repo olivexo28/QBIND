@@ -7713,6 +7713,10 @@ fn inc_timeout_reject_reason(
                 .inbound_timeout_rejected_unsupported_suite
                 .saturating_add(1);
         }
+        TimeoutVerifyError::InvalidTargetView(_) => {
+            // Target-view structure is a TC-level check and cannot be returned
+            // by verify_timeout_msg. Do not classify it as a signature error.
+        }
         TimeoutVerifyError::InvalidSignature(_)
         | TimeoutVerifyError::MalformedSignature(_)
         | TimeoutVerifyError::BackendError(_, _) => {
@@ -7720,18 +7724,13 @@ fn inc_timeout_reject_reason(
                 .inbound_timeout_rejected_bad_signature
                 .saturating_add(1);
         }
-        // The TC-level evidence/quorum errors should never surface
-        // from a single-message verify_timeout_msg call. Counted as
-        // "bad signature" if they ever do — defensive bucket.
+        // The TC-level evidence/quorum errors should never surface from a
+        // single-message verify_timeout_msg call.
         TimeoutVerifyError::DuplicateSigner(_)
         | TimeoutVerifyError::EvidenceMismatch
         | TimeoutVerifyError::MixedView { .. }
         | TimeoutVerifyError::InsufficientQuorum { .. }
-        | TimeoutVerifyError::HighQcMismatch => {
-            stats.inbound_timeout_rejected_bad_signature = stats
-                .inbound_timeout_rejected_bad_signature
-                .saturating_add(1);
-        }
+        | TimeoutVerifyError::HighQcMismatch => {}
     }
 }
 
@@ -7754,6 +7753,14 @@ fn inc_newview_reject_reason(
             // caller increments `missing_evidence` first based on
             // `tc.signed_timeouts.is_empty()` (see callers), but here
             // we count generic evidence mismatch.
+            stats.inbound_newview_rejected_evidence_mismatch = stats
+                .inbound_newview_rejected_evidence_mismatch
+                .saturating_add(1);
+        }
+        TimeoutVerifyError::InvalidTargetView(_) => {
+            // The target is structurally unbound to signed timeout evidence;
+            // count it with other TC/evidence correspondence mismatches, never
+            // as a cryptographic signature failure.
             stats.inbound_newview_rejected_evidence_mismatch = stats
                 .inbound_newview_rejected_evidence_mismatch
                 .saturating_add(1);
@@ -11434,6 +11441,55 @@ mod tests {
             );
         }
 
+        fn run422_node_id_for(id: ValidatorId) -> NodeId {
+            let mut bytes = [0u8; 32];
+            bytes[0] = 0xC0u8.wrapping_add(id.0 as u8);
+            bytes[31] = 0x40u8.wrapping_add(id.0 as u8);
+            NodeId::new(bytes)
+        }
+
+        fn run422_newview_binding_gate(n: u64) -> PeerConsensusBindingGate {
+            let map = crate::peer_consensus_binding::PeerConsensusBindingMap::build(
+                (0..n).map(|id| {
+                    let validator_id = ValidatorId(id);
+                    (run422_node_id_for(validator_id), validator_id)
+                }),
+            )
+            .expect("valid one-to-one binding map");
+            PeerConsensusBindingGate::new(map)
+        }
+
+        fn deliver_newview_with_authenticated_origin(
+            engine: &mut BasicHotStuffEngine<[u8; 32]>,
+            stats: &mut BinaryConsensusLoopInboundStats,
+            ctx: &TimeoutVerificationContext,
+            tc: &TimeoutCertificate<[u8; 32]>,
+            metrics: &Arc<NodeMetrics>,
+            origin: &AuthenticatedConsensusOrigin,
+            gate: &PeerConsensusBindingGate,
+            outbound: Option<&dyn ConsensusNetworkFacade>,
+        ) {
+            let bytes = bincode::serialize(tc).expect("encode");
+            let mut restore_mode = RestoreCatchupModeState::from_config(None);
+            handle_inbound_consensus_msg(
+                engine,
+                ConsensusNetMsg::NewView(bytes),
+                stats,
+                outbound,
+                metrics,
+                ValidatorId(0),
+                &mut restore_mode,
+                Some(ctx),
+                None,
+                None,
+                &mut BinaryReconfigDetector::default(),
+                Some(origin),
+                Some(gate),
+                None,
+                ConsensusVerificationPolicy::LocalFixtureUnsigned,
+            );
+        }
+
         pub(super) fn build_valid_tc(
             fixture: &Fixture,
             timeout_view: u64,
@@ -11462,6 +11518,114 @@ mod tests {
             assert_eq!(stats.inbound_newview_engine_accepted, 1);
             assert!(stats.view_advances_due_to_verified_tc >= 1);
             assert!(engine.current_view() > view_before);
+        }
+
+        #[test]
+        fn run422_tc_target_view_authenticated_newview_refuses_then_retries() {
+            let fixture = make_fixture(4);
+            let ctx = make_ctx(&fixture, None);
+            let mut engine = make_engine(ValidatorId(0), 4);
+            let gate = run422_newview_binding_gate(4);
+            let origin = AuthenticatedConsensusOrigin::new(
+                run422_node_id_for(ValidatorId(1)),
+                ValidatorId(1),
+            );
+            let mut stats = BinaryConsensusLoopInboundStats::default();
+            let metrics = make_metrics();
+            let outbound = CapturingFacade::new();
+
+            let seeded_timeout = signed_timeout(0, ValidatorId(3), &fixture.sks);
+            assert!(engine
+                .on_timeout_msg(ValidatorId(3), seeded_timeout)
+                .expect("seed one timeout without forming a TC")
+                .is_none());
+            engine.mark_timeout_emitted();
+            let view_before = engine.current_view();
+            let lock_before = engine.locked_qc().map(|qc| (qc.view, qc.block_id));
+            let committed_height_before = engine.committed_height();
+            let committed_block_before = engine.committed_block().copied();
+            let commit_count_before = engine.commit_log().len();
+            let timeout_count_before = engine.timeout_count(0);
+            let timeout_latch_before = engine.timeout_emitted_in_view();
+
+            let mut invalid_tc = build_valid_tc(&fixture, 0);
+            invalid_tc.view = 2;
+            deliver_newview_with_authenticated_origin(
+                &mut engine,
+                &mut stats,
+                &ctx,
+                &invalid_tc,
+                &metrics,
+                &origin,
+                &gate,
+                Some(&outbound),
+            );
+
+            assert_eq!(gate.metrics().accepted(), 1);
+            assert_eq!(stats.inbound_sender_binding_rejected_total, 0);
+            assert_eq!(stats.inbound_newview_verify_rejected_total, 1);
+            assert_eq!(stats.inbound_newview_rejected_evidence_mismatch, 1);
+            assert_eq!(stats.inbound_newview_rejected_bad_signature, 0);
+            assert_eq!(stats.inbound_newview_verify_accepted, 0);
+            assert_eq!(stats.inbound_newview_engine_accepted, 0);
+            assert_eq!(stats.inbound_new_views_delivered, 0);
+            assert_eq!(engine.current_view(), view_before);
+            assert_eq!(
+                engine.locked_qc().map(|qc| (qc.view, qc.block_id)),
+                lock_before
+            );
+            assert_eq!(engine.committed_height(), committed_height_before);
+            assert_eq!(engine.committed_block().copied(), committed_block_before);
+            assert_eq!(engine.commit_log().len(), commit_count_before);
+            assert_eq!(engine.timeout_count(0), timeout_count_before);
+            assert_eq!(engine.timeout_emitted_in_view(), timeout_latch_before);
+            assert!(outbound.captured.lock().unwrap().is_empty());
+
+            let valid_tc = build_valid_tc(&fixture, 0);
+            deliver_newview_with_authenticated_origin(
+                &mut engine,
+                &mut stats,
+                &ctx,
+                &valid_tc,
+                &metrics,
+                &origin,
+                &gate,
+                Some(&outbound),
+            );
+            assert_eq!(gate.metrics().accepted(), 2);
+            assert_eq!(stats.inbound_newview_verify_accepted, 1);
+            assert_eq!(stats.inbound_newview_engine_accepted, 1);
+            assert_eq!(stats.inbound_new_views_delivered, 1);
+            assert_eq!(engine.current_view(), valid_tc.view);
+            assert_eq!(engine.timeout_count(0), 0);
+            assert!(!engine.timeout_emitted_in_view());
+            assert_eq!(engine.committed_height(), committed_height_before);
+            assert_eq!(engine.commit_log().len(), commit_count_before);
+            assert!(outbound.captured.lock().unwrap().is_empty());
+        }
+
+        #[test]
+        fn run422_tc_target_view_engine_gate_preserves_stale_behavior() {
+            let mut engine = make_engine(ValidatorId(0), 4);
+            assert!(engine.try_advance_to_view(5));
+            engine.mark_timeout_emitted();
+            let signers = vec![ValidatorId(0), ValidatorId(1), ValidatorId(2)];
+
+            let stale_valid = TimeoutCertificate::<[u8; 32]>::new(0, None, signers.clone());
+            assert_eq!(engine.on_timeout_certificate(&stale_valid), Ok(5));
+            assert_eq!(engine.current_view(), 5);
+            assert!(engine.timeout_emitted_in_view());
+
+            let mut stale_malformed =
+                TimeoutCertificate::<[u8; 32]>::new(4, None, signers);
+            stale_malformed.view = 3;
+            assert!(matches!(
+                engine.on_timeout_certificate(&stale_malformed),
+                Err(qbind_consensus::timeout::TimeoutValidationError::InvalidTargetView(_))
+            ));
+            assert_eq!(engine.current_view(), 5);
+            assert!(engine.timeout_emitted_in_view());
+            assert_eq!(engine.timeout_count(4), 0);
         }
 
         #[test]
@@ -12022,6 +12186,53 @@ mod tests {
             );
             assert_eq!(accepted_stats.view_advances_due_to_verified_tc, 1);
             assert_eq!(accepted_engine.current_view(), valid_tc.timeout_view + 1);
+            assert!(matches!(
+                accepted_facade.captured.lock().unwrap().as_slice(),
+                [ConsensusNetMsg::NewView(_)]
+            ));
+        }
+
+        #[test]
+        fn run422_tc_target_view_local_application_refuses_and_control_publishes() {
+            let fixture = make_fixture(4);
+            let ctx = make_ctx(&fixture, None);
+
+            let mut invalid_tc = build_valid_tc(&fixture, 0);
+            invalid_tc.view = 3;
+            let mut rejected_engine = make_engine(ValidatorId(0), 4);
+            let rejected_view = rejected_engine.current_view();
+            let rejected_lock = rejected_engine.locked_qc().map(|qc| (qc.view, qc.block_id));
+            let mut rejected_stats = BinaryConsensusLoopInboundStats::default();
+            let rejected_facade = CapturingFacade::new();
+            apply_local_tc_and_broadcast_new_view(
+                &mut rejected_engine,
+                &invalid_tc,
+                &mut rejected_stats,
+                Some(&rejected_facade),
+                &ctx,
+            );
+            assert_eq!(rejected_stats.timeout_certificates_formed, 1);
+            assert_eq!(rejected_stats.view_advances_due_to_verified_tc, 0);
+            assert_eq!(rejected_engine.current_view(), rejected_view);
+            assert_eq!(
+                rejected_engine.locked_qc().map(|qc| (qc.view, qc.block_id)),
+                rejected_lock
+            );
+            assert!(rejected_facade.captured.lock().unwrap().is_empty());
+
+            let valid_tc = build_valid_tc(&fixture, 0);
+            let mut accepted_engine = make_engine(ValidatorId(0), 4);
+            let mut accepted_stats = BinaryConsensusLoopInboundStats::default();
+            let accepted_facade = CapturingFacade::new();
+            apply_local_tc_and_broadcast_new_view(
+                &mut accepted_engine,
+                &valid_tc,
+                &mut accepted_stats,
+                Some(&accepted_facade),
+                &ctx,
+            );
+            assert_eq!(accepted_stats.view_advances_due_to_verified_tc, 1);
+            assert_eq!(accepted_engine.current_view(), valid_tc.view);
             assert!(matches!(
                 accepted_facade.captured.lock().unwrap().as_slice(),
                 [ConsensusNetMsg::NewView(_)]

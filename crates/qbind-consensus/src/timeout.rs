@@ -246,9 +246,77 @@ pub struct TimeoutCertificate<BlockIdT> {
     pub timeout_view: u64,
 }
 
+/// Structural failure to bind a timeout certificate's target view to the
+/// immediate successor authenticated by its timeout messages.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TimeoutTargetViewError {
+    /// `timeout_view` has no representable successor.
+    SuccessorOverflow {
+        timeout_view: u64,
+        target_view: u64,
+    },
+    /// The target is not exactly the checked successor of `timeout_view`.
+    NotImmediateSuccessor {
+        timeout_view: u64,
+        target_view: u64,
+        expected_view: u64,
+    },
+}
+
+impl std::fmt::Display for TimeoutTargetViewError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::SuccessorOverflow {
+                timeout_view,
+                target_view,
+            } => write!(
+                f,
+                "timeout view {} has no representable successor (target={})",
+                timeout_view, target_view
+            ),
+            Self::NotImmediateSuccessor {
+                timeout_view,
+                target_view,
+                expected_view,
+            } => write!(
+                f,
+                "target view {} is not the immediate successor {} of timeout view {}",
+                target_view, expected_view, timeout_view
+            ),
+        }
+    }
+}
+
+impl std::error::Error for TimeoutTargetViewError {}
+
+/// Require a target view to be the checked immediate successor of a timeout
+/// view. Used before allocating signer sets or applying a certificate.
+pub fn validate_timeout_target_view(
+    timeout_view: u64,
+    target_view: u64,
+) -> Result<(), TimeoutTargetViewError> {
+    let expected_view = timeout_view
+        .checked_add(1)
+        .ok_or(TimeoutTargetViewError::SuccessorOverflow {
+            timeout_view,
+            target_view,
+        })?;
+    if target_view != expected_view {
+        return Err(TimeoutTargetViewError::NotImmediateSuccessor {
+            timeout_view,
+            target_view,
+            expected_view,
+        });
+    }
+    Ok(())
+}
+
 /// Errors that can occur during timeout message/certificate validation.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TimeoutValidationError {
+    /// The target view is not the checked immediate successor of
+    /// `timeout_view`.
+    InvalidTargetView(TimeoutTargetViewError),
     /// A signer is not in the validator set.
     NonMemberSigner(ValidatorId),
     /// Duplicate signer detected.
@@ -269,6 +337,9 @@ pub enum TimeoutValidationError {
 impl std::fmt::Display for TimeoutValidationError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            TimeoutValidationError::InvalidTargetView(error) => {
+                write!(f, "invalid timeout certificate target view: {}", error)
+            }
             TimeoutValidationError::NonMemberSigner(id) => {
                 write!(f, "non-member signer: {:?}", id)
             }
@@ -356,6 +427,9 @@ impl<BlockIdT: Clone + Eq> TimeoutCertificate<BlockIdT> {
     ) -> Result<(), TimeoutValidationError> {
         use std::collections::HashSet;
 
+        self.validate_target_view()
+            .map_err(TimeoutValidationError::InvalidTargetView)?;
+
         let mut seen = HashSet::new();
         let mut acc_vp: u64 = 0;
 
@@ -386,6 +460,12 @@ impl<BlockIdT: Clone + Eq> TimeoutCertificate<BlockIdT> {
         }
 
         Ok(())
+    }
+
+    /// Validate the target's structural relationship to the signed timeout
+    /// view without inspecting signer membership or quorum.
+    pub fn validate_target_view(&self) -> Result<(), TimeoutTargetViewError> {
+        validate_timeout_target_view(self.timeout_view, self.view)
     }
 
     /// Get the view number this TC enables transition to.
@@ -733,6 +813,53 @@ mod tests {
             vec![ValidatorId(1), ValidatorId(2), ValidatorId(3)],
         );
 
+        assert!(tc.validate(&validators).is_ok());
+    }
+
+    #[test]
+    fn run422_tc_target_view_logical_validation_requires_immediate_successor() {
+        let validators = make_validator_set(4);
+        for (timeout_view, target_view) in [
+            (5, 5),
+            (5, 4),
+            (5, 7),
+            (5, u64::MAX),
+            (u64::MAX, u64::MAX),
+        ] {
+            let mut tc = TimeoutCertificate::<[u8; 32]>::new(
+                timeout_view,
+                None,
+                vec![ValidatorId(1), ValidatorId(2), ValidatorId(3)],
+            );
+            tc.view = target_view;
+            let error = tc.validate(&validators).expect_err("invalid target view");
+            if timeout_view == u64::MAX {
+                assert!(matches!(
+                    error,
+                    TimeoutValidationError::InvalidTargetView(
+                        TimeoutTargetViewError::SuccessorOverflow { .. }
+                    )
+                ));
+            } else {
+                assert!(matches!(
+                    error,
+                    TimeoutValidationError::InvalidTargetView(
+                        TimeoutTargetViewError::NotImmediateSuccessor { .. }
+                    )
+                ));
+            }
+        }
+    }
+
+    #[test]
+    fn run422_tc_target_view_logical_validation_accepts_largest_successor() {
+        let validators = make_validator_set(4);
+        let mut tc = TimeoutCertificate::<[u8; 32]>::new(
+            u64::MAX - 1,
+            None,
+            vec![ValidatorId(1), ValidatorId(2), ValidatorId(3)],
+        );
+        tc.view = u64::MAX;
         assert!(tc.validate(&validators).is_ok());
     }
 

@@ -21750,3 +21750,59 @@ CRLF-aware whitespace checks use `git -c core.whitespace=cr-at-eol diff --check`
 #### Run 422 startup marker exit-race correction
 
 `SupervisedChild::wait_for_stderr_marker` now takes a final stderr snapshot after `observe_exit()` joins the output readers. If that completed capture contains the requested marker, the wait succeeds; otherwise `UnexpectedEof` reports that same final snapshot. This closes the exit/read-drain ordering gap while retaining the bounded deadline, capture cap, child ownership, and distinction between ACTIVE preflight acceptance and transport readiness. The race was corrected from code-path analysis; it was not independently forced or experimentally reproduced. Fresh validation on the follow-up source based on `f338cdc89ef11c686e3f835f8d0e5afaf8b34ebc`: `LIBCLANG_PATH=/usr/lib/llvm-18/lib cargo test --locked -p qbind-node --test run_422_mandatory_timeout_policy_tests -- --nocapture` selected 3 tests (3 passed, 0 failed, 0 ignored), exit 0. Prior F5 validation above remains attributed to its stated producing source revision.
+
+#### Run 422 TimeoutCertificate target-view binding
+
+Source finding: timeout signatures cover `TimeoutMsg.view`, not the separate
+`TimeoutCertificate.view`; before this correction the evidence verifier and
+logical certificate validation accepted a mismatched target consumed by the
+engine. Commit `f5aeb09e9761eeca4ee3b37275d7776731b6b028` adds one shared
+checked-successor validator. Cryptographic verification invokes it before
+signer-set allocation or timeout-signature backend calls, and logical TC
+validation invokes the same check before signer-set allocation and engine
+effects. Overflow is a distinct typed structural error. Constructors and the
+wire shape remain unchanged; a saturating terminal constructor result fails
+validation. No timeout signing preimage, suite/domain policy, quorum rule, or
+high-QC selection behavior changed.
+
+Pre-fix characterization was executed against required baseline
+`69740ba1bc05f749c1c4462630284e90627aa4ee`: the genuine signed-timeout
+substitution test failed as expected because changing only `tc.view` was
+accepted (one selected test failed, exit 101). This is separate from the
+post-fix results below.
+
+Post-fix validation, produced from source commit
+`f5aeb09e9761eeca4ee3b37275d7776731b6b028`:
+
+| Literal command | Result | Exit |
+|---|---:|---:|
+| `cargo test --locked -p qbind-consensus --lib run422_tc_target_view -- --nocapture` | 6 passed, 0 failed | 0 |
+| `cargo test --locked -p qbind-consensus` | 966 passed, 0 failed, 21 ignored across test targets | 0 |
+| `LIBCLANG_PATH=/usr/lib/llvm-18/lib cargo test --locked -p qbind-node --lib run422_tc_target_view -- --nocapture` | 3 passed, 0 failed | 0 |
+| `LIBCLANG_PATH=/usr/lib/llvm-18/lib cargo test --locked -p qbind-node --lib --features test-utils` | 2,184 passed, 0 failed, 6 ignored | 0 |
+| `LIBCLANG_PATH=/usr/lib/llvm-18/lib cargo test --locked -p qbind-node --test run_422_mandatory_timeout_policy_tests` | 3 passed, 0 failed | 0 |
+| `LIBCLANG_PATH=/usr/lib/llvm-18/lib cargo test --locked -p qbind-node --test run_418_newview_demux_chain_integration_tests` | 4 passed, 0 failed | 0 |
+| `CARGO_BUILD_JOBS=2 CARGO_PROFILE_TEST_STRIP=symbols LIBCLANG_PATH=/usr/lib/llvm-18/lib cargo test --locked -p qbind-node --no-run` | All default-feature node test targets compiled; compilation only, no tests executed | 0 |
+
+The final command is default-feature compilation only, with the explicit
+profile override; it is not test execution or an unmodified-profile pass.
+
+The authenticated NewView test exercises the serialized bounded handler path
+with a real origin-binding gate and genuine `high_qc=None` timeout signatures.
+The invalid target is rejected with unchanged engine view, lock, commit state,
+timeout latch, accumulator, and outbound delivery, then a valid counterpart
+advances the same preserved engine state. The local TC test is helper-level,
+not evidence that the ordinary constructor creates a forged target. Direct
+engine coverage confirms valid stale-TC behavior remains ignored and malformed
+stale target relationships fail validation before effects. The new target
+rejection increments NewView evidence-mismatch accounting, not bad-signature
+accounting.
+
+This correction binds only the TC target view to its signed timeout view. It
+does not verify constituent high-QC Vote signatures, establish current
+authority/freshness, O4 acknowledgement, or restart safety; F7 high-QC proof
+and authority gaps remain open. Standing verdicts remain unchanged:
+`D7D14_STORAGE_COMPONENT=IMPLEMENTED-ISOLATED`;
+`D7D14_STORAGE_ACCEPTANCE=PASS-ACCEPTED-SUBSET`; §13.6 whole-lifecycle
+INCOMPLETE; activation DISABLED; public DevNet NO-GO; durable anti-rollback
+NOT-ESTABLISHED; C4/C5 OPEN.
