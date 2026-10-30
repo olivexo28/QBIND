@@ -2800,3 +2800,32 @@ acceptance is claimed. `D7D14_STORAGE_COMPONENT=IMPLEMENTED-ISOLATED`;
 `D7D14_STORAGE_ACCEPTANCE=PASS-ACCEPTED-SUBSET`; §13.6 whole-lifecycle
 INCOMPLETE; activation DISABLED; public DevNet NO-GO; durable anti-rollback
 NOT-ESTABLISHED; C4/C5 OPEN. Implementation delivery is not independent source-review acceptance.
+
+## RUN 422 — captured-Vote lifecycle acceptance gap closure
+
+The original captured Vote now survives a checked same-authority use after the
+first acknowledged O4 advances durable revision beyond its captured revision.
+Before dropping the original `decided` and `p1`, the lifecycle checks exact
+Signed-signature correspondence, one delivery/no additional signing, and
+preservation of the Vote, Proposal, pin provenance, storage and consensus
+ledgers, ceilings, journal record/metadata bytes, and position count. This
+advance case is distinct from the existing successor-capture equality case.
+
+The contention observer now has finite receive polling, explicit atomic
+shutdown, and RAII join cleanup. A deliberately skipped-hook control proves
+bounded completion while the positive path still verifies same-domain
+`WouldBlock`. Each pre-O5, post-O3, post-O5, and post-resumption boundary now
+checks its live-owner baseline immediately, including independent ledgers,
+ceilings, Vote/pin, consensus, signer/sink/probe, and separate exact journal
+record, metadata, and count comparisons. Post-resumption occupancy is asserted
+equal to its captured baseline. Fresh validation was produced by source commit
+`57948f56db346ca9f9d56af1e6ce16d3347335ae`: lifecycle and owner selections passed
+3/3 and 174/180 (6 ignored); lifecycle-only changes do not replace or relabel
+prior exact-copy/Miri validation. The unpressured high-water remains 83,666
+aggregate bytes; the separate pressure peak remains 84,956.
+
+All standing statuses remain unchanged: `D7D14_STORAGE_COMPONENT=IMPLEMENTED-ISOLATED`;
+`D7D14_STORAGE_ACCEPTANCE=PASS-ACCEPTED-SUBSET`; §13.6 whole-lifecycle INCOMPLETE;
+activation DISABLED; public DevNet NO-GO; durable anti-rollback NOT-ESTABLISHED;
+C4/C5 OPEN. This remains isolated test evidence, not production integration or
+independent source-review acceptance.

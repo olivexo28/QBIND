@@ -21660,3 +21660,51 @@ public DevNet NO-GO
 durable anti-rollback NOT-ESTABLISHED
 C4/C5 OPEN
 ```
+
+### RUN 422 — captured-Vote lifecycle acceptance gap closure
+
+The original capture is now exercised across an acknowledged durable advance.
+After first O4 acknowledgement and engine effects, the test reads current
+validated durable authority and proves its revision exceeds the original
+`PreparedProvenance.captured_revision`; before dropping `decided` or `p1`, it
+successfully consumes that original capture through checked same-authority use.
+The test compares the full Vote and Proposal, pin provenance, independent
+operational/aggregate ledgers, all ceilings, consensus accounting, and journal
+record bytes, metadata bytes, and position count at that boundary. A
+`RetainedSliceProbe` compares the cryptographically verified retrieved signature
+against the exact acknowledged Signed-position signature; delivery occurs once
+and signing remains at one call. This is distinct from the existing successor
+capture check, whose capture revision equals the post-O4 revision and does not
+establish that the original capture survives advancement.
+
+The protected-use contention observer now polls a finite receive deadline and
+has atomic shutdown plus RAII join cleanup. This covers successful observation,
+early refusal, missing hook, and assertion unwinding without an indefinitely
+blocked worker. A deliberate skipped-hook control confirms bounded completion;
+the positive route still requires the competing same-domain handle to observe
+`WouldBlock`.
+
+The pre-O5 refusal, refusal with genuine O2/O3 proof live, post-O5 pre-resumption
+refusal, and successful post-resumption use each capture the live-owner
+baseline before the operation. Immediately afterward they assert independent
+ledger equality, unchanged ceilings, complete Vote/pin preservation, consensus
+accounting, and signer/sink/probe observations, then independently compare
+Signed record bytes, metadata bytes, and reserved-position count. Journal
+readback remains outside the protected accounting claim. The successful
+post-resumption occupancy is an equality assertion, not only a diagnostic.
+
+Fresh validation of source commit `57948f56db346ca9f9d56af1e6ce16d3347335ae`:
+`LIBCLANG_PATH=/usr/lib/llvm-18/lib cargo test --locked -p qbind-node --lib --features test-utils received_qc_captured_vote_lifecycle -- --nocapture`
+selected 3 tests (3 passed, 0 failed, 0 ignored), exit 0.
+`LIBCLANG_PATH=/usr/lib/llvm-18/lib cargo test --locked -p qbind-node --lib --features test-utils safety_record_store::owner:: -- --quiet`
+selected 180 tests (174 passed, 0 failed, 6 ignored), exit 0. The unpressured
+aggregate high-water remains 83,666 bytes at interrupted O4; the separate
+deliberate-pressure peak remains the unchanged 84,956-byte ceiling. Exact-copy
+native/Miri results remain attributed to their prior source revision; they were
+not rerun for these lifecycle-only changes.
+
+`D7D14_STORAGE_COMPONENT=IMPLEMENTED-ISOLATED`;
+`D7D14_STORAGE_ACCEPTANCE=PASS-ACCEPTED-SUBSET`; §13.6 whole-lifecycle INCOMPLETE;
+activation DISABLED; public DevNet NO-GO; durable anti-rollback NOT-ESTABLISHED;
+C4/C5 OPEN. This remains isolated test evidence, not production integration or
+independent source-review acceptance.
