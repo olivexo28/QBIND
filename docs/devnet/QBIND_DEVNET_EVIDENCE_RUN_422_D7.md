@@ -21806,3 +21806,97 @@ and authority gaps remain open. Standing verdicts remain unchanged:
 `D7D14_STORAGE_ACCEPTANCE=PASS-ACCEPTED-SUBSET`; §13.6 whole-lifecycle
 INCOMPLETE; activation DISABLED; public DevNet NO-GO; durable anti-rollback
 NOT-ESTABLISHED; C4/C5 OPEN.
+
+#### Run 422 F7 — bounded retained-QC admission
+
+Implemented on source commit `d17a4db2a24c682f988594e6c3347f24adeffcae`.
+F5 mandatory outer-timeout verification and the checked TC target-view
+relationship are preserved. Inbound Timeout, inbound NewView, local timeout,
+and locally formed TC/NewView now gate every present logical high-QC before
+accumulator insertion/eviction, lock/view/latch changes, or TC application and
+publication. `None` remains a separate no-QC case; `Some([0; 32], view 0)`
+requires retained proof. TimeoutVerificationContext remains limited to timeout
+authentication and is never Proposal/Vote authority. Production currently has
+no admitted Proposal/Vote snapshot, so present-QC claims fail closed; positive
+controls use test-only snapshots and genuine constituent signatures.
+
+The read-only lookup scans child blocks' retained verified justifications,
+matching the actual logical projection: block ID, logical view to wire QC
+height (never round), and exact ascending signer identities. Reordered or
+duplicate signer lists do not match. Identical complete certificates on
+multiple children are one candidate; distinct complete certificates with the
+same projection return typed ambiguity. The scan refuses a tree larger than
+`min(configured max_pending_blocks, 4096)` before iteration. It allocates no
+candidate collection, clones no evidence, and does not change evidence,
+accounting, or eviction state. Missing and evicted proof are the same fail-closed
+admission result.
+
+Present-QC admission uses only the supplied snapshot's bound verifier for
+domain, epoch, membership, keys, and backend; it checks engine epoch/weights and
+timeout-context chain/membership correspondence before QC cryptography, then
+reverifies the complete retained wire certificate through the shared verifier
+core and confirms the original ticket immediately before effect. The private
+guard binds the exact borrowed claim, timeout context, snapshot, operation, and
+ticket. Runtime calls are synchronous; those borrowed inputs are immutable,
+engine-mutating callbacks are not handed to verification/signing, and the local
+timeout path reconfirms the original ticket after signing and immediately
+before ingestion. TC application performs its own admission of the actually
+selected QC; prior timeout admission is not reused as proof.
+On local refusal, the pre-existing progress observation remains an observation
+only; F7 does not consume the timeout latch, insert into the timeout
+accumulator, or advance timeout backoff.
+
+The enforced F7 component ceiling is 1 MiB per present-QC operation, checked
+with overflow-safe arithmetic before revalidation. It charges the selected
+retained evidence's capacity accounting (within the existing 256 MiB evidence
+ledger), decoded Timeout/TC inline storage and nested vector capacities,
+one-at-a-time per-Vote `Vote`/signature temporary, canonical Vote body plus
+overlapping v2 preimage, the borrowed verifier's fixed result storage, and the
+operation guard. Borrowed revalidation shares the existing QC crypto core but
+creates neither a signer-vector allocation nor an owned certificate result;
+therefore there is no returned certificate backing to charge. The encoded
+inbound frame is released immediately after bounded decode to avoid overlapping
+it with the decoded control object. Key-provider/backend internal work and
+backend-produced error strings are inherited and not included in this F7
+component ceiling; allocator metadata/rounding, fragmentation, stack/process
+memory, unrelated retained engine state, and physical memory/RSS are also not
+bounded or claimed. No RSS measurement was performed.
+
+Timeout signing preimages are unchanged. The existing encoding maps `None` to
+zero block ID/view, so `None` and `Some(zero block ID, view 0)` remain
+signing-preimage-ambiguous; F7 does not reinterpret or normalize that claim.
+Unknown remote QCs, cold starts, evicted evidence, unavailable/superseded
+authority, and over-limit state therefore fail closed. This slice adds no
+wire-carried proofs, production authority activation/currentness, O4
+publication, restart safety, or complete F7/RS1 closure. No deployment,
+trust-anchor selection, D15, or Run 423 is implied.
+
+Acceptance validation was run against source commit
+`d17a4db2a24c682f988594e6c3347f24adeffcae`; counts overlap between focused and
+full selectors. All commands exited 0:
+
+| Literal command | Result | Exit |
+|---|---|---:|
+| `cargo test --locked -p qbind-consensus --lib run422_f7_retained_qc -- --nocapture` | 3 passed | 0 |
+| `cargo test --locked -p qbind-consensus` | 969 passed, 0 failed, 21 ignored across 59 targets | 0 |
+| `LIBCLANG_PATH=/usr/lib/llvm-18/lib cargo test --locked -p qbind-node --lib run422_f7_retained_qc -- --nocapture` | 11 passed | 0 |
+| `LIBCLANG_PATH=/usr/lib/llvm-18/lib cargo test --locked -p qbind-node --lib --features test-utils` | 2,195 passed, 0 failed, 6 ignored | 0 |
+| `LIBCLANG_PATH=/usr/lib/llvm-18/lib cargo test --locked -p qbind-node --test run_422_mandatory_timeout_policy_tests` | 3 passed | 0 |
+| `LIBCLANG_PATH=/usr/lib/llvm-18/lib cargo test --locked -p qbind-node --test run_418_newview_demux_chain_integration_tests` | 4 passed | 0 |
+| `LIBCLANG_PATH=/usr/lib/llvm-18/lib cargo test --locked -p qbind-node --test run_418_authenticated_peer_consensus_sender_binding_tests` | 18 passed | 0 |
+| `LIBCLANG_PATH=/usr/lib/llvm-18/lib cargo build --locked -p qbind-node` | Build succeeded | 0 |
+| `CARGO_BUILD_JOBS=2 CARGO_PROFILE_TEST_STRIP=symbols LIBCLANG_PATH=/usr/lib/llvm-18/lib cargo test --locked -p qbind-node --no-run` | 344 default-feature test executables compiled; no tests executed | 0 |
+
+The no-run command is default-feature compilation with the explicit profile
+override, not test execution or an unmodified-profile pass. Runtime-path tests
+cover genuine-proof acceptance, independently signed unsupported claims,
+no-authority refusal without Timeout-to-Proposal/Vote promotion, preserved
+state on inbound/local refusal, successful local retry, and one faulty
+validator's unsupported timeout failing to poison later admissible quorum
+progress. The direct local-TC helper refusal and pure verifier/lookup tests are
+identified as helper-level controls; they supplement, not replace, the actual
+inbound and locally formed runtime-path tests. Standing verdicts remain
+unchanged: `D7D14_STORAGE_COMPONENT=IMPLEMENTED-ISOLATED`;
+`D7D14_STORAGE_ACCEPTANCE=PASS-ACCEPTED-SUBSET`; §13.6 whole-lifecycle
+INCOMPLETE; activation DISABLED; public DevNet NO-GO; durable anti-rollback
+NOT-ESTABLISHED; C4/C5 OPEN.

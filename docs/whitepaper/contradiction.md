@@ -2863,3 +2863,43 @@ current authority/freshness, O4 acknowledgement, or restart safety. F7
 high-QC proof and authority gaps remain open; the correction does not change
 activation DISABLED, public DevNet NO-GO, or the other standing Run 422
 verdicts.
+
+#### Run 422 F7 — bounded retained-QC admission
+
+Source commit `d17a4db2a24c682f988594e6c3347f24adeffcae` adds fail-closed
+admission for present logical high-QCs on inbound Timeout/NewView, local
+timeout, and locally formed TC/NewView paths. Evidence must be a complete QC
+already retained by the engine; it is reverified through the shared QC verifier
+using an admitted Proposal/Vote snapshot's bound domain, epoch, membership,
+keys, and backend. Timeout authority is not promoted. `None` remains a
+distinct no-QC case, while `Some([0; 32], view 0)` requires proof. The
+historical Timeout preimage still encodes `None` and a zero-valued `Some`
+identically; F7 does not change that preimage ambiguity.
+
+Lookup is read-only and bounded to 4,096 child-block entries or the smaller
+configured limit, refuses before scanning an over-limit tree, and distinguishes
+identical certificates from conflicting certificates with the same logical
+projection. The 1 MiB per-operation component ceiling uses checked arithmetic
+for retained source capacities, decoded Timeout/TC control capacities,
+one-at-a-time per-Vote signature/preimage temporaries, fixed borrowed-verifier
+result storage, and the admission guard. The borrowed path allocates no signer
+vector and returns no owned certificate. Backend/key-provider internals,
+backend error strings, allocator overhead, physical memory/RSS, and global
+engine memory are outside that component bound; no RSS measurement is claimed.
+Production Proposal/Vote authority remains unavailable, so present-QC claims
+without it, unknown/cold-start QCs, and evicted evidence fail closed. No wire
+proof, activation/currentness, O4 publication, restart safety, or full F7/RS1
+closure follows from this slice.
+
+Validation from the source commit: focused consensus F7 3/3, focused node F7
+11/11, full consensus 969 passed with 21 ignored, and node `test-utils` 2,195
+passed with 6 ignored; mandatory-timeout, NewView-demux, and authenticated
+sender-binding suites passed 3/3, 4/4, and 18/18. The node build succeeded and
+the default-feature `--no-run` command compiled 344 test executables with its
+explicit profile override (compilation only). Exact command strings and
+individual exits are recorded in the Run 422 D7 evidence document. Counts
+overlap; standing verdicts remain unchanged:
+`D7D14_STORAGE_COMPONENT=IMPLEMENTED-ISOLATED`;
+`D7D14_STORAGE_ACCEPTANCE=PASS-ACCEPTED-SUBSET`; §13.6 whole-lifecycle
+INCOMPLETE; activation DISABLED; public DevNet NO-GO; durable anti-rollback
+NOT-ESTABLISHED; C4/C5 OPEN.
