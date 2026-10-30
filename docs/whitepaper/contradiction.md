@@ -3178,3 +3178,132 @@ C4/C5 OPEN
 ```
 
 Documentation reconciliation does not close RS1 or authorize launch.
+
+## Run 422 - isolated TC/O4 pre-effect evidence (2026-10-30)
+
+This implementation supersedes only the Critical Path section 5 statement that
+the selected isolated TC slice was not yet implemented. Recovery sections
+13.3A and 13.5-13.7 still govern. The shared engine's legacy public wrapper
+preserves its signature/behavior; the new opt-in fallible TC gate validates
+target/quorum, classifies stale/no-raise/strict raise, and borrows the exact TC
+and selected high-QC before any dependent effect. Generic permission is neither
+durability nor authorization. Target overflow/substitution refuses first;
+None/equal/lower cases do not invent evidence or submit a lock publication.
+No timeout preimage, wire format or equal-view tie selection changes.
+
+The private `cfg(all(test, feature = "test-utils"))` node composition holds the
+existing owner domain once through exact context/membership, revision and
+engine/durable predecessor checks, charged authoritative loading, ordinary
+`publish_locked_held`, engine application, synchronous callbacks and receipt
+construction. Both absence-mismatch directions refuse. Existing anchors require
+independent history and are preserved. Effective non-raising operations cannot
+skip owner-state checks. The complete `TcDerived` candidate retains the original
+full TC and record-level logical high-QC. Only an actual O4
+`DurableAcknowledged` result permits the strict raise; no public-locking O4
+re-entry, fabricated acknowledgement, O5, replay or automatic recovery.
+
+**Requirement-to-assertion map** (private tests under
+`safety_record_store::owner::tc_publication_model`; five inline engine tests
+prefixed `run422_tc_o4`):
+
+| Requirement | Executed discrimination |
+| --- | --- |
+| A | `acknowledged_exact_tc_unverified_order_domain_and_ledgers`: four equal-power ML-DSA-44 members and three authentic timeout signers, existing F5 verification, independently retained/domain-verified selected wire QC (height 6 != round 5); actual O4 hook plus post-ack/pre-effect observer; old engine lock/view before one ordinary application. Durable readback contains exact complete TC and selected restriction, still `Unverified`. |
+| B | `actual_publication_failures_surviving_storage_and_recovery_fenced_retry`: actual pre-submit refusal, ambiguous-write and uncertain-after-write injections return the three distinct O4 classifications and suppress all dependent lock/view/latch/time/accumulator/recorder effects. Already completed Timeout ingestion remains. Complete input equality and all nested backing pointer/capacity observations are preserved. |
+| B: storage/retry | Actual readback, not presumed rollback: these pre-write/ambiguous injections leave byte-identical predecessor/revision; uncertain synchronous write leaves complete TC successor at revision +1. Both ambiguous/uncertain states remain recovery-required and retry submits no O4. Removing a pre-write fault permits a new actual acknowledgement, not an acknowledgement shortcut. |
+| C | `independent_revision_context_selected_and_predecessor_fences` and `anchored_predecessor_requires_independent_history_and_preserves_anchor`: stale revision, wrong context/domain/membership/powers, missing/foreign selected-QC evidence, both absence mismatches, conflicting present predecessors, missing/wrong independent history refuse. Matching predecessor and anchored controls succeed without anchor replacement. |
+| C: no bypass | `nonraising_effective_operation_cannot_skip_authoritative_fences` refuses revision/predecessor mismatches without O4. `helper_only_strict_publication_rejects_equal_and_lower_candidates` is explicitly direct helper coverage, not composed engine-route coverage. |
+| D | `genuine_target_substitution_and_stale_none_equal_lower_controls`: authentic signed evidence with only `tc.view` substituted, genuine terminal overflow, signed MAX-1 -> MAX, stale/None/equal/lower controls. Engine tests cover unchanged latches on refusal, retry, stale/non-raising outcomes, gate unwind and identical legacy/opt-in successful effects. Existing F5/F7/target/exhaustion selectors rerun. |
+| E: pressure/lifetime | `admission_pressure_relief_retry_and_valid_over_capacity` directly samples occupancy/ceilings before readback allocations across admission abandonment/refusal, loader pressure, actual O4 capacity refusal, relief/retry, successful return and receipt destruction. Over-cap backing retains valid cryptography, genuine quorum and full signatures and refuses as capacity. Final teardown observes zero operational/context/shared occupancy. |
+| E: serialization/unwind | Bounded supervised competitor acquires as positive control, observes contention at O4 post-ack, pre-engine gate, synchronous callback and return-construction boundaries, then acquires after release; RAII worker shutdown. `controlled_unwind_distinguishes_pre_effect_and_applied_callback`: guards/reservations release, domain is poisoned, acknowledged storage survives. Recorder panic has already installed lock but not view; return panic has already applied all TC effects. Neither is called rollback. |
+
+**Phase inventory and observed bound (64-bit test target).** Checked `u128`
+inventory is derived before operation-owned copies or the large receipt.
+Route/admission/gate/result controls and transfer overlap: 1,440 bytes (two
+receipt and two admission slots, gate, inventory/result intermediates, publication
+and outcome controls, references/scalars and embedded reservation handles).
+Candidate: 8,940 bytes, separately counting TC and record-level high-QC signer
+backings, TC signers, signed-timeout descriptors, all signatures and nested
+high-QC signer backings by capacity, plus record-transfer, safe-copy, reservation
+and anchor controls. Standard-library safe copies are measured in place;
+no shrink-to-fit assumption or new unsafe ownership-transfer implementation.
+Charged authoritative loader: 31,814; destroyed before candidate construction.
+Ordinary O4: 52,939 (`2 * transient + 3 * record + metadata`), including its own
+reload, binding/validation/encoding and publication working set. Candidate
+coverage persists through the move into O4 until backing destruction, without
+claiming a second allocation from that transfer.
+
+The checked phase peak is
+`1,440 + max(31,814, 8,940 + 52,939) = 63,319`; distinct context is 240.
+Exact shared inequality: `63,319 + 240 = 63,559 <= 84,956`.
+No ceilings, signatures, quorum or powers changed to fit; no fit blocker.
+The existing O4 post-ack hook independently samples operational reservation
+63,319. Receipt-only operational/shared occupancy is 1,440/1,680; receipt
+destruction restores 0/240; final owner teardown restores all ledgers to zero.
+Ceilings are sampled independently and remain unchanged. This is component
+accounting, not physical memory. Borrowed fixture inputs/keys/readback witnesses,
+independently retained consensus evidence, inherited engine/accumulator allocations
+and backend internals are distinct; consensus evidence remains on its own ledger.
+
+**Reproducibility.** Entry was clean `main`, origin
+`https://github.com/olivexo28/QBIND`, HEAD
+`2c629d3854584762bcba63f770c4b570f725b706`, tree
+`0db0fda5824e072078bfbad49c320c481e69c7c2`, matching remote main at entry.
+Object availability and exact content correspondence are separate from ancestry:
+the shallow boundary's raw commit names parent
+`de05c009a130d7d044a0c896b8a8559b00b411e4`, unavailable locally, not absent.
+The task branch is a descendant of the required baseline.
+Task branch: `copilot/run-422-tc-o4-pre-effect-composition`.
+Tested committed source: `54a17d58ece2db0301e905850501585414d2acec`,
+tree `5a4e42d0be0d7f4a409c60b48391b05c8fda67ef`. Subsequent documentation-only
+commits inherit these runs without claiming fresh execution.
+
+| Literal command | Exit | Passed / failed / ignored |
+| --- | --- | --- |
+| `cargo test --locked -p qbind-consensus --lib run422_tc_o4 -- --nocapture` | 0 | 5 / 0 / 0 |
+| `cargo test --locked -p qbind-consensus` | 0 | 984 / 0 / 21 (59 result summaries, including doctests) |
+| `LIBCLANG_PATH=/usr/lib/llvm-18/lib cargo test --locked -p qbind-node --lib --features test-utils safety_record_store::owner::tc_publication_model -- --nocapture` | 0 | 9 / 0 / 0 |
+| `LIBCLANG_PATH=/usr/lib/llvm-18/lib cargo test --locked -p qbind-node --lib --features test-utils safety_record_store::owner:: -- --quiet` | 0 | 183 / 0 / 6 |
+| `LIBCLANG_PATH=/usr/lib/llvm-18/lib cargo test --locked -p qbind-node --features test-utils --test run_422_d7d14_safety_record_store_tests` | 0 | 157 / 0 / 1 |
+| `LIBCLANG_PATH=/usr/lib/llvm-18/lib cargo test --locked -p qbind-node --lib run030 -- --quiet` | 0 | 30 / 0 / 0 |
+| `LIBCLANG_PATH=/usr/lib/llvm-18/lib cargo test --locked -p qbind-node --lib run422_f7_retained_qc -- --quiet` | 0 | 17 / 0 / 0 |
+| `LIBCLANG_PATH=/usr/lib/llvm-18/lib cargo test --locked -p qbind-node --lib run422_tc_target_view -- --quiet` | 0 | 3 / 0 / 0 |
+| `LIBCLANG_PATH=/usr/lib/llvm-18/lib cargo test --locked -p qbind-node --lib run422_timeout_view_exhaustion -- --quiet` | 0 | 2 / 0 / 0 |
+| `LIBCLANG_PATH=/usr/lib/llvm-18/lib cargo build --locked -p qbind-node` | 0 | N/A - build |
+| `CARGO_BUILD_JOBS=2 CARGO_PROFILE_TEST_STRIP=symbols LIBCLANG_PATH=/usr/lib/llvm-18/lib cargo test --locked -p qbind-node --no-run` | 0 | N/A - 344 executables compiled, none executed |
+
+All focused selectors are nonzero; overlapping selectors are not additive.
+The last command is default-feature compilation with a command-local strip
+override, not test execution or an unmodified-profile pass. Disk was checked
+before broad builds (6.7 GiB free before the final no-run, 1.6 GiB afterward);
+no cleanup required. Earlier development-only failures (missing libclang,
+fixture constructor, in-flight stale dependency build and membership-control
+ingestion setup: 8 passed / 1 failed) were corrected before this final-source
+matrix; `libclang-18-dev` was installed only after the missing-library failure.
+No new unsafe code: conditional new-unsafe Miri validation is not applicable,
+and no Miri execution is claimed.
+
+**Scope remains restricted.** These are real engine/O4 operations in a private
+model, not actual inbound-handler coverage or production current-authority
+evidence. Stored TC carry remains `Unverified`; no verified-QC, authorization or
+signing capability is minted from it. This does not implement full TC recovery,
+crash/reopen/replay/resumption, durable pacemaker, production wiring, freshness/
+anti-rollback/anchor policy, deployment, seeds, D15 or Run 423.
+Delivery changes only the five authorized paths, preserving both documents'
+exact starting-byte prefixes, modes, CRLF/LF and no-final-newline conventions;
+the new Rust file uses LF with final newline. CRLF-aware working-tree and
+baseline-to-final whitespace checks passed alongside exact-prefix, EOL/EOF,
+mode, five-path and tested-source correspondence checks. Task branch only:
+no PR, merge, main push or force-push.
+
+```text
+D7D14_STORAGE_COMPONENT=IMPLEMENTED-ISOLATED
+D7D14_STORAGE_ACCEPTANCE=PASS-ACCEPTED-SUBSET
+§13.6 whole-lifecycle INCOMPLETE
+activation DISABLED
+public DevNet NO-GO
+durable anti-rollback NOT-ESTABLISHED
+C4/C5 OPEN
+```
+
+This isolated slice is not full TC lifecycle acceptance, RS1 closure or launch approval.
