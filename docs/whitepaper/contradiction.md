@@ -2684,3 +2684,42 @@ boundary, deployment, D15 or Run 423 is added.
 `D7D14_STORAGE_ACCEPTANCE=PASS-ACCEPTED-SUBSET`; §13.6 whole-lifecycle INCOMPLETE;
 activation DISABLED; public DevNet NO-GO; durable anti-rollback NOT-ESTABLISHED;
 C4/C5 OPEN.
+
+### RUN 422 -- captured-Vote / received-QC composition stopped on accounting
+
+The requested combined lifecycle was **not delivered**. At the exact required
+baseline `f63198ee61c009cefe381f95d1a35a22e57885d6`, an uncommitted private
+prototype retained the original verified-capture envelope/pin, full
+three-signature predecessor Proposal and associated bounded journal on the
+same four-equal-power engine. The genuine local journal signature was admitted
+as received evidence; ordinary acknowledged O4 had one exploratory passing
+round-trip test. This is discarded exploratory evidence, not accepted source.
+
+With the required interrupted owner also admitted, existing charged operands
+were 17570 standing aggregate + 1864 interruption + 3552 adapter + 10137
+candidate + 52939 ordinary O4 = **86062**, above the unchanged **84956**
+ceiling by **1106**. Actual O4 refused before writing rather than producing the
+required uncertain publication. Even omitting all 1032 prototype bridge-control
+bytes from that conservative overlap leaves 85030. Consensus evidence/report
+quotas are independent and cannot fund this storage deficit.
+
+The literal focused command selected 4 exploratory tests: 1 passed, 3 failed,
+exit 101, after installing initially missing libclang. The D7 stop appendix
+records the full command, operands, source/prototype provenance, environmental
+qualification and requirement disposition. No commit-qualified bridge validation
+revision exists; both Rust files were restored to baseline. The broader requested
+suites were not run after the accounting stop. No acceptance count, full-build,
+Miri or security result is imported from history.
+
+A reviewed bounded ownership/working-set contract fitting the required
+coexistence under the existing ceiling is still needed. This report authorizes
+no lowered charge, altered voting powers, dropped pin/journal/recovery owner,
+reconstructed authority or weakened lifecycle check. It does not prove that all
+future accounting implementations are impossible. Recovery, authorization,
+pressure and serialization acceptance for the combined lifecycle remain absent.
+Only documentation is delivered; no activation, production/restart/TC/leader/
+delivery integration, new crash boundary, D15 or Run 423 is added.
+`D7D14_STORAGE_COMPONENT=IMPLEMENTED-ISOLATED`;
+`D7D14_STORAGE_ACCEPTANCE=PASS-ACCEPTED-SUBSET`; §13.6 whole-lifecycle INCOMPLETE;
+activation DISABLED; public DevNet NO-GO; durable anti-rollback NOT-ESTABLISHED;
+C4/C5 OPEN.

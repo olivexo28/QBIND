@@ -21254,3 +21254,120 @@ public DevNet NO-GO
 durable anti-rollback NOT-ESTABLISHED
 C4/C5 OPEN
 ```
+
+### RUN 422 -- captured-Vote / received-QC bridge: accounting stop
+
+**STOPPED; not implementation delivery or acceptance.** The required starting
+commit `f63198ee61c009cefe381f95d1a35a22e57885d6` and root tree
+`ebedf5c6b1d3ffa60fb9ea812891babffc6940c2` were available and matched HEAD,
+index and tracked content, with a clean worktree. Origin was
+`https://github.com/olivexo28/QBIND`. The task branch
+`copilot/run-422-captured-vote-qc-lifecycle` was created from that commit.
+Baseline-object availability, content equality and ancestry were checked
+separately; the checkout is shallow/grafted, so no additional pre-baseline
+history is claimed. The starting branch was `main`; no main update is part of
+this task.
+
+An uncommitted, subsequently discarded private test prototype connected verified
+owning capture, strict real local signing, bounded journal retrieval and genuine
+received-Vote admission to the existing QC publication composition. Its final
+fixture kept the existing four equal voting powers, IDs 0 through 3, epoch 0,
+suite 100 and independent real keys; the wire domain was 1 to match the
+unmodified engine self-Vote, with Devnet runtime domain, genesis `[0x71; 32]`
+and the fixture-derived authority commitment. The predecessor had three genuine
+signatures. The original complete Proposal, unsigned envelope/pin and associated
+one-slot bounded journal remained alive. This fixture assumption establishes no
+production current authority or restart authorization.
+
+The combined charged overlap did not fit the unchanged aggregate ceiling.
+These are source-layout/reservation figures, not physical stack or RSS bounds:
+
+| Simultaneous operand at interrupted O4 | Bytes |
+|---|---:|
+| Standing operational ownership: original Proposal, bridge controls, prepared registry/pin/generation and bounded journal | 17330 |
+| Pinned-context partition, sharing the same aggregate authority | 240 |
+| Existing `interruption_charge()` (I) | 1864 |
+| Existing `adapter_charge()` (A) | 3552 |
+| Existing `candidate_charge()` (C), profile N=4, S_sig=2420 | 10137 |
+| Ordinary O4 working set, `2*T + 3*R + META_ENCODED_LEN` | 52939 |
+| **Combined** | **86062** |
+| Unchanged combined ceiling | **84956** |
+| **Excess** | **1106** |
+
+Here R=10459 and T=10760. Standing aggregate occupancy was 17570
+(17330 operational + 240 context). It included a 7645-byte original-Proposal
+reservation (actual inline layout, one bitmap byte and three signature
+descriptors/backings), and 1032 bytes of prototype bridge controls derived with
+checked arithmetic from actual layouts. Ordinary O4 without I bounded at
+84198 and its exploratory acknowledged round trip passed. Adding I bounded at
+86062; the real ordinary O4 returned `RefusedPreWrite`, not the required
+`UncertainDurable`. Therefore there was no genuine interrupted publication from
+which to authorize the requested O3/O5/exact-QC lifecycle.
+
+Even subtracting all 1032 prototype control bytes from that conservative charged
+overlap leaves 85030, still 74 above 84956. This is a conflict in this existing
+charged composition, not a proof that every future ownership implementation is
+impossible. The storage aggregate is not the sum of its operational/context
+sub-ceilings. Consensus evidence occupancy/report quotas remain a separate
+ledger; they cannot fund the storage deficit.
+
+The exploratory focused command was:
+
+```text
+LIBCLANG_PATH=/usr/lib/llvm-18/lib cargo test --locked -p qbind-node --lib --features test-utils received_qc_captured_vote_lifecycle -- --nocapture
+```
+
+Final exploratory selection: 4 tests, 1 passed, 3 failed, exit 101.
+`acknowledged_round_trip_and_existing_signed_position` passed.
+`complete_combined_phase_bounds_and_release_inventory` failed at the 86062 bound;
+`uncertain_barrier_exact_resumption_pressure_and_authorization` observed
+`RefusedPreWrite` instead of `UncertainDurable`; the alternative-membership
+control consequently could not obtain the required acknowledged recovery owner.
+These are failure observations, not acceptance results. An initial run exited
+101 before compilation because the literal libclang path was missing;
+`libclang-18-dev` was installed, then compilation/test iterations were retried.
+APT also reported an unrelated Chrome-repository DNS warning. Earlier compile,
+exploratory non-default-power and teardown iterations are not acceptance evidence.
+
+Producing source was HEAD `f63198ee61c009cefe381f95d1a35a22e57885d6` **plus
+uncommitted prototype edits**, not a commit-qualified validation revision.
+The discarded prototype patch was retained only as a session artifact, SHA-256
+`0b9bbf5cbae894f56e2ecef721cbc3af29ff542f752adda3019577d9fe85c713`.
+Both authorized Rust files were restored byte-for-byte to the required baseline.
+No new focused tests remain in the committed source. The requested owner and
+integration suites were not run after this explicit accounting stop; neither
+their historical results nor the prototype's one passing test validate a
+delivered bridge. No fresh full-build, Miri or security-review result is claimed.
+For the delivered append-only documentation,
+`git -c core.whitespace=cr-at-eol diff --check` exited 0; historical prefixes,
+file modes and original EOL/EOF conventions were preserved.
+
+Requirement disposition: A has exploratory, discarded partial evidence only;
+B and C's recovery/exactness composition are blocked at O4 admission; D, E and F
+have no accepted combined-lifecycle evidence. Signature-copy admission,
+conversion/destruction overlap, protected-use contention and complete teardown
+must still be reviewed and validated in any future implementation. None is
+waived by the arithmetic above.
+
+The next bounded prerequisite is a reviewed source-derived ownership/working-set
+contract that admits the required pin, original Proposal, bounded journal,
+interrupted owner and ordinary O4 simultaneously under 84956. Any proposed
+accounting refinement must cover actual layouts/backings and conversion
+overlap, retain all required owners and preserve ordinary O3/O4/O5 behavior.
+No lower reservation, changed voting powers, raised ceiling, dropped provenance
+owner or reconstructed capability is authorized by this stop report.
+
+Only this evidence and the corresponding contradiction appendix are delivered.
+No production wiring, activation, restart/reopen authority, TC integration,
+leader-envelope adaptation, delivery, new crash boundary, D15 or Run 423.
+Implementation delivery and independent source-review acceptance remain absent.
+
+```text
+D7D14_STORAGE_COMPONENT=IMPLEMENTED-ISOLATED
+D7D14_STORAGE_ACCEPTANCE=PASS-ACCEPTED-SUBSET
+§13.6 whole-lifecycle INCOMPLETE
+activation DISABLED
+public DevNet NO-GO
+durable anti-rollback NOT-ESTABLISHED
+C4/C5 OPEN
+```
