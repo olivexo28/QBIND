@@ -2685,6 +2685,43 @@ boundary, deployment, D15 or Run 423 is added.
 activation DISABLED; public DevNet NO-GO; durable anti-rollback NOT-ESTABLISHED;
 C4/C5 OPEN.
 
+### RUN 422 — exact candidate ownership and captured-Vote lifecycle implementation
+
+The preceding accounting-stop report is preserved as historical evidence. The
+bounded private exact-layout candidate owner and test-only captured-Vote bridge
+are now implemented in source commit `401180640fae79e762e0e0dab4d21345ed8fcda7`; no ordinary O3/O4/O5,
+production, restart, journal, storage-format or consensus behavior was changed.
+Three-signature candidate backing is 7,693 bytes plus a separately admitted
+1,024-byte workspace. A complete four-signature candidate remains intact and
+fails closed when the full interrupted-O4 coexistence exceeds the unchanged
+84,956-byte aggregate limit.
+
+The private genuine-fixture lifecycle composes owner-captured Vote, one real
+local signing operation, acknowledged journal retrieval as received Vote,
+peer quorum, acknowledged O4, uncertain O4, genuine O3, explicit O5, exact-QC
+resumption and checked retained reuse only after resumption. It also exercises
+pressure/refusal/retry, membership/Proposal/authorization controls and an
+already-Signed journal control. Direct ledger samples report standing
+16,354 operational + 240 context = 16,594 aggregate bytes and a complete
+lifecycle high-water of 84,956 aggregate bytes (84,716 operational + 240
+context); the measured high-water reaches but does not exceed the unchanged
+ceiling. The four-signature full coexistence bound is 86,110 and is a capacity
+refusal, not invalid evidence.
+
+Validation on the implementation source: native exact-copy tests 9/9;
+lifecycle 1/1; owner selection 172 passed, 6 ignored; required integration
+selections 224 passed, 1 ignored; each of two phase-inventory selections 1/1;
+default-checking Miri exact-copy selection 9/9. The Miri run covered the exact
+candidate-copy implementation bytes committed in `401180640fae79e762e0e0dab4d21345ed8fcda7`; only lifecycle
+diagnostic/assertion changes followed that run, and the lifecycle selector was
+rerun after them. This remains private test evidence, not production
+integration, restart authorization or independent source-review acceptance.
+
+`D7D14_STORAGE_COMPONENT=IMPLEMENTED-ISOLATED`;
+`D7D14_STORAGE_ACCEPTANCE=PASS-ACCEPTED-SUBSET`; §13.6 whole-lifecycle INCOMPLETE;
+activation DISABLED; public DevNet NO-GO; durable anti-rollback NOT-ESTABLISHED;
+C4/C5 OPEN. No D15 or Run 423 work.
+
 ### RUN 422 -- captured-Vote / received-QC composition stopped on accounting
 
 The requested combined lifecycle was **not delivered**. At the exact required

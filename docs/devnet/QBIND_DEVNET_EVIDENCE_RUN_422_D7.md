@@ -20330,6 +20330,170 @@ durable anti-rollback NOT-ESTABLISHED
 C4/C5 OPEN
 ```
 
+### RUN 422 — exact candidate ownership and captured-Vote lifecycle implementation
+
+This append supersedes the accounting stop as the current implementation/test
+result; the stop above remains historical evidence and is not rewritten. Source
+implementation is commit `401180640fae79e762e0e0dab4d21345ed8fcda7` (the producing source revision for the native
+selections below). The discarded prototype remains a separate, un-applied
+session artifact at
+`/root/.copilot/session-state/120a96caed074a50b39b4a42a2635e9a/files/run422-stopped-bridge-prototype.patch`
+with SHA-256
+`0b9bbf5cbae894f56e2ecef721cbc3af29ff542f752adda3019577d9fe85c713`; its
+one-pass/three-fail run is not acceptance evidence.
+
+**Exact candidate ownership.** `owner/received_qc_publication_model.rs`
+implements a private, test-only exact-copy owner, reachable only through
+`#[cfg(all(test, feature = "test-utils"))]`. Allocation-free
+`validate_candidate_shape` first checks the QC scalar/domain correspondence,
+logical signer uniqueness, bitmap correspondence, bounded counts and source
+capacities. `CandidateCopyPlan` uses checked `Layout::array`, checked byte
+arithmetic, nonzero/isize bounds and the exact source lengths. Workspace
+reservation precedes candidate reservation; both precede the first
+destination allocation. The existing authoritative load completes and its
+proof is destroyed before candidate construction.
+
+`ExactBuffer<T>` owns the exact global-allocator pointer/layout immediately,
+tracks its initialized prefix, and releases only that prefix before deallocation.
+Each in-flight signature has its own guard until it transfers into the
+initialized descriptor prefix. A completed buffer transfers to `Vec` only with
+the original pointer, matching array layout, initialized length and exact
+capacity. Null allocation, layout, admission, shape and injected-allocation
+outcomes remain distinct. O4 receives the entire candidate through unchanged
+`publish_locked_held`; candidate and workspace leases remain alive until O4 has
+destroyed the moved candidate on every result. Borrowed source QC/report bytes,
+capacities and pointers are not mutated.
+
+The compiler-derived candidate control inventory is 849 bytes in a 1,024-byte
+workspace; the separately measured exact local-Vote copy inventory is 536
+bytes in its own 1,024-byte workspace. Observed constituent layouts include
+candidate owner 704, plan 112, exact buffer 40, allocation result 16 and
+`LockedRecord` 360 bytes. The compile-time bounds and executable assertions
+both pass. Three-signature candidate backing is exactly
+`360 + 1 + 3*(24 + 2420) = 7693` bytes. A valid four-signature candidate keeps
+all signatures and requires 10,137 bytes; under the full interrupted-O4
+coexistence bound it is refused for capacity, not classified as invalid QC.
+The exact local Vote uses a separately admitted workspace and candidate charge
+of `size_of::<Vote>() + 2420`, retained until verified-token admission transfers
+the signature to the independently charged consensus owner.
+
+**Captured-Vote bridge.** The private integration test
+`model::tests::real_fresh_sign::received_qc_captured_vote_lifecycle` composes
+the actual four-member equal-power engine and immutable authority fixture.
+It obtains owner-controlled verified Proposal capture with the original
+envelope, complete Proposal, pin and generation preserved. The real local
+signer runs once before transition; the journal's Signed result is acknowledged,
+and retirement is separately reported. Checked journal retrieval supplies the
+exact local signature to the received-Vote route without a second signing call.
+The local duplicate is actually reported and its signature remains in the
+complete three-signer QC; peer quorum invokes the received-QC gate.
+
+The test exercises acknowledged O4 and the distinct uncertain-O4 path. In the
+latter, engine effects are refused, the actual route/report is retained, a
+genuine O3 proof is constructed, and explicit ordinary O5 acknowledges that
+exact attempt/proof. O5 admission is first refused while the pin, journal,
+interrupted owner and proof remain live under real aggregate pressure; releasing
+only that temporary pressure permits retry. Checked retained use is refused
+before and after O5 while engine and durable restriction disagree. It succeeds
+only after exact-QC resumption using freshly checked retrieval, with no
+additional signer call. Controls cover substituted Proposal, alternative
+complete membership, authorization invalidation and an already-Signed journal
+position. There is no direct engine mutation or engine-first/manual publication
+substitute.
+
+**Reconciled ownership and phases.** The test independently samples the
+operational, context and shared aggregate storage ledgers; the context partition
+is not added to an operational allowance. Standing owners measured directly
+are:
+
+| Owner | Bytes |
+|---|---:|
+| Covered original Proposal | 7,701 |
+| Captured envelope | 288 |
+| Prepared pin | 96 |
+| Prepared registry | 208 |
+| Generation core, including 7,333 evidence backing | 7,717 |
+| Generation control | 144 |
+| Bounded journal, backing shape `(1, 1)` | 200 |
+| **Operational standing total** | **16,354** |
+| Context partition | 240 |
+| **Shared aggregate standing total** | **16,594** |
+
+There is no separately retained bridge-control owner in the implementation
+(zero bytes). Ceilings remain operational/aggregate 84,956 and context 960.
+The old 17,330 operational inventory was prototype-derived; it is not reused
+as the implemented standing total.
+
+For the full bridge's three-signature O4, source operands are `A=3,552`,
+`I=1,864`, exact candidate `C3=7,693`, copy workspace `W=1,024`, and ordinary
+`O4=52,939`. With the measured standing aggregate, acknowledged O4 is
+`16,594 + A + C3 + W + O4 = 81,802` (3,154 headroom); interrupted O4 is
+`16,594 + I + A + C3 + W + O4 = 83,666` (1,290 headroom). Four signatures
+replace `C3` with 10,137, giving 86,110 (1,154 over); that valid evidence must
+fail closed for capacity. The complete executed lifecycle also samples its
+high-water directly: operational 84,716 + context 240 = aggregate 84,956,
+exactly the unchanged aggregate ceiling. Thus the observed whole-lifecycle peak
+has zero spare aggregate headroom; the smaller O4 subtotal is not presented as
+the whole-lifecycle maximum.
+
+Independent source-phase inventory reports `R=10,459`, `G=10,752`,
+`T=10,760`, loader `L=31,814`, `H=21,347`, recovery control `K=592`,
+resumption control `S=4,753`, and ordinary O5 `31,770`. In its separately
+bounded recovery fixture (context baseline 240), the executed bounds are:
+interrupted O4 67,312; interrupted loader 46,187; O3 proof 33,918; explicit
+O5 55,813; resumption loader 60,610; resumption returned 28,796; changed
+publication O4 84,675 (281 below the cap). These are source-phase inventory
+bounds, not additions to the full-bridge standing owners. Journal output and
+envelope workspaces, exact Vote conversion, proofs, reports, O4/O5 controls and
+return conversions remain separately covered for their actual lifetimes; a
+reservation is not counted twice merely because it is embedded in an owner.
+
+Consensus evidence remains a separate ledger. The lifecycle prints its actual
+local-QC and resumed-QC before/after samples and report charges independently;
+neither storage headroom nor consensus quota funds the other. Teardown separately
+drops the Proposal/envelope/generation/journal, recovery report/proof/attempt,
+engine and backend registry, then asserts operational and aggregate storage
+return to zero and the consensus ledger to its empty floor.
+
+**Validation.** Native candidate-copy selector: 9 passed, 0 failed, 0 ignored.
+Lifecycle selector: 1 passed. Owner module selector: 172 passed, 6 ignored.
+The required five integration binaries: 224 passed, 1 ignored. The two
+source-phase selectors each passed (one test each). Default-checking Miri
+completed the nine candidate-copy tests: 9 passed, 0 failed, 0 ignored, exit 0
+(738.04 s). Miri ran against the exact-copy implementation source that is in
+commit `401180640fae79e762e0e0dab4d21345ed8fcda7`; the subsequent `model.rs` changes were limited to lifecycle
+peak assertions/diagnostics and unused-import cleanup, and the lifecycle
+selector was rerun after those changes. The injected unwind/failure cases are
+explicitly test-injected, not claims of observed system OOM.
+
+Literal commands:
+
+```text
+LIBCLANG_PATH=/usr/lib/llvm-18/lib cargo test --locked -p qbind-node --lib --features test-utils safety_record_store::owner::received_qc_publication_model::candidate_copy_tests:: -- --nocapture
+env -u MIRIFLAGS LIBCLANG_PATH=/usr/lib/llvm-18/lib cargo +nightly miri test --locked -p qbind-node --lib --features test-utils safety_record_store::owner::received_qc_publication_model::candidate_copy_tests:: -- --nocapture
+LIBCLANG_PATH=/usr/lib/llvm-18/lib cargo test --locked -p qbind-node --lib --features test-utils received_qc_captured_vote_lifecycle -- --nocapture
+LIBCLANG_PATH=/usr/lib/llvm-18/lib cargo test --locked -p qbind-node --lib --features test-utils safety_record_store::owner:: -- --quiet
+LIBCLANG_PATH=/usr/lib/llvm-18/lib cargo test --locked -p qbind-node --features test-utils --test run_422_owning_capture_binding_tests --test run_422_owning_decision_vote_handoff_node_tests --test run_422_leader_proposal_owning_handoff_tests --test run_422_retained_decision_observation_tests --test run_422_d7d14_safety_record_store_tests
+LIBCLANG_PATH=/usr/lib/llvm-18/lib cargo test --locked -p qbind-node --lib --features test-utils safety_record_store::owner::received_qc_publication_model::ownership_phase_operands_and_independent_final_floors -- --nocapture
+LIBCLANG_PATH=/usr/lib/llvm-18/lib cargo test --locked -p qbind-node --lib --features test-utils safety_record_store::owner::received_qc_publication_model::recovery_phase_inventory_and_independent_ledger_maxima -- --nocapture
+git -c core.whitespace=cr-at-eol diff --check
+```
+
+This remains a private test composition, not production integration or
+independent source-review acceptance. No activation, restart authorization,
+anti-rollback establishment, TC integration, public DevNet approval, D15 or Run
+423 work is claimed. Preserved statuses:
+
+```text
+D7D14_STORAGE_COMPONENT=IMPLEMENTED-ISOLATED
+D7D14_STORAGE_ACCEPTANCE=PASS-ACCEPTED-SUBSET
+§13.6 whole-lifecycle INCOMPLETE
+activation DISABLED
+public DevNet NO-GO
+durable anti-rollback NOT-ESTABLISHED
+C4/C5 OPEN
+```
+
 This implementation delivery is not independent source-review acceptance.
 
 ### Run 422 bounded signed-QC ownership and acceptance correction
