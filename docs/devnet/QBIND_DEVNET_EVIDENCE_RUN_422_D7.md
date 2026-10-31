@@ -22740,3 +22740,203 @@ not a source-accounting change or a newly observed runtime defect.
 All Rust source is unchanged; no tests or builds were rerun. Validation remains
 attributed to `0553e374edf6a9221870b9c5e4f8a6689af3901f`.
 All standing scope, lifecycle and release verdicts remain unchanged.
+
+## RUN 422 isolated TC captured-Vote lifecycle (bounded implementation)
+
+This append supersedes no historical result. Starting HEAD was
+`caf8ecf0a995b18eb9aa0c188df470bad915c0f7`, root tree
+`9ba1ea9a63e9481419f81afd4c95813ecdfb4e76`. The clean starting worktree,
+four starting blobs/modes, raw commit/tree, ancestry and remote were checked
+separately. The checkout was shallow, NOT parentless: the raw parent is
+`1ef3639735455fafca351f1fdb29b30f6c29515d`; fetching two more ancestors
+confirmed that relationship. Origin was `https://github.com/olivexo28/QBIND`;
+remote main/HEAD named the baseline and the task branch did not exist remotely.
+The task branch was created at that exact baseline, without replacing work.
+
+Producing implementation revision: `807d6029a90f532d387b46ca1b4186bd9eebdf25`,
+root tree `89ef1ca5e03fef78ec5279004f66a2e5c30cc739`. Its source blobs are
+`owner/model.rs=9f167d7808148e12e9f425d6feba8871c9cf180c` and
+`owner/tc_publication_model.rs=f484dda192a16164b73b213dc729d7b70ae244ca`,
+both mode `100644`, relative to `crates/qbind-node/src/safety_record_store/`.
+Only those two existing test-only modules implement this composition. The TC
+module already requires `test-utils`; all new model-side uses are feature-gated.
+There is no production caller, public API, unsafe code or schema change.
+
+### Requirement-to-assertion mapping
+
+The six focused tests share prefix `tc_captured_vote_lifecycle`:
+
+| Suffix | Executed assertions |
+|---|---|
+| `phase_gate` | Actual four-member combined fixture; checked phase sums before proceeding to lifecycle implementation; exact standing owners and nested capacities; unchanged independent ceilings; abandoned capture/final ownership cleanup. |
+| `acknowledged_fresh` | Real suite-100 verified-Proposal owning capture under acknowledged L0; peer-only selected complete QC independently domain-verified; authenticated TC strictly raises L0. Actual O4 acknowledges revision 1 -> 2 before lock/view effects; stored exact `TcDerived` remains `Unverified`. Original capture revalidates by ancestry at L1, signs once, and the stored Signed bytes verify against the exact original Vote preimage. |
+| `uncertain_fresh` | Actual `UncertainAfterWrite` O4; completed Timeout ingestion and predecessor survive. Fresh and checked-retained routes refuse after O4, O2 and O3; inspection never clears recovery. Ordinary explicit O5 clears recovery but both routes still refuse with engine/durable disagreement. Exact original TC resumes once, without O4 or Timeout re-ingestion; original candidate then signs once. |
+| `uncertain_signed` | A genuinely acknowledged Signed result exists before uncertain O4. The same barriers preserve its complete record/metadata/count. After exact resumption, checked use verifies/delivers its exact original signature through `RetainedSliceWitness`/`RetainedSliceProbe`, with zero additional signer calls. Fresh signing at that Signed position refuses. |
+| `unsafe_candidate` | Same actual owning capture was safe under L0. An unrelated higher selected restriction is durably acknowledged; exact candidate revalidation now reports `Rejected(Ancestry(NoParentLink))`. Fresh and retained use refuse before reservation/signing/delivery; signer and journal counts remain zero. Revision advancement is not authorization. |
+| `pressure_relief` | Original owners remain live during TC admission refusal, abandoned-owner cleanup and relieved admission followed by actual O4. Fresh WorkSet pressure refuses before reservation, then relief signs the original capture once. Checked Verify pressure preserves Signed bytes; relief delivers once with zero additional signing. Deliberate pressure peaks are not reported as unpressured peaks. |
+
+Across applicable fixtures, a genuinely authenticated alternative TC has the SAME
+selected block/view but different complete signed evidence: resumption rejects
+`Certificate`. A new independent authority rejects `Context`. Complete Proposal
+substitution and changed membership reject checked use without delivery.
+Authorization invalidation at the existing confirmation boundary preserves the
+original Signed obligation. A separate bounded journal exercises fresh
+post-consume invalidation: zero signer effects, a present Reserved record, and
+`PotentiallySigned` on retry, with unchanged complete bytes/metadata.
+This auxiliary journal is destroyed before final teardown and does not replace
+the original lifecycle journal.
+
+The original Proposal/Vote, owning payload binding/ancestry/origin metadata,
+prepared pin address/provenance, generation identity/serial/shares/capacity,
+Proposal QC backing identities/capacities and consensus occupancy are checked
+immediately around protected operations. Full durable/journal witnesses are
+captured before each operation; after scalar/ledger/input/engine/outcome checks,
+record and metadata are checked separately by complete equality with redacted
+diagnostics and required record presence. Fresh writes are distinguished from
+retained-use preservation. TC-side witnesses also cover exact complete TC and
+selected wire QC/backings, predecessor/latches, retained Timeout state and
+callback counts. Repeated resumption refuses before additional effects.
+Cancellation-safe bounded observers prove same-domain exclusion at successful
+fresh-sign and retained-use coordination points; skipped hooks cancel/join the
+worker, and expected observations must be present. Existing RAII teardown also
+joins on unwind; no new channel or unbounded cleanup protocol was introduced.
+
+### Complete combined phase inventory and measured outcomes
+
+The gate was exercised before implementing lifecycle continuation, then rerun on
+the committed producing source. All sums use checked arithmetic over the actual
+fixture and existing charge functions, not a standalone-TC or received-QC peak.
+Standing storage owners: covered Proposal 7,701; envelope excluding its separately
+charged pin 288; pin 96; registry 208; captured L0 generation core 7,717
+(including 7,333 evidence backing); generation control 144; bounded journal 200
+with actual backing shape `(1,1)`. Total B=16,354 operational, P=240 context,
+16,594 aggregate. Original capture and journal remain live throughout.
+
+TC operands: A=1,584 route; C=8,940 candidate (7,740 nested backing plus 1,200
+whole copy/transfer controls); I=672 retained interruption; W=2,832 invocation-only
+workspace; K=625 recovery/acknowledgement; S=2,706 resumption/report; H=21,347
+genuine O3 holder; R=10,459 encoded record; T=10,760 transient decode;
+L=31,814 fresh loader; F=52,939 O4. Publication envelopes E=10,509 and
+metadata M=42 give ordinary explicit O5 O=R+T+E+M=31,770.
+
+Actual TC signer and signed-timeout capacities are 3 and 3. Every nested Timeout
+signature capacity is 2,420 and every nested logical-QC signer capacity is 3;
+record-level and TC-level high-QC signer owners are counted separately.
+Proposal QC signatures have capacities `[2420,2420,2420]`. Complete compiler
+layouts (bytes): Report 240, PublishResult 80, Interrupted and its Result 672,
+InterruptionAdmission 224, RecoveryAdmission 64, Acknowledged and its Result 64,
+ResumptionAdmission 64, ResumptionGate 24, Predecessor and its Result 352,
+Reservation 48 and reservation Result 80. The existing checked W/A/K/S formulas
+include their admission Results, argument/return overlaps, copy temporaries,
+reference/scalar controls and leases; embedded coverage is not counted twice.
+
+| Required simultaneous phase (all include B+P) | Operational | Context | Aggregate |
+|---|---:|---:|---:|
+| Interruption admission + I+W+A | 21,442 | 240 | 21,682 |
+| Acknowledged O4 + A+C+F | 79,817 | 240 | 80,057 |
+| Interrupted O4 + I+W+A+C+F | 83,321 | 240 | 83,561 |
+| Predecessor reload + I+W+A+L | 53,256 | 240 | 53,496 |
+| Genuine O3 + I+L | 48,840 | 240 | 49,080 |
+| Explicit O5 + I+H+K+O | 70,768 | 240 | 71,008 |
+| Exact resumption fresh reload + I+H+K+S+L | 73,518 | 240 | 73,758 |
+| Returned report + I+H+K+S | 41,704 | 240 | 41,944 |
+| Protected observation/lifecycle + I+H+K+31,966 | 70,964 | 240 | 71,204 |
+| Fresh pre-reservation + I+H+K+31,884 | 70,882 | 240 | 71,122 |
+| Checked retained verify/delivery + I+H+K+16,451 | 55,449 | 240 | 55,689 |
+
+Protected-use operands are independently derived from existing functions:
+authorization control 16, lifecycle scratch 136; signing/verification working set
+3,224 (owned key, preimage, separate canonical-body temporary and
+position/binding/hash controls); crypto wrapper temporaries 17,396; output 2,480;
+reservation workspace 3,129; continuation 320; publication workspace 5,319.
+Fresh pre-reservation delta is 31,884; after consumption only 3,129 is released,
+giving 28,755. Checked verification adds backend-wrapper coverage 7,940 and
+retrieval envelope 2,791, giving 16+3,224+7,940+2,480+2,791=16,451.
+The observation/lifecycle maximum is 16+136+L=31,966 and dominates the separate
+observation working-set phase 16+H+1,232=22,595.
+During recovered protected use, I/H/K remain alive; only the completed report S
+has finished its lifetime. The auxiliary invalidation journal adds 200 after all
+recovery owners have gone: its loader/fresh bounds are 48,760/48,678 aggregate,
+well below the unchanged cap; it performs no signer call.
+
+Executed unpressured peaks: acknowledged and unsafe branches
+operational/context/aggregate `(79817,240,80057)`; uncertain fresh and Signed
+branches `(83321,240,83561)`, determining phase interrupted O4, leaving 1,395
+aggregate headroom. Executed fresh pre-reservation/post-consume pairs:
+normal `(48238,48478)` / `(45109,45349)` operational/aggregate;
+recovered `(70882,71122)` / `(67753,67993)`.
+Checked retained-use live pairs are normal `(32805,33045)` and recovered
+`(55449,55689)`, returning exactly to each operation's expected baseline.
+The separate pressure fixture reaches `(84716,240,84956)` and never exceeds a
+ceiling. Ceilings remain operational/aggregate 84,956 and context 960.
+
+Fixture-owned immutable authority keys, source TC, independently verified selected
+wire QC, comparison copies/probes and recorder controls are caller instrumentation,
+not storage-component evidence owners or production authorization. The retained
+verified-Proposal evidence is separately consensus-accounted: 7,613 under the
+unchanged 268,435,456 ceiling throughout; TC does not add verified-QC payload.
+Completed Timeout ingestion is ordinary engine ownership, preserved by exact
+message/backing witnesses, not silently charged to storage headroom. There is no
+received-Vote/QC formation pipeline in this composition. Final engine destruction
+releases its verified evidence (only the independent fixture Arc remains);
+original capture/Proposal/journal/store/backend teardown restores storage
+operational and aggregate to zero, including context ownership. These are
+component ownership bounds, not allocator/RSS/physical-stack or dependency-internal
+crypto/backend memory bounds.
+
+Scope remains private safe-Rust, in-process composition only: no production
+wiring/current-authority mechanism, restart reconstruction, process-death boundary,
+transport delivery, wire/journal/schema change, activation/deployment, D15 or Run
+423. No full consensus suite or Miri rerun is claimed. Fixture authority is not
+production authorization; this does not close RS1 or establish launch readiness.
+
+```text
+D7D14_STORAGE_COMPONENT=IMPLEMENTED-ISOLATED
+D7D14_STORAGE_ACCEPTANCE=PASS-ACCEPTED-SUBSET
+§13.6 whole-lifecycle INCOMPLETE
+activation DISABLED
+public DevNet NO-GO
+durable anti-rollback NOT-ESTABLISHED
+C4/C5 OPEN
+```
+
+### Literal validation and delivery correspondence
+
+All five acceptance commands below produced their final results on source
+revision `807d6029a90f532d387b46ca1b4186bd9eebdf25`, root tree
+`89ef1ca5e03fef78ec5279004f66a2e5c30cc739`. Commands are literal; shell log
+redirection is omitted. Selections overlap and must not be summed.
+
+```sh
+LIBCLANG_PATH=/usr/lib/llvm-18/lib cargo test --locked -p qbind-node --lib --features test-utils tc_captured_vote_lifecycle -- --nocapture
+LIBCLANG_PATH=/usr/lib/llvm-18/lib cargo test --locked -p qbind-node --lib --features test-utils safety_record_store::owner::tc_publication_model -- --nocapture
+LIBCLANG_PATH=/usr/lib/llvm-18/lib cargo test --locked -p qbind-node --lib --features test-utils safety_record_store::owner:: -- --quiet
+LIBCLANG_PATH=/usr/lib/llvm-18/lib cargo test --locked -p qbind-node --features test-utils --test run_422_retained_decision_observation_tests --test run_422_owning_capture_binding_tests --test run_422_d7d14_safety_record_store_tests -- --quiet
+CARGO_BUILD_JOBS=2 CARGO_PROFILE_TEST_STRIP=symbols LIBCLANG_PATH=/usr/lib/llvm-18/lib cargo test --locked -p qbind-node --no-run
+```
+
+| Command | Exit | Actual selection/result |
+|---|---:|---|
+| 1 | 0 | 6 selected, 6 passed, 0 ignored, 2,230 filtered; nonzero focused selection required and observed. |
+| 2 | 0 | 21 selected, 21 passed, 0 ignored, 2,215 filtered; existing TC behavior preserved. |
+| 3 | 0 | 207 selected: 201 passed, 6 ignored, 2,029 filtered; includes existing received-QC and TC tests. |
+| 4 | 0 | D7-D14: 158 selected, 157 passed, 1 ignored. Owning-capture binding: 24/24 passed. Retained-decision observation: 24/24 passed. Total 206 selected, 205 passed, 1 ignored; child-process diagnostic selections are not extra tests. |
+| 5 | 0 | Default-feature compilation only: 344 test executables produced, zero tests executed, 8m47s. Explicit command-local `CARGO_PROFILE_TEST_STRIP=symbols`; NOT an unmodified-profile pass. |
+
+Development preparation initially encountered missing `libclang` (exit 101);
+the missing `libclang-18-dev` dependency was installed only after that failure.
+Intermediate fixture/expectation/cleanup corrections are not acceptance results.
+The checked combined gate passed before lifecycle continuation was implemented;
+its final committed rerun is included in command 1. No dependency manifest or
+lockfile changed.
+
+The evidence documents are append-only relative to the full baseline bytes:
+exact-prefix checks, original mode `100644`, CRLF/no-final-newline for this file
+and LF/no-final-newline for `contradiction.md` are preserved. Working-tree and
+baseline-to-delivery whitespace checks use `git -c core.whitespace=cr-at-eol diff
+--check`. The final four-path allowlist and source-blob equality to the producing
+revision are checked independently; the following delivery commit adds only
+these evidence appends. Final HEAD/tree, four mode/blob entries, remote tip and
+clean worktree are reported in the delivery handoff rather than embedding a
+self-referential final documentation blob hash here. Only the task branch is
+pushed, without force; no PR or main push.
