@@ -3315,3 +3315,48 @@ Consensus accounting is observed independently: this route retains 0 engine evid
 Post-ack/pre-effect, recorder and return observations are explicitly counted. The omission control waits a bounded 20 ms, reports the expected missing phase, and verifies acknowledged supervisor shutdown and worker join; actual same-domain contention and post-release acquisition remain tested. No production wiring, activation, accounting mechanism or unsafe code was added.
 
 Final-source tests on `99ebd72`: `LIBCLANG_PATH=/usr/lib/llvm-18/lib cargo test --locked -p qbind-node --lib --features test-utils safety_record_store::owner::tc_publication_model -- --nocapture` — exit 0, 10 passed, 0 failed, 0 ignored; `LIBCLANG_PATH=/usr/lib/llvm-18/lib cargo test --locked -p qbind-node --lib --features test-utils safety_record_store::owner:: -- --quiet` — exit 0, 184 passed, 0 failed, 6 ignored (190 selected). Both selectors selected tests; no broad suite rerun. All standing storage, lifecycle, activation, DevNet, anti-rollback and C4/C5 verdicts remain unchanged.
+
+**Observer shutdown correction.** The verified clean starting state was HEAD
+`3c5ee69eb228e9a6afb033d3380c6bb94b34023b`, root tree
+`16bb771f02b37301210b976b22ebe283e18f9531`, on the existing task branch with
+matching origin tip. Source analysis identified the lost-Shutdown/full-queue
+deadlock; no baseline hang was experimentally reproduced. The corrected
+observer uses queue-independent atomic cancellation, cancellation-aware bounded
+request/response `try_send` loops and receive polling. Explicit shutdown
+acknowledges and joins; caller unwind cancels and joins, without detached workers.
+
+The new regression explicitly gates worker scheduling, fills the request queue
+and observes a second send's 20 ms timeout. A separate response-backpressure
+condition is observed directly. Both conditions cover explicit shutdown and
+unwind and assert completed joining. Four child-test cases have independent
+eight-second supervisor deadlines with RAII kill/reap, bounding regression
+failure instead of risking a hung test runner. Real contention, post-release
+acquisition and skipped-observation controls still pass. Intentional caught
+panics exercise unwind; they are not test failures.
+
+Exact tested source: `37709512d03c547d32d3494d4270bf04c2ad28d1`.
+`LIBCLANG_PATH=/usr/lib/llvm-18/lib cargo test --locked -p qbind-node --lib --features test-utils safety_record_store::owner::tc_publication_model -- --nocapture`
+exited 0: 11 passed, 0 failed, 0 ignored (11 selected).
+`LIBCLANG_PATH=/usr/lib/llvm-18/lib cargo test --locked -p qbind-node --lib --features test-utils safety_record_store::owner:: -- --quiet`
+exited 0: 185 passed, 0 failed, 6 ignored (191 selected).
+These overlap, are nonempty and are not additive. Documentation-only delivery
+follows that source revision; no broader suite was rerun or relabelled.
+CRLF-aware working-tree and starting-to-final whitespace checks, the three-path
+allowlist, exact historical document prefixes, modes and EOL/EOF conventions
+passed before delivery.
+
+Accepted refusal and independent consensus-accounting corrections, engine/O4
+outcomes, formulas and ceilings are preserved. No new unsafe code, production
+integration or activation. Standing verdicts remain:
+
+```text
+D7D14_STORAGE_COMPONENT=IMPLEMENTED-ISOLATED
+D7D14_STORAGE_ACCEPTANCE=PASS-ACCEPTED-SUBSET
+§13.6 whole-lifecycle INCOMPLETE
+activation DISABLED
+public DevNet NO-GO
+durable anti-rollback NOT-ESTABLISHED
+C4/C5 OPEN
+```
+
+This correction is not full TC lifecycle acceptance, RS1 closure or launch approval.

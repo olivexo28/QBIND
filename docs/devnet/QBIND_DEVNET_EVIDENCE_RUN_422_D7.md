@@ -22472,3 +22472,59 @@ C4/C5 OPEN
 Serialization evidence explicitly counts post-ack/pre-effect, recorder and return observations. The omitted-observation control is bounded (20 ms), asserts the typed missing phase, and requires acknowledged shutdown plus worker join; the real same-domain contention and post-release acquisition controls remain. The observed four-member fixture inventory was route 1440, candidate 8940, loader 31814, O4 52939, peak 63319 bytes; context occupancy 240 and shared aggregate ceiling 84956. These are component-accounting observations, not inherited engine/backend allocation or physical-memory measurements.
 
 Final-source validation on `99ebd72`: `LIBCLANG_PATH=/usr/lib/llvm-18/lib cargo test --locked -p qbind-node --lib --features test-utils safety_record_store::owner::tc_publication_model -- --nocapture` — exit 0, 10 passed, 0 failed, 0 ignored; `LIBCLANG_PATH=/usr/lib/llvm-18/lib cargo test --locked -p qbind-node --lib --features test-utils safety_record_store::owner:: -- --quiet` — exit 0, 184 passed, 0 failed, 6 ignored (190 selected). Both selectors were nonempty. These finishing-pass results supersede no earlier broader results; no broad suite was rerun. Standing lifecycle, activation, DevNet, anti-rollback and C4/C5 verdicts are unchanged.
+
+**Supervised observer shutdown correction.** Starting identity was verified:
+HEAD `3c5ee69eb228e9a6afb033d3380c6bb94b34023b`, root tree
+`16bb771f02b37301210b976b22ebe283e18f9531`, clean worktree on the existing
+`copilot/run-422-tc-o4-pre-effect-composition` branch; origin's tip matched.
+Source analysis found that a full request queue could discard the destructor's
+Shutdown request while its retained sender kept the worker alive indefinitely.
+That baseline hang was not experimentally reproduced; the experiments below
+exercise the corrected source, not a claimed historical failure reproduction.
+
+The observer now cancels through an independent atomic flag. Both request and
+response sends use cancellation-aware, deadline-bounded `try_send` polling;
+idle/start-gated receive polling also observes cancellation. Explicit shutdown
+still requires worker acknowledgement and joining, and unwind cleanup cancels
+and joins without enqueueing Shutdown. No worker is detached.
+`queued_observer_timeout_and_unwind_cleanup_is_supervised` holds the worker
+behind an explicit start gate, fills its request queue and asserts a second
+request times out after a 20 ms budget. Separate cases observe actual response
+queue backpressure. Each condition exercises explicit shutdown and caller
+unwind, asserting cancellation and completed join. Four child-test executions
+are supervised independently with eight-second deadlines and RAII kill/reap,
+so a cleanup regression fails boundedly instead of hanging the parent runner.
+Real same-domain contention, post-release acquisition and skipped-observation
+controls remain selected and passing; the intentional caught panic messages
+are unwind controls, not failed tests.
+
+Exact producing source: `37709512d03c547d32d3494d4270bf04c2ad28d1`.
+
+| Literal command on that revision | Exit | Passed | Failed | Ignored | Selected |
+|---|---:|---:|---:|---:|---:|
+| `LIBCLANG_PATH=/usr/lib/llvm-18/lib cargo test --locked -p qbind-node --lib --features test-utils safety_record_store::owner::tc_publication_model -- --nocapture` | 0 | 11 | 0 | 0 | 11 |
+| `LIBCLANG_PATH=/usr/lib/llvm-18/lib cargo test --locked -p qbind-node --lib --features test-utils safety_record_store::owner:: -- --quiet` | 0 | 185 | 0 | 6 | 191 |
+
+Selectors overlap and are not additive. A documentation-only commit follows;
+earlier broader results remain historical, and no broader suite was rerun.
+CRLF-aware checks use `git -c core.whitespace=cr-at-eol diff --check` and
+`git -c core.whitespace=cr-at-eol diff --check 3c5ee69eb228e9a6afb033d3380c6bb94b34023b HEAD`
+before delivery; both passed. Only the three
+authorized paths change; historical document bytes remain exact prefixes with
+unchanged modes, CRLF/LF and no-final-newline conventions.
+The accepted refusal-preservation and separate consensus-accounting evidence,
+engine/O4 semantics, ownership formulas and resource ceilings are unchanged.
+No new unsafe code, production integration, activation or broader acceptance
+is introduced. Standing verdicts remain:
+
+```text
+D7D14_STORAGE_COMPONENT=IMPLEMENTED-ISOLATED
+D7D14_STORAGE_ACCEPTANCE=PASS-ACCEPTED-SUBSET
+§13.6 whole-lifecycle INCOMPLETE
+activation DISABLED
+public DevNet NO-GO
+durable anti-rollback NOT-ESTABLISHED
+C4/C5 OPEN
+```
+
+This correction is not full TC lifecycle acceptance, RS1 closure or launch approval.
