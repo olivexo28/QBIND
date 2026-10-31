@@ -23137,3 +23137,68 @@ The focused selectors select tests. Counts from overlapping selections are not a
 The initial scoped `rustfmt --check crates/qbind-serde/src/keyset.rs crates/qbind-wire/src/keyset.rs` exited 1 for new fixture wrapping; formatting was applied only to the two authorized Rust paths before the source-validation revision. Final literal `rustfmt --check --edition 2021 crates/qbind-serde/src/keyset.rs crates/qbind-wire/src/keyset.rs` exits 0. CRLF-aware working-tree `git -c core.whitespace=cr-at-eol --no-pager diff --check` and baseline-to-final `git -c core.whitespace=cr-at-eol --no-pager diff --check a8e9f7789440a0c5ac4412f65785fa04da82f875 HEAD` exit 0. Byte-prefix, EOL/EOF, modes, authorized-path-only diff and tested-Rust equality checks pass. No additional validation scope was needed.
 
 Preserved verdicts: `D7D14_STORAGE_COMPONENT=IMPLEMENTED-ISOLATED`; `D7D14_STORAGE_ACCEPTANCE=PASS-ACCEPTED-SUBSET`; §13.6 whole-lifecycle INCOMPLETE; activation DISABLED; public DevNet NO-GO; durable anti-rollback NOT-ESTABLISHED; C4/C5 OPEN; RS1 OPEN. Slice 2B does not close F1/F2, establish persistent-store guarantees, activate weighted authorization, or establish deployed-path readiness.
+
+## RUN 422 Slice 2C: isolated canonical-keyset semantic analysis
+
+### Baseline, ancestry, and source identity
+
+**Required start:** repository `olivexo28/QBIND`; initial branch `main`; clean worktree; HEAD `8cc7d9d15cf43621a0c5c33ccc169ca39259a466`; root tree `53ed30ba2d79515d713e963605b30703257d1685`; origin `https://github.com/olivexo28/QBIND`. The commit and tree objects were separately available locally; the commit names the required tree, and the initial HEAD has identical content (empty baseline-to-HEAD diff). `git ls-remote` independently reported `origin/main` at the required commit; the task branch did not exist remotely at start. Initial ancestry to the required commit is equality. The repository is shallow: `.git/shallow` contains exactly the required commit, whose raw commit object records parent `a8e9f7789440a0c5ac4412f65785fa04da82f875`; that parent object is unavailable. Thus ancestry before the required commit is not established by this checkout; the commit is not parentless. The task branch `copilot/run-422-keyset-semantic-analysis` was created at the required commit. Its local descendant chain through the source and documentation commits is available.
+
+**Tested source revision:** `246ed7b9faa95222493d90850739de007380750d`, tree `764c4d83d2910c8d8d37e1c183dddcb016643fb3`. All Rust tests and compilation checks below were executed against this source commit. The only later changes are the two evidence-document appends; the tested Rust files are byte-identical to this revision.
+
+### Contract and trust boundary
+
+`qbind-ledger::keyset_validation` exposes separate `analyze_stored_keyset_semantics::<N>` and `analyze_create_keyset_semantics::<N>` entry points. Both accept the existing fully parsed borrowed view, `&dyn CryptoProvider`, a caller-selected maximum number of distinct-key proofs, and a caller-selected maximum combined algorithm/parameter identifier length. `N` is an explicit const-generic implementation capacity, not a protocol limit. There is no default capacity, profile, production cap, integration, or caller. `lib.rs` adds only this module declaration.
+
+On entry, advertised encoded count greater than `N` returns `EntryCountExceedsWorkspace` before suite lookup or descriptor construction. Empty input and zero threshold refuse. For each admitted entry, the helper looks up its requested suite, confirms returned `suite_id()`, calls `canonical_key_descriptor` exactly once, maps `Unsupported`/`Malformed`/`NonCanonical` to fixed-size errors, checks the combined identifier length with `checked_add` against the caller's limit, and confirms the descriptor key slice has the exact original pointer and length. Pointer equality establishes provenance only. Identity uses exact content equality of `(algorithm_id, parameter_id, public_key_encoding)`; suite ID, pointers, fingerprints, and hashes are not identity. Same-identity/same-weight entries coalesce; any weight conflict refuses, including zero-weight or suite-alias duplicates. Zero weights otherwise remain valid, but still undergo descriptor and conflict checks. No threshold success is returned before all entries have been examined.
+
+The completed summary contains encoded entry count, distinct canonical identity count, total distinct-key weight, attainable weight, and minimum distinct-key proofs to reach threshold. Distinct weights are summed with checked `u64` arithmetic and ordered descending in place. Attainable weight sums the first `min(proof_budget, distinct_count)` weights; a threshold greater than that sum refuses (equality succeeds). The minimum proof count is the shortest prefix of that same descending order that reaches threshold, so zero-weight identities cannot lower it. The 16 distinct weight-1 / threshold-16 test refuses at proof budget 8 and succeeds at 16; these are fixtures only. Success is a diagnostic mathematical result, not a verified signature, admitted/current account, authorization, or permission to execute.
+
+This helper does not implement version or reserved-field policy; parser success remains distinct from native account admission. It does not evaluate transaction-wide proof allocation, repeated account indices, actual signatures, pooling across account keysets, account identity/owner/type, suite governance/freshness, current authorization, store access, weighted transaction authorization, keyset creation enforcement, or activation. The existing authorization and creation implementations, parsers, crypto adapters, and canonical hashing/preimage code were not changed. The new APIs have no production callers.
+
+### Resource and ownership evidence
+
+The single `Workspace<'a, N>` contains `[Record<'a>; N]` and a `usize` distinct count. Each `Record` contains `Option<CanonicalKeyDescriptor<'a>>` and a `u16` weight; descriptors and key bytes are borrowed, and no variable-length key is copied. On the tested x86_64 Rust 1.99.1 compiler, `size_of` in the focused test reported `Record=56` bytes, `Workspace<1>=64` bytes, and `Workspace<16>=904` bytes. These are compiler-derived type sizes, not a promise about compiler stack-frame reservation/layout, backend temporaries, process or physical memory. An early capacity refusal does not establish that the compiler reserved no workspace stack frame.
+
+For `m` admitted encoded entries, successful analysis performs exactly `m` provider lookups and `m` descriptor constructions; errors stop earlier. The admitted-count over-capacity check performs zero of either. Coalescing compares a new descriptor against at most all previous distinct records, for at most `m(m-1)/2` exact-content identity comparisons. Each comparison is bounded by the caller's combined identifier limit plus the entry key span (the parsed entry length field is `u16`). Descending selection ordering uses at most `u(u-1)/2` scalar weight comparisons for `u` distinct identities. Thus the helper's explicit work is O(m²) comparisons plus O(u²) ordering; provider/backend execution time and internal allocation are outside this bound. The provider and suite adapters are trusted implementation components during the call; this does not establish their governance, freshness, or authority admission.
+
+The proof budget and identifier limit are scalar values and never allocation sizes. The helper uses no heap allocation, owned decoding, count-sized `Vec`, unsafe code, or key copies. Test fixture construction, key generation, provider storage, and test snapshots allocate outside the helper. Caller-owned encoded input, provider-owned identifier bytes, adapter/backend temporaries, compiler stack layout, allocator overhead, and physical memory are excluded from the fixed-record accounting. No allocator instrumentation or arbitrary-backend time bound is claimed. Errors are fixed-size enums with no input-derived strings, key bytes, signatures, or secrets.
+
+### Requirement-to-test mapping
+
+All inline tests use selector prefix `run422_keyset_semantics`; test-only `TestSuite` fixtures are controlled adapters and are not claims about failures of the real ML-DSA adapter.
+
+| Requirement | Inline test |
+|---|---|
+| Genuine ML-DSA-44: two generated distinct public keys, repeated equal bytes in a separately allocated buffer, suite alias; stored and create entry points; equal duplicate weight counted once | `genuine_mldsa_stored_and_create_aliases` |
+| Equal descriptors with conflicting weights in both orders and across suite aliases; equal alias weights coalesce | `duplicate_weights_conflict_in_any_order_and_alias` |
+| Exact identity distinguishes algorithm ID, parameter ID, and key encoding using the explicit test adapter | `exact_descriptor_fields_remain_distinct` |
+| Zero weight contributes zero but is described; invalid zero-weight descriptor and zero/positive duplicate conflict refuse | `zero_weight_validates_and_conflicts` |
+| Exact threshold, insufficient proof budget, zero threshold, empty keyset, zero proof budget; sixteen-key fixture and minimum proof count | `threshold_and_proof_budget_math` |
+| Distinct weight sum above `u16::MAX` does not wrap; no unreachable `u64` overflow claim | `weight_sum_exceeds_u16_without_wrapping` |
+| Missing suite, returned suite-ID mismatch, actual trait-default Unsupported, controlled Unsupported/Malformed/NonCanonical outcomes | `suite_and_descriptor_failures` |
+| Borrowed key-span substitution refused; exact identifier budget succeeds and one-under limit refuses | `descriptor_span_and_identifier_limits` |
+| Invalid final entry after an earlier threshold-sufficient weight and invalid zero-weight entry both refuse | `checks_final_and_zero_weight_entries` |
+| Exact workspace capacity succeeds; one-over refuses with zero lookup/descriptor calls | `capacity_refuses_before_provider_calls` |
+| `usize::MAX` proof/identifier budgets on a small entry leave workspace fixed | `usize_max_budgets_are_not_storage_sizes` and `workspace_has_fixed_record_layout` |
+| Entry permutations preserve successful summaries and conflict decisions | `permutations_preserve_results_and_conflicts` |
+| Repeated deterministic result, complete input-byte preservation for both views, one lookup/descriptor call per encoded entry, no signature verification | `calls_once_preserves_bytes_and_repeats` |
+
+### Validation and environment
+
+All successful commands below ran at source revision `246ed7b9faa95222493d90850739de007380750d` / tree `764c4d83d2910c8d8d37e1c183dddcb016643fb3`. Focused selectors selected tests. Full-suite totals aggregate test targets; the focused selector overlaps that suite and counts are not additive. `cargo check` is compilation only.
+
+| Literal command | Exit | Selected / passed / failed / ignored |
+|---|---:|---|
+| `LIBCLANG_PATH=/usr/lib/llvm-18/lib cargo test --locked -p qbind-ledger --lib run422_keyset_semantics -- --nocapture` | 0 | 14 / 14 / 0 / 0; 272 filtered |
+| `LIBCLANG_PATH=/usr/lib/llvm-18/lib cargo test --locked -p qbind-ledger` | 0 | 666 / 650 / 0 / 16; across 25 test targets |
+| `LIBCLANG_PATH=/usr/lib/llvm-18/lib cargo test --locked -p qbind-system --test keyset_program_tests` | 0 | 2 / 2 / 0 / 0 |
+| `cargo test --locked -p qbind-crypto run422_canonical_key_descriptor -- --nocapture` | 0 | 6 / 6 / 0 / 0; 76 filtered in the unit-test target |
+| `LIBCLANG_PATH=/usr/lib/llvm-18/lib cargo check --locked -p qbind-node` | 0 | N/A; compilation only, no tests; existing dead-code warnings |
+| `rustfmt --check --edition 2021 crates/qbind-ledger/src/keyset_validation.rs` | 0 | Formatting check; new Rust module only |
+
+The first prescribed focused ledger command exited 101 before tests ran because `/usr/lib/llvm-18/lib/libclang.so` was absent (selected/passed/failed/ignored: N/A). Environment preparation `apt-get update -qq && apt-get install -y -qq libclang-18-dev` then exited 0; package `libclang-18-dev 1:18.1.3-1ubuntu1` provided the requested shared library. Apt logged an unrelated Google Chrome index DNS warning but installed successfully. No repository dependency or manifest changed. Toolchain: cargo 1.99.1, rustc 1.99.1, rustfmt 1.10.0, host `x86_64-unknown-linux-gnu`.
+
+The working-tree whitespace check `git -c core.whitespace=cr-at-eol diff --check` and baseline-to-final check `git -c core.whitespace=cr-at-eol diff --check 8cc7d9d15cf43621a0c5c33ccc169ca39259a466 HEAD` were run after the evidence append. Rust source was not modified after the tested source revision. The requested validation scope was not broadened.
+
+Preserved verdicts: `D7D14_STORAGE_COMPONENT=IMPLEMENTED-ISOLATED`; `D7D14_STORAGE_ACCEPTANCE=PASS-ACCEPTED-SUBSET`; §13.6 whole-lifecycle INCOMPLETE; activation DISABLED; public DevNet NO-GO; durable anti-rollback NOT-ESTABLISHED; C4/C5 OPEN; RS1 OPEN. Slice 2C does not close F1/F2 or establish deployed-path readiness.
