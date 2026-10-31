@@ -37,6 +37,8 @@ enum Refusal {
     Predecessor,
     NonAdvancing,
     Publication,
+    PublicationChanged,
+    Certificate,
 }
 
 #[derive(Default)]
@@ -45,6 +47,7 @@ struct Controls {
     refused: Option<Refusal>,
     gate_calls: usize,
     submitted: usize,
+    anchor: Option<CommittedAnchor>,
 }
 
 // Field order destroys all result controls before releasing their coverage.
@@ -313,6 +316,7 @@ impl Gate<'_, '_> {
         // The charged loader validated any anchor against independent history.
         // It is destroyed before candidate/O4 coexistence.
         self.anchor = anchor;
+        self.controls.anchor = self.anchor.clone();
         Ok(())
     }
 
@@ -441,6 +445,488 @@ impl Admission<'_> {
         returning(engine);
         drop(guard);
         report
+    }
+}
+
+// No evidence backing is copied: the original immutable inputs outlive recovery.
+// The pointer is an identity comparison only, never dereferenced.
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct TcPredecessor {
+    engine: usize,
+    lock: Option<([u8; 32], u64)>,
+    signers: [Option<ValidatorId>; 4],
+    lock_backing: [usize; 2],
+    committed: Option<([u8; 32], u64)>,
+    log_len: usize,
+    view: u64,
+    latches: (bool, bool, bool, Option<Instant>),
+    timeout_backings: [[usize; 4]; 4],
+}
+
+impl TcPredecessor {
+    fn capture(engine: &BasicHotStuffEngine<[u8; 32]>, tc: &TimeoutCert) -> Result<Self, Refusal> {
+        let mut signers = [None; 4];
+        let mut lock_backing = [0; 2];
+        if let Some(qc) = engine.locked_qc() {
+            if qc.signers.len() > signers.len() {
+                return Err(Refusal::Capacity);
+            }
+            for (slot, signer) in signers.iter_mut().zip(&qc.signers) {
+                *slot = Some(*signer);
+            }
+            lock_backing = [qc.signers.as_ptr() as usize, qc.signers.capacity()];
+        }
+        let messages = engine.timeout_accumulator().get_timeouts(tc.timeout_view);
+        if messages.map_or(0, |m| m.len()) != tc.signed_timeouts.len() {
+            return Err(Refusal::Predecessor);
+        }
+        let mut timeout_backings = [[0; 4]; 4];
+        for expected in &tc.signed_timeouts {
+            let actual = messages
+                .and_then(|m| m.get(&expected.validator_id))
+                .filter(|actual| *actual == expected)
+                .ok_or(Refusal::Predecessor)?;
+            let slot = timeout_backings
+                .get_mut(usize::try_from(actual.validator_id.0).map_err(|_| Refusal::Capacity)?)
+                .ok_or(Refusal::Capacity)?;
+            *slot = [
+                actual.signature.as_ptr() as usize,
+                actual.signature.capacity(),
+                actual
+                    .high_qc
+                    .as_ref()
+                    .map_or(0, |q| q.signers.as_ptr() as usize),
+                actual.high_qc.as_ref().map_or(0, |q| q.signers.capacity()),
+            ];
+        }
+        Ok(Self {
+            engine: engine as *const _ as usize,
+            lock: engine.locked_qc().map(|q| (q.block_id, q.view)),
+            signers,
+            lock_backing,
+            committed: engine
+                .committed_block()
+                .copied()
+                .zip(engine.committed_height()),
+            log_len: engine.commit_log().len(),
+            view: engine.current_view(),
+            latches: engine.timeout_effect_latches_for_test(),
+            timeout_backings,
+        })
+    }
+}
+
+struct TcInterrupted<'a> {
+    controls: Controls,
+    outcome: ReportOutcome,
+    input: &'a TimeoutCert,
+    selected: &'a VerifiedQuorumCertificate,
+    authority: &'a Authority,
+    history: &'a FixtureCommittedHistory,
+    predecessor: TcPredecessor,
+    incarnation: u64,
+    context: [u8; 32],
+    expected: u64,
+    _coverage: Reservation,
+}
+
+type ReportOutcome = Option<
+    Result<TimeoutCertificateOutcome<Refusal>, qbind_consensus::timeout::TimeoutValidationError>,
+>;
+
+struct TcInterruptionAdmission<'a> {
+    route: Admission<'a>,
+    coverage: Reservation,
+    workspace: Reservation,
+}
+
+struct TcRecoveryAdmission<'a> {
+    owner: &'a SafetyRecordOwner,
+    coverage: Reservation,
+}
+
+// Volatile model association only; not verified evidence or current authority.
+struct TcAcknowledged<'a> {
+    attempt: &'a TcInterrupted<'a>,
+    proof: &'a ValidatedRecord,
+    _coverage: Reservation,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TcRecoveryOutcome {
+    AttemptMismatch,
+    RefusedPreWrite,
+    WriteFailedAmbiguous,
+    UncertainDurable,
+}
+
+struct TcResumptionAdmission<'a> {
+    owner: &'a SafetyRecordOwner,
+    coverage: Reservation,
+}
+
+struct TcResumptionGate<'a, 'g> {
+    owner: &'a SafetyRecordOwner,
+    guard: &'a std::sync::MutexGuard<'g, super::super::backend::SerializationDomain>,
+    acknowledged: &'a TcAcknowledged<'a>,
+}
+
+fn control_sum(terms: &[usize]) -> Result<u128, Refusal> {
+    terms.iter().try_fold(0, |a, b| add(a, *b as u128))
+}
+
+fn interruption_charge() -> Result<u128, Refusal> {
+    Ok(size_of::<TcInterrupted<'static>>() as u128)
+}
+
+fn interruption_workspace_charge() -> Result<u128, Refusal> {
+    control_sum(&[
+        2 * size_of::<Result<TcInterrupted<'static>, Refusal>>(),
+        2 * size_of::<TcInterruptionAdmission<'static>>(),
+        size_of::<Result<TcInterruptionAdmission<'static>, Refusal>>(),
+        2 * size_of::<Result<TcPredecessor, Refusal>>(),
+        size_of::<Result<Reservation, SafetyStoreError>>(),
+        4 * size_of::<&()>(),
+    ])
+}
+
+fn recovery_charge() -> Result<u128, Refusal> {
+    control_sum(&[
+        2 * size_of::<TcRecoveryAdmission<'static>>(),
+        size_of::<Result<TcRecoveryAdmission<'static>, Refusal>>(),
+        2 * size_of::<Result<TcAcknowledged<'static>, TcRecoveryOutcome>>(),
+        2 * size_of::<PublishResult>(),
+        size_of::<Result<Reservation, SafetyStoreError>>(),
+        8 * size_of::<&()>(),
+        size_of::<Result<(), Refusal>>(),
+    ])
+}
+
+fn resumption_charge(route: u128) -> Result<u128, Refusal> {
+    add(
+        route,
+        control_sum(&[
+            2 * size_of::<TcResumptionAdmission<'static>>(),
+            size_of::<Result<TcResumptionAdmission<'static>, Refusal>>(),
+            2 * size_of::<TcResumptionGate<'static, 'static>>(),
+            2 * size_of::<Result<TcPredecessor, Refusal>>(),
+            size_of::<Result<Reservation, SafetyStoreError>>(),
+            2 * size_of::<Result<(), Refusal>>(),
+            12 * size_of::<&()>(),
+        ])?,
+    )
+}
+
+fn admit_interruption<'a>(
+    owner: &'a SafetyRecordOwner,
+    input: &'a TimeoutCert,
+) -> Result<TcInterruptionAdmission<'a>, Refusal> {
+    let coverage = owner
+        .backend
+        .accounting()
+        .reserve(interruption_charge()?)
+        .map_err(|_| Refusal::Capacity)?;
+    let workspace = owner
+        .backend
+        .accounting()
+        .reserve(interruption_workspace_charge()?)
+        .map_err(|_| Refusal::Capacity)?;
+    let route = admit(owner, input)?;
+    Ok(TcInterruptionAdmission {
+        route,
+        coverage,
+        workspace,
+    })
+}
+
+impl<'a> TcInterruptionAdmission<'a> {
+    fn invoke(
+        self,
+        engine: &mut BasicHotStuffEngine<[u8; 32]>,
+        authority: &'a Authority,
+        selected: &'a VerifiedQuorumCertificate,
+        expected: u64,
+        history: &'a FixtureCommittedHistory,
+    ) -> Result<TcInterrupted<'a>, Refusal> {
+        // Retained coverage protects the returned value. Admission workspace
+        // covers invocation and return-transfer overlap only, not its lifetime.
+        let _workspace = self.workspace;
+        let predecessor = TcPredecessor::capture(engine, self.route.input)?;
+        let incarnation = self.route.owner.backend.incarnation();
+        let context = context_digest(self.route.owner.pinned());
+        let input = self.route.input;
+        let Report {
+            outcome,
+            controls,
+            _coverage,
+        } = self.route.invoke(
+            engine,
+            authority,
+            Some(selected),
+            expected,
+            Some(history),
+            |_| {},
+            |_| {},
+        );
+        // The entire returned control is now covered by the interruption lease.
+        drop(_coverage);
+        Ok(TcInterrupted {
+            outcome,
+            controls,
+            input,
+            selected,
+            authority,
+            history,
+            predecessor,
+            incarnation,
+            context,
+            expected,
+            _coverage: self.coverage,
+        })
+    }
+}
+
+fn exact_tc_record(proof: &ValidatedRecord, attempt: &TcInterrupted<'_>) -> bool {
+    let SafetyRecord::Locked(record) = &proof.retained().record else {
+        return false;
+    };
+    let SupportingEvidence::TcDerived { high_qc, tc } = &record.evidence else {
+        return false;
+    };
+    Some(proof.publication_revision()) == attempt.expected.checked_add(1)
+        && proof.origin_context_digest() == &attempt.context
+        && proof.recovery_backend_incarnation() == Some(attempt.incarnation)
+        && record.authority_context_ref == *attempt.authority.domain.authority_commitment()
+        && record.predecessor_ref == Some(attempt.expected)
+        && record.committed_anchor == attempt.controls.anchor
+        && tc == attempt.input
+        && Some(high_qc) == attempt.input.high_qc.as_ref()
+        && (record.lock_block_id, record.lock_view) == (high_qc.block_id, high_qc.view)
+}
+
+fn admit_recovery(owner: &SafetyRecordOwner) -> Result<TcRecoveryAdmission<'_>, Refusal> {
+    let coverage = owner
+        .backend
+        .accounting()
+        .reserve(recovery_charge()?)
+        .map_err(|_| Refusal::Capacity)?;
+    Ok(TcRecoveryAdmission { owner, coverage })
+}
+
+impl TcRecoveryAdmission<'_> {
+    fn acknowledge<'a>(
+        self,
+        attempt: &'a TcInterrupted<'a>,
+        proof: &'a ValidatedRecord,
+    ) -> Result<TcAcknowledged<'a>, TcRecoveryOutcome> {
+        if attempt.controls.publication != Some(PublishResult::UncertainDurable)
+            || attempt.outcome
+                != Some(Ok(TimeoutCertificateOutcome::Refused {
+                    reason: Refusal::Publication,
+                }))
+            || (attempt.controls.gate_calls, attempt.controls.submitted) != (1, 1)
+            || attempt.incarnation != self.owner.backend.incarnation()
+            || attempt.context != context_digest(self.owner.pinned())
+            || !exact_tc_record(proof, attempt)
+        {
+            return Err(TcRecoveryOutcome::AttemptMismatch);
+        }
+        // Ordinary O5 takes its own domain. No owner domain is held here.
+        match self.owner.reacknowledge(proof) {
+            PublishResult::DurableAcknowledged { new_revision } => {
+                assert_eq!(new_revision, proof.publication_revision());
+                Ok(TcAcknowledged {
+                    attempt,
+                    proof,
+                    _coverage: self.coverage,
+                })
+            }
+            PublishResult::RefusedPreWrite(_) => Err(TcRecoveryOutcome::RefusedPreWrite),
+            PublishResult::WriteFailedAmbiguous(_) => Err(TcRecoveryOutcome::WriteFailedAmbiguous),
+            PublishResult::UncertainDurable => Err(TcRecoveryOutcome::UncertainDurable),
+        }
+    }
+}
+
+fn admit_resumption<'a>(
+    owner: &'a SafetyRecordOwner,
+    input: &TimeoutCert,
+) -> Result<TcResumptionAdmission<'a>, Refusal> {
+    let route = Inventory::checked(owner, input)?.route;
+    let coverage = owner
+        .backend
+        .accounting()
+        .reserve(resumption_charge(route)?)
+        .map_err(|_| Refusal::Capacity)?;
+    Ok(TcResumptionAdmission { owner, coverage })
+}
+
+impl TcResumptionGate<'_, '_> {
+    fn check(
+        &self,
+        engine: &BasicHotStuffEngine<[u8; 32]>,
+        authority: &Authority,
+        input: &TimeoutCert,
+        selected: &VerifiedQuorumCertificate,
+    ) -> Result<(), Refusal> {
+        let attempt = self.acknowledged.attempt;
+        let proof = self.acknowledged.proof;
+        if self.owner.recovery_required() {
+            return Err(Refusal::RecoveryRequired);
+        }
+        if attempt.incarnation != self.owner.backend.incarnation()
+            || attempt.context != context_digest(self.owner.pinned())
+            || !context_matches(self.owner, engine, authority)
+            || selected.domain() != &attempt.authority.domain
+            || selected.authorized_epoch() != self.owner.pinned().epoch
+        {
+            return Err(Refusal::Context);
+        }
+        let current = self
+            .owner
+            .load_current_validated_locked(self.guard, Some(attempt.history))
+            .map_err(|_| Refusal::Loader)?;
+        if current.encoded() != proof.encoded()
+            || current.publication_revision() != proof.publication_revision()
+            || current.origin_context_digest() != proof.origin_context_digest()
+            || current.recovery_backend_incarnation() != proof.recovery_backend_incarnation()
+        {
+            return Err(Refusal::PublicationChanged);
+        }
+        if !exact_tc_record(&current, attempt)
+            || !exact_tc_record(proof, attempt)
+            || input != attempt.input
+            || !std::ptr::eq(selected, attempt.selected)
+        {
+            return Err(Refusal::Certificate);
+        }
+        // Check before entering the engine: its stale/non-raising branches do
+        // not call a gate. Repeated use must refuse rather than claim success.
+        if TcPredecessor::capture(engine, attempt.input)? != attempt.predecessor {
+            return Err(Refusal::Predecessor);
+        }
+        let high = input.high_qc.as_ref().ok_or(Refusal::NonAdvancing)?;
+        if input.view <= engine.current_view()
+            || engine.locked_qc().is_some_and(|q| high.view <= q.view)
+        {
+            return Err(Refusal::NonAdvancing);
+        }
+        let wire = selected.certificate();
+        if wire.block_id != high.block_id
+            || wire.height != high.view
+            || wire.chain_id != self.owner.pinned().chain_id
+            || wire.epoch != self.owner.pinned().epoch
+            || wire.suite_id != self.owner.pinned().qc_suite_id
+            || selected.signers() != high.signers.as_slice()
+        {
+            return Err(Refusal::SelectedQc);
+        }
+        Ok(())
+    }
+}
+
+impl TcResumptionAdmission<'_> {
+    fn invoke(
+        self,
+        engine: &mut BasicHotStuffEngine<[u8; 32]>,
+        authority: &Authority,
+        input: &TimeoutCert,
+        selected: &VerifiedQuorumCertificate,
+        acknowledged: &TcAcknowledged<'_>,
+        mut pre_effect: impl FnMut(&BasicHotStuffEngine<[u8; 32]>),
+        mut returning: impl FnMut(&BasicHotStuffEngine<[u8; 32]>),
+    ) -> Report {
+        let guard = self.owner.backend.lock_domain();
+        let gate = TcResumptionGate {
+            owner: self.owner,
+            guard: &guard,
+            acknowledged,
+        };
+        let mut controls = Controls::default();
+        let outcome = match gate.check(engine, authority, input, selected) {
+            Err(reason) => {
+                controls.refused = Some(reason);
+                None
+            }
+            Ok(()) => Some(
+                engine.on_timeout_certificate_gated(input, &mut |old, exact, high| {
+                    controls.gate_calls += 1;
+                    if exact != acknowledged.attempt.input
+                        || Some(high) != acknowledged.attempt.input.high_qc.as_ref()
+                    {
+                        controls.refused = Some(Refusal::Certificate);
+                        return Err(Refusal::Certificate);
+                    }
+                    pre_effect(old);
+                    Ok(())
+                }),
+            ),
+        };
+        let report = Report {
+            outcome,
+            controls,
+            _coverage: self.coverage,
+        };
+        returning(engine);
+        drop(guard);
+        report
+    }
+}
+
+#[test]
+fn explicit_o5_checked_phase_inventory_before_lifecycle() {
+    let f = Fixture::new();
+    let ctx = f.owner.pinned();
+    let p = Inventory::checked(&f.owner, &f.tc).unwrap();
+    let i = interruption_charge().unwrap();
+    let w = interruption_workspace_charge().unwrap();
+    let k = recovery_charge().unwrap();
+    let s = resumption_charge(p.route).unwrap();
+    let h = f.owner.retained_holder_charge().unwrap();
+    let r = max_safety_record_bytes(ctx).unwrap();
+    let t = max_transient_decoded_working_set(ctx).unwrap();
+    let staging = super::super::accounting::publication_staging_charge(ctx).unwrap();
+    let o5 = add(
+        add(r, t).unwrap(),
+        add(super::super::backend::META_ENCODED_LEN, staging).unwrap(),
+    )
+    .unwrap();
+    let node = f.sample();
+    assert_eq!(node.aggregate_cap, Some(84_956));
+    println!("TC recovery layouts interrupted={} predecessor={} I={i} W={w} K={k} S={s} route={} candidate={} loader={} O4={} H={h} R={r} T={t} envelopes={staging} O5={o5} context={}",
+        size_of::<TcInterrupted<'static>>(), size_of::<TcPredecessor>(),
+        p.route, p.candidate, p.loader, p.o4, node.context);
+    println!("TC complete control layouts: interruption_admission={} interruption_admission_result={} interruption_result={} recovery_admission={} recovery_admission_result={} acknowledged={} acknowledgement_result={} resumption_admission={} resumption_admission_result={} resumption_gate={} report={} publication={} predecessor_result={} reservation={} reservation_result={}; op_cap={:?} context_cap={:?} shared_cap={:?}",
+        size_of::<TcInterruptionAdmission<'static>>(), size_of::<Result<TcInterruptionAdmission<'static>, Refusal>>(),
+        size_of::<Result<TcInterrupted<'static>, Refusal>>(), size_of::<TcRecoveryAdmission<'static>>(),
+        size_of::<Result<TcRecoveryAdmission<'static>, Refusal>>(), size_of::<TcAcknowledged<'static>>(),
+        size_of::<Result<TcAcknowledged<'static>, TcRecoveryOutcome>>(), size_of::<TcResumptionAdmission<'static>>(),
+        size_of::<Result<TcResumptionAdmission<'static>, Refusal>>(), size_of::<TcResumptionGate<'static, 'static>>(),
+        size_of::<Report>(), size_of::<PublishResult>(), size_of::<Result<TcPredecessor, Refusal>>(),
+        size_of::<Reservation>(), size_of::<Result<Reservation, SafetyStoreError>>(),
+        node.operational_cap, node.context_cap, node.aggregate_cap);
+    for (phase, terms) in [
+        ("interruption admission", vec![i, w, p.route]),
+        ("interrupted O4", vec![i, w, p.route, p.candidate, p.o4]),
+        (
+            "interrupted predecessor loader",
+            vec![i, w, p.route, p.loader],
+        ),
+        ("O3 proof", vec![i, p.loader]),
+        ("explicit O5", vec![i, h, k, o5]),
+        ("resumption fresh loader", vec![i, h, k, s, p.loader]),
+        ("failure/returned owners", vec![i, h, k, s]),
+        (
+            "newer O4 with all recovery owners",
+            vec![i, h, k, p.candidate, p.o4],
+        ),
+    ] {
+        let bound = terms.into_iter().try_fold(node.context, add).unwrap();
+        println!("TC recovery checked phase {phase}: {bound} <= 84956");
+        assert!(
+            bound <= node.aggregate_cap.unwrap(),
+            "phase {phase} cannot fit"
+        );
     }
 }
 
@@ -735,14 +1221,23 @@ struct Ledger {
 }
 impl Ledger {
     fn capture(backend: &SafetyBackend) -> Self {
-        Self {
+        let ledger = Self {
             operational: backend.accounting_current(),
             context: backend.context_accounting_current(),
             aggregate: backend.accounting_aggregate_current(),
             operational_cap: backend.accounting_cap(),
             context_cap: backend.context_accounting_cap(),
             aggregate_cap: backend.accounting_aggregate_cap(),
-        }
+        };
+        assert!(ledger
+            .operational_cap
+            .is_some_and(|cap| ledger.operational <= cap));
+        assert!(ledger.context_cap.is_some_and(|cap| ledger.context <= cap));
+        assert!(ledger
+            .aggregate_cap
+            .is_some_and(|cap| ledger.aggregate <= cap));
+        assert_eq!(ledger.aggregate, ledger.operational + ledger.context);
+        ledger
     }
     fn returned(self, f: &Fixture, route: u128) {
         assert_eq!(
@@ -764,10 +1259,12 @@ struct ConsensusLedger {
 
 impl ConsensusLedger {
     fn capture(engine: &BasicHotStuffEngine<[u8; 32]>) -> Self {
-        Self {
+        let ledger = Self {
             retained: engine.state().retained_evidence_bytes(),
             ceiling: engine.state().max_retained_evidence_bytes(),
-        }
+        };
+        assert!(ledger.retained <= ledger.ceiling);
+        ledger
     }
 }
 
@@ -805,6 +1302,8 @@ struct RefusalBaseline {
     node: Ledger,
     consensus: ConsensusLedger,
     selected_arc_strong_count: usize,
+    selected_wire: WireQc,
+    selected_backings: [usize; 10],
 }
 
 impl RefusalBaseline {
@@ -845,6 +1344,8 @@ impl RefusalBaseline {
             node: f.sample(),
             consensus: ConsensusLedger::capture(&f.engine),
             selected_arc_strong_count: Arc::strong_count(&f.selected),
+            selected_wire: f.selected.certificate().clone(),
+            selected_backings: wire_backings(f.selected.certificate()),
         }
     }
 
@@ -860,6 +1361,11 @@ impl RefusalBaseline {
             self.selected_arc_strong_count,
             "caller-owned verified-QC Arc strong count differs"
         );
+        assert!(
+            f.selected.certificate() == &self.selected_wire
+                && wire_backings(f.selected.certificate()) == self.selected_backings,
+            "independent selected wire QC/backings differ (redacted)"
+        );
     }
 
     fn assert_input_engine_consensus(&self, f: &Fixture) {
@@ -871,7 +1377,10 @@ impl RefusalBaseline {
         let lock_backing = f.engine.locked_qc().map_or([0; 2], |qc| {
             [qc.signers.as_ptr() as usize, qc.signers.capacity()]
         });
-        assert_eq!(lock_backing, self.engine_lock_backing);
+        assert!(
+            lock_backing == self.engine_lock_backing,
+            "engine lock backing differs (redacted)"
+        );
         assert_eq!(f.engine.current_view(), self.engine_view);
         assert_eq!(
             f.engine.timeout_effect_latches_for_test(),
@@ -902,8 +1411,8 @@ impl RefusalBaseline {
                 }
                 value
             });
-            assert_eq!(
-                backing, *slot,
+            assert!(
+                backing == *slot,
                 "retained Timeout backing differs (redacted)"
             );
         }
@@ -982,6 +1491,20 @@ fn input_backings(tc: &TimeoutCert) -> [usize; 32] {
         if let Some(qc) = &timeout.high_qc {
             push(qc.signers.as_ptr() as usize, qc.signers.capacity());
         }
+    }
+    result
+}
+
+fn wire_backings(qc: &WireQc) -> [usize; 10] {
+    let mut result = [0; 10];
+    result[0] = qc.signer_bitmap.as_ptr() as usize;
+    result[1] = qc.signer_bitmap.capacity();
+    result[2] = qc.signatures.as_ptr() as usize;
+    result[3] = qc.signatures.capacity();
+    assert!(qc.signatures.len() <= 3);
+    for (slot, signature) in result[4..].chunks_exact_mut(2).zip(&qc.signatures) {
+        slot[0] = signature.as_ptr() as usize;
+        slot[1] = signature.capacity();
     }
     result
 }
@@ -2086,6 +2609,1003 @@ fn nonraising_effective_operation_cannot_skip_authoritative_fences() {
         assert_eq!(f.engine.timeout_count(7), 3);
         drop(result);
         assert_eq!(f.sample(), before);
+    }
+}
+
+// These allocating witnesses are caller-owned test instrumentation, not model
+// evidence owners. Capture them before invoking the operation being measured.
+struct TcProofWitness {
+    bytes: Vec<u8>,
+    meta: Vec<u8>,
+    record: LockedRecord,
+    encoded_backing: [usize; 2],
+    tc_backings: [usize; 32],
+    high_backing: [usize; 2],
+    revision: u64,
+    incarnation: Option<u64>,
+    context: [u8; 32],
+    status: EvidenceStatus,
+}
+
+impl TcProofWitness {
+    fn capture(owner: &SafetyRecordOwner, proof: &ValidatedRecord) -> Self {
+        let SafetyRecord::Locked(record) = &proof.retained().record else {
+            panic!("expected TC lock")
+        };
+        let SupportingEvidence::TcDerived { high_qc, tc } = &record.evidence else {
+            panic!("expected TC")
+        };
+        Self {
+            bytes: proof.encoded().to_vec(),
+            record: record.clone(),
+            meta: owner
+                .backend
+                .read_meta(super::super::backend::META_ENCODED_LEN)
+                .unwrap()
+                .unwrap(),
+            encoded_backing: [proof.encoded().as_ptr() as usize, proof.encoded_capacity()],
+            tc_backings: input_backings(tc),
+            high_backing: [
+                high_qc.signers.as_ptr() as usize,
+                high_qc.signers.capacity(),
+            ],
+            revision: proof.publication_revision(),
+            incarnation: proof.recovery_backend_incarnation(),
+            context: *proof.origin_context_digest(),
+            status: proof.evidence_status(),
+        }
+    }
+
+    fn unchanged(&self, proof: &ValidatedRecord) {
+        let SafetyRecord::Locked(record) = &proof.retained().record else {
+            panic!("expected TC lock")
+        };
+        let SupportingEvidence::TcDerived { high_qc, tc } = &record.evidence else {
+            panic!("expected TC")
+        };
+        assert!(
+            proof.encoded() == self.bytes
+                && record == &self.record
+                && [proof.encoded().as_ptr() as usize, proof.encoded_capacity()]
+                    == self.encoded_backing
+                && input_backings(tc) == self.tc_backings
+                && [
+                    high_qc.signers.as_ptr() as usize,
+                    high_qc.signers.capacity()
+                ] == self.high_backing
+                && proof.origin_context_digest() == &self.context
+                && proof.recovery_backend_incarnation() == self.incarnation,
+            "complete proof/provenance/backing differs (redacted)"
+        );
+        assert_eq!(proof.publication_revision(), self.revision);
+        assert_eq!(proof.evidence_status(), self.status);
+        assert_eq!(self.status, EvidenceStatus::Unverified);
+    }
+
+    fn storage_unchanged(&self, owner: &SafetyRecordOwner) {
+        assert!(
+            owner
+                .backend
+                .read_record(max_safety_record_bytes(owner.pinned()).unwrap())
+                .unwrap()
+                .as_deref()
+                == Some(self.bytes.as_slice()),
+            "authoritative publication differs (redacted)"
+        );
+        assert!(
+            owner
+                .backend
+                .read_meta(super::super::backend::META_ENCODED_LEN)
+                .unwrap()
+                .as_deref()
+                == Some(self.meta.as_slice()),
+            "authoritative metadata differs (redacted)"
+        );
+    }
+}
+
+macro_rules! interrupted_checked {
+    ($f:ident) => {{
+        let before = RefusalBaseline::capture(&$f);
+        $f.owner
+            .backend
+            .set_inject(InjectFault::UncertainAfterWrite);
+        let attempt = admit_interruption(&$f.owner, &$f.tc)
+            .unwrap()
+            .invoke(
+                &mut $f.engine,
+                &$f.authority,
+                &$f.selected,
+                $f.revision,
+                &$f.history,
+            )
+            .unwrap();
+        before.assert_route_refusal(&$f, interruption_charge().unwrap());
+        assert_eq!(
+            attempt.controls.publication,
+            Some(PublishResult::UncertainDurable)
+        );
+        assert_eq!(
+            attempt.outcome,
+            Some(Ok(TimeoutCertificateOutcome::Refused {
+                reason: Refusal::Publication
+            }))
+        );
+        assert_eq!(
+            (attempt.controls.gate_calls, attempt.controls.submitted),
+            (1, 1)
+        );
+        assert!($f.owner.recovery_required());
+        $f.owner.backend.set_inject(InjectFault::None);
+        attempt
+    }};
+}
+
+macro_rules! acknowledged_checked {
+    ($f:ident, $attempt:ident, $proof:ident) => {{
+        let before = RefusalBaseline::capture(&$f);
+        let witness = TcProofWitness::capture(&$f.owner, &$proof);
+        let ack = admit_recovery(&$f.owner)
+            .unwrap()
+            .acknowledge(&$attempt, &$proof);
+        before.assert_route_refusal(&$f, recovery_charge().unwrap());
+        assert!(ack.is_ok(), "ordinary explicit O5 did not acknowledge");
+        assert!(!$f.owner.recovery_required());
+        witness.unchanged(&$proof);
+        witness.storage_unchanged(&$f.owner);
+        ack.unwrap()
+    }};
+}
+
+macro_rules! proof_checked {
+    ($f:ident, $attempt:ident) => {{
+        let before = RefusalBaseline::capture(&$f);
+        let proof = $f.read();
+        before.assert_route_refusal(&$f, $f.owner.retained_holder_charge().unwrap());
+        assert!($f.owner.recovery_required());
+        assert_eq!(proof.evidence_status(), EvidenceStatus::Unverified);
+        assert!(exact_tc_record(&proof, &$attempt));
+        proof
+    }};
+}
+
+macro_rules! resumed {
+    ($f:ident, $ack:ident) => {
+        admit_resumption(&$f.owner, &$f.tc).unwrap().invoke(
+            &mut $f.engine,
+            &$f.authority,
+            &$f.tc,
+            &$f.selected,
+            &$ack,
+            |_| {},
+            |_| {},
+        )
+    };
+}
+
+fn assert_resumed(report: &Report) {
+    assert_eq!(
+        report.outcome,
+        Some(Ok(TimeoutCertificateOutcome::LockRaised { view: 8 }))
+    );
+    assert_eq!(
+        (report.controls.gate_calls, report.controls.submitted),
+        (1, 0)
+    );
+    assert!(report.controls.publication.is_none());
+    assert_eq!(report.controls.refused, None);
+}
+
+fn teardown_tc(f: Fixture) {
+    let backend = f.owner.backend.clone();
+    let consensus = ConsensusLedger::capture(&f.engine);
+    assert_eq!(f.sample().operational, 0);
+    assert_eq!(ConsensusLedger::capture(&f.engine).retained, 0);
+    assert_eq!(Arc::strong_count(&f.selected), 1);
+    drop(f);
+    let node = Ledger::capture(&backend);
+    assert_eq!((node.operational, node.context, node.aggregate), (0, 0, 0));
+    assert!(backend.accounting_peak() <= node.operational_cap.unwrap());
+    assert!(backend.context_accounting_peak() <= node.context_cap.unwrap());
+    assert!(backend.accounting_aggregate_peak() <= node.aggregate_cap.unwrap());
+    println!("TC recovery teardown: node current op/context/aggregate=0/0/0 peaks={}/{}/{} caps={:?}/{:?}/{:?}; independent consensus={consensus:?}; original caller-QC Arc strong_count=1",
+        backend.accounting_peak(), backend.context_accounting_peak(), backend.accounting_aggregate_peak(),
+        node.operational_cap, node.context_cap, node.aggregate_cap);
+}
+
+#[test]
+fn uncertain_o4_o2_o3_explicit_o5_exact_tc_resumption_once() {
+    let mut f = Fixture::new();
+    let original = RefusalBaseline::capture(&f);
+    let attempt = interrupted_checked!(f);
+    let before = RefusalBaseline::capture(&f);
+    let opened = f.owner.open().unwrap();
+    before.assert_route_returned(&f);
+    assert_eq!(opened.current_revision, f.revision + 1);
+    assert!(f.owner.recovery_required());
+    let proof = f.read();
+    before.assert_route_refusal(&f, f.owner.retained_holder_charge().unwrap());
+    assert!(f.owner.recovery_required());
+    assert!(exact_tc_record(&proof, &attempt));
+    let witness = TcProofWitness::capture(&f.owner, &proof);
+    let before = RefusalBaseline::capture(&f);
+    let blocked = admit(&f.owner, &f.tc).unwrap().invoke(
+        &mut f.engine,
+        &f.authority,
+        Some(&f.selected),
+        f.revision,
+        Some(&f.history),
+        |_| {},
+        |_| {},
+    );
+    let route = Inventory::checked(&f.owner, &f.tc).unwrap().route;
+    before.assert_route_refusal(&f, route);
+    assert_eq!(blocked.controls.refused, Some(Refusal::RecoveryRequired));
+    assert_eq!(
+        (blocked.controls.gate_calls, blocked.controls.submitted),
+        (0, 0)
+    );
+    assert!(blocked.controls.publication.is_none());
+    assert!(f.owner.recovery_required());
+    witness.unchanged(&proof);
+    drop(blocked);
+    before.assert_route_returned(&f);
+    let ack = acknowledged_checked!(f, attempt, proof);
+    let before = f.sample();
+    let s = resumption_charge(route).unwrap();
+    let competitor = Competitor::new(f.owner.backend.clone());
+    competitor.expect(true);
+    let observations = Arc::new(BoundaryObservations::default());
+    *f.notes.competitor.lock().unwrap() = Some(competitor.clone());
+    *f.notes.observers.lock().unwrap() = Some(observations.clone());
+    let report = admit_resumption(&f.owner, &f.tc).unwrap().invoke(
+        &mut f.engine,
+        &f.authority,
+        &f.tc,
+        &f.selected,
+        &ack,
+        |old| {
+            competitor.expect(false);
+            assert!(old.locked_qc().is_none());
+            assert_eq!(old.timeout_count(7), 3);
+            observations.post_ack.fetch_add(1, Ordering::SeqCst);
+        },
+        |applied| {
+            competitor.expect(false);
+            assert_eq!(applied.current_view(), 8);
+            observations.return_boundary.fetch_add(1, Ordering::SeqCst);
+        },
+    );
+    before.returned(&f, s);
+    original.assert_applied(&f, f.sample());
+    assert_resumed(&report);
+    assert_eq!(observations.status(), ObservationStatus::Complete);
+    witness.unchanged(&proof);
+    witness.storage_unchanged(&f.owner);
+    competitor.expect(true);
+    drop(report);
+    assert_eq!(f.sample(), before);
+    let repeated = RefusalBaseline::capture(&f);
+    let report = resumed!(f, ack);
+    repeated.assert_route_refusal(&f, s);
+    assert_eq!(report.controls.refused, Some(Refusal::Predecessor));
+    assert_eq!(
+        (report.controls.gate_calls, report.controls.submitted),
+        (0, 0)
+    );
+    assert!(report.outcome.is_none());
+    witness.unchanged(&proof);
+    witness.storage_unchanged(&f.owner);
+    drop(report);
+    repeated.assert_route_returned(&f);
+    *f.notes.competitor.lock().unwrap() = None;
+    *f.notes.observers.lock().unwrap() = None;
+    assert!(competitor.shutdown());
+    assert!(competitor.joined.load(Ordering::SeqCst));
+    drop(competitor);
+    drop(ack);
+    let after_ack = f.sample();
+    assert_eq!(
+        after_ack.operational,
+        interruption_charge().unwrap() + f.owner.retained_holder_charge().unwrap()
+    );
+    drop(proof);
+    assert_eq!(f.sample().operational, interruption_charge().unwrap());
+    drop(attempt);
+    original.assert_applied(&f, original.node);
+    teardown_tc(f);
+    println!("TC O5 A: actual uncertain O4; O2/O3 blocked; explicit O5; one exact gate application; repeated use refused; domain held at pre-effect/recorder/return");
+}
+
+#[test]
+fn explicit_o5_actual_faults_remain_distinct_and_retry_acknowledges() {
+    for (fault, expected) in [
+        (
+            InjectFault::FailBeforeSubmit,
+            TcRecoveryOutcome::RefusedPreWrite,
+        ),
+        (
+            InjectFault::WriteErrors,
+            TcRecoveryOutcome::WriteFailedAmbiguous,
+        ),
+        (
+            InjectFault::UncertainAfterWrite,
+            TcRecoveryOutcome::UncertainDurable,
+        ),
+    ] {
+        let mut f = Fixture::new();
+        let attempt = interrupted_checked!(f);
+        let proof = proof_checked!(f, attempt);
+        let witness = TcProofWitness::capture(&f.owner, &proof);
+        let before = RefusalBaseline::capture(&f);
+        f.owner.backend.set_inject(fault);
+        let failed = admit_recovery(&f.owner)
+            .unwrap()
+            .acknowledge(&attempt, &proof);
+        before.assert_route_returned(&f);
+        assert!(matches!(failed, Err(actual) if actual == expected));
+        assert!(f.owner.recovery_required());
+        witness.unchanged(&proof);
+        // The injected ambiguous backend is deterministic here; no general
+        // claim that arbitrary ambiguous storage is unchanged is made.
+        witness.storage_unchanged(&f.owner);
+        drop(failed);
+        f.owner.backend.set_inject(InjectFault::None);
+        let ack = acknowledged_checked!(f, attempt, proof);
+        let original = RefusalBaseline::capture(&f);
+        let s = resumption_charge(Inventory::checked(&f.owner, &f.tc).unwrap().route).unwrap();
+        let report = resumed!(f, ack);
+        original.node.returned(&f, s);
+        original.assert_applied(&f, f.sample());
+        assert_resumed(&report);
+        witness.unchanged(&proof);
+        witness.storage_unchanged(&f.owner);
+        drop(report);
+        drop(ack);
+        drop(proof);
+        drop(attempt);
+        teardown_tc(f);
+        println!(
+            "TC O5 B: {expected:?}; no acknowledged owner; actual cleared-fault O5 retry succeeds"
+        );
+    }
+}
+
+#[test]
+fn recovery_rejects_foreign_proof_and_replaced_publication() {
+    let mut f = Fixture::new();
+    let mut newer = f.tc.clone();
+    newer.timeout_view = 8;
+    newer.view = 9;
+    newer.high_qc.as_mut().unwrap().view = 7;
+    for timeout in &mut newer.signed_timeouts {
+        timeout.view = 8;
+        timeout.high_qc = newer.high_qc.clone();
+        timeout.signature = MlDsa44Backend::sign(
+            f.authority.secret(timeout.validator_id.0 as usize),
+            &timeout.signing_bytes(),
+        )
+        .unwrap();
+    }
+    let registry =
+        SimpleBackendRegistry::with_backend(SUITE_PQ_RESERVED_1, Arc::new(MlDsa44Backend));
+    assert!(verify_timeout_certificate_with_evidence(
+        &newer,
+        &newer.signed_timeouts,
+        f.engine.validators(),
+        &f.authority,
+        &registry,
+        qbind_types::QBIND_DEVNET_CHAIN_ID,
+    )
+    .is_ok());
+    let newer_original = newer.clone();
+    let newer_backings = input_backings(&newer);
+    let attempt = interrupted_checked!(f);
+    let proof = proof_checked!(f, attempt);
+    // Same exact authenticated inputs and pinned context, different real backend.
+    let foreign_dir = tempfile::tempdir().unwrap();
+    let foreign_backend = SafetyBackend::open_or_initialize(
+        foreign_dir.path(),
+        SafetyBackendPolicy::EnabledForTesting,
+        TrustBundleEnvironment::Devnet,
+    )
+    .unwrap();
+    let foreign_owner =
+        SafetyRecordOwner::attach(foreign_backend.clone(), f.authority.pinned()).unwrap();
+    assert_eq!(foreign_owner.initialize(true).unwrap(), f.revision);
+    let lease = foreign_owner
+        .backend
+        .accounting()
+        .reserve(Inventory::checked(&foreign_owner, &f.tc).unwrap().candidate)
+        .unwrap();
+    let candidate = copy_candidate(&f.tc, foreign_owner.pinned(), None, f.revision);
+    assert!(matches!(
+        foreign_owner.publish_locked(candidate, f.revision, Some(&f.history)),
+        PublishResult::DurableAcknowledged { .. }
+    ));
+    drop(lease);
+    let foreign = foreign_owner.read_validate(Some(&f.history)).unwrap();
+    assert!(
+        foreign.encoded() == proof.encoded(),
+        "foreign control bytes differ (redacted)"
+    );
+    let witness = TcProofWitness::capture(&foreign_owner, &foreign);
+    let before = RefusalBaseline::capture(&f);
+    let ordinary = f.owner.reacknowledge(&foreign);
+    before.assert_route_returned(&f);
+    assert!(matches!(ordinary, PublishResult::RefusedPreWrite(_)));
+    assert!(f.owner.recovery_required());
+    witness.unchanged(&foreign);
+    let result = admit_recovery(&f.owner)
+        .unwrap()
+        .acknowledge(&attempt, &foreign);
+    before.assert_route_returned(&f);
+    assert!(matches!(result, Err(TcRecoveryOutcome::AttemptMismatch)));
+    witness.unchanged(&foreign);
+    drop(result);
+    drop(foreign);
+    drop(foreign_owner);
+    assert_eq!(foreign_backend.accounting_aggregate_current(), 0);
+    let ack = acknowledged_checked!(f, attempt, proof);
+    let old = TcProofWitness::capture(&f.owner, &proof);
+    let before = RefusalBaseline::capture(&f);
+    let plan = Inventory::checked(&f.owner, &f.tc).unwrap();
+    let lease = f
+        .owner
+        .backend
+        .accounting()
+        .reserve(plan.candidate)
+        .unwrap();
+    let candidate = copy_candidate(&newer, f.owner.pinned(), None, proof.publication_revision());
+    let replacement =
+        f.owner
+            .publish_locked(candidate, proof.publication_revision(), Some(&f.history));
+    before.assert_route_refusal(&f, plan.candidate);
+    assert_eq!(
+        replacement,
+        PublishResult::DurableAcknowledged {
+            new_revision: proof.publication_revision() + 1
+        }
+    );
+    assert!(
+        newer == newer_original && input_backings(&newer) == newer_backings,
+        "authenticated replacement TC/backings differ (redacted)"
+    );
+    drop(lease);
+    before.assert_route_returned(&f);
+    let report = resumed!(f, ack);
+    before.assert_route_refusal(&f, resumption_charge(plan.route).unwrap());
+    assert_eq!(report.controls.refused, Some(Refusal::PublicationChanged));
+    assert_eq!(
+        (report.controls.gate_calls, report.controls.submitted),
+        (0, 0)
+    );
+    old.unchanged(&proof);
+    drop(report);
+    before.assert_route_returned(&f);
+    let stale = f.owner.reacknowledge(&proof);
+    before.assert_route_returned(&f);
+    assert!(matches!(stale, PublishResult::RefusedPreWrite(_)));
+    old.unchanged(&proof);
+    drop(ack);
+    drop(proof);
+    drop(attempt);
+    teardown_tc(f);
+}
+
+#[test]
+fn resumption_context_predecessor_and_renewed_recovery_fences_precede_engine() {
+    for case in 0..7 {
+        let mut f = Fixture::new();
+        let attempt = interrupted_checked!(f);
+        let proof = proof_checked!(f, attempt);
+        let ack = acknowledged_checked!(f, attempt, proof);
+        let wrong_authority = Authority::new_for_wire_chain(8);
+        let mut changed = f.authority.pinned();
+        changed.chain_id = 8;
+        let changed_owner = SafetyRecordOwner::attach(f.owner.backend.clone(), changed).unwrap();
+        if case == 1 {
+            f.engine.try_advance_to_view(8); // Would be stale without the preflight fence.
+        } else if case == 2 {
+            f.engine
+                .state_mut()
+                .set_locked_qc(f.tc.high_qc.as_ref().unwrap().clone());
+        } else if case == 3 {
+            f.owner.backend.set_inject(InjectFault::UncertainAfterWrite);
+            let before = RefusalBaseline::capture(&f);
+            let uncertain = f.owner.reacknowledge(&proof);
+            before.assert_route_returned(&f);
+            assert_eq!(uncertain, PublishResult::UncertainDurable);
+            assert!(f.owner.recovery_required());
+            f.owner.backend.set_inject(InjectFault::None);
+        } else if case == 5 {
+            f.engine.mark_timeout_emitted();
+        } else if case == 6 {
+            let mut extra = TimeoutMessage::new(7, f.tc.high_qc.clone(), ValidatorId(3));
+            extra.suite_id = 100;
+            extra.signature =
+                MlDsa44Backend::sign(f.authority.secret(3), &extra.signing_bytes()).unwrap();
+            let before = RefusalBaseline::capture(&f);
+            let ingested = f.engine.on_timeout_msg(ValidatorId(3), extra);
+            assert_eq!(f.sample(), before.node);
+            before.assert_input_and_consensus(&f);
+            assert_eq!(RecorderCounters::capture(&f.notes), before.recorder);
+            assert_eq!(f.engine.current_view(), before.engine_view);
+            assert_eq!(
+                f.engine.timeout_effect_latches_for_test(),
+                before.engine_latches
+            );
+            assert!(ingested.is_ok());
+            assert_eq!(f.engine.timeout_count(7), 4);
+        }
+        let witness = TcProofWitness::capture(&f.owner, &proof);
+        let before = RefusalBaseline::capture(&f);
+        let owner = if case == 4 { &changed_owner } else { &f.owner };
+        let authority = if case == 0 {
+            &wrong_authority
+        } else {
+            &f.authority
+        };
+        let s = resumption_charge(Inventory::checked(owner, &f.tc).unwrap().route).unwrap();
+        let report = admit_resumption(owner, &f.tc).unwrap().invoke(
+            &mut f.engine,
+            authority,
+            &f.tc,
+            &f.selected,
+            &ack,
+            |_| panic!("unexpected effect"),
+            |_| {},
+        );
+        before.assert_route_refusal(&f, s);
+        assert_eq!(
+            report.controls.refused,
+            Some(match case {
+                0 | 4 => Refusal::Context,
+                3 => Refusal::RecoveryRequired,
+                _ => Refusal::Predecessor,
+            })
+        );
+        assert_eq!(
+            (report.controls.gate_calls, report.controls.submitted),
+            (0, 0)
+        );
+        assert!(report.outcome.is_none());
+        witness.unchanged(&proof);
+        witness.storage_unchanged(&f.owner);
+        drop(report);
+        before.assert_route_returned(&f);
+        if case == 3 {
+            let retry = acknowledged_checked!(f, attempt, proof);
+            let before = RefusalBaseline::capture(&f);
+            let report = resumed!(f, retry);
+            before.node.returned(&f, s);
+            before.assert_applied(&f, f.sample());
+            assert_resumed(&report);
+            drop(report);
+            drop(retry);
+        }
+        drop(changed_owner);
+        drop(ack);
+        drop(proof);
+        drop(attempt);
+        teardown_tc(f);
+    }
+}
+
+#[test]
+fn authenticated_alternative_same_selected_block_view_is_not_original_tc() {
+    let mut f = Fixture::new();
+    let mut other_wire = f.selected.certificate().clone();
+    other_wire.round = 4;
+    let vote = qbind_wire::consensus::Vote {
+        version: other_wire.version,
+        chain_id: other_wire.chain_id,
+        epoch: other_wire.epoch,
+        height: other_wire.height,
+        round: other_wire.round,
+        step: other_wire.step,
+        block_id: other_wire.block_id,
+        suite_id: other_wire.suite_id,
+        validator_index: 0,
+        signature: Vec::new(),
+    };
+    for (index, signature) in other_wire.signatures.iter_mut().enumerate() {
+        *signature = f.authority.sign_like_vote(&vote, index).signature;
+    }
+    let other_selected = f.authority.verified_test_evidence(&other_wire);
+    let other_backings = wire_backings(other_selected.certificate());
+    let mut alternative = f.tc.clone();
+    // Genuine different quorum: 0,1,3 instead of 0,1,2. Re-sign the changed
+    // Timeout preimage; both independently authenticated TCs select the same QC.
+    alternative.signers[2] = ValidatorId(3);
+    alternative.signed_timeouts[2].validator_id = ValidatorId(3);
+    alternative.signed_timeouts[2].signature = MlDsa44Backend::sign(
+        f.authority.secret(3),
+        &alternative.signed_timeouts[2].signing_bytes(),
+    )
+    .unwrap();
+    let registry =
+        SimpleBackendRegistry::with_backend(SUITE_PQ_RESERVED_1, Arc::new(MlDsa44Backend));
+    assert!(verify_timeout_certificate_with_evidence(
+        &alternative,
+        &alternative.signed_timeouts,
+        f.engine.validators(),
+        &f.authority,
+        &registry,
+        qbind_types::QBIND_DEVNET_CHAIN_ID,
+    )
+    .is_ok());
+    assert!(
+        alternative != f.tc && alternative.high_qc == f.tc.high_qc,
+        "alternative control differs (redacted)"
+    );
+    let alternative_bytes = alternative.clone();
+    let alternative_backings = input_backings(&alternative);
+    let attempt = interrupted_checked!(f);
+    let proof = proof_checked!(f, attempt);
+    let ack = acknowledged_checked!(f, attempt, proof);
+    let witness = TcProofWitness::capture(&f.owner, &proof);
+    let before = RefusalBaseline::capture(&f);
+    let report = admit_resumption(&f.owner, &alternative).unwrap().invoke(
+        &mut f.engine,
+        &f.authority,
+        &alternative,
+        &f.selected,
+        &ack,
+        |_| panic!("substitution applied"),
+        |_| {},
+    );
+    let s = resumption_charge(Inventory::checked(&f.owner, &f.tc).unwrap().route).unwrap();
+    before.assert_route_refusal(&f, s);
+    assert_eq!(report.controls.refused, Some(Refusal::Certificate));
+    assert_eq!(
+        (report.controls.gate_calls, report.controls.submitted),
+        (0, 0)
+    );
+    assert!(
+        alternative == alternative_bytes && input_backings(&alternative) == alternative_backings,
+        "alternative input/backings differ (redacted)"
+    );
+    witness.unchanged(&proof);
+    witness.storage_unchanged(&f.owner);
+    drop(report);
+    before.assert_route_returned(&f);
+    let report = admit_resumption(&f.owner, &f.tc).unwrap().invoke(
+        &mut f.engine,
+        &f.authority,
+        &f.tc,
+        &other_selected,
+        &ack,
+        |_| panic!("wire substitution applied"),
+        |_| {},
+    );
+    before.assert_route_refusal(&f, s);
+    assert_eq!(report.controls.refused, Some(Refusal::Certificate));
+    assert_eq!(
+        (report.controls.gate_calls, report.controls.submitted),
+        (0, 0)
+    );
+    assert!(
+        other_selected.certificate() == &other_wire
+            && wire_backings(other_selected.certificate()) == other_backings
+            && Arc::strong_count(&other_selected) == 1,
+        "alternative verified wire/backing differs (redacted)"
+    );
+    witness.unchanged(&proof);
+    witness.storage_unchanged(&f.owner);
+    drop(report);
+    before.assert_route_returned(&f);
+    let report = resumed!(f, ack);
+    before.node.returned(&f, s);
+    before.assert_applied(&f, f.sample());
+    assert_resumed(&report);
+    drop(report);
+    drop(ack);
+    drop(proof);
+    drop(attempt);
+    teardown_tc(f);
+}
+
+#[test]
+fn recovery_admission_and_working_set_pressure_relief_and_owner_destruction() {
+    for boundary in 0..4 {
+        let mut f = Fixture::new();
+        let node = f.sample();
+        let i = interruption_charge().unwrap();
+        let w = interruption_workspace_charge().unwrap();
+        let plan = Inventory::checked(&f.owner, &f.tc).unwrap();
+        let leave = match boundary {
+            0 => i - 1,
+            1 => i + w - 1,
+            2 => i + w + plan.route - 1,
+            _ => i + w + plan.route + plan.loader.max(plan.candidate),
+        };
+        let pressure = f
+            .owner
+            .backend
+            .accounting()
+            .reserve(node.aggregate_cap.unwrap() - node.aggregate - leave)
+            .unwrap();
+        let before = RefusalBaseline::capture(&f);
+        if boundary < 3 {
+            let failed = admit_interruption(&f.owner, &f.tc);
+            before.assert_route_returned(&f);
+            assert!(matches!(failed, Err(Refusal::Capacity)));
+            drop(failed);
+        } else {
+            let refused = admit_interruption(&f.owner, &f.tc)
+                .unwrap()
+                .invoke(
+                    &mut f.engine,
+                    &f.authority,
+                    &f.selected,
+                    f.revision,
+                    &f.history,
+                )
+                .unwrap();
+            before.assert_route_refusal(&f, i);
+            assert!(matches!(
+                refused.controls.publication,
+                Some(PublishResult::RefusedPreWrite(
+                    SafetyStoreError::CapacityRefusal(_)
+                ))
+            ));
+            assert_eq!(refused.controls.refused, Some(Refusal::Publication));
+            assert_eq!(
+                (refused.controls.gate_calls, refused.controls.submitted),
+                (1, 1)
+            );
+            assert!(!f.owner.recovery_required());
+            drop(refused);
+            before.assert_route_returned(&f);
+        }
+        drop(pressure);
+        assert_eq!(f.sample(), node);
+        let abandoned = admit_interruption(&f.owner, &f.tc).unwrap();
+        node.returned(&f, i + w + plan.route);
+        drop(abandoned);
+        assert_eq!(f.sample(), node);
+        let attempt = interrupted_checked!(f);
+        let free = f.sample().aggregate_cap.unwrap() - f.sample().aggregate;
+        let pressure = f.owner.backend.accounting().reserve(free).unwrap();
+        let before = RefusalBaseline::capture(&f);
+        let blocked_proof = f.owner.read_validate(Some(&f.history));
+        before.assert_route_returned(&f);
+        assert!(matches!(
+            blocked_proof,
+            Err(SafetyStoreError::CapacityRefusal(_))
+        ));
+        assert!(f.owner.recovery_required());
+        drop(blocked_proof);
+        drop(pressure);
+        let before = RefusalBaseline::capture(&f);
+        let proof = f.read();
+        before.assert_route_refusal(&f, f.owner.retained_holder_charge().unwrap());
+        assert!(f.owner.recovery_required());
+        let witness = TcProofWitness::capture(&f.owner, &proof);
+        let free = f.sample().aggregate_cap.unwrap() - f.sample().aggregate;
+        let k = recovery_charge().unwrap();
+        let pressure = f
+            .owner
+            .backend
+            .accounting()
+            .reserve(free - if boundary % 2 == 0 { k - 1 } else { k })
+            .unwrap();
+        let before = RefusalBaseline::capture(&f);
+        if boundary % 2 == 0 {
+            let failed = admit_recovery(&f.owner);
+            before.assert_route_returned(&f);
+            assert!(matches!(failed, Err(Refusal::Capacity)));
+            drop(failed);
+        } else {
+            let failed = admit_recovery(&f.owner)
+                .unwrap()
+                .acknowledge(&attempt, &proof);
+            before.assert_route_returned(&f);
+            assert!(matches!(failed, Err(TcRecoveryOutcome::RefusedPreWrite)));
+            drop(failed);
+        }
+        assert!(f.owner.recovery_required());
+        witness.unchanged(&proof);
+        witness.storage_unchanged(&f.owner);
+        drop(pressure);
+        let before = f.sample();
+        let abandoned = admit_recovery(&f.owner).unwrap();
+        before.returned(&f, k);
+        drop(abandoned);
+        assert_eq!(f.sample(), before);
+        let ack = acknowledged_checked!(f, attempt, proof);
+        let before = RefusalBaseline::capture(&f);
+        let s = resumption_charge(plan.route).unwrap();
+        let report = resumed!(f, ack);
+        before.node.returned(&f, s);
+        before.assert_applied(&f, f.sample());
+        assert_resumed(&report);
+        witness.unchanged(&proof);
+        witness.storage_unchanged(&f.owner);
+        drop(report);
+        assert_eq!(f.sample(), before.node);
+        drop(ack);
+        drop(proof);
+        drop(attempt);
+        teardown_tc(f);
+    }
+}
+
+#[test]
+fn resumption_admission_and_fresh_loader_pressure_relief_retry() {
+    for boundary in 0..2 {
+        let mut f = Fixture::new();
+        let attempt = interrupted_checked!(f);
+        let proof = proof_checked!(f, attempt);
+        let ack = acknowledged_checked!(f, attempt, proof);
+        let witness = TcProofWitness::capture(&f.owner, &proof);
+        let plan = Inventory::checked(&f.owner, &f.tc).unwrap();
+        let s = resumption_charge(plan.route).unwrap();
+        let node = f.sample();
+        let free = node.aggregate_cap.unwrap() - node.aggregate;
+        let pressure = f
+            .owner
+            .backend
+            .accounting()
+            .reserve(free - s + u128::from(boundary == 0))
+            .unwrap();
+        let before = RefusalBaseline::capture(&f);
+        if boundary == 0 {
+            let failed = admit_resumption(&f.owner, &f.tc);
+            before.assert_route_returned(&f);
+            assert!(matches!(failed, Err(Refusal::Capacity)));
+            drop(failed);
+        } else {
+            let report = resumed!(f, ack);
+            before.assert_route_refusal(&f, s);
+            assert_eq!(report.controls.refused, Some(Refusal::Loader));
+            assert_eq!(
+                (report.controls.gate_calls, report.controls.submitted),
+                (0, 0)
+            );
+            assert!(report.outcome.is_none());
+            witness.unchanged(&proof);
+            drop(report);
+            before.assert_route_returned(&f);
+        }
+        assert!(!f.owner.recovery_required());
+        witness.unchanged(&proof);
+        witness.storage_unchanged(&f.owner);
+        drop(pressure);
+        assert_eq!(f.sample(), node);
+        let abandoned = admit_resumption(&f.owner, &f.tc).unwrap();
+        node.returned(&f, s);
+        drop(abandoned);
+        assert_eq!(f.sample(), node);
+        let before = RefusalBaseline::capture(&f);
+        let report = resumed!(f, ack);
+        before.node.returned(&f, s);
+        before.assert_applied(&f, f.sample());
+        assert_resumed(&report);
+        witness.unchanged(&proof);
+        witness.storage_unchanged(&f.owner);
+        drop(report);
+        assert_eq!(f.sample(), node);
+        drop(ack);
+        drop(proof);
+        drop(attempt);
+        teardown_tc(f);
+    }
+}
+
+#[test]
+fn anchored_exact_tc_o5_and_resumption_preserve_independent_history() {
+    let mut f = Fixture::new();
+    let anchor = CommittedAnchor {
+        block_id: [0xC1; 32],
+        height: 1,
+    };
+    f.history = FixtureCommittedHistory::new().with(anchor.block_id, anchor.height);
+    f.seed(Some(anchor.clone()));
+    f.engine.state_mut().set_locked_qc(LogicalQc::new(
+        [0xB5; 32],
+        5,
+        vec![ValidatorId(0), ValidatorId(1), ValidatorId(2)],
+    ));
+    let attempt = interrupted_checked!(f);
+    assert_eq!(attempt.controls.anchor, Some(anchor.clone()));
+    let wrong = FixtureCommittedHistory::new().with([0xC2; 32], 1);
+    for history in [None, Some(&wrong)] {
+        let before = RefusalBaseline::capture(&f);
+        let failed = f.owner.read_validate(history);
+        before.assert_route_returned(&f);
+        assert!(
+            failed.is_err(),
+            "independent committed history was required"
+        );
+        assert!(f.owner.recovery_required());
+        drop(failed);
+    }
+    let before = RefusalBaseline::capture(&f);
+    let proof = f.read();
+    before.assert_route_refusal(&f, f.owner.retained_holder_charge().unwrap());
+    let witness = TcProofWitness::capture(&f.owner, &proof);
+    assert!(exact_tc_record(&proof, &attempt));
+    let ack = acknowledged_checked!(f, attempt, proof);
+    let before = RefusalBaseline::capture(&f);
+    let s = resumption_charge(Inventory::checked(&f.owner, &f.tc).unwrap().route).unwrap();
+    let report = resumed!(f, ack);
+    before.node.returned(&f, s);
+    before.assert_applied(&f, f.sample());
+    assert_resumed(&report);
+    witness.unchanged(&proof);
+    witness.storage_unchanged(&f.owner);
+    let SafetyRecord::Locked(record) = &proof.retained().record else {
+        unreachable!()
+    };
+    assert_eq!(record.committed_anchor, Some(anchor));
+    drop(report);
+    drop(ack);
+    drop(proof);
+    drop(attempt);
+    teardown_tc(f);
+}
+
+#[test]
+fn acknowledged_resumption_unwind_preserves_storage_and_reports_partial_effects() {
+    for boundary in 0..3 {
+        let mut f = Fixture::new();
+        let attempt = interrupted_checked!(f);
+        let proof = proof_checked!(f, attempt);
+        let ack = acknowledged_checked!(f, attempt, proof);
+        let witness = TcProofWitness::capture(&f.owner, &proof);
+        let before = RefusalBaseline::capture(&f);
+        if boundary == 1 {
+            f.notes.panic.store(true, Ordering::SeqCst);
+        }
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _report = admit_resumption(&f.owner, &f.tc).unwrap().invoke(
+                &mut f.engine,
+                &f.authority,
+                &f.tc,
+                &f.selected,
+                &ack,
+                |_| assert!(boundary != 0, "controlled acknowledged pre-effect unwind"),
+                |_| assert!(boundary != 2, "controlled acknowledged return unwind"),
+            );
+        }));
+        assert_eq!(f.sample(), before.node);
+        before.assert_input_and_consensus(&f);
+        assert!(result.is_err());
+        assert!(!f.owner.recovery_required());
+        assert!(matches!(
+            f.owner.backend.try_lock_domain_for_test(),
+            TryLockDomainOutcome::Poisoned
+        ));
+        if boundary == 0 {
+            before.assert_input_engine_consensus(&f);
+        } else if boundary == 1 {
+            assert_eq!(f.engine.locked_qc(), f.tc.high_qc.as_ref());
+            assert_eq!(f.engine.current_view(), before.engine_view);
+            assert_eq!(f.engine.timeout_count(7), 3);
+            assert_eq!(
+                f.engine.timeout_effect_latches_for_test(),
+                before.engine_latches
+            );
+            assert_eq!(
+                RecorderCounters::capture(&f.notes),
+                RecorderCounters {
+                    view: before.recorder.view + 1,
+                    ..before.recorder
+                }
+            );
+        } else {
+            before.assert_applied(&f, before.node);
+        }
+        witness.unchanged(&proof);
+        // Raw readback only: never bypass or reacquire the poisoned owner domain.
+        witness.storage_unchanged(&f.owner);
+        drop(ack);
+        drop(proof);
+        drop(attempt);
+        teardown_tc(f);
+        println!("TC O5 unwind boundary={boundary}: storage acknowledged/unchanged; engine effects={} (callback unwind can be partial); domain poisoned, not repaired", boundary != 0);
     }
 }
 
