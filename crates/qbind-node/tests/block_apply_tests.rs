@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use qbind_consensus::{
@@ -85,21 +86,27 @@ fn test_crypto() -> Arc<dyn CryptoProvider> {
 }
 
 struct AuthFixture {
+    account_id: AccountId,
     public_key: Vec<u8>,
     secret_key: Vec<u8>,
 }
 
 impl AuthFixture {
     fn new() -> Self {
+        Self::new_at(AUTH_KEYSET_ID)
+    }
+
+    fn new_at(account_id: AccountId) -> Self {
         let (public_key, secret_key) =
             qbind_crypto::ml_dsa44::MlDsa44Backend::generate_keypair().expect("ML-DSA-44 keygen");
         Self {
+            account_id,
             public_key,
             secret_key,
         }
     }
 
-    fn seed(&self, store: &mut InMemoryAccountStore) {
+    fn seed(&self, store: &mut impl AccountStore) {
         let keyset = KeysetAccount {
             version: 1,
             reserved0: [0; 3],
@@ -117,7 +124,7 @@ impl AuthFixture {
         let mut data = Vec::new();
         qbind_serde::StateEncode::encode_state(&keyset, &mut data);
         store
-            .put(Account::new(AUTH_KEYSET_ID, KEYSET_PROGRAM_ID, 0, data))
+            .put(Account::new(self.account_id, KEYSET_PROGRAM_ID, 0, data))
             .expect("seed existing test keyset");
     }
 
@@ -125,7 +132,7 @@ impl AuthFixture {
         tx.accounts.insert(
             0,
             TxAccountMeta {
-                account_id: AUTH_KEYSET_ID,
+                account_id: self.account_id,
                 flags: 1,
                 access_hint: 0,
                 reserved0: [0; 2],
@@ -141,6 +148,55 @@ impl AuthFixture {
         tx.auths[0].signature =
             ml_dsa_44_sign_digest(&self.secret_key, &digest).expect("sign canonical tx_digest");
     }
+
+    fn add_required_signer(&self, tx: &mut Transaction, primary: &AuthFixture) {
+        let index = u16::try_from(tx.accounts.len()).unwrap();
+        tx.accounts.push(TxAccountMeta {
+            account_id: self.account_id,
+            flags: 1,
+            access_hint: 0,
+            reserved0: [0; 2],
+        });
+        let digest = qbind_hash::tx::tx_digest(tx);
+        tx.auths[0].signature = ml_dsa_44_sign_digest(&primary.secret_key, &digest).unwrap();
+        tx.auths.push(TxAuth {
+            account_index: index,
+            suite_id: AUTH_SUITE_ID,
+            reserved: 0,
+            signature: ml_dsa_44_sign_digest(&self.secret_key, &digest).unwrap(),
+        });
+    }
+}
+
+#[derive(Default)]
+struct WitnessStore {
+    accounts: HashMap<AccountId, Account>,
+    mutations: usize,
+}
+
+impl AccountStore for WitnessStore {
+    fn get(&self, id: &AccountId) -> Option<Account> {
+        self.accounts.get(id).cloned()
+    }
+    fn put(&mut self, account: Account) -> Result<(), ExecutionError> {
+        self.mutations += 1;
+        self.accounts.insert(account.id, account);
+        Ok(())
+    }
+    fn delete(&mut self, id: &AccountId) -> Result<(), ExecutionError> {
+        self.mutations += 1;
+        self.accounts.remove(id);
+        Ok(())
+    }
+}
+
+fn witness_node() -> Node<WitnessStore> {
+    Node::new(
+        small_validator_set(),
+        HotStuffState::new_at_height(10),
+        BlockVerifyConfig { max_tx_count: 1024 },
+        test_crypto(),
+    )
 }
 
 fn small_validator_set() -> ValidatorSet {
@@ -175,7 +231,7 @@ fn build_keyset_create_tx(target_id: AccountId, auth: &AuthFixture) -> Transacti
 
     let accounts = vec![TxAccountMeta {
         account_id: target_id,
-        flags: 0b0000_0011, // signer + writable
+        flags: 0b0000_0010, // writable target, not the existing authorizing keyset
         access_hint: 0,
         reserved0: [0u8; 2],
     }];
@@ -308,6 +364,95 @@ fn node_returns_block_outcome_when_native_transaction_auth_fails() {
         account_state_after == account_witness,
         "empty-auth transaction changed the complete account witness"
     );
+}
+
+#[test]
+fn node_missing_signer_preserves_actual_proposal_and_sequential_state() {
+    let primary = AuthFixture::new();
+    let second = AuthFixture::new_at(dummy_account_id(0xA1));
+    let mut store = WitnessStore::default();
+    primary.seed(&mut store);
+    second.seed(&mut store);
+    let target = dummy_account_id(0xB1);
+    let later_target = dummy_account_id(0xB2);
+    let mut signed = build_keyset_create_tx(target, &primary);
+    second.add_required_signer(&mut signed, &primary);
+    let mut partial = signed.clone();
+    let removed = partial.auths.pop().unwrap();
+    assert_eq!(partial.auths.len(), 1);
+    assert_eq!(partial.auths[0], signed.auths[0]);
+    let mut restored = partial.clone();
+    restored.auths.push(removed);
+    assert_eq!(restored, signed);
+    let initial = store.accounts.clone();
+    store.mutations = 0;
+    let refused_proposal = build_proposal_with_txs(&[partial.clone()]);
+    let refused_witness = refused_proposal.clone();
+    let outcome = witness_node()
+        .apply_block(&mut store, &refused_proposal)
+        .expect("outer block operation succeeds despite failed transaction");
+    assert_eq!(refused_proposal, refused_witness);
+    assert_eq!(outcome.exec_result.tx_results.len(), 1);
+    assert!(matches!(
+        outcome.exec_result.tx_results[0],
+        qbind_runtime::TxApplyResult::Failed(ExecutionError::InvalidCallData(
+            "required signer authentication missing"
+        ))
+    ));
+    assert!(!outcome.exec_result.all_succeeded());
+    assert!(
+        store.accounts == initial,
+        "complete refused-only state changed"
+    );
+    assert_eq!(store.mutations, 0);
+
+    let mut later = build_keyset_create_tx(later_target, &primary);
+    later.accounts[0].account_id = target;
+    let digest = qbind_hash::tx::tx_digest(&later);
+    later.auths[0].signature = ml_dsa_44_sign_digest(&primary.secret_key, &digest).unwrap();
+    let mut expected = WitnessStore {
+        accounts: initial,
+        mutations: 0,
+    };
+    let positive = build_proposal_with_txs(&[signed.clone(), later.clone()]);
+    let positive_witness = positive.clone();
+    assert!(witness_node()
+        .apply_block(&mut expected, &positive)
+        .expect("later signature authenticates with newly created keyset")
+        .exec_result
+        .all_succeeded());
+    assert_eq!(positive, positive_witness);
+    let proposal = build_proposal_with_txs(&[partial, signed, later]);
+    let witness = proposal.clone();
+    let outcome = witness_node()
+        .apply_block(&mut store, &proposal)
+        .expect("mixed block returns successful outer outcome");
+    assert_eq!(
+        proposal, witness,
+        "complete actual proposal, including all tx bytes, changed"
+    );
+    assert_eq!(outcome.height, 10);
+    assert_eq!(outcome.exec_result.tx_results.len(), 3);
+    assert!(matches!(
+        outcome.exec_result.tx_results[0],
+        qbind_runtime::TxApplyResult::Failed(ExecutionError::InvalidCallData(
+            "required signer authentication missing"
+        ))
+    ));
+    assert!(matches!(
+        outcome.exec_result.tx_results[1],
+        qbind_runtime::TxApplyResult::Success
+    ));
+    assert!(matches!(
+        outcome.exec_result.tx_results[2],
+        qbind_runtime::TxApplyResult::Success
+    ));
+    assert!(!outcome.exec_result.all_succeeded());
+    assert!(
+        store.accounts == expected.accounts,
+        "complete sequential state differs"
+    );
+    assert_eq!(store.mutations, 2);
 }
 
 #[test]

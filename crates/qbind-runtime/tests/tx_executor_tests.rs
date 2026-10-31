@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use qbind_crypto::{ml_dsa_44_sign_digest, MlDsa44SignatureSuite, StaticCryptoProvider};
@@ -22,12 +23,17 @@ fn dummy_program_id(byte: u8) -> ProgramId {
 }
 
 struct AuthFixture {
+    account_id: AccountId,
     public_key: Vec<u8>,
     secret_key: Vec<u8>,
 }
 
 impl AuthFixture {
-    fn new(store: &mut InMemoryAccountStore) -> Self {
+    fn new(store: &mut impl AccountStore) -> Self {
+        Self::new_at(store, AUTH_KEYSET_ID)
+    }
+
+    fn new_at(store: &mut impl AccountStore, account_id: AccountId) -> Self {
         let (public_key, secret_key) =
             qbind_crypto::ml_dsa44::MlDsa44Backend::generate_keypair().expect("ML-DSA-44 keygen");
         let entry = KeysetEntry {
@@ -48,9 +54,10 @@ impl AuthFixture {
         let mut data = Vec::new();
         qbind_serde::StateEncode::encode_state(&keyset, &mut data);
         store
-            .put(Account::new(AUTH_KEYSET_ID, KEYSET_PROGRAM_ID, 0, data))
+            .put(Account::new(account_id, KEYSET_PROGRAM_ID, 0, data))
             .expect("seed existing test keyset");
         Self {
+            account_id,
             public_key,
             secret_key,
         }
@@ -67,7 +74,7 @@ impl AuthFixture {
         tx.accounts.insert(
             0,
             TxAccountMeta {
-                account_id: AUTH_KEYSET_ID,
+                account_id: self.account_id,
                 flags: 1,
                 access_hint: 0,
                 reserved0: [0; 2],
@@ -82,6 +89,46 @@ impl AuthFixture {
         let digest = qbind_hash::tx::tx_digest(tx);
         tx.auths[0].signature =
             ml_dsa_44_sign_digest(&self.secret_key, &digest).expect("sign canonical tx_digest");
+    }
+
+    fn add_required_signer(&self, tx: &mut Transaction, primary: &AuthFixture) {
+        let index = u16::try_from(tx.accounts.len()).unwrap();
+        tx.accounts.push(TxAccountMeta {
+            account_id: self.account_id,
+            flags: 1,
+            access_hint: 0,
+            reserved0: [0; 2],
+        });
+        let digest = qbind_hash::tx::tx_digest(tx);
+        tx.auths[0].signature = ml_dsa_44_sign_digest(&primary.secret_key, &digest).unwrap();
+        tx.auths.push(TxAuth {
+            account_index: index,
+            suite_id: AUTH_SUITE_ID,
+            reserved: 0,
+            signature: ml_dsa_44_sign_digest(&self.secret_key, &digest).unwrap(),
+        });
+    }
+}
+
+#[derive(Default)]
+struct WitnessStore {
+    accounts: HashMap<AccountId, Account>,
+    mutations: usize,
+}
+
+impl AccountStore for WitnessStore {
+    fn get(&self, id: &AccountId) -> Option<Account> {
+        self.accounts.get(id).cloned()
+    }
+    fn put(&mut self, account: Account) -> Result<(), ExecutionError> {
+        self.mutations += 1;
+        self.accounts.insert(account.id, account);
+        Ok(())
+    }
+    fn delete(&mut self, id: &AccountId) -> Result<(), ExecutionError> {
+        self.mutations += 1;
+        self.accounts.remove(id);
+        Ok(())
     }
 }
 
@@ -214,4 +261,39 @@ fn executor_rejects_empty_auth_before_keyset_program_changes_state() {
         account_state_after == account_witness,
         "refusal changed the complete account witness"
     );
+}
+
+#[test]
+fn executor_refuses_nonempty_missing_signer_without_any_program_mutation() {
+    let mut store = WitnessStore::default();
+    let primary = AuthFixture::new(&mut store);
+    let second = AuthFixture::new_at(&mut store, dummy_account_id(0xA1));
+    let executor: TxExecutor<WitnessStore> = TxExecutor::new();
+    let target = dummy_account_id(0xEE);
+    let mut signed = build_keyset_create_tx(target, &primary);
+    second.add_required_signer(&mut signed, &primary);
+    let mut partial = signed.clone();
+    let removed = partial.auths.pop().unwrap();
+    assert_eq!(partial.auths.len(), 1);
+    assert_eq!(partial.auths[0], signed.auths[0]);
+    let mut restored = partial.clone();
+    restored.auths.push(removed);
+    assert_eq!(restored, signed);
+    let witness = partial.clone();
+    let state = store.accounts.clone();
+    store.mutations = 0;
+    assert!(matches!(
+        executor.execute_transaction(&mut store, primary.crypto(), &partial),
+        Err(ExecutionError::InvalidCallData(
+            "required signer authentication missing"
+        ))
+    ));
+    assert_eq!(partial, witness);
+    assert!(store.accounts == state, "complete store changed");
+    assert_eq!(store.mutations, 0, "program must not mutate");
+    executor
+        .execute_transaction(&mut store, primary.crypto(), &signed)
+        .expect("both genuine required signatures permit native execution");
+    assert!(store.get(&target).is_some());
+    assert_eq!(store.mutations, 1);
 }
