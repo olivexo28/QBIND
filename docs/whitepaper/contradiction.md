@@ -3731,3 +3731,9 @@ Final HEAD/tree, four-path mode/blob manifest, verified remote tip and clean
 worktree are in the handoff, avoiding self-referential documentation hashes.
 Only the task branch is pushed, without force; no PR or main push. All standing
 verdicts in the immediately preceding block remain unchanged.
+
+### RUN 422 — Native ordinary Transaction empty-auth refusal (code/test only)
+
+The bounded F1 remediation on the native `qbind_wire::tx::Transaction` path now rejects an empty `auths` vector before digest computation, account access, suite lookup or signature verification. The direct verifier, `ExecutionContext`, `TxExecutor`, `BlockExecutor` and `Node::apply_block` harness have acceptance coverage; ML-DSA-44 tests use the existing digest, backend and `SignatureSuite` adapter. `BlockExecutor` still reports per-transaction failures sequentially without rollback, and `Node::apply_block` may return an application outcome whose transaction result failed. Genesis configuration loading is not an authenticated native bootstrap caller; fixture account seeding is test-only.
+
+This does not complete F1 thresholds/weights, key deduplication, signer coverage or ownership policy, nor any full F2 requirement. Other `QbindTransaction`/VM and `QbindTx`/EVM routes are outside scope. Evidence is source/test and compile-only; no deployed-binary or live-network evidence exists. No ingress or activation boundary changed. The D7D14 isolated-storage verdicts remain `IMPLEMENTED-ISOLATED` / `PASS-ACCEPTED-SUBSET`; §13.6 whole-lifecycle remains **INCOMPLETE**; activation **DISABLED**; public DevNet **NO-GO**; durable anti-rollback **NOT-ESTABLISHED**; C4/C5 **OPEN**; RS1 **OPEN**.
