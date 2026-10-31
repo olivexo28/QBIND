@@ -1,14 +1,17 @@
 use std::sync::Arc;
 
-use qbind_crypto::{AeadSuite, CryptoError, CryptoProvider, KemSuite, SignatureSuite};
-use qbind_ledger::{AccountStore, ExecutionError, InMemoryAccountStore};
+use qbind_crypto::{ml_dsa_44_sign_digest, MlDsa44SignatureSuite, StaticCryptoProvider};
+use qbind_ledger::{Account, AccountStore, ExecutionError, InMemoryAccountStore};
 use qbind_runtime::TxExecutor;
 use qbind_serde::StateDecode;
 use qbind_system::keyset_program::KEYSET_PROGRAM_ID;
-use qbind_types::{AccountId, Hash32, KeysetAccount, ProgramId};
+use qbind_types::{AccountId, KeysetAccount, KeysetEntry, ProgramId};
 use qbind_wire::io::WireEncode;
 use qbind_wire::keyset::{CreateKeysetCall, WireKeyEntry, OP_KEYSET_CREATE};
-use qbind_wire::tx::{Transaction, TxAccountMeta};
+use qbind_wire::tx::{Transaction, TxAccountMeta, TxAuth};
+
+const AUTH_SUITE_ID: u8 = 100;
+const AUTH_KEYSET_ID: AccountId = [0xA0; 32];
 
 fn dummy_account_id(byte: u8) -> AccountId {
     [byte; 32]
@@ -18,71 +21,75 @@ fn dummy_program_id(byte: u8) -> ProgramId {
     [byte; 32]
 }
 
-/// A dummy SignatureSuite that always verifies successfully.
-struct AcceptAllSignatureSuite;
-
-impl SignatureSuite for AcceptAllSignatureSuite {
-    fn suite_id(&self) -> u8 {
-        1
-    }
-
-    fn public_key_len(&self) -> usize {
-        0
-    }
-
-    fn signature_len(&self) -> usize {
-        0
-    }
-
-    fn verify(&self, _pk: &[u8], _msg_digest: &Hash32, _sig: &[u8]) -> Result<(), CryptoError> {
-        Ok(())
-    }
+struct AuthFixture {
+    public_key: Vec<u8>,
+    secret_key: Vec<u8>,
 }
 
-/// A CryptoProvider for tests that returns AcceptAllSignatureSuite for suite_id 1.
-struct TestCryptoProvider {
-    sig_suite: AcceptAllSignatureSuite,
-}
-
-impl TestCryptoProvider {
-    fn new() -> Self {
+impl AuthFixture {
+    fn new(store: &mut InMemoryAccountStore) -> Self {
+        let (public_key, secret_key) =
+            qbind_crypto::ml_dsa44::MlDsa44Backend::generate_keypair().expect("ML-DSA-44 keygen");
+        let entry = KeysetEntry {
+            suite_id: AUTH_SUITE_ID,
+            weight: 1,
+            reserved0: [0; 1],
+            pubkey_len: public_key.len() as u16,
+            pubkey_bytes: public_key.clone(),
+        };
+        let keyset = KeysetAccount {
+            version: 1,
+            reserved0: [0; 3],
+            threshold: 1,
+            entry_count: 1,
+            reserved1: [0; 4],
+            entries: vec![entry],
+        };
+        let mut data = Vec::new();
+        qbind_serde::StateEncode::encode_state(&keyset, &mut data);
+        store
+            .put(Account::new(AUTH_KEYSET_ID, KEYSET_PROGRAM_ID, 0, data))
+            .expect("seed existing test keyset");
         Self {
-            sig_suite: AcceptAllSignatureSuite,
-        }
-    }
-}
-
-impl CryptoProvider for TestCryptoProvider {
-    fn signature_suite(&self, suite_id: u8) -> Option<&dyn SignatureSuite> {
-        if suite_id == 1 {
-            Some(&self.sig_suite)
-        } else {
-            None
+            public_key,
+            secret_key,
         }
     }
 
-    fn kem_suite(&self, _suite_id: u8) -> Option<&dyn KemSuite> {
-        None
+    fn crypto(&self) -> Arc<dyn qbind_crypto::CryptoProvider> {
+        Arc::new(
+            StaticCryptoProvider::new()
+                .with_signature_suite(Arc::new(MlDsa44SignatureSuite::new(AUTH_SUITE_ID))),
+        )
     }
 
-    fn aead_suite(&self, _suite_id: u8) -> Option<&dyn AeadSuite> {
-        None
+    fn authenticate(&self, tx: &mut Transaction) {
+        tx.accounts.insert(
+            0,
+            TxAccountMeta {
+                account_id: AUTH_KEYSET_ID,
+                flags: 1,
+                access_hint: 0,
+                reserved0: [0; 2],
+            },
+        );
+        tx.auths = vec![TxAuth {
+            account_index: 0,
+            suite_id: AUTH_SUITE_ID,
+            reserved: 0,
+            signature: Vec::new(),
+        }];
+        let digest = qbind_hash::tx::tx_digest(tx);
+        tx.auths[0].signature =
+            ml_dsa_44_sign_digest(&self.secret_key, &digest).expect("sign canonical tx_digest");
     }
 }
 
-fn empty_crypto() -> Arc<dyn CryptoProvider> {
-    Arc::new(TestCryptoProvider::new())
-}
-
-/// Build a minimal Transaction targeting KEYSET_PROGRAM_ID with one auth referencing
-/// a keyset account that will be created.
-///
-/// In this test, we rely on AcceptAllSignatureSuite to accept any signature bytes.
-fn build_keyset_create_tx(target_id: AccountId) -> Transaction {
+fn build_keyset_create_tx(target_id: AccountId, auth: &AuthFixture) -> Transaction {
     let entries = vec![WireKeyEntry {
-        suite_id: 1,
+        suite_id: AUTH_SUITE_ID,
         weight: 100,
-        pubkey_bytes: vec![1, 2, 3],
+        pubkey_bytes: auth.public_key.clone(),
     }];
 
     let call = CreateKeysetCall {
@@ -96,19 +103,15 @@ fn build_keyset_create_tx(target_id: AccountId) -> Transaction {
     call.encode(&mut call_data);
     assert_eq!(call_data[0], OP_KEYSET_CREATE);
 
-    // accounts[0] will be the keyset account id referenced by TxAuth.account_index = 0.
+    // The target remains distinct from the existing keyset used for authentication.
     let accounts = vec![TxAccountMeta {
         account_id: target_id,
-        flags: 0b0000_0011, // signer + writable (advisory)
+        flags: 0b0000_0010,
         access_hint: 0,
         reserved0: [0u8; 2],
     }];
 
-    // No auths for this test as the keyset doesn't exist yet.
-    // verify_transaction_auth returns Ok if auths is empty.
-    let auths = Vec::new();
-
-    Transaction {
+    let mut tx = Transaction {
         version: 1,
         chain_id: 1,
         payer: dummy_account_id(0x01),
@@ -117,18 +120,22 @@ fn build_keyset_create_tx(target_id: AccountId) -> Transaction {
         accounts,
         program_id: KEYSET_PROGRAM_ID,
         call_data,
-        auths,
-    }
+        auths: Vec::new(),
+    };
+    auth.authenticate(&mut tx);
+    tx
 }
 
 #[test]
 fn executor_runs_keyset_create_end_to_end() {
     let mut store = InMemoryAccountStore::new();
-    let crypto = empty_crypto();
+    let auth = AuthFixture::new(&mut store);
+    let crypto = auth.crypto();
     let executor: TxExecutor<InMemoryAccountStore> = TxExecutor::new();
 
     let keyset_id = dummy_account_id(0xEE);
-    let tx = build_keyset_create_tx(keyset_id);
+    let tx = build_keyset_create_tx(keyset_id, &auth);
+    assert_ne!(keyset_id, AUTH_KEYSET_ID);
 
     executor
         .execute_transaction(&mut store, crypto, &tx)
@@ -145,18 +152,19 @@ fn executor_runs_keyset_create_end_to_end() {
 
     assert_eq!(decoded.threshold, 50);
     assert_eq!(decoded.entries.len(), 1);
-    assert_eq!(decoded.entries[0].suite_id, 1);
+    assert_eq!(decoded.entries[0].suite_id, AUTH_SUITE_ID);
     assert_eq!(decoded.entries[0].weight, 100);
-    assert_eq!(decoded.entries[0].pubkey_bytes, vec![1, 2, 3]);
+    assert_eq!(decoded.entries[0].pubkey_bytes, auth.public_key);
 }
 
 #[test]
 fn executor_unknown_program_id_fails() {
     let mut store = InMemoryAccountStore::new();
-    let crypto = empty_crypto();
+    let auth = AuthFixture::new(&mut store);
+    let crypto = auth.crypto();
     let executor: TxExecutor<InMemoryAccountStore> = TxExecutor::new();
 
-    let tx = Transaction {
+    let mut tx = Transaction {
         version: 1,
         chain_id: 1,
         payer: dummy_account_id(0x01),
@@ -167,6 +175,7 @@ fn executor_unknown_program_id_fails() {
         call_data: Vec::new(),
         auths: Vec::new(),
     };
+    auth.authenticate(&mut tx);
 
     let err = executor
         .execute_transaction(&mut store, crypto, &tx)
@@ -177,4 +186,32 @@ fn executor_unknown_program_id_fails() {
         }
         other => panic!("unexpected error: {:?}", other),
     }
+}
+
+#[test]
+fn executor_rejects_empty_auth_before_keyset_program_changes_state() {
+    let mut store = InMemoryAccountStore::new();
+    let auth = AuthFixture::new(&mut store);
+    let crypto = auth.crypto();
+    let executor: TxExecutor<InMemoryAccountStore> = TxExecutor::new();
+    let target_id = dummy_account_id(0xEE);
+    let mut tx = build_keyset_create_tx(target_id, &auth);
+    tx.auths.clear();
+
+    let tx_witness = tx.clone();
+    let account_witness = [store.get(&AUTH_KEYSET_ID), store.get(&target_id)];
+    let err = executor
+        .execute_transaction(&mut store, crypto, &tx)
+        .expect_err("empty-auth keyset create must fail before execution");
+
+    assert!(matches!(
+        err,
+        ExecutionError::InvalidCallData("transaction requires at least one authentication entry")
+    ));
+    assert!(tx == tx_witness, "refusal changed the complete transaction");
+    let account_state_after = [store.get(&AUTH_KEYSET_ID), store.get(&target_id)];
+    assert!(
+        account_state_after == account_witness,
+        "refusal changed the complete account witness"
+    );
 }

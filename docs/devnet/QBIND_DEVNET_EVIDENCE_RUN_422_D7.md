@@ -22940,3 +22940,50 @@ these evidence appends. Final HEAD/tree, four mode/blob entries, remote tip and
 clean worktree are reported in the delivery handoff rather than embedding a
 self-referential final documentation blob hash here. Only the task branch is
 pushed, without force; no PR or main push.
+
+## RUN 422 — Native ordinary Transaction empty-auth refusal (F1 code/test remediation)
+
+**Scope and call path.** This change is limited to `qbind_wire::tx::Transaction` on the native system-program route: `Node::apply_block` decodes each proposal blob and passes decoded transactions to `BlockExecutor`; `BlockExecutor` invokes `TxExecutor::execute_transaction`; that calls `ExecutionContext::verify_tx_auth`, which forwards to `verify_transaction_auth` (`crates/qbind-node/src/lib.rs:2595`, `crates/qbind-runtime/src/lib.rs:149,183`, `crates/qbind-ledger/src/context.rs:49-50`, `crates/qbind-ledger/src/auth.rs:25-34`). The verifier now returns `ExecutionError::InvalidCallData("transaction requires at least one authentication entry")` immediately for `auths.is_empty()`, before `tx_digest`, account-store access, signature-suite lookup or signature verification. Nonempty-auth verification behavior is unchanged.
+
+This is the bounded minimum-authentication portion of F1 only. It does not enforce thresholds/weights, key deduplication, payer or required-signer coverage, account ownership policy, or full F2. It adds no empty-auth mode or genesis/field-based exception. `BlockExecutor` retains its existing sequential, per-transaction result semantics and does not roll back earlier/later successful effects. `Node::apply_block` can return a block outcome containing a failed transaction; the test does not claim that every transaction failure rejects the whole block. Existing transaction-count, malformed-blob and trailing-byte checks remain covered.
+
+**Baseline characterization (separate from final validation).** At baseline commit `fa3e5c14e9e2a8f51d4365688cca8d8cba8778d1` / root tree `d415c31e3ad8dbd6d721dc4e26db59e1d543eccf`, `auth.rs` blob `bf20fa32497b09351aac78ab0448a34a8cce5292` returned `Ok(())` for an empty auth vector; the baseline test blob `4543b0b7de1f8129799c685511179030e27808a1` contains `verify_transaction_auth_empty_auths_succeeds`, which directly exercised that branch. In an isolated detached baseline worktree, the test-only selection
+
+```text
+LIBCLANG_PATH=/usr/lib/llvm-18/lib CARGO_TARGET_DIR=/workspaces/QBIND/olivexo28/QBIND/target cargo test --locked -p qbind-ledger --test tx_auth_verifier_tests verify_transaction_auth_empty_auths_succeeds -- --exact --nocapture
+```
+
+exited 0: 1 passed, 0 failed, 0 ignored, 8 filtered out. This is source/test characterization only, not a reproduced deployed exploit or deployed-binary evidence.
+
+**Acceptance evidence and source revision.** Tested Rust source is commit `b521de4fdbc8496dbffb0b125efb594e2d9ced81` (tree `b2dc348e1ed896f28f7d721305eee293ebeff8d4`); it is a direct child of the required baseline. All final Rust validation commands below were run on that source revision. Focused counts overlap the broader ledger/runtime run and are not additive.
+
+| Literal command | Exit | Selected | Passed | Failed | Ignored |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `LIBCLANG_PATH=/usr/lib/llvm-18/lib cargo test --locked -p qbind-ledger --test tx_auth_verifier_tests -- --nocapture` | 0 | 10 | 10 | 0 | 0 |
+| `LIBCLANG_PATH=/usr/lib/llvm-18/lib cargo test --locked -p qbind-runtime --test tx_executor_tests --test block_executor_tests -- --nocapture` | 0 | 6 | 6 | 0 | 0 |
+| `LIBCLANG_PATH=/usr/lib/llvm-18/lib cargo test --locked -p qbind-node --test block_apply_tests -- --nocapture` | 0 | 5 | 5 | 0 | 0 |
+| `LIBCLANG_PATH=/usr/lib/llvm-18/lib cargo test --locked -p qbind-ledger -p qbind-runtime` | 0 | 743 | 726 | 0 | 17 |
+| `CARGO_BUILD_JOBS=2 CARGO_PROFILE_TEST_STRIP=symbols LIBCLANG_PATH=/usr/lib/llvm-18/lib cargo test --locked -p qbind-node --no-run` | 0 | N/A | N/A | N/A | N/A |
+
+The final command is default-feature compile-only with the explicit test-profile override; it executed no tests and does not claim an unmodified-profile pass. The ledger witness/counter test records complete transaction and account-state snapshots with fixed non-sensitive diagnostics and directly observes zero reads, writes, deletes, signature-suite lookups and verifier calls for both direct and context-wrapper refusal. Genuine cryptographic controls use `qbind_hash::tx::tx_digest`, `ml_dsa_44_sign_digest`, `MlDsa44SignatureSuite` and the existing ML-DSA-44 backend: the signed transaction verifies, clearing its auth vector is refused, and tampered or malformed nonempty signatures take the existing cryptographic failure path. Native executor fixtures pre-seed a distinct test keyset and sign against it; the unsigned keyset-create witness leaves the existing account unchanged and creates no target, while the authenticated control creates its target. The mixed block test confirms only the unsigned transaction fails and the separately authenticated transaction still applies. The Node test distinguishes successful decoding/application outcome from its per-transaction auth failure. Suite-1 accept-all use in the Node consensus harness and old accept/reject provider cases are explicitly structural/provider controls, not evidence of cryptographic acceptance.
+
+**Genesis, ingress and route boundaries.** The source call-site search finds the native verifier reached through `ExecutionContext`/`TxExecutor`; no genesis/bootstrap caller invokes this generic transaction verifier. Startup's `run_boot_time_genesis_verification` loads/parses/verifies genesis configuration (`crates/qbind-node/src/pqc_boot_genesis.rs:181,215`) and is not unsigned native transaction execution. Test keyset initialization directly seeds a trusted account in the test store; that is not an authenticated production bootstrap mechanism. No ingress, startup, suite-policy, wire-format, signing-preimage or production activation change was made. This does not cover ledger `QbindTransaction`/VM routes, runtime `QbindTx`/EVM routes, or every execution path. No deployed binary, live network, release, or production-path evidence was captured.
+
+**Preserved posture.** `D7D14_STORAGE_COMPONENT=IMPLEMENTED-ISOLATED`; `D7D14_STORAGE_ACCEPTANCE=PASS-ACCEPTED-SUBSET`; §13.6 whole-lifecycle **INCOMPLETE**; activation **DISABLED**; public DevNet **NO-GO**; durable anti-rollback **NOT-ESTABLISHED**; C4/C5 **OPEN**; RS1 **OPEN**. Broader F1/F2 obligations and the current public-DevNet critical path remain open and unchanged. This code/test result is not full F1/F2 closure and does not enable ingress, consensus, deployment, D15 or Run 423.
+
+## RUN 422 — Native empty-auth acceptance-evidence finishing correction
+
+Starting branch `copilot/run-422-native-tx-empty-auth-refusal`, HEAD `53338d08b75f7d28e77902bc81357b088ab27c48`, tree `cfc1cd39bfd34d5ff8212e77b8357c8c6036b7fb`, and remote tip were verified exactly with a clean worktree. Production `auth.rs` remains byte-identical to blob `3eb990f8c44a5552fe620604246d952f8f78f05a`. These are test-evidence corrections, not discovered production vulnerabilities.
+
+`block_executor_applies_multiple_txs_and_reports_results` now requires the genuinely authenticated invalid validator transaction to return exactly `TxApplyResult::Failed(ExecutionError::ProgramError("unsupported validator opcode"))`; authentication refusal cannot satisfy this control. The first transaction's success and state assertions remain. `AuthFixture::unsigned` clears only `auths` from the already-signed transaction, without reinserting account metadata or signing again; a complete pre-removal transaction witness is compared with the unsigned value after restoring only the original auth entries, establishing complete body preservation. The Node refusal test now witnesses the actual complete `BlockProposal` passed to `Node::apply_block`, including every serialized transaction byte, using complete value equality and a fixed redacted diagnostic rather than a separate local transaction witness. Its successful outer outcome, exact empty-auth transaction failure and complete account-preservation assertions remain.
+
+Producing source revision: `3f3e010b3c1d13bbf2e20f18808708bd3ee2b74b`, tree `576221fb8b9a77d645b24c48eefd62f3c9ab5476`. Only the two affected targets were executed:
+
+| Literal command | Exit | Selected | Passed | Failed | Ignored |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `LIBCLANG_PATH=/usr/lib/llvm-18/lib cargo test --locked -p qbind-runtime --test block_executor_tests -- --nocapture` | 0 | 3 | 3 | 0 | 0 |
+| `LIBCLANG_PATH=/usr/lib/llvm-18/lib cargo test --locked -p qbind-node --test block_apply_tests -- --nocapture` | 0 | 5 | 5 | 0 | 0 |
+
+Both runs selected nonzero tests with zero filtered-out tests. Earlier full ledger/runtime and default-feature node compile-only results remain attributed to `b521de4fdbc8496dbffb0b125efb594e2d9ced81`; they were not rerun or promoted to this revision. No consensus, TC lifecycle or Miri suite was rerun.
+
+Scope is exactly the two corrected test files and the two append-only evidence documents. Original document prefixes, modes and EOL/absent-final-newline conventions are preserved; CRLF-aware working-tree and starting-to-final whitespace checks and tested-source correspondence after the documentation-only commit are verified in delivery. Bounded F1 empty-auth refusal is unchanged; thresholds, weights, deduplication and broader authorization remain outside scope, and no deployed-path closure is claimed. All preceding storage, §13.6 lifecycle, activation, public-DevNet, anti-rollback, C4/C5 and RS1 verdicts remain unchanged. Only the existing task branch is pushed; no PR, main push or force-push.
