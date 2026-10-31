@@ -23202,3 +23202,53 @@ The first prescribed focused ledger command exited 101 before tests ran because 
 The working-tree whitespace check `git -c core.whitespace=cr-at-eol diff --check` and baseline-to-final check `git -c core.whitespace=cr-at-eol diff --check 8cc7d9d15cf43621a0c5c33ccc169ca39259a466 HEAD` were run after the evidence append. Rust source was not modified after the tested source revision. The requested validation scope was not broadened.
 
 Preserved verdicts: `D7D14_STORAGE_COMPONENT=IMPLEMENTED-ISOLATED`; `D7D14_STORAGE_ACCEPTANCE=PASS-ACCEPTED-SUBSET`; §13.6 whole-lifecycle INCOMPLETE; activation DISABLED; public DevNet NO-GO; durable anti-rollback NOT-ESTABLISHED; C4/C5 OPEN; RS1 OPEN. Slice 2C does not close F1/F2 or establish deployed-path readiness.
+
+## RUN 422 — checked streaming native transaction digest (isolated)
+
+### Baseline and implementation identity
+
+The authorized checkout began clean on `copilot/run-422-checked-streaming-tx-digest` from origin `https://github.com/olivexo28/QBIND`, at baseline commit `8c126325d7b680947143acc3b1dff30634d797c3`, root tree `36d6908705d70f82c50e85389f9a76ac4285da87`; the checkout content and baseline tree matched exactly. The repository is shallow at that commit: `.git/shallow` names the baseline and its raw commit object has parent header `8cc7d9d15cf43621a0c5c33ccc169ca39259a466`. Ancestry beyond that shallow boundary is not established; the baseline is not described as parentless.
+
+Tested source tree (Rust changes plus the exact baseline documentation): `6b55393b4f23e02acf21d7fe48ff5b8d6121508b`. Tested Rust blob IDs: `crates/qbind-hash/src/tx.rs` `5c8fc07dbf8065574baf9bdc9cd9886c33c2e105`; `crates/qbind-hash/tests/tx_digest_tests.rs` `a8a7aa2b9cb157ae72c7010d03399e6655d0417f`. The final commit and root-tree identities are the task-branch tip and tree reported in the completion record (`git rev-parse HEAD HEAD^{tree}`); the manifest below is verified against that tip. The baseline byte contents of both evidence documents were exact prefixes before these appendages.
+
+### API and byte contract
+
+`qbind_hash::tx::try_tx_digest_streaming(&Transaction) -> Result<Hash32, TxDigestError>` is additive and has no production caller in this slice. Its fixed-size refusal categories are `AccountCountTooLarge`, `CallDataLengthTooLarge`, and `LengthOverflow`; no transaction bytes or input-derived text are retained/formatted. Before hashing, the shared private scalar preflight validates account count as `u16`, call-data length as `u32`, and checked `u64` body/domain accounting. It refuses before hashing or traversing account records. The signed body is exactly `L = 91 + 36 * account_count + call_data_length`; the stream is 8-byte `QBIND:TX` followed by that body.
+
+The stream preserves the existing encoding byte-for-byte and in order: version `u8`, chain ID LE `u32`, payer `[u8;32]`, nonce LE `u64`, fee limit LE `u64`, account count LE `u16`, each original account record `(account_id[32], flags, access_hint, reserved0[2])`, program ID `[u8;32]`, call-data length LE `u32`, then original call-data bytes. `MSG_TYPE_TX` and all auth entries/fields/signatures are excluded, with no auth validation. `tx_digest`, `tx_sign_body_preimage`, their signatures/behavior, existing callers, and production behavior remain unchanged; the old digest still materializes its preimage.
+
+### Independent fixed vector
+
+The deterministic fixture has body length 170 and full absorbed length 178. Its explicit body layout is: version `7b`; chain ID `78 56 34 12`; payer `00..1f`; nonce `08 07 06 05 04 03 02 01`; fee limit `88 77 66 55 44 33 22 11`; account count `02 00`; account 0 `a0..bf 91 42 fe 7d`; account 1 `20..3f 35 c6 81 02`; program ID `80..9f`; call-data length `07 00 00 00`; call data `de ad be ef 00 7f 80`. Prefix bytes are ASCII `QBIND:TX` (`51 42 49 4e 44 3a 54 58`). Expected digest is `5a36873207138c6e4da783aee0bd6d07e7b0c5e46dd96117aa832b31049ed61a`. Provenance: independently assembled the stated byte layout in Python 3.12.3 with `struct.pack('<I'/'<H'/'<Q', ...)` and obtained it using Python standard-library `hashlib.sha3_256(b'QBIND:TX' + body).hexdigest()`; the expected constant is not derived from the new Rust helper.
+
+### Requirements mapped to tests
+
+| Requirement | Test(s) |
+|---|---|
+| Legacy digest and independently hashed legacy preimage equivalence; fixed vector | `run422_native_tx_streaming_exact_legacy_and_independent_preimage_equivalence`; `run422_native_tx_streaming_known_answer_vector` |
+| Every signed field, metadata flags/hints/reserved bytes, account order/count, LE/framing | `run422_native_tx_streaming_every_signed_field_affects_digest`; known vector |
+| Empty accounts/data; full absorbed lengths 135/136/137 and multi-block payload | `run422_native_tx_streaming_empty_fields_and_sha3_block_boundaries` |
+| Add/remove/reorder/modify auth entries and empty auths without auth validation | `run422_native_tx_streaming_authentication_is_excluded_without_validation` |
+| Public API accepts 65,535 accounts and refuses 65,536 | `run422_native_tx_streaming_accepts_maximum_account_count_and_preserves_input`; `run422_native_tx_streaming_public_account_overflow_refuses_without_mutation` |
+| Exact and one-over `u16`/`u32` scalar limits; maximum combined wire body/stream without huge fixtures | helper-only `run422_native_tx_streaming_scalar_wire_limits_and_exact_lengths`; `run422_native_tx_streaming_scalar_lengths_at_account_and_data_limits` |
+| Repeatability and full transaction preservation on success/refusal, including auth/signature bytes | `run422_native_tx_streaming_repeated_success_preserves_complete_transaction`; `run422_native_tx_streaming_public_account_overflow_refuses_without_mutation` |
+
+No multi-gigabyte fixture or allocator override/instrumentation was used. Maximum scalar wire-width body is `4,297,326,646` bytes and domain-plus-body is `4,297,326,654` bytes. Checked `u64` arithmetic is used; there is no claim of reachable `u64` overflow after wire-width checks. Source-derived inventory: the new helper has fixed-size scalar/hash/output state and streams borrowed field slices; it creates no `Vec`, `Box`, owned transaction clone, or variable-sized scratch. Its hashing work is O(`accounts.len() + call_data.len()`). Caller-owned transaction storage and separate test-oracle allocations are excluded. This source inventory is not runtime allocation measurement; type sizes do not establish compiler stack-frame or physical-memory bounds. No operational total-time bound or ingress/body-size cap is established.
+
+### Validation and environment
+
+The final Rust source identity for successful gates is the tested source tree and two Rust blob IDs above. Focused selection overlaps the package suite and counts are not additive. `cargo check` is compilation only.
+
+| Literal command | Exit | Selected / passed / failed / ignored |
+|---|---:|---|
+| `cargo test --locked -p qbind-hash run422_native_tx_streaming -- --nocapture` | 0 | 10 / 10 / 0 / 0 |
+| `cargo test --locked -p qbind-hash` | 0 | 23 / 23 / 0 / 0 across package test targets; 0 doc tests |
+| `LIBCLANG_PATH=/usr/lib/llvm-18/lib cargo test --locked -p qbind-ledger --test tx_auth_verifier_tests -- --nocapture` | 0 | 13 / 13 / 0 / 0 |
+| `LIBCLANG_PATH=/usr/lib/llvm-18/lib cargo check --locked -p qbind-node` | 0 | N/A; compilation only; existing dead-code warnings |
+| `rustfmt --check --edition 2021 crates/qbind-hash/src/tx.rs crates/qbind-hash/tests/tx_digest_tests.rs` | 0 | Scoped Rust formatting check |
+
+Initial attempts of the prescribed ledger-test and node-check commands exited 101 during pre-test native dependency compilation, not as executed test failures: bindgen could not find `/usr/lib/llvm-18/lib/libclang.so` (test counts N/A). Environment-only `apt-get update -qq && apt-get install -y -qq libclang-18-dev` exited 0 and installed `libclang-18-dev 1:18.1.3-1ubuntu1`; apt reported an unrelated Google Chrome index DNS warning. Both prescribed commands then passed as recorded above. Cargo/rustc were 1.99.1; no repository manifest/dependency changed.
+
+Final delivery checks: both authorized evidence documents retain their complete baseline bytes as exact prefixes, original modes and EOL/EOF conventions; Rust blobs exactly match the tested IDs above. CRLF-aware working-tree and baseline-to-final whitespace checks passed. The complete final path/mode/blob manifest is reported from the committed branch tip. Only the four authorized paths changed; no activation, caller wiring, limits, authorization, deployment, PR, merge, or main-branch push occurred.
+
+Preserved verdicts: `D7D14_STORAGE_COMPONENT=IMPLEMENTED-ISOLATED`; `D7D14_STORAGE_ACCEPTANCE=PASS-ACCEPTED-SUBSET`; §13.6 whole-lifecycle INCOMPLETE; activation DISABLED; public DevNet NO-GO; durable anti-rollback NOT-ESTABLISHED; C4/C5 OPEN; RS1 OPEN. This slice does not activate weighted authorization, approve resource limits, close F1/F2, or establish deployed-path readiness.
