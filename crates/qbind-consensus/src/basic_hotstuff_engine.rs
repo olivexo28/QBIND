@@ -5164,17 +5164,41 @@ impl BasicHotStuffEngine<[u8; 32]> {
         &mut self,
         tc: &TimeoutCertificate<[u8; 32]>,
     ) -> Result<u64, TimeoutValidationError> {
-        // Validate the TC
+        let outcome = self.on_timeout_certificate_gated(tc, &mut |_, _, _| {
+            Ok::<(), std::convert::Infallible>(())
+        })?;
+        match outcome {
+            TimeoutCertificateOutcome::Stale { view }
+            | TimeoutCertificateOutcome::AdvancedWithoutLockRaise { view }
+            | TimeoutCertificateOutcome::LockRaised { view } => Ok(view),
+            TimeoutCertificateOutcome::Refused { reason } => match reason {},
+        }
+    }
+
+    /// Opt-in, fallible boundary before an effective TC-derived lock raise.
+    ///
+    /// The callback borrows the exact selected QC and original TC, and observes
+    /// the pre-effect engine. Permission here is only control flow: this generic
+    /// gate supplies neither durability nor authentication. Completed Timeout
+    /// ingestion is not undone on refusal. Non-raising advances are not gated.
+    pub fn on_timeout_certificate_gated<E>(
+        &mut self,
+        tc: &TimeoutCertificate<[u8; 32]>,
+        gate: &mut impl FnMut(
+            &Self,
+            &TimeoutCertificate<[u8; 32]>,
+            &QuorumCertificate<[u8; 32]>,
+        ) -> Result<(), E>,
+    ) -> Result<TimeoutCertificateOutcome<E>, TimeoutValidationError> {
         tc.validate(self.state.validators())?;
 
-        // Only process TCs for views > current_view
         if tc.view <= self.current_view {
-            // TC is for an old view, ignore
-            return Ok(self.current_view);
+            return Ok(TimeoutCertificateOutcome::Stale {
+                view: self.current_view,
+            });
         }
 
-        // T146 Safety: Update locked_qc if TC's high_qc is higher
-        // This ensures we don't vote for blocks that conflict with committed blocks
+        let mut raised = false;
         if let Some(ref tc_high_qc) = tc.high_qc {
             let should_update = match self.state.locked_qc() {
                 None => true,
@@ -5182,8 +5206,11 @@ impl BasicHotStuffEngine<[u8; 32]> {
             };
 
             if should_update {
-                // Update locked_qc through the state engine
+                if let Err(reason) = gate(self, tc, tc_high_qc) {
+                    return Ok(TimeoutCertificateOutcome::Refused { reason });
+                }
                 self.state.set_locked_qc(tc_high_qc.clone());
+                raised = true;
             }
         }
 
@@ -5205,7 +5232,11 @@ impl BasicHotStuffEngine<[u8; 32]> {
         // Clear old timeout messages
         self.timeout_accumulator.clear_view(tc.timeout_view);
 
-        Ok(to_view)
+        Ok(if raised {
+            TimeoutCertificateOutcome::LockRaised { view: to_view }
+        } else {
+            TimeoutCertificateOutcome::AdvancedWithoutLockRaise { view: to_view }
+        })
     }
 
     /// Get the timeout accumulator (for testing/debugging).
@@ -5217,14 +5248,151 @@ impl BasicHotStuffEngine<[u8; 32]> {
     pub fn timeout_count(&self, view: u64) -> usize {
         self.timeout_accumulator.timeout_count(view)
     }
+
+    #[cfg(feature = "test-utils")]
+    pub fn timeout_effect_latches_for_test(&self) -> (bool, bool, bool, Option<Instant>) {
+        (
+            self.proposed_in_view,
+            self.voted_in_view,
+            self.timeout_emitted_in_view,
+            self.last_view_start_instant,
+        )
+    }
 }
 
 #[cfg(feature = "test-utils")]
 pub mod received_qc_effect_test_support;
 
+/// Truthful result of the opt-in TC effect boundary; not an authority token.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TimeoutCertificateOutcome<E> {
+    Stale { view: u64 },
+    AdvancedWithoutLockRaise { view: u64 },
+    LockRaised { view: u64 },
+    Refused { reason: E },
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn run422_tc_o4_tc(high: Option<QuorumCertificate<[u8; 32]>>) -> TimeoutCertificate<[u8; 32]> {
+        TimeoutCertificate::new(7, high, vec![ValidatorId(1), ValidatorId(2), ValidatorId(3)])
+    }
+
+    #[test]
+    fn run422_tc_o4_refusal_preserves_all_effects_then_retry_applies_once() {
+        let mut engine =
+            BasicHotStuffEngine::<[u8; 32]>::new(ValidatorId(1), make_validator_set(4));
+        let qc = QuorumCertificate::new([9; 32], 6, vec![ValidatorId(1), ValidatorId(2), ValidatorId(3)]);
+        for id in 1..=3 {
+            engine.on_timeout_msg(ValidatorId(id), TimeoutMsg::new(7, Some(qc.clone()), ValidatorId(id))).unwrap();
+        }
+        let tc = run422_tc_o4_tc(Some(qc));
+        engine.proposed_in_view = true;
+        engine.voted_in_view = true;
+        engine.timeout_emitted_in_view = true;
+        let start = engine.last_view_start_instant;
+        let before = engine.current_view;
+        let original = tc.clone();
+        let refused = engine.on_timeout_certificate_gated(&tc, &mut |old, exact, selected| {
+            assert!(std::ptr::eq(exact, &tc));
+            assert!(std::ptr::eq(selected, tc.high_qc.as_ref().unwrap()));
+            assert_eq!(old.current_view, before);
+            assert!(old.locked_qc().is_none());
+            Err("not acknowledged")
+        }).unwrap();
+        assert_eq!(refused, TimeoutCertificateOutcome::Refused { reason: "not acknowledged" });
+        assert_eq!(tc, original);
+        assert_eq!(engine.current_view, before);
+        assert!(engine.locked_qc().is_none());
+        assert!(engine.proposed_in_view && engine.voted_in_view && engine.timeout_emitted_in_view);
+        assert_eq!(engine.last_view_start_instant, start);
+        assert_eq!(engine.timeout_count(7), 3);
+        assert_eq!(engine.on_timeout_certificate_gated(&tc, &mut |_, _, _| Ok::<_, ()>(())),
+            Ok(TimeoutCertificateOutcome::LockRaised { view: 8 }));
+        assert_eq!(engine.locked_qc(), tc.high_qc.as_ref());
+        assert_eq!(engine.timeout_count(7), 0);
+        assert!(!engine.proposed_in_view && !engine.voted_in_view && !engine.timeout_emitted_in_view);
+        assert_eq!(engine.on_timeout_certificate(&tc), Ok(8));
+    }
+
+    #[test]
+    fn run422_tc_o4_stale_none_equal_lower_and_legacy_compatibility() {
+        for lock_view in [None, Some(6), Some(7)] {
+            let mut gated = BasicHotStuffEngine::<[u8; 32]>::new(ValidatorId(1), make_validator_set(4));
+            let mut legacy = BasicHotStuffEngine::<[u8; 32]>::new(ValidatorId(1), make_validator_set(4));
+            let high = lock_view.map(|_| QuorumCertificate::new([8; 32], 6, vec![ValidatorId(1)]));
+            if let Some(view) = lock_view {
+                let lock = QuorumCertificate::new([7; 32], view, vec![ValidatorId(1)]);
+                gated.state.set_locked_qc(lock.clone());
+                legacy.state.set_locked_qc(lock);
+            }
+            let tc = run422_tc_o4_tc(high);
+            let mut never = |_: &BasicHotStuffEngine<[u8; 32]>, _: &TimeoutCertificate<[u8; 32]>, _: &QuorumCertificate<[u8; 32]>| -> Result<(), ()> {
+                panic!("non-raising and stale TCs must not call the gate")
+            };
+            assert_eq!(gated.on_timeout_certificate_gated(&tc, &mut never),
+                Ok(TimeoutCertificateOutcome::AdvancedWithoutLockRaise { view: 8 }));
+            assert_eq!(legacy.on_timeout_certificate(&tc), Ok(8));
+            assert_eq!(gated.locked_qc(), legacy.locked_qc());
+            assert_eq!(gated.on_timeout_certificate_gated(&tc, &mut never),
+                Ok(TimeoutCertificateOutcome::Stale { view: 8 }));
+        }
+    }
+
+    #[test]
+    fn run422_tc_o4_target_overflow_and_terminal_eligible_boundary() {
+        let mut engine = BasicHotStuffEngine::<[u8; 32]>::new(ValidatorId(1), make_validator_set(4));
+        let mut tc = run422_tc_o4_tc(None);
+        let mut never = |_: &BasicHotStuffEngine<[u8; 32]>, _: &TimeoutCertificate<[u8; 32]>, _: &QuorumCertificate<[u8; 32]>| -> Result<(), ()> { panic!("invalid or non-raising") };
+        for target in [0, 7, 9, u64::MAX] {
+            tc.view = target;
+            assert!(engine.on_timeout_certificate_gated(&tc, &mut never).is_err());
+            assert_eq!(engine.current_view(), 0);
+        }
+        tc.timeout_view = u64::MAX;
+        assert!(engine.on_timeout_certificate_gated(&tc, &mut never).is_err());
+        tc.timeout_view = u64::MAX - 1;
+        assert_eq!(engine.on_timeout_certificate_gated(&tc, &mut never),
+            Ok(TimeoutCertificateOutcome::AdvancedWithoutLockRaise { view: u64::MAX }));
+    }
+
+    #[test]
+    fn run422_tc_o4_gate_unwind_precedes_effects() {
+        let mut engine = BasicHotStuffEngine::<[u8; 32]>::new(ValidatorId(1), make_validator_set(4));
+        let tc = run422_tc_o4_tc(Some(QuorumCertificate::new([9; 32], 6, vec![ValidatorId(1)])));
+        assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _ = engine.on_timeout_certificate_gated::<()>(&tc, &mut |_, _, _| panic!("controlled pre-effect unwind"));
+        })).is_err());
+        assert_eq!(engine.current_view(), 0);
+        assert!(engine.locked_qc().is_none());
+    }
+
+    #[test]
+    fn run422_tc_o4_legacy_and_opt_in_raise_have_identical_effects() {
+        let tc = run422_tc_o4_tc(Some(QuorumCertificate::new(
+            [9; 32], 6, vec![ValidatorId(1), ValidatorId(2), ValidatorId(3)],
+        )));
+        let mut legacy = BasicHotStuffEngine::<[u8; 32]>::new(ValidatorId(1), make_validator_set(4));
+        let mut gated = BasicHotStuffEngine::<[u8; 32]>::new(ValidatorId(1), make_validator_set(4));
+        for engine in [&mut legacy, &mut gated] {
+            engine.state.set_locked_qc(QuorumCertificate::new([8; 32], 5, vec![ValidatorId(1)]));
+            engine.proposed_in_view = true;
+            engine.voted_in_view = true;
+            engine.timeout_emitted_in_view = true;
+            engine.on_timeout_msg(ValidatorId(1), TimeoutMsg::new(7, None, ValidatorId(1))).unwrap();
+        }
+        assert_eq!(legacy.on_timeout_certificate(&tc), Ok(8));
+        assert_eq!(gated.on_timeout_certificate_gated(&tc, &mut |_, _, _| Ok::<_, ()>(())),
+            Ok(TimeoutCertificateOutcome::LockRaised { view: 8 }));
+        assert_eq!(legacy.locked_qc(), gated.locked_qc());
+        assert_eq!(legacy.current_view(), gated.current_view());
+        for engine in [&legacy, &gated] {
+            assert!(!engine.proposed_in_view && !engine.voted_in_view && !engine.timeout_emitted_in_view);
+            assert_eq!(engine.timeout_count(7), 0);
+        }
+    }
     // Direct engine tests; signature and authenticated-origin gates are node tests.
     #[test]
     fn run422_timeout_view_exhaustion_engine_search_boundaries() {

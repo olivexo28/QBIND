@@ -3360,6 +3360,9 @@ pub fn make_locked_qc(
 #[cfg(all(test, feature = "test-utils"))]
 mod received_qc_publication_model;
 
+#[cfg(all(test, feature = "test-utils"))]
+mod tc_publication_model;
+
 // ---------------------------------------------------------------------------
 // §13.6 owner-controlled capture gate (isolated, no production caller)
 // ---------------------------------------------------------------------------
