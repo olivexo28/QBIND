@@ -7,6 +7,7 @@ pub mod error;
 pub mod execution;
 pub mod execution_gas;
 pub mod genesis;
+pub mod keyset_validation;
 pub mod monetary_engine;
 pub mod monetary_state;
 pub mod parallel_exec;
