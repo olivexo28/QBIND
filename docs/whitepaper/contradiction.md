@@ -3533,3 +3533,201 @@ not a source-accounting change or a newly observed runtime defect.
 All Rust source is unchanged; no tests or builds were rerun. Validation remains
 attributed to `0553e374edf6a9221870b9c5e4f8a6689af3901f`.
 All standing scope, lifecycle and release verdicts remain unchanged.
+
+## RUN 422: isolated TC captured-Vote lifecycle implementation
+
+This is bounded implementation evidence, not closure of the whole lifecycle.
+Baseline HEAD/tree were independently verified as
+`caf8ecf0a995b18eb9aa0c188df470bad915c0f7` /
+`9ba1ea9a63e9481419f81afd4c95813ecdfb4e76`, with clean starting content and
+the four baseline blob/mode entries. A shallow boundary was not treated as a
+parentless commit: raw parent `1ef3639735455fafca351f1fdb29b30f6c29515d` was
+confirmed after deepening ancestry. Origin was
+`https://github.com/olivexo28/QBIND`; remote main/HEAD matched the baseline and
+the task branch was absent remotely before creation at the verified baseline.
+
+Producing source revision `807d6029a90f532d387b46ca1b4186bd9eebdf25`,
+root tree `89ef1ca5e03fef78ec5279004f66a2e5c30cc739`, changes only the two
+existing test-only owner models. Source blobs (mode `100644`, relative to
+`crates/qbind-node/src/safety_record_store/`) are
+`owner/model.rs=9f167d7808148e12e9f425d6feba8871c9cf180c` and
+`owner/tc_publication_model.rs=f484dda192a16164b73b213dc729d7b70ae244ca`.
+The existing TC module and new model-side dependencies require `test-utils`.
+No production path, unsafe code, current-authority mechanism or schema changed.
+
+### Requirements mapped to assertions
+
+Six `tc_captured_vote_lifecycle` tests now compose the original verified-Proposal
+owning capture, original Vote/pin, bounded journal and accepted TC owners:
+
+| Suffix | Discriminating evidence |
+|---|---|
+| `phase_gate` | Actual combined four-equal-power fixture, checked phase inventories before lifecycle continuation, independent unchanged ceilings, complete cleanup. |
+| `acknowledged_fresh` | Suite-100 genuine signatures; authenticated TC; peer-only complete selected wire QC independently domain-verified. Actual O4 `DurableAcknowledged` precedes lock/view effects; revision 1 -> 2, exact stored `TcDerived`, still `Unverified`. Exact original candidate revalidates under L1, signs once, and its journal Signed signature cryptographically verifies against the unchanged original Vote. |
+| `uncertain_fresh` | Actual O4 `UncertainDurable`; predecessor and completed Timeout ingestion preserved. Fresh/retained use blocked before O5, including after actual O2/O3 inspection; O5 clears recovery but engine/durable disagreement still blocks both. Exact original TC resumes once with no O4 or Timeout re-ingestion, then the eligible original capture signs once. |
+| `uncertain_signed` | Genuine acknowledged Signed result predates uncertain TC. Same barriers preserve its record/metadata/count. Post-resumption checked delivery verifies and matches the exact stored signature through the existing slice witness/probe, with zero new signing. Fresh signing at that Signed position refuses. |
+| `unsafe_candidate` | Original candidate safe under L0 becomes unsafe under an acknowledged unrelated higher restriction. Revalidation is `Rejected(Ancestry(NoParentLink))`, not a mere revision comparison. Both routes refuse before journal/signing/delivery effects; zero signer calls and zero positions. |
+| `pressure_relief` | TC admission refusal/cleanup and relieved actual O4; fresh WorkSet refusal before reservation then one successful original signing; retained Verify refusal preserving Signed then successful checked delivery without signing. Deliberate pressure is measured separately from unpressured fixtures. |
+
+Genuine alternative TC evidence with the same selected block/view rejects
+`Certificate`; independent changed TC authority rejects `Context`. Checked use
+rejects complete Proposal substitution, changed membership and authorization
+invalidation at the existing confirmation boundary, preserving Signed bytes.
+A separate bounded journal exercises fresh confirmation invalidation after
+consumption: zero signing, present Reserved obligation and `PotentiallySigned`
+on retry, with complete byte/metadata preservation; it never replaces the
+original lifecycle journal.
+
+Before each measured operation, full witnesses retain the original
+Proposal/Vote/payload binding/ancestry/origin metadata, pin address/provenance,
+generation identity/serial/shares/capacity, Proposal QC backing
+identities/capacities, engine lock/view/latches/Timeout state and consensus quota.
+Immediately afterward the component ledgers/ceilings, unchanged inputs,
+engine/outcome and signer/delivery/coordination/publication counts are checked
+before separate complete durable and journal record/metadata/count comparisons.
+Diagnostics redact contents and existing records must remain present. TC
+inspection and transitions cannot silently remove an existing Signed obligation;
+fresh confirmation refusal cannot erase Reserved. Checked signature use must
+match the previously validated slice exactly, not merely its length or digest.
+Repeated exact-TC resumption refuses without repeated effects.
+The reused cancellation-safe bounded observer proves same-domain exclusion at
+both successful protected coordination points; missing expected observations
+fail explicitly, skipped hooks cancel/join, and RAII joins on unwind.
+
+### Complete combined ownership inventory
+
+Checked gate operands come from the actual combined fixture, not reuse of a
+standalone TC or received-QC peak. Standing operational owners B=16,354:
+covered original Proposal 7,701; owning envelope excluding pin 288; pin 96;
+registry 208; captured L0 generation core 7,717 (7,333 evidence backing);
+generation control 144; bounded journal 200, actual shape `(1,1)`.
+Context P=240 gives aggregate baseline 16,594. These original owners remain
+alive through TC publication, acknowledgement, resumption and protected use.
+
+TC operands: route A=1,584; candidate C=8,940 (nested backing 7,740 and complete
+copy/transfer controls 1,200); interruption I=672; invocation workspace W=2,832;
+recovery/acknowledgement K=625; resumption/report S=2,706; O3 holder H=21,347;
+encoded record R=10,459; transient decode T=10,760; fresh loader L=31,814;
+O4 F=52,939; publication envelopes E=10,509 and metadata M=42.
+Ordinary explicit O5 O=R+T+E+M=31,770.
+TC signer/timeout vector capacities are 3/3; each nested signature capacity
+is 2,420 and nested QC signer capacity is 3. Record-level and TC-level high QCs
+are independent counted owners. Original Proposal QC signature capacities
+are `[2420,2420,2420]`.
+
+Complete compiler layouts: Report 240, PublishResult 80, Interrupted and
+interruption Result 672, InterruptionAdmission 224, RecoveryAdmission 64,
+Acknowledged and its Result 64, ResumptionAdmission 64, ResumptionGate 24,
+Predecessor and its Result 352, Reservation 48 and reservation Result 80.
+Existing checked A/W/K/S formulas cover whole admission Results, copy
+temporaries, reference/scalar controls, leases and argument/return overlaps;
+embedded reservations are not charged twice.
+
+| Simultaneous phase, including B+P | Operational | Context | Aggregate |
+|---|---:|---:|---:|
+| Interruption admission + I+W+A | 21,442 | 240 | 21,682 |
+| Acknowledged O4 + A+C+F | 79,817 | 240 | 80,057 |
+| Interrupted O4 + I+W+A+C+F | 83,321 | 240 | 83,561 |
+| Predecessor loader + I+W+A+L | 53,256 | 240 | 53,496 |
+| Genuine O3 + I+L | 48,840 | 240 | 49,080 |
+| Explicit O5 + I+H+K+O | 70,768 | 240 | 71,008 |
+| Exact resumption loader + I+H+K+S+L | 73,518 | 240 | 73,758 |
+| Returned report + I+H+K+S | 41,704 | 240 | 41,944 |
+| Observation/lifecycle + I+H+K+31,966 | 70,964 | 240 | 71,204 |
+| Fresh pre-reservation + I+H+K+31,884 | 70,882 | 240 | 71,122 |
+| Checked retained use + I+H+K+16,451 | 55,449 | 240 | 55,689 |
+
+Protected-resource subinventory: authorization control 16; lifecycle scratch 136;
+working set 3,224 (owned key, preimage, separate canonical-body temporary,
+position/binding/hash controls); crypto wrapper temporaries 17,396; output
+2,480; reservation workspace 3,129; continuation 320; publication workspace
+5,319. Fresh pre-reservation delta is 31,884; post-consumption delta 28,755,
+releasing exactly 3,129. Checked verification adds 7,940 wrapper coverage and
+2,791 retrieval envelope, totaling 16+3,224+7,940+2,480+2,791=16,451.
+The loader/lifecycle maximum is 16+136+31,814=31,966, larger than the separate
+observation working set 16+21,347+1,232=22,595. During recovered protected use,
+I/H/K remain live; the completed result report S alone has finished its lifetime.
+The auxiliary invalidation journal adds 200 only after recovery owners finish;
+its aggregate loader/fresh bounds are 48,760/48,678 and it never signs.
+
+Executed unpressured operational/context/aggregate peaks are
+`(79817,240,80057)` for acknowledged/unsafe and `(83321,240,83561)` for
+uncertain fresh/Signed. Interrupted O4 determines the latter peak, with 1,395
+aggregate headroom. Fresh pre-/post-consumption operational/aggregate pairs
+are `(48238,48478)` / `(45109,45349)` normally and
+`(70882,71122)` / `(67753,67993)` during recovered use.
+Checked retained-use live pairs are `(32805,33045)` and `(55449,55689)`;
+each protected operation returns to its expected baseline.
+Deliberate pressure separately reaches `(84716,240,84956)`, never exceeding
+the unchanged operational/aggregate 84,956 or context 960 ceilings.
+
+Caller-owned immutable fixture keys, source TC, selected verified wire QC,
+comparison copies/probes and recorder controls are not storage evidence owners
+or production authorization. Verified-Proposal evidence is separately
+consensus-accounted at 7,613 under unchanged ceiling 268,435,456; TC adds no
+verified-QC payload. Completed Timeout ingestion is ordinary engine ownership,
+covered by exact message/backing preservation witnesses, not funded by storage
+headroom. No received-Vote/QC formation pipeline is duplicated.
+Final engine drop releases its verified evidence, leaving only the fixture Arc;
+original Proposal/capture/journal/store/backend teardown returns operational and
+aggregate storage to zero, including context ownership. These component
+ownership bounds exclude allocator/RSS/physical stack, crypto dependency
+internals and backend-internal memory; they are not whole-process memory bounds.
+
+This private safe-Rust composition adds no production wiring, current-authority
+mechanism, restart reconstruction, process-death boundary, transport delivery,
+wire/journal/schema change, activation, deployment, D15 or Run 423.
+No full consensus suite or Miri rerun is claimed. Fixture authority is not
+production authorization; successful private composition does not close RS1 or
+establish launch readiness.
+
+```text
+D7D14_STORAGE_COMPONENT=IMPLEMENTED-ISOLATED
+D7D14_STORAGE_ACCEPTANCE=PASS-ACCEPTED-SUBSET
+§13.6 whole-lifecycle INCOMPLETE
+activation DISABLED
+public DevNet NO-GO
+durable anti-rollback NOT-ESTABLISHED
+C4/C5 OPEN
+```
+
+### Literal validation and delivery correspondence
+
+Producing revision for all final acceptance commands:
+`807d6029a90f532d387b46ca1b4186bd9eebdf25`, tree
+`89ef1ca5e03fef78ec5279004f66a2e5c30cc739`. Literal commands (log redirection
+omitted), all exit 0:
+
+```sh
+LIBCLANG_PATH=/usr/lib/llvm-18/lib cargo test --locked -p qbind-node --lib --features test-utils tc_captured_vote_lifecycle -- --nocapture
+LIBCLANG_PATH=/usr/lib/llvm-18/lib cargo test --locked -p qbind-node --lib --features test-utils safety_record_store::owner::tc_publication_model -- --nocapture
+LIBCLANG_PATH=/usr/lib/llvm-18/lib cargo test --locked -p qbind-node --lib --features test-utils safety_record_store::owner:: -- --quiet
+LIBCLANG_PATH=/usr/lib/llvm-18/lib cargo test --locked -p qbind-node --features test-utils --test run_422_retained_decision_observation_tests --test run_422_owning_capture_binding_tests --test run_422_d7d14_safety_record_store_tests -- --quiet
+CARGO_BUILD_JOBS=2 CARGO_PROFILE_TEST_STRIP=symbols LIBCLANG_PATH=/usr/lib/llvm-18/lib cargo test --locked -p qbind-node --no-run
+```
+
+| Command | Exit | Selection and measured result |
+|---|---:|---|
+| 1 | 0 | 6 selected/passed, 0 ignored, 2,230 filtered. Nonzero prefix selection explicitly observed. |
+| 2 | 0 | 21 selected/passed, 0 ignored, 2,215 filtered. |
+| 3 | 0 | 207 selected: 201 passed, 6 ignored, 2,029 filtered, preserving TC and received-QC tests. |
+| 4 | 0 | D7-D14 158 selected: 157 passed, 1 ignored; owning-capture binding 24 passed; retained-decision observation 24 passed. Combined 206 selected, 205 passed, 1 ignored; child-process diagnostic selections are not additional tests. |
+| 5 | 0 | Default-feature compilation only, 344 test executables produced, zero executed tests, 8m47s. Command-local `CARGO_PROFILE_TEST_STRIP=symbols` is an explicit profile override, not an unmodified-profile pass. |
+
+Counts overlap; do not sum them as independent coverage. Before acceptance,
+missing libclang caused an initial exit-101 build failure; `libclang-18-dev`
+was installed only after that failure. Development fixture/expectation/cleanup
+corrections were followed by the successful final commands above. The combined
+gate passed before implementing continuation and was rerun on this committed
+source in command 1. No dependency manifest/lockfile changed.
+
+Both evidence documents preserve their complete baseline bytes as exact prefixes,
+mode `100644`, original EOL conventions (this file LF, DevNet evidence CRLF) and
+no-final-newline convention. CRLF-aware working-tree and baseline-to-delivery
+checks use `git -c core.whitespace=cr-at-eol diff --check`. The four-path allowlist
+and identical delivered/validated source blobs are checked separately; the
+delivery commit adds only evidence appends after the producing source revision.
+Final HEAD/tree, four-path mode/blob manifest, verified remote tip and clean
+worktree are in the handoff, avoiding self-referential documentation hashes.
+Only the task branch is pushed, without force; no PR or main push. All standing
+verdicts in the immediately preceding block remain unchanged.

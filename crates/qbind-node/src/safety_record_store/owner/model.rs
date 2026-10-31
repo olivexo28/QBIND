@@ -9379,6 +9379,1046 @@ mod tests {
 
         #[cfg(feature = "test-utils")]
         #[test]
+        fn tc_captured_vote_lifecycle_phase_gate() {
+            run_tc_captured_vote_lifecycle(true, false, false, false, false);
+        }
+
+        #[cfg(feature = "test-utils")]
+        #[test]
+        fn tc_captured_vote_lifecycle_acknowledged_fresh() {
+            run_tc_captured_vote_lifecycle(false, false, false, false, false);
+        }
+
+        #[cfg(feature = "test-utils")]
+        #[test]
+        fn tc_captured_vote_lifecycle_uncertain_fresh() {
+            run_tc_captured_vote_lifecycle(false, true, false, false, false);
+        }
+
+        #[cfg(feature = "test-utils")]
+        #[test]
+        fn tc_captured_vote_lifecycle_uncertain_signed() {
+            run_tc_captured_vote_lifecycle(false, true, true, false, false);
+        }
+
+        #[cfg(feature = "test-utils")]
+        #[test]
+        fn tc_captured_vote_lifecycle_unsafe_candidate() {
+            run_tc_captured_vote_lifecycle(false, false, false, true, false);
+        }
+
+        #[cfg(feature = "test-utils")]
+        #[test]
+        fn tc_captured_vote_lifecycle_pressure_relief() {
+            run_tc_captured_vote_lifecycle(false, true, false, false, true);
+        }
+
+        #[cfg(feature = "test-utils")]
+        fn run_tc_captured_vote_lifecycle(
+            inventory_only: bool,
+            uncertain: bool,
+            retained: bool,
+            unsafe_candidate: bool,
+            pressure: bool,
+        ) {
+            use crate::safety_record_store::owner::{
+                received_qc_publication_model as received, tc_publication_model as tc_route,
+            };
+            use crate::safety_record_store::record::{LogicalQc, TimeoutCert, TimeoutMessage};
+            use qbind_consensus::timeout_verify::verify_timeout_certificate_with_evidence;
+
+            let authority = received::Authority::new_for_wire_chain(MODEL_WIRE_CHAIN_ID);
+            let ctx = authority.pinned();
+            let dir = tempfile::tempdir().unwrap();
+            let mut engine = BasicHotStuffEngine::with_state_limits_and_vote_suite(
+                ValidatorId::new(SIGNER_VID),
+                authority_validators(),
+                qbind_consensus::vote_accumulator::ConsensusLimitsConfig::default(),
+                MODEL_SUITE_U16,
+            );
+            let p0 = make_proposal(0, [0xFF; 32], 0);
+            assert!(matches!(
+                engine.on_proposal_event(ValidatorId::new(0), &p0),
+                Some(ConsensusEngineAction::BroadcastVote(_))
+            ));
+            let l0 = derive_block_id_local(0, 0, &[0xFF; 32]);
+            for id in [2, 3] {
+                engine
+                    .on_vote_event(
+                        ValidatorId::new(id),
+                        &logical_vote(0, l0, u16::try_from(id).unwrap()),
+                    )
+                    .expect("bootstrap logical quorum");
+            }
+            let owner = init_owner(dir.path(), &ctx);
+            let mut template = logical_vote(0, l0, 0);
+            template.chain_id = ctx.chain_id;
+            template.suite_id = ctx.qc_suite_id;
+            let wire = StoreWireQc {
+                version: 1,
+                chain_id: ctx.chain_id,
+                epoch: 0,
+                height: 0,
+                round: 0,
+                step: 0,
+                block_id: l0,
+                suite_id: ctx.qc_suite_id,
+                signer_bitmap: vec![0b1101],
+                signatures: [0, 2, 3]
+                    .into_iter()
+                    .map(|id| authority.sign_like_vote(&template, id).signature)
+                    .collect(),
+            };
+            let evidence = authority.verified_test_evidence(&wire);
+            let evidence_owner = evidence.clone();
+            let logical = LogicalQc::new(l0, 0, [0, 2, 3].into_iter().map(ValidatorId::new).collect());
+            let covered_qc = received::copy_wire_qc_exact(
+                &owner.backend_for_test().accounting(),
+                &wire,
+                &logical,
+                &ctx,
+            )
+            .unwrap();
+            let mut proposal = make_proposal(1, l0, 1);
+            proposal.header.chain_id = ctx.chain_id;
+            let proposal = received::CoveredProposal::new(proposal, covered_qc);
+            let revision = match owner.publish_locked(
+                make_locked_qc(&ctx, l0, 0, wire, None).unwrap(),
+                0,
+                None::<&FixtureCommittedHistory>,
+            ) {
+                PublishResult::DurableAcknowledged { new_revision } => new_revision,
+                other => panic!("TC lifecycle L0 publication refused: {other:?}"),
+            };
+            let lim = limits(&ctx);
+            let decided = match owner.decide_verified_and_capture_owned(
+                &mut engine,
+                ValidatorId::new(1),
+                &proposal,
+                evidence,
+                &lim,
+                revision,
+                owner
+                    .read_validate(None::<&FixtureCommittedHistory>)
+                    .unwrap(),
+            ) {
+                OwnedDecisionOutcome::Decided(d) => d,
+                other => panic!("TC lifecycle owning capture refused: {other:?}"),
+            };
+            let pv = received_qc_signing_authority(&authority);
+            let mut snapshot = established_snapshot(&pv);
+            let store = real_fresh_store();
+            let journal = associated_bounded_journal(&owner, store.clone(), 1);
+            let inner = real_local_signer(authority.secret(SIGNER_VID as usize));
+            let signer = CountingValidatorSigner::new(&inner);
+            let history = FixtureCommittedHistory::new();
+            let vote = decided.vote().clone();
+            let provenance = pin_provenance_now(&owner, &decided);
+            let original = proposal.proposal.clone();
+            let mut selected_template = vote.clone();
+            selected_template.signature.clear();
+            if unsafe_candidate {
+                selected_template.block_id = [0xE9; 32];
+                selected_template.height += 1;
+                selected_template.round += 1;
+            }
+            let selected_wire = StoreWireQc {
+                version: vote.version,
+                chain_id: vote.chain_id,
+                epoch: vote.epoch,
+                height: selected_template.height,
+                round: selected_template.round,
+                step: vote.step,
+                block_id: selected_template.block_id,
+                suite_id: vote.suite_id,
+                signer_bitmap: vec![0b1101],
+                signatures: [0, 2, 3]
+                    .into_iter()
+                    .map(|id| authority.sign_like_vote(&selected_template, id).signature)
+                    .collect(),
+            };
+            let selected = authority.verified_test_evidence(&selected_wire);
+            let high = LogicalQc::new(
+                selected_wire.block_id,
+                selected_wire.height,
+                [0, 2, 3].into_iter().map(ValidatorId::new).collect(),
+            );
+            let timeouts = [0, 2, 3]
+                .into_iter()
+                .map(|id| {
+                    let mut timeout = TimeoutMessage::new(3, Some(high.clone()), ValidatorId::new(id));
+                    timeout.suite_id = 100;
+                    timeout.signature =
+                        MlDsa44Backend::sign(authority.secret(id as usize), &timeout.signing_bytes())
+                            .unwrap();
+                    timeout
+                })
+                .collect();
+            let tc = TimeoutCert::new_with_evidence(
+                3,
+                Some(high),
+                [0, 2, 3].into_iter().map(ValidatorId::new).collect(),
+                timeouts,
+            );
+            let registry =
+                SimpleBackendRegistry::with_backend(SUITE_PQ_RESERVED_1, Arc::new(MlDsa44Backend));
+            verify_timeout_certificate_with_evidence(
+                &tc,
+                &tc.signed_timeouts,
+                engine.validators(),
+                &authority,
+                &registry,
+                QBIND_DEVNET_CHAIN_ID,
+            )
+            .unwrap();
+            assert_eq!(
+                signer.calls(),
+                0,
+                "peer QC never invokes the protected local signer"
+            );
+            let standing = snapshot_ledgers(&owner);
+            let registry = owner
+                .backend_for_test()
+                .prepared_registry_for_test()
+                .unwrap();
+            let (registry_charge, entry) = {
+                let registry = registry.lock().unwrap();
+                (
+                    registry.registry_reservation_charge(),
+                    registry.inspect(decided.payload().pin().handle()).unwrap(),
+                )
+            };
+            drop(registry);
+            let terms = [
+                proposal._coverage.charge(),
+                crate::safety_record_store::decision_capture::covering_charge_for_test().unwrap(),
+                crate::safety_record_store::prepared::pin_charge_bytes(),
+                registry_charge,
+                entry.generation_core_charge,
+                entry.generation_control_charge,
+                journal.live_backing_charge_for_test().unwrap(),
+            ];
+            assert_eq!(
+                standing.operational,
+                terms
+                    .into_iter()
+                    .try_fold(0u128, u128::checked_add)
+                    .unwrap()
+            );
+            assert_eq!(owner.backend_for_test().context_accounting_current(), 240);
+            assert_eq!(journal.live_backing_shape_for_test(), Some((1, 1)));
+            println!("TC captured standing terms={terms:?} generation backing={} proposal signature capacities={:?} journal={:?}",
+                entry.evidence_backing_capacity,
+                proposal.qc.as_ref().unwrap().signatures.iter().map(Vec::capacity).collect::<Vec<_>>(),
+                journal.live_backing_shape_for_test());
+            let checked = |terms: &[u128]| {
+                terms
+                    .iter()
+                    .copied()
+                    .try_fold(0u128, u128::checked_add)
+                    .unwrap()
+            };
+            let transient =
+                crate::safety_record_store::accounting::max_transient_decoded_working_set(&ctx).unwrap();
+            let retained_bound = crate::safety_record_store::profile::max_retained_generation_bytes(
+                &ctx,
+                std::mem::size_of::<TimeoutMessage>() as u128,
+            )
+            .unwrap();
+            let loader = checked(&[
+                owner.retained_holder_charge().unwrap(),
+                transient.checked_sub(retained_bound).unwrap(),
+                crate::safety_record_store::profile::max_safety_record_bytes(&ctx).unwrap(),
+            ]);
+            let protected = [
+                checked(&[control_charge(), lifecycle_charge(), loader]),
+                checked(&[
+                    control_charge(),
+                    real_sign_work_charge(),
+                    crypto_temp_charge(),
+                    crate::signing_journal_admission::output_charge(),
+                    crate::signing_journal_admission::reserve_work_charge(),
+                    crate::signing_journal_admission::cont_charge(),
+                    crate::signing_journal_admission::publish_work_charge(),
+                ]),
+                checked(&[
+                    control_charge(),
+                    verify_charge(),
+                    verify_backend_wrapper_charge(),
+                    crate::signing_journal_admission::output_charge(),
+                    crate::signing_journal_admission::envelope_charge(),
+                ]),
+            ];
+            tc_route::captured_phase_inventory(&owner, &tc, protected);
+            if !inventory_only {
+                use tc_route::CapturedBoundary;
+                let (position, binding) = retained_pos_binding(&pv, &vote);
+                let key = position.storage_key();
+                let proposal_address = &proposal.proposal as *const _;
+                let backing = || {
+                    let qc = proposal.qc.as_ref().unwrap();
+                    (
+                        qc.signer_bitmap.as_ptr(),
+                        qc.signer_bitmap.capacity(),
+                        qc.signatures.as_ptr(),
+                        qc.signatures.capacity(),
+                        qc.signatures
+                            .iter()
+                            .map(|s| (s.as_ptr(), s.capacity()))
+                            .collect::<Vec<_>>(),
+                    )
+                };
+                let original_backing = backing();
+                let payload_witness = (
+                    *decided.payload().proposal_binding(),
+                    *decided.payload().ancestry(),
+                    *decided.payload().meta(),
+                );
+                let pin_address = decided.payload().pin() as *const _;
+                let entry_witness = (
+                    entry.identity,
+                    entry.serial,
+                    entry.generation_core_charge,
+                    entry.generation_control_charge,
+                    entry.backing_shares,
+                    entry.captured_revision,
+                    entry.recovery_backend_incarnation,
+                    entry.origin_context_digest,
+                    entry.evidence_status,
+                    entry.evidence_backing_capacity,
+                );
+                let consensus = (
+                    engine.state().retained_evidence_bytes(),
+                    engine.state().max_retained_evidence_bytes(),
+                );
+                let assert_capture = |eng: &BasicHotStuffEngine<[u8; 32]>| {
+                    assert!(
+                        decided.vote() == &vote && proposal.proposal == original,
+                        "original captured Proposal/Vote differs (redacted)"
+                    );
+                    assert_eq!(&proposal.proposal as *const _, proposal_address);
+                    assert_eq!(pin_provenance_now(&owner, &decided), provenance);
+                    assert!(
+                        (
+                            *decided.payload().proposal_binding(),
+                            *decided.payload().ancestry(),
+                            *decided.payload().meta()
+                        ) == payload_witness,
+                        "original captured binding/ancestry/origin metadata differs (redacted)"
+                    );
+                    assert_eq!(decided.payload().meta().origin_view(), vote.height);
+                    assert_eq!(decided.payload().pin() as *const _, pin_address);
+                    let registry = owner
+                        .backend_for_test()
+                        .prepared_registry_for_test()
+                        .unwrap();
+                    let registry = registry.lock().unwrap();
+                    let entry = registry.inspect(decided.payload().pin().handle()).unwrap();
+                    assert_eq!(
+                        (
+                            entry.identity,
+                            entry.serial,
+                            entry.generation_core_charge,
+                            entry.generation_control_charge,
+                            entry.backing_shares,
+                            entry.captured_revision,
+                            entry.recovery_backend_incarnation,
+                            entry.origin_context_digest,
+                            entry.evidence_status,
+                            entry.evidence_backing_capacity
+                        ),
+                        entry_witness
+                    );
+                    let qc = proposal.qc.as_ref().unwrap();
+                    assert_eq!(
+                        (
+                            qc.signer_bitmap.as_ptr(),
+                            qc.signer_bitmap.capacity(),
+                            qc.signatures.as_ptr(),
+                            qc.signatures.capacity()
+                        ),
+                        (
+                            original_backing.0,
+                            original_backing.1,
+                            original_backing.2,
+                            original_backing.3
+                        )
+                    );
+                    for (sig, expected) in qc.signatures.iter().zip(&original_backing.4) {
+                        assert_eq!((sig.as_ptr(), sig.capacity()), *expected);
+                    }
+                    assert!(decided.vote().signature.is_empty());
+                    assert_eq!(
+                        (
+                            eng.state().retained_evidence_bytes(),
+                            eng.state().max_retained_evidence_bytes()
+                        ),
+                        consensus
+                    );
+                    assert_eq!(
+                        (
+                            owner.backend_for_test().accounting_cap(),
+                            owner.backend_for_test().context_accounting_cap(),
+                            owner.backend_for_test().accounting_aggregate_cap()
+                        ),
+                        (Some(84_956), Some(960), Some(84_956))
+                    );
+                    assert_eq!(owner.backend_for_test().context_accounting_current(), 240);
+                };
+                // Witness allocation/readback is outside every measured operation.
+                macro_rules! before_use {
+                    ($eng:expr) => {{
+                        (
+                            snapshot_ledgers(&owner),
+                            (
+                                $eng.locked_qc().cloned(),
+                                $eng.current_view(),
+                                $eng.timeout_effect_latches_for_test(),
+                                $eng.timeout_count(3),
+                            ),
+                            store.get_signing_record(&key).unwrap(),
+                            store
+                                .get_signing_metadata()
+                                .unwrap()
+                                .expect("journal metadata present"),
+                            journal.reserved_position_count(),
+                            owner
+                                .backend_for_test()
+                                .read_record(
+                                    crate::safety_record_store::profile::max_safety_record_bytes(&ctx)
+                                        .unwrap(),
+                                )
+                                .unwrap()
+                                .expect("safety record present"),
+                            owner
+                                .backend_for_test()
+                                .read_meta(crate::safety_record_store::backend::META_ENCODED_LEN)
+                                .unwrap()
+                                .expect("safety metadata present"),
+                        )
+                    }};
+                }
+                macro_rules! after_use {
+                    ($eng:expr, $w:expr, $writes:expr) => {{
+                        let w = &$w;
+                        assert_eq!(snapshot_ledgers(&owner), w.0);
+                        assert_capture($eng);
+                        assert!(
+                            $eng.locked_qc() == w.1 .0.as_ref(),
+                            "engine lock differs (redacted)"
+                        );
+                        assert_eq!(
+                            (
+                                $eng.current_view(),
+                                $eng.timeout_effect_latches_for_test(),
+                                $eng.timeout_count(3)
+                            ),
+                            (w.1 .1, w.1 .2, w.1 .3)
+                        );
+                        if !$writes {
+                            assert!(
+                                store.get_signing_record(&key).unwrap() == w.2,
+                                "journal record differs (redacted)"
+                            );
+                            assert!(
+                                store.get_signing_metadata().unwrap().as_ref() == Some(&w.3),
+                                "journal metadata differs (redacted)"
+                            );
+                            assert_eq!(journal.reserved_position_count(), w.4);
+                        } else {
+                            assert!(
+                                store.get_signing_record(&key).unwrap().is_some(),
+                                "new Signed journal record must be present"
+                            );
+                            assert_eq!(journal.reserved_position_count(), 1);
+                        }
+                        assert!(
+                            owner
+                                .backend_for_test()
+                                .read_record(
+                                    crate::safety_record_store::profile::max_safety_record_bytes(&ctx)
+                                        .unwrap()
+                                )
+                                .unwrap()
+                                .as_ref()
+                                == Some(&w.5),
+                            "safety bytes differ (redacted)"
+                        );
+                        assert!(
+                            owner
+                                .backend_for_test()
+                                .read_meta(crate::safety_record_store::backend::META_ENCODED_LEN)
+                                .unwrap()
+                                .as_ref()
+                                == Some(&w.6),
+                            "safety metadata differs (redacted)"
+                        );
+                    }};
+                }
+                let w = before_use!(&engine);
+                let l0_observation =
+                    owner.observe_retained_decision(&engine, &decided, &proposal, &lim, Some(&history));
+                assert!(matches!(
+                    l0_observation,
+                    RetainedDecisionObservation::Revalidated(BoundedSafetyOutcome::SafeViewSufficiency)
+                ));
+                after_use!(&engine, w, false);
+                let mut signature_witness = None;
+                if retained {
+                    let mut sink = RealSignRecordingSink::new();
+                    let mut coord = ModelCoordinationHook::inert();
+                    let w = before_use!(&engine);
+                    let result = fresh_vote_sign_real_local_same_authority(
+                        &owner,
+                        &engine,
+                        &decided,
+                        &proposal,
+                        &lim,
+                        Some(&history),
+                        &mut snapshot,
+                        &signer,
+                        &mut sink,
+                        &journal,
+                        &mut coord,
+                        ReconfirmPerturbation::None,
+                    );
+                    assert_eq!((signer.calls(), sink.calls, coord.calls), (1, 1, 1));
+                    assert!(matches!(result, RealFreshSignOutcome::Published(_)));
+                    after_use!(&engine, w, true);
+                    let (mut output, mut scratch) = journal.admit_retrieval_workspace().unwrap();
+                    let bytes = match journal
+                        .retrieve_retained_checked(&position, &binding, &mut scratch, &mut output)
+                        .unwrap()
+                    {
+                        crate::signing_reservation_journal::RetainedDelivery::Retained(bytes) => bytes,
+                        other => panic!("missing acknowledged Signed result: {other:?}"),
+                    };
+                    signature_witness = Some(RetainedSliceWitness::from_validated(bytes));
+                }
+                for timeout in &tc.signed_timeouts {
+                    engine
+                        .on_timeout_msg(timeout.validator_id, timeout.clone())
+                        .unwrap();
+                }
+                let mut journal_before_transition = None;
+                let mut ready_calls = 0;
+                tc_route::captured_transition(
+                    &owner,
+                    &mut engine,
+                    &authority,
+                    &selected,
+                    &tc,
+                    revision,
+                    &history,
+                    uncertain,
+                    pressure,
+                    |phase, eng| {
+                        if phase == CapturedBoundary::Before {
+                            journal_before_transition = Some((
+                                store.get_signing_record(&key).unwrap(),
+                                store
+                                    .get_signing_metadata()
+                                    .unwrap()
+                                    .expect("journal metadata present"),
+                                journal.reserved_position_count(),
+                            ));
+                            return;
+                        }
+                        assert_capture(eng);
+                        let prior = journal_before_transition
+                            .as_ref()
+                            .expect("before-operation witness");
+                        assert!(
+                            store.get_signing_record(&key).unwrap() == prior.0,
+                            "TC transition erased/changed journal obligation (redacted)"
+                        );
+                        assert!(
+                            store.get_signing_metadata().unwrap().as_ref() == Some(&prior.1),
+                            "TC transition changed journal metadata (redacted)"
+                        );
+                        assert_eq!(journal.reserved_position_count(), prior.2);
+                        if phase == CapturedBoundary::Preserved {
+                            return;
+                        }
+                        let ready = phase == CapturedBoundary::Ready;
+                        let w = before_use!(eng);
+                        let observed =
+                            owner.observe_retained_decision(eng, &decided, &proposal, &lim, Some(&history));
+                        match phase {
+                        CapturedBoundary::Blocked => assert_eq!(observed,
+                            RetainedDecisionObservation::Inconclusive(
+                                crate::safety_record_store::decision_capture::RetainedDecisionBlocked::RecoveryRequired)),
+                        CapturedBoundary::EngineMismatch => assert_eq!(observed,
+                            RetainedDecisionObservation::Inconclusive(
+                                crate::safety_record_store::decision_capture::RetainedDecisionBlocked::EngineDurableDisagreement)),
+                        CapturedBoundary::Ready if unsafe_candidate => assert_eq!(observed,
+                            RetainedDecisionObservation::Rejected(
+                                crate::safety_record_store::decision_capture::RetainedDecisionReject::Ancestry(
+                                    crate::safety_record_store::decision_capture::BoundedAncestryReject::NoParentLink))),
+                        CapturedBoundary::Ready => assert_eq!(observed,
+                            RetainedDecisionObservation::Revalidated(BoundedSafetyOutcome::SafeAncestry { hops: 0 })),
+                        _ => unreachable!("non-use boundary"),
+                    }
+                        after_use!(eng, w, false);
+                        if ready && pressure {
+                            let before = before_use!(eng);
+                            let pressure_slot = std::rc::Rc::new(std::cell::RefCell::new(None));
+                            let slot = pressure_slot.clone();
+                            let backend = owner.backend_for_test().clone();
+                            struct PressureReset;
+                            impl Drop for PressureReset {
+                                fn drop(&mut self) {
+                                    clear_real_admit_pressure_hook();
+                                }
+                            }
+                            let reset = PressureReset;
+                            install_real_admit_pressure_hook(move |stage| {
+                                if stage == RealAdmitStage::WorkSet {
+                                    let free = backend.accounting_aggregate_cap().unwrap()
+                                        - backend.accounting_aggregate_current();
+                                    *slot.borrow_mut() = Some(backend.accounting().reserve(free).unwrap());
+                                }
+                            });
+                            let mut sink = RealSignRecordingSink::new();
+                            let mut coord = ModelCoordinationHook::inert();
+                            let result = fresh_vote_sign_real_local_same_authority(
+                                &owner,
+                                eng,
+                                &decided,
+                                &proposal,
+                                &lim,
+                                Some(&history),
+                                &mut snapshot,
+                                &signer,
+                                &mut sink,
+                                &journal,
+                                &mut coord,
+                                ReconfirmPerturbation::None,
+                            );
+                            assert_eq!(result, RealFreshSignOutcome::WorkSetAdmitRefused);
+                            assert_eq!((signer.calls(), sink.calls, coord.calls), (0, 0, 0));
+                            let fill = pressure_slot
+                                .borrow()
+                                .as_ref()
+                                .expect("pressure hook ran")
+                                .charge();
+                            assert_eq!(
+                                snapshot_ledgers(&owner),
+                                LedgerSnapshot {
+                                    operational: before.0.operational + fill,
+                                    aggregate: before.0.aggregate + fill,
+                                }
+                            );
+                            assert_capture(eng);
+                            assert_eq!(journal.reserved_position_count(), 0);
+                            drop(reset);
+                            pressure_slot.borrow_mut().take();
+                            after_use!(eng, before, false);
+                        }
+                        let (mut fresh_worker, tx, rx) =
+                            BoundedProtectedUseObserver::start(owner.backend_for_test().clone());
+                        let w = before_use!(eng);
+                        let mut sink = RealSignRecordingSink::new();
+                        let mut coord =
+                            ModelCoordinationHook::probing(tx, rx, std::time::Duration::from_secs(2));
+                        coord.sample_backend = Some(owner.backend_for_test().clone());
+                        let result = fresh_vote_sign_real_local_same_authority(
+                            &owner,
+                            eng,
+                            &decided,
+                            &proposal,
+                            &lim,
+                            Some(&history),
+                            &mut snapshot,
+                            &signer,
+                            &mut sink,
+                            &journal,
+                            &mut coord,
+                            ReconfirmPerturbation::None,
+                        );
+                        let success = ready && !retained && !unsafe_candidate;
+                        assert_eq!(
+                            (sink.calls, coord.calls),
+                            if success { (1, 1) } else { (0, 0) }
+                        );
+                        assert_eq!(signer.calls(), u32::from(retained || success));
+                        if success {
+                            assert!(matches!(result, RealFreshSignOutcome::Published(_)));
+                            assert_eq!(coord.last_excluded, Some(true));
+                            let post = protected[1]
+                                .checked_sub(crate::signing_journal_admission::reserve_work_charge())
+                                .unwrap();
+                            assert_eq!(
+                                (
+                                    coord.observed_operational_pre_reserve,
+                                    coord.observed_aggregate_pre_reserve
+                                ),
+                                (
+                                    Some(w.0.operational + protected[1]),
+                                    Some(w.0.aggregate + protected[1])
+                                )
+                            );
+                            assert_eq!(
+                                (coord.observed_operational, coord.observed_aggregate),
+                                (Some(w.0.operational + post), Some(w.0.aggregate + post))
+                            );
+                            println!(
+                                "TC captured fresh live pre-reserve={:?}/{:?} post-consume={:?}/{:?}",
+                                coord.observed_operational_pre_reserve,
+                                coord.observed_aggregate_pre_reserve,
+                                coord.observed_operational,
+                                coord.observed_aggregate
+                            );
+                        } else {
+                            assert_eq!(
+                                result,
+                                if ready && retained {
+                                    RealFreshSignOutcome::ReservePotentiallySigned
+                                } else {
+                                    RealFreshSignOutcome::ObservationRefused
+                                }
+                            );
+                        }
+                        after_use!(eng, w, success);
+                        fresh_worker
+                            .shutdown_and_join()
+                            .expect("fresh boundary observer joined");
+                        if ready {
+                            ready_calls += 1;
+                            if !unsafe_candidate {
+                                let (mut output, mut scratch) =
+                                    journal.admit_retrieval_workspace().unwrap();
+                                let bytes = match journal
+                                    .retrieve_retained_checked(
+                                        &position,
+                                        &binding,
+                                        &mut scratch,
+                                        &mut output,
+                                    )
+                                    .unwrap()
+                                {
+                                    crate::signing_reservation_journal::RetainedDelivery::Retained(
+                                        bytes,
+                                    ) => bytes,
+                                    other => panic!("exact Signed result missing: {other:?}"),
+                                };
+                                let preimage = pv.signing_domain.vote_preimage(&vote);
+                                let (_, pk) = pv
+                                    .key_provider
+                                    .get_suite_and_key(ValidatorId::new(SIGNER_VID))
+                                    .unwrap();
+                                MlDsa44Backend::verify(&pk, &preimage, bytes).unwrap();
+                                if signature_witness.is_none() {
+                                    signature_witness = Some(RetainedSliceWitness::from_validated(bytes));
+                                }
+                                assert!(
+                                    bytes == signature_witness.as_ref().unwrap().slice(),
+                                    "original stored signature differs (redacted)"
+                                );
+                            }
+                        }
+                        if ready && pressure {
+                            let before = before_use!(eng);
+                            let pressure_slot = std::rc::Rc::new(std::cell::RefCell::new(None));
+                            let slot = pressure_slot.clone();
+                            let backend = owner.backend_for_test().clone();
+                            struct RetainedPressureReset;
+                            impl Drop for RetainedPressureReset {
+                                fn drop(&mut self) {
+                                    clear_retained_admit_pressure_hook();
+                                }
+                            }
+                            let reset = RetainedPressureReset;
+                            install_retained_admit_pressure_hook(move |stage| {
+                                if stage == RetainedAdmitStage::Verify {
+                                    let free = backend.accounting_aggregate_cap().unwrap()
+                                        - backend.accounting_aggregate_current();
+                                    *slot.borrow_mut() = Some(backend.accounting().reserve(free).unwrap());
+                                }
+                            });
+                            let mut sink = RetainedUseRecordingSink::new();
+                            let mut coord = ModelCoordinationHook::inert();
+                            let result = retained_vote_use_checked_same_authority_model(
+                                &owner,
+                                eng,
+                                &decided,
+                                &proposal,
+                                &lim,
+                                Some(&history),
+                                &mut snapshot,
+                                &mut sink,
+                                &journal,
+                                &mut coord,
+                                ReconfirmPerturbation::None,
+                            );
+                            assert_eq!(result, ModelRetainedUseOutcome::VerifyAdmitRefused);
+                            assert_eq!((signer.calls(), sink.calls, coord.calls), (1, 0, 0));
+                            let fill = pressure_slot
+                                .borrow()
+                                .as_ref()
+                                .expect("retained pressure hook ran")
+                                .charge();
+                            assert_eq!(
+                                snapshot_ledgers(&owner),
+                                LedgerSnapshot {
+                                    operational: before.0.operational + fill,
+                                    aggregate: before.0.aggregate + fill,
+                                }
+                            );
+                            assert_capture(eng);
+                            assert_eq!(journal.reserved_position_count(), 1);
+                            drop(reset);
+                            pressure_slot.borrow_mut().take();
+                            after_use!(eng, before, false);
+                        }
+                        let probe = if ready && !unsafe_candidate {
+                            let witness = signature_witness
+                                .take()
+                                .expect("verified exact signature witness");
+                            Some(std::rc::Rc::new(RetainedSliceProbe::new(witness)))
+                        } else {
+                            None
+                        };
+                        let _probe_guard = probe
+                            .as_ref()
+                            .map(|p| install_retained_slice_probe(p.clone()));
+                        let (mut worker, tx, rx) =
+                            BoundedProtectedUseObserver::start(owner.backend_for_test().clone());
+                        let mut retained_coord =
+                            ModelCoordinationHook::probing(tx, rx, std::time::Duration::from_secs(2));
+                        retained_coord.sample_backend = Some(owner.backend_for_test().clone());
+                        let mut retained_sink = RetainedUseRecordingSink::new();
+                        let w = before_use!(eng);
+                        let result = retained_vote_use_checked_same_authority_model(
+                            &owner,
+                            eng,
+                            &decided,
+                            &proposal,
+                            &lim,
+                            Some(&history),
+                            &mut snapshot,
+                            &mut retained_sink,
+                            &journal,
+                            &mut retained_coord,
+                            ReconfirmPerturbation::None,
+                        );
+                        let delivered = ready && !unsafe_candidate;
+                        assert_eq!(signer.calls(), u32::from(retained || success));
+                        assert_eq!(
+                            (retained_sink.calls, retained_coord.calls),
+                            if delivered { (1, 1) } else { (0, 0) }
+                        );
+                        if delivered {
+                            assert!(matches!(result, ModelRetainedUseOutcome::Consumed(_)));
+                            assert_eq!(retained_coord.last_excluded, Some(true));
+                            assert_eq!(
+                                (
+                                    retained_coord.observed_operational,
+                                    retained_coord.observed_aggregate
+                                ),
+                                (
+                                    Some(w.0.operational + protected[2]),
+                                    Some(w.0.aggregate + protected[2])
+                                )
+                            );
+                            println!(
+                                "TC captured retained live={:?}/{:?}",
+                                retained_coord.observed_operational, retained_coord.observed_aggregate
+                            );
+                            let probe = probe.as_ref().unwrap();
+                            assert_eq!(
+                                (probe.invocations(), probe.last_matched(), probe.last_len()),
+                                (1, Some(true), Some(qbind_crypto::ML_DSA_44_SIGNATURE_SIZE))
+                            );
+                        } else {
+                            assert_eq!(result, ModelRetainedUseOutcome::ObservationRefused);
+                        }
+                        after_use!(eng, w, false);
+                        worker.shutdown_and_join().expect("bounded observer joined");
+                    },
+                );
+                assert_eq!(ready_calls, 1);
+                assert_capture(&engine);
+                assert_eq!(snapshot_ledgers(&owner), standing);
+                let successful_peaks = (
+                    owner.backend_for_test().accounting_peak(),
+                    owner.backend_for_test().context_accounting_peak(),
+                    owner.backend_for_test().accounting_aggregate_peak(),
+                );
+                println!("TC captured outcome uncertain={uncertain} retained={retained} unsafe={unsafe_candidate} pressure={pressure} signer={} journal={} peaks={successful_peaks:?} (unpressured only when pressure=false)",
+                    signer.calls(), journal.reserved_position_count());
+
+                if !unsafe_candidate {
+                    // The exact Signed position is never a fresh-sign fallback.
+                    let w = before_use!(&engine);
+                    let mut sink = RealSignRecordingSink::new();
+                    let mut coord = ModelCoordinationHook::inert();
+                    let result = fresh_vote_sign_real_local_same_authority(
+                        &owner,
+                        &engine,
+                        &decided,
+                        &proposal,
+                        &lim,
+                        Some(&history),
+                        &mut snapshot,
+                        &signer,
+                        &mut sink,
+                        &journal,
+                        &mut coord,
+                        ReconfirmPerturbation::None,
+                    );
+                    assert_eq!(result, RealFreshSignOutcome::ReservePotentiallySigned);
+                    assert_eq!((signer.calls(), sink.calls, coord.calls), (1, 0, 0));
+                    after_use!(&engine, w, false);
+
+                    for control in 0..3 {
+                        let substituted = make_proposal(1, l0, 1);
+                        let mut changed = pv.clone();
+                        changed.validators = Arc::new(
+                            ConsensusValidatorSet::new([0, 2, 3, 4].into_iter().map(|id| {
+                                ValidatorSetEntry {
+                                    id: ValidatorId::new(id),
+                                    voting_power: 1,
+                                }
+                            }))
+                            .unwrap(),
+                        );
+                        let mut control_snapshot =
+                            established_snapshot(if control == 1 { &changed } else { &pv });
+                        let w = before_use!(&engine);
+                        let mut sink = RetainedUseRecordingSink::new();
+                        let mut coord = ModelCoordinationHook::inert();
+                        let result = retained_vote_use_checked_same_authority_model(
+                            &owner,
+                            &engine,
+                            &decided,
+                            if control == 0 {
+                                &substituted
+                            } else {
+                                &proposal
+                            },
+                            &lim,
+                            Some(&history),
+                            &mut control_snapshot,
+                            &mut sink,
+                            &journal,
+                            &mut coord,
+                            if control == 2 {
+                                ReconfirmPerturbation::AdvanceGenerationBeforeConfirm
+                            } else {
+                                ReconfirmPerturbation::None
+                            },
+                        );
+                        assert_eq!(
+                            result,
+                            match control {
+                                0 => ModelRetainedUseOutcome::ObservationRefused,
+                                1 => ModelRetainedUseOutcome::MembershipRefused,
+                                _ => ModelRetainedUseOutcome::AuthorizationConfirmRefused,
+                            }
+                        );
+                        assert_eq!((signer.calls(), sink.calls, coord.calls), (1, 0, 0));
+                        after_use!(&engine, w, false);
+                    }
+                }
+                if pressure {
+                    assert_eq!(snapshot_ledgers(&owner), standing);
+                    println!("TC captured deliberate pressure peak={} separate unpressured fixtures required; pressure lifecycle peak={successful_peaks:?}",
+                        owner.backend_for_test().accounting_aggregate_peak());
+                }
+                if !unsafe_candidate {
+                    let invalidation_store = real_fresh_store();
+                    let invalidation_journal =
+                        associated_bounded_journal(&owner, invalidation_store.clone(), 1);
+                    let mut invalidation_snapshot = established_snapshot(&pv);
+                    let w = before_use!(&engine);
+                    let calls = signer.calls();
+                    let mut sink = RealSignRecordingSink::new();
+                    let mut coord = ModelCoordinationHook::inert();
+                    let result = fresh_vote_sign_real_local_same_authority(
+                        &owner,
+                        &engine,
+                        &decided,
+                        &proposal,
+                        &lim,
+                        Some(&history),
+                        &mut invalidation_snapshot,
+                        &signer,
+                        &mut sink,
+                        &invalidation_journal,
+                        &mut coord,
+                        ReconfirmPerturbation::AdvanceGenerationBeforeConfirm,
+                    );
+                    assert_eq!(result, RealFreshSignOutcome::AuthorizationConfirmRefused);
+                    assert_eq!((signer.calls(), sink.calls, coord.calls), (calls, 0, 0));
+                    assert_eq!(invalidation_journal.reserved_position_count(), 1);
+                    after_use!(&engine, w, false);
+                    let reserved = invalidation_store
+                        .get_signing_record(&key)
+                        .unwrap()
+                        .expect("consumed Reserved obligation remains present");
+                    let metadata = invalidation_store
+                        .get_signing_metadata()
+                        .unwrap()
+                        .expect("invalidation journal metadata remains present");
+                    let w = before_use!(&engine);
+                    let retry = invalidation_journal.reserve_for_sign(&position, &binding);
+                    assert!(matches!(retry, Ok(ReservationOutcome::PotentiallySigned)));
+                    assert_capture(&engine);
+                    assert_eq!((signer.calls(), sink.calls, coord.calls), (calls, 0, 0));
+                    assert!(
+                        invalidation_store
+                            .get_signing_record(&key)
+                            .unwrap()
+                            .as_ref()
+                            == Some(&reserved),
+                        "refusal erased Reserved obligation (redacted)"
+                    );
+                    assert!(
+                        invalidation_store.get_signing_metadata().unwrap().as_ref() == Some(&metadata),
+                        "refusal changed journal metadata (redacted)"
+                    );
+                    after_use!(&engine, w, false);
+                    drop(invalidation_journal);
+                    drop(invalidation_store);
+                    assert_eq!(snapshot_ledgers(&owner), standing);
+                }
+            }
+            assert!(
+                decided.vote() == &vote && proposal.proposal == original,
+                "original Proposal/Vote differs at teardown (redacted)"
+            );
+            assert_eq!(pin_provenance_now(&owner, &decided), provenance);
+            assert_eq!(snapshot_ledgers(&owner), standing);
+            assert_eq!(
+                journal.reserved_position_count(),
+                u64::from(!inventory_only && !unsafe_candidate)
+            );
+            drop(journal);
+            drop(store);
+            drop(decided);
+            drop(proposal);
+            let accountant = owner.backend_for_test().accounting_handle_for_test();
+            println!(
+                "TC captured final live consensus occupancy={} ceiling={}; selected fixture Arc={}",
+                engine.state().retained_evidence_bytes(),
+                engine.state().max_retained_evidence_bytes(),
+                Arc::strong_count(&selected)
+            );
+            drop(engine);
+            assert_eq!(
+                Arc::strong_count(&evidence_owner),
+                1,
+                "engine destruction releases its verified-Proposal QC evidence"
+            );
+            drop(owner);
+            assert_eq!(accountant.current(), 0);
+            assert_eq!(accountant.aggregate().current(), 0);
+            println!("TC captured final storage operational/aggregate=0/0; engine evidence released; context ownership released");
+        }
+
+        #[cfg(feature = "test-utils")]
+        #[test]
         fn received_qc_captured_vote_lifecycle_pressure() {
             run_received_qc_captured_vote_lifecycle(true, false);
         }
