@@ -3521,3 +3521,15 @@ C4/C5 OPEN
 ```
 
 Full TC lifecycle acceptance, production restart safety and RS1 remain unclosed.
+
+### Explicit-O5 metadata operand correction (2026-10-31)
+
+The latest explicit-O5 formula's `+48` metadata operand is withdrawn.
+The unchanged source uses `META_ENCODED_LEN = 2 + 32 + 8 = 42` bytes:
+`O5 = 10,459 + 42 + 10,760 + 10,509 = 31,770 bytes`.
+The explicit-O5 phase remains 54,654 bytes; newer-publication coexistence
+remains 84,763 <= 84,956 bytes. This is a documentation operand correction,
+not a source-accounting change or a newly observed runtime defect.
+All Rust source is unchanged; no tests or builds were rerun. Validation remains
+attributed to `0553e374edf6a9221870b9c5e4f8a6689af3901f`.
+All standing scope, lifecycle and release verdicts remain unchanged.
