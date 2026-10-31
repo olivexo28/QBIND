@@ -23078,3 +23078,62 @@ The first ledger attempt with the same literal command exited 101 because `libcl
 Focused counts overlap the package suite and are not added. No dependency installation or manifest/lockfile change was required. The additional `cargo fmt --all -- --check` exited 1 because of pre-existing formatting differences in unrelated workspace files; `rustfmt --check --edition 2021 crates/qbind-ledger/src/store.rs` passes. The API adds no caller, authorization behavior, policy constant, or whole-memory claim.
 
 Preserved verdicts: `D7D14_STORAGE_COMPONENT=IMPLEMENTED-ISOLATED`; `D7D14_STORAGE_ACCEPTANCE=PASS-ACCEPTED-SUBSET`; §13.6 whole-lifecycle INCOMPLETE; activation DISABLED; public DevNet NO-GO; durable anti-rollback NOT-ESTABLISHED; C4/C5 OPEN; RS1 OPEN. This unused prerequisite does not implement weighted authorization, bounded keyset parsing, persistent-store integration, or F1/F2 closure.
+
+## RUN 422 Slice 2B: bounded borrowed keyset parsing (unused prerequisite)
+
+**Baseline verification:** initial branch `main`, clean worktree, HEAD `a8e9f7789440a0c5ac4412f65785fa04da82f875`, root tree `a05d4d282b786339deee8ff58beacaf19123e897`, origin fetch/push `https://github.com/olivexo28/QBIND`. Commit and tree object availability were checked independently; the commit names that tree, HEAD content matches the baseline, and the two baseline source blobs independently hash to `666d31f198ce27fc1c75ddee0acae28c82e8342a` and `93efd5c088a003abb7342f0e74302fcbfb045749`. Baseline ancestry to initial HEAD is equality, not a reconstruction of earlier history. This is a shallow repository whose boundary is the baseline: its raw commit records parent `dc07baf66746b5ae31c08264bb50044b7c17fdf7`, but that parent object is unavailable. It is not a parentless commit. The task branch was created from the verified baseline; the local descendant chain to the tested source is verified.
+
+**Source-validation identity:** `841db3b261a00ca58cd2ddc0ca1d6c73ca2223e8`, tree `e197badf5a56a5c46771698b45e4b0192dce98b2`. Tested Rust blobs (mode `100755`) are `crates/qbind-serde/src/keyset.rs` = `fd1924c22600e1d508b982593d9e6d52fae39adb` and `crates/qbind-wire/src/keyset.rs` = `97566219b9d6f9a84e3fb6d2442f0762b328a6f3`. Both original Rust files remain exact byte prefixes of these additive changes. Subsequent changes are documentation only. Both evidence documents retain their complete baseline bytes as exact prefixes, mode `100644`, and original EOL/EOF conventions (this document CRLF without final newline; contradiction document LF without final newline).
+
+**Layouts confirmed from baseline codecs, all u16 fields little-endian:**
+
+| Format | Header and offsets | Entry prefix and offsets |
+|---|---|---|
+| Stored `KeysetAccount` | 12 bytes: version @0, reserved0[3] @1, threshold @4, entry_count @6, reserved1[4] @8 | 6 bytes: suite_id @0, weight @1, reserved0[1] @3, pubkey_len @4, key body @6 |
+| `CreateKeysetCall` | 42 bytes: opcode @0, version @1, target_id[32] @2, threshold @34, entry_count @36, reserved0[4] @38 | 5 bytes: suite_id @0, weight @1, pubkey_len @3, key body @5 |
+
+Public APIs in the existing public modules are `parse_stored_keyset(input, StoredKeysetLimits)` -> `StoredKeysetView` and `parse_create_keyset(input, CreateKeysetLimits)` -> `CreateKeysetView`. Limits have four independent caller-supplied usize fields: `max_encoded_bytes`, `max_entries`, `max_key_bytes`, `max_total_key_bytes`; no defaults, production caps, policy constants, or callers are introduced. Test budgets are fixtures, not deployment policy.
+
+Admission order: complete input length before any header read; complete header (including required `OP_KEYSET_CREATE` for calls); advertised count before iteration; checked count-times-prefix plus header minimum size before walking entries; complete entry prefix; declared per-key limit; checked cumulative key-byte addition and aggregate limit; complete key body. Exactly the advertised entries must consume the entire input; any trailing bytes, including understated counts, refuse. Offset progression uses length-checked `get_bytes`/`split_at` on shrinking slices, avoiding offset addition and its overflow entirely. No partially validated view is returned.
+
+**Allocation/ownership proof is source-path inspection, not allocator instrumentation:** the additive parser, view accessors and iterator `next` use only borrowed immutable slices, scalar counters, fixed arrays, checked arithmetic, existing allocation-free `get_bytes`, and bounded splits. The helper checks slice length and splits without copying (`crates/qbind-serde/src/io.rs:71-78`, `crates/qbind-wire/src/io.rs:72-79`). No owned decoder, Vec/Box, count-sized array, collection, unsafe code, formatted error string, or allocator is on these paths. Only fixed header fields are copied (including the 32-byte target); variable key bytes retain exact original spans. Errors are fixed-size local enums separating four limit causes from existing fixed-size `StateError`/`WireError` structural failures. Test fixtures/owned comparison decoders do allocate outside those paths. Pointer assertions prove borrowing only; no allocation/OOM runtime measurement is claimed.
+
+Validated-view fields and iterator construction are private. Metadata accessors retain version, opcode/target where applicable, thresholds, counts and all reserved bytes (including create-call bytes discarded by the owned decoder). Entry views retain suite, weight, length, order, stored-entry reserved byte and borrowed key contents. Every `entries()` creates an independent forward cursor: O(1) controls, O(1) per entry, O(entry_count) complete traversal, no rescanning earlier entries or error-to-None fallback; None occurs only when the validated advertised count is exhausted. Parsing is O(entry_count), does not inspect key-body contents, and allocates no storage from limits. These APIs bound admitted encoded lengths and parsing work, not acquisition of the caller-owned input, allocator overhead, physical memory, or arbitrary repeated traversals.
+
+**Structural framing is not authorization.** Unknown versions/suites, nonzero reserved fields, zero threshold/weights, duplicate entries and zero-length keys are preserved without normalization, deduplication or reordering. Success establishes no supported version/suite, canonical key encoding, meaningful threshold, distinct signer identities, signatures, account ownership, or authorization. Existing encoders, owned decoders, formats and signing semantics are unchanged. Source search finds parser calls only in the new inline tests; no production caller uses either parser. No canonical descriptors, AccountStore reads, weighted verification, keyset program, transaction acceptance or persistent-store integration is wired.
+
+**Requirement-to-test mapping:** both inline modules use prefix `run422_bounded_keyset_parse`; suffixes below apply to both formats unless specified.
+
+| Requirement | Test suffix / evidence |
+|---|---|
+| Independent layout/LE/offset fixtures; all metadata/reserved bytes/order/key contents; original-span pointers; independent complete repeat traversals | `layout_borrowing_and_repeatable_traversal` |
+| Encoder-produced fixtures against every owned-decoder field; create reserved bytes additionally retained | `encoder_owned_correspondence` |
+| Exact budgets and otherwise-valid one-over refusal for each independent limit; relax only relevant limit; aggregate refusal with every key individually within budget; zero byte budget; usize::MAX small input | `exact_limits_and_independent_one_over_refusals` |
+| Zero count and zero-length key with explicit zero key budgets | `zero_entries_and_zero_length_keys` |
+| All strict prefixes of multi-entry inputs (29 stored / 57 call prefixes), including every truncated header, prefix and body | `every_truncated_prefix` |
+| Excessive/impossible advertised count, zero/one understated count, trailing byte, malformed last prefix/body | `malformed_counts_trailing_and_final_entries` |
+| Encoded-byte check before header, count check before minimum-size loop, key limits before missing body | `admission_order_before_body_access` |
+| Required create opcode | `wrong_create_opcode` (wire only) |
+| Unknown fields, nonzero reserved bytes, zero threshold/weights and duplicate opaque keys preserved; explicitly not authorization | `structural_success_is_not_authorization` |
+| u8/u16 maximum fields, max-length key and max-count zero-key entries, usize::MAX budgets never used for storage sizing | `boundary_fields_without_limit_sized_storage` |
+| Input unchanged after all successes and refusals | Shared test `parse` wrapper snapshots and compares every input |
+| Allocation-free parsing/traversal and private invariant, rather than pointer-only allocation claims | Actual additive paths and `get_bytes` source inspection above |
+
+**Literal validation results, all successful gates against source-validation commit `841db3b261a00ca58cd2ddc0ca1d6c73ca2223e8` / tree `e197badf5a56a5c46771698b45e4b0192dce98b2`:**
+
+| Literal command | Exit | Selected / passed / failed / ignored |
+|---|---:|---|
+| `cargo test --locked -p qbind-serde --lib run422_bounded_keyset_parse -- --nocapture` | 0 | 9 / 9 / 0 / 0; 0 filtered |
+| `cargo test --locked -p qbind-wire --lib run422_bounded_keyset_parse -- --nocapture` | 0 | 10 / 10 / 0 / 0; 9 filtered |
+| `cargo test --locked -p qbind-serde -p qbind-wire` | 0 | 146 / 144 / 0 / 2; includes existing roundtrip suites and doc tests |
+| `LIBCLANG_PATH=/usr/lib/llvm-18/lib cargo test --locked -p qbind-ledger --test tx_auth_verifier_tests` | 0 | 13 / 13 / 0 / 0; 0 filtered |
+| `LIBCLANG_PATH=/usr/lib/llvm-18/lib cargo test --locked -p qbind-system --test keyset_program_tests` | 0 | 2 / 2 / 0 / 0; 0 filtered |
+| `LIBCLANG_PATH=/usr/lib/llvm-18/lib cargo check --locked -p qbind-node` | 0 | N/A; compilation only, no node tests; 8 pre-existing library dead-code warnings |
+
+The focused selectors select tests. Counts from overlapping selections are not additive; the full codec result includes both focused modules. Existing roundtrip tests pass unchanged. The two ignored cases are pre-existing wire doc tests, not ignored parser tests.
+
+**Preparation and earlier attempts:** Cargo fetched existing locked dependencies; no manifest, dependency or lockfile changes. At initial source `409cfec244eb3582204dd07b71dc11e92c51cd0c` / tree `da59358fb6993086cd6a57e0c245fa04de6fb85c`, the same first three literal commands each exited 101 during compilation (selected/passed/failed/ignored N/A; no tests ran) because count-understatement test literals needed an explicit u16 type. Commit `841db3b261a00ca58cd2ddc0ca1d6c73ca2223e8` fixes only those two test literals before all successful gates. The ledger literal command first exited 101 at this corrected revision before test execution (counts N/A), because bindgen could not find libclang at the specified path. Environment-only `apt-get update -qq` and `apt-get install -y -qq libclang-18-dev` both exited 0; installed package `1:18.1.3-1ubuntu1` provides `/usr/lib/llvm-18/lib/libclang.so`. Apt reported an unrelated Chrome-index DNS warning and reused available index data. No source was changed for that environment failure. Toolchain: cargo 1.99.1, rustc 1.99.1, rustfmt 1.10.0-stable.
+
+The initial scoped `rustfmt --check crates/qbind-serde/src/keyset.rs crates/qbind-wire/src/keyset.rs` exited 1 for new fixture wrapping; formatting was applied only to the two authorized Rust paths before the source-validation revision. Final literal `rustfmt --check --edition 2021 crates/qbind-serde/src/keyset.rs crates/qbind-wire/src/keyset.rs` exits 0. CRLF-aware working-tree `git -c core.whitespace=cr-at-eol --no-pager diff --check` and baseline-to-final `git -c core.whitespace=cr-at-eol --no-pager diff --check a8e9f7789440a0c5ac4412f65785fa04da82f875 HEAD` exit 0. Byte-prefix, EOL/EOF, modes, authorized-path-only diff and tested-Rust equality checks pass. No additional validation scope was needed.
+
+Preserved verdicts: `D7D14_STORAGE_COMPONENT=IMPLEMENTED-ISOLATED`; `D7D14_STORAGE_ACCEPTANCE=PASS-ACCEPTED-SUBSET`; §13.6 whole-lifecycle INCOMPLETE; activation DISABLED; public DevNet NO-GO; durable anti-rollback NOT-ESTABLISHED; C4/C5 OPEN; RS1 OPEN. Slice 2B does not close F1/F2, establish persistent-store guarantees, activate weighted authorization, or establish deployed-path readiness.
