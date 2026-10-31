@@ -80,9 +80,19 @@ impl AuthFixture {
             ml_dsa_44_sign_digest(&self.secret_key, &digest).expect("sign canonical tx_digest");
     }
 
-    fn unsigned(&self, mut tx: Transaction) -> Transaction {
-        self.authenticate(&mut tx);
+    fn unsigned(mut tx: Transaction) -> Transaction {
+        assert!(
+            !tx.auths.is_empty(),
+            "unsigned fixture requires a signed input"
+        );
+        let signed_witness = tx.clone();
         tx.auths.clear();
+        let mut restored = tx.clone();
+        restored.auths = signed_witness.auths.clone();
+        assert!(
+            restored == signed_witness,
+            "signature removal changed the complete transaction body"
+        );
         tx
     }
 }
@@ -158,7 +168,10 @@ fn block_executor_applies_multiple_txs_and_reports_results() {
 
     assert_eq!(result.tx_results.len(), 2);
     assert!(matches!(result.tx_results[0], TxApplyResult::Success));
-    assert!(matches!(result.tx_results[1], TxApplyResult::Failed(_)));
+    assert!(matches!(
+        result.tx_results[1],
+        TxApplyResult::Failed(ExecutionError::ProgramError("unsupported validator opcode"))
+    ));
     assert!(!result.all_succeeded());
 
     // Check that state from the successful tx is present.
@@ -203,7 +216,7 @@ fn block_executor_refuses_unsigned_effects_and_keeps_sequential_positive_result(
     let executor: BlockExecutor<InMemoryAccountStore> = BlockExecutor::new();
     let refused_target = dummy_account_id(0xB1);
     let accepted_target = dummy_account_id(0xB2);
-    let unsigned = auth.unsigned(build_keyset_create_tx(refused_target, &auth));
+    let unsigned = AuthFixture::unsigned(build_keyset_create_tx(refused_target, &auth));
     let accepted = build_keyset_create_tx(accepted_target, &auth);
     let txs = [unsigned, accepted];
     let tx_witnesses = txs.clone();

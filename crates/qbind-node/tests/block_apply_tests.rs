@@ -284,17 +284,17 @@ fn node_returns_block_outcome_when_native_transaction_auth_fails() {
     let target_id = dummy_account_id(0xE1);
     let mut tx = build_keyset_create_tx(target_id, &auth);
     tx.auths.clear();
-    let tx_witness = tx.clone();
     let account_witness = [store.get(&AUTH_KEYSET_ID), store.get(&target_id)];
-    let proposal = build_proposal_with_txs(&[tx.clone()]);
+    let proposal = build_proposal_with_txs(&[tx]);
+    let proposal_witness = proposal.clone();
 
     let outcome = node
         .apply_block(&mut store, &proposal)
         .expect("block decoding/application outcome should be returned");
 
     assert!(
-        tx == tx_witness,
-        "node path changed the transaction witness"
+        proposal == proposal_witness,
+        "node path changed the complete proposal witness"
     );
     assert_eq!(outcome.exec_result.tx_results.len(), 1);
     assert!(matches!(
