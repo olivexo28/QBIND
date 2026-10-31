@@ -289,6 +289,233 @@ fn signed_native_fixture() -> (CountingStore, Arc<dyn CryptoProvider>, Transacti
     (store, crypto, tx)
 }
 
+fn two_signer_fixture(
+    duplicate_ids: bool,
+) -> (CountingStore, Arc<dyn CryptoProvider>, Transaction) {
+    let mut store = CountingStore::default();
+    let (public_key, secret_key) =
+        qbind_crypto::ml_dsa44::MlDsa44Backend::generate_keypair().expect("ML-DSA-44 keygen");
+    let first_id = dummy_account_id(0xA1);
+    let second_id = if duplicate_ids {
+        first_id
+    } else {
+        dummy_account_id(0xA2)
+    };
+    let mut encoded = Vec::new();
+    make_keyset_account(100, public_key).encode_state(&mut encoded);
+    store.seed(Account::new(second_id, dummy_program_id(0x4B), 0, encoded));
+    let (first_pk, first_sk) =
+        qbind_crypto::ml_dsa44::MlDsa44Backend::generate_keypair().expect("ML-DSA-44 keygen");
+    let mut first_data = Vec::new();
+    make_keyset_account(100, first_pk).encode_state(&mut first_data);
+    store.seed(Account::new(
+        first_id,
+        dummy_program_id(0x4B),
+        0,
+        first_data,
+    ));
+    let mut tx = make_transaction(
+        [first_id, second_id]
+            .into_iter()
+            .map(|account_id| TxAccountMeta {
+                account_id,
+                flags: 1,
+                access_hint: 0,
+                reserved0: [0; 2],
+            })
+            .collect(),
+        (0..2)
+            .map(|account_index| TxAuth {
+                account_index,
+                suite_id: 100,
+                reserved: 0,
+                signature: Vec::new(),
+            })
+            .collect(),
+    );
+    let digest = qbind_hash::tx::tx_digest(&tx);
+    tx.auths[0].signature = ml_dsa_44_sign_digest(&first_sk, &digest).expect("sign first");
+    let second_sk = if duplicate_ids {
+        &first_sk
+    } else {
+        &secret_key
+    };
+    tx.auths[1].signature = ml_dsa_44_sign_digest(second_sk, &digest).expect("sign second");
+    store.reset_counts();
+    let crypto: Arc<dyn CryptoProvider> = Arc::new(
+        StaticCryptoProvider::new().with_signature_suite(Arc::new(MlDsa44SignatureSuite::new(100))),
+    );
+    (store, crypto, tx)
+}
+
+#[test]
+fn genuine_required_signers_use_exact_indices_not_account_ids_or_auth_count() {
+    for duplicate_ids in [false, true] {
+        let (mut store, crypto, tx) = two_signer_fixture(duplicate_ids);
+        verify_transaction_auth(&mut store, crypto.clone(), &tx).expect("two genuine signatures");
+        let witness = store.snapshot();
+        let mut partial = tx.clone();
+        let removed = partial.auths.pop().unwrap();
+        assert_eq!(partial.auths.len(), 1);
+        assert_eq!(partial.auths[0], tx.auths[0]);
+        assert_eq!(
+            qbind_hash::tx::tx_digest(&partial),
+            qbind_hash::tx::tx_digest(&tx)
+        );
+        let mut restored = partial.clone();
+        restored.auths.push(removed);
+        assert_eq!(restored, tx);
+        for candidate in [partial.clone(), {
+            let mut duplicated = partial;
+            duplicated.auths.push(duplicated.auths[0].clone());
+            duplicated
+        }] {
+            store.reset_counts();
+            assert!(matches!(
+                verify_transaction_auth(&mut store, crypto.clone(), &candidate),
+                Err(ExecutionError::InvalidCallData(
+                    "required signer authentication missing"
+                ))
+            ));
+            assert_eq!(store.counts.reads.get(), 0);
+            assert!(store.snapshot() == witness);
+        }
+        let mut invalid_extra = tx.clone();
+        let mut extra = invalid_extra.auths[0].clone();
+        extra.signature[0] ^= 0x80;
+        invalid_extra.auths.push(extra);
+        store.reset_counts();
+        assert!(matches!(
+            verify_transaction_auth(&mut store, crypto, &invalid_extra),
+            Err(ExecutionError::CryptoError("signature verification failed"))
+        ));
+        assert_eq!(
+            store.counts.reads.get(),
+            3,
+            "every auth including extra was checked"
+        );
+        assert!(store.snapshot() == witness);
+    }
+}
+
+/// Counting providers below establish structural ordering only, not signature validity.
+#[test]
+fn structural_preflight_refuses_before_store_provider_or_backend_work() {
+    let mut store = seeded_counting_store();
+    let crypto = Arc::new(CountingCryptoProvider::new());
+    let meta = TxAccountMeta {
+        account_id: dummy_account_id(0xAA),
+        flags: 1,
+        access_hint: 0,
+        reserved0: [0; 2],
+    };
+    let auth = TxAuth {
+        account_index: 0,
+        suite_id: 1,
+        reserved: 0,
+        signature: vec![0xAA],
+    };
+    let base = make_transaction(vec![meta.clone()], vec![auth.clone()]);
+    let cases = [
+        (
+            make_transaction(vec![meta.clone(); 65536], vec![]),
+            EMPTY_AUTH_ERROR,
+        ),
+        (
+            make_transaction(vec![meta.clone(); 65536], vec![auth.clone()]),
+            "transaction account count exceeds wire limit",
+        ),
+        (
+            make_transaction(vec![meta.clone()], vec![auth.clone(); 65536]),
+            "transaction authentication count exceeds wire limit",
+        ),
+        (
+            {
+                let mut tx = base.clone();
+                tx.auths.push(TxAuth {
+                    account_index: 1,
+                    ..auth.clone()
+                });
+                tx
+            },
+            "auth.account_index out of range",
+        ),
+        (
+            {
+                let mut tx = base.clone();
+                tx.accounts[0].flags = 2;
+                tx
+            },
+            "authentication account is not a required signer",
+        ),
+        (
+            {
+                let mut tx = base.clone();
+                tx.accounts.push(meta);
+                tx
+            },
+            "required signer authentication missing",
+        ),
+    ];
+    let state = store.snapshot();
+    for (tx, expected) in cases {
+        let witness = tx.clone();
+        assert!(matches!(
+            verify_transaction_auth(&mut store, crypto.clone(), &tx),
+            Err(ExecutionError::InvalidCallData(message)) if message == expected
+        ));
+        assert_eq!(tx, witness);
+        assert!(store.snapshot() == state);
+        assert_eq!(store.counts.reads.get(), 0);
+        assert_eq!(store.counts.writes.get(), 0);
+        assert_eq!(store.counts.deletes.get(), 0);
+        assert_eq!(crypto.lookups.load(Ordering::SeqCst), 0);
+        assert_eq!(crypto.verification_calls(), 0);
+    }
+}
+
+#[test]
+fn wire_count_and_index_boundaries_are_structural_controls() {
+    let mut store = seeded_counting_store();
+    let crypto = Arc::new(CountingCryptoProvider::new());
+    let writable = TxAccountMeta {
+        account_id: dummy_account_id(0xAA),
+        flags: 2,
+        access_hint: 0,
+        reserved0: [0; 2],
+    };
+    let mut accounts = vec![writable; usize::from(u16::MAX)];
+    accounts[65534].flags = 1;
+    let mut tx = make_transaction(
+        accounts,
+        vec![TxAuth {
+            account_index: 65534,
+            suite_id: 1,
+            reserved: 0,
+            signature: vec![0xAA],
+        }],
+    );
+    verify_transaction_auth(&mut store, crypto.clone(), &tx)
+        .expect("highest usable index and writable-only accounts pass structure");
+    assert_eq!(crypto.verification_calls(), 1);
+    tx.auths[0].account_index = u16::MAX;
+    store.reset_counts();
+    assert!(matches!(
+        verify_transaction_auth(&mut store, crypto.clone(), &tx),
+        Err(ExecutionError::InvalidCallData(
+            "auth.account_index out of range"
+        ))
+    ));
+    assert_eq!(store.counts.reads.get(), 0);
+    assert_eq!(crypto.verification_calls(), 1);
+    tx.auths[0].account_index = 65534;
+    tx.auths = vec![tx.auths[0].clone(); usize::from(u16::MAX)];
+    verify_transaction_auth(&mut store, crypto.clone(), &tx)
+        .expect("maximum representable auth count passes structure");
+    assert_eq!(crypto.verification_calls(), 65536);
+    assert_eq!(store.counts.reads.get(), 65535);
+}
+
 #[test]
 fn verify_transaction_auth_structural_accept_all_provider_control() {
     let keyset_id = dummy_account_id(0xAA);
