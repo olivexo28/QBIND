@@ -492,7 +492,7 @@ mod run422_bounded_keyset_parse {
             parse(&excessive, permissive()).unwrap_err(),
             Malformed(StateError::UnexpectedEof)
         );
-        for count in [0, 1] {
+        for count in [0u16, 1] {
             let mut bytes = fixture();
             bytes[6..8].copy_from_slice(&count.to_le_bytes());
             assert_eq!(
