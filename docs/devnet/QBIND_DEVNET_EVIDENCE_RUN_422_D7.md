@@ -22528,3 +22528,203 @@ C4/C5 OPEN
 ```
 
 This correction is not full TC lifecycle acceptance, RS1 closure or launch approval.
+
+## RUN 422 isolated explicit-O5 recovery and exact-TC resumption (2026-10-31)
+
+**Outcome: IMPLEMENTED-ISOLATED, restriction-only.** The private, existing
+test/test-utils-gated TC composition now retains an actual interrupted O4 invocation,
+performs ordinary explicit O5, and resumes the exact original TC through the existing
+engine gate. This is in-process resumption with live immutable inputs, not process
+death/reopen reconstruction, a verified recovery certificate, or current authority.
+The eleven accepted TC/O4 tests remain selected; ten focused tests were added.
+
+### Checkout identity, ancestry, scope and validation attribution
+
+The initial index and worktree were clean. `origin` fetch/push was
+`https://github.com/olivexo28/QBIND`; remote main initially named the required starting
+commit. Commit availability, tree availability, tracked content correspondence
+(`git diff --exit-code <start> --`, exit 0), and ancestry were checked separately.
+Starting HEAD was `1ef3639735455fafca351f1fdb29b30f6c29515d`, root tree
+`de56f30940d1ad7dbe8dad3a2b04db71ddbb4fcb`.
+
+The checkout was shallow: the starting commit header names parent
+`2c629d3854584762bcba63f770c4b570f725b706`, initially unavailable. This was not
+classified as a parentless commit. A targeted depth-two fetch made that parent
+available; `git merge-base --is-ancestor <parent> <start>` exited 0. That parent's
+header itself names `de05c009a130d7d044a0c896b8a8559b00b411e4`; the remaining
+shallow boundary is not a claim that the parent is a root. Starting-to-tested
+ancestry also exited 0. The requested task branch
+`copilot/run-422-tc-explicit-o5-resumption` was absent before creation. No unrelated
+work was overwritten.
+
+All three final commands below ran against committed source HEAD
+`0553e374edf6a9221870b9c5e4f8a6689af3901f`, tree
+`e7a6d2ac0535c37f0c21986275803651f2c9bc8a`, with a clean worktree.
+The source blob is `11885b30054f5ea3777d184547935a55510461e9`, mode `100644`.
+Subsequent evidence-only changes to these two documents do not change that source
+blob or transfer source-validation attribution to an untested source revision.
+Only the permitted Rust file and these two append-only documents change.
+
+### Actual lifecycle and requirement-to-assertion mapping
+
+All test names below are in
+`crates/qbind-node/src/safety_record_store/owner/tc_publication_model.rs`.
+`Fixture::new` uses four equal-power members, three ML-DSA-44 Timeout signatures,
+the real TC evidence verifier, and an independently domain-verified wire QC
+(`height=6`, `round=5`, wire chain 7). The logical high-QC is never used to invent
+missing wire fields. The original verified-QC Arc stays caller-owned, strong count
+one, distinct from the engine's verified-evidence accountant.
+
+| Requirement | Executed assertion/test |
+|---|---|
+| Actual uncertain O4, unchanged engine predecessor and completed Timeout ingestion, exact surviving successor | `uncertain_o4_o2_o3_explicit_o5_exact_tc_resumption_once`; `interrupted_checked!` asserts actual `UncertainDurable`, `Refused(Publication)`, one gate and one submission, unchanged lock/view/latches/three retained Timeouts and recorder counters immediately after invocation |
+| O2/O3 inspection cannot authorize or clear recovery | Same test checks actual `open`, genuine backend-incarnation O3, recovery still required, and a blocked ordinary TC operation before O5 |
+| Explicit, separate ordinary O5; complete bytes/metadata/revision/status preserved | `acknowledged_checked!` calls `SafetyRecordOwner::reacknowledge` without a held domain; only actual `DurableAcknowledged` constructs `TcAcknowledged`; `TcProofWitness` compares full decoded record, encoded bytes, metadata, revision, context/incarnation, `Unverified` status and backing pointers/capacities |
+| Refusal, ambiguous write and uncertain O5 acknowledgement are distinct | `explicit_o5_actual_faults_remain_distinct_and_retry_acknowledges` executes all three real injected outcomes; no usable owner is returned; removal of each fault permits actual acknowledged O5 and resumption |
+| Foreign proof, replaced/stale publication | `recovery_rejects_foreign_proof_and_replaced_publication` uses identical bytes from a different real backend; ordinary O5 refuses that proof; after valid O5 a newer authenticated three-signer TC is published by actual ordinary O4 while every required recovery owner remains live; fresh resumption refuses `PublicationChanged` and ordinary stale O5 refuses |
+| Changed context, engine predecessor/view/latches/Timeouts, renewed recovery | `resumption_context_predecessor_and_renewed_recovery_fences_precede_engine` checks foreign authority, independently advanced stale view, installed lock, actual uncertain O5 after acknowledgement, changed pinned owner context, changed timeout-emitted latch, and a genuinely signed fourth ingested Timeout; zero gate calls/effects on refusal; renewed recovery requires another actual O5 |
+| Full authenticated TC substitution, not merely block/view | `authenticated_alternative_same_selected_block_view_is_not_original_tc` verifies quorum 0/1/3 instead of original 0/1/2, selecting the same logical QC; resumption rejects the different complete TC; a separately authenticated wire QC with the same block/height/signers but different signed round also refuses as non-original evidence |
+| Exactly one application, no extra O4 and no Timeout re-ingestion | Main lifecycle asserts one existing TC gate call, zero submissions, no publication result, one view/reset callback sequence, consumed original Timeout view and exact raised lock; repeated use refuses before the gate rather than returning stale/non-raising success; raw storage remains unchanged |
+| Independent history and applicable anchor | `anchored_exact_tc_o5_and_resumption_preserve_independent_history` retains the real captured anchor through uncertainty/O3/O5/resumption; missing and wrong independent history refuse O3 |
+| Admission, working-set pressure, relief/retry, abandoned and returned owners, teardown | `recovery_admission_and_working_set_pressure_relief_and_owner_destruction` and `resumption_admission_and_fresh_loader_pressure_relief_retry` exercise interruption retained/workspace/route admission, interrupted O4, O3 retention, recovery admission/O5 working set, resumption admission/fresh loader, relief and actual retries; every returned coverage is released on destruction |
+| Same domain through pre-effect, callbacks and result construction | Main lifecycle reuses accepted cancellation-safe `Competitor` and `BoundaryObservations`: acquired outside, blocked at resumption pre-effect, synchronous recorder and return boundary, acquired after return; all three required observations complete; existing missing/queued-observation controls still pass and workers join |
+| Controlled unwinds honestly preserve acknowledged storage and partial effects | `acknowledged_resumption_unwind_preserves_storage_and_reports_partial_effects`: before effects nothing applied; during view callback the lock and one view notification have happened but current view/Timeout clearing have not; at return full effects have happened. Storage remains acknowledged/unchanged, reservations unwind, domain poisoning is reported and never bypassed or repaired |
+
+`TcInterrupted` is constructed from the actual invocation's returned outcome and
+controls, never from a caller success flag or a later block/view reconstruction.
+It borrows the original immutable full TC, selected verified evidence, authority and
+independent history. Covered controls capture backend incarnation, pinned-context
+digest, expected publication revision, applicable authoritative anchor, engine
+address, complete bounded lock signers/backing, committed/log state, view/latches
+and exact retained Timeout correspondence/backings before invocation.
+
+Resumption acquires the owner domain once, checks recovery, provenance/context,
+fresh charged authoritative bytes and revision against the genuine acknowledged
+O3 proof, and exact original TcDerived evidence/selected logical QC/anchor.
+The ordinary loader checks the binding; complete encoded equality also preserves
+that binding byte-for-byte. The original independently verified wire-QC reference
+must remain the admitted evidence. Full predecessor and strict-raise checks run
+before entering any engine stale or non-raising branch. The same guard spans the
+existing engine gate, synchronous callbacks and construction of the returned report.
+No O4 or Timeout ingestion is performed by resumption.
+
+Caller-owned input/proof witnesses are captured before measured operations.
+Immediately after each measured operation, before storage readback or new witness
+allocations, independent operational/context/aggregate occupancies and unchanged
+ceilings, consensus occupancy/ceiling, engine state, recorder counters and actual
+outcome are checked. Pointer/capacity preservation diagnostics are redacted.
+Helper-only semantic/malformed controls in the older tests remain distinct from
+the newly authenticated alternatives and replacement.
+
+### Checked accounting gate and phase inventory
+
+The first checked phase test ran before lifecycle implementation (1 selected,
+1 passed, exit 0). Its initial all-in-one retained interruption reservation was
+subsequently refined after an actual newer-publication pressure refusal:
+`86,779 > 84,956`. The correction separates invocation-only workspace from
+retained controls; it does not discard an interruption, proof, acknowledgement or
+required evidence owner. The workspace ends only after invocation and return
+transfer; the retained interruption remains live throughout recovery.
+The corrected phase gate was executed before proceeding, and again on final source.
+
+Final checked operands (bytes, this target layout): context `P=240`;
+route `A=1,584`; nested candidate backing plus whole copy/transfer controls
+`C=8,940`; record ceiling `R=10,459`; transient decoded ceiling `T=10,760`;
+charged O3 holder `H=21,347`; loader `L=31,814`; O4 `F=52,939`;
+O5 staging envelopes `E=10,509`; ordinary O5
+`O=R+48+T+E=31,770`; retained interruption `I=672`;
+invocation-only interruption workspace `W=2,832`;
+recovery/acknowledgement controls `K=625`; resumption/report controls `S=2,706`.
+Arithmetic uses checked `u128` sums/products, not the historical 63,559-byte
+TC/O4 bound.
+
+Whole inline layouts are included, not just evidence payloads:
+`TcPredecessor`/its result 352; `TcInterrupted`/its result 672;
+interruption admission/result 224; recovery admission/result 64;
+acknowledged owner/result 64; resumption admission/result 64;
+resumption gate 24; report 240; publication result 80;
+reservation 48 and reservation result 80 bytes. Workspace sums include explicit
+duplicate argument/return slots, temporary result controls, fixed predecessor
+arrays and reservation handles. Candidate inventory includes capacities of both
+high-QC copies, TC signers, Timeout vector, every Timeout signature and logical-QC
+signer backing. Recovery borrows these immutable sources and the charged O3 proof,
+so no additional owned signature or proof clone is hidden in the new owners.
+
+| Simultaneously live phase | Checked shared bound | Ceiling |
+|---|---:|---:|
+| Interruption admission `P+I+W+A` | 5,328 | 84,956 |
+| Interrupted O4 `P+I+W+A+C+F` | 67,207 | 84,956 |
+| Interrupted predecessor reload `P+I+W+A+L` | 37,142 | 84,956 |
+| Genuine O3 acquisition `P+I+L` | 32,726 | 84,956 |
+| Explicit O5, including publication envelopes `P+I+H+K+O` | 54,654 | 84,956 |
+| Resumption authoritative reload `P+I+H+K+S+L` | 57,404 | 84,956 |
+| Failure/returned-owner lifetimes `P+I+H+K+S` | 25,590 | 84,956 |
+| Newer O4 with interrupted owner, original proof and acknowledgement still live `P+I+H+K+C+F` | 84,763 | 84,956 |
+
+Operational and shared ceilings remain 84,956; context sub-ceiling remains 960.
+Ordinary fixtures retain 240 context bytes; the changed-context control briefly
+retains 480 without raising any limit. Executed newer-O4 peaks were operational
+84,523/shared 84,763. Injected admission pressure reached operational 84,716/shared
+84,956 and refused further work; relief permitted actual retries. Final node
+operational/context/shared occupancies are independently asserted `0/0/0`.
+Consensus verified-evidence retention stays 0 under its unchanged 268,435,456-byte
+ceiling; the caller's verified-QC Arc remains a separate owner.
+
+Reservations precede new covered controls/copies. Field order destroys controls
+and owned backing before releasing coverage. The charged authoritative loader,
+ordinary O4 and ordinary O5 keep their existing reservations; O5 envelopes are
+not omitted or silently charged to a vanished O4. These are storage-component
+accounting claims, not whole-node physical-memory bounds. Caller-owned immutable
+fixture/witness allocations, inherited engine logical-lock/Timeout allocations,
+RocksDB/crypto allocator internals and inherited backend allocations remain
+separately excluded; none is silently attributed to consensus retained-evidence
+accounting.
+
+### Final-source validation and delivery constraints
+
+```text
+LIBCLANG_PATH=/usr/lib/llvm-18/lib cargo test --locked -p qbind-node --lib --features test-utils safety_record_store::owner::tc_publication_model -- --nocapture
+exit 0; selected 21; passed 21; failed 0; ignored 0; filtered out 2209
+
+LIBCLANG_PATH=/usr/lib/llvm-18/lib cargo test --locked -p qbind-node --lib --features test-utils safety_record_store::owner:: -- --quiet
+exit 0; selected 201; passed 195; failed 0; ignored 6; filtered out 2029
+
+LIBCLANG_PATH=/usr/lib/llvm-18/lib cargo test --locked -p qbind-node --features test-utils --test run_422_d7d14_safety_record_store_tests -- --quiet
+exit 0; selected 158; passed 157; failed 0; ignored 1; filtered out 0
+```
+
+Selections are nonzero and overlap; counts must not be added. Integration output
+also includes child-process `running 1 test` lines, not additional parent-suite
+tests. Expected controlled-unwind panic diagnostics are exercised passing controls,
+not unresolved failures. An initial phase-gate attempt exited 101 because the
+specified libclang-18 library was missing; that dependency was installed before
+the successful phase and final runs, without dependency-manifest changes.
+
+CRLF-aware working-tree and starting-to-final whitespace checks use
+`git -c core.whitespace=cr-at-eol diff --check` and
+`git -c core.whitespace=cr-at-eol diff --check 1ef3639735455fafca351f1fdb29b30f6c29515d`;
+both exit 0. Both complete original document byte strings are verified exact
+prefixes. Modes remain `100644`; this document keeps CRLF, the contradiction
+document keeps LF, and both preserve their no-final-newline convention. Final
+document blobs and final HEAD/tree are delivery metadata, not replacements for the
+source-producing revision above.
+
+No broader suite, default build or Miri rerun was performed; no new unsafe code
+was introduced. No production wiring, activation/current-authority mechanism,
+process death/reopen reconstruction, automatic replay, durable pacemaker,
+signing/delivery, prepared-Vote integration, new wire fields, journal/schema
+changes, new ceilings, D15, Run 423, PR, main push or force-push is included.
+Only the requested task branch is delivered.
+
+```text
+D7D14_STORAGE_COMPONENT=IMPLEMENTED-ISOLATED
+D7D14_STORAGE_ACCEPTANCE=PASS-ACCEPTED-SUBSET
+§13.6 whole-lifecycle INCOMPLETE
+activation DISABLED
+public DevNet NO-GO
+durable anti-rollback NOT-ESTABLISHED
+C4/C5 OPEN
+```
+
+This isolated explicit-O5 slice does not close full TC lifecycle acceptance,
+production restart safety or RS1.
