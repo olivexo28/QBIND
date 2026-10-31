@@ -990,7 +990,29 @@ fn input_backings(tc: &TimeoutCert) -> [usize; 32] {
 #[derive(Debug)]
 enum CompetitorRequest {
     Observe,
-    Shutdown,
+}
+
+fn observer_send_until<T>(
+    tx: &std::sync::mpsc::SyncSender<T>,
+    mut value: T,
+    cancelled: &AtomicBool,
+    deadline: Instant,
+    blocked: Option<&AtomicBool>,
+) -> bool {
+    while !cancelled.load(Ordering::SeqCst) && Instant::now() < deadline {
+        match tx.try_send(value) {
+            Ok(()) => return true,
+            Err(std::sync::mpsc::TrySendError::Disconnected(_)) => return false,
+            Err(std::sync::mpsc::TrySendError::Full(pending)) => {
+                value = pending;
+                if let Some(blocked) = blocked {
+                    blocked.store(true, Ordering::SeqCst);
+                }
+                std::thread::sleep(Duration::from_millis(1));
+            }
+        }
+    }
+    false
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1007,36 +1029,70 @@ struct Competitor {
     shutdown_ack: std::sync::Mutex<std::sync::mpsc::Receiver<()>>,
     thread: std::sync::Mutex<Option<std::thread::JoinHandle<()>>>,
     requests: AtomicUsize,
-    joined: AtomicBool,
+    joined: Arc<AtomicBool>,
+    cancelled: Arc<AtomicBool>,
+    response_blocked: Arc<AtomicBool>,
 }
 impl Competitor {
     fn new(backend: SafetyBackend) -> Arc<Self> {
+        Self::with_start_gate(backend, None)
+    }
+
+    fn with_start_gate(
+        backend: SafetyBackend,
+        start: Option<std::sync::mpsc::Receiver<()>>,
+    ) -> Arc<Self> {
         let (tx, requests) = std::sync::mpsc::sync_channel(1);
         let (responses, rx) = std::sync::mpsc::sync_channel(1);
         let (shutdown_tx, shutdown_ack) = std::sync::mpsc::sync_channel(1);
-        let thread = std::thread::spawn(move || loop {
-            match requests.recv_timeout(Duration::from_secs(10)) {
-                Ok(CompetitorRequest::Observe) => {
-                    let until = Instant::now() + Duration::from_secs(2);
-                    let acquired = loop {
-                        match backend.try_lock_domain_for_test() {
-                            TryLockDomainOutcome::Acquired(_) => break true,
-                            TryLockDomainOutcome::WouldBlock => break false,
-                            _ if Instant::now() < until => std::thread::yield_now(),
-                            _ => panic!("competitor observed poisoned domain"),
+        let cancelled = Arc::new(AtomicBool::new(false));
+        let worker_cancelled = cancelled.clone();
+        let response_blocked = Arc::new(AtomicBool::new(false));
+        let worker_blocked = response_blocked.clone();
+        let thread = std::thread::spawn(move || {
+            // The regression can hold the worker before it consumes a full queue.
+            if let Some(start) = start {
+                while !worker_cancelled.load(Ordering::SeqCst) {
+                    match start.recv_timeout(Duration::from_millis(10)) {
+                        Ok(()) => break,
+                        Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+                            worker_cancelled.store(true, Ordering::SeqCst);
+                            break;
                         }
-                    };
-                    if responses.send(acquired).is_err() {
-                        break;
+                        Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
                     }
                 }
-                Ok(CompetitorRequest::Shutdown)
-                | Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
-                    let _ = shutdown_tx.send(());
-                    break;
-                }
-                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => continue,
             }
+            while !worker_cancelled.load(Ordering::SeqCst) {
+                match requests.recv_timeout(Duration::from_millis(10)) {
+                    Ok(CompetitorRequest::Observe) => {
+                        let until = Instant::now() + Duration::from_secs(2);
+                        let acquired = loop {
+                            if worker_cancelled.load(Ordering::SeqCst) {
+                                break false;
+                            }
+                            match backend.try_lock_domain_for_test() {
+                                TryLockDomainOutcome::Acquired(_) => break true,
+                                TryLockDomainOutcome::WouldBlock => break false,
+                                _ if Instant::now() < until => std::thread::yield_now(),
+                                _ => panic!("competitor observed poisoned domain"),
+                            }
+                        };
+                        if !observer_send_until(
+                            &responses,
+                            acquired,
+                            &worker_cancelled,
+                            Instant::now() + Duration::from_secs(5),
+                            Some(&worker_blocked),
+                        ) {
+                            break;
+                        }
+                    }
+                    Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
+                    Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
+                }
+            }
+            let _ = shutdown_tx.try_send(());
         });
         Arc::new(Self {
             tx,
@@ -1044,11 +1100,19 @@ impl Competitor {
             shutdown_ack: std::sync::Mutex::new(shutdown_ack),
             thread: std::sync::Mutex::new(Some(thread)),
             requests: AtomicUsize::new(0),
-            joined: AtomicBool::new(false),
+            joined: Arc::new(AtomicBool::new(false)),
+            cancelled,
+            response_blocked,
         })
     }
     fn expect(&self, acquired: bool) {
-        self.tx.send(CompetitorRequest::Observe).unwrap();
+        assert!(observer_send_until(
+            &self.tx,
+            CompetitorRequest::Observe,
+            &self.cancelled,
+            Instant::now() + Duration::from_secs(5),
+            None,
+        ));
         self.requests.fetch_add(1, Ordering::SeqCst);
         assert_eq!(
             self.rx
@@ -1075,13 +1139,13 @@ impl Competitor {
         if self.joined.load(Ordering::SeqCst) {
             return true;
         }
-        if self.tx.send(CompetitorRequest::Shutdown).is_err()
-            || self
-                .shutdown_ack
-                .lock()
-                .unwrap()
-                .recv_timeout(Duration::from_secs(5))
-                .is_err()
+        self.cancelled.store(true, Ordering::SeqCst);
+        if self
+            .shutdown_ack
+            .lock()
+            .unwrap()
+            .recv_timeout(Duration::from_secs(5))
+            .is_err()
         {
             return false;
         }
@@ -1096,9 +1160,14 @@ impl Competitor {
 impl Drop for Competitor {
     fn drop(&mut self) {
         if !self.joined.load(Ordering::SeqCst) {
-            let _ = self.tx.try_send(CompetitorRequest::Shutdown);
-            if let Some(thread) = self.thread.get_mut().unwrap().take() {
-                let _ = thread.join();
+            self.cancelled.store(true, Ordering::SeqCst);
+            if let Some(thread) = self
+                .thread
+                .get_mut()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .take()
+            {
+                self.joined.store(thread.join().is_ok(), Ordering::SeqCst);
             }
         }
     }
@@ -1284,6 +1353,102 @@ fn skipped_serialization_observation_is_bounded_and_worker_joins() {
     );
     assert!(competitor.joined.load(Ordering::SeqCst));
     drop(competitor);
+}
+
+#[test]
+fn queued_observer_timeout_and_unwind_cleanup_is_supervised() {
+    const CHILD_CASE: &str = "QBIND_TC_OBSERVER_CLEANUP_CASE";
+    if let Ok(case) = std::env::var(CHILD_CASE) {
+        let f = Fixture::new();
+        let (release, start) = std::sync::mpsc::sync_channel(1);
+        let queued = case.starts_with("queued");
+        let competitor = Competitor::with_start_gate(
+            f.owner.backend.clone(),
+            if queued { Some(start) } else { None },
+        );
+        if queued {
+            competitor.tx.try_send(CompetitorRequest::Observe).unwrap();
+            // The unreleased start gate keeps the request queue deterministically full.
+            assert!(!observer_send_until(
+                &competitor.tx,
+                CompetitorRequest::Observe,
+                &competitor.cancelled,
+                Instant::now() + Duration::from_millis(20),
+                None,
+            ));
+        } else {
+            for _ in 0..2 {
+                assert!(observer_send_until(
+                    &competitor.tx,
+                    CompetitorRequest::Observe,
+                    &competitor.cancelled,
+                    Instant::now() + Duration::from_secs(2),
+                    None,
+                ));
+            }
+            let deadline = Instant::now() + Duration::from_secs(2);
+            while !competitor.response_blocked.load(Ordering::SeqCst) {
+                assert!(Instant::now() < deadline, "response queue never filled");
+                std::thread::sleep(Duration::from_millis(1));
+            }
+        }
+        let joined = competitor.joined.clone();
+        let cancelled = competitor.cancelled.clone();
+        if case.ends_with("unwind") {
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || {
+                let _owned = competitor;
+                panic!("controlled observer caller unwind");
+            }));
+            assert!(result.is_err());
+        } else {
+            assert!(competitor.shutdown());
+            drop(competitor);
+        }
+        assert!(cancelled.load(Ordering::SeqCst));
+        assert!(joined.load(Ordering::SeqCst), "worker was not joined");
+        drop(release);
+        return;
+    }
+
+    struct SupervisedChild(std::process::Child);
+    impl Drop for SupervisedChild {
+        fn drop(&mut self) {
+            // A regressed destructor must not strand either the child or this runner.
+            let _ = self.0.kill();
+            let _ = self.0.wait();
+        }
+    }
+    for case in [
+        "queued-shutdown",
+        "queued-unwind",
+        "response-shutdown",
+        "response-unwind",
+    ] {
+        let mut child = SupervisedChild(
+            std::process::Command::new(std::env::current_exe().unwrap())
+                .args([
+                    "--exact",
+                    "safety_record_store::owner::tc_publication_model::queued_observer_timeout_and_unwind_cleanup_is_supervised",
+                    "--nocapture",
+                ])
+                .env(CHILD_CASE, case)
+                .stdout(std::process::Stdio::null())
+                .spawn()
+                .unwrap(),
+        );
+        let deadline = Instant::now() + Duration::from_secs(8);
+        loop {
+            if let Some(status) = child.0.try_wait().unwrap() {
+                assert!(status.success(), "observer cleanup child failed: {case}");
+                break;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "observer cleanup exceeded supervisor deadline: {case}"
+            );
+            std::thread::sleep(Duration::from_millis(5));
+        }
+    }
 }
 
 #[test]
