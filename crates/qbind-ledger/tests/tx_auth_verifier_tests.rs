@@ -1,11 +1,19 @@
+use std::cell::Cell;
+use std::collections::HashMap;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
-use qbind_crypto::{CryptoError, CryptoProvider, SignatureSuite};
+use qbind_crypto::{
+    ml_dsa_44_sign_digest, AeadSuite, CryptoError, CryptoProvider, KemSuite, MlDsa44SignatureSuite,
+    SignatureSuite, StaticCryptoProvider,
+};
 use qbind_ledger::auth::verify_transaction_auth;
-use qbind_ledger::{Account, AccountStore, ExecutionError, InMemoryAccountStore};
+use qbind_ledger::{Account, AccountStore, ExecutionContext, ExecutionError, InMemoryAccountStore};
 use qbind_serde::StateEncode;
 use qbind_types::{AccountId, Hash32, KeysetAccount, KeysetEntry, ProgramId};
 use qbind_wire::tx::{Transaction, TxAccountMeta, TxAuth};
+
+const EMPTY_AUTH_ERROR: &str = "transaction requires at least one authentication entry";
 
 fn dummy_account_id(byte: u8) -> AccountId {
     [byte; 32]
@@ -15,7 +23,7 @@ fn dummy_program_id(byte: u8) -> ProgramId {
     [byte; 32]
 }
 
-/// A dummy SignatureSuite that always returns Ok(()).
+/// Structural-only provider control; it is not cryptographic acceptance evidence.
 struct AcceptAllSignatureSuite;
 
 impl SignatureSuite for AcceptAllSignatureSuite {
@@ -36,7 +44,7 @@ impl SignatureSuite for AcceptAllSignatureSuite {
     }
 }
 
-/// A dummy SignatureSuite that always returns an error.
+/// Structural-only provider control; it is not cryptographic acceptance evidence.
 struct RejectAllSignatureSuite;
 
 impl SignatureSuite for RejectAllSignatureSuite {
@@ -57,8 +65,11 @@ impl SignatureSuite for RejectAllSignatureSuite {
     }
 }
 
-/// A CryptoProvider that returns AcceptAllSignatureSuite for suite_id 1,
-/// RejectAllSignatureSuite for suite_id 2, and None for others.
+/// Structural/provider controls only; these suites are not cryptographic evidence.
+/// The real ML-DSA-44 adapter is exercised in a separate test below.
+///
+/// Returns AcceptAllSignatureSuite for suite_id 1, RejectAllSignatureSuite for
+/// suite_id 2, and None for others.
 struct TestCryptoProvider {
     accept_suite: AcceptAllSignatureSuite,
     reject_suite: RejectAllSignatureSuite,
@@ -129,8 +140,157 @@ fn make_transaction(accounts: Vec<TxAccountMeta>, auths: Vec<TxAuth>) -> Transac
     }
 }
 
+#[derive(Default)]
+struct OperationCounts {
+    reads: Cell<usize>,
+    writes: Cell<usize>,
+    deletes: Cell<usize>,
+}
+
+#[derive(Default)]
+struct CountingStore {
+    accounts: HashMap<AccountId, Account>,
+    counts: OperationCounts,
+}
+
+impl CountingStore {
+    fn seed(&mut self, account: Account) {
+        self.accounts.insert(account.id, account);
+    }
+
+    fn snapshot(&self) -> HashMap<AccountId, Account> {
+        self.accounts.clone()
+    }
+
+    fn reset_counts(&self) {
+        self.counts.reads.set(0);
+        self.counts.writes.set(0);
+        self.counts.deletes.set(0);
+    }
+}
+
+impl AccountStore for CountingStore {
+    fn get(&self, id: &AccountId) -> Option<Account> {
+        self.counts.reads.set(self.counts.reads.get() + 1);
+        self.accounts.get(id).cloned()
+    }
+
+    fn put(&mut self, account: Account) -> Result<(), ExecutionError> {
+        self.counts.writes.set(self.counts.writes.get() + 1);
+        self.accounts.insert(account.id, account);
+        Ok(())
+    }
+
+    fn delete(&mut self, id: &AccountId) -> Result<(), ExecutionError> {
+        self.counts.deletes.set(self.counts.deletes.get() + 1);
+        self.accounts.remove(id);
+        Ok(())
+    }
+}
+
+struct CountingSignatureSuite {
+    calls: Arc<AtomicUsize>,
+}
+
+impl SignatureSuite for CountingSignatureSuite {
+    fn suite_id(&self) -> u8 {
+        1
+    }
+
+    fn public_key_len(&self) -> usize {
+        0
+    }
+
+    fn signature_len(&self) -> usize {
+        0
+    }
+
+    fn verify(&self, _pk: &[u8], _msg_digest: &Hash32, _sig: &[u8]) -> Result<(), CryptoError> {
+        self.calls.fetch_add(1, Ordering::SeqCst);
+        Ok(())
+    }
+}
+
+struct CountingCryptoProvider {
+    lookups: Arc<AtomicUsize>,
+    suite: CountingSignatureSuite,
+}
+
+impl CountingCryptoProvider {
+    fn new() -> Self {
+        let calls = Arc::new(AtomicUsize::new(0));
+        Self {
+            lookups: Arc::new(AtomicUsize::new(0)),
+            suite: CountingSignatureSuite { calls },
+        }
+    }
+
+    fn verification_calls(&self) -> usize {
+        self.suite.calls.load(Ordering::SeqCst)
+    }
+}
+
+impl CryptoProvider for CountingCryptoProvider {
+    fn signature_suite(&self, suite_id: u8) -> Option<&dyn SignatureSuite> {
+        self.lookups.fetch_add(1, Ordering::SeqCst);
+        (suite_id == 1).then_some(&self.suite)
+    }
+
+    fn kem_suite(&self, _suite_id: u8) -> Option<&dyn KemSuite> {
+        None
+    }
+
+    fn aead_suite(&self, _suite_id: u8) -> Option<&dyn AeadSuite> {
+        None
+    }
+}
+
+fn seeded_counting_store() -> CountingStore {
+    let keyset_id = dummy_account_id(0xAA);
+    let mut encoded = Vec::new();
+    make_keyset_account(1, vec![1, 2, 3]).encode_state(&mut encoded);
+    let mut store = CountingStore::default();
+    store.seed(Account::new(keyset_id, dummy_program_id(0x4B), 0, encoded));
+    store.reset_counts();
+    store
+}
+
+fn signed_native_fixture() -> (CountingStore, Arc<dyn CryptoProvider>, Transaction) {
+    let keyset_id = dummy_account_id(0xA1);
+    let (public_key, secret_key) =
+        qbind_crypto::ml_dsa44::MlDsa44Backend::generate_keypair().expect("ML-DSA-44 keygen");
+    let keyset = make_keyset_account(100, public_key);
+    let mut encoded = Vec::new();
+    keyset.encode_state(&mut encoded);
+
+    let mut store = CountingStore::default();
+    store.seed(Account::new(keyset_id, dummy_program_id(0x4B), 0, encoded));
+
+    let mut tx = make_transaction(
+        vec![TxAccountMeta {
+            account_id: keyset_id,
+            flags: 1,
+            access_hint: 0,
+            reserved0: [0; 2],
+        }],
+        vec![TxAuth {
+            account_index: 0,
+            suite_id: 100,
+            reserved: 0,
+            signature: Vec::new(),
+        }],
+    );
+    let digest = qbind_hash::tx::tx_digest(&tx);
+    tx.auths[0].signature =
+        ml_dsa_44_sign_digest(&secret_key, &digest).expect("sign canonical tx_digest");
+    let crypto: Arc<dyn CryptoProvider> = Arc::new(
+        StaticCryptoProvider::new().with_signature_suite(Arc::new(MlDsa44SignatureSuite::new(100))),
+    );
+    (store, crypto, tx)
+}
+
 #[test]
-fn verify_transaction_auth_success_with_keyset_account() {
+fn verify_transaction_auth_structural_accept_all_provider_control() {
     let keyset_id = dummy_account_id(0xAA);
 
     // Build a KeysetAccount with one entry (suite_id 1).
@@ -168,14 +328,126 @@ fn verify_transaction_auth_success_with_keyset_account() {
 }
 
 #[test]
-fn verify_transaction_auth_empty_auths_succeeds() {
-    let mut store = InMemoryAccountStore::new();
-    let crypto = Arc::new(TestCryptoProvider::new()) as Arc<dyn CryptoProvider>;
+fn empty_auth_is_refused_without_store_crypto_or_witness_changes() {
+    let keyset_id = dummy_account_id(0xAA);
+    let mut store = seeded_counting_store();
+    let crypto = Arc::new(CountingCryptoProvider::new());
+    let crypto_provider: Arc<dyn CryptoProvider> = crypto.clone();
+    let tx = make_transaction(
+        vec![TxAccountMeta {
+            account_id: keyset_id,
+            flags: 3,
+            access_hint: 0,
+            reserved0: [0; 2],
+        }],
+        Vec::new(),
+    );
+    let tx_witness = tx.clone();
+    let account_witness = store.snapshot();
 
-    let tx = make_transaction(Vec::new(), Vec::new());
+    let err = verify_transaction_auth(&mut store, crypto_provider, &tx)
+        .expect_err("empty authentication must be refused");
+    assert!(matches!(
+        err,
+        ExecutionError::InvalidCallData(EMPTY_AUTH_ERROR)
+    ));
+    assert!(tx == tx_witness, "empty-auth transaction witness changed");
+    assert!(
+        store.snapshot() == account_witness,
+        "empty-auth refusal changed complete account state"
+    );
+    assert_eq!(store.counts.reads.get(), 0, "unexpected account read");
+    assert_eq!(store.counts.writes.get(), 0, "unexpected account write");
+    assert_eq!(store.counts.deletes.get(), 0, "unexpected account delete");
+    assert_eq!(
+        crypto.lookups.load(Ordering::SeqCst),
+        0,
+        "unexpected signature-suite lookup"
+    );
+    assert_eq!(
+        crypto.verification_calls(),
+        0,
+        "unexpected signature verify"
+    );
 
-    let result = verify_transaction_auth(&mut store, crypto, &tx);
-    assert!(result.is_ok());
+    store.reset_counts();
+    let context_tx_witness = tx.clone();
+    let context_account_witness = store.snapshot();
+    let mut context = ExecutionContext::new(&mut store, crypto.clone());
+    let err = context
+        .verify_tx_auth(&tx)
+        .expect_err("context wrapper must preserve empty-auth refusal");
+    assert!(matches!(
+        err,
+        ExecutionError::InvalidCallData(EMPTY_AUTH_ERROR)
+    ));
+    assert!(
+        tx == context_tx_witness,
+        "context transaction witness changed"
+    );
+    assert!(
+        context.store.snapshot() == context_account_witness,
+        "context refusal changed complete account state"
+    );
+    assert_eq!(
+        context.store.counts.reads.get(),
+        0,
+        "unexpected account read"
+    );
+    assert_eq!(
+        context.store.counts.writes.get(),
+        0,
+        "unexpected account write"
+    );
+    assert_eq!(
+        context.store.counts.deletes.get(),
+        0,
+        "unexpected account delete"
+    );
+    assert_eq!(
+        crypto.lookups.load(Ordering::SeqCst),
+        0,
+        "unexpected signature-suite lookup"
+    );
+    assert_eq!(
+        crypto.verification_calls(),
+        0,
+        "unexpected signature verify"
+    );
+}
+
+#[test]
+fn genuine_mldsa44_authentication_accepts_and_removal_or_tampering_fails() {
+    let (mut store, crypto, tx) = signed_native_fixture();
+    verify_transaction_auth(&mut store, crypto.clone(), &tx)
+        .expect("genuinely signed native transaction must verify");
+
+    let mut removed = tx.clone();
+    removed.auths.clear();
+    let err = verify_transaction_auth(&mut store, crypto.clone(), &removed)
+        .expect_err("removing all auth entries must fail");
+    assert!(matches!(
+        err,
+        ExecutionError::InvalidCallData(EMPTY_AUTH_ERROR)
+    ));
+
+    let mut tampered = tx.clone();
+    tampered.auths[0].signature[0] ^= 0x80;
+    let err = verify_transaction_auth(&mut store, crypto.clone(), &tampered)
+        .expect_err("tampered nonempty signature must fail cryptographically");
+    assert!(matches!(
+        err,
+        ExecutionError::CryptoError("signature verification failed")
+    ));
+
+    let mut malformed = tx;
+    malformed.auths[0].signature.clear();
+    let err = verify_transaction_auth(&mut store, crypto, &malformed)
+        .expect_err("malformed nonempty signature must fail cryptographically");
+    assert!(matches!(
+        err,
+        ExecutionError::CryptoError("signature verification failed")
+    ));
 }
 
 #[test]
@@ -354,7 +626,7 @@ fn verify_transaction_auth_fails_on_invalid_signature() {
 }
 
 #[test]
-fn verify_transaction_auth_multiple_auths_all_succeed() {
+fn verify_transaction_auth_multiple_auths_structural_provider_control() {
     let keyset_id1 = dummy_account_id(0xAA);
     let keyset_id2 = dummy_account_id(0xBB);
 
@@ -415,7 +687,7 @@ fn verify_transaction_auth_multiple_auths_all_succeed() {
 }
 
 #[test]
-fn verify_transaction_auth_multiple_auths_one_fails() {
+fn verify_transaction_auth_multiple_auths_reject_control() {
     let keyset_id1 = dummy_account_id(0xAA);
     let keyset_id2 = dummy_account_id(0xBB);
 

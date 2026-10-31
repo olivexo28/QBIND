@@ -18,6 +18,7 @@ use crate::ExecutionError;
 ///  - decode KeysetAccount from account.data via qbind-serde
 ///  - look up a KeysetEntry with matching suite_id
 ///  - use CryptoProvider to fetch a SignatureSuite and verify the signature
+///  - reject an empty authentication vector before digest, store, or crypto work
 ///
 /// This function does NOT enforce thresholds/weights yet; it only checks that each
 /// TxAuth verifies successfully against at least one key in its keyset.
@@ -26,10 +27,10 @@ pub fn verify_transaction_auth<S: AccountStore>(
     crypto: Arc<dyn CryptoProvider>,
     tx: &Transaction,
 ) -> Result<(), ExecutionError> {
-    // If there are no auths, we succeed trivially for now.
-    // Later we may require at least one auth for payer, etc.
     if tx.auths.is_empty() {
-        return Ok(());
+        return Err(ExecutionError::InvalidCallData(
+            "transaction requires at least one authentication entry",
+        ));
     }
 
     let digest = tx_digest(tx);
