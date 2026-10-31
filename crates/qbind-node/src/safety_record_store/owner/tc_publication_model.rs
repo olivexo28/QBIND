@@ -943,6 +943,489 @@ fn validator_set(authority: &Authority) -> ConsensusValidatorSet {
     .unwrap()
 }
 
+#[cfg(feature = "test-utils")]
+pub(super) fn captured_phase_inventory(
+    owner: &SafetyRecordOwner,
+    tc: &TimeoutCert,
+    protected: [u128; 3],
+) {
+    let b = Ledger::capture(&owner.backend);
+    let p = Inventory::checked(owner, tc).unwrap();
+    let i = interruption_charge().unwrap();
+    let w = interruption_workspace_charge().unwrap();
+    let k = recovery_charge().unwrap();
+    let s = resumption_charge(p.route).unwrap();
+    let h = owner.retained_holder_charge().unwrap();
+    let r = max_safety_record_bytes(owner.pinned()).unwrap();
+    let t = max_transient_decoded_working_set(owner.pinned()).unwrap();
+    let e = super::super::accounting::publication_staging_charge(owner.pinned()).unwrap();
+    let o5 = [r, t, e, super::super::backend::META_ENCODED_LEN]
+        .into_iter()
+        .try_fold(0, add)
+        .unwrap();
+    assert_eq!(
+        (b.operational_cap, b.context_cap, b.aggregate_cap),
+        (Some(84_956), Some(960), Some(84_956))
+    );
+    println!("TC captured inventory standing={b:?} A={} C={} L={} F={} I={i} W={w} K={k} S={s} H={h} R={r} T={t} E={e} O5={o5} protected={protected:?}",
+        p.route, p.candidate, p.loader, p.o4);
+    println!("TC captured capacities signers={} timeouts={} nested={:?}; complete controls Report={} PublishResult={} interruption={} interruption_result={} interruption_admission={} recovery_admission={} acknowledgement={} acknowledgement_result={} resumption_admission={} resumption_gate={} predecessor={} predecessor_result={} reservation={} reservation_result={}",
+        tc.signers.capacity(), tc.signed_timeouts.capacity(),
+        tc.signed_timeouts.iter().map(|m| (m.signature.capacity(),
+            m.high_qc.as_ref().map_or(0, |q| q.signers.capacity()))).collect::<Vec<_>>(),
+        size_of::<Report>(), size_of::<PublishResult>(), size_of::<TcInterrupted<'static>>(),
+        size_of::<Result<TcInterrupted<'static>, Refusal>>(), size_of::<TcInterruptionAdmission<'static>>(),
+        size_of::<TcRecoveryAdmission<'static>>(), size_of::<TcAcknowledged<'static>>(),
+        size_of::<Result<TcAcknowledged<'static>, TcRecoveryOutcome>>(),
+        size_of::<TcResumptionAdmission<'static>>(), size_of::<TcResumptionGate<'static, 'static>>(),
+        size_of::<TcPredecessor>(), size_of::<Result<TcPredecessor, Refusal>>(),
+        size_of::<Reservation>(), size_of::<Result<Reservation, SafetyStoreError>>());
+    for (name, terms) in [
+        ("acknowledged O4", vec![p.route, p.candidate, p.o4]),
+        ("interrupted O4", vec![i, w, p.route, p.candidate, p.o4]),
+        ("predecessor loader", vec![i, w, p.route, p.loader]),
+        ("O3", vec![i, p.loader]),
+        ("explicit O5", vec![i, h, k, o5]),
+        ("exact resumption loader", vec![i, h, k, s, p.loader]),
+        ("observation/lifecycle", vec![i, h, k, protected[0]]),
+        ("fresh signing", vec![i, h, k, protected[1]]),
+        ("checked retained use", vec![i, h, k, protected[2]]),
+    ] {
+        let delta = terms.into_iter().try_fold(0, add).unwrap();
+        let op = add(b.operational, delta).unwrap();
+        let aggregate = add(b.aggregate, delta).unwrap();
+        println!("TC captured checked phase {name}: operational={op} context={} aggregate={aggregate} <= 84956", b.context);
+        assert!(op <= b.operational_cap.unwrap() && aggregate <= b.aggregate_cap.unwrap(),
+            "TC captured phase {name} cannot fit: aggregate {aggregate} > 84956; required original capture, journal and recovery owners coexist");
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum CapturedBoundary {
+    Before,
+    Preserved,
+    Blocked,
+    EngineMismatch,
+    Ready,
+}
+
+// The caller keeps its original owning capture and journal throughout this
+// composition. Only the accepted TC owners may publish, acknowledge or resume.
+pub(super) fn captured_transition(
+    owner: &SafetyRecordOwner,
+    engine: &mut BasicHotStuffEngine<[u8; 32]>,
+    authority: &Authority,
+    selected: &VerifiedQuorumCertificate,
+    tc: &TimeoutCert,
+    revision: u64,
+    history: &FixtureCommittedHistory,
+    uncertain: bool,
+    pressure: bool,
+    mut observe: impl FnMut(CapturedBoundary, &BasicHotStuffEngine<[u8; 32]>),
+) {
+    let b = Ledger::capture(&owner.backend);
+    let consensus = ConsensusLedger::capture(engine);
+    let predecessor = TcPredecessor::capture(engine, tc).unwrap();
+    let original_tc = tc.clone();
+    let original_backings = input_backings(tc);
+    let original_wire = selected.certificate().clone();
+    let selected_backings = wire_backings(selected.certificate());
+    let notes = Arc::new(Notes::default());
+    engine.set_progress_recorder(notes.clone());
+    let mut observe = |phase, eng: &BasicHotStuffEngine<[u8; 32]>| {
+        let before = RecorderCounters::capture(&notes);
+        observe(phase, eng);
+        assert_eq!(
+            RecorderCounters::capture(&notes),
+            before,
+            "protected capture observation/use changed TC callbacks"
+        );
+    };
+    let counters = RecorderCounters::capture(&notes);
+    let assert_owners = |engine: &BasicHotStuffEngine<[u8; 32]>, delta: u128| {
+        assert_eq!(
+            Ledger::capture(&owner.backend),
+            Ledger {
+                operational: b.operational + delta,
+                aggregate: b.aggregate + delta,
+                ..b
+            }
+        );
+        assert_eq!(ConsensusLedger::capture(engine), consensus);
+        assert!(
+            tc == &original_tc && input_backings(tc) == original_backings,
+            "TC input/provenance/backing differs (redacted)"
+        );
+        assert!(
+            selected.certificate() == &original_wire
+                && wire_backings(selected.certificate()) == selected_backings,
+            "selected complete wire QC differs (redacted)"
+        );
+    };
+    let assert_predecessor = |engine: &BasicHotStuffEngine<[u8; 32]>| {
+        assert!(
+            TcPredecessor::capture(engine, tc).unwrap() == predecessor,
+            "engine predecessor, completed Timeout ingestion or backing differs (redacted)"
+        );
+        assert_eq!(RecorderCounters::capture(&notes), counters);
+    };
+    let assert_applied = |engine: &BasicHotStuffEngine<[u8; 32]>| {
+        assert!(
+            engine.locked_qc() == tc.high_qc.as_ref(),
+            "complete effective lock differs (redacted)"
+        );
+        assert_eq!(
+            engine.locked_qc().map(|q| (q.block_id, q.view)),
+            tc.high_qc.as_ref().map(|q| (q.block_id, q.view))
+        );
+        assert_eq!(engine.current_view(), tc.view);
+        assert_eq!(engine.timeout_count(tc.timeout_view), 0);
+        let latches = engine.timeout_effect_latches_for_test();
+        assert!(!latches.0 && !latches.1 && !latches.2);
+        let now = RecorderCounters::capture(&notes);
+        assert_eq!(
+            (now.qc, now.vote, now.view, now.leader, now.reset),
+            (
+                counters.qc,
+                counters.vote,
+                counters.view + 1,
+                counters.leader
+                    + usize::from(
+                        engine.leader_for_view(predecessor.view) != engine.leader_for_view(tc.view)
+                    ),
+                counters.reset + 1
+            )
+        );
+    };
+    observe(CapturedBoundary::Before, engine);
+    let abandoned = admit_interruption(owner, tc).unwrap();
+    assert_owners(
+        engine,
+        interruption_charge().unwrap()
+            + interruption_workspace_charge().unwrap()
+            + Inventory::checked(owner, tc).unwrap().route,
+    );
+    assert_predecessor(engine);
+    observe(CapturedBoundary::Preserved, engine);
+    drop(abandoned);
+    assert_owners(engine, 0);
+    if pressure {
+        observe(CapturedBoundary::Before, engine);
+        captured_admission_cleanup(owner, engine, tc, || {
+            assert_predecessor(engine);
+            observe(CapturedBoundary::Preserved, engine);
+        });
+        assert_owners(engine, 0);
+    }
+    if !uncertain {
+        observe(CapturedBoundary::Before, engine);
+        let report = admit(owner, tc).unwrap().invoke(
+            engine,
+            authority,
+            Some(selected),
+            revision,
+            Some(history),
+            |old| {
+                assert!(TcPredecessor::capture(old, tc).unwrap() == predecessor);
+                assert!(!owner.recovery_required());
+            },
+            |_| {},
+        );
+        assert_owners(engine, Inventory::checked(owner, tc).unwrap().route);
+        assert_applied(engine);
+        assert_eq!(
+            report.controls.publication,
+            Some(PublishResult::DurableAcknowledged {
+                new_revision: revision + 1
+            })
+        );
+        assert_eq!(
+            (report.controls.gate_calls, report.controls.submitted),
+            (1, 1)
+        );
+        assert_eq!(
+            report.outcome,
+            Some(Ok(TimeoutCertificateOutcome::LockRaised { view: tc.view }))
+        );
+        observe(CapturedBoundary::Preserved, engine);
+        drop(report);
+        assert_owners(engine, 0);
+        let proof = owner.read_validate(Some(history)).unwrap();
+        assert_eq!(proof.publication_revision(), revision + 1);
+        assert_eq!(proof.evidence_status(), EvidenceStatus::Unverified);
+        let SafetyRecord::Locked(record) = &proof.retained().record else {
+            panic!("missing TC lock")
+        };
+        assert!(
+            matches!(&record.evidence, SupportingEvidence::TcDerived { tc: stored, high_qc }
+            if stored == tc && Some(high_qc) == tc.high_qc.as_ref()),
+            "stored TC differs (redacted)"
+        );
+        drop(proof);
+        observe(CapturedBoundary::Ready, engine);
+        assert_owners(engine, 0);
+        return;
+    }
+
+    observe(CapturedBoundary::Before, engine);
+    owner.backend.set_inject(InjectFault::UncertainAfterWrite);
+    let attempt = admit_interruption(owner, tc)
+        .unwrap()
+        .invoke(engine, authority, selected, revision, history)
+        .unwrap();
+    let i = interruption_charge().unwrap();
+    let h = owner.retained_holder_charge().unwrap();
+    let k = recovery_charge().unwrap();
+    let s = resumption_charge(Inventory::checked(owner, tc).unwrap().route).unwrap();
+    assert_owners(engine, i);
+    assert_predecessor(engine);
+    assert_eq!(
+        attempt.controls.publication,
+        Some(PublishResult::UncertainDurable)
+    );
+    assert_eq!(
+        (attempt.controls.gate_calls, attempt.controls.submitted),
+        (1, 1)
+    );
+    assert_eq!(
+        attempt.outcome,
+        Some(Ok(TimeoutCertificateOutcome::Refused {
+            reason: Refusal::Publication,
+        }))
+    );
+    assert!(owner.recovery_required());
+    observe(CapturedBoundary::Blocked, engine);
+    owner.backend.set_inject(InjectFault::None);
+
+    let safety_bytes = owner
+        .backend
+        .read_record(max_safety_record_bytes(owner.pinned()).unwrap())
+        .unwrap()
+        .expect("uncertain TC record remains present");
+    let safety_meta = owner
+        .backend
+        .read_meta(super::super::backend::META_ENCODED_LEN)
+        .unwrap()
+        .expect("uncertain TC metadata remains present");
+    let assert_publication = || {
+        assert!(
+            owner
+                .backend
+                .read_record(max_safety_record_bytes(owner.pinned()).unwrap())
+                .unwrap()
+                .as_ref()
+                == Some(&safety_bytes),
+            "O2/O3 changed safety bytes (redacted)"
+        );
+        assert!(
+            owner
+                .backend
+                .read_meta(super::super::backend::META_ENCODED_LEN)
+                .unwrap()
+                .as_ref()
+                == Some(&safety_meta),
+            "O2/O3 changed safety metadata (redacted)"
+        );
+    };
+    observe(CapturedBoundary::Before, engine);
+    let opened = owner.open().unwrap();
+    assert_owners(engine, i);
+    assert_predecessor(engine);
+    assert_eq!(opened.current_revision, revision + 1);
+    assert!(owner.recovery_required());
+    observe(CapturedBoundary::Blocked, engine);
+    assert_publication();
+
+    observe(CapturedBoundary::Before, engine);
+    let proof = owner.read_validate(Some(history)).unwrap();
+    assert_owners(engine, i + h);
+    assert_predecessor(engine);
+    assert!(owner.recovery_required());
+    assert!(exact_tc_record(&proof, &attempt));
+    assert_eq!(proof.evidence_status(), EvidenceStatus::Unverified);
+    observe(CapturedBoundary::Blocked, engine);
+    assert_publication();
+    let witness = TcProofWitness::capture(owner, &proof);
+
+    observe(CapturedBoundary::Before, engine);
+    let ack = admit_recovery(owner)
+        .unwrap()
+        .acknowledge(&attempt, &proof)
+        .unwrap();
+    assert_owners(engine, i + h + k);
+    assert_predecessor(engine);
+    assert!(!owner.recovery_required());
+    witness.unchanged(&proof);
+    observe(CapturedBoundary::EngineMismatch, engine);
+    witness.storage_unchanged(owner);
+
+    // Same selected identity is insufficient: this independently authenticated
+    // alternative TC has different complete signed evidence.
+    let mut alternative = tc.clone();
+    alternative.signed_timeouts[0].high_qc = None;
+    alternative.signed_timeouts[0].signature = MlDsa44Backend::sign(
+        authority.secret(alternative.signed_timeouts[0].validator_id.0 as usize),
+        &alternative.signed_timeouts[0].signing_bytes(),
+    )
+    .unwrap();
+    let registry =
+        SimpleBackendRegistry::with_backend(SUITE_PQ_RESERVED_1, Arc::new(MlDsa44Backend));
+    let verified = verify_timeout_certificate_with_evidence(
+        &alternative,
+        &alternative.signed_timeouts,
+        engine.validators(),
+        authority,
+        &registry,
+        qbind_types::QBIND_DEVNET_CHAIN_ID,
+    )
+    .unwrap();
+    assert!(
+        verified.1.as_ref() == tc.high_qc.as_ref(),
+        "alternative selection differs (redacted)"
+    );
+    observe(CapturedBoundary::Before, engine);
+    let refused = admit_resumption(owner, &alternative).unwrap().invoke(
+        engine,
+        authority,
+        &alternative,
+        selected,
+        &ack,
+        |_| {},
+        |_| {},
+    );
+    assert_owners(engine, i + h + k + s);
+    assert_predecessor(engine);
+    assert_eq!(refused.controls.refused, Some(Refusal::Certificate));
+    assert_eq!(
+        (refused.controls.gate_calls, refused.controls.submitted),
+        (0, 0)
+    );
+    observe(CapturedBoundary::EngineMismatch, engine);
+    witness.unchanged(&proof);
+    witness.storage_unchanged(owner);
+    drop(refused);
+
+    let foreign = Authority::new_for_wire_chain(owner.pinned().chain_id);
+    observe(CapturedBoundary::Before, engine);
+    let refused = admit_resumption(owner, tc).unwrap().invoke(
+        engine,
+        &foreign,
+        tc,
+        selected,
+        &ack,
+        |_| {},
+        |_| {},
+    );
+    assert_owners(engine, i + h + k + s);
+    assert_predecessor(engine);
+    assert_eq!(refused.controls.refused, Some(Refusal::Context));
+    assert_eq!(
+        (refused.controls.gate_calls, refused.controls.submitted),
+        (0, 0)
+    );
+    observe(CapturedBoundary::EngineMismatch, engine);
+    witness.unchanged(&proof);
+    witness.storage_unchanged(owner);
+    drop(refused);
+
+    observe(CapturedBoundary::Before, engine);
+    let report = admit_resumption(owner, tc).unwrap().invoke(
+        engine,
+        authority,
+        tc,
+        selected,
+        &ack,
+        |_| {},
+        |_| {},
+    );
+    assert_owners(engine, i + h + k + s);
+    assert_applied(engine);
+    assert_eq!(
+        report.outcome,
+        Some(Ok(TimeoutCertificateOutcome::LockRaised { view: tc.view }))
+    );
+    assert_eq!(
+        (report.controls.gate_calls, report.controls.submitted),
+        (1, 0)
+    );
+    assert!(report.controls.publication.is_none());
+    observe(CapturedBoundary::Preserved, engine);
+    witness.unchanged(&proof);
+    witness.storage_unchanged(owner);
+    drop(report);
+    observe(CapturedBoundary::Ready, engine);
+    assert_owners(engine, i + h + k);
+    witness.unchanged(&proof);
+    witness.storage_unchanged(owner);
+
+    observe(CapturedBoundary::Before, engine);
+    let repeated = admit_resumption(owner, tc).unwrap().invoke(
+        engine,
+        authority,
+        tc,
+        selected,
+        &ack,
+        |_| {},
+        |_| {},
+    );
+    assert_owners(engine, i + h + k + s);
+    assert_applied(engine);
+    assert_eq!(repeated.controls.refused, Some(Refusal::Predecessor));
+    assert_eq!(
+        (repeated.controls.gate_calls, repeated.controls.submitted),
+        (0, 0)
+    );
+    assert!(repeated.outcome.is_none() && repeated.controls.publication.is_none());
+    observe(CapturedBoundary::Preserved, engine);
+    witness.unchanged(&proof);
+    witness.storage_unchanged(owner);
+    drop(repeated);
+    drop(ack);
+    drop(proof);
+    drop(attempt);
+    assert_owners(engine, 0);
+}
+
+fn captured_admission_cleanup(
+    owner: &SafetyRecordOwner,
+    engine: &BasicHotStuffEngine<[u8; 32]>,
+    tc: &TimeoutCert,
+    mut preserved: impl FnMut(),
+) {
+    let before = Ledger::capture(&owner.backend);
+    let consensus = ConsensusLedger::capture(engine);
+    let free = before
+        .aggregate_cap
+        .unwrap()
+        .checked_sub(before.aggregate)
+        .unwrap();
+    let pressure = owner.backend.accounting().reserve(free).unwrap();
+    let pressured = Ledger::capture(&owner.backend);
+    let refusal = admit_interruption(owner, tc);
+    assert!(matches!(refusal, Err(Refusal::Capacity)));
+    assert_eq!(Ledger::capture(&owner.backend), pressured);
+    assert_eq!(ConsensusLedger::capture(engine), consensus);
+    preserved();
+    drop(pressure);
+    assert_eq!(Ledger::capture(&owner.backend), before);
+    let retry = admit_interruption(owner, tc).unwrap();
+    let delta = interruption_charge().unwrap()
+        + interruption_workspace_charge().unwrap()
+        + Inventory::checked(owner, tc).unwrap().route;
+    assert_eq!(
+        Ledger::capture(&owner.backend),
+        Ledger {
+            operational: before.operational + delta,
+            aggregate: before.aggregate + delta,
+            ..before
+        }
+    );
+    assert_eq!(ConsensusLedger::capture(engine), consensus);
+    preserved();
+    drop(retry);
+    assert_eq!(Ledger::capture(&owner.backend), before);
+}
+
 struct Fixture {
     authority: Authority,
     owner: SafetyRecordOwner,
