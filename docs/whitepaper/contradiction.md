@@ -3307,3 +3307,11 @@ C4/C5 OPEN
 ```
 
 This isolated slice is not full TC lifecycle acceptance, RS1 closure or launch approval.
+
+**Finishing-pass correction (tested source `99ebd72`).** Refusal baselines are captured before admission/loader/O4 pressure, publication faults, context/revision/predecessor fences, and anchored-history refusals. Immediately after each operation, before readback, assertions cover the full original TC and nested backing identity/capacities, engine restriction/view/latches/Timeout retention, recorder counters, node operational/context/aggregate occupancy and unchanged ceilings, and independent consensus accounting. Exact expected occupancy is also checked after report destruction, pressure release and acknowledged retry. The composed success and failure routes keep actual O4 classifications and recovery fencing distinct.
+
+Consensus accounting is observed independently: this route retains 0 engine evidence bytes against the unchanged 268435456-byte cap across refusal, acknowledged application, report destruction and teardown. The verified-QC Arc remains caller-owned; an ordinary Arc is not represented as a ledger charge. Fixture phase inventory observed route 1440, candidate 8940, loader 31814, O4 52939, peak 63319 bytes, context occupancy 240 and shared aggregate ceiling 84956. These component measurements exclude inherited engine/backend allocation and physical memory.
+
+Post-ack/pre-effect, recorder and return observations are explicitly counted. The omission control waits a bounded 20 ms, reports the expected missing phase, and verifies acknowledged supervisor shutdown and worker join; actual same-domain contention and post-release acquisition remain tested. No production wiring, activation, accounting mechanism or unsafe code was added.
+
+Final-source tests on `99ebd72`: `LIBCLANG_PATH=/usr/lib/llvm-18/lib cargo test --locked -p qbind-node --lib --features test-utils safety_record_store::owner::tc_publication_model -- --nocapture` — exit 0, 10 passed, 0 failed, 0 ignored; `LIBCLANG_PATH=/usr/lib/llvm-18/lib cargo test --locked -p qbind-node --lib --features test-utils safety_record_store::owner:: -- --quiet` — exit 0, 184 passed, 0 failed, 6 ignored (190 selected). Both selectors selected tests; no broad suite rerun. All standing storage, lifecycle, activation, DevNet, anti-rollback and C4/C5 verdicts remain unchanged.
