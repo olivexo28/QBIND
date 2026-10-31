@@ -470,21 +470,82 @@ struct Fixture {
     _dir: tempfile::TempDir,
 }
 
+impl Drop for Fixture {
+    fn drop(&mut self) {
+        let ledger = ConsensusLedger::capture(&self.engine);
+        assert_eq!(
+            ledger.retained, 0,
+            "TC composition retained no verified-QC payload"
+        );
+        assert!(ledger.ceiling > 0);
+        assert_eq!(
+            Arc::strong_count(&self.selected),
+            1,
+            "fixture verified-QC Arc is independently caller-owned"
+        );
+    }
+}
+
 #[derive(Debug, Default)]
 struct Notes {
+    qc: AtomicUsize,
+    vote: AtomicUsize,
     view: AtomicUsize,
     leader: AtomicUsize,
     reset: AtomicUsize,
     panic: AtomicBool,
     competitor: std::sync::Mutex<Option<Arc<Competitor>>>,
+    observers: std::sync::Mutex<Option<Arc<BoundaryObservations>>>,
+}
+
+#[derive(Debug, Default)]
+struct BoundaryObservations {
+    post_ack: AtomicUsize,
+    recorder: AtomicUsize,
+    return_boundary: AtomicUsize,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ObservationPhase {
+    PostAckPreEffect,
+    Recorder,
+    ReturnBoundary,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ObservationStatus {
+    Complete,
+    Missing(ObservationPhase),
+}
+
+impl BoundaryObservations {
+    fn status(&self) -> ObservationStatus {
+        for (phase, count) in [
+            (ObservationPhase::PostAckPreEffect, &self.post_ack),
+            (ObservationPhase::Recorder, &self.recorder),
+            (ObservationPhase::ReturnBoundary, &self.return_boundary),
+        ] {
+            if count.load(Ordering::SeqCst) != 1 {
+                return ObservationStatus::Missing(phase);
+            }
+        }
+        ObservationStatus::Complete
+    }
 }
 
 impl ConsensusProgressRecorder for Notes {
-    fn record_qc_formed(&self) {}
-    fn record_vote_observed(&self, _: bool) {}
+    fn record_qc_formed(&self) {
+        self.qc.fetch_add(1, Ordering::SeqCst);
+    }
+    fn record_vote_observed(&self, _: bool) {
+        self.vote.fetch_add(1, Ordering::SeqCst);
+    }
     fn record_view_change(&self, _: u64, _: u64) {
         if let Some(competitor) = self.competitor.lock().unwrap().as_ref() {
             competitor.expect(false);
+        }
+        if let Some(observers) = self.observers.lock().unwrap().as_ref() {
+            observers.recorder.fetch_add(1, Ordering::SeqCst);
         }
         self.view.fetch_add(1, Ordering::SeqCst);
         assert!(
@@ -695,6 +756,208 @@ impl Ledger {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct ConsensusLedger {
+    retained: u64,
+    ceiling: u64,
+}
+
+impl ConsensusLedger {
+    fn capture(engine: &BasicHotStuffEngine<[u8; 32]>) -> Self {
+        Self {
+            retained: engine.state().retained_evidence_bytes(),
+            ceiling: engine.state().max_retained_evidence_bytes(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct RecorderCounters {
+    qc: usize,
+    vote: usize,
+    view: usize,
+    leader: usize,
+    reset: usize,
+}
+
+impl RecorderCounters {
+    fn capture(notes: &Notes) -> Self {
+        Self {
+            qc: notes.qc.load(Ordering::SeqCst),
+            vote: notes.vote.load(Ordering::SeqCst),
+            view: notes.view.load(Ordering::SeqCst),
+            leader: notes.leader.load(Ordering::SeqCst),
+            reset: notes.reset.load(Ordering::SeqCst),
+        }
+    }
+}
+
+struct RefusalBaseline {
+    tc: TimeoutCert,
+    input_backings: [usize; 32],
+    engine_lock: Option<LogicalQc>,
+    engine_lock_backing: [usize; 2],
+    engine_view: u64,
+    engine_latches: (bool, bool, bool, Option<Instant>),
+    retained_timeouts: Vec<TimeoutMessage>,
+    retained_timeout_backings: [[usize; 4]; 4],
+    recorder: RecorderCounters,
+    node: Ledger,
+    consensus: ConsensusLedger,
+    selected_arc_strong_count: usize,
+}
+
+impl RefusalBaseline {
+    fn capture(f: &Fixture) -> Self {
+        let mut retained_timeout_backings = [[0; 4]; 4];
+        if let Some(messages) = f.engine.timeout_accumulator().get_timeouts(7) {
+            for timeout in messages.values() {
+                let slot = &mut retained_timeout_backings[timeout.validator_id.0 as usize];
+                slot[0] = timeout.signature.as_ptr() as usize;
+                slot[1] = timeout.signature.capacity();
+                if let Some(qc) = &timeout.high_qc {
+                    slot[2] = qc.signers.as_ptr() as usize;
+                    slot[3] = qc.signers.capacity();
+                }
+            }
+        }
+        let engine_lock_backing = f.engine.locked_qc().map_or([0; 2], |qc| {
+            [qc.signers.as_ptr() as usize, qc.signers.capacity()]
+        });
+        let mut retained_timeouts: Vec<_> = f
+            .engine
+            .timeout_accumulator()
+            .get_timeouts(7)
+            .into_iter()
+            .flat_map(|messages| messages.values().cloned())
+            .collect();
+        retained_timeouts.sort_by_key(|timeout| timeout.validator_id);
+        Self {
+            tc: f.tc.clone(),
+            input_backings: input_backings(&f.tc),
+            engine_lock: f.engine.locked_qc().cloned(),
+            engine_lock_backing,
+            engine_view: f.engine.current_view(),
+            engine_latches: f.engine.timeout_effect_latches_for_test(),
+            retained_timeouts,
+            retained_timeout_backings,
+            recorder: RecorderCounters::capture(&f.notes),
+            node: f.sample(),
+            consensus: ConsensusLedger::capture(&f.engine),
+            selected_arc_strong_count: Arc::strong_count(&f.selected),
+        }
+    }
+
+    fn assert_input_and_consensus(&self, f: &Fixture) {
+        assert!(f.tc == self.tc, "complete input TC differs (redacted)");
+        assert!(
+            input_backings(&f.tc) == self.input_backings,
+            "input backing identity/capacity differs (redacted)"
+        );
+        assert_eq!(ConsensusLedger::capture(&f.engine), self.consensus);
+        assert_eq!(
+            Arc::strong_count(&f.selected),
+            self.selected_arc_strong_count,
+            "caller-owned verified-QC Arc strong count differs"
+        );
+    }
+
+    fn assert_input_engine_consensus(&self, f: &Fixture) {
+        self.assert_input_and_consensus(f);
+        assert!(
+            f.engine.locked_qc() == self.engine_lock.as_ref(),
+            "engine lock differs (redacted)"
+        );
+        let lock_backing = f.engine.locked_qc().map_or([0; 2], |qc| {
+            [qc.signers.as_ptr() as usize, qc.signers.capacity()]
+        });
+        assert_eq!(lock_backing, self.engine_lock_backing);
+        assert_eq!(f.engine.current_view(), self.engine_view);
+        assert_eq!(
+            f.engine.timeout_effect_latches_for_test(),
+            self.engine_latches
+        );
+        let actual_timeouts = f.engine.timeout_accumulator().get_timeouts(7);
+        assert_eq!(
+            actual_timeouts.map_or(0, |messages| messages.len()),
+            self.retained_timeouts.len()
+        );
+        for expected in &self.retained_timeouts {
+            let actual = actual_timeouts.and_then(|messages| messages.get(&expected.validator_id));
+            assert!(
+                actual == Some(expected),
+                "retained Timeout input differs (redacted)"
+            );
+            let slot = &self.retained_timeout_backings[expected.validator_id.0 as usize];
+            let backing = actual.map_or([0; 4], |timeout| {
+                let mut value = [
+                    timeout.signature.as_ptr() as usize,
+                    timeout.signature.capacity(),
+                    0,
+                    0,
+                ];
+                if let Some(qc) = &timeout.high_qc {
+                    value[2] = qc.signers.as_ptr() as usize;
+                    value[3] = qc.signers.capacity();
+                }
+                value
+            });
+            assert_eq!(
+                backing, *slot,
+                "retained Timeout backing differs (redacted)"
+            );
+        }
+        assert_eq!(RecorderCounters::capture(&f.notes), self.recorder);
+    }
+
+    fn assert_admission_refusal(&self, f: &Fixture) {
+        self.assert_input_engine_consensus(f);
+        assert_eq!(f.sample(), self.node);
+    }
+
+    fn assert_route_refusal(&self, f: &Fixture, route: u128) {
+        self.assert_input_engine_consensus(f);
+        assert_eq!(
+            f.sample(),
+            Ledger {
+                operational: self.node.operational + route,
+                aggregate: self.node.aggregate + route,
+                ..self.node
+            }
+        );
+    }
+
+    fn assert_route_returned(&self, f: &Fixture) {
+        self.assert_input_engine_consensus(f);
+        assert_eq!(f.sample(), self.node);
+    }
+
+    fn assert_report_released(&self, f: &Fixture, node: Ledger) {
+        self.assert_input_engine_consensus(f);
+        assert_eq!(f.sample(), node);
+    }
+
+    fn assert_applied(&self, f: &Fixture, node: Ledger) {
+        self.assert_input_and_consensus(f);
+        assert_eq!(f.engine.locked_qc(), self.tc.high_qc.as_ref());
+        assert_eq!(f.engine.current_view(), self.tc.view);
+        let latches = f.engine.timeout_effect_latches_for_test();
+        assert!(!latches.0 && !latches.1 && !latches.2);
+        assert_eq!(f.engine.timeout_count(self.tc.timeout_view), 0);
+        assert_eq!(
+            RecorderCounters::capture(&f.notes),
+            RecorderCounters {
+                qc: self.recorder.qc,
+                vote: self.recorder.vote,
+                view: self.recorder.view + 1,
+                leader: self.recorder.leader,
+                reset: self.recorder.reset + 1,
+            }
+        );
+        assert_eq!(f.sample(), node);
+    }
+}
+
 fn input_backings(tc: &TimeoutCert) -> [usize; 32] {
     let mut result = [0; 32];
     let mut used = 0;
@@ -725,39 +988,68 @@ fn input_backings(tc: &TimeoutCert) -> [usize; 32] {
 
 // One supervised competitor, bounded request/response; no detached worker.
 #[derive(Debug)]
+enum CompetitorRequest {
+    Observe,
+    Shutdown,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CompetitorObservation {
+    Acquired,
+    WouldBlock,
+    Missing,
+}
+
+#[derive(Debug)]
 struct Competitor {
-    tx: std::sync::mpsc::SyncSender<Option<()>>,
+    tx: std::sync::mpsc::SyncSender<CompetitorRequest>,
     rx: std::sync::Mutex<std::sync::mpsc::Receiver<bool>>,
+    shutdown_ack: std::sync::Mutex<std::sync::mpsc::Receiver<()>>,
     thread: std::sync::Mutex<Option<std::thread::JoinHandle<()>>>,
+    requests: AtomicUsize,
+    joined: AtomicBool,
 }
 impl Competitor {
     fn new(backend: SafetyBackend) -> Arc<Self> {
         let (tx, requests) = std::sync::mpsc::sync_channel(1);
         let (responses, rx) = std::sync::mpsc::sync_channel(1);
-        let thread = std::thread::spawn(move || {
-            while let Ok(Some(())) = requests.recv_timeout(Duration::from_secs(10)) {
-                let until = Instant::now() + Duration::from_secs(2);
-                let acquired = loop {
-                    match backend.try_lock_domain_for_test() {
-                        TryLockDomainOutcome::Acquired(_) => break true,
-                        TryLockDomainOutcome::WouldBlock => break false,
-                        _ if Instant::now() < until => std::thread::yield_now(),
-                        _ => panic!("competitor observed poisoned domain"),
+        let (shutdown_tx, shutdown_ack) = std::sync::mpsc::sync_channel(1);
+        let thread = std::thread::spawn(move || loop {
+            match requests.recv_timeout(Duration::from_secs(10)) {
+                Ok(CompetitorRequest::Observe) => {
+                    let until = Instant::now() + Duration::from_secs(2);
+                    let acquired = loop {
+                        match backend.try_lock_domain_for_test() {
+                            TryLockDomainOutcome::Acquired(_) => break true,
+                            TryLockDomainOutcome::WouldBlock => break false,
+                            _ if Instant::now() < until => std::thread::yield_now(),
+                            _ => panic!("competitor observed poisoned domain"),
+                        }
+                    };
+                    if responses.send(acquired).is_err() {
+                        break;
                     }
-                };
-                if responses.send(acquired).is_err() {
+                }
+                Ok(CompetitorRequest::Shutdown)
+                | Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+                    let _ = shutdown_tx.send(());
                     break;
                 }
+                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => continue,
             }
         });
         Arc::new(Self {
             tx,
             rx: std::sync::Mutex::new(rx),
+            shutdown_ack: std::sync::Mutex::new(shutdown_ack),
             thread: std::sync::Mutex::new(Some(thread)),
+            requests: AtomicUsize::new(0),
+            joined: AtomicBool::new(false),
         })
     }
     fn expect(&self, acquired: bool) {
-        self.tx.send(Some(())).unwrap();
+        self.tx.send(CompetitorRequest::Observe).unwrap();
+        self.requests.fetch_add(1, Ordering::SeqCst);
         assert_eq!(
             self.rx
                 .lock()
@@ -767,12 +1059,47 @@ impl Competitor {
             acquired
         );
     }
+
+    fn wait_for_skipped_observation(&self, timeout: Duration) -> CompetitorObservation {
+        match self.rx.lock().unwrap().recv_timeout(timeout) {
+            Ok(true) => CompetitorObservation::Acquired,
+            Ok(false) => CompetitorObservation::WouldBlock,
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => CompetitorObservation::Missing,
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+                panic!("supervised observer disconnected")
+            }
+        }
+    }
+
+    fn shutdown(&self) -> bool {
+        if self.joined.load(Ordering::SeqCst) {
+            return true;
+        }
+        if self.tx.send(CompetitorRequest::Shutdown).is_err()
+            || self
+                .shutdown_ack
+                .lock()
+                .unwrap()
+                .recv_timeout(Duration::from_secs(5))
+                .is_err()
+        {
+            return false;
+        }
+        let Some(thread) = self.thread.lock().unwrap().take() else {
+            return false;
+        };
+        let joined = thread.join().is_ok();
+        self.joined.store(joined, Ordering::SeqCst);
+        joined
+    }
 }
 impl Drop for Competitor {
     fn drop(&mut self) {
-        let _ = self.tx.try_send(None);
-        if let Some(thread) = self.thread.get_mut().unwrap().take() {
-            thread.join().unwrap();
+        if !self.joined.load(Ordering::SeqCst) {
+            let _ = self.tx.try_send(CompetitorRequest::Shutdown);
+            if let Some(thread) = self.thread.get_mut().unwrap().take() {
+                let _ = thread.join();
+            }
         }
     }
 }
@@ -782,9 +1109,12 @@ fn acknowledged_exact_tc_unverified_order_domain_and_ledgers() {
     let mut f = Fixture::new();
     let before = f.sample();
     let inventory = Inventory::checked(&f.owner, &f.tc).unwrap();
+    let unchanged = RefusalBaseline::capture(&f);
     assert!(inventory.peak().unwrap() + before.context <= before.aggregate_cap.unwrap());
     let competitor = Competitor::new(f.owner.backend.clone());
     competitor.expect(true); // Discriminating observation control.
+    let observations = Arc::new(BoundaryObservations::default());
+    *f.notes.observers.lock().unwrap() = Some(observations.clone());
     let hook_competitor = competitor.clone();
     let hook_backend = f.owner.backend.clone();
     let hooks = Arc::new(AtomicUsize::new(0));
@@ -816,12 +1146,14 @@ fn acknowledged_exact_tc_unverified_order_domain_and_ledgers() {
             assert_eq!(old.current_view(), 0);
             assert_eq!(old.timeout_count(7), 3);
             post.expect(false);
+            observations.post_ack.fetch_add(1, Ordering::SeqCst);
             calls.set(calls.get() + 1);
         },
         |applied| {
             assert_eq!(applied.current_view(), 8);
             assert_eq!(applied.locked_qc().map(|q| q.view), Some(6));
             returning.expect(false);
+            observations.return_boundary.fetch_add(1, Ordering::SeqCst);
         },
     );
     // Observe independently BEFORE allocating readback witnesses.
@@ -829,6 +1161,10 @@ fn acknowledged_exact_tc_unverified_order_domain_and_ledgers() {
     assert_eq!(hooks.load(Ordering::SeqCst), 1);
     f.owner.backend.set_pre_effective_hook(Arc::new(|_, _| {}));
     assert_eq!(calls.get(), 1);
+    assert_eq!(observations.status(), ObservationStatus::Complete);
+    assert_eq!(observations.post_ack.load(Ordering::SeqCst), 1);
+    assert_eq!(observations.recorder.load(Ordering::SeqCst), 1);
+    assert_eq!(observations.return_boundary.load(Ordering::SeqCst), 1);
     assert_eq!(
         result.outcome,
         Some(Ok(TimeoutCertificateOutcome::LockRaised { view: 8 }))
@@ -843,7 +1179,24 @@ fn acknowledged_exact_tc_unverified_order_domain_and_ledgers() {
         (result.controls.gate_calls, result.controls.submitted),
         (1, 1)
     );
-    assert_eq!(f.notes.view.load(Ordering::SeqCst), 1);
+    assert_eq!(
+        RecorderCounters::capture(&f.notes),
+        RecorderCounters {
+            qc: unchanged.recorder.qc,
+            vote: unchanged.recorder.vote,
+            view: unchanged.recorder.view + 1,
+            leader: unchanged.recorder.leader,
+            reset: unchanged.recorder.reset + 1,
+        }
+    );
+    assert_eq!(ConsensusLedger::capture(&f.engine), unchanged.consensus);
+    // The verified certificate is the caller-owned fixture Arc, not a consensus
+    // ledger entry; this route retained no verified-QC payload in engine state.
+    assert_eq!(f.engine.state().retained_evidence_bytes(), 0);
+    assert_eq!(
+        Arc::strong_count(&f.selected),
+        unchanged.selected_arc_strong_count
+    );
     assert_eq!(f.engine.timeout_count(7), 0);
     competitor.expect(true);
     let proof = f.read();
@@ -865,9 +1218,27 @@ fn acknowledged_exact_tc_unverified_order_domain_and_ledgers() {
     assert_eq!(proof.publication_revision(), f.revision + 1);
     drop(proof);
     drop(result);
+    assert_eq!(ConsensusLedger::capture(&f.engine), unchanged.consensus);
+    assert_eq!(
+        Arc::strong_count(&f.selected),
+        unchanged.selected_arc_strong_count
+    );
+    assert!(f.tc == unchanged.tc, "complete input TC differs (redacted)");
+    assert!(
+        input_backings(&f.tc) == unchanged.input_backings,
+        "input backing differs (redacted)"
+    );
+    assert_eq!(ConsensusLedger::capture(&f.engine), unchanged.consensus);
+    assert_eq!(
+        Arc::strong_count(&f.selected),
+        unchanged.selected_arc_strong_count
+    );
     assert_eq!(f.sample(), before);
     let backend = f.owner.backend.clone();
+    *f.notes.observers.lock().unwrap() = None;
     *f.notes.competitor.lock().unwrap() = None;
+    assert!(competitor.shutdown());
+    assert!(competitor.joined.load(Ordering::SeqCst));
     drop(competitor);
     drop(f);
     let final_ledger = Ledger::capture(&backend);
@@ -892,6 +1263,30 @@ fn acknowledged_exact_tc_unverified_order_domain_and_ledgers() {
 }
 
 #[test]
+fn skipped_serialization_observation_is_bounded_and_worker_joins() {
+    let f = Fixture::new();
+    let competitor = Competitor::new(f.owner.backend.clone());
+    competitor.expect(true); // Positive control: observer and reply channel work.
+    let observations = BoundaryObservations::default();
+    // Deliberately skip post-ack/pre-effect, recorder and return callbacks.
+    assert_eq!(
+        observations.status(),
+        ObservationStatus::Missing(ObservationPhase::PostAckPreEffect)
+    );
+    assert_eq!(
+        competitor.wait_for_skipped_observation(Duration::from_millis(20)),
+        CompetitorObservation::Missing
+    );
+    assert_eq!(competitor.requests.load(Ordering::SeqCst), 1);
+    assert!(
+        competitor.shutdown(),
+        "bounded supervisor shutdown must be acknowledged"
+    );
+    assert!(competitor.joined.load(Ordering::SeqCst));
+    drop(competitor);
+}
+
+#[test]
 fn actual_publication_failures_surviving_storage_and_recovery_fenced_retry() {
     for fault in [
         InjectFault::FailBeforeSubmit,
@@ -901,12 +1296,18 @@ fn actual_publication_failures_surviving_storage_and_recovery_fenced_retry() {
         let mut f = Fixture::new();
         let before = f.sample();
         let inventory = Inventory::checked(&f.owner, &f.tc).unwrap();
+        let unchanged = RefusalBaseline::capture(&f);
         let original = f.tc.clone();
         let original_bytes = f.read().encoded().to_vec();
         let backings = input_backings(&f.tc);
         f.owner.backend.set_inject(fault);
         let result = f.run();
-        before.returned(&f, inventory.route);
+        unchanged.assert_route_refusal(&f, inventory.route);
+        assert_eq!(result.controls.refused, Some(Refusal::Publication));
+        assert_eq!(
+            (result.controls.gate_calls, result.controls.submitted),
+            (1, 1)
+        );
         assert_eq!(
             result.outcome,
             Some(Ok(TimeoutCertificateOutcome::Refused {
@@ -956,20 +1357,51 @@ fn actual_publication_failures_surviving_storage_and_recovery_fenced_retry() {
         );
         f.owner.backend.set_inject(InjectFault::None);
         let retry = f.run();
-        before.returned(&f, inventory.route);
         if fault == InjectFault::FailBeforeSubmit {
+            assert!(f.tc == unchanged.tc, "complete input TC differs (redacted)");
+            assert!(
+                input_backings(&f.tc) == unchanged.input_backings,
+                "input backing differs (redacted)"
+            );
+            assert_eq!(ConsensusLedger::capture(&f.engine), unchanged.consensus);
+            assert_eq!(
+                Arc::strong_count(&f.selected),
+                unchanged.selected_arc_strong_count
+            );
+            before.returned(&f, inventory.route);
+            assert_eq!(retry.controls.refused, None);
             assert!(matches!(
                 retry.controls.publication,
                 Some(PublishResult::DurableAcknowledged { .. })
             ));
+            assert_eq!(
+                (retry.controls.gate_calls, retry.controls.submitted),
+                (1, 1)
+            );
+            unchanged.assert_applied(
+                &f,
+                Ledger {
+                    operational: before.operational + inventory.route,
+                    aggregate: before.aggregate + inventory.route,
+                    ..before
+                },
+            );
         } else {
+            unchanged.assert_route_refusal(&f, inventory.route);
             assert_eq!(retry.controls.refused, Some(Refusal::RecoveryRequired));
-            assert_eq!(retry.controls.submitted, 0);
+            assert_eq!(
+                (retry.controls.gate_calls, retry.controls.submitted),
+                (0, 0)
+            );
             assert!(retry.controls.publication.is_none());
             f.unchanged();
         }
         drop(retry);
-        assert_eq!(f.sample(), before);
+        if fault == InjectFault::FailBeforeSubmit {
+            unchanged.assert_applied(&f, before);
+        } else {
+            unchanged.assert_route_returned(&f);
+        }
     }
 }
 
@@ -1001,6 +1433,7 @@ fn independent_revision_context_selected_and_predecessor_fences() {
                     .unwrap();
             }
         }
+        let unchanged = RefusalBaseline::capture(&f);
         let before = f.sample();
         let expected = if case == 0 {
             f.revision + 1
@@ -1017,6 +1450,7 @@ fn independent_revision_context_selected_and_predecessor_fences() {
         } else {
             Some(f.selected.as_ref())
         };
+        let route = Inventory::checked(&f.owner, &f.tc).unwrap().route;
         let result = admit(&f.owner, &f.tc).unwrap().invoke(
             &mut f.engine,
             authority,
@@ -1026,13 +1460,26 @@ fn independent_revision_context_selected_and_predecessor_fences() {
             |_| {},
             |_| {},
         );
-        before.returned(&f, Inventory::checked(&f.owner, &f.tc).unwrap().route);
         if case == 7 {
+            unchanged.assert_applied(
+                &f,
+                Ledger {
+                    operational: before.operational + route,
+                    aggregate: before.aggregate + route,
+                    ..before
+                },
+            );
+            assert_eq!(result.controls.refused, None);
+            assert_eq!(
+                (result.controls.gate_calls, result.controls.submitted),
+                (1, 1)
+            );
             assert!(matches!(
                 result.controls.publication,
                 Some(PublishResult::DurableAcknowledged { .. })
             ));
         } else {
+            unchanged.assert_route_refusal(&f, route);
             let reason = match case {
                 0 => Refusal::Revision,
                 1 | 8 => Refusal::Context,
@@ -1040,11 +1487,24 @@ fn independent_revision_context_selected_and_predecessor_fences() {
                 _ => Refusal::Predecessor,
             };
             assert_eq!(result.controls.refused, Some(reason));
-            assert_eq!(result.controls.submitted, 0);
+            let expected_gate_calls = usize::from(case == 2 || case == 9);
+            assert_eq!(
+                (result.controls.gate_calls, result.controls.submitted),
+                (expected_gate_calls, 0)
+            );
             assert_eq!(f.engine.current_view(), 0);
-            assert_eq!(f.engine.timeout_count(7), 3);
         }
         drop(result);
+        if case == 7 {
+            unchanged.assert_applied(&f, before);
+            assert_eq!(ConsensusLedger::capture(&f.engine), unchanged.consensus);
+            assert_eq!(
+                Arc::strong_count(&f.selected),
+                unchanged.selected_arc_strong_count
+            );
+        } else {
+            unchanged.assert_route_returned(&f);
+        }
         assert_eq!(f.sample(), before);
     }
 }
@@ -1070,7 +1530,9 @@ fn anchored_predecessor_requires_independent_history_and_preserves_anchor() {
             1 => Some(&wrong),
             _ => Some(&f.history),
         };
+        let unchanged = RefusalBaseline::capture(&f);
         let before = f.sample();
+        let route = Inventory::checked(&f.owner, &f.tc).unwrap().route;
         let report = admit(&f.owner, &f.tc).unwrap().invoke(
             &mut f.engine,
             &f.authority,
@@ -1080,17 +1542,33 @@ fn anchored_predecessor_requires_independent_history_and_preserves_anchor() {
             |_| {},
             |_| {},
         );
-        before.returned(&f, Inventory::checked(&f.owner, &f.tc).unwrap().route);
         if case < 2 {
+            unchanged.assert_route_refusal(&f, route);
             assert_eq!(report.controls.refused, Some(Refusal::Loader));
-            assert_eq!(report.controls.submitted, 0);
+            assert_eq!(
+                (report.controls.gate_calls, report.controls.submitted),
+                (0, 0)
+            );
         } else {
+            unchanged.assert_applied(
+                &f,
+                Ledger {
+                    operational: before.operational + route,
+                    aggregate: before.aggregate + route,
+                    ..before
+                },
+            );
             assert!(matches!(
                 report.controls.publication,
                 Some(PublishResult::DurableAcknowledged { .. })
             ));
         }
         drop(report);
+        if case < 2 {
+            unchanged.assert_route_returned(&f);
+        } else {
+            unchanged.assert_applied(&f, before);
+        }
         assert_eq!(f.sample(), before);
         let proof = f.read();
         let SafetyRecord::Locked(record) = &proof.retained().record else {
@@ -1194,10 +1672,20 @@ fn admission_pressure_relief_retry_and_valid_over_capacity() {
     drop(abandoned);
     assert_eq!(f.sample(), before);
     let pressure = f.owner.backend.accounting().reserve(free).unwrap();
-    assert!(matches!(admit(&f.owner, &f.tc), Err(Refusal::Capacity)));
-    assert_eq!(f.sample().aggregate, before.aggregate_cap.unwrap());
-    f.unchanged();
+    let unchanged = RefusalBaseline::capture(&f);
+    let refused = admit(&f.owner, &f.tc);
+    assert!(matches!(refused, Err(Refusal::Capacity)));
+    unchanged.assert_admission_refusal(&f);
+    assert_eq!(
+        f.sample(),
+        Ledger {
+            operational: before.operational + free,
+            aggregate: before.aggregate + free,
+            ..before
+        }
+    );
     drop(pressure);
+    unchanged.assert_input_engine_consensus(&f);
     assert_eq!(f.sample(), before);
     let admission = admit(&f.owner, &f.tc).unwrap();
     let pressure = f
@@ -1206,6 +1694,7 @@ fn admission_pressure_relief_retry_and_valid_over_capacity() {
         .accounting()
         .reserve(free - plan.route)
         .unwrap();
+    let under_loader_pressure = RefusalBaseline::capture(&f);
     let result = admission.invoke(
         &mut f.engine,
         &f.authority,
@@ -1215,10 +1704,21 @@ fn admission_pressure_relief_retry_and_valid_over_capacity() {
         |_| {},
         |_| {},
     );
+    under_loader_pressure.assert_route_returned(&f);
     assert_eq!(result.controls.refused, Some(Refusal::Loader));
-    assert_eq!(result.controls.submitted, 0);
-    f.unchanged();
+    assert_eq!(
+        (result.controls.gate_calls, result.controls.submitted),
+        (0, 0)
+    );
     drop(result);
+    under_loader_pressure.assert_report_released(
+        &f,
+        Ledger {
+            operational: under_loader_pressure.node.operational - plan.route,
+            aggregate: under_loader_pressure.node.aggregate - plan.route,
+            ..under_loader_pressure.node
+        },
+    );
     drop(pressure);
     assert_eq!(f.sample(), before);
     let success = f.run();
@@ -1227,7 +1727,20 @@ fn admission_pressure_relief_retry_and_valid_over_capacity() {
         success.controls.publication,
         Some(PublishResult::DurableAcknowledged { .. })
     ));
+    assert_eq!(
+        (success.controls.gate_calls, success.controls.submitted),
+        (1, 1)
+    );
+    unchanged.assert_applied(
+        &f,
+        Ledger {
+            operational: before.operational + plan.route,
+            aggregate: before.aggregate + plan.route,
+            ..before
+        },
+    );
     drop(success);
+    unchanged.assert_applied(&f, before);
     assert_eq!(f.sample(), before);
 
     let mut f = Fixture::new();
@@ -1241,7 +1754,9 @@ fn admission_pressure_relief_retry_and_valid_over_capacity() {
         .accounting()
         .reserve(free - available)
         .unwrap();
+    let under_o4_pressure = RefusalBaseline::capture(&f);
     let result = f.run();
+    under_o4_pressure.assert_route_refusal(&f, plan.route);
     assert_eq!(result.controls.submitted, 1);
     assert!(matches!(
         result.controls.publication,
@@ -1249,13 +1764,28 @@ fn admission_pressure_relief_retry_and_valid_over_capacity() {
             SafetyStoreError::CapacityRefusal(_)
         ))
     ));
-    assert_eq!(f.sample().operational, free - available + plan.route);
+    assert_eq!(result.controls.refused, Some(Refusal::Publication));
     assert_eq!(
-        f.sample().aggregate,
-        before.context + free - available + plan.route
+        (result.controls.gate_calls, result.controls.submitted),
+        (1, 1)
     );
-    f.unchanged();
+    assert_eq!(
+        f.sample(),
+        Ledger {
+            operational: before.operational + free - available + plan.route,
+            aggregate: before.aggregate + free - available + plan.route,
+            ..before
+        }
+    );
     drop(result);
+    under_o4_pressure.assert_report_released(
+        &f,
+        Ledger {
+            operational: before.operational + free - available,
+            aggregate: before.aggregate + free - available,
+            ..before
+        },
+    );
     drop(pressure);
     assert_eq!(f.sample(), before);
     let result = f.run();
@@ -1264,7 +1794,27 @@ fn admission_pressure_relief_retry_and_valid_over_capacity() {
         result.controls.publication,
         Some(PublishResult::DurableAcknowledged { .. })
     ));
+    assert_eq!(
+        (result.controls.gate_calls, result.controls.submitted),
+        (1, 1)
+    );
+    under_o4_pressure.assert_applied(
+        &f,
+        Ledger {
+            operational: before.operational + plan.route,
+            aggregate: before.aggregate + plan.route,
+            ..before
+        },
+    );
     drop(result);
+    assert_eq!(
+        ConsensusLedger::capture(&f.engine),
+        under_o4_pressure.consensus
+    );
+    assert_eq!(
+        Arc::strong_count(&f.selected),
+        under_o4_pressure.selected_arc_strong_count
+    );
     assert_eq!(f.sample(), before);
 
     let mut f = Fixture::new();
@@ -1285,9 +1835,11 @@ fn admission_pressure_relief_retry_and_valid_over_capacity() {
     )
     .is_ok());
     let before = f.sample();
-    assert!(matches!(admit(&f.owner, &f.tc), Err(Refusal::Capacity)));
+    let unchanged = RefusalBaseline::capture(&f);
+    let refused = admit(&f.owner, &f.tc);
+    assert!(matches!(refused, Err(Refusal::Capacity)));
+    unchanged.assert_admission_refusal(&f);
     assert_eq!(f.sample(), before);
-    f.unchanged();
 }
 
 #[test]
