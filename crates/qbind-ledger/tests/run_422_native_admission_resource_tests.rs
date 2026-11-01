@@ -350,6 +350,14 @@ fn stored_account(id: AccountId, keys: &[Keypair], threshold: u16) -> Account {
             pubkey_bytes: public_key.clone(),
         })
         .collect::<Vec<_>>();
+    stored_account_with_entries(id, entries, threshold)
+}
+
+fn stored_account_with_entries(
+    id: AccountId,
+    entries: Vec<KeysetEntry>,
+    threshold: u16,
+) -> Account {
     let state = KeysetAccount {
         version: 1,
         reserved0: [0; 3],
@@ -927,6 +935,88 @@ fn run422_native_compatibility_witnesses_legacy_and_isolated_semantics() {
     assert_eq!(tx, tx_before);
     assert_eq!(unreachable_tx, unreachable_tx_before);
     assert_eq!(store.inner.get(&id), Some(unreachable_account));
+
+    let duplicate = KeysetEntry {
+        suite_id: SUITE_ID,
+        weight: 1,
+        reserved0: [0],
+        pubkey_len: u16::try_from(one_key[0].0.len()).unwrap(),
+        pubkey_bytes: one_key[0].0.clone(),
+    };
+    let conflicting_duplicate = stored_account_with_entries(
+        id,
+        vec![
+            duplicate.clone(),
+            KeysetEntry {
+                weight: 2,
+                ..duplicate.clone()
+            },
+        ],
+        1,
+    );
+    store.seed_fixture(conflicting_duplicate);
+    let duplicate_tx = signed_transaction(&[id], &[(0, one_key[0].1.as_slice())], Vec::new());
+    let duplicate_tx_before = duplicate_tx.clone();
+    store.reset_counts();
+    verify_transaction_auth(&mut store, provider.clone(), &duplicate_tx)
+        .expect("legacy checks the first matching duplicate only");
+    assert_eq!(store.counts.legacy_reads.get(), 1);
+    store.reset_counts();
+    provider.counts.reset();
+    assert_eq!(
+        evaluate_native_transaction_proofs::<GROUPS, PROOFS, ENTRIES>(
+            &duplicate_tx,
+            &store,
+            provider.as_ref(),
+            native_limits(),
+        ),
+        Err(NativeTransactionProofError::KeysetProof(
+            qbind_ledger::keyset_proof::KeysetProofEvaluationError::ConflictingDuplicateWeights
+        ))
+    );
+    store.assert_accesses(1);
+    provider.counts.assert_work(2, 0);
+    assert_eq!(duplicate_tx, duplicate_tx_before);
+
+    let unsupported_unused = stored_account_with_entries(
+        id,
+        vec![
+            duplicate,
+            KeysetEntry {
+                suite_id: SUITE_ID + 1,
+                weight: 1,
+                reserved0: [0],
+                pubkey_len: u16::try_from(one_key[0].0.len()).unwrap(),
+                pubkey_bytes: one_key[0].0.clone(),
+            },
+        ],
+        1,
+    );
+    store.seed_fixture(unsupported_unused);
+    let unused_tx = signed_transaction(&[id], &[(0, one_key[0].1.as_slice())], Vec::new());
+    let unused_tx_before = unused_tx.clone();
+    store.reset_counts();
+    verify_transaction_auth(&mut store, provider.clone(), &unused_tx)
+        .expect("legacy ignores a well-framed unused suite entry");
+    assert_eq!(store.counts.legacy_reads.get(), 1);
+    store.reset_counts();
+    provider.counts.reset();
+    assert_eq!(
+        evaluate_native_transaction_proofs::<GROUPS, PROOFS, ENTRIES>(
+            &unused_tx,
+            &store,
+            provider.as_ref(),
+            native_limits(),
+        ),
+        Err(NativeTransactionProofError::KeysetProof(
+            qbind_ledger::keyset_proof::KeysetProofEvaluationError::SuiteNotFound
+        ))
+    );
+    store.assert_accesses(1);
+    assert_eq!(provider.counts.lookups.load(Ordering::SeqCst), 2);
+    assert_eq!(provider.counts.descriptors.load(Ordering::SeqCst), 1);
+    assert_eq!(provider.counts.verifications.load(Ordering::SeqCst), 0);
+    assert_eq!(unused_tx, unused_tx_before);
 }
 
 #[test]
@@ -1031,7 +1121,8 @@ fn run422_native_compatibility_witnesses_metadata_bounded_read_and_proof_limit()
     let nine_proofs = signed_transaction(&[id], &nine_signers, Vec::new());
     let nine_proofs_before = nine_proofs.clone();
     let mut store = CountedStore::new();
-    store.seed_fixture(stored_account(id, &keys, 1));
+    let stored = stored_account(id, &keys, 1);
+    store.seed_fixture(stored.clone());
     provider.counts.reset();
     verify_transaction_auth(&mut store, provider.clone(), &nine_proofs)
         .expect("legacy accepts nine genuine proofs covering the same signer index");
@@ -1058,6 +1149,7 @@ fn run422_native_compatibility_witnesses_metadata_bounded_read_and_proof_limit()
     provider.counts.assert_work(0, 0);
     assert_eq!(nine_proofs, nine_proofs_before);
     assert_eq!(tx, tx_before);
+    assert_eq!(store.inner.get(&id), Some(stored));
     println!(
         "RUN422 compatibility metadata=legacy-accepts/new-refuses owner-executable-returned-id; bounded-read=legacy-accepts/new-unsupported; proof-count=legacy-accepts-9/new-refuses-9-before-work"
     );
