@@ -796,7 +796,7 @@ fn run422_native_resource_genuine_create_preparation_and_composed_evaluation() {
         },
     );
     println!(
-        "RUN422 create-output logical_len={} requested_reservation={} observed_capacity={}",
+        "RUN422 create-output logical_len={} source_derived_expected_reservation_request={} observed_capacity={}",
         observed_output_len.get(),
         expected_requested_bytes,
         observed_output_capacity.get()
@@ -814,9 +814,14 @@ fn run422_native_resource_genuine_create_preparation_and_composed_evaluation() {
     provider.counts.assert_work(16, 0);
     assert_eq!(unreachable, unreachable_before);
 
+    provider.counts.reset();
+    let prepared = prepare_keyset_account_bounded::<ENTRIES>(&call_data, &provider, limits)
+        .expect("actual prepared account for fixture-only handoff");
+    assert_eq!(prepared, expected);
+    provider.counts.assert_work(16, 0);
     let mut store = CountedStore::new();
     // This is fixture-only insertion. Preparation itself never writes a store.
-    store.seed_fixture(expected.clone());
+    store.seed_fixture(prepared);
     let ids = vec![id; 8];
     let signers = (0..8)
         .map(|index| (u16::try_from(index).unwrap(), keys[index].1.as_slice()))
