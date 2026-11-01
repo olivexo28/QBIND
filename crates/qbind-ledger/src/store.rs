@@ -51,6 +51,418 @@ impl InMemoryAccountStore {
             inner: HashMap::new(),
         }
     }
+
+    /// Model-scoped support only. Validate all invariants before taking inputs.
+    ///
+    /// std::collections::HashMap::capacity documents the number of elements
+    /// the map can hold without reallocating. Admit len + ALL creates against
+    /// that current capacity, ignoring possible later deletion space. Creates
+    /// run first; unique replacements cannot increase len and deletes reduce it.
+    /// Keys are [u8;32], the hasher is std RandomState, and Accounts contain only
+    /// scalar headers and Vec<u8>. There are no user Hash/Eq/Drop implementations.
+    /// No guarantee covers arbitrary panic, allocator abort, or process failure.
+    pub(crate) fn publish_native_fixture_batch<const W: usize>(
+        &mut self,
+        effects: &mut [Option<crate::native_staged_effects::FixtureEffect>; W],
+        limits: crate::native_staged_effects::FixtureStageLimits,
+        eligible: bool,
+    ) -> Result<
+        crate::native_staged_effects::FixturePublicationSummary,
+        crate::native_staged_effects::FixtureStageRefusal,
+    > {
+        use crate::native_staged_effects::{
+            check_account, checked_capacity, checked_result_counts, FixtureEffect,
+            FixturePublicationSummary, FixtureStageRefusal as Error,
+        };
+        #[cfg(test)]
+        NATIVE_FIXTURE_OBSERVER.with(|c| c.set((c.get().0.saturating_add(1), c.get().1)));
+
+        if !eligible {
+            return Err(Error::Poisoned);
+        }
+        if limits.max_operations > W
+            || limits.max_data_len > limits.max_account_capacity
+            || limits.max_account_capacity > limits.max_aggregate_capacity
+        {
+            return Err(Error::OperationCapacity);
+        }
+        let mut summary = FixturePublicationSummary {
+            operations: 0,
+            creates: 0,
+            replaces: 0,
+            deletes: 0,
+            retained_capacity: 0,
+            resulting_accounts: 0,
+        };
+        for (index, effect) in effects.iter().enumerate() {
+            let Some(effect) = effect else { continue };
+            summary.operations = summary
+                .operations
+                .checked_add(1)
+                .ok_or(Error::ArithmeticOverflow)?;
+            if summary.operations > limits.max_operations {
+                return Err(Error::OperationCapacity);
+            }
+            if effects
+                .iter()
+                .take(index)
+                .flatten()
+                .any(|e| e.target() == effect.target())
+            {
+                return Err(Error::DuplicateTarget);
+            }
+            if let Some(account) = effect.account() {
+                check_account(effect.target(), account, limits)?;
+                summary.retained_capacity = checked_capacity(
+                    summary.retained_capacity,
+                    account.data.capacity(),
+                    limits.max_aggregate_capacity,
+                )?;
+            }
+            let exists = self.inner.contains_key(effect.target());
+            match effect {
+                FixtureEffect::Create(_, _) => {
+                    if exists {
+                        return Err(Error::CreateExisting);
+                    }
+                    summary.creates = summary
+                        .creates
+                        .checked_add(1)
+                        .ok_or(Error::ArithmeticOverflow)?;
+                }
+                FixtureEffect::Replace(_, _) => {
+                    if !exists {
+                        return Err(Error::ReplaceMissing);
+                    }
+                    summary.replaces = summary
+                        .replaces
+                        .checked_add(1)
+                        .ok_or(Error::ArithmeticOverflow)?;
+                }
+                FixtureEffect::Delete(_) => {
+                    if !exists {
+                        return Err(Error::DeleteMissing);
+                    }
+                    summary.deletes = summary
+                        .deletes
+                        .checked_add(1)
+                        .ok_or(Error::ArithmeticOverflow)?;
+                }
+            }
+        }
+        let (peak, result) =
+            checked_result_counts(self.inner.len(), summary.creates, summary.deletes)?;
+        summary.resulting_accounts = result;
+        if peak > self.inner.capacity() {
+            return Err(Error::MapCapacity);
+        }
+
+        // From here onward: admitted moves only, no fallible work or validation.
+        for slot in effects.iter_mut() {
+            if matches!(slot, Some(FixtureEffect::Create(_, _))) {
+                if let Some(FixtureEffect::Create(id, account)) = slot.take() {
+                    self.inner.insert(id, account);
+                    #[cfg(test)]
+                    observe_native_fixture_mutation();
+                }
+            }
+        }
+        for slot in effects.iter_mut() {
+            match slot.take() {
+                Some(FixtureEffect::Replace(id, account)) => {
+                    self.inner.insert(id, account);
+                    #[cfg(test)]
+                    observe_native_fixture_mutation();
+                }
+                Some(FixtureEffect::Delete(id)) => {
+                    self.inner.remove(&id);
+                    #[cfg(test)]
+                    observe_native_fixture_mutation();
+                }
+                _ => {}
+            }
+        }
+        Ok(summary)
+    }
+}
+
+#[cfg(test)]
+thread_local! {
+    static NATIVE_FIXTURE_OBSERVER: std::cell::Cell<(usize, usize)> =
+        const { std::cell::Cell::new((0, 0)) };
+}
+
+#[cfg(test)]
+fn observe_native_fixture_mutation() {
+    NATIVE_FIXTURE_OBSERVER.with(|c| c.set((c.get().0, c.get().1.saturating_add(1))));
+}
+
+#[cfg(test)]
+mod run422_native_staged_effects_tests {
+    use super::*;
+    use crate::native_staged_effects::{
+        FixtureEffect as Op, FixtureStageLimits, FixtureStageRefusal as Error,
+    };
+    use std::cell::Cell;
+
+    fn limits(n: usize) -> FixtureStageLimits {
+        FixtureStageLimits {
+            max_operations: n,
+            max_data_len: 8,
+            max_account_capacity: 8,
+            max_aggregate_capacity: n.max(1) * 8,
+        }
+    }
+    fn account(id: u8) -> Account {
+        Account::new([id; 32], [7; 32], 42, vec![id; 4])
+    }
+    fn reset() {
+        NATIVE_FIXTURE_OBSERVER.with(|c| c.set((0, 0)));
+    }
+    fn counts() -> (usize, usize) {
+        NATIVE_FIXTURE_OBSERVER.with(Cell::get)
+    }
+
+    #[test]
+    fn run422_native_staged_effects_actual_capacity_boundary() {
+        let mut store = InMemoryAccountStore::new();
+        // Provision before the attempt; use the real resulting capacity.
+        store.inner.reserve(8);
+        let capacity = store.inner.capacity();
+        assert!(capacity > 0 && capacity < 200);
+        for id in 0..capacity - 1 {
+            store.put(account(id as u8)).unwrap();
+        }
+        let mut exact = [Some(Op::Create([200; 32], account(200)))];
+        let pointer = exact[0].as_ref().unwrap().account().unwrap().data.as_ptr();
+        reset();
+        let result = store
+            .publish_native_fixture_batch(&mut exact, limits(1), true)
+            .unwrap();
+        assert_eq!(result.resulting_accounts, capacity);
+        assert_eq!(store.inner.capacity(), capacity);
+        assert_eq!(store.inner.get(&[200; 32]).unwrap().data.as_ptr(), pointer);
+        assert_eq!(counts(), (1, 1));
+
+        let before_len = store.inner.len();
+        let mut refused = [
+            Some(Op::Create([201; 32], account(201))),
+            Some(Op::Delete([0; 32])),
+        ];
+        let pointer = refused[0]
+            .as_ref()
+            .unwrap()
+            .account()
+            .unwrap()
+            .data
+            .as_ptr();
+        reset();
+        assert_eq!(
+            store.publish_native_fixture_batch(&mut refused, limits(2), true),
+            Err(Error::MapCapacity)
+        );
+        assert_eq!(counts(), (1, 0));
+        assert_eq!(store.inner.len(), before_len);
+        for id in 0..capacity - 1 {
+            assert_eq!(store.inner.get(&[id as u8; 32]), Some(&account(id as u8)));
+        }
+        assert_eq!(store.inner.get(&[200; 32]), Some(&account(200)));
+        assert_eq!(
+            refused[0]
+                .as_ref()
+                .unwrap()
+                .account()
+                .unwrap()
+                .data
+                .as_ptr(),
+            pointer
+        );
+        assert_eq!(store.inner.capacity(), capacity);
+
+        store.inner.reserve(1); // fresh fixture provisioning outside publication
+        assert!(store.inner.capacity() > capacity);
+        reset();
+        let result = store
+            .publish_native_fixture_batch(&mut refused, limits(2), true)
+            .unwrap();
+        assert_eq!(result.operations, 2);
+        assert_eq!(counts(), (1, 2));
+        assert!(store.inner.contains_key(&[201; 32]));
+        assert!(!store.inner.contains_key(&[0; 32]));
+    }
+
+    #[test]
+    fn run422_native_staged_effects_helper_prevalidates_without_consuming() {
+        let mut store = InMemoryAccountStore::new();
+        store.inner.reserve(8);
+        let original = account(1);
+        store.put(original.clone()).unwrap();
+        let cases = [
+            (Some(Op::Create([1; 32], account(1))), Error::CreateExisting),
+            (
+                Some(Op::Replace([2; 32], account(2))),
+                Error::ReplaceMissing,
+            ),
+            (Some(Op::Delete([2; 32])), Error::DeleteMissing),
+            (
+                Some(Op::Replace([1; 32], account(2))),
+                Error::AccountIdMismatch,
+            ),
+            (Some(Op::Delete([3; 32])), Error::DuplicateTarget),
+            (
+                Some(Op::Create(
+                    [4; 32],
+                    Account::new([4; 32], [7; 32], 0, vec![0; 9]),
+                )),
+                Error::LogicalLength,
+            ),
+        ];
+        for (bad, expected) in cases {
+            let mut effects = [Some(Op::Create([3; 32], account(3))), bad];
+            let pointer = effects[0]
+                .as_ref()
+                .unwrap()
+                .account()
+                .unwrap()
+                .data
+                .as_ptr();
+            reset();
+            assert_eq!(
+                store.publish_native_fixture_batch(&mut effects, limits(2), true),
+                Err(expected)
+            );
+            assert_eq!(counts(), (1, 0));
+            assert_eq!(store.inner.len(), 1);
+            assert_eq!(store.inner.get(&original.id), Some(&original));
+            assert_eq!(
+                effects[0]
+                    .as_ref()
+                    .unwrap()
+                    .account()
+                    .unwrap()
+                    .data
+                    .as_ptr(),
+                pointer
+            );
+        }
+        let mut data = Vec::with_capacity(9);
+        data.push(1);
+        let mut effects = [Some(Op::Create(
+            [3; 32],
+            Account::new([3; 32], [7; 32], 0, data),
+        ))];
+        reset();
+        assert_eq!(
+            store.publish_native_fixture_batch(&mut effects, limits(1), true),
+            Err(Error::AccountCapacity)
+        );
+        assert_eq!(counts(), (1, 0));
+        assert!(effects[0].is_some());
+        assert_eq!(store.inner.get(&original.id), Some(&original));
+    }
+
+    #[test]
+    fn run422_native_staged_effects_helper_bounds_and_poison() {
+        let mut store = InMemoryAccountStore::new();
+        store.inner.reserve(4);
+        let mut effects = [
+            Some(Op::Create([1; 32], account(1))),
+            Some(Op::Create([2; 32], account(2))),
+        ];
+        for (limits, eligible, expected) in [
+            (limits(2), false, Error::Poisoned),
+            (limits(1), true, Error::OperationCapacity),
+            (
+                FixtureStageLimits {
+                    max_aggregate_capacity: 7,
+                    max_account_capacity: 4,
+                    ..limits(2)
+                },
+                true,
+                Error::OperationCapacity,
+            ),
+            (
+                FixtureStageLimits {
+                    max_data_len: 4,
+                    max_account_capacity: 4,
+                    max_aggregate_capacity: 7,
+                    ..limits(2)
+                },
+                true,
+                Error::AggregateCapacity,
+            ),
+        ] {
+            reset();
+            assert_eq!(
+                store.publish_native_fixture_batch(&mut effects, limits, eligible),
+                Err(expected)
+            );
+            assert_eq!(counts(), (1, 0));
+            assert!(store.inner.is_empty());
+            assert!(effects.iter().all(Option::is_some));
+        }
+        reset();
+        let summary = store
+            .publish_native_fixture_batch(&mut effects, limits(2), true)
+            .unwrap();
+        assert_eq!(summary.retained_capacity, 8);
+        assert_eq!(counts(), (1, 2));
+    }
+
+    #[test]
+    fn run422_native_staged_effects_private_multi_effect_moves_and_headers() {
+        let mut store = InMemoryAccountStore::new();
+        store.inner.reserve(8);
+        let originals = [account(1), account(2), account(3)];
+        for a in &originals {
+            store.put(a.clone()).unwrap();
+        }
+        let create = account(4);
+        let mut replace = account(1);
+        replace.header.owner = [99; 32];
+        replace.header.lamports = 100;
+        replace.header.is_executable = true;
+        replace.header.rent_epoch = 101;
+        replace.header.reserved = [9; 8];
+        replace.data = vec![9; 8];
+        let pointers = (create.data.as_ptr(), replace.data.as_ptr());
+        let capacities = (create.data.capacity(), replace.data.capacity());
+        let expected = (create.clone(), replace.clone());
+        let mut effects = [
+            Some(Op::Replace([1; 32], replace)),
+            Some(Op::Delete([2; 32])),
+            Some(Op::Create([4; 32], create)),
+        ];
+        let original_capacity = store.inner.capacity();
+        reset();
+        let summary = store
+            .publish_native_fixture_batch(&mut effects, limits(3), true)
+            .unwrap();
+        assert_eq!(counts(), (1, 3));
+        assert_eq!(
+            (
+                summary.operations,
+                summary.creates,
+                summary.replaces,
+                summary.deletes
+            ),
+            (3, 1, 1, 1)
+        );
+        assert_eq!(store.inner.len(), 3);
+        assert_eq!(store.inner.capacity(), original_capacity);
+        let create = store.inner.get(&[4; 32]).unwrap();
+        let replace = store.inner.get(&[1; 32]).unwrap();
+        assert_eq!(create, &expected.0);
+        assert_eq!(replace, &expected.1);
+        assert_eq!((create.data.as_ptr(), replace.data.as_ptr()), pointers);
+        assert_eq!(
+            (create.data.capacity(), replace.data.capacity()),
+            capacities
+        );
+        assert_eq!(store.inner.get(&[3; 32]), Some(&originals[2]));
+        assert!(!store.inner.contains_key(&[2; 32]));
+        assert!(effects.iter().all(Option::is_none));
+    }
 }
 
 impl Default for InMemoryAccountStore {
