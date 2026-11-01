@@ -24451,3 +24451,26 @@ C4/C5 OPEN; RS1 OPEN. Whole native admission contract remains **DRAFT / NOT
 APPROVED / NOT IMPLEMENTED**. All limits UNAPPROVED. No F1/F2 or C4/C5 closure,
 production authorization, deployed-path readiness, PR, merge, main/force push,
 activation, deployment, or release approval.
+
+## Source-identification correction
+
+I withdraw the earlier identification above of `hotstuff_node_sim`'s
+`execution_adapter` route as EVM. Source shows a separate ledger route:
+`crates/qbind-node/src/execution_adapter.rs:71-76` imports ledger
+`ExecutionEngine`, `QbindTransaction`, and `VmV0ExecutionEngine`; `:166-175`
+defines `QbindBlock.txs: Vec<QbindTransaction>`; and `:341-350` invokes the
+ledger engine for each transaction. The async worker constructs
+`VmV0ExecutionEngine` at `execution_adapter.rs:865-866`.
+`hotstuff_node_sim.rs:3118-3127,3153-3156` creates the QbindBlock from
+decoded ledger transactions and submits it to the async service or sync
+adapter.
+
+Distinguish (1) native `qbind_wire::tx::Transaction` / `TxExecutor` /
+`GovernanceProgram`; (2) ledger `QbindTransaction` / execution-adapter /
+nonce-or-VM execution; and (3) runtime `QbindTx` / EVM execution, using
+`RevmExecutionEngine` (`crates/qbind-runtime/src/qbind_tx.rs:43-52`;
+`crates/qbind-runtime/src/revm_engine.rs:100-103`). This corrects source
+identification only: governance characterization is unchanged, no deployed
+reachability is established, and no new executed evidence is added.
+Historical validation remains attributed to
+`c279c7be1cc415032975f162109e5e2c3f9c6ed0`.

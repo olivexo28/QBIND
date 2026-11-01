@@ -275,3 +275,26 @@ retain documented error ordering without a mutation. Positive authenticated
 governance execution, decision consumption, and persistent atomicity must be a
 later separately approved design and implementation; they are outside this
 single unavailable-boundary proposal.
+
+## Source-identification correction
+
+I withdraw the earlier identification above of `hotstuff_node_sim`'s
+`execution_adapter` route as EVM. Source shows it is a separate ledger route:
+`crates/qbind-node/src/execution_adapter.rs:71-76` imports
+`qbind_ledger::{ExecutionEngine, QbindTransaction, VmV0ExecutionEngine}`;
+`:166-175` defines `QbindBlock.txs` as `Vec<QbindTransaction>`, and
+`:341-350` executes each transaction through the ledger `ExecutionEngine`.
+The async worker constructs `VmV0ExecutionEngine` at
+`crates/qbind-node/src/execution_adapter.rs:865-866`. The simulator creates
+this `QbindBlock` and submits it to the async service or synchronous adapter
+at `crates/qbind-node/src/hotstuff_node_sim.rs:3118-3127,3153-3156`.
+
+These are three distinct paths: (1) native
+`qbind_wire::tx::Transaction` → `TxExecutor` → `GovernanceProgram`, which this
+characterization tests; (2) ledger `QbindTransaction` through the node
+execution-adapter with nonce-or-VM execution; and (3) runtime `QbindTx` with
+the EVM `RevmExecutionEngine` (`crates/qbind-runtime/src/qbind_tx.rs:43-52`;
+`crates/qbind-runtime/src/revm_engine.rs:100-103`). This source-identification
+correction changes no governance result, adds no executed evidence, and does
+not establish deployed reachability. Historical validation remains attributed
+to `c279c7be1cc415032975f162109e5e2c3f9c6ed0`.
