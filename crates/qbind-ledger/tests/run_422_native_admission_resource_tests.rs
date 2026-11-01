@@ -12,6 +12,7 @@ use qbind_crypto::{
 };
 use qbind_hash::tx::try_tx_digest_streaming;
 use qbind_ledger::auth::verify_transaction_auth;
+use qbind_ledger::keyset_account::KeysetAccountReadError;
 use qbind_ledger::keyset_create::{
     prepare_keyset_account_bounded, KeysetCreatePreparationError, KeysetCreatePreparationLimits,
 };
@@ -212,6 +213,91 @@ impl AccountStore for CountedStore {
 
     fn delete(&mut self, id: &AccountId) -> Result<(), ExecutionError> {
         self.counts.deletes.set(self.counts.deletes.get() + 1);
+        self.inner.delete(id)
+    }
+}
+
+struct ReportedAccountStore {
+    account: Account,
+    legacy_reads: Cell<usize>,
+    bounded_reads: Cell<usize>,
+    writes: Cell<usize>,
+    deletes: Cell<usize>,
+}
+
+impl ReportedAccountStore {
+    fn new(account: Account) -> Self {
+        Self {
+            account,
+            legacy_reads: Cell::new(0),
+            bounded_reads: Cell::new(0),
+            writes: Cell::new(0),
+            deletes: Cell::new(0),
+        }
+    }
+
+    fn reset_reads(&self) {
+        self.legacy_reads.set(0);
+        self.bounded_reads.set(0);
+    }
+}
+
+impl AccountStore for ReportedAccountStore {
+    fn get(&self, _id: &AccountId) -> Option<Account> {
+        self.legacy_reads.set(self.legacy_reads.get() + 1);
+        Some(self.account.clone())
+    }
+
+    fn get_bounded(
+        &self,
+        _id: &AccountId,
+        max_data_bytes: usize,
+    ) -> Result<Option<Account>, qbind_ledger::store::BoundedReadError> {
+        self.bounded_reads.set(self.bounded_reads.get() + 1);
+        if self.account.data.len() > max_data_bytes {
+            return Err(qbind_ledger::store::BoundedReadError::Oversized);
+        }
+        Ok(Some(self.account.clone()))
+    }
+
+    fn put(&mut self, _account: Account) -> Result<(), ExecutionError> {
+        self.writes.set(self.writes.get() + 1);
+        Err(ExecutionError::InvalidCallData("unexpected fixture write"))
+    }
+
+    fn delete(&mut self, _id: &AccountId) -> Result<(), ExecutionError> {
+        self.deletes.set(self.deletes.get() + 1);
+        Err(ExecutionError::InvalidCallData("unexpected fixture delete"))
+    }
+}
+
+struct LegacyOnlyStore {
+    inner: InMemoryAccountStore,
+    legacy_reads: Cell<usize>,
+}
+
+impl LegacyOnlyStore {
+    fn new(account: Account) -> Self {
+        let mut inner = InMemoryAccountStore::new();
+        inner.put(account).expect("fixture insertion");
+        Self {
+            inner,
+            legacy_reads: Cell::new(0),
+        }
+    }
+}
+
+impl AccountStore for LegacyOnlyStore {
+    fn get(&self, id: &AccountId) -> Option<Account> {
+        self.legacy_reads.set(self.legacy_reads.get() + 1);
+        self.inner.get(id)
+    }
+
+    fn put(&mut self, account: Account) -> Result<(), ExecutionError> {
+        self.inner.put(account)
+    }
+
+    fn delete(&mut self, id: &AccountId) -> Result<(), ExecutionError> {
         self.inner.delete(id)
     }
 }
@@ -841,4 +927,138 @@ fn run422_native_compatibility_witnesses_legacy_and_isolated_semantics() {
     assert_eq!(tx, tx_before);
     assert_eq!(unreachable_tx, unreachable_tx_before);
     assert_eq!(store.inner.get(&id), Some(unreachable_account));
+}
+
+#[test]
+fn run422_native_compatibility_witnesses_metadata_bounded_read_and_proof_limit() {
+    let id = [0xE6; 32];
+    let keys = generate_keypairs(1);
+    let tx = signed_transaction(&[id], &[(0, keys[0].1.as_slice())], Vec::new());
+    let tx_before = tx.clone();
+    let provider = Arc::new(CountedProvider::new());
+
+    for (name, mutate, expected) in [
+        (
+            "owner",
+            0u8,
+            NativeTransactionProofError::AccountRead(KeysetAccountReadError::OwnerMismatch),
+        ),
+        (
+            "executable",
+            1u8,
+            NativeTransactionProofError::AccountRead(KeysetAccountReadError::Executable),
+        ),
+        (
+            "returned-id",
+            2u8,
+            NativeTransactionProofError::AccountRead(KeysetAccountReadError::AccountIdMismatch),
+        ),
+    ] {
+        let mut account = stored_account(id, &keys, 1);
+        match mutate {
+            0 => account.header.owner = [0xE7; 32],
+            1 => account.header.is_executable = true,
+            2 => account.id = [0xE8; 32],
+            _ => unreachable!(),
+        }
+        let account_before = account.clone();
+        let mut store = ReportedAccountStore::new(account);
+
+        provider.counts.reset();
+        verify_transaction_auth(&mut store, provider.clone(), &tx)
+            .expect("legacy verifier ignores returned-account metadata");
+        assert_eq!(store.legacy_reads.get(), 1, "{name}");
+        assert_eq!(store.bounded_reads.get(), 0, "{name}");
+        assert_eq!(provider.counts.lookups.load(Ordering::SeqCst), 1, "{name}");
+        assert_eq!(
+            provider.counts.descriptors.load(Ordering::SeqCst),
+            0,
+            "{name}"
+        );
+        assert_eq!(
+            provider.counts.verifications.load(Ordering::SeqCst),
+            1,
+            "{name}"
+        );
+
+        store.reset_reads();
+        provider.counts.reset();
+        assert_eq!(
+            evaluate_native_transaction_proofs::<GROUPS, PROOFS, ENTRIES>(
+                &tx,
+                &store,
+                provider.as_ref(),
+                native_limits(),
+            ),
+            Err(expected),
+            "{name}"
+        );
+        assert_eq!(store.bounded_reads.get(), 1, "{name}");
+        assert_eq!(store.legacy_reads.get(), 0, "{name}");
+        assert_eq!(store.writes.get(), 0, "{name}");
+        assert_eq!(store.deletes.get(), 0, "{name}");
+        provider.counts.assert_work(0, 0);
+        assert_eq!(store.account, account_before, "{name}");
+    }
+
+    let mut legacy_only = LegacyOnlyStore::new(stored_account(id, &keys, 1));
+    provider.counts.reset();
+    verify_transaction_auth(&mut legacy_only, provider.clone(), &tx)
+        .expect("legacy verifier works with a get-only store");
+    assert_eq!(legacy_only.legacy_reads.get(), 1);
+    assert_eq!(provider.counts.lookups.load(Ordering::SeqCst), 1);
+    assert_eq!(provider.counts.descriptors.load(Ordering::SeqCst), 0);
+    assert_eq!(provider.counts.verifications.load(Ordering::SeqCst), 1);
+    legacy_only.legacy_reads.set(0);
+    provider.counts.reset();
+    assert_eq!(
+        evaluate_native_transaction_proofs::<GROUPS, PROOFS, ENTRIES>(
+            &tx,
+            &legacy_only,
+            provider.as_ref(),
+            native_limits(),
+        ),
+        Err(NativeTransactionProofError::AccountRead(
+            KeysetAccountReadError::Unsupported
+        ))
+    );
+    assert_eq!(legacy_only.legacy_reads.get(), 0, "no fallback to get");
+    provider.counts.assert_work(0, 0);
+
+    let nine_signers = (0..9)
+        .map(|_| (0, keys[0].1.as_slice()))
+        .collect::<Vec<_>>();
+    let nine_proofs = signed_transaction(&[id], &nine_signers, Vec::new());
+    let nine_proofs_before = nine_proofs.clone();
+    let mut store = CountedStore::new();
+    store.seed_fixture(stored_account(id, &keys, 1));
+    provider.counts.reset();
+    verify_transaction_auth(&mut store, provider.clone(), &nine_proofs)
+        .expect("legacy accepts nine genuine proofs covering the same signer index");
+    assert_eq!(store.counts.legacy_reads.get(), 9);
+    assert_eq!(store.counts.bounded_reads.get(), 0);
+    assert_eq!(provider.counts.lookups.load(Ordering::SeqCst), 9);
+    assert_eq!(provider.counts.descriptors.load(Ordering::SeqCst), 0);
+    assert_eq!(provider.counts.verifications.load(Ordering::SeqCst), 9);
+
+    store.reset_counts();
+    provider.counts.reset();
+    assert_eq!(
+        evaluate_native_transaction_proofs::<GROUPS, PROOFS, ENTRIES>(
+            &nine_proofs,
+            &store,
+            provider.as_ref(),
+            native_limits(),
+        ),
+        Err(NativeTransactionProofError::Structure(
+            NativeTransactionProofStructureError::AuthenticationProofCountLimit
+        ))
+    );
+    store.assert_accesses(0);
+    provider.counts.assert_work(0, 0);
+    assert_eq!(nine_proofs, nine_proofs_before);
+    assert_eq!(tx, tx_before);
+    println!(
+        "RUN422 compatibility metadata=legacy-accepts/new-refuses owner-executable-returned-id; bounded-read=legacy-accepts/new-unsupported; proof-count=legacy-accepts-9/new-refuses-9-before-work"
+    );
 }
