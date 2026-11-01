@@ -4115,3 +4115,48 @@ activation DISABLED; public DevNet NO-GO; durable anti-rollback NOT-ESTABLISHED;
 C4/C5 OPEN; RS1 OPEN. All candidate limits UNAPPROVED. No production integration,
 atomic commit, activation, deployment, PR, merge, main push, force-push, F1/F2
 closure or release approval.
+
+### RUN 422 - unused bounded exclusive native staged-effects fixture
+
+The whole native admission state contract remains
+**DRAFT / NOT APPROVED / NOT IMPLEMENTED**. The isolated model adds a concrete
+exclusive InMemoryAccountStore borrow held continuously from fresh existing
+NativeAdmissionContext proof checking through private staging and consuming
+publication/cancellation. There is no reacquisition gap, transferable proof
+success, production caller, persistent MVCC implementation or replacement of
+the draft's primary immutable-version/serializable validation recommendation.
+
+Trusted fixture create/replace/delete plans are not program/payer/nonce/replay/
+fee/creation authority. Complete immutable transaction/provider/selected labels
+are retained; provenance and provider stability remain fixture trust assumptions.
+Unique targets, logical and actual Vec capacity bounds, checked aggregate
+capacity and poisoned-attempt semantics prevent ignored staging errors from
+publishing a subset. Rejected offered Accounts retain their original allocations.
+The crate-private helper prevalidates the entire batch before consuming inputs,
+checks len+ALL creates against existing HashMap capacity without deletion credit,
+then moves creates before replacements/deletes with no remaining fallible work.
+No public batch/map access or existing trait/method behavior change is introduced.
+
+This is narrow normal-error in-memory publication atomicity, not persistent
+atomic commit, arbitrary-panic rollback, crash/restart/process-abort recovery,
+optimistic conflict detection or chain-authority enforcement. Local map capacity
+inability must not become a consensus invalid-transaction receipt. Holding
+exclusivity across crypto limits concurrency; no throughput or process-memory
+bound is claimed. Stage-owned allocations coexist with old store data; old
+displaced/deleted data is deallocated, not journaled or cloned.
+
+Final tested source `f053797ae0aa7afc39d9ed6a42651d3400a70876`,
+tree `fb68759b1becf8bca41d76b944ee61a93833e68e`: focused 9 passed,
+private 7 passed, unchanged context/characterization 7+2 passed; full ledger
+759 passed/16 pre-existing ignored, including all 9 new doctests; node check
+and scoped rustfmt exit 0. Counts overlap; node check is compilation only.
+Literal commands, initial environment/test-fixture failures, layout/ownership
+inventory, genuine versus injected controls and exact prefix/source attribution
+are appended in D7. This complete starting document prefix, mode 100644, LF
+convention and absent terminal newline remain preserved.
+
+D7D14_STORAGE_COMPONENT=IMPLEMENTED-ISOLATED;
+D7D14_STORAGE_ACCEPTANCE=PASS-ACCEPTED-SUBSET; §13.6 whole-lifecycle INCOMPLETE;
+activation DISABLED; public DevNet NO-GO; durable anti-rollback NOT-ESTABLISHED;
+C4/C5 OPEN; RS1 OPEN. All limits UNAPPROVED. No F1/F2 closure, production
+integration, PR, merge, main/force push, activation, deployment or release approval.
