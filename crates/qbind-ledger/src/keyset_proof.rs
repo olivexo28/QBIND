@@ -11,8 +11,8 @@
 //! or persistent-read guarantee.
 
 use crate::keyset_validation::{
-    checked_identifier_byte_len, identity_weight, prepare_entries, summarize_workspace,
-    KeysetSemanticAnalysisError, KeysetSemanticAnalysisSummary, PreparedCandidate, Workspace,
+    identity_weight, prepare_entries, summarize_workspace, KeysetSemanticAnalysisError,
+    PreparedCandidate, Workspace,
 };
 use qbind_crypto::error::CryptoError;
 use qbind_crypto::CryptoProvider;
@@ -257,6 +257,7 @@ fn map_semantic_error(error: KeysetSemanticAnalysisError) -> KeysetProofEvaluati
 mod tests {
     use super::*;
     use crate::keyset_account::read_keyset_owned_account_bounded;
+    use crate::keyset_validation::{checked_identifier_byte_len, KeysetSemanticAnalysisSummary};
     use crate::{store::AccountStore, Account, AccountHeader, ExecutionError};
     use qbind_crypto::error::CryptoError;
     use qbind_crypto::ml_dsa44::MlDsa44Backend;
