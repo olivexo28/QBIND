@@ -4284,3 +4284,22 @@ Genuine ML-DSA-44 executor cases, direct Program cases, malformed calls, authent
 The successful-write findings at `c279c7be1cc415032975f162109e5e2c3f9c6ed0` remain correct for that historical revision and are not post-fix results. New results belong only to the tested source commit above. The whole native admission/governance contract remains **DRAFT / NOT APPROVED / NOT IMPLEMENTED**; positive authority provenance/currentness, timelock, one-use consumption, atomic publication and recovery remain unresolved. Legacy authentication still runs before the gate; no whole-path allocation/resource-bound claim or selected-binary, running-node, network or deployed-path evidence follows from these source/library tests.
 
 D7D14_STORAGE_COMPONENT=IMPLEMENTED-ISOLATED; D7D14_STORAGE_ACCEPTANCE=PASS-ACCEPTED-SUBSET; §13.6 whole-lifecycle INCOMPLETE; activation DISABLED; public DevNet NO-GO; durable anti-rollback NOT-ESTABLISHED; C4/C5 OPEN; RS1 OPEN. All candidate limits remain UNAPPROVED; no F1/F2 or C4/C5 closure or release approval.
+
+## RUN 422 native validator-registration characterization
+
+The separate draft `docs/devnet/QBIND_RUN_422_NATIVE_VALIDATOR_AUTHORITY_CONTRACT.md`
+characterizes native validator registration as an authenticated signed call
+that can write a local Active record, not as independent owner authorization,
+funded stake, key admission, network admission, or validator-set activation.
+The source/test distinction, bounded assertions, and proposed unavailable-
+authority enforcement slice are documented there; the slice remains
+**DRAFT / NOT APPROVED / NOT IMPLEMENTED** and is not a governance change.
+
+The dedicated `qbind-runtime` integration target exercises the actual native
+`TxExecutor` using genuine ML-DSA-44 transaction authentication and records full
+state/mutation outcomes. Consensus-signature and network-KEM setup checks are
+fixture validity controls only. See the accompanying D7 evidence append for
+source attribution, executed commands, selected/passed/failed/ignored counts,
+and environment preparation. No node, network, deployment, durable-storage, or
+anti-rollback conclusion follows. All existing posture markers and completed
+native governance-refusal findings remain unchanged.
