@@ -113,7 +113,7 @@ pub fn evaluate_stored_keyset_proofs<const N: usize>(
     checked_aggregate_signature_bytes(proofs, limits)?;
 
     let mut candidates = [None; N];
-    let identities = prepare_entries::<N, _, _>(
+    let identities = prepare_entries::<N, _>(
         keyset.threshold(),
         keyset.entry_count(),
         keyset
@@ -121,7 +121,7 @@ pub fn evaluate_stored_keyset_proofs<const N: usize>(
             .map(|entry| (entry.suite_id, entry.weight, entry.pubkey_bytes)),
         provider,
         limits.max_algorithm_parameter_identifier_bytes,
-        |index, candidate| candidates[index] = Some(candidate),
+        Some(&mut candidates),
     )
     .map_err(map_semantic_error)?;
     let mut workspace = ProofWorkspace {

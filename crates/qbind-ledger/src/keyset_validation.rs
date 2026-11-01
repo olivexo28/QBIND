@@ -131,28 +131,27 @@ fn analyze_entries<'a, const N: usize, I>(
 where
     I: Iterator<Item = (u8, u16, &'a [u8])>,
 {
-    let workspace = prepare_entries::<N, _, _>(
+    let workspace = prepare_entries::<N, _>(
         threshold,
         entry_count,
         entries,
         provider,
         max_identifier_bytes,
-        |_, _| {},
+        None,
     )?;
     summarize_workspace(&workspace, threshold, entry_count, max_distinct_key_proofs)
 }
 
-pub(super) fn prepare_entries<'key, 'provider, const N: usize, I, F>(
+pub(super) fn prepare_entries<'key, 'provider, const N: usize, I>(
     threshold: u16,
     entry_count: u16,
     entries: I,
     provider: &'provider dyn CryptoProvider,
     max_identifier_bytes: usize,
-    mut on_candidate: F,
+    mut candidate_output: Option<&mut [Option<PreparedCandidate<'key, 'provider>>; N]>,
 ) -> Result<Workspace<'key, N>, KeysetSemanticAnalysisError>
 where
     I: Iterator<Item = (u8, u16, &'key [u8])>,
-    F: FnMut(usize, PreparedCandidate<'key, 'provider>),
 {
     use KeysetSemanticAnalysisError as Error;
 
@@ -223,15 +222,14 @@ where
             workspace.distinct_count += 1;
             index
         };
-        on_candidate(
-            entry_index,
-            PreparedCandidate {
+        if let Some(output) = candidate_output.as_deref_mut() {
+            output[entry_index] = Some(PreparedCandidate {
                 suite_id: requested_suite_id,
                 suite,
                 public_key: original_key_span,
                 identity_index,
-            },
-        );
+            });
+        }
     }
 
     Ok(workspace)
