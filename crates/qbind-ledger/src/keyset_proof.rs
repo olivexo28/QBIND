@@ -434,7 +434,7 @@ mod tests {
         }
     }
 
-    fn test_provider(suite_id: u8, suite: TestSuite, _calls: &Arc<Calls>) -> TestProvider {
+    fn test_provider(suite_id: u8, suite: TestSuite) -> TestProvider {
         TestProvider::new(vec![(suite_id, Box::new(suite))])
     }
 
@@ -665,7 +665,7 @@ mod tests {
     fn run422_keyset_proof_conflicting_duplicates_refuse_before_crypto() {
         let calls = Arc::new(Calls::default());
         let suite = TestSuite::new(1, Arc::clone(&calls));
-        let provider = test_provider(1, suite, &calls);
+        let provider = test_provider(1, suite);
         let key = [1u8];
         for entries in [
             [(1, 0, key.as_slice()), (1, 2, key.as_slice())],
@@ -705,7 +705,7 @@ mod tests {
         let calls = Arc::new(Calls::default());
         let mut suite = TestSuite::new(1, Arc::clone(&calls));
         suite.verify_mode = VerifyMode::SignatureEqualsKey;
-        let provider = test_provider(1, suite, &calls);
+        let provider = test_provider(1, suite);
         let a = [1u8];
         let b = [2u8];
         let entries_a = [(1, 0, a.as_slice()), (1, 3, b.as_slice())];
@@ -746,7 +746,7 @@ mod tests {
         let calls = Arc::new(Calls::default());
         let mut suite = TestSuite::new(1, Arc::clone(&calls));
         suite.verify_mode = VerifyMode::AcceptAny;
-        let provider = test_provider(1, suite, &calls);
+        let provider = test_provider(1, suite);
         let first = [1u8];
         let second = [2u8];
         let ambiguous = encode_keyset(1, &[(1, 1, &first), (1, 1, &second)]);
@@ -834,7 +834,7 @@ mod tests {
             ),
             Err(KeysetProofEvaluationError::SuiteNotFound)
         );
-        let no_matching_suite = test_provider(1, TestSuite::new(1, Arc::clone(&calls)), &calls);
+        let no_matching_suite = test_provider(1, TestSuite::new(1, Arc::clone(&calls)));
         assert_eq!(
             evaluate_stored_keyset_proofs::<1>(
                 view(&bytes),
@@ -879,7 +879,7 @@ mod tests {
         ] {
             let mut suite = TestSuite::new(1, Arc::clone(&calls));
             suite.descriptor_mode = mode;
-            let provider = test_provider(1, suite, &calls);
+            let provider = test_provider(1, suite);
             assert_eq!(
                 evaluate_stored_keyset_proofs::<1>(
                     view(&bytes),
@@ -892,7 +892,7 @@ mod tests {
             );
         }
 
-        let provider = test_provider(1, TestSuite::new(1, Arc::clone(&calls)), &calls);
+        let provider = test_provider(1, TestSuite::new(1, Arc::clone(&calls)));
         let mut short_identifiers = limits(1, 1, 1);
         short_identifiers.max_algorithm_parameter_identifier_bytes =
             b"test-algorithm".len() + b"test-parameters".len() - 1;
@@ -927,7 +927,7 @@ mod tests {
         let calls = Arc::new(Calls::default());
         let mut suite = TestSuite::new(1, Arc::clone(&calls));
         suite.verify_mode = VerifyMode::FailOnKey(2);
-        let provider = test_provider(1, suite, &calls);
+        let provider = test_provider(1, suite);
         let first = [1u8];
         let second = [2u8];
         let bytes = encode_keyset(1, &[(1, 1, &first), (1, 1, &second)]);
@@ -948,7 +948,7 @@ mod tests {
     fn run422_keyset_proof_preflight_capacity_and_byte_limits() {
         let calls = Arc::new(Calls::default());
         let suite = TestSuite::new(1, Arc::clone(&calls));
-        let provider = test_provider(1, suite, &calls);
+        let provider = test_provider(1, suite);
         let key = [1u8];
         let bytes = encode_keyset(1, &[(1, 1, &key)]);
         let one = [proof(1, &key)];
@@ -1045,7 +1045,7 @@ mod tests {
         let empty_signature = [proof(1, &[])];
         let mut accepts_empty = TestSuite::new(1, Arc::new(Calls::default()));
         accepts_empty.verify_mode = VerifyMode::AcceptAny;
-        let empty_provider = test_provider(1, accepts_empty, &Arc::new(Calls::default()));
+        let empty_provider = test_provider(1, accepts_empty);
         assert_eq!(
             evaluate_stored_keyset_proofs::<1>(
                 view(&bytes),
@@ -1065,7 +1065,7 @@ mod tests {
         let calls = Arc::new(Calls::default());
         let mut suite = TestSuite::new(1, Arc::clone(&calls));
         suite.verify_mode = VerifyMode::SignatureEqualsKey;
-        let provider = test_provider(1, suite, &calls);
+        let provider = test_provider(1, suite);
         let one = [1u8];
         let two = [2u8];
         assert_eq!(
