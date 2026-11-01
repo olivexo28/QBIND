@@ -4036,3 +4036,82 @@ Literal validation: `LIBCLANG_PATH=/usr/lib/llvm-18/lib cargo test --locked -p q
 Tested source was committed separately from these evidence-only updates; final Rust must equal its tested blob exactly. Complete starting evidence bytes/modes and native EOL/EOF conventions are retained as prefixes. CRLF-aware working-tree and full baseline-to-final whitespace, exact four-path mode/blob scope, final tested-source correspondence, unchanged production/prerequisite Rust, clean worktree and remote task-tip equality are checked at delivery. Final self-referential HEAD/tree and four-path manifest are reported after commit/push.
 
 Preserved: `D7D14_STORAGE_COMPONENT=IMPLEMENTED-ISOLATED`; `D7D14_STORAGE_ACCEPTANCE=PASS-ACCEPTED-SUBSET`; §13.6 whole-lifecycle INCOMPLETE; activation DISABLED; public DevNet NO-GO; durable anti-rollback NOT-ESTABLISHED; C4/C5 OPEN; RS1 OPEN. All candidate limits UNAPPROVED; no F1/F2 closure, release approval, PR, merge, main push, force-push, activation or deployment. Only `copilot/run-422-native-admission-state-contract` is pushed.
+
+## RUN 422 - isolated native admission context, not whole-contract closure
+
+**DRAFT / NOT APPROVED / NOT IMPLEMENTED** remains the whole native state
+contract status. The unused read-context slice in
+`crates/qbind-ledger/src/native_admission_context.rs` is implemented, with a
+module-only export and new `run_422_native_admission_context_tests` target.
+Exact API/source/test mapping, enforced versus trusted assumptions and resource
+ownership are appended in section 12 of
+`docs/devnet/QBIND_RUN_422_NATIVE_ADMISSION_STATE_CONTRACT.md`; literal validation,
+initial attempts and delivery inventory are appended under
+`RUN 422 - isolated native admission context validation` in
+`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_422_D7.md`. The completed resource
+assessment and original switching characterization are unchanged.
+
+The context privately borrows one concrete InMemoryAccountStore and the complete
+native Transaction (including all authentication proofs), copies an explicit
+fixture binding/policy and borrows the fixture-selected provider. The safe
+immutable borrow of this store's private ordinary map enforces in-memory read
+immutability only; generic AccountStore borrows do not enforce common state and
+are not accepted. Execution-position/policy provenance is trusted fixture input,
+and provider semantic stability is a separate trusted assumption, not proved by
+borrowing or Arc. No chain authority, freshness, persistent backend guarantee,
+staging/atomic commit or production state-consistency enforcement follows.
+
+Separate trusted/requested bindings meaningfully refuse missing/unavailable,
+chain/pre-state mismatch, unknown/inactive/mismatched profile, provider identity
+mismatch and local G/P/E insufficiency before helper/read/provider work. Candidate
+limits remain UNAPPROVED and cannot be silently lowered for a small transaction.
+Argument-free evaluate delegates to the existing bounded evaluator and keeps
+underlying errors separate from context configuration errors, without universal
+invalid-transaction or consensus receipt classification. No auth-vector swapping
+by signing-body digest, mutation/rebinding, Clone/Copy, serialization, execution,
+commit/reservation or transferable authorization API exists. Summary counts
+are diagnostic only and uncached. Drop/cancel releases only context borrows,
+not caller-owned transaction/provider/store, with no implicit evaluation/effects.
+
+Four distinct genuine ML-DSA-44 keys show mixed A0+B1 refuses at B on pinned
+S0=A0+B0 (exact InvalidProof, two lookup/descriptor/verification calls) and at A
+on S1=A1+B1 (same exact error, one call each). Matched controls succeed with exact
+(2,2,2) summaries and two calls each, preserving complete transactions/wire
+bytes and both generations. The unchanged old API's A/S0 followed by B/S1 still
+passes its switching characterization; that route is unavailable through the
+new concrete-only construction API. This is not a claim of a deployed exploit
+or a production guarantee. Injected backend/provider/panic controls are
+explicitly synthetic/helper-level evidence, distinct from genuine signatures.
+Fresh contexts retry after failures without recycling proof success.
+
+Tested source `34ee33fd5c96c6d78d9979293411823fa622a170`, root tree
+`ee92c7c5a9c4bbba1ea4d0c6abb012b812b2d431`, ordinary x86_64 compiler:
+context 224 bytes, fixture 224, binding 192, policy 120, context error 1;
+cfg(test) context 248/adapter 24. Context owns no account snapshot; inherited
+one-account-at-a-time helper materialization remains unchanged. Caller store/
+transaction, backend/provider allocations, crypto/allocator/stack layout and
+physical memory are excluded; no physical-memory guarantee or production ceiling.
+All six required final commands exit 0: new target 7/7, unchanged characterization
+2/2, private target 3/3 with 346 filtered, full ledger 750 selected/734 passed/
+0 failed/16 pre-existing ignored/0 filtered. All six new doctests execute;
+five negatives separately confirm intended E0502/E0502/E0597/E0308/E0382, not
+missing imports/APIs. Node check is compilation only; rustfmt is scoped.
+Counts overlap. Initial libclang failure (101, no selection) was repaired only
+in the environment; an initial private zero-selection acceptance failure was
+corrected at module scope and the complete matrix rerun on final Rust.
+
+Remaining chain-authority/freshness and approved policy provenance, provider
+conformance, persistent/all-writer backend, staging/commit/recovery, independent
+creation/absence/program/payer, replay/nonce/fee and compatibility requirements
+are not closed. No completed assessment is reopened or reattributed.
+Append-only delivery preserves the exact starting bytes, modes, native EOL and
+terminal-newline state of all three documents, changes only six authorized paths
+and keeps final Rust identical to tested source. Only the named task branch is
+non-force pushed, with final remote-tip equality/clean-worktree checks.
+
+Preserved: D7D14_STORAGE_COMPONENT=IMPLEMENTED-ISOLATED;
+D7D14_STORAGE_ACCEPTANCE=PASS-ACCEPTED-SUBSET; §13.6 whole-lifecycle INCOMPLETE;
+activation DISABLED; public DevNet NO-GO; durable anti-rollback NOT-ESTABLISHED;
+C4/C5 OPEN; RS1 OPEN. All candidate limits UNAPPROVED. No production integration,
+atomic commit, activation, deployment, PR, merge, main push, force-push, F1/F2
+closure or release approval.

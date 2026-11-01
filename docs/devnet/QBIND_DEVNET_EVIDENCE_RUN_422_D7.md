@@ -23553,3 +23553,186 @@ Literal validation: `LIBCLANG_PATH=/usr/lib/llvm-18/lib cargo test --locked -p q
 Tested source was committed separately from these evidence-only updates; final Rust must equal its tested blob exactly. Complete starting evidence bytes/modes and native EOL/EOF conventions are retained as prefixes. CRLF-aware working-tree and full baseline-to-final whitespace, exact four-path mode/blob scope, final tested-source correspondence, unchanged production/prerequisite Rust, clean worktree and remote task-tip equality are checked at delivery. Final self-referential HEAD/tree and four-path manifest are reported after commit/push.
 
 Preserved: `D7D14_STORAGE_COMPONENT=IMPLEMENTED-ISOLATED`; `D7D14_STORAGE_ACCEPTANCE=PASS-ACCEPTED-SUBSET`; §13.6 whole-lifecycle INCOMPLETE; activation DISABLED; public DevNet NO-GO; durable anti-rollback NOT-ESTABLISHED; C4/C5 OPEN; RS1 OPEN. All candidate limits UNAPPROVED; no F1/F2 closure, release approval, PR, merge, main push, force-push, activation or deployment. Only `copilot/run-422-native-admission-state-contract` is pushed.
+
+## RUN 422 - isolated native admission context validation
+
+**Whole native state contract: DRAFT / NOT APPROVED / NOT IMPLEMENTED.**
+Only the unused concrete in-memory diagnostic read-context slice is implemented.
+API, source/test mapping, enforcement versus trust assumptions, release,
+complete transaction binding and remaining gates are recorded in section 12 of
+`QBIND_RUN_422_NATIVE_ADMISSION_STATE_CONTRACT.md`. The completed resource
+assessment and existing characterization remain byte-for-byte unchanged.
+All candidate limits are UNAPPROVED; no production state-consistency, F1/F2
+closure or release readiness follows.
+
+### Baseline and object/ancestry facts
+
+Repository root `/workspaces/QBIND/olivexo28/QBIND`; origin fetch/push
+`https://github.com/olivexo28/QBIND`. Initial clean HEAD was exactly
+`950650fcb2d7264ec1623e8f57e722e401fc07f2`; its readable commit object names
+root tree `7aa15e0ef3fda714e8ec943a3122317211e9bccb`, also a readable tree.
+HEAD/tree correspondence was checked separately from ancestry. Raw starting
+parent is `bb2ce6ad0fa5362abe5f5b523d5cbfc8b98cfbd8`: initially named but
+unavailable at the shallow boundary, not absent. After
+`git fetch --no-tags --deepen=1 origin main`, that parent is a readable commit
+and `git merge-base --is-ancestor bb2ce6ad0fa5362abe5f5b523d5cbfc8b98cfbd8 HEAD`
+exits 0. Repository remains shallow at that parent. Its raw header names
+`8ae9ceafb2fd4fd9e491d33c44415f99c0de8a5f`, whose commit object is unavailable
+in this checkout, not absent. No further ancestry is established. Starting
+commit ancestry to tested/final task commits is checked separately at delivery.
+No applicable AGENTS.md was found by repository traversal or tracked-file
+inventory. Only `copilot/run-422-native-admission-context-prototype` is created
+and pushed; fetching main is read-only, not a main modification/push.
+
+### Producing source and literal final validation
+
+Final tested Rust source commit:
+`34ee33fd5c96c6d78d9979293411823fa622a170`; root tree:
+`ee92c7c5a9c4bbba1ea4d0c6abb012b812b2d431`.
+Source/tests were committed separately from final validation evidence.
+The source manifests at that revision are:
+
+| Mode | Path | Blob |
+|---|---|---|
+| 100644 | crates/qbind-ledger/src/native_admission_context.rs | edff0b7b4d170ba4d5b19bd46ccbed35ce1ddd55 |
+| 100755 | crates/qbind-ledger/src/lib.rs | a49335e1464d3158328da7f597a76c6bdb8112e8 |
+| 100644 | crates/qbind-ledger/tests/run_422_native_admission_context_tests.rs | db5f656f24f8aba8ebc81b943fb3cea8887a0b8b |
+
+Compiler `rustc 1.99.1 (58cf8f9c3 2026-10-13)`, LLVM 23.1.1,
+`x86_64-unknown-linux-gnu`; ordinary workspace dev/test profiles, no release
+profile, benchmark or timing acceptance. The context/type measurements and
+counter observations are attributed to this source and compiler only.
+Every command below ran on this exact final Rust; all exited 0.
+Selected includes ignored tests; filtered counts are separate. Counts overlap.
+
+| Literal command | Selected | Passed | Failed | Ignored | Filtered | Exit |
+|---|---:|---:|---:|---:|---:|---:|
+| `LIBCLANG_PATH=/usr/lib/llvm-18/lib cargo test --locked -p qbind-ledger --test run_422_native_admission_context_tests -- --nocapture --test-threads=1` | 7 | 7 | 0 | 0 | 0 | 0 |
+| `LIBCLANG_PATH=/usr/lib/llvm-18/lib cargo test --locked -p qbind-ledger --test run_422_native_admission_state_contract_tests -- --nocapture --test-threads=1` | 2 | 2 | 0 | 0 | 0 | 0 |
+| `LIBCLANG_PATH=/usr/lib/llvm-18/lib cargo test --locked -p qbind-ledger --lib run422_native_admission_context -- --nocapture` | 3 | 3 | 0 | 0 | 346 | 0 |
+| `LIBCLANG_PATH=/usr/lib/llvm-18/lib cargo test --locked -p qbind-ledger` | 750 | 734 | 0 | 16 | 0 | 0 |
+| `LIBCLANG_PATH=/usr/lib/llvm-18/lib cargo check --locked -p qbind-node` | N/A | N/A | N/A | N/A | N/A | 0 |
+| `rustfmt --check --edition 2021 --config skip_children=true crates/qbind-ledger/src/native_admission_context.rs crates/qbind-ledger/src/lib.rs crates/qbind-ledger/tests/run_422_native_admission_context_tests.rs` | N/A | N/A | N/A | N/A | N/A | 0 |
+
+All measured-test counts are 0. Full ledger aggregation spans 28 target result
+lines. Its doctest target selects 41: 25 passed and 16 pre-existing ignored.
+All six new module doctests executed: one valid construction/release and five
+compile-fail controls, no new ignored tests. A supplemental direct rustc
+metadata validation against the built ledger/crypto/wire libraries confirmed
+the valid counterpart exits 0 and each intended negative exits 1 with exactly
+E0502, E0502, E0597, E0308 or E0382 respectively (no missing-import/API errors).
+Node check is compilation only, not test execution or deployed-path evidence;
+it retains 37 consensus and 8 node warnings. Final ledger emits no new warnings.
+Parallel cargo commands reported build-directory lock waits outside test work.
+No release benchmarks, Miri, full node suite or dependency changes occurred.
+
+### Actual sizes and acceptance observations
+
+Integration size_of: context 224, fixture 224, binding 192, policy 120,
+context error 1, evaluator error 24, limits 80, summary 24, Transaction 160,
+Account 120, provider reference 16, store reference 8 bytes. Context size is
+the same at G/P/E=0/0/0, 8/8/16 and 32/32/32. Its fields are borrowed
+transaction 8, private concrete-store adapter reference 8, provider reference
+16 and copied complete binding 192, spanning only the context lifetime.
+Cfg(test) context 248 and adapter 24 include private counters/fault Boolean
+and padding; test-local entry storage does not create threads.
+Inherited helper arrays/coverage and one-account-at-a-time owned materialization
+remain scoped inside each fresh evaluator call. Caller-owned transaction,
+store, backend/provider allocations, crypto internals, allocator behavior,
+compiler stack layout and physical memory are excluded. No snapshot or whole
+store clone, physical-memory guarantee or production ceiling is introduced.
+
+Genuine ML-DSA-44 pinned-state controls preserve four distinct keys and both
+complete account generations. Unchanged A0+B1 refuses on S0 at B with exact
+KeysetProof(InvalidProof), two lookup/descriptor/verification calls, and on S1
+at A with the same exact error, one call each. A0+B0/S0 and A1+B1/S1 succeed
+with exact diagnostic (2,2,2), two calls each. The unchanged baseline switching
+characterization still passes; its A/S0 then B/S1 route is unavailable to the
+new concrete-only context. Complete transaction/wire and account preservation
+is asserted at the relevant boundaries. Provider counts are observed; read
+ordering/delegation claims are separately source-derived and backed by private
+entry/adapter controls, not invented integration store counters.
+
+Construction errors have zero observed evaluator/read entries in private
+tests and zero observed provider work in integration controls. Selected
+candidate (8,8,16) compatibility is checked even though the small actual
+transaction would succeed through the unchanged helper with (2,2,1).
+Equal signing-body digests do not permit auth substitution; altered/late-invalid
+proof contexts do fresh work and refuse, while the original complete context
+still evaluates its original transaction. Missing/oversized/malformed/wrong-owner
+and executable evidence preserve exact existing errors. Explicit synthetic
+provider InternalError/panic and private helper-level Backend injection are
+identified as injections, not genuine backend allocation failures or provider
+conformance evidence. Fresh valid contexts retry without recycling success.
+Cancellation/drop and provider unwind release only context borrows; caller
+owners survive and normal caller mutation becomes possible afterward.
+
+### Initial attempts, not final acceptance
+
+The first exact focused context command exited 101 before selecting tests:
+zstd-sys/bindgen could not find libclang at `/usr/lib/llvm-18/lib`. Producing
+worktree was uncommitted on starting HEAD; Rust blobs were context
+`2ed340faa27d63182f562a6bb7fd10a9b9d5c1fa`, lib
+`a49335e1464d3158328da7f597a76c6bdb8112e8`, test
+`b4a66a2db36218504886728b51467490b9e60b22`.
+`apt-get update -qq` and `apt-get install -y -qq libclang-18-dev` exited 0;
+update warned of an unrelated Chrome repository DNS failure. This was
+environment-only preparation. The same exact focused command was relaunched
+on unchanged Rust blobs and exited 0, 7 selected/passed, 0 failed/ignored/
+filtered. Subsequent source cleanup and a copied-request binding assertion
+preceded the first source commit.
+
+First source commit `7714d277436859240c983f899d6f90f21261a1a6` / tree
+`30139c6e9291bc201ac1dc41065280abf2b97814` ran the same matrix. Context 7/7,
+baseline 2/2, node check and rustfmt passed. The private command exited 0 but
+selected 0 (0 passed/failed/ignored, 346 filtered), because inline test items
+were mistakenly nested in a method. That is failed acceptance evidence,
+not a successful focused selection. Its full ledger result was 747 selected,
+731 passed, 0 failed, 16 ignored, 0 filtered across 28 target results; it did
+not execute those three private tests. No acceptance relies on that run.
+The tests were moved to module scope without weakening any assertions.
+The correction command selected/passed 3 (0 failed/ignored, 346 filtered),
+then correction was committed as the final tested source above and every
+required literal command was rerun successfully. No commit was amended.
+Expected caught panic controls print panic diagnostics while their tests pass.
+
+### Append-only and final delivery checks
+
+Complete baseline document inventory (mode 100644 in all three):
+
+| Path | Baseline blob | Bytes | EOL / original EOF |
+|---|---|---:|---|
+| docs/devnet/QBIND_RUN_422_NATIVE_ADMISSION_STATE_CONTRACT.md | 9dcb19a2fd2623e8a1eaf3faf4a08fc84f61dc37 | 37457 | LF only, terminal LF |
+| docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_422_D7.md | d351e66e66a00df999c9da9c2b2cc72a657b4ef6 | 2601295 | 23554 CRLF, zero bare LF, no terminal newline |
+| docs/whitepaper/contradiction.md | d18c099f9ef05ae84edabfd9802347977d32c826 | 2657609 | 4037 LF, zero CRLF, no terminal newline |
+
+Every starting byte remains an exact prefix, including the old EOF. Appends
+use each original EOL and preserve original terminal-newline state. A scoped
+byte/EOL preservation pass restores the untouched baseline prefix after the
+text patch tool, normalizes only appended EOLs and checks EOF/modes explicitly.
+Rust final blobs must equal the tested source manifest above.
+The exact changed-path set is six authorized paths: that three-Rust manifest
+plus these three documents. Lib mode remains 100755; other paths are 100644.
+The completed assessment, old characterization, AccountStore, evaluators,
+providers, runtime/program/node callers, dependencies/features, wire/preimages
+and production defaults remain unchanged, verified by the complete changed-path
+allowlist and separate diff of every prerequisite path.
+
+CRLF-aware working-tree and complete baseline-to-final checks:
+`git -c core.whitespace=cr-at-eol diff --check` and
+`git -c core.whitespace=cr-at-eol diff --check 950650fcb2d7264ec1623e8f57e722e401fc07f2`
+before the evidence commit; after commit,
+`git -c core.whitespace=cr-at-eol diff --check 950650fcb2d7264ec1623e8f57e722e401fc07f2 HEAD`.
+Delivery requires exit 0, exact six-path mode/blob manifest, source equality,
+document-prefix/EOL/EOF checks, starting/tested/final ancestry separately,
+non-force task-tip equality after push, and final clean worktree.
+Final self-referential commit/tree and document blob identities are reported
+after the evidence-only commit, rather than embedded in their own content.
+
+Preserved: D7D14_STORAGE_COMPONENT=IMPLEMENTED-ISOLATED;
+D7D14_STORAGE_ACCEPTANCE=PASS-ACCEPTED-SUBSET; §13.6 whole-lifecycle INCOMPLETE;
+activation DISABLED; public DevNet NO-GO; durable anti-rollback NOT-ESTABLISHED;
+C4/C5 OPEN; RS1 OPEN. Whole native contract DRAFT / NOT APPROVED / NOT IMPLEMENTED;
+all candidate limits UNAPPROVED. No production integration, atomic commit,
+activation, deployment, PR, merge, main push, force-push, F1/F2 closure or
+release approval.
