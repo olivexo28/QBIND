@@ -463,6 +463,148 @@ mod run422_native_staged_effects_tests {
         assert!(!store.inner.contains_key(&[2; 32]));
         assert!(effects.iter().all(Option::is_none));
     }
+
+    #[test]
+    fn run422_native_staged_effects_capacity_refusal_consumes_session_fresh_begin_succeeds() {
+        use crate::native_admission_context::{
+            FixtureBinding, FixtureProfileStatus, PrototypePolicy,
+        };
+        use crate::native_staged_effects::{FixtureSelection, NativeStagedEffects};
+        use crate::native_tx_proof::NativeTransactionProofLimits;
+        use qbind_crypto::ml_dsa44::MlDsa44Backend;
+        use qbind_crypto::{ml_dsa_44_sign_digest, MlDsa44SignatureSuite, StaticCryptoProvider};
+        use qbind_hash::tx::try_tx_digest_streaming;
+        use qbind_serde::keyset::StoredKeysetLimits;
+        use qbind_serde::StateEncode;
+        use qbind_types::{KeysetAccount, KeysetEntry, KEYSET_PROGRAM_ID};
+        use qbind_wire::tx::{Transaction, TxAccountMeta, TxAuth};
+        use std::sync::Arc;
+
+        let (public, secret) = MlDsa44Backend::generate_keypair().unwrap();
+        let keyset = KeysetAccount {
+            version: 1,
+            reserved0: [0; 3],
+            threshold: 1,
+            entry_count: 1,
+            reserved1: [0; 4],
+            entries: vec![KeysetEntry {
+                suite_id: 100,
+                weight: 1,
+                reserved0: [0],
+                pubkey_len: 1312,
+                pubkey_bytes: public,
+            }],
+        };
+        let mut data = Vec::new();
+        keyset.encode_state(&mut data);
+        let key_account = Account::new([1; 32], KEYSET_PROGRAM_ID, 0, data);
+        let mut store = InMemoryAccountStore::new();
+        store.put(key_account.clone()).unwrap();
+        let capacity = store.inner.capacity();
+        assert!(capacity < 200);
+        for id in 2..=capacity {
+            store.put(account(id as u8)).unwrap();
+        }
+        assert_eq!(store.inner.len(), capacity);
+        let provider = StaticCryptoProvider::new()
+            .with_signature_suite(Arc::new(MlDsa44SignatureSuite::new(100)));
+        let binding = FixtureBinding {
+            chain_id: 1,
+            execution_pre_state: [4; 32],
+            provider_identity: [5; 32],
+            policy: PrototypePolicy {
+                identity: [6; 32],
+                version: 1,
+                limits: NativeTransactionProofLimits {
+                    max_required_signer_indices: 1,
+                    max_keyset_account_count: 1,
+                    max_authentication_proof_count: 1,
+                    max_signature_bytes: 2420,
+                    max_aggregate_signature_bytes: 2420,
+                    stored_keyset: StoredKeysetLimits {
+                        max_encoded_bytes: 2048,
+                        max_entries: 1,
+                        max_key_bytes: 1312,
+                        max_total_key_bytes: 1312,
+                    },
+                    max_algorithm_parameter_identifier_bytes: 128,
+                },
+            },
+        };
+        let mut tx = Transaction {
+            version: 1,
+            chain_id: 1,
+            payer: [2; 32],
+            nonce: 1,
+            fee_limit: 0,
+            accounts: vec![TxAccountMeta {
+                account_id: [1; 32],
+                flags: 1,
+                access_hint: 0,
+                reserved0: [0; 2],
+            }],
+            program_id: [3; 32],
+            call_data: vec![],
+            auths: vec![],
+        };
+        let signature =
+            ml_dsa_44_sign_digest(&secret, &try_tx_digest_streaming(&tx).unwrap()).unwrap();
+        tx.auths.push(TxAuth {
+            account_index: 0,
+            suite_id: 100,
+            reserved: 0,
+            signature,
+        });
+        reset();
+        let mut s = NativeStagedEffects::<1, 1, 1, 1>::begin_for_fixture(
+            &mut store,
+            &tx,
+            Some(FixtureSelection::new_for_fixture(
+                &provider,
+                binding,
+                FixtureProfileStatus::Active,
+            )),
+            Some(binding),
+            limits(1),
+        )
+        .ok()
+        .unwrap();
+        s.create_for_fixture([200; 32], account(200)).unwrap();
+        assert_eq!(s.publish_for_fixture(), Err(Error::MapCapacity));
+        assert_eq!(counts(), (1, 0));
+        assert_eq!(store.inner.len(), capacity);
+        assert_eq!(store.inner.capacity(), capacity);
+        assert_eq!(store.inner.get(&[1; 32]), Some(&key_account));
+        for id in 2..=capacity {
+            assert_eq!(store.inner.get(&[id as u8; 32]), Some(&account(id as u8)));
+        }
+        assert!(!store.inner.contains_key(&[200; 32]));
+
+        store.inner.reserve(1); // provisioning after release, not in publication
+        assert!(store.inner.capacity() > capacity);
+        reset();
+        let mut s = NativeStagedEffects::<1, 1, 1, 1>::begin_for_fixture(
+            &mut store,
+            &tx,
+            Some(FixtureSelection::new_for_fixture(
+                &provider,
+                binding,
+                FixtureProfileStatus::Active,
+            )),
+            Some(binding),
+            limits(1),
+        )
+        .ok()
+        .unwrap();
+        let offered = account(200);
+        let pointer = offered.data.as_ptr();
+        s.create_for_fixture([200; 32], offered).unwrap();
+        s.publish_for_fixture().unwrap();
+        assert_eq!(counts(), (1, 1));
+        assert_eq!(store.inner.get(&[200; 32]).unwrap().data.as_ptr(), pointer);
+        assert_eq!(store.inner.len(), capacity + 1);
+        assert_eq!(store.inner.get(&[1; 32]), Some(&key_account));
+    }
 }
 
 impl Default for InMemoryAccountStore {

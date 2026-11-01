@@ -473,6 +473,11 @@ fn run422_native_staged_effects_duplicates_and_id_mismatch_poison_intact_candida
         assert_eq!(s.publish_for_fixture(), Err(Refusal::Poisoned));
         f.preserved();
     }
+    let mut s = f.begin(limits());
+    s.replace_for_fixture(C, account(C, 30, 4)).unwrap();
+    assert_eq!(s.delete_for_fixture(C), Err(Refusal::DuplicateTarget));
+    assert_eq!(s.publish_for_fixture(), Err(Refusal::Poisoned));
+    f.preserved();
 }
 
 #[test]
