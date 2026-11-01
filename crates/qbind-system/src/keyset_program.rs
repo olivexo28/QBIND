@@ -5,8 +5,7 @@ use qbind_wire::io::WireDecode;
 use qbind_wire::keyset::{CreateKeysetCall, OP_KEYSET_CREATE};
 use qbind_wire::tx::Transaction;
 
-/// Hard-coded ProgramId for the keyset system program.
-pub const KEYSET_PROGRAM_ID: ProgramId = [0x4B; 32]; // 'K'
+pub use qbind_types::KEYSET_PROGRAM_ID;
 
 pub struct KeysetProgram;
 
@@ -17,6 +16,24 @@ impl KeysetProgram {
 
     pub fn id() -> ProgramId {
         KEYSET_PROGRAM_ID
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use qbind_ledger::InMemoryAccountStore;
+
+    #[test]
+    fn run422_keyset_program_id_shared_constant_preserves_both_methods() {
+        let shared: ProgramId = qbind_types::KEYSET_PROGRAM_ID;
+        assert_eq!(shared, [0x4B; 32]);
+        assert_eq!(KEYSET_PROGRAM_ID, shared);
+        assert_eq!(KeysetProgram::id(), shared);
+        assert_eq!(
+            <KeysetProgram as Program<InMemoryAccountStore>>::id(&KeysetProgram::new()),
+            shared
+        );
     }
 }
 
