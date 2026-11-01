@@ -83,8 +83,8 @@ are outside the evaluator's counted store surface.
 | `matched_genuine_proofs_pass_separate_fixed_generation_controls`, D | Separate fixed wrappers: A0+B0 on S0 and A1+B1 on S1 each return the same exact success summary, ordered A then B, and 2 lookups/descriptors/verifications. No transitions. | Provider/fixtures are valid; positive controls do not publish a mixed generation or pollute switching history. |
 | All controls | Requested budget 65,536 per read; zero evaluator legacy reads/fallback, writes and deletes; complete unchanged transaction bytes and both generation contents. | Isolated checking has no effects; state-selection, freshness and commit remain future obligations. |
 
-These assertions are predictions encoded for executable confirmation, with the
-literal final run recorded below. Successful C is allowed by the diagnostic
+The literal focused run below confirmed all these assertions, including C.
+Successful C is allowed by the diagnostic
 helper's documented contract, not a violation of a guarantee it never provided.
 It does not establish a production exploit, deployed exposure, consensus
 failure or demonstrated safety violation. Tests do not implement the proposed
@@ -128,7 +128,7 @@ configuration is concurrently refreshed locally.
 `<8,8,16>` arrays are local workspace capacities, not protocol limits. A selected
 profile exceeding supported capacities must refuse locally before execution;
 do not truncate keys/proofs or reduce protocol limits to fit an implementation.
-Current helper workspace errors are not yet a approved consensus mapping.
+Current helper workspace errors are not yet an approved consensus mapping.
 Wire-representability checks are separate from operational resource approval.
 
 ## 5. Proposed state/provider context and primary backend contract
@@ -398,14 +398,45 @@ requires independent acceptance beyond that slice.
 
 ## 11. Validation and delivery
 
-Tested source is committed separately before the literal focused validation;
-subsequent delivery updates are evidence-only. Recorded tested revision/results,
-historical-prefix checks and delivery manifests follow in the evidence update.
-Final self-referential HEAD/tree identities are reported after commit, not
-embedded in their own hashed content.
+Tested source HEAD: `f06bb7ad4bd9a9fdf694e07d696eaf8d5f205fb9`;
+tree: `8f61c60c6fbba789d1387953ab31c9d9bce99486`;
+new test blob: `858baf09554b20988b8d1acc826d614c60a70f91`.
+Source and the initial draft were committed before the focused validation.
+Subsequent updates are evidence/documentation only; final Rust must equal that
+tested blob exactly. Compiler: `rustc 1.99.1 (58cf8f9c3 2026-10-13)`,
+LLVM 23.1.1, target `x86_64-unknown-linux-gnu`; ordinary workspace test profile,
+no overrides beyond the literal `LIBCLANG_PATH`.
+
+| Literal command | Result at tested source |
+|---|---|
+| `LIBCLANG_PATH=/usr/lib/llvm-18/lib cargo test --locked -p qbind-ledger --test run_422_native_admission_state_contract_tests -- --nocapture --test-threads=1` | Exit 0; 2 selected, 2 passed, 0 failed, 0 ignored, 0 measured, 0 filtered. A/B/C share one unchanged transaction in one test; D is separate. |
+| `rustfmt --check --edition 2021 crates/qbind-ledger/tests/run_422_native_admission_state_contract_tests.rs` | Exit 0; no mutation. |
+
+The first exact target invocation at the same source exited 101 before selecting
+tests: bindgen could not find libclang under `/usr/lib/llvm-18/lib`.
+`apt-get update -qq` / `apt-get install -y -qq libclang-18-dev` restored this
+environment prerequisite (installation exit 0; update warned of an unrelated
+Chrome repository DNS failure). The unchanged-source exact retry above passed.
+Cargo downloaded/built locked dependencies; no manifests or lockfile changed.
+No benchmark, full ledger/system suite, node build/check or Miri run here.
+Earlier assessment results retain their original source/profile attribution.
+
+Historical prefix inventory: D7 starting length 2,596,194 bytes, 23,538 CRLF,
+zero bare LF, no terminal newline; contradiction 2,652,524 bytes, 4,021 LF,
+zero CRLF, no terminal newline. Both retain mode `100644`. Appends use the
+respective EOL convention and retain no terminal newline; complete starting
+bytes must remain exact prefixes, including the old EOF bytes. New files use LF.
+
+Delivery checks cover CRLF-aware working-tree whitespace and complete
+baseline-to-final whitespace, exact four-path scope/modes, prefix/EOL/EOF
+preservation, unchanged production/prerequisite Rust and exact tested-test
+correspondence. Final self-referential HEAD/tree identities, complete four-path
+mode/blob manifest, clean worktree and non-force remote-tip equality are
+reported after the documentation-only commit and task-branch push, not embedded
+in their own hashed content.
 
 Preserved posture: `D7D14_STORAGE_COMPONENT=IMPLEMENTED-ISOLATED`;
-`D7D14_STORAGE_ACCEPTANCE=PASS-ACCEPTED-SUBSET`; section 13.6 whole-lifecycle
+`D7D14_STORAGE_ACCEPTANCE=PASS-ACCEPTED-SUBSET`; §13.6 whole-lifecycle
 INCOMPLETE; activation DISABLED; public DevNet NO-GO; durable anti-rollback
 NOT-ESTABLISHED; C4/C5 OPEN; RS1 OPEN. All candidate limits UNAPPROVED.
 No F1/F2 closure, production state-consistency guarantee or release approval.
