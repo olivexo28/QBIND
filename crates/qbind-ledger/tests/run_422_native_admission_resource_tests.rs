@@ -992,7 +992,7 @@ fn run422_native_compatibility_witnesses_legacy_and_isolated_semantics() {
         ],
         1,
     );
-    store.seed_fixture(unsupported_unused);
+    store.seed_fixture(unsupported_unused.clone());
     let unused_tx = signed_transaction(&[id], &[(0, one_key[0].1.as_slice())], Vec::new());
     let unused_tx_before = unused_tx.clone();
     store.reset_counts();
@@ -1013,6 +1013,7 @@ fn run422_native_compatibility_witnesses_legacy_and_isolated_semantics() {
         ))
     );
     store.assert_accesses(1);
+    assert_eq!(store.inner.get(&id), Some(unsupported_unused));
     assert_eq!(provider.counts.lookups.load(Ordering::SeqCst), 2);
     assert_eq!(provider.counts.descriptors.load(Ordering::SeqCst), 1);
     assert_eq!(provider.counts.verifications.load(Ordering::SeqCst), 0);
@@ -1091,7 +1092,8 @@ fn run422_native_compatibility_witnesses_metadata_bounded_read_and_proof_limit()
         assert_eq!(store.account, account_before, "{name}");
     }
 
-    let mut legacy_only = LegacyOnlyStore::new(stored_account(id, &keys, 1));
+    let legacy_account = stored_account(id, &keys, 1);
+    let mut legacy_only = LegacyOnlyStore::new(legacy_account.clone());
     provider.counts.reset();
     verify_transaction_auth(&mut legacy_only, provider.clone(), &tx)
         .expect("legacy verifier works with a get-only store");
@@ -1114,6 +1116,7 @@ fn run422_native_compatibility_witnesses_metadata_bounded_read_and_proof_limit()
     );
     assert_eq!(legacy_only.legacy_reads.get(), 0, "no fallback to get");
     provider.counts.assert_work(0, 0);
+    assert_eq!(legacy_only.inner.get(&id), Some(legacy_account));
 
     let nine_signers = (0..9)
         .map(|_| (0, keys[0].1.as_slice()))
