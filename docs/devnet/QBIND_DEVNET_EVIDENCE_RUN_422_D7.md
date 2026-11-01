@@ -24522,8 +24522,8 @@ Required validation results (counts overlap):
 * `LIBCLANG_PATH=/usr/lib/llvm-18/lib cargo test --locked -p qbind-system --test validator_register_tests -- --nocapture` — exit 0; selected 7, passed 7, failed 0, ignored 0.
 * `LIBCLANG_PATH=/usr/lib/llvm-18/lib cargo test --locked -p qbind-runtime -p qbind-system` — exit 0; selected 135, passed 134, failed 0, ignored 1 (the existing ignored runtime gas-model doctest).
 * `rustfmt --check --edition 2021 crates/qbind-runtime/tests/run_422_native_validator_authority_contract_tests.rs` — exit 0.
-* `git -c core.whitespace=cr-at-eol diff --check` — final result recorded after the evidence append.
-* `git -c core.whitespace=cr-at-eol diff --check 229a1a1069a51f5cd0a0dcf7b7e186bcce3bf11f HEAD` — final result recorded after the evidence append.
+* `git -c core.whitespace=cr-at-eol diff --check` — exit 0; rerun after the final evidence commit also exited 0.
+* `git -c core.whitespace=cr-at-eol diff --check 229a1a1069a51f5cd0a0dcf7b7e186bcce3bf11f HEAD` — exit 0; rerun after the final evidence commit also exited 0.
 
 Environment preparation and unsuccessful attempts: the first required focused command exited 101 before test selection because `/usr/lib/llvm-18/lib` lacked `libclang.so`. `apt-get update` reported a temporary DNS failure fetching the unrelated Google Chrome repository; package indexes otherwise sufficed and `libclang-18-dev` was installed without changing repository dependency files. The retry reached Rust compilation but exited 101 before selecting tests: the new source lacked the `Program` trait import and had mutable/immutable borrow conflicts while cloning fixture transactions. Those test-source issues were corrected; the final focused target and commands above passed. An initial `rustfmt --check --edition 2021 crates/qbind-runtime/tests/run_422_native_validator_authority_contract_tests.rs` exited 1 on formatting differences only; `rustfmt` was run and the required check then exited 0. The compilation-only failures selected/passed/failed/ignored 0/0/0/0 tests.
 
