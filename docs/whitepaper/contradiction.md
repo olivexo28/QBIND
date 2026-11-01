@@ -4274,3 +4274,13 @@ activation DISABLED; public DevNet NO-GO; durable anti-rollback NOT-ESTABLISHED;
 C4/C5 OPEN; RS1 OPEN. Whole native admission contract remains **DRAFT / NOT
 APPROVED / NOT IMPLEMENTED**; all limits UNAPPROVED. No F1/F2 or C4/C5 closure,
 production authorization, deployed-path readiness, or release approval.
+
+## RUN 422 bounded refusal correction
+
+The earlier three-file enforcement proposal is superseded by the explicitly scoped implementation. Existing system direct-handler and runtime `TxExecutor` test targets were updated in place; old successful-write expectations were migrated, not skipped, and no new test target or execution bypass was added. At tested source commit `99023fcb30ec2c6c042dea0f0196b88c072049ac`, all four valid native governance calls now refuse with exactly `ProgramError("native governance authority unavailable")` after their existing call-only decode/trailing validation and before any governed-account access. Invalid SuiteStatus retains its existing error before target access; invalid MainnetStatus remains a wire-decode refusal.
+
+Genuine ML-DSA-44 executor cases, direct Program cases, malformed calls, authentication retries, proposal/ETA and council-identity claims, Ready/Activated requests, repeated identical setter input, and absent/malformed targets are covered by the updated tests. Valid calls now refuse independently of target existence or contents; no governance state is read or changed. Repeated refusal does not establish durable replay protection or decision consumption, and the change adds no positive authority implementation.
+
+The successful-write findings at `c279c7be1cc415032975f162109e5e2c3f9c6ed0` remain correct for that historical revision and are not post-fix results. New results belong only to the tested source commit above. The whole native admission/governance contract remains **DRAFT / NOT APPROVED / NOT IMPLEMENTED**; positive authority provenance/currentness, timelock, one-use consumption, atomic publication and recovery remain unresolved. Legacy authentication still runs before the gate; no whole-path allocation/resource-bound claim or selected-binary, running-node, network or deployed-path evidence follows from these source/library tests.
+
+D7D14_STORAGE_COMPONENT=IMPLEMENTED-ISOLATED; D7D14_STORAGE_ACCEPTANCE=PASS-ACCEPTED-SUBSET; §13.6 whole-lifecycle INCOMPLETE; activation DISABLED; public DevNet NO-GO; durable anti-rollback NOT-ESTABLISHED; C4/C5 OPEN; RS1 OPEN. All candidate limits remain UNAPPROVED; no F1/F2 or C4/C5 closure or release approval.

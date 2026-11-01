@@ -986,3 +986,16 @@ activation DISABLED; public DevNet NO-GO; durable anti-rollback NOT-ESTABLISHED;
 C4/C5 OPEN; RS1 OPEN. Whole native admission contract remains **DRAFT / NOT
 APPROVED / NOT IMPLEMENTED**. All limits remain UNAPPROVED. No F1/F2 or C4/C5
 closure, production authorization, deployed-path readiness, or release approval.
+
+
+## RUN 422 bounded refusal implementation update
+
+The bounded native refusal is now implemented in `GovernanceProgram` and tested using the two existing test targets; the earlier proposal for three new enforcement files/targets is superseded, and the old successful-write assertions were migrated rather than ignored or bypassed. All four recognized operations parse their existing call-only format, retain decode/trailing-data errors and then reach one private unconditional boundary. SuiteStatus's existing scalar validation runs before that boundary and before target access; the existing MainnetStatus decoder still rejects invalid enum encodings.
+
+The exact result for a valid call is `ProgramError("native governance authority unavailable")`. This boundary executes before target lookup or state decoding, so absent/malformed target and missing suite-entry errors are intentionally no longer reached. Invalid SuiteStatus remains the call-only error even when the target is absent. No positive authorization is inferred from transaction authentication, council IDs/accounts, signed proposal or ETA fields, or requested mainnet status. TxExecutor's existing authentication-before-dispatch order is unchanged; authentication still incurs its legacy work and is not claimed to be allocation-free or newly bounded.
+
+At source/test commit `99023fcb30ec2c6c042dea0f0196b88c072049ac`, real ML-DSA-44 executor tests verify fresh signature checks, signer-only account reads, zero governed reads/writes/deletes, and unchanged full account and transaction oracles. Direct Program tests are distinct and prove no handler bypass. Malformed-call, authentication retry, proposal/ETA, council-ID identity-claim, Ready/Activated, identical signed replay, absent-target, and malformed-target cases are mapped in the governance authority contract and D7 evidence appended with this update. Repeated refusal is not durable replay protection or decision consumption.
+
+No positive authority provenance/currentness, timelock, one-use consumption, atomic publication, or recovery is implemented. Historical successful-write findings remain attributable only to `c279c7be1cc415032975f162109e5e2c3f9c6ed0`; new refusal behavior is attributable to the tested source above. No selected binary, running-node, network, or deployed-path evidence is established.
+
+Preserved posture: D7D14_STORAGE_COMPONENT=IMPLEMENTED-ISOLATED; D7D14_STORAGE_ACCEPTANCE=PASS-ACCEPTED-SUBSET; §13.6 whole-lifecycle INCOMPLETE; activation DISABLED; public DevNet NO-GO; durable anti-rollback NOT-ESTABLISHED; C4/C5 OPEN; RS1 OPEN. The whole contract remains **DRAFT / NOT APPROVED / NOT IMPLEMENTED**. All candidate limits remain UNAPPROVED. No F1/F2 closure, C4/C5 closure, or release approval.
