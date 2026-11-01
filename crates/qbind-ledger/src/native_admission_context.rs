@@ -331,318 +331,6 @@ impl AccountStore for ReadOnlyStore<'_> {
                 return Err(BoundedReadError::Backend);
             }
         }
-
-        #[cfg(test)]
-        mod tests {
-            use super::*;
-            use crate::keyset_account::KeysetAccountReadError;
-            use qbind_crypto::ml_dsa44::MlDsa44Backend;
-            use qbind_crypto::{
-                ml_dsa_44_sign_digest, MlDsa44SignatureSuite, StaticCryptoProvider,
-            };
-            use qbind_hash::tx::try_tx_digest_streaming;
-            use qbind_serde::keyset::StoredKeysetLimits;
-            use qbind_serde::StateEncode;
-            use qbind_types::{KeysetAccount, KeysetEntry, KEYSET_PROGRAM_ID};
-            use qbind_wire::tx::{TxAccountMeta, TxAuth};
-            use std::sync::Arc;
-
-            fn binding() -> FixtureBinding {
-                FixtureBinding {
-                    chain_id: 1,
-                    execution_pre_state: [0; 32],
-                    policy: PrototypePolicy {
-                        identity: [0x42; 32],
-                        version: 1,
-                        limits: NativeTransactionProofLimits {
-                            max_required_signer_indices: 8,
-                            max_keyset_account_count: 8,
-                            max_authentication_proof_count: 8,
-                            max_signature_bytes: 8_192,
-                            max_aggregate_signature_bytes: 65_536,
-                            stored_keyset: StoredKeysetLimits {
-                                max_encoded_bytes: 65_536,
-                                max_entries: 16,
-                                max_key_bytes: 4_096,
-                                max_total_key_bytes: 65_536,
-                            },
-                            max_algorithm_parameter_identifier_bytes: 128,
-                        },
-                    },
-                    provider_identity: [0x44; 32],
-                }
-            }
-
-            fn transaction() -> Transaction {
-                Transaction {
-                    version: 1,
-                    chain_id: 1,
-                    payer: [0; 32],
-                    nonce: 0,
-                    fee_limit: 0,
-                    accounts: vec![TxAccountMeta {
-                        account_id: [1; 32],
-                        flags: 1,
-                        access_hint: 0,
-                        reserved0: [0; 2],
-                    }],
-                    program_id: [0; 32],
-                    call_data: vec![],
-                    auths: vec![TxAuth {
-                        account_index: 0,
-                        suite_id: 100,
-                        reserved: 0,
-                        signature: vec![1],
-                    }],
-                }
-            }
-
-            fn entries() -> (usize, usize) {
-                TEST_ENTRIES.with(std::cell::Cell::get)
-            }
-
-            #[test]
-            fn run422_native_admission_context_early_refusals_have_zero_helper_entries() {
-                use NativeAdmissionContextError as Error;
-                let store = InMemoryAccountStore::new();
-                let provider = StaticCryptoProvider::new();
-                let tx = transaction();
-                let selected = binding();
-                let active = PrototypeFixture::new_for_fixture(
-                    &store,
-                    &provider,
-                    selected,
-                    FixtureProfileStatus::Active,
-                );
-                let unavailable = PrototypeFixture::new_for_fixture(
-                    &store,
-                    &provider,
-                    selected,
-                    FixtureProfileStatus::Unavailable,
-                );
-                let inactive = PrototypeFixture::new_for_fixture(
-                    &store,
-                    &provider,
-                    selected,
-                    FixtureProfileStatus::Inactive,
-                );
-                let mut wrong_chain = selected;
-                wrong_chain.chain_id = 2;
-                let mut wrong_state = selected;
-                wrong_state.execution_pre_state = [2; 32];
-                let mut unknown = selected;
-                unknown.policy.identity = [2; 32];
-                let mut wrong_profile = selected;
-                wrong_profile.policy.version = 2;
-                let mut wrong_limits = selected;
-                wrong_limits.policy.limits.max_signature_bytes = 1;
-                let mut wrong_provider = selected;
-                wrong_provider.provider_identity = [2; 32];
-                TEST_ENTRIES.with(|entries| entries.set((0, 0)));
-                for (source, requested, expected) in [
-                    (Some(&active), None, Error::MissingBinding),
-                    (None, Some(selected), Error::UnavailableFixture),
-                    (
-                        Some(&unavailable),
-                        Some(selected),
-                        Error::UnavailableSelection,
-                    ),
-                    (Some(&inactive), Some(selected), Error::InactiveProfile),
-                    (Some(&active), Some(wrong_chain), Error::ChainMismatch),
-                    (
-                        Some(&active),
-                        Some(wrong_state),
-                        Error::ExecutionPreStateMismatch,
-                    ),
-                    (Some(&active), Some(unknown), Error::UnknownProfile),
-                    (Some(&active), Some(wrong_profile), Error::ProfileMismatch),
-                    (Some(&active), Some(wrong_limits), Error::ProfileMismatch),
-                    (Some(&active), Some(wrong_provider), Error::ProviderMismatch),
-                ] {
-                    assert!(matches!(
-                        NativeAdmissionContext::<8, 8, 16>::new_for_fixture(source, requested, &tx),
-                        Err(error) if error == expected
-                    ));
-                    assert_eq!(entries(), (0, 0));
-                    assert_eq!(store.get(&[1; 32]), None);
-                }
-                assert!(matches!(
-                    NativeAdmissionContext::<1, 8, 16>::new_for_fixture(
-                        Some(&active),
-                        Some(selected),
-                        &tx
-                    ),
-                    Err(Error::GroupWorkspaceUnsupported)
-                ));
-                assert!(matches!(
-                    NativeAdmissionContext::<8, 1, 16>::new_for_fixture(
-                        Some(&active),
-                        Some(selected),
-                        &tx
-                    ),
-                    Err(Error::ProofWorkspaceUnsupported)
-                ));
-                assert!(matches!(
-                    NativeAdmissionContext::<8, 8, 1>::new_for_fixture(
-                        Some(&active),
-                        Some(selected),
-                        &tx
-                    ),
-                    Err(Error::EntryWorkspaceUnsupported)
-                ));
-                assert_eq!(entries(), (0, 0));
-                let context = NativeAdmissionContext::<8, 8, 16>::new_for_fixture(
-                    Some(&active),
-                    Some(selected),
-                    &tx,
-                )
-                .unwrap();
-                assert_eq!(entries(), (0, 0));
-                assert_eq!(
-                    context.evaluate(),
-                    Err(NativeTransactionProofError::AccountRead(
-                        KeysetAccountReadError::MissingAccount
-                    ))
-                );
-                assert_eq!(entries(), (1, 1));
-                assert_eq!(context.evaluator_calls.get(), 1);
-                assert_eq!(context.store.bounded_reads.get(), 1);
-                context.cancel();
-                assert_eq!(entries(), (1, 1));
-            }
-
-            #[test]
-            fn run422_native_admission_context_injected_backend_refusal_then_fresh_genuine_success()
-            {
-                let (public, secret) = MlDsa44Backend::generate_keypair().unwrap();
-                let state = KeysetAccount {
-                    version: 1,
-                    reserved0: [0; 3],
-                    threshold: 1,
-                    entry_count: 1,
-                    reserved1: [0; 4],
-                    entries: vec![KeysetEntry {
-                        suite_id: 100,
-                        weight: 1,
-                        reserved0: [0],
-                        pubkey_len: u16::try_from(public.len()).unwrap(),
-                        pubkey_bytes: public,
-                    }],
-                };
-                let mut data = Vec::new();
-                state.encode_state(&mut data);
-                let account = Account::new([1; 32], KEYSET_PROGRAM_ID, 0, data);
-                let mut store = InMemoryAccountStore::new();
-                store.put(account.clone()).unwrap();
-                let mut tx = transaction();
-                tx.auths[0].signature =
-                    ml_dsa_44_sign_digest(&secret, &try_tx_digest_streaming(&tx).unwrap()).unwrap();
-                let original = tx.clone();
-                let provider = StaticCryptoProvider::new()
-                    .with_signature_suite(Arc::new(MlDsa44SignatureSuite::new(100)));
-                let fixture = PrototypeFixture::new_for_fixture(
-                    &store,
-                    &provider,
-                    binding(),
-                    FixtureProfileStatus::Active,
-                );
-                let mut context = NativeAdmissionContext::<8, 8, 16>::new_for_fixture(
-                    Some(&fixture),
-                    Some(binding()),
-                    &tx,
-                )
-                .unwrap();
-                // Private helper-level injection, not a genuine backend allocation fault.
-                context.store.injected_backend_failure = true;
-                assert_eq!(
-                    context.evaluate(),
-                    Err(NativeTransactionProofError::AccountRead(
-                        KeysetAccountReadError::Backend
-                    ))
-                );
-                assert_eq!(context.store.bounded_reads.get(), 1);
-                assert_eq!(store.get(&account.id), Some(account.clone()));
-                assert_eq!(tx, original);
-                context.cancel();
-                let fresh = NativeAdmissionContext::<8, 8, 16>::new_for_fixture(
-                    Some(&fixture),
-                    Some(binding()),
-                    &tx,
-                )
-                .unwrap();
-                assert_eq!(
-                    fresh.evaluate(),
-                    Ok(NativeTransactionProofSummary {
-                        required_signer_index_count: 1,
-                        distinct_keyset_account_count: 1,
-                        evaluated_authentication_proof_count: 1,
-                    })
-                );
-                assert_eq!(fresh.store.bounded_reads.get(), 1);
-                assert_eq!(fresh.evaluator_calls.get(), 1);
-                assert_eq!(store.get(&account.id), Some(account.clone()));
-                assert_eq!(tx, original);
-                drop(fresh);
-                store.put(account).unwrap();
-            }
-
-            #[test]
-            fn run422_native_admission_context_adapter_has_no_legacy_or_write_surface() {
-                let mut store = InMemoryAccountStore::new();
-                let account = Account::new([1; 32], KEYSET_PROGRAM_ID, 7, vec![1, 2, 3]);
-                store.put(account.clone()).unwrap();
-                let provider = StaticCryptoProvider::new();
-                let tx = transaction();
-                let fixture = PrototypeFixture::new_for_fixture(
-                    &store,
-                    &provider,
-                    binding(),
-                    FixtureProfileStatus::Active,
-                );
-                let mut context = NativeAdmissionContext::<8, 8, 16>::new_for_fixture(
-                    Some(&fixture),
-                    Some(binding()),
-                    &tx,
-                )
-                .unwrap();
-                assert!(matches!(
-                    context.store.put(account.clone()),
-                    Err(ExecutionError::ProgramError(
-                        "isolated native context is read-only"
-                    ))
-                ));
-                assert!(matches!(
-                    context.store.delete(&account.id),
-                    Err(ExecutionError::ProgramError(
-                        "isolated native context is read-only"
-                    ))
-                ));
-                assert!(
-                    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| context
-                        .store
-                        .get(&account.id)))
-                    .is_err()
-                );
-                assert_eq!(
-                    context.evaluate(),
-                    Err(NativeTransactionProofError::KeysetParse(
-                        qbind_serde::keyset::StoredKeysetParseError::Malformed(
-                            qbind_serde::StateError::UnexpectedEof
-                        )
-                    ))
-                );
-                assert_eq!(context.store.bounded_reads.get(), 1);
-                assert_eq!(store.get(&account.id), Some(account.clone()));
-                context.cancel();
-                store.delete(&account.id).unwrap();
-                assert_eq!(store.get(&account.id), None);
-                println!(
-                    "cfg_test_context={} cfg_test_adapter={} adapter_genuine_read_count=1",
-                    std::mem::size_of::<NativeAdmissionContext<'_, 8, 8, 16>>(),
-                    std::mem::size_of::<ReadOnlyStore<'_>>(),
-                );
-            }
-        }
         self.inner.get_bounded(id, max_data_bytes)
     }
 
@@ -656,5 +344,299 @@ impl AccountStore for ReadOnlyStore<'_> {
         Err(ExecutionError::ProgramError(
             "isolated native context is read-only",
         ))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::keyset_account::KeysetAccountReadError;
+    use qbind_crypto::ml_dsa44::MlDsa44Backend;
+    use qbind_crypto::{ml_dsa_44_sign_digest, MlDsa44SignatureSuite, StaticCryptoProvider};
+    use qbind_hash::tx::try_tx_digest_streaming;
+    use qbind_serde::keyset::StoredKeysetLimits;
+    use qbind_serde::StateEncode;
+    use qbind_types::{KeysetAccount, KeysetEntry, KEYSET_PROGRAM_ID};
+    use qbind_wire::tx::{TxAccountMeta, TxAuth};
+    use std::sync::Arc;
+
+    fn binding() -> FixtureBinding {
+        FixtureBinding {
+            chain_id: 1,
+            execution_pre_state: [0; 32],
+            policy: PrototypePolicy {
+                identity: [0x42; 32],
+                version: 1,
+                limits: NativeTransactionProofLimits {
+                    max_required_signer_indices: 8,
+                    max_keyset_account_count: 8,
+                    max_authentication_proof_count: 8,
+                    max_signature_bytes: 8_192,
+                    max_aggregate_signature_bytes: 65_536,
+                    stored_keyset: StoredKeysetLimits {
+                        max_encoded_bytes: 65_536,
+                        max_entries: 16,
+                        max_key_bytes: 4_096,
+                        max_total_key_bytes: 65_536,
+                    },
+                    max_algorithm_parameter_identifier_bytes: 128,
+                },
+            },
+            provider_identity: [0x44; 32],
+        }
+    }
+
+    fn transaction() -> Transaction {
+        Transaction {
+            version: 1,
+            chain_id: 1,
+            payer: [0; 32],
+            nonce: 0,
+            fee_limit: 0,
+            accounts: vec![TxAccountMeta {
+                account_id: [1; 32],
+                flags: 1,
+                access_hint: 0,
+                reserved0: [0; 2],
+            }],
+            program_id: [0; 32],
+            call_data: vec![],
+            auths: vec![TxAuth {
+                account_index: 0,
+                suite_id: 100,
+                reserved: 0,
+                signature: vec![1],
+            }],
+        }
+    }
+
+    fn entries() -> (usize, usize) {
+        TEST_ENTRIES.with(std::cell::Cell::get)
+    }
+
+    #[test]
+    fn run422_native_admission_context_early_refusals_have_zero_helper_entries() {
+        use NativeAdmissionContextError as Error;
+        let store = InMemoryAccountStore::new();
+        let provider = StaticCryptoProvider::new();
+        let tx = transaction();
+        let selected = binding();
+        let active = PrototypeFixture::new_for_fixture(
+            &store,
+            &provider,
+            selected,
+            FixtureProfileStatus::Active,
+        );
+        let unavailable = PrototypeFixture::new_for_fixture(
+            &store,
+            &provider,
+            selected,
+            FixtureProfileStatus::Unavailable,
+        );
+        let inactive = PrototypeFixture::new_for_fixture(
+            &store,
+            &provider,
+            selected,
+            FixtureProfileStatus::Inactive,
+        );
+        let mut wrong_chain = selected;
+        wrong_chain.chain_id = 2;
+        let mut wrong_state = selected;
+        wrong_state.execution_pre_state = [2; 32];
+        let mut unknown = selected;
+        unknown.policy.identity = [2; 32];
+        let mut wrong_profile = selected;
+        wrong_profile.policy.version = 2;
+        let mut wrong_limits = selected;
+        wrong_limits.policy.limits.max_signature_bytes = 1;
+        let mut wrong_provider = selected;
+        wrong_provider.provider_identity = [2; 32];
+        TEST_ENTRIES.with(|entries| entries.set((0, 0)));
+        for (source, requested, expected) in [
+            (Some(&active), None, Error::MissingBinding),
+            (None, Some(selected), Error::UnavailableFixture),
+            (
+                Some(&unavailable),
+                Some(selected),
+                Error::UnavailableSelection,
+            ),
+            (Some(&inactive), Some(selected), Error::InactiveProfile),
+            (Some(&active), Some(wrong_chain), Error::ChainMismatch),
+            (
+                Some(&active),
+                Some(wrong_state),
+                Error::ExecutionPreStateMismatch,
+            ),
+            (Some(&active), Some(unknown), Error::UnknownProfile),
+            (Some(&active), Some(wrong_profile), Error::ProfileMismatch),
+            (Some(&active), Some(wrong_limits), Error::ProfileMismatch),
+            (Some(&active), Some(wrong_provider), Error::ProviderMismatch),
+        ] {
+            assert!(matches!(
+                NativeAdmissionContext::<8, 8, 16>::new_for_fixture(source, requested, &tx),
+                Err(error) if error == expected
+            ));
+            assert_eq!(entries(), (0, 0));
+            assert_eq!(store.get(&[1; 32]), None);
+        }
+        assert!(matches!(
+            NativeAdmissionContext::<1, 8, 16>::new_for_fixture(Some(&active), Some(selected), &tx),
+            Err(Error::GroupWorkspaceUnsupported)
+        ));
+        assert!(matches!(
+            NativeAdmissionContext::<8, 1, 16>::new_for_fixture(Some(&active), Some(selected), &tx),
+            Err(Error::ProofWorkspaceUnsupported)
+        ));
+        assert!(matches!(
+            NativeAdmissionContext::<8, 8, 1>::new_for_fixture(Some(&active), Some(selected), &tx),
+            Err(Error::EntryWorkspaceUnsupported)
+        ));
+        assert_eq!(entries(), (0, 0));
+        let context =
+            NativeAdmissionContext::<8, 8, 16>::new_for_fixture(Some(&active), Some(selected), &tx)
+                .unwrap();
+        assert_eq!(entries(), (0, 0));
+        assert_eq!(
+            context.evaluate(),
+            Err(NativeTransactionProofError::AccountRead(
+                KeysetAccountReadError::MissingAccount
+            ))
+        );
+        assert_eq!(entries(), (1, 1));
+        assert_eq!(context.evaluator_calls.get(), 1);
+        assert_eq!(context.store.bounded_reads.get(), 1);
+        context.cancel();
+        assert_eq!(entries(), (1, 1));
+    }
+
+    #[test]
+    fn run422_native_admission_context_injected_backend_refusal_then_fresh_genuine_success() {
+        let (public, secret) = MlDsa44Backend::generate_keypair().unwrap();
+        let state = KeysetAccount {
+            version: 1,
+            reserved0: [0; 3],
+            threshold: 1,
+            entry_count: 1,
+            reserved1: [0; 4],
+            entries: vec![KeysetEntry {
+                suite_id: 100,
+                weight: 1,
+                reserved0: [0],
+                pubkey_len: u16::try_from(public.len()).unwrap(),
+                pubkey_bytes: public,
+            }],
+        };
+        let mut data = Vec::new();
+        state.encode_state(&mut data);
+        let account = Account::new([1; 32], KEYSET_PROGRAM_ID, 0, data);
+        let mut store = InMemoryAccountStore::new();
+        store.put(account.clone()).unwrap();
+        let mut tx = transaction();
+        tx.auths[0].signature =
+            ml_dsa_44_sign_digest(&secret, &try_tx_digest_streaming(&tx).unwrap()).unwrap();
+        let original = tx.clone();
+        let provider = StaticCryptoProvider::new()
+            .with_signature_suite(Arc::new(MlDsa44SignatureSuite::new(100)));
+        let fixture = PrototypeFixture::new_for_fixture(
+            &store,
+            &provider,
+            binding(),
+            FixtureProfileStatus::Active,
+        );
+        let mut context = NativeAdmissionContext::<8, 8, 16>::new_for_fixture(
+            Some(&fixture),
+            Some(binding()),
+            &tx,
+        )
+        .unwrap();
+        // Private helper-level injection, not a genuine backend allocation fault.
+        context.store.injected_backend_failure = true;
+        assert_eq!(
+            context.evaluate(),
+            Err(NativeTransactionProofError::AccountRead(
+                KeysetAccountReadError::Backend
+            ))
+        );
+        assert_eq!(context.store.bounded_reads.get(), 1);
+        assert_eq!(store.get(&account.id), Some(account.clone()));
+        assert_eq!(tx, original);
+        context.cancel();
+        let fresh = NativeAdmissionContext::<8, 8, 16>::new_for_fixture(
+            Some(&fixture),
+            Some(binding()),
+            &tx,
+        )
+        .unwrap();
+        assert_eq!(
+            fresh.evaluate(),
+            Ok(NativeTransactionProofSummary {
+                required_signer_index_count: 1,
+                distinct_keyset_account_count: 1,
+                evaluated_authentication_proof_count: 1,
+            })
+        );
+        assert_eq!(fresh.store.bounded_reads.get(), 1);
+        assert_eq!(fresh.evaluator_calls.get(), 1);
+        assert_eq!(store.get(&account.id), Some(account.clone()));
+        assert_eq!(tx, original);
+        drop(fresh);
+        store.put(account).unwrap();
+    }
+
+    #[test]
+    fn run422_native_admission_context_adapter_has_no_legacy_or_write_surface() {
+        let mut store = InMemoryAccountStore::new();
+        let account = Account::new([1; 32], KEYSET_PROGRAM_ID, 7, vec![1, 2, 3]);
+        store.put(account.clone()).unwrap();
+        let provider = StaticCryptoProvider::new();
+        let tx = transaction();
+        let fixture = PrototypeFixture::new_for_fixture(
+            &store,
+            &provider,
+            binding(),
+            FixtureProfileStatus::Active,
+        );
+        let mut context = NativeAdmissionContext::<8, 8, 16>::new_for_fixture(
+            Some(&fixture),
+            Some(binding()),
+            &tx,
+        )
+        .unwrap();
+        assert!(matches!(
+            context.store.put(account.clone()),
+            Err(ExecutionError::ProgramError(
+                "isolated native context is read-only"
+            ))
+        ));
+        assert!(matches!(
+            context.store.delete(&account.id),
+            Err(ExecutionError::ProgramError(
+                "isolated native context is read-only"
+            ))
+        ));
+        assert!(
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| context
+                .store
+                .get(&account.id)))
+            .is_err()
+        );
+        assert_eq!(
+            context.evaluate(),
+            Err(NativeTransactionProofError::KeysetParse(
+                qbind_serde::keyset::StoredKeysetParseError::Malformed(
+                    qbind_serde::StateError::UnexpectedEof
+                )
+            ))
+        );
+        assert_eq!(context.store.bounded_reads.get(), 1);
+        assert_eq!(store.get(&account.id), Some(account.clone()));
+        context.cancel();
+        store.delete(&account.id).unwrap();
+        assert_eq!(store.get(&account.id), None);
+        println!(
+            "cfg_test_context={} cfg_test_adapter={} adapter_genuine_read_count=1",
+            std::mem::size_of::<NativeAdmissionContext<'_, 8, 8, 16>>(),
+            std::mem::size_of::<ReadOnlyStore<'_>>(),
+        );
     }
 }
