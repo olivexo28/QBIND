@@ -442,3 +442,187 @@ NOT-ESTABLISHED; C4/C5 OPEN; RS1 OPEN. All candidate limits UNAPPROVED.
 No F1/F2 closure, production state-consistency guarantee or release approval.
 Push only the named task branch; no PR, merge, main push, force-push, activation
 or deployment.
+
+## 12. Isolated native admission context slice (RUN 422)
+
+**Whole contract: DRAFT / NOT APPROVED / NOT IMPLEMENTED.** Only the unused
+concrete in-memory diagnostic read-context slice is implemented. All numerical
+candidate limits remain **UNAPPROVED**. This is not production state-consistency
+enforcement, F1/F2 closure, release readiness or chain-policy approval.
+
+### Source, selection and trust boundary
+
+`crates/qbind-ledger/src/native_admission_context.rs` adds `PrototypePolicy`,
+`FixtureBinding`, `FixtureProfileStatus`, `PrototypeFixture::new_for_fixture`,
+`NativeAdmissionContext::new_for_fixture`, `evaluate` and consuming `cancel`.
+`crates/qbind-ledger/src/lib.rs` changes only by exporting the module.
+No existing evaluator, AccountStore, provider, runtime/program/node caller,
+manifest, dependency, feature, wire format, signing preimage or default changes.
+The resource assessment and existing state-contract characterization are unchanged.
+
+The private fixture source contains one concrete `&InMemoryAccountStore`, one
+`&dyn CryptoProvider`, one copied complete binding and an explicit selection
+status. A separately presented `Option<FixtureBinding>` is compared with that
+source, not with itself. Labels cover u32 chain identity, a 32-byte combined
+execution-position/pre-state identity, a 32-byte profile identity plus version
+and every selected limit, and a 32-byte fixture provider identity. The transaction
+chain ID is independently compared with the fixture chain. These labels do not
+authenticate the fixture's state, policy or provider; there is no governance
+root, activation height, production registry or new wire policy field.
+
+Missing request, unavailable fixture/selection, chain or pre-state mismatch,
+unknown profile identity, inactive profile, mismatched version/limits and
+provider identity, and insufficient G/P/E return fixed-size
+`NativeAdmissionContextError` categories before evaluator entry, account reads
+or provider work. Unknown identity and mismatched version are distinct cases.
+Selected max_keyset_account_count <= G, max_authentication_proof_count <= P,
+and stored_keyset.max_entries <= E are required even when the actual transaction
+would fit smaller arrays. No selected limits are lowered and no legacy/default
+fallback exists. These are trusted fixture-contract checks, not provenance
+verification or policy approval.
+
+The supported store has a private ordinary HashMap and mutation requires a safe
+mutable borrow. Its immutable borrow enforces stable in-memory account contents
+for this context's usable lifetime. Borrowing arbitrary `&dyn AccountStore`
+would not: that trait promises only per-account coherence and admits the
+baseline switching store. The constructor accepts only the concrete store;
+no extensible snapshot trait is introduced. Do not generalize this argument to
+persistent stores, interior-mutable implementations or other processes.
+Execution-position and policy provenance are trusted fixture inputs only.
+Provider semantic stability and conformance are separately trusted assumptions,
+not proved by a trait-object borrow or Arc. No production chain authority,
+freshness or commit guarantee is established.
+
+### Complete transaction, delegation, errors and release
+
+The context immutably borrows the complete native Transaction, including all
+auth vectors, and retains the selected provider reference and binding. Its
+argument-free `evaluate()` delegates to
+`evaluate_native_transaction_proofs::<G,P,E>` with those original inputs.
+There is no replacement transaction/store/provider/limits parameter, public
+field mutation, rebinding, Clone/Copy, serialization, execution, insertion,
+commit, nonce reservation or transferable authorization method. A signing-body
+digest excludes auths; digest equality is not used to accept proof substitution.
+
+The private read-only adapter delegates each genuine bounded read to the same
+borrowed concrete store. Unbounded get explicitly panics if wrongly reached;
+put/delete return explicit read-only ProgramError and are inaccessible to public
+callers. Evaluation uses get_bounded only, with no unbounded fallback.
+Delegation preserves exact-index coverage, first-occurrence AccountId grouping,
+one bounded owned account per group, borrowed parsing and complete semantic
+admission, independent thresholds, all supplied proof verification and checked
+streaming digest semantics. No evaluator implementation is copied.
+
+Construction is fixed-size and performs no crypto, transaction/proof cloning
+or snapshot allocation. Context errors describe prototype availability or
+configuration only. `evaluate()` preserves `NativeTransactionProofError`
+detail separately; backend/crypto inability is not universally classified as
+an invalid transaction and no consensus receipt mapping is invented.
+`NativeTransactionProofSummary` is uncached diagnostic counts, not an execution
+token. Each evaluation, including repeated evaluation, does fresh helper work.
+
+Drop or consuming cancel ends only this context's borrows and copied binding.
+It performs no reads/evaluation, writes, deletes or commit, leaves no reusable
+context, and does not destroy the caller-owned transaction, provider or store.
+There are no staged effects, locks, MVCC owners or recovery references to release.
+Unwinding is tested through the existing provider interface, without adding a
+callback API. Injection controls are private cfg(test) or clearly identified
+test providers, not production bypasses or genuine backend/crypto faults.
+
+### Acceptance source/test mapping
+
+`crates/qbind-ledger/tests/run_422_native_admission_context_tests.rs`:
+
+| Test | Evidence asserted |
+|---|---|
+| pinned_generations_refuse_mixed_genuine_proofs_and_accept_matched_controls | Four distinct genuine ML-DSA-44 keys; S0=A0+B0 and S1=A1+B1. Unchanged A0+B1 refuses as KeysetProof(InvalidProof) on S0 at B (two lookup/descriptor/verification calls), and on S1 at A (one each). Matched controls succeed with exact summary (2,2,2), two calls each. Complete transactions/wire bytes and both account generations remain unchanged. |
+| fixture_selection_refusals_and_small_transaction_workspace_controls | Separate trusted/requested fixture bindings; all selection refusals, transaction chain mismatch and G/P/E incompatibility; zero observed provider work before refusal. The unchanged small transaction succeeds through the old evaluator with arrays (2,2,1), yet the selected (8,8,16) profile refuses those local capacities. Fresh valid context succeeds with fresh provider work. |
+| complete_transaction_binding_does_not_use_signing_digest_as_proof_identity | Equal signing-body digests with altered auth vectors, bit-flipped genuine proof and late invalid extra proof. Changing the caller's copied request cannot change context policy. Separate contexts freshly refuse; original context continues to evaluate its original complete transaction successfully. Late threshold attainment does not skip supplied proofs. |
+| concrete_bounded_read_and_existing_evidence_refusals_preserve_state | Missing B, 65,537-byte B, malformed B, wrong-owner B and executable B after genuine A work; exact helper errors, preserved complete supplied state/transactions, and fresh valid retries. |
+| injected_provider_failure_and_unwind_release_only_context_borrows | Explicit synthetic InternalError and panic controls use genuine input material and real descriptor delegation. VerificationFailure/panic does not succeed or mutate state; caller owners survive and a fresh genuine provider/context succeeds. No claim that injection proves genuine provider reliability. |
+| cancellation_and_drop_do_not_evaluate_or_destroy_caller_owners | Unused contexts cancel/drop with zero provider work and no state effects; caller-owned store/proofs can then be mutated, restored and freshly evaluated. |
+| report_fixed_context_and_configuration_sizes | Compiler-derived type sizes; context storage is independent of G/P/E; not physical memory/stack/RSS accounting. |
+
+Private inline tests in the new module have the
+`run422_native_admission_context` prefix. They observe evaluator/bounded-read
+entry counts (zero on early refusal, nonzero valid entry), private adapter
+write/get refusal, and an explicitly injected helper-level Backend error while
+retaining the concrete pinned store, followed by fresh genuine success.
+Those entry counters are cfg(test) only; test-local thread storage does not
+create threads. Integration provider lookup/descriptor/verification counts
+are observed separately. First-occurrence ordering and absence of extra reads,
+writes or fallback are also source-derived from unchanged delegation and the
+private adapter, not falsely claimed as an integration store-call observer.
+
+Five compile-fail module doctests and a valid construction/release counterpart
+cover store mutation, transaction/proof mutation, required store-owner lifetime,
+unsupported generic backend type, and reuse after consuming cancellation.
+They use actual APIs/imports and fail for borrow/type/move reasons, not missing
+APIs. No generic backend is added just to elicit Unsupported. Genuine account
+materialization allocation failure is not manufactured; the private Backend
+injection is helper-level propagation evidence only.
+
+The unchanged `run_422_native_admission_state_contract_tests` target still
+allows A/S0 followed by B/S1 through its switching store. Its success remains
+valid under the old diagnostic contract; it is not exposed through the new
+restricted construction surface.
+
+### Inherited and excluded resources; measured sizes
+
+At tested source `34ee33fd5c96c6d78d9979293411823fa622a170` / root tree
+`ee92c7c5a9c4bbba1ea4d0c6abb012b812b2d431`, ordinary x86_64 workspace profile,
+the integration size_of observations are: context 224 bytes (unchanged for
+G/P/E=0/0/0, 8/8/16 and 32/32/32), fixture 224, binding 192, policy 120,
+context error 1, evaluator error 24, limits 80, summary 24, Transaction 160,
+Account 120, provider reference 16, store reference 8. The production-layout
+context stores transaction reference (8), adapter/store reference (8), provider
+reference (16) and copied binding (192). Binding includes three 32-byte labels,
+chain ID, policy/version and limits, plus compiler alignment padding.
+Private cfg(test) observations are context 248 and adapter 24: additional
+evaluator/read counters and injected-backend Boolean plus compiler padding.
+Test entry instrumentation is excluded from the production-layout observation.
+These are type-size observations, not physical-memory/stack/RSS guarantees.
+
+The context adds only borrowed store/transaction/provider references and a
+fixed-size copied fixture binding. The fixture owns no snapshot. The immutable
+inputs span the usable context lifetime; the copied binding is discarded on
+release. G/P/E helper arrays are created afresh inside each evaluation, not
+retained in the context. The inherited 8,192-byte coverage bitmap ends with
+preflight; group/proof arrays span evaluation and one newly owned bounded
+Account plus borrowed parser/semantic/proof workspace is live per group.
+The completed assessment's ownership/work qualifications remain unchanged.
+
+Caller-owned transaction/proof capacities, the entire store and its allocations,
+backend materialization, provider/ML-DSA internals, allocator behavior, compiler
+stack layout and physical memory remain outside component accounting. No whole
+store clone, account snapshot, body clone, physical-memory guarantee, allocator
+hook, unsafe code, threads, sleeps, benchmark suite or production resource
+ceiling is introduced.
+
+Remaining requirements include chain authority/correct execution position and
+freshness; authenticated approved profile provenance and numeric approval;
+provider conformance/immutable suite interpretation; persistent backend/all-writer
+guarantees; staging, serializable atomic commit, cancellation during publication
+and recovery; independent creation/absence, program/payer authority, replay,
+nonce/fee and compatibility/corpus/hardware rules. This read-only slice
+implements or approves none of those whole-contract obligations.
+
+### Final-source validation and delivery attribution
+
+The exact final-source literal commands, counts (overlapping, not additive),
+initial environment failure and zero-selection correction, baseline/object
+facts, prefix/mode/EOL/EOF inventory and delivery checks are appended under
+`RUN 422 - isolated native admission context validation` in
+`QBIND_DEVNET_EVIDENCE_RUN_422_D7.md`. The producing source commit/tree are
+`34ee33fd5c96c6d78d9979293411823fa622a170` /
+`ee92c7c5a9c4bbba1ea4d0c6abb012b812b2d431`. All six new module doctests
+executed in the full ledger run; direct rustc metadata checks separately
+confirmed E0502/E0502/E0597/E0308/E0382 and a valid counterpart with exit 0.
+Evidence-only final commits do not change tested Rust.
+
+Preserved: D7D14_STORAGE_COMPONENT=IMPLEMENTED-ISOLATED;
+D7D14_STORAGE_ACCEPTANCE=PASS-ACCEPTED-SUBSET; §13.6 whole-lifecycle INCOMPLETE;
+activation DISABLED; public DevNet NO-GO; durable anti-rollback NOT-ESTABLISHED;
+C4/C5 OPEN; RS1 OPEN. All candidate limits UNAPPROVED. No production integration,
+atomic commit, activation, deployment, PR, merge, main push, force-push, F1/F2
+closure or release approval.
