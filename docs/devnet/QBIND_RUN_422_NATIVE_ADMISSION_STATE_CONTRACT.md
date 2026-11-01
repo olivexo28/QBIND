@@ -999,3 +999,20 @@ At source/test commit `99023fcb30ec2c6c042dea0f0196b88c072049ac`, real ML-DSA-44
 No positive authority provenance/currentness, timelock, one-use consumption, atomic publication, or recovery is implemented. Historical successful-write findings remain attributable only to `c279c7be1cc415032975f162109e5e2c3f9c6ed0`; new refusal behavior is attributable to the tested source above. No selected binary, running-node, network, or deployed-path evidence is established.
 
 Preserved posture: D7D14_STORAGE_COMPONENT=IMPLEMENTED-ISOLATED; D7D14_STORAGE_ACCEPTANCE=PASS-ACCEPTED-SUBSET; §13.6 whole-lifecycle INCOMPLETE; activation DISABLED; public DevNet NO-GO; durable anti-rollback NOT-ESTABLISHED; C4/C5 OPEN; RS1 OPEN. The whole contract remains **DRAFT / NOT APPROVED / NOT IMPLEMENTED**. All candidate limits remain UNAPPROVED. No F1/F2 closure, C4/C5 closure, or release approval.
+
+## RUN 422 native validator-registration characterization
+
+The separate draft
+[`QBIND_RUN_422_NATIVE_VALIDATOR_AUTHORITY_CONTRACT.md`](QBIND_RUN_422_NATIVE_VALIDATOR_AUTHORITY_CONTRACT.md)
+records the native `qbind_wire::tx::Transaction` → `TxExecutor` →
+`ValidatorProgram` registration route, its local Active-record result, and the
+independent owner/funding/key-admission/membership questions that remain open.
+Its in-memory characterization uses genuine transaction ML-DSA-44
+authentication, fixture-only consensus-signature and network-KEM controls, and
+complete account-state and mutation traces. It does not modify native
+governance refusal, establish deployed reachability, or implement a validator
+authority contract. The proposed unavailable-authority refusal remains
+unapproved and unimplemented.
+
+The evidence and command attribution for this characterization is appended to
+`QBIND_DEVNET_EVIDENCE_RUN_422_D7.md`; the preserved posture above is unchanged.
