@@ -221,7 +221,7 @@ impl Fixture {
             tx.auths.push(TxAuth {
                 account_index: i as u16,
                 suite_id: SUITE,
-                reserved0: 0,
+                reserved: 0,
                 signature,
             });
         }

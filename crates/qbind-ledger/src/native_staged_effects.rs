@@ -340,7 +340,7 @@ mod tests {
         tx.auths.push(TxAuth {
             account_index: 0,
             suite_id: 100,
-            reserved0: 0,
+            reserved: 0,
             signature,
         });
         let mut binding = FixtureBinding {
