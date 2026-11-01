@@ -23736,3 +23736,18 @@ C4/C5 OPEN; RS1 OPEN. Whole native contract DRAFT / NOT APPROVED / NOT IMPLEMENT
 all candidate limits UNAPPROVED. No production integration, atomic commit,
 activation, deployment, PR, merge, main push, force-push, F1/F2 closure or
 release approval.
+
+### Delivery verifier retry (tracking metadata only)
+
+The initial post-push Python delivery verifier exited 1 because it assumed a
+local `origin/copilot/run-422-native-admission-context-prototype` tracking ref.
+The configured fetch refspec is only
+`+refs/heads/main:refs/remotes/origin/main`; the successful task push had not
+materialized that local ref. This was not a push failure or source/test failure:
+authoritative `git ls-remote --heads origin refs/heads/copilot/run-422-native-admission-context-prototype`
+already equaled the local evidence commit. The read-only command
+`git fetch --no-tags origin refs/heads/copilot/run-422-native-admission-context-prototype:refs/remotes/origin/copilot/run-422-native-admission-context-prototype`
+exited 0, populated only task tracking metadata, and local/remote identities
+then matched. The complete verifier is rerun on final delivery after this
+append-only evidence update and non-force task push. Final Rust is unchanged;
+no dependency, prerequisite or main branch content changed.
