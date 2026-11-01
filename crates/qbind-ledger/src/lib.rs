@@ -14,6 +14,7 @@ pub mod keyset_validation;
 pub mod monetary_engine;
 pub mod monetary_state;
 pub mod native_admission_context;
+pub mod native_keyset_create_model;
 pub mod native_staged_effects;
 pub mod native_tx_proof;
 pub mod parallel_exec;
