@@ -626,3 +626,175 @@ activation DISABLED; public DevNet NO-GO; durable anti-rollback NOT-ESTABLISHED;
 C4/C5 OPEN; RS1 OPEN. All candidate limits UNAPPROVED. No production integration,
 atomic commit, activation, deployment, PR, merge, main push, force-push, F1/F2
 closure or release approval.
+
+## 13. Bounded native staged-effects fixture slice (RUN 422)
+
+**Whole contract: DRAFT / NOT APPROVED / NOT IMPLEMENTED.** This slice is
+implemented only as an unused trusted fixture model. All limits remain
+**UNAPPROVED**. The primary persistent immutable-version plus serializable
+validation/commit recommendation in section 5 is unchanged, not implemented
+or replaced by this concrete in-memory serialization alternative.
+
+### Binding and exclusive access
+
+`native_staged_effects.rs::NativeStagedEffects::begin_for_fixture` receives
+one concrete `&mut InMemoryAccountStore` before any proof work. Within that
+outer borrow it constructs the existing `PrototypeFixture` from an immutable
+reborrow, then the existing `NativeAdmissionContext`, evaluates afresh and
+cancels the temporary diagnostic context. The outer exclusive borrow is
+retained in private session fields until consuming publication, cancellation,
+drop or unwind. There is no success-token handoff or reacquisition gap and no
+self-referential session. Existing context selection/capacity checks and proof
+evaluation are delegated, not copied. A failed begin produces no session.
+
+The session borrows the complete immutable transaction including proof bytes,
+retains the selected provider reference, and copies the complete selected
+binding/status. Trusted `FixtureSelection` inputs are separate from requested
+`Option<FixtureBinding>`. Stage configuration is checked before context/proof
+work. Missing, unavailable, mismatched and unsupported context refusals retain
+their existing categories; proof errors retain their typed detail separately.
+No replacement transaction, provider, policy or store arguments/setters exist.
+Changing a caller's copied binding cannot change the retained selection.
+
+Safe external store access is excluded while the session remains usable:
+the concrete private HashMap has no interior mutation surface. This is compiler
+enforced serialization, NOT implemented optimistic conflict detection or a
+generic/persistent/all-process backend contract. Holding exclusivity through
+crypto serializes this model and limits concurrency; no throughput measurement
+or claim is made. Provider semantic stability and label/policy/execution-position
+provenance remain trusted fixture assumptions, not current-authority capabilities.
+
+### Trusted plans, ownership and refusal
+
+Only explicit create, replace and delete fixture effects are supported.
+They are trusted effect plans, not native program execution. Proof success
+does not establish program/payer authority, nonce/replay policy, fees, creation
+rights or a bootstrap exception. There is no dispatch or read-your-writes API.
+No production caller may use this model.
+
+The private `[Option<FixtureEffect>; W]` stores complete moved Accounts.
+Independent caller-supplied limits bound operation count, each logical data
+length, each actual Vec capacity and checked aggregate retained Vec capacity.
+W is an implementation array capacity, not an approved profile. Small test
+effect limits (W=3, at most 3 operations, 8 logical/retained bytes per offered
+account and 16 aggregate bytes) are UNAPPROVED and distinct from the existing
+UNAPPROVED native proof candidate (8/8/16 workspace/selection).
+
+Targets must be unique across all operation variants. No coalescing or implicit
+overwrite is allowed. Admission checks the offered Account ID, resource limits
+and uniqueness before changing any existing stage slot. Rejected create/replace
+returns `FixtureAccountRefusal` containing the actual offered Account, including
+its original data pointer/length/capacity. This owner can exceed the stage bound:
+it is caller-offered, never admitted, and remains caller-owned after refusal.
+Every staging refusal poisons the attempt, including a late invalid submission.
+Ignoring an error cannot publish a previously accepted subset. Existing accepted
+stage owners remain intact until cancel/drop or consuming publication refusal;
+a retry requires a fresh begin and fresh proof evaluation.
+
+Cancel/drop and prepublication unwind discard only session-owned effects and
+release borrows. Caller store/transaction/provider owners survive. Publication
+consumes on both outcomes; a publication refusal may drop all stage-owned
+Accounts but leaves the complete original store unchanged. There is no cached
+proof result and no reusable successful/cancelled session. Earlier successful
+in-memory batches remain present after later refusal/cancellation, and a fresh
+attempt observes that modified pre-state.
+
+### Complete preflight and narrow publication argument
+
+The crate-private model-scoped
+`store.rs::InMemoryAccountStore::publish_native_fixture_batch` itself checks
+eligibility/configuration, operation/resource counts, unique targets, matching
+Account IDs, create-absent and replace/delete-present predicates, checked result
+arithmetic and existing map capacity before taking ANY effect or changing ANY
+map entry. It does not loop over fallible trait `put` calls. The existing trait,
+public store methods and their behavior are unchanged; no map access or
+general-purpose public batch mutation API is exposed.
+
+The standard-library `HashMap::capacity` contract is the number of elements the
+map can hold without reallocating:
+`https://doc.rust-lang.org/std/collections/struct.HashMap.html#method.capacity`.
+Admission requires checked `len + all_creates <= existing_capacity`, without
+credit for any deletion. Creates execute first, while count increases only
+within that admitted peak. Unique replacements target existing entries and
+cannot increase count; deletions follow and reduce it. Unique targets make this
+order irrelevant to the final logical contents. No growth factor, accidental
+fixture spare capacity, reserve/try_reserve/shrink or rebuilding is relied on.
+Insufficient capacity is `MapCapacity`, a LOCAL model inability, never
+deterministic invalid-transaction evidence or a consensus failure receipt.
+Fixture provisioning is outside the attempt and publication.
+
+The fixed diagnostic summary is fully computed before first mutation.
+The publication loops then only move admitted Accounts, replace and remove
+entries. There is no fallible allocation, data cloning, external callback,
+crypto/provider work, program execution, remaining fallible input validation,
+unwrap/indexing or fault hook after mutation starts. Test-only thread-local
+entry/mutation counters are internal observation, not user callbacks or failure
+injection; production contains none of that instrumentation.
+
+Concrete keys are byte arrays with standard Hash/Eq, the private map uses
+standard RandomState, and Account contains scalar/byte-array headers and
+Vec<u8>. No user-defined key/hasher/destructor code is invoked. Replaced/deleted
+old Accounts are dropped, including deallocation of their original data Vec;
+these existing-store owners are not copied into a rollback journal. Incoming
+stage data and old store data coexist before displacement, and earlier newly
+inserted data coexists with old entries until those later operations run.
+HashMap hashing/probing is not constant worst-case lookup work. The argument
+bounds stage ownership, not allocator metadata, total store/process memory,
+physical stack/RSS or deallocation implementation internals.
+
+Guarantee: no state changes on defined refusals; no externally observable
+partial batch through supported safe access; no remaining fallible work of the
+specified kinds after first publication mutation. This is normal-error
+atomicity for concrete in-memory serialization ONLY. It is NOT persistent
+atomic commit, crash durability, restart safety, rollback after arbitrary
+midpublication panic, process-abort recovery or all-writer persistent isolation.
+No midpublication panic injection/rollback claim is made.
+
+### Evidence and remaining prerequisites
+
+Integration target `run_422_native_staged_effects_tests.rs` covers genuine
+ML-DSA-44 admission, invalid/mixed proofs, separate selection refusals, complete
+transaction bytes, fresh provider counts, multi-effect headers/data, duplicate
+and mismatched IDs, late resource/predicate refusal, intact returned candidates,
+poisoning, drop/cancel, caller/provider prepublication unwind and sequential
+success/refusal/cancellation. Injection controls are explicitly separate from
+genuine cryptographic outcomes.
+
+Private tests prefixed `run422_native_staged_effects` directly observe private
+stage/base-state preservation, moved pointers/capacities and copied selection;
+real map len/capacity exact and insufficient boundaries plus fresh provisioned
+retry; helper rejection before consuming any input; zero mutation counters on
+refusal; complete mixed operation results; scalar arithmetic overflow without
+large allocations/fabricated Vec values; and compiler layout inventories.
+Compile-fail doctests exclude conflicting external writers, transaction/proof
+mutation, provider-owner destruction, private store/selection replacement and
+reuse after consuming publication/cancel. A valid release counterpart and
+genuine integration publication use actual imports/APIs.
+
+Retained session storage is fixed fields plus W option-operation slots plus
+admitted Account Vec capacities (aggregate bounded). Summary/errors/limits and
+selection have fixed layouts; the refused-candidate error additionally owns the
+offered Account's unadmitted allocation. G/P/E proof workspace is inherited and
+temporary during begin: coverage preflight ends before group evaluation, and
+one owned bounded read plus borrowed parsing/proof workspace is live per group.
+No stage is retained during that proof evaluation. Existing store accounts and
+caller transaction/provider are outside the NEW stage bound, not hidden new
+owners. The stage then coexists with all existing store data through preflight.
+Exact tested layouts and command/source attribution are in the D7 validation
+appendix. No heap-backed operation index, whole-store/transaction clone,
+rollback journal, unsafe code, allocator hook or new dependency is introduced.
+
+Remaining production prerequisites include independently approved authority,
+execution-position freshness/provenance, immutable governed provider policy,
+numeric profiles, persistent/all-writer backend semantics, program/payer/
+nonce/replay/fee/creation rules, full error/receipt mappings, corpus/resource
+compatibility, cancellation/uncertain-outcome and durable recovery evidence.
+Existing evaluators, assessment/characterization/context evidence, runtime/
+program callers, wire/signing formats, manifests and production defaults remain
+unchanged.
+
+Preserved: D7D14_STORAGE_COMPONENT=IMPLEMENTED-ISOLATED;
+D7D14_STORAGE_ACCEPTANCE=PASS-ACCEPTED-SUBSET; §13.6 whole-lifecycle INCOMPLETE;
+activation DISABLED; public DevNet NO-GO; durable anti-rollback NOT-ESTABLISHED;
+C4/C5 OPEN; RS1 OPEN. No F1/F2 closure, activation, deployment, PR, merge,
+main/force push or release approval.
