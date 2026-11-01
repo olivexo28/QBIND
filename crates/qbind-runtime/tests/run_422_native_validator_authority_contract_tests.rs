@@ -597,12 +597,35 @@ fn signed_stake_change_is_rejected_until_the_changed_body_is_resigned() {
     let original_wire = transaction_bytes(&original);
 
     let mut changed = original.clone();
+    let mut original_call_input: &[u8] = &original.call_data;
+    let original_call =
+        RegisterValidatorCall::decode(&mut original_call_input).expect("original call");
+    assert!(original_call_input.is_empty());
     let mut input: &[u8] = &changed.call_data;
     let mut call = RegisterValidatorCall::decode(&mut input).expect("original call");
     assert!(input.is_empty());
     call.stake = 82;
     changed.call_data.clear();
     call.encode(&mut changed.call_data);
+    let mut changed_call_input: &[u8] = &changed.call_data;
+    let changed_call =
+        RegisterValidatorCall::decode(&mut changed_call_input).expect("changed call");
+    assert!(changed_call_input.is_empty());
+    assert_eq!(changed_call.version, original_call.version);
+    assert_eq!(changed_call.validator_id, original_call.validator_id);
+    assert_eq!(changed_call.owner_keyset_id, original_call.owner_keyset_id);
+    assert_eq!(
+        changed_call.consensus_suite_id,
+        original_call.consensus_suite_id
+    );
+    assert_eq!(changed_call.consensus_pk, original_call.consensus_pk);
+    assert_eq!(
+        changed_call.network_suite_id,
+        original_call.network_suite_id
+    );
+    assert_eq!(changed_call.network_pk, original_call.network_pk);
+    assert_eq!(changed_call.stake, original_call.stake + 1);
+    assert!(!before.contains_key(&TARGET_ID), "target is fresh");
     assert_eq!(changed.version, original.version);
     assert_eq!(changed.chain_id, original.chain_id);
     assert_eq!(changed.payer, original.payer);
