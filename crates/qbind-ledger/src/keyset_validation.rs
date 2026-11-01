@@ -4,7 +4,7 @@
 //! reachability only. They do not verify signatures, admit account metadata,
 //! establish current authorization, or authorize execution.
 
-use qbind_crypto::signature::{CanonicalKeyDescriptor, KeyDescriptorError};
+use qbind_crypto::signature::{CanonicalKeyDescriptor, KeyDescriptorError, SignatureSuite};
 use qbind_crypto::CryptoProvider;
 use qbind_serde::keyset::StoredKeysetView;
 use qbind_wire::keyset::CreateKeysetView;
@@ -52,18 +52,26 @@ impl Record<'_> {
     };
 }
 
-struct Workspace<'a, const N: usize> {
+pub(super) struct Workspace<'a, const N: usize> {
     records: [Record<'a>; N],
     distinct_count: usize,
 }
 
 impl<'a, const N: usize> Workspace<'a, N> {
-    const fn new() -> Self {
+    pub(super) const fn new() -> Self {
         Self {
             records: [Record::EMPTY; N],
             distinct_count: 0,
         }
     }
+}
+
+#[derive(Clone, Copy)]
+pub(super) struct PreparedCandidate<'key, 'provider> {
+    pub suite_id: u8,
+    pub suite: &'provider dyn SignatureSuite,
+    pub public_key: &'key [u8],
+    pub identity_index: usize,
 }
 
 /// Analyze fully parsed stored-state metadata using caller-selected bounds.
@@ -123,9 +131,30 @@ fn analyze_entries<'a, const N: usize, I>(
 where
     I: Iterator<Item = (u8, u16, &'a [u8])>,
 {
+    let workspace = prepare_entries::<N, _>(
+        threshold,
+        entry_count,
+        entries,
+        provider,
+        max_identifier_bytes,
+        None,
+    )?;
+    summarize_workspace(&workspace, threshold, entry_count, max_distinct_key_proofs)
+}
+
+pub(super) fn prepare_entries<'key, 'provider, const N: usize, I>(
+    threshold: u16,
+    entry_count: u16,
+    entries: I,
+    provider: &'provider dyn CryptoProvider,
+    max_identifier_bytes: usize,
+    mut candidate_output: Option<&mut [Option<PreparedCandidate<'key, 'provider>>; N]>,
+) -> Result<Workspace<'key, N>, KeysetSemanticAnalysisError>
+where
+    I: Iterator<Item = (u8, u16, &'key [u8])>,
+{
     use KeysetSemanticAnalysisError as Error;
 
-    // Charge encoded entries, before any provider lookup or descriptor call.
     if usize::from(entry_count) > N {
         return Err(Error::EntryCountExceedsWorkspace);
     }
@@ -137,7 +166,7 @@ where
     }
 
     let mut workspace = Workspace::<N>::new();
-    for (requested_suite_id, weight, original_key_span) in entries {
+    for (entry_index, (requested_suite_id, weight, original_key_span)) in entries.enumerate() {
         let suite = provider
             .signature_suite(requested_suite_id)
             .ok_or(Error::SuiteNotFound)?;
@@ -153,11 +182,10 @@ where
                 KeyDescriptorError::NonCanonical => Error::DescriptorNonCanonical,
             })?;
 
-        let identifier_bytes = descriptor
-            .algorithm_id
-            .len()
-            .checked_add(descriptor.parameter_id.len())
-            .ok_or(Error::IdentifierLengthOverflow)?;
+        let identifier_bytes = checked_identifier_byte_len(
+            descriptor.algorithm_id.len(),
+            descriptor.parameter_id.len(),
+        )?;
         if identifier_bytes > max_identifier_bytes {
             return Err(Error::IdentifierLengthLimit);
         }
@@ -177,46 +205,73 @@ where
         let duplicate = workspace.records[..workspace.distinct_count]
             .iter()
             .position(|record| record.descriptor == Some(descriptor));
-        if let Some(index) = duplicate {
+        let identity_index = if let Some(index) = duplicate {
             if workspace.records[index].weight != weight {
                 return Err(Error::ConflictingDuplicateWeights);
             }
+            index
         } else {
             if workspace.distinct_count == N {
                 return Err(Error::EntryCountExceedsWorkspace);
             }
+            let index = workspace.distinct_count;
             workspace.records[workspace.distinct_count] = Record {
                 descriptor: Some(descriptor),
                 weight,
             };
             workspace.distinct_count += 1;
+            index
+        };
+        if let Some(output) = candidate_output.as_deref_mut() {
+            output[entry_index] = Some(PreparedCandidate {
+                suite_id: requested_suite_id,
+                suite,
+                public_key: original_key_span,
+                identity_index,
+            });
         }
     }
 
+    Ok(workspace)
+}
+
+pub(super) fn summarize_workspace<const N: usize>(
+    workspace: &Workspace<'_, N>,
+    threshold: u16,
+    entry_count: u16,
+    max_distinct_key_proofs: usize,
+) -> Result<KeysetSemanticAnalysisSummary, KeysetSemanticAnalysisError> {
+    use KeysetSemanticAnalysisError as Error;
+
+    let mut weights = [0u16; N];
     let mut total_distinct_key_weight = 0u64;
-    for record in &workspace.records[..workspace.distinct_count] {
+    for (index, record) in workspace.records[..workspace.distinct_count]
+        .iter()
+        .enumerate()
+    {
         total_distinct_key_weight = total_distinct_key_weight
             .checked_add(u64::from(record.weight))
             .ok_or(Error::WeightOverflow)?;
+        weights[index] = record.weight;
     }
 
-    // Selection ordering is in-place and O(u^2), where u is the number of
-    // distinct identities. Descriptors are never reconstructed or copied.
+    // Keep identity indexes stable for the proof evaluator while ordering only
+    // the scalar weights needed for threshold reachability.
     for index in 0..workspace.distinct_count {
         let mut greatest = index;
         for candidate in (index + 1)..workspace.distinct_count {
-            if workspace.records[candidate].weight > workspace.records[greatest].weight {
+            if weights[candidate] > weights[greatest] {
                 greatest = candidate;
             }
         }
-        workspace.records.swap(index, greatest);
+        weights.swap(index, greatest);
     }
 
     let reachable_count = max_distinct_key_proofs.min(workspace.distinct_count);
     let mut attainable_weight = 0u64;
-    for record in &workspace.records[..reachable_count] {
+    for weight in &weights[..reachable_count] {
         attainable_weight = attainable_weight
-            .checked_add(u64::from(record.weight))
+            .checked_add(u64::from(*weight))
             .ok_or(Error::WeightOverflow)?;
     }
     if u64::from(threshold) > attainable_weight {
@@ -225,9 +280,9 @@ where
 
     let mut minimum_distinct_key_proofs = 0usize;
     let mut highest_weight_sum = 0u64;
-    for record in &workspace.records[..reachable_count] {
+    for weight in &weights[..reachable_count] {
         highest_weight_sum = highest_weight_sum
-            .checked_add(u64::from(record.weight))
+            .checked_add(u64::from(*weight))
             .ok_or(Error::WeightOverflow)?;
         minimum_distinct_key_proofs += 1;
         if highest_weight_sum >= u64::from(threshold) {
@@ -244,6 +299,26 @@ where
         minimum_distinct_key_proofs: u16::try_from(minimum_distinct_key_proofs)
             .map_err(|_| Error::EntryCountExceedsWorkspace)?,
     })
+}
+
+pub(super) fn checked_identifier_byte_len(
+    algorithm_len: usize,
+    parameter_len: usize,
+) -> Result<usize, KeysetSemanticAnalysisError> {
+    algorithm_len
+        .checked_add(parameter_len)
+        .ok_or(KeysetSemanticAnalysisError::IdentifierLengthOverflow)
+}
+
+pub(super) fn identity_weight<const N: usize>(
+    workspace: &Workspace<'_, N>,
+    index: usize,
+) -> Option<u16> {
+    workspace
+        .records
+        .get(index)
+        .filter(|record| record.descriptor.is_some())
+        .map(|record| record.weight)
 }
 
 #[cfg(test)]
