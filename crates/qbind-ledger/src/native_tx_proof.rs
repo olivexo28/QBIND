@@ -741,9 +741,19 @@ mod run422_native_tx_proof_tests {
         assert_eq!(store.legacy_gets.get(), 0);
         assert_eq!(store.puts.get(), 0);
         assert_eq!(store.deletes.get(), 0);
+        assert_no_provider_work(calls);
+    }
+
+    fn assert_no_provider_work(calls: &Calls) {
         assert_eq!(calls.lookups.load(Ordering::SeqCst), 0);
         assert_eq!(calls.descriptors.load(Ordering::SeqCst), 0);
         assert_eq!(calls.verifications.load(Ordering::SeqCst), 0);
+    }
+
+    fn assert_store_read_only(store: &RecordingStore) {
+        assert_eq!(store.legacy_gets.get(), 0);
+        assert_eq!(store.puts.get(), 0);
+        assert_eq!(store.deletes.get(), 0);
     }
 
     #[test]
@@ -937,6 +947,8 @@ mod run422_native_tx_proof_tests {
                 Structure::CallDataWireLimit
             ))
         );
+        // A call-data slice larger than u32::MAX is impractical to allocate;
+        // this is the scalar-only control for that wire boundary.
         assert_eq!(check_signature_wire_length(usize::from(u16::MAX)), Ok(()));
         assert_eq!(
             check_signature_wire_length(usize::from(u16::MAX) + 1),
@@ -944,6 +956,140 @@ mod run422_native_tx_proof_tests {
                 Structure::SignatureLengthWireLimit
             ))
         );
+    }
+
+    #[test]
+    fn run422_native_tx_proof_evaluator_rejects_wire_lengths_before_external_work() {
+        use NativeTransactionProofStructureError as Structure;
+
+        let id = [0xD5; 32];
+        let store = RecordingStore::default();
+        let calls = Arc::new(Calls::default());
+        let provider = CountedProvider::mldsa(Arc::clone(&calls));
+
+        let mut too_many_accounts = with_auths(transaction(&[(id, true)]), &[(0, vec![])]);
+        too_many_accounts.accounts = (0..=u16::MAX).map(|_| metadata(id, true)).collect();
+        let original_accounts = too_many_accounts.clone();
+        assert_eq!(
+            evaluate_native_transaction_proofs::<1, 1, 1>(
+                &too_many_accounts,
+                &store,
+                &provider,
+                limits(1),
+            ),
+            Err(NativeTransactionProofError::Structure(
+                Structure::AccountCountWireLimit
+            ))
+        );
+        assert_eq!(too_many_accounts, original_accounts);
+        assert_no_external_work(&store, &calls);
+
+        let mut too_many_auths = transaction(&[(id, true)]);
+        too_many_auths.auths = (0..=u16::MAX).map(|_| auth(0, vec![])).collect();
+        let original_auths = too_many_auths.clone();
+        let mut roomy = limits(usize::MAX);
+        roomy.max_signature_bytes = usize::MAX;
+        roomy.max_aggregate_signature_bytes = usize::MAX;
+        assert_eq!(
+            evaluate_native_transaction_proofs::<1, 1, 1>(
+                &too_many_auths,
+                &store,
+                &provider,
+                roomy,
+            ),
+            Err(NativeTransactionProofError::Structure(
+                Structure::AuthCountWireLimit
+            ))
+        );
+        assert_eq!(too_many_auths, original_auths);
+        assert_no_external_work(&store, &calls);
+
+        let too_long_signature = vec![0; usize::from(u16::MAX) + 1];
+        let too_long = with_auths(transaction(&[(id, true)]), &[(0, too_long_signature)]);
+        let original_signature = too_long.clone();
+        assert_eq!(
+            evaluate_native_transaction_proofs::<1, 1, 1>(&too_long, &store, &provider, roomy,),
+            Err(NativeTransactionProofError::Structure(
+                Structure::SignatureLengthWireLimit
+            ))
+        );
+        assert_eq!(too_long, original_signature);
+        assert_no_external_work(&store, &calls);
+    }
+
+    #[test]
+    fn run422_native_tx_proof_identifier_byte_limit_has_exact_success_boundary() {
+        let (key, secret) = MlDsa44Backend::generate_keypair().unwrap();
+        let id = [0xD6; 32];
+        let body = transaction(&[(id, true)]);
+        let mut tx = body.clone();
+        tx.auths.push(auth(0, sign(&secret, &body)));
+        let original = tx.clone();
+        let descriptor = MlDsa44SignatureSuite::new(SUITE)
+            .canonical_key_descriptor(&key)
+            .unwrap();
+        assert_eq!(
+            descriptor.algorithm_id.len() + descriptor.parameter_id.len(),
+            16
+        );
+        let data = keyset(1, &[(1, &key)]);
+        let account_size = data.len();
+        let account = keyset_account(id, data);
+
+        let mut below = limits(1);
+        below.stored_keyset.max_encoded_bytes = account_size;
+        below.stored_keyset.max_entries = 1;
+        below.stored_keyset.max_key_bytes = key.len();
+        below.stored_keyset.max_total_key_bytes = key.len();
+        below.max_signature_bytes = tx.auths[0].signature.len();
+        below.max_aggregate_signature_bytes = tx.auths[0].signature.len();
+        below.max_algorithm_parameter_identifier_bytes = 15;
+        let store = RecordingStore {
+            accounts: vec![account.clone()],
+            ..RecordingStore::default()
+        };
+        let calls = Arc::new(Calls::default());
+        let provider = CountedProvider::mldsa(Arc::clone(&calls));
+        assert_eq!(
+            evaluate_native_transaction_proofs::<1, 1, 1>(&tx, &store, &provider, below),
+            Err(NativeTransactionProofError::KeysetProof(
+                KeysetProofEvaluationError::IdentifierLengthLimit
+            ))
+        );
+        assert_eq!(&*store.reads.borrow(), &[(id, account_size)]);
+        assert_eq!(calls.lookups.load(Ordering::SeqCst), 1);
+        assert_eq!(calls.descriptors.load(Ordering::SeqCst), 1);
+        assert_eq!(calls.verifications.load(Ordering::SeqCst), 0);
+        assert_store_read_only(&store);
+        assert_eq!(tx, original);
+
+        let mut exact = below;
+        exact.max_algorithm_parameter_identifier_bytes = 16;
+        let exact_store = RecordingStore {
+            accounts: vec![account],
+            ..RecordingStore::default()
+        };
+        let exact_calls = Arc::new(Calls::default());
+        let exact_provider = CountedProvider::mldsa(Arc::clone(&exact_calls));
+        assert_eq!(
+            evaluate_native_transaction_proofs::<1, 1, 1>(
+                &tx,
+                &exact_store,
+                &exact_provider,
+                exact
+            ),
+            Ok(NativeTransactionProofSummary {
+                required_signer_index_count: 1,
+                distinct_keyset_account_count: 1,
+                evaluated_authentication_proof_count: 1,
+            })
+        );
+        assert_eq!(&*exact_store.reads.borrow(), &[(id, account_size)]);
+        assert_eq!(exact_calls.lookups.load(Ordering::SeqCst), 1);
+        assert_eq!(exact_calls.descriptors.load(Ordering::SeqCst), 1);
+        assert_eq!(exact_calls.verifications.load(Ordering::SeqCst), 1);
+        assert_store_read_only(&exact_store);
+        assert_eq!(tx, original);
     }
 
     #[test]
@@ -1051,6 +1197,89 @@ mod run422_native_tx_proof_tests {
     }
 
     #[test]
+    fn run422_native_tx_proof_zero_runtime_limits_refuse_before_external_work() {
+        let id = [0xD3; 32];
+        let tx = with_auths(transaction(&[(id, true)]), &[(0, vec![0x42])]);
+        let cases = [
+            (
+                {
+                    let mut configured = limits(1);
+                    configured.max_required_signer_indices = 0;
+                    configured
+                },
+                NativeTransactionProofStructureError::RequiredSignerCountLimit,
+            ),
+            (
+                {
+                    let mut configured = limits(1);
+                    configured.max_keyset_account_count = 0;
+                    configured
+                },
+                NativeTransactionProofStructureError::KeysetAccountCountLimit,
+            ),
+            (
+                limits(0),
+                NativeTransactionProofStructureError::AuthenticationProofCountLimit,
+            ),
+            (
+                {
+                    let mut configured = limits(1);
+                    configured.max_signature_bytes = 0;
+                    configured
+                },
+                NativeTransactionProofStructureError::SignatureByteLimit,
+            ),
+            (
+                {
+                    let mut configured = limits(1);
+                    configured.max_aggregate_signature_bytes = 0;
+                    configured
+                },
+                NativeTransactionProofStructureError::AggregateSignatureByteLimit,
+            ),
+        ];
+
+        for (configured, expected) in cases {
+            let original = tx.clone();
+            let store = RecordingStore::default();
+            let calls = Arc::new(Calls::default());
+            let provider = CountedProvider::mldsa(Arc::clone(&calls));
+            assert_eq!(
+                evaluate_native_transaction_proofs::<1, 1, 1>(&tx, &store, &provider, configured),
+                Err(NativeTransactionProofError::Structure(expected))
+            );
+            assert_no_external_work(&store, &calls);
+            assert_eq!(tx, original);
+        }
+    }
+
+    #[test]
+    fn run422_native_tx_proof_e_zero_refuses_nonempty_keyset_before_provider_work() {
+        let (key, _secret) = MlDsa44Backend::generate_keypair().unwrap();
+        let id = [0xD4; 32];
+        let tx = with_auths(transaction(&[(id, true)]), &[(0, vec![0x42])]);
+        let original = tx.clone();
+        let data = keyset(1, &[(1, &key)]);
+        let bound = limits(1).stored_keyset.max_encoded_bytes;
+        let store = RecordingStore {
+            accounts: vec![keyset_account(id, data)],
+            ..RecordingStore::default()
+        };
+        let calls = Arc::new(Calls::default());
+        let provider = CountedProvider::mldsa(Arc::clone(&calls));
+        assert_eq!(
+            evaluate_native_transaction_proofs::<1, 1, 0>(&tx, &store, &provider, limits(1)),
+            Err(NativeTransactionProofError::Structure(
+                NativeTransactionProofStructureError::EntryWorkspaceCapacity
+            ))
+        );
+        assert_eq!(&*store.reads.borrow(), &[(id, bound)]);
+        assert_store_read_only(&store);
+        assert_no_provider_work(&calls);
+        assert_eq!(tx, original);
+    }
+
+    #[test]
     fn run422_native_tx_proof_thresholds_cannot_borrow_between_groups() {
         let (key_a, secret_a) = MlDsa44Backend::generate_keypair().unwrap();
         let (key_b, secret_b) = MlDsa44Backend::generate_keypair().unwrap();
@@ -1108,18 +1337,26 @@ mod run422_native_tx_proof_tests {
             accounts: vec![account_a, account_b],
             ..RecordingStore::default()
         };
+        let mut limits = limits(4);
+        limits.max_required_signer_indices = 2;
+        limits.max_keyset_account_count = 2;
+        limits.max_authentication_proof_count = 4;
+        limits.stored_keyset.max_entries = 2;
         let calls = Arc::new(Calls::default());
         let provider = CountedProvider::mldsa(Arc::clone(&calls));
 
         assert_eq!(
-            evaluate_native_transaction_proofs::<2, 1, 2>(&tx, &store, &provider, limits(2)),
+            evaluate_native_transaction_proofs::<2, 1, 2>(&tx, &store, &provider, limits),
             Err(NativeTransactionProofError::KeysetProof(
                 KeysetProofEvaluationError::ThresholdUnreachable
             ))
         );
-        let bound = limits(2).stored_keyset.max_encoded_bytes;
+        let bound = limits.stored_keyset.max_encoded_bytes;
         assert_eq!(&*store.reads.borrow(), &[(id_a, bound), (id_b, bound)]);
+        assert_eq!(calls.lookups.load(Ordering::SeqCst), 3);
+        assert_eq!(calls.descriptors.load(Ordering::SeqCst), 3);
         assert_eq!(calls.verifications.load(Ordering::SeqCst), 1);
+        assert_store_read_only(&store);
         assert_eq!(tx, original);
     }
 
@@ -1170,6 +1407,7 @@ mod run422_native_tx_proof_tests {
             accounts: vec![keyset_account(id, keyset(2, &[(1, &key)]))],
             ..RecordingStore::default()
         };
+        let original = tx.clone();
         let calls = Arc::new(Calls::default());
         let provider = CountedProvider::mldsa(Arc::clone(&calls));
 
@@ -1179,8 +1417,207 @@ mod run422_native_tx_proof_tests {
                 KeysetProofEvaluationError::ThresholdUnreachable
             ))
         );
-        assert_eq!(store.reads.borrow().len(), 1);
+        assert_eq!(
+            &*store.reads.borrow(),
+            &[(id, limits(3).stored_keyset.max_encoded_bytes)]
+        );
+        assert_eq!(calls.lookups.load(Ordering::SeqCst), 1);
+        assert_eq!(calls.descriptors.load(Ordering::SeqCst), 1);
         assert_eq!(calls.verifications.load(Ordering::SeqCst), 0);
+        assert_store_read_only(&store);
+        assert_eq!(tx, original);
+    }
+
+    #[test]
+    fn run422_native_tx_proof_repeated_proofs_need_distinct_verified_weight() {
+        let (key_a, secret_a) = MlDsa44Backend::generate_keypair().unwrap();
+        let (key_b, secret_b) = MlDsa44Backend::generate_keypair().unwrap();
+        let id = [0xEB; 32];
+        let body = transaction(&[(id, true), (id, true)]);
+        let signature_a = sign(&secret_a, &body);
+        let signature_b = sign(&secret_b, &body);
+        let keyset_data = keyset(2, &[(1, &key_a), (1, &key_b)]);
+        let account_size = keyset_data.len();
+        let store_account = keyset_account(id, keyset_data);
+        let mut limits = limits(3);
+        limits.max_required_signer_indices = 2;
+        limits.max_keyset_account_count = 1;
+        limits.max_authentication_proof_count = 3;
+        limits.max_signature_bytes = signature_a.len();
+        limits.max_aggregate_signature_bytes = 3 * signature_a.len();
+        limits.stored_keyset.max_encoded_bytes = account_size;
+        limits.stored_keyset.max_entries = 2;
+        limits.stored_keyset.max_key_bytes = key_a.len();
+        limits.stored_keyset.max_total_key_bytes = key_a.len() + key_b.len();
+        limits.max_algorithm_parameter_identifier_bytes = 16;
+
+        let mut refused = body.clone();
+        refused.auths = vec![
+            auth(0, signature_a.clone()),
+            auth(0, signature_a.clone()),
+            auth(1, signature_a.clone()),
+        ];
+        let original_refused = refused.clone();
+        let refused_store = RecordingStore {
+            accounts: vec![store_account.clone()],
+            ..RecordingStore::default()
+        };
+        let refused_calls = Arc::new(Calls::default());
+        let refused_provider = CountedProvider::mldsa(Arc::clone(&refused_calls));
+        assert_eq!(
+            evaluate_native_transaction_proofs::<1, 3, 2>(
+                &refused,
+                &refused_store,
+                &refused_provider,
+                limits,
+            ),
+            Err(NativeTransactionProofError::KeysetProof(
+                KeysetProofEvaluationError::InsufficientVerifiedWeight
+            ))
+        );
+        assert_eq!(&*refused_store.reads.borrow(), &[(id, account_size)]);
+        assert_eq!(refused_calls.lookups.load(Ordering::SeqCst), 2);
+        assert_eq!(refused_calls.descriptors.load(Ordering::SeqCst), 2);
+        assert_eq!(refused_calls.verifications.load(Ordering::SeqCst), 6);
+        assert_store_read_only(&refused_store);
+        assert_eq!(refused, original_refused);
+
+        let mut accepted = body;
+        accepted.auths = vec![
+            auth(0, signature_a.clone()),
+            auth(0, signature_a),
+            auth(1, signature_b),
+        ];
+        let original_accepted = accepted.clone();
+        let accepted_store = RecordingStore {
+            accounts: vec![store_account],
+            ..RecordingStore::default()
+        };
+        let accepted_calls = Arc::new(Calls::default());
+        let accepted_provider = CountedProvider::mldsa(Arc::clone(&accepted_calls));
+        assert_eq!(
+            evaluate_native_transaction_proofs::<1, 3, 2>(
+                &accepted,
+                &accepted_store,
+                &accepted_provider,
+                limits,
+            ),
+            Ok(NativeTransactionProofSummary {
+                required_signer_index_count: 2,
+                distinct_keyset_account_count: 1,
+                evaluated_authentication_proof_count: 3,
+            })
+        );
+        assert_eq!(&*accepted_store.reads.borrow(), &[(id, account_size)]);
+        assert_eq!(accepted_calls.lookups.load(Ordering::SeqCst), 2);
+        assert_eq!(accepted_calls.descriptors.load(Ordering::SeqCst), 2);
+        assert_eq!(accepted_calls.verifications.load(Ordering::SeqCst), 6);
+        assert_store_read_only(&accepted_store);
+        assert_eq!(accepted, original_accepted);
+    }
+
+    #[test]
+    fn run422_native_tx_proof_independent_thresholds_require_each_key_weight() {
+        let (key_a1, secret_a1) = MlDsa44Backend::generate_keypair().unwrap();
+        let (key_a2, secret_a2) = MlDsa44Backend::generate_keypair().unwrap();
+        let (key_b1, secret_b1) = MlDsa44Backend::generate_keypair().unwrap();
+        let (key_b2, secret_b2) = MlDsa44Backend::generate_keypair().unwrap();
+        let id_a = [0xEC; 32];
+        let id_b = [0xED; 32];
+        let body = transaction(&[(id_a, true), (id_b, true)]);
+        let sig_a1 = sign(&secret_a1, &body);
+        let sig_a2 = sign(&secret_a2, &body);
+        let sig_b1 = sign(&secret_b1, &body);
+        let sig_b2 = sign(&secret_b2, &body);
+        let data_a = keyset(1, &[(2, &key_a1), (1, &key_a2)]);
+        let data_b = keyset(2, &[(1, &key_b1), (1, &key_b2)]);
+        let account_size = data_a.len().max(data_b.len());
+        let mut limits = limits(4);
+        limits.max_required_signer_indices = 2;
+        limits.max_keyset_account_count = 2;
+        limits.max_authentication_proof_count = 4;
+        limits.max_signature_bytes = sig_a1.len();
+        limits.max_aggregate_signature_bytes = 4 * sig_a1.len();
+        limits.stored_keyset.max_encoded_bytes = account_size;
+        limits.stored_keyset.max_entries = 2;
+        limits.stored_keyset.max_key_bytes = key_a1.len();
+        limits.stored_keyset.max_total_key_bytes = 2 * key_a1.len();
+        limits.max_algorithm_parameter_identifier_bytes = 16;
+
+        let mut refused = body.clone();
+        refused.auths = vec![
+            auth(0, sig_a1.clone()),
+            auth(0, sig_a2.clone()),
+            auth(1, sig_b1.clone()),
+            auth(1, sig_b1.clone()),
+        ];
+        let original_refused = refused.clone();
+        let refused_store = RecordingStore {
+            accounts: vec![
+                keyset_account(id_a, data_a.clone()),
+                keyset_account(id_b, data_b.clone()),
+            ],
+            ..RecordingStore::default()
+        };
+        let refused_calls = Arc::new(Calls::default());
+        let refused_provider = CountedProvider::mldsa(Arc::clone(&refused_calls));
+        assert_eq!(
+            evaluate_native_transaction_proofs::<2, 2, 2>(
+                &refused,
+                &refused_store,
+                &refused_provider,
+                limits,
+            ),
+            Err(NativeTransactionProofError::KeysetProof(
+                KeysetProofEvaluationError::InsufficientVerifiedWeight
+            ))
+        );
+        assert_eq!(
+            &*refused_store.reads.borrow(),
+            &[(id_a, account_size), (id_b, account_size)]
+        );
+        assert_eq!(refused_calls.lookups.load(Ordering::SeqCst), 4);
+        assert_eq!(refused_calls.descriptors.load(Ordering::SeqCst), 4);
+        assert_eq!(refused_calls.verifications.load(Ordering::SeqCst), 8);
+        assert_store_read_only(&refused_store);
+        assert_eq!(refused, original_refused);
+
+        let mut accepted = body;
+        accepted.auths = vec![
+            auth(0, sig_a1.clone()),
+            auth(0, sig_a2),
+            auth(1, sig_b1.clone()),
+            auth(1, sig_b2),
+        ];
+        let original_accepted = accepted.clone();
+        let accepted_store = RecordingStore {
+            accounts: vec![keyset_account(id_a, data_a), keyset_account(id_b, data_b)],
+            ..RecordingStore::default()
+        };
+        let accepted_calls = Arc::new(Calls::default());
+        let accepted_provider = CountedProvider::mldsa(Arc::clone(&accepted_calls));
+        assert_eq!(
+            evaluate_native_transaction_proofs::<2, 2, 2>(
+                &accepted,
+                &accepted_store,
+                &accepted_provider,
+                limits,
+            ),
+            Ok(NativeTransactionProofSummary {
+                required_signer_index_count: 2,
+                distinct_keyset_account_count: 2,
+                evaluated_authentication_proof_count: 4,
+            })
+        );
+        assert_eq!(
+            &*accepted_store.reads.borrow(),
+            &[(id_a, account_size), (id_b, account_size)]
+        );
+        assert_eq!(accepted_calls.lookups.load(Ordering::SeqCst), 4);
+        assert_eq!(accepted_calls.descriptors.load(Ordering::SeqCst), 4);
+        assert_eq!(accepted_calls.verifications.load(Ordering::SeqCst), 8);
+        assert_store_read_only(&accepted_store);
+        assert_eq!(accepted, original_accepted);
     }
 
     #[test]
@@ -1254,6 +1691,7 @@ mod run422_native_tx_proof_tests {
         let (key, _secret) = MlDsa44Backend::generate_keypair().unwrap();
         let id = [0xE6; 32];
         let tx = with_auths(transaction(&[(id, true)]), &[(0, vec![0x42; 2420])]);
+        let original_tx = tx.clone();
         let calls = Arc::new(Calls::default());
         let provider = CountedProvider::mldsa(Arc::clone(&calls));
 
@@ -1267,7 +1705,7 @@ mod run422_native_tx_proof_tests {
         assert_eq!(unsupported.legacy_gets.get(), 0);
         assert_eq!(unsupported.puts.get(), 0);
         assert_eq!(unsupported.deletes.get(), 0);
-        assert_eq!(calls.verifications.load(Ordering::SeqCst), 0);
+        assert_no_provider_work(&calls);
 
         let missing = RecordingStore::default();
         assert_eq!(
@@ -1280,6 +1718,8 @@ mod run422_native_tx_proof_tests {
             &*missing.reads.borrow(),
             &[(id, limits(1).stored_keyset.max_encoded_bytes)]
         );
+        assert_store_read_only(&missing);
+        assert_no_provider_work(&calls);
 
         let backend = RecordingStore {
             read_error: Some(BoundedReadError::Backend),
@@ -1291,6 +1731,12 @@ mod run422_native_tx_proof_tests {
                 KeysetAccountReadError::Backend
             ))
         );
+        assert_eq!(
+            &*backend.reads.borrow(),
+            &[(id, limits(1).stored_keyset.max_encoded_bytes)]
+        );
+        assert_store_read_only(&backend);
+        assert_no_provider_work(&calls);
 
         let mut configured = limits(1);
         configured.stored_keyset.max_encoded_bytes = 1;
@@ -1304,6 +1750,9 @@ mod run422_native_tx_proof_tests {
                 KeysetAccountReadError::Oversized
             ))
         );
+        assert_eq!(&*oversized.reads.borrow(), &[(id, 1)]);
+        assert_store_read_only(&oversized);
+        assert_no_provider_work(&calls);
 
         let malformed = RecordingStore {
             accounts: vec![keyset_account(id, vec![1, 2, 3])],
@@ -1315,6 +1764,12 @@ mod run422_native_tx_proof_tests {
                 StoredKeysetParseError::Malformed(_)
             ))
         ));
+        assert_eq!(
+            &*malformed.reads.borrow(),
+            &[(id, limits(1).stored_keyset.max_encoded_bytes)]
+        );
+        assert_store_read_only(&malformed);
+        assert_no_provider_work(&calls);
 
         let too_many_entries = RecordingStore {
             accounts: vec![keyset_account(id, keyset(1, &[(1, &key), (1, &key)]))],
@@ -1333,12 +1788,14 @@ mod run422_native_tx_proof_tests {
                 StoredKeysetParseError::EntryCountLimit
             ))
         );
+        assert_store_read_only(&too_many_entries);
+        assert_no_provider_work(&calls);
 
         for (max_key_bytes, max_total_key_bytes, expected) in [
             (0, 2 * key.len(), StoredKeysetParseError::PerKeyBytesLimit),
             (
                 key.len(),
-                key.len() - 1,
+                2 * key.len() - 1,
                 StoredKeysetParseError::AggregateKeyBytesLimit,
             ),
         ] {
@@ -1356,6 +1813,8 @@ mod run422_native_tx_proof_tests {
                 Err(NativeTransactionProofError::KeysetParse(expected))
             );
         }
+        assert_store_read_only(&too_many_entries);
+        assert_no_provider_work(&calls);
 
         let trailing = RecordingStore {
             accounts: vec![keyset_account(id, {
@@ -1371,6 +1830,12 @@ mod run422_native_tx_proof_tests {
                 StoredKeysetParseError::Malformed(_)
             ))
         ));
+        assert_eq!(
+            &*trailing.reads.borrow(),
+            &[(id, limits(1).stored_keyset.max_encoded_bytes)]
+        );
+        assert_store_read_only(&trailing);
+        assert_no_provider_work(&calls);
 
         let mut capacity_limits = limits(1);
         capacity_limits.stored_keyset.max_entries = 2;
@@ -1387,9 +1852,18 @@ mod run422_native_tx_proof_tests {
                 NativeTransactionProofStructureError::EntryWorkspaceCapacity
             ))
         );
-        assert_eq!(capacity_calls.lookups.load(Ordering::SeqCst), 0);
-        assert_eq!(capacity_calls.descriptors.load(Ordering::SeqCst), 0);
-        assert_eq!(capacity_calls.verifications.load(Ordering::SeqCst), 0);
+        assert_eq!(
+            &*too_many_entries.reads.borrow(),
+            &[
+                (id, limits(1).stored_keyset.max_encoded_bytes),
+                (id, limits(1).stored_keyset.max_encoded_bytes),
+                (id, limits(1).stored_keyset.max_encoded_bytes),
+                (id, limits(1).stored_keyset.max_encoded_bytes),
+            ]
+        );
+        assert_store_read_only(&too_many_entries);
+        assert_no_provider_work(&capacity_calls);
+        assert_eq!(tx, original_tx);
     }
 
     #[test]
@@ -1428,9 +1902,92 @@ mod run422_native_tx_proof_tests {
                 evaluate_native_transaction_proofs::<1, 1, 1>(&tx, store, &provider, limits(1),),
                 Err(NativeTransactionProofError::AccountRead(expected))
             );
-            assert_eq!(calls.verifications.load(Ordering::SeqCst), 0);
+            assert_eq!(
+                &*store.reads.borrow(),
+                &[(id, limits(1).stored_keyset.max_encoded_bytes)]
+            );
+            assert_store_read_only(store);
+            assert_no_provider_work(&calls);
             reset(&calls);
         }
+        assert_eq!(
+            tx,
+            with_auths(transaction(&[(id, true)]), &[(0, vec![0x42; 2420])])
+        );
+    }
+
+    #[test]
+    fn run422_native_tx_proof_signed_metadata_mutation_requires_resigning() {
+        let (key, secret) = MlDsa44Backend::generate_keypair().unwrap();
+        let id = [0xE7; 32];
+        let body = transaction(&[(id, true)]);
+        let signature = sign(&secret, &body);
+        let mut mutated = body;
+        mutated.accounts[0].access_hint = 1;
+        mutated.auths.push(auth(0, signature));
+        let original_mutated = mutated.clone();
+        let account_size = keyset(1, &[(1, &key)]).len();
+        let store = RecordingStore {
+            accounts: vec![keyset_account(id, keyset(1, &[(1, &key)]))],
+            ..RecordingStore::default()
+        };
+        let calls = Arc::new(Calls::default());
+        let provider = CountedProvider::mldsa(Arc::clone(&calls));
+        let mut configured = limits(1);
+        configured.max_signature_bytes = mutated.auths[0].signature.len();
+        configured.max_aggregate_signature_bytes = mutated.auths[0].signature.len();
+
+        assert_eq!(
+            evaluate_native_transaction_proofs::<1, 1, 1>(&mutated, &store, &provider, configured,),
+            Err(NativeTransactionProofError::KeysetProof(
+                KeysetProofEvaluationError::InvalidProof
+            ))
+        );
+        assert_eq!(
+            &*store.reads.borrow(),
+            &[(id, configured.stored_keyset.max_encoded_bytes)]
+        );
+        assert_eq!(calls.lookups.load(Ordering::SeqCst), 1);
+        assert_eq!(calls.descriptors.load(Ordering::SeqCst), 1);
+        assert_eq!(calls.verifications.load(Ordering::SeqCst), 1);
+        assert_store_read_only(&store);
+        assert_eq!(mutated, original_mutated);
+        let changed_body = {
+            let mut tx = mutated.clone();
+            tx.auths.clear();
+            tx
+        };
+        let mut resigned = changed_body;
+        let resigned_signature = sign(&secret, &resigned);
+        resigned.auths.push(auth(0, resigned_signature));
+        let original_resigned = resigned.clone();
+        let accepted_store = RecordingStore {
+            accounts: vec![keyset_account(id, keyset(1, &[(1, &key)]))],
+            ..RecordingStore::default()
+        };
+        let accepted_calls = Arc::new(Calls::default());
+        let accepted_provider = CountedProvider::mldsa(Arc::clone(&accepted_calls));
+        assert_eq!(
+            evaluate_native_transaction_proofs::<1, 1, 1>(
+                &resigned,
+                &accepted_store,
+                &accepted_provider,
+                configured,
+            ),
+            Ok(NativeTransactionProofSummary {
+                required_signer_index_count: 1,
+                distinct_keyset_account_count: 1,
+                evaluated_authentication_proof_count: 1,
+            })
+        );
+        assert_eq!(
+            &*accepted_store.reads.borrow(),
+            &[(id, configured.stored_keyset.max_encoded_bytes)]
+        );
+        assert_eq!(accepted_calls.verifications.load(Ordering::SeqCst), 1);
+        assert_store_read_only(&accepted_store);
+        assert_eq!(resigned, original_resigned);
+        assert_eq!(account_size, store.accounts[0].data.len());
     }
 
     #[test]
