@@ -4220,3 +4220,57 @@ activation DISABLED; public DevNet NO-GO; durable anti-rollback NOT-ESTABLISHED;
 C4/C5 OPEN; RS1 OPEN. All limits UNAPPROVED. No F1/F2 closure, deployed-path
 readiness, production integration, PR, merge, main/force push, activation,
 deployment or release approval.
+
+### RUN 422 — Native governance signer authentication is not operation authority
+
+**DRAFT / NOT APPROVED / NOT IMPLEMENTED.** New source/test characterization
+exercises the native `qbind_wire::tx::Transaction` path through actual
+`TxExecutor::execute_transaction`, `ExecutionContext::verify_tx_auth`,
+`verify_transaction_auth`, and the four registered `GovernanceProgram`
+handlers. Genuine ML-DSA-44 ordinary signer authentication succeeded for suite
+status, parameter registry, launch checklist and mainnet status operations.
+The test-local witness observed a signer-keyset read, fixed target read, and one
+target write per successful operation; no council keyset/member or payer reads.
+Every complete target header, unrelated account/map entry and transaction wire
+image was checked. This establishes only the tested library route, not approved
+governance, selected executable/network reachability, a production exploit or a
+consensus safety violation.
+
+The four call codecs sign `proposal_id` and `eta_height` as part of call_data:
+unsigned alterations fail genuine signature verification. Re-signed variants
+are accepted; no proposal decision, current council membership, replay
+consumption, trusted height or timelock is consulted by these handlers.
+Identical signed parameter-setter replay is accepted twice, with a fresh
+signature verification and target write on each execution; second state is
+equal to first. This is an idempotent setter replay result, not double-spend or
+value-loss evidence. Current source separately authenticates transaction-
+declared signer keysets; it does not bind those signer declarations to
+privileged governance authority.
+
+The test, source references, evidence levels, historical distinctions and
+unresolved requirements are in
+`docs/devnet/QBIND_RUN_422_NATIVE_GOVERNANCE_AUTHORITY_CONTRACT.md`. It proposes
+one bounded next phase only: a production unavailable/refusal boundary before
+the four native governance handlers, failing closed until independently
+admitted authority is available. Positive authority implementation remains
+separate, unapproved and unimplemented. No threshold, root, delay, activation
+height, wire field, authority token, or policy was selected. Payer, nonce/fee,
+keyset creation and validator-registration authority remain independent open
+obligations.
+
+Test-source commit `c279c7be1cc415032975f162109e5e2c3f9c6ed0`,
+tree `3a08eca808d2e84c80d5b9f969289f0c21f8c0de`: focused target 5/5 passed;
+combined runtime/system 122 passed, 1 existing ignored, 0 failed; scoped
+rustfmt and CRLF-aware whitespace checks passed. These counts overlap.
+`qbind-gov` upgrade-envelope verification, node trust-bundle governance, and
+consensus Proposal/Vote authority are separate and do not authorize this native
+route. The existing native admission contract and all posture markers remain
+unchanged; no production behavior, existing test, manifest, dependency,
+feature, wire/signing format, network or deployment changed.
+
+D7D14_STORAGE_COMPONENT=IMPLEMENTED-ISOLATED;
+D7D14_STORAGE_ACCEPTANCE=PASS-ACCEPTED-SUBSET; §13.6 whole-lifecycle INCOMPLETE;
+activation DISABLED; public DevNet NO-GO; durable anti-rollback NOT-ESTABLISHED;
+C4/C5 OPEN; RS1 OPEN. Whole native admission contract remains **DRAFT / NOT
+APPROVED / NOT IMPLEMENTED**; all limits UNAPPROVED. No F1/F2 or C4/C5 closure,
+production authorization, deployed-path readiness, or release approval.

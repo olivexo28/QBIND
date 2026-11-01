@@ -922,3 +922,67 @@ D7D14_STORAGE_ACCEPTANCE=PASS-ACCEPTED-SUBSET; §13.6 whole-lifecycle INCOMPLETE
 activation DISABLED; public DevNet NO-GO; durable anti-rollback NOT-ESTABLISHED;
 C4/C5 OPEN; RS1 OPEN. All limits UNAPPROVED. No F1/F2 closure, deployed-path
 readiness, PR, merge, main/force push, activation, deployment or release approval.
+
+## RUN 422 — Native governance authority characterization
+
+**DRAFT / NOT APPROVED / NOT IMPLEMENTED.** The new source/test characterization
+is limited to `qbind_wire::tx::Transaction` through the real
+`TxExecutor::execute_transaction` and registered `GovernanceProgram`. Genuine
+ML-DSA-44 controls show that transaction-declared signer-keyset authentication
+passes independently of the privileged governance authority question. Each of
+the four existing native operations succeeded with an ordinary signer distinct
+from the seeded 5-of-7 council identifiers and no supplied approval capability.
+The witness recorded reads only of the signer keyset and fixed operation target,
+then one target write; council keyset/member and payer accounts were not read.
+Complete non-target state, account headers, transaction values and wire bytes
+were preserved.
+
+`proposal_id` and `eta_height` are encoded into signed `call_data`: changing
+either without re-signing failed genuine authentication. Re-signed variants
+(including proposal ID `u64::MAX` and ETA 0) succeeded with unchanged target
+outcomes. The native context has no trusted execution height, and handlers do
+not consult proposal approval, council membership, timelock or replay state.
+The exact signed parameter-setter transaction was accepted twice with fresh
+verification and one write each; its second write produced no further logical
+state change. This is executor/handler source-test evidence, not approved
+governance, deployed exposure, exploit, or consensus safety violation.
+
+New test: `crates/qbind-runtime/tests/run_422_native_governance_authority_contract_tests.rs`.
+New draft contract and bounded next fail-closed-boundary proposal:
+`docs/devnet/QBIND_RUN_422_NATIVE_GOVERNANCE_AUTHORITY_CONTRACT.md`. The tests
+exercise the actual `TxExecutor`, not only direct `Program::execute`; existing
+system governance handler tests remain separate. The inspected node
+`Node::apply_block`/`BlockExecutor` path is not a demonstrated executable or
+network call site; EVM block execution, upgrade envelopes, trust-bundle
+governance and consensus Proposal/Vote authority remain separate mechanisms.
+The existing historical evidence is neither reclassified nor rerun.
+
+Proposed future requirements include independently admitted authority, exact
+network/position and operation/target/parameter/proposal binding, current
+membership and provider interpretation, owner-approved threshold/identity
+semantics, trusted height/timelock, one-use replay consumption, common-state
+evaluation and atomic publication, fail-closed local inability and explicit
+uncertain-outcome/restart/rollback limits. Payer, nonce/fee, keyset-creation
+and validator-registration rights remain separate unresolved obligations.
+The sole next proposal is a production unavailable/refusal gate immediately
+before the four governance dispatch handlers, with positive authority execution
+deferred to a later approved phase. Nothing in that proposal is implemented.
+
+Producing test source revision:
+`c279c7be1cc415032975f162109e5e2c3f9c6ed0`,
+tree `3a08eca808d2e84c80d5b9f969289f0c21f8c0de`. Required focused runtime test:
+exit 0, selected/passed 5/5, failed/ignored 0. Required combined runtime/system
+suite: exit 0, selected 123, passed 122, failed 0, ignored 1 (one pre-existing
+ignored runtime gas-model doctest). Counts overlap. Rustfmt and both
+CRLF-aware whitespace checks exit 0. The first focused compile attempt in this
+iteration failed before test selection with E0369 because `ExecutionError` does
+not implement `PartialEq`; the test was corrected to assert exact error variant
+and message. Its required-command rerun passed; no production or existing test
+was changed. Full commands, counts and source attribution are appended in D7.
+
+Preserved: D7D14_STORAGE_COMPONENT=IMPLEMENTED-ISOLATED;
+D7D14_STORAGE_ACCEPTANCE=PASS-ACCEPTED-SUBSET; §13.6 whole-lifecycle INCOMPLETE;
+activation DISABLED; public DevNet NO-GO; durable anti-rollback NOT-ESTABLISHED;
+C4/C5 OPEN; RS1 OPEN. Whole native admission contract remains **DRAFT / NOT
+APPROVED / NOT IMPLEMENTED**. All limits remain UNAPPROVED. No F1/F2 or C4/C5
+closure, production authorization, deployed-path readiness, or release approval.

@@ -24242,3 +24242,235 @@ activation DISABLED; public DevNet NO-GO; durable anti-rollback NOT-ESTABLISHED;
 C4/C5 OPEN; RS1 OPEN. All limits UNAPPROVED. No F1/F2 closure, deployed-path
 readiness, production integration, PR, merge, main/force push, activation,
 deployment or release approval.
+
+## RUN 422 — Native governance authority characterization (test-and-contract)
+
+**DRAFT / NOT APPROVED / NOT IMPLEMENTED.** Scope is only native
+`qbind_wire::tx::Transaction`; production Rust and existing tests are unchanged.
+No governance was enabled, no policy approved, no isolated native admission/
+staging model integrated, and no public-network, deployment or executable
+experiment performed.
+
+### Starting identity and call path
+
+Initial checkout was clean at task baseline
+`af5f739076263ce9b46406650d019a91243de851`; `HEAD^{tree}` exactly matched
+`a0e0023779ebd325768233e6fb1365dd7fa16739`. The commit/tree objects and
+correspondence were checked independently. Origin fetch/push is
+`https://github.com/olivexo28/QBIND`. The raw baseline commit header names parent
+`2903b50f8aaeb857349da76d1e968d0bc5585435`; that parent object is available.
+The shallow file marks `2903b50f8aaeb857349da76d1e968d0bc5585435` as the shallow
+boundary; no earlier ancestry is inferred. The required starting commit is an
+ancestor of the tested source commit, independently checked with Git ancestry
+commands. No applicable `AGENTS.md` was found. Only the task branch
+`copilot/run-422-native-governance-authority-contract` is in scope.
+
+Source route:
+
+```text
+crates/qbind-runtime/src/lib.rs
+TxExecutor::execute_transaction
+  -> crates/qbind-ledger/src/context.rs
+     ExecutionContext::verify_tx_auth
+  -> crates/qbind-ledger/src/auth.rs
+     verify_transaction_auth -> verify_single_auth
+  -> registered GovernanceProgram::execute
+  -> opcode-selected governance handler
+  -> AccountStore::put(fixed governance target)
+```
+
+`TxExecutor` registers the native GovernanceProgram and authenticates before
+program lookup/dispatch. The auth verifier selects accounts only from each
+caller-declared `TxAuth.account_index` and `Transaction.accounts` entry with
+signer bit 0 set. It loads and decodes that keyset, selects the first matching
+suite ID and verifies the transaction signing-body digest. It does not bind
+the caller-declared signer to the council or operation, enforce keyset
+threshold weights or establish independent governance authority. `tx.payer`
+and `tx.nonce` are not checked/consumed here.
+
+The four wire codecs encode/decode proposal ID and ETA:
+
+| Opcode | Handler | Fixed target | Target fields changed on success |
+|---|---|---|---|
+| `OP_GOV_UPDATE_SUITE_STATUS` (`0x20`) | `handle_update_suite_status` | `SUITE_REGISTRY_ACCOUNT_ID` | One matching `SuiteEntry.status` (0 Active / 1 Legacy / 2 Disabled). |
+| `OP_GOV_UPDATE_PARAM_REGISTRY` (`0x21`) | `handle_update_param_registry` | `PARAM_REGISTRY_ACCOUNT_ID` | `slash_bps_prevote`, `slash_bps_precommit`, `reporter_reward_bps`. |
+| `OP_GOV_UPDATE_LAUNCH_CHECKLIST` (`0x22`) | `handle_update_launch_checklist` | `LAUNCH_CHECKLIST_ACCOUNT_ID` | Seven checklist flags and seven report hashes. |
+| `OP_GOV_SET_MAINNET_STATUS` (`0x23`) | `handle_set_mainnet_status` | `PARAM_REGISTRY_ACCOUNT_ID` | `mainnet_status` (PreGenesis / Ready / Activated). |
+
+Each handler parses its complete call and rejects trailing bytes, reads the
+fixed target, decodes state and checks for trailing state bytes, applies the
+above edits and reaches its first store mutation at `ctx.store.put(account)`.
+The Suite handler additionally validates the status enum and finds the suite
+entry before the write; Mainnet status enum errors arise during call decode.
+Other pre-write error categories include handler-specific
+`InvalidCallData("invalid <call type>")`, fixed-target `AccountNotFound`,
+target `SerializationError`, unsupported dispatch
+`ProgramError("unsupported governance opcode")`, and executor auth errors.
+No handler uses proposal ID or ETA after decoding. No handler reads
+`SAFETY_COUNCIL_KEYSET_ACCOUNT_ID`, council member IDs, proposal approval,
+timelock, trusted execution height, nonce/replay state or consumed-decision
+state. The context has no trusted height argument. A field-only change to
+LaunchChecklist or MainnetStatus is not launch approval or node/network
+activation.
+
+### Reachability and separate mechanisms
+
+`qbind-node::Node::apply_block` contains a library route that decodes wire
+Transactions and delegates to `BlockExecutor`; the inspected in-repository
+callers are block-apply tests, not the node executable. The inspected
+`qbind-node/src/main.rs` does not instantiate/call this `TxExecutor` path.
+The network simulation's `execution_adapter` uses a distinct EVM
+`QbindBlock`/`ExecutionEngine` route. These facts establish source/library
+surfaces only, not selected executable, ingress, release-binary or network
+reachability. Runtime executor tests exercise the exact public TxExecutor API;
+existing `qbind-system` governance tests call `Program::execute` directly and
+remain handler-only controls.
+
+`qbind-runtime` has no `qbind-gov` dependency. `qbind-gov::verify_envelope`
+handles an off-chain protocol-upgrade envelope, not these native program calls.
+Node trust-bundle governance proof/evaluator/policy APIs are distinct lifecycle
+surfaces; no result is threaded into GovernanceProgram. Consensus Proposal/
+Vote authority is also separate. Existing protocol governance audits and the
+Run 422 native admission contract are historical, adjacent evidence only; none
+was recursively audited or modified here. Do not equate any envelope, fixture
+Boolean, history record, trust-bundle proof or generic “authorized” token with
+native governance permission.
+
+### Newly executed real-executor evidence
+
+New test source:
+`crates/qbind-runtime/tests/run_422_native_governance_authority_contract_tests.rs`.
+It creates genuine ML-DSA-44 keys and signs the actual full transaction signing
+body. Authorizing keysets are existing, one-entry, threshold-one keysets with
+correct keyset-program owner and non-executable account metadata. Ordinary
+signer IDs are distinct from the seeded, well-formed 5-of-7 council keyset and
+seven member IDs. A test-local witness store records `get`, `put`, and `delete`;
+fixture setup and direct complete-map preservation checks are excluded from
+observations. The counting suite delegates verification to the real
+`MlDsa44SignatureSuite`.
+
+| New test | Executed result |
+|---|---|
+| `all_four_native_governance_operations_execute_through_tx_executor` | Each genuine call succeeds through TxExecutor. Exact typed target state and complete target account (including owner, lamports, executable, rent epoch, reserved header and data) are checked; every non-target account is identical. Transaction struct and full encoded bytes are unchanged. Exactly the ordinary signer keyset and fixed target are read, one target is written, none deleted; no council/member/payer read occurs. |
+| `each_operation_authentication_refusal_is_exact_and_recoverable` | For each opcode, empty auth returns exact `InvalidCallData("transaction requires at least one authentication entry")`, with zero reads/verifications/writes/deletes. A tampered genuine signature returns exact `CryptoError("signature verification failed")` after one real verification and signer read only. Full state and attempted transaction are unchanged at each refusal; restoring genuine input succeeds. |
+| `signed_malformed_calls_and_unsupported_dispatch_refuse_before_effects` | Every truncated, genuinely re-signed operation reaches its handler and returns its exact handler-specific `InvalidCallData("invalid <call type>")`; no target read or mutation. Re-signed unsupported opcode returns exact `ProgramError("unsupported governance opcode")`. Re-signed invalid SuiteStatus reaches handler, reads the target, returns exact `InvalidCallData("invalid SuiteStatus")`, and makes no write/delete. Valid control calls then succeed. |
+| `proposal_id_and_eta_are_signed_but_not_admission_inputs` | Per operation, modifying either signed field without resigning changes `tx_digest` and returns signature-verification `CryptoError` before target read. Per operation, separately genuinely re-signed proposal ID `u64::MAX` and ETA 0 variants succeed with identical target output. No proposal approval or execution-height input is consulted. ETA 0 is not described as premature at any height. |
+| `identical_complete_signed_transaction_is_accepted_twice` | Identical complete parameter-registry setter transaction succeeds twice; each attempt performs a fresh real signature verification, reads signer and target, and writes the target once. The complete state after execution two equals execution one. This is an accepted second idempotent write, not a second logical state transition, double spend or value loss. No nonce/proposal-consumption state is consulted. |
+
+The errors and observations are immediate after each executor refusal; no
+preservation-oracle reads contaminate the recorded attempt. The test-local
+counter does not alter production behavior. No fake success verifier, direct
+Program-only substitute, existing-test edit, arbitrary verifier bypass,
+consensus inference or production finding ID is introduced.
+
+### Draft boundary and remaining decisions
+
+Future privileged mutation requires independently admitted authority provenance,
+not transaction-declared signer flags; exact network and authenticated execution
+position; exact operation, target, parameters and proposal/decision
+correspondence; current membership and governed suite/provider interpretation;
+approved threshold and duplicate-identity semantics; trusted height and any
+approved timelock; replay/one-use decision consumption; common-state evaluation
+and atomic publication of consumption plus effects; fail-closed behavior when
+authority/currentness/backend support is unavailable; local-inability versus
+deterministic-disposition separation; and explicit cancellation, uncertain
+outcome, restart and rollback limits. No threshold, council size, delay,
+activation height, root, wire field or cryptographic construction is selected.
+Payer, nonce/fee, keyset-creation and validator-registration authority remain
+separate unresolved obligations.
+
+The single bounded next proposal is a **production unavailable/refusal
+boundary** at `GovernanceProgram::execute` immediately before the four handler
+branches and all governed writes. Until independently admitted authority with
+the required binding is available, all four operations would refuse before
+mutation. Compatibility consequence: today-successful setter calls would stop
+succeeding until a separate positive authority design is approved. Proposed
+next-phase allowlist only:
+
+```text
+crates/qbind-system/src/governance_program.rs
+crates/qbind-system/tests/native_governance_unavailable_tests.rs
+crates/qbind-runtime/tests/native_governance_unavailable_executor_tests.rs
+```
+
+Acceptance should invoke all four operations through real TxExecutor with
+genuine signer signatures, assert exact unavailable error, zero writes/deletes,
+complete state/transaction preservation and no authority-state claim, plus
+retain malformed/unsupported error ordering. Positive authority evaluation,
+one-use consumption, persistent atomicity and recovery remain a later separate
+approved implementation; this unavailable-boundary proposal is not that work.
+
+### Validation on final test source
+
+Producing source commit:
+`c279c7be1cc415032975f162109e5e2c3f9c6ed0`,
+tree `3a08eca808d2e84c80d5b9f969289f0c21f8c0de`.
+All focused tests were selected. Counts overlap; the focused target is included
+in the combined package run.
+
+```text
+LIBCLANG_PATH=/usr/lib/llvm-18/lib cargo test --locked -p qbind-runtime --test run_422_native_governance_authority_contract_tests -- --nocapture --test-threads=1
+exit 0; selected 5; passed 5; failed 0; ignored 0
+
+LIBCLANG_PATH=/usr/lib/llvm-18/lib cargo test --locked -p qbind-runtime -p qbind-system
+exit 0; selected 123; passed 122; failed 0; ignored 1
+runtime: 108 passed; system: 14 passed; one existing ignored runtime gas-model doctest
+
+rustfmt --check --edition 2021 crates/qbind-runtime/tests/run_422_native_governance_authority_contract_tests.rs
+exit 0; formatting check only, no test counts
+
+git -c core.whitespace=cr-at-eol diff --check
+exit 0; no whitespace errors
+
+git -c core.whitespace=cr-at-eol diff --check af5f739076263ce9b46406650d019a91243de851 HEAD
+exit 0; no starting-to-tested whitespace errors
+```
+
+The first focused compilation attempt in this iteration failed before test
+selection with E0369: `ExecutionError` does not implement `PartialEq`. The
+test-only helper was corrected to compare exact error variants and messages;
+the required focused command reran successfully. No initial toolchain or
+dependency/environment failure occurred. The existing suite's one ignored
+doctest is retained; no broader ledger/node suite or Miri run was requested.
+
+### Append-only preservation and final posture
+
+This appendix is appended to the starting D7 document without rewriting its
+prior evidence. Starting D7 bytes remain an exact prefix, mode `100644`, CRLF,
+without terminal newline. The new state-contract and contradiction appendices
+likewise preserve their complete starting bytes, modes, LF convention and
+terminal-newline states. The separate new draft contract is LF with a terminal
+newline. Delivered Rust and existing source/tests outside the single new test
+path remain unchanged; full final manifest and final commit/tree are reported
+after the evidence-only commit.
+
+Preserved exactly: D7D14_STORAGE_COMPONENT=IMPLEMENTED-ISOLATED;
+D7D14_STORAGE_ACCEPTANCE=PASS-ACCEPTED-SUBSET; §13.6 whole-lifecycle INCOMPLETE;
+activation DISABLED; public DevNet NO-GO; durable anti-rollback NOT-ESTABLISHED;
+C4/C5 OPEN; RS1 OPEN. Whole native admission contract remains **DRAFT / NOT
+APPROVED / NOT IMPLEMENTED**. All limits UNAPPROVED. No F1/F2 or C4/C5 closure,
+production authorization, deployed-path readiness, PR, merge, main/force push,
+activation, deployment, or release approval.
+
+## Source-identification correction
+
+I withdraw the earlier identification above of `hotstuff_node_sim`'s
+`execution_adapter` route as EVM. Source shows a separate ledger route:
+`crates/qbind-node/src/execution_adapter.rs:71-76` imports ledger
+`ExecutionEngine`, `QbindTransaction`, and `VmV0ExecutionEngine`; `:166-175`
+defines `QbindBlock.txs: Vec<QbindTransaction>`; and `:341-350` invokes the
+ledger engine for each transaction. The async worker constructs
+`VmV0ExecutionEngine` at `execution_adapter.rs:865-866`.
+`hotstuff_node_sim.rs:3118-3127,3153-3156` creates the QbindBlock from
+decoded ledger transactions and submits it to the async service or sync
+adapter.
+
+Distinguish (1) native `qbind_wire::tx::Transaction` / `TxExecutor` /
+`GovernanceProgram`; (2) ledger `QbindTransaction` / execution-adapter /
+nonce-or-VM execution; and (3) runtime `QbindTx` / EVM execution, using
+`RevmExecutionEngine` (`crates/qbind-runtime/src/qbind_tx.rs:43-52`;
+`crates/qbind-runtime/src/revm_engine.rs:100-103`). This corrects source
+identification only: governance characterization is unchanged, no deployed
+reachability is established, and no new executed evidence is added.
+Historical validation remains attributed to
+`c279c7be1cc415032975f162109e5e2c3f9c6ed0`.
