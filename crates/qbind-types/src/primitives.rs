@@ -4,6 +4,9 @@ pub type AccountId = [u8; 32];
 pub type ProgramId = [u8; 32];
 pub type Hash32 = [u8; 32];
 
+/// Hard-coded ProgramId for the keyset system program.
+pub const KEYSET_PROGRAM_ID: ProgramId = [0x4B; 32]; // 'K'
+
 // ============================================================================
 // ChainId - T159: Chain ID for domain separation
 // ============================================================================
