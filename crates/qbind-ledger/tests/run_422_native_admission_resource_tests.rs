@@ -57,6 +57,7 @@ impl CryptoCounts {
     }
 
     fn assert_work(&self, descriptors: usize, verifications: usize) {
+        assert_eq!(self.lookups.load(Ordering::SeqCst), descriptors);
         assert_eq!(self.descriptors.load(Ordering::SeqCst), descriptors);
         assert_eq!(self.verifications.load(Ordering::SeqCst), verifications);
     }
@@ -415,6 +416,7 @@ fn run422_native_resource_eight_groups_full_descriptor_and_signature_scan() {
     let tx = signed_transaction(&ids, &signers, Vec::new());
     let tx_before = tx.clone();
     let provider = CountedProvider::new();
+    let limits = native_limits();
 
     timed_repetitions(
         "eight-groups-16-keys-8-proofs",
@@ -425,10 +427,7 @@ fn run422_native_resource_eight_groups_full_descriptor_and_signature_scan() {
         },
         |_| {
             let result = evaluate_native_transaction_proofs::<GROUPS, PROOFS, ENTRIES>(
-                &tx,
-                &store,
-                &provider,
-                native_limits(),
+                &tx, &store, &provider, limits,
             )
             .expect("all eight genuine groups verify");
             assert_summary(result, 8, 8, 8);
@@ -477,6 +476,7 @@ fn run422_native_resource_all_proofs_run_after_threshold_and_late_invalid_refuse
     let tx = signed_transaction(&ids, &signers, Vec::new());
     let tx_before = tx.clone();
     let provider = CountedProvider::new();
+    let limits = native_limits();
 
     timed_repetitions(
         "one-group-16-keys-8-proofs-threshold-1",
@@ -487,10 +487,7 @@ fn run422_native_resource_all_proofs_run_after_threshold_and_late_invalid_refuse
         },
         |_| {
             let result = evaluate_native_transaction_proofs::<GROUPS, PROOFS, ENTRIES>(
-                &tx,
-                &store,
-                &provider,
-                native_limits(),
+                &tx, &store, &provider, limits,
             )
             .expect("all eight genuine proofs are checked");
             assert_summary(result, 8, 1, 8);
@@ -687,6 +684,8 @@ fn run422_native_resource_genuine_create_preparation_and_composed_evaluation() {
     let expected_requested_bytes = expected.data.len();
     let actual_key_bytes = keys[0].0.len();
     let create_input_bytes = call_data.len();
+    let observed_output_len = Cell::new(0);
+    let observed_output_capacity = Cell::new(0);
 
     timed_repetitions(
         "create-preparation-16-genuine-keys-threshold-8",
@@ -698,13 +697,15 @@ fn run422_native_resource_genuine_create_preparation_and_composed_evaluation() {
             assert_eq!(prepared, expected);
             assert_eq!(prepared.data.len(), expected_requested_bytes);
             provider.counts.assert_work(16, 0);
-            println!(
-                "RUN422 create-output logical_len={} requested_reservation={} observed_capacity={}",
-                prepared.data.len(),
-                expected_requested_bytes,
-                prepared.data.capacity()
-            );
+            observed_output_len.set(prepared.data.len());
+            observed_output_capacity.set(prepared.data.capacity());
         },
+    );
+    println!(
+        "RUN422 create-output logical_len={} requested_reservation={} observed_capacity={}",
+        observed_output_len.get(),
+        expected_requested_bytes,
+        observed_output_capacity.get()
     );
 
     let unreachable = create_call_data(id, &keys, 9);
@@ -728,6 +729,7 @@ fn run422_native_resource_genuine_create_preparation_and_composed_evaluation() {
         .collect::<Vec<_>>();
     let tx = signed_transaction(&ids, &signers, Vec::new());
     let tx_before = tx.clone();
+    let proof_limits = native_limits();
 
     timed_repetitions(
         "prepared-account-8-proof-composition",
@@ -742,7 +744,7 @@ fn run422_native_resource_genuine_create_preparation_and_composed_evaluation() {
                     &tx,
                     &store,
                     &provider,
-                    native_limits(),
+                    proof_limits,
                 )
                 .expect("prepared 16-entry account verifies eight distinct genuine proofs"),
                 8,
