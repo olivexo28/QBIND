@@ -23252,3 +23252,73 @@ Initial attempts of the prescribed ledger-test and node-check commands exited 10
 Final delivery checks: both authorized evidence documents retain their complete baseline bytes as exact prefixes, original modes and EOL/EOF conventions; Rust blobs exactly match the tested IDs above. CRLF-aware working-tree and baseline-to-final whitespace checks passed. The complete final path/mode/blob manifest is reported from the committed branch tip. Only the four authorized paths changed; no activation, caller wiring, limits, authorization, deployment, PR, merge, or main-branch push occurred.
 
 Preserved verdicts: `D7D14_STORAGE_COMPONENT=IMPLEMENTED-ISOLATED`; `D7D14_STORAGE_ACCEPTANCE=PASS-ACCEPTED-SUBSET`; §13.6 whole-lifecycle INCOMPLETE; activation DISABLED; public DevNet NO-GO; durable anti-rollback NOT-ESTABLISHED; C4/C5 OPEN; RS1 OPEN. This slice does not activate weighted authorization, approve resource limits, close F1/F2, or establish deployed-path readiness.
+
+## RUN 422 — shared keyset identity and bounded owner-checked account reads (unused)
+
+### Baseline, history and source attribution
+
+The checkout was clean on `main` at required commit `9100767c5ff42f7d494eef7021d57f8b363ad3b8`, root tree `4209e9b72202060461c58c3597ef684822668df1`, with origin `https://github.com/olivexo28/QBIND`. Both required objects were available; HEAD/tree equality and empty index/worktree diffs against the baseline separately established exact content correspondence. No applicable AGENTS.md or repository Copilot instruction file was found. The task branch is `copilot/run-422-bounded-keyset-account-read`.
+
+History is shallow: `.git/shallow` contains the baseline. Its raw commit header names parent `8c126325d7b680947143acc3b1dff30634d797c3`; `git cat-file -e 8c126325d7b680947143acc3b1dff30634d797c3^{commit}` exited 128 because that object is unavailable locally. The baseline is not parentless. `git merge-base --is-ancestor 9100767c5ff42f7d494eef7021d57f8b363ad3b8 HEAD` exited 0 both at the baseline and after the implementation commit; ancestry beyond the shallow boundary is not established.
+
+All successful validation below was produced by tested-source commit `1b1e460937cd840481cc4b49fa969edc685d53e1`, tree `08ff7d3290b58c842cf649f476e92c1abe1fa185` (final Rust plus unchanged baseline documentation). Its four Rust blobs are:
+
+| Path | Mode | Validated blob |
+|---|---|---|
+| `crates/qbind-types/src/primitives.rs` | `100755` | `a4310ba69f6aaf4ddd803962dae63461aed31b95` |
+| `crates/qbind-system/src/keyset_program.rs` | `100755` | `d5c3d9b30755ee0b26ad2487a065b15fde0eb416` |
+| `crates/qbind-ledger/src/lib.rs` | `100755` | `5295bdbaf66c404c6a8829ddae378176ac72e746` |
+| `crates/qbind-ledger/src/keyset_account.rs` | `100644` | `48f2ba5ccc5a68093585fe8c70fc6a493fbb3965` |
+
+The final delivery commit is the evidence-only child of that tested-source commit on the task branch. Its exact commit/root-tree IDs and complete six-path mode/blob manifest are recorded in the completion report, resolved after committing these appendages rather than attempting a self-referential commit hash inside its own tree. Final Rust blobs must match the table exactly. Both documents retain their complete baseline byte sequences as exact prefixes, existing modes, original EOL conventions (this document CRLF; contradiction.md LF), and no terminal newline.
+
+### Shared ID, reader and ownership contract
+
+The sole `KEYSET_PROGRAM_ID: ProgramId = [0x4B; 32]` definition now lives in `qbind-types::primitives`, already publicly exported by qbind-types. `qbind_system::keyset_program::KEYSET_PROGRAM_ID` is a public re-export of that same constant, not an independent definition. Both KeysetProgram ID methods and creation behavior are unchanged. There is no ledger-to-system dependency or changed identifier byte.
+
+`qbind_ledger::keyset_account::read_keyset_owned_account_bounded(&dyn AccountStore, &AccountId, usize) -> Result<Account, KeysetAccountReadError>` is additive, with one module declaration and no root re-export or production caller. It calls `get_bounded(requested_id, max_data_bytes)` exactly once. Fixed-size unit error categories distinguish `Unsupported`, `Oversized`, `Backend`, `MissingAccount`, `AccountIdMismatch`, `OwnerMismatch`, and `Executable`, without retained data, key bytes, signatures, or input-derived strings. After backend/missing admission, checks are ordered logical length, returned ID, shared owner, then executable flag. Success moves out the same plain owned Account. It never calls legacy get, retries, falls back, writes, deletes, clones the account/data, decodes entries, or invokes crypto.
+
+The source-derived helper inventory consists only of constant-size metadata checks and moves; it performs no additional heap allocation or data-body scan. Backend materialization and destruction on refusal are separate from those checks. No unsafe code or allocation instrumentation was used. The ownership witness transfers a prebuilt Account without cloning, preserves exact data pointer/length/capacity, complete header/ID/bytes, and inspects the result after the store's scope ends. Nonzero lamports, rent_epoch and reserved header bytes survive unchanged. Spare Vec capacity above the logical limit is accepted and preserved.
+
+The explicit caller limit bounds logical data length only, not Vec capacity, allocator overhead, stack, physical memory, protocol resources, or backend runtime. The backend is trusted to perform one coherent bounded materialization. A defensive post-read oversized refusal detects a violated backend postcondition; it cannot undo an oversized allocation already performed by a faulty backend. The faulty-backend fixture is deliberately post-allocation and is not evidence of pre-allocation protection.
+
+Metadata admission does not establish valid keyset encoding, version/reserved-field policy, canonical keys, reachable thresholds, valid signatures, transaction authorization, currentness, rollback protection, or persistent-store guarantees. A coherent account read is not a transaction-wide snapshot or freshness after return. Account data remains uninterpreted. No default limit, profile, cap, activation policy, capability wrapper, cache, registry, refcounting scheme or callback framework was introduced.
+
+### Requirement-to-test mapping
+
+All reader test names below use prefix `run422_keyset_account_read`; the ID test uses `run422_keyset_program_id`.
+
+| Requirement | Test suffix after reader prefix (unless specified) |
+|---|---|
+| Real InMemoryAccountStore success, exact limit, one below, repeatability | `_real_store_exact_limit_and_one_below` |
+| Real missing account | `_real_store_missing` |
+| Zero limit / empty data succeeds as metadata, independently fails framing with UnexpectedEof | `_zero_limit_metadata_is_not_encoding` |
+| Actual trait-default Unsupported, plus recording wrapper forwarding to that default; no legacy fallback | `_actual_default_unsupported_no_fallback` |
+| Each bounded-read error and missing account distinctly mapped; one read with exact ID/limit, no get/put/delete | `_bounded_errors_and_missing_are_distinct_once` |
+| Returned ID, owner and executable single-fault refusals, each with discriminating valid control | `_wrong_returned_id_single_fault`; `_wrong_owner_single_fault`; `_executable_single_fault` |
+| Violated backend logical-length postcondition, with valid control | `_faulty_backend_post_read_oversized` |
+| Move-only handoff, spare capacity, pointer/full metadata preservation, independence after store destruction | `_move_preserves_buffer_after_store_destruction` |
+| Genuine ML-DSA-44 keys encoded through existing StateEncode, bounded borrowed parser, Slice 2C semantics, exact key-span pointers | `_composes_borrowed_parser_and_slice2c_semantics` |
+| Types constant, system re-export, literal [0x4B;32], inherent and Program ID methods | `run422_keyset_program_id_shared_constant_preserves_both_methods` |
+| Unchanged creation and rejection behavior | Existing `keyset_program_tests` integration target |
+
+Handoff witnesses record exactly one bounded read and the requested ID/limit, and zero legacy get/put/delete on success and every refusal category; prohibited methods panic if invoked. The composition fixture uses two genuinely generated canonical ML-DSA-44 keys with weights 3 and 5, threshold 8. After separate metadata admission and parser success, the existing semantic analyzer reports encoded/distinct counts 2/2, total/attainable weight 8/8 and minimum proofs 2; proof budget 1 independently refuses ThresholdUnreachable. Each borrowed key starts at its exact expected offset in returned Account data. This test performs no signature or transaction authorization and does not merge these prerequisites.
+
+### Literal validation commands and results
+
+All successful rows used the tested-source commit/tree and Rust blobs above. Counts overlap: focused reader tests are included in the full ledger suite and must not be added to it. Check is compilation only.
+
+| Literal command | Exit | Selected / passed / failed / ignored |
+|---|---:|---|
+| `LIBCLANG_PATH=/usr/lib/llvm-18/lib cargo test --locked -p qbind-ledger --lib run422_keyset_account_read -- --nocapture` | 0 | 11 / 11 / 0 / 0; 286 filtered |
+| `LIBCLANG_PATH=/usr/lib/llvm-18/lib cargo test --locked -p qbind-system --lib run422_keyset_program_id -- --nocapture` | 0 | 1 / 1 / 0 / 0; 0 filtered |
+| `LIBCLANG_PATH=/usr/lib/llvm-18/lib cargo test --locked -p qbind-ledger` | 0 | 677 / 661 / 0 / 16; 0 filtered; 24 unit/integration targets: 642 passed, plus 35 doc tests: 19 passed / 16 existing ignores |
+| `LIBCLANG_PATH=/usr/lib/llvm-18/lib cargo test --locked -p qbind-system --test keyset_program_tests -- --nocapture` | 0 | 2 / 2 / 0 / 0; 0 filtered |
+| `LIBCLANG_PATH=/usr/lib/llvm-18/lib cargo check --locked -p qbind-node` | 0 | N/A; compilation only; existing warnings |
+| `rustfmt --check --edition 2021 --config skip_children=true crates/qbind-types/src/primitives.rs crates/qbind-system/src/keyset_program.rs crates/qbind-ledger/src/lib.rs crates/qbind-ledger/src/keyset_account.rs` | 0 | N/A; scoped Rust formatting, no traversal/rewrite of unrelated modules |
+
+The first prescribed reader command exited 101 before executing any tests (counts N/A), during zstd-sys bindgen compilation because the required libclang path was missing. Its Rust source already matched the tested-source tree above, before that tree was committed. Environment-only `apt-get update -qq && apt-get install -y -qq libclang-18-dev` exited 0, restoring `libclang-18-dev 1:18.1.3-1ubuntu1`; apt reported an unrelated Chrome-index DNS warning. This preparation is not a test result. Earlier scoped formatting attempts exited 1 for test-module placement and the existing ledger lib.rs missing terminal newline; these were corrected before the tested-source identity, with only authorized Rust files formatted. Cargo/rustc 1.99.1, rustfmt 1.10.0-stable, host x86_64-unknown-linux-gnu; no manifests, dependencies or lockfile changed.
+
+Delivery gates are `git -c core.whitespace=cr-at-eol diff --check` and `git -c core.whitespace=cr-at-eol diff --check 9100767c5ff42f7d494eef7021d57f8b363ad3b8 HEAD`, plus exact document-prefix/mode/EOL/EOF checks, validated-to-final Rust blob equality, and a six-path-only baseline-to-final manifest check. They are repeated after the evidence commit. Only the task branch is pushed without force; remote tip equality with final HEAD and a clean final worktree are verified in the completion report. No PR, main push, merge, production wiring, or deployment is performed.
+
+Preserved: `D7D14_STORAGE_COMPONENT=IMPLEMENTED-ISOLATED`; `D7D14_STORAGE_ACCEPTANCE=PASS-ACCEPTED-SUBSET`; §13.6 whole-lifecycle INCOMPLETE; activation DISABLED; public DevNet NO-GO; durable anti-rollback NOT-ESTABLISHED; C4/C5 OPEN; RS1 OPEN. This unused read-boundary prerequisite does not switch native authorization to bounded reads, enforce keyset creation policy, approve resource limits, close F1/F2, or establish deployed-path readiness.
