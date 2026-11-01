@@ -1,13 +1,8 @@
-//! GovernanceProgram: mutates SuiteRegistry, ParamRegistry, and LaunchChecklist state
-//! using governance call_data types from qbind-wire::gov.
-//!
-//! No timelock/TA/SC enforcement yet; just parse → mutate → re-encode.
+//! Native governance calls are parsed but refused until governance authority is
+//! independently available.
 
 use qbind_ledger::{AccountStore, ExecutionContext, ExecutionError, Program};
-use qbind_serde::{StateDecode, StateEncode};
-use qbind_types::{
-    AccountId, LaunchChecklist, ParamRegistry, ProgramId, SuiteRegistry, SuiteStatus,
-};
+use qbind_types::{AccountId, ProgramId, SuiteStatus};
 use qbind_wire::gov::{
     GovSetMainnetStatusCall, GovUpdateLaunchChecklistCall, GovUpdateParamRegistryCall,
     GovUpdateSuiteStatusCall, OP_GOV_SET_MAINNET_STATUS, OP_GOV_UPDATE_LAUNCH_CHECKLIST,
@@ -56,6 +51,12 @@ fn decode_err(label: &'static str) -> ExecutionError {
     ExecutionError::InvalidCallData(label)
 }
 
+fn native_governance_authority_unavailable() -> Result<(), ExecutionError> {
+    Err(ExecutionError::ProgramError(
+        "native governance authority unavailable",
+    ))
+}
+
 impl<S: AccountStore> Program<S> for GovernanceProgram {
     fn id(&self) -> ProgramId {
         GOVERNANCE_PROGRAM_ID
@@ -88,10 +89,10 @@ impl<S: AccountStore> Program<S> for GovernanceProgram {
 }
 
 impl GovernanceProgram {
-    /// Handle GovUpdateSuiteStatusCall → SuiteRegistry
+    /// Validate GovUpdateSuiteStatusCall before refusing unavailable authority.
     fn handle_update_suite_status<S: AccountStore>(
         &self,
-        ctx: &mut ExecutionContext<S>,
+        _ctx: &mut ExecutionContext<S>,
         tx: &Transaction,
     ) -> Result<(), ExecutionError> {
         let mut input: &[u8] = &tx.call_data;
@@ -103,63 +104,25 @@ impl GovernanceProgram {
             ));
         }
 
-        // Load SuiteRegistry account.
-        let mut account = ctx
-            .store
-            .get(&SUITE_REGISTRY_ACCOUNT_ID)
-            .ok_or(ExecutionError::AccountNotFound)?;
-
-        // Decode existing SuiteRegistry.
-        let mut slice: &[u8] = &account.data;
-        let mut registry = SuiteRegistry::decode_state(&mut slice)
-            .map_err(|_| ExecutionError::SerializationError("decode SuiteRegistry"))?;
-        if !slice.is_empty() {
-            return Err(ExecutionError::SerializationError(
-                "trailing bytes in SuiteRegistry account",
-            ));
-        }
-
         // Map new_status (u8) into SuiteStatus enum.
-        let new_status = match call.new_status {
+        let _new_status = match call.new_status {
             0 => SuiteStatus::Active,
             1 => SuiteStatus::Legacy,
             2 => SuiteStatus::Disabled,
             _ => return Err(ExecutionError::InvalidCallData("invalid SuiteStatus")),
         };
 
-        // Find suite entry by suite_id and update status.
-        let mut updated = false;
-        for entry in &mut registry.suites {
-            if entry.suite_id == call.suite_id {
-                entry.status = new_status;
-                updated = true;
-                break;
-            }
-        }
-
-        if !updated {
-            return Err(ExecutionError::InvalidCallData(
-                "suite_id not found in SuiteRegistry",
-            ));
-        }
-
-        // Re-encode and store back.
-        let mut new_data = Vec::new();
-        registry.encode_state(&mut new_data);
-        account.data = new_data;
-        ctx.store.put(account)?;
-
-        Ok(())
+        native_governance_authority_unavailable()
     }
 
-    /// Handle GovUpdateParamRegistryCall → ParamRegistry
+    /// Validate GovUpdateParamRegistryCall before refusing unavailable authority.
     fn handle_update_param_registry<S: AccountStore>(
         &self,
-        ctx: &mut ExecutionContext<S>,
+        _ctx: &mut ExecutionContext<S>,
         tx: &Transaction,
     ) -> Result<(), ExecutionError> {
         let mut input: &[u8] = &tx.call_data;
-        let call = GovUpdateParamRegistryCall::decode(&mut input)
+        let _call = GovUpdateParamRegistryCall::decode(&mut input)
             .map_err(|_| decode_err("invalid GovUpdateParamRegistryCall"))?;
         if !input.is_empty() {
             return Err(ExecutionError::InvalidCallData(
@@ -167,40 +130,17 @@ impl GovernanceProgram {
             ));
         }
 
-        let mut account = ctx
-            .store
-            .get(&PARAM_REGISTRY_ACCOUNT_ID)
-            .ok_or(ExecutionError::AccountNotFound)?;
-
-        let mut slice: &[u8] = &account.data;
-        let mut params = ParamRegistry::decode_state(&mut slice)
-            .map_err(|_| ExecutionError::SerializationError("decode ParamRegistry"))?;
-        if !slice.is_empty() {
-            return Err(ExecutionError::SerializationError(
-                "trailing bytes in ParamRegistry account",
-            ));
-        }
-
-        params.slash_bps_prevote = call.slash_bps_prevote;
-        params.slash_bps_precommit = call.slash_bps_precommit;
-        params.reporter_reward_bps = call.reporter_reward_bps;
-
-        let mut new_data = Vec::new();
-        params.encode_state(&mut new_data);
-        account.data = new_data;
-        ctx.store.put(account)?;
-
-        Ok(())
+        native_governance_authority_unavailable()
     }
 
-    /// Handle GovUpdateLaunchChecklistCall → LaunchChecklist
+    /// Validate GovUpdateLaunchChecklistCall before refusing unavailable authority.
     fn handle_update_launch_checklist<S: AccountStore>(
         &self,
-        ctx: &mut ExecutionContext<S>,
+        _ctx: &mut ExecutionContext<S>,
         tx: &Transaction,
     ) -> Result<(), ExecutionError> {
         let mut input: &[u8] = &tx.call_data;
-        let call = GovUpdateLaunchChecklistCall::decode(&mut input)
+        let _call = GovUpdateLaunchChecklistCall::decode(&mut input)
             .map_err(|_| decode_err("invalid GovUpdateLaunchChecklistCall"))?;
         if !input.is_empty() {
             return Err(ExecutionError::InvalidCallData(
@@ -208,54 +148,17 @@ impl GovernanceProgram {
             ));
         }
 
-        let mut account = ctx
-            .store
-            .get(&LAUNCH_CHECKLIST_ACCOUNT_ID)
-            .ok_or(ExecutionError::AccountNotFound)?;
-
-        let mut slice: &[u8] = &account.data;
-        let mut checklist = LaunchChecklist::decode_state(&mut slice)
-            .map_err(|_| ExecutionError::SerializationError("decode LaunchChecklist"))?;
-        if !slice.is_empty() {
-            return Err(ExecutionError::SerializationError(
-                "trailing bytes in LaunchChecklist account",
-            ));
-        }
-
-        // Update flags.
-        checklist.devnet_ok = call.devnet_ok;
-        checklist.testnet_ok = call.testnet_ok;
-        checklist.perf_ok = call.perf_ok;
-        checklist.adversarial_ok = call.adversarial_ok;
-        checklist.crypto_audit_ok = call.crypto_audit_ok;
-        checklist.proto_audit_ok = call.proto_audit_ok;
-        checklist.spec_ok = call.spec_ok;
-
-        // Update hashes.
-        checklist.devnet_report_hash = call.devnet_report_hash;
-        checklist.testnet_report_hash = call.testnet_report_hash;
-        checklist.perf_report_hash = call.perf_report_hash;
-        checklist.adversarial_report_hash = call.adversarial_report_hash;
-        checklist.crypto_audit_hash = call.crypto_audit_hash;
-        checklist.proto_audit_hash = call.proto_audit_hash;
-        checklist.spec_hash = call.spec_hash;
-
-        let mut new_data = Vec::new();
-        checklist.encode_state(&mut new_data);
-        account.data = new_data;
-        ctx.store.put(account)?;
-
-        Ok(())
+        native_governance_authority_unavailable()
     }
 
-    /// Handle GovSetMainnetStatusCall → ParamRegistry
+    /// Validate GovSetMainnetStatusCall before refusing unavailable authority.
     fn handle_set_mainnet_status<S: AccountStore>(
         &self,
-        ctx: &mut ExecutionContext<S>,
+        _ctx: &mut ExecutionContext<S>,
         tx: &Transaction,
     ) -> Result<(), ExecutionError> {
         let mut input: &[u8] = &tx.call_data;
-        let call = GovSetMainnetStatusCall::decode(&mut input)
+        let _call = GovSetMainnetStatusCall::decode(&mut input)
             .map_err(|_| decode_err("invalid GovSetMainnetStatusCall"))?;
         if !input.is_empty() {
             return Err(ExecutionError::InvalidCallData(
@@ -263,27 +166,6 @@ impl GovernanceProgram {
             ));
         }
 
-        let mut account = ctx
-            .store
-            .get(&PARAM_REGISTRY_ACCOUNT_ID)
-            .ok_or(ExecutionError::AccountNotFound)?;
-
-        let mut slice: &[u8] = &account.data;
-        let mut params = ParamRegistry::decode_state(&mut slice)
-            .map_err(|_| ExecutionError::SerializationError("decode ParamRegistry"))?;
-        if !slice.is_empty() {
-            return Err(ExecutionError::SerializationError(
-                "trailing bytes in ParamRegistry account",
-            ));
-        }
-
-        params.mainnet_status = call.new_status;
-
-        let mut new_data = Vec::new();
-        params.encode_state(&mut new_data);
-        account.data = new_data;
-        ctx.store.put(account)?;
-
-        Ok(())
+        native_governance_authority_unavailable()
     }
 }

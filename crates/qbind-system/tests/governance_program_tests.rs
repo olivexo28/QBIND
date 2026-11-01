@@ -1,8 +1,9 @@
+use std::cell::RefCell;
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use qbind_crypto::{CryptoProvider, StaticCryptoProvider};
-use qbind_ledger::{Account, AccountStore, ExecutionContext, InMemoryAccountStore, Program};
-use qbind_serde::StateDecode;
+use qbind_ledger::{Account, AccountStore, ExecutionContext, ExecutionError, Program};
 use qbind_serde::StateEncode;
 use qbind_system::governance_program::{
     GOVERNANCE_PROGRAM_ID, LAUNCH_CHECKLIST_ACCOUNT_ID, PARAM_REGISTRY_ACCOUNT_ID,
@@ -47,8 +48,65 @@ fn base_tx(program_id: ProgramId, call_data: Vec<u8>) -> Transaction {
     }
 }
 
+#[derive(Default, Debug, PartialEq, Eq)]
+struct StoreEvents {
+    reads: Vec<AccountId>,
+    writes: Vec<AccountId>,
+    deletes: Vec<AccountId>,
+}
+
+#[derive(Default)]
+struct WitnessStore {
+    accounts: HashMap<AccountId, Account>,
+    events: RefCell<StoreEvents>,
+}
+
+impl WitnessStore {
+    fn clear_events(&mut self) {
+        *self.events.get_mut() = StoreEvents::default();
+    }
+
+    fn take_events(&mut self) -> StoreEvents {
+        std::mem::take(self.events.get_mut())
+    }
+}
+
+impl AccountStore for WitnessStore {
+    fn get(&self, id: &AccountId) -> Option<Account> {
+        self.events.borrow_mut().reads.push(*id);
+        self.accounts.get(id).cloned()
+    }
+
+    fn put(&mut self, account: Account) -> Result<(), ExecutionError> {
+        self.events.get_mut().writes.push(account.id);
+        self.accounts.insert(account.id, account);
+        Ok(())
+    }
+
+    fn delete(&mut self, id: &AccountId) -> Result<(), ExecutionError> {
+        self.events.get_mut().deletes.push(*id);
+        self.accounts.remove(id);
+        Ok(())
+    }
+}
+
+fn assert_direct_refusal(store: &mut WitnessStore, tx: &Transaction) {
+    let before = store.accounts.clone();
+    store.clear_events();
+    let result = {
+        let mut ctx = ExecutionContext::new(store, empty_crypto());
+        GovernanceProgram::new().execute(&mut ctx, tx)
+    };
+    match result {
+        Err(ExecutionError::ProgramError("native governance authority unavailable")) => {}
+        other => panic!("expected native governance authority refusal, got {other:?}"),
+    }
+    assert_eq!(store.accounts, before);
+    assert_eq!(store.take_events(), StoreEvents::default());
+}
+
 #[test]
-fn gov_update_suite_status_updates_entry() {
+fn gov_update_suite_status_refuses_without_reading_target() {
     // Prepare a SuiteRegistry account with two entries.
     let e1 = SuiteEntry {
         suite_id: 0x01,
@@ -85,13 +143,8 @@ fn gov_update_suite_status_updates_entry() {
 
     let suite_account = Account::new(SUITE_REGISTRY_ACCOUNT_ID, GOVERNANCE_PROGRAM_ID, 0, data);
 
-    let mut store = InMemoryAccountStore::new();
+    let mut store = WitnessStore::default();
     store.put(suite_account).unwrap();
-
-    let crypto = empty_crypto();
-    let mut ctx = ExecutionContext::new(&mut store, crypto);
-
-    let program = GovernanceProgram::new();
 
     // Build call to set suite_id 0x01 to Disabled (2).
     let call = GovUpdateSuiteStatusCall {
@@ -106,25 +159,11 @@ fn gov_update_suite_status_updates_entry() {
     assert_eq!(call_data[0], OP_GOV_UPDATE_SUITE_STATUS);
 
     let tx = base_tx(GOVERNANCE_PROGRAM_ID, call_data);
-    program.execute(&mut ctx, &tx).expect("execute ok");
-
-    // Re-read SuiteRegistry and assert change.
-    let stored = store
-        .get(&SUITE_REGISTRY_ACCOUNT_ID)
-        .expect("suite registry exists");
-    let mut slice: &[u8] = &stored.data;
-    let decoded = SuiteRegistry::decode_state(&mut slice).expect("decode");
-    assert!(slice.is_empty());
-    assert_eq!(decoded.suites.len(), 2);
-    let s1 = &decoded.suites[0];
-    let s2 = &decoded.suites[1];
-    assert_eq!(s1.suite_id, 0x01);
-    assert_eq!(s1.status, SuiteStatus::Disabled);
-    assert_eq!(s2.status, SuiteStatus::Active);
+    assert_direct_refusal(&mut store, &tx);
 }
 
 #[test]
-fn gov_update_param_registry_changes_slash_params() {
+fn gov_update_param_registry_refuses_without_reading_target() {
     // Prepare ParamRegistry account.
     let params = ParamRegistry {
         version: 1,
@@ -142,12 +181,8 @@ fn gov_update_param_registry_changes_slash_params() {
     params.encode_state(&mut data);
     let param_account = Account::new(PARAM_REGISTRY_ACCOUNT_ID, GOVERNANCE_PROGRAM_ID, 0, data);
 
-    let mut store = InMemoryAccountStore::new();
+    let mut store = WitnessStore::default();
     store.put(param_account).unwrap();
-
-    let crypto = empty_crypto();
-    let mut ctx = ExecutionContext::new(&mut store, crypto);
-    let program = GovernanceProgram::new();
 
     let call = GovUpdateParamRegistryCall {
         version: 1,
@@ -162,22 +197,11 @@ fn gov_update_param_registry_changes_slash_params() {
     assert_eq!(call_data[0], OP_GOV_UPDATE_PARAM_REGISTRY);
 
     let tx = base_tx(GOVERNANCE_PROGRAM_ID, call_data);
-    program.execute(&mut ctx, &tx).expect("execute ok");
-
-    let stored = store
-        .get(&PARAM_REGISTRY_ACCOUNT_ID)
-        .expect("params account");
-    let mut slice: &[u8] = &stored.data;
-    let decoded = ParamRegistry::decode_state(&mut slice).expect("decode");
-    assert!(slice.is_empty());
-    assert_eq!(decoded.slash_bps_prevote, 100);
-    assert_eq!(decoded.slash_bps_precommit, 200);
-    assert_eq!(decoded.reporter_reward_bps, 50);
-    assert_eq!(decoded.mainnet_status, MainnetStatus::PreGenesis);
+    assert_direct_refusal(&mut store, &tx);
 }
 
 #[test]
-fn gov_update_launch_checklist_roundtrip() {
+fn gov_update_launch_checklist_refuses_without_reading_target() {
     // Prepare LaunchChecklist account with defaults.
     let checklist = LaunchChecklist {
         version: 1,
@@ -204,12 +228,8 @@ fn gov_update_launch_checklist_roundtrip() {
     let checklist_account =
         Account::new(LAUNCH_CHECKLIST_ACCOUNT_ID, GOVERNANCE_PROGRAM_ID, 0, data);
 
-    let mut store = InMemoryAccountStore::new();
+    let mut store = WitnessStore::default();
     store.put(checklist_account).unwrap();
-
-    let crypto = empty_crypto();
-    let mut ctx = ExecutionContext::new(&mut store, crypto);
-    let program = GovernanceProgram::new();
 
     let call = GovUpdateLaunchChecklistCall {
         version: 1,
@@ -236,34 +256,11 @@ fn gov_update_launch_checklist_roundtrip() {
     assert_eq!(call_data[0], OP_GOV_UPDATE_LAUNCH_CHECKLIST);
 
     let tx = base_tx(GOVERNANCE_PROGRAM_ID, call_data);
-    program.execute(&mut ctx, &tx).expect("execute ok");
-
-    let stored = store
-        .get(&LAUNCH_CHECKLIST_ACCOUNT_ID)
-        .expect("checklist account");
-    let mut slice: &[u8] = &stored.data;
-    let decoded = LaunchChecklist::decode_state(&mut slice).expect("decode");
-    assert!(slice.is_empty());
-
-    assert!(decoded.devnet_ok);
-    assert!(decoded.testnet_ok);
-    assert!(decoded.perf_ok);
-    assert!(!decoded.adversarial_ok);
-    assert!(decoded.crypto_audit_ok);
-    assert!(!decoded.proto_audit_ok);
-    assert!(decoded.spec_ok);
-
-    assert_eq!(decoded.devnet_report_hash, [1u8; 32]);
-    assert_eq!(decoded.testnet_report_hash, [2u8; 32]);
-    assert_eq!(decoded.perf_report_hash, [3u8; 32]);
-    assert_eq!(decoded.adversarial_report_hash, [4u8; 32]);
-    assert_eq!(decoded.crypto_audit_hash, [5u8; 32]);
-    assert_eq!(decoded.proto_audit_hash, [6u8; 32]);
-    assert_eq!(decoded.spec_hash, [7u8; 32]);
+    assert_direct_refusal(&mut store, &tx);
 }
 
 #[test]
-fn gov_set_mainnet_status_changes_status_only() {
+fn gov_set_mainnet_status_refuses_without_reading_target() {
     // Prepare ParamRegistry with PreGenesis.
     let params = ParamRegistry {
         version: 1,
@@ -280,12 +277,8 @@ fn gov_set_mainnet_status_changes_status_only() {
     params.encode_state(&mut data);
     let param_account = Account::new(PARAM_REGISTRY_ACCOUNT_ID, GOVERNANCE_PROGRAM_ID, 0, data);
 
-    let mut store = InMemoryAccountStore::new();
+    let mut store = WitnessStore::default();
     store.put(param_account).unwrap();
-
-    let crypto = empty_crypto();
-    let mut ctx = ExecutionContext::new(&mut store, crypto);
-    let program = GovernanceProgram::new();
 
     let call = GovSetMainnetStatusCall {
         version: 1,
@@ -298,17 +291,31 @@ fn gov_set_mainnet_status_changes_status_only() {
     assert_eq!(call_data[0], OP_GOV_SET_MAINNET_STATUS);
 
     let tx = base_tx(GOVERNANCE_PROGRAM_ID, call_data);
-    program.execute(&mut ctx, &tx).expect("execute ok");
+    assert_direct_refusal(&mut store, &tx);
+}
 
-    let stored = store
-        .get(&PARAM_REGISTRY_ACCOUNT_ID)
-        .expect("params account");
-    let mut slice: &[u8] = &stored.data;
-    let decoded = ParamRegistry::decode_state(&mut slice).expect("decode");
-    assert!(slice.is_empty());
-    assert_eq!(decoded.mainnet_status, MainnetStatus::Ready);
-    // Other fields unchanged.
-    assert_eq!(decoded.slash_bps_prevote, 10);
-    assert_eq!(decoded.slash_bps_precommit, 20);
-    assert_eq!(decoded.reporter_reward_bps, 5);
+#[test]
+fn direct_program_wrong_id_refuses_before_any_store_access() {
+    let mut store = WitnessStore::default();
+    store
+        .put(Account::new(
+            dummy_account_id(0xDD),
+            dummy_account_id(0xEE),
+            7,
+            vec![1, 2, 3],
+        ))
+        .unwrap();
+    store.clear_events();
+    let before = store.accounts.clone();
+    let tx = base_tx(dummy_account_id(0xFF), Vec::new());
+    let result = {
+        let mut ctx = ExecutionContext::new(&mut store, empty_crypto());
+        GovernanceProgram::new().execute(&mut ctx, &tx)
+    };
+    match result {
+        Err(ExecutionError::ProgramError("program_id mismatch for GovernanceProgram")) => {}
+        other => panic!("expected wrong program id refusal, got {other:?}"),
+    }
+    assert_eq!(store.accounts, before);
+    assert_eq!(store.take_events(), StoreEvents::default());
 }
