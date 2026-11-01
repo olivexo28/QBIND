@@ -8,6 +8,7 @@ pub mod execution;
 pub mod execution_gas;
 pub mod genesis;
 pub mod keyset_account;
+pub mod keyset_create;
 pub mod keyset_proof;
 pub mod keyset_validation;
 pub mod monetary_engine;
