@@ -23906,3 +23906,339 @@ activation DISABLED; public DevNet NO-GO; durable anti-rollback NOT-ESTABLISHED;
 C4/C5 OPEN; RS1 OPEN. All limits UNAPPROVED. No production integration,
 persistent atomic commit, crash/restart safety, F1/F2 closure, activation,
 deployment, PR, merge, main/force push or release approval.
+
+## RUN 422: isolated transaction-bound keyset-create composition (2026-11-01)
+
+Whole native admission contract: **DRAFT / NOT APPROVED / NOT IMPLEMENTED**.
+This appendix records UNUSED, IMPLEMENTED-ISOLATED trusted fixture composition,
+not production KeysetProgram execution, approved limits or authority.
+
+### Starting identity and history: separate observed facts
+
+Origin fetch/push URL: `https://github.com/olivexo28/QBIND`.
+Initial `git status --porcelain=v1` emitted no entries; initial branch was main.
+Required starting commit object was available:
+`2903b50f8aaeb857349da76d1e968d0bc5585435`.
+Required starting root tree object was separately available:
+`2c79ba526aef00a8214723935ace0f3cc8e331fb`.
+`git rev-parse HEAD HEAD^{tree}` and raw `git cat-file -p` commit header
+independently established that correspondence, not an ancestry inference.
+
+Raw starting headers contain:
+`tree 2c79ba526aef00a8214723935ace0f3cc8e331fb`
+`parent 0b7d5fd66a57f9d22b293b0fc94efbedf07a8661`.
+`git cat-file -e 0b7d5fd66a57f9d22b293b0fc94efbedf07a8661^{commit}`
+failed (exit 128): that parent OBJECT is unavailable locally, not absent from
+the raw header. `git rev-parse --is-shallow-repository` returned true; .git/shallow
+contains exactly the starting commit. No prior ancestry is inferred from tree
+equality or this shallow boundary. No repository or applicable ancestor AGENTS.md
+was found. Only `copilot/run-422-native-keyset-create-composition` was created.
+The named remote task branch was initially absent from `git ls-remote`.
+
+Final Rust/test source was separately committed:
+`beec901e974715932f0d3faf6470189d0c562fec`,
+root tree `c5afb9d96a5bbbec43b5ae11b96bc9e6f581a466`.
+Its raw parent is the full required starting commit. Before evidence,
+`git merge-base --is-ancestor 2903b50f8aaeb857349da76d1e968d0bc5585435 HEAD`
+exited 0 and starting..HEAD counted one commit. Starting-to-final ancestry is
+checked again after the evidence-only child commit, independently of trees,
+with raw final parent, merge-base and rev-list. Final commit/tree, complete
+cumulative mode/blob manifest, remote task-tip equality and clean worktree are
+reported after delivery, outside the self-hashed evidence documents.
+
+### Composition, binding and ownership argument
+
+New source: `crates/qbind-ledger/src/native_keyset_create_model.rs`.
+Private selected provider/binding/status: 89-108; explicit configuration and
+fixed diagnostic enum: 111-124; private one-slot wrapper: 127-129.
+Constructor 132-179 receives the complete immutable Transaction, concrete
+mutable store, selected fixture inputs, separate requested native binding and
+explicit preparation/staging limits before external work. Shared fixed
+KEYSET_PROGRAM_ID and local compatibility are checked first (140-153):
+create max_entries fits E; stage supports exactly one operation; configured
+create logical output fits stage logical size, which fits individual and
+aggregate capacity limits. No chosen limit is silently clamped.
+
+NativeStagedEffects::begin_for_fixture (UNCHANGED, native_staged_effects.rs
+473-519) performs existing native context selection and fresh proof evaluation
+under the same exclusive store borrow. Requested versus selected binding/status,
+workspace refusal and Context/Proof distinctions are forwarded unchanged.
+The wrapper retains the SAME provider reference for semantic preparation;
+it accepts no second provider, alternate bytes/target/prepared owner or
+replacement transaction after admission. After proof workspace ends, the
+empty one-slot session stays live through preparation. The only preparation
+call (new source 169) uses the original transaction.call_data and unchanged
+prepare_keyset_account_bounded; framing/opcode/complete-call checks are delegated,
+not duplicated. The returned Account and returned ID move directly into
+session.create_for_fixture (174). No Account clone, reconstruction, re-encoding
+or second preparation exists on the publication path. Staging refusal drops
+the returned internal owner (176) before exposing only its fixed-size reason.
+Any constructor failure destroys the session and yields no publishable result.
+
+Only consuming publish_for_fixture/cancel are exposed (184-190). Publication
+has no inputs and delegates to the existing complete batch preflight. Private
+inner session, store/provider/transaction references and effect slots cannot
+be extracted or rebound. No Clone/Copy/serialization/read-your-writes/program
+dispatch or arbitrary stage interface is supplied.
+
+UNCHANGED store.rs publish_native_fixture_batch preserves complete preflight,
+absent-target CreateExisting refusal and len + ALL creates <= current map
+capacity with no deletion credit. All potentially refusing work precedes map
+mutation; admitted moves require no map reservation. No attempt reserves map
+capacity. Outside-attempt provisioning after consuming MapCapacity refusal
+is followed by fresh session construction, proof evaluation and preparation.
+One continuous concrete exclusive borrow spans all phases; no intermediate
+release/reacquisition, public bypass or fallible postmutation hook was added.
+
+This is normal-error atomicity for concrete in-memory fixture publication ONLY.
+Existing target, cancellation, drop, caller prepublication unwind and injected
+provider failure/unwind preserve complete original contents and release borrows.
+Earlier successful creation remains after subsequent refused/cancelled attempts.
+No arbitrary-panic mutation rollback, crash durability, restart safety,
+persistent isolation or production transaction receipt is established.
+MapCapacity and allocation/backend inability remain LOCAL INABILITY, never
+consensus invalid-transaction receipts. No allocator-failure reproduction or
+production exploit is claimed.
+
+No proof result confers creator, payer, program, nonce, fee, replay or bootstrap
+authority. Missing proposed new keysets cannot authorize themselves from future
+created state: genuine proofs using that missing pre-state ID refuse AccountRead/
+MissingAccount before preparation. A later independently admitted transaction
+can use a keyset stored by earlier fixture publication with genuine signatures;
+execution-position labels are merely trusted fixture inputs, not production
+freshness. All additional limits/provider/profile/status/binding configuration
+is explicitly trusted and UNAPPROVED; no defaults, governance or activation
+mechanism is inferred.
+
+### Source/test mapping and actual observations
+
+`tests/run_422_native_keyset_create_model_tests.rs` uses generated genuine
+ML-DSA-44 authorizing/new keys (1312-byte public keys, 2420-byte signatures).
+Its pre-existing authorizing keyset is distinct from initially absent target.
+
+- A: genuine_success_complete_account_and_transaction (298-319) compares the
+  complete independently encoded expected Account, including all header fields,
+  and preserves complete transaction bytes, authorizing/unrelated accounts.
+  Fresh provider work is counted; private entry observation sees preparation.
+- B/D: early_program_and_configuration_have_zero_provider_work (340-368) and
+  native_selection_distinctions_before_external_work (371-475) cover missing/
+  unavailable/inactive/mismatched native selections and G/P/E capacity refusal.
+  genuine_negative_proofs_auth_vectors_and_no_bootstrap (478-533) first admits
+  and cancels genuinely, then refuses changed auth vectors with equal signing
+  body digests, missing auths/required coverage, late invalid extra proof AFTER
+  an earlier valid proof, and missing proposed keyset before preparation.
+- C: actual_altered_body_signed_preparation_refusals (536-590) re-signs each
+  ACTUAL altered body: wrong opcode, trailing bytes, zero threshold and logical
+  output limit. Exactly one genuine verification succeeds before preparation;
+  exact Parse/Malformed opcode/trailing strings, Semantics/ZeroThreshold and
+  StoredDataBytesLimit categories are retained, not earlier signature refusals.
+- E: existing_target_preserves_complete_nondefault_account (322-337) checks
+  nondefault owner/lamports/executable/rent/reserved/data are not overwritten.
+  Private store cfg(test) actual_composition_capacity_retry_and_allocation_movement
+  measures the real map, invokes the actual wrapper, compares preparation-boundary
+  pointer/length/capacity with the actual private map owner, consumes MapCapacity
+  refusal, verifies every original entry, provisions only after release, and
+  repeats fresh genuine proofs/preparation successfully. No get() clone is used
+  to infer allocation identity; no whole-store snapshot or fabricated Vec
+  metadata is used.
+- F: lifecycle_synthetic_failure_and_unwind_fresh_retry (593-627) covers cancel,
+  drop, caller prepublication unwind, explicitly injected InvalidSignature
+  failure and provider panic, followed by fresh genuine retry.
+  synthetic_preparation_provider_failure_and_unwind_after_genuine_proof
+  (630-658) injects DescriptorUnsupported/error and panic ONLY at create semantic
+  admission after one genuine valid proof; these are synthetic provider controls,
+  not genuine negative signatures or experimental backend/allocator failures.
+  sequential_genuine_new_keyset_and_later_refusal_preserve_success (661-692)
+  uses the stored new keyset with separately signed later transaction and
+  preserves earlier successful publication through refusal/cancel.
+- Private actual_composition_preparation_entry_boundaries covers zero entries
+  for local/proof/missing-keyset failures, exactly one entry for genuinely
+  admitted malformed/semantic/output refusal, and no prepared owner on refusal.
+  The observer is a fixed-size cfg(test) thread-local tuple at the actual new
+  composition entry and preparation-to-stage boundary, not production access.
+- G: new module doctests at 18/34/44/54/60/67 execute one valid counterpart and
+  five compile-fail cases. Additional direct rustc metadata checks of these exact
+  extracted blocks isolate E0499 conflicting writer, E0502 complete transaction
+  mutation, E0616 private inner session, E0382 post-publication reuse and E0382
+  post-cancel reuse. Valid counterpart exits 0; each negative exits 1 with
+  exactly its intended diagnostic, without a missing-import/API error.
+
+The cfg(test) store module includes the SAME integration fixture file to avoid
+duplicating provider/proof/preparation logic; its ten shared composition tests
+plus two private controls explain the private selector's overlapping count.
+Helper-only unchanged batch tests remain separate from this actual composition.
+Only lib.rs module export and narrowly scoped cfg(test) store evidence are
+added to existing Rust. Frozen prerequisites and existing tests remain unchanged.
+
+### Resource accounting: measured facts versus limitations
+
+For G=2/P=4/E=4/W=1 on this x86_64 compiler, size_of reports:
+wrapper 448 B; KeysetCreateFixtureConfig 88 B; selected fixture 216 B;
+KeysetCreateModelError 32 B; FixturePublicationSummary 48 B.
+Errors/summaries are fixed-size; no bytes, owner, dynamic text or operation
+index escapes. The model adds no transaction clone, whole-store snapshot,
+rollback journal, unsafe code, allocator hook or dependency.
+
+Observed actual prepared logical length = 1330 B, unchanged preparer requested
+try_reserve_exact(1330), and actual Vec capacity = 1330 B. These are distinct
+facts, NOT a preallocation/physical-memory guarantee. The unchanged preparer
+checks logical length before reservation but does NOT guarantee an actual
+capacity ceiling before allocation. Its semantic workspace ends BEFORE
+destination reservation, as established by unchanged source. The stage checks
+actual capacity AFTER preparation; an excessive transient owner is dropped on
+refusal. That refusal route is source-attributed, not a claim of allocator
+over-allocation experimentally reproduced here.
+
+Inherited proof workspace/owned bounded account reads finish before preparation.
+The empty one-slot session coexists with create semantic workspace, then with
+the single prepared allocation, which moves to the stage and actual map.
+Existing store allocations and caller-owned transaction/provider remain live
+throughout. No stage bound covers allocator overhead, compiler frames, RSS,
+crypto/provider internals or all existing state.
+
+Private observed map capacity = 3. With original len=2, one create publishes
+at exact peak=3 without map capacity change. A later genuine create at len=3
+refuses MapCapacity and preserves every complete entry, length and map capacity.
+After consuming refusal, reserve(1) provisions observed capacity=7 outside the
+attempt; fresh proofs/preparation rerun and the same new prepared allocation
+pointer/length/capacity moves into the actual private map. The earlier successful
+target remains intact in every later failed/cancelled control. Candidate limits
+remain UNAPPROVED.
+
+### Literal final-source validation commands and counts
+
+All commands below ran on source commit
+`beec901e974715932f0d3faf6470189d0c562fec`, tree
+`c5afb9d96a5bbbec43b5ae11b96bc9e6f581a466`.
+Each focused selector selects tests. Counts overlap; do not sum commands.
+Node check is COMPILATION ONLY, not node runtime/suite acceptance.
+
+```text
+LIBCLANG_PATH=/usr/lib/llvm-18/lib cargo test --locked -p qbind-ledger --test run_422_native_keyset_create_model_tests -- --nocapture --test-threads=1
+exit 0; selected 10; passed 10; failed 0; ignored 0; filtered 0
+
+LIBCLANG_PATH=/usr/lib/llvm-18/lib cargo test --locked -p qbind-ledger --lib run422_native_keyset_create_model -- --nocapture
+exit 0; selected 12; passed 12; failed 0; ignored 0; filtered 356
+
+LIBCLANG_PATH=/usr/lib/llvm-18/lib cargo test --locked -p qbind-ledger --test run_422_native_staged_effects_tests --test run_422_native_admission_context_tests --test run_422_native_admission_state_contract_tests -- --nocapture --test-threads=1
+exit 0; context selected/passed 7/7; contract 2/2; staged 9/9
+each failed 0, ignored 0, filtered 0; total selected/passed 18/18
+
+LIBCLANG_PATH=/usr/lib/llvm-18/lib cargo test --locked -p qbind-ledger
+exit 0; selected 803; passed 787; failed 0; ignored 16; filtered 0
+368 unit + 379 integration + 40 doctests passed; 16 existing ignored doctests
+
+LIBCLANG_PATH=/usr/lib/llvm-18/lib cargo test --locked -p qbind-system --test keyset_program_tests -- --nocapture
+exit 0; selected 2; passed 2; failed 0; ignored 0; filtered 0
+
+LIBCLANG_PATH=/usr/lib/llvm-18/lib cargo check --locked -p qbind-node
+exit 0; selected/passed/failed/ignored not applicable (compilation only)
+
+rustfmt --check --edition 2021 --config skip_children=true crates/qbind-ledger/src/native_keyset_create_model.rs crates/qbind-ledger/src/store.rs crates/qbind-ledger/src/lib.rs crates/qbind-ledger/tests/run_422_native_keyset_create_model_tests.rs
+exit 0; selected/passed/failed/ignored not applicable (format check only)
+```
+
+Full ledger per-target source attribution (each failed 0; integration/unit
+ignored 0; selected equals passed except the doctest row):
+
+```text
+src/lib.rs                                                368 passed
+tests/ledger_apply_tests.rs                                  5 passed
+tests/run_422_native_admission_context_tests.rs              7 passed
+tests/run_422_native_admission_resource_tests.rs             6 passed
+tests/run_422_native_admission_state_contract_tests.rs       2 passed
+tests/run_422_native_keyset_create_model_tests.rs            10 passed
+tests/run_422_native_staged_effects_tests.rs                  9 passed
+tests/suite_registry_account_tests.rs                        1 passed
+tests/t157_parallel_nonce_executor_tests.rs                  9 passed
+tests/t163_vm_v0_tests.rs                                   17 passed
+tests/t164_vm_persistence_tests.rs                          13 passed
+tests/t168_vm_gas_tests.rs                                  15 passed
+tests/t171_parallel_conflict_graph_tests.rs                 11 passed
+tests/t171_parallel_executor_integration_tests.rs            8 passed
+tests/t177_vm_v0_proptests.rs                               15 passed
+tests/t179_vm_v0_gas_proptests.rs                            13 passed
+tests/t193_hybrid_fee_distribution_tests.rs                 15 passed
+tests/t195_monetary_engine_tests.rs                         22 passed
+tests/t197_monetary_seigniorage_tests.rs                     16 passed
+tests/t199_monetary_epoch_state_tests.rs                     19 passed
+tests/t200_validator_seigniorage_tests.rs                    20 passed
+tests/t201_monetary_application_tests.rs                    22 passed
+tests/t202_ema_fee_smoothing_tests.rs                        21 passed
+tests/t203_rate_of_change_limiters_tests.rs                 17 passed
+tests/t204_phase_transition_tests.rs                        28 passed
+tests/t215_state_snapshot_tests.rs                          10 passed
+tests/t232_genesis_config_tests.rs                          16 passed
+tests/t233_genesis_hash_tests.rs                            19 passed
+tests/tx_auth_verifier_tests.rs                             13 passed
+qbind_ledger doctests                      56 selected, 40 passed, 16 ignored
+```
+
+Unchanged ignored doctest inventory (files unchanged from starting blobs):
+execution.rs: AccountState 1096; PersistentAccountState 1244;
+RocksDbAccountState 1365; RocksDbAccountState::open 1408;
+CachedPersistentAccountState 1741; VmV0ExecutionEngine 2084;
+VmV0ExecutionEngine::execute_block_with_proposer 2620.
+slashing_ledger.rs: SlashingUpdateBatch 621; RocksDbSlashingLedger 701;
+RocksDbSlashingLedger::open 750; apply_slashing_update_atomic 1082;
+verify_slashing_consistency_on_startup 1229.
+state_pruning.rs: StatePruner 133.
+state_snapshot.rs: module 30; StateSnapshotter 1042; validate_snapshot_dir 1172.
+All six new wrapper doctests passed and none was ignored.
+
+Initial environment failure: the literal focused integration command above
+first exited 101 before tests (selected/passed/failed/ignored tests all 0):
+bindgen could not find libclang.so in the required LIBCLANG_PATH.
+After that observed missing-dependency failure only, `sudo apt-get update -qq`
+and `sudo apt-get install -y -qq libclang-18-dev` restored the system tool;
+the apt update emitted an unrelated unavailable Chrome repository DNS warning.
+No manifest/dependency/feature edit was made. Retry of that same focused
+command exited 0 with selected/passed 10, failed/ignored 0; precommit repetition
+also exited 0 with 10/10/0/0. The literal private-selector command above ran
+before source commit too: exit 0, selected/passed 12/12, failed/ignored 0.
+There was no failing composition assertion or synthetic allocator-failure run.
+Final seven-command evidence above supersedes preliminary build attribution;
+delivered Rust is compared byte-for-byte against the tested source commit.
+
+### Exact prefix, scope and delivery checks
+
+Starting allowed documents (all mode 100644):
+contract blob `648cf7148432ee3a69c7bb700db9831dc6a6f4a1`,
+61,605 bytes, 800 LF, no CRLF, terminal LF;
+D7 blob `43f519c6468b476ef94f2a86e2377adcee1598ee`,
+2,625,218 bytes, 23,907 CRLF, no bare LF, no terminal newline;
+contradiction blob `24e03528aa11dd7646662b86b93a6266802e4be9`,
+2,665,890 bytes, 4,161 LF, no CRLF, no terminal newline.
+Each complete starting byte sequence must remain an exact prefix, with starting
+mode, EOL convention and EOF state preserved; only appended D7 text inherits
+CRLF. Final evidence is committed separately from the tested Rust source.
+
+Tested source mode/blob manifest:
+100755 `88c743d1c05c9c94deaa700dcbc2006c8a42de2f` crates/qbind-ledger/src/lib.rs
+100644 `c9441b67890e61cea9e5d84552ad4e0a3ecb5df9` crates/qbind-ledger/src/native_keyset_create_model.rs
+100755 `09c91a9233dbe4838c5ef1fd4429bb48065bd745` crates/qbind-ledger/src/store.rs
+100644 `0091711bf591bab90c135f1798dc6551ff06d2ae` crates/qbind-ledger/tests/run_422_native_keyset_create_model_tests.rs
+
+Complete cumulative allowlist is those four paths plus exactly these three
+append-only documents; no other path/mode change is permitted. Delivery uses
+`git -c core.whitespace=cr-at-eol diff --check`,
+`git -c core.whitespace=cr-at-eol diff --check 2903b50f8aaeb857349da76d1e968d0bc5585435 HEAD`,
+prefix/EOL/EOF verification, tested-Rust byte equality, complete path/mode/blob
+inventory, raw parent/starting-to-final ancestry checks and non-force push of
+ONLY the named task branch. Final remote tip and clean worktree are checked.
+No main push, force push, PR, merge, activation or deployment is performed.
+
+Remaining prerequisites: independently approved authority and execution-position
+provenance/freshness, governed stable provider/profile selection, numeric limits/
+resource and corpus compatibility, creator/payer/program/nonce/fee/replay/
+bootstrap rules, production execution integration, all-writer persistent
+isolation/atomic commit semantics, local-versus-consensus receipt/error mapping,
+cancellation/uncertain-outcome evidence and durable recovery/anti-rollback.
+No policy Boolean/token or production interface was invented to bypass these.
+
+Preserved exactly: D7D14_STORAGE_COMPONENT=IMPLEMENTED-ISOLATED;
+D7D14_STORAGE_ACCEPTANCE=PASS-ACCEPTED-SUBSET; §13.6 whole-lifecycle INCOMPLETE;
+activation DISABLED; public DevNet NO-GO; durable anti-rollback NOT-ESTABLISHED;
+C4/C5 OPEN; RS1 OPEN. All limits UNAPPROVED. No F1/F2 closure, deployed-path
+readiness, production integration, PR, merge, main/force push, activation,
+deployment or release approval.

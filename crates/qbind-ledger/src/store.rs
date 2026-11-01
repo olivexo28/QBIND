@@ -613,6 +613,161 @@ impl Default for InMemoryAccountStore {
     }
 }
 
+#[cfg(test)]
+mod run422_native_keyset_create_model {
+    use super::*;
+    use crate::native_keyset_create_model::observation;
+    use crate::native_staged_effects::FixtureStageRefusal;
+
+    // The same genuine composition fixtures also execute as integration tests.
+    mod fixture {
+        use crate as qbind_ledger;
+        include!("../tests/run_422_native_keyset_create_model_tests.rs");
+    }
+
+    #[test]
+    fn actual_composition_preparation_entry_boundaries() {
+        use crate::native_keyset_create_model::KeysetCreateModelError;
+        for case in 0..8 {
+            let mut f = fixture::Fixture::new();
+            let mut config = fixture::config();
+            match case {
+                0 => f.tx.program_id = [0; 32],
+                1 => config.staging.max_operations = 2,
+                2 => f.tx.auths[0].signature[0] ^= 1,
+                3 => f.tx.auths.clear(),
+                4 => {
+                    f.tx.accounts[0].account_id = fixture::TARGET;
+                    f.resign(true);
+                }
+                5 => {
+                    f.tx.call_data.push(0);
+                    f.resign(false);
+                }
+                6 => {
+                    f.tx.call_data[34..36].copy_from_slice(&0u16.to_le_bytes());
+                    f.resign(false);
+                }
+                _ => config.preparation.max_stored_data_bytes = 1329,
+            }
+            observation::reset();
+            let error = match fixture::Model::begin_for_fixture(
+                &mut f.store,
+                &f.tx,
+                Some(fixture::selection(&f.provider)),
+                Some(fixture::binding()),
+                config,
+            ) {
+                Ok(_) => panic!("expected refusal"),
+                Err(error) => error,
+            };
+            let entries = usize::from(case >= 5);
+            assert_eq!(observation::get(), (entries, 0, 0, 0));
+            assert_eq!(
+                matches!(error, KeysetCreateModelError::Preparation(_)),
+                case >= 5
+            );
+            f.preserved();
+            assert!(!f.store.inner.contains_key(&fixture::TARGET));
+            if case >= 5 {
+                assert_eq!(f.provider.work().2, 1);
+            }
+        }
+    }
+
+    #[test]
+    fn actual_composition_capacity_retry_and_allocation_movement() {
+        let mut f = fixture::Fixture::new();
+        let capacity = f.store.inner.capacity();
+        assert!(capacity >= 3 && capacity < 200);
+        let fillers = capacity - f.store.inner.len() - 1;
+        for id in 0..fillers {
+            f.store
+                .put(Account::new([100 + id as u8; 32], [7; 32], 42, vec![9; 4]))
+                .unwrap();
+        }
+        observation::reset();
+        let m = f.begin().unwrap();
+        let (entries, pointer, length, allocated) = observation::get();
+        assert_eq!(entries, 1);
+        assert_eq!(length, 1330);
+        assert!(allocated >= length);
+        assert_ne!(pointer, 0);
+        let summary = m.publish_for_fixture().unwrap();
+        assert_eq!(summary.resulting_accounts, capacity);
+        let actual = f.store.inner.get(&fixture::TARGET).unwrap();
+        assert_eq!(
+            (
+                actual.data.as_ptr() as usize,
+                actual.data.len(),
+                actual.data.capacity()
+            ),
+            (pointer, length, allocated)
+        );
+        assert_eq!(actual, &f.expected);
+        assert_eq!(f.store.inner.capacity(), capacity);
+        f.preserved();
+        for id in 0..fillers {
+            assert_eq!(
+                f.store.inner.get(&[100 + id as u8; 32]),
+                Some(&Account::new([100 + id as u8; 32], [7; 32], 42, vec![9; 4]))
+            );
+        }
+        println!("exact map capacity={capacity}; prepared len={length} actual capacity={allocated}; pointer moved to private map");
+
+        f.tx.call_data[2..34].copy_from_slice(&[20; 32]);
+        // Re-sign the actual changed body via the shared genuine fixture helper.
+        f.resign(false);
+        observation::reset();
+        let work = f.provider.work();
+        assert_eq!(
+            f.begin().unwrap().publish_for_fixture(),
+            Err(FixtureStageRefusal::MapCapacity)
+        );
+        assert_eq!(observation::get().0, 1);
+        assert_eq!(f.store.inner.len(), capacity);
+        f.preserved();
+        assert_eq!(f.store.inner.get(&fixture::TARGET), Some(&f.expected));
+        assert!(!f.store.inner.contains_key(&[20; 32]));
+        for id in 0..fillers {
+            assert_eq!(
+                f.store.inner.get(&[100 + id as u8; 32]),
+                Some(&Account::new([100 + id as u8; 32], [7; 32], 42, vec![9; 4]))
+            );
+        }
+        assert_eq!(f.store.inner.capacity(), capacity);
+        assert!(f.provider.work().2 > work.2);
+        f.store.inner.reserve(1); // Only after consuming refusal released exclusivity.
+        let provisioned = f.store.inner.capacity();
+        assert!(provisioned > capacity);
+        let work = f.provider.work();
+        let m = f.begin().unwrap();
+        let (_, pointer, length, allocated) = observation::get();
+        assert_eq!(observation::get().0, 2);
+        m.publish_for_fixture().unwrap();
+        let actual = f.store.inner.get(&[20; 32]).unwrap();
+        assert_eq!(
+            (
+                actual.data.as_ptr() as usize,
+                actual.data.len(),
+                actual.data.capacity()
+            ),
+            (pointer, length, allocated)
+        );
+        assert!(f.provider.work().2 > work.2);
+        f.preserved();
+        assert_eq!(f.store.inner.get(&fixture::TARGET), Some(&f.expected));
+        assert_eq!(f.store.inner.len(), capacity + 1);
+        for id in 0..fillers {
+            assert_eq!(
+                f.store.inner.get(&[100 + id as u8; 32]),
+                Some(&Account::new([100 + id as u8; 32], [7; 32], 42, vec![9; 4]))
+            );
+        }
+        println!("insufficient map capacity={capacity}; outside-attempt provisioned={provisioned}; fresh proofs/preparation repeated");
+    }
+}
+
 impl AccountStore for InMemoryAccountStore {
     fn get(&self, id: &AccountId) -> Option<Account> {
         self.inner.get(id).cloned()

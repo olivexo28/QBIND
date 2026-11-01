@@ -4160,3 +4160,63 @@ D7D14_STORAGE_ACCEPTANCE=PASS-ACCEPTED-SUBSET; §13.6 whole-lifecycle INCOMPLETE
 activation DISABLED; public DevNet NO-GO; durable anti-rollback NOT-ESTABLISHED;
 C4/C5 OPEN; RS1 OPEN. All limits UNAPPROVED. No F1/F2 closure, production
 integration, PR, merge, main/force push, activation, deployment or release approval.
+
+### RUN 422: transaction-bound keyset-create fixture composition, not authority
+
+Whole native admission contract: **DRAFT / NOT APPROVED / NOT IMPLEMENTED**.
+The new unused `native_keyset_create_model` composes existing primitives only.
+One exclusive concrete in-memory store borrow spans fresh genuine native proof
+evaluation, bounded preparation from the SAME complete transaction's call_data,
+movement of that actual Account into a private one-create stage, and consuming
+publication/cancellation. The selected provider reference is shared by proof
+evaluation and create semantic admission; requested binding remains separate
+from selected binding/status. Fixed program and configuration compatibility
+checks precede provider/preparation work; no duplicate parser or policy is added.
+
+Success is not creator/payer/program/nonce/fee/replay/bootstrap authority.
+Missing pre-state proposed keysets still refuse proof evaluation before create
+preparation. Execution-position labels are trusted fixture inputs, not production
+freshness. No replacement transaction/call/target/provider/Account, arbitrary
+stage access, inner extraction, Clone/Copy, serialization or dispatch is exposed.
+Publication accepts no new inputs, preserves absent-target/complete-preflight/
+no-deletion-credit semantics and performs no map reservation within an attempt.
+Refusal consumes the wrapper; outside-attempt provisioning and fresh proof/
+preparation are required for retry. Later refusal/cancellation cannot undo an
+earlier successful creation.
+
+Phase overlap is not a physical-memory guarantee: inherited proof workspace
+ends before preparation; the empty one-slot session remains live; create semantic
+workspace ends before destination reservation. Existing store accounts and the
+caller transaction/provider remain live. The prepared allocation moves, rather
+than being cloned/rebuilt, into stage and map. Logical output, requested
+reservation and actual Vec capacity are distinct. The unchanged preparer does
+NOT establish an actual-capacity ceiling before allocating a transient owner;
+the stage checks actual capacity only afterward. No approved limits, allocator/
+RSS bound, arbitrary-panic rollback, crash durability, restart safety, persistent
+isolation or production receipt is established. MapCapacity and allocation/
+backend inability remain local inability, not consensus invalid-transaction
+receipts; no allocator-failure reproduction or production exploit is claimed.
+
+Tested Rust commit `beec901e974715932f0d3faf6470189d0c562fec`, tree
+`c5afb9d96a5bbbec43b5ae11b96bc9e6f581a466`: genuine composition controls
+10 passed, private composition selector 12 passed (overlapping shared fixtures),
+unchanged staged/context/contract controls 9/7/2 passed, full ledger 787 passed
+with the existing 16 ignored doctests unchanged, unchanged system keyset tests
+2 passed, node compilation and scoped rustfmt exit 0. All six new doctests
+execute; direct compiler checks isolate borrow/privacy/move refusal causes.
+Compiler measurements: wrapper/configuration/selection/error/summary
+448/88/216/32/48 B. Private map evidence: prepared length/request/capacity
+1330/1330/1330 B, identical preparation-to-map pointer, exact capacity 3,
+consuming insufficient-capacity refusal, outside-attempt provision to 7 and
+fresh genuine retry. Synthetic provider errors/panics are separately labeled.
+Source/test mapping, exact commands/counts, ownership limitations and remaining
+authority/production prerequisites are appended in the state contract and D7.
+This complete starting document remains an exact prefix, mode 100644, LF,
+without terminal newline; final evidence is committed separately from Rust.
+
+D7D14_STORAGE_COMPONENT=IMPLEMENTED-ISOLATED;
+D7D14_STORAGE_ACCEPTANCE=PASS-ACCEPTED-SUBSET; §13.6 whole-lifecycle INCOMPLETE;
+activation DISABLED; public DevNet NO-GO; durable anti-rollback NOT-ESTABLISHED;
+C4/C5 OPEN; RS1 OPEN. All limits UNAPPROVED. No F1/F2 closure, deployed-path
+readiness, production integration, PR, merge, main/force push, activation,
+deployment or release approval.

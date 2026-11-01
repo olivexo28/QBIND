@@ -798,3 +798,127 @@ D7D14_STORAGE_ACCEPTANCE=PASS-ACCEPTED-SUBSET; §13.6 whole-lifecycle INCOMPLETE
 activation DISABLED; public DevNet NO-GO; durable anti-rollback NOT-ESTABLISHED;
 C4/C5 OPEN; RS1 OPEN. No F1/F2 closure, activation, deployment, PR, merge,
 main/force push or release approval.
+
+## RUN 422: isolated transaction-bound keyset-create composition (2026-11-01)
+
+Whole native admission contract: **DRAFT / NOT APPROVED / NOT IMPLEMENTED**.
+The new `native_keyset_create_model` module is IMPLEMENTED-ISOLATED, unused
+trusted fixture composition, not production KeysetProgram execution. All limits
+and execution-position/provider/profile labels remain UNAPPROVED trusted
+configuration. No default, approved numeric profile, governance commitment,
+activation mechanism or authenticated policy selection is supplied.
+
+`NativeKeysetCreateModel<'a,G,P,E>` privately owns exactly one
+`NativeStagedEffects<'a,G,P,E,1>`. Its constructor receives one complete
+immutable Transaction, one concrete mutable InMemoryAccountStore, optional
+selected provider/binding/status, separate requested native binding, and explicit
+create-preparation/staging limits. There is no second provider, alternate call,
+target ID, prepared Account or replacement transaction input after admission.
+The wrapper has only consuming publication/cancellation after construction:
+no arbitrary staging, inner-session extraction, rebinding, Clone/Copy,
+serialization, read-your-writes or program dispatch.
+
+Source argument (`crates/qbind-ledger/src/native_keyset_create_model.rs`):
+lines 89-108 define private selected provider/binding/status; 111-124 define
+explicit limits and fixed errors; 127-179 compose the private one-slot session.
+Lines 140-153 check shared KEYSET_PROGRAM_ID and local compatibility before
+external work: selected create max_entries <= E, staging max_operations == 1,
+create logical output <= staging logical length <= individual actual-capacity
+limit <= aggregate capacity. No selected limit is silently reduced.
+Lines 154-164 delegate native selection/proofs to the unchanged constructor,
+preserving its Context versus Proof error distinctions. Lines 166-178 enter
+preparation only after successful fresh proof evaluation, pass the original
+transaction.call_data and SAME selected provider to the unchanged bounded
+preparer, and move the returned Account with its own returned ID directly into
+create staging. A staging refusal's internally prepared Account is dropped
+before its fixed-size reason is returned. Preparation/staging errors discard
+the private session; no publishable partial result escapes.
+
+One continuous exclusive borrow spans proof evaluation, preparation, staging
+and publication/cancellation/drop. No store release/reacquisition occurs within
+an attempt. Publication (lines 184-185) accepts no new inputs and delegates to
+the unchanged complete batch helper in store.rs: all target predicates,
+operation/ID/length/actual-capacity/aggregate checks and len + ALL creates
+capacity calculation precede mutation, with no deletion credit. The absent
+target predicate preserves any existing complete Account, including metadata.
+Admitted map capacity supports subsequent moves without reservation or other
+fallible publication work. Map provisioning occurs only outside an attempt,
+including after a consuming MapCapacity refusal. Fresh retry reacquires the
+session and repeats genuine proof evaluation and preparation.
+
+Proof success does NOT confer creator, payer, program, nonce, fee, replay or
+bootstrap authority. A proposed missing keyset cannot authorize its own create
+from future state: existing bounded pre-state proof reads refuse MissingAccount
+before preparation. A later separately admitted transaction may use a previously
+stored keyset with genuine proofs, but execution-position labels remain fixture
+inputs, not evidence of production freshness. Earlier successful publication
+survives later existing-target refusal, map-capacity refusal and cancellation.
+
+Resource overlap is phase-specific, not an end-to-end physical-memory bound:
+inherited proof workspace and owned bounded account reads end before create
+preparation; the empty one-slot session is live during preparation; the unchanged
+create semantic workspace ends before destination reservation. One prepared
+Account allocation moves into the stage and then map, while existing store
+allocations and caller-owned complete transaction/provider remain live. The
+preparer checks logical stored length and requests try_reserve_exact(length);
+it does NOT guarantee an actual Vec-capacity ceiling before allocation. The
+stage checks actual capacity only AFTER the transient prepared owner exists.
+An over-capacity owner is disposed of on staging refusal, not published or
+returned as a reusable capability. No stage budget is promoted to a
+preallocation, allocator-overhead, physical-stack, RSS or provider-internal bound.
+
+Compiler-measured x86_64 sizes for the tested G=2/P=4/E=4 fixture: wrapper
+448 B, configuration 88 B, selected fixture 216 B, error 32 B, summary 48 B.
+Observed prepared logical length 1330 B, requested reservation 1330 B and actual
+Vec capacity 1330 B are distinct facts; equality in this run is not a guarantee.
+The private map test measures capacity 3, succeeds at len+1=3 without capacity
+change, refuses the next create at len=3, then provisions capacity 7 after
+release and succeeds on a fresh attempt. Preparation-boundary pointer/length/
+capacity equal those of the actual private map owner, not a get() clone.
+
+Tests in `tests/run_422_native_keyset_create_model_tests.rs` cover genuine
+complete-account publication and preservation (298-337), zero-work local/native
+selection refusals (340-475), equal body digests with altered auth vectors,
+missing required coverage, late invalid extra proof and no bootstrap (478-533),
+genuinely re-signed altered-body preparation refusals (536-590), lifecycle/fresh
+retry (593-627), explicitly synthetic semantic provider error/unwind after
+genuine proof (630-658), later genuine use and preserved earlier creation
+(661-692), and measured layouts (696 onward). The private cfg(test) store module
+executes these same composition fixtures plus actual preparation-entry and
+measured capacity/allocation controls. The new module's fixed-size cfg(test)
+observer is not a production interface or allocator hook. Five compile-fail
+doctests plus one valid counterpart all execute; direct rustc checks confirm
+E0499, E0502, E0616, E0382 and E0382, with no unrelated failure cause.
+
+Guarantee retained: normal-error atomicity for concrete in-memory fixture
+publication ONLY. Construction failure, cancellation, drop, caller unwind and
+injected provider failure/unwind before publication preserve the complete store
+and release borrows. This is not arbitrary-panic rollback during mutation, crash
+durability, restart safety, persistent isolation or production transaction
+receipts. MapCapacity and destination-allocation/backend inability are local
+inability, not consensus invalid-transaction receipts. No experimentally
+reproduced allocator failure or production exploit is claimed.
+
+Final Rust/test source commit `beec901e974715932f0d3faf6470189d0c562fec`,
+tree `c5afb9d96a5bbbec43b5ae11b96bc9e6f581a466`: all seven required
+validation commands exit 0. Focused new integration 10 passed; private selector
+12 passed (10 shared composition fixtures plus 2 private controls); unchanged
+staged/context/contract 9/7/2 passed; full ledger 787 passed, 0 failed,
+16 pre-existing ignored; unchanged system keyset tests 2 passed. All six new
+doctests passed, none ignored. Node check is compilation only; counts overlap.
+Literal commands, per-target counts, initial missing-libclang restoration,
+identity and prefix evidence are recorded in the D7 appendix.
+
+Remaining authority/production prerequisites are unchanged: approved authority
+and policy/provider provenance, numeric limits and resource compatibility,
+creator/payer/program/nonce/fee/replay/bootstrap rules, production execution
+integration, persistent all-writer isolation and commit semantics, receipt/error
+classification, cancellation/uncertain outcome and durable recovery evidence.
+No frozen prerequisite, production caller, parser/crypto adapter, account/wire
+representation, signing preimage, manifest, dependency or feature is changed.
+
+Preserved exactly: D7D14_STORAGE_COMPONENT=IMPLEMENTED-ISOLATED;
+D7D14_STORAGE_ACCEPTANCE=PASS-ACCEPTED-SUBSET; §13.6 whole-lifecycle INCOMPLETE;
+activation DISABLED; public DevNet NO-GO; durable anti-rollback NOT-ESTABLISHED;
+C4/C5 OPEN; RS1 OPEN. All limits UNAPPROVED. No F1/F2 closure, deployed-path
+readiness, PR, merge, main/force push, activation, deployment or release approval.
