@@ -222,7 +222,6 @@ impl SignatureSuite for CountedSuite {
 
 struct Fixture {
     store: WitnessStore,
-    original_state: HashMap<AccountId, Account>,
     transaction: Transaction,
     secret: Vec<u8>,
     crypto: Arc<dyn CryptoProvider>,
@@ -232,6 +231,10 @@ struct Fixture {
 
 impl Fixture {
     fn new(operation: Operation) -> Self {
+        Self::new_with_auth_id(operation, AUTH_ID)
+    }
+
+    fn new_with_auth_id(operation: Operation, auth_id: AccountId) -> Self {
         let (public_key, secret) = MlDsa44Backend::generate_keypair().expect("genuine ML-DSA-44");
         let keyset = KeysetAccount {
             version: 1,
@@ -249,10 +252,9 @@ impl Fixture {
         };
         let mut keyset_data = Vec::new();
         keyset.encode_state(&mut keyset_data);
-        let signer = Account::new(AUTH_ID, KEYSET_PROGRAM_ID, 0, keyset_data);
+        let signer = Account::new(auth_id, KEYSET_PROGRAM_ID, 0, keyset_data);
 
         let mut store = WitnessStore::default();
-        store.seed(signer);
         store.seed(target_account(operation));
         store.seed(sentinel_account());
 
@@ -294,9 +296,10 @@ impl Fixture {
             member.encode_state(&mut data);
             store.seed(Account::new(id, GOVERNANCE_PROGRAM_ID, 0, data));
         }
+        store.seed(signer);
 
         let accounts = std::iter::once(TxAccountMeta {
-            account_id: AUTH_ID,
+            account_id: auth_id,
             flags: 1,
             access_hint: 0,
             reserved0: [0; 2],
@@ -351,10 +354,8 @@ impl Fixture {
             })),
         );
         store.clear_events();
-        let original_state = store.complete_state();
         Self {
             store,
-            original_state,
             transaction,
             secret,
             crypto,
@@ -372,34 +373,25 @@ impl Fixture {
             .execute_transaction(&mut self.store, Arc::clone(&self.crypto), tx)
     }
 
-    fn expected_state_after(&self, operation: Operation) -> HashMap<AccountId, Account> {
-        let mut expected = self.original_state.clone();
-        expected.insert(operation.target(), expected_target(operation));
-        expected
-    }
-
-    fn assert_success(&mut self, operation: Operation, tx: &Transaction) -> StoreEvents {
+    fn assert_unavailable(&mut self, tx: &Transaction) -> StoreEvents {
         let tx_before = tx.clone();
         let wire_before = transaction_bytes(tx);
+        let state_before = self.store.complete_state();
         let before_verifications = self.verify_count();
         self.store.clear_events();
-        self.execute(tx).expect("genuine executor control succeeds");
-        let events = self.store.take_events();
-        assert_eq!(
-            events.reads,
-            vec![AUTH_ID, operation.target()],
-            "only transaction signer keyset and fixed operation target are read"
+        assert_execution_error(
+            self.execute(tx)
+                .expect_err("native governance remains unavailable"),
+            ExecutionError::ProgramError("native governance authority unavailable"),
         );
-        assert_eq!(events.writes, vec![operation.target()]);
+        let events = self.store.take_events();
+        assert_eq!(events.reads, vec![tx.accounts[0].account_id]);
+        assert!(events.writes.is_empty());
         assert!(events.deletes.is_empty());
         assert_eq!(self.verify_count(), before_verifications + 1);
-        assert_eq!(self.store.accounts, self.expected_state_after(operation));
+        assert_eq!(self.store.accounts, state_before);
         assert_eq!(*tx, tx_before);
         assert_eq!(transaction_bytes(tx), wire_before);
-        assert!(!events.reads.contains(&SAFETY_COUNCIL_KEYSET_ACCOUNT_ID));
-        assert!(SAFETY_COUNCIL_MEMBER_ACCOUNT_IDS
-            .iter()
-            .all(|id| !events.reads.contains(id)));
         assert!(!events.reads.contains(&PAYER_ID));
         events
     }
@@ -469,6 +461,21 @@ fn decode_state<T: StateDecode>(data: &[u8]) -> T {
     let state = T::decode_state(&mut input).expect("fixture state decodes");
     assert!(input.is_empty(), "fixture state has no trailing bytes");
     state
+}
+
+fn assert_signer_keyset(account: &Account) {
+    assert_eq!(account.header.owner, KEYSET_PROGRAM_ID);
+    assert!(!account.header.is_executable);
+    let keyset: KeysetAccount = decode_state(&account.data);
+    assert_eq!(keyset.version, 1);
+    assert_eq!(keyset.threshold, 1);
+    assert_eq!(keyset.entries.len(), 1);
+    assert_eq!(keyset.entries[0].suite_id, SUITE_ID);
+    assert_eq!(keyset.entries[0].weight, 1);
+    assert_eq!(
+        usize::from(keyset.entries[0].pubkey_len),
+        keyset.entries[0].pubkey_bytes.len()
+    );
 }
 
 fn target_account(operation: Operation) -> Account {
@@ -560,103 +567,29 @@ fn initial_checklist() -> LaunchChecklist {
     }
 }
 
-fn expected_target(operation: Operation) -> Account {
-    let mut expected = target_account(operation);
-    expected.data = match operation {
-        Operation::SuiteStatus => {
-            let mut state: SuiteRegistry = decode_state(&expected.data);
-            state
-                .suites
-                .iter_mut()
-                .find(|suite| suite.suite_id == 0x03)
-                .unwrap()
-                .status = SuiteStatus::Disabled;
-            encode_state(&state)
-        }
-        Operation::ParamRegistry => {
-            let mut state: ParamRegistry = decode_state(&expected.data);
-            state.slash_bps_prevote = 101;
-            state.slash_bps_precommit = 202;
-            state.reporter_reward_bps = 303;
-            encode_state(&state)
-        }
-        Operation::LaunchChecklist => {
-            let mut state: LaunchChecklist = decode_state(&expected.data);
-            state.devnet_ok = true;
-            state.testnet_ok = false;
-            state.perf_ok = true;
-            state.adversarial_ok = false;
-            state.crypto_audit_ok = true;
-            state.proto_audit_ok = false;
-            state.spec_ok = true;
-            state.devnet_report_hash = [0x11; 32];
-            state.testnet_report_hash = [0x22; 32];
-            state.perf_report_hash = [0x33; 32];
-            state.adversarial_report_hash = [0x44; 32];
-            state.crypto_audit_hash = [0x55; 32];
-            state.proto_audit_hash = [0x66; 32];
-            state.spec_hash = [0x77; 32];
-            encode_state(&state)
-        }
-        Operation::MainnetStatus => {
-            let mut state: ParamRegistry = decode_state(&expected.data);
-            state.mainnet_status = MainnetStatus::Ready;
-            encode_state(&state)
-        }
-    };
-    expected
-}
-
 #[test]
-fn all_four_native_governance_operations_execute_through_tx_executor() {
+fn all_four_operations_authenticate_then_refuse_without_governed_reads_or_effects() {
     for operation in Operation::ALL {
         let mut fixture = Fixture::new(operation);
         assert_ne!(AUTH_ID, operation.target());
-        assert_ne!(AUTH_ID, SAFETY_COUNCIL_KEYSET_ACCOUNT_ID);
-        assert!(SAFETY_COUNCIL_MEMBER_ACCOUNT_IDS
-            .iter()
-            .all(|id| AUTH_ID != *id));
+        assert_signer_keyset(&fixture.store.accounts[&AUTH_ID]);
         let tx = fixture.transaction.clone();
-        fixture.assert_success(operation, &tx);
-        let updated = &fixture.store.accounts[&operation.target()];
-        assert_eq!(updated, &expected_target(operation));
-
-        match operation {
-            Operation::SuiteStatus => {
-                let stored: SuiteRegistry = decode_state(&updated.data);
-                assert_eq!(stored.suites[0].status, SuiteStatus::Disabled);
-                assert_eq!(stored.suites[1], initial_suite_registry().suites[1]);
-            }
-            Operation::ParamRegistry => {
-                let stored: ParamRegistry = decode_state(&updated.data);
-                assert_eq!(
-                    (
-                        stored.slash_bps_prevote,
-                        stored.slash_bps_precommit,
-                        stored.reporter_reward_bps,
-                        stored.mainnet_status
-                    ),
-                    (101, 202, 303, MainnetStatus::PreGenesis)
-                );
-            }
-            Operation::LaunchChecklist => {
-                let stored: LaunchChecklist = decode_state(&updated.data);
-                assert!(stored.devnet_ok);
-                assert!(!stored.testnet_ok);
-                assert_eq!(stored.devnet_report_hash, [0x11; 32]);
-                assert_eq!(stored.spec_hash, [0x77; 32]);
-            }
-            Operation::MainnetStatus => {
-                let stored: ParamRegistry = decode_state(&updated.data);
-                assert_eq!(stored.mainnet_status, MainnetStatus::Ready);
-                assert_eq!(stored.slash_bps_prevote, initial_params().slash_bps_prevote);
-            }
-        }
+        assert_eq!(fixture.verify_count(), 0);
+        let events = fixture.assert_unavailable(&tx);
+        assert_eq!(events.reads, vec![AUTH_ID]);
+        assert!(events.writes.is_empty());
+        assert!(events.deletes.is_empty());
+        assert!(fixture.store.accounts.contains_key(&operation.target()));
+        assert!(fixture
+            .store
+            .accounts
+            .contains_key(&SAFETY_COUNCIL_KEYSET_ACCOUNT_ID));
+        assert!(fixture.store.accounts.contains_key(&SENTINEL_ID));
     }
 }
 
 #[test]
-fn each_operation_authentication_refusal_is_exact_and_recoverable() {
+fn authentication_refusals_preserve_state_and_genuine_retry_reaches_unavailable_gate() {
     for operation in Operation::ALL {
         let mut fixture = Fixture::new(operation);
         let valid = fixture.transaction.clone();
@@ -670,7 +603,7 @@ fn each_operation_authentication_refusal_is_exact_and_recoverable() {
             vec![],
             0,
         );
-        fixture.assert_success(operation, &valid);
+        fixture.assert_unavailable(&valid);
 
         let mut tampered_fixture = Fixture::new(operation);
         let valid = tampered_fixture.transaction.clone();
@@ -682,18 +615,18 @@ fn each_operation_authentication_refusal_is_exact_and_recoverable() {
             vec![AUTH_ID],
             1,
         );
-        tampered_fixture.assert_success(operation, &valid);
+        tampered_fixture.assert_unavailable(&valid);
     }
 }
 
 #[test]
-fn signed_malformed_calls_and_unsupported_dispatch_refuse_before_effects() {
+fn genuinely_signed_call_only_errors_precede_the_authority_refusal() {
     for operation in Operation::ALL {
         let mut fixture = Fixture::new(operation);
-        let mut malformed = fixture.transaction.clone();
-        malformed.call_data.pop();
-        sign(&mut malformed, &fixture.secret);
-        let handler_error = match operation {
+        let mut truncated = fixture.transaction.clone();
+        truncated.call_data.pop();
+        sign(&mut truncated, &fixture.secret);
+        let decode_error = match operation {
             Operation::SuiteStatus => {
                 ExecutionError::InvalidCallData("invalid GovUpdateSuiteStatusCall")
             }
@@ -707,12 +640,39 @@ fn signed_malformed_calls_and_unsupported_dispatch_refuse_before_effects() {
                 ExecutionError::InvalidCallData("invalid GovSetMainnetStatusCall")
             }
         };
-        fixture.assert_refusal(&malformed, handler_error, vec![AUTH_ID], 1);
-        let valid = fixture.transaction.clone();
-        fixture.assert_success(operation, &valid);
+        fixture.assert_refusal(&truncated, decode_error, vec![AUTH_ID], 1);
+
+        let mut trailing = fixture.transaction.clone();
+        trailing.call_data.push(0xA5);
+        sign(&mut trailing, &fixture.secret);
+        let trailing_error = match operation {
+            Operation::SuiteStatus => {
+                ExecutionError::InvalidCallData("extra bytes after GovUpdateSuiteStatusCall")
+            }
+            Operation::ParamRegistry => {
+                ExecutionError::InvalidCallData("extra bytes after GovUpdateParamRegistryCall")
+            }
+            Operation::LaunchChecklist => {
+                ExecutionError::InvalidCallData("extra bytes after GovUpdateLaunchChecklistCall")
+            }
+            Operation::MainnetStatus => {
+                ExecutionError::InvalidCallData("extra bytes after GovSetMainnetStatusCall")
+            }
+        };
+        fixture.assert_refusal(&trailing, trailing_error, vec![AUTH_ID], 1);
     }
 
     let mut fixture = Fixture::new(Operation::SuiteStatus);
+    let mut empty = fixture.transaction.clone();
+    empty.call_data.clear();
+    sign(&mut empty, &fixture.secret);
+    fixture.assert_refusal(
+        &empty,
+        ExecutionError::InvalidCallData("empty call_data"),
+        vec![AUTH_ID],
+        1,
+    );
+
     let mut unsupported = fixture.transaction.clone();
     unsupported.call_data[0] = 0xFF;
     sign(&mut unsupported, &fixture.secret);
@@ -722,81 +682,97 @@ fn signed_malformed_calls_and_unsupported_dispatch_refuse_before_effects() {
         vec![AUTH_ID],
         1,
     );
-    let valid = fixture.transaction.clone();
-    fixture.assert_success(Operation::SuiteStatus, &valid);
 
-    let mut fixture = Fixture::new(Operation::SuiteStatus);
     let mut invalid_status = fixture.transaction.clone();
     invalid_status.call_data[3] = 0xFF;
     sign(&mut invalid_status, &fixture.secret);
     fixture.assert_refusal(
         &invalid_status,
         ExecutionError::InvalidCallData("invalid SuiteStatus"),
-        vec![AUTH_ID, SUITE_REGISTRY_ACCOUNT_ID],
+        vec![AUTH_ID],
         1,
     );
-    let valid = fixture.transaction.clone();
-    fixture.assert_success(Operation::SuiteStatus, &valid);
+
+    let mut invalid_mainnet_status = Fixture::new(Operation::MainnetStatus);
+    let mut invalid = invalid_mainnet_status.transaction.clone();
+    invalid.call_data[2] = 0xFF;
+    sign(&mut invalid, &invalid_mainnet_status.secret);
+    invalid_mainnet_status.assert_refusal(
+        &invalid,
+        ExecutionError::InvalidCallData("invalid GovSetMainnetStatusCall"),
+        vec![AUTH_ID],
+        1,
+    );
 }
 
 #[test]
-fn proposal_id_and_eta_are_signed_but_not_admission_inputs() {
+fn proposal_eta_and_council_identity_claims_do_not_grant_authority() {
     for operation in Operation::ALL {
         for offset in [operation.proposal_offset(), operation.eta_offset()] {
             let mut fixture = Fixture::new(operation);
-            let original = fixture.transaction.clone();
-            let mut altered = original.clone();
-            altered.call_data[offset] ^= 0x40;
-            assert_ne!(tx_digest(&original), tx_digest(&altered));
-            fixture.assert_refusal(
-                &altered,
-                ExecutionError::CryptoError("signature verification failed"),
-                vec![AUTH_ID],
-                1,
-            );
-        }
-
-        for (offset, value) in [
-            (operation.proposal_offset(), u64::MAX),
-            (operation.eta_offset(), 0),
-        ] {
-            let mut fixture = Fixture::new(operation);
-            let mut resubmitted = fixture.transaction.clone();
-            resubmitted.call_data[offset..offset + 8].copy_from_slice(&value.to_le_bytes());
-            sign(&mut resubmitted, &fixture.secret);
-            fixture.assert_success(operation, &resubmitted);
-            assert_eq!(
-                fixture.store.accounts[&operation.target()],
-                expected_target(operation),
-                "proposal/ETA values do not change the handler's stored result"
-            );
+            let mut changed = fixture.transaction.clone();
+            let value = if offset == operation.proposal_offset() {
+                u64::MAX
+            } else {
+                0
+            };
+            changed.call_data[offset..offset + 8].copy_from_slice(&value.to_le_bytes());
+            sign(&mut changed, &fixture.secret);
+            fixture.assert_unavailable(&changed);
         }
     }
+
+    for requested in [MainnetStatus::Ready, MainnetStatus::Activated] {
+        let mut fixture = Fixture::new(Operation::MainnetStatus);
+        let mut tx = fixture.transaction.clone();
+        tx.call_data[2] = requested as u8;
+        sign(&mut tx, &fixture.secret);
+        fixture.assert_unavailable(&tx);
+    }
+
+    let mut identity_claim =
+        Fixture::new_with_auth_id(Operation::ParamRegistry, SAFETY_COUNCIL_KEYSET_ACCOUNT_ID);
+    let signer = &identity_claim.store.accounts[&SAFETY_COUNCIL_KEYSET_ACCOUNT_ID];
+    assert_signer_keyset(signer);
+    let tx = identity_claim.transaction.clone();
+    identity_claim.assert_unavailable(&tx);
 }
 
 #[test]
-fn identical_complete_signed_transaction_is_accepted_twice() {
-    let operation = Operation::ParamRegistry;
-    let mut fixture = Fixture::new(operation);
+fn identical_signed_setter_replay_refuses_each_freshly_authenticated_attempt() {
+    let mut fixture = Fixture::new(Operation::ParamRegistry);
     let tx = fixture.transaction.clone();
     let bytes = transaction_bytes(&tx);
-
     assert_eq!(fixture.verify_count(), 0);
 
-    let first_events = fixture.assert_success(operation, &tx);
+    let first_events = fixture.assert_unavailable(&tx);
+    assert_eq!(first_events.reads, vec![AUTH_ID]);
     assert_eq!(fixture.verify_count(), 1);
-    assert_eq!(first_events.writes, vec![operation.target()]);
-    assert_eq!(first_events.deletes, Vec::<AccountId>::new());
     let after_first = fixture.store.complete_state();
 
-    let second_events = fixture.assert_success(operation, &tx);
+    let second_events = fixture.assert_unavailable(&tx);
+    assert_eq!(second_events.reads, vec![AUTH_ID]);
     assert_eq!(fixture.verify_count(), 2);
-    assert_eq!(second_events.writes, vec![operation.target()]);
-    assert_eq!(second_events.deletes, Vec::<AccountId>::new());
-    let after_second = fixture.store.complete_state();
-    assert_eq!(
-        after_second, after_first,
-        "setter's second logical state is unchanged"
-    );
+    assert_eq!(fixture.store.complete_state(), after_first);
     assert_eq!(transaction_bytes(&tx), bytes);
+}
+
+#[test]
+fn absent_and_malformed_targets_are_not_read_before_unavailable_refusal() {
+    for operation in Operation::ALL {
+        let mut absent = Fixture::new(operation);
+        absent.store.accounts.remove(&operation.target());
+        let tx = absent.transaction.clone();
+        absent.assert_unavailable(&tx);
+
+        let mut malformed = Fixture::new(operation);
+        malformed
+            .store
+            .accounts
+            .get_mut(&operation.target())
+            .unwrap()
+            .data = vec![0xFF];
+        let tx = malformed.transaction.clone();
+        malformed.assert_unavailable(&tx);
+    }
 }

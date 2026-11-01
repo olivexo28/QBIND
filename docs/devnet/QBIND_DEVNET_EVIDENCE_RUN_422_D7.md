@@ -24474,3 +24474,36 @@ identification only: governance characterization is unchanged, no deployed
 reachability is established, and no new executed evidence is added.
 Historical validation remains attributed to
 `c279c7be1cc415032975f162109e5e2c3f9c6ed0`.
+
+## RUN 422 native governance authority-unavailable implementation evidence
+
+### Scope and behavior
+
+This implementation supersedes the earlier three-file enforcement proposal. It updates the existing system governance target and the existing runtime authority-contract target; no new target, copied old production handler, cfg branch, or fixture-only permission was added. The source/test commit is `99023fcb30ec2c6c042dea0f0196b88c072049ac` (tree `40ff775df79b609116bc1a6212a2aacc4e5f863d`). The final evidence updates are separate from that source/test commit.
+
+`GovernanceProgram` checks direct program ID, then empty call data, then dispatches the opcode. Each recognized operation retains its existing call decode and trailing-byte error; SuiteStatus performs its existing scalar enum mapping after successful decode/trailing validation and before target access. Invalid encoded MainnetStatus remains rejected by its existing decoder. After these call-only checks, every operation reaches one private unconditional refusal returning exactly `ExecutionError::ProgramError("native governance authority unavailable")`.
+
+The gate precedes any governance target-account read, state decoding, suite-entry lookup, state serialization, write, or delete. Thus an otherwise valid call returns authority-unavailable even if its target is missing or malformed; missing-account, malformed-state, trailing-state, and missing-suite-entry errors are intentionally not reached. Invalid SuiteStatus still wins before target access. No additional policy/field checks or positive authorization branch were introduced.
+
+`TxExecutor` authentication-before-dispatch is unchanged. The executor tests use genuine ML-DSA-44 signing and the real verification suite, with a counted wrapper that delegates verification to the actual suite. Retained signer keysets are well-formed, keyset-program-owned, and non-executable. Test-local store observations are reset after setup; full account-map and encoded-transaction oracles are taken without adding observed reads. Each valid signed attempt verifies freshly, reads only its expected signer keyset, returns the exact unavailable error, and has no target/council/proposal/replay-state access or store mutation. Direct Program tests are separate, do not claim authentication, and prove the same boundary cannot be bypassed.
+
+### Acceptance mapping and tested results
+
+A: all four operations with populated targets and sentinel/council state, genuine authentication, exact refusal, signer-only reads, fresh verification, zero writes/deletes, and full state/transaction preservation. B: every operation's empty-auth and tampered-signature refusal, immediate preservation oracle, and genuine retry to authority-unavailable. C: re-signed truncation and trailing data for every operation, empty data, unsupported opcode, invalid SuiteStatus, invalid encoded MainnetStatus, and their exact downstream errors with no target access; direct wrong-program-ID ordering is tested separately. D: changed, genuinely re-signed proposal IDs and ETAs; Ready and Activated setter requests; and a labeled auth-valid keyset at the known council keyset ID, treated only as an identity-claim control. E: identical complete signed parameter-setter submitted twice, with a fresh verification and refusal each time, no state changes or writes. This demonstrates repeated refusal only, not durable replay protection or decision consumption. F: valid calls with absent and malformed targets, refused before target lookup/decode. G: the four direct handler tests now assert refusal and complete preservation; direct wrong program ID asserts no store access.
+
+The historical successful-write characterization remains valid for `c279c7be1cc415032975f162109e5e2c3f9c6ed0` only. It is not rewritten as post-fix behavior. All results below are from committed Rust source/tests `99023fcb30ec2c6c042dea0f0196b88c072049ac`, not the historical revision.
+
+Required command results (counts overlap):
+
+* `LIBCLANG_PATH=/usr/lib/llvm-18/lib cargo test --locked -p qbind-runtime --test run_422_native_governance_authority_contract_tests -- --nocapture --test-threads=1` — exit 0; selected 6, passed 6, failed 0, ignored 0.
+* `LIBCLANG_PATH=/usr/lib/llvm-18/lib cargo test --locked -p qbind-system --test governance_program_tests -- --nocapture` — exit 0; selected 5, passed 5, failed 0, ignored 0.
+* `LIBCLANG_PATH=/usr/lib/llvm-18/lib cargo test --locked -p qbind-runtime --test tx_executor_tests --test block_executor_tests -- --nocapture` — exit 0; selected 8, passed 8, failed 0, ignored 0.
+* `LIBCLANG_PATH=/usr/lib/llvm-18/lib cargo test --locked -p qbind-runtime -p qbind-system` — exit 0; selected 125, passed 124, failed 0, ignored 1 (the existing ignored runtime gas-model doctest).
+* `LIBCLANG_PATH=/usr/lib/llvm-18/lib cargo check --locked -p qbind-node` — exit 0; compilation check only, no tests selected.
+* `rustfmt --check --edition 2021 crates/qbind-system/src/governance_program.rs crates/qbind-system/tests/governance_program_tests.rs crates/qbind-runtime/tests/run_422_native_governance_authority_contract_tests.rs` — exit 0.
+* `git -c core.whitespace=cr-at-eol diff --check` — exit 0.
+* `git -c core.whitespace=cr-at-eol diff --check 73efdb3f9c51fa6ab055555fd2211a79840b2a96 HEAD` — exit 0.
+
+The first two focused compile attempts exited 101 before test selection because the prescribed `/usr/lib/llvm-18/lib` lacked `libclang.so`. Installing the missing system `libclang-18-dev` enabled the successful required commands; no dependency manifest or lockfile changed. The package check establishes compilation only. Legacy transaction authentication still performs its normal work before the gate: this result does not claim whole-path allocation freedom or new resource bounds. Source/library tests do not establish selected-binary, running-node, network, or deployed-path evidence.
+
+No positive authority provenance/currentness, timelock, one-use consumption, atomic publication, or recovery was implemented. The whole native admission/governance contract remains DRAFT / NOT APPROVED / NOT IMPLEMENTED. Preserve D7D14_STORAGE_COMPONENT=IMPLEMENTED-ISOLATED; D7D14_STORAGE_ACCEPTANCE=PASS-ACCEPTED-SUBSET; §13.6 whole-lifecycle INCOMPLETE; activation DISABLED; public DevNet NO-GO; durable anti-rollback NOT-ESTABLISHED; C4/C5 OPEN; RS1 OPEN. All candidate limits remain UNAPPROVED; no F1/F2 or C4/C5 closure or release approval.
