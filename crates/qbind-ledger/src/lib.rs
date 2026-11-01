@@ -13,6 +13,7 @@ pub mod keyset_proof;
 pub mod keyset_validation;
 pub mod monetary_engine;
 pub mod monetary_state;
+pub mod native_admission_context;
 pub mod native_tx_proof;
 pub mod parallel_exec;
 pub mod program;
