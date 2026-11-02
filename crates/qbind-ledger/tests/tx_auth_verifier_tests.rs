@@ -1,7 +1,7 @@
 use std::cell::Cell;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use qbind_crypto::{
     ml_dsa_44_sign_digest, AeadSuite, CryptoError, CryptoProvider, KemSuite, MlDsa44SignatureSuite,
@@ -245,6 +245,87 @@ impl CryptoProvider for CountingCryptoProvider {
     }
 }
 
+struct RecordingMlDsa44Suite {
+    inner: MlDsa44SignatureSuite,
+    digests: Arc<Mutex<Vec<Hash32>>>,
+}
+
+impl SignatureSuite for RecordingMlDsa44Suite {
+    fn suite_id(&self) -> u8 {
+        100
+    }
+
+    fn public_key_len(&self) -> usize {
+        self.inner.public_key_len()
+    }
+
+    fn signature_len(&self) -> usize {
+        self.inner.signature_len()
+    }
+
+    fn verify(
+        &self,
+        public_key: &[u8],
+        digest: &Hash32,
+        signature: &[u8],
+    ) -> Result<(), CryptoError> {
+        self.digests
+            .lock()
+            .expect("recorded digest lock")
+            .push(*digest);
+        self.inner.verify(public_key, digest, signature)
+    }
+}
+
+struct RecordingCryptoProvider {
+    lookups: AtomicUsize,
+    suite: RecordingMlDsa44Suite,
+}
+
+impl RecordingCryptoProvider {
+    fn new() -> Self {
+        Self {
+            lookups: AtomicUsize::new(0),
+            suite: RecordingMlDsa44Suite {
+                inner: MlDsa44SignatureSuite::new(100),
+                digests: Arc::new(Mutex::new(Vec::new())),
+            },
+        }
+    }
+
+    fn reset(&self) {
+        self.lookups.store(0, Ordering::SeqCst);
+        self.suite
+            .digests
+            .lock()
+            .expect("recorded digest lock")
+            .clear();
+    }
+
+    fn recorded_digests(&self) -> Vec<Hash32> {
+        self.suite
+            .digests
+            .lock()
+            .expect("recorded digest lock")
+            .clone()
+    }
+}
+
+impl CryptoProvider for RecordingCryptoProvider {
+    fn signature_suite(&self, suite_id: u8) -> Option<&dyn SignatureSuite> {
+        self.lookups.fetch_add(1, Ordering::SeqCst);
+        (suite_id == 100).then_some(&self.suite)
+    }
+
+    fn kem_suite(&self, _suite_id: u8) -> Option<&dyn KemSuite> {
+        None
+    }
+
+    fn aead_suite(&self, _suite_id: u8) -> Option<&dyn AeadSuite> {
+        None
+    }
+}
+
 fn seeded_counting_store() -> CountingStore {
     let keyset_id = dummy_account_id(0xAA);
     let mut encoded = Vec::new();
@@ -287,6 +368,162 @@ fn signed_native_fixture() -> (CountingStore, Arc<dyn CryptoProvider>, Transacti
         StaticCryptoProvider::new().with_signature_suite(Arc::new(MlDsa44SignatureSuite::new(100))),
     );
     (store, crypto, tx)
+}
+
+#[test]
+fn genuine_mldsa44_streaming_caller_compatibility_and_retry() {
+    let first_id = dummy_account_id(0x31);
+    let second_id = dummy_account_id(0x72);
+    let (first_public_key, first_secret_key) =
+        qbind_crypto::ml_dsa44::MlDsa44Backend::generate_keypair().expect("first ML-DSA-44 keygen");
+    let (second_public_key, second_secret_key) =
+        qbind_crypto::ml_dsa44::MlDsa44Backend::generate_keypair()
+            .expect("second ML-DSA-44 keygen");
+    let mut store = CountingStore::default();
+    for (account_id, public_key, lamports) in [
+        (first_id, first_public_key, 91),
+        (second_id, second_public_key, 207),
+    ] {
+        let mut encoded = Vec::new();
+        make_keyset_account(100, public_key).encode_state(&mut encoded);
+        store.seed(Account::new(
+            account_id,
+            dummy_program_id(0x4B),
+            lamports,
+            encoded,
+        ));
+    }
+
+    let mut tx = make_transaction(
+        vec![
+            TxAccountMeta {
+                account_id: first_id,
+                flags: 3,
+                access_hint: 0x34,
+                reserved0: [0x5A, 0xA5],
+            },
+            TxAccountMeta {
+                account_id: second_id,
+                flags: 5,
+                access_hint: 0xCD,
+                reserved0: [0xC3, 0x3C],
+            },
+        ],
+        vec![
+            TxAuth {
+                account_index: 0,
+                suite_id: 100,
+                reserved: 0,
+                signature: Vec::new(),
+            },
+            TxAuth {
+                account_index: 1,
+                suite_id: 100,
+                reserved: 0,
+                signature: Vec::new(),
+            },
+        ],
+    );
+    tx.version = 2;
+    tx.chain_id = 0xA1B2_C3D4;
+    tx.payer = dummy_account_id(0xE7);
+    tx.nonce = 0x0102_0304_0506_0708;
+    tx.fee_limit = 987_654_321;
+    tx.program_id = dummy_program_id(0x6D);
+    tx.call_data = (0..256 * 1024)
+        .map(|index| (index as u8).wrapping_mul(37).wrapping_add(11))
+        .collect();
+
+    // The legacy digest is an independent signing oracle, outside verifier counters.
+    let oracle_digest = qbind_hash::tx::tx_digest(&tx);
+    tx.auths[0].signature =
+        ml_dsa_44_sign_digest(&first_secret_key, &oracle_digest).expect("sign first proof");
+    tx.auths[1].signature =
+        ml_dsa_44_sign_digest(&second_secret_key, &oracle_digest).expect("sign second proof");
+
+    let crypto = Arc::new(RecordingCryptoProvider::new());
+    let crypto_provider: Arc<dyn CryptoProvider> = crypto.clone();
+    let original_tx = tx.clone();
+    let original_store = store.snapshot();
+
+    verify_transaction_auth(&mut store, crypto_provider.clone(), &tx)
+        .expect("legacy-oracle signatures must pass the streaming caller");
+    assert_eq!(
+        tx, original_tx,
+        "successful verification changed transaction"
+    );
+    assert_eq!(
+        store.snapshot(),
+        original_store,
+        "success changed full store"
+    );
+    assert_eq!(store.counts.reads.get(), 2);
+    assert_eq!(store.counts.writes.get(), 0);
+    assert_eq!(store.counts.deletes.get(), 0);
+    assert_eq!(crypto.lookups.load(Ordering::SeqCst), 2);
+    assert_eq!(crypto.recorded_digests(), vec![oracle_digest; 2]);
+
+    let mut changed_body = tx.clone();
+    changed_body.call_data[131_071] ^= 0x80;
+    let changed_oracle_digest = qbind_hash::tx::tx_digest(&changed_body);
+    let changed_witness = changed_body.clone();
+    store.reset_counts();
+    crypto.reset();
+    assert!(matches!(
+        verify_transaction_auth(&mut store, crypto_provider.clone(), &changed_body),
+        Err(ExecutionError::CryptoError("signature verification failed"))
+    ));
+    assert_eq!(changed_body, changed_witness);
+    assert_eq!(
+        store.snapshot(),
+        original_store,
+        "refusal changed full store"
+    );
+    assert_eq!(store.counts.reads.get(), 1);
+    assert_eq!(store.counts.writes.get(), 0);
+    assert_eq!(store.counts.deletes.get(), 0);
+    assert_eq!(crypto.lookups.load(Ordering::SeqCst), 1);
+    assert_eq!(crypto.recorded_digests(), vec![changed_oracle_digest]);
+
+    let mut invalid_later_proof = tx.clone();
+    invalid_later_proof.auths[1].signature[0] ^= 0x80;
+    let invalid_witness = invalid_later_proof.clone();
+    store.reset_counts();
+    crypto.reset();
+    assert!(matches!(
+        verify_transaction_auth(&mut store, crypto_provider.clone(), &invalid_later_proof),
+        Err(ExecutionError::CryptoError("signature verification failed"))
+    ));
+    assert_eq!(invalid_later_proof, invalid_witness);
+    assert_eq!(
+        store.snapshot(),
+        original_store,
+        "later refusal changed full store"
+    );
+    assert_eq!(store.counts.reads.get(), 2);
+    assert_eq!(store.counts.writes.get(), 0);
+    assert_eq!(store.counts.deletes.get(), 0);
+    assert_eq!(crypto.lookups.load(Ordering::SeqCst), 2);
+    assert_eq!(crypto.recorded_digests(), vec![oracle_digest; 2]);
+
+    changed_body.auths[0].signature =
+        ml_dsa_44_sign_digest(&first_secret_key, &changed_oracle_digest)
+            .expect("re-sign changed body first proof");
+    changed_body.auths[1].signature =
+        ml_dsa_44_sign_digest(&second_secret_key, &changed_oracle_digest)
+            .expect("re-sign changed body second proof");
+    let retry_witness = changed_body.clone();
+    store.reset_counts();
+    crypto.reset();
+    verify_transaction_auth(&mut store, crypto_provider, &changed_body)
+        .expect("valid re-signed retry must verify");
+    assert_eq!(changed_body, retry_witness);
+    assert_eq!(store.snapshot(), original_store, "retry changed full store");
+    assert_eq!(store.counts.reads.get(), 2);
+    assert_eq!(store.counts.writes.get(), 0);
+    assert_eq!(store.counts.deletes.get(), 0);
+    assert_eq!(crypto.lookups.load(Ordering::SeqCst), 2);
+    assert_eq!(crypto.recorded_digests(), vec![changed_oracle_digest; 2]);
 }
 
 fn two_signer_fixture(
