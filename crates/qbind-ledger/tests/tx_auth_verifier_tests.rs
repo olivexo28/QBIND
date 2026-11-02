@@ -1,4 +1,4 @@
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
@@ -10,7 +10,7 @@ use qbind_crypto::{
 use qbind_ledger::auth::verify_transaction_auth;
 use qbind_ledger::{Account, AccountStore, ExecutionContext, ExecutionError, InMemoryAccountStore};
 use qbind_serde::StateEncode;
-use qbind_types::{AccountId, Hash32, KeysetAccount, KeysetEntry, ProgramId};
+use qbind_types::{AccountId, Hash32, KeysetAccount, KeysetEntry, ProgramId, KEYSET_PROGRAM_ID};
 use qbind_wire::tx::{Transaction, TxAccountMeta, TxAuth};
 
 const EMPTY_AUTH_ERROR: &str = "transaction requires at least one authentication entry";
@@ -150,7 +150,9 @@ struct OperationCounts {
 #[derive(Default)]
 struct CountingStore {
     accounts: HashMap<AccountId, Account>,
+    reported_accounts: HashMap<AccountId, Account>,
     counts: OperationCounts,
+    read_ids: RefCell<Vec<AccountId>>,
     returned_data_range: Cell<Option<(usize, usize)>>,
 }
 
@@ -163,10 +165,15 @@ impl CountingStore {
         self.accounts.clone()
     }
 
+    fn report_account(&mut self, requested_id: AccountId, account: Account) {
+        self.reported_accounts.insert(requested_id, account);
+    }
+
     fn reset_counts(&self) {
         self.counts.reads.set(0);
         self.counts.writes.set(0);
         self.counts.deletes.set(0);
+        self.read_ids.borrow_mut().clear();
         self.returned_data_range.set(None);
     }
 
@@ -178,7 +185,12 @@ impl CountingStore {
 impl AccountStore for CountingStore {
     fn get(&self, id: &AccountId) -> Option<Account> {
         self.counts.reads.set(self.counts.reads.get() + 1);
-        let account = self.accounts.get(id).cloned();
+        self.read_ids.borrow_mut().push(*id);
+        let account = self
+            .reported_accounts
+            .get(id)
+            .or_else(|| self.accounts.get(id))
+            .cloned();
         if let Some(account) = &account {
             self.returned_data_range
                 .set(Some((account.data.as_ptr() as usize, account.data.len())));
@@ -361,7 +373,7 @@ fn seeded_counting_store() -> CountingStore {
     let mut encoded = Vec::new();
     make_keyset_account(1, vec![1, 2, 3]).encode_state(&mut encoded);
     let mut store = CountingStore::default();
-    store.seed(Account::new(keyset_id, dummy_program_id(0x4B), 0, encoded));
+    store.seed(Account::new(keyset_id, KEYSET_PROGRAM_ID, 0, encoded));
     store.reset_counts();
     store
 }
@@ -375,7 +387,10 @@ fn signed_native_fixture() -> (CountingStore, Arc<dyn CryptoProvider>, Transacti
     keyset.encode_state(&mut encoded);
 
     let mut store = CountingStore::default();
-    store.seed(Account::new(keyset_id, dummy_program_id(0x4B), 0, encoded));
+    let mut account = Account::new(keyset_id, KEYSET_PROGRAM_ID, 0x0102_0304_0506_0708, encoded);
+    account.header.rent_epoch = 0x1112_1314_1516_1718;
+    account.header.reserved = [0xA5; 8];
+    store.seed(account);
 
     let mut tx = make_transaction(
         vec![TxAccountMeta {
@@ -441,7 +456,10 @@ fn genuine_mldsa44_verification_borrows_selected_key_from_returned_account() {
     make_keyset_account(100, public_key.clone()).encode_state(&mut encoded);
 
     let mut store = CountingStore::default();
-    store.seed(Account::new(keyset_id, dummy_program_id(0x4B), 19, encoded));
+    let mut account = Account::new(keyset_id, KEYSET_PROGRAM_ID, 19, encoded);
+    account.header.rent_epoch = 0x2122_2324_2526_2728;
+    account.header.reserved = [0x5A; 8];
+    store.seed(account);
     let mut tx = transaction_for_keyset(keyset_id, 100);
     let oracle_digest = qbind_hash::tx::tx_digest(&tx);
     tx.auths[0].signature =
@@ -456,6 +474,10 @@ fn genuine_mldsa44_verification_borrows_selected_key_from_returned_account() {
     let (data_start, data_len) = store
         .returned_data_range()
         .expect("observed returned Account");
+    let returned_account = store.accounts.get(&keyset_id).expect("stored account");
+    assert_eq!(returned_account.header.lamports, 19);
+    assert_eq!(returned_account.header.rent_epoch, 0x2122_2324_2526_2728);
+    assert_eq!(returned_account.header.reserved, [0x5A; 8]);
     let (key_start, observed_key) = crypto
         .recorded_public_keys()
         .into_iter()
@@ -475,6 +497,83 @@ fn genuine_mldsa44_verification_borrows_selected_key_from_returned_account() {
     assert_eq!(store.snapshot(), original_store);
     assert_eq!(store.counts.writes.get(), 0);
     assert_eq!(store.counts.deletes.get(), 0);
+}
+
+#[test]
+fn returned_account_metadata_refusals_precede_parsing_and_crypto() {
+    let (mut store, _, tx) = signed_native_fixture();
+    let keyset_id = tx.accounts[0].account_id;
+    let valid_account = store.accounts.get(&keyset_id).unwrap().clone();
+    let tx_witness = tx.clone();
+    let store_witness = store.snapshot();
+    let crypto = Arc::new(RecordingCryptoProvider::new());
+
+    // The returned-ID case is a synthetic backend response: the account is
+    // stored under the requested key, but get deliberately reports another ID.
+    let cases = [
+        ("returned id wins", 0u8),
+        ("owner wins", 1u8),
+        ("executable", 2u8),
+    ];
+    for (name, fault) in cases {
+        let mut response = valid_account.clone();
+        response.data = vec![0xFF]; // malformed data must not be parsed first
+        match fault {
+            0 => {
+                response.id = dummy_account_id(0xFE);
+                response.header.owner = dummy_program_id(0xFD);
+                response.header.is_executable = true;
+            }
+            1 => {
+                response.header.owner = dummy_program_id(0xFC);
+                response.header.is_executable = true;
+            }
+            2 => response.header.is_executable = true,
+            _ => unreachable!(),
+        }
+        store.report_account(keyset_id, response.clone());
+        let responses_before = store.reported_accounts.clone();
+        store.reset_counts();
+        crypto.reset();
+
+        let error = verify_transaction_auth(&mut store, crypto.clone(), &tx)
+            .expect_err("invalid returned metadata must refuse");
+        match (fault, error) {
+            (0, ExecutionError::InvalidCallData("keyset account id mismatch")) => {}
+            (1, ExecutionError::AccountOwnerMismatch) => {}
+            (2, ExecutionError::InvalidCallData("keyset account is executable")) => {}
+            (_, other) => panic!("{name}: unexpected error {other:?}"),
+        }
+        assert_eq!(store.counts.reads.get(), 1, "{name}");
+        assert_eq!(&*store.read_ids.borrow(), &[keyset_id], "{name}");
+        assert_eq!(crypto.lookups.load(Ordering::SeqCst), 0, "{name}");
+        assert!(crypto.recorded_digests().is_empty(), "{name}");
+        assert!(crypto.recorded_public_keys().is_empty(), "{name}");
+        assert_eq!(store.counts.writes.get(), 0, "{name}");
+        assert_eq!(store.counts.deletes.get(), 0, "{name}");
+        assert_eq!(tx, tx_witness, "{name}");
+        assert_eq!(store.snapshot(), store_witness, "{name}");
+        assert_eq!(store.reported_accounts, responses_before, "{name}");
+        assert_eq!(store.reported_accounts[&keyset_id], response, "{name}");
+    }
+
+    // A valid-metadata malformed account continues to expose the parser's
+    // existing error rather than a metadata refusal.
+    let mut malformed = valid_account;
+    malformed.data = vec![0xFF];
+    store.report_account(keyset_id, malformed.clone());
+    store.reset_counts();
+    crypto.reset();
+    assert!(matches!(
+        verify_transaction_auth(&mut store, crypto.clone(), &tx),
+        Err(ExecutionError::SerializationError("decode KeysetAccount"))
+    ));
+    assert_eq!(store.counts.reads.get(), 1);
+    assert_eq!(&*store.read_ids.borrow(), &[keyset_id]);
+    assert_eq!(crypto.lookups.load(Ordering::SeqCst), 0);
+    assert!(crypto.recorded_digests().is_empty());
+    assert_eq!(store.snapshot(), store_witness);
+    assert_eq!(tx, tx_witness);
 }
 
 #[test]
@@ -519,7 +618,7 @@ fn stored_keyset_framing_refusals_precede_provider_and_preserve_state() {
     for (name, data, trailing_error) in cases {
         let keyset_id = dummy_account_id(0xD2);
         let mut store = CountingStore::default();
-        store.seed(Account::new(keyset_id, dummy_program_id(0x4B), 27, data));
+        store.seed(Account::new(keyset_id, KEYSET_PROGRAM_ID, 27, data));
         let tx = transaction_for_keyset(keyset_id, 1);
         let tx_witness = tx.clone();
         let store_witness = store.snapshot();
@@ -599,7 +698,7 @@ fn zero_entry_missing_account_suite_and_provider_outcomes_are_exact() {
     for (data, suite_id, name, expected_reads, expected_lookups, expected_error) in cases {
         let mut store = CountingStore::default();
         if let Some(data) = data {
-            store.seed(Account::new(keyset_id, dummy_program_id(0x4B), 31, data));
+            store.seed(Account::new(keyset_id, KEYSET_PROGRAM_ID, 31, data));
         }
         let tx = transaction_for_keyset(keyset_id, suite_id);
         let tx_witness = tx.clone();
@@ -670,12 +769,7 @@ fn genuine_same_suite_selection_uses_first_key_and_ignores_semantic_metadata() {
     let mut store = CountingStore::default();
     let mut wrong_first = Vec::new();
     make_entries(wrong_public_key.clone(), valid_public_key.clone()).encode_state(&mut wrong_first);
-    store.seed(Account::new(
-        keyset_id,
-        dummy_program_id(0x4B),
-        41,
-        wrong_first,
-    ));
+    store.seed(Account::new(keyset_id, KEYSET_PROGRAM_ID, 41, wrong_first));
     let wrong_first_store_witness = store.snapshot();
     let mut tx = transaction_for_keyset(keyset_id, 100);
     let digest = qbind_hash::tx::tx_digest(&tx);
@@ -702,12 +796,7 @@ fn genuine_same_suite_selection_uses_first_key_and_ignores_semantic_metadata() {
 
     let mut valid_first = Vec::new();
     make_entries(valid_public_key.clone(), wrong_public_key.clone()).encode_state(&mut valid_first);
-    store.seed(Account::new(
-        keyset_id,
-        dummy_program_id(0x4B),
-        41,
-        valid_first,
-    ));
+    store.seed(Account::new(keyset_id, KEYSET_PROGRAM_ID, 41, valid_first));
     let valid_first_store_witness = store.snapshot();
     store.reset_counts();
     crypto.reset();
@@ -741,7 +830,7 @@ fn genuine_mldsa44_streaming_caller_compatibility_and_retry() {
         make_keyset_account(100, public_key).encode_state(&mut encoded);
         store.seed(Account::new(
             account_id,
-            dummy_program_id(0x4B),
+            KEYSET_PROGRAM_ID,
             lamports,
             encoded,
         ));
@@ -893,17 +982,12 @@ fn two_signer_fixture(
     };
     let mut encoded = Vec::new();
     make_keyset_account(100, public_key).encode_state(&mut encoded);
-    store.seed(Account::new(second_id, dummy_program_id(0x4B), 0, encoded));
+    store.seed(Account::new(second_id, KEYSET_PROGRAM_ID, 0, encoded));
     let (first_pk, first_sk) =
         qbind_crypto::ml_dsa44::MlDsa44Backend::generate_keypair().expect("ML-DSA-44 keygen");
     let mut first_data = Vec::new();
     make_keyset_account(100, first_pk).encode_state(&mut first_data);
-    store.seed(Account::new(
-        first_id,
-        dummy_program_id(0x4B),
-        0,
-        first_data,
-    ));
+    store.seed(Account::new(first_id, KEYSET_PROGRAM_ID, 0, first_data));
     let mut tx = make_transaction(
         [first_id, second_id]
             .into_iter()
@@ -936,6 +1020,51 @@ fn two_signer_fixture(
         StaticCryptoProvider::new().with_signature_suite(Arc::new(MlDsa44SignatureSuite::new(100))),
     );
     (store, crypto, tx)
+}
+
+#[test]
+fn genuine_multi_auth_metadata_refusal_preserves_first_proof_and_retries() {
+    let (mut store, _, tx) = two_signer_fixture(false);
+    let first_id = dummy_account_id(0xA1);
+    let second_id = dummy_account_id(0xA2);
+    store.accounts.get_mut(&second_id).unwrap().header.owner = dummy_program_id(0xFC);
+    let tx_witness = tx.clone();
+    let rejected_store = store.snapshot();
+    let crypto = Arc::new(RecordingCryptoProvider::new());
+
+    assert!(matches!(
+        verify_transaction_auth(&mut store, crypto.clone(), &tx),
+        Err(ExecutionError::AccountOwnerMismatch)
+    ));
+    assert_eq!(&*store.read_ids.borrow(), &[first_id, second_id]);
+    assert_eq!(store.counts.reads.get(), 2);
+    assert_eq!(crypto.lookups.load(Ordering::SeqCst), 1);
+    assert_eq!(
+        crypto.recorded_digests(),
+        vec![qbind_hash::tx::tx_digest(&tx)]
+    );
+    assert_eq!(store.counts.writes.get(), 0);
+    assert_eq!(store.counts.deletes.get(), 0);
+    assert_eq!(tx, tx_witness);
+    assert_eq!(store.snapshot(), rejected_store);
+
+    // Correct only the fixture metadata outside the invocation. Signed bytes
+    // remain untouched, and both genuine proofs then verify.
+    store.accounts.get_mut(&second_id).unwrap().header.owner = KEYSET_PROGRAM_ID;
+    store.reset_counts();
+    crypto.reset();
+    verify_transaction_auth(&mut store, crypto.clone(), &tx)
+        .expect("corrected fixture metadata permits an unchanged signed retry");
+    assert_eq!(&*store.read_ids.borrow(), &[first_id, second_id]);
+    assert_eq!(store.counts.reads.get(), 2);
+    assert_eq!(crypto.lookups.load(Ordering::SeqCst), 2);
+    assert_eq!(
+        crypto.recorded_digests(),
+        vec![qbind_hash::tx::tx_digest(&tx); 2]
+    );
+    assert_eq!(store.counts.writes.get(), 0);
+    assert_eq!(store.counts.deletes.get(), 0);
+    assert_eq!(tx, tx_witness);
 }
 
 #[test]
@@ -1117,7 +1246,7 @@ fn verify_transaction_auth_structural_accept_all_provider_control() {
     keyset.encode_state(&mut data);
 
     let mut store = InMemoryAccountStore::new();
-    let account = Account::new(keyset_id, dummy_program_id(0x4B), 0, data);
+    let account = Account::new(keyset_id, KEYSET_PROGRAM_ID, 0, data);
     store.put(account).unwrap();
 
     // Build a Transaction with one account meta and one auth.
@@ -1332,7 +1461,7 @@ fn verify_transaction_auth_fails_on_wrong_suite_id() {
     keyset.encode_state(&mut data);
 
     let mut store = InMemoryAccountStore::new();
-    let account = Account::new(keyset_id, dummy_program_id(0x4B), 0, data);
+    let account = Account::new(keyset_id, KEYSET_PROGRAM_ID, 0, data);
     store.put(account).unwrap();
 
     let crypto = Arc::new(TestCryptoProvider::new()) as Arc<dyn CryptoProvider>;
@@ -1373,7 +1502,7 @@ fn verify_transaction_auth_fails_on_unknown_suite() {
     keyset.encode_state(&mut data);
 
     let mut store = InMemoryAccountStore::new();
-    let account = Account::new(keyset_id, dummy_program_id(0x4B), 0, data);
+    let account = Account::new(keyset_id, KEYSET_PROGRAM_ID, 0, data);
     store.put(account).unwrap();
 
     let crypto = Arc::new(TestCryptoProvider::new()) as Arc<dyn CryptoProvider>;
@@ -1413,7 +1542,7 @@ fn verify_transaction_auth_fails_on_invalid_signature() {
     keyset.encode_state(&mut data);
 
     let mut store = InMemoryAccountStore::new();
-    let account = Account::new(keyset_id, dummy_program_id(0x4B), 0, data);
+    let account = Account::new(keyset_id, KEYSET_PROGRAM_ID, 0, data);
     store.put(account).unwrap();
 
     let crypto = Arc::new(TestCryptoProvider::new()) as Arc<dyn CryptoProvider>;
@@ -1458,10 +1587,10 @@ fn verify_transaction_auth_multiple_auths_structural_provider_control() {
 
     let mut store = InMemoryAccountStore::new();
     store
-        .put(Account::new(keyset_id1, dummy_program_id(0x4B), 0, data1))
+        .put(Account::new(keyset_id1, KEYSET_PROGRAM_ID, 0, data1))
         .unwrap();
     store
-        .put(Account::new(keyset_id2, dummy_program_id(0x4B), 0, data2))
+        .put(Account::new(keyset_id2, KEYSET_PROGRAM_ID, 0, data2))
         .unwrap();
 
     let crypto = Arc::new(TestCryptoProvider::new()) as Arc<dyn CryptoProvider>;
@@ -1519,10 +1648,10 @@ fn verify_transaction_auth_multiple_auths_reject_control() {
 
     let mut store = InMemoryAccountStore::new();
     store
-        .put(Account::new(keyset_id1, dummy_program_id(0x4B), 0, data1))
+        .put(Account::new(keyset_id1, KEYSET_PROGRAM_ID, 0, data1))
         .unwrap();
     store
-        .put(Account::new(keyset_id2, dummy_program_id(0x4B), 0, data2))
+        .put(Account::new(keyset_id2, KEYSET_PROGRAM_ID, 0, data2))
         .unwrap();
 
     let crypto = Arc::new(TestCryptoProvider::new()) as Arc<dyn CryptoProvider>;

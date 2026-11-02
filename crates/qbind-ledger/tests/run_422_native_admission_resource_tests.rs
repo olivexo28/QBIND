@@ -1,4 +1,4 @@
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -220,6 +220,7 @@ impl AccountStore for CountedStore {
 struct ReportedAccountStore {
     account: Account,
     legacy_reads: Cell<usize>,
+    requested_ids: RefCell<Vec<AccountId>>,
     bounded_reads: Cell<usize>,
     writes: Cell<usize>,
     deletes: Cell<usize>,
@@ -230,6 +231,7 @@ impl ReportedAccountStore {
         Self {
             account,
             legacy_reads: Cell::new(0),
+            requested_ids: RefCell::new(Vec::new()),
             bounded_reads: Cell::new(0),
             writes: Cell::new(0),
             deletes: Cell::new(0),
@@ -238,13 +240,15 @@ impl ReportedAccountStore {
 
     fn reset_reads(&self) {
         self.legacy_reads.set(0);
+        self.requested_ids.borrow_mut().clear();
         self.bounded_reads.set(0);
     }
 }
 
 impl AccountStore for ReportedAccountStore {
-    fn get(&self, _id: &AccountId) -> Option<Account> {
+    fn get(&self, id: &AccountId) -> Option<Account> {
         self.legacy_reads.set(self.legacy_reads.get() + 1);
+        self.requested_ids.borrow_mut().push(*id);
         Some(self.account.clone())
     }
 
@@ -1061,21 +1065,28 @@ fn run422_native_compatibility_witnesses_metadata_bounded_read_and_proof_limit()
         let mut store = ReportedAccountStore::new(account);
 
         provider.counts.reset();
-        verify_transaction_auth(&mut store, provider.clone(), &tx)
-            .expect("legacy verifier ignores returned-account metadata");
+        let native_error = verify_transaction_auth(&mut store, provider.clone(), &tx)
+            .expect_err("native verifier refuses invalid returned-account metadata");
+        match mutate {
+            0 => assert!(matches!(native_error, ExecutionError::AccountOwnerMismatch)),
+            1 => assert!(matches!(
+                native_error,
+                ExecutionError::InvalidCallData("keyset account is executable")
+            )),
+            2 => assert!(matches!(
+                native_error,
+                ExecutionError::InvalidCallData("keyset account id mismatch")
+            )),
+            _ => unreachable!(),
+        }
         assert_eq!(store.legacy_reads.get(), 1, "{name}");
+        assert_eq!(&*store.requested_ids.borrow(), &[id], "{name}");
         assert_eq!(store.bounded_reads.get(), 0, "{name}");
-        assert_eq!(provider.counts.lookups.load(Ordering::SeqCst), 1, "{name}");
-        assert_eq!(
-            provider.counts.descriptors.load(Ordering::SeqCst),
-            0,
-            "{name}"
-        );
-        assert_eq!(
-            provider.counts.verifications.load(Ordering::SeqCst),
-            1,
-            "{name}"
-        );
+        provider.counts.assert_work(0, 0);
+        assert_eq!(store.writes.get(), 0, "{name}");
+        assert_eq!(store.deletes.get(), 0, "{name}");
+        assert_eq!(tx, tx_before, "{name}");
+        assert_eq!(store.account, account_before, "{name}");
 
         store.reset_reads();
         provider.counts.reset();
@@ -1159,6 +1170,6 @@ fn run422_native_compatibility_witnesses_metadata_bounded_read_and_proof_limit()
     assert_eq!(tx, tx_before);
     assert_eq!(store.inner.get(&id), Some(stored));
     println!(
-        "RUN422 compatibility metadata=legacy-accepts/new-refuses owner-executable-returned-id; bounded-read=legacy-accepts/new-unsupported; proof-count=legacy-accepts-9/new-refuses-9-before-work"
+        "RUN422 compatibility metadata=native-refuses owner-executable-returned-id/isolated-typed-refusals; bounded-read=legacy-accepts/new-unsupported; proof-count=legacy-accepts-9/new-refuses-9-before-work"
     );
 }
