@@ -24747,3 +24747,229 @@ Preserve `D7D14_STORAGE_COMPONENT=IMPLEMENTED-ISOLATED`,
 `NOT-ESTABLISHED`, C4/C5 `OPEN`, RS1 `OPEN`; all candidate limits remain
 `UNAPPROVED`. No F1/F2 closure, production activation, live-validator admission
 or release approval follows.
+
+## RUN 422 - Native keyset-create authority characterization and draft contract
+
+**DRAFT / NOT APPROVED / NOT IMPLEMENTED. Test-and-contract work only.**
+Production behavior is unchanged; isolated admission helpers/models are not
+activated. New contract:
+`docs/devnet/QBIND_RUN_422_NATIVE_KEYSET_CREATE_AUTHORITY_CONTRACT.md`.
+New actual-executor target:
+`crates/qbind-runtime/tests/run_422_native_keyset_create_authority_contract_tests.rs`.
+Cross-references are appended to the native-admission state contract and
+`docs/whitepaper/contradiction.md`. Historical evidence above keeps its own
+source/profile/command attribution.
+
+### Baseline objects, origin, ancestry and frozen source
+
+Initial `git status --porcelain=v1` was empty. Origin fetch/push:
+`https://github.com/olivexo28/QBIND`. Required starting commit
+`62217a3792932db6948e602c39facade0190a180` and root tree
+`380813f63c73df6aa0eebfb86493a68595047663` were independently readable as
+commit/tree objects. The commit's raw tree header and `HEAD^{tree}` both
+identified the required tree. No applicable repository instruction file was
+found. Task branch was created directly from the required baseline with
+`git switch -c copilot/run-422-native-keyset-create-authority-contract 62217a3792932db6948e602c39facade0190a180`.
+
+Ancestry is distinct from tree equality. `git rev-parse --is-shallow-repository`
+returned `true`. The raw starting header includes parent
+`a7d7c1dc31094b59e13f758791f1d77c49055b62`; `git cat-file -t` for that parent
+failed with exit 128 (object unavailable locally). It is not an absent parent
+header or proof of a root commit. No cause of shallow history is inferred;
+pre-baseline ancestry is not established, and no history deepening was done.
+`git merge-base --is-ancestor 62217a3792932db6948e602c39facade0190a180 HEAD`
+exited 0 for the source/test commit; final ancestry is checked again at delivery.
+
+Frozen source/test commit: `ce25c42e3a389608832294c29bf5d2cdc7a59a6d`.
+Its root tree: `6e776019580b4a0139425b65b125353cd89b01b3`.
+It changes exactly the two new files, both mode `100644`, LF with terminal
+newline. Test blob: `bd240b538a218bcadd22371553b9389bd1bd9897`;
+test SHA-256:
+`bddfcccbda400f610fb60ed8a6831847cd32f01142c82ee7cba3e8bdcaeffb44`.
+Draft-contract blob: `ff284580fa1e9628dd4afebbeb8e2c01431c4863`.
+The separate final evidence commit appends only the three existing documents.
+Final delivery reports that commit/tree and all five mode/blob identities;
+a commit cannot embed its own final object identity in its contents.
+
+### Source-derived findings versus executed assertions
+
+The new draft's source mapping reviews the actual executor/context/auth,
+KeysetProgram, create/stored codecs, account/store representation, existing
+direct-program tests and isolated preparation/semantic/proof/context/staging/
+composition APIs. Source review confirms authentication before dispatch;
+create decoding, trailing-byte and target-existence checks before account
+construction/encoding/put; no independent creator/namespace authority,
+target-key possession or isolated candidate semantics in that route.
+Legacy auth selects the first matching suite entry and does not enforce
+stored thresholds/weights. These source facts are not inferred solely from
+test success.
+
+The executed nine-test target covers the nine required groups. Every positive
+result uses real ML-DSA-44 via the actual executor. The counting suite records
+the exact key/digest/proof and delegates to the genuine verifier; no
+always-accepting provider is used. Independently generated fixture keys are
+signed/verified outside measured execution, which does not establish a
+production possession rule. All ordinary signer fixtures are correctly owned,
+non-executable, one-key weight-1/threshold-1 keysets.
+
+The assertions establish: creation with an independent unsigned candidate key;
+absent versus seeded distinct payer non-use; target tamper authentication
+failure and re-signed changed-target creation; empty/malformed/tampered auth
+refusals and fresh valid retry; existence refusal on replay and unrelated-owner
+targets with complete preservation; same-nonce separately signed fresh-target
+success; exact storage of eight small structurally decodable semantic-gap
+calls; actual later single-key use of a created genuine two-key threshold-2
+keyset with threshold-1 control; absent pre-state signer `AccountNotFound`
+before crypto; and authenticated framing errors before target lookup.
+
+Per-invocation assertions reset setup counters, compare complete store maps,
+exact read/put/delete traces, exact error variants/payloads, complete
+transaction values and wire bytes. Raw map snapshots do not add measured
+reads. The complete header/data oracle is independently byte-assembled and
+checked by state decoding. No unexpected signer, payer, sentinel or earlier
+created-account modification/deletion is accepted. Counting the bounded
+assertions gives 31 executor invocations: 19 one-put successes, 12 no-effect
+refusals, 29 delegated real verification attempts and zero descriptor calls.
+These are assertion totals, not a latency or resource benchmark.
+
+Notable observed results are library behavior, not deployed exploit evidence:
+the signed call target governs creation even when target metadata still names
+the old ID after re-signing; a signed payer is neither read nor charged;
+exact replay authenticates again and hits existence, not a nonce journal;
+and a stored threshold 2 does not stop successful first-key authentication.
+An absent signer cannot bootstrap its own creation despite a mathematically
+valid signature. No ledger `QbindTransaction`/VM or runtime `QbindTx`/EVM
+properties, selected-binary reachability or deployment are inferred.
+
+### Required final-source validation: literal commands and results
+
+All commands below ran at the frozen source/test revision above. Tests were
+not edited afterward; delivery compares the complete delivered test bytes and
+blob to that tested revision. The two whitespace commands also run again
+after final documentation and at final HEAD. There are no dependency-file
+changes or broad formatting rewrites.
+
+```bash
+LIBCLANG_PATH=/usr/lib/llvm-18/lib cargo test --locked -p qbind-runtime --test run_422_native_keyset_create_authority_contract_tests -- --nocapture --test-threads=1
+
+LIBCLANG_PATH=/usr/lib/llvm-18/lib cargo test --locked -p qbind-system --test keyset_program_tests -- --nocapture
+
+LIBCLANG_PATH=/usr/lib/llvm-18/lib cargo test --locked -p qbind-runtime -p qbind-system
+
+rustfmt --check --edition 2021 crates/qbind-runtime/tests/run_422_native_keyset_create_authority_contract_tests.rs
+
+git -c core.whitespace=cr-at-eol diff --check
+
+git -c core.whitespace=cr-at-eol diff --check 62217a3792932db6948e602c39facade0190a180 HEAD
+```
+
+| Required command, in order above | Exit | Selected | Passed | Failed | Ignored |
+|---|---:|---:|---:|---:|---:|
+| New focused runtime target | 0 | 9 | 9 | 0 | 0 |
+| Existing focused system keyset target | 0 | 2 | 2 | 0 | 0 |
+| Full runtime + system suite, including doctests | 0 | 149 | 148 | 0 | 1 |
+| rustfmt check | 0 | n/a | n/a | n/a | n/a |
+| Worktree diff check | 0 | n/a | n/a | n/a | n/a |
+| Baseline-to-HEAD diff check | 0 | n/a | n/a | n/a | n/a |
+
+Both focused targets selected nonzero tests. Full-suite selection counts
+include its one ignored runtime doctest; 148 actually ran and passed. Runtime
+unit/integration tests contribute 133 passes, system tests 15 passes. Exact
+full-suite breakdown:
+
+| Target | Passed | Failed | Ignored |
+|---|---:|---:|---:|
+| runtime library | 53 | 0 | 0 |
+| block_executor_tests | 4 | 0 | 0 |
+| run_422_native_governance_authority_contract_tests | 6 | 0 | 0 |
+| run_422_native_keyset_create_authority_contract_tests | 9 | 0 | 0 |
+| run_422_native_validator_authority_contract_tests | 15 | 0 | 0 |
+| t150_revm_execution_tests | 11 | 0 | 0 |
+| t151_block_apply_tests | 11 | 0 | 0 |
+| t152_block_apply_gas_tests | 7 | 0 | 0 |
+| t152_gas_model_tests | 13 | 0 | 0 |
+| tx_executor_tests | 4 | 0 | 0 |
+| system library | 1 | 0 | 0 |
+| governance_program_tests | 5 | 0 | 0 |
+| keyset_program_tests | 2 | 0 | 0 |
+| validator_register_tests | 7 | 0 | 0 |
+| runtime doctests | 0 | 0 | 1 |
+| system doctests | 0 | 0 | 0 |
+
+The focused 9 and 2 overlap the full suite's 148 passes. Thus these three
+required Cargo commands produce 159 passing executions, not 159 distinct
+tests; the union is 148 distinct passing tests plus 1 ignored doctest.
+All result lines report zero measured/filtered-out tests. Non-test check
+commands have no selected/passed test count.
+
+### Environment preparation and preliminary attempts (separate attribution)
+
+Environment: Linux; `rustc 1.99.1 (58cf8f9c3 2026-10-13)`,
+`cargo 1.99.1 (5f94df478 2026-08-27)`,
+`rustfmt 1.10.0-stable (58cf8f9c35 2026-10-13)`.
+Only `libclang-cpp.so.18.1`, not bindgen's required libclang C library, was
+initially present. The first, pre-commit attempt at the exact focused runtime
+command above exited 101 during `zstd-sys`/bindgen build: unable to find
+libclang. It selected/executed 0 tests; this was not a failing selected test.
+
+After that missing-prerequisite failure, `apt-get update` exited 0 with a
+temporary DNS warning for the unrelated Google Chrome repository, and
+`apt-get install -y libclang-18-dev` exited 0. No repository dependency manifest
+or lockfile was changed. A subsequent pre-commit run of the same focused
+command selected/passed 9, failed/ignored 0, exit 0. It is preliminary evidence,
+not an extra distinct-test count or a substitute for the post-commit required
+run recorded above. The only formatting command that changed source was
+`rustfmt --edition 2021 crates/qbind-runtime/tests/run_422_native_keyset_create_authority_contract_tests.rs`
+before the source/test commit. No test assertion or production-source change
+was needed to correct an anticipated baseline result.
+
+### Append-only integrity and exact scope
+
+The cumulative change set is exactly the five authorized paths: the two new
+files and append-only changes to these three documents. All five modes are
+`100644`. Existing document starting bytes remain exact prefixes, including
+their last byte. EOL conventions and terminal-newline states are preserved:
+
+| Existing document | Original bytes | EOL / terminal newline | SHA-256 of exact original prefix |
+|---|---:|---|---|
+| `docs/devnet/QBIND_RUN_422_NATIVE_ADMISSION_STATE_CONTRACT.md` | 81727 | LF / present | `57e6f62e3477ed1690d9ae49d6d5c6075dda45765d613ca52ffc000e3dae15e9` |
+| `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_422_D7.md` | 2691288 | CRLF / absent | `b1a4e270f292d4fa54881957c208ca1915cd9962d22344918638fca8ae5d55be` |
+| `docs/whitepaper/contradiction.md` | 2680376 | LF / absent | `7609bffe2872d91adea2d288deba920e4b1856876815ee2d2148f66d78b14d06` |
+
+Original mode/blob identities respectively:
+`100644 f55c91a7b5f885058cc9d02a602a68d779d01fac`,
+`100644 ee93d80378b94fd8e1bed51c743dbe920ef17c30`,
+`100644 043fb6d4929b3e262d74d7d0063109c5d9bf7649`.
+Final mode/blob manifest and final root are reported at delivery rather than
+self-referentially embedded in this evidence blob. Every other tracked path
+is unchanged from the baseline; final versus tested-source changes are only
+these three evidence documents. The task branch alone is pushed without
+force; delivery requires verified remote tip equality and a clean worktree.
+No PR, merge, main push, activation or deployment is part of this task.
+
+### Unresolved authority and preserved posture
+
+The new draft independently addresses weighted signer policy, creator and
+namespace rights (permissionless versus independently authorized allocation
+remains undecided), candidate/suite/threshold/duplicate semantics and any
+required possession, payer/funding/fees, nonce/replay/failure, coherent
+pre-state/atomic absent-target insertion, compatibility and persistent-store,
+crash/restart/deployment evidence. Isolated models do not supply active
+authority. Legacy preimage allocation, signer-state materialization/decoding,
+create-decoder allocations, entry/key copying and output encoding remain;
+no new resource ceiling or physical-memory bound follows.
+
+Exactly one separate-review unavailable-authority refusal is proposed after
+the existing decoding/trailing-byte/existence checks and before construction,
+serialization or write. It would refuse previously successful creates while
+preserving earlier work/errors. It is not implemented; no policy flag or
+permissive bootstrap exception is introduced. Completed governance/validator
+refusals, their contracts, all existing tests and production code are frozen.
+
+Whole native-admission, governance and validator contracts remain
+**DRAFT / NOT APPROVED / NOT IMPLEMENTED**. Preserve
+`D7D14_STORAGE_COMPONENT=IMPLEMENTED-ISOLATED`,
+`D7D14_STORAGE_ACCEPTANCE=PASS-ACCEPTED-SUBSET`, section 13.6 whole-lifecycle
+`INCOMPLETE`, activation `DISABLED`, public DevNet `NO-GO`, durable anti-rollback
+`NOT-ESTABLISHED`, C4/C5 `OPEN`, RS1 `OPEN`; all candidate limits `UNAPPROVED`.
+No F1/F2 closure, production-consistency guarantee or release approval follows.

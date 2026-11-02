@@ -4360,3 +4360,50 @@ and its contract are unchanged. Preserve
 `NOT-ESTABLISHED`, C4/C5 `OPEN`, RS1 `OPEN`; all candidate limits remain
 `UNAPPROVED`. No F1/F2 closure, production activation, live-validator admission
 or release approval follows.
+
+## RUN 422 - Native keyset-create authority characterization (test and draft only)
+
+**DRAFT / NOT APPROVED / NOT IMPLEMENTED.** New evidence is scoped to native
+wire `Transaction` -> `TxExecutor` -> `KeysetProgram` at required starting
+commit `62217a3792932db6948e602c39facade0190a180`, tree
+`380813f63c73df6aa0eebfb86493a68595047663`. Tested source revision:
+`ce25c42e3a389608832294c29bf5d2cdc7a59a6d`, tree
+`6e776019580b4a0139425b65b125353cd89b01b3`. Earlier claims above retain their
+historical source attribution; they are not rewritten as current evidence.
+
+See `../devnet/QBIND_RUN_422_NATIVE_KEYSET_CREATE_AUTHORITY_CONTRACT.md` for the
+source/assertion mapping and independently unresolved draft obligations, and
+the new appendix in `../devnet/QBIND_DEVNET_EVIDENCE_RUN_422_D7.md` for literal
+commands and results. Genuine ML-DSA-44 executor tests show authentication
+before dispatch, absent-target insertion without independent creator/namespace,
+target-possession or candidate-semantic admission, payer non-use, exact signed
+target tamper failure, fresh authentication on retry/replay, same-nonce fresh
+creation, semantic-gap storage and missing-signer/framing refusals. An actually
+created two-key, weights 1+1/threshold-2 keyset then authenticates a later actual
+executor call using only its first key; a threshold-1 control also succeeds.
+Successful cryptography is not enforcement of stored weighted policy.
+
+These are complete in-memory state/effect characterizations, not deployed
+exploits, selected-binary reachability, creator-policy approval, fee payment,
+durable replay protection or production-consistency guarantees. Isolated
+preparation, proof evaluation, context, staged effects and transaction-bound
+creation remain unused by the active route. Fixture keys do not supply a
+production possession rule. Legacy allocations/copies/encoding remain; this
+task supplies no resource ceiling or physical-memory bound.
+
+Exactly one separate-review safeguard is proposed, not implemented: an
+unavailable-authority refusal after existing decode/trailing-byte/existence
+checks and before account construction/serialization/write. It would reject
+previously accepted creations while preserving earlier work/errors. No policy
+flag or permissive bootstrap exception is introduced. Permissionless creation
+versus independently authorized namespace allocation remains an unresolved
+policy choice, not silently decided by acceptance or by this proposal.
+
+Production Rust, existing tests, completed governance/validator refusals and
+their contracts remain unchanged. Whole native-admission, governance and
+validator contracts remain **DRAFT / NOT APPROVED / NOT IMPLEMENTED**.
+Preserve `D7D14_STORAGE_COMPONENT=IMPLEMENTED-ISOLATED`,
+`D7D14_STORAGE_ACCEPTANCE=PASS-ACCEPTED-SUBSET`, section 13.6 whole-lifecycle
+`INCOMPLETE`, activation `DISABLED`, public DevNet `NO-GO`, durable anti-rollback
+`NOT-ESTABLISHED`, C4/C5 `OPEN`, RS1 `OPEN`; all candidate limits `UNAPPROVED`.
+No F1/F2 closure, activation, deployment or release approval follows.
