@@ -1,3 +1,198 @@
+<!-- A44 FULLY-POPULATED PROPOSAL POST-DECODE PROCESSING / OWNERSHIP / RESOURCE-LIFETIME LAYER (internal v1.124) — prepended to the preserved v1.123 input below -->
+# QBIND Security Findings Register
+
+> **Layer A44 — fully populated proposal: post-decode processing, ownership, and resource lifetime
+> (internal v1.124).** Third-party audit/reporting only; no repository code fixed or implemented; A45
+> not started; the completed outer/inner decoder schema-and-visitor review is not reopened. Scope
+> **Public DevNet**.
+> **Audited code baseline (unchanged, pinned):** HEAD `18d71a549d868ed33d352e9fc70a9d060f75e03b` /
+> tree `5b6c543435ac017dd8372c93f48be397899db14a` / origin `https://github.com/olivexo28/QBIND.git`.
+> Runtime remains **UNEXECUTED**; **C5** remains **OPEN** against its production cryptographic
+> custody / signing-lifecycle criteria. All obligation identities, finding IDs, aliases, and
+> dispositions preserved; no global index rewrite. **No plan-file was written this pass.**
+
+## Input provenance and baseline
+
+**Input used: the retained, previously delivered v1.123 master** — actual bytes match the expected
+canonical input exactly: **5,253,507 bytes**, SHA-256
+`8509392887c06edee298948549c3315fa9506477ed14566a32a29a6d7dad6f63`, all six embedded archives verified,
+A43.1 present, A44 absent, **0 CRLF**. The copy re-supplied this turn was independently confirmed
+byte-identical. **The CRLF→LF recovery authorization was not exercised** (no exact-match failure). The
+separately-observed GitHub delivery copy (`…/1ce24936…/Audit/…`, 5,280,008 bytes, SHA-256
+`c2a87429…`, 26,501 CRLF) is a **CRLF delivery artifact, not canonical LF bytes**, and was not used.
+**Source-access method:** local read-only of the retained scratch master under `/tmp`; the GitHub
+delivery commit `1ce24936…` is a **delivery location only, not the code-audit baseline**; no checkout
+was reset, switched, or merged.
+
+## Carry-forward wording qualifications
+
+- **A43.1-C2 `K`:** replace "`K ≠ 1` assumed" with "**`K` is unspecified; do not assume `K = 1`**"
+  (the decoded-vs-encoded representation constant is not pinned, and §cases below show it can exceed 1).
+- **A43.1-C1 first refusal:** "first refusal is slice availability" applies specifically to an
+  **otherwise-valid short/truncated input that passes the earlier guards**. An **oversized** input
+  first fails the **explicit `bytes.len()` length precheck**; other malformed inputs can fail other
+  checks (msg_type, fixint/length decode, trailing bytes). The first refusal is **branch-specific**,
+  not universally "slice availability." (The completed bincode/Serde review is not reopened.)
+
+## Source question
+
+Per the register's R7.3 / E12 retained residual *"later handling of fully populated large proposals"*:
+**after `BlockProposal::decode` returns `Ok` for a fully populated proposal on the selected binary's
+inbound Proposal route, what work and allocations occur, which gates run, and which owners release or
+retain the encoded and decoded data?** This concerns **successful structural decoding and its
+post-decode handling**, not the A21-F1 reservation-before-validation mechanism (cross-referenced
+below, not reopened).
+
+## Production entry and ordered gates (Proposal arm of `handle_inbound_consensus_msg`)
+
+Production entry: `run_binary_consensus_loop` `tokio::select!` on `inbound_rx.recv()` →
+`handle_inbound_consensus_msg(…)` (`binary_consensus_loop.rs:3128–3146`). **Production arguments are
+real suppliers, not hypotheticals:** `proposal_vote_authority.as_deref()` (production **`None`**),
+`current_auth = None` (literal, `:3139` "current-authorization owner (unwired)"),
+`journal = None` (`:3143`), `verification_policy = Required` (production default,
+`ConsensusVerificationPolicy::Required` Default, `:777`). The `binding_gate`/`origin` come from the
+transport/session layer (prerequisite transport admission reused, not re-audited).
+
+Ordered gates in the `ConsensusNetMsg::Proposal(bytes)` arm (`:6190`):
+
+| # | Gate | Site | Production outcome |
+| --- | --- | --- | --- |
+| 1 | outer `ConsensusNetMsg` decode already done; `inc_inbound_proposal` metric | `:6179` | counted |
+| 2 | `BlockProposal::decode(&mut slice)` where `slice = &bytes` | `:6192` | **Ok(proposal)** — full structure allocated (this layer's premise) |
+| 3 | **sender binding** `bind_sender(ValidatorId(proposal.header.proposer_index))` | `:6198–6212` | `None` gate → pass; wired gate → authorize origin, else **REJECT→return** |
+| 4 | effective authority `effective_pv = current_auth.map(verifier).or(pv_authority)` | `:6254–6257` | `None` (both unwired) |
+| 5 | `match effective_pv { None => if requires_context() REJECT }` | `:6422–6435` | **REJECT "verification context unavailable" (Required) → return** — fail-closed, before crypto/QC/delivery/reconfig/engine |
+
+**First actual refusal in production (fully-decoded proposal):** gate 5 — the Proposal/Vote
+**verification-context-unavailable** rejection (`:6422–6434`, counter
+`inbound_proposal_verification_context_unavailable_total`), unless gate 3 (sender binding) rejects
+first when a binding gate is wired and the origin is unauthorized. **`engine.on_proposal_event` is
+never reached in production**; neither is embedded-QC verification (`:6512`), restore-catchup
+deferral, the `inbound_proposals_delivered` counter, reconfig observation
+(`reconfig_detector.record_observed_proposal`), or `forward_actions_to_facade`. Those downstream steps
+require a wired authority (`Some(ctx)` arm, `:6259–6421`, then `:6439+`), which production does not
+supply — matching the established absent-authority / current-authorization qualification. Outbound
+signing-journal refusals are an **outbound-path** concern and are not transferred onto this inbound
+processing.
+
+The work performed **before** the production refusal: the complete `BlockProposal::decode` allocation
+(gate 2) plus the `inc_inbound_proposal` metric and the sender-binding lookup. A later refusal does
+not undo this allocation/copy work.
+
+## Decoded structure and the hand-written decoder (premise)
+
+`BlockProposal` (`qbind-wire/consensus.rs:667–673`): `header: BlockHeader` (all inline — scalars +
+three `Hash32` `[u8;32]` arrays `parent_block_id`/`payload_hash`/`batch_commitment`, plus `tx_count:
+u32`), `qc: Option<QuorumCertificate>`, **`txs: Vec<Vec<u8>>`**, `signature: Vec<u8>`.
+`BlockProposal::decode` (`:727–797`) reads the fixed header, then `qc_len`/`qc` (via
+`QuorumCertificate::decode` when present), then **`let mut txs = Vec::with_capacity(tx_count as
+usize)`** followed by a `for _ in 0..tx_count { tx_len = get_u32; txs.push(get_bytes(input,
+tx_len)?.to_vec()) }` loop, then the `signature`. The `Vec::with_capacity(tx_count)` is the
+**A21-F1 / QBIND-A1-F001 reservation-before-validation** mechanism — **cross-referenced, not reopened**:
+A44's premise is that decode **returned `Ok`** (so each `tx_len` body was actually present in the
+input and copied). Each transaction is an **owned `.to_vec()` copy** of its input bytes (not a borrow),
+and `get_bytes` bounds each read to the available input.
+
+## Ownership-and-work table (successful decode → production refusal / handler return)
+
+| Object | Creation / copy / move | Owner | Live span | Release |
+| --- | --- | --- | --- | --- |
+| **Encoded proposal bytes** `bytes: Vec<u8>` | moved out of `ConsensusNetMsg::Proposal(bytes)` (the outer-decoded payload, itself an owned `.to_vec`/seq copy) | the Proposal arm (`bytes`) | **entire arm** — the Proposal arm has **no mid-arm `drop(bytes)`** (unlike the Timeout/NewView arms), so the encoded form stays resident through every gate | dropped at arm end / any `return` |
+| **Decoded `proposal.header`** | built inline by `decode` | `proposal` | whole arm | dropped with `proposal` |
+| **`proposal.qc: Option<QuorumCertificate>`** | `QuorumCertificate::decode` when `qc_len>0` — owns `signer_bitmap: Vec<u8>` + `signatures: Vec<Vec<u8>>` (owned copies) | `proposal` | whole arm | dropped with `proposal` |
+| **`proposal.txs: Vec<Vec<u8>>`** | outer `Vec` from `with_capacity(tx_count)`; each element a **`.to_vec()` owned copy** of a tx body from `bytes` | `proposal` | whole arm | dropped with `proposal` |
+| **`proposal.signature: Vec<u8>`** | `get_bytes(..).to_vec()` owned copy | `proposal` | whole arm | dropped with `proposal` |
+| **sender-binding temporaries** | `ValidatorId::new(proposer_index)` (scalar), gate lookup | stack | gate 3 | n/a |
+| **crypto/QC/engine work** | **not reached in production** (gate 5 rejects) | — | — | — |
+
+**Simultaneous liveness (no double-count):** after a successful decode and through the production
+gates, **both** the encoded `bytes` **and** the decoded `proposal` (header inline + `qc` buffers +
+`txs` copies + `signature`) are **simultaneously resident** — the transaction bodies exist **twice**
+(once encoded in `bytes`, once as decoded `.to_vec()` copies in `txs`), and they do **not** alias
+(copies, not shared references). Inline `Vec`/`Option` headers inside `proposal` are counted within
+`proposal`, not separately. On the production refusal `return`, both `bytes` and `proposal` drop
+(ordinary Rust cleanup); **no move into the engine, a queue, or a retained structure occurs in
+production**. On the (non-production, authority-wired) success path, `engine.on_proposal_event(from,
+&proposal)` (`:6645`) takes `&proposal` **by reference** — the proposal is **not moved** into the
+engine by this call; any fields the engine retains are copied into engine-side proposal-storage, a
+**separate owner/boundary** that this single-message trace stops at.
+
+**Accounting discipline:** capacity is not inferred from length; allocator footprint is not inferred
+from capacity; RSS reduction is not inferred from `Drop`. No numerical layout constants or growth
+factors are asserted.
+
+## Finite, source-supported cases
+
+Let the inner proposal payload be `P` bytes; `H` = fixed header/other-field overhead (symbolic:
+scalars + 3×32-byte `Hash32` + the `qc_len`/`sig_len` framing); `N` = `tx_count`; `B` = total
+transaction body bytes; `S` = signature length. Encoded: `P ≈ H + Q + Σ_i(4 + tx_len_i) + (2 + S)`
+where `Q` = qc byte length (`0` when `qc = None`, i.e. `qc_len = 0`). **The full 16 MiB
+`MAX_TRANSPORT_CIPHERTEXT` is NOT available inner-proposal payload** — `P` is bounded above by the
+decrypted plaintext (ciphertext minus AEAD/framing and the inner discriminator/length prefix), kept
+symbolic.
+
+| Case | Encoded constraint | Decoded storage (symbolic) | Production boundary |
+| --- | --- | --- | --- |
+| **Many zero-length tx entries** | `N` large, each `tx_len_i = 0` → `P ≈ H + Q + 4·N + 2 + S`, so `N ≤ (P − H − Q − 2 − S)/4` | `txs` = `N` entries, each an **empty `Vec<u8>`** (inline 24-byte header on 64-bit; empty body may be non-allocating); outer `txs` buffer from `with_capacity(N)`. Encoded ~4 B/tx → decoded ~(header) B/tx, so **`K > 1` for this shape** (decoded per-tx exceeds encoded) | full decode, then gate-5 reject; `bytes`+`proposal` dropped |
+| **Fewer, larger tx bodies** | `N` small, `tx_len_i` large → `P ≈ H + Q + Σ(4+tx_len_i) + 2 + S`, `B` dominates | `txs` = `N` owned buffers totalling `B` bytes (each a `.to_vec()` copy); decoded content ≈ encoded content for the bodies | full decode, then gate-5 reject |
+| **Decoded then rejected by binding or authorization** | any structurally valid `P` | full `proposal` + `bytes` allocated | gate 3 (sender binding, if gate wired + unauthorized origin) **or** gate 5 (effective-pv `None` + Required) → `return`; all dropped; engine untouched |
+
+**Ordered, jointly satisfiable production trace to the furthest supported boundary:** transport/session
+admission (prerequisite) → inbound envelope delivered → outer `ConsensusNetMsg::Proposal` already
+decoded → `BlockProposal::decode` returns `Ok` (premise; requires each tx body present) → metric →
+sender binding passes (no gate, or authorized origin) → `effective_pv = None` → **gate 5 fail-closed
+rejection (Required)** → `return`, dropping `bytes` and `proposal`. No deeper effect is reachable in
+production without wiring an authority (an enablement this layer does not assume).
+
+**Separated:** parser work (decode allocations/copies, bounded by present input + the A21-F1
+reservation) · later processing (**none in production** beyond binding + the authority gate) · retained
+storage (**none** — engine not reached; no queue/retention transfer) · unmeasured runtime consequences
+(RSS/CPU — UNEXECUTED). **No OOM, crash, consensus disruption, transaction execution, or network
+effect is claimed.**
+
+## Disposition
+
+The R7.3 / E12 post-decode residual *"later handling of fully populated large proposals"* is answered
+for the **selected binary**: a fully, successfully decoded proposal's post-decode handling performs
+the decode allocations (encoded `bytes` + decoded `proposal` incl. `txs` `.to_vec()` copies, both
+simultaneously resident, non-aliasing), increments a metric, runs sender binding, and is then
+**rejected fail-closed at the Proposal/Vote verification-context-unavailable gate** (production
+`pv_authority = None` / `current_auth = None` / `Required`) **before** crypto verification, embedded-QC
+verification, delivery, reconfig observation, engine ingestion, retention, or outbound action; both
+owned buffers are dropped at the rejecting `return`. The furthest production boundary is
+`handle_inbound_consensus_msg`'s gate-5 `return`; the engine proposal-storage boundary is reached only
+on the authority-wired (non-production) success path and is recorded as a **separate retention owner**
+not traced further here.
+
+This records against the existing R7.3 / E12 post-decode residual and **cross-references** the
+hand-written parser/resource obligation **A21-F1 / QBIND-A1-F001** (the decode-time
+`with_capacity(tx_count)` reservation) **without reopening it**; **A17-F1, A1-F3**, transaction
+execution, consensus safety, and the completed decoder inventory are **not** reopened (no newly traced
+edge contradicts them). **No finding is forced**; the production path is fail-closed-before-engine for
+a decoded proposal, and **neither exhaustion nor safety is inferred** as a runtime outcome. A
+source-reviewed boundary is complete here while A21-F1's and E12's finding/runtime obligations remain
+**open**. **C5** remains **OPEN**; runtime remains **UNEXECUTED**. No unresolved source question
+remains for this single-message post-decode trace; the only deeper reach (engine proposal-storage
+retention and the outbound handoff) is gated behind an authority production does not wire.
+
+## A44 evidence ledger
+
+| Ref | Source | Fact |
+| --- | --- | --- |
+| C1 | `binary_consensus_loop.rs:3128–3146` | production call wires `proposal_vote_authority.as_deref()` (None), `current_auth=None`, `journal=None`, `verification_policy=Required` |
+| C2 | `:6190–6212` | Proposal arm: `bytes` owned; `BlockProposal::decode(&bytes)`; sender binding after decode; reject→return |
+| C3 | `:6254–6257, 6422–6435` | `effective_pv=None` in production → `None` arm → Required `requires_context()` → reject "verification context unavailable" before engine |
+| C4 | `:6476–6533, 6645` | embedded-QC verify + `engine.on_proposal_event(from,&proposal)` reached only on authority-wired path; engine takes `&proposal` by reference |
+| C5 | `:6183–6187` (Proposal arm has no mid-arm `drop(bytes)`; cf. Timeout `:6996`/NewView `:7206`) | encoded `bytes` stays resident alongside decoded `proposal` for the whole arm |
+| S1 | `qbind-wire/consensus.rs:667–673` | `BlockProposal { header, qc: Option<QC>, txs: Vec<Vec<u8>>, signature: Vec<u8> }` |
+| S2 | `qbind-wire/consensus.rs:727–797` | hand-written decode; `Vec::with_capacity(tx_count)` (A21-F1) then per-tx `.to_vec()` owned copies; `get_bytes` availability-bounded |
+| S3 | `:742–744, 777, 1089` | `Required` is the production default; production `proposal_vote_authority == None` |
+
+---
+
+*End of A44 fully-populated proposal post-decode processing / ownership / resource-lifetime layer
+(internal v1.124). The complete v1.123 input is preserved byte-for-byte below.*
+
 <!-- A43.1 BINCODE-LIMIT ATTRIBUTION / INPUT-vs-MEMORY ACCOUNTING CORRECTION LAYER (internal v1.123) — prepended to the preserved v1.122 input below -->
 # QBIND Security Findings Register
 
