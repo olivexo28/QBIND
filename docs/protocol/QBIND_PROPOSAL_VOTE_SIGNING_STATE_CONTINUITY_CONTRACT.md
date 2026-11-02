@@ -1966,3 +1966,22 @@ PRODUCTION-LIFECYCLE-UNAVAILABLE`, `DURABLE_ANTI_ROLLBACK=NOT-ESTABLISHED`,
 `SECURITY_POSTURE=RS1-OPEN / PUBLIC-DEVNET-NO-GO` are unchanged. No D11, Run 423,
 production initialization, signing enablement, activation, or architectural redesign
 is authorized.
+
+## Run 422 public DevNet signing-profile decision boundary
+
+The lifecycle contract's appendix **“Run 422 public DevNet Proposal/Vote
+signing-profile decision proposal”** records the owner decision proposal,
+candidate comparison, conditional effect ordering, future acceptance matrix and
+continued-refusal recommendation. This cross-reference does not amend or weaken
+this contract: local D10 reservation remains non-authorizing, a recovered
+`Reserved` remains potentially signed, and independent history outside the
+specified rollback domain remains unselected and unproven.
+
+For clarity, a safety-record publication, D10 reservation acknowledgement,
+independent history-update acknowledgement, signature result record and
+external publication are distinct effects. No later committed checkpoint
+licenses dropping an earlier pending or uncertain reservation. Missing or
+uncertain independent evidence blocks the dependent action; exact retained
+result reuse remains subject to existing D10 binding, acknowledgement and
+revalidation rules. See the lifecycle appendix for the proposed, conditional
+sequence; it is not implemented or approved here.
