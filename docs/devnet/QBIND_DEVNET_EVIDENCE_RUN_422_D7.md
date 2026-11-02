@@ -25379,3 +25379,620 @@ Starting full-byte SHA-256 values, in the same row order:
 The bulk append renderer retains the complete starting bytes, rendering only new suffixes with each document's EOL/EOF convention. Delivery verifies startswith(the complete baseline blob), not a sampled prefix or normalized-text comparison; lengths above include every starting byte. Existing EOF bytes are not changed: a separator is part of the appended suffix. All original modes and complete excluded-path mode/blob tuples are compared. Final Rust tuples must equal the tested-source tuples above. The final evidence commit/tree and complete old/new seven-path manifest are returned with delivery rather than attempting a self-referential hash inside this document.
 
 Only the named task branch is pushed without force, with remote-tip equality and a clean worktree checked afterward. No PR, merge, main push, activation or deployment is part of delivery.
+
+## RUN 422 follow-up: conservative individual-key threshold admission
+
+This append supersedes only the active verifier's historical absence of scalar
+threshold/weight admission. All preceding bytes are historical evidence and are
+preserved verbatim. This is a conservative compatibility restriction, NOT
+implementation or approval of full weighted authorization.
+
+### Exact rule and precedence
+
+For EACH supplied TxAuth, retain structural exact-index coverage and digest
+compatibility, then independently acquire its requested account in supplied order.
+Retain returned AccountId, KEYSET_PROGRAM_ID owner and non-executable metadata
+checks; complete stored framing (including unused entries and trailing bytes);
+version 1; and all header and all-entry reserved-field checks.
+
+Only after that stored-format admission, read the u16 threshold. Zero returns
+exactly `ExecutionError::InvalidCallData("keyset threshold is zero")`, before
+missing-entry, provider or signature handling. For a nonzero threshold, select the
+FIRST matching suite entry, retaining exactly
+`ExecutionError::InvalidCallData("no key in keyset for given suite_id")` when
+absent. Before provider lookup compare its u16 weight directly with the u16
+threshold. If lower, return exactly
+`ExecutionError::InvalidCallData("selected key weight below keyset threshold")`.
+
+Sufficient individual weight preserves provider-None
+`ExecutionError::CryptoError("signature suite not found")`, returned suite-ID
+consistency `ExecutionError::CryptoError("signature suite id mismatch")`, borrowed
+public-key verification, and
+`ExecutionError::CryptoError("signature verification failed")` mapping. Neither
+threshold nor stored weight is added to or changed in the transaction digest.
+No parser, crypto adapter, store/interface, dependency, lockfile, isolated
+evaluator, creation helper, native program or production runtime file changes.
+
+A valid signature from an individually insufficient selected key refuses.
+Several individually insufficient proofs do not combine in this route.
+Repeating a proof does not increase its admitted weight. Weight from another
+keyset cannot satisfy this keyset. An unused higher-weight entry does not replace
+first-match selection. An individually insufficient extra proof refuses even if
+an earlier supplied proof independently met its threshold. Every supplied proof
+is processed independently in order until the first failure: no cached admission,
+shared-account read reuse or threshold-success short circuit.
+
+This is intentionally stricter than general weighted multisignature
+authorization. It introduces no positive authority path and does not establish
+canonical duplicate/alias consistency or common-state semantics.
+
+### Genuine controls and synthetic negative controls
+
+`individual_threshold_matched_scalar_boundaries_preserve_complete_state` uses the
+same controlled returned-account path, complete transaction, public key and
+genuine ML-DSA-44 signature. Genuine controls are threshold/weight 1/1, 2/2 and
+65535/65535. Refusals are 0/1 (zero threshold), 1/0, 2/1 and 65535/65534
+(insufficient individual weight). Each refusal differs from its adjacent genuine
+control only in the intended stored scalar; all other returned bytes and the
+signed transaction are held fixed. Refusals observe one requested-account read,
+zero provider lookups, suite-ID, verify/digest/key observations and writes/deletes.
+Genuine controls observe one lookup, one ID check and one genuine verification.
+Complete transaction, backing-map snapshot and controlled-response map remain
+unchanged in every invocation.
+
+`individual_threshold_precedence_retains_metadata_framing_and_all_entry_format_checks`
+combines threshold zero with returned-ID/owner/executable faults, trailing bytes,
+truncation, unsupported version, either header reserved field, the selected
+entry's reserved field and a later unused entry's reserved field. Existing exact
+metadata/serialization/format errors precede the zero-threshold error with no
+provider work. In particular nonzero reserved data plus zero threshold is still
+a format refusal.
+
+`individual_threshold_precedes_missing_entry_provider_faults_and_invalid_signature`
+crosses threshold 0/1/2, absent/present matching entry, genuine/None/inconsistent-ID
+provider configurations and intact/corrupted genuine signatures. Provider None
+and mismatching IDs are configured synthetic faults; signature corruption is
+only a negative control. Zero precedes all later handling; nonzero missing-entry
+keeps its old error; insufficient weight precedes None, mismatching ID and invalid
+signature. Sufficient weight with the invalid genuine signature still reaches
+one backend attempt and its existing signature-verification error. Exact read
+order, lookup/ID/digest/key work, zero writes/deletes and complete input/store/
+response preservation are asserted.
+
+`individual_threshold_distinct_genuine_proofs_do_not_aggregate_or_short_circuit`
+uses two distinct genuine keys with separately dispatched, correctly identified
+ML-DSA-44 suites 100 and 101. At threshold 2, weights 1 and 1 mathematically sum
+to 2 but the first proof refuses after one read and before any provider work.
+The matched threshold-1 case genuinely verifies both keys with two reads,
+lookups, ID checks and backend attempts, confirming the fixture is not a
+wrong-first-key artifact. At threshold 2 with first weight 2 and second weight 1,
+the first proof genuinely verifies and the extra second proof refuses: exactly
+two reads and one lookup/ID/verification. Complete state is preserved.
+
+`individual_threshold_repetition_and_unused_higher_weight_cannot_rescue_first_match`
+crosses repeated/non-repeated genuine proofs and absent/present higher-weight
+unused same-suite entry. First weight 1 at threshold 2 always refuses before
+provider work. Matched threshold-1 controls genuinely verify every supplied
+proof, with one account read per proof, without changing input/store/responses.
+These refusals do NOT prove full weighted multisignature semantics.
+
+`individual_threshold_account_groups_do_not_pool_and_corrected_store_retry_reverifies_all`
+uses two AccountIds. The earlier genuine key has individually sufficient weight
+65535 for threshold 1; the later weight 1 cannot meet its own threshold 2.
+Exactly two ordered reads and only the earlier proof's lookup, ID and genuine
+verification occur. Only the later stored weight is corrected to 2; a NEW
+complete corrected-store snapshot is taken. Fresh/reset observers then see both
+proofs verify again with two ordered reads and two lookup/ID/backend attempts;
+the corrected store and complete transaction remain unchanged by verification.
+
+The former
+`genuine_same_suite_selection_uses_first_key_without_threshold_or_weight_enforcement`
+is narrowly renamed
+`genuine_same_suite_selection_uses_first_individually_sufficient_key`.
+Its selected entry now has admissible threshold 1 and weight 1. Its genuine
+wrong-first/later-valid-key failure and swapped-key success are retained.
+Historical claims about absence of scalar threshold checks describe the old
+verifier only; first-match selection remains current. Existing complete framing,
+format, alias, returned-suite-ID, borrowed-key pointer, exact-index, streaming
+digest compatibility, refusal and retry controls remain active.
+
+### Historical resource witness migration and actual executor
+
+In `run422_native_compatibility_witnesses_legacy_and_isolated_semantics`, the
+one-genuine-key, weight-1, threshold-2 fixture is unchanged. ONLY its active
+verifier success expectation is migrated to the exact insufficient-weight error,
+with counters reset before invocation: one get, zero bounded reads, zero
+provider lookups, descriptors and signature attempts, zero writes/deletes, and
+complete transaction/account preservation. The isolated evaluator retains
+`KeysetProofEvaluationError::ThresholdUnreachable`, one bounded read, one
+descriptor admission and zero signature attempts. The paths now refuse for
+DIFFERENT reasons, not because the active route implements isolated weighted
+semantics. Other compatibility witnesses, workloads, candidate limits, and
+isolated-helper assertions are unchanged.
+
+`executor_individual_threshold_admission_precedes_absent_native_target_read`
+uses the genuine existing-keyset/keyset-create fixture and absent target.
+Threshold/weight 0/1 and 2/1 independently return their exact authentication
+errors after only the authentication-account read, with zero lookup/ID/signature
+work. The matched 2/2 case genuinely authenticates, then reads the absent target
+and returns exactly
+`ExecutionError::ProgramError("native keyset creation authority unavailable")`.
+That is successful authentication followed by existing program refusal, NOT
+successful transaction execution. Ordered reads, observer counts, target
+absence, zero mutation and complete transaction/store preservation are asserted.
+
+### Scope, provenance and preservation
+
+Starting commit: ca8b772fe9962557be11ddbcb24661d78a887e89.
+Required and verified starting root tree:
+318f10bca46aefedfbcf3230756bc022a42a481d.
+Raw starting parent header:
+`parent 0f92d6460164d2131d5deb3b519dd9db679014af`.
+`git rev-parse --is-shallow-repository` returned `true`.
+`git cat-file -e 0f92d6460164d2131d5deb3b519dd9db679014af^{commit}`
+failed because that parent object is not present; its header is NOT evidence
+that its ancestry was traversed. No assertion about unavailable pre-baseline
+history is made.
+
+The initially clean task branch was created directly at the required baseline.
+Committed tested Rust source:
+0a163bb733f7dd160a588b5aa11cd37ad13fd143.
+Tested root tree: 7499eec58c38e4056337b89abfd6d3965ba9eef8.
+Raw tested parent header:
+`parent ca8b772fe9962557be11ddbcb24661d78a887e89`.
+Commit identity, root-tree identity and ancestry are separate checks:
+`git merge-base --is-ancestor ca8b772fe9962557be11ddbcb24661d78a887e89 0a163bb733f7dd160a588b5aa11cd37ad13fd143`
+exited 0. Final evidence is a separate direct child commit of that tested source.
+Its exact final commit/tree and complete old/new eight-path mode/blob manifest
+are reported at delivery, rather than inventing a self-referential evidence
+commit ID or document blob inside its own contents.
+
+Every excluded tracked path must compare identically with the baseline, including
+`crates/qbind-node/tests/run_375_public_devnet_identity_cli_tests.rs`:
+mode 100644, blob e03b7f6338547b0c99695cc5ae1ddcd0d28b1cf4.
+All eight changed paths retain their original modes; final Rust mode/blob pairs
+must equal the tested-source pairs exactly. Each document's COMPLETE baseline
+bytes must be an exact prefix, not merely a matching selected range:
+resource assessment 59210 bytes (LF, terminal LF); state contract 115497 bytes
+(LF, terminal LF); D7 evidence 2775184 bytes (CRLF, no terminal newline);
+contradiction 2707163 bytes (LF, no terminal newline). Appends preserve those
+EOL/EOF conventions. Verification compares the full baseline and final trees,
+document prefixes, modes and final Rust blobs; ancestry is checked separately.
+Committed-range whitespace checks are repeated after the evidence commit.
+
+### Retained limits and non-approvals
+
+The new gate adds constant-size scalar comparisons after existing parsing and
+selection. It neither adds weights, multiplies them, accumulates contributions,
+deduplicates identities, searches an alternative matching key nor allocates a
+threshold-validation workspace. It introduces no weight-arithmetic overflow
+path. This is ordinary regression validation, NOT new performance approval,
+new target-hardware evidence or a replacement for historical timings. No new
+latency, RSS or allocator guarantee is made.
+
+Full weighted threshold aggregation is NOT implemented. Canonical identity,
+duplicate/alias consistency and unused-entry semantic admission remain
+unresolved. Individually sufficient weight does not establish backend
+authenticity, common-state consistency, program/payer authority or replay
+protection. Account acquisition/cloning, repeated work, bounded-read integration,
+operational limits and deployed compatibility remain unresolved. Parsers and
+isolated evaluators retain their existing contracts. Positive native-program
+authority remains unavailable.
+
+Preserved status: D7D14_STORAGE_COMPONENT=IMPLEMENTED-ISOLATED;
+D7D14_STORAGE_ACCEPTANCE=PASS-ACCEPTED-SUBSET; section 13.6 whole-lifecycle
+INCOMPLETE; activation DISABLED; public DevNet NO-GO; durable anti-rollback
+NOT-ESTABLISHED; C4/C5 OPEN; RS1 OPEN; all candidate limits UNAPPROVED.
+Whole native-admission and authority contracts remain
+DRAFT / NOT APPROVED / NOT IMPLEMENTED.
+No F1/F2 closure, activation, public DevNet acceptance or release approval follows.
+No PR, merge, main push, activation or deployment is part of this delivery.
+
+### Literal validation commands and results on committed tested source
+
+All commands below ran with Rust source committed at the tested commit above
+and no evidence-document changes present. Counts are PER COMMAND:
+selected = passed + failed + ignored. Overlapping focused/package runs and the
+supplemental package rerun are NOT added together. The required package command
+stopped at its first failing target; its counts describe only tests actually
+executed. The supplemental --no-fail-fast run exposes all remaining package and
+doc-test results without changing any source. Node cargo check is compilation
+only, not test execution. Successful compilation does not remove the package
+regression blocker.
+
+```text
+LIBCLANG_PATH=/usr/lib/llvm-18/lib cargo test --locked -p qbind-ledger --test tx_auth_verifier_tests -- --nocapture
+exit 0
+selected = 34 = 34 passed + 0 failed + 0 ignored
+test result: ok. 34 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.89s
+Executed focused test names (none filtered or ignored):
+correctly_registered_mldsa44_alias_remains_compatible
+empty_auth_is_refused_without_store_crypto_or_witness_changes
+complete_framing_and_missing_entry_precede_synthetic_provider_mismatch
+genuine_mldsa44_authentication_accepts_and_removal_or_tampering_fails
+genuine_mldsa44_verification_borrows_selected_key_from_returned_account
+genuine_multi_auth_later_format_refusal_and_fresh_corrected_store_retry
+genuine_multi_auth_later_suite_mismatch_and_fresh_matched_retry
+genuine_mldsa44_streaming_caller_compatibility_and_retry
+genuine_multi_auth_metadata_refusal_preserves_first_proof_and_retries
+genuine_same_suite_selection_uses_first_individually_sufficient_key
+genuine_required_signers_use_exact_indices_not_account_ids_or_auth_count
+individual_threshold_account_groups_do_not_pool_and_corrected_store_retry_reverifies_all
+individual_threshold_distinct_genuine_proofs_do_not_aggregate_or_short_circuit
+individual_threshold_matched_scalar_boundaries_preserve_complete_state
+individual_threshold_precedence_retains_metadata_framing_and_all_entry_format_checks
+individual_threshold_repetition_and_unused_higher_weight_cannot_rescue_first_match
+individual_threshold_precedes_missing_entry_provider_faults_and_invalid_signature
+returned_suite_id_admission_genuine_positive_mismatch_and_invalid_retry
+returned_account_metadata_refusals_precede_parsing_and_crypto
+stored_format_combined_fault_precedence_before_selection_provider_and_signature
+stored_format_admits_every_entry_before_selecting_genuine_first_key
+stored_keyset_framing_refusals_precede_provider_and_preserve_state
+structural_preflight_refuses_before_store_provider_or_backend_work
+verify_transaction_auth_fails_on_bad_index
+verify_transaction_auth_fails_on_invalid_signature
+verify_transaction_auth_fails_on_missing_keyset
+verify_transaction_auth_fails_on_unknown_suite
+verify_transaction_auth_fails_on_wrong_suite_id
+verify_transaction_auth_multiple_auths_reject_control
+verify_transaction_auth_multiple_auths_structural_provider_control
+verify_transaction_auth_structural_accept_all_provider_control
+stored_format_independent_refusals_and_genuine_control_share_response_path
+zero_entry_missing_account_suite_and_provider_outcomes_are_exact
+wire_count_and_index_boundaries_are_structural_controls
+```
+
+```text
+LIBCLANG_PATH=/usr/lib/llvm-18/lib cargo test --locked -p qbind-ledger --test run_422_native_admission_resource_tests -- --nocapture --test-threads=1
+exit 0
+selected = 6 = 6 passed + 0 failed + 0 ignored
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 7.69s
+Executed focused test names (none filtered or ignored):
+run422_native_compatibility_witnesses_legacy_and_isolated_semantics
+run422_native_compatibility_witnesses_metadata_bounded_read_and_proof_limit
+run422_native_resource_all_proofs_run_after_threshold_and_late_invalid_refuses
+run422_native_resource_eight_groups_full_descriptor_and_signature_scan
+run422_native_resource_genuine_create_preparation_and_composed_evaluation
+run422_native_resource_global_proof_and_entry_boundaries_refuse_then_retry
+```
+
+```text
+LIBCLANG_PATH=/usr/lib/llvm-18/lib cargo test --locked -p qbind-runtime --test tx_executor_tests -- --nocapture
+exit 0
+selected = 8 = 8 passed + 0 failed + 0 ignored
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.10s
+Executed focused test names (none filtered or ignored):
+executor_individual_threshold_admission_precedes_absent_native_target_read
+executor_authenticated_keyset_create_refuses_without_mutation
+executor_refuses_nonempty_missing_signer_without_any_program_mutation
+executor_native_auth_metadata_admission_precedes_target_read
+executor_rejects_empty_auth_before_keyset_program_changes_state
+executor_returned_suite_id_admission_precedes_native_target_read
+executor_unknown_program_id_fails
+executor_stored_keyset_format_admission_precedes_native_target_read
+```
+
+```text
+LIBCLANG_PATH=/usr/lib/llvm-18/lib cargo test --locked -p qbind-ledger -p qbind-runtime -p qbind-system
+exit 101
+selected = 841 = 840 passed + 1 failed + 0 ignored
+     Running unittests src/lib.rs (target/debug/deps/qbind_ledger-8c02fbfa5802e7c2)
+test result: ok. 368 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.12s
+     Running tests/ledger_apply_tests.rs (target/debug/deps/ledger_apply_tests-4afd78b4f3c17f69)
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running tests/run_422_native_admission_context_tests.rs (target/debug/deps/run_422_native_admission_context_tests-3896b95f280a79ba)
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.27s
+     Running tests/run_422_native_admission_resource_tests.rs (target/debug/deps/run_422_native_admission_resource_tests-3d53c083fad8255a)
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 3.75s
+     Running tests/run_422_native_admission_state_contract_tests.rs (target/debug/deps/run_422_native_admission_state_contract_tests-3fe5a319c7ad5490)
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.09s
+     Running tests/run_422_native_keyset_create_model_tests.rs (target/debug/deps/run_422_native_keyset_create_model_tests-2b46fca4f010a8e7)
+test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.23s
+     Running tests/run_422_native_staged_effects_tests.rs (target/debug/deps/run_422_native_staged_effects_tests-15bf6f5b4014816a)
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.29s
+     Running tests/suite_registry_account_tests.rs (target/debug/deps/suite_registry_account_tests-5c25d1b534a997ec)
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running tests/t157_parallel_nonce_executor_tests.rs (target/debug/deps/t157_parallel_nonce_executor_tests-8cf519d4043346fb)
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+     Running tests/t163_vm_v0_tests.rs (target/debug/deps/t163_vm_v0_tests-8314f8bdbce42d94)
+test result: ok. 17 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running tests/t164_vm_persistence_tests.rs (target/debug/deps/t164_vm_persistence_tests-86ccaf26996d8c32)
+test result: ok. 13 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.14s
+     Running tests/t168_vm_gas_tests.rs (target/debug/deps/t168_vm_gas_tests-531ead3be7df8fc7)
+test result: ok. 15 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running tests/t171_parallel_conflict_graph_tests.rs (target/debug/deps/t171_parallel_conflict_graph_tests-e0f1306e7d7e8a06)
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running tests/t171_parallel_executor_integration_tests.rs (target/debug/deps/t171_parallel_executor_integration_tests-0e99b0f5bd06c335)
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+     Running tests/t177_vm_v0_proptests.rs (target/debug/deps/t177_vm_v0_proptests-f0bc96cd69df53f3)
+test result: ok. 15 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.09s
+     Running tests/t179_vm_v0_gas_proptests.rs (target/debug/deps/t179_vm_v0_gas_proptests-a09a9932fe8c9ed8)
+test result: ok. 13 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.05s
+     Running tests/t193_hybrid_fee_distribution_tests.rs (target/debug/deps/t193_hybrid_fee_distribution_tests-32cf2458968a4a8c)
+test result: ok. 15 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running tests/t195_monetary_engine_tests.rs (target/debug/deps/t195_monetary_engine_tests-5925af5627f06b4f)
+test result: ok. 22 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running tests/t197_monetary_seigniorage_tests.rs (target/debug/deps/t197_monetary_seigniorage_tests-481c232a1631fb51)
+test result: ok. 16 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running tests/t199_monetary_epoch_state_tests.rs (target/debug/deps/t199_monetary_epoch_state_tests-072d1493e0dde4e6)
+test result: ok. 19 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running tests/t200_validator_seigniorage_tests.rs (target/debug/deps/t200_validator_seigniorage_tests-c11b1348c1318867)
+test result: ok. 20 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running tests/t201_monetary_application_tests.rs (target/debug/deps/t201_monetary_application_tests-86c7cdfb6bf93e85)
+test result: ok. 22 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running tests/t202_ema_fee_smoothing_tests.rs (target/debug/deps/t202_ema_fee_smoothing_tests-f4c2ec26a63243b5)
+test result: ok. 21 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running tests/t203_rate_of_change_limiters_tests.rs (target/debug/deps/t203_rate_of_change_limiters_tests-ef12a3b517e885d5)
+test result: ok. 17 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running tests/t204_phase_transition_tests.rs (target/debug/deps/t204_phase_transition_tests-818909b15a93bec3)
+test result: ok. 28 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running tests/t215_state_snapshot_tests.rs (target/debug/deps/t215_state_snapshot_tests-510c0d74e2224c3c)
+test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.13s
+     Running tests/t232_genesis_config_tests.rs (target/debug/deps/t232_genesis_config_tests-dfaeafb05009355f)
+test result: ok. 16 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running tests/t233_genesis_hash_tests.rs (target/debug/deps/t233_genesis_hash_tests-0251a6da534d0e38)
+test result: ok. 19 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running tests/tx_auth_verifier_tests.rs (target/debug/deps/tx_auth_verifier_tests-e90c75554fc7aa10)
+test result: ok. 34 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.27s
+     Running unittests src/lib.rs (target/debug/deps/qbind_runtime-fdb308b3cfe45039)
+test result: ok. 53 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running tests/block_executor_tests.rs (target/debug/deps/block_executor_tests-d87f5b3c58ec1f9c)
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.09s
+     Running tests/run_422_native_governance_authority_contract_tests.rs (target/debug/deps/run_422_native_governance_authority_contract_tests-0d54677d887c7854)
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.61s
+     Running tests/run_422_native_keyset_create_authority_contract_tests.rs (target/debug/deps/run_422_native_keyset_create_authority_contract_tests-17043d1f191a3fbc)
+test result: FAILED. 8 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.50s
+error: test failed, to rerun pass `-p qbind-runtime --test run_422_native_keyset_create_authority_contract_tests`
+```
+
+```text
+LIBCLANG_PATH=/usr/lib/llvm-18/lib cargo test --locked -p qbind-node --test block_apply_tests -- --nocapture
+exit 0
+selected = 6 = 6 passed + 0 failed + 0 ignored
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.10s
+Executed focused test names (none filtered or ignored):
+node_rejects_block_when_tx_count_exceeds_max
+node_rejects_block_with_extra_bytes_after_tx
+node_rejects_block_with_malformed_tx_blob
+node_returns_block_outcome_when_authenticated_native_creation_refuses
+node_missing_coverage_creation_and_would_be_signer_fail_in_order
+node_returns_block_outcome_when_native_transaction_auth_fails
+```
+
+```text
+LIBCLANG_PATH=/usr/lib/llvm-18/lib cargo check --locked -p qbind-node
+exit 0
+    Finished `dev` profile [unoptimized] target(s) in 40.51s
+Compilation only; no tests selected.
+```
+
+```text
+rustfmt --check --edition 2021 crates/qbind-ledger/src/auth.rs crates/qbind-ledger/tests/tx_auth_verifier_tests.rs crates/qbind-ledger/tests/run_422_native_admission_resource_tests.rs crates/qbind-runtime/tests/tx_executor_tests.rs
+exit 0
+(no diagnostic output)
+```
+
+```text
+git -c core.whitespace=cr-at-eol diff --check
+exit 0
+(no diagnostic output)
+```
+
+```text
+git -c core.whitespace=cr-at-eol diff --check ca8b772fe9962557be11ddbcb24661d78a887e89 HEAD
+exit 0
+(no diagnostic output)
+```
+
+```text
+LIBCLANG_PATH=/usr/lib/llvm-18/lib cargo test --locked -p qbind-ledger -p qbind-runtime -p qbind-system --no-fail-fast
+exit 101
+selected = 979 = 961 passed + 1 failed + 17 ignored
+     Running unittests src/lib.rs (target/debug/deps/qbind_ledger-8c02fbfa5802e7c2)
+test result: ok. 368 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 3.78s
+     Running tests/ledger_apply_tests.rs (target/debug/deps/ledger_apply_tests-4afd78b4f3c17f69)
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running tests/run_422_native_admission_context_tests.rs (target/debug/deps/run_422_native_admission_context_tests-3896b95f280a79ba)
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.28s
+     Running tests/run_422_native_admission_resource_tests.rs (target/debug/deps/run_422_native_admission_resource_tests-3d53c083fad8255a)
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 3.62s
+     Running tests/run_422_native_admission_state_contract_tests.rs (target/debug/deps/run_422_native_admission_state_contract_tests-3fe5a319c7ad5490)
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.08s
+     Running tests/run_422_native_keyset_create_model_tests.rs (target/debug/deps/run_422_native_keyset_create_model_tests-2b46fca4f010a8e7)
+test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.24s
+     Running tests/run_422_native_staged_effects_tests.rs (target/debug/deps/run_422_native_staged_effects_tests-15bf6f5b4014816a)
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.32s
+     Running tests/suite_registry_account_tests.rs (target/debug/deps/suite_registry_account_tests-5c25d1b534a997ec)
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running tests/t157_parallel_nonce_executor_tests.rs (target/debug/deps/t157_parallel_nonce_executor_tests-8cf519d4043346fb)
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+     Running tests/t163_vm_v0_tests.rs (target/debug/deps/t163_vm_v0_tests-8314f8bdbce42d94)
+test result: ok. 17 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running tests/t164_vm_persistence_tests.rs (target/debug/deps/t164_vm_persistence_tests-86ccaf26996d8c32)
+test result: ok. 13 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.24s
+     Running tests/t168_vm_gas_tests.rs (target/debug/deps/t168_vm_gas_tests-531ead3be7df8fc7)
+test result: ok. 15 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running tests/t171_parallel_conflict_graph_tests.rs (target/debug/deps/t171_parallel_conflict_graph_tests-e0f1306e7d7e8a06)
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running tests/t171_parallel_executor_integration_tests.rs (target/debug/deps/t171_parallel_executor_integration_tests-0e99b0f5bd06c335)
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+     Running tests/t177_vm_v0_proptests.rs (target/debug/deps/t177_vm_v0_proptests-f0bc96cd69df53f3)
+test result: ok. 15 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.07s
+     Running tests/t179_vm_v0_gas_proptests.rs (target/debug/deps/t179_vm_v0_gas_proptests-a09a9932fe8c9ed8)
+test result: ok. 13 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.06s
+     Running tests/t193_hybrid_fee_distribution_tests.rs (target/debug/deps/t193_hybrid_fee_distribution_tests-32cf2458968a4a8c)
+test result: ok. 15 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running tests/t195_monetary_engine_tests.rs (target/debug/deps/t195_monetary_engine_tests-5925af5627f06b4f)
+test result: ok. 22 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running tests/t197_monetary_seigniorage_tests.rs (target/debug/deps/t197_monetary_seigniorage_tests-481c232a1631fb51)
+test result: ok. 16 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running tests/t199_monetary_epoch_state_tests.rs (target/debug/deps/t199_monetary_epoch_state_tests-072d1493e0dde4e6)
+test result: ok. 19 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running tests/t200_validator_seigniorage_tests.rs (target/debug/deps/t200_validator_seigniorage_tests-c11b1348c1318867)
+test result: ok. 20 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running tests/t201_monetary_application_tests.rs (target/debug/deps/t201_monetary_application_tests-86c7cdfb6bf93e85)
+test result: ok. 22 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running tests/t202_ema_fee_smoothing_tests.rs (target/debug/deps/t202_ema_fee_smoothing_tests-f4c2ec26a63243b5)
+test result: ok. 21 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running tests/t203_rate_of_change_limiters_tests.rs (target/debug/deps/t203_rate_of_change_limiters_tests-ef12a3b517e885d5)
+test result: ok. 17 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running tests/t204_phase_transition_tests.rs (target/debug/deps/t204_phase_transition_tests-818909b15a93bec3)
+test result: ok. 28 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running tests/t215_state_snapshot_tests.rs (target/debug/deps/t215_state_snapshot_tests-510c0d74e2224c3c)
+test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.14s
+     Running tests/t232_genesis_config_tests.rs (target/debug/deps/t232_genesis_config_tests-dfaeafb05009355f)
+test result: ok. 16 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running tests/t233_genesis_hash_tests.rs (target/debug/deps/t233_genesis_hash_tests-0251a6da534d0e38)
+test result: ok. 19 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running tests/tx_auth_verifier_tests.rs (target/debug/deps/tx_auth_verifier_tests-e90c75554fc7aa10)
+test result: ok. 34 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.32s
+     Running unittests src/lib.rs (target/debug/deps/qbind_runtime-fdb308b3cfe45039)
+test result: ok. 53 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+     Running tests/block_executor_tests.rs (target/debug/deps/block_executor_tests-d87f5b3c58ec1f9c)
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.10s
+     Running tests/run_422_native_governance_authority_contract_tests.rs (target/debug/deps/run_422_native_governance_authority_contract_tests-0d54677d887c7854)
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.64s
+     Running tests/run_422_native_keyset_create_authority_contract_tests.rs (target/debug/deps/run_422_native_keyset_create_authority_contract_tests-17043d1f191a3fbc)
+test result: FAILED. 8 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.49s
+error: test failed, to rerun pass `-p qbind-runtime --test run_422_native_keyset_create_authority_contract_tests`
+     Running tests/run_422_native_validator_authority_contract_tests.rs (target/debug/deps/run_422_native_validator_authority_contract_tests-0532fd3b15542f5a)
+test result: ok. 15 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.64s
+     Running tests/t150_revm_execution_tests.rs (target/debug/deps/t150_revm_execution_tests-ce257344cc3c17e1)
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running tests/t151_block_apply_tests.rs (target/debug/deps/t151_block_apply_tests-1b058b00e196bd91)
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+     Running tests/t152_block_apply_gas_tests.rs (target/debug/deps/t152_block_apply_gas_tests-bcde4484c4b6847f)
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running tests/t152_gas_model_tests.rs (target/debug/deps/t152_gas_model_tests-b52326aa30cce19b)
+test result: ok. 13 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running tests/tx_executor_tests.rs (target/debug/deps/tx_executor_tests-9e8fa3d259cebca0)
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.15s
+     Running unittests src/lib.rs (target/debug/deps/qbind_system-f635c0e8e457e070)
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running tests/governance_program_tests.rs (target/debug/deps/governance_program_tests-41858b37480b5047)
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running tests/keyset_program_tests.rs (target/debug/deps/keyset_program_tests-801604c9ae079389)
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running tests/validator_register_tests.rs (target/debug/deps/validator_register_tests-dd7f8c6265c81f81)
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+   Doc-tests qbind_ledger
+test result: ok. 40 passed; 0 failed; 16 ignored; 0 measured; 0 filtered out; finished in 4.51s
+   Doc-tests qbind_runtime
+test result: ok. 0 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s
+   Doc-tests qbind_system
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+error: 1 target failed:
+```
+
+### Concrete outside-scope validation blocker (not silently migrated)
+
+The required
+`LIBCLANG_PATH=/usr/lib/llvm-18/lib cargo test --locked -p qbind-ledger -p qbind-runtime -p qbind-system`
+exits 101. The supplemental identical package selection with `--no-fail-fast`
+also exits 101, with only this one failing target/test:
+
+`crates/qbind-runtime/tests/run_422_native_keyset_create_authority_contract_tests.rs`
+`preseeded_threshold_two_and_threshold_one_controls_reach_unavailable_authority`
+(fixture lines 607-648; read-order assertion at line 240).
+
+Its historical threshold-2 fixture has two weight-1 entries but supplies only
+one proof for the first key, then expects reads `[TARGET, FRESH]`, one
+verification and the native-program authority-unavailable error. With this
+intentional restriction the insufficient selected key refuses authentication
+before the FRESH read. Actual assertion output reports only `[0x22; 32]`
+(TARGET) versus expected `[0x22; 32], [0x33; 32]` (TARGET, FRESH). The read-order
+assertion panics before that test's later error assertion; this is not reported
+as an observed program error or as a pre-existing unrelated failure.
+
+The target reports `8 passed; 1 failed; 0 ignored`. The entire supplemental run
+reports 979 selected = 961 passed + 1 failed + 17 ignored (including doc-tests).
+The required early-stopping run reports 841 executed = 840 passed + 1 failed +
+0 ignored. These overlap and must not be summed.
+
+That file is EXCLUDED by the exact eight-path scope, remains mode 100644 and
+blob 841928e45df09ad7a74ed0946c512da05970df35, and is NOT changed, skipped,
+filtered, ignored or hidden. An all-green broad package validation is therefore
+NOT established within this task's authorized scope. No claim of full
+validation success or release approval follows. The implementation and focused
+controls are delivered with this explicit compatibility/validation blocker.
+
+### Preparatory/environment results (separate from final validation)
+
+Before source commit, the preparatory ledger command used the same literal
+ledger command listed above and exited 101 during zstd-sys/bindgen build:
+`Unable to find libclang: "couldn't find any valid shared libraries matching:
+['libclang.so', 'libclang-*.so', 'libclang.so.*', 'libclang-*.so.*']"`.
+No verifier tests executed in that attempt; it is not counted as a test failure.
+Only libclang-cpp.so.18.1 existed initially, not a bindgen-loadable libclang.so.
+Environment-only prerequisite repair:
+`apt-get update -qq && apt-get install -y -qq libclang-18-dev` exited 0.
+apt update emitted a separate Google Chrome repository DNS warning and reused
+available indexes; installation succeeded and
+`/usr/lib/llvm-18/lib/libclang.so` and `libclang.so.1` became available.
+There were no repository dependency/lockfile changes.
+The preparatory retry then exited 0 with 34 selected = 34 passed + 0 failed +
+0 ignored. It is separate from, and not added to, committed-source validation.
+
+### Starting and tested Rust mode/blob inventory
+
+The following mode/blob pairs are the source-provenance equality check for the
+final evidence-only commit. Final Rust must equal the tested side exactly.
+
+```text
+crates/qbind-ledger/src/auth.rs
+starting 100755 blob fa7ede001a5f563cdf4a9c382493806a35936368
+tested 100755 blob 895763fd47267a008fe10e2729b5db73606ca8cc
+```
+
+```text
+crates/qbind-ledger/tests/tx_auth_verifier_tests.rs
+starting 100755 blob 8b1b499a4b27e8bbdabce93c398d807d34c3e39c
+tested 100755 blob 65b156ec44f5c84d32fc25add37a868ce473f7f0
+```
+
+```text
+crates/qbind-ledger/tests/run_422_native_admission_resource_tests.rs
+starting 100644 blob 47843755bda7f413dc4dea417cce373b62610ff8
+tested 100644 blob ed5f0a8c2bb78c6c2eff86e73f0bc365aaccbaec
+```
+
+```text
+crates/qbind-runtime/tests/tx_executor_tests.rs
+starting 100755 blob b9c3b8c2b4e0ea8a3985cc83f5092cda8fe44269
+tested 100755 blob 3ce8b9c5987b625b8dcbaadf512836aad4efe332
+```
+
+
+Document starting mode/blob inventory (the final document hashes necessarily
+depend on this append and are reported after commit at delivery):
+
+```text
+100644 blob 16c90548f4a967e0af5649f1e5092591eea24049	docs/devnet/QBIND_RUN_422_NATIVE_ADMISSION_RESOURCE_ASSESSMENT.md
+```
+
+```text
+100644 blob e6cc7a9d549ee4cbe17256cbf0411b66b88cfb94	docs/devnet/QBIND_RUN_422_NATIVE_ADMISSION_STATE_CONTRACT.md
+```
+
+```text
+100644 blob 9c1fbd31a2bb2c9986f576b40b8adb594d2d9d79	docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_422_D7.md
+```
+
+```text
+100644 blob b799eba7dca78ab40ffb341f27750bc01cf8333a	docs/whitepaper/contradiction.md
+```
+
+
+Delivery verification commands to repeat AFTER the evidence-only commit:
+`git -c core.whitespace=cr-at-eol diff --check`;
+`git -c core.whitespace=cr-at-eol diff --check ca8b772fe9962557be11ddbcb24661d78a887e89 HEAD`;
+full-tree mode/blob comparison, complete-document-prefix and EOL/EOF checks;
+`git merge-base --is-ancestor ca8b772fe9962557be11ddbcb24661d78a887e89 HEAD`;
+`git merge-base --is-ancestor 0a163bb733f7dd160a588b5aa11cd37ad13fd143 HEAD`.
+Push ONLY
+`git push origin HEAD:refs/heads/copilot/run-422-native-auth-individual-threshold-admission`
+without force, then compare the exact `git ls-remote --heads origin
+refs/heads/copilot/run-422-native-auth-individual-threshold-admission` tip with
+local HEAD and check a clean worktree. Those post-commit outcomes and final
+identities are recorded in the delivery response, not asserted prospectively
+inside this self-identifying evidence append.
