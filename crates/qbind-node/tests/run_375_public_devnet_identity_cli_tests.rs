@@ -12,13 +12,15 @@
 //! path). No private material appears in any public output.
 //!
 //! Scope guard: these tests exercise a **local key/cert generation + verification
-//! utility only**. They open no socket, register no peer, mutate no
-//! trust/validator/epoch/sequence/marker state, change no P2P wire format, and
-//! weaken no peer admission. Loopback strict-auth boot is covered by
+//! utility and a fail-closed boot check**. The boot check uses isolated storage
+//! and valid timeout-verification inputs to reach certificate identity validation
+//! before P2P transport starts. These tests register no peer, change no P2P wire
+//! format, and weaken no peer admission. Loopback strict-auth boot is covered by
 //! `scripts/devnet/run_375_public_devnet_identity_cli.sh`.
 
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Stdio};
+use std::time::{Duration, Instant};
 
 fn qbind_node_bin() -> PathBuf {
     PathBuf::from(env!("CARGO_BIN_EXE_qbind-node"))
@@ -305,15 +307,44 @@ fn seed_candidate_maps_public_identity_without_live_claim() {
 
 #[test]
 fn mismatched_validator_id_fails_closed_at_boot() {
-    let dir = tmpdir("mismatch").join("vc");
-    let g = generate("validator-candidate", &dir, Some("0"));
+    let base = tempfile::tempdir().expect("create isolated boot fixture");
+    let dir = base.path().join("vc");
+    let g = generate("validator-candidate", &dir, Some("9"));
     assert_eq!(g.code, 0, "{}", g.stderr);
     let spec = read(&dir.join("trusted-root.spec"));
-    let data_dir = tmpdir("mismatch-data");
+    let data_dir = base.path().join("data");
+    let keystore = tempfile::tempdir_in(base.path()).expect("create signer keystore");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(keystore.path(), std::fs::Permissions::from_mode(0o700))
+            .expect("restrict signer keystore permissions");
+    }
+    let (pk, sk) = qbind_crypto::ml_dsa44::MlDsa44Backend::generate_keypair()
+        .expect("generate timeout-verification signer");
+    let signer_file =
+        tempfile::NamedTempFile::new_in(keystore.path()).expect("create private signer file");
+    serde_json::to_writer(
+        signer_file.as_file(),
+        &serde_json::json!({ "suite_id": 100, "private_key_hex": hex::encode(&sk) }),
+    )
+    .expect("write signer fixture");
+    signer_file
+        .persist_noclobber(keystore.path().join("validator-0.json"))
+        .expect("persist private signer fixture");
+    let local_consensus_key = format!("0:100:{}", hex::encode(&pk));
+    let stderr_file = tempfile::NamedTempFile::new_in(base.path()).expect("create boot log");
 
-    // Boot with mismatched --validator-id 9 (cert is bound to qbind-val-0).
-    let out = Command::new(qbind_node_bin())
-        .env("QBIND_METRICS_HTTP_ADDR", "127.0.0.1:0")
+    // Keep local validator 0 in range for the single-validator setup. The valid
+    // signer/key provider must pass mandatory preflight before the cert mismatch.
+    let mut child = Command::new(qbind_node_bin())
+        .env_remove("QBIND_METRICS_HTTP_ADDR")
+        .env_remove("QBIND_MUTUAL_AUTH")
+        .env_remove("QBIND_DRAIN_ONCE_DELAY_SECS")
+        .env_remove("QBIND_DEVNET_FORGED_INJECTION")
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::from(stderr_file.reopen().expect("open boot log")))
         .args([
             "--env",
             "devnet",
@@ -321,7 +352,11 @@ fn mismatched_validator_id_fails_closed_at_boot() {
             "p2p",
             "--enable-p2p",
             "--validator-id",
-            "9",
+            "0",
+            "--signer-keystore-path",
+            keystore.path().to_str().unwrap(),
+            "--validator-consensus-key",
+            &local_consensus_key,
             "--data-dir",
             data_dir.to_str().unwrap(),
             "--p2p-listen-addr",
@@ -337,17 +372,41 @@ fn mismatched_validator_id_fails_closed_at_boot() {
             "--p2p-leaf-cert-key",
             dir.join("leaf.kem.sk.bin").to_str().unwrap(),
         ])
-        .output()
+        .spawn()
         .expect("spawn node");
-    assert!(
-        !out.status.success(),
-        "node must fail closed under mismatched --validator-id"
+    let deadline = Instant::now() + Duration::from_secs(30);
+    let status = loop {
+        if let Some(status) = child.try_wait().expect("poll node exit") {
+            break status;
+        }
+        if Instant::now() >= deadline {
+            child.kill().expect("kill node after boot deadline");
+            child.wait().expect("reap node after boot deadline");
+            panic!(
+                "node did not refuse mismatched identity within 30s: {}",
+                read(stderr_file.path())
+            );
+        }
+        std::thread::sleep(Duration::from_millis(25));
+    };
+    let stderr = read(stderr_file.path());
+    assert_eq!(
+        status.code(),
+        Some(1),
+        "expected clean boot refusal: {stderr}"
     );
-    let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(
-        stderr.contains("validator_id does not match") || stderr.contains("does not match"),
+        stderr.contains("timeout verification ACTIVE"),
+        "valid timeout-verification preflight must pass before identity refusal: {stderr}"
+    );
+    assert!(
+        stderr.contains("local leaf cert validator_id does not match --validator-id"),
         "expected validator-id mismatch error, got: {}",
         stderr
+    );
+    assert!(
+        !stderr.contains("[binary] P2P transport up."),
+        "P2P transport must not start with a mismatched identity: {stderr}"
     );
 }
 
