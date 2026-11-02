@@ -151,6 +151,7 @@ struct OperationCounts {
 struct CountingStore {
     accounts: HashMap<AccountId, Account>,
     counts: OperationCounts,
+    returned_data_range: Cell<Option<(usize, usize)>>,
 }
 
 impl CountingStore {
@@ -166,13 +167,23 @@ impl CountingStore {
         self.counts.reads.set(0);
         self.counts.writes.set(0);
         self.counts.deletes.set(0);
+        self.returned_data_range.set(None);
+    }
+
+    fn returned_data_range(&self) -> Option<(usize, usize)> {
+        self.returned_data_range.get()
     }
 }
 
 impl AccountStore for CountingStore {
     fn get(&self, id: &AccountId) -> Option<Account> {
         self.counts.reads.set(self.counts.reads.get() + 1);
-        self.accounts.get(id).cloned()
+        let account = self.accounts.get(id).cloned();
+        if let Some(account) = &account {
+            self.returned_data_range
+                .set(Some((account.data.as_ptr() as usize, account.data.len())));
+        }
+        account
     }
 
     fn put(&mut self, account: Account) -> Result<(), ExecutionError> {
@@ -248,6 +259,7 @@ impl CryptoProvider for CountingCryptoProvider {
 struct RecordingMlDsa44Suite {
     inner: MlDsa44SignatureSuite,
     digests: Arc<Mutex<Vec<Hash32>>>,
+    public_keys: Arc<Mutex<Vec<(usize, Vec<u8>)>>>,
 }
 
 impl SignatureSuite for RecordingMlDsa44Suite {
@@ -273,6 +285,10 @@ impl SignatureSuite for RecordingMlDsa44Suite {
             .lock()
             .expect("recorded digest lock")
             .push(*digest);
+        self.public_keys
+            .lock()
+            .expect("recorded public-key lock")
+            .push((public_key.as_ptr() as usize, public_key.to_vec()));
         self.inner.verify(public_key, digest, signature)
     }
 }
@@ -289,6 +305,7 @@ impl RecordingCryptoProvider {
             suite: RecordingMlDsa44Suite {
                 inner: MlDsa44SignatureSuite::new(100),
                 digests: Arc::new(Mutex::new(Vec::new())),
+                public_keys: Arc::new(Mutex::new(Vec::new())),
             },
         }
     }
@@ -300,6 +317,11 @@ impl RecordingCryptoProvider {
             .lock()
             .expect("recorded digest lock")
             .clear();
+        self.suite
+            .public_keys
+            .lock()
+            .expect("recorded public-key lock")
+            .clear();
     }
 
     fn recorded_digests(&self) -> Vec<Hash32> {
@@ -307,6 +329,14 @@ impl RecordingCryptoProvider {
             .digests
             .lock()
             .expect("recorded digest lock")
+            .clone()
+    }
+
+    fn recorded_public_keys(&self) -> Vec<(usize, Vec<u8>)> {
+        self.suite
+            .public_keys
+            .lock()
+            .expect("recorded public-key lock")
             .clone()
     }
 }
@@ -368,6 +398,329 @@ fn signed_native_fixture() -> (CountingStore, Arc<dyn CryptoProvider>, Transacti
         StaticCryptoProvider::new().with_signature_suite(Arc::new(MlDsa44SignatureSuite::new(100))),
     );
     (store, crypto, tx)
+}
+
+fn raw_keyset_header(entry_count: u16) -> Vec<u8> {
+    let mut bytes = vec![1, 0, 0, 0, 1, 0];
+    bytes.extend_from_slice(&entry_count.to_le_bytes());
+    bytes.extend_from_slice(&[0; 4]);
+    bytes
+}
+
+fn append_raw_keyset_entry(bytes: &mut Vec<u8>, suite_id: u8, pubkey: &[u8]) {
+    bytes.push(suite_id);
+    bytes.extend_from_slice(&1u16.to_le_bytes());
+    bytes.push(0);
+    bytes.extend_from_slice(&(pubkey.len() as u16).to_le_bytes());
+    bytes.extend_from_slice(pubkey);
+}
+
+fn transaction_for_keyset(keyset_id: AccountId, suite_id: u8) -> Transaction {
+    make_transaction(
+        vec![TxAccountMeta {
+            account_id: keyset_id,
+            flags: 1,
+            access_hint: 0,
+            reserved0: [0; 2],
+        }],
+        vec![TxAuth {
+            account_index: 0,
+            suite_id,
+            reserved: 0,
+            signature: vec![0xAA],
+        }],
+    )
+}
+
+#[test]
+fn genuine_mldsa44_verification_borrows_selected_key_from_returned_account() {
+    let keyset_id = dummy_account_id(0xB4);
+    let (public_key, secret_key) =
+        qbind_crypto::ml_dsa44::MlDsa44Backend::generate_keypair().expect("ML-DSA-44 keygen");
+    let mut encoded = Vec::new();
+    make_keyset_account(100, public_key.clone()).encode_state(&mut encoded);
+
+    let mut store = CountingStore::default();
+    store.seed(Account::new(keyset_id, dummy_program_id(0x4B), 19, encoded));
+    let mut tx = transaction_for_keyset(keyset_id, 100);
+    let oracle_digest = qbind_hash::tx::tx_digest(&tx);
+    tx.auths[0].signature =
+        ml_dsa_44_sign_digest(&secret_key, &oracle_digest).expect("sign genuine transaction");
+
+    let crypto = Arc::new(RecordingCryptoProvider::new());
+    let original_tx = tx.clone();
+    let original_store = store.snapshot();
+    verify_transaction_auth(&mut store, crypto.clone(), &tx)
+        .expect("genuine ML-DSA-44 signature must verify");
+
+    let (data_start, data_len) = store
+        .returned_data_range()
+        .expect("observed returned Account");
+    let (key_start, observed_key) = crypto
+        .recorded_public_keys()
+        .into_iter()
+        .next()
+        .expect("actual signature verification observed its key");
+    let expected_key_start = data_start
+        .checked_add(12 + 6)
+        .expect("key offset is within address range");
+    assert_eq!(store.counts.reads.get(), 1);
+    assert_eq!(data_len, 12 + 6 + public_key.len());
+    assert_eq!(key_start, expected_key_start);
+    assert_eq!(observed_key.len(), public_key.len());
+    assert_eq!(observed_key, public_key);
+    assert_eq!(crypto.lookups.load(Ordering::SeqCst), 1);
+    assert_eq!(crypto.recorded_digests(), vec![oracle_digest]);
+    assert_eq!(tx, original_tx);
+    assert_eq!(store.snapshot(), original_store);
+    assert_eq!(store.counts.writes.get(), 0);
+    assert_eq!(store.counts.deletes.get(), 0);
+}
+
+#[test]
+fn stored_keyset_framing_refusals_precede_provider_and_preserve_state() {
+    let truncated_header = vec![0xA5; 11];
+
+    let insufficient_entry = raw_keyset_header(1);
+
+    let mut truncated_body = raw_keyset_header(1);
+    truncated_body.push(1);
+    truncated_body.extend_from_slice(&1u16.to_le_bytes());
+    truncated_body.push(0);
+    truncated_body.extend_from_slice(&3u16.to_le_bytes());
+    truncated_body.extend_from_slice(&[0x11, 0x22]);
+
+    let mut malformed_unused_entry = raw_keyset_header(2);
+    append_raw_keyset_entry(&mut malformed_unused_entry, 1, &[0x51]);
+    malformed_unused_entry.push(2);
+    malformed_unused_entry.extend_from_slice(&1u16.to_le_bytes());
+    malformed_unused_entry.push(0);
+    malformed_unused_entry.extend_from_slice(&3u16.to_le_bytes());
+    malformed_unused_entry.extend_from_slice(&[0x61, 0x62]);
+
+    let mut trailing = raw_keyset_header(1);
+    append_raw_keyset_entry(&mut trailing, 1, &[0x71]);
+    trailing.push(0xFF);
+
+    let large_advertised_count = raw_keyset_header(u16::MAX);
+    let cases = [
+        ("truncated header", truncated_header, false),
+        ("insufficient entry data", insufficient_entry, false),
+        ("truncated key body", truncated_body, false),
+        ("malformed unused entry", malformed_unused_entry, false),
+        ("trailing bytes", trailing, true),
+        (
+            "large advertised count with short buffer",
+            large_advertised_count,
+            false,
+        ),
+    ];
+
+    for (name, data, trailing_error) in cases {
+        let keyset_id = dummy_account_id(0xD2);
+        let mut store = CountingStore::default();
+        store.seed(Account::new(keyset_id, dummy_program_id(0x4B), 27, data));
+        let tx = transaction_for_keyset(keyset_id, 1);
+        let tx_witness = tx.clone();
+        let store_witness = store.snapshot();
+        let crypto = Arc::new(CountingCryptoProvider::new());
+
+        let error = verify_transaction_auth(&mut store, crypto.clone(), &tx)
+            .expect_err(&format!("{name} must be refused"));
+        if trailing_error {
+            assert!(matches!(
+                error,
+                ExecutionError::SerializationError("trailing bytes in KeysetAccount account")
+            ));
+        } else {
+            assert!(matches!(
+                error,
+                ExecutionError::SerializationError("decode KeysetAccount")
+            ));
+        }
+        assert_eq!(tx, tx_witness, "{name} changed transaction");
+        assert_eq!(
+            store.snapshot(),
+            store_witness,
+            "{name} changed complete store"
+        );
+        assert_eq!(store.counts.reads.get(), 1, "{name} get count");
+        assert_eq!(store.counts.writes.get(), 0, "{name} write count");
+        assert_eq!(store.counts.deletes.get(), 0, "{name} delete count");
+        assert_eq!(
+            crypto.lookups.load(Ordering::SeqCst),
+            0,
+            "{name} lookup count"
+        );
+        assert_eq!(crypto.verification_calls(), 0, "{name} verify count");
+    }
+}
+
+#[test]
+fn zero_entry_missing_account_suite_and_provider_outcomes_are_exact() {
+    let keyset_id = dummy_account_id(0xD3);
+    let crypto = Arc::new(CountingCryptoProvider::new());
+    let cases = [
+        (
+            Some(raw_keyset_header(0)),
+            1,
+            "zero-entry",
+            1,
+            0,
+            "no matching key",
+        ),
+        (
+            Some({
+                let mut bytes = raw_keyset_header(1);
+                append_raw_keyset_entry(&mut bytes, 2, &[0x22]);
+                bytes
+            }),
+            1,
+            "missing matching suite",
+            1,
+            0,
+            "no matching key",
+        ),
+        (None, 1, "missing account", 1, 0, "missing account"),
+        (
+            Some({
+                let mut bytes = raw_keyset_header(1);
+                append_raw_keyset_entry(&mut bytes, 99, &[0x99]);
+                bytes
+            }),
+            99,
+            "provider unavailable",
+            1,
+            1,
+            "provider unavailable",
+        ),
+    ];
+
+    for (data, suite_id, name, expected_reads, expected_lookups, expected_error) in cases {
+        let mut store = CountingStore::default();
+        if let Some(data) = data {
+            store.seed(Account::new(keyset_id, dummy_program_id(0x4B), 31, data));
+        }
+        let tx = transaction_for_keyset(keyset_id, suite_id);
+        let tx_witness = tx.clone();
+        let store_witness = store.snapshot();
+        crypto.lookups.store(0, Ordering::SeqCst);
+        let error = verify_transaction_auth(&mut store, crypto.clone(), &tx).unwrap_err();
+        match expected_error {
+            "no matching key" => assert!(matches!(
+                error,
+                ExecutionError::InvalidCallData("no key in keyset for given suite_id")
+            )),
+            "missing account" => assert!(matches!(error, ExecutionError::AccountNotFound)),
+            "provider unavailable" => assert!(matches!(
+                error,
+                ExecutionError::CryptoError("signature suite not found")
+            )),
+            _ => unreachable!("test expectation is defined above"),
+        }
+        assert_eq!(tx, tx_witness, "{name} changed transaction");
+        assert_eq!(
+            store.snapshot(),
+            store_witness,
+            "{name} changed complete store"
+        );
+        assert_eq!(store.counts.reads.get(), expected_reads, "{name} get count");
+        assert_eq!(store.counts.writes.get(), 0, "{name} write count");
+        assert_eq!(store.counts.deletes.get(), 0, "{name} delete count");
+        assert_eq!(
+            crypto.lookups.load(Ordering::SeqCst),
+            expected_lookups,
+            "{name} lookup count"
+        );
+        assert_eq!(crypto.verification_calls(), 0, "{name} verify count");
+    }
+}
+
+#[test]
+fn genuine_same_suite_selection_uses_first_key_and_ignores_semantic_metadata() {
+    let keyset_id = dummy_account_id(0xD4);
+    let (wrong_public_key, _wrong_secret_key) =
+        qbind_crypto::ml_dsa44::MlDsa44Backend::generate_keypair().expect("wrong keypair");
+    let (valid_public_key, valid_secret_key) =
+        qbind_crypto::ml_dsa44::MlDsa44Backend::generate_keypair().expect("valid keypair");
+    let make_entries = |first: Vec<u8>, second: Vec<u8>| KeysetAccount {
+        version: u8::MAX,
+        reserved0: [u8::MAX; 3],
+        threshold: 0,
+        entry_count: 2,
+        reserved1: [u8::MAX; 4],
+        entries: vec![
+            KeysetEntry {
+                suite_id: 100,
+                weight: 0,
+                reserved0: [u8::MAX],
+                pubkey_len: first.len() as u16,
+                pubkey_bytes: first,
+            },
+            KeysetEntry {
+                suite_id: 100,
+                weight: u16::MAX,
+                reserved0: [u8::MAX],
+                pubkey_len: second.len() as u16,
+                pubkey_bytes: second,
+            },
+        ],
+    };
+
+    let mut store = CountingStore::default();
+    let mut wrong_first = Vec::new();
+    make_entries(wrong_public_key.clone(), valid_public_key.clone()).encode_state(&mut wrong_first);
+    store.seed(Account::new(
+        keyset_id,
+        dummy_program_id(0x4B),
+        41,
+        wrong_first,
+    ));
+    let wrong_first_store_witness = store.snapshot();
+    let mut tx = transaction_for_keyset(keyset_id, 100);
+    let digest = qbind_hash::tx::tx_digest(&tx);
+    tx.auths[0].signature =
+        ml_dsa_44_sign_digest(&valid_secret_key, &digest).expect("sign with later matching key");
+    let tx_witness = tx.clone();
+    let crypto = Arc::new(RecordingCryptoProvider::new());
+
+    assert!(
+        matches!(
+            verify_transaction_auth(&mut store, crypto.clone(), &tx),
+            Err(ExecutionError::CryptoError("signature verification failed"))
+        ),
+        "signature valid only for a later matching key must fail"
+    );
+    assert_eq!(store.counts.reads.get(), 1);
+    assert_eq!(crypto.lookups.load(Ordering::SeqCst), 1);
+    assert_eq!(crypto.recorded_digests(), vec![digest]);
+    assert_eq!(crypto.recorded_public_keys()[0].1, wrong_public_key);
+    assert_eq!(tx, tx_witness);
+    assert_eq!(store.snapshot(), wrong_first_store_witness);
+    assert_eq!(store.counts.writes.get(), 0);
+    assert_eq!(store.counts.deletes.get(), 0);
+
+    let mut valid_first = Vec::new();
+    make_entries(valid_public_key.clone(), wrong_public_key.clone()).encode_state(&mut valid_first);
+    store.seed(Account::new(
+        keyset_id,
+        dummy_program_id(0x4B),
+        41,
+        valid_first,
+    ));
+    let valid_first_store_witness = store.snapshot();
+    store.reset_counts();
+    crypto.reset();
+    verify_transaction_auth(&mut store, crypto.clone(), &tx)
+        .expect("same signature succeeds when its key is first");
+    assert_eq!(store.counts.reads.get(), 1);
+    assert_eq!(crypto.lookups.load(Ordering::SeqCst), 1);
+    assert_eq!(crypto.recorded_digests(), vec![digest]);
+    assert_eq!(crypto.recorded_public_keys()[0].1, valid_public_key);
+    assert_eq!(tx, tx_witness);
+    assert_eq!(store.snapshot(), valid_first_store_witness);
+    assert_eq!(store.counts.writes.get(), 0);
+    assert_eq!(store.counts.deletes.get(), 0);
 }
 
 #[test]

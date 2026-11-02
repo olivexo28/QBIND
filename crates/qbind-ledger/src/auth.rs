@@ -2,8 +2,9 @@ use std::sync::Arc;
 
 use qbind_crypto::CryptoProvider;
 use qbind_hash::tx::{try_tx_digest_streaming, TxDigestError};
-use qbind_serde::StateDecode;
-use qbind_types::{Hash32, KeysetAccount};
+use qbind_serde::keyset::{parse_stored_keyset, StoredKeysetLimits, StoredKeysetParseError};
+use qbind_serde::StateError;
+use qbind_types::Hash32;
 use qbind_wire::tx::{Transaction, TxAuth};
 
 use crate::store::AccountStore;
@@ -113,19 +114,26 @@ fn verify_single_auth<S: AccountStore>(
         .get(&keyset_id)
         .ok_or(ExecutionError::AccountNotFound)?;
 
-    // 3) Decode KeysetAccount from account.data.
-    let mut slice: &[u8] = &account.data;
-    let keyset = KeysetAccount::decode_state(&mut slice)
-        .map_err(|_| ExecutionError::SerializationError("decode KeysetAccount"))?;
-    if !slice.is_empty() {
-        return Err(ExecutionError::SerializationError(
-            "trailing bytes in KeysetAccount account",
-        ));
-    }
+    // These limits preserve the existing u16 framing without adding operational caps.
+    let keyset = parse_stored_keyset(
+        &account.data,
+        StoredKeysetLimits {
+            max_encoded_bytes: account.data.len(),
+            max_entries: usize::from(u16::MAX),
+            max_key_bytes: usize::from(u16::MAX),
+            max_total_key_bytes: account.data.len(),
+        },
+    )
+    .map_err(|error| match error {
+        StoredKeysetParseError::Malformed(StateError::InvalidValue(
+            "trailing stored keyset bytes",
+        )) => ExecutionError::SerializationError("trailing bytes in KeysetAccount account"),
+        _ => ExecutionError::SerializationError("decode KeysetAccount"),
+    })?;
 
     // 4) Find a KeysetEntry with matching suite_id.
     let suite_id = auth.suite_id;
-    let maybe_entry = keyset.entries.iter().find(|e| e.suite_id == suite_id);
+    let maybe_entry = keyset.entries().find(|e| e.suite_id == suite_id);
     let entry = match maybe_entry {
         Some(e) => e,
         None => {
@@ -142,7 +150,7 @@ fn verify_single_auth<S: AccountStore>(
 
     // 6) Extract signature bytes from TxAuth.
     let sig_bytes: &[u8] = &auth.signature;
-    let pk_bytes: &[u8] = &entry.pubkey_bytes;
+    let pk_bytes: &[u8] = entry.pubkey_bytes;
 
     // 7) Verify using the suite.
     suite
