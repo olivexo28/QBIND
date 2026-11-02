@@ -26224,3 +26224,116 @@ Each command below was run literally after source/tests commit `da9bb1ffac15a5d2
 A preliminary identical ledger command exited 101 before tests because `libclang.so` was absent from `/usr/lib/llvm-18/lib` (`Unable to find libclang`). Environment-only `libclang-18-dev` was installed; no repository dependency/lockfile changed. The required command then passed as recorded above. Package-manager update emitted an unrelated DNS warning for `dl.google.com`; installation succeeded.
 
 Standing posture is unchanged: `D7D14_STORAGE_COMPONENT=IMPLEMENTED-ISOLATED`; `D7D14_STORAGE_ACCEPTANCE=PASS-ACCEPTED-SUBSET`; §13.6 whole-lifecycle `INCOMPLETE`; activation `DISABLED`; public DevNet `NO-GO`; durable anti-rollback `NOT-ESTABLISHED`; C4/C5 `OPEN`; RS1 `OPEN`; candidate limits `UNAPPROVED`. No activation, deployment, PR, merge, or main push.
+
+## RUN 422 native transaction-format admission — test/evidence finishing pass
+
+### Starting identity and corrected source
+
+This pass started clean on `copilot/run-422-native-auth-transaction-format-admission` at commit `9cbfe313dfe611e513fea71a8b1e558f26053142`, tree `4f5d84ae0a1035d6571c4365cf2f9d76e97f809f`. The required original baseline remains `e93ee53dd2263cfea65fde0461176b84889e45ee`, tree `a0d201f0f43a9fd1353313f10fee6a64640b6c77`; both starting and baseline ancestry queries to the follow-up HEAD succeed, independently of tree identity.
+
+Corrected ledger tests were committed separately. The test-source commit actually exercised by both final Cargo commands is `15b53f496c8164d5bab4bff2713c44de5413e81b`, tree `8f2c3318386961747e0e5ed0010bd49ffabd48f0`; ledger test tuple at that commit is `100755 043a79ba10eff02e46f27001635827ef75e5ffbd crates/qbind-ledger/tests/tx_auth_verifier_tests.rs`. An initial focused attempt at `164372ae79ca3da8095c6139dbec74b111c99b53` exited 101 because the test tried to clone non-Clone `CountingStore`; the fixture was corrected to copy the same baseline account and controlled-response maps into a fresh store. No production source changed.
+
+### Corrected downstream precedence controls
+
+`native_transaction_format_precedes_account_and_provider_failures` creates one genuine signed ML-DSA-44 fixture and derives each case from that same complete transaction/account baseline. A normal matched proof is measured as the positive control. Each isolated downstream case is first invoked without a transaction-format fault, asserting its exact existing error and read/provider/suite-ID/verification observations; only then is `TxAuth.reserved` set to 1 on that same transaction. The digest and genuine signature remain identical, and the format refusal requires zero reads, puts, deletes, provider lookups, suite-ID observations, verification work, recorded digests, and public-key observations. Each invocation resets observations and asserts complete transaction, backing-store, and controlled-response preservation. Metadata fault responses clone the valid account and modify only returned ID, owner, or executable state. The unavailable provider and returned-suite-ID mismatch are explicitly synthetic faults.
+
+| Downstream case | Ordinary result | Reads / lookups / suite-ID observations / verifies | With reserved byte fault |
+|---|---|---:|---|
+| Genuine matched control | success | 1 / 1 / 1 / 1 | exact transaction-format InvalidCallData; all external work zero |
+| Missing account | `AccountNotFound` | 1 / 0 / 0 / 0 | exact transaction-format InvalidCallData; all external work zero |
+| Returned ID mismatch | `InvalidCallData("keyset account id mismatch")` | 1 / 0 / 0 / 0 | exact transaction-format InvalidCallData; all external work zero |
+| Wrong owner | `AccountOwnerMismatch` | 1 / 0 / 0 / 0 | exact transaction-format InvalidCallData; all external work zero |
+| Executable account | `InvalidCallData("keyset account is executable")` | 1 / 0 / 0 / 0 | exact transaction-format InvalidCallData; all external work zero |
+| Malformed stored data | `SerializationError("decode KeysetAccount")` | 1 / 0 / 0 / 0 | exact transaction-format InvalidCallData; all external work zero |
+| Zero threshold | `InvalidCallData("keyset threshold is zero")` | 1 / 0 / 0 / 0 | exact transaction-format InvalidCallData; all external work zero |
+| Insufficient selected weight | `InvalidCallData("selected key weight below keyset threshold")` | 1 / 0 / 0 / 0 | exact transaction-format InvalidCallData; all external work zero |
+| Corrupted signature | `CryptoError("signature verification failed")` | 1 / 1 / 1 / 1 | exact transaction-format InvalidCallData; all external work zero |
+| Unavailable provider (synthetic) | `CryptoError("signature suite not found")` | 1 / 1 / 0 / 0 | exact transaction-format InvalidCallData; all external work zero |
+| Mismatching returned suite ID (synthetic) | `CryptoError("signature suite id mismatch")` | 1 / 1 / 1 / 0 | exact transaction-format InvalidCallData; all external work zero |
+
+`genuine_later_format_fault_precedes_all_proofs_and_corrected_retry_is_fresh` now corrects the actual rejected transaction snapshot. It changes only the later metadata reservation and regenerates signatures for that corrected signed body; assertions compare all remaining transaction/account/auth metadata and body fields against the rejected snapshot. Fresh input/store/response snapshots and reset observations precede retry. Both genuine proofs then verify in expected account order with two lookups, two suite-ID observations, the corrected digest twice, both expected public keys, and no store mutation.
+
+### Complete package-count reconciliation
+
+The retained complete earlier package output is `/tmp/1793635745530-copilot-tool-output-805-d02d1604-1da6-431e-92e3-a35df9f77de5.txt`; it is the run on source/tests commit `da9bb1ffac15a5d2746014dcb89f8c1d36a5ea92`, tree `82e9229c6986217ac2f595ff1df4ccd3974a4869`. Parsing all 46 target markers and all 46 result summaries gives **984 selected = 967 passed + 0 failed + 17 ignored; 967 executed; 0 filtered**. The earlier claimed 285 / 268 passed / 17 ignored was not an aggregate: it is exactly the subtotal of the final 20 target summaries emitted by the earlier `grep ... | tail -40` excerpt. That excerpt omitted the other 26 targets. This unsupported aggregate is superseded.
+
+The prior 979 inventory is the pre-change package inventory. Between the original baseline and tested source, four ledger verifier tests and one runtime executor test were added (the 38-test ledger verifier target and 9-test executor target are visible in the complete run), accounting for 979 + 5 = 984 selected. There was no selection/configuration change: the complete output contains all default unit, integration, and doctest targets for all three requested packages. The complete historical target summaries also reconcile to 984 / 967 / 0 / 17.
+
+The corrected package run below captures stdout and stderr separately outside the checkout. The target markers are in stderr and test-runner results in stdout; all 46 targets pair one-to-one. Every target has zero filtered and zero measured tests. Per-target results:
+
+| Package | Target kind | Target | Passed | Failed | Ignored | Filtered |
+|---|---|---|---:|---:|---:|---:|
+| ledger | unit | `src/lib.rs` | 368 | 0 | 0 | 0 |
+| ledger | integration | `ledger_apply_tests.rs` | 5 | 0 | 0 | 0 |
+| ledger | integration | `run_422_native_admission_context_tests.rs` | 7 | 0 | 0 | 0 |
+| ledger | integration | `run_422_native_admission_resource_tests.rs` | 6 | 0 | 0 | 0 |
+| ledger | integration | `run_422_native_admission_state_contract_tests.rs` | 2 | 0 | 0 | 0 |
+| ledger | integration | `run_422_native_keyset_create_model_tests.rs` | 10 | 0 | 0 | 0 |
+| ledger | integration | `run_422_native_staged_effects_tests.rs` | 9 | 0 | 0 | 0 |
+| ledger | integration | `suite_registry_account_tests.rs` | 1 | 0 | 0 | 0 |
+| ledger | integration | `t157_parallel_nonce_executor_tests.rs` | 9 | 0 | 0 | 0 |
+| ledger | integration | `t163_vm_v0_tests.rs` | 17 | 0 | 0 | 0 |
+| ledger | integration | `t164_vm_persistence_tests.rs` | 13 | 0 | 0 | 0 |
+| ledger | integration | `t168_vm_gas_tests.rs` | 15 | 0 | 0 | 0 |
+| ledger | integration | `t171_parallel_conflict_graph_tests.rs` | 11 | 0 | 0 | 0 |
+| ledger | integration | `t171_parallel_executor_integration_tests.rs` | 8 | 0 | 0 | 0 |
+| ledger | integration | `t177_vm_v0_proptests.rs` | 15 | 0 | 0 | 0 |
+| ledger | integration | `t179_vm_v0_gas_proptests.rs` | 13 | 0 | 0 | 0 |
+| ledger | integration | `t193_hybrid_fee_distribution_tests.rs` | 15 | 0 | 0 | 0 |
+| ledger | integration | `t195_monetary_engine_tests.rs` | 22 | 0 | 0 | 0 |
+| ledger | integration | `t197_monetary_seigniorage_tests.rs` | 16 | 0 | 0 | 0 |
+| ledger | integration | `t199_monetary_epoch_state_tests.rs` | 19 | 0 | 0 | 0 |
+| ledger | integration | `t200_validator_seigniorage_tests.rs` | 20 | 0 | 0 | 0 |
+| ledger | integration | `t201_monetary_application_tests.rs` | 22 | 0 | 0 | 0 |
+| ledger | integration | `t202_ema_fee_smoothing_tests.rs` | 21 | 0 | 0 | 0 |
+| ledger | integration | `t203_rate_of_change_limiters_tests.rs` | 17 | 0 | 0 | 0 |
+| ledger | integration | `t204_phase_transition_tests.rs` | 28 | 0 | 0 | 0 |
+| ledger | integration | `t215_state_snapshot_tests.rs` | 10 | 0 | 0 | 0 |
+| ledger | integration | `t232_genesis_config_tests.rs` | 16 | 0 | 0 | 0 |
+| ledger | integration | `t233_genesis_hash_tests.rs` | 19 | 0 | 0 | 0 |
+| ledger | integration | `tx_auth_verifier_tests.rs` | 38 | 0 | 0 | 0 |
+| runtime | unit | `src/lib.rs` | 53 | 0 | 0 | 0 |
+| runtime | integration | `block_executor_tests.rs` | 5 | 0 | 0 | 0 |
+| runtime | integration | `run_422_native_governance_authority_contract_tests.rs` | 6 | 0 | 0 | 0 |
+| runtime | integration | `run_422_native_keyset_create_authority_contract_tests.rs` | 9 | 0 | 0 | 0 |
+| runtime | integration | `run_422_native_validator_authority_contract_tests.rs` | 15 | 0 | 0 | 0 |
+| runtime | integration | `t150_revm_execution_tests.rs` | 11 | 0 | 0 | 0 |
+| runtime | integration | `t151_block_apply_tests.rs` | 11 | 0 | 0 | 0 |
+| runtime | integration | `t152_block_apply_gas_tests.rs` | 7 | 0 | 0 | 0 |
+| runtime | integration | `t152_gas_model_tests.rs` | 13 | 0 | 0 | 0 |
+| runtime | integration | `tx_executor_tests.rs` | 9 | 0 | 0 | 0 |
+| system | unit | `src/lib.rs` | 1 | 0 | 0 | 0 |
+| system | integration | `governance_program_tests.rs` | 5 | 0 | 0 | 0 |
+| system | integration | `keyset_program_tests.rs` | 3 | 0 | 0 | 0 |
+| system | integration | `validator_register_tests.rs` | 7 | 0 | 0 | 0 |
+| ledger | doctest | `doctests` | 40 | 0 | 16 | 0 |
+| runtime | doctest | `doctests` | 0 | 0 | 1 | 0 |
+| system | doctest | `doctests` | 0 | 0 | 0 | 0 |
+
+| Package | Targets | Selected | Passed | Failed | Ignored | Filtered | Executed |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| ledger | 30 | 828 | 812 | 0 | 16 | 0 | 812 |
+| runtime | 11 | 140 | 139 | 0 | 1 | 0 | 139 |
+| system | 5 | 16 | 16 | 0 | 0 | 0 | 16 |
+| **Total** | **46** | **984** | **967** | **0** | **17** | **0** | **967** |
+
+For every target, selected equals passed + failed + ignored; executed equals passed + failed. Package totals are ledger 828 selected / 812 passed / 0 failed / 16 ignored / 812 executed; runtime 140 / 139 / 0 / 1 / 139; system 16 / 16 / 0 / 0 / 16. Total is 984 / 967 / 0 / 17 / 967. All default target groups ran: ledger 30 targets, runtime 11, system 5.
+
+### Literal validation and captured results
+
+| Literal command | Exit | Result | Captured output |
+|---|---:|---|---|
+| `LIBCLANG_PATH=/usr/lib/llvm-18/lib cargo test --locked -p qbind-ledger --test tx_auth_verifier_tests -- --nocapture` | 0 | 38 selected = 38 passed + 0 failed + 0 ignored; 38 executed | `/tmp/run422-followup-ledger-focused.stdout` and `.stderr` |
+| `LIBCLANG_PATH=/usr/lib/llvm-18/lib cargo test --locked -p qbind-ledger -p qbind-runtime -p qbind-system` | 0 | 984 selected = 967 passed + 0 failed + 17 ignored; 967 executed; 0 filtered | `/tmp/run422-followup-packages.stdout` and `.stderr` |
+| `rustfmt --check --edition 2021 crates/qbind-ledger/tests/tx_auth_verifier_tests.rs` | 0 | PASS | command output |
+| `git -c core.whitespace=cr-at-eol diff --check` | 0 | PASS before evidence append | command output |
+| `git -c core.whitespace=cr-at-eol diff --check 9cbfe313dfe611e513fea71a8b1e558f26053142 HEAD` | 0 | PASS after evidence commit | command output |
+| `git -c core.whitespace=cr-at-eol diff --check e93ee53dd2263cfea65fde0461176b84889e45ee HEAD` | 0 | PASS after evidence commit | command output |
+
+Earlier focused/runtime/Node and compilation-only checks remain attributed only to tested-source commit `da9bb1ffac15a5d2746014dcb89f8c1d36a5ea92`, tree `82e9229c6986217ac2f595ff1df4ccd3974a4869`; they are not rerun or reassigned here.
+
+### Scope, preservation, and limits
+
+Only `crates/qbind-ledger/tests/tx_auth_verifier_tests.rs` and this D7 document change relative to follow-up starting HEAD. Production `auth.rs` remains `100755 47b8309be4b42ab284b184f9ccf6ea12eecb1382`; runtime `tx_executor_tests.rs` remains `100755 a505e577a347b8a8751298582f0fc8649317be02`. The D7 document preserves its complete 2,836,306-byte starting content as an exact prefix, mode `100644`, CRLF-only content and no terminal newline. The original task remains exactly seven cumulative paths; all excluded mode/blob tuples remain unchanged. Production behavior, dependencies, ignored tests, features and test-selection defaults are unchanged in this finishing pass.
+
+All standing readiness limitations and posture values remain unchanged. This test/evidence correction establishes no new operational, authority, deployment, or release claim.
