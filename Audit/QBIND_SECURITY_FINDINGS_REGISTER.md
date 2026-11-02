@@ -1,3 +1,164 @@
+<!-- A43.1 BINCODE-LIMIT ATTRIBUTION / INPUT-vs-MEMORY ACCOUNTING CORRECTION LAYER (internal v1.123) — prepended to the preserved v1.122 input below -->
+# QBIND Security Findings Register
+
+> **Layer A43.1 — correction-only review of A43 (internal v1.123).**
+> Third-party audit/reporting only; no repository code is fixed or implemented; A44 is **not** started
+> and the completed decoder inventories are **not** reopened. Scope **Public DevNet**.
+> **Audited code baseline (unchanged, pinned):** HEAD `18d71a549d868ed33d352e9fc70a9d060f75e03b` /
+> tree `5b6c543435ac017dd8372c93f48be397899db14a` / origin `https://github.com/olivexo28/QBIND.git`.
+> Runtime remains **UNEXECUTED**; **C5** remains **OPEN** against its production cryptographic
+> custody / signing-lifecycle criteria. All obligation identities, finding IDs, aliases, and
+> dispositions preserved; no global index rewrite. **No plan-file was written this pass.**
+> Superseded A43 statements are marked `[SUPERSEDED-A43 → A43.1-C1]` / `[… → A43.1-C2]`.
+
+## Input provenance and baseline (recorded)
+
+**Input used: the retained, previously delivered v1.122 master** — its actual bytes match the expected
+canonical input exactly: **5,241,348 bytes**, SHA-256
+`67f3af27cce1f88f26643f57f677784e626cae088a7db884fb4ccf5871a198e6`, all six embedded archives verified
+against their recorded hashes, A43 layer present, A43.1 absent. (The copy re-supplied this turn was
+independently confirmed **byte-identical** to the retained master — same length, same SHA-256, 0 CRLF.)
+**The CRLF→LF recovery authorization was therefore not exercised** — no exact-match failure occurred,
+so no transformation of any downloaded copy was needed. The separately-observed GitHub delivery copy
+(`…/a47688b1…/Audit/QBIND_SECURITY_FINDINGS_REGISTER.md`, 5,267,688 bytes, SHA-256
+`2df5c4cb…`, 26,340 CRLF) is a **delivery artifact with CRLF line endings and is NOT byte-identical**
+to the canonical v1.122; it was not used as input. **Source-access method:** local read-only of the
+retained scratch master under `/tmp` (not a checkout operation); the GitHub delivery commit
+`a47688b1…` is a **delivery location only, not a new code-audit baseline**; no checkout was reset,
+switched, merged, or changed.
+
+## C1 — Effective bincode limit corrected `[SUPERSEDED-A43 → A43.1-C1]`
+
+A43 stated the inner calls carry an **effective 64 KiB bytes-read counter** via
+`.with_limit(MAX_INBOUND_TIMEOUT_FRAME_BYTES)` (its options table, failure cases, supported
+conclusion, and evidence-ledger row V2 all relied on this). **This enforcement attribution is wrong.**
+Re-traced through the checksum-verified bincode 1.3.3 source:
+
+- `Options::deserialize(self, bytes)` → `::internal::deserialize(bytes, self)` →
+  `deserialize_seed(PhantomData, bytes, options)` (`config/mod.rs:199–201`, `internal.rs:101–107`).
+- **`internal::deserialize_seed` replaces the limit:** its first line is
+  `let options = ::config::WithOtherLimit::new(options, Infinite);` (`internal.rs:114`), then it builds
+  a `SliceReader` and deserializes under those options.
+- `WithOtherLimit<O, L>` sets `type Limit = L` and `limit() → &mut self.new_limit`
+  (`config/mod.rs:353–361`), so the **outermost** limit wins: the caller's inner `Bounded(64 KiB)`
+  (from `.with_limit`) is overridden by **`Infinite`**. (`WithOtherIntEncoding` / `WithOtherTrailing`
+  delegate `IntEncoding` / `Trailing` unchanged, `mod.rs:363–376`.)
+
+**Consequence:** on these borrowed-slice (`SliceReader`) deserializations, **`.with_limit(64 KiB)` is
+not an additional effective bytes-read counter** — it is replaced by `Infinite`. This matches the
+register's standing R7.3 result ("slice deserialization replaces the supplied limit with Infinite").
+
+**The independently-supported protections remain distinct and effective** (none is a heap-budget
+guarantee):
+
+| Protection | Status | Evidence |
+| --- | --- | --- |
+| Explicit `bytes.len() > 64*1024` precheck | **effective** — bounds the input *slice length* `P ≤ 64 KiB` | `binary_consensus_loop.rs:6975–6987` (Timeout), `:7183–7196` (NewView) |
+| `SliceReader` availability check | **effective** — a declared length exceeding remaining slice is rejected before copy | `bincode de/read.rs:47–54` |
+| Fixint encoding | **effective** (`IntEncoding` preserved through the wraps) | `with_fixint_encoding` + `mod.rs:363–370` |
+| Trailing-byte rejection | **effective** (`Trailing` preserved; `check_end` after decode) | no `allow_trailing_bytes`; `internal.rs:119` |
+| `.with_limit(64 KiB)` bytes-read counter | **NOT effective on slice decode** (replaced by `Infinite`) | `internal.rs:114` |
+
+**First relevant refusal — corrected.** On an oversized declared count or truncation within a nested
+signer/signature vector, the first refusal is the **`SliceReader` availability check** (`get_byte_slice`:
+`len > remaining → Err(unexpected_eof)`) reached when an element/field read exhausts the slice — **not**
+an enforced bincode read-counter. A43's failure-case wording attributing the refusal to "the 64 KiB
+read-limit / `with_limit` counter" is corrected to **slice exhaustion / availability rejection**. The
+explicit input-length bound (`bytes.len()` precheck) is **not** withdrawn — only its mis-attribution to
+a bincode counter is.
+
+## C2 — Input-length vs memory accounting corrected `[SUPERSEDED-A43 → A43.1-C2]`
+
+A43 wrote "total decoded content O(P) ≤ O(64 KiB)" and "`drop(bytes)` frees the ≤ 64 KiB input
+buffer," phrasings that imply a decoded-memory or capacity ceiling. **Withdrawn as capacity/memory
+ceilings** and replaced by these distinctions:
+
+- **Encoded length:** `P ≤ 64 KiB` (from the explicit precheck) — an **encoded-input-length** bound,
+  not a memory bound.
+- **Decoded logical storage:** input-proportional for the inspected schemas at a fixed representation,
+  expressed **symbolically as `L(P) ≤ K·P + K₀`**, with `K`, `K₀` representation constants **not
+  assumed to be 1** (in-memory layout — struct padding, `Option` tags, `Vec`/pointer headers — is not
+  the encoded size). No numerical layout constant is invented.
+- **`bytes.len()` does not bound `bytes.capacity()`** — the already-owned input buffer's capacity may
+  exceed its length; `drop(bytes)` releases that buffer's **allocation** but establishes **no** memory
+  ceiling and **no** immediate RSS reduction.
+- **Serde's cautious formula** `min(declared, floor(1 MiB/size_of::<T>))` bounds **initial reservation
+  requests**, not allocator footprint or total container capacity.
+- **The one/two-active-collection analysis** concerns **concurrent speculative initial requests** only;
+  **completed sibling collections and their spare capacity remain live** for the life of the decoded
+  value (A42.1-C1 discipline, carried).
+- **Dropping values does not establish immediate RSS reduction** (freed heap may be allocator-retained;
+  RSS unmeasured).
+
+`Vec` growth, initial-capacity grants, allocator behavior, and RSS remain **separately qualified**; no
+growth multiplier is assumed. This is a local wording correction — **not** an allocator, retention, or
+whole-node-concurrency audit.
+
+## Retained from A43 (unchanged by this narrow re-trace)
+
+The supported schema inventory and minimum encoded sizes (`ValidatorId` 8 B; `QuorumCertificate` min
+48 B; `TimeoutMsg` min 26 B; `TimeoutCertificate` min 33 B); the **absence of zero-input elements**;
+the **fixed Vec-nesting depth ≤ 2**; the field-order / allocation-lifetime analysis (TC decodes
+`high_qc`/`signers` before `signed_timeouts`; completed siblings persist; success-path `drop(bytes)`);
+and the decode/admission ordering (**Timeout** binds sender *after* decode; **NewView** admits origin
+*before* decode) all stand — none is contradicted by the C1/C2 re-trace. Previously verified dependency
+sources (bincode 1.3.3, serde 1.0.228) are reused, not re-inventoried.
+
+## Corrected supported conclusion (R7.3 / E12 inner-decoder question)
+
+For one `bincode::options().with_limit(64 KiB).with_fixint_encoding().deserialize::<T>(&bytes)` with
+`T ∈ {TimeoutMsg<[u8;32]>, TimeoutCertificate<[u8;32]>}`:
+
+- **Input length:** `P ≤ 64 KiB`, enforced by the explicit `bytes.len()` precheck (the `with_limit`
+  counter is replaced by `Infinite`; it is **not** a second enforcement).
+- **Decoded logical storage:** `L(P) ≤ K·P + K₀` (symbolic, input-proportional, `K ≠ 1` assumed);
+  every nested collection element consumes a nonzero minimum of input (checked), so filled content is
+  input-proportional.
+- **Speculative initial reservation requests:** each active collection requests
+  `min(declared, floor(1 MiB/size_of::<T>))` ≤ 1 MiB of bytes; concurrent speculative requests ≤ 1 MiB
+  (`TimeoutMsg`) / ≤ 2 MiB (`TimeoutCertificate`) by field order and sequential element decode — a
+  bound on **requests**, not on footprint, total capacity, or completed-sibling capacity.
+- **Actual capacities / allocator behavior / RSS:** conditional on initial-grant + growth assumptions
+  (not pinned) / unmeasured. No numerical peak is invented; no execution is required.
+
+First refusal on hostile input = `SliceReader` availability rejection (not a bincode counter);
+fixint and trailing-byte rejection remain effective; none of these is a heap-budget guarantee.
+
+## Disposition
+
+The **bounded outer (A42/A42.1) and inner (A43 + this A43.1 correction) decoder schema-and-visitor
+source review is complete**, with **corrected enforcement attribution** (C1: the effective slice-decode
+limit is `Infinite`; protection comes from the explicit precheck, availability checks, fixint, and
+trailing rejection) and **corrected input-vs-memory accounting** (C2: `P ≤ 64 KiB` encoded;
+`L(P) ≤ K·P + K₀` symbolic; requests ≠ capacity ≠ footprint ≠ RSS). This accounting correction is
+**not** merged with **A21-F1**, **A17-F1**, or **A1-F3**, which retain their identities. **Neither
+exhaustion nor safety is inferred.** Broader **OBL-DEP-1 / E12** obligations and their separately
+identified residuals (actual container capacities / `Vec` growth policy — a pinned-std implementation
+question; whole-node queues, concurrent connections, aggregate memory; and runtime RSS/CPU) are **not**
+closed. **C5** remains **OPEN**; runtime remains **UNEXECUTED**.
+
+## A43.1 correction ledger
+
+| Ref | Supersedes (A43) | Correction |
+| --- | --- | --- |
+| C1 | options table + failure cases + conclusion + ledger V2 ("effective 64 KiB `with_limit` read counter") | `internal::deserialize_seed` wraps `WithOtherLimit::new(options, Infinite)` (`internal.rs:114`); `.with_limit` is replaced by `Infinite` on slice decode; effective protections are the explicit `bytes.len()` precheck, `SliceReader` availability, fixint, trailing rejection; first refusal = slice-availability, not a counter |
+| C2 | "total decoded content ≤ 64 KiB" / "`drop(bytes)` frees the ≤ 64 KiB input buffer" | withdrawn as memory/capacity ceilings; `P ≤ 64 KiB` encoded; `L(P) ≤ K·P + K₀` (`K ≠ 1`); `len ≠ capacity`; cautious bounds requests not footprint; completed siblings + spare capacity live; drop ≠ immediate RSS reduction |
+
+## A43.1 evidence ledger
+
+| Ref | Source | Fact |
+| --- | --- | --- |
+| E1 | `bincode internal.rs:101–123` | `deserialize` → `deserialize_seed`; line 114 `WithOtherLimit::new(options, Infinite)`; `check_end` trailing check after decode |
+| E2 | `bincode config/mod.rs:199–201, 216–222, 353–376` | `Options::deserialize`→`internal`; `WithOtherLimit` `Limit = L`, `limit()→new_limit`; IntEncoding/Trailing delegated unchanged |
+| E3 | `bincode de/read.rs:47–54` | `SliceReader::get_byte_slice` rejects `len > remaining` before copy (first refusal) |
+| E4 | `binary_consensus_loop.rs:6975–6987, 7183–7196` | explicit `bytes.len() > 64 KiB` prechecks (the effective input-length bound) |
+| E5 | `serde_core private/size_hint.rs:12–22` (reused) | cautious bounds initial reservation requests only |
+
+---
+
+*End of A43.1 bincode-limit attribution / input-vs-memory accounting correction layer (internal
+v1.123). The complete v1.122 input is preserved byte-for-byte below.*
+
 <!-- A43 INNER TIMEOUT/NEWVIEW DECODER ALLOCATION / DECODE-WORK ACCOUNTING LAYER (internal v1.122) — prepended to the preserved v1.121 input below -->
 # QBIND Security Findings Register
 
