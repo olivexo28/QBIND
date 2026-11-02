@@ -26510,3 +26510,18 @@ The current `auth.rs` also rejects a provider whose returned `SignatureSuite::su
 This correction identifies the refusal-producing evidence already detailed above; it does not rerun or expand any historical result. Use governance source/test commit `99023fcb30ec2c6c042dea0f0196b88c072049ac` (focused runtime target: 6 selected, 6 passed, 0 failed, 0 ignored); validator-registration source/test commit `02198fac5ba638a1fbcbc2c5361fce7116a33e51` (runtime focused: 15/15/0/0); and keyset-creation source/test commit `92ba29ee13b2470e4b21b681aefcd8cf1ecf3264` (runtime focused: 9/9/0/0) for unavailable-authority refusal claims. The earlier `c279c7be1cc415032975f162109e5e2c3f9c6ed0`, `8769118ef4b5b27631a4177862b1dc91cd66c7ca`, and `ce25c42e3a389608832294c29bf5d2cdc7a59a6d` revisions are historical successful-write characterization only, not refusal evidence.
 
 Run 417 `findings_matrix.txt` defines F3 as proposal authentication **outbound and inbound**. Its remaining acceptance boundary includes configured outbound signing, inbound signature plus leader/membership and domain verification before delivery or engine effects, genuine matched acceptance, and relevant adversarial refusals. Do not conflate this with F4 Vote authentication, F6 transport peer/sender binding, or F7 QC verification. Run 419 is partial standalone release-binary F6 evidence; Run 421 is unavailable-authority fail-closed release-binary evidence. Neither establishes usable configured-authority consensus.
+
+## RUN 422 public DevNet signing-profile proposal
+
+The owner-facing decision proposal is in
+`docs/protocol/QBIND_PROPOSAL_VOTE_AUTHORITY_LIFECYCLE_CONTRACT.md`, appendix
+“Run 422 public DevNet Proposal/Vote signing-profile decision proposal.”
+This documentation-only proposal recommends continued refusal pending an
+owner-identified A/B/C trust root and rollback boundary. It preserves
+`D7D14_STORAGE_COMPONENT=IMPLEMENTED-ISOLATED`,
+`D7D14_STORAGE_ACCEPTANCE=PASS-ACCEPTED-SUBSET`,
+`D7D10_LOCAL_SIGNING_RESERVATION=CODE-AND-STORAGE-TEST-POSITIVE`, §13.6
+whole-lifecycle `INCOMPLETE`, activation `DISABLED`, public DevNet `NO-GO`,
+durable anti-rollback `NOT-ESTABLISHED`, and C4/C5 and RS1 `OPEN`. Historical
+evidence remains attributed to its producing revisions; no proposal validation
+was run.

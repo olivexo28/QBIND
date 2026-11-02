@@ -872,3 +872,367 @@ D7-D9 protocol is NOT relabelled as existing behavior):
 Authority lifecycle posture is unchanged; C4/C5 stay open; no activation or
 readiness promotion. Evidence:
 `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_422_D7.md` (Run 422 D7-D9 section).
+
+## Run 422 public DevNet Proposal/Vote signing-profile decision proposal
+
+**DRAFT / OWNER DECISION PENDING / NOT IMPLEMENTED**
+
+**Approval fields:** decision `PENDING`; approver `PENDING`; date `PENDING`;
+authorization evidence `PENDING`. This appendix records a recommendation for
+review. It does not approve an operating profile, trust root, resource limit,
+production integration, or activation.
+
+### 1. Decision scope and repository evidence
+
+This proposal was prepared at required starting commit
+`ff8eea048355535373299d582dd1776e49f63257`, root tree
+`5a0fb3e2410c2104272e44ca65ce9ec2e660495d`. The commit and tree objects are
+available and the commit is an ancestor of the inspected worktree. This appendix
+does not convert any historical test result into evidence for this proposal.
+The current integrated assessment is
+`docs/devnet/QBIND_PUBLIC_DEVNET_CRITICAL_PATH.md`; the detailed component
+evidence and its producing revisions remain in
+`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_422_D7.md`.
+
+The current public-DevNet posture remains **NO-GO**, activation **DISABLED**,
+`DURABLE_ANTI_ROLLBACK=NOT-ESTABLISHED`, C4/C5 and RS1 **OPEN**, candidate
+limits **UNAPPROVED**, and §13.6 whole-lifecycle **INCOMPLETE**. The production
+binary has no configured Proposal/Vote authority, current-authorization owner,
+or signing journal; Required verification fails closed when those prerequisites
+are absent. `binary_consensus_loop.rs` contains guarded Proposal/Vote signing
+and `signing_reservation_journal.rs` contains `reserve_for_sign`, but their
+existence is not production lifecycle wiring. The safety-record store defaults
+disabled. No policy conclusion follows from those local components.
+
+Reuse is bounded and intentionally not reopened: the local D10 signing
+reservation result is `D7D10_LOCAL_SIGNING_RESERVATION=CODE-AND-STORAGE-TEST-POSITIVE`;
+D7D14 remains `D7D14_STORAGE_COMPONENT=IMPLEMENTED-ISOLATED` and
+`D7D14_STORAGE_ACCEPTANCE=PASS-ACCEPTED-SUBSET`; QC/TC verification, retention,
+ownership and O1–O5 results retain their producing revisions and accepted
+subsets. These do not supply A, B, C, a production caller, or full restart
+recovery. In particular, never attach a historical run to this proposal's
+starting commit or describe historical evidence as newly executed validation.
+Native-program authority, transaction ingress, key-identity admission, M4 and
+M6 remain separate obligations.
+
+**Profile A remains the smallest justified *scope*, not a selected trust
+model.** Restricting the first release to a pinned founding authority and
+founding epoch avoids adding epoch-transition and successor-authority paths.
+It does not eliminate the need for authorized first use, present freshness,
+per-validator signing-history continuity, lock recovery, or copied-key
+exclusivity. A fixed authority can still be rolled back, duplicated, or used
+to produce incompatible signatures. Profile A is therefore still the
+smallest candidate to evaluate, but no available repository evidence justifies
+enabling it.
+
+### 2. Operating and adversary model
+
+**Authorization principal is deliberately unassigned.** The project owner must
+name the person, governance body, or documented process authorized to establish
+the founding authority and must designate how that decision is authenticated.
+No owner infrastructure, staffing, key custody, validator distribution,
+hardware, or willingness to trust a third party is inferred here. Owner
+approval of this document would be a policy decision only; it would not itself
+be a cryptographic activation credential or freshness/durability evidence.
+
+The activation decision and any later evidence must bind, without aliases or
+caller-selected substitutions, at least:
+
+* QBIND network/environment and exact runtime chain ID / wire signing domain;
+* independently pinned genesis hash and the genesis founding-authority record;
+* exact membership/voting-power commitment, validator ID, and validator key
+  identity (key material or a canonical digest), key suite and role;
+* Profile A identifier and founding epoch; and
+* for continuity evidence, this validator's ordered signing-history head and
+  the exact safety restriction/history state being advanced.
+
+The authority that authenticates these pins, how operators distribute and
+verify them, and how changes are announced remain **deployment facts required
+from the owner**. A genesis file, matching epoch, membership copied from that
+file, a historical QC, local checksum, source label, or caller Boolean is not
+an independent pin or activation authorization.
+
+**Threat boundary.** Consider both an honest validator with fault-prone storage
+and an attacker able to copy, restore, replay, corrupt, or suppress the node's
+data directory, database, journal, snapshots, VM image, or network messages.
+The attacker may restore an older but internally valid copy, erase recent
+records, replay old evidence, or make local evidence unavailable. A cloned
+host may run concurrently with the original while both have the same key and
+database image. An attacker may also compromise an unrestricted signing key.
+The chosen trust model must state which authenticated state remains outside
+each attacker's rollback domain; state copied or rewound with the node is not
+outside it.
+
+| Case | What this proposal assumes or requires; current conclusion |
+|---|---|
+| Ordinary process crash / interrupted write | Honest storage may preserve acknowledged durable writes only under explicitly validated filesystem/device assumptions. Atomic write, fsync, recovery and local D10 evidence do not imply resistance to a restored older copy. Any ambiguous write blocks dependent signing until reconciled. |
+| Disk loss or missing/corrupt history | Treat as lost state, not first use. Fail closed unless an independently authenticated source establishes both authorized activation and the exact current history/safety state. The repository has no such selected source. |
+| Old valid database restore | Treat every local marker, checksum, revision and journal head in that restored database as rollbackable. Local consistency cannot establish latestness. |
+| Whole-VM restore | Assume database, journal, local counters, clock, and software-visible markers can all revert together. A fresh nonce or local clock is not anti-rollback. Require evidence outside this VM rollback domain or refuse. |
+| Cloned host / copied key | A local mutex, file lock or D10 owner coordinates supported local handles; it does not fence another host. Concurrent use is excluded only if the owner approves and an independently justified mechanism enforces exclusive use. No such mechanism is demonstrated. |
+| Honest validator storage | The local-journal candidate may assume honest operation honors acknowledged durability barriers, but only after its filesystem/device assumptions and failure model are demonstrated. This is not a claim about all hardware. |
+| Compromised unrestricted signing key | No proposed storage or witness arrangement prevents arbitrary signatures from an attacker who already possesses an unrestricted key. A compromise requires refusal, incident handling, and an authorized replacement identity; signatures made during compromise cannot be undone. |
+| Partition / cold start / simultaneous restart | No node may infer latestness from peers it can reach, local epoch equality, or absence of records. If current evidence is unavailable, conflicting, stale, or cannot establish a trusted first-use state, refuse. All-validator restart must not bootstrap solely from each other using unauthenticated or stale state. |
+| Backup / reset / identity replacement / retirement | Backups are recovery inputs, never freshness authority; restoring one requires external reconciliation. Reset does not erase signing obligations or authorize reuse. Identity replacement requires explicit authenticated retirement/revocation and a distinct key identity; do not silently reuse the old key or reset its history namespace. Retirement must preserve the old history and pending/uncertain reservations. |
+
+### 3. Keep the requirements and their consumers distinct
+
+| Requirement | Evidence a future selected policy must provide | Trust root / consumer | Required failure behavior |
+|---|---|---|---|
+| **A. Activation authorization** | An authenticated authorization for first use of this exact network, genesis, membership, validator/key, suite, domain and Profile A. It must state whether authority is one-time, revocable and replaceable. | Owner-designated activation authority and its independently pinned verification root; consumed before creating any usable Proposal/Vote authorization. Identity validation alone is not permission. | Missing, invalid, ambiguous, replayed, wrong-identity or wrong-domain authorization keeps the authority unavailable; no signing or bootstrap exception. |
+| **B. Current-authority freshness** | Authenticated evidence that the A-authorized authority and its freshness/history head remain applicable now, with replay resistance and a stated rollback domain. A counter must be bound to the exact identity and committed history, not merely an epoch. | An independently justified fresh-state root or witness arrangement, separate from the rollbackable DB; consumed at cold start and before each dependent signing transition as its contract requires. | Stale, conflicting, unavailable or unverifiable evidence blocks activation/signing. No fallback to a local epoch, peer maximum, source label or old QC. |
+| **C. Signing-history continuity** | Authenticated, monotonic per-validator history covering every reservation that may have produced a signature, resulting publication/retained result, and safety restriction relevant to future Proposal/Vote actions. It must detect lost/rolled-back state and define exclusive use. | A root outside the specified rollback domain with identity-bound update/compare semantics; consumed before the signer and before result publication. D10 remains the local reservation mechanism, not this independent root. | Keep every uncertain reservation potentially signed; refuse conflicting or new signing until exact state is reconciled. Never erase uncertainty because a commit later occurred. |
+| **Lock/safety-record recovery** | The actual durable safety restriction required by the engine (including lock and QC/TC-derived restrictions) must be recovered and bound to the decision before signing. | Independently authenticated durable safety record plus the engine decision consumer; D7 O1–O5/QC/TC work is reusable only in its accepted scope. | Missing, uncertain or stale lock evidence means no Proposal/Vote signing. A logical QC/TC restriction recovered from evidence remains unverified unless independently verified; recovery does not authenticate or make it current. |
+| **Copied-key/concurrent host** | Evidence of approved custody and enforced single-use/exclusive writer behavior across all permitted hosts, or an explicit threat-model exclusion. | Owner-approved key-custody boundary and a mechanism that actually fences copies; a local mutex is insufficient. | If concurrency cannot be excluded or safely fenced, no signing. A compromised unrestricted key remains outside prevention capability. |
+| **Bootstrap / absent QC** | Explicit authenticated permission for the exact initial proposal fields and a termination/replay rule; evidence must distinguish genuine first use from lost or rolled-back state. | The same independently established A/B root, not an empty DB, genesis label, unsigned QC, or peer assertion. | Absent QC is not a bootstrap credential. Refuse until policy authorizes it; preserve existing present-QC verification unchanged. |
+
+No single row subsumes another. In particular, a valid QC only proves the
+verified quorum statement it contains; it is not proof of latestness or of an
+individual validator's uncommitted signing history. Identity correspondence,
+matching epoch, checksum, source label and caller Boolean establish none of A,
+B and C by themselves.
+
+### 4. Candidate comparison (none silently adopted)
+
+| Candidate | What it could cover, if its assumptions were proven | Trust, freshness and retention requirements | Failure, feasibility and trade-offs |
+|---|---|---|---|
+| **Protected local state outside the rollback domain** | Potentially B and C for one validator; A only if it also verifies a separately authorized activation credential. It does not itself recover the engine lock. | Identify the actual device, API, firmware/update chain, access control, state capacity, identity binding, monotonic/compare-and-advance semantics, authenticated readback, rollback/copy resistance and PQ dependencies. A hardware counter alone is not a history commitment. A counter must commit to the ordered record/history head; attestation is not accepted unless its actual verification roots and cryptography satisfy QBIND's PQ requirements. Per-host copied keys still require an exclusivity story. | Lowest network dependence and potentially low per-operation latency, but hardware availability, quality, firmware, administration, portability, recovery and concurrent-clone behavior are unknown. Device loss/unavailability must refuse. No suitable device or assurance is established in the repository; no external device specification is selected. |
+| **Authenticated witness arrangement using the existing validator/quorum trust model** | Could provide a current shared head and possibly per-validator C if witnesses retain and authenticate the full per-validator history, not just chain epoch or QC. It may help B; A still requires an authorized founding decision. It does not automatically recover a validator's lock. | Authenticate membership against independent network/genesis pins; use the approved QBIND quorum rule and domain-bound signatures; retain each validator's ordered commitments, pending reservations, safety restrictions, and update responses across restart. Specify quorum intersection, Byzantine bound, state durability outside each witness rollback domain, freshness challenge/version semantics, replay rejection, exclusive updates, cold-start and simultaneous/all-validator restart behavior. A QC alone is insufficient. | Decentralized in principle and avoids a single operator, but adds network round trips, quorum availability and protocol burden. A partition or no quorum must refuse. If the same consensus validators must first activate/sign to create the witness QC that authorizes their activation/signing, the design is circular. It is not resolved by describing the witness as a quorum; it needs an independently valid bootstrap/current-state rule. No retained-state witness service or demonstrated interface is known here. |
+| **Decentralized external anchor** | Could publish an authenticated latest head for B and per-validator history commitments for C; cannot by itself authorize A or reconstruct lock state. | Name the actual protocol, independent genesis/membership pins, finality and reorganization bound, data-availability/retention, query freshness, replay-resistant inclusion/current-head proof, authenticated update rules, write authority, and PQ security assumptions. The anchor must commit to full validator history and exact authority identity, not only an epoch. | May avoid a single QBIND operator and support independent reads, but adds latency, throughput/cost, availability and integration dependencies. No chain, external network, or classical signature is implicitly selected. No technically reviewed anchor with these properties is available in this repository evidence. |
+| **Continued refusal** | Prevents authorized production Proposal/Vote effects while A/B/C and lock recovery are unresolved; it does not prove the missing properties or protect an out-of-band use of a compromised key. | Existing fail-closed Required policy and disabled activation are the current boundary; no new trust root or state is asserted. | No signing availability or added signing-path cost; operationally unavailable consensus for this profile, with no added witness service, decentralization trade-off or new state growth. This is the only candidate justified by presently available evidence. |
+
+For a witness-based design, witnesses must each authenticate the exact
+membership and keep durable history outside the relevant validator's rollback
+domain. A fresh quorum response is useful only if the quorum is itself authorized,
+has retained the latest head through cold start/all-restart, and cannot produce
+two accepted conflicting advances under the chosen intersection/fault
+assumptions. If every witness can restore an old copy, a quorum can sign stale
+state. If the validator quorum is the only source of permission to activate the
+same validators, the circular dependency remains unresolved. The repository
+demonstrates QC verification, not this witness service or any of these
+operational properties.
+
+An external anchor or protected device cannot be credited with post-quantum
+assurance based on its label. Its actual authentication/signature algorithms,
+root distribution, hardware or consensus dependency, update/firmware trust,
+rollback boundary and adversarial behavior require primary evidence and owner
+approval before it can be reconsidered. No cloud/operator service, external
+chain, classical signature, remote signing root or trusted third party is
+introduced by this proposal.
+
+### 5. Conditional evidence and effect ordering for future review
+
+This section defines what a later selected mechanism must be able to represent;
+it does not define a new wire format, storage schema, interface, or mechanism.
+The absence of trustworthy evidence remains a refusal.
+
+A future evidence record must bind a canonical authority identity:
+`(network/environment, chain ID, genesis hash, founding-authority commitment,
+membership commitment, validator ID, key identity, suite, signing domain,
+Profile A, epoch)`. Its ordered history commitment must bind at least:
+`(authority identity, prior history commitment, monotonic sequence, canonical
+Proposal/Vote position and kind, exact signing-preimage/payload binding,
+decision-time safety restriction identity and view, supporting-evidence
+identity/status, reservation disposition, and any signed/retained-result
+commitment)`. It must distinguish verified from merely logical/recovered
+supporting evidence. This list is a logical completeness requirement, not a
+claim that the existing D10 `BindingDigest` contains or recovers those fields.
+
+**First use is not inferred from absence.** First use is permitted only when A
+authenticates the exact founding authority and an independently trusted B/C
+source establishes a never-initialized state for that exact identity, with
+freshness and replay protection. An empty, missing, corrupt, reset, replaced or
+restored local database is indistinguishable from lost history without that
+independent evidence and therefore refuses. A fresh nonce only prevents replay
+if its challenge source and current response are independently authenticated;
+it does not defeat whole-VM rollback by itself.
+
+**Conditional order and acknowledgements.** A future implementation must compose
+the existing mechanisms in this order and satisfy every acknowledgement before
+the next external effect:
+
+1. Authenticate A and independently pinned identity; establish B currentness;
+   recover the durable safety record and restriction. No `Established`
+   authorization or engine effect before all checks pass.
+2. Capture and durably publish the exact decision-time safety restriction
+   through the selected safety-record owner. Require the durability/publication
+   acknowledgement before proceeding; an uncertain publication blocks.
+3. Use the existing D10 admission and reserve the exact signing position and
+   binding. Require its durable reservation acknowledgement before any
+   independent history update or signer invocation. A recovered `Reserved`
+   remains **potentially signed**.
+4. Advance the independently retained C history head with a compare against
+   the exact prior head and the exact reservation/history commitment. Require
+   authenticated acknowledgement before calling the signer. A monotonic
+   counter that does not retain this commitment is insufficient.
+5. Invoke the signer only after those acknowledgements. Persist/publish the
+   exact signed result through the existing D10 path and require its
+   acknowledgement before network/facade publication. Publication is never
+   authorized merely because a signature was produced.
+
+If a C update succeeds but its acknowledgement or local record is lost, the
+new C head may already state that the reservation could have produced a
+signature. Do not retry with a different position/binding, roll back C, or
+assume the update failed. Read and authenticate the exact current head and
+reconcile the same operation; if the result cannot be established, retain
+uncertainty and refuse. If the local D10 reservation survives but C update is
+uncertain, do not sign until C is reconciled. If C advances but the D10 record
+is missing, treat the exact reservation as potentially signed and refuse any
+conflicting action. If signing completes but result persistence/publication
+acknowledgement is lost, reconcile the exact retained result; never sign again
+for an uncertain reservation. An authenticated C head alone does not recreate
+missing signature bytes.
+
+Exact retained-result reuse is permitted only where existing D10 rules establish
+the same canonical signing position and exact binding, the retained bytes are
+identical, no new signer invocation occurs, current A/B authorization is still
+valid, the latest effective safety restriction allows the exact candidate, and
+all local and independent history acknowledgements are reconciled. Reuse is not
+a shortcut around currentness or recovery.
+
+Do not prune a pending reservation, recovered `Reserved`, ambiguous result, or
+unresolved publication merely because a later block/epoch checkpoint committed.
+Any future compaction must prove that a separately authenticated checkpoint
+covers the complete ordered reservation/signature history, all pending or
+uncertain outcomes, retained-result obligations, and safety restrictions; it
+must preserve the ability to refuse conflicting actions. No compaction rule or
+history cap is approved here.
+
+QC/TC recovery follows the existing recovery contract: preserve the safety
+restriction required by the selected rule, bind it to the actual decision, and
+refuse dependent signing until durably recovered. A QC/TC-derived logical
+restriction is not silently promoted to an independently authenticated,
+latest, or verified record. Verified-QC evidence remains distinct from
+recovered logical lock state; do not reverify by pretending retained evidence
+survived process death or discard a restriction because its proof is unavailable.
+
+Backup restore must reconcile the full history with the selected independent
+source before any signing. Reset cannot clear the external head or pending
+reservations. Replacement/retirement must authenticate revocation and preserve
+the old identity's history; the successor receives a distinct identity/history
+namespace only after owner-authorized lifecycle evidence. No operator procedure
+or reset contract is amended by this proposal. Existing operator requirements
+remain in `docs/release/public-devnet/ops/RESET_POLICY.md` §§2–8, including
+its distinction between a data reset and the offline authority-state-reset
+ceremony.
+
+### 6. Performance, resource behavior, and future acceptance
+
+Under the **recommended current refusal**, Proposal/Vote effect paths perform
+zero signing-history writes and zero witness/network round trips: they refuse
+before a signer or publication effect. This is intentional unavailability, not
+a throughput claim.
+
+For a later owner-selected candidate, symbolic work per fresh signing effect is
+at least: `W_safety` durable safety-record publications required by the
+decision; `W_reserve` acknowledged D10 reservation; `W_history` independent
+history-head advance; and `W_result` acknowledged D10 result recording before
+publication. Any independent freshness read is `R_current` and any challenge or
+readback adds `R_reconcile`; a remote witness necessarily adds the round trips
+its selected protocol requires. The ordering is serialized per validator
+identity, and a cross-host design additionally needs a real exclusive-update
+primitive. No batching, numerical cap, TPS, latency or memory figure is
+proposed.
+
+Retained history grows with every reservation and result not safely compacted:
+`O(number of retained signing positions and unresolved outcomes)`. Compaction
+preconditions are those in §5 and may not discard pending or uncertain entries.
+Serialization and ownership boundaries must cover activation, safety decision,
+reservation, independent history advance, signing, result recording and
+publication across every leader, inbound, re-emission and restart path.
+Capacity exhaustion, malformed state, allocation/storage failure, unavailable
+witness, partition, stale/conflicting response or lost acknowledgement all
+refuse the dependent effect. Exact retry is allowed only after reconciliation
+under D10 and the selected history rules.
+
+The following are **required future tests, not executed evidence**:
+
+| Scenario | Required assertion |
+|---|---|
+| Authorized genuine first use | Exact A, pinned identity and never-initialized B/C evidence permit only the stated founding authority and permitted initial effect. |
+| Unauthorized/replayed activation | Missing, invalid, wrong-identity or replayed A refuses without signer or publication effect. |
+| Wrong identity/domain | Wrong network, genesis, membership, validator, key, suite, role or signing domain refuses. |
+| Restart after reservation | A surviving reservation remains potentially signed; no conflicting retry or signature occurs. |
+| Sign then crash before publication | Exact result is recovered/reconciled or the reservation remains uncertain; no second sign. |
+| Independent update survives, acknowledgement lost | Reconcile the exact head; do not roll back, substitute an operation, or sign while uncertain. |
+| Older valid DB / whole-VM restore | Independent current-history evidence detects the old copy; absent independent evidence, refuse. |
+| Conflicting or stale witness evidence | Conflicting heads, replayed response, stale membership or unverifiable proof refuses without selecting a convenient source. |
+| Partition, cold start, all-validator restart | No peer-only or stale-QC bootstrap; refuse unless the approved independent evidence establishes current authorized state. |
+| Cloned host/concurrent use | Enforce the expressly approved concurrency boundary or demonstrate refusal; local lock alone must not pass. |
+| Missing/corrupt local history | Distinguish neither first use nor safe restore by absence; refuse until authenticated recovery completes. |
+| QC/TC-derived restrictions | Preserve and bind the restriction; distinguish logical/unverified recovery from independently verified current evidence. |
+| Capacity exhaustion / safe retry | Fail before effect; retain uncertain reservations; allow only exact D10-approved result reuse after reconciliation. |
+| Backup, reset, retirement and identity replacement | Restoring/resetting cannot erase history; retired identity cannot be accidentally reused or silently reactivate. |
+
+The future gate sequence is separate: **design approval** selects or rejects
+assumptions; **implementation acceptance** proves implementation against an
+approved contract; **release-binary evidence** proves the deployed path and
+build; **public activation** is a further explicit operational decision.
+Passing or approving any one does not imply the next passed. This appendix
+records no evidence for any of these gates.
+
+### 7. Owner decision summary
+
+**Recommendation:** retain Profile A (founding-authority-only) as the smallest
+scope for future evaluation, but choose **continued refusal** now: leave
+activation disabled and Proposal/Vote signing unavailable until a concrete,
+independently justified activation root, rollback domain, fresh history source,
+and lock-recovery path are named and shown to meet A/B/C. This is a
+recommendation, not an approved selection.
+
+**New trust assumptions the owner would have to accept to enable any candidate:**
+an authenticated principal authorized to establish the exact founding
+authority; independently pinned network/genesis/membership/key/domain values;
+an identified rollback boundary and state outside it; and a defined durability,
+freshness, replay and exclusive-use guarantee for every selected mechanism.
+None is supplied by this proposal or inferred from existing QBIND components.
+
+**Operational consequences and principal failure modes:** under the present
+recommendation there is no configured Proposal/Vote consensus availability.
+A future selected mechanism would add durable serialization and, for witness
+options, network availability/latency; unavailable or uncertain state would
+stop signing. Old backups, cloned hosts, lost acknowledgements, corrupt history,
+compromised keys and all-validator restart can require prolonged refusal and
+explicit identity retirement/recovery. Resettable/no-value status does not
+reduce these safety requirements.
+
+**Owner decision questions (maximum three):**
+1. Who is authorized to authenticate first activation, and how will the exact
+   network/genesis/membership/validator/key/domain pins be independently
+   distributed and checked?
+2. What actual trusted state and operational rollback domain are available for
+   current-authority freshness and per-validator history continuity, including
+   cloned-host, cold-start, partition and all-validator-restart behavior?
+3. Given the evidence and deployment facts, should Profile A remain disabled
+   under continued refusal, or should a specific candidate proceed to a
+   feasibility review without implying activation?
+
+**Unresolved prerequisite preventing responsible enablement:** the owner has
+not identified a concrete A/B/C trust root and state source that survives the
+stated rollback domain while preserving per-validator history and safe lock
+recovery. The smallest discriminating input is an owner-provided deployment
+statement naming the actual available mechanism, its authenticated roots,
+what state it retains outside which rollback domain, and whether it fences
+copied-key concurrent use; if none exists, continued refusal remains the
+justified outcome. A hardware counter, a valid QC or owner approval alone does
+not answer this.
+
+**Exactly one bounded next task after the decision — candidate feasibility
+characterization:** after the owner records the decision and, only if a
+candidate is named, characterize that candidate's trust roots, rollback
+boundary, retained history, freshness/update/readback semantics, exclusive
+use, lost-ack behavior, cold-start/partition recovery and PQ dependencies
+against this appendix. Paths: this lifecycle contract; the continuity and
+recovery contracts; `docs/devnet/QBIND_PUBLIC_DEVNET_CRITICAL_PATH.md`; and a
+new owner-authorized evidence entry in `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_422_D7.md`.
+Prerequisites: written owner decision, exact mechanism/documentation supplied
+by the owner, and no implication that a proposed capability exists. Acceptance:
+each A/B/C/lock requirement is mapped to authenticated evidence, trust root,
+consumer, rollback boundary and fail-closed behavior; all unavailable facts
+remain explicit; recommendation is either technically supported or continued
+refusal. Exclusions: code, tests/builds, new service or trust root, resource
+caps, production wiring, activation, release-binary claims, deployment and
+readiness changes.
+
+**Decision remains PENDING.** Approval fields remain PENDING; no approver,
+signature, date or authorization token is asserted.

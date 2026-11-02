@@ -5220,3 +5220,13 @@ The native verifier also checks returned provider suite-ID consistency. Its synt
 The critical-path table now separates the unavailable-authority refusal evidence from earlier successful-write characterization: governance `99023fcb30ec2c6c042dea0f0196b88c072049ac` (focused runtime 6/6), validator `02198fac5ba638a1fbcbc2c5361fce7116a33e51` (15/15), and keyset creation `92ba29ee13b2470e4b21b681aefcd8cf1ecf3264` (9/9). The earlier governance `c279c7be1cc415032975f162109e5e2c3f9c6ed0`, validator `8769118ef4b5b27631a4177862b1dc91cd66c7ca`, and keyset `ce25c42e3a389608832294c29bf5d2cdc7a59a6d` revisions remain historical successful-write characterization only. These were not rerun in this finishing pass.
 
 Run 417 defines F3 as outbound and inbound proposal authentication. Acceptance must include configured outbound signing and inbound signature, leader/membership, and domain verification before delivery or engine effects, with genuine matched acceptance and relevant adversarial refusals. F3 remains distinct from F4 Vote authentication, F6 transport peer/sender binding, and F7 QC verification. Run 419 is partial standalone release-binary F6 evidence; Run 421 is unavailable-authority fail-closed release-binary evidence. Neither demonstrates usable configured-authority consensus. Readiness verdicts are unchanged.
+
+## Run 422 public DevNet signing-profile decision proposal
+
+The lifecycle contract now contains a single owner-facing, non-approved
+Proposal/Vote signing-profile proposal. It recommends continued refusal while
+activation, current-authority freshness, signing-history continuity and
+consensus-lock recovery lack a justified trust model. Profile A remains a
+candidate, not approved policy. No implementation, activation, readiness
+change, or new validation is claimed; public DevNet remains NO-GO and C4/C5
+remain OPEN.
