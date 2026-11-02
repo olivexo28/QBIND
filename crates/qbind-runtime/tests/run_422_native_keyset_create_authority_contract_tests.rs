@@ -80,8 +80,19 @@ struct Verification {
 
 #[derive(Default)]
 struct CryptoWork {
+    lookups: AtomicUsize,
+    suite_ids: AtomicUsize,
     verifications: Mutex<Vec<Verification>>,
     descriptors: AtomicUsize,
+}
+
+impl CryptoWork {
+    fn reset(&self) {
+        self.lookups.store(0, Ordering::SeqCst);
+        self.suite_ids.store(0, Ordering::SeqCst);
+        self.verifications.lock().unwrap().clear();
+        self.descriptors.store(0, Ordering::SeqCst);
+    }
 }
 
 struct CountedSuite {
@@ -91,6 +102,7 @@ struct CountedSuite {
 
 impl SignatureSuite for CountedSuite {
     fn suite_id(&self) -> u8 {
+        self.work.suite_ids.fetch_add(1, Ordering::SeqCst);
         self.inner.suite_id()
     }
 
@@ -117,6 +129,26 @@ impl SignatureSuite for CountedSuite {
             signature: signature.to_vec(),
         });
         self.inner.verify(key, digest, signature)
+    }
+}
+
+struct CountedProvider {
+    inner: StaticCryptoProvider,
+    work: Arc<CryptoWork>,
+}
+
+impl CryptoProvider for CountedProvider {
+    fn signature_suite(&self, suite_id: u8) -> Option<&dyn SignatureSuite> {
+        self.work.lookups.fetch_add(1, Ordering::SeqCst);
+        self.inner.signature_suite(suite_id)
+    }
+
+    fn kem_suite(&self, _suite_id: u8) -> Option<&dyn qbind_crypto::KemSuite> {
+        None
+    }
+
+    fn aead_suite(&self, _suite_id: u8) -> Option<&dyn qbind_crypto::AeadSuite> {
+        None
     }
 }
 
@@ -175,12 +207,14 @@ impl Fixture {
         sentinel.header.reserved = [0xA6; 8];
         store.seed(sentinel);
         let work = Arc::new(CryptoWork::default());
-        let provider: Arc<dyn CryptoProvider> = Arc::new(
-            StaticCryptoProvider::new().with_signature_suite(Arc::new(CountedSuite {
-                inner: MlDsa44SignatureSuite::new(SUITE),
-                work: Arc::clone(&work),
-            })),
-        );
+        let inner = StaticCryptoProvider::new().with_signature_suite(Arc::new(CountedSuite {
+            inner: MlDsa44SignatureSuite::new(SUITE),
+            work: Arc::clone(&work),
+        }));
+        let provider: Arc<dyn CryptoProvider> = Arc::new(CountedProvider {
+            inner,
+            work: Arc::clone(&work),
+        });
         Self {
             store,
             signer,
@@ -230,8 +264,8 @@ impl Fixture {
             }]
         };
         self.store.reset();
-        self.work.verifications.lock().unwrap().clear();
-        self.work.descriptors.store(0, Ordering::SeqCst);
+        // Provider registration and fixture signing are outside measured work.
+        self.work.reset();
 
         let result =
             self.executor
@@ -244,6 +278,11 @@ impl Fixture {
             expected_verifications
         );
         assert_eq!(self.work.descriptors.load(Ordering::SeqCst), 0);
+        assert_eq!(self.work.lookups.load(Ordering::SeqCst), verification_count);
+        assert_eq!(
+            self.work.suite_ids.load(Ordering::SeqCst),
+            verification_count
+        );
         let Outcome::Refused(expected) = outcome;
         assert_error(
             result.expect_err("native keyset creation must refuse"),
@@ -604,7 +643,7 @@ fn structurally_decodable_candidate_variants_all_reach_unavailable_authority() {
 }
 
 #[test]
-fn preseeded_threshold_two_and_threshold_one_controls_reach_unavailable_authority() {
+fn preseeded_individual_threshold_refusal_and_matched_threshold_controls() {
     for threshold in [2, 1] {
         let mut f = Fixture::new();
         let second = Key::genuine();
@@ -634,18 +673,53 @@ fn preseeded_threshold_two_and_threshold_one_controls_reach_unavailable_authorit
         assert_eq!(later_tx.auths.len(), 1);
         assert_eq!(threshold_call.entries[0].weight, 1);
         assert_eq!(threshold_call.threshold, threshold);
+        assert_eq!(
+            threshold_call.entries.get(1).map(|entry| entry.weight),
+            (threshold == 2).then_some(1)
+        );
         assert_ne!(
             later_tx.auths[0].signature,
             initial_attempt.auths[0].signature
         );
-        f.invoke(
-            &later_tx,
-            Outcome::Refused(ExecutionError::ProgramError(
-                "native keyset creation authority unavailable",
-            )),
-            &[TARGET, FRESH],
-            1,
-        );
+        if threshold == 2 {
+            f.invoke(
+                &later_tx,
+                Outcome::Refused(ExecutionError::InvalidCallData(
+                    "selected key weight below keyset threshold",
+                )),
+                &[TARGET],
+                0,
+            );
+            assert!(!f.store.snapshot().contains_key(&FRESH));
+            let before_correction = f.store.snapshot();
+            let mut expected_account = before_correction[&TARGET].clone();
+            expected_account.data[13..15].copy_from_slice(&2u16.to_le_bytes());
+            let corrected_entry = f.store.accounts.get_mut(&TARGET).unwrap();
+            corrected_entry.data[13..15].copy_from_slice(&2u16.to_le_bytes());
+            let corrected_store_before = f.store.snapshot();
+            let mut expected_corrected_store = before_correction;
+            expected_corrected_store.insert(TARGET, expected_account);
+            assert_eq!(corrected_store_before, expected_corrected_store);
+            f.invoke(
+                &later_tx,
+                Outcome::Refused(ExecutionError::ProgramError(
+                    "native keyset creation authority unavailable",
+                )),
+                &[TARGET, FRESH],
+                1,
+            );
+            assert_eq!(f.store.snapshot(), corrected_store_before);
+            assert!(!f.store.snapshot().contains_key(&FRESH));
+        } else {
+            f.invoke(
+                &later_tx,
+                Outcome::Refused(ExecutionError::ProgramError(
+                    "native keyset creation authority unavailable",
+                )),
+                &[TARGET, FRESH],
+                1,
+            );
+        }
     }
 }
 
