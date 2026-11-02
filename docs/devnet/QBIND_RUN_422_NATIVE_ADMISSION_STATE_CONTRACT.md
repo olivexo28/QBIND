@@ -1016,3 +1016,64 @@ unapproved and unimplemented.
 
 The evidence and command attribution for this characterization is appended to
 `QBIND_DEVNET_EVIDENCE_RUN_422_D7.md`; the preserved posture above is unchanged.
+
+## RUN 422 follow-on: native validator unavailable-authority safeguard
+
+**Whole native admission, validator-registration and governance contracts:
+DRAFT / NOT APPROVED / NOT IMPLEMENTED. Bounded validator safeguard:
+IMPLEMENTED.** The earlier successful-write characterization remains correct
+historical evidence at source
+`8769118ef4b5b27631a4177862b1dc91cd66c7ca` (tree
+`7a8979d2e3df9e49ef87e6291dce86fe129732a8`). It is not the behavior of the
+new handler. Required starting commit
+`a7d7c1dc31094b59e13f758791f1d77c49055b62` has tree
+`7a5d1ff88799a0484a63fedaa94c1b8a10c30f09`; the historical handler and
+characterization-test bytes correspond, but that historical commit is not a
+baseline ancestor. New refusal source/tests are at tested revision
+`02198fac5ba638a1fbcbc2c5361fce7116a33e51`, tree
+`d03e9c4481be3e3c85eb9029fa19136cfed94229`, directly descended from the
+required baseline.
+
+`ValidatorProgram` preserves program-ID, empty-call/opcode, decoding,
+trailing-byte, existing-target and supplied-minimum validation in that order.
+After the existing target `get` and successful minimum comparison, a private
+unconditional helper returns
+`ExecutionError::ProgramError("native validator registration authority unavailable")`.
+The former record construction, serialization and store write are removed.
+There is no authority switch, permissive default or alternative registration
+success. Unsupported-opcode behavior, earlier errors, public validator error
+definitions, the stake helper and executor authentication are unchanged.
+Previously successful native registrations now refuse: this compatibility
+change is a completed bounded safeguard, not an admitted registration policy.
+
+The existing runtime target keeps real ML-DSA-44 authentication and independent
+consensus-signature/network-KEM setup checks. Actual executor cases distinguish
+unrelated/absent/matching owners, large/zero stake, bad authentication,
+stake-field binding, genuine retries, repeated fresh-target refusal and
+directly seeded existing targets. Separate direct-`Program` cases exercise
+explicit-minimum and competing-invalidity ordering with zero transaction
+verifications. Both existing test targets compare complete store state,
+transaction values and wire encodings and observe reads with zero
+writes/deletes; map snapshots do not add measured reads. Identical valid
+retries freshly authenticate and recheck the still-absent target. They neither
+consume authority nor establish durable replay protection. Exact assertion
+mapping is appended to the validator contract; literal commands, outcomes and
+test counts are appended to D7 evidence.
+
+Authentication still performs its existing signer reads/cryptography/preimage
+work. The call decoder still allocates both key vectors before the refusal,
+and the target-existence read remains. No whole-path allocation freedom, zero
+reads, new resource bound or production policy minimum is claimed. Fixture
+key usability, suite IDs and stake amounts are not production proof of
+possession, funding or approval.
+
+No owner-authority/consent, funding/escrow, governed key-admission,
+freshness, atomic-publication or membership-handoff contract is implemented.
+No deployed-path, persistent-storage, crash/restart or anti-rollback evidence
+is supplied. The completed native governance refusal and its contract remain
+unchanged. All candidate limits remain `UNAPPROVED`; preserve
+`D7D14_STORAGE_COMPONENT=IMPLEMENTED-ISOLATED`,
+`D7D14_STORAGE_ACCEPTANCE=PASS-ACCEPTED-SUBSET`, §13.6 whole-lifecycle
+`INCOMPLETE`, activation `DISABLED`, public DevNet `NO-GO`, durable anti-rollback
+`NOT-ESTABLISHED`, C4/C5 `OPEN`, RS1 `OPEN`. No F1/F2 closure, production
+activation, live-validator admission or release approval follows.

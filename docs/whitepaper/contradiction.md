@@ -4303,3 +4303,60 @@ source attribution, executed commands, selected/passed/failed/ignored counts,
 and environment preparation. No node, network, deployment, durable-storage, or
 anti-rollback conclusion follows. All existing posture markers and completed
 native governance-refusal findings remain unchanged.
+
+## RUN 422 follow-on: bounded native validator-registration refusal
+
+**Completed safeguard, not completed authority contract.** Preserve the
+historical successful-write characterization at source
+`8769118ef4b5b27631a4177862b1dc91cd66c7ca` (tree
+`7a8979d2e3df9e49ef87e6291dce86fe129732a8`). Its relevant source/test bytes
+match starting commit `a7d7c1dc31094b59e13f758791f1d77c49055b62` (tree
+`7a5d1ff88799a0484a63fedaa94c1b8a10c30f09`), without claiming historical
+commit ancestry. New refusal implementation and migrated tests are at tested
+revision `02198fac5ba638a1fbcbc2c5361fce7116a33e51` (tree
+`d03e9c4481be3e3c85eb9029fa19136cfed94229`), a direct baseline child;
+final documentation attribution is separate.
+
+Native registration now preserves program-ID validation, empty-call/opcode
+checks, decoding, trailing-byte rejection, the existing target read/existence
+error and the supplied-minimum comparison, then unconditionally returns
+`ExecutionError::ProgramError("native validator registration authority unavailable")`.
+Record construction, state serialization and the write path are removed,
+not retained behind a gate. Earlier error variants/messages, unsupported
+validator opcodes, public validator errors and stake helper remain unchanged.
+Native registrations that previously succeeded now refuse. This intentional
+compatibility change admits no positive registration policy.
+
+The existing runtime test target retains genuine authentication reaching the
+gate as its positive control, real-crypto counting delegation and independent
+key-usability checks. Unrelated, absent and matching owner claims, large/zero
+declared stake, changed signed stake, bad/empty authentication, genuine
+same-state retries, repeated absent-target refusals and directly seeded
+existing targets are distinguished from direct-context minimum/precedence
+controls. Complete snapshots, read/write/delete traces and full input/wire
+comparisons establish local nonmutation; snapshots bypass measured reads.
+Each valid absent-target retry authenticates again and reaches the gate
+without creating a record. Direct-`Program` controls require zero transaction
+verification and are not authenticated executor evidence. The system tests are migrated in
+place, retaining stake-helper coverage. Exact assertion mapping and commands/
+counts are in the validator-contract and D7 evidence appendices.
+
+Authentication still does its original work, decoding still allocates key
+vectors and the target lookup remains. No whole-path allocation freedom,
+zero-read route or new resource ceiling is established. Matching identity,
+fixture suite IDs, key round trips and declared stake are not independent
+authority, production possession proofs or funded stake. No owner-authority,
+funding/escrow, governed key-admission, freshness, atomic publication or
+membership-handoff implementation is supplied; repeated refusal is not
+durable replay protection. No deployed-path, persistent-storage, crash/restart
+or anti-rollback evidence follows.
+
+Whole validator, native-admission and governance contracts remain
+**DRAFT / NOT APPROVED / NOT IMPLEMENTED**. The completed governance refusal
+and its contract are unchanged. Preserve
+`D7D14_STORAGE_COMPONENT=IMPLEMENTED-ISOLATED`,
+`D7D14_STORAGE_ACCEPTANCE=PASS-ACCEPTED-SUBSET`, §13.6 whole-lifecycle
+`INCOMPLETE`, activation `DISABLED`, public DevNet `NO-GO`, durable anti-rollback
+`NOT-ESTABLISHED`, C4/C5 `OPEN`, RS1 `OPEN`; all candidate limits remain
+`UNAPPROVED`. No F1/F2 closure, production activation, live-validator admission
+or release approval follows.

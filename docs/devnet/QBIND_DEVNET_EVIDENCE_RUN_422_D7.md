@@ -24528,3 +24528,222 @@ Required validation results (counts overlap):
 Environment preparation and unsuccessful attempts: the first required focused command exited 101 before test selection because `/usr/lib/llvm-18/lib` lacked `libclang.so`. `apt-get update` reported a temporary DNS failure fetching the unrelated Google Chrome repository; package indexes otherwise sufficed and `libclang-18-dev` was installed without changing repository dependency files. The retry reached Rust compilation but exited 101 before selecting tests: the new source lacked the `Program` trait import and had mutable/immutable borrow conflicts while cloning fixture transactions. Those test-source issues were corrected; the final focused target and commands above passed. An initial `rustfmt --check --edition 2021 crates/qbind-runtime/tests/run_422_native_validator_authority_contract_tests.rs` exited 1 on formatting differences only; `rustfmt` was run and the required check then exited 0. The compilation-only failures selected/passed/failed/ignored 0/0/0/0 tests.
 
 No production Rust, existing test, dependency, manifest, lockfile, feature, codec, signing preimage, resource ceiling, or native governance authority contract changed. These local tests do not establish persistent/deployed reachability, crash/restart behavior, replay durability, anti-rollback, network admission, funded stake, or consensus-set activation. Preserve the existing D7D14 and §13.6/C4/C5/RS1 posture; no F1/F2 closure or deployment readiness follows.
+
+## RUN 422 follow-on: completed bounded native validator-registration refusal
+
+**Whole validator-registration, native-admission and governance contracts:
+DRAFT / NOT APPROVED / NOT IMPLEMENTED. Bounded unavailable-authority
+safeguard: IMPLEMENTED, locally validated.** The previous successful-write
+characterization is retained, not withdrawn or reinterpreted as current
+behavior. No positive registration authority or approval is established.
+
+### Starting-state, history and tested-source attribution
+
+Repository identity was checked as `olivexo28/QBIND` with origin
+`https://github.com/olivexo28/QBIND`. The worktree was clean before editing.
+No applicable `AGENTS.md` was found in the repository or its ancestor
+directories. The requested task branch was created at the exact required
+baseline; no baseline or user changes were discarded.
+
+| Role | Full commit | Exact root tree |
+|---|---|---|
+| Required starting revision | `a7d7c1dc31094b59e13f758791f1d77c49055b62` | `7a5d1ff88799a0484a63fedaa94c1b8a10c30f09` |
+| Historical successful-write source | `8769118ef4b5b27631a4177862b1dc91cd66c7ca` | `7a8979d2e3df9e49ef87e6291dce86fe129732a8` |
+| New tested Rust source and migrated tests | `02198fac5ba638a1fbcbc2c5361fce7116a33e51` | `d03e9c4481be3e3c85eb9029fa19136cfed94229` |
+
+Tree correspondence and ancestry were checked separately. Initially
+`git rev-parse --is-shallow-repository` returned `true`. The baseline's raw
+commit header contains parent `229a1a1069a51f5cd0a0dcf7b7e186bcce3bf11f`;
+an initial `git cat-file -e` for that parent failed because the object was
+unavailable locally, not because the baseline lacked a parent.
+`git fetch --unshallow origin` succeeded, after which shallow status was
+`false` and the parent object was readable (tree
+`ee1a833adccca649a8a592a71168a81fff4ca273`, raw parent
+`73efdb3f9c51fa6ab055555fd2211a79840b2a96`). The baseline history has
+1,077 commits, with reachable root `34ae9bb31f6849d44c5e743f243e779755c0d8eb`.
+
+The historical source object was initially unavailable even after that
+fetch. `git fetch origin 8769118ef4b5b27631a4177862b1dc91cd66c7ca`
+succeeded. Its raw parent is `a3f9f2f913641faec1486205a9d9eb713751d23c`,
+whose raw parent is the baseline's parent
+`229a1a1069a51f5cd0a0dcf7b7e186bcce3bf11f`.
+`git merge-base --is-ancestor 8769118ef4b5b27631a4177862b1dc91cd66c7ca a7d7c1dc31094b59e13f758791f1d77c49055b62`
+returned 1: the historical source is not a baseline ancestor. Their merge
+base is `229a1a1069a51f5cd0a0dcf7b7e186bcce3bf11f`. A direct diff of the
+validator handler and existing runtime characterization target was empty
+between the historical and required starting revisions. Relevant byte
+correspondence therefore holds without inventing commit ancestry or root-tree
+identity. The tested implementation commit's raw parent is the required
+baseline. Final evidence attribution is a separate documentation-only commit;
+delivery verification reports its final commit/tree and remote-tip identity.
+
+### Implemented boundary and remaining work before refusal
+
+The only production change is
+`crates/qbind-system/src/validator_program.rs`. The private unconditional
+`native_validator_registration_authority_unavailable()` returns exactly
+`ExecutionError::ProgramError("native validator registration authority unavailable")`.
+The preserved sequence is program-ID validation, empty-call/opcode dispatch,
+`RegisterValidatorCall` decoding, trailing-byte rejection, existing target
+lookup/existence rejection, comparison against `ctx.min_validator_stake`,
+then the new refusal. Earlier error variants and messages are unchanged.
+There is no authority boolean, switch, feature, bootstrap exception,
+permissive default, test bypass or alternate successful registration path.
+Record construction, state serialization and `AccountStore::put` were removed,
+not made unreachable behind a nominal gate. Public `ValidatorError`
+definitions and `is_stake_sufficient` behavior remain unchanged.
+
+**Compatibility impact:** registrations that previously created a local
+validator account now refuse. Existing targets and below-minimum stake retain
+their exact earlier errors and ordering. The preserved target-existence read
+is intentional. Executor authentication still precedes dispatch and performs
+its existing signer lookup, state materialization, preimage construction and
+cryptography. The registration decoder still allocates consensus/network key
+vectors before this gate. No whole-path allocation freedom, zero store reads,
+new resource bound or approved stake minimum is claimed.
+
+No executor authentication, `ExecutionContext`, `AccountStore`, account
+representation, wire codec, signing preimage, production crypto provider implementation,
+dependency, manifest, lockfile, feature, resource limit, consensus membership
+or production configuration changed. The completed native governance refusal,
+its source, its tests and its separate authority contract are unchanged.
+
+### Complete state/input preservation and retry assertion mapping
+
+The existing runtime integration target was migrated in place rather than
+replaced. It retains genuine ML-DSA-44 signing and verification, correctly
+owned signer keysets, real-verifier delegation in `CountedSuite`, independent
+consensus-signature verification and a network ML-KEM-768 round trip.
+Those fixture key checks and suite IDs are not governed key admission or
+production proof of possession. Eleven tests call actual `TxExecutor`;
+four explicitly labelled direct-context tests call `Program` with zero
+transaction-verifier calls. The focused count must not be described as
+15 authenticated executor tests.
+
+`assert_refusal_unchanged` takes a complete store-map snapshot and captures
+the entire input transaction, full wire encoding and verifier count before
+each attempt. It then requires the exact error, exact ordered reads, zero
+`put`/`delete` calls, unchanged complete state/input/wire and exact verification
+delta. `assert_direct_refusal_unchanged` applies the same observations to the
+direct Program/context cases with explicit zero verifications. Snapshots read
+the witness map directly and never contaminate the measured activity.
+`assert_unavailable_then_retry` runs the identical valid signed transaction
+twice against an absent target, freshly authenticating and rechecking target
+existence each time; it requires target absence throughout.
+
+| Matrix | Existing target's current test mapping and outcomes |
+|---|---|
+| Authenticated unrelated existing owner | `authenticated_unrelated_existing_owner_reaches_unavailable_refusal`: new error, exactly signer/target reads and one real verification per attempt, no mutation on attempt or retry. |
+| Authenticated absent owner | `authenticated_absent_owner_reaches_unavailable_refusal`: same outcomes; no owner lookup or owner account creation. |
+| Positive/large stake and usable keys | `authenticated_large_declared_stake_and_usable_keys_cannot_bypass_refusal`: new error despite genuine usable key fixtures and large declaration; complete payer/owner/sentinel and target absence preservation. |
+| Zero stake with executor default context | `authenticated_zero_stake_reaches_refusal_in_default_executor_context`: default minimum comparison passes, then new refusal, not account creation. |
+| Matching owner/signing identity | `authenticated_matching_owner_identity_does_not_manufacture_authority`: declared owner equals authenticated signer keyset, with a genuinely re-signed transaction; new error on both attempts. |
+| Authentication ordering/retry | `empty_auth_and_tampered_signature_refuse_then_genuine_retry_reaches_gate`: empty auth retains `InvalidCallData("transaction requires at least one authentication entry")`, zero reads and zero verifications; tampered signature retains `CryptoError("signature verification failed")`, signer-only read and one real verification. Each genuine original retry freshly authenticates and reaches the new gate on the unchanged state. |
+| Signed stake-field binding | `signed_stake_change_is_rejected_until_the_changed_body_is_resigned`: compare every other call field, transaction metadata and original auth entries; changed stake without re-signing fails authentication before target access. Original transaction retries reach the gate; after re-signing, changed-body attempts also reach the new error. Complete input/wire/state comparisons cover each attempt. |
+| Repeated fresh-target refusal | `repeated_fresh_target_registration_authenticates_and_refuses_each_time`: the same valid signed transaction performs two verifications and two target checks while target stays absent. This is not authorization consumption or durable replay protection. |
+| Existing stored record | `preexisting_validator_record_seeded_directly_is_not_overwritten`: record is seeded directly in setup, not created through registration; both authenticated attempts retain exact `"validator already exists"` with unchanged target bytes. |
+| Unrelated existing target | `preexisting_unrelated_target_is_not_overwritten`: directly seeded unrelated account, including nondefault header/data, retains exact bytes on both refusals. |
+| Direct explicit minimum, below and zero | `direct_context_fixture_minimum_rejects_below_and_zero_without_authentication`: target-only read, zero verifications, exact `"stake below minimum required for validator registration"`; supplied threshold is fixture-only. |
+| Direct explicit minimum, equality and above | `direct_context_equality_and_above_minimum_reach_refusal_without_authentication`: target-only read, zero verifications, comparison passes then new authority-unavailable error. |
+| Existing target before minimum | `direct_context_existing_target_precedes_below_minimum_without_authentication`: seeded record plus zero stake below a positive supplied minimum still returns exact existing-target error. |
+| Framing before target/minimum | `direct_context_validation_precedes_existing_target_and_minimum_without_authentication`: existing target and below-minimum stake compete with wrong program plus empty call, empty call, unsupported opcode, truncation and trailing bytes. Exact errors are respectively `ProgramError("program_id mismatch for ValidatorProgram")`, `InvalidCallData("empty call_data")`, `ProgramError("unsupported validator opcode")`, `InvalidCallData("invalid RegisterValidatorCall")` and `InvalidCallData("extra bytes after RegisterValidatorCall")`, with zero reads/verifications/writes/deletes. |
+| Authenticated framing with retry | `authenticated_framing_controls_refuse_before_target_lookup`: genuinely signed truncated, trailing, unsupported and empty calls retain exact errors after signer-only lookup/one real verification. Original valid transactions retry on each same-state fixture, reaching the new error with signer/target reads and no mutation. |
+
+The existing `qbind-system` target also migrates in place. Its six direct
+Program/context registration tests preserve the original creation, existing
+target, below-minimum, equality, above-minimum and zero-stake scenarios as
+current refusal expectations; the seventh stake-helper test keeps its
+unchanged coverage. A direct seeded existing target replaces the former
+successful-production-registration setup and also competes with a below-minimum
+stake. Its witness store compares complete snapshots and input transaction/
+wire bytes, exact target reads and zero writes/deletes. The dummy provider
+panics if transaction verification is requested: these are explicitly not
+executor authentication tests. No test is ignored or discarded, and no
+parallel replacement target or successful validator-registration control was
+introduced. Genuine authentication reaching the gate is this slice's positive
+control. Existing keyset execution tests remain neighboring-program success
+controls.
+
+### Literal validation commands and results on the tested Rust bytes
+
+Counts are selected/passed/failed/ignored per invocation, not unique tests.
+They overlap across commands and must not be added together. Every focused
+target below selected tests. Non-test checks have no selected tests.
+
+| Literal command | Exit | Selected | Passed | Failed | Ignored |
+|---|---|---|---|---|---|
+| `LIBCLANG_PATH=/usr/lib/llvm-18/lib cargo test --locked -p qbind-runtime --test run_422_native_validator_authority_contract_tests -- --nocapture --test-threads=1` | 0 | 15 | 15 | 0 | 0 |
+| `LIBCLANG_PATH=/usr/lib/llvm-18/lib cargo test --locked -p qbind-system --test validator_register_tests -- --nocapture` | 0 | 7 | 7 | 0 | 0 |
+| `LIBCLANG_PATH=/usr/lib/llvm-18/lib cargo test --locked -p qbind-runtime --test tx_executor_tests --test block_executor_tests --test run_422_native_governance_authority_contract_tests -- --nocapture` | 0 | 14 | 14 | 0 | 0 |
+| `LIBCLANG_PATH=/usr/lib/llvm-18/lib cargo test --locked -p qbind-runtime -p qbind-system` | 0 | 140 | 139 | 0 | 1 |
+| `LIBCLANG_PATH=/usr/lib/llvm-18/lib cargo check --locked -p qbind-node` | 0 | n/a | n/a | n/a | n/a |
+| `rustfmt --check --edition 2021 crates/qbind-system/src/validator_program.rs crates/qbind-system/tests/validator_register_tests.rs crates/qbind-runtime/tests/run_422_native_validator_authority_contract_tests.rs` | 0 | n/a | n/a | n/a | n/a |
+| `git -c core.whitespace=cr-at-eol diff --check` | 0 | n/a | n/a | n/a | n/a |
+| `git -c core.whitespace=cr-at-eol diff --check a7d7c1dc31094b59e13f758791f1d77c49055b62 HEAD` | 0 | n/a | n/a | n/a | n/a |
+
+The combined neighboring-target command selected/passed 4/4
+`tx_executor_tests`, 4/4 `block_executor_tests` and 6/6
+`run_422_native_governance_authority_contract_tests`, with zero failed/ignored
+in each. The two-package command's one ignored case is the pre-existing
+runtime gas-model doctest. The node command is **compilation only**, not
+node/runtime/deployment or selected-test evidence; it completed with existing
+warnings, including eight `qbind-node` library warnings. Formatting was
+limited to the three allowed Rust files; no workspace-wide rewrite was run.
+Whitespace checks are repeated after final evidence attribution. Final
+delivery verifies the Rust blobs still equal this tested source revision.
+
+**Failed attempt and environment preparation:** before the final source
+commit, the first literal focused runtime command above exited 101 during
+native dependency compilation, selecting/passing/failing/ignoring 0/0/0/0
+tests. Bindgen could not find `libclang.so` under the required
+`LIBCLANG_PATH`; only `libclang-cpp.so.18.1` was initially present.
+`apt-get update` exited 0 with a temporary DNS warning for the unrelated
+Google Chrome repository, and `apt-get install -y libclang-18-dev` succeeded
+(combined environment-preparation exit 0). No repository dependency file was
+changed. After final allowed-file formatting and the source/test commit, the
+focused command and every remaining required validation command passed as
+recorded above. There were no failing selected tests or additional compiler/
+formatting failures in this task.
+
+### Append-only evidence integrity and scope
+
+The source/test commit changes exactly the three allowed Rust files.
+The final evidence commit changes only the four allowed documents. Cumulative
+scope is the exact seven-path allowlist, with no mode changes. The executable
+modes of the production handler and system registration target remain
+`100755`; runtime target and all documents remain `100644`.
+
+Each document's complete starting bytes remain an exact prefix. Original
+document conventions and SHA-256 prefix identities are:
+
+| Document | Starting bytes | EOL / terminal newline | SHA-256 of exact starting prefix |
+|---|---|---|---|
+| `docs/devnet/QBIND_RUN_422_NATIVE_VALIDATOR_AUTHORITY_CONTRACT.md` | 13308 | LF / present | `d31c421a11a06a3853f22387ac89143038b70a9d93ecc8120c81fe9a0f2047ef` |
+| `docs/devnet/QBIND_RUN_422_NATIVE_ADMISSION_STATE_CONTRACT.md` | 77985 | LF / present | `9bfc3a08ad8e66aad76e16b12a8bf9c3e9e73d35d2b2aa9664811163a0e790c1` |
+| `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_422_D7.md` | 2673419 | CRLF / absent | `3f7d825f6ffdafedbd4ea00e6cde7cd94295c58da6725c106efbc32c96ec8630` |
+| `docs/whitepaper/contradiction.md` | 2676800 | LF / absent | `a4557ba0307caabaf0635f5e198000d92f4795839919ffe0bd88b7c60daaa378` |
+
+Final delivery separately reports full cumulative old/new mode/blob
+identities and final root tree, checks required-baseline ancestry, verifies
+the remote task-branch tip equals final HEAD, and requires a clean worktree.
+Only `copilot/run-422-native-validator-unavailable-refusal` is pushed,
+without force. No PR, merge, main push, activation or deployment is part of
+this task.
+
+### Unresolved whole contract and preserved posture
+
+No owner-authority or owner-consent, funding/escrow, governed key-admission,
+freshness, atomic-publication or membership-handoff implementation is
+established. Matching identity, valid signatures, usable keys and large stake
+claims do not bypass the safeguard or approve a registration policy. No
+deployed-path, persistent-storage, crash/restart or anti-rollback evidence is
+provided. The full validator, native-admission and governance contracts remain
+**DRAFT / NOT APPROVED / NOT IMPLEMENTED**, independently of the completed
+bounded safeguard. Native governance refusal and its contract remain unchanged.
+
+Preserve `D7D14_STORAGE_COMPONENT=IMPLEMENTED-ISOLATED`,
+`D7D14_STORAGE_ACCEPTANCE=PASS-ACCEPTED-SUBSET`, §13.6 whole-lifecycle
+`INCOMPLETE`, activation `DISABLED`, public DevNet `NO-GO`, durable anti-rollback
+`NOT-ESTABLISHED`, C4/C5 `OPEN`, RS1 `OPEN`; all candidate limits remain
+`UNAPPROVED`. No F1/F2 closure, production activation, live-validator admission
+or release approval follows.
