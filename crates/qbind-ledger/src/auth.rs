@@ -18,6 +18,7 @@ use crate::ExecutionError;
 ///  - load the corresponding account from AccountStore
 ///  - require the returned ID, keyset-program owner and non-executable metadata
 ///  - decode KeysetAccount from account.data via qbind-serde
+///  - require stored version 1 and zero header/entry reserved bytes
 ///  - look up a KeysetEntry with matching suite_id
 ///  - use CryptoProvider to fetch a SignatureSuite and verify the signature
 ///  - reject an empty authentication vector before digest, store, or crypto work
@@ -146,6 +147,25 @@ fn verify_single_auth<S: AccountStore>(
         )) => ExecutionError::SerializationError("trailing bytes in KeysetAccount account"),
         _ => ExecutionError::SerializationError("decode KeysetAccount"),
     })?;
+
+    // Native-auth compatibility admission, after complete framing validation.
+    if keyset.version() != 1 {
+        return Err(ExecutionError::InvalidCallData(
+            "unsupported keyset account version",
+        ));
+    }
+    if keyset.reserved0() != [0; 3] || keyset.reserved1() != [0; 4] {
+        return Err(ExecutionError::InvalidCallData(
+            "nonzero keyset account reserved bytes",
+        ));
+    }
+    for entry in keyset.entries() {
+        if entry.reserved0 != [0; 1] {
+            return Err(ExecutionError::InvalidCallData(
+                "nonzero keyset entry reserved bytes",
+            ));
+        }
+    }
 
     // 4) Find a KeysetEntry with matching suite_id.
     let suite_id = auth.suite_id;

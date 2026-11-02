@@ -445,6 +445,221 @@ fn append_raw_keyset_entry(bytes: &mut Vec<u8>, suite_id: u8, pubkey: &[u8]) {
     bytes.extend_from_slice(pubkey);
 }
 
+fn assert_format_observations(
+    store: &CountingStore,
+    crypto: &RecordingCryptoProvider,
+    tx: &Transaction,
+    reads: &[AccountId],
+    verifications: usize,
+) {
+    assert_eq!(store.counts.reads.get(), reads.len());
+    assert_eq!(&*store.read_ids.borrow(), reads);
+    assert_eq!(crypto.lookups.load(Ordering::SeqCst), verifications);
+    assert_eq!(
+        &*crypto.requested_ids.lock().unwrap(),
+        &vec![100; verifications]
+    );
+    assert_eq!(
+        crypto.suite.id_observations.load(Ordering::SeqCst),
+        verifications
+    );
+    assert_eq!(
+        crypto.recorded_digests(),
+        vec![qbind_hash::tx::tx_digest(tx); verifications]
+    );
+    assert_eq!(crypto.recorded_public_keys().len(), verifications);
+    assert_eq!(store.counts.writes.get(), 0);
+    assert_eq!(store.counts.deletes.get(), 0);
+}
+
+#[test]
+fn stored_format_independent_refusals_and_genuine_control_share_response_path() {
+    let (mut store, _, tx) = signed_native_fixture();
+    let id = tx.accounts[0].account_id;
+    let valid = store.accounts[&id].clone();
+    let tx_before = tx.clone();
+    let backing_before = store.snapshot();
+    // AccountHeader metadata is deliberately nonzero and is not keyset data.
+    assert_ne!(valid.header.reserved, [0; 8]);
+    let mut cases = vec![(0, 0), (0, 2), (0, 255)];
+    cases.extend((1..4).map(|offset| (offset, 1)));
+    cases.extend((8..12).map(|offset| (offset, 1)));
+    cases.push((15, 1));
+    for fault in std::iter::once(None).chain(cases.into_iter().map(Some)) {
+        let mut response = valid.clone();
+        if let Some((offset, value)) = fault {
+            response.data[offset] = value;
+        }
+        store.report_account(id, response);
+        let responses_before = store.reported_accounts.clone();
+        store.reset_counts();
+        let crypto = Arc::new(RecordingCryptoProvider::new());
+        let result = verify_transaction_auth(&mut store, crypto.clone(), &tx);
+        if let Some((offset, _)) = fault {
+            let expected = match offset {
+                0 => "unsupported keyset account version",
+                15 => "nonzero keyset entry reserved bytes",
+                _ => "nonzero keyset account reserved bytes",
+            };
+            assert!(matches!(result, Err(ExecutionError::InvalidCallData(s)) if s == expected));
+        } else {
+            result.expect("same get-response path genuinely authenticates admissible format");
+        }
+        assert_format_observations(&store, &crypto, &tx, &[id], usize::from(fault.is_none()));
+        assert_eq!(tx, tx_before);
+        assert_eq!(store.snapshot(), backing_before);
+        assert_eq!(store.reported_accounts, responses_before);
+    }
+}
+
+#[test]
+fn stored_format_admits_every_entry_before_selecting_genuine_first_key() {
+    let (mut store, _, tx) = signed_native_fixture();
+    let id = tx.accounts[0].account_id;
+    let valid = store.accounts[&id].clone();
+    let backing_before = store.snapshot();
+    let tx_before = tx.clone();
+    for unused_suite in [100, 255] {
+        let mut response = valid.clone();
+        response.data[6..8].copy_from_slice(&2u16.to_le_bytes());
+        let later_offset = response.data.len();
+        append_raw_keyset_entry(&mut response.data, unused_suite, &[0xFF]);
+        for reserved in [0, 1] {
+            response.data[later_offset + 3] = reserved;
+            store.report_account(id, response.clone());
+            let responses_before = store.reported_accounts.clone();
+            store.reset_counts();
+            let crypto = Arc::new(RecordingCryptoProvider::new());
+            let result = verify_transaction_auth(&mut store, crypto.clone(), &tx);
+            if reserved == 0 {
+                result.expect("unused unsupported suite/key is not semantic admission");
+            } else {
+                assert!(matches!(
+                    result,
+                    Err(ExecutionError::InvalidCallData(
+                        "nonzero keyset entry reserved bytes"
+                    ))
+                ));
+            }
+            assert_format_observations(&store, &crypto, &tx, &[id], usize::from(reserved == 0));
+            assert_eq!(tx, tx_before);
+            assert_eq!(store.snapshot(), backing_before);
+            assert_eq!(store.reported_accounts, responses_before);
+        }
+    }
+}
+
+#[test]
+fn stored_format_combined_fault_precedence_before_selection_provider_and_signature() {
+    let (mut store, _, tx) = signed_native_fixture();
+    let id = tx.accounts[0].account_id;
+    let valid = store.accounts[&id].clone();
+    let backing_before = store.snapshot();
+    let mut all_faults = valid.data.clone();
+    all_faults[0] = 2;
+    all_faults[1] = 1;
+    all_faults[8] = 1;
+    all_faults[15] = 1;
+    let mut malformed = all_faults.clone();
+    malformed[6..8].copy_from_slice(&2u16.to_le_bytes());
+    malformed.push(255); // Matching first entry cannot hide incomplete later framing.
+    let mut trailing = all_faults.clone();
+    trailing.push(0);
+    let mut cases = vec![
+        (malformed, true, "decode KeysetAccount"),
+        (trailing, true, "trailing bytes in KeysetAccount account"),
+        (
+            all_faults.clone(),
+            false,
+            "unsupported keyset account version",
+        ),
+    ];
+    for offset in [1, 8] {
+        let mut header_and_entry = valid.data.clone();
+        header_and_entry[offset] = 1;
+        header_and_entry[15] = 1;
+        cases.push((
+            header_and_entry,
+            false,
+            "nonzero keyset account reserved bytes",
+        ));
+    }
+    for offset in [0, 1, 15] {
+        let mut missing_match = valid.data.clone();
+        missing_match[12] = 255;
+        missing_match[offset] = 2;
+        let expected = match offset {
+            0 => "unsupported keyset account version",
+            1 => "nonzero keyset account reserved bytes",
+            _ => "nonzero keyset entry reserved bytes",
+        };
+        cases.push((missing_match, false, expected));
+        let mut matching = valid.data.clone();
+        matching[offset] = 2;
+        cases.push((matching, false, expected));
+    }
+    let mut invalid_signature = tx.clone();
+    invalid_signature.auths[0].signature[0] ^= 0x80;
+    for candidate in [&tx, &invalid_signature] {
+        let tx_before = candidate.clone();
+        for (data, parser_error, expected) in &cases {
+            let mut response = valid.clone();
+            response.data = data.clone();
+            store.report_account(id, response);
+            let responses_before = store.reported_accounts.clone();
+            store.reset_counts();
+            // Deliberately inconsistent provider; must never be consulted.
+            let crypto = Arc::new(RecordingCryptoProvider::with_reported_ids(vec![3]));
+            let error = verify_transaction_auth(&mut store, crypto.clone(), candidate).unwrap_err();
+            match error {
+                ExecutionError::SerializationError(s) if *parser_error => assert_eq!(s, *expected),
+                ExecutionError::InvalidCallData(s) if !*parser_error => assert_eq!(s, *expected),
+                other => panic!("unexpected precedence error: {other:?}"),
+            }
+            assert_format_observations(&store, &crypto, candidate, &[id], 0);
+            assert_eq!(*candidate, tx_before);
+            assert_eq!(store.snapshot(), backing_before);
+            assert_eq!(store.reported_accounts, responses_before);
+        }
+    }
+}
+
+#[test]
+fn genuine_multi_auth_later_format_refusal_and_fresh_corrected_store_retry() {
+    for (offset, expected) in [
+        (0, "unsupported keyset account version"),
+        (8, "nonzero keyset account reserved bytes"),
+        (15, "nonzero keyset entry reserved bytes"),
+    ] {
+        let (mut store, _, tx) = two_signer_fixture(false);
+        let ids = [tx.accounts[0].account_id, tx.accounts[1].account_id];
+        let original = store.accounts[&ids[1]].data[offset];
+        store.accounts.get_mut(&ids[1]).unwrap().data[offset] = 2;
+        let rejected_store = store.snapshot();
+        let tx_before = tx.clone();
+        let responses_before = store.reported_accounts.clone();
+        let crypto = Arc::new(RecordingCryptoProvider::new());
+        assert!(matches!(
+            verify_transaction_auth(&mut store, crypto.clone(), &tx),
+            Err(ExecutionError::InvalidCallData(s)) if s == expected
+        ));
+        assert_format_observations(&store, &crypto, &tx, &ids, 1);
+        assert_eq!(store.snapshot(), rejected_store);
+        assert_eq!(store.reported_accounts, responses_before);
+        assert_eq!(tx, tx_before);
+
+        store.accounts.get_mut(&ids[1]).unwrap().data[offset] = original;
+        let corrected_store = store.snapshot();
+        store.reset_counts();
+        let fresh = Arc::new(RecordingCryptoProvider::new());
+        verify_transaction_auth(&mut store, fresh.clone(), &tx).expect("all proofs verify again");
+        assert_format_observations(&store, &fresh, &tx, &ids, 2);
+        assert_eq!(store.snapshot(), corrected_store);
+        assert_eq!(store.reported_accounts, responses_before);
+        assert_eq!(tx, tx_before);
+    }
+}
+
 fn transaction_for_keyset(keyset_id: AccountId, suite_id: u8) -> Transaction {
     make_transaction(
         vec![TxAccountMeta {
@@ -842,30 +1057,30 @@ fn zero_entry_missing_account_suite_and_provider_outcomes_are_exact() {
 }
 
 #[test]
-fn genuine_same_suite_selection_uses_first_key_and_ignores_semantic_metadata() {
+fn genuine_same_suite_selection_uses_first_key_without_threshold_or_weight_enforcement() {
     let keyset_id = dummy_account_id(0xD4);
     let (wrong_public_key, _wrong_secret_key) =
         qbind_crypto::ml_dsa44::MlDsa44Backend::generate_keypair().expect("wrong keypair");
     let (valid_public_key, valid_secret_key) =
         qbind_crypto::ml_dsa44::MlDsa44Backend::generate_keypair().expect("valid keypair");
     let make_entries = |first: Vec<u8>, second: Vec<u8>| KeysetAccount {
-        version: u8::MAX,
-        reserved0: [u8::MAX; 3],
+        version: 1,
+        reserved0: [0; 3],
         threshold: 0,
         entry_count: 2,
-        reserved1: [u8::MAX; 4],
+        reserved1: [0; 4],
         entries: vec![
             KeysetEntry {
                 suite_id: 100,
                 weight: 0,
-                reserved0: [u8::MAX],
+                reserved0: [0],
                 pubkey_len: first.len() as u16,
                 pubkey_bytes: first,
             },
             KeysetEntry {
                 suite_id: 100,
                 weight: u16::MAX,
-                reserved0: [u8::MAX],
+                reserved0: [0],
                 pubkey_len: second.len() as u16,
                 pubkey_bytes: second,
             },
