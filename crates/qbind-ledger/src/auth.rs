@@ -19,15 +19,19 @@ use crate::ExecutionError;
 ///  - require the returned ID, keyset-program owner and non-executable metadata
 ///  - decode KeysetAccount from account.data via qbind-serde
 ///  - require stored version 1 and zero header/entry reserved bytes
-///  - look up a KeysetEntry with matching suite_id
+///  - require a nonzero threshold, then select the first matching suite_id entry
+///  - require that selected entry's individual weight to meet the threshold
 ///  - use CryptoProvider to fetch a SignatureSuite and verify the signature
 ///  - reject an empty authentication vector before digest, store, or crypto work
 ///  - structurally cover every signed bit-0 signer declaration by its exact index,
 ///    and reject authentication entries targeting unmarked accounts before that work
 ///
-/// This function does NOT enforce thresholds/weights yet; it only checks that each
-/// TxAuth verifies successfully against at least one key in its keyset after index
-/// coverage. Repeated account IDs do not cover other indices. These declarations
+/// This conservative compatibility restriction is not full weighted authorization:
+/// weights are never aggregated, repeated proofs add no weight, and a later
+/// matching key cannot replace the first. Every supplied TxAuth is independently
+/// processed in order, even after an earlier proof meets its own threshold.
+/// Canonical duplicate/alias consistency and common-state semantics remain
+/// unresolved. Repeated account IDs do not cover other indices. These declarations
 /// are transaction-supplied; programs still need independent authority rules.
 pub fn verify_transaction_auth<S: AccountStore>(
     store: &mut S,
@@ -167,7 +171,12 @@ fn verify_single_auth<S: AccountStore>(
         }
     }
 
-    // 4) Find a KeysetEntry with matching suite_id.
+    let threshold = keyset.threshold();
+    if threshold == 0 {
+        return Err(ExecutionError::InvalidCallData("keyset threshold is zero"));
+    }
+
+    // 4) Find the first KeysetEntry with matching suite_id.
     let suite_id = auth.suite_id;
     let maybe_entry = keyset.entries().find(|e| e.suite_id == suite_id);
     let entry = match maybe_entry {
@@ -178,6 +187,12 @@ fn verify_single_auth<S: AccountStore>(
             ));
         }
     };
+
+    if entry.weight < threshold {
+        return Err(ExecutionError::InvalidCallData(
+            "selected key weight below keyset threshold",
+        ));
+    }
 
     // 5) Obtain SignatureSuite from CryptoProvider.
     let suite = crypto

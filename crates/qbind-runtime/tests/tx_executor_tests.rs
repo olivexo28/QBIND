@@ -256,6 +256,65 @@ fn build_keyset_create_tx(target_id: AccountId, auth: &AuthFixture) -> Transacti
 }
 
 #[test]
+fn executor_individual_threshold_admission_precedes_absent_native_target_read() {
+    let executor: TxExecutor<WitnessStore> = TxExecutor::new();
+    let target_id = dummy_account_id(0xEE);
+    let mut store = WitnessStore::default();
+    let auth = AuthFixture::new(&mut store);
+    let tx = build_keyset_create_tx(target_id, &auth);
+    let tx_before = tx.clone();
+    let valid = store.accounts[&AUTH_KEYSET_ID].clone();
+    for (threshold, weight, expected) in [
+        (0u16, 1u16, Some("keyset threshold is zero")),
+        (2, 1, Some("selected key weight below keyset threshold")),
+        (2, 2, None),
+    ] {
+        let mut account = valid.clone();
+        account.data[4..6].copy_from_slice(&threshold.to_le_bytes());
+        account.data[13..15].copy_from_slice(&weight.to_le_bytes());
+        store.accounts.insert(AUTH_KEYSET_ID, account);
+        let store_before = store.accounts.clone();
+        let crypto = CountingAuthProvider::new();
+        let counts = Arc::clone(&crypto.counts);
+        store.reads.borrow_mut().clear();
+        store.mutations = 0;
+        store.writes = 0;
+        store.deletes = 0;
+        counts.lookups.store(0, Ordering::SeqCst);
+        counts.requested_ids.lock().unwrap().clear();
+        counts.id_observations.store(0, Ordering::SeqCst);
+        counts.verifications.store(0, Ordering::SeqCst);
+        let error = executor
+            .execute_transaction(&mut store, Arc::new(crypto), &tx)
+            .unwrap_err();
+        if let Some(expected) = expected {
+            assert!(matches!(error, ExecutionError::InvalidCallData(s) if s == expected));
+            assert_eq!(&*store.reads.borrow(), &[AUTH_KEYSET_ID]);
+        } else {
+            assert!(matches!(
+                error,
+                ExecutionError::ProgramError("native keyset creation authority unavailable")
+            ));
+            assert_eq!(&*store.reads.borrow(), &[AUTH_KEYSET_ID, target_id]);
+        }
+        let work = usize::from(expected.is_none());
+        assert_eq!(counts.lookups.load(Ordering::SeqCst), work);
+        assert_eq!(counts.id_observations.load(Ordering::SeqCst), work);
+        assert_eq!(counts.verifications.load(Ordering::SeqCst), work);
+        assert_eq!(
+            &*counts.requested_ids.lock().unwrap(),
+            &vec![AUTH_SUITE_ID; work]
+        );
+        assert!(!store.accounts.contains_key(&target_id));
+        assert_eq!(store.mutations, 0);
+        assert_eq!(store.writes, 0);
+        assert_eq!(store.deletes, 0);
+        assert_eq!(store.accounts, store_before);
+        assert_eq!(tx, tx_before);
+    }
+}
+
+#[test]
 fn executor_stored_keyset_format_admission_precedes_native_target_read() {
     let executor: TxExecutor<WitnessStore> = TxExecutor::new();
     let target_id = dummy_account_id(0xEE);

@@ -279,7 +279,10 @@ struct RecordingMlDsa44Suite {
 impl SignatureSuite for RecordingMlDsa44Suite {
     fn suite_id(&self) -> u8 {
         let index = self.id_observations.fetch_add(1, Ordering::SeqCst);
-        self.reported_ids.get(index).copied().unwrap_or(100)
+        self.reported_ids
+            .get(index)
+            .copied()
+            .unwrap_or_else(|| self.inner.suite_id())
     }
 
     fn public_key_len(&self) -> usize {
@@ -311,6 +314,7 @@ impl SignatureSuite for RecordingMlDsa44Suite {
 struct RecordingCryptoProvider {
     lookups: AtomicUsize,
     requested_ids: Mutex<Vec<u8>>,
+    unavailable: bool,
     suite: RecordingMlDsa44Suite,
 }
 
@@ -324,6 +328,7 @@ impl RecordingCryptoProvider {
         Self {
             lookups: AtomicUsize::new(0),
             requested_ids: Mutex::new(Vec::new()),
+            unavailable: false,
             suite: RecordingMlDsa44Suite {
                 inner: MlDsa44SignatureSuite::new(100),
                 reported_ids,
@@ -371,7 +376,7 @@ impl CryptoProvider for RecordingCryptoProvider {
     fn signature_suite(&self, suite_id: u8) -> Option<&dyn SignatureSuite> {
         self.lookups.fetch_add(1, Ordering::SeqCst);
         self.requested_ids.lock().unwrap().push(suite_id);
-        (suite_id == 100).then_some(&self.suite)
+        (!self.unavailable && suite_id == self.suite.inner.suite_id()).then_some(&self.suite)
     }
 
     fn kem_suite(&self, _suite_id: u8) -> Option<&dyn KemSuite> {
@@ -470,6 +475,377 @@ fn assert_format_observations(
     assert_eq!(crypto.recorded_public_keys().len(), verifications);
     assert_eq!(store.counts.writes.get(), 0);
     assert_eq!(store.counts.deletes.get(), 0);
+}
+
+#[test]
+fn individual_threshold_matched_scalar_boundaries_preserve_complete_state() {
+    let (mut store, _, tx) = signed_native_fixture();
+    let id = tx.accounts[0].account_id;
+    let valid = store.accounts[&id].clone();
+    let backing_before = store.snapshot();
+    let tx_before = tx.clone();
+    let crypto = Arc::new(RecordingCryptoProvider::new());
+    // Each refusal differs from its adjacent genuine control in only one scalar.
+    for (threshold, weight, expected) in [
+        (1, 1, None),
+        (0, 1, Some("keyset threshold is zero")),
+        (1, 1, None),
+        (1, 0, Some("selected key weight below keyset threshold")),
+        (2, 2, None),
+        (2, 1, Some("selected key weight below keyset threshold")),
+        (u16::MAX, u16::MAX, None),
+        (
+            u16::MAX,
+            u16::MAX - 1,
+            Some("selected key weight below keyset threshold"),
+        ),
+    ] {
+        let mut response = valid.clone();
+        response.data[4..6].copy_from_slice(&threshold.to_le_bytes());
+        response.data[13..15].copy_from_slice(&weight.to_le_bytes());
+        store.report_account(id, response);
+        let responses_before = store.reported_accounts.clone();
+        store.reset_counts();
+        crypto.reset();
+        let result = verify_transaction_auth(&mut store, crypto.clone(), &tx);
+        if let Some(expected) = expected {
+            assert!(matches!(result, Err(ExecutionError::InvalidCallData(s)) if s == expected));
+        } else {
+            result.expect("genuine individually sufficient boundary");
+            assert_eq!(crypto.recorded_public_keys()[0].1, valid.data[18..]);
+        }
+        assert_format_observations(&store, &crypto, &tx, &[id], usize::from(expected.is_none()));
+        assert_eq!(tx, tx_before);
+        assert_eq!(store.snapshot(), backing_before);
+        assert_eq!(store.reported_accounts, responses_before);
+    }
+}
+
+#[test]
+fn individual_threshold_precedence_retains_metadata_framing_and_all_entry_format_checks() {
+    let (mut store, _, tx) = signed_native_fixture();
+    let id = tx.accounts[0].account_id;
+    let valid = store.accounts[&id].clone();
+    let backing_before = store.snapshot();
+    let tx_before = tx.clone();
+    for fault in 0..10 {
+        let mut response = valid.clone();
+        response.data[4..6].copy_from_slice(&0u16.to_le_bytes());
+        match fault {
+            0 => response.id = [0xFF; 32],
+            1 => response.header.owner = [0xFF; 32],
+            2 => response.header.is_executable = true,
+            3 => response.data.push(0),
+            4 => response.data.truncate(11),
+            5 => response.data[0] = 2,
+            6 => response.data[1] = 1,
+            7 => response.data[8] = 1,
+            8 => response.data[15] = 1,
+            9 => {
+                response.data[6..8].copy_from_slice(&2u16.to_le_bytes());
+                let offset = response.data.len();
+                append_raw_keyset_entry(&mut response.data, 255, &[0xFF]);
+                response.data[offset + 3] = 1;
+            }
+            _ => unreachable!(),
+        }
+        store.report_account(id, response);
+        let responses_before = store.reported_accounts.clone();
+        let crypto = Arc::new(RecordingCryptoProvider::with_reported_ids(vec![3]));
+        store.reset_counts();
+        crypto.reset();
+        let error = verify_transaction_auth(&mut store, crypto.clone(), &tx).unwrap_err();
+        match (fault, error) {
+            (0, ExecutionError::InvalidCallData("keyset account id mismatch"))
+            | (1, ExecutionError::AccountOwnerMismatch)
+            | (2, ExecutionError::InvalidCallData("keyset account is executable"))
+            | (3, ExecutionError::SerializationError("trailing bytes in KeysetAccount account"))
+            | (4, ExecutionError::SerializationError("decode KeysetAccount"))
+            | (5, ExecutionError::InvalidCallData("unsupported keyset account version"))
+            | (6 | 7, ExecutionError::InvalidCallData("nonzero keyset account reserved bytes"))
+            | (8 | 9, ExecutionError::InvalidCallData("nonzero keyset entry reserved bytes")) => {}
+            (_, other) => panic!("fault {fault}: {other:?}"),
+        }
+        assert_format_observations(&store, &crypto, &tx, &[id], 0);
+        assert_eq!(tx, tx_before);
+        assert_eq!(store.snapshot(), backing_before);
+        assert_eq!(store.reported_accounts, responses_before);
+    }
+}
+
+#[test]
+fn individual_threshold_precedes_missing_entry_provider_faults_and_invalid_signature() {
+    let (mut store, _, signed) = signed_native_fixture();
+    let id = signed.accounts[0].account_id;
+    let valid = store.accounts[&id].clone();
+    let backing_before = store.snapshot();
+    for threshold in [0u16, 1, 2] {
+        for missing in [false, true] {
+            for provider_fault in 0..3 {
+                for corrupted in [false, true] {
+                    let mut tx = signed.clone();
+                    if corrupted {
+                        tx.auths[0].signature[0] ^= 0x80;
+                    }
+                    let tx_before = tx.clone();
+                    let mut response = valid.clone();
+                    response.data[4..6].copy_from_slice(&threshold.to_le_bytes());
+                    if missing {
+                        response.data[12] = 255;
+                    }
+                    store.report_account(id, response);
+                    let responses_before = store.reported_accounts.clone();
+                    let mut provider =
+                        RecordingCryptoProvider::with_reported_ids(if provider_fault == 2 {
+                            vec![3]
+                        } else {
+                            vec![]
+                        });
+                    provider.unavailable = provider_fault == 1;
+                    let crypto = Arc::new(provider);
+                    store.reset_counts();
+                    crypto.reset();
+                    let result = verify_transaction_auth(&mut store, crypto.clone(), &tx);
+                    let (expected, lookups, ids, verifications) = if threshold == 0 {
+                        (Some("keyset threshold is zero"), 0, 0, 0)
+                    } else if missing {
+                        (Some("no key in keyset for given suite_id"), 0, 0, 0)
+                    } else if threshold == 2 {
+                        (Some("selected key weight below keyset threshold"), 0, 0, 0)
+                    } else if provider_fault == 1 {
+                        (Some("signature suite not found"), 1, 0, 0)
+                    } else if provider_fault == 2 {
+                        (Some("signature suite id mismatch"), 1, 1, 0)
+                    } else if corrupted {
+                        (Some("signature verification failed"), 1, 1, 1)
+                    } else {
+                        (None, 1, 1, 1)
+                    };
+                    match (expected, result) {
+                        (None, Ok(())) => {}
+                        (Some(expected), Err(ExecutionError::InvalidCallData(actual)))
+                            if lookups == 0 =>
+                        {
+                            assert_eq!(actual, expected);
+                        }
+                        (Some(expected), Err(ExecutionError::CryptoError(actual)))
+                            if lookups != 0 =>
+                        {
+                            assert_eq!(actual, expected);
+                        }
+                        (_, other) => panic!("unexpected threshold/provider result: {other:?}"),
+                    }
+                    assert_eq!(&*store.read_ids.borrow(), &[id]);
+                    assert_eq!(store.counts.reads.get(), 1);
+                    assert_eq!(crypto.lookups.load(Ordering::SeqCst), lookups);
+                    assert_eq!(&*crypto.requested_ids.lock().unwrap(), &vec![100; lookups]);
+                    assert_eq!(crypto.suite.id_observations.load(Ordering::SeqCst), ids);
+                    assert_eq!(
+                        crypto.recorded_digests(),
+                        vec![qbind_hash::tx::tx_digest(&tx); verifications]
+                    );
+                    assert_eq!(crypto.recorded_public_keys().len(), verifications);
+                    assert_eq!(store.counts.writes.get(), 0);
+                    assert_eq!(store.counts.deletes.get(), 0);
+                    assert_eq!(tx, tx_before);
+                    assert_eq!(store.snapshot(), backing_before);
+                    assert_eq!(store.reported_accounts, responses_before);
+                }
+            }
+        }
+    }
+}
+
+struct TwoGenuineSuites([RecordingCryptoProvider; 2]);
+
+impl CryptoProvider for TwoGenuineSuites {
+    fn signature_suite(&self, suite_id: u8) -> Option<&dyn SignatureSuite> {
+        match suite_id {
+            100 => self.0[0].signature_suite(suite_id),
+            101 => self.0[1].signature_suite(suite_id),
+            _ => panic!("unexpected suite"),
+        }
+    }
+
+    fn kem_suite(&self, _suite_id: u8) -> Option<&dyn KemSuite> {
+        None
+    }
+
+    fn aead_suite(&self, _suite_id: u8) -> Option<&dyn AeadSuite> {
+        None
+    }
+}
+
+#[test]
+fn individual_threshold_distinct_genuine_proofs_do_not_aggregate_or_short_circuit() {
+    let id = [0xD5; 32];
+    let keys = (0..2)
+        .map(|_| qbind_crypto::ml_dsa44::MlDsa44Backend::generate_keypair().unwrap())
+        .collect::<Vec<_>>();
+    assert_ne!(keys[0].0, keys[1].0);
+    let mut keyset = make_keyset_account(100, keys[0].0.clone());
+    let second = make_keyset_account(101, keys[1].0.clone())
+        .entries
+        .remove(0);
+    keyset.entries.push(second);
+    keyset.entry_count = 2;
+    let mut data = Vec::new();
+    keyset.encode_state(&mut data);
+    let mut store = CountingStore::default();
+    store.seed(Account::new(id, KEYSET_PROGRAM_ID, 17, data));
+    let backing_before = store.snapshot();
+    let mut tx = transaction_for_keyset(id, 100);
+    tx.auths.push(TxAuth {
+        suite_id: 101,
+        ..tx.auths[0].clone()
+    });
+    let digest = qbind_hash::tx::tx_digest(&tx);
+    for (auth, (_, secret)) in tx.auths.iter_mut().zip(&keys) {
+        auth.signature = ml_dsa_44_sign_digest(secret, &digest).unwrap();
+    }
+    let tx_before = tx.clone();
+    let mut second_provider = RecordingCryptoProvider::new();
+    second_provider.suite.inner = MlDsa44SignatureSuite::new(101);
+    let crypto = Arc::new(TwoGenuineSuites([
+        RecordingCryptoProvider::new(),
+        second_provider,
+    ]));
+    // Sum 1+1=2 is intentionally irrelevant here; the first proof refuses.
+    // The final case proves an extra insufficient proof cannot hide behind success.
+    for (threshold, first_weight, expected_work) in [(2u16, 1u16, 0), (1, 1, 2), (2, 2, 1)] {
+        let mut response = store.accounts[&id].clone();
+        response.data[4..6].copy_from_slice(&threshold.to_le_bytes());
+        response.data[13..15].copy_from_slice(&first_weight.to_le_bytes());
+        store.report_account(id, response);
+        let responses_before = store.reported_accounts.clone();
+        store.reset_counts();
+        for provider in &crypto.0 {
+            provider.reset();
+        }
+        let result = verify_transaction_auth(&mut store, crypto.clone(), &tx);
+        if expected_work == 2 {
+            result.expect("both distinct registered ML-DSA-44 suites genuinely verify");
+        } else {
+            assert!(matches!(
+                result,
+                Err(ExecutionError::InvalidCallData(
+                    "selected key weight below keyset threshold"
+                ))
+            ));
+        }
+        let reads = if expected_work == 0 { 1 } else { 2 };
+        assert_eq!(&*store.read_ids.borrow(), &vec![id; reads]);
+        assert_eq!(store.counts.reads.get(), reads);
+        for (index, provider) in crypto.0.iter().enumerate() {
+            let work = usize::from(index < expected_work);
+            assert_eq!(provider.lookups.load(Ordering::SeqCst), work);
+            assert_eq!(
+                &*provider.requested_ids.lock().unwrap(),
+                &vec![100 + index as u8; work]
+            );
+            assert_eq!(provider.suite.id_observations.load(Ordering::SeqCst), work);
+            assert_eq!(provider.recorded_digests(), vec![digest; work]);
+            assert_eq!(
+                provider
+                    .recorded_public_keys()
+                    .iter()
+                    .map(|(_, key)| key.clone())
+                    .collect::<Vec<_>>(),
+                vec![keys[index].0.clone(); work]
+            );
+        }
+        assert_eq!(store.counts.writes.get(), 0);
+        assert_eq!(store.counts.deletes.get(), 0);
+        assert_eq!(tx, tx_before);
+        assert_eq!(store.snapshot(), backing_before);
+        assert_eq!(store.reported_accounts, responses_before);
+    }
+}
+
+#[test]
+fn individual_threshold_repetition_and_unused_higher_weight_cannot_rescue_first_match() {
+    let (mut store, _, signed) = signed_native_fixture();
+    let id = signed.accounts[0].account_id;
+    let valid = store.accounts[&id].clone();
+    let backing_before = store.snapshot();
+    for repeat in [false, true] {
+        for unused in [false, true] {
+            let mut tx = signed.clone();
+            if repeat {
+                tx.auths.push(tx.auths[0].clone());
+            }
+            let tx_before = tx.clone();
+            for threshold in [1u16, 2] {
+                let mut response = valid.clone();
+                response.data[4..6].copy_from_slice(&threshold.to_le_bytes());
+                if unused {
+                    response.data[6..8].copy_from_slice(&2u16.to_le_bytes());
+                    let offset = response.data.len();
+                    append_raw_keyset_entry(&mut response.data, 100, &valid.data[18..]);
+                    response.data[offset + 1..offset + 3].copy_from_slice(&u16::MAX.to_le_bytes());
+                }
+                store.report_account(id, response);
+                let responses_before = store.reported_accounts.clone();
+                let crypto = Arc::new(RecordingCryptoProvider::new());
+                store.reset_counts();
+                crypto.reset();
+                let result = verify_transaction_auth(&mut store, crypto.clone(), &tx);
+                if threshold == 1 {
+                    result.expect("same genuine signature remains valid; auths are not digested");
+                } else {
+                    assert!(matches!(
+                        result,
+                        Err(ExecutionError::InvalidCallData(
+                            "selected key weight below keyset threshold"
+                        ))
+                    ));
+                }
+                let work = if threshold == 1 { tx.auths.len() } else { 0 };
+                let reads = if threshold == 1 { tx.auths.len() } else { 1 };
+                assert_format_observations(&store, &crypto, &tx, &vec![id; reads], work);
+                assert_eq!(tx, tx_before);
+                assert_eq!(store.snapshot(), backing_before);
+                assert_eq!(store.reported_accounts, responses_before);
+            }
+        }
+    }
+}
+
+#[test]
+fn individual_threshold_account_groups_do_not_pool_and_corrected_store_retry_reverifies_all() {
+    let (mut store, _, tx) = two_signer_fixture(false);
+    let ids = [tx.accounts[0].account_id, tx.accounts[1].account_id];
+    store.accounts.get_mut(&ids[0]).unwrap().data[13..15].copy_from_slice(&u16::MAX.to_le_bytes());
+    store.accounts.get_mut(&ids[1]).unwrap().data[4..6].copy_from_slice(&2u16.to_le_bytes());
+    let tx_before = tx.clone();
+    let before = store.snapshot();
+    let responses_before = store.reported_accounts.clone();
+    let crypto = Arc::new(RecordingCryptoProvider::new());
+    store.reset_counts();
+    crypto.reset();
+    assert!(matches!(
+        verify_transaction_auth(&mut store, crypto.clone(), &tx),
+        Err(ExecutionError::InvalidCallData(
+            "selected key weight below keyset threshold"
+        ))
+    ));
+    assert_format_observations(&store, &crypto, &tx, &ids, 1);
+    assert_eq!(tx, tx_before);
+    assert_eq!(store.snapshot(), before);
+    assert_eq!(store.reported_accounts, responses_before);
+
+    store.accounts.get_mut(&ids[1]).unwrap().data[13..15].copy_from_slice(&2u16.to_le_bytes());
+    let corrected = store.snapshot();
+    assert_ne!(corrected, before);
+    let fresh = Arc::new(RecordingCryptoProvider::new());
+    store.reset_counts();
+    fresh.reset();
+    verify_transaction_auth(&mut store, fresh.clone(), &tx)
+        .expect("retry verifies every proof again");
+    assert_format_observations(&store, &fresh, &tx, &ids, 2);
+    assert_eq!(tx, tx_before);
+    assert_eq!(store.snapshot(), corrected);
+    assert_eq!(store.reported_accounts, responses_before);
 }
 
 #[test]
@@ -1057,7 +1433,7 @@ fn zero_entry_missing_account_suite_and_provider_outcomes_are_exact() {
 }
 
 #[test]
-fn genuine_same_suite_selection_uses_first_key_without_threshold_or_weight_enforcement() {
+fn genuine_same_suite_selection_uses_first_individually_sufficient_key() {
     let keyset_id = dummy_account_id(0xD4);
     let (wrong_public_key, _wrong_secret_key) =
         qbind_crypto::ml_dsa44::MlDsa44Backend::generate_keypair().expect("wrong keypair");
@@ -1066,13 +1442,13 @@ fn genuine_same_suite_selection_uses_first_key_without_threshold_or_weight_enfor
     let make_entries = |first: Vec<u8>, second: Vec<u8>| KeysetAccount {
         version: 1,
         reserved0: [0; 3],
-        threshold: 0,
+        threshold: 1,
         entry_count: 2,
         reserved1: [0; 4],
         entries: vec![
             KeysetEntry {
                 suite_id: 100,
-                weight: 0,
+                weight: 1,
                 reserved0: [0],
                 pubkey_len: first.len() as u16,
                 pubkey_bytes: first,
@@ -1099,6 +1475,8 @@ fn genuine_same_suite_selection_uses_first_key_without_threshold_or_weight_enfor
     let tx_witness = tx.clone();
     let crypto = Arc::new(RecordingCryptoProvider::new());
 
+    store.reset_counts();
+    crypto.reset();
     assert!(
         matches!(
             verify_transaction_auth(&mut store, crypto.clone(), &tx),

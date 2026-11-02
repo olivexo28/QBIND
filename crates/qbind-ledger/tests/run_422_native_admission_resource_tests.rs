@@ -915,17 +915,28 @@ fn run422_native_compatibility_witnesses_legacy_and_isolated_semantics() {
     store.assert_accesses(1);
     provider.counts.assert_work(2, 2);
 
-    // Conversely, legacy verifies a matching key without enforcing the stored
-    // weighted threshold; the isolated path refuses an unreachable threshold.
+    // Historical legacy success is now an individual-weight refusal; the
+    // isolated path still refuses unreachable aggregate threshold semantics.
     let one_key = generate_keypairs(1);
     let unreachable_account = compatibility_account(id, &one_key, 2);
     store.seed_fixture(unreachable_account.clone());
     let unreachable_tx = signed_transaction(&[id], &[(0, one_key[0].1.as_slice())], Vec::new());
     let unreachable_tx_before = unreachable_tx.clone();
     store.reset_counts();
-    verify_transaction_auth(&mut store, provider.clone(), &unreachable_tx)
-        .expect("legacy verifier ignores weighted threshold semantics");
+    provider.counts.reset();
+    assert!(matches!(
+        verify_transaction_auth(&mut store, provider.clone(), &unreachable_tx),
+        Err(ExecutionError::InvalidCallData(
+            "selected key weight below keyset threshold"
+        ))
+    ));
     assert_eq!(store.counts.legacy_reads.get(), 1);
+    assert_eq!(store.counts.bounded_reads.get(), 0);
+    assert_eq!(store.counts.writes.get(), 0);
+    assert_eq!(store.counts.deletes.get(), 0);
+    provider.counts.assert_work(0, 0);
+    assert_eq!(unreachable_tx, unreachable_tx_before);
+    assert_eq!(store.inner.get(&id), Some(unreachable_account.clone()));
     store.reset_counts();
     provider.counts.reset();
     assert_eq!(
