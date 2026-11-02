@@ -26428,3 +26428,79 @@ The literal focused command `LIBCLANG_PATH=/usr/lib/llvm-18/lib cargo test --loc
 The previously captured package result of 990 selected / 973 passed / 0 failed / 17 ignored remains attributed solely to source commit `1112d4b9f93a281085c10a0b4fd016f9194f0f0e`, tree `4f511db9339effbbd81ad9894c5fe28aa7cf1102`; it is not represented as a run of this corrected source. The earlier full inventory is not repeated or rewritten here.
 
 All standing posture remains unchanged: D7D14 storage component IMPLEMENTED-ISOLATED; acceptance PASS-ACCEPTED-SUBSET; §13.6 whole-lifecycle INCOMPLETE; activation DISABLED; public DevNet NO-GO; durable anti-rollback NOT-ESTABLISHED; C4/C5 OPEN; RS1 OPEN; all candidate limits UNAPPROVED. Whole native-admission and authority contracts remain DRAFT / NOT APPROVED / NOT IMPLEMENTED. No production integration, policy approval, operational-bound, authority, persistence, replay-protection, F1/F2 or release claim is made.
+
+## RUN 422 public DevNet readiness reconciliation — current source and scoped evidence
+
+The current assessment and dependency matrix are in
+`docs/devnet/QBIND_PUBLIC_DEVNET_CRITICAL_PATH.md`. This appendix records
+concise corrections and evidence attribution; it does not duplicate that matrix
+or change a readiness verdict.
+
+The old Run 417 F1/F2 source findings described then-current `auth.rs`, not the
+current implementation. At the required reconciliation baseline the verifier
+rejects empty auth, checks exact required-signer coverage, transaction version
+and reserved bytes, checked streaming digest, complete borrowed keyset framing,
+returned account ID/owner/executable status, stored version/reserved fields,
+nonzero threshold, and the individually sufficient first matching key weight.
+Threshold evidence: production source `0a163bb733f7dd160a588b5aa11cd37ad13fd143`,
+test commit `31af27f46aef427299fc83bffdfaaee7c0077753`. Transaction-format
+evidence: source/test commit `da9bb1ffac15a5d2746014dcb89f8c1d36a5ea92`, with
+corrected verifier tests at `15b53f496c8164d5bab4bff2713c44de5413e81b`. Current
+baseline `auth.rs` is blob `47b8309be4b42ab284b184f9ccf6ea12eecb1382`.
+These checks supersede “empty-auth acceptance” as a current-source claim; they
+do not close F1/F2 or establish a production transaction caller. In particular,
+unwired transaction execution is not cryptographic closure.
+
+Native key-identity characterization is isolated. The corrected alias-order,
+repeated-proof and exact-snapshot retry controls received focused 6/6 validation
+at source `52a9bcd1280c002755311c2a5d290b67691b11b1`. The historical 990-selected
+package result remains attributed to `1112d4b9f93a281085c10a0b4fd016f9194f0f0e`;
+it is not evidence for the corrected key-identity test revision. Production
+first-match behavior, canonical alias/duplicate consistency, full weighted
+authorization and approved resource limits remain unresolved. Native governance,
+validator-registration and keyset-creation refusals are unavailable-authority
+refusals, not positive program authority.
+
+D7 D14 retains its independently accepted 23-row subset and exact posture:
+`D7D14_STORAGE_COMPONENT=IMPLEMENTED-ISOLATED` and
+`D7D14_STORAGE_ACCEPTANCE=PASS-ACCEPTED-SUBSET`. Later isolated signing,
+owner/publication/recovery, QC/TC, state-context and staged-effect work remains
+scoped to its producing revisions; it does not enlarge that subset or create a
+production caller. The isolated TC/O4 composition and finishing corrections
+were tested through source `37709512d03c547d32d3494d4270bf04c2ad28d1`; explicit
+O5 and exact-TC in-process resumption were tested at
+`0553e374edf6a9221870b9c5e4f8a6689af3901f`. The latter is not process-death
+reconstruction. The earlier critical-path recommendation to implement isolated
+TC/O4 pre-effect publication is therefore superseded, not repeated. Context
+and staged-effects component results are attributed respectively to
+`34ee33fd5c96c6d78d9979293411823fa622a170` and
+`beec901e974715932f0d3faf6470189d0c562fec`.
+
+Production still supplies no Proposal/Vote authority, current-authorization
+owner, or signing journal; genesis activation stays disabled, and the safety
+backend defaults Disabled. `Required` refuses absent Proposal/Vote authority;
+Timeout/NewView context does not grant it. Fail-closed refusal is not configured
+consensus readiness. The transaction families remain distinct: native wire
+`Transaction`/`TxExecutor`, ledger `QbindTransaction` execution-adapter/nonce/VM,
+and runtime `QbindTx`/EVM. Harnesses and isolated helpers do not establish
+standalone `qbind-node` execution wiring.
+
+The operating profile remains UNRESOLVED; Profile A is not approved. Activation
+authorization, current-authority freshness, signing-history continuity,
+consensus-lock recovery, and copied-key assumptions remain distinct decisions
+or prerequisites. Do not waive applicable freshness/history on “resettable/no-
+value,” select candidate limits, or infer release-binary/network evidence from
+historical Green artifacts. M4 preparation may proceed alongside RS1 work; M6
+live identity admission remains M4-gated. The next bounded task is the owner
+trust/profile decision recorded in the current critical-path document, not
+another isolated TC/O4 implementation.
+
+Preserved: §13.6 whole-lifecycle INCOMPLETE; activation DISABLED; public DevNet
+NO-GO; durable anti-rollback NOT-ESTABLISHED; C4/C5 OPEN; RS1 OPEN; candidate
+limits UNAPPROVED; whole native-admission and authority contracts DRAFT / NOT
+APPROVED / NOT IMPLEMENTED. No F1/F2 closure, production activation, release
+approval, seed publication, or launch estimate follows.
+
+## Run 422 native-auth provider suite-ID detail
+
+The current `auth.rs` also rejects a provider whose returned `SignatureSuite::suite_id()` differs from the requested `TxAuth.suite_id` (`CryptoError("signature suite id mismatch")`). The synthetic returned-suite-ID mismatch control is attributed to the corrected transaction-format test source `15b53f496c8164d5bab4bff2713c44de5413e81b` and its source commit `da9bb1ffac15a5d2746014dcb89f8c1d36a5ea92`; it is not evidence of provider conformance or production caller integration.
