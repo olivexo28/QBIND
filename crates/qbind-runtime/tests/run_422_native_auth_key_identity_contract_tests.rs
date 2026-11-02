@@ -446,13 +446,26 @@ fn direct_semantics(
     qbind_ledger::keyset_validation::KeysetSemanticAnalysisSummary,
     KeysetSemanticAnalysisError,
 > {
+    let input_before = bytes.to_vec();
+    let store_before = f.store.snapshot();
+    let reads_before = f.store.reads.borrow().clone();
+    let responses_before = f.store.responses.borrow().clone();
+    let puts_before = f.store.puts.clone();
+    let deletes_before = f.store.deletes.clone();
     f.work.reset();
-    analyze_stored_keyset_semantics::<WORKSPACE_ENTRIES>(
+    let result = analyze_stored_keyset_semantics::<WORKSPACE_ENTRIES>(
         stored_view(bytes),
         f.provider.as_ref(),
         max_proofs,
         TEST_MAX_IDENTIFIER_BYTES,
-    )
+    );
+    assert_eq!(bytes, input_before);
+    assert_eq!(f.store.snapshot(), store_before);
+    assert_eq!(*f.store.reads.borrow(), reads_before);
+    assert_eq!(*f.store.responses.borrow(), responses_before);
+    assert_eq!(f.store.puts, puts_before);
+    assert_eq!(f.store.deletes, deletes_before);
+    result
 }
 
 fn direct_proofs<'a>(
@@ -461,14 +474,59 @@ fn direct_proofs<'a>(
     digest: &Hash32,
     proofs: &[KeysetSignatureProof<'_>],
 ) -> Result<qbind_ledger::keyset_proof::KeysetProofEvaluationSummary, KeysetProofEvaluationError> {
+    let bytes_before = bytes.to_vec();
+    let digest_before = *digest;
+    let proofs_before: Vec<_> = proofs
+        .iter()
+        .map(|proof| (proof.suite_id, proof.signature_bytes.to_vec()))
+        .collect();
+    let store_before = f.store.snapshot();
+    let reads_before = f.store.reads.borrow().clone();
+    let responses_before = f.store.responses.borrow().clone();
+    let puts_before = f.store.puts.clone();
+    let deletes_before = f.store.deletes.clone();
     f.work.reset();
-    evaluate_stored_keyset_proofs::<WORKSPACE_ENTRIES>(
+    let result = evaluate_stored_keyset_proofs::<WORKSPACE_ENTRIES>(
         stored_view(bytes),
         f.provider.as_ref(),
         digest,
         proofs,
         proof_limits(),
-    )
+    );
+    assert_eq!(bytes, bytes_before);
+    assert_eq!(*digest, digest_before);
+    assert_eq!(
+        proofs
+            .iter()
+            .map(|proof| (proof.suite_id, proof.signature_bytes.to_vec()))
+            .collect::<Vec<_>>(),
+        proofs_before
+    );
+    assert_eq!(f.store.snapshot(), store_before);
+    assert_eq!(*f.store.reads.borrow(), reads_before);
+    assert_eq!(*f.store.responses.borrow(), responses_before);
+    assert_eq!(f.store.puts, puts_before);
+    assert_eq!(f.store.deletes, deletes_before);
+    result
+}
+
+fn threshold_two_account(account: &Account) -> Account {
+    let mut changed = account.clone();
+    changed.data[4..6].copy_from_slice(&2u16.to_le_bytes());
+    changed
+}
+
+fn entry_weight_range(bytes: &[u8], target_index: usize) -> std::ops::Range<usize> {
+    let view = stored_view(bytes);
+    let mut offset = 12;
+    for (index, entry) in view.entries().enumerate() {
+        let weight = offset + 1..offset + 3;
+        if index == target_index {
+            return weight;
+        }
+        offset += 6 + usize::from(entry.pubkey_len);
+    }
+    panic!("entry index is outside the stored keyset");
 }
 
 fn assert_conflicting_isolation(f: &Fixture, bytes: &[u8], tx: &Transaction) {
@@ -498,6 +556,25 @@ fn assert_conflicting_isolation(f: &Fixture, bytes: &[u8], tx: &Transaction) {
         &[tx.auths[0].suite_id, tx.auths[0].suite_id],
         0,
     );
+}
+
+fn assert_alias_conflicting_isolation(
+    f: &Fixture,
+    bytes: &[u8],
+    digest: &Hash32,
+    proofs: &[KeysetSignatureProof<'_>],
+    encoded_suites: &[u8],
+) {
+    assert_eq!(
+        direct_semantics(f, bytes, 2),
+        Err(KeysetSemanticAnalysisError::ConflictingDuplicateWeights)
+    );
+    assert_isolated_work(f, encoded_suites, encoded_suites, encoded_suites, 0);
+    assert_eq!(
+        direct_proofs(f, bytes, digest, proofs),
+        Err(KeysetProofEvaluationError::ConflictingDuplicateWeights)
+    );
+    assert_isolated_work(f, encoded_suites, encoded_suites, encoded_suites, 0);
 }
 
 #[test]
@@ -693,40 +770,16 @@ fn conflicting_duplicate_weights_are_order_and_alias_selected_in_production_only
     let high_first = f.store.snapshot();
     assert_conflicting_isolation(&f, &high_first[&SIGNER].data, &tx);
 
-    let alias_entries = [f.key.entry(SUITE_A, 1), f.key.entry(SUITE_B, 2)];
-    f.seed_entries(1, &alias_entries);
     let tx_a = f.transaction(&[SUITE_A]);
-    assert_executor_refusal(
-        &mut f,
-        &tx_a,
-        ExecutionError::ProgramError("native keyset creation authority unavailable"),
-        &[SIGNER, TARGET],
-        &[SUITE_A],
-        1,
-    );
     let tx_b = f.transaction(&[SUITE_B]);
-    assert_executor_refusal(
-        &mut f,
-        &tx_b,
-        ExecutionError::ProgramError("native keyset creation authority unavailable"),
-        &[SIGNER, TARGET],
-        &[SUITE_B],
-        1,
-    );
-    let alias_snapshot = f.store.snapshot();
-    let alias_bytes = &alias_snapshot[&SIGNER].data;
-    assert_eq!(
-        direct_semantics(&f, alias_bytes, 2),
-        Err(KeysetSemanticAnalysisError::ConflictingDuplicateWeights)
-    );
-    assert_isolated_work(
-        &f,
-        &[SUITE_A, SUITE_B],
-        &[SUITE_A, SUITE_B],
-        &[SUITE_A, SUITE_B],
-        0,
-    );
-    let both_alias_proofs = [
+    let digest = tx_digest(&tx_a);
+    assert_eq!(digest, tx_digest(&tx_b));
+    let mut body_a = tx_a.clone();
+    body_a.auths.clear();
+    let mut body_b = tx_b.clone();
+    body_b.auths.clear();
+    assert_eq!(body_a, body_b);
+    let alias_proofs = [
         KeysetSignatureProof {
             suite_id: SUITE_A,
             signature_bytes: &tx_a.auths[0].signature,
@@ -736,78 +789,153 @@ fn conflicting_duplicate_weights_are_order_and_alias_selected_in_production_only
             signature_bytes: &tx_b.auths[0].signature,
         },
     ];
-    assert_eq!(
-        direct_proofs(&f, alias_bytes, &tx_digest(&tx_a), &both_alias_proofs),
-        Err(KeysetProofEvaluationError::ConflictingDuplicateWeights)
-    );
-    assert_isolated_work(
-        &f,
-        &[SUITE_A, SUITE_B],
-        &[SUITE_A, SUITE_B],
-        &[SUITE_A, SUITE_B],
-        0,
-    );
 
-    f.seed_entries(2, &alias_entries);
-    let tx_a = f.transaction(&[SUITE_A]);
-    assert_executor_refusal(
-        &mut f,
-        &tx_a,
-        ExecutionError::InvalidCallData("selected key weight below keyset threshold"),
-        &[SIGNER],
-        &[],
-        0,
-    );
-    let tx_b = f.transaction(&[SUITE_B]);
-    assert_executor_refusal(
-        &mut f,
-        &tx_b,
-        ExecutionError::ProgramError("native keyset creation authority unavailable"),
-        &[SIGNER, TARGET],
-        &[SUITE_B],
-        1,
-    );
-    let alias_snapshot = f.store.snapshot();
-    let alias_bytes = &alias_snapshot[&SIGNER].data;
-    assert_eq!(
-        direct_semantics(&f, alias_bytes, 2),
-        Err(KeysetSemanticAnalysisError::ConflictingDuplicateWeights)
-    );
-    assert_isolated_work(
-        &f,
-        &[SUITE_A, SUITE_B],
-        &[SUITE_A, SUITE_B],
-        &[SUITE_A, SUITE_B],
-        0,
-    );
-    let proof = [KeysetSignatureProof {
-        suite_id: SUITE_B,
-        signature_bytes: &tx_b.auths[0].signature,
-    }];
-    assert_eq!(
-        direct_proofs(&f, alias_bytes, &tx_digest(&tx_b), &proof),
-        Err(KeysetProofEvaluationError::ConflictingDuplicateWeights)
-    );
-    assert!(f.work.attempts.lock().unwrap().is_empty());
-    assert_isolated_work(
-        &f,
-        &[SUITE_A, SUITE_B],
-        &[SUITE_A, SUITE_B],
-        &[SUITE_A, SUITE_B],
-        0,
-    );
+    for (ordered_entries, encoded_suites) in [
+        (
+            vec![f.key.entry(SUITE_A, 1), f.key.entry(SUITE_B, 2)],
+            [SUITE_A, SUITE_B],
+        ),
+        (
+            vec![f.key.entry(SUITE_B, 2), f.key.entry(SUITE_A, 1)],
+            [SUITE_B, SUITE_A],
+        ),
+    ] {
+        f.seed_entries(1, &ordered_entries);
+        for (tx, suite) in [(&tx_a, SUITE_A), (&tx_b, SUITE_B)] {
+            assert_executor_refusal(
+                &mut f,
+                tx,
+                ExecutionError::ProgramError("native keyset creation authority unavailable"),
+                &[SIGNER, TARGET],
+                &[suite],
+                1,
+            );
+        }
+        let threshold_one_snapshot = f.store.snapshot();
+        let threshold_one_bytes = &threshold_one_snapshot[&SIGNER].data;
+        assert_alias_conflicting_isolation(
+            &f,
+            threshold_one_bytes,
+            &digest,
+            &alias_proofs,
+            &encoded_suites,
+        );
+
+        let threshold_two_account = threshold_two_account(&threshold_one_snapshot[&SIGNER]);
+        f.store.seed(threshold_two_account);
+        assert_executor_refusal(
+            &mut f,
+            &tx_a,
+            ExecutionError::InvalidCallData("selected key weight below keyset threshold"),
+            &[SIGNER],
+            &[],
+            0,
+        );
+        assert_executor_refusal(
+            &mut f,
+            &tx_b,
+            ExecutionError::ProgramError("native keyset creation authority unavailable"),
+            &[SIGNER, TARGET],
+            &[SUITE_B],
+            1,
+        );
+        let threshold_two_snapshot = f.store.snapshot();
+        let threshold_two_bytes = &threshold_two_snapshot[&SIGNER].data;
+        assert_alias_conflicting_isolation(
+            &f,
+            threshold_two_bytes,
+            &digest,
+            &alias_proofs,
+            &encoded_suites,
+        );
+    }
 }
 
 #[test]
 fn repeated_proofs_do_not_create_weight_for_equal_duplicate_aliases() {
     let mut f = Fixture::new();
-    let tx = f.transaction(&[SUITE_A, SUITE_B]);
     let cases = [
-        vec![f.key.entry(SUITE_A, 1), f.key.entry(SUITE_A, 1)],
-        vec![f.key.entry(SUITE_A, 1), f.key.entry(SUITE_B, 1)],
+        (
+            vec![SUITE_A, SUITE_A],
+            vec![f.key.entry(SUITE_A, 1), f.key.entry(SUITE_A, 1)],
+            vec![SUITE_A, SUITE_A],
+            4,
+        ),
+        (
+            vec![SUITE_A, SUITE_B],
+            vec![f.key.entry(SUITE_A, 1), f.key.entry(SUITE_B, 1)],
+            vec![SUITE_A, SUITE_B],
+            2,
+        ),
     ];
-    for entries in cases {
-        f.seed_entries(2, &entries);
+    for (proof_suites, entries, encoded_suites, attempt_count) in cases {
+        let tx = f.transaction(&proof_suites);
+        let proofs = [
+            KeysetSignatureProof {
+                suite_id: proof_suites[0],
+                signature_bytes: &tx.auths[0].signature,
+            },
+            KeysetSignatureProof {
+                suite_id: proof_suites[1],
+                signature_bytes: &tx.auths[1].signature,
+            },
+        ];
+        let digest = tx_digest(&tx);
+        assert!(proofs
+            .iter()
+            .zip(&tx.auths)
+            .all(|(proof, auth)| proof.suite_id == auth.suite_id
+                && proof.signature_bytes == auth.signature.as_slice()));
+        f.seed_entries(1, &entries);
+        assert_executor_refusal(
+            &mut f,
+            &tx,
+            ExecutionError::ProgramError("native keyset creation authority unavailable"),
+            &[SIGNER, SIGNER, TARGET],
+            &proof_suites,
+            2,
+        );
+        let threshold_one = f.store.snapshot();
+        let threshold_one_bytes = &threshold_one[&SIGNER].data;
+        let summary = direct_semantics(&f, threshold_one_bytes, 2)
+            .expect("one distinct identity is reachable");
+        assert_eq!(summary.distinct_canonical_identity_count, 1);
+        assert_eq!(summary.total_distinct_key_weight, 1);
+        assert_isolated_work(&f, &encoded_suites, &encoded_suites, &encoded_suites, 0);
+        let evaluated = direct_proofs(&f, threshold_one_bytes, &digest, &proofs)
+            .expect("matching repeated genuine proofs verify");
+        assert_eq!(evaluated.evaluated_proof_count, 2);
+        assert_eq!(evaluated.verified_distinct_key_count, 1);
+        assert_eq!(evaluated.verified_distinct_key_weight, 1);
+        assert_isolated_work(
+            &f,
+            &encoded_suites,
+            &encoded_suites,
+            &encoded_suites,
+            attempt_count,
+        );
+        let attempts = f.work.attempts.lock().unwrap();
+        assert_eq!(attempts.len(), attempt_count);
+        let expected_attempts: Vec<_> = proofs
+            .iter()
+            .flat_map(|proof| {
+                entries
+                    .iter()
+                    .filter(move |entry| entry.suite_id == proof.suite_id)
+                    .map(move |entry| Attempt {
+                        suite_id: proof.suite_id,
+                        key: entry.pubkey_bytes.clone(),
+                        digest,
+                        signature: proof.signature_bytes.to_vec(),
+                    })
+            })
+            .collect();
+        assert_eq!(*attempts, expected_attempts);
+        drop(attempts);
+
+        let threshold_two = threshold_two_account(&threshold_one[&SIGNER]);
+        assert_eq!(threshold_two.data.len(), threshold_one_bytes.len());
+        f.store.seed(threshold_two);
         assert_executor_refusal(
             &mut f,
             &tx,
@@ -816,42 +944,20 @@ fn repeated_proofs_do_not_create_weight_for_equal_duplicate_aliases() {
             &[],
             0,
         );
-        let snapshot = f.store.snapshot();
-        let bytes = &snapshot[&SIGNER].data;
+        let threshold_two_snapshot = f.store.snapshot();
+        let threshold_two_bytes = &threshold_two_snapshot[&SIGNER].data;
         assert_eq!(
-            direct_semantics(&f, bytes, 2),
+            direct_semantics(&f, threshold_two_bytes, 2),
             Err(KeysetSemanticAnalysisError::ThresholdUnreachable),
             "the analyzer refuses reachability before proof evaluation"
         );
-        assert_isolated_work(
-            &f,
-            &[SUITE_A, entries[1].suite_id],
-            &[SUITE_A, entries[1].suite_id],
-            &[SUITE_A, entries[1].suite_id],
-            0,
-        );
-        let proofs = [
-            KeysetSignatureProof {
-                suite_id: SUITE_A,
-                signature_bytes: &tx.auths[0].signature,
-            },
-            KeysetSignatureProof {
-                suite_id: SUITE_B,
-                signature_bytes: &tx.auths[1].signature,
-            },
-        ];
+        assert_isolated_work(&f, &encoded_suites, &encoded_suites, &encoded_suites, 0);
         assert_eq!(
-            direct_proofs(&f, bytes, &tx_digest(&tx), &proofs),
+            direct_proofs(&f, threshold_two_bytes, &digest, &proofs),
             Err(KeysetProofEvaluationError::ThresholdUnreachable)
         );
         assert!(f.work.attempts.lock().unwrap().is_empty());
-        assert_isolated_work(
-            &f,
-            &[SUITE_A, entries[1].suite_id],
-            &[SUITE_A, entries[1].suite_id],
-            &[SUITE_A, entries[1].suite_id],
-            0,
-        );
+        assert_isolated_work(&f, &encoded_suites, &encoded_suites, &encoded_suites, 0);
     }
 }
 
@@ -1084,10 +1190,23 @@ fn conflicting_account_corrected_retry_preserves_transaction_and_store() {
     let mut f = Fixture::new();
     let entries = [f.key.entry(SUITE_A, 1), f.key.entry(SUITE_B, 2)];
     f.seed_entries(1, &entries);
+    f.store.seed(Account {
+        id: [0x44; 32],
+        header: AccountHeader {
+            owner: [0x45; 32],
+            lamports: 77,
+            is_executable: true,
+            rent_epoch: 9,
+            reserved: [0xA5; 8],
+        },
+        data: vec![0xDE, 0xAD, 0xBE, 0xEF],
+    });
     let tx = f.transaction(&[SUITE_A]);
     let tx_before = tx.clone();
-    let initial_store = f.store.snapshot();
-    let rejected = initial_store[&SIGNER].data.clone();
+    let tx_signature_before = tx.auths[0].signature.clone();
+    let rejected_store = f.store.snapshot();
+    let rejected_account = rejected_store[&SIGNER].clone();
+    let rejected = rejected_account.data.clone();
     let proof = [KeysetSignatureProof {
         suite_id: SUITE_A,
         signature_bytes: &tx.auths[0].signature,
@@ -1105,11 +1224,28 @@ fn conflicting_account_corrected_retry_preserves_transaction_and_store() {
         0,
     );
 
-    let mut corrected_entries = entries.clone();
-    corrected_entries[1].weight = 1;
-    let corrected_account = keyset_account(SIGNER, 1, &corrected_entries);
-    let expected_corrected_store = HashMap::from([(SIGNER, corrected_account.clone())]);
-    f.store.accounts.insert(SIGNER, corrected_account);
+    let weight_range = entry_weight_range(&rejected_account.data, 1);
+    assert_eq!(
+        &rejected_account.data[weight_range.clone()],
+        &2u16.to_le_bytes()
+    );
+    let mut corrected_account = rejected_account.clone();
+    corrected_account.data[weight_range.clone()].copy_from_slice(&1u16.to_le_bytes());
+    assert_eq!(corrected_account.id, rejected_account.id);
+    assert_eq!(corrected_account.header, rejected_account.header);
+    assert_eq!(corrected_account.data.len(), rejected_account.data.len());
+    assert_eq!(
+        &corrected_account.data[weight_range.clone()],
+        &1u16.to_le_bytes()
+    );
+    for index in 0..rejected_account.data.len() {
+        if !weight_range.contains(&index) {
+            assert_eq!(corrected_account.data[index], rejected_account.data[index]);
+        }
+    }
+    let mut expected_corrected_store = rejected_store.clone();
+    expected_corrected_store.insert(SIGNER, corrected_account.clone());
+    f.store.seed(corrected_account);
     let corrected_store_before = f.store.snapshot();
     assert_eq!(corrected_store_before, expected_corrected_store);
     let summary = direct_semantics(&f, &corrected_store_before[&SIGNER].data, 2)
@@ -1144,6 +1280,7 @@ fn conflicting_account_corrected_retry_preserves_transaction_and_store() {
     assert_eq!(retry_attempt.key, f.key.public);
     assert_eq!(retry_attempt.digest, tx_digest(&tx));
     assert_eq!(retry_attempt.signature, tx.auths[0].signature);
+    assert_eq!(tx.auths[0].signature, tx_signature_before);
     assert_eq!(tx, tx_before);
     assert_eq!(f.store.snapshot(), corrected_store_before);
     assert!(f.store.puts.is_empty());
