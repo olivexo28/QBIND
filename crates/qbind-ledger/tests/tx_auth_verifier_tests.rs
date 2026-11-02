@@ -573,6 +573,52 @@ fn returned_account_metadata_refusals_precede_parsing_and_crypto() {
         assert_eq!(store.reported_accounts[&keyset_id], response, "{name}");
     }
 
+    // Owner mismatch precedes executable status and malformed account data.
+    // Executable status likewise precedes parsing when identity and owner match.
+    for (name, fault) in [
+        ("owner before executable and parser", 0u8),
+        ("executable before parser", 1u8),
+    ] {
+        let mut response = valid_account.clone();
+        match fault {
+            0 => {
+                response.header.owner = dummy_program_id(0xFD);
+                response.header.is_executable = true;
+            }
+            1 => response.header.is_executable = true,
+            _ => unreachable!(),
+        }
+        response.data = vec![0xFF];
+        let supplied_account = response.clone();
+        store.report_account(keyset_id, response);
+        let responses_before = store.reported_accounts.clone();
+        let store_before = store.snapshot();
+        store.reset_counts();
+        crypto.reset();
+
+        let error = verify_transaction_auth(&mut store, crypto.clone(), &tx)
+            .expect_err("metadata refusal must precede malformed-data parsing");
+        match (fault, error) {
+            (0, ExecutionError::AccountOwnerMismatch) => {}
+            (1, ExecutionError::InvalidCallData("keyset account is executable")) => {}
+            (_, other) => panic!("{name}: unexpected error {other:?}"),
+        }
+        assert_eq!(store.counts.reads.get(), 1, "{name}");
+        assert_eq!(&*store.read_ids.borrow(), &[keyset_id], "{name}");
+        assert_eq!(crypto.lookups.load(Ordering::SeqCst), 0, "{name}");
+        assert!(crypto.recorded_digests().is_empty(), "{name}");
+        assert!(crypto.recorded_public_keys().is_empty(), "{name}");
+        assert_eq!(store.counts.writes.get(), 0, "{name}");
+        assert_eq!(store.counts.deletes.get(), 0, "{name}");
+        assert_eq!(tx, tx_witness, "{name}");
+        assert_eq!(store.snapshot(), store_before, "{name}");
+        assert_eq!(store.reported_accounts, responses_before, "{name}");
+        assert_eq!(
+            store.reported_accounts[&keyset_id], supplied_account,
+            "{name}"
+        );
+    }
+
     // Combined faults remain a separate control: returned ID is checked
     // before owner and executable, even when data is malformed.
     let mut combined_fault = valid_account.clone();
