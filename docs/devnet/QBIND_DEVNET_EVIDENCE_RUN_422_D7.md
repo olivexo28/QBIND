@@ -24973,3 +24973,82 @@ Whole native-admission, governance and validator contracts remain
 `INCOMPLETE`, activation `DISABLED`, public DevNet `NO-GO`, durable anti-rollback
 `NOT-ESTABLISHED`, C4/C5 `OPEN`, RS1 `OPEN`; all candidate limits `UNAPPROVED`.
 No F1/F2 closure, production-consistency guarantee or release approval follows.
+
+## RUN 422 — Native keyset unavailable-authority refusal (implemented safeguard)
+
+### Baseline, branch and ancestry
+
+Required starting commit: `90b01cb95487e7c49f5dad39294fa3c7c4810255`; its root tree and `HEAD^{tree}` both equal required tree `3a643f824d8624cbcba43ae40076b5a6ffb2f009`. Starting worktree was clean. Origin fetch/push is `https://github.com/olivexo28/QBIND`. Branch `copilot/run-422-native-keyset-unavailable-refusal` was created at the required commit. The source/tests delivery is `92ba29ee13b2470e4b21b681aefcd8cf1ecf3264` / tree `8657372596b2d5dbeaed5954028cb6aa14642a1d`; its parent chain directly includes the required baseline. The original source/test change is commit `0b1f7e787b10e41d7c855d430d197f6009d450b7`; the following mode-only commit restores the pre-existing `100755` test-file mode.
+
+The repository is shallow (`git rev-parse --is-shallow-repository` = `true`) and `.git/shallow` names the baseline commit. The baseline commit object contains a `parent 62217a3792932db6948e602c39facade0190a180` header, but that parent object is unavailable locally. An unavailable parent object is not an absent parent header; ancestry beyond the shallow boundary is not established. Tree equality (the exact starting root tree above) and ancestry are separate observations. The prior successful characterization's recorded source identity `ce25c42e3a389608832294c29bf5d2cdc7a59a6d` / tree `6e776019580b4a0139425b65b125353cd89b01b3` is preserved as historical evidence only. Neither historical object is available locally, so this task does not claim that it is an ancestor or revalidate its source/tree correspondence. The closed historical characterization was not rerun.
+
+Baseline caller inventory found active `KeysetProgram` execution only through the runtime executor and the six allowlisted Rust files. Ledger keyset preparation/model tests and wire codec tests are separate helpers/codecs, not additional production `KeysetProgram` callers. Governance/validator refusals and contracts, auth/context/runtime/Node production code, stores, isolated helpers, crypto adapters, codecs, wire/signing formats, manifests, lockfile and features are unchanged.
+
+### Implemented gate and assertion attribution
+
+Order is preserved: execute program-ID validation; empty-call and opcode dispatch; `CreateKeysetCall::decode`; trailing-byte rejection; target `get`; exact existing-target refusal; then the unconditional private zero-argument helper returns exactly `ExecutionError::ProgramError("native keyset creation authority unavailable")`. No switch, feature, environment override, authority parameter, permissive default or bootstrap exception exists. The handler no longer copies key entries, constructs stored state, serializes it, constructs an account, or calls `put`; no unreachable success route remains.
+
+The direct-Program tests cover absent-target refusal/no mutation, fixture-seeded existing-target preservation/exact error, wrong program ID, empty/unsupported opcode, malformed/truncated and trailing framing, and competing framing-invalidity before lookup of a seeded target. They do not prove executor authentication. Nine executor scenarios use genuine ML-DSA-44 delegation and distinguish authentication failures from handler refusal: payer absent/seeded and unread, re-signed target changes, fresh retry, identical absent-target requests and same-nonce fresh targets, separately seeded existing targets, eight structurally decodable candidate variants (not semantic validation), absent signer keyset, authenticated framing, and threshold-2/threshold-1 controls. The initial threshold-2 creation attempt is asserted to refuse and leave its target absent; a separate fixture seed supplies a genuine two-key weight-1+1/threshold-2 keyset for the later first-key-only authentication observation. This is not production creation and does not mean weighted authentication was fixed.
+
+Measured refusal paths compare complete store snapshots, transaction values and encoded bytes, require exact errors and observe reads with zero puts/deletes. Snapshot reads bypass trace instrumentation. BlockExecutor retains ordered processing and the exact malformed-validator error; the sequence is missing signer coverage, fully authenticated create refusal, then `AccountNotFound` for the absent would-be signer, with no intermediate seed and no store change. Node tests retain outer block outcomes, consensus decision, actual full proposal/payload bytes, tx-count and malformed/trailing blob controls. Node's accept-all consensus suite is structural only; transaction authentication uses genuine ML-DSA-44. No real consensus-signature, deployed-node or production-reachability evidence is claimed.
+
+### Required final-source validation
+
+All commands below were run after tested-source commit `92ba29ee13b2470e4b21b681aefcd8cf1ecf3264`; they select only committed source/tests. Per-target results are selected / passed / failed / ignored. The focused selections overlap the complete runtime/system package command and are not added a second time to the unique aggregate.
+
+```bash
+LIBCLANG_PATH=/usr/lib/llvm-18/lib cargo test --locked -p qbind-runtime --test run_422_native_keyset_create_authority_contract_tests -- --nocapture --test-threads=1
+
+LIBCLANG_PATH=/usr/lib/llvm-18/lib cargo test --locked -p qbind-system --test keyset_program_tests -- --nocapture
+
+LIBCLANG_PATH=/usr/lib/llvm-18/lib cargo test --locked -p qbind-runtime --test tx_executor_tests --test block_executor_tests --test run_422_native_governance_authority_contract_tests --test run_422_native_validator_authority_contract_tests -- --nocapture
+
+LIBCLANG_PATH=/usr/lib/llvm-18/lib cargo test --locked -p qbind-node --test block_apply_tests -- --nocapture
+
+LIBCLANG_PATH=/usr/lib/llvm-18/lib cargo test --locked -p qbind-runtime -p qbind-system
+
+LIBCLANG_PATH=/usr/lib/llvm-18/lib cargo check --locked -p qbind-node
+
+rustfmt --check --edition 2021 \
+  crates/qbind-system/src/keyset_program.rs \
+  crates/qbind-system/tests/keyset_program_tests.rs \
+  crates/qbind-runtime/tests/run_422_native_keyset_create_authority_contract_tests.rs \
+  crates/qbind-runtime/tests/tx_executor_tests.rs \
+  crates/qbind-runtime/tests/block_executor_tests.rs \
+  crates/qbind-node/tests/block_apply_tests.rs
+
+git -c core.whitespace=cr-at-eol diff --check
+
+git -c core.whitespace=cr-at-eol diff --check 90b01cb95487e7c49f5dad39294fa3c7c4810255 HEAD
+```
+
+| Required test target | Selected | Passed | Failed | Ignored | Exit |
+|---|---:|---:|---:|---:|---:|
+| `run_422_native_keyset_create_authority_contract_tests` | 9 | 9 | 0 | 0 | 0 |
+| `keyset_program_tests` | 3 | 3 | 0 | 0 | 0 |
+| `tx_executor_tests` + `block_executor_tests` + governance + validator contracts | 30 | 30 | 0 | 0 | 0 |
+| Node `block_apply_tests` | 6 | 6 | 0 | 0 | 0 |
+| Complete `qbind-runtime` + `qbind-system` package tests | 151 | 150 | 0 | 1 | 0 |
+| Unique aggregate (package tests plus distinct Node target; focused overlaps deduplicated) | 157 | 156 | 0 | 1 | — |
+
+`cargo check --locked -p qbind-node` exited 0 and is compilation only, not a test result. It emitted existing dead-code warnings from consensus/node code. `rustfmt --check` and both CR-at-EOL whitespace checks exited 0. No selected test failed.
+
+### Preliminary failures and environment preparation (not part of final result counts)
+
+The first exact focused runtime attempt exited 101 during `zstd-sys`/bindgen because `/usr/lib/llvm-18/lib` initially lacked `libclang.so`; it selected zero tests. The directory had `libclang-cpp` only. `apt-get update -qq` exited 0 with a DNS warning for the unrelated Google Chrome index; `apt-get install -y -qq libclang-18-dev` exited 0 and supplied the missing library. No repository manifest or lockfile changed. The required runtime target then passed before commit.
+
+Two pre-final attempts at the grouped runtime test command exposed test-only imports accidentally removed during migration (`KeysetAccount` in `tx_executor_tests.rs`, then in `block_executor_tests.rs`); both compiler failures selected zero tests. The imports were restored, the grouped command passed, and all required commands were rerun successfully on the tested-source commit above. These preliminary failures are not counted as failed selected tests.
+
+The first append-only evidence write detected the D7 CRLF/no-final-newline convention after the two LF documents had been appended. Its stray terminal CRLF was removed before proceeding; all four original byte prefixes remained intact and the final EOL/EOF checks passed.
+
+### Scope, compatibility, resource and preserved posture
+
+The exact allowlist is six Rust paths above plus the four append-only contracts/evidence documents. All non-allowlisted tracked paths remain unchanged. The native safeguard intentionally refuses every formerly successful valid absent-target creation. It does not approve positive creator authority or namespace policy, implement weighted authentication or candidate semantic admission, or define payer/funding/fee/nonce/replay policy or persistent atomic publication. Existing authentication preimage work, signer reads/owned decoding/verification, create-call decoder allocations and target lookup remain. No allocation-free path, new memory ceiling, bounded backend guarantee, or zero-read claim is made.
+
+This is not activation: whole native-admission/keyset/governance/validator contracts remain `DRAFT / NOT APPROVED / NOT IMPLEMENTED`; `D7D14_STORAGE_COMPONENT=IMPLEMENTED-ISOLATED`; `D7D14_STORAGE_ACCEPTANCE=PASS-ACCEPTED-SUBSET`; §13.6 whole-lifecycle `INCOMPLETE`; activation `DISABLED`; public DevNet `NO-GO`; durable anti-rollback `NOT-ESTABLISHED`; C4/C5 `OPEN`; RS1 `OPEN`; all candidate limits `UNAPPROVED`. No F1/F2 closure, production consistency, deployed-path readiness or release approval follows.
+
+### Append-only byte integrity
+
+At the required baseline all four documents were `100644`, LF except the D7 evidence file (CRLF). The keyset authority contract and native-admission contract ended with LF; D7 evidence and contradiction log had no terminal newline. Exact original byte lengths and SHA-256 values were: keyset authority contract 20,434 / `44535d321da0828cc257f7e6e079aa76721886d4870a7ac6dc59c484beec033c`; native admission contract 84,533 / `fcd96a58ff1b6d6e87c854339cc187c9e3284b7b71102fe320a4335eb6b6e79a`; D7 evidence 2,704,573 / `be05074807704cac7eecbfa9aef2958511e67073fb764fb28745aef07f94bedc`; contradiction log 2,683,426 / `33f6d3746b4d3a5c4fcd3d5c0e44b3b7a6c0b0d689aedda213206697847d3f19`. Every complete starting document remains an exact byte prefix; appended sections continue each file's EOL style and preserve its terminal-newline convention. Final prefix checks verified those exact lengths/hashes. The exact ten-path old/new mode/blob manifest and final commit/tree are recorded in the delivery handoff; the D7 document's own resulting blob is necessarily reported outside its self-referential content.
+
+Final EOL/EOF checks: keyset authority contract 25,779 bytes / LF / final LF; native-admission contract 86,939 bytes / LF / final LF; D7 evidence 2,716,014 bytes / CRLF / no final newline; contradiction log 2,685,606 bytes / LF / no final newline. The six Rust path mode/blob tuples in the final tree equal the tested-source commit exactly; the evidence commit changes only these four documents.

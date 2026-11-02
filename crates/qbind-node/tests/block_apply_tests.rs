@@ -11,7 +11,6 @@ use qbind_crypto::{
 };
 use qbind_ledger::{Account, AccountStore, ExecutionError, InMemoryAccountStore};
 use qbind_node::{Node, NodeError};
-use qbind_serde::StateDecode;
 use qbind_system::keyset_program::KEYSET_PROGRAM_ID;
 use qbind_types::{AccountId, Hash32, KeysetAccount, KeysetEntry};
 use qbind_wire::consensus::{BlockHeader, BlockProposal};
@@ -284,30 +283,41 @@ fn build_proposal_with_txs(txs: &[Transaction]) -> BlockProposal {
 }
 
 #[test]
-fn node_applies_block_and_executes_transactions() {
+fn node_returns_block_outcome_when_authenticated_native_creation_refuses() {
     let vs = small_validator_set();
     let auth = AuthFixture::new();
     let crypto = test_crypto();
     let cfg = BlockVerifyConfig { max_tx_count: 1024 };
     let hs = HotStuffState::new_at_height(10);
 
-    let mut node: Node<InMemoryAccountStore> = Node::new(vs, hs, cfg, crypto);
+    let mut node: Node<WitnessStore> = Node::new(vs, hs, cfg, crypto);
 
-    let mut store = InMemoryAccountStore::new();
+    let mut store = WitnessStore::default();
     auth.seed(&mut store);
 
     let keyset_id = dummy_account_id(0xEE);
     let tx = build_keyset_create_tx(keyset_id, &auth);
     let proposal = build_proposal_with_txs(&[tx]);
+    let proposal_witness = proposal.clone();
+    let before = store.accounts.clone();
+    store.mutations = 0;
 
     let outcome = node
         .apply_block(&mut store, &proposal)
         .expect("block apply should succeed");
 
+    assert_eq!(proposal, proposal_witness);
     assert_eq!(outcome.height, 10);
     assert_eq!(outcome.round, 0);
     assert_eq!(outcome.block_id, [0xAB; 32]);
-    assert!(outcome.exec_result.all_succeeded());
+    assert_eq!(outcome.exec_result.tx_results.len(), 1);
+    assert!(matches!(
+        outcome.exec_result.tx_results[0],
+        qbind_runtime::TxApplyResult::Failed(ExecutionError::ProgramError(
+            "native keyset creation authority unavailable"
+        ))
+    ));
+    assert!(!outcome.exec_result.all_succeeded());
     assert!(matches!(
         outcome.vote_decision,
         VoteDecision::ShouldVote {
@@ -316,14 +326,9 @@ fn node_applies_block_and_executes_transactions() {
         }
     ));
 
-    // Check that the keyset account was created.
-    let stored = store.get(&keyset_id).expect("keyset account should exist");
-    assert_eq!(stored.header.owner, KEYSET_PROGRAM_ID);
-
-    let mut slice: &[u8] = &stored.data;
-    let decoded = KeysetAccount::decode_state(&mut slice).expect("decode KeysetAccount");
-    assert!(slice.is_empty());
-    assert_eq!(decoded.entries.len(), 1);
+    assert_eq!(store.accounts, before);
+    assert_eq!(store.mutations, 0);
+    assert!(!store.accounts.contains_key(&keyset_id));
 }
 
 #[test]
@@ -367,7 +372,7 @@ fn node_returns_block_outcome_when_native_transaction_auth_fails() {
 }
 
 #[test]
-fn node_missing_signer_preserves_actual_proposal_and_sequential_state() {
+fn node_missing_coverage_creation_and_would_be_signer_fail_in_order() {
     let primary = AuthFixture::new();
     let second = AuthFixture::new_at(dummy_account_id(0xA1));
     let mut store = WitnessStore::default();
@@ -410,18 +415,6 @@ fn node_missing_signer_preserves_actual_proposal_and_sequential_state() {
     later.accounts[0].account_id = target;
     let digest = qbind_hash::tx::tx_digest(&later);
     later.auths[0].signature = ml_dsa_44_sign_digest(&primary.secret_key, &digest).unwrap();
-    let mut expected = WitnessStore {
-        accounts: initial,
-        mutations: 0,
-    };
-    let positive = build_proposal_with_txs(&[signed.clone(), later.clone()]);
-    let positive_witness = positive.clone();
-    assert!(witness_node()
-        .apply_block(&mut expected, &positive)
-        .expect("later signature authenticates with newly created keyset")
-        .exec_result
-        .all_succeeded());
-    assert_eq!(positive, positive_witness);
     let proposal = build_proposal_with_txs(&[partial, signed, later]);
     let witness = proposal.clone();
     let outcome = witness_node()
@@ -441,18 +434,17 @@ fn node_missing_signer_preserves_actual_proposal_and_sequential_state() {
     ));
     assert!(matches!(
         outcome.exec_result.tx_results[1],
-        qbind_runtime::TxApplyResult::Success
+        qbind_runtime::TxApplyResult::Failed(ExecutionError::ProgramError(
+            "native keyset creation authority unavailable"
+        ))
     ));
     assert!(matches!(
         outcome.exec_result.tx_results[2],
-        qbind_runtime::TxApplyResult::Success
+        qbind_runtime::TxApplyResult::Failed(ExecutionError::AccountNotFound)
     ));
     assert!(!outcome.exec_result.all_succeeded());
-    assert!(
-        store.accounts == expected.accounts,
-        "complete sequential state differs"
-    );
-    assert_eq!(store.mutations, 2);
+    assert_eq!(store.accounts, initial);
+    assert_eq!(store.mutations, 0);
 }
 
 #[test]

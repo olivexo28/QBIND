@@ -1,6 +1,5 @@
-use qbind_ledger::{Account, AccountStore, ExecutionContext, ExecutionError, Program};
-use qbind_serde::StateEncode;
-use qbind_types::{KeysetAccount, KeysetEntry, ProgramId};
+use qbind_ledger::{AccountStore, ExecutionContext, ExecutionError, Program};
+use qbind_types::ProgramId;
 use qbind_wire::io::WireDecode;
 use qbind_wire::keyset::{CreateKeysetCall, OP_KEYSET_CREATE};
 use qbind_wire::tx::Transaction;
@@ -45,6 +44,10 @@ impl Default for KeysetProgram {
 
 fn decode_err(label: &'static str) -> ExecutionError {
     ExecutionError::InvalidCallData(label)
+}
+
+fn unavailable_authority() -> ExecutionError {
+    ExecutionError::ProgramError("native keyset creation authority unavailable")
 }
 
 impl<S: AccountStore> Program<S> for KeysetProgram {
@@ -95,36 +98,6 @@ impl KeysetProgram {
             ));
         }
 
-        // Build KeysetAccount from wire entries.
-        let entries: Vec<KeysetEntry> = call
-            .entries
-            .iter()
-            .map(|e| KeysetEntry {
-                suite_id: e.suite_id,
-                weight: e.weight,
-                reserved0: [0u8; 1],
-                pubkey_len: e.pubkey_bytes.len() as u16,
-                pubkey_bytes: e.pubkey_bytes.clone(),
-            })
-            .collect();
-
-        // Optionally, we could check that sum(weights) >= threshold here.
-        let account_state = KeysetAccount {
-            version: call.version,
-            reserved0: [0u8; 3],
-            threshold: call.threshold,
-            entry_count: entries.len() as u16,
-            reserved1: [0u8; 4],
-            entries,
-        };
-
-        // Encode and store.
-        let mut data = Vec::new();
-        account_state.encode_state(&mut data);
-
-        let account = Account::new(call.target_id, KEYSET_PROGRAM_ID, 0, data);
-        ctx.store.put(account)?;
-
-        Ok(())
+        Err(unavailable_authority())
     }
 }

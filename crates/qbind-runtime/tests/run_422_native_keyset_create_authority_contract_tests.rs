@@ -1,4 +1,4 @@
-//! Baseline characterization, not an approved creation or signer policy.
+//! Unavailable-authority refusal controls, not an approved creation or signer policy.
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -154,8 +154,7 @@ struct Fixture {
     executor: TxExecutor<WitnessStore>,
 }
 
-enum Outcome<'a> {
-    Created(&'a CreateKeysetCall),
+enum Outcome {
     Refused(ExecutionError),
 }
 
@@ -165,7 +164,11 @@ impl Fixture {
         let candidate = Key::genuine();
         assert_ne!(signer.public, candidate.public);
         let mut store = WitnessStore::default();
-        store.seed(expected_account(&call(SIGNER, 1, vec![signer.entry(1)])));
+        store.seed(fixture_keyset_account(&call(
+            SIGNER,
+            1,
+            vec![signer.entry(1)],
+        )));
         let mut sentinel = Account::new(SENTINEL, [0x66; 32], 987_654, vec![9, 8, 7]);
         sentinel.header.is_executable = true;
         sentinel.header.rent_epoch = 123;
@@ -201,7 +204,7 @@ impl Fixture {
     fn invoke(
         &mut self,
         tx: &Transaction,
-        outcome: Outcome<'_>,
+        outcome: Outcome,
         reads: &[AccountId],
         verification_count: usize,
     ) {
@@ -241,21 +244,20 @@ impl Fixture {
             expected_verifications
         );
         assert_eq!(self.work.descriptors.load(Ordering::SeqCst), 0);
-        match outcome {
-            Outcome::Created(call) => {
-                result.expect("baseline create succeeds");
-                assert_eq!(self.store.puts, [call.target_id]);
-                let mut expected = before;
-                assert!(expected
-                    .insert(call.target_id, expected_account(call))
-                    .is_none());
-                assert_eq!(self.store.snapshot(), expected);
-            }
-            Outcome::Refused(expected) => {
-                assert_error(result.expect_err("baseline refusal"), expected);
-                assert!(self.store.puts.is_empty());
-                assert_eq!(self.store.snapshot(), before);
-            }
+        let Outcome::Refused(expected) = outcome;
+        assert_error(
+            result.expect_err("native keyset creation must refuse"),
+            expected,
+        );
+        assert!(self.store.puts.is_empty());
+        assert_eq!(self.store.snapshot(), before);
+        if let Some(target) = tx.call_data.get(2..34) {
+            let mut target_id = [0; 32];
+            target_id.copy_from_slice(target);
+            assert_eq!(
+                self.store.snapshot().contains_key(&target_id),
+                before.contains_key(&target_id)
+            );
         }
         assert_eq!(*tx, original_tx);
         assert_eq!(wire_bytes(tx), original_wire);
@@ -271,8 +273,8 @@ fn call(target: AccountId, threshold: u16, entries: Vec<WireKeyEntry>) -> Create
     }
 }
 
-// Independent byte oracle for the complete stored header and state encoding.
-fn expected_account(call: &CreateKeysetCall) -> Account {
+// Fixture-only account construction for pre-existing signer state.
+fn fixture_keyset_account(call: &CreateKeysetCall) -> Account {
     let count = u16::try_from(call.entries.len()).unwrap();
     let mut data = vec![call.version, 0, 0, 0];
     data.extend_from_slice(&call.threshold.to_le_bytes());
@@ -376,7 +378,7 @@ fn assert_error(actual: ExecutionError, expected: ExecutionError) {
 }
 
 #[test]
-fn authenticated_creation_control() {
+fn authenticated_creation_reaches_unavailable_authority() {
     let mut f = Fixture::new();
     let call = f.ordinary_call(TARGET);
     let tx = f.signed(&call);
@@ -388,7 +390,14 @@ fn authenticated_creation_control() {
     assert!(MlDsa44SignatureSuite::new(SUITE)
         .verify(&f.candidate.public, &tx_digest(&tx), signature)
         .is_err());
-    f.invoke(&tx, Outcome::Created(&call), &[SIGNER, TARGET], 1);
+    f.invoke(
+        &tx,
+        Outcome::Refused(ExecutionError::ProgramError(
+            "native keyset creation authority unavailable",
+        )),
+        &[SIGNER, TARGET],
+        1,
+    );
 }
 
 #[test]
@@ -406,7 +415,14 @@ fn payer_is_signed_data_not_independent_authority_or_fee_payment() {
         assert_eq!(tx.payer, PAYER);
         assert_ne!(tx.payer, SIGNER);
         assert!(tx.accounts.iter().all(|meta| meta.account_id != PAYER));
-        f.invoke(&tx, Outcome::Created(&call), &[SIGNER, TARGET], 1);
+        f.invoke(
+            &tx,
+            Outcome::Refused(ExecutionError::ProgramError(
+                "native keyset creation authority unavailable",
+            )),
+            &[SIGNER, TARGET],
+            1,
+        );
     }
 }
 
@@ -436,7 +452,9 @@ fn signed_target_binding_and_resigned_fresh_state() {
     assert_eq!(changed.accounts, original_tx.accounts);
     f.invoke(
         &changed,
-        Outcome::Created(&changed_call),
+        Outcome::Refused(ExecutionError::ProgramError(
+            "native keyset creation authority unavailable",
+        )),
         &[SIGNER, FRESH],
         1,
     );
@@ -471,29 +489,47 @@ fn authentication_refusals_then_valid_retry() {
             1,
         );
     }
-    f.invoke(&valid, Outcome::Created(&call), &[SIGNER, TARGET], 1);
-}
-
-#[test]
-fn existing_targets_exact_replay_and_same_nonce_fresh_target() {
-    let mut f = Fixture::new();
-    let call = f.ordinary_call(TARGET);
-    let tx = f.signed(&call);
-    f.invoke(&tx, Outcome::Created(&call), &[SIGNER, TARGET], 1);
     f.invoke(
-        &tx,
+        &valid,
         Outcome::Refused(ExecutionError::ProgramError(
-            "keyset account already exists",
+            "native keyset creation authority unavailable",
         )),
         &[SIGNER, TARGET],
         1,
     );
+}
+
+#[test]
+fn repeated_absent_target_and_same_nonce_requests_refuse_without_writes() {
+    let mut f = Fixture::new();
+    let call = f.ordinary_call(TARGET);
+    let tx = f.signed(&call);
+    f.invoke(
+        &tx,
+        Outcome::Refused(ExecutionError::ProgramError(
+            "native keyset creation authority unavailable",
+        )),
+        &[SIGNER, TARGET],
+        1,
+    );
+    assert!(!f.store.snapshot().contains_key(&TARGET));
+    f.invoke(
+        &tx,
+        Outcome::Refused(ExecutionError::ProgramError(
+            "native keyset creation authority unavailable",
+        )),
+        &[SIGNER, TARGET],
+        1,
+    );
+    assert!(!f.store.snapshot().contains_key(&TARGET));
     let fresh_call = f.ordinary_call(FRESH);
     let fresh_tx = f.signed(&fresh_call);
     assert_eq!(fresh_tx.nonce, tx.nonce);
     f.invoke(
         &fresh_tx,
-        Outcome::Created(&fresh_call),
+        Outcome::Refused(ExecutionError::ProgramError(
+            "native keyset creation authority unavailable",
+        )),
         &[SIGNER, FRESH],
         1,
     );
@@ -516,7 +552,7 @@ fn existing_targets_exact_replay_and_same_nonce_fresh_target() {
 }
 
 #[test]
-fn structurally_decodable_semantic_gaps_store_exact_candidate_claims() {
+fn structurally_decodable_candidate_variants_all_reach_unavailable_authority() {
     let mut f = Fixture::new();
     let duplicate = f.candidate.entry(1);
     let mut inconsistent = duplicate.clone();
@@ -555,13 +591,20 @@ fn structurally_decodable_semantic_gaps_store_exact_candidate_claims() {
         let target = [0x80 + u8::try_from(index).unwrap(); 32];
         let call = call(target, threshold, entries);
         let tx = f.signed(&call);
-        println!("semantic characterization: {label}");
-        f.invoke(&tx, Outcome::Created(&call), &[SIGNER, target], 1);
+        println!("structural candidate case: {label}");
+        f.invoke(
+            &tx,
+            Outcome::Refused(ExecutionError::ProgramError(
+                "native keyset creation authority unavailable",
+            )),
+            &[SIGNER, target],
+            1,
+        );
     }
 }
 
 #[test]
-fn actual_subsequent_use_ignores_threshold_two_with_threshold_one_control() {
+fn preseeded_threshold_two_and_threshold_one_controls_reach_unavailable_authority() {
     for threshold in [2, 1] {
         let mut f = Fixture::new();
         let second = Key::genuine();
@@ -571,23 +614,38 @@ fn actual_subsequent_use_ignores_threshold_two_with_threshold_one_control() {
         } else {
             vec![f.candidate.entry(1)]
         };
-        let created_signer = call(TARGET, threshold, entries);
-        let create_tx = f.signed(&created_signer);
+        let threshold_call = call(TARGET, threshold, entries);
+        let initial_attempt = f.signed(&threshold_call);
         f.invoke(
-            &create_tx,
-            Outcome::Created(&created_signer),
+            &initial_attempt,
+            Outcome::Refused(ExecutionError::ProgramError(
+                "native keyset creation authority unavailable",
+            )),
             &[SIGNER, TARGET],
             1,
         );
+        assert!(!f.store.snapshot().contains_key(&TARGET));
+        // Fixture setup only: the production create refusal above left TARGET absent.
+        f.store.seed(fixture_keyset_account(&threshold_call));
         let next = call(FRESH, 1, vec![second.entry(1)]);
-        let mut use_tx = transaction(&next);
-        use_tx.accounts[0].account_id = TARGET;
-        sign(&mut use_tx, &f.candidate);
-        assert_eq!(use_tx.auths.len(), 1);
-        assert_eq!(created_signer.entries[0].weight, 1);
-        assert_eq!(created_signer.threshold, threshold);
-        assert_ne!(use_tx.auths[0].signature, create_tx.auths[0].signature);
-        f.invoke(&use_tx, Outcome::Created(&next), &[TARGET, FRESH], 1);
+        let mut later_tx = transaction(&next);
+        later_tx.accounts[0].account_id = TARGET;
+        sign(&mut later_tx, &f.candidate);
+        assert_eq!(later_tx.auths.len(), 1);
+        assert_eq!(threshold_call.entries[0].weight, 1);
+        assert_eq!(threshold_call.threshold, threshold);
+        assert_ne!(
+            later_tx.auths[0].signature,
+            initial_attempt.auths[0].signature
+        );
+        f.invoke(
+            &later_tx,
+            Outcome::Refused(ExecutionError::ProgramError(
+                "native keyset creation authority unavailable",
+            )),
+            &[TARGET, FRESH],
+            1,
+        );
     }
 }
 

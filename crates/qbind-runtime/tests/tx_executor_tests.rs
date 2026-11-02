@@ -4,7 +4,6 @@ use std::sync::Arc;
 use qbind_crypto::{ml_dsa_44_sign_digest, MlDsa44SignatureSuite, StaticCryptoProvider};
 use qbind_ledger::{Account, AccountStore, ExecutionError, InMemoryAccountStore};
 use qbind_runtime::TxExecutor;
-use qbind_serde::StateDecode;
 use qbind_system::keyset_program::KEYSET_PROGRAM_ID;
 use qbind_types::{AccountId, KeysetAccount, KeysetEntry, ProgramId};
 use qbind_wire::io::WireEncode;
@@ -174,34 +173,29 @@ fn build_keyset_create_tx(target_id: AccountId, auth: &AuthFixture) -> Transacti
 }
 
 #[test]
-fn executor_runs_keyset_create_end_to_end() {
-    let mut store = InMemoryAccountStore::new();
+fn executor_authenticated_keyset_create_refuses_without_mutation() {
+    let mut store = WitnessStore::default();
     let auth = AuthFixture::new(&mut store);
     let crypto = auth.crypto();
-    let executor: TxExecutor<InMemoryAccountStore> = TxExecutor::new();
+    let executor: TxExecutor<WitnessStore> = TxExecutor::new();
 
     let keyset_id = dummy_account_id(0xEE);
     let tx = build_keyset_create_tx(keyset_id, &auth);
+    let tx_witness = tx.clone();
+    let before = store.accounts.clone();
+    store.mutations = 0;
     assert_ne!(keyset_id, AUTH_KEYSET_ID);
 
-    executor
-        .execute_transaction(&mut store, crypto, &tx)
-        .expect("execute_transaction should succeed");
-
-    // Check that the keyset account now exists and decodes correctly.
-    let stored = store.get(&keyset_id).expect("keyset account should exist");
-    assert_eq!(stored.id, keyset_id);
-    assert_eq!(stored.header.owner, KEYSET_PROGRAM_ID);
-
-    let mut slice: &[u8] = &stored.data;
-    let decoded = KeysetAccount::decode_state(&mut slice).expect("decode keyset account");
-    assert!(slice.is_empty());
-
-    assert_eq!(decoded.threshold, 50);
-    assert_eq!(decoded.entries.len(), 1);
-    assert_eq!(decoded.entries[0].suite_id, AUTH_SUITE_ID);
-    assert_eq!(decoded.entries[0].weight, 100);
-    assert_eq!(decoded.entries[0].pubkey_bytes, auth.public_key);
+    assert!(matches!(
+        executor.execute_transaction(&mut store, crypto, &tx),
+        Err(ExecutionError::ProgramError(
+            "native keyset creation authority unavailable"
+        ))
+    ));
+    assert_eq!(tx, tx_witness);
+    assert_eq!(store.accounts, before);
+    assert_eq!(store.mutations, 0);
+    assert!(!store.accounts.contains_key(&keyset_id));
 }
 
 #[test]
@@ -291,9 +285,13 @@ fn executor_refuses_nonempty_missing_signer_without_any_program_mutation() {
     assert_eq!(partial, witness);
     assert!(store.accounts == state, "complete store changed");
     assert_eq!(store.mutations, 0, "program must not mutate");
-    executor
-        .execute_transaction(&mut store, primary.crypto(), &signed)
-        .expect("both genuine required signatures permit native execution");
-    assert!(store.get(&target).is_some());
-    assert_eq!(store.mutations, 1);
+    assert!(matches!(
+        executor.execute_transaction(&mut store, primary.crypto(), &signed),
+        Err(ExecutionError::ProgramError(
+            "native keyset creation authority unavailable"
+        ))
+    ));
+    assert_eq!(signed, restored);
+    assert_eq!(store.accounts, state);
+    assert_eq!(store.mutations, 0);
 }
