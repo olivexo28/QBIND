@@ -1,3 +1,211 @@
+<!-- A45 PRODUCTION CONSENSUS INGRESS: BUFFER OWNERSHIP / QUEUE LIMITS / BACKPRESSURE LAYER (internal v1.125) — prepended to the preserved v1.124 input below -->
+# QBIND Security Findings Register
+
+> **Layer A45 — production consensus ingress: buffer ownership, queue limits, and backpressure
+> (internal v1.125).** Third-party audit/reporting only; no repository code fixed or implemented; A46
+> not started. Scope **Public DevNet**.
+> **Audited code baseline (unchanged, pinned):** HEAD `18d71a549d868ed33d352e9fc70a9d060f75e03b` /
+> tree `5b6c543435ac017dd8372c93f48be397899db14a` / origin `https://github.com/olivexo28/QBIND.git`.
+> Runtime remains **UNEXECUTED**; **C5** remains **OPEN** against its production cryptographic
+> custody / signing-lifecycle criteria. All obligation identities, finding IDs, aliases, and
+> dispositions preserved; no global index rewrite. **No plan-file was written this pass.**
+
+## Input provenance and baseline
+
+**Input: the retained, previously delivered v1.124 master** — actual bytes match the expected
+canonical input exactly: **5,269,716 bytes**, SHA-256
+`ce66155f70d7383f1da2c263787546ce9a2eb28ea343f7587fbd495a9c23b678`, all six embedded archives
+verified, A44 present, A45 absent, **0 CRLF**. The copy re-supplied this turn was independently
+confirmed byte-identical. **CRLF→LF recovery not exercised** (no exact-match failure). The GitHub
+delivery copy (`…/cb068dd5…/Audit/…`, 5,296,412 bytes, SHA-256 `31e8f53f…`, 26,696 CRLF) is a
+**CRLF delivery artifact, not canonical LF bytes**, and was not used. **Source-access:** local
+read-only of the retained scratch master under `/tmp`; delivery commit `cb068dd5…` is a **delivery
+location only, not the code-audit baseline**; no checkout reset/switch/merge.
+
+## Carry-forward correction ledger (A44)
+
+- **A44-C1 (binding gate):** production P2P supplies **`Some(binding_gate)`**; the `None` (no-gate)
+  branch is **test-only**. Under the selected binary's `Required` policy, engine entry for a decoded
+  proposal remains rejected (A44 gate 5); this rejection is **not** generalized to the separate
+  **`LocalFixtureUnsigned`** library/test passthrough.
+- **A44-C2 (metric order):** `inc_inbound_proposal` runs **before** `BlockProposal::decode`
+  (`binary_consensus_loop.rs:6179` precedes `:6192`); a rejection still performs counter/logging work.
+- **A44-C3 (framing):** count signature-length framing **once**. If `H` includes all fixed framing,
+  use `P = H + Q + 4N + B + S + R`, with `R ≥ 0` for **unconsumed trailing input**; successful
+  proposal decoding does not itself assert `R = 0`.
+
+A44's bounded post-decode ownership/rejection question remains complete and is not repeated.
+
+## Source question
+
+For completed production P2P sessions carrying structurally valid `ConsensusNetMsg::Proposal`
+messages: **which buffers, channels, and tasks retain data before `handle_inbound_consensus_msg`
+receives it, and what happens when the downstream consumer does not drain promptly?** Trace limited to
+the production path from an established transport's receive/framing/decryption through secure-channel
+delivery, P2P dispatch, and consensus forwarding to `inbound_rx.recv()`. Completed
+handshake/admission, decoder semantics, and A44's handler result are reused boundaries.
+
+## The production ingress chain (constructors + callers)
+
+`TCP socket` → **reader_worker** (`secure_channel.rs:649`, in `spawn_blocking`): `recv_app()` reads a
+ciphertext frame and ChaCha20-Poly1305-decrypts it to an owned `Vec<u8>`, then
+**`tx.blocking_send(Ok(data))`** (`:669`) into the **per-connection decrypted-frame channel**
+`read_tx`/`read_rx` = `mpsc::channel::<Result<Vec<u8>,ChannelError>>(32)` (`:625`/`:770`, capacity
+**32**) → **`read_loop`** (`p2p_tcp.rs:1448`, async, one per connection): `channel.recv().await`
+(`SecureChannelAsync::recv`, `:1468`) → `decode_frame(&frame_bytes)` (outer `P2pMessage` bincode
+decode) → optional per-peer rate limiter (Run-369, drop-over-budget, `:1504–1509`) →
+`InboundP2pEnvelope::new(origin, msg)` (`:1516`) → **`inbound_tx.send(envelope).await`** (`:1517`,
+**awaited**) into **Queue A** = `mpsc::channel::<InboundP2pEnvelope>(256)` (`p2p_tcp.rs:593`, capacity
+**256**, `inbound_tx` cloned per connection → **shared, many producers**) → **`P2pInboundDemuxer::run`**
+(`p2p_inbound.rs:360`, single task): `receiver.recv().await` (`:362`) → `handle_envelope` →
+`P2pMessage::Consensus` → `consensus_handler.handle_consensus_msg_from(origin, net_msg)` (`:385`) →
+**`ChannelConsensusHandler`**: **`self.sender.try_send(InboundConsensusEnvelope::new(origin, msg))`**
+(`:513`, **non-blocking**) into **Queue B** = `ChannelConsensusHandler::new(256)` →
+`mpsc::channel(256)` (`main.rs:6177`, capacity **256**) → **consensus loop**: `inbound_rx.recv().await`
+(`binary_consensus_loop.rs:3128`) → `handle_inbound_consensus_msg` (A44 boundary). Demuxer wiring:
+`P2pInboundDemuxer::new(inbound_rx, consensus_handler, …)` (`p2p_node_builder.rs:1810`); the
+consensus handler is the `ChannelConsensusHandler(256)` and `consensus_inbound_rx` is threaded into the
+loop (`main.rs:6173–6177`). The Run-035 `sender_clone()` (`main.rs:6186`) is **dev/test-only**
+(refuses outside `--env devnet` + `QBIND_DEVNET_FORGED_INJECTION=1`), not a production producer.
+
+## Ownership-transfer table (source-cited)
+
+| Stage | Buffer / message · owner | Create / move / copy | Channel · capacity · unit | Producers→Consumers · scope | Enqueue op | Full behavior | Closed behavior | Retained by pending producer |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| socket→decrypt | ciphertext (transport read buffer) · reader_worker | read + decrypt → **new** owned `Vec<u8>` (plaintext); ciphertext released after decrypt | — | — | — | — | — | — |
+| decrypted-frame | `Vec<u8>` plaintext frame · SecureChannelAsync | moved into `read_tx` | `mpsc<Result<Vec<u8>,_>>` · **32** · messages · **per-connection** | 1→1 per conn | **`blocking_send`** (`secure_channel.rs:669`) | **blocks the blocking reader_worker** → socket read stops → TCP backpressure | reader_worker `break` (exits) | ≤1 frame per blocked worker (≤ C) |
+| demuxer intake | `InboundP2pEnvelope` (owns decoded `P2pMessage`; Proposal payload = inner `Vec<u8>` copy from `decode_frame`) · read_loop→Queue A | `InboundP2pEnvelope::new`, **moved** via send | `mpsc<InboundP2pEnvelope>` · **256** · messages · **shared** | **C→1** (inbound_tx cloned per conn) | **`send().await`** (`p2p_tcp.rs:1517`) | **blocks the sending read_loop** (backpressure → that conn's cap-32 channel → socket) | read_loop `break` (`:1518`) | ≤1 envelope per blocked read_loop (≤ C, outside Queue A) |
+| consensus intake | `InboundConsensusEnvelope` (owns `ConsensusNetMsg`; Proposal `Vec<u8>` **moved**, not re-copied) · demuxer→Queue B | `InboundConsensusEnvelope::new`, **moved** via try_send | `mpsc<InboundConsensusEnvelope>` · **256** · messages · **shared (1 producer)** | 1→1 | **`try_send`** (`p2p_inbound.rs:513`) | **drop message + log + continue** (demuxer keeps draining Queue A) | **same arm: drop + log + continue** (demuxer does **not** exit) | **none** (try_send does not retain on full/closed) |
+| handler | `ConsensusNetMsg::Proposal(Vec<u8>)` · `handle_inbound_consensus_msg` (A44) | moved out of envelope | — | — | — | — | — | — |
+
+**Move vs copy:** the inner proposal bytes are **copied once** (a `.to_vec()` during `decode_frame`'s
+outer decode, producing `ConsensusNetMsg::Proposal(Vec<u8>)`); from there the `Vec<u8>` is **moved**
+through Queue A → demuxer → Queue B → the handler (no further copy; no `Arc` clone of the payload).
+The ciphertext and the decrypted frame are **earlier, separate** owned buffers released upstream
+(ciphertext after decrypt; the decrypted `frame_bytes` after `decode_frame` returns). Queued messages,
+executing handlers, and pending senders are distinct; a bounded channel bounds **queued message
+count**, not allocations held outside it (pending senders, per-connection buffers, the executing
+handler's A44 working set).
+
+## Backpressure and refusal, end-to-end
+
+- **Queue B (consensus ingress, the selected route's terminal queue):** fed by **`try_send`**. On a
+  **temporarily full** queue the message is **dropped and logged** (`"Failed to forward consensus
+  message (channel full or closed)"`, `p2p_inbound.rs:516`) and the demuxer continues; on a
+  **permanently closed** receiver the **same arm** runs — drop + log + continue (the demuxer does
+  **not** stop, close the transport, or exit when the consensus receiver is gone). So a non-draining
+  or dead consensus consumer produces **silent, logged message loss at this boundary**, **not**
+  memory growth and **not** upstream/socket backpressure.
+- **Queue A (read_loop→demuxer):** fed by **awaited `send().await`**. A full Queue A (i.e. a stalled
+  **demuxer**) blocks the per-connection read_loop, which stops draining that connection's cap-32
+  decrypted channel, whose `blocking_send` then blocks the reader_worker → **socket TCP
+  backpressure**. A closed Queue A receiver → read_loop `break`.
+- **Per-connection decrypted channel (cap 32):** `blocking_send` → full blocks the reader_worker →
+  socket backpressure; closed → worker `break`.
+
+**Net:** the demuxer is the pivot that converts consensus-consumer slowness into **drops** (Queue B
+`try_send`), while demuxer slowness propagates as **backpressure** to sockets (Queue A / cap-32
+awaited/blocking sends). The actual error consumers (not just the channel return types) are: Queue B
+`try_send` Err → drop+log+continue; Queue A `send().await` Err → `break`; cap-32 `blocking_send` Err →
+`break`. Session-abort / socket cleanup on `break` and consensus-loop supervision are **prior
+lifecycle findings** (A6-F1 and related), reused not re-audited.
+
+**Established limiters (distinct controls, positions noted, not re-audited):** a **per-peer inbound
+message-rate limiter** (Run-369) drops over-budget frames in `read_loop` **after** decode and
+**before** Queue A (`p2p_tcp.rs:1504–1509`); connection-count / arrival-rate / session controls are
+tracked under the existing findings (incl. **A28-F1**, **A4-F1**, **A15-F1**). Arrival-rate,
+queue-occupancy, byte, and connection-count limits are **different controls** and are not conflated.
+
+## Bounded accounting and finite traces
+
+Let **C** = established connections; queue capacities **Q_sec = 32** (per-connection, decrypted),
+**Q_A = 256** (shared, envelopes), **Q_B = 256** (shared, consensus envelopes). The source bounds:
+
+- **Queue occupancy:** Q_sec ≤ 32 **per connection** (≤ 32·C across C); Q_A ≤ 256 (shared); Q_B ≤ 256
+  (shared) — all **message-count** caps.
+- **Pending/in-progress ownership outside queues:** ≤ C decrypted frames (one per blocked
+  reader_worker) + ≤ C envelopes (one per blocked read_loop); the demuxer retains **none** on a full
+  Queue B (drop). One message is in the executing handler (A44 working set).
+- **Queued logical payload:** each queued message owns one inner-payload `Vec<u8>`; total queued
+  payload ≤ (32·C + C + 256 + C + 256) × (**max inner Proposal payload**). The **inner Proposal
+  payload is smaller than the ciphertext**; the 16 MiB `MAX_TRANSPORT_CIPHERTEXT` is **not** the inner
+  payload size and is **not** multiplied into a node-memory figure here.
+- **Container capacity, allocator footprint, and RSS are distinct** and **not** inferred from these
+  caps; **no numerical node-memory ceiling** is asserted from frame caps × queue lengths.
+
+**Finite ordered traces:**
+1. **Normal draining:** socket→decrypt→Q_sec(≤32)→read_loop→Q_A(≤256)→demuxer→`try_send`→Q_B(≤256)→
+   `inbound_rx.recv()`→handler. Occupancy stays low; each stage moves the payload forward; no drop.
+2. **Full Q_B (consensus loop not draining):** Q_B reaches 256 → demuxer `try_send` → **Err(Full) →
+   drop + log + continue** → Q_A keeps draining → **no upstream backpressure, no memory growth beyond
+   the 256 resident in Q_B** → inbound Proposals are **lost (logged)** while the consensus loop is
+   behind. Transport and other connections are unaffected.
+3. **Closed Q_B (consensus receiver dropped / loop exited):** demuxer `try_send` → **Err(Closed) →
+   same drop+log+continue arm** → the demuxer **keeps running and keeps dropping** every consensus
+   message indefinitely; it does **not** close the transport or exit (DAG/control still handled). This
+   is a precise source behavior, not an inferred fault.
+4. **Full Q_A or Q_sec (demuxer stalled — the earlier receive-stage queue):** Q_A fills → read_loops
+   block on `send().await` → cap-32 channels fill → reader_workers block on `blocking_send` → socket
+   read stops → **TCP backpressure** to peers (bounded buffering: ≤32·C + ≤C + 256 + ≤C resident).
+   Unlike trace 2/3, a stalled demuxer **does** backpressure rather than drop.
+
+**Non-draining cause (conditional premise):** this trace does **not** assert a scheduler/throughput
+cause for a slow consumer; traces 2–4 hold **conditionally** on "the downstream consumer does not
+drain promptly," which is retained as a premise. No overload is demonstrated from unmeasured
+scheduling or throughput; no traffic generation or node run was performed.
+
+## Disposition
+
+The R7.3 / E12 concurrent-ingress residual is answered for the selected production route: an inbound
+structurally-valid `ConsensusNetMsg::Proposal` is retained, in order, by (a) a per-connection
+decrypted-frame channel (cap 32, `blocking_send` backpressure), (b) a shared `InboundP2pEnvelope`
+queue (cap 256, awaited-send backpressure, C producers), and (c) a shared consensus-ingress queue
+(cap 256, **`try_send` drop-on-full/closed**), before `inbound_rx.recv()`; the payload is copied once
+at outer decode and **moved** thereafter. When the consensus consumer does not drain, the terminal
+boundary **silently drops and logs** consensus messages (never grows memory or backpressures the
+socket), and a **closed** consensus receiver leaves the demuxer dropping consensus messages
+indefinitely without tearing down the transport; when the **demuxer** stalls, backpressure propagates
+to the sockets with bounded resident buffering.
+
+This records against the existing R7.3 / E12 resource residual; original obligation definitions and
+the completed decoder / A44 post-decode sub-boundaries are preserved and not reset. Existing findings
+remain distinct — **A4-F1, A6-F1, A15-F1, A21-F1, A28-F1** are cross-referenced (session lifecycle,
+connection/limiter controls, parser reservation) **without** being reopened or merged. **An uncapped
+quantity is not automatically a new vulnerability**, and the bounded queues plus the drop-on-full
+terminal boundary mean the selected route does **not** exhibit an unbounded-ingress-memory growth on
+consumer stall at this boundary; the observed terminal **silent consensus-message drop on
+full/closed** (and the demuxer not exiting on a closed consensus receiver) is recorded as a
+**liveness/observability characteristic of the ingress route**, **not forced into a finding** — it is
+fail-**open-to-loss** (messages dropped), not fail-to-memory-growth, and any availability consequence
+is a **runtime, UNEXECUTED** question. No mechanism/boundary/consequence duplicate check yields a
+distinct new memory-safety or resource-exhaustion defect on this route beyond the already-tracked
+controls.
+
+**No source edge is left unresolved** for this ingress chain: owners, capacities (32 / 256 / 256),
+full/closed behavior, and backpressure propagation are established from the actual constructors
+(`secure_channel.rs:625/669`, `p2p_tcp.rs:593/1517`, `p2p_inbound.rs:476/513`, `main.rs:6177`) and
+callers. Runtime memory, throughput, scheduling, and cross-task consequences remain separately
+**UNEXECUTED**. **C5** remains **OPEN**.
+
+## A45 evidence ledger
+
+| Ref | Source | Fact |
+| --- | --- | --- |
+| Q1 | `secure_channel.rs:625,770` | per-connection decrypted channel `mpsc(32)` |
+| Q2 | `secure_channel.rs:649,669` | reader_worker `blocking_send` → full blocks worker → socket backpressure; closed → break |
+| Q3 | `p2p_tcp.rs:593` | shared Queue A `mpsc<InboundP2pEnvelope>(256)` |
+| Q4 | `p2p_tcp.rs:1448–1519` | read_loop: decode_frame → per-peer limiter → `inbound_tx.send(envelope).await`; Err → break |
+| Q5 | `p2p_inbound.rs:360–408` | demuxer loop `receiver.recv().await` → Consensus → `handle_consensus_msg_from` |
+| Q6 | `p2p_inbound.rs:467,476,509–518` | `ChannelConsensusHandler` `mpsc(capacity)`; `try_send`; full **or** closed → drop + log + continue |
+| Q7 | `main.rs:6173–6177,6186` | `ChannelConsensusHandler::new(256)`; receiver → consensus loop; Run-035 sender_clone dev/test-only |
+| Q8 | `p2p_node_builder.rs:1810` | `P2pInboundDemuxer::new(inbound_rx, consensus_handler, …)` — Queue A receiver + the 256-cap handler |
+| L1 | `p2p_tcp.rs:1504–1509` | established per-peer rate limiter (Run-369) drops over-budget frames before Queue A |
+
+---
+
+*End of A45 production consensus ingress buffer-ownership / queue-limits / backpressure layer (internal
+v1.125). The complete v1.124 input is preserved byte-for-byte below.*
+
 <!-- A44 FULLY-POPULATED PROPOSAL POST-DECODE PROCESSING / OWNERSHIP / RESOURCE-LIFETIME LAYER (internal v1.124) — prepended to the preserved v1.123 input below -->
 # QBIND Security Findings Register
 
