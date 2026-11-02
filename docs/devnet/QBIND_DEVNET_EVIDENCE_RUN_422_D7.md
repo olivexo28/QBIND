@@ -26148,3 +26148,35 @@ tested production implementation. The five-path follow-up and cumulative
 nine-path tree comparisons, exclusion checks, complete document-prefix/EOL/EOF
 checks, tested-test blob equality, final ancestry and clean worktree were
 verified separately from root-tree identity.
+
+### D7 evidence correction: historical test attribution and count terms
+
+This append explicitly supersedes the historical attribution and supplemental
+count terminology in “RUN 422 follow-up: superseded threshold-two test blocker”
+above. The preceding bytes remain intact as historical evidence; use this
+correction for accurate attribution and terminology.
+
+The original failed required package run (exit 101; 841 selected/executed =
+840 passed + 1 failed + 0 ignored) and original supplemental
+`--no-fail-fast` run (exit 101) are attributed to the actual tested-source
+commit `0a163bb733f7dd160a588b5aa11cd37ad13fd143`, tree
+`7499eec58c38e4056337b89abfd6d3965ba9eef8`. The later commit
+`e3858b78010bac250e99aed283c6ae9f16813818` is the subsequent evidence commit
+and follow-up starting revision, NOT the tested source for those runs. Its
+identical Rust does not establish a separate test execution. Withdraw the
+identification of `e3858b78010bac250e99aed283c6ae9f16813818` as their tested
+source.
+
+For the historical supplemental run, the exact accounting is **979 selected
+= 961 passed + 1 failed + 17 ignored**; only **962 executed = 961 passed +
+1 failed**. Do not describe all 979 selected tests as executed. The original
+required early-stopping run remains **841 selected/executed = 840 passed +
+1 failed + 0 ignored**.
+
+The successful migration results and attribution are unchanged: tested-test
+commit `31af27f46aef427299fc83bffdfaaee7c0077753`, tree
+`30b2908bc653fe81c44d3b1cd73acbd03752bcf8`; focused target **9 selected,
+9 passed, 0 failed, 0 ignored**; required package command **979 selected,
+962 passed, 0 failed, 17 ignored**. No execution result or blocker-resolution
+status changes. This correction changes neither implementation nor any
+standing readiness verdict.
