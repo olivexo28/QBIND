@@ -25264,3 +25264,118 @@ This establishes only requested-ID consistency with the returned implementation'
 Account acquisition/cloning is unchanged. Weights, threshold enforcement, canonical identity enforcement, repeated reads/cryptography, account caching, bounded reads, common-state consistency, program/payer authority, freshness and resource-policy approval remain outside this slice. No positive native-program authority path, timing, RSS, allocation-free, persistent-storage or deployed-path claim is made.
 
 Standing posture is unchanged: `D7D14_STORAGE_COMPONENT=IMPLEMENTED-ISOLATED`; `D7D14_STORAGE_ACCEPTANCE=PASS-ACCEPTED-SUBSET`; section 13.6 whole-lifecycle INCOMPLETE; activation DISABLED; public DevNet NO-GO; durable anti-rollback NOT-ESTABLISHED; C4/C5 OPEN; RS1 OPEN; all candidate limits UNAPPROVED. Whole native-admission and authority contracts remain DRAFT / NOT APPROVED / NOT IMPLEMENTED. No F1/F2 closure or release approval follows.
+
+## RUN 422: native authentication stored-keyset format admission (2026-11-02)
+
+### Intentional compatibility restriction, not whole-contract approval
+
+The active native authentication verifier now admits only stored-keyset version 1 with all header reserved0/reserved1 and every entry reserved0 zero. This is a new, narrow compatibility restriction, not an already-enforced protocol rule. Previously parseable stored keysets with other versions or nonzero stored reservations now refuse in this verifier. It is not approval or implementation of the whole native-admission or authority contract.
+
+The existing structural preflight, checked streaming digest, requested-account get/missing handling, returned ID/owner/executable checks and complete framing validation remain ahead of format admission. After successful complete parse_stored_keyset framing validation, the order is:
+
+1. version() != 1: exactly ExecutionError::InvalidCallData("unsupported keyset account version").
+2. Either header reservation nonzero: exactly ExecutionError::InvalidCallData("nonzero keyset account reserved bytes").
+3. Any entry reservation nonzero, including unused entries and other suites: exactly ExecutionError::InvalidCallData("nonzero keyset entry reserved bytes").
+4. Only after the all-entry traversal succeeds: first matching suite selection, provider-None error, returned-suite ID consistency, existing borrowed-key verification/error mapping.
+
+Malformed complete framing remains SerializationError("decode KeysetAccount"); trailing bytes remain SerializationError("trailing bytes in KeysetAccount account"), even with all format faults present. Metadata errors and their earlier precedence are unchanged. The format checks perform no provider, descriptor, length or signature queries, collect no entries, copy no key bodies and allocate no validation vector.
+
+This concerns stored keyset data only. It adds no Transaction.version, TxAccountMeta reservation, TxAuth.reserved, extra AccountHeader or CreateKeysetCall checks. The framing-only parser, serialization, isolated helpers, crypto providers/adapters, stores/interfaces, native programs, runtime production code, dependencies and lockfiles are unchanged. The parser and isolated helpers may still accept other version/reserved values within their contracts; in particular isolated create preparation in crates/qbind-ledger/src/keyset_create.rs preserves call.version. It does not enforce this active-verifier admission rule. Production keyset creation remains unavailable.
+
+### Test-to-claim mapping and historical interpretation
+
+The focused ledger target retains genuine ML-DSA-44 signatures and observable get/provider/suite-ID/digest/key controls:
+
+- stored_format_independent_refusals_and_genuine_control_share_response_path: the exact same controlled response route genuinely succeeds with version 1 and zero stored reservations, preserving deliberately nonzero unrelated AccountHeader metadata. Eleven independent refusals change only one stored-format field: versions 0, 2, 255; all three header reserved0 positions; all four reserved1 positions; entry reserved0. The signed transaction/key/signature are unchanged. Every refusal has one requested-account read and zero provider lookups, suite-ID observations and verify digest/key observations; no writes/deletes; complete transaction, backing map and controlled response map preserved.
+- stored_format_admits_every_entry_before_selecting_genuine_first_key: a genuine selected first proof succeeds with a well-framed unused zero-reserved entry, including suite 255 with an arbitrary unused key. Making only that later entry's reservation nonzero refuses before lookup for both suite 100 and different suite 255. This is not support/canonical-key admission for the unused suite.
+- stored_format_combined_fault_precedence_before_selection_provider_and_signature: explicit all-format-fault plus incomplete-later-framing/trailing controls preserve both parser errors; version wins over header/entry; each header reservation class wins over entry; each format error wins over absent matching suite or configured inconsistent provider. Each matrix runs with genuine and corrupted signatures; no provider/verify access occurs. Provider inconsistency is a synthetic fault, not cryptographic acceptance evidence.
+- genuine_multi_auth_later_format_refusal_and_fresh_corrected_store_retry: for each of version/header/entry faults, ordered two-account reads perform exactly one earlier genuine lookup/ID observation/verify before later format refusal. Correct only the later stored field, take a NEW complete post-correction store snapshot, then retry with fresh observers: both supplied proofs verify again. Both invocations preserve their complete transaction/store/response snapshots with zero writes/deletes.
+- Historical genuine_same_suite_selection_uses_first_key_and_ignores_semantic_metadata is narrowly migrated to genuine_same_suite_selection_uses_first_key_without_threshold_or_weight_enforcement. Only stored version/reservation fixture values and the test name change: version 1, all stored reservations zero. The later-key-only genuine proof still fails when the wrong matching key is first; swapping keys makes the same proof succeed. Threshold 0 and weights 0/u16::MAX remain separate observations of absent threshold/weight enforcement, not claims that version/reserved fields are ignored today. Earlier evidence remains historical and unmodified.
+- Existing correctly_registered_mldsa44_alias_remains_compatible, returned-suite ID guard, borrowed-key pointer assertions, exact-index coverage, digest compatibility and metadata/refusal/retry controls remain in the focused target.
+
+The actual TxExecutor control executor_stored_keyset_format_admission_precedes_native_target_read uses the existing genuine keyset-create fixture and absent target. Independent stored version, header reserved0, header reserved1 and entry reservation faults each read only the authentication account, return the exact authentication error, and perform zero provider/suite-ID/verify work. The matched valid-format proof genuinely authenticates, reads authentication account then absent target, and returns exactly ExecutionError::ProgramError("native keyset creation authority unavailable"). Counts are one lookup/ID observation/verify. This is authentication success followed by the existing program refusal, NOT successful transaction execution. All controls assert target absence, zero mutations/writes/deletes and complete transaction/store preservation.
+
+### Resource and authority boundary
+
+The additional borrowed iterator traversal is at most O(entry_count) additional work per processed authentication and O(1) additional control storage; key bodies remain borrowed. It can stop at the first nonzero reservation. This is source-level accounting, not measured latency, RSS or allocator behavior, and not an allocation-free claim for the whole verifier. Account acquisition/cloning, repeated reads/parsing/cryptography, account caching, snapshot/common-state consistency, bounded reads, resource caps and operational limits remain unresolved.
+
+Stored-format admission is not full keyset semantics, weighted threshold enforcement, canonical cryptographic identity, backend authenticity or authorization. Provider-ID consistency still cannot establish the actual algorithm executed by a misreporting provider. No positive native-program/payer authority, replay protection, deployed compatibility, persistence or complete native authorization is established.
+
+Preserve D7D14_STORAGE_COMPONENT=IMPLEMENTED-ISOLATED; D7D14_STORAGE_ACCEPTANCE=PASS-ACCEPTED-SUBSET; section 13.6 whole-lifecycle INCOMPLETE; activation DISABLED; public DevNet NO-GO; durable anti-rollback NOT-ESTABLISHED; C4/C5 OPEN; RS1 OPEN; all candidate limits UNAPPROVED. Whole native-admission and authority contracts remain DRAFT / NOT APPROVED / NOT IMPLEMENTED. No F1/F2 closure or release approval follows.
+
+### Baseline identity, actual ancestry and tested source
+
+The starting worktree was clean. The task branch is copilot/run-422-native-auth-keyset-format-admission; origin is https://github.com/olivexo28/QBIND. No applicable AGENTS.md or tracked Copilot instructions were found in the repository or ancestor instruction locations.
+
+Starting commit identity: 51c4f122be2420a59aa833a58731c4a0db1d45b4.
+Independently verified starting root tree: 4151bd8443404b440270ad38a58775984ee00b74.
+Raw baseline header:
+
+```text
+tree 4151bd8443404b440270ad38a58775984ee00b74
+parent 0a74f0d91cc6df588540d3fe470389e63d0edc38
+```
+
+git rev-parse --is-shallow-repository returned true. The baseline is explicitly listed in .git/shallow. git cat-file -e 0a74f0d91cc6df588540d3fe470389e63d0edc38^{commit} exited 128 with "Not a valid object name": that raw parent is present in the commit header but its object is unavailable locally. No claim is made about ancestry beyond that shallow boundary; no absent-parent claim is substituted for object unavailability.
+
+Rust implementation/tests were committed separately before final validation:
+tested-source commit 0f92d6460164d2131d5deb3b519dd9db679014af;
+tested-source root tree 27d86fead5922c85eeb031e6f3717de5098172f8.
+Its raw parent header is exactly:
+
+```text
+parent 51c4f122be2420a59aa833a58731c4a0db1d45b4
+```
+
+git merge-base --is-ancestor 51c4f122be2420a59aa833a58731c4a0db1d45b4 0f92d6460164d2131d5deb3b519dd9db679014af exited 0. Actual parent edges establish new ancestry, separately from root-tree equality. The evidence-only successor is checked for direct tested-source parentage and baseline/tested-source ancestry before delivery. No earlier history is invented.
+
+| Rust path | Starting mode/blob | Tested-source mode/blob (also required unchanged in final delivery) |
+|---|---|---|
+| crates/qbind-ledger/src/auth.rs | 100755 / 742fafde6da885005005afd6ea702f7fe9ac9741 | 100755 / fa7ede001a5f563cdf4a9c382493806a35936368 |
+| crates/qbind-ledger/tests/tx_auth_verifier_tests.rs | 100755 / 869e395700730aeb04faa0a33f1022d689af0957 | 100755 / 8b1b499a4b27e8bbdabce93c398d807d34c3e39c |
+| crates/qbind-runtime/tests/tx_executor_tests.rs | 100755 / e3b9603b9bfb1ea9dbdbceeec667087da44196ff | 100755 / b9c3b8c2b4e0ea8a3985cc83f5092cda8fe44269 |
+
+### Literal final validation commands and results
+
+All commands below were run after the source commit, with the exact Rust blobs above and no uncommitted source modifications. Each command exited 0. Selected = passed + failed + ignored; filtered/measured counts are zero. Package-command totals cover its 46 distinct result sections, including doc tests. Do not add rows together: focused targets overlap the package command. Node cargo check is compilation only, not a test execution count.
+
+| Literal command | Exit | Selected | Passed | Failed | Ignored |
+|---|---:|---:|---:|---:|---:|
+| LIBCLANG_PATH=/usr/lib/llvm-18/lib cargo test --locked -p qbind-ledger --test tx_auth_verifier_tests -- --nocapture | 0 | 28 | 28 | 0 | 0 |
+| LIBCLANG_PATH=/usr/lib/llvm-18/lib cargo test --locked -p qbind-runtime --test tx_executor_tests -- --nocapture | 0 | 7 | 7 | 0 | 0 |
+| LIBCLANG_PATH=/usr/lib/llvm-18/lib cargo test --locked -p qbind-ledger -p qbind-runtime -p qbind-system | 0 | 972 | 955 | 0 | 17 |
+| LIBCLANG_PATH=/usr/lib/llvm-18/lib cargo test --locked -p qbind-node --test block_apply_tests -- --nocapture | 0 | 6 | 6 | 0 | 0 |
+| LIBCLANG_PATH=/usr/lib/llvm-18/lib cargo check --locked -p qbind-node | 0 | compilation only | - | - | - |
+| rustfmt --check --edition 2021 crates/qbind-ledger/src/auth.rs crates/qbind-ledger/tests/tx_auth_verifier_tests.rs crates/qbind-runtime/tests/tx_executor_tests.rs | 0 | - | - | - | - |
+| git -c core.whitespace=cr-at-eol diff --check | 0 | - | - | - | - |
+| git -c core.whitespace=cr-at-eol diff --check 51c4f122be2420a59aa833a58731c4a0db1d45b4 HEAD | 0 | - | - | - | - |
+
+The focused logs explicitly show the three stored_format_* tests, genuine_multi_auth_later_format_refusal_and_fresh_corrected_store_retry, migrated first-key test, registered-alias control, returned-suite ID control and borrowed-key control passing, plus executor_stored_keyset_format_admission_precedes_native_target_read passing. Existing tests remain selected. No ignored tests were added; the 17 package-command ignored tests predate this change. No unrelated failing test was changed or validation scope broadened. Node cargo check completes with existing warnings, not errors.
+
+Preparatory failure, NOT a final test result: the same literal focused ledger command initially exited 101 during zstd-sys/bindgen build because /usr/lib/llvm-18/lib lacked libclang.so ("Unable to find libclang"). No test executable ran in that attempt. Environment-only `apt-get update -qq` and `apt-get install -y -qq libclang-18-dev` completed with exit 0 and supplied /usr/lib/llvm-18/lib/libclang.so and libclang.so.1. apt update warned that dl.google.com DNS resolution failed and reused available indexes; installation and all final commands succeeded. No repository dependency, lockfile or configuration repair was made. The unavailable-parent object probe above is a separate history limitation, not a build/test failure.
+
+Both whitespace commands are repeated after the append and after the evidence commit, with cr-at-eol enabled for the preserved D7 CRLF file. Final tree/manifest, direct evidence-parent edge, baseline/tested ancestry, byte prefixes/conventions and tested-source Rust equality are checked again against committed delivery; they do not depend on inferred identity from test counts.
+
+### Complete starting-byte preservation and scope evidence
+
+The cumulative permitted change set is exactly the three Rust paths above plus the four documents below. All seven retain their modes, every excluded tracked tree tuple remains identical, and there are no dependency/lockfile changes. The protected completed Run375 repair remains crates/qbind-node/tests/run_375_public_devnet_identity_cli_tests.rs, mode 100644, blob e03b7f6338547b0c99695cc5ae1ddcd0d28b1cf4.
+
+| Document | Starting bytes | Starting mode/blob | Required retained EOL/EOF |
+|---|---:|---|---|
+| docs/devnet/QBIND_RUN_422_NATIVE_ADMISSION_RESOURCE_ASSESSMENT.md | 55047 | 100644 / c2fc77e8683a84e13c12074d52699c7b74bef2e8 | LF; terminal LF |
+| docs/devnet/QBIND_RUN_422_NATIVE_ADMISSION_STATE_CONTRACT.md | 110425 | 100644 / d89e2fc70fc61f1dd2d8855986c69cecce1c9bc9 | LF; terminal LF |
+| docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_422_D7.md | 2759170 | 100644 / 99873a51aff2788a2ede0e971b51f834230b9b9b | uniform CRLF; no terminal newline |
+| docs/whitepaper/contradiction.md | 2702522 | 100644 / 26bffc2e291262cf725d4d413379cae8381eed4f | LF; no terminal newline |
+
+Starting full-byte SHA-256 values, in the same row order:
+
+```text
+347b5a967e91645fcb65e36af904345f99f4b490e9cd0bc9334c1bbd39b49db3
+5f903c852e6d608e7ff012c729398d16320e38104edcf1bece496ff82664d955
+758151c9779f03d28573ba0bf6bcf43e7289b83891ec82656cd7eae34f72c72f
+52021548ad3bf037e6052dda82364941844b821fd0d4cc88ca2135ddd80c543b
+```
+
+The bulk append renderer retains the complete starting bytes, rendering only new suffixes with each document's EOL/EOF convention. Delivery verifies startswith(the complete baseline blob), not a sampled prefix or normalized-text comparison; lengths above include every starting byte. Existing EOF bytes are not changed: a separator is part of the appended suffix. All original modes and complete excluded-path mode/blob tuples are compared. Final Rust tuples must equal the tested-source tuples above. The final evidence commit/tree and complete old/new seven-path manifest are returned with delivery rather than attempting a self-referential hash inside this document.
+
+Only the named task branch is pushed without force, with remote-tip equality and a clean worktree checked afterward. No PR, merge, main push, activation or deployment is part of delivery.
