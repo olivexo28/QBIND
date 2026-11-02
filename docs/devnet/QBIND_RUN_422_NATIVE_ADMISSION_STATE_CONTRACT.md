@@ -1121,3 +1121,15 @@ Whole native-admission, governance and validator contracts remain
 `INCOMPLETE`, activation `DISABLED`, public DevNet `NO-GO`, durable anti-rollback
 `NOT-ESTABLISHED`, C4/C5 `OPEN`, RS1 `OPEN`; all candidate limits `UNAPPROVED`.
 No F1/F2 closure, production-consistency guarantee or release approval follows.
+
+## RUN 422 follow-on: native keyset unavailable-authority refusal
+
+The bounded native keyset-creation safeguard is now **IMPLEMENTED** at tested-source commit `92ba29ee13b2470e4b21b681aefcd8cf1ecf3264`, tree `8657372596b2d5dbeaed5954028cb6aa14642a1d`. This does not change the whole-contract status: native admission, keyset authority, governance and validator authority remain **DRAFT / NOT APPROVED / NOT IMPLEMENTED**.
+
+After unchanged program-ID, empty/opcode, create decoding, trailing-byte and target-existence checks, an absent target now receives exactly `ExecutionError::ProgramError("native keyset creation authority unavailable")`. Existing targets still receive exactly `"keyset account already exists"`. Entry copying, stored-state construction, serialization, `Account` construction and `put` were removed from the creation path. Earlier errors retain precedence; this deliberately breaks all former successful absent-target native keyset creations.
+
+Direct-Program controls and genuine ML-DSA-44 executor tests remain separately attributed. The direct tests establish handler/error order only. Executor scenarios compare complete store state, transaction values and encoded bytes, and trace reads with zero writes/deletes. Node block tests distinguish a successful outer block result from failed transaction results; their consensus accept-all suite is a structural harness only, while transaction authentication remains genuine. The exact nine RUN 422 scenarios, assertion mapping, commands, results, environment preparation and append-integrity checks are in `QBIND_DEVNET_EVIDENCE_RUN_422_D7.md`.
+
+This safeguard does not approve creator/namespace policy or implement weighted authentication, candidate semantic admission, payer/funding/fee/nonce/replay policy, or persistent atomic publication. Existing authentication preimage, signer reads/owned decoding/verification, create decoder allocations and target lookup remain. It establishes no allocation ceiling, bounded-backend behavior, deployed-path evidence or production consistency.
+
+Preserved posture: `D7D14_STORAGE_COMPONENT=IMPLEMENTED-ISOLATED`; `D7D14_STORAGE_ACCEPTANCE=PASS-ACCEPTED-SUBSET`; §13.6 whole-lifecycle `INCOMPLETE`; activation `DISABLED`; public DevNet `NO-GO`; durable anti-rollback `NOT-ESTABLISHED`; C4/C5 `OPEN`; RS1 `OPEN`; all candidate limits `UNAPPROVED`. No F1/F2 closure or release approval follows.
