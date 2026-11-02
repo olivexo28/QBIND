@@ -25097,3 +25097,13 @@ Preliminary failures are separate from the table. The first exact focused build 
 Earlier resource claims remain attached to their cited original sources/commits. This change only removes the legacy signing-preimage allocation from the active native `Transaction` authentication component. It does not reattribute old measurements to this revision or establish a bounded whole-verifier. Explicit exclusions are caller-owned transaction/signature buffers, legacy `AccountStore::get`/clone, owned keyset decoding, provider/backend and crypto workspace, and other unchanged legacy-digest callers. Bounded evaluator + legacy verifier composition remains unimplemented; repeated reads/cryptography, common-state consistency and further integration prerequisites remain. No complete native authorization or deployed-path readiness is established.
 
 Preserved posture: `D7D14_STORAGE_COMPONENT=IMPLEMENTED-ISOLATED`; `D7D14_STORAGE_ACCEPTANCE=PASS-ACCEPTED-SUBSET`; section 13.6 whole-lifecycle INCOMPLETE; activation DISABLED; public DevNet NO-GO; durable anti-rollback NOT-ESTABLISHED; C4/C5 OPEN; RS1 OPEN; all candidate limits UNAPPROVED. Whole native-admission/governance/validator/keyset authority contracts remain DRAFT / NOT APPROVED / NOT IMPLEMENTED. This digest-only change does not close F1/F2. The final evidence commit/tree and remote branch tip are reported in the delivery handoff to avoid self-referential identity claims.
+
+### RUN 422 streaming-digest validation count correction
+
+This append-only correction supersedes the `Selected = 938` cell in the combined ledger/runtime/system row of the validation table immediately above. The command and execution results are unchanged; only the selected-count attribution is corrected. `938` is the passing/executed-test count, while `955` is the total of non-filtered harness entries including the 17 ignored entries.
+
+| Literal command | Exit | Selected (including ignored) | Passed/executed | Failed | Ignored |
+|---|---:|---:|---:|---:|---:|
+| `LIBCLANG_PATH=/usr/lib/llvm-18/lib cargo test --locked -p qbind-ledger -p qbind-runtime -p qbind-system` | 0 | 955 | 938 | 0 | 17 |
+
+Validation remains attributed to tested Rust source commit `fe4ae05a746787cfa5424d487beba8db6e8cb68a`, tree `dc533c196f33a02fd6cf0301783881cff8848db0`. This is a documentation-only count-label correction; the recorded execution results and all scope/readiness verdicts are unchanged. No tests or builds were run for this correction.
