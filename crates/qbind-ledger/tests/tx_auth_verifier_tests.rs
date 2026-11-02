@@ -477,6 +477,100 @@ fn assert_format_observations(
     assert_eq!(store.counts.deletes.get(), 0);
 }
 
+fn resign_native_auths(tx: &mut Transaction, secret_keys: &[Vec<u8>]) {
+    let digest = qbind_hash::tx::tx_digest(tx);
+    for (auth, secret_key) in tx.auths.iter_mut().zip(secret_keys) {
+        auth.signature =
+            ml_dsa_44_sign_digest(secret_key, &digest).expect("sign genuine format control");
+    }
+}
+
+fn genuine_multi_auth_with_non_signer() -> (CountingStore, Transaction, Vec<Vec<u8>>) {
+    let ids = [
+        dummy_account_id(0x41),
+        dummy_account_id(0x52),
+        dummy_account_id(0x63),
+    ];
+    let mut store = CountingStore::default();
+    let mut secret_keys = Vec::new();
+    for id in &ids[..2] {
+        let (public_key, secret_key) = qbind_crypto::ml_dsa44::MlDsa44Backend::generate_keypair()
+            .expect("multi-auth ML-DSA-44 keygen");
+        let mut encoded = Vec::new();
+        make_keyset_account(100, public_key).encode_state(&mut encoded);
+        store.seed(Account::new(*id, KEYSET_PROGRAM_ID, 17, encoded));
+        secret_keys.push(secret_key);
+    }
+    let mut tx = make_transaction(
+        vec![
+            TxAccountMeta {
+                account_id: ids[0],
+                flags: 1,
+                access_hint: 0x11,
+                reserved0: [0; 2],
+            },
+            TxAccountMeta {
+                account_id: ids[1],
+                flags: 1,
+                access_hint: 0x22,
+                reserved0: [0; 2],
+            },
+            TxAccountMeta {
+                account_id: ids[2],
+                flags: 2,
+                access_hint: 0x33,
+                reserved0: [0; 2],
+            },
+        ],
+        vec![
+            TxAuth {
+                account_index: 0,
+                suite_id: 100,
+                reserved: 0,
+                signature: Vec::new(),
+            },
+            TxAuth {
+                account_index: 1,
+                suite_id: 100,
+                reserved: 0,
+                signature: Vec::new(),
+            },
+        ],
+    );
+    resign_native_auths(&mut tx, &secret_keys);
+    store.reset_counts();
+    (store, tx, secret_keys)
+}
+
+fn assert_format_refusal_has_no_external_work(
+    store: &mut CountingStore,
+    crypto: &Arc<RecordingCryptoProvider>,
+    tx: &Transaction,
+    expected: &str,
+) {
+    let tx_witness = tx.clone();
+    let backing_witness = store.snapshot();
+    let responses_witness = store.reported_accounts.clone();
+    store.reset_counts();
+    crypto.reset();
+    assert!(matches!(
+        verify_transaction_auth(store, crypto.clone(), tx),
+        Err(ExecutionError::InvalidCallData(message)) if message == expected
+    ));
+    assert_eq!(store.counts.reads.get(), 0);
+    assert!(store.read_ids.borrow().is_empty());
+    assert_eq!(store.counts.writes.get(), 0);
+    assert_eq!(store.counts.deletes.get(), 0);
+    assert_eq!(crypto.lookups.load(Ordering::SeqCst), 0);
+    assert!(crypto.requested_ids.lock().unwrap().is_empty());
+    assert_eq!(crypto.suite.id_observations.load(Ordering::SeqCst), 0);
+    assert!(crypto.recorded_digests().is_empty());
+    assert!(crypto.recorded_public_keys().is_empty());
+    assert_eq!(*tx, tx_witness);
+    assert_eq!(store.snapshot(), backing_witness);
+    assert_eq!(store.reported_accounts, responses_witness);
+}
+
 #[test]
 fn individual_threshold_matched_scalar_boundaries_preserve_complete_state() {
     let (mut store, _, tx) = signed_native_fixture();
@@ -1541,13 +1635,13 @@ fn genuine_mldsa44_streaming_caller_compatibility_and_retry() {
                 account_id: first_id,
                 flags: 3,
                 access_hint: 0x34,
-                reserved0: [0x5A, 0xA5],
+                reserved0: [0; 2],
             },
             TxAccountMeta {
                 account_id: second_id,
                 flags: 5,
                 access_hint: 0xCD,
-                reserved0: [0xC3, 0x3C],
+                reserved0: [0; 2],
             },
         ],
         vec![
@@ -1565,7 +1659,7 @@ fn genuine_mldsa44_streaming_caller_compatibility_and_retry() {
             },
         ],
     );
-    tx.version = 2;
+    tx.version = 1;
     tx.chain_id = 0xA1B2_C3D4;
     tx.payer = dummy_account_id(0xE7);
     tx.nonce = 0x0102_0304_0506_0708;
@@ -1665,6 +1759,312 @@ fn genuine_mldsa44_streaming_caller_compatibility_and_retry() {
     assert_eq!(store.counts.deletes.get(), 0);
     assert_eq!(crypto.lookups.load(Ordering::SeqCst), 2);
     assert_eq!(crypto.recorded_digests(), vec![changed_oracle_digest; 2]);
+}
+
+#[test]
+fn genuine_mldsa44_native_transaction_format_controls() {
+    let (mut store, tx, secret_keys) = genuine_multi_auth_with_non_signer();
+    let tx_witness = tx.clone();
+    let store_witness = store.snapshot();
+    let crypto = Arc::new(RecordingCryptoProvider::new());
+
+    verify_transaction_auth(&mut store, crypto.clone(), &tx)
+        .expect("version 1 with zero transaction reservations authenticates");
+    let digest = qbind_hash::tx::tx_digest(&tx);
+    assert_eq!(
+        crypto.recorded_digests(),
+        vec![digest; tx.auths.len()],
+        "both genuine proofs use the independent legacy digest"
+    );
+    assert_eq!(
+        crypto
+            .recorded_public_keys()
+            .iter()
+            .map(|(_, key)| key.clone())
+            .collect::<Vec<_>>(),
+        tx.accounts[..2]
+            .iter()
+            .map(|meta| store.accounts[&meta.account_id].data[18..].to_vec())
+            .collect::<Vec<_>>()
+    );
+    assert_eq!(
+        &*store.read_ids.borrow(),
+        &[tx.accounts[0].account_id, tx.accounts[1].account_id]
+    );
+    assert_eq!(tx, tx_witness);
+    assert_eq!(store.snapshot(), store_witness);
+
+    for version in [0, 2, 255] {
+        let mut candidate = tx.clone();
+        candidate.version = version;
+        resign_native_auths(&mut candidate, &secret_keys);
+        assert_ne!(qbind_hash::tx::tx_digest(&candidate), digest);
+        assert_format_refusal_has_no_external_work(
+            &mut store,
+            &crypto,
+            &candidate,
+            "unsupported transaction version",
+        );
+    }
+
+    for account_index in 0..tx.accounts.len() {
+        for byte_index in 0..2 {
+            let mut candidate = tx.clone();
+            candidate.accounts[account_index].reserved0[byte_index] = 0x80 + byte_index as u8;
+            resign_native_auths(&mut candidate, &secret_keys);
+            assert_ne!(qbind_hash::tx::tx_digest(&candidate), digest);
+            assert_format_refusal_has_no_external_work(
+                &mut store,
+                &crypto,
+                &candidate,
+                "nonzero transaction account reserved bytes",
+            );
+        }
+    }
+
+    for auth_index in 0..tx.auths.len() {
+        let mut candidate = tx.clone();
+        candidate.auths[auth_index].reserved = 1;
+        assert_eq!(
+            qbind_hash::tx::tx_digest(&candidate),
+            digest,
+            "TxAuth.reserved remains outside the legacy signed digest"
+        );
+        assert_format_refusal_has_no_external_work(
+            &mut store,
+            &crypto,
+            &candidate,
+            "nonzero transaction authentication reserved byte",
+        );
+    }
+}
+
+#[test]
+fn transaction_format_admission_precedence_preserves_structural_errors() {
+    let (mut store, base, secret_keys) = genuine_multi_auth_with_non_signer();
+    let crypto = Arc::new(RecordingCryptoProvider::new());
+
+    let mut both_reservation_categories = base.clone();
+    both_reservation_categories.version = 2;
+    both_reservation_categories.accounts[0].reserved0[0] = 1;
+    both_reservation_categories.auths[0].reserved = 1;
+    resign_native_auths(&mut both_reservation_categories, &secret_keys);
+    assert_format_refusal_has_no_external_work(
+        &mut store,
+        &crypto,
+        &both_reservation_categories,
+        "unsupported transaction version",
+    );
+
+    let mut later_metadata = base.clone();
+    later_metadata.auths[0].reserved = 1;
+    later_metadata.accounts[1].reserved0[1] = 1;
+    resign_native_auths(&mut later_metadata, &secret_keys);
+    assert_format_refusal_has_no_external_work(
+        &mut store,
+        &crypto,
+        &later_metadata,
+        "nonzero transaction account reserved bytes",
+    );
+
+    let mut structural_base = base.clone();
+    structural_base.version = 2;
+    structural_base.accounts[0].reserved0[0] = 1;
+    structural_base.auths[0].reserved = 1;
+    let cases = [
+        {
+            let mut candidate = structural_base.clone();
+            candidate.auths.clear();
+            (
+                candidate,
+                "transaction requires at least one authentication entry",
+            )
+        },
+        {
+            let mut candidate = structural_base.clone();
+            candidate.accounts.resize(
+                65_536,
+                TxAccountMeta {
+                    account_id: dummy_account_id(0x71),
+                    flags: 2,
+                    access_hint: 0,
+                    reserved0: [0; 2],
+                },
+            );
+            (candidate, "transaction account count exceeds wire limit")
+        },
+        {
+            let mut candidate = structural_base.clone();
+            let mut small_auth = candidate.auths[0].clone();
+            small_auth.signature.clear();
+            candidate.auths = vec![small_auth; 65_536];
+            (
+                candidate,
+                "transaction authentication count exceeds wire limit",
+            )
+        },
+        {
+            let mut candidate = structural_base.clone();
+            candidate.auths[0].account_index = u16::MAX;
+            (candidate, "auth.account_index out of range")
+        },
+        {
+            let mut candidate = structural_base.clone();
+            candidate.accounts[0].flags = 2;
+            (candidate, "authentication account is not a required signer")
+        },
+        {
+            let mut candidate = structural_base.clone();
+            candidate.accounts.push(TxAccountMeta {
+                account_id: dummy_account_id(0x72),
+                flags: 1,
+                access_hint: 0,
+                reserved0: [0; 2],
+            });
+            (candidate, "required signer authentication missing")
+        },
+    ];
+    for (candidate, expected) in cases {
+        let tx_witness = candidate.clone();
+        let store_witness = store.snapshot();
+        store.reset_counts();
+        crypto.reset();
+        assert!(matches!(
+            verify_transaction_auth(&mut store, crypto.clone(), &candidate),
+            Err(ExecutionError::InvalidCallData(message)) if message == expected
+        ));
+        assert_eq!(candidate, tx_witness);
+        assert_eq!(store.snapshot(), store_witness);
+        assert_eq!(store.counts.reads.get(), 0);
+        assert_eq!(store.counts.writes.get(), 0);
+        assert_eq!(store.counts.deletes.get(), 0);
+        assert_eq!(crypto.lookups.load(Ordering::SeqCst), 0);
+        assert_eq!(crypto.suite.id_observations.load(Ordering::SeqCst), 0);
+        assert!(crypto.recorded_digests().is_empty());
+        assert!(crypto.recorded_public_keys().is_empty());
+    }
+}
+
+#[test]
+fn native_transaction_format_precedes_account_and_provider_failures() {
+    let id = dummy_account_id(0xA1);
+    let (_, _, mut candidate) = signed_native_fixture();
+    candidate.auths[0].reserved = 1;
+    let crypto = Arc::new(RecordingCryptoProvider::with_reported_ids(vec![3]));
+
+    for fault in 0..8 {
+        let mut tx = candidate.clone();
+        let (mut trial_store, _, _) = signed_native_fixture();
+        match fault {
+            0 => {
+                trial_store.accounts.remove(&id);
+            }
+            1 => {
+                trial_store.report_account(
+                    id,
+                    Account::new(dummy_account_id(0xF1), KEYSET_PROGRAM_ID, 0, vec![1]),
+                );
+            }
+            2 => {
+                let mut account = trial_store.accounts[&id].clone();
+                account.header.owner = dummy_program_id(0xF2);
+                trial_store.report_account(id, account);
+            }
+            3 => {
+                let mut account = trial_store.accounts[&id].clone();
+                account.header.is_executable = true;
+                trial_store.report_account(id, account);
+            }
+            4 => {
+                let mut account = trial_store.accounts[&id].clone();
+                account.data = vec![0xFF];
+                trial_store.report_account(id, account);
+            }
+            5 => {
+                let mut account = trial_store.accounts[&id].clone();
+                account.data[4..6].copy_from_slice(&0u16.to_le_bytes());
+                trial_store.report_account(id, account);
+            }
+            6 => {
+                let mut account = trial_store.accounts[&id].clone();
+                account.data[13..15].copy_from_slice(&0u16.to_le_bytes());
+                trial_store.report_account(id, account);
+            }
+            7 => tx.auths[0].signature[0] ^= 0x80,
+            _ => unreachable!(),
+        }
+        let tx_witness = tx.clone();
+        let backing_witness = trial_store.snapshot();
+        let responses_witness = trial_store.reported_accounts.clone();
+        trial_store.reset_counts();
+        crypto.reset();
+        assert!(matches!(
+            verify_transaction_auth(&mut trial_store, crypto.clone(), &tx),
+            Err(ExecutionError::InvalidCallData(
+                "nonzero transaction authentication reserved byte"
+            ))
+        ));
+        assert_eq!(trial_store.counts.reads.get(), 0, "fault {fault}");
+        assert_eq!(trial_store.counts.writes.get(), 0, "fault {fault}");
+        assert_eq!(trial_store.counts.deletes.get(), 0, "fault {fault}");
+        assert_eq!(crypto.lookups.load(Ordering::SeqCst), 0, "fault {fault}");
+        assert_eq!(crypto.suite.id_observations.load(Ordering::SeqCst), 0);
+        assert!(crypto.recorded_digests().is_empty());
+        assert!(crypto.recorded_public_keys().is_empty());
+        assert_eq!(tx, tx_witness);
+        assert_eq!(trial_store.snapshot(), backing_witness);
+        assert_eq!(trial_store.reported_accounts, responses_witness);
+    }
+}
+
+#[test]
+fn genuine_later_format_fault_precedes_all_proofs_and_corrected_retry_is_fresh() {
+    let (mut store, mut tx, secret_keys) = genuine_multi_auth_with_non_signer();
+    let first_id = tx.accounts[0].account_id;
+    let second_id = tx.accounts[1].account_id;
+    let crypto = Arc::new(RecordingCryptoProvider::new());
+    let mut faulted = tx.clone();
+    faulted.accounts[1].reserved0[0] = 0xA4;
+    resign_native_auths(&mut faulted, &secret_keys);
+    assert_format_refusal_has_no_external_work(
+        &mut store,
+        &crypto,
+        &faulted,
+        "nonzero transaction account reserved bytes",
+    );
+
+    tx.accounts[1].reserved0[0] = 0;
+    resign_native_auths(&mut tx, &secret_keys);
+    let corrected_witness = tx.clone();
+    let store_witness = store.snapshot();
+    let responses_witness = store.reported_accounts.clone();
+    store.reset_counts();
+    crypto.reset();
+    verify_transaction_auth(&mut store, crypto.clone(), &tx)
+        .expect("corrected later metadata admits both genuine proofs");
+    let digest = qbind_hash::tx::tx_digest(&tx);
+    assert_eq!(&*store.read_ids.borrow(), &[first_id, second_id]);
+    assert_eq!(store.counts.reads.get(), 2);
+    assert_eq!(crypto.lookups.load(Ordering::SeqCst), 2);
+    assert_eq!(&*crypto.requested_ids.lock().unwrap(), &[100, 100]);
+    assert_eq!(crypto.suite.id_observations.load(Ordering::SeqCst), 2);
+    assert_eq!(crypto.recorded_digests(), vec![digest; 2]);
+    assert_eq!(
+        crypto
+            .recorded_public_keys()
+            .iter()
+            .map(|(_, key)| key.clone())
+            .collect::<Vec<_>>(),
+        vec![
+            store.accounts[&first_id].data[18..].to_vec(),
+            store.accounts[&second_id].data[18..].to_vec()
+        ]
+    );
+    assert_eq!(store.counts.writes.get(), 0);
+    assert_eq!(store.counts.deletes.get(), 0);
+    assert_eq!(tx, corrected_witness);
+    assert_eq!(store.snapshot(), store_witness);
+    assert_eq!(store.reported_accounts, responses_witness);
 }
 
 fn two_signer_fixture(

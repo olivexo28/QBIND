@@ -501,6 +501,100 @@ fn executor_native_auth_metadata_admission_precedes_target_read() {
 }
 
 #[test]
+fn executor_native_transaction_format_admission_precedes_all_reads_and_crypto() {
+    let executor: TxExecutor<WitnessStore> = TxExecutor::new();
+    let target_id = dummy_account_id(0xEE);
+    let mut store = WitnessStore::default();
+    let auth = AuthFixture::new(&mut store);
+    let base = build_keyset_create_tx(target_id, &auth);
+
+    for (name, expected) in [
+        ("version", "unsupported transaction version"),
+        ("metadata", "nonzero transaction account reserved bytes"),
+        (
+            "authentication",
+            "nonzero transaction authentication reserved byte",
+        ),
+    ] {
+        let mut tx = base.clone();
+        match name {
+            "version" => {
+                tx.version = 2;
+                let digest = qbind_hash::tx::tx_digest(&tx);
+                tx.auths[0].signature =
+                    ml_dsa_44_sign_digest(&auth.secret_key, &digest).expect("re-sign version");
+            }
+            "metadata" => {
+                tx.accounts[0].reserved0[1] = 0xA7;
+                let digest = qbind_hash::tx::tx_digest(&tx);
+                tx.auths[0].signature =
+                    ml_dsa_44_sign_digest(&auth.secret_key, &digest).expect("re-sign metadata");
+            }
+            "authentication" => {
+                let digest = qbind_hash::tx::tx_digest(&tx);
+                tx.auths[0].reserved = 1;
+                assert_eq!(qbind_hash::tx::tx_digest(&tx), digest);
+            }
+            _ => unreachable!(),
+        }
+        let tx_witness = tx.clone();
+        let store_witness = store.accounts.clone();
+        store.reads.borrow_mut().clear();
+        store.mutations = 0;
+        store.writes = 0;
+        store.deletes = 0;
+        let crypto = CountingAuthProvider::new();
+        let counts = Arc::clone(&crypto.counts);
+
+        assert!(
+            matches!(
+                executor.execute_transaction(&mut store, Arc::new(crypto), &tx),
+                Err(ExecutionError::InvalidCallData(message)) if message == expected
+            ),
+            "{name}"
+        );
+        assert!(store.reads.borrow().is_empty(), "{name}");
+        assert_eq!(counts.lookups.load(Ordering::SeqCst), 0, "{name}");
+        assert!(counts.requested_ids.lock().unwrap().is_empty(), "{name}");
+        assert_eq!(counts.id_observations.load(Ordering::SeqCst), 0, "{name}");
+        assert_eq!(counts.verifications.load(Ordering::SeqCst), 0, "{name}");
+        assert_eq!(store.mutations, 0, "{name}");
+        assert_eq!(store.writes, 0, "{name}");
+        assert_eq!(store.deletes, 0, "{name}");
+        assert_eq!(store.accounts, store_witness, "{name}");
+        assert_eq!(tx, tx_witness, "{name}");
+        assert!(!store.accounts.contains_key(&target_id), "{name}");
+    }
+
+    let tx = base;
+    let tx_witness = tx.clone();
+    let store_witness = store.accounts.clone();
+    store.reads.borrow_mut().clear();
+    store.mutations = 0;
+    store.writes = 0;
+    store.deletes = 0;
+    let crypto = CountingAuthProvider::new();
+    let counts = Arc::clone(&crypto.counts);
+    assert!(matches!(
+        executor.execute_transaction(&mut store, Arc::new(crypto), &tx),
+        Err(ExecutionError::ProgramError(
+            "native keyset creation authority unavailable"
+        ))
+    ));
+    assert_eq!(&*store.reads.borrow(), &[AUTH_KEYSET_ID, target_id]);
+    assert_eq!(counts.lookups.load(Ordering::SeqCst), 1);
+    assert_eq!(&*counts.requested_ids.lock().unwrap(), &[AUTH_SUITE_ID]);
+    assert_eq!(counts.id_observations.load(Ordering::SeqCst), 1);
+    assert_eq!(counts.verifications.load(Ordering::SeqCst), 1);
+    assert_eq!(store.mutations, 0);
+    assert_eq!(store.writes, 0);
+    assert_eq!(store.deletes, 0);
+    assert_eq!(store.accounts, store_witness);
+    assert_eq!(tx, tx_witness);
+    assert!(!store.accounts.contains_key(&target_id));
+}
+
+#[test]
 fn executor_authenticated_keyset_create_refuses_without_mutation() {
     let mut store = WitnessStore::default();
     let auth = AuthFixture::new(&mut store);

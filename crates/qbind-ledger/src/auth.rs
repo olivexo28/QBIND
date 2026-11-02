@@ -25,6 +25,8 @@ use crate::ExecutionError;
 ///  - reject an empty authentication vector before digest, store, or crypto work
 ///  - structurally cover every signed bit-0 signer declaration by its exact index,
 ///    and reject authentication entries targeting unmarked accounts before that work
+///  - require transaction version 1 and zero transaction reservation bytes before
+///    digest, store, or crypto work
 ///
 /// This conservative compatibility restriction is not full weighted authorization:
 /// weights are never aggregated, repeated proofs add no weight, and a later
@@ -77,6 +79,26 @@ pub fn verify_transaction_auth<S: AccountStore>(
         if meta.flags & 1 != 0 && covered[index / 8] & (1 << (index % 8)) == 0 {
             return Err(ExecutionError::InvalidCallData(
                 "required signer authentication missing",
+            ));
+        }
+    }
+
+    if tx.version != 1 {
+        return Err(ExecutionError::InvalidCallData(
+            "unsupported transaction version",
+        ));
+    }
+    for meta in &tx.accounts {
+        if meta.reserved0 != [0; 2] {
+            return Err(ExecutionError::InvalidCallData(
+                "nonzero transaction account reserved bytes",
+            ));
+        }
+    }
+    for auth in &tx.auths {
+        if auth.reserved != 0 {
+            return Err(ExecutionError::InvalidCallData(
+                "nonzero transaction authentication reserved byte",
             ));
         }
     }
