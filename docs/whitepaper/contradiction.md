@@ -5178,3 +5178,45 @@ The native verifier now rejects transaction versions other than 1, nonzero `TxAc
 ### RUN 422 native key identity contract cross-reference
 
 The test-and-contract draft `docs/devnet/QBIND_RUN_422_NATIVE_AUTH_KEY_IDENTITY_CONTRACT.md` characterizes canonical key identity and the differences between production first-match verification and isolated complete-keyset semantics. It introduces no production behavior, resource approval, authority, or readiness claim; detailed controls and results are in the D7 evidence appendix.
+
+## RUN 422 public DevNet readiness reconciliation — scoped implementation correction
+
+See `docs/devnet/QBIND_PUBLIC_DEVNET_CRITICAL_PATH.md` for the single current
+launch-dependency matrix and recommended next task; see the append-only D7
+appendix for producing revisions and evidence limits. Earlier audit findings
+remain historically attributed to their tested source and are not silently
+rewritten as current implementation facts.
+
+Current native `auth.rs` no longer accepts empty auth and now performs
+structural/format admission, checked streaming digest, complete keyset framing,
+returned-account checks, stored-keyset compatibility checks, nonzero threshold,
+and individually sufficient first-selected-key weight. Threshold and format
+evidence are separately attributed in the D7 appendix. Corrected key-identity
+controls are focused evidence at `52a9bcd1280c002755311c2a5d290b67691b11b1`;
+the older 990-selected package result belongs to
+`1112d4b9f93a281085c10a0b4fd016f9194f0f0e`, not that corrected revision. None
+of these facts closes F1/F2: canonical identity/alias semantics, full weighted
+authorization, approved resource policy, actual ingress integration, and
+release evidence remain open. No-ingress is not cryptographic closure.
+
+The earlier recommendation to implement isolated TC/O4 pre-effect publication
+is superseded by the completed isolated composition (final correction source
+`37709512d03c547d32d3494d4270bf04c2ad28d1`) and explicit O5/exact-TC
+in-process resumption (`0553e374edf6a9221870b9c5e4f8a6689af3901f`). This does
+not establish production integration or whole-lifecycle acceptance.
+
+D7D14 storage remains `IMPLEMENTED-ISOLATED` / `PASS-ACCEPTED-SUBSET`; §13.6
+whole-lifecycle remains INCOMPLETE; activation remains DISABLED; public DevNet
+remains NO-GO; durable anti-rollback remains NOT-ESTABLISHED; C4/C5 and RS1
+remain OPEN; candidate limits remain UNAPPROVED. The whole native-admission
+and authority contracts remain DRAFT / NOT APPROVED / NOT IMPLEMENTED. The
+operating profile is unresolved; no policy, activation, F1/F2 closure, release
+approval, or launch date is created by this reconciliation.
+
+The native verifier also checks returned provider suite-ID consistency. Its synthetic mismatch control and producing source/test revisions are recorded in the D7 appendix; this does not establish provider conformance or deployed integration.
+
+## RUN 422 readiness-reconciliation attribution correction
+
+The critical-path table now separates the unavailable-authority refusal evidence from earlier successful-write characterization: governance `99023fcb30ec2c6c042dea0f0196b88c072049ac` (focused runtime 6/6), validator `02198fac5ba638a1fbcbc2c5361fce7116a33e51` (15/15), and keyset creation `92ba29ee13b2470e4b21b681aefcd8cf1ecf3264` (9/9). The earlier governance `c279c7be1cc415032975f162109e5e2c3f9c6ed0`, validator `8769118ef4b5b27631a4177862b1dc91cd66c7ca`, and keyset `ce25c42e3a389608832294c29bf5d2cdc7a59a6d` revisions remain historical successful-write characterization only. These were not rerun in this finishing pass.
+
+Run 417 defines F3 as outbound and inbound proposal authentication. Acceptance must include configured outbound signing and inbound signature, leader/membership, and domain verification before delivery or engine effects, with genuine matched acceptance and relevant adversarial refusals. F3 remains distinct from F4 Vote authentication, F6 transport peer/sender binding, and F7 QC verification. Run 419 is partial standalone release-binary F6 evidence; Run 421 is unavailable-authority fail-closed release-binary evidence. Neither demonstrates usable configured-authority consensus. Readiness verdicts are unchanged.
