@@ -4,7 +4,6 @@ use std::sync::Arc;
 use qbind_crypto::{ml_dsa_44_sign_digest, MlDsa44SignatureSuite, StaticCryptoProvider};
 use qbind_ledger::{Account, AccountStore, ExecutionError, InMemoryAccountStore};
 use qbind_runtime::{BlockExecutor, TxApplyResult};
-use qbind_serde::StateDecode;
 use qbind_system::keyset_program::KEYSET_PROGRAM_ID;
 use qbind_system::validator_program::VALIDATOR_PROGRAM_ID;
 use qbind_types::{AccountId, KeysetAccount, KeysetEntry};
@@ -202,76 +201,98 @@ fn build_invalid_validator_tx(auth: &AuthFixture) -> Transaction {
 
 #[test]
 fn block_executor_applies_multiple_txs_and_reports_results() {
-    let mut store = InMemoryAccountStore::new();
+    let mut store = WitnessStore::default();
     let auth = AuthFixture::new(&mut store);
     let crypto = auth.crypto();
-    let executor: BlockExecutor<InMemoryAccountStore> = BlockExecutor::new();
+    let executor: BlockExecutor<WitnessStore> = BlockExecutor::new();
 
     let keyset_id = dummy_account_id(0xEE);
     let tx1 = build_keyset_create_tx(keyset_id, &auth);
     let tx2 = build_invalid_validator_tx(&auth);
+    let tx_witnesses = [tx1.clone(), tx2.clone()];
+    let before = store.accounts.clone();
+    store.mutations = 0;
 
-    let result = executor.execute_block(&mut store, crypto, &[tx1, tx2]);
+    let txs = [tx1, tx2];
+    let result = executor.execute_block(&mut store, crypto, &txs);
 
     assert_eq!(result.tx_results.len(), 2);
-    assert!(matches!(result.tx_results[0], TxApplyResult::Success));
+    assert!(matches!(
+        result.tx_results[0],
+        TxApplyResult::Failed(ExecutionError::ProgramError(
+            "native keyset creation authority unavailable"
+        ))
+    ));
     assert!(matches!(
         result.tx_results[1],
         TxApplyResult::Failed(ExecutionError::ProgramError("unsupported validator opcode"))
     ));
     assert!(!result.all_succeeded());
-
-    // Check that state from the successful tx is present.
-    let stored = store.get(&keyset_id).expect("keyset account must exist");
-    assert_eq!(stored.header.owner, KEYSET_PROGRAM_ID);
-
-    let mut slice: &[u8] = &stored.data;
-    let decoded = KeysetAccount::decode_state(&mut slice).expect("decode KeysetAccount");
-    assert!(slice.is_empty());
-    assert_eq!(decoded.entries.len(), 1);
+    assert_eq!(txs, tx_witnesses);
+    assert_eq!(store.accounts, before);
+    assert_eq!(store.mutations, 0);
 }
 
 #[test]
-fn block_executor_all_successes_sets_all_succeeded_true() {
-    let mut store = InMemoryAccountStore::new();
+fn block_executor_multiple_authenticated_creations_refuse_in_order() {
+    let mut store = WitnessStore::default();
     let auth = AuthFixture::new(&mut store);
     let crypto = auth.crypto();
-    let executor: BlockExecutor<InMemoryAccountStore> = BlockExecutor::new();
+    let executor: BlockExecutor<WitnessStore> = BlockExecutor::new();
 
     let keyset_id1 = dummy_account_id(0xA1);
     let keyset_id2 = dummy_account_id(0xA2);
 
     let tx1 = build_keyset_create_tx(keyset_id1, &auth);
     let tx2 = build_keyset_create_tx(keyset_id2, &auth);
+    let tx_witnesses = [tx1.clone(), tx2.clone()];
+    let before = store.accounts.clone();
+    store.mutations = 0;
 
-    let result = executor.execute_block(&mut store, crypto, &[tx1, tx2]);
+    let txs = [tx1, tx2];
+    let result = executor.execute_block(&mut store, crypto, &txs);
 
     assert_eq!(result.tx_results.len(), 2);
-    assert!(result.all_succeeded());
-    assert!(matches!(result.tx_results[0], TxApplyResult::Success));
-    assert!(matches!(result.tx_results[1], TxApplyResult::Success));
-
-    assert!(store.get(&keyset_id1).is_some());
-    assert!(store.get(&keyset_id2).is_some());
+    assert!(!result.all_succeeded());
+    for tx_result in result.tx_results {
+        assert!(matches!(
+            tx_result,
+            TxApplyResult::Failed(ExecutionError::ProgramError(
+                "native keyset creation authority unavailable"
+            ))
+        ));
+    }
+    assert_eq!(txs, tx_witnesses);
+    assert_eq!(store.accounts, before);
+    assert_eq!(store.mutations, 0);
 }
 
 #[test]
-fn block_executor_refuses_unsigned_effects_and_keeps_sequential_positive_result() {
+fn block_executor_empty_block_has_no_failed_transactions() {
     let mut store = InMemoryAccountStore::new();
     let auth = AuthFixture::new(&mut store);
-    let crypto = auth.crypto();
     let executor: BlockExecutor<InMemoryAccountStore> = BlockExecutor::new();
+
+    let result = executor.execute_block(&mut store, auth.crypto(), &[]);
+
+    assert!(result.tx_results.is_empty());
+    assert!(result.all_succeeded());
+}
+
+#[test]
+fn block_executor_refuses_unsigned_and_authenticated_effects_without_mutation() {
+    let mut store = WitnessStore::default();
+    let auth = AuthFixture::new(&mut store);
+    let crypto = auth.crypto();
+    let executor: BlockExecutor<WitnessStore> = BlockExecutor::new();
     let refused_target = dummy_account_id(0xB1);
     let accepted_target = dummy_account_id(0xB2);
     let unsigned = AuthFixture::unsigned(build_keyset_create_tx(refused_target, &auth));
-    let accepted = build_keyset_create_tx(accepted_target, &auth);
-    let txs = [unsigned, accepted];
+    let authenticated = build_keyset_create_tx(accepted_target, &auth);
+    let txs = [unsigned, authenticated];
     let tx_witnesses = txs.clone();
-    let account_witness = [
-        store.get(&AUTH_KEYSET_ID),
-        store.get(&refused_target),
-        store.get(&accepted_target),
-    ];
+    let before = store.accounts.clone();
+    store.mutations = 0;
 
     let result = executor.execute_block(&mut store, crypto, &txs);
 
@@ -286,25 +307,18 @@ fn block_executor_refuses_unsigned_effects_and_keeps_sequential_positive_result(
             "transaction requires at least one authentication entry"
         ))
     ));
-    assert!(matches!(result.tx_results[1], TxApplyResult::Success));
-    let account_state_after = [
-        store.get(&AUTH_KEYSET_ID),
-        store.get(&refused_target),
-        store.get(&accepted_target),
-    ];
-    assert!(
-        account_state_after[0] == account_witness[0]
-            && account_state_after[1] == account_witness[1]
-            && account_witness[2].is_none()
-            && account_state_after[2]
-                .as_ref()
-                .is_some_and(|account| account.header.owner == KEYSET_PROGRAM_ID),
-        "block execution account witnesses disagree with the sequential result"
-    );
+    assert!(matches!(
+        result.tx_results[1],
+        TxApplyResult::Failed(ExecutionError::ProgramError(
+            "native keyset creation authority unavailable"
+        ))
+    ));
+    assert_eq!(store.accounts, before);
+    assert_eq!(store.mutations, 0);
 }
 
 #[test]
-fn block_executor_missing_signer_preserves_store_and_later_sequential_effects() {
+fn block_executor_missing_coverage_creation_and_would_be_signer_fail_in_order() {
     let mut store = WitnessStore::default();
     let primary = AuthFixture::new(&mut store);
     let second = AuthFixture::new_at(&mut store, dummy_account_id(0xA1));
@@ -337,21 +351,10 @@ fn block_executor_missing_signer_preserves_store_and_later_sequential_effects() 
     );
     assert_eq!(store.mutations, 0);
 
-    // The third transaction authenticates with the keyset created by the second.
     let mut later = build_keyset_create_tx(later_target, &primary);
     later.accounts[0].account_id = target;
     let digest = qbind_hash::tx::tx_digest(&later);
     later.auths[0].signature = ml_dsa_44_sign_digest(&primary.secret_key, &digest).unwrap();
-    let mut expected = WitnessStore {
-        accounts: initial,
-        mutations: 0,
-    };
-    let positive = executor.execute_block(
-        &mut expected,
-        primary.crypto(),
-        &[signed.clone(), later.clone()],
-    );
-    assert!(positive.all_succeeded());
     let txs = [partial, signed, later];
     let witnesses = txs.clone();
     let result = executor.execute_block(&mut store, primary.crypto(), &txs);
@@ -363,12 +366,17 @@ fn block_executor_missing_signer_preserves_store_and_later_sequential_effects() 
             "required signer authentication missing"
         ))
     ));
-    assert!(matches!(result.tx_results[1], TxApplyResult::Success));
-    assert!(matches!(result.tx_results[2], TxApplyResult::Success));
+    assert!(matches!(
+        result.tx_results[1],
+        TxApplyResult::Failed(ExecutionError::ProgramError(
+            "native keyset creation authority unavailable"
+        ))
+    ));
+    assert!(matches!(
+        result.tx_results[2],
+        TxApplyResult::Failed(ExecutionError::AccountNotFound)
+    ));
     assert!(!result.all_succeeded());
-    assert!(
-        store.accounts == expected.accounts,
-        "complete sequential state differs"
-    );
-    assert_eq!(store.mutations, 2);
+    assert_eq!(store.accounts, initial);
+    assert_eq!(store.mutations, 0);
 }
