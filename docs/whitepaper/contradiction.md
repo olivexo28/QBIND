@@ -5121,3 +5121,52 @@ refs/heads/copilot/run-422-native-auth-individual-threshold-admission` tip with
 local HEAD and check a clean worktree. Those post-commit outcomes and final
 identities are recorded in the delivery response, not asserted prospectively
 inside this self-identifying evidence append.
+
+### RUN 422 follow-up: migrated genuine threshold-two authority regression
+
+Follow-up scope explicitly expanded from eight to exactly nine cumulative
+paths: the existing RUN 422 native keyset-create authority-contract test plus
+these four evidence documents; the prior four Rust paths are unchanged from
+the tested-source commit. The old package failures remain historical evidence:
+the old test expected its preseeded threshold-2, weight-1 selected key to reach
+the FRESH target and unavailable-authority refusal. That expectation conflicts
+with the intentional individual-weight compatibility restriction. Only after
+the required package command passed on the committed migration is that
+validation blocker superseded.
+
+The renamed genuine TxExecutor control retains the initial ordinary creation
+attempt, authenticated by the existing threshold-1/weight-1 signer. It reads
+the creation target, refuses with
+`ProgramError("native keyset creation authority unavailable")`, and leaves
+TARGET absent. Subsequent target account seeding is fixture-only construction,
+not successful production creation. With preseeded threshold 2 and two distinct
+weight-1 entries, the unchanged genuine transaction signed by the first
+selected key now returns exactly
+`InvalidCallData("selected key weight below keyset threshold")` after reads
+`[TARGET]`; FRESH is not read. Provider lookups, suite-ID observations,
+verifications and canonical descriptors are all zero, as are puts/deletes.
+Complete transaction, wire bytes, backing store and target/FRESH presence are
+preserved. The second entry does not rescue the first selection.
+
+The matched retry changes only the first stored entry weight from 1 to 2,
+retains threshold, second entry, keys and signed transaction, snapshots the
+complete corrected store anew, and resets all observations before invocation.
+It performs one provider lookup, one returned-suite-ID observation and one
+genuine verification of the expected key/digest/signature, reads
+`[TARGET, FRESH]`, then returns exactly
+`ProgramError("native keyset creation authority unavailable")`. It has no
+writes/deletes and preserves the corrected complete store and input. This is
+successful authentication followed by existing program refusal, NOT successful
+transaction execution. The threshold-1/weight-1 genuine target control still
+authenticates, reads `[TARGET, FRESH]` and reaches the same program refusal
+with one verification and no writes. Registration/setup observations are reset
+before every measured invocation.
+
+The production threshold implementation remains byte-identical:
+`crates/qbind-ledger/src/auth.rs` is still
+`100755 / 895763fd47267a008fe10e2729b5db73606ca8cc`; all prior Rust source
+blobs and the excluded identity test remain unchanged. No weighted aggregation,
+positive native authority, deployed readiness or F1/F2 closure is introduced.
+See the D7 follow-up below for literal commands and results.
+
+See the append-only RUN 422 D7 follow-up for tested-source provenance, exact commands/counts, preservation checks and the historical blocker attribution.

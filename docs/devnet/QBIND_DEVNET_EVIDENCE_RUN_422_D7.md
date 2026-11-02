@@ -25996,3 +25996,155 @@ refs/heads/copilot/run-422-native-auth-individual-threshold-admission` tip with
 local HEAD and check a clean worktree. Those post-commit outcomes and final
 identities are recorded in the delivery response, not asserted prospectively
 inside this self-identifying evidence append.
+
+### RUN 422 follow-up: migrated genuine threshold-two authority regression
+
+Follow-up scope explicitly expanded from eight to exactly nine cumulative
+paths: the existing RUN 422 native keyset-create authority-contract test plus
+these four evidence documents; the prior four Rust paths are unchanged from
+the tested-source commit. The old package failures remain historical evidence:
+the old test expected its preseeded threshold-2, weight-1 selected key to reach
+the FRESH target and unavailable-authority refusal. That expectation conflicts
+with the intentional individual-weight compatibility restriction. Only after
+the required package command passed on the committed migration is that
+validation blocker superseded.
+
+The renamed genuine TxExecutor control retains the initial ordinary creation
+attempt, authenticated by the existing threshold-1/weight-1 signer. It reads
+the creation target, refuses with
+`ProgramError("native keyset creation authority unavailable")`, and leaves
+TARGET absent. Subsequent target account seeding is fixture-only construction,
+not successful production creation. With preseeded threshold 2 and two distinct
+weight-1 entries, the unchanged genuine transaction signed by the first
+selected key now returns exactly
+`InvalidCallData("selected key weight below keyset threshold")` after reads
+`[TARGET]`; FRESH is not read. Provider lookups, suite-ID observations,
+verifications and canonical descriptors are all zero, as are puts/deletes.
+Complete transaction, wire bytes, backing store and target/FRESH presence are
+preserved. The second entry does not rescue the first selection.
+
+The matched retry changes only the first stored entry weight from 1 to 2,
+retains threshold, second entry, keys and signed transaction, snapshots the
+complete corrected store anew, and resets all observations before invocation.
+It performs one provider lookup, one returned-suite-ID observation and one
+genuine verification of the expected key/digest/signature, reads
+`[TARGET, FRESH]`, then returns exactly
+`ProgramError("native keyset creation authority unavailable")`. It has no
+writes/deletes and preserves the corrected complete store and input. This is
+successful authentication followed by existing program refusal, NOT successful
+transaction execution. The threshold-1/weight-1 genuine target control still
+authenticates, reads `[TARGET, FRESH]` and reaches the same program refusal
+with one verification and no writes. Registration/setup observations are reset
+before every measured invocation.
+
+The production threshold implementation remains byte-identical:
+`crates/qbind-ledger/src/auth.rs` is still
+`100755 / 895763fd47267a008fe10e2729b5db73606ca8cc`; all prior Rust source
+blobs and the excluded identity test remain unchanged. No weighted aggregation,
+positive native authority, deployed readiness or F1/F2 closure is introduced.
+See the D7 follow-up below for literal commands and results.
+
+### RUN 422 follow-up: superseded threshold-two test blocker
+
+The preceding package failure records are retained verbatim as historical
+evidence. At tested source `e3858b78010bac250e99aed283c6ae9f16813818`
+(tree `08c625ed232d955760250dbdebc1621cf99f1522`), the required package
+command exited 101 with 841 executed = 840 passed + 1 failed + 0 ignored.
+The supplemental `--no-fail-fast` command exited 101 with 979 executed =
+961 passed + 1 failed + 17 ignored. The failing excluded historical
+threshold-two test expected a weight-1 selected key to reach the FRESH read.
+That expectation conflicted with the intended individual-weight refusal.
+
+The follow-up explicitly expands the cumulative allowed paths to nine: the
+existing runtime authority test and these four documents, in addition to the
+original four Rust source/test paths. The old test is renamed and migrated,
+not removed, ignored, filtered or weakened. It asserts the preserved initial
+genuine creation refusal; threshold-2/weight-1 refuses at `[TARGET]` with zero
+provider/ID/verify/descriptor work and unchanged state; changing ONLY the first
+stored weight to 2 permits the same signed genuine transaction to verify once
+and reach the existing unavailable-authority program refusal after
+`[TARGET, FRESH]`; the threshold-1/weight-1 genuine control also reaches that
+program refusal. Fixture setup and provider registration observations are reset
+before every measured invocation.
+
+Tested-test commit: `31af27f46aef427299fc83bffdfaaee7c0077753`.
+Tested root tree: `30b2908bc653fe81c44d3b1cd73acbd03752bcf8`.
+Raw parent: `parent e3858b78010bac250e99aed283c6ae9f16813818`.
+The original production-source commit remains
+`0a163bb733f7dd160a588b5aa11cd37ad13fd143`, tree
+`7499eec58c38e4056337b89abfd6d3965ba9eef8`. The follow-up changes test and
+evidence only; production Rust is byte-identical.
+
+Literal commands, exit codes and selected counts on the committed tested-test
+source:
+
+```text
+LIBCLANG_PATH=/usr/lib/llvm-18/lib cargo test --locked -p qbind-runtime --test run_422_native_keyset_create_authority_contract_tests -- --nocapture --test-threads=1
+exit 0
+selected = 9 = 9 passed + 0 failed + 0 ignored
+Executed target tests: 9, including
+preseeded_individual_threshold_refusal_and_matched_threshold_controls
+```
+
+```text
+LIBCLANG_PATH=/usr/lib/llvm-18/lib cargo test --locked -p qbind-ledger -p qbind-runtime -p qbind-system
+exit 0
+selected = 979 = 962 passed + 0 failed + 17 ignored
+```
+
+The package count is the sum of all Cargo `running N tests` and result rows,
+including doc-tests; the independently matched total is 979. The ignored tests
+are pre-existing test-harness statuses, not filters or skips used to obtain
+success. The focused target selected all nine tests with zero ignored.
+
+```text
+rustfmt --check --edition 2021 crates/qbind-runtime/tests/run_422_native_keyset_create_authority_contract_tests.rs
+exit 0
+
+git -c core.whitespace=cr-at-eol diff --check
+exit 0
+```
+
+The package blocker is superseded because the exact required package command
+now exits 0 on the committed test migration. The old failing result remains
+historical; do not combine it with or subtract it from the new run.
+
+### Follow-up starting-state, ancestry and exact source manifest
+
+The follow-up started on branch
+`copilot/run-422-native-auth-individual-threshold-admission`, repository
+`olivexo28/QBIND`, at clean HEAD
+`e3858b78010bac250e99aed283c6ae9f16813818`, root tree
+`08c625ed232d955760250dbdebc1621cf99f1522`. These commit and tree identities
+were checked separately. Its raw parent header is
+`parent 0a163bb733f7dd160a588b5aa11cd37ad13fd143`; that parent object is
+available. Ancestry checks from the required baseline and tested-source commit
+to the follow-up starting HEAD both exited 0. The repository is shallow. The
+baseline raw parent header remains
+`parent 0f92d6460164d2131d5deb3b519dd9db679014af`, but that object is
+unavailable; this is a shallow-history limitation, NOT evidence that the
+header had no parent. The follow-up starting worktree was clean.
+
+Exactly five follow-up paths were authorized relative to that starting HEAD:
+the runtime test and these four documents. Cumulatively exactly nine paths
+change relative to baseline ca8b772fe9962557be11ddbcb24661d78a887e89. At
+tested-test commit 31af27f46aef427299fc83bffdfaaee7c0077753 (tree
+30b2908bc653fe81c44d3b1cd73acbd03752bcf8), the runtime test changed from
+`100644 / 841928e45df09ad7a74ed0946c512da05970df35` to
+`100644 / 50359b04d4cbf9a3007aff7cad6d4e8dabf3e85a`.
+
+Protected unchanged mode/blob tuples:
+
+```text
+100755 895763fd47267a008fe10e2729b5db73606ca8cc crates/qbind-ledger/src/auth.rs
+100755 65b156ec44f5c84d32fc25add37a868ce473f7f0 crates/qbind-ledger/tests/tx_auth_verifier_tests.rs
+100644 ed5f0a8c2bb78c6c2eff86e73f0bc365aaccbaec crates/qbind-ledger/tests/run_422_native_admission_resource_tests.rs
+100755 3ce8b9c5987b625b8dcbaadf512836aad4efe332 crates/qbind-runtime/tests/tx_executor_tests.rs
+100644 e03b7f6338547b0c99695cc5ae1ddcd0d28b1cf4 crates/qbind-node/tests/run_375_public_devnet_identity_cli_tests.rs
+```
+
+In particular production `auth.rs` remains byte-identical to the already
+tested production implementation. The five-path follow-up and cumulative
+nine-path tree comparisons, exclusion checks, complete document-prefix/EOL/EOF
+checks, tested-test blob equality, final ancestry and clean worktree were
+verified separately from root-tree identity.
