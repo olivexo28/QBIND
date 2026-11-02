@@ -163,6 +163,9 @@ fn verify_single_auth<S: AccountStore>(
     let suite = crypto
         .signature_suite(suite_id)
         .ok_or(ExecutionError::CryptoError("signature suite not found"))?;
+    if suite.suite_id() != auth.suite_id {
+        return Err(ExecutionError::CryptoError("signature suite id mismatch"));
+    }
 
     // 6) Extract signature bytes from TxAuth.
     let sig_bytes: &[u8] = &auth.signature;

@@ -270,13 +270,16 @@ impl CryptoProvider for CountingCryptoProvider {
 
 struct RecordingMlDsa44Suite {
     inner: MlDsa44SignatureSuite,
+    reported_ids: Vec<u8>,
+    id_observations: AtomicUsize,
     digests: Arc<Mutex<Vec<Hash32>>>,
     public_keys: Arc<Mutex<Vec<(usize, Vec<u8>)>>>,
 }
 
 impl SignatureSuite for RecordingMlDsa44Suite {
     fn suite_id(&self) -> u8 {
-        100
+        let index = self.id_observations.fetch_add(1, Ordering::SeqCst);
+        self.reported_ids.get(index).copied().unwrap_or(100)
     }
 
     fn public_key_len(&self) -> usize {
@@ -307,15 +310,24 @@ impl SignatureSuite for RecordingMlDsa44Suite {
 
 struct RecordingCryptoProvider {
     lookups: AtomicUsize,
+    requested_ids: Mutex<Vec<u8>>,
     suite: RecordingMlDsa44Suite,
 }
 
 impl RecordingCryptoProvider {
     fn new() -> Self {
+        Self::with_reported_ids(Vec::new())
+    }
+
+    // Nonmatching reported IDs inject a synthetic provider fault, not a new algorithm.
+    fn with_reported_ids(reported_ids: Vec<u8>) -> Self {
         Self {
             lookups: AtomicUsize::new(0),
+            requested_ids: Mutex::new(Vec::new()),
             suite: RecordingMlDsa44Suite {
                 inner: MlDsa44SignatureSuite::new(100),
+                reported_ids,
+                id_observations: AtomicUsize::new(0),
                 digests: Arc::new(Mutex::new(Vec::new())),
                 public_keys: Arc::new(Mutex::new(Vec::new())),
             },
@@ -324,6 +336,8 @@ impl RecordingCryptoProvider {
 
     fn reset(&self) {
         self.lookups.store(0, Ordering::SeqCst);
+        self.requested_ids.lock().unwrap().clear();
+        self.suite.id_observations.store(0, Ordering::SeqCst);
         self.suite
             .digests
             .lock()
@@ -356,6 +370,7 @@ impl RecordingCryptoProvider {
 impl CryptoProvider for RecordingCryptoProvider {
     fn signature_suite(&self, suite_id: u8) -> Option<&dyn SignatureSuite> {
         self.lookups.fetch_add(1, Ordering::SeqCst);
+        self.requested_ids.lock().unwrap().push(suite_id);
         (suite_id == 100).then_some(&self.suite)
     }
 
@@ -1111,6 +1126,188 @@ fn two_signer_fixture(
         StaticCryptoProvider::new().with_signature_suite(Arc::new(MlDsa44SignatureSuite::new(100))),
     );
     (store, crypto, tx)
+}
+
+#[test]
+fn returned_suite_id_admission_genuine_positive_mismatch_and_invalid_retry() {
+    let (mut store, _, tx) = signed_native_fixture();
+    let tx_witness = tx.clone();
+    let store_witness = store.snapshot();
+    let responses_witness = store.reported_accounts.clone();
+    let matched = Arc::new(RecordingCryptoProvider::with_reported_ids(vec![100]));
+    verify_transaction_auth(&mut store, matched.clone(), &tx).expect("genuine matched proof");
+    assert_eq!(
+        matched.recorded_digests(),
+        vec![qbind_hash::tx::tx_digest(&tx)]
+    );
+    assert_eq!(matched.recorded_public_keys().len(), 1);
+    assert_eq!(matched.suite.id_observations.load(Ordering::SeqCst), 1);
+    assert_eq!(&*matched.requested_ids.lock().unwrap(), &[100]);
+    assert_eq!(&*store.read_ids.borrow(), &[tx.accounts[0].account_id]);
+    assert_eq!(store.counts.writes.get(), 0);
+    assert_eq!(store.counts.deletes.get(), 0);
+    assert_eq!(store.snapshot(), store_witness);
+    assert_eq!(tx, tx_witness);
+
+    let mut invalid = tx.clone();
+    invalid.auths[0].signature[0] ^= 0x80;
+    for candidate in [&tx, &invalid] {
+        let candidate_witness = candidate.clone();
+        store.reset_counts();
+        let fault = Arc::new(RecordingCryptoProvider::with_reported_ids(vec![3]));
+        assert!(matches!(
+            verify_transaction_auth(&mut store, fault.clone(), candidate),
+            Err(ExecutionError::CryptoError("signature suite id mismatch"))
+        ));
+        assert_eq!(store.counts.reads.get(), 1);
+        assert_eq!(&*store.read_ids.borrow(), &[tx.accounts[0].account_id]);
+        assert_eq!(fault.lookups.load(Ordering::SeqCst), 1);
+        assert_eq!(&*fault.requested_ids.lock().unwrap(), &[100]);
+        assert_eq!(fault.suite.id_observations.load(Ordering::SeqCst), 1);
+        assert!(fault.recorded_digests().is_empty());
+        assert!(fault.recorded_public_keys().is_empty());
+        assert_eq!(store.counts.writes.get(), 0);
+        assert_eq!(store.counts.deletes.get(), 0);
+        assert_eq!(*candidate, candidate_witness);
+        assert_eq!(store.snapshot(), store_witness);
+        assert_eq!(store.reported_accounts, responses_witness);
+    }
+
+    store.reset_counts();
+    matched.reset();
+    let invalid_witness = invalid.clone();
+    assert!(matches!(
+        verify_transaction_auth(&mut store, matched.clone(), &invalid),
+        Err(ExecutionError::CryptoError("signature verification failed"))
+    ));
+    assert_eq!(matched.recorded_digests().len(), 1);
+    assert_eq!(matched.recorded_public_keys().len(), 1);
+    assert_eq!(matched.suite.id_observations.load(Ordering::SeqCst), 1);
+    assert_eq!(&*matched.requested_ids.lock().unwrap(), &[100]);
+    assert_eq!(&*store.read_ids.borrow(), &[tx.accounts[0].account_id]);
+    assert_eq!(invalid, invalid_witness);
+    assert_eq!(store.snapshot(), store_witness);
+    assert_eq!(store.counts.writes.get(), 0);
+    assert_eq!(store.counts.deletes.get(), 0);
+
+    store.reset_counts();
+    matched.reset();
+    verify_transaction_auth(&mut store, matched.clone(), &tx).expect("corrected genuine retry");
+    assert_eq!(matched.recorded_digests().len(), 1);
+    assert_eq!(matched.recorded_public_keys().len(), 1);
+    assert_eq!(matched.suite.id_observations.load(Ordering::SeqCst), 1);
+    assert_eq!(&*matched.requested_ids.lock().unwrap(), &[100]);
+    assert_eq!(&*store.read_ids.borrow(), &[tx.accounts[0].account_id]);
+    assert_eq!(store.counts.writes.get(), 0);
+    assert_eq!(store.counts.deletes.get(), 0);
+    assert_eq!(store.snapshot(), store_witness);
+    assert_eq!(store.reported_accounts, responses_witness);
+    assert_eq!(tx, tx_witness);
+}
+
+#[test]
+fn correctly_registered_mldsa44_alias_remains_compatible() {
+    let (mut store, _, mut tx) = signed_native_fixture();
+    // TxAuth is outside the signed body; keyset suite ID is outside it as well.
+    tx.auths[0].suite_id = 3;
+    store
+        .accounts
+        .get_mut(&tx.accounts[0].account_id)
+        .unwrap()
+        .data[12] = 3;
+    let tx_witness = tx.clone();
+    let store_witness = store.snapshot();
+    let crypto = Arc::new(
+        StaticCryptoProvider::new().with_signature_suite(Arc::new(MlDsa44SignatureSuite::new(3))),
+    );
+    verify_transaction_auth(&mut store, crypto, &tx).expect("registered genuine ML-DSA-44 alias");
+    assert_eq!(&*store.read_ids.borrow(), &[tx.accounts[0].account_id]);
+    assert_eq!(store.counts.writes.get(), 0);
+    assert_eq!(store.counts.deletes.get(), 0);
+    assert_eq!(tx, tx_witness);
+    assert_eq!(store.snapshot(), store_witness);
+}
+
+#[test]
+fn complete_framing_and_missing_entry_precede_synthetic_provider_mismatch() {
+    for malformed in [true, false] {
+        let (mut store, _, tx) = signed_native_fixture();
+        let data = &mut store
+            .accounts
+            .get_mut(&tx.accounts[0].account_id)
+            .unwrap()
+            .data;
+        if malformed {
+            // A valid matching first entry must not hide a malformed trailing entry.
+            data[6..8].copy_from_slice(&2u16.to_le_bytes());
+            data.push(3);
+        } else {
+            data[12] = 3;
+        }
+        let store_witness = store.snapshot();
+        let tx_witness = tx.clone();
+        let fault = Arc::new(RecordingCryptoProvider::with_reported_ids(vec![3]));
+        let error = verify_transaction_auth(&mut store, fault.clone(), &tx).unwrap_err();
+        if malformed {
+            assert!(matches!(
+                error,
+                ExecutionError::SerializationError("decode KeysetAccount")
+            ));
+        } else {
+            assert!(matches!(
+                error,
+                ExecutionError::InvalidCallData("no key in keyset for given suite_id")
+            ));
+        }
+        assert_eq!(&*store.read_ids.borrow(), &[tx.accounts[0].account_id]);
+        assert_eq!(store.counts.reads.get(), 1);
+        assert_eq!(fault.lookups.load(Ordering::SeqCst), 0);
+        assert!(fault.requested_ids.lock().unwrap().is_empty());
+        assert_eq!(fault.suite.id_observations.load(Ordering::SeqCst), 0);
+        assert!(fault.recorded_digests().is_empty());
+        assert!(fault.recorded_public_keys().is_empty());
+        assert_eq!(store.counts.writes.get(), 0);
+        assert_eq!(store.counts.deletes.get(), 0);
+        assert_eq!(store.snapshot(), store_witness);
+        assert_eq!(tx, tx_witness);
+    }
+}
+
+#[test]
+fn genuine_multi_auth_later_suite_mismatch_and_fresh_matched_retry() {
+    let (mut store, _, tx) = two_signer_fixture(false);
+    let tx_witness = tx.clone();
+    let store_witness = store.snapshot();
+    for (reported_ids, expected_verifications) in [(vec![100, 3], 1), (vec![100, 100], 2)] {
+        store.reset_counts();
+        let crypto = Arc::new(RecordingCryptoProvider::with_reported_ids(reported_ids));
+        let result = verify_transaction_auth(&mut store, crypto.clone(), &tx);
+        if expected_verifications == 1 {
+            assert!(matches!(
+                result,
+                Err(ExecutionError::CryptoError("signature suite id mismatch"))
+            ));
+        } else {
+            result.expect("fresh matched retry");
+        }
+        assert_eq!(
+            &*store.read_ids.borrow(),
+            &[tx.accounts[0].account_id, tx.accounts[1].account_id]
+        );
+        assert_eq!(store.counts.reads.get(), 2);
+        assert_eq!(crypto.lookups.load(Ordering::SeqCst), 2);
+        assert_eq!(&*crypto.requested_ids.lock().unwrap(), &[100, 100]);
+        assert_eq!(crypto.suite.id_observations.load(Ordering::SeqCst), 2);
+        assert_eq!(
+            crypto.recorded_digests(),
+            vec![qbind_hash::tx::tx_digest(&tx); expected_verifications]
+        );
+        assert_eq!(crypto.recorded_public_keys().len(), expected_verifications);
+        assert_eq!(store.counts.writes.get(), 0);
+        assert_eq!(store.counts.deletes.get(), 0);
+        assert_eq!(tx, tx_witness);
+        assert_eq!(store.snapshot(), store_witness);
+    }
 }
 
 #[test]

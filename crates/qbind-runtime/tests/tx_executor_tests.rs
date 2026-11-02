@@ -1,7 +1,7 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use qbind_crypto::{
     ml_dsa_44_sign_digest, CryptoError, CryptoProvider, MlDsa44SignatureSuite, SignatureSuite,
@@ -145,6 +145,8 @@ impl AccountStore for WitnessStore {
 #[derive(Default)]
 struct AuthCryptoCounts {
     lookups: AtomicUsize,
+    requested_ids: Mutex<Vec<u8>>,
+    id_observations: AtomicUsize,
     verifications: AtomicUsize,
 }
 
@@ -155,7 +157,8 @@ struct CountingAuthSuite {
 
 impl SignatureSuite for CountingAuthSuite {
     fn suite_id(&self) -> u8 {
-        AUTH_SUITE_ID
+        self.counts.id_observations.fetch_add(1, Ordering::SeqCst);
+        self.inner.suite_id()
     }
 
     fn public_key_len(&self) -> usize {
@@ -198,6 +201,7 @@ impl CountingAuthProvider {
 impl CryptoProvider for CountingAuthProvider {
     fn signature_suite(&self, suite_id: u8) -> Option<&dyn SignatureSuite> {
         self.counts.lookups.fetch_add(1, Ordering::SeqCst);
+        self.counts.requested_ids.lock().unwrap().push(suite_id);
         (suite_id == AUTH_SUITE_ID).then_some(&self.suite)
     }
 
@@ -249,6 +253,57 @@ fn build_keyset_create_tx(target_id: AccountId, auth: &AuthFixture) -> Transacti
     };
     auth.authenticate(&mut tx);
     tx
+}
+
+#[test]
+fn executor_returned_suite_id_admission_precedes_native_target_read() {
+    let executor: TxExecutor<WitnessStore> = TxExecutor::new();
+    let target_id = dummy_account_id(0xEE);
+    let mut store = WitnessStore::default();
+    let auth = AuthFixture::new(&mut store);
+    let tx = build_keyset_create_tx(target_id, &auth);
+    let tx_witness = tx.clone();
+    let store_witness = store.accounts.clone();
+    for (reported_id, expected_verifications) in [(3, 0), (AUTH_SUITE_ID, 1)] {
+        store.mutations = 0;
+        store.writes = 0;
+        store.deletes = 0;
+        store.reads.borrow_mut().clear();
+        let mut crypto = CountingAuthProvider::new();
+        // ID 3 under requested ID 100 is a synthetic provider fault.
+        crypto.suite.inner = MlDsa44SignatureSuite::new(reported_id);
+        let counts = Arc::clone(&crypto.counts);
+        let error = executor
+            .execute_transaction(&mut store, Arc::new(crypto), &tx)
+            .unwrap_err();
+        if reported_id != AUTH_SUITE_ID {
+            assert!(matches!(
+                error,
+                ExecutionError::CryptoError("signature suite id mismatch")
+            ));
+            assert_eq!(&*store.reads.borrow(), &[AUTH_KEYSET_ID]);
+        } else {
+            // Successful genuine authentication, then the existing program refusal.
+            assert!(matches!(
+                error,
+                ExecutionError::ProgramError("native keyset creation authority unavailable")
+            ));
+            assert_eq!(&*store.reads.borrow(), &[AUTH_KEYSET_ID, target_id]);
+        }
+        assert_eq!(counts.lookups.load(Ordering::SeqCst), 1);
+        assert_eq!(&*counts.requested_ids.lock().unwrap(), &[AUTH_SUITE_ID]);
+        assert_eq!(counts.id_observations.load(Ordering::SeqCst), 1);
+        assert_eq!(
+            counts.verifications.load(Ordering::SeqCst),
+            expected_verifications
+        );
+        assert_eq!(store.mutations, 0);
+        assert_eq!(store.writes, 0);
+        assert_eq!(store.deletes, 0);
+        assert!(!store.accounts.contains_key(&target_id));
+        assert_eq!(store.accounts, store_witness);
+        assert_eq!(tx, tx_witness);
+    }
 }
 
 #[test]
