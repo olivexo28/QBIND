@@ -1947,85 +1947,178 @@ fn transaction_format_admission_precedence_preserves_structural_errors() {
 
 #[test]
 fn native_transaction_format_precedes_account_and_provider_failures() {
-    let id = dummy_account_id(0xA1);
-    let (_, _, mut candidate) = signed_native_fixture();
-    candidate.auths[0].reserved = 1;
-    let crypto = Arc::new(RecordingCryptoProvider::with_reported_ids(vec![3]));
+    let (baseline_store, _, baseline_tx) = signed_native_fixture();
+    let id = baseline_tx.accounts[0].account_id;
+    let baseline_account = baseline_store.accounts[&id].clone();
+    let cases = [
+        ("matched genuine proof", 0),
+        ("missing account", 1),
+        ("returned ID mismatch", 2),
+        ("wrong owner", 3),
+        ("executable account", 4),
+        ("malformed stored data", 5),
+        ("zero threshold", 6),
+        ("insufficient selected weight", 7),
+        ("corrupted signature", 8),
+        ("unavailable provider (synthetic)", 9),
+        ("mismatching returned suite ID (synthetic)", 10),
+    ];
 
-    for fault in 0..8 {
-        let mut tx = candidate.clone();
-        let (mut trial_store, _, _) = signed_native_fixture();
+    for (name, fault) in cases {
+        let mut tx = baseline_tx.clone();
+        let mut trial_store = baseline_store.clone();
+        let mut crypto = Arc::new(RecordingCryptoProvider::new());
         match fault {
             0 => {
-                trial_store.accounts.remove(&id);
+                // Genuine matched control: keep the complete fixture unchanged.
             }
             1 => {
-                trial_store.report_account(
-                    id,
-                    Account::new(dummy_account_id(0xF1), KEYSET_PROGRAM_ID, 0, vec![1]),
-                );
+                trial_store.accounts.remove(&id);
             }
             2 => {
-                let mut account = trial_store.accounts[&id].clone();
-                account.header.owner = dummy_program_id(0xF2);
+                let mut account = baseline_account.clone();
+                account.id = dummy_account_id(0xF1);
                 trial_store.report_account(id, account);
             }
             3 => {
-                let mut account = trial_store.accounts[&id].clone();
-                account.header.is_executable = true;
+                let mut account = baseline_account.clone();
+                account.header.owner = dummy_program_id(0xF2);
                 trial_store.report_account(id, account);
             }
             4 => {
-                let mut account = trial_store.accounts[&id].clone();
-                account.data = vec![0xFF];
+                let mut account = baseline_account.clone();
+                account.header.is_executable = true;
                 trial_store.report_account(id, account);
             }
             5 => {
-                let mut account = trial_store.accounts[&id].clone();
-                account.data[4..6].copy_from_slice(&0u16.to_le_bytes());
+                let mut account = baseline_account.clone();
+                account.data = vec![0xFF];
                 trial_store.report_account(id, account);
             }
             6 => {
-                let mut account = trial_store.accounts[&id].clone();
+                let mut account = baseline_account.clone();
+                account.data[4..6].copy_from_slice(&0u16.to_le_bytes());
+                trial_store.report_account(id, account);
+            }
+            7 => {
+                let mut account = baseline_account.clone();
                 account.data[13..15].copy_from_slice(&0u16.to_le_bytes());
                 trial_store.report_account(id, account);
             }
-            7 => tx.auths[0].signature[0] ^= 0x80,
+            8 => tx.auths[0].signature[0] ^= 0x80,
+            9 => Arc::get_mut(&mut crypto).unwrap().unavailable = true,
+            10 => crypto = Arc::new(RecordingCryptoProvider::with_reported_ids(vec![3])),
             _ => unreachable!(),
         }
-        let tx_witness = tx.clone();
-        let backing_witness = trial_store.snapshot();
-        let responses_witness = trial_store.reported_accounts.clone();
+
+        let tx_without_format_fault = tx.clone();
+        let backing_before = trial_store.snapshot();
+        let responses_before = trial_store.reported_accounts.clone();
         trial_store.reset_counts();
         crypto.reset();
-        assert!(matches!(
-            verify_transaction_auth(&mut trial_store, crypto.clone(), &tx),
-            Err(ExecutionError::InvalidCallData(
-                "nonzero transaction authentication reserved byte"
-            ))
-        ));
-        assert_eq!(trial_store.counts.reads.get(), 0, "fault {fault}");
-        assert_eq!(trial_store.counts.writes.get(), 0, "fault {fault}");
-        assert_eq!(trial_store.counts.deletes.get(), 0, "fault {fault}");
-        assert_eq!(crypto.lookups.load(Ordering::SeqCst), 0, "fault {fault}");
-        assert_eq!(crypto.suite.id_observations.load(Ordering::SeqCst), 0);
-        assert!(crypto.recorded_digests().is_empty());
-        assert!(crypto.recorded_public_keys().is_empty());
-        assert_eq!(tx, tx_witness);
-        assert_eq!(trial_store.snapshot(), backing_witness);
-        assert_eq!(trial_store.reported_accounts, responses_witness);
+        let result = verify_transaction_auth(&mut trial_store, crypto.clone(), &tx);
+        match (fault, result) {
+            (0, Ok(())) => {}
+            (1, Err(ExecutionError::AccountNotFound)) => {}
+            (2, Err(ExecutionError::InvalidCallData("keyset account id mismatch"))) => {}
+            (3, Err(ExecutionError::AccountOwnerMismatch)) => {}
+            (4, Err(ExecutionError::InvalidCallData("keyset account is executable"))) => {}
+            (5, Err(ExecutionError::SerializationError("decode KeysetAccount"))) => {}
+            (6, Err(ExecutionError::InvalidCallData("keyset threshold is zero"))) => {}
+            (
+                7,
+                Err(ExecutionError::InvalidCallData("selected key weight below keyset threshold")),
+            ) => {}
+            (8, Err(ExecutionError::CryptoError("signature verification failed"))) => {}
+            (9, Err(ExecutionError::CryptoError("signature suite not found"))) => {}
+            (10, Err(ExecutionError::CryptoError("signature suite id mismatch"))) => {}
+            (_, other) => panic!("{name}: unexpected downstream result {other:?}"),
+        }
+
+        let (reads, lookups, suite_id_observations, verifications) = match fault {
+            0 | 8 => (1, 1, 1, 1),
+            1..=7 => (1, 0, 0, 0),
+            9 => (1, 1, 0, 0),
+            10 => (1, 1, 1, 0),
+            _ => unreachable!(),
+        };
+        assert_eq!(trial_store.counts.reads.get(), reads, "{name}");
+        assert_eq!(&*trial_store.read_ids.borrow(), &[id], "{name}");
+        assert_eq!(crypto.lookups.load(Ordering::SeqCst), lookups, "{name}");
+        assert_eq!(
+            &*crypto.requested_ids.lock().unwrap(),
+            &vec![100; lookups],
+            "{name}"
+        );
+        assert_eq!(
+            crypto.suite.id_observations.load(Ordering::SeqCst),
+            suite_id_observations,
+            "{name}"
+        );
+        assert_eq!(
+            crypto.recorded_digests(),
+            vec![qbind_hash::tx::tx_digest(&tx); verifications],
+            "{name}"
+        );
+        assert_eq!(crypto.recorded_public_keys().len(), verifications, "{name}");
+        assert_eq!(trial_store.counts.writes.get(), 0, "{name}");
+        assert_eq!(trial_store.counts.deletes.get(), 0, "{name}");
+        assert_eq!(tx, tx_without_format_fault, "{name}");
+        assert_eq!(trial_store.snapshot(), backing_before, "{name}");
+        assert_eq!(trial_store.reported_accounts, responses_before, "{name}");
+
+        let mut format_fault = tx.clone();
+        format_fault.auths[0].reserved = 1;
+        assert_eq!(
+            qbind_hash::tx::tx_digest(&format_fault),
+            qbind_hash::tx::tx_digest(&tx),
+            "{name}: TxAuth.reserved must not change the signed digest"
+        );
+        assert_eq!(
+            format_fault.auths[0].signature, tx.auths[0].signature,
+            "{name}: format fault must preserve the genuine proof"
+        );
+        let format_tx_witness = format_fault.clone();
+        trial_store.reset_counts();
+        crypto.reset();
+        assert!(
+            matches!(
+                verify_transaction_auth(&mut trial_store, crypto.clone(), &format_fault),
+                Err(ExecutionError::InvalidCallData(
+                    "nonzero transaction authentication reserved byte"
+                ))
+            ),
+            "{name}"
+        );
+        assert_eq!(trial_store.counts.reads.get(), 0, "{name}");
+        assert!(trial_store.read_ids.borrow().is_empty(), "{name}");
+        assert_eq!(trial_store.counts.writes.get(), 0, "{name}");
+        assert_eq!(trial_store.counts.deletes.get(), 0, "{name}");
+        assert_eq!(crypto.lookups.load(Ordering::SeqCst), 0, "{name}");
+        assert!(crypto.requested_ids.lock().unwrap().is_empty(), "{name}");
+        assert_eq!(
+            crypto.suite.id_observations.load(Ordering::SeqCst),
+            0,
+            "{name}"
+        );
+        assert!(crypto.recorded_digests().is_empty(), "{name}");
+        assert!(crypto.recorded_public_keys().is_empty(), "{name}");
+        assert_eq!(format_fault, format_tx_witness, "{name}");
+        assert_eq!(trial_store.snapshot(), backing_before, "{name}");
+        assert_eq!(trial_store.reported_accounts, responses_before, "{name}");
     }
 }
 
 #[test]
 fn genuine_later_format_fault_precedes_all_proofs_and_corrected_retry_is_fresh() {
-    let (mut store, mut tx, secret_keys) = genuine_multi_auth_with_non_signer();
+    let (mut store, tx, secret_keys) = genuine_multi_auth_with_non_signer();
     let first_id = tx.accounts[0].account_id;
     let second_id = tx.accounts[1].account_id;
     let crypto = Arc::new(RecordingCryptoProvider::new());
     let mut faulted = tx.clone();
     faulted.accounts[1].reserved0[0] = 0xA4;
     resign_native_auths(&mut faulted, &secret_keys);
+    let rejected_snapshot = faulted.clone();
     assert_format_refusal_has_no_external_work(
         &mut store,
         &crypto,
@@ -2033,16 +2126,63 @@ fn genuine_later_format_fault_precedes_all_proofs_and_corrected_retry_is_fresh()
         "nonzero transaction account reserved bytes",
     );
 
-    tx.accounts[1].reserved0[0] = 0;
-    resign_native_auths(&mut tx, &secret_keys);
-    let corrected_witness = tx.clone();
+    let mut corrected = rejected_snapshot.clone();
+    corrected.accounts[1].reserved0[0] = 0;
+    resign_native_auths(&mut corrected, &secret_keys);
+    let mut corrected_without_signatures = corrected.clone();
+    let mut expected_without_signatures = rejected_snapshot.clone();
+    expected_without_signatures.accounts[1].reserved0[0] = 0;
+    for auth in &mut corrected_without_signatures.auths {
+        auth.signature.clear();
+    }
+    for auth in &mut expected_without_signatures.auths {
+        auth.signature.clear();
+    }
+    assert_eq!(
+        corrected_without_signatures, expected_without_signatures,
+        "retry may correct only the rejected reservation and re-sign"
+    );
+    assert_eq!(corrected.version, rejected_snapshot.version);
+    assert_eq!(corrected.chain_id, rejected_snapshot.chain_id);
+    assert_eq!(corrected.payer, rejected_snapshot.payer);
+    assert_eq!(corrected.nonce, rejected_snapshot.nonce);
+    assert_eq!(corrected.fee_limit, rejected_snapshot.fee_limit);
+    assert_eq!(corrected.accounts[0], rejected_snapshot.accounts[0]);
+    assert_eq!(corrected.accounts[2], rejected_snapshot.accounts[2]);
+    assert_eq!(
+        corrected.auths[0].account_index,
+        rejected_snapshot.auths[0].account_index
+    );
+    assert_eq!(
+        corrected.auths[0].suite_id,
+        rejected_snapshot.auths[0].suite_id
+    );
+    assert_eq!(
+        corrected.auths[0].reserved,
+        rejected_snapshot.auths[0].reserved
+    );
+    assert_eq!(
+        corrected.auths[1].account_index,
+        rejected_snapshot.auths[1].account_index
+    );
+    assert_eq!(
+        corrected.auths[1].suite_id,
+        rejected_snapshot.auths[1].suite_id
+    );
+    assert_eq!(
+        corrected.auths[1].reserved,
+        rejected_snapshot.auths[1].reserved
+    );
+    assert_eq!(corrected.program_id, rejected_snapshot.program_id);
+    assert_eq!(corrected.call_data, rejected_snapshot.call_data);
+    let corrected_witness = corrected.clone();
     let store_witness = store.snapshot();
     let responses_witness = store.reported_accounts.clone();
     store.reset_counts();
     crypto.reset();
-    verify_transaction_auth(&mut store, crypto.clone(), &tx)
+    verify_transaction_auth(&mut store, crypto.clone(), &corrected)
         .expect("corrected later metadata admits both genuine proofs");
-    let digest = qbind_hash::tx::tx_digest(&tx);
+    let digest = qbind_hash::tx::tx_digest(&corrected);
     assert_eq!(&*store.read_ids.borrow(), &[first_id, second_id]);
     assert_eq!(store.counts.reads.get(), 2);
     assert_eq!(crypto.lookups.load(Ordering::SeqCst), 2);
@@ -2062,7 +2202,7 @@ fn genuine_later_format_fault_precedes_all_proofs_and_corrected_retry_is_fresh()
     );
     assert_eq!(store.counts.writes.get(), 0);
     assert_eq!(store.counts.deletes.get(), 0);
-    assert_eq!(tx, corrected_witness);
+    assert_eq!(corrected, corrected_witness);
     assert_eq!(store.snapshot(), store_witness);
     assert_eq!(store.reported_accounts, responses_witness);
 }
