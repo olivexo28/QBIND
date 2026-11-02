@@ -4,7 +4,7 @@ use qbind_crypto::CryptoProvider;
 use qbind_hash::tx::{try_tx_digest_streaming, TxDigestError};
 use qbind_serde::keyset::{parse_stored_keyset, StoredKeysetLimits, StoredKeysetParseError};
 use qbind_serde::StateError;
-use qbind_types::Hash32;
+use qbind_types::{Hash32, KEYSET_PROGRAM_ID};
 use qbind_wire::tx::{Transaction, TxAuth};
 
 use crate::store::AccountStore;
@@ -16,6 +16,7 @@ use crate::ExecutionError;
 ///  - interpret auth.account_index as an index into tx.accounts
 ///  - use that account's account_id as the keyset AccountId
 ///  - load the corresponding account from AccountStore
+///  - require the returned ID, keyset-program owner and non-executable metadata
 ///  - decode KeysetAccount from account.data via qbind-serde
 ///  - look up a KeysetEntry with matching suite_id
 ///  - use CryptoProvider to fetch a SignatureSuite and verify the signature
@@ -109,10 +110,25 @@ fn verify_single_auth<S: AccountStore>(
     let meta = &tx.accounts[account_index];
     let keyset_id = meta.account_id;
 
-    // 2) Load account from store.
+    // 2) Load once; missing-account behavior remains unchanged.
     let account = store
         .get(&keyset_id)
         .ok_or(ExecutionError::AccountNotFound)?;
+
+    // 3) Admit only the requested account's keyset-owned, non-executable response.
+    if account.id != keyset_id {
+        return Err(ExecutionError::InvalidCallData(
+            "keyset account id mismatch",
+        ));
+    }
+    if account.header.owner != KEYSET_PROGRAM_ID {
+        return Err(ExecutionError::AccountOwnerMismatch);
+    }
+    if account.header.is_executable {
+        return Err(ExecutionError::InvalidCallData(
+            "keyset account is executable",
+        ));
+    }
 
     // These limits preserve the existing u16 framing without adding operational caps.
     let keyset = parse_stored_keyset(

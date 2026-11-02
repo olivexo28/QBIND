@@ -1,11 +1,16 @@
+use std::cell::RefCell;
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
-use qbind_crypto::{ml_dsa_44_sign_digest, MlDsa44SignatureSuite, StaticCryptoProvider};
+use qbind_crypto::{
+    ml_dsa_44_sign_digest, CryptoError, CryptoProvider, MlDsa44SignatureSuite, SignatureSuite,
+    StaticCryptoProvider,
+};
 use qbind_ledger::{Account, AccountStore, ExecutionError, InMemoryAccountStore};
 use qbind_runtime::TxExecutor;
 use qbind_system::keyset_program::KEYSET_PROGRAM_ID;
-use qbind_types::{AccountId, KeysetAccount, KeysetEntry, ProgramId};
+use qbind_types::{AccountId, Hash32, KeysetAccount, KeysetEntry, ProgramId};
 use qbind_wire::io::WireEncode;
 use qbind_wire::keyset::{CreateKeysetCall, WireKeyEntry, OP_KEYSET_CREATE};
 use qbind_wire::tx::{Transaction, TxAccountMeta, TxAuth};
@@ -112,22 +117,96 @@ impl AuthFixture {
 #[derive(Default)]
 struct WitnessStore {
     accounts: HashMap<AccountId, Account>,
+    reads: RefCell<Vec<AccountId>>,
     mutations: usize,
+    writes: usize,
+    deletes: usize,
 }
 
 impl AccountStore for WitnessStore {
     fn get(&self, id: &AccountId) -> Option<Account> {
+        self.reads.borrow_mut().push(*id);
         self.accounts.get(id).cloned()
     }
     fn put(&mut self, account: Account) -> Result<(), ExecutionError> {
         self.mutations += 1;
+        self.writes += 1;
         self.accounts.insert(account.id, account);
         Ok(())
     }
     fn delete(&mut self, id: &AccountId) -> Result<(), ExecutionError> {
         self.mutations += 1;
+        self.deletes += 1;
         self.accounts.remove(id);
         Ok(())
+    }
+}
+
+#[derive(Default)]
+struct AuthCryptoCounts {
+    lookups: AtomicUsize,
+    verifications: AtomicUsize,
+}
+
+struct CountingAuthSuite {
+    inner: MlDsa44SignatureSuite,
+    counts: Arc<AuthCryptoCounts>,
+}
+
+impl SignatureSuite for CountingAuthSuite {
+    fn suite_id(&self) -> u8 {
+        AUTH_SUITE_ID
+    }
+
+    fn public_key_len(&self) -> usize {
+        self.inner.public_key_len()
+    }
+
+    fn signature_len(&self) -> usize {
+        self.inner.signature_len()
+    }
+
+    fn verify(
+        &self,
+        public_key: &[u8],
+        digest: &Hash32,
+        signature: &[u8],
+    ) -> Result<(), CryptoError> {
+        self.counts.verifications.fetch_add(1, Ordering::SeqCst);
+        self.inner.verify(public_key, digest, signature)
+    }
+}
+
+struct CountingAuthProvider {
+    counts: Arc<AuthCryptoCounts>,
+    suite: CountingAuthSuite,
+}
+
+impl CountingAuthProvider {
+    fn new() -> Self {
+        let counts = Arc::new(AuthCryptoCounts::default());
+        Self {
+            suite: CountingAuthSuite {
+                inner: MlDsa44SignatureSuite::new(AUTH_SUITE_ID),
+                counts: Arc::clone(&counts),
+            },
+            counts,
+        }
+    }
+}
+
+impl CryptoProvider for CountingAuthProvider {
+    fn signature_suite(&self, suite_id: u8) -> Option<&dyn SignatureSuite> {
+        self.counts.lookups.fetch_add(1, Ordering::SeqCst);
+        (suite_id == AUTH_SUITE_ID).then_some(&self.suite)
+    }
+
+    fn kem_suite(&self, _suite_id: u8) -> Option<&dyn qbind_crypto::KemSuite> {
+        None
+    }
+
+    fn aead_suite(&self, _suite_id: u8) -> Option<&dyn qbind_crypto::AeadSuite> {
+        None
     }
 }
 
@@ -170,6 +249,83 @@ fn build_keyset_create_tx(target_id: AccountId, auth: &AuthFixture) -> Transacti
     };
     auth.authenticate(&mut tx);
     tx
+}
+
+#[test]
+fn executor_native_auth_metadata_admission_precedes_target_read() {
+    let executor: TxExecutor<WitnessStore> = TxExecutor::new();
+    let target_id = dummy_account_id(0xEE);
+    for (name, fault) in [("returned id", 0u8), ("owner", 1u8), ("executable", 2u8)] {
+        let mut store = WitnessStore::default();
+        let auth = AuthFixture::new(&mut store);
+        let tx = build_keyset_create_tx(target_id, &auth);
+        let tx_witness = tx.clone();
+        let mut returned = store.accounts[&AUTH_KEYSET_ID].clone();
+        match fault {
+            0 => returned.id = dummy_account_id(0xF0),
+            1 => returned.header.owner = dummy_program_id(0xF1),
+            2 => returned.header.is_executable = true,
+            _ => unreachable!(),
+        }
+        store.accounts.insert(AUTH_KEYSET_ID, returned);
+        let store_witness = store.accounts.clone();
+        store.mutations = 0;
+        store.writes = 0;
+        store.deletes = 0;
+        store.reads.borrow_mut().clear();
+        let crypto = CountingAuthProvider::new();
+        let counts = Arc::clone(&crypto.counts);
+
+        let error = executor
+            .execute_transaction(&mut store, Arc::new(crypto), &tx)
+            .expect_err("metadata-faulted auth must stop before program execution");
+        match (fault, error) {
+            (0, ExecutionError::InvalidCallData("keyset account id mismatch")) => {}
+            (1, ExecutionError::AccountOwnerMismatch) => {}
+            (2, ExecutionError::InvalidCallData("keyset account is executable")) => {}
+            (_, other) => panic!("{name}: unexpected error {other:?}"),
+        }
+        assert_eq!(&*store.reads.borrow(), &[AUTH_KEYSET_ID], "{name}");
+        assert_eq!(counts.lookups.load(Ordering::SeqCst), 0, "{name}");
+        assert_eq!(counts.verifications.load(Ordering::SeqCst), 0, "{name}");
+        assert_eq!(store.mutations, 0, "{name}");
+        assert_eq!(store.writes, 0, "{name}");
+        assert_eq!(store.deletes, 0, "{name}");
+        assert_eq!(store.accounts, store_witness, "{name}");
+        assert_eq!(tx, tx_witness, "{name}");
+        assert!(!store.accounts.contains_key(&target_id), "{name}");
+    }
+
+    let mut store = WitnessStore::default();
+    let auth = AuthFixture::new(&mut store);
+    let tx = build_keyset_create_tx(target_id, &auth);
+    let tx_witness = tx.clone();
+    let store_witness = store.accounts.clone();
+    store.mutations = 0;
+    store.writes = 0;
+    store.deletes = 0;
+    store.reads.borrow_mut().clear();
+    let crypto = CountingAuthProvider::new();
+    let counts = Arc::clone(&crypto.counts);
+    assert!(matches!(
+        executor.execute_transaction(&mut store, Arc::new(crypto), &tx),
+        Err(ExecutionError::ProgramError(
+            "native keyset creation authority unavailable"
+        ))
+    ));
+    assert_eq!(
+        &*store.reads.borrow(),
+        &[AUTH_KEYSET_ID, target_id],
+        "valid metadata must reach the native program's absent-target read"
+    );
+    assert_eq!(counts.lookups.load(Ordering::SeqCst), 1);
+    assert_eq!(counts.verifications.load(Ordering::SeqCst), 1);
+    assert_eq!(store.mutations, 0);
+    assert_eq!(store.writes, 0);
+    assert_eq!(store.deletes, 0);
+    assert_eq!(store.accounts, store_witness);
+    assert_eq!(tx, tx_witness);
+    assert!(!store.accounts.contains_key(&target_id));
 }
 
 #[test]
