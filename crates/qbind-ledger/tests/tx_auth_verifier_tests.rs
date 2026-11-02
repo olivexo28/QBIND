@@ -508,6 +508,29 @@ fn returned_account_metadata_refusals_precede_parsing_and_crypto() {
     let store_witness = store.snapshot();
     let crypto = Arc::new(RecordingCryptoProvider::new());
 
+    // The same controlled get-response route accepts the exact signed keyset
+    // bytes when all returned metadata matches the requested account.
+    store.report_account(keyset_id, valid_account.clone());
+    let valid_responses = store.reported_accounts.clone();
+    store.reset_counts();
+    crypto.reset();
+    verify_transaction_auth(&mut store, crypto.clone(), &tx)
+        .expect("matching returned metadata accepts the genuine signed transaction");
+    assert_eq!(store.counts.reads.get(), 1);
+    assert_eq!(&*store.read_ids.borrow(), &[keyset_id]);
+    assert_eq!(crypto.lookups.load(Ordering::SeqCst), 1);
+    assert_eq!(
+        crypto.recorded_digests(),
+        vec![qbind_hash::tx::tx_digest(&tx)]
+    );
+    assert_eq!(crypto.recorded_public_keys().len(), 1);
+    assert_eq!(store.counts.writes.get(), 0);
+    assert_eq!(store.counts.deletes.get(), 0);
+    assert_eq!(tx, tx_witness);
+    assert_eq!(store.snapshot(), store_witness);
+    assert_eq!(store.reported_accounts, valid_responses);
+    assert_eq!(store.reported_accounts[&keyset_id], valid_account);
+
     // The returned-ID case is a synthetic backend response: the account is
     // stored under the requested key, but get deliberately reports another ID.
     let cases = [
@@ -517,20 +540,13 @@ fn returned_account_metadata_refusals_precede_parsing_and_crypto() {
     ];
     for (name, fault) in cases {
         let mut response = valid_account.clone();
-        response.data = vec![0xFF]; // malformed data must not be parsed first
         match fault {
-            0 => {
-                response.id = dummy_account_id(0xFE);
-                response.header.owner = dummy_program_id(0xFD);
-                response.header.is_executable = true;
-            }
-            1 => {
-                response.header.owner = dummy_program_id(0xFC);
-                response.header.is_executable = true;
-            }
+            0 => response.id = dummy_account_id(0xFE),
+            1 => response.header.owner = dummy_program_id(0xFC),
             2 => response.header.is_executable = true,
             _ => unreachable!(),
         }
+        assert_eq!(response.data, valid_account.data, "{name}");
         store.report_account(keyset_id, response.clone());
         let responses_before = store.reported_accounts.clone();
         store.reset_counts();
@@ -556,6 +572,35 @@ fn returned_account_metadata_refusals_precede_parsing_and_crypto() {
         assert_eq!(store.reported_accounts, responses_before, "{name}");
         assert_eq!(store.reported_accounts[&keyset_id], response, "{name}");
     }
+
+    // Combined faults remain a separate control: returned ID is checked
+    // before owner and executable, even when data is malformed.
+    let mut combined_fault = valid_account.clone();
+    combined_fault.id = dummy_account_id(0xFE);
+    combined_fault.header.owner = dummy_program_id(0xFD);
+    combined_fault.header.is_executable = true;
+    combined_fault.data = vec![0xFF];
+    store.report_account(keyset_id, combined_fault.clone());
+    let responses_before = store.reported_accounts.clone();
+    store.reset_counts();
+    crypto.reset();
+    assert!(matches!(
+        verify_transaction_auth(&mut store, crypto.clone(), &tx),
+        Err(ExecutionError::InvalidCallData(
+            "keyset account id mismatch"
+        ))
+    ));
+    assert_eq!(store.counts.reads.get(), 1);
+    assert_eq!(&*store.read_ids.borrow(), &[keyset_id]);
+    assert_eq!(crypto.lookups.load(Ordering::SeqCst), 0);
+    assert!(crypto.recorded_digests().is_empty());
+    assert!(crypto.recorded_public_keys().is_empty());
+    assert_eq!(store.counts.writes.get(), 0);
+    assert_eq!(store.counts.deletes.get(), 0);
+    assert_eq!(tx, tx_witness);
+    assert_eq!(store.snapshot(), store_witness);
+    assert_eq!(store.reported_accounts, responses_before);
+    assert_eq!(store.reported_accounts[&keyset_id], combined_fault);
 
     // A valid-metadata malformed account continues to expose the parser's
     // existing error rather than a metadata refusal.
@@ -1051,6 +1096,7 @@ fn genuine_multi_auth_metadata_refusal_preserves_first_proof_and_retries() {
     // Correct only the fixture metadata outside the invocation. Signed bytes
     // remain untouched, and both genuine proofs then verify.
     store.accounts.get_mut(&second_id).unwrap().header.owner = KEYSET_PROGRAM_ID;
+    let corrected_store = store.snapshot();
     store.reset_counts();
     crypto.reset();
     verify_transaction_auth(&mut store, crypto.clone(), &tx)
@@ -1065,6 +1111,7 @@ fn genuine_multi_auth_metadata_refusal_preserves_first_proof_and_retries() {
     assert_eq!(store.counts.writes.get(), 0);
     assert_eq!(store.counts.deletes.get(), 0);
     assert_eq!(tx, tx_witness);
+    assert_eq!(store.snapshot(), corrected_store);
 }
 
 #[test]
