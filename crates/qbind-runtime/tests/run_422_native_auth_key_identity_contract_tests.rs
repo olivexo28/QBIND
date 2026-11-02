@@ -471,6 +471,35 @@ fn direct_proofs<'a>(
     )
 }
 
+fn assert_conflicting_isolation(f: &Fixture, bytes: &[u8], tx: &Transaction) {
+    assert_eq!(
+        direct_semantics(f, bytes, 2),
+        Err(KeysetSemanticAnalysisError::ConflictingDuplicateWeights)
+    );
+    assert_isolated_work(
+        f,
+        &[tx.auths[0].suite_id, tx.auths[0].suite_id],
+        &[tx.auths[0].suite_id, tx.auths[0].suite_id],
+        &[tx.auths[0].suite_id, tx.auths[0].suite_id],
+        0,
+    );
+    let proof = [KeysetSignatureProof {
+        suite_id: tx.auths[0].suite_id,
+        signature_bytes: &tx.auths[0].signature,
+    }];
+    assert_eq!(
+        direct_proofs(f, bytes, &tx_digest(tx), &proof),
+        Err(KeysetProofEvaluationError::ConflictingDuplicateWeights)
+    );
+    assert_isolated_work(
+        f,
+        &[tx.auths[0].suite_id, tx.auths[0].suite_id],
+        &[tx.auths[0].suite_id, tx.auths[0].suite_id],
+        &[tx.auths[0].suite_id, tx.auths[0].suite_id],
+        0,
+    );
+}
+
 #[test]
 fn aliases_share_content_identity_but_production_verifies_each_proof() {
     let mut f = Fixture::new();
@@ -650,6 +679,8 @@ fn conflicting_duplicate_weights_are_order_and_alias_selected_in_production_only
         &[],
         0,
     );
+    let low_first = f.store.snapshot();
+    assert_conflicting_isolation(&f, &low_first[&SIGNER].data, &tx);
     f.seed_entries(2, &[high.clone(), low.clone()]);
     assert_executor_refusal(
         &mut f,
@@ -659,6 +690,8 @@ fn conflicting_duplicate_weights_are_order_and_alias_selected_in_production_only
         &[SUITE_A],
         1,
     );
+    let high_first = f.store.snapshot();
+    assert_conflicting_isolation(&f, &high_first[&SIGNER].data, &tx);
 
     let alias_entries = [f.key.entry(SUITE_A, 1), f.key.entry(SUITE_B, 2)];
     f.seed_entries(1, &alias_entries);
