@@ -1,6 +1,5 @@
-use qbind_ledger::{Account, AccountStore, ExecutionContext, ExecutionError, Program};
-use qbind_serde::StateEncode;
-use qbind_types::{AccountId, ProgramId, ValidatorRecord, ValidatorStatus};
+use qbind_ledger::{AccountStore, ExecutionContext, ExecutionError, Program};
+use qbind_types::{AccountId, ProgramId};
 use qbind_wire::io::WireDecode;
 use qbind_wire::tx::Transaction;
 use qbind_wire::validator::{RegisterValidatorCall, OP_REGISTER_VALIDATOR};
@@ -75,6 +74,12 @@ impl Default for ValidatorProgram {
     }
 }
 
+fn native_validator_registration_authority_unavailable() -> Result<(), ExecutionError> {
+    Err(ExecutionError::ProgramError(
+        "native validator registration authority unavailable",
+    ))
+}
+
 impl<S: AccountStore> Program<S> for ValidatorProgram {
     fn id(&self) -> ProgramId {
         VALIDATOR_PROGRAM_ID
@@ -136,33 +141,7 @@ impl ValidatorProgram {
             ));
         }
 
-        // Build initial ValidatorRecord.
-        let record = ValidatorRecord {
-            version: 1,
-            status: ValidatorStatus::Active, // may be tightened to Inactive + separate activation later
-            reserved0: [0u8; 2],
-            owner_keyset_id: call.owner_keyset_id,
-            consensus_suite_id: call.consensus_suite_id,
-            reserved1: [0u8; 3],
-            consensus_pk: call.consensus_pk,
-            network_suite_id: call.network_suite_id,
-            reserved2: [0u8; 3],
-            network_pk: call.network_pk,
-            stake: call.stake,
-            last_slash_height: 0,
-            jailed_until_epoch: None, // M13: New validators are not jailed
-            ext_bytes: Vec::new(),
-        };
-
-        // Encode state using qbind-serde.
-        let mut data = Vec::new();
-        record.encode_state(&mut data);
-
-        // Create and insert the account, owned by VALIDATOR_PROGRAM.
-        let account = Account::new(validator_id, VALIDATOR_PROGRAM_ID, 0, data);
-        ctx.store.put(account)?;
-
-        Ok(())
+        native_validator_registration_authority_unavailable()
     }
 }
 

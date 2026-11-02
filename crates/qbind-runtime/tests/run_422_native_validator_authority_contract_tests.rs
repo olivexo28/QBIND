@@ -1,3 +1,5 @@
+// Migrated from the successful-write characterization at
+// 8769118ef4b5b27631a4177862b1dc91cd66c7ca; current registrations must refuse.
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -33,6 +35,7 @@ const TARGET_ID: AccountId = [0x44; 32];
 const SENTINEL_ID: AccountId = [0x55; 32];
 const PAYER_OWNER_ID: AccountId = [0x66; 32];
 const SENTINEL_OWNER_ID: AccountId = [0x77; 32];
+const AUTHORITY_UNAVAILABLE: &str = "native validator registration authority unavailable";
 
 #[derive(Default, Debug, PartialEq, Eq)]
 struct StoreEvents {
@@ -344,14 +347,7 @@ fn transaction_bytes(tx: &Transaction) -> Vec<u8> {
     bytes
 }
 
-fn decode_record(account: &Account) -> ValidatorRecord {
-    let mut input: &[u8] = &account.data;
-    let record = ValidatorRecord::decode_state(&mut input).expect("stored ValidatorRecord");
-    assert!(input.is_empty(), "ValidatorRecord must decode completely");
-    record
-}
-
-fn expected_record(tx: &Transaction) -> ValidatorRecord {
+fn fixture_record(tx: &Transaction) -> ValidatorRecord {
     let mut input: &[u8] = &tx.call_data;
     let call = RegisterValidatorCall::decode(&mut input).expect("valid registration fixture");
     assert!(input.is_empty());
@@ -373,21 +369,11 @@ fn expected_record(tx: &Transaction) -> ValidatorRecord {
     }
 }
 
-fn expected_account(tx: &Transaction) -> Account {
+fn fixture_record_account(tx: &Transaction) -> Account {
     let target_id = tx.accounts[1].account_id;
     let mut data = Vec::new();
-    expected_record(tx).encode_state(&mut data);
+    fixture_record(tx).encode_state(&mut data);
     Account::new(target_id, VALIDATOR_PROGRAM_ID, 0, data)
-}
-
-fn assert_record_matches(account: &Account, tx: &Transaction) {
-    assert_eq!(account.id, tx.accounts[1].account_id);
-    assert_eq!(account.header.owner, VALIDATOR_PROGRAM_ID);
-    assert_eq!(account.header.lamports, 0);
-    assert!(!account.header.is_executable);
-    assert_eq!(account.header.rent_epoch, 0);
-    assert_eq!(account.header.reserved, [0; 8]);
-    assert_eq!(decode_record(account), expected_record(tx));
 }
 
 fn assert_execution_error(actual: ExecutionError, expected: ExecutionError) {
@@ -431,35 +417,61 @@ fn assert_refusal_unchanged(
     assert_eq!(transaction_bytes(tx), wire_before);
 }
 
-fn assert_success(fixture: &mut Fixture, tx: &Transaction, prior: &HashMap<AccountId, Account>) {
+fn assert_unavailable_then_retry(fixture: &mut Fixture, tx: &Transaction) {
+    let target_id = tx.accounts[1].account_id;
+    assert!(!fixture.store.complete_state().contains_key(&target_id));
+    for _ in 0..2 {
+        assert_refusal_unchanged(
+            fixture,
+            tx,
+            ExecutionError::ProgramError(AUTHORITY_UNAVAILABLE),
+            &[SIGNER_ID, target_id],
+            1,
+        );
+        assert!(!fixture.store.complete_state().contains_key(&target_id));
+    }
+}
+
+fn assert_direct_refusal_unchanged(
+    fixture: &mut Fixture,
+    tx: &Transaction,
+    fixture_minimum: u64,
+    expected_error: ExecutionError,
+    expected_reads: &[AccountId],
+) {
+    let before = fixture.store.complete_state();
     let tx_before = tx.clone();
     let wire_before = transaction_bytes(tx);
-    let verify_before = fixture.verify_count();
+    assert_eq!(
+        fixture.verify_count(),
+        0,
+        "direct Program test, not TxExecutor"
+    );
     fixture.store.clear_events();
 
-    fixture
-        .execute(tx)
-        .expect("authenticated registration succeeds");
+    let mut context = ExecutionContext::new_with_min_stake(
+        &mut fixture.store,
+        Arc::clone(&fixture.crypto),
+        fixture_minimum,
+    );
+    assert_execution_error(
+        ValidatorProgram::new()
+            .execute(&mut context, tx)
+            .expect_err("direct Program refusal"),
+        expected_error,
+    );
     let events = fixture.store.take_events();
-    assert_eq!(events.reads, vec![SIGNER_ID, tx.accounts[1].account_id]);
-    assert_eq!(events.writes, vec![tx.accounts[1].account_id]);
+    assert_eq!(events.reads, expected_reads);
+    assert!(events.writes.is_empty());
     assert!(events.deletes.is_empty());
-    assert_eq!(fixture.verify_count(), verify_before + 1);
-
-    let mut expected = prior.clone();
-    let account = expected_account(tx);
-    assert_record_matches(&account, tx);
-    expected.insert(account.id, account);
-    assert_eq!(fixture.store.complete_state(), expected);
+    assert_eq!(fixture.verify_count(), 0, "no transaction verifier invoked");
+    assert_eq!(fixture.store.complete_state(), before);
     assert_eq!(*tx, tx_before);
     assert_eq!(transaction_bytes(tx), wire_before);
-    assert!(!events.reads.contains(&OWNER_ID));
-    assert!(!events.reads.contains(&PAYER_ID));
-    assert!(!events.reads.contains(&SENTINEL_ID));
 }
 
 #[test]
-fn unrelated_authenticated_signer_can_name_an_existing_different_owner() {
+fn authenticated_unrelated_existing_owner_reaches_unavailable_refusal() {
     let mut fixture = Fixture::new(TARGET_ID, true, 71);
     let before = fixture.store.complete_state();
     let owner = before.get(&OWNER_ID).expect("owner keyset exists");
@@ -472,121 +484,147 @@ fn unrelated_authenticated_signer_can_name_an_existing_different_owner() {
     assert_eq!(fixture.setup_checks.network_kem_round_trips, 1);
 
     let tx = fixture.transaction.clone();
-    assert_success(&mut fixture, &tx, &before);
-    let created = fixture
-        .store
-        .complete_state()
-        .get(&TARGET_ID)
-        .cloned()
-        .expect("target created");
-    assert_eq!(decode_record(&created).owner_keyset_id, OWNER_ID);
-    assert_eq!(decode_record(&created).stake, 71);
+    assert_unavailable_then_retry(&mut fixture, &tx);
+    assert_eq!(fixture.store.complete_state(), before);
 }
 
 #[test]
-fn missing_declared_owner_does_not_block_authenticated_record_creation() {
+fn authenticated_absent_owner_reaches_unavailable_refusal() {
     let mut fixture = Fixture::new(TARGET_ID, false, 72);
     let before = fixture.store.complete_state();
     assert!(!before.contains_key(&OWNER_ID));
 
     let tx = fixture.transaction.clone();
-    assert_success(&mut fixture, &tx, &before);
-    let created = fixture
-        .store
-        .complete_state()
-        .get(&TARGET_ID)
-        .cloned()
-        .expect("target created");
-    assert_eq!(decode_record(&created).owner_keyset_id, OWNER_ID);
+    assert_unavailable_then_retry(&mut fixture, &tx);
+    assert_eq!(fixture.store.complete_state(), before);
     assert!(!fixture.store.complete_state().contains_key(&OWNER_ID));
 }
 
 #[test]
-fn positive_declared_stake_is_recorded_without_payer_or_owner_debit() {
+fn authenticated_large_declared_stake_and_usable_keys_cannot_bypass_refusal() {
     let mut fixture = Fixture::new(TARGET_ID, true, 9_876_543);
     let before = fixture.store.complete_state();
     let payer_before = before.get(&PAYER_ID).unwrap().clone();
     let owner_before = before.get(&OWNER_ID).unwrap().clone();
 
     let tx = fixture.transaction.clone();
-    assert_success(&mut fixture, &tx, &before);
+    assert_unavailable_then_retry(&mut fixture, &tx);
     let after = fixture.store.complete_state();
     assert_eq!(after.get(&PAYER_ID), Some(&payer_before));
     assert_eq!(after.get(&OWNER_ID), Some(&owner_before));
+    assert_eq!(after, before);
+}
+
+#[test]
+fn authenticated_zero_stake_reaches_refusal_in_default_executor_context() {
+    let mut fixture = Fixture::new(TARGET_ID, false, 0);
+    let before = fixture.store.complete_state();
+    let tx = fixture.transaction.clone();
+    assert_unavailable_then_retry(&mut fixture, &tx);
+    assert_eq!(fixture.store.complete_state(), before);
+}
+
+#[test]
+fn authenticated_matching_owner_identity_does_not_manufacture_authority() {
+    let mut fixture = Fixture::new(TARGET_ID, true, 73);
+    let mut input: &[u8] = &fixture.transaction.call_data;
+    let mut call = RegisterValidatorCall::decode(&mut input).unwrap();
+    assert!(input.is_empty());
+    call.owner_keyset_id = SIGNER_ID;
+    fixture.transaction.call_data.clear();
+    call.encode(&mut fixture.transaction.call_data);
+    fixture.transaction.accounts[2].account_id = SIGNER_ID;
+    sign(&mut fixture.transaction, &fixture.signer_secret);
     assert_eq!(
-        decode_record(after.get(&TARGET_ID).unwrap()).stake,
-        9_876_543
+        call.owner_keyset_id,
+        fixture.transaction.accounts[0].account_id
+    );
+    let tx = fixture.transaction.clone();
+    assert_unavailable_then_retry(&mut fixture, &tx);
+}
+
+#[test]
+fn direct_context_fixture_minimum_rejects_below_and_zero_without_authentication() {
+    for stake in [79, 0] {
+        let mut fixture = Fixture::new(TARGET_ID, true, stake);
+        let tx = fixture.transaction.clone();
+        assert_direct_refusal_unchanged(
+            &mut fixture,
+            &tx,
+            80,
+            ExecutionError::ProgramError("stake below minimum required for validator registration"),
+            &[TARGET_ID],
+        );
+    }
+}
+
+#[test]
+fn direct_context_equality_and_above_minimum_reach_refusal_without_authentication() {
+    for stake in [80, u64::MAX] {
+        let mut fixture = Fixture::new(TARGET_ID, true, stake);
+        let tx = fixture.transaction.clone();
+        assert_direct_refusal_unchanged(
+            &mut fixture,
+            &tx,
+            80,
+            ExecutionError::ProgramError(AUTHORITY_UNAVAILABLE),
+            &[TARGET_ID],
+        );
+    }
+}
+
+#[test]
+fn direct_context_existing_target_precedes_below_minimum_without_authentication() {
+    let mut fixture = Fixture::new(TARGET_ID, true, 0);
+    let tx = fixture.transaction.clone();
+    fixture.store.seed(fixture_record_account(&tx));
+    assert_direct_refusal_unchanged(
+        &mut fixture,
+        &tx,
+        80,
+        ExecutionError::ProgramError("validator already exists"),
+        &[TARGET_ID],
     );
 }
 
 #[test]
-fn default_tx_executor_context_records_zero_stake() {
-    let mut fixture = Fixture::new(TARGET_ID, false, 0);
-    let before = fixture.store.complete_state();
-    let tx = fixture.transaction.clone();
-    assert_success(&mut fixture, &tx, &before);
-    let record = decode_record(fixture.store.complete_state().get(&TARGET_ID).unwrap());
-    assert_eq!(record.status, ValidatorStatus::Active);
-    assert_eq!(record.stake, 0);
-}
+fn direct_context_validation_precedes_existing_target_and_minimum_without_authentication() {
+    let mut fixture = Fixture::new(TARGET_ID, true, 0);
+    let genuine = fixture.transaction.clone();
+    fixture.store.seed(fixture_record_account(&genuine));
 
-#[test]
-fn direct_context_fixture_minimum_rejects_below_and_accepts_equality() {
-    let fixture_minimum = 80;
-    let mut below = Fixture::new(TARGET_ID, true, fixture_minimum - 1);
-    let before = below.store.complete_state();
-    let tx_before = below.transaction.clone();
-    let wire_before = transaction_bytes(&below.transaction);
-    below.store.clear_events();
-    {
-        let mut context = ExecutionContext::new_with_min_stake(
-            &mut below.store,
-            Arc::clone(&below.crypto),
-            fixture_minimum,
-        );
-        assert_execution_error(
-            ValidatorProgram::new()
-                .execute(&mut context, &below.transaction)
-                .expect_err("below fixture-only minimum"),
-            ExecutionError::ProgramError("stake below minimum required for validator registration"),
-        );
+    let mut wrong_program = genuine.clone();
+    wrong_program.program_id = [0xFF; 32];
+    wrong_program.call_data.clear();
+    let mut empty = genuine.clone();
+    empty.call_data.clear();
+    let mut unsupported = genuine.clone();
+    unsupported.call_data = vec![0x02];
+    let mut truncated = genuine.clone();
+    truncated.call_data.pop();
+    let mut trailing = genuine.clone();
+    trailing.call_data.push(0xAA);
+    for (tx, error) in [
+        (
+            wrong_program,
+            ExecutionError::ProgramError("program_id mismatch for ValidatorProgram"),
+        ),
+        (empty, ExecutionError::InvalidCallData("empty call_data")),
+        (
+            unsupported,
+            ExecutionError::ProgramError("unsupported validator opcode"),
+        ),
+        (
+            truncated,
+            ExecutionError::InvalidCallData("invalid RegisterValidatorCall"),
+        ),
+        (
+            trailing,
+            ExecutionError::InvalidCallData("extra bytes after RegisterValidatorCall"),
+        ),
+    ] {
+        assert_direct_refusal_unchanged(&mut fixture, &tx, 80, error, &[]);
     }
-    let events = below.store.take_events();
-    assert_eq!(events.reads, vec![TARGET_ID]);
-    assert!(events.writes.is_empty());
-    assert!(events.deletes.is_empty());
-    assert_eq!(below.store.complete_state(), before);
-    assert_eq!(below.transaction, tx_before);
-    assert_eq!(transaction_bytes(&below.transaction), wire_before);
-    assert_eq!(below.verify_count(), 0);
-
-    let mut equal = Fixture::new(TARGET_ID, true, fixture_minimum);
-    let before = equal.store.complete_state();
-    let tx = equal.transaction.clone();
-    let tx_before = tx.clone();
-    let wire_before = transaction_bytes(&tx);
-    equal.store.clear_events();
-    {
-        let mut context = ExecutionContext::new_with_min_stake(
-            &mut equal.store,
-            Arc::clone(&equal.crypto),
-            fixture_minimum,
-        );
-        ValidatorProgram::new()
-            .execute(&mut context, &tx)
-            .expect("equality passes explicit direct-context minimum");
-    }
-    let events = equal.store.take_events();
-    assert_eq!(events.reads, vec![TARGET_ID]);
-    assert_eq!(events.writes, vec![TARGET_ID]);
-    assert!(events.deletes.is_empty());
-    let mut expected = before;
-    expected.insert(TARGET_ID, expected_account(&tx));
-    assert_eq!(equal.store.complete_state(), expected);
-    assert_record_matches(equal.store.complete_state().get(&TARGET_ID).unwrap(), &tx);
-    assert_eq!(tx, tx_before);
-    assert_eq!(transaction_bytes(&tx), wire_before);
-    assert_eq!(equal.verify_count(), 0);
 }
 
 #[test]
@@ -643,7 +681,9 @@ fn signed_stake_change_is_rejected_until_the_changed_body_is_resigned() {
         1,
     );
     assert_eq!(fixture.store.complete_state(), before);
+    assert_unavailable_then_retry(&mut fixture, &original);
 
+    let changed_body = changed.call_data.clone();
     sign(&mut changed, &fixture.signer_secret);
     assert_eq!(changed.version, original.version);
     assert_eq!(changed.chain_id, original.chain_id);
@@ -652,20 +692,21 @@ fn signed_stake_change_is_rejected_until_the_changed_body_is_resigned() {
     assert_eq!(changed.fee_limit, original.fee_limit);
     assert_eq!(changed.accounts, original.accounts);
     assert_eq!(changed.program_id, original.program_id);
-    let mut expected = before.clone();
-    expected.insert(TARGET_ID, expected_account(&changed));
-    assert_success(&mut fixture, &changed, &before);
-    assert_eq!(fixture.store.complete_state(), expected);
+    assert_eq!(changed.call_data, changed_body);
+    assert_eq!(
+        changed.auths[0].account_index,
+        original.auths[0].account_index
+    );
+    assert_eq!(changed.auths[0].suite_id, original.auths[0].suite_id);
+    assert_eq!(changed.auths[0].reserved, original.auths[0].reserved);
+    assert_unavailable_then_retry(&mut fixture, &changed);
+    assert_eq!(fixture.store.complete_state(), before);
     assert_eq!(transaction_bytes(&original), original_wire);
     assert_eq!(original, fixture.transaction);
-    assert_eq!(
-        decode_record(fixture.store.complete_state().get(&TARGET_ID).unwrap()).stake,
-        82
-    );
 }
 
 #[test]
-fn empty_auth_and_tampered_signature_refuse_then_genuine_retry_registers() {
+fn empty_auth_and_tampered_signature_refuse_then_genuine_retry_reaches_gate() {
     let mut empty_auth = Fixture::new(TARGET_ID, true, 83);
     let before = empty_auth.store.complete_state();
     let valid_retry = empty_auth.transaction.clone();
@@ -678,7 +719,8 @@ fn empty_auth_and_tampered_signature_refuse_then_genuine_retry_registers() {
         &[],
         0,
     );
-    assert_success(&mut empty_auth, &valid_retry, &before);
+    assert_unavailable_then_retry(&mut empty_auth, &valid_retry);
+    assert_eq!(empty_auth.store.complete_state(), before);
 
     let mut tampered = Fixture::new(TARGET_ID, true, 84);
     let before = tampered.store.complete_state();
@@ -692,30 +734,39 @@ fn empty_auth_and_tampered_signature_refuse_then_genuine_retry_registers() {
         &[SIGNER_ID],
         1,
     );
-    assert_success(&mut tampered, &valid_retry, &before);
+    assert_unavailable_then_retry(&mut tampered, &valid_retry);
+    assert_eq!(tampered.store.complete_state(), before);
 }
 
 #[test]
-fn exact_replay_authenticates_again_but_target_uniqueness_refuses_second_write() {
+fn repeated_fresh_target_registration_authenticates_and_refuses_each_time() {
     let mut fixture = Fixture::new(TARGET_ID, true, 85);
     let tx = fixture.transaction.clone();
     let before = fixture.store.complete_state();
-    assert_success(&mut fixture, &tx, &before);
-    let first_result = fixture.store.complete_state();
-    let first_target = first_result.get(&TARGET_ID).unwrap().clone();
+    assert_unavailable_then_retry(&mut fixture, &tx);
+    assert_eq!(fixture.verify_count(), 2);
+    assert_eq!(fixture.store.complete_state(), before);
+}
 
-    assert_refusal_unchanged(
-        &mut fixture,
-        &tx,
-        ExecutionError::ProgramError("validator already exists"),
-        &[SIGNER_ID, TARGET_ID],
-        1,
-    );
-    assert_eq!(fixture.store.complete_state(), first_result);
-    assert_eq!(
-        fixture.store.complete_state().get(&TARGET_ID),
-        Some(&first_target)
-    );
+#[test]
+fn preexisting_validator_record_seeded_directly_is_not_overwritten() {
+    let mut fixture = Fixture::new(TARGET_ID, true, 85);
+    let tx = fixture.transaction.clone();
+    let stored = fixture_record_account(&tx);
+    fixture.store.seed(stored.clone());
+    for _ in 0..2 {
+        assert_refusal_unchanged(
+            &mut fixture,
+            &tx,
+            ExecutionError::ProgramError("validator already exists"),
+            &[SIGNER_ID, TARGET_ID],
+            1,
+        );
+        assert_eq!(
+            fixture.store.complete_state().get(&TARGET_ID),
+            Some(&stored)
+        );
+    }
 }
 
 #[test]
@@ -728,13 +779,15 @@ fn preexisting_unrelated_target_is_not_overwritten() {
     let before = fixture.store.complete_state();
 
     let tx = fixture.transaction.clone();
-    assert_refusal_unchanged(
-        &mut fixture,
-        &tx,
-        ExecutionError::ProgramError("validator already exists"),
-        &[SIGNER_ID, TARGET_ID],
-        1,
-    );
+    for _ in 0..2 {
+        assert_refusal_unchanged(
+            &mut fixture,
+            &tx,
+            ExecutionError::ProgramError("validator already exists"),
+            &[SIGNER_ID, TARGET_ID],
+            1,
+        );
+    }
     assert_eq!(
         fixture.store.complete_state().get(&TARGET_ID),
         Some(&unrelated)
@@ -745,6 +798,7 @@ fn preexisting_unrelated_target_is_not_overwritten() {
 #[test]
 fn authenticated_framing_controls_refuse_before_target_lookup() {
     let mut truncated = Fixture::new(TARGET_ID, true, 87);
+    let genuine_retry = truncated.transaction.clone();
     truncated.transaction.call_data.pop();
     sign(&mut truncated.transaction, &truncated.signer_secret);
     let truncated_tx = truncated.transaction.clone();
@@ -755,8 +809,10 @@ fn authenticated_framing_controls_refuse_before_target_lookup() {
         &[SIGNER_ID],
         1,
     );
+    assert_unavailable_then_retry(&mut truncated, &genuine_retry);
 
     let mut trailing = Fixture::new(TARGET_ID, true, 88);
+    let genuine_retry = trailing.transaction.clone();
     trailing.transaction.call_data.push(0xAA);
     sign(&mut trailing.transaction, &trailing.signer_secret);
     let trailing_tx = trailing.transaction.clone();
@@ -767,8 +823,10 @@ fn authenticated_framing_controls_refuse_before_target_lookup() {
         &[SIGNER_ID],
         1,
     );
+    assert_unavailable_then_retry(&mut trailing, &genuine_retry);
 
     let mut unsupported = Fixture::new(TARGET_ID, true, 89);
+    let genuine_retry = unsupported.transaction.clone();
     unsupported.transaction.call_data[0] = 0x02;
     sign(&mut unsupported.transaction, &unsupported.signer_secret);
     let unsupported_tx = unsupported.transaction.clone();
@@ -779,9 +837,23 @@ fn authenticated_framing_controls_refuse_before_target_lookup() {
         &[SIGNER_ID],
         1,
     );
+    assert_unavailable_then_retry(&mut unsupported, &genuine_retry);
+
+    let mut empty = Fixture::new(TARGET_ID, true, 89);
+    let genuine_retry = empty.transaction.clone();
+    empty.transaction.call_data.clear();
+    sign(&mut empty.transaction, &empty.signer_secret);
+    let empty_tx = empty.transaction.clone();
+    assert_refusal_unchanged(
+        &mut empty,
+        &empty_tx,
+        ExecutionError::InvalidCallData("empty call_data"),
+        &[SIGNER_ID],
+        1,
+    );
+    assert_unavailable_then_retry(&mut empty, &genuine_retry);
 
     let mut valid = Fixture::new(TARGET_ID, true, 90);
-    let before = valid.store.complete_state();
     let tx = valid.transaction.clone();
-    assert_success(&mut valid, &tx, &before);
+    assert_unavailable_then_retry(&mut valid, &tx);
 }

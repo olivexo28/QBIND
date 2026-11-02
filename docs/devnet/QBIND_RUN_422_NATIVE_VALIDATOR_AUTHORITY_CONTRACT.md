@@ -182,3 +182,119 @@ refusals when no independent authority is available; this is an intentional
 compatibility break for successful writes, not a positive authorization
 implementation. No source change, policy choice, or enforcement is made in
 this task.
+
+## RUN 422 follow-on: completed bounded unavailable-authority refusal
+
+**Whole contract: DRAFT / NOT APPROVED / NOT IMPLEMENTED. Bounded safeguard:
+IMPLEMENTED.** The preceding characterization and proposal are preserved as
+historical evidence, not descriptions of the new handler's successful outcome.
+Historical successful-write source is
+`8769118ef4b5b27631a4177862b1dc91cd66c7ca` (root tree
+`7a8979d2e3df9e49ef87e6291dce86fe129732a8`). Its validator handler and
+characterization-test bytes match the required starting revision
+`a7d7c1dc31094b59e13f758791f1d77c49055b62` (root tree
+`7a5d1ff88799a0484a63fedaa94c1b8a10c30f09`); this is byte correspondence,
+not an ancestry claim about that historical source commit.
+
+The new refusal and migrated tests are in tested source revision
+`02198fac5ba638a1fbcbc2c5361fce7116a33e51` (root tree
+`d03e9c4481be3e3c85eb9029fa19136cfed94229`), a direct child of the required
+starting commit. Final evidence attribution is committed separately without
+changing those Rust bytes. Literal validation commands and results are in the
+companion D7 evidence append.
+
+### Exact boundary and compatibility
+
+`TxExecutor` still authenticates before program dispatch. Inside
+`ValidatorProgram`, the preserved order is:
+
+1. Program-ID validation.
+2. Empty-call rejection and opcode dispatch.
+3. `RegisterValidatorCall` decoding.
+4. Trailing-byte rejection.
+5. The existing target-account `get` and exact `"validator already exists"` rejection.
+6. The existing `call.stake < ctx.min_validator_stake` comparison and exact
+   `"stake below minimum required for validator registration"` rejection.
+7. Private, unconditional
+   `native_validator_registration_authority_unavailable()`, returning
+   `ExecutionError::ProgramError("native validator registration authority unavailable")`.
+
+All earlier variants/messages remain unchanged, including wrong-program,
+empty-call, unsupported-opcode, truncated-call and trailing-byte errors.
+Record construction, state serialization and `AccountStore::put` have been
+removed from registration, not hidden behind a bypass or nominal gate.
+There is no authority boolean, switch, feature, permissive default, bootstrap
+exception or successful native-registration path. `ValidatorError` and
+`is_stake_sufficient` retain their existing behavior.
+
+**Compatibility impact:** native registrations that previously succeeded now
+refuse after the preserved checks. Existing targets and insufficient stake
+still receive their earlier errors. This is a completed bounded safeguard
+against unsupported registration writes, not approval of any authority or
+registration policy.
+
+Authentication still reads/materializes signer state, verifies signatures and
+constructs the existing signing preimage. Registration decoding still
+allocates consensus/network key vectors before the gate, and the target
+existence read is intentionally retained. This does not establish whole-path
+allocation freedom, zero store reads, new resource bounds or an approved
+minimum. The direct-context minimum is fixture-only.
+
+### Assertion mapping in the existing targets
+
+The runtime target retains genuine ML-DSA-44 transaction authentication. Its
+counting wrapper delegates to the real verifier; independently checked
+consensus ML-DSA-44 signatures and ML-KEM-768 round trips remain fixture
+usability controls, not governed suite admission or production proof of
+possession. Eleven runtime tests use actual `TxExecutor`; four explicitly
+labelled direct-context tests call `Program` without authentication.
+
+| Acceptance dimension | Runtime test(s) and measured result |
+|---|---|
+| Existing unrelated owner, absent owner, positive/large declared stake and zero stake | `authenticated_unrelated_existing_owner_reaches_unavailable_refusal`, `authenticated_absent_owner_reaches_unavailable_refusal`, `authenticated_large_declared_stake_and_usable_keys_cannot_bypass_refusal`, `authenticated_zero_stake_reaches_refusal_in_default_executor_context`: each valid attempt reads exactly signer then target, verifies once, and receives the new refusal. |
+| Matching authenticated owner identity | `authenticated_matching_owner_identity_does_not_manufacture_authority`: the declared owner is the actual signer keyset, the body is genuinely re-signed, and both attempts still reach the new refusal. Identity equality supplies no independent policy. |
+| Authentication ordering and genuine retry | `empty_auth_and_tampered_signature_refuse_then_genuine_retry_reaches_gate`: empty auth retains `InvalidCallData("transaction requires at least one authentication entry")`, with no reads/verifications; tampering retains `CryptoError("signature verification failed")`, with only signer lookup and one real verification. Each is followed by genuine same-state retries reaching the new gate. |
+| Signed-field binding | `signed_stake_change_is_rejected_until_the_changed_body_is_resigned`: only stake changes in the call; all other call/transaction fields and original auth entries are compared. Without re-signing, signature verification fails before target access. The original genuine transaction retries unchanged; re-signing the changed body then reaches the new refusal, not a write. |
+| Repeated fresh-target refusal | `repeated_fresh_target_registration_authenticates_and_refuses_each_time`: identical signed transaction, two fresh verifications and two target checks; the target stays absent. This is neither authorization consumption nor durable replay protection. |
+| Existing target preservation | `preexisting_validator_record_seeded_directly_is_not_overwritten` and `preexisting_unrelated_target_is_not_overwritten`: fixtures are seeded directly, never through successful registration. Each attempt authenticates, reads signer/target and returns the exact existing-target error; complete account bytes remain unchanged. |
+| Explicit minimum, without executor authentication | `direct_context_fixture_minimum_rejects_below_and_zero_without_authentication` and `direct_context_equality_and_above_minimum_reach_refusal_without_authentication`: below/zero reject at the fixture minimum; equality/above pass the comparison then refuse authority. Each reads only target and explicitly requires zero transaction-verifier calls. |
+| Competing invalidities and framing precedence | `direct_context_existing_target_precedes_below_minimum_without_authentication` requires existing-target before a positive minimum rejects zero stake. `direct_context_validation_precedes_existing_target_and_minimum_without_authentication` combines existing target and below-minimum stake with wrong program plus empty call, empty call, unsupported opcode, truncation or trailing bytes; each exact framing/program error occurs before any store read. |
+| Authenticated framing, distinct from direct controls | `authenticated_framing_controls_refuse_before_target_lookup` genuinely signs truncated, trailing, unsupported and empty calls; each verifies once, reads only signer and retains its exact error. Original valid transactions retry on the same state and reach the new gate. |
+
+`assert_refusal_unchanged` and `assert_direct_refusal_unchanged` compare complete
+store snapshots, exact read sequences, zero writes/deletes, complete input
+transactions and their full wire encodings before/after each attempt.
+Snapshots clone the witness store's internal map directly; assertion reads do
+not contaminate measured store activity. `assert_unavailable_then_retry`
+requires an absent target and runs the same valid signed transaction twice
+with a fresh real verification and target read each time.
+
+The existing system registration target is migrated in place: the former
+record-creation case now refuses twice without creating a record; existing
+target setup is direct and proves target-before-minimum precedence; below,
+zero, equality and above-minimum scenarios remain. Its complete snapshots,
+read/write/delete observations and transaction/wire comparisons are
+direct-`Program` evidence only, with a crypto provider that rejects any
+transaction-verifier invocation. `test_is_stake_sufficient_helper` coverage
+remains unchanged. There is no parallel replacement target, ignored migrated
+scenario, or successful-registration control. Genuine authentication reaching
+the new gate is the positive control for this slice; unchanged keyset
+execution tests supply neighboring-program success coverage.
+
+### Unresolved whole contract and preserved posture
+
+There is still no implementation of independent owner authority/consent,
+funding or escrow, governed key admission, freshness/authorization consumption,
+atomic publication, or membership handoff. No threshold, limit, registration
+authority, fixture suite ID or bootstrap exception is approved. No
+deployed-path, persistent-storage, crash/restart or anti-rollback evidence is
+provided. The completed native governance refusal and its separate authority
+contract are unchanged; validator, native-admission and governance whole
+contracts remain **DRAFT / NOT APPROVED / NOT IMPLEMENTED**.
+
+Preserve `D7D14_STORAGE_COMPONENT=IMPLEMENTED-ISOLATED`,
+`D7D14_STORAGE_ACCEPTANCE=PASS-ACCEPTED-SUBSET`, §13.6 whole-lifecycle
+`INCOMPLETE`, activation `DISABLED`, public DevNet `NO-GO`, durable anti-rollback
+`NOT-ESTABLISHED`, C4/C5 `OPEN`, RS1 `OPEN`, and all candidate limits
+`UNAPPROVED`. No F1/F2 closure, production activation, live-validator admission
+or release approval follows.
