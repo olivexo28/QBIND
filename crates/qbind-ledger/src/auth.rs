@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use qbind_crypto::CryptoProvider;
-use qbind_hash::tx::tx_digest;
+use qbind_hash::tx::{try_tx_digest_streaming, TxDigestError};
 use qbind_serde::StateDecode;
 use qbind_types::{Hash32, KeysetAccount};
 use qbind_wire::tx::{Transaction, TxAuth};
@@ -74,7 +74,15 @@ pub fn verify_transaction_auth<S: AccountStore>(
         }
     }
 
-    let digest = tx_digest(tx);
+    let digest = try_tx_digest_streaming(tx).map_err(|error| {
+        ExecutionError::InvalidCallData(match error {
+            TxDigestError::AccountCountTooLarge => "transaction account count exceeds wire limit",
+            TxDigestError::CallDataLengthTooLarge => {
+                "transaction call-data length exceeds wire limit"
+            }
+            TxDigestError::LengthOverflow => "transaction signed-body length overflow",
+        })
+    })?;
 
     for auth in &tx.auths {
         verify_single_auth(store, crypto.as_ref(), tx, auth, &digest)?;
