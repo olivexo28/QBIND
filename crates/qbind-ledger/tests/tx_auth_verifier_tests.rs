@@ -1966,7 +1966,9 @@ fn native_transaction_format_precedes_account_and_provider_failures() {
 
     for (name, fault) in cases {
         let mut tx = baseline_tx.clone();
-        let mut trial_store = baseline_store.clone();
+        let mut trial_store = CountingStore::default();
+        trial_store.accounts = baseline_store.snapshot();
+        trial_store.reported_accounts = baseline_store.reported_accounts.clone();
         let mut crypto = Arc::new(RecordingCryptoProvider::new());
         match fault {
             0 => {
