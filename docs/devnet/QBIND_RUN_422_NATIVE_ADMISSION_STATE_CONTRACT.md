@@ -1910,3 +1910,9 @@ positive native authority, deployed readiness or F1/F2 closure is introduced.
 See the D7 follow-up below for literal commands and results.
 
 See the append-only RUN 422 D7 follow-up for tested-source provenance, exact commands/counts, preservation checks and the historical blocker attribution.
+
+## Native transaction-format admission follow-up
+
+The native verifier now intentionally admits only transaction version 1 with zero reservations, in this order after structural signer coverage and before digest/store/provider work: version, all account metadata, then all authentication entries. This restriction is not canonical transaction semantics, positive authority, replay protection, or protocol-wide approval. The migrated genuine streaming fixture preserves independent legacy-digest coverage; wire parsing/encoding and hashing are unchanged, and `TxAuth.reserved` remains outside the digest. See the D7 appendix for source/test attribution and exact validation results.
+
+The added scans are O(account_count + auth_count), with fixed control storage; no latency/RSS/allocator bound is claimed. Rejection occurs after materialization, so decoder allocation guarantees are not established. Account-header reservations and all other excluded transaction fields remain unchanged. Preserve `D7D14_STORAGE_COMPONENT=IMPLEMENTED-ISOLATED`, `D7D14_STORAGE_ACCEPTANCE=PASS-ACCEPTED-SUBSET`, §13.6 whole-lifecycle INCOMPLETE, activation DISABLED, public DevNet NO-GO, durable anti-rollback NOT-ESTABLISHED, C4/C5 OPEN, RS1 OPEN, and candidate limits UNAPPROVED. Whole native-admission and authority contracts remain DRAFT / NOT APPROVED / NOT IMPLEMENTED; weighted aggregation, alias consistency, provider trust, common-state semantics, program/payer authority, replay protection, operational limits, and deployed compatibility remain unresolved. No F1/F2 closure or release approval follows.

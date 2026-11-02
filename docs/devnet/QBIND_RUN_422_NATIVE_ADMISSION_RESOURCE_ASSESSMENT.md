@@ -896,3 +896,11 @@ positive native authority, deployed readiness or F1/F2 closure is introduced.
 See the D7 follow-up below for literal commands and results.
 
 See the append-only RUN 422 D7 follow-up for tested-source provenance, exact commands/counts, preservation checks and the historical blocker attribution.
+
+## Native transaction-format admission follow-up
+
+The narrow native-verifier restriction is implemented only after complete structural signer preflight and before digest or account/provider work: version must be 1, every account-meta `reserved0` must be zero, then every `TxAuth.reserved` must be zero. The exact errors, genuine controls, ordering, retry evidence, and literal validation counts are recorded in `QBIND_DEVNET_EVIDENCE_RUN_422_D7.md`.
+
+The existing streaming caller fixture was migrated to version 1 and zero reservations without weakening its genuine distinct ML-DSA-44 proofs, independent legacy-digest oracle, two recorded digests, varied signed fields, large call data, refusal/re-sign/retry, or full-state checks. Wire parsing/encoding and hashing remain unchanged; `TxAuth.reserved` remains outside the digest. Account-header reservations and other previously excluded transaction fields remain unrestricted.
+
+The additional complete-field scans are O(account_count + auth_count) with fixed control storage. No latency, RSS, or allocator bound is measured. Admission occurs after `Transaction` materialization, so wire-decoder allocation and account/provider resource guarantees are not established. Preserve all prior status values: D7D14 storage component `IMPLEMENTED-ISOLATED`; storage acceptance `PASS-ACCEPTED-SUBSET`; §13.6 whole-lifecycle `INCOMPLETE`; activation `DISABLED`; public DevNet `NO-GO`; durable anti-rollback `NOT-ESTABLISHED`; C4/C5 and RS1 `OPEN`; candidate limits `UNAPPROVED`. Whole admission/authority contracts remain DRAFT / NOT APPROVED / NOT IMPLEMENTED; no F1/F2 closure or release approval.

@@ -26180,3 +26180,47 @@ commit `31af27f46aef427299fc83bffdfaaee7c0077753`, tree
 962 passed, 0 failed, 17 ignored**. No execution result or blocker-resolution
 status changes. This correction changes neither implementation nor any
 standing readiness verdict.
+
+## RUN 422 — Native transaction-format admission (this delivery)
+
+**Narrow native-verifier compatibility restriction; not full canonical transaction semantics, positive authority, replay protection, or protocol-wide format approval.** Production change is limited to `crates/qbind-ledger/src/auth.rs`; tests are limited to the two authorized integration-test files.
+
+### Baseline, provenance, scope, and ancestry
+
+Origin is `https://github.com/olivexo28/QBIND`; the required clean worktree was at HEAD `e93ee53dd2263cfea65fde0461176b84889e45ee`, root tree `a0d201f0f43a9fd1353313f10fee6a64640b6c77`. The named branch is `copilot/run-422-native-auth-transaction-format-admission`. The commit object records parent header `c20f8b771eb15dfe0d262378ee9166862265de40`; this checkout is shallow, `git cat-file` cannot read that parent object, and the ancestry query is indeterminate (exit 128). This is unavailable shallow history, **not** evidence that the commit had no parent. Tree correspondence was separately verified. No `AGENTS.md` was present.
+
+Source/tests were committed separately at `da9bb1ffac15a5d2746014dcb89f8c1d36a5ea92`, tree `82e9229c6986217ac2f595ff1df4ccd3974a4869`. Tested source modes/blobs: `100755 47b8309be4b42ab284b184f9ccf6ea12eecb1382 crates/qbind-ledger/src/auth.rs`; `100755 e8443543f79f5a1c91966985dce03ebc1d2a64dc crates/qbind-ledger/tests/tx_auth_verifier_tests.rs`; `100755 a505e577a347b8a8751298582f0fc8649317be02 crates/qbind-runtime/tests/tx_executor_tests.rs`.
+
+Only these seven paths are authorized: the three Rust paths above, this D7 record, `docs/devnet/QBIND_RUN_422_NATIVE_ADMISSION_RESOURCE_ASSESSMENT.md`, `docs/devnet/QBIND_RUN_422_NATIVE_ADMISSION_STATE_CONTRACT.md`, and `docs/whitepaper/contradiction.md`. Preserved excluded tuples: `100644 ed5f0a8c2bb78c6c2eff86e73f0bc365aaccbaec crates/qbind-ledger/tests/run_422_native_admission_resource_tests.rs`; `100644 50359b04d4cbf9a3007aff7cad6d4e8dabf3e85a crates/qbind-runtime/tests/run_422_native_keyset_create_authority_contract_tests.rs`; `100644 e03b7f6338547b0c99695cc5ae1ddcd0d28b1cf4 crates/qbind-node/tests/run_375_public_devnet_identity_cli_tests.rs`.
+
+### Implementation and test attribution
+
+After the existing empty-auth refusal, representable account/auth counts, every auth-index and signer-bit check, and complete exact-index signer coverage (`auth.rs:43-84`), borrowed loops require `tx.version == 1` (`:86-90`), then zero `reserved0` on **every** account meta (`:91-97`), then zero `reserved` on **every** authentication (`:98-104`). These ordered full traversals precede the sole checked streaming digest (`:106`) and all account/provider work. Errors are respectively `unsupported transaction version`, `nonzero transaction account reserved bytes`, and `nonzero transaction authentication reserved byte`, each as `InvalidCallData`. No input fields are copied, normalized, repaired, or mutated. Existing verifier route and first-failure behavior after digest are unchanged.
+
+`tx_auth_verifier_tests.rs:1765-1840` uses genuine matched ML-DSA-44 two-auth controls: a zero-reservation version-1 success; versions 0, 2, 255; each byte in first, later signer, and non-signer metadata; and first/later auth reservation refusals. Signed version/meta changes are re-signed over each changed body outside the measured verifier call. Auth reservation mutation is shown to preserve the legacy digest. Each format refusal checks zero reads/puts/deletes, provider lookup, returned suite-ID observation, signature work, recorded verifier digests and public keys, and preserves transaction, backing store, and controlled responses. `:1843-2020` covers structural-error precedence, version-before-both-reservation categories, later metadata before earlier auth reservation, and format-before account/returned-account/keyset/threshold/weight/provider/signature faults. `:2021-2069` verifies a genuine later-field fault before any proof, then corrects only the field, re-signs the corrected signed body, resets observations, and verifies both proofs afresh in account order with the expected digest and keys and unchanged state.
+
+The existing genuine streaming compatibility test remains at `tx_auth_verifier_tests.rs:1609-1763`. Its successful transaction is now version 1 with all transaction reservations zero; it retains distinct genuine ML-DSA-44 proofs, the independent legacy digest signing oracle and both recorded verifier digests, varied signed fields including flags/access hints, 256 KiB call data, body-change and later-proof refusals, re-sign/fresh retry, and complete input/store preservation. `tx_executor_tests.rs:504-597` independently tests the three exact errors before any authentication-account or target read or provider/suite/signature work, then proves a matched valid transaction authenticates and reads the absent target before the exact existing `ProgramError("native keyset creation authority unavailable")`; that is not successful execution or approved authority.
+
+### Compatibility and resource limits
+
+This adds only O(account_count + auth_count) borrowed traversal and fixed control storage (the pre-existing fixed coverage bitmap remains; no variable-sized format-admission state is added). No latency, RSS, allocator, or physical-memory bound was measured. Rejection follows `Transaction` materialization; wire-decoder allocation and account/provider resource guarantees are not established. Wire parsing/encoding and hashing are unchanged. `TxAuth.reserved` remains outside the existing signed digest; this change adds neither a transaction-ID nor replay claim. Account-header reserved bytes, chain ID, payer, nonce, fee limit, flags, access hints, call-data fields, and signatures have no new restrictions; signer-bit interpretation is unchanged.
+
+No changes were made to qbind-wire/qbind-hash fixtures, encoders/decoders/digests, crypto adapters/providers, stores, isolated helpers, native programs, runtime production code, dependencies, or lockfiles. The whole native-admission and authority contracts remain **DRAFT / NOT APPROVED / NOT IMPLEMENTED**. Weighted aggregation, canonical duplicate/alias consistency, provider trust, common-state semantics, program/payer authority, replay protection, operational limits, and deployed compatibility remain unresolved. No F1/F2 closure or release approval follows.
+
+### Validation on committed source
+
+Each command below was run literally after source/tests commit `da9bb1ffac15a5d2746014dcb89f8c1d36a5ea92` / tree `82e9229c6986217ac2f595ff1df4ccd3974a4869`. `selected = passed + failed + ignored`; executed excludes ignored, and overlapping runs are not additive.
+
+| Literal command | Exit | Selected / passed / failed / ignored | Executed | Result |
+|---|---:|---:|---:|---|
+| `LIBCLANG_PATH=/usr/lib/llvm-18/lib cargo test --locked -p qbind-ledger --test tx_auth_verifier_tests -- --nocapture` | 0 | 38 / 38 / 0 / 0 | 38 | PASS |
+| `LIBCLANG_PATH=/usr/lib/llvm-18/lib cargo test --locked -p qbind-runtime --test tx_executor_tests -- --nocapture` | 0 | 9 / 9 / 0 / 0 | 9 | PASS |
+| `LIBCLANG_PATH=/usr/lib/llvm-18/lib cargo test --locked -p qbind-ledger -p qbind-runtime -p qbind-system` | 0 | 285 / 268 / 0 / 17 | 268 | PASS |
+| `LIBCLANG_PATH=/usr/lib/llvm-18/lib cargo test --locked -p qbind-node --test block_apply_tests -- --nocapture` | 0 | 6 / 6 / 0 / 0 | 6 | PASS |
+| `LIBCLANG_PATH=/usr/lib/llvm-18/lib cargo check --locked -p qbind-node` | 0 | N/A (compilation only) | N/A | PASS; no tests selected |
+| `rustfmt --check --edition 2021 crates/qbind-ledger/src/auth.rs crates/qbind-ledger/tests/tx_auth_verifier_tests.rs crates/qbind-runtime/tests/tx_executor_tests.rs` | 0 | N/A | N/A | PASS |
+| `git -c core.whitespace=cr-at-eol diff --check` | 0 | N/A | N/A | PASS |
+
+A preliminary identical ledger command exited 101 before tests because `libclang.so` was absent from `/usr/lib/llvm-18/lib` (`Unable to find libclang`). Environment-only `libclang-18-dev` was installed; no repository dependency/lockfile changed. The required command then passed as recorded above. Package-manager update emitted an unrelated DNS warning for `dl.google.com`; installation succeeded.
+
+Standing posture is unchanged: `D7D14_STORAGE_COMPONENT=IMPLEMENTED-ISOLATED`; `D7D14_STORAGE_ACCEPTANCE=PASS-ACCEPTED-SUBSET`; §13.6 whole-lifecycle `INCOMPLETE`; activation `DISABLED`; public DevNet `NO-GO`; durable anti-rollback `NOT-ESTABLISHED`; C4/C5 `OPEN`; RS1 `OPEN`; candidate limits `UNAPPROVED`. No activation, deployment, PR, merge, or main push.
