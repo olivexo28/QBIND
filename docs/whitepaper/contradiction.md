@@ -5174,3 +5174,7 @@ See the append-only RUN 422 D7 follow-up for tested-source provenance, exact com
 ### Run 422 native transaction-format admission update
 
 The native verifier now rejects transaction versions other than 1, nonzero `TxAccountMeta.reserved0` anywhere in the account vector, and nonzero `TxAuth.reserved` anywhere in the auth vector. These ordered compatibility checks run after structural signer coverage and before digest/account/provider work; they do not establish canonical transaction semantics, authority, replay protection, or protocol-wide approval. Wire encoding/parsing and hashing remain unchanged (`TxAuth.reserved` is still outside the signed digest); account-header reservations and other excluded fields are unchanged. The large genuine ML-DSA-44 streaming fixture was migrated to version 1/zero reservations while preserving its independent legacy digest oracle and retry coverage. Detailed attribution, bounds, and results: `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_422_D7.md`. All standing D7 posture and unresolved authorization/compatibility limitations remain unchanged.
+
+### RUN 422 native key identity contract cross-reference
+
+The test-and-contract draft `docs/devnet/QBIND_RUN_422_NATIVE_AUTH_KEY_IDENTITY_CONTRACT.md` characterizes canonical key identity and the differences between production first-match verification and isolated complete-keyset semantics. It introduces no production behavior, resource approval, authority, or readiness claim; detailed controls and results are in the D7 evidence appendix.
