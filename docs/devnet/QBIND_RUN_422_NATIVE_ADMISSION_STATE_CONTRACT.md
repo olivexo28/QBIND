@@ -1077,3 +1077,47 @@ unchanged. All candidate limits remain `UNAPPROVED`; preserve
 `INCOMPLETE`, activation `DISABLED`, public DevNet `NO-GO`, durable anti-rollback
 `NOT-ESTABLISHED`, C4/C5 `OPEN`, RS1 `OPEN`. No F1/F2 closure, production
 activation, live-validator admission or release approval follows.
+
+## RUN 422 follow-on: native keyset-create authority characterization
+
+**DRAFT / NOT APPROVED / NOT IMPLEMENTED.** The new
+`QBIND_RUN_422_NATIVE_KEYSET_CREATE_AUTHORITY_CONTRACT.md` documents the
+unchanged native `Transaction` -> `TxExecutor` -> `KeysetProgram` route at
+starting commit `62217a3792932db6948e602c39facade0190a180`, root tree
+`380813f63c73df6aa0eebfb86493a68595047663`. Its source/test revision is
+`ce25c42e3a389608832294c29bf5d2cdc7a59a6d`, root tree
+`6e776019580b4a0139425b65b125353cd89b01b3`. Historical evidence above retains
+its original source attribution.
+
+Nine new actual-executor tests use genuine ML-DSA-44, delegated verification
+counting, read/put/delete traces, complete-state comparisons and unchanged
+transaction/wire checks. They distinguish authenticated signer from payer,
+call target and candidate keys; show signed-target binding, authentication
+refusal/retry, existence/replay and same-nonce fresh-target behavior, eight
+small semantic-admission gaps, actual subsequent single-key use of a created
+threshold-2 keyset, absent-signer refusal and authenticated framing errors.
+Candidate-key fixture usability is not production possession enforcement.
+The active legacy verifier still does not enforce stored weights/thresholds;
+the isolated weighted/preparation/context/staging/composition models are not
+activated. No creator/namespace policy is inferred from library acceptance.
+
+The new draft separately addresses allocation rights, candidate semantics,
+weighted auth, payer/funding/fees, nonce/replay/failure, coherent pre-state,
+atomic absent-target insertion, compatibility and persistent/deployment
+evidence. It proposes only a separate-review unavailable-authority refusal
+after existing decoding/trailing-byte/existence validation and before account
+construction/encoding/write. No safeguard, flag or bootstrap exception is
+implemented. Legacy preimage, signer materialization/decoding, create-decoder
+allocations, copied entries and output encoding remain; no new ceiling follows.
+
+Literal commands, selected/passed/failed/ignored counts, preliminary environment
+failure and preservation attestations are appended to
+`QBIND_DEVNET_EVIDENCE_RUN_422_D7.md`. Production code, existing tests and the
+completed native governance/validator refusals and their contracts are frozen.
+Whole native-admission, governance and validator contracts remain
+**DRAFT / NOT APPROVED / NOT IMPLEMENTED**. Preserve
+`D7D14_STORAGE_COMPONENT=IMPLEMENTED-ISOLATED`,
+`D7D14_STORAGE_ACCEPTANCE=PASS-ACCEPTED-SUBSET`, section 13.6 whole-lifecycle
+`INCOMPLETE`, activation `DISABLED`, public DevNet `NO-GO`, durable anti-rollback
+`NOT-ESTABLISHED`, C4/C5 `OPEN`, RS1 `OPEN`; all candidate limits `UNAPPROVED`.
+No F1/F2 closure, production-consistency guarantee or release approval follows.
