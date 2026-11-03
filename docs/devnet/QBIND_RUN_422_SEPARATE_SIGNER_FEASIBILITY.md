@@ -60,10 +60,10 @@ operational claim.
 | Path / symbol | Actual caller | Implemented behavior | Evidence scope | Reusable part | Missing requirement |
 |---|---|---|---|---|---|
 | `validator_signer.rs::ValidatorSigner`, `LocalKeySigner` | `signer_loader::load_validator_signer_from_config`, reached from `main.rs::run_p2p_node`; harness `hotstuff_node_sim.rs` also constructs signers | In-process signing of caller-provided bytes for Proposal, Vote and Timeout; exposes identity/suite; Timeout can construct a canonical timeout preimage | Implemented local interface and local-key signer; not an independently protected service | Typed signer boundary and operation-specific methods | No remote protocol, durable state, activation/root admission, canonical-request validation, or independent key custody |
-| `remote_signer.rs::RemoteSignerClient`, `LoopbackSignerTransport` | `hotstuff_node_sim.rs` harness constructs the loopback client; no production constructor found | Client increments an in-memory request counter, sends supplied preimage, correlates echoed response ID; loopback checks the counter and delegates to a colocated `LocalKeySigner` | Simulated/in-process; no production caller | Request/response structs, byte codec, fail-closed client shape, and client transport interface | Counter is reset on client construction, is not a consensus position, and is neither durable history nor cross-client exclusion |
-| `remote_signer.rs::TcpKemTlsSignerTransport` | No production construction found; `RemoteSignerClient` is only documented with a generic transport | Opens `SecureChannel`, sends a framed request, checks matching response ID, returns the result | Implemented source transport primitive; unverified as a live signer route | Existing client-side channel and message framing | No reachable server handler, durable signer policy, authenticated activation binding, continuity state, or failover/fencing contract |
+| `remote_signer.rs::RemoteSignerClient`, `LoopbackSignerTransport` | `hotstuff_node_sim.rs` harness constructs the loopback client; no production constructor found | Client increments an in-memory request counter and sends supplied preimage; `sign_common` itself does not compare the returned `request_id`. `TcpKemTlsSignerTransport::decode_response` validates the echoed ID before returning; loopback checks the counter and delegates to a colocated `LocalKeySigner` | Simulated/in-process; no production caller | Request/response structs, byte codec, fail-closed client shape, and client transport interface | Counter is reset on client construction, is not a consensus position, and is neither durable history nor cross-client exclusion |
+| `remote_signer.rs::TcpKemTlsSignerTransport` | No production construction found; `RemoteSignerClient` is only documented with a generic transport | Opens `SecureChannel`, sends a framed request, and returns a response after `decode_response` checks the matching response ID | Implemented source transport primitive; unverified as a live signer route | Existing client-side channel and message framing | No reachable server handler, durable signer policy, authenticated activation binding, continuity state, or failover/fencing contract |
 | `qbind-remote-signer/src/main.rs` accept loop | Standalone `qbind-remote-signer` binary | Loads a backend, binds a TCP listener, accepts streams and increments a metric | Binary exists, but accepted sockets are not handshaken or dispatched; `handle_connection` is dead-code-allowed and not called | CLI/config parsing, request codec, and isolated handler shape | KEMTLS server identity/handshake, handler dispatch, durable request tracking, production stateful policy, release operation and evidence |
-| `qbind-remote-signer::validate_and_sign` | Only `handle_connection`, itself not reached from the accept loop | Checks validator ID, suite 100 and preimage size; then signs supplied bytes. Proposal maps to proposal signing; Vote and Timeout both map to `sign_vote` | Unreachable helper, not a live signing vulnerability or deployable behavior | Bounded framing and some identity/suite checks | Correctly distinct Timeout behavior, canonical parsing and safety/authorization checks, durable continuity, and authenticated client identity |
+| `qbind-remote-signer::validate_and_sign` | Only `handle_connection`, itself not reached from the accept loop | Checks validator ID, suite 100 and preimage size; Proposal dispatches through `sign_proposal`, while Vote and Timeout dispatch through `sign_vote`. For Timeout, the client constructs the Timeout preimage, and `LocalKeySigner::sign_vote` signs supplied bytes unchanged; the method name alone does not establish a wrong domain or signature | Unreachable helper, not a live signing vulnerability or deployable behavior | Bounded framing and some identity/suite checks | Server-side canonical operation/domain validation and an explicit backend dispatch and policy contract, durable continuity, and authenticated client identity |
 | `signer_loader.rs::load_validator_signer_from_config` | P2P startup in `main.rs` | Loads local plaintext/encrypted keystore signer; explicitly returns `SignerModeNotWiredYet` for `RemoteSigner` and `HsmPkcs11` | Implemented production startup loader with fail-closed unsupported modes | Local key loading and signer abstraction | Remote signer selection, signer-identity authentication, state-store construction and a safe production activation path |
 | `hsm_pkcs11.rs::HsmPkcs11Signer` | Loader rejects HSM mode; daemon backend constructor can ask for it | Validates configuration but PKCS#11 calls are placeholders; signing returns tagged deterministic non-cryptographic bytes | Unsupported placeholder, not a usable HSM integration | Configuration boundary only | Real PKCS#11 calls, supported PQ mechanism, durable anti-rollback state and tested custody |
 | `secure_channel.rs::SecureChannel` | TCP signer client uses `SecureChannel::connect`; server-side methods are available elsewhere | Implements client/server KEMTLS channel mechanics and surfaces verified peer information for supported channel setup | Channel primitive is implemented; signer-daemon integration is absent | PQ transport building block | Independently distributed roots, signer-specific client/server role binding, active server handshake and a complete request authorization policy |
@@ -74,11 +74,14 @@ operational claim.
 
 The daemon's actual `main` loop accepts a `_tcp_stream`, clones some state and
 logs “KEMTLS handshake not yet implemented”; it neither calls
-`SecureChannel::from_accepted` nor `handle_connection`. The helper's Timeout-to-
-Vote mapping is therefore recorded as an unreachable implementation defect, not
-as evidence that an active service signs arbitrary traffic. Similarly, a
-transport request counter and matching response ID establish neither D10
-continuity nor an authorized consensus position.
+`SecureChannel::from_accepted` nor `handle_connection`. Its helper routes
+Timeout through a method named `sign_vote`, but the client constructs the
+Timeout preimage and `LocalKeySigner::sign_vote` signs supplied bytes unchanged.
+That method-name dispatch alone does not establish a wrong domain or signature.
+The helper remains unreachable; server-side canonical operation/domain
+validation and an explicit backend dispatch and policy contract are unresolved.
+Similarly, a transport request counter and matching response ID establish
+neither D10 continuity nor an authorized consensus position.
 
 ## Candidate boundary and trust assumptions
 
@@ -217,14 +220,20 @@ authoritative are unresolved design decisions.
 wire preimages and existing D10 guards; production currently has no PV
 authority and supplies no journal. Timeout has its own signing domain and
 preimage path, and is kept separate from Proposal/Vote authority in the node.
-The remote daemon helper incorrectly maps Timeout to `sign_vote`, but is
-unreachable. This assessment does not silently redefine that code.
+The remote daemon helper dispatches Timeout through `sign_vote`, but is
+unreachable. The client constructs the Timeout preimage, and
+`LocalKeySigner::sign_vote` signs supplied bytes unchanged, so the method name
+alone does not establish a wrong domain or signature. Server-side canonical
+operation/domain validation and an explicit backend dispatch and policy
+contract remain unresolved; no generic backend boundary is established to
+enforce those distinctions.
 
 The candidate must decide whether Timeout is in scope for the signer and what
 its position, high-QC, replay and state requirements are. Sharing a validator
 key across operation families would not make their authorization or history
-interchangeable; operation/domain binding and the existing per-family policies
-must remain explicit. No new key/domain or Timeout behavior is approved here.
+interchangeable; server-side operation/domain binding, backend dispatch and
+policy must be explicit. No new key/domain or Timeout behavior is approved
+here.
 
 ## Conditional cross-process state transitions
 
@@ -373,7 +382,7 @@ re-attributed here.
 | Migration / retirement | Old instance/key is fenced before replacement can sign | Old instance request rejected after fence; auditably bound retirement and new identity | Process and operational evidence |
 | Capacity exhaustion / corrupt or absent history | Refuse before unsafe allocation/signing; no empty-history fallback | Explicit bounded refusal, preserved records, no signing | Source and process test |
 | Retained-result reuse after currentness/safety revalidation | Return byte-identical result only when exact position/binding remains authorized | Revalidation proof, result digest equality, invocation count unchanged | Source and process test |
-| Timeout operation and shared-key/domain interactions | Separate behavior and policy; refuse unsupported family until specified | Distinct canonical domain/position/history; no Vote substitution | Source test and release-binary |
+| Timeout operation and shared-key/domain interactions | Preserve the supplied Timeout preimage; define server-side canonical operation/domain validation and an explicit backend dispatch and policy contract | Validate Timeout domain/position/history; dispatch through a method named `sign_vote` alone proves neither a wrong domain nor a wrong signature | Source test and release-binary |
 
 ## Decision card
 
@@ -439,7 +448,7 @@ acceptance or release approval follows.
 * Signer interface and operation methods:
   `crates/qbind-node/src/validator_signer.rs:125-203,361-400`.
 * Remote request/counter/loopback and TCP transport:
-  `crates/qbind-node/src/remote_signer.rs:143-171,254-267,303-428,447-539,963-1047`.
+  `crates/qbind-node/src/remote_signer.rs:143-171,254-267,303-428,447-539,904-921,963-1047`.
 * Standalone daemon backend, handler and accept loop:
   `crates/qbind-remote-signer/src/main.rs:409-459,467-597,627-687`.
 * Production signer loader and P2P wiring:
