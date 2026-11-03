@@ -26593,3 +26593,8 @@ IMPLEMENTED; §13.6 whole-lifecycle INCOMPLETE; activation DISABLED; public
 DevNet NO-GO; durable anti-rollback NOT-ESTABLISHED; C4/C5 OPEN; RS1 OPEN;
 candidate resource limits UNAPPROVED. No tests, builds, keys, activation,
 deployment, or operational evidence were created by this documentation note.
+## RUN 422 BR-01 founder verification profile decision proposal
+
+`docs/devnet/QBIND_RUN_422_DEVNET_BOOTSTRAP_AUTHORITY_DECISION.md` now appends one `PROPOSED / OWNER DECISION PENDING / NOT IMPLEMENTED` ML-DSA-44 candidate for the exact initial-DevNet approval message, raw 1312-byte public key, raw 2420-byte signature, pure verification, and empty context. Evidence inspected: the existing approval and custody/recovery records, separate-signer feasibility and D7 evidence, the crypto backend/adapter, manifest and lockfile, and checksum-verified `fips204` 0.4.6 source (lock checksum matched). The NIST final-publication page was available only through indexed metadata; direct retrieval of its PDF and linked errata spreadsheet failed because the NIST hosts did not resolve. Errata contents/applicability remain unverified.
+
+Owner profile acceptance, BR-02 allocation, independent operational root/profile provisioning, implementation acceptance, and activation/release remain pending or disabled; B/C/L/X/U and all other lifecycle gates are unchanged. No keys, signatures, vectors, tests, builds, or operational evidence were produced. Existing preserved D7D14/D7D10 and whole-lifecycle posture is unchanged; no prior evidence result is rerun or promoted.

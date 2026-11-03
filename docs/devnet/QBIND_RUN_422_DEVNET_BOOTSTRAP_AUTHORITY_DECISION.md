@@ -745,3 +745,296 @@ implementation-entry checklist in
 applicable. Isolated implementation prerequisites are **NOT SATISFIED**.
 This is a candidate documentation contract, not security acceptance or
 operational approval.
+
+## BR-01 founder verification profile — decision proposal
+
+**PROPOSED / OWNER DECISION PENDING / NOT IMPLEMENTED**
+
+This is one complete, concrete candidate for an explicit decision by the
+unassigned founder-root policy approver. Preparing it is not acceptance,
+identifier allocation, root provisioning, implementation authorization, or
+activation. It keeps the settled scope: founder-authorized bootstrap of one
+exact initial DevNet configuration, fixed initial membership, explicit unit
+voting weights in this compatibility candidate, a dedicated bootstrap
+credential separate from validator consensus keys, operator-controlled
+validator keys, signer-owned authoritative per-key signing history, and
+node-owned consensus-lock/recovery state. The founder cannot override
+consensus safety, reset signing history, assume an uncertain signing outcome,
+or establish freshness. Before MainNet, the planned transition is to genuinely
+independent joint authority under a separately reviewed authorization and
+transition policy. Environment identities, credentials, and authorization
+records remain separate. No committee, threshold construction, recovery
+authority, operational credential, or infrastructure is introduced.
+
+### Proposed profile
+
+| Property | Single candidate submitted for decision |
+|---|---|
+| Algorithm / parameter set | Pure ML-DSA-44, as specified by FIPS 204 |
+| Standard and errata | NIST FIPS 204 final, published 2024-08-13. The NIST CSRC page's 2026-07-31 planning note points to an errata spreadsheet and says several minor issues are expected to be corrected in a future revision. The spreadsheet itself was not retrievable in this environment; its entries and applicability are **not verified**. Review that official errata before approval or implementation. No concrete incompatibility was found in the repository source inspected, but this is not a claim that the errata were cleared. |
+| Public key | Exact raw FIPS 204 ML-DSA-44 encoding `rho || t1`, 1312 bytes; no wrapper, textual form, fingerprint, or alternate encoding on the wire |
+| Signature | Exact raw FIPS 204 ML-DSA-44 encoding `c_tilde || z || h`, exactly 2420 bytes; no wrapper or alternate encoding |
+| External verification | Pure ML-DSA verification of the **complete application message** below; algorithm context is empty; application-level prehash is none |
+| Application message / domain | Exactly `ASCII("QBIND:BOOTSTRAP-APPROVAL:v1") || 0x00 || u32_be(payload_length) || payload` |
+| Proposed profile ID | `1`, in the bootstrap proposal's local profile namespace only; unallocated pending BR-02. It is not consensus suite ID `100`, a standards identifier, or registry approval. |
+| Purpose and scope | Dedicated founder authorization for one exact initial DevNet configuration and one initial network instantiation only; not consensus signing, other environments, later activation, or a standing authority |
+| Refusal and compatibility | Accept only the exact algorithm, parameter set, key/signature encodings and lengths, pure mode, empty context, and message above. No alternate key, suite, context, digest, encoding, wrapper, domain, fallback, normalization, or legacy interpretation. A change requires a separately reviewed profile/version and authorized transition. |
+
+This is a technical proposal, not an operational suite selection or approval.
+Future algorithm agility does not permit changing the meaning of this profile
+identifier in place.
+A textual import representation, if separately specified in the future, is
+outside this raw wire profile and must not become a second accepted wire
+encoding.
+
+### Standard and pinned-source correspondence
+
+The primary normative reference is [NIST FIPS 204, final
+(2024-08-13)](https://csrc.nist.gov/pubs/fips/204/final), also published at
+[DOI 10.6028/NIST.FIPS.204](https://doi.org/10.6028/NIST.FIPS.204). The CSRC
+page was available through its indexed result, which identifies the final
+publication and reports a 2026-07-31 planning note linking an “Errata
+(potential updates)” spreadsheet. Direct retrieval of the CSRC page, official
+PDF, and linked spreadsheet failed because the hostnames could not be
+resolved. Therefore the exact errata entries, corrections, and their effect
+on this candidate were **not inspected**; approval and implementation must
+not treat errata review as complete.
+
+At this baseline, `crates/qbind-crypto/Cargo.toml` requests
+`fips204 = "0.4"`; this is a semver range, not an exact pin. `Cargo.lock`
+resolves `fips204` **0.4.6** with package checksum
+`c9fb5a367b9846933e271a3c2a992930743f82ae5e8cb7faa780715a80fa0b15`.
+The 0.4.6 crates.io archive was obtained from its versioned static archive
+URL and its SHA-256 was checked against that exact lockfile checksum before
+reading the extracted source. Only source and package metadata were read; no
+package code, build script, examples, helper, or test was executed.
+
+The source trace supports this one candidate:
+
+* `MlDsa44Backend::verify(pk, message, signature)` in
+  `crates/qbind-crypto/src/ml_dsa44.rs` checks `pk.len() == 1312` and
+  `signature.len() == 2420`, converts each to the corresponding fixed array,
+  decodes the key, then calls the pinned verifier with `message` and `&[]`.
+  It maps malformed key/signature encodings to a malformed-signature error
+  and a failed mathematical verification to `InvalidSignature`.
+* `MlDsa44SignatureSuite::verify` in
+  `crates/qbind-crypto/src/ml_dsa44_signature_suite.rs` instead accepts a
+  `Hash32` and passes those 32 digest bytes as its message. It is **not**
+  evidence that the complete bootstrap message is verified and must not be
+  used for this profile.
+* The suite adapter's `canonical_key_descriptor` checks the same exact
+  1312-byte length, decodes and re-encodes through the pinned `SerDes`
+  implementation, and compares the bytes. Its source records that ML-DSA-44
+  `rho` is arbitrary 32-byte data and each `t1` coefficient has a 10-bit
+  encoding covering 0..=1023. Thus there is no distinct noncanonical
+  full-length key pattern to invent for this parameter set; wrong length is
+  malformed, and full-length encoding/canonicality is distinct from key
+  validity, honest generation, private-key possession, identity, and custody.
+* In the checksum-verified `fips204` 0.4.6 archive,
+  `src/encodings.rs::pk_encode`/`pk_decode` (Algorithms 22/23) encode/decode
+  `rho` followed by packed `t1`; `sig_encode`/`sig_decode` (Algorithms 26/27)
+  encode/decode `c_tilde`, packed `z`, and packed hints `h`. Those source
+  comments identify their FIPS 204 algorithm/page correspondence; the official
+  PDF itself was not directly retrieved here. `z` is unpacked from its
+  fixed-width coefficient encoding; the verifier then rejects values outside
+  the strict norm bound. `HintBitUnpack` rejects invalid hint encodings,
+  including out-of-order/duplicate hint positions and nonzero unused hint
+  bytes.
+  Verification requires `||z||_infinity < gamma1 - beta`, computes
+  `w'_approx = A z - c t1*2^d`, reconstructs `w'_1` with the decoded hint,
+  and checks that the challenge recomputed from the message representative
+  and `w1Encode(w'_1)` equals encoded `c_tilde`. Failure returns false; there
+  is no normalization or alternate parse. The wrapper rejects all
+  wrong-length inputs before fixed-array conversion. The outer record parser
+  must separately reject truncation, wrappers, extra/trailing bytes, and any
+  signature length other than 2420; it must not normalize or retry another
+  representation.
+* `fips204`'s `try_sign(message, ctx)` and verification API implement the
+  standard's pure ML-DSA message path. The pinned source forms the algorithm's
+  internal message representative using its own mode byte, context-length
+  byte, context, and message before internal hashing. For this proposal the
+  external context is empty. The application's one NUL byte is only the
+  separator in the application-domain bytes; it is not the algorithm context.
+  “No application-level prehash” means pass the entire framed application
+  message unchanged to raw-message verification. It does **not** disable
+  ML-DSA's standard internal message formatting or hashing. Do not manually
+  reproduce that internal framing, call an internal-only primitive, or
+  substitute a digest.
+
+The repository package is named `fips204` and implements a standardized
+algorithm; neither fact establishes FIPS module validation, independent audit,
+operational security acceptance, or production assurance. The source
+inspection is not algorithm/module validation and no new test execution or
+test evidence is claimed.
+
+### Exact record, trust-root, and policy requirements
+
+The existing signature envelope remains exactly:
+
+```text
+ASCII("SIG1") || u16_be(envelope_profile_id)
+    || u32_be(signature_length) || signature_bytes
+```
+
+For this candidate, `signature_length` is exactly 2420 and the independently
+trusted founder public key uses exactly the profile-defined 1312-byte raw
+encoding. The payload's founder verification profile ID, the envelope profile
+ID, and the independently selected trusted-root profile ID must all equal
+candidate ID `1`. The record is untrusted input and cannot select or widen
+root, profile, purpose, environment, or policy. Root/profile lookup is
+independent of the record and refuses missing, ambiguous, mismatched, or
+unsupported inputs.
+
+The existing payload layout and application message above are unchanged:
+
+```text
+payload_length = 135 + label_length + 1394*member_count
+record_length  = 4 + payload_length + 10 + signature_length
+```
+
+With the existing generic caps (`label_length <= 255`,
+`member_count <= 4096`, generic `signature_length <= 65,535`), the generic
+candidate maximum payload is **5,710,214 bytes** and generic maximum record
+is **5,775,763 bytes**. With this profile's exact 2420-byte signature,
+`record_length = payload_length + 2434` and its profile-specific maximum
+record is **5,712,648 bytes**. The latter is a narrower profile acceptance
+bound, not a change to the generic envelope cap and not an approved
+operational resource limit. No parser allocation, latency, or other resource
+policy is approved here.
+
+Before any verification, each verifier independently provisions and selects
+all of the following:
+
+1. The **complete founder public-key byte string** in the exact profile
+   encoding, not an untrusted carried key or a shortened fingerprint.
+2. The exact accepted verification profile and **initial-DevNet-bootstrap**
+   purpose.
+3. The exact, nonzero 32-byte founder credential reference, associated
+   independently and compared byte-for-byte; this is an opaque association,
+   not a self-authenticating key, short fingerprint, or freshness proof.
+4. The independently established environment/network identity and scope,
+   including the external identity/configuration expectations required by
+   the existing integrated approval contract (runtime and wire identities,
+   exact genesis/configuration, fixed ordered membership, validator
+   consensus-key associations, explicit unit weights, epoch/profile, and
+   single-instantiation scope).
+5. Any additional independently trusted purpose, conflict, and currentness
+   policy inputs required by that contract. A valid signature alone does not
+   establish B/U or the other lifecycle evidence.
+
+No value for the root, private key, credential reference, network, operator,
+device, certificate, or ceremony is created here. Root provisioning must
+remain independent of first-arrival order and the approval record. No
+trust-on-first-use, carried-key self-authentication, optional pins,
+shortened-fingerprint trust, automatic root replacement, or first-arrival
+conflict resolution is allowed. Repository access, HTTPS, SSH, email, and
+administrative accounts do not themselves establish the founder root. The
+existing ceremony recommendation assumes a manual direct founder-to-operator
+encounter: each operator's verifier authenticates the founder through a
+prearranged physical identity procedure independent of the repository,
+download distributor, and installer; the founder personally presents the
+full public key and exact intended DevNet manifest; and operators reconcile
+full public references and conflicts before separately checking each
+node/signer installation. This human identity check is itself a trust
+assumption and can fail through impersonation, collusion, coercion, or
+substitution; a paper copy or manual comparison is neither PQ identity
+authentication nor freshness proof. These proposed steps and risks come
+from the existing custody/recovery model; no personnel, procedure, evidence,
+or ceremony is supplied here.
+
+The founder credential must be dedicated to this bootstrap purpose and
+separate from validator consensus keys and credentials for other environments
+or purposes. Public-key bytes cannot prove exclusive custody or universal
+absence of key reuse. Verification proves neither key ownership/possession nor
+honest key generation, offline custody, non-copyability, side-channel
+resistance, zeroization, or uncompromised execution.
+
+### Signing procedure and limits of verification
+
+The production-facing repository backend's current `generate_keypair()` calls
+the pinned `try_keygen()`; its `sign()` and `sign_into()` paths call
+`try_sign(message, &[])`. In `fips204` 0.4.6 those default APIs use the OS
+default RNG (`OsRng`): key generation obtains its 32-byte random seed through
+fallible RNG filling, and randomized signing obtains a 32-byte per-message
+random value.
+The backend returns an error on key-generation or signing failure; there is
+no automatic deterministic fallback in these calls. Any separately
+authorized future key-generation/signing procedure must use a cryptographic
+random generator seeded with adequate entropy for the standard and its
+approved environment, require the needed random bytes, and refuse on any
+required randomness failure. It must not switch automatically to
+`try_sign_with_seed`, a fixed seed, or another deterministic path.
+
+The verifier cannot establish the entropy quality or custody of the signing
+process, nor infer which permitted generation procedure produced a valid
+signature. A signing error or uncertain result is not proof that no signature
+was produced; preserve the potentially-signed/uncertain state and do not retry
+or resolve it by assumption. Generating an operational key, signing an
+approval, and conducting a root ceremony are separately authorized future
+actions.
+
+### Future acceptance cases — NOT EXECUTED
+
+| Case | Expected isolated content-verifier result | Evidence level needed; not supplied here |
+|---|---|---|
+| Correct independent profile/root and exact framed message | Verify the complete message once and return only the existing exact-content result; no activation/signing permission | Source/unit, independent-process, release-binary, and actual root/custody evidence are separate |
+| Wrong key, purpose, profile ID, or envelope/payload/root profile mismatch | Refuse before any alternate root/profile/purpose attempt | Source/unit; independent root provisioning and release-binary checks separately |
+| Modified message, domain, NUL separator, payload, or length prefix | Signature verification fails; no alternate framing | Source/unit negative controls |
+| Non-empty algorithm context | Unsupported by this profile; refuse, do not retry with another context | Source/unit |
+| Digest-taking `MlDsa44SignatureSuite` adapter substituted for complete-message verification | Profile mismatch / no acceptance; adapter is not the specified input path | Source-level call-path check and source/unit control |
+| Wrong key/signature lengths, wrappers, truncation, or trailing bytes | Refuse as malformed/noncanonical; no trimming, normalization, or fallback | Source/unit boundary controls; release-binary behavior separately |
+| Decoder-invalid or mathematically invalid signature | Refuse; no partial content result | Source/unit controls; independent implementation testing separately |
+| Correctly encoded public key without proof of ownership/custody | Encoding may parse; no ownership, possession, identity, or custody conclusion follows | Actual root ceremony, operator/device/custody evidence; not a source/unit fact |
+| Different valid signatures over identical payload content | Same approval-content identity; no additional bootstrap permission | Source/unit identity control; activation remains separately gated |
+| Valid signature with missing B/U or other lifecycle evidence | Content verification alone supplies no activation, freshness, or signing permission; consumer refuses the dependent effect | Independent-process, release-binary, and actual currentness/recovery evidence |
+
+These are future cases, not vectors, keys, signatures, or tests created or run
+by this task. Source/unit behavior, independent-process behavior,
+release-binary behavior, and actual custody/device evidence remain distinct.
+Historical tests retain their original revision and scope and are not new
+evidence from this proposal.
+
+### Owner decision card
+
+**Decision requested:** accept or reject the exact proposed ML-DSA-44 profile
+above for founder authorization of one exact initial DevNet configuration.
+The decision is only about this proposed content-verification profile.
+
+| Field | Status |
+|---|---|
+| Proposal prepared | YES — documentation only |
+| Authorized technical-profile decision | **PENDING** — acceptance/rejection not supplied |
+| BR-02 identifier allocation | **PENDING** — candidate ID `1` remains unallocated |
+| Independent operational root/profile provisioning | **NOT DONE** |
+| Implementation acceptance/authorization | **PENDING** — not authorized by preparing or accepting this proposal |
+| Activation/release approval | **PENDING / DISABLED** |
+| Accountable approver role | Founder-root policy approver; unassigned. No person is designated here. |
+| Disposition, approval date, signature, evidence | **PENDING** — no value supplied or inferred |
+
+Owner acceptance must cover this exact profile, its precise mode and root
+policy, and the disclosed standard/errata limitation. An incompatible change
+requires a separately reviewed profile/version. Even later acceptance cannot
+supply B/C/L/X/U, waive BR-02–BR-11, authorize implementation automatically,
+or enable activation.
+
+Preserved without promotion:
+
+```text
+D7D14_STORAGE_COMPONENT=IMPLEMENTED-ISOLATED
+D7D14_STORAGE_ACCEPTANCE=PASS-ACCEPTED-SUBSET
+D7D10_LOCAL_SIGNING_RESERVATION=CODE-AND-STORAGE-TEST-POSITIVE
+Whole native-admission and authority contracts: DRAFT / NOT APPROVED / NOT IMPLEMENTED
+Section 13.6 whole-lifecycle: INCOMPLETE
+Activation: DISABLED
+Public DevNet: NO-GO
+Durable anti-rollback: NOT-ESTABLISHED
+C4/C5: OPEN
+RS1: OPEN
+Candidate resource limits: UNAPPROVED
+Isolated implementation prerequisites: NOT SATISFIED
+```
+
+The existing non-null `GenesisConfig.extra` refusal and all other integrated
+contract restrictions remain unchanged. No F1/F2 closure, deployment
+permission, production authority, security acceptance, or release approval
+follows.
