@@ -1323,3 +1323,241 @@ operational approver or waive any prerequisite. Existing source-only errata
 evidence, source provenance limitations, and signing-counter/exhaustion
 follow-up concerns remain intact. No technical review is reopened or
 repeated by this decision record.
+
+## RUN 422 BR-02 identifier-allocation and compatibility proposal
+
+**PROPOSAL PREPARED / BR-02 OWNER DISPOSITION PENDING / NO IDENTIFIERS
+ALLOCATED / NOT IMPLEMENTED**
+
+This is a source-grounded proposal for the separate protocol/record contract
+owner's explicit BR-02 accept-or-reject decision. It does not accept BR-02,
+allocate values in a registry, authorize implementation, or alter the
+accepted BR-01 design. The accountable BR-02 owner remains unassigned; BR-01's
+founder-root policy approver role does not assign this separate contract-owner
+role.
+
+### Layout and allocation scope
+
+The authoritative candidate layout remains this document's §2, “Logical
+bootstrap authorization record,” specifically its payload and message
+framing at lines 301–340 and the ordered 21-field table at lines 342–362,
+followed by its classification at lines 364–376. Those existing bytes,
+order, constraints, arithmetic bounds, profile-specific sizes, and the
+`GenesisConfig.extra == Null` refusal are unchanged. This proposal points to
+that table rather than defining a competing layout. Its 21 entries remain in
+order: fields 1–9 once, fields 10–15 repeated `member_count` times in genesis
+order, then fields 16–21 once. All integers remain unsigned big-endian;
+field 7 retains its `u16_be` byte-length framing and permitted ASCII
+constraints; fields 8, 11, 12, 14, 16, and 20 retain their specified fixed
+byte widths. The outer payload length, member count, validator-ID/index rule,
+per-field bounds, checked arithmetic, and candidate size rules are unchanged.
+These are encoding/format constraints, not approval of operational resource
+limits.
+
+The following is the complete proposed identifier/domain set for BR-02.
+“Proposed only” is the status of every row: none is registered or allocated
+by this task. Hex is shown to make the literal bytes unambiguous.
+
+| Candidate item / layout slot | Exact candidate bytes or value and width | Namespace and meaning | Authentication status | Source / proposal locator | Bounded collision comparison | Proposed status |
+|---|---|---|---|---|---|---|
+| Record magic / field 1 | ASCII `QBAP` = `51 42 41 50`, 4 bytes | Bootstrap approval-record family | Authenticated field; the complete payload is signed | §2 fields 1–2; no executable bootstrap record type located | No exact `QBAP` record magic observed in the inspected source; unrelated persisted-record magics have their own formats | Proposed only; unallocated |
+| Record format version / field 2 | `u16_be(1)` = `00 01` | Bootstrap approval-record schema version | Authenticated field | §2 field 2; compare persistence versions at `crates/qbind-node/src/signing_reservation_journal.rs:56-59` | Numeric value 1 also occurs in other format namespaces, including a distinct journal `u16`; value equality alone is not a collision | Proposed only; unallocated |
+| Authorization purpose / field 3 | `u16_be(1)` = `00 01` | Bootstrap approval-purpose namespace; initial DevNet bootstrap only | Authenticated field | §2 field 3; no executable bootstrap-purpose registry located | No same-purpose registry allocation observed in inspected source; unrelated enums/versions do not allocate this purpose | Proposed only; unallocated |
+| Environment / field 4 | `u8(1)` = `01` | Candidate bootstrap-record environment namespace; DevNet only | Authenticated field | §2 field 4; `NetworkEnvironment` at `crates/qbind-types/src/primitives.rs:105-146` | No serialization assigning this byte to `NetworkEnvironment` was found. It is not a `ChainId`, wire alias, chain label, or existing environment encoding | Proposed only; unallocated |
+| Application signing domain | ASCII `QBIND:BOOTSTRAP-APPROVAL:v1` (27 bytes: `51 42 49 4e 44 3a 42 4f 4f 54 53 54 52 41 50 2d 41 50 50 52 4f 56 41 4c 3a 76 31`) followed by literal `00` | Dedicated bootstrap-approval message domain; the NUL is a separator, not part of the text | Not a payload field; fixed bytes prefix the authenticated message | §2 exact message at lines 313–324; compare `qbind-wire/src/pv_signing_domain.rs:91,273-291`, `qbind-types/src/domain.rs:175-181`, and trust-bundle domain at `qbind-node/src/pqc_trust_bundle.rs:102,1607-1642` | No exact executable-source match observed. Distinct from existing chain-scope, Proposal/Vote, trust-bundle, remote-signer, timeout, and persisted-authority domains | Proposed only; no domain registration |
+| Envelope magic | ASCII `SIG1` = `53 49 47 31`, 4 bytes | Bootstrap signature-envelope framing | Unauthenticated selection/framing metadata; it is outside the signed input | §2 envelope at lines 326–339 | No exact `SIG1` envelope magic observed in inspected source; not interchangeable with record magic or another format's prefix | Proposed only; unallocated |
+| Consensus configuration profile / field 18 | `u16_be(1)` = `00 01` | Bootstrap consensus-configuration-profile namespace; ordered genesis members, the existing supported suite, unit weights, founding epoch 0 | Authenticated field | §2 field 18; source shape at `crates/qbind-node/src/genesis_consensus_authority.rs:86,106,336-435` | Distinct field/namespace from suite identifiers; no existing bootstrap configuration-profile registry entry observed | Proposed only; unallocated |
+| Permitted operation/scope / field 19 | `u16_be(1)` = `00 01` | Bootstrap permitted-operation/scope namespace; one initial instantiation of the exact approved DevNet configuration | Authenticated field | §2 field 19; §3 independent root-selection rule | No same-namespace scope registry entry observed; other operation codes are not adopted by this candidate | Proposed only; unallocated |
+| Founder verification profile / field 21 | `u16_be(1)` = `00 01` | Bootstrap founder-verification-profile namespace; exactly the unchanged BR-01 design accepted **DESIGN ONLY** | Authenticated field; meaning is accepted only through the independently trusted profile | §2 field 21; BR-01 decision above, lines 1270–1324 | Distinct from consensus suite ID 100 and from every other profile namespace reviewed; does not itself select a root | Proposed only; **UNALLOCATED — PENDING BR-02** |
+| Envelope profile ID | `u16_be(1)` = `00 01`; same namespace/value as field 21 | Same founder-verification-profile namespace, not a second profile allocation | Envelope metadata is unauthenticated; verifier must require equality with authenticated field 21 and its independently selected trusted-root profile | §2 envelope and field 21, lines 326–362 | Reuse is intentional only for this exact profile-selection equality; the envelope cannot choose the trusted root | Proposed only; unallocated |
+
+This identifier set does **not** allocate the existing consensus suite ID
+`100`, any `SuiteRegistry` ID, runtime `ChainId`, wire `chain_id`, genesis
+label/hash, validator ID, root or credential reference, or any environment
+mapping. In the unchanged 21-field layout, field 13 remains the existing
+`u16_be` consensus suite value `100`; field 18 is a different field and
+namespace. `ConsensusSigSuiteId(pub u16)` and `SUPPORTED_TIMEOUT_SUITE_ID`
+are defined at `crates/qbind-crypto/src/consensus_sig.rs:34` and
+`crates/qbind-node/src/timeout_verification_bridge.rs:97`; the genesis
+authority builder assigns that suite and `ValidatorId(i)` in genesis order
+and constructs unit voting power at
+`crates/qbind-node/src/genesis_consensus_authority.rs:336-416`. The separate
+genesis `SuiteRegistry` stores `suite_id: u8` with values `0x01`, `0x02`,
+`0x03`, and `0x10`, at `crates/qbind-types/src/state_suite.rs:7-43,52-104`.
+Those integers are not automatically collisions, but neither Rust wrapper
+types nor names alone establish safe separation: a future decoder must first
+select this record format and exact positional field, then enforce that
+field's namespace and supported value.
+
+Likewise, candidate environment byte `01` is not an encoding of
+`NetworkEnvironment`, the `ChainId(u64)` constants, the `NetworkWireAlias(u32)`
+values, or `GenesisConfig.chain_id`. `NetworkEnvironment` has no explicit
+integer representation in `crates/qbind-types/src/primitives.rs:105-146`;
+runtime IDs are defined separately at lines 34–87. A dormant standard
+runtime-to-wire alias helper exists at
+`crates/qbind-types/src/network_wire_alias.rs:21-29,66-79,110-137`.
+`GenesisValidatedIdentity::check_network_correspondence` checks a selected
+environment against its retained validation policy and a supplied full-width
+runtime ID against that helper, returning only a borrowed, explicitly
+non-authorizing correspondence
+(`crates/qbind-node/src/genesis_authority_record_correspondence.rs:229-277,
+308-379`). This is static source correspondence, not a serialization for the
+candidate environment byte or production activation. No mapping between these
+record fields is proposed; BR-03 remains open. The separate
+`GenesisAuthorityConfig` and `GenesisAuthorityRoot` are governance/transport
+authority surfaces in `crates/qbind-ledger/src/genesis.rs:402-426,703-789`,
+not this bootstrap record or its founder root. No mapping between these
+values is proposed.
+
+Other numeric values in the existing layout retain their current meanings
+and are not allocations by this decision: field 5 runtime chain identity;
+field 6 wire chain identity; field 7 genesis chain label; field 8 genesis
+hash; field 9 member count; repeated field 10's existing index-derived
+validator ID; field 11 address; field 12 signer reference; field 13 suite
+ID 100; field 14 key bytes; field 15 weight 1; field 16 derived authority
+commitment; field 17 epoch 0; and field 20 founder credential reference.
+Lengths, counts, weights, opaque references, hashes, indices, and operational
+identities are not added to the BR-02 allocation set.
+
+### Bounded collision and compatibility review
+
+The review compared executable source definitions and constructors, not
+comments or historical test fixtures as if they were runtime registrations.
+Relevant test and historical documentation matches were used only to locate
+source or understand prior claims. “No collision observed” below is limited
+to the inspected baseline and search scope; it is not proof of global
+uniqueness, runtime isolation, deployed parser behavior, or cryptographic
+conformance.
+
+| Baseline source locator(s) | Inspected namespace / constructed preimage | Comparison result | Unresolved limitation |
+|---|---|---|---|
+| `crates/qbind-node/src/signing_reservation_journal.rs:51-60,93-100`; `crates/qbind-node/src/restore_completion.rs:58,244-276`; `crates/qbind-node/src/safety_record_store/owner/model.rs:923-941`; `crates/qbind-types/src/state_suite.rs:20-43` | Executable persistence magics and format versions, including `QSJ1`, `QSJM`, `QBNDRTR` and model-only `R4B2`; separate `SuiteRegistry` u8 identifiers | No exact candidate record magic `QBAP` or envelope magic `SIG1` observed. Existing magic/version pairs identify other formats; numeric version `1` is reused across those independent formats | The repositories contain many additional serializers and schemas. A source text search cannot prove every downstream, generated, private, or future parser has distinct dispatch |
+| `crates/qbind-crypto/src/consensus_sig.rs:34-60`; `crates/qbind-crypto/src/suite_catalog.rs:39-58,103-155`; `crates/qbind-node/src/timeout_verification_bridge.rs:97`; `crates/qbind-types/src/state_suite.rs:7-43` | Consensus suite ID 100 is a `u16`; state SuiteRegistry IDs are `u8`; candidate configuration and founder profile IDs are `u16` at different fixed bootstrap fields | Candidate profile/scope value 1 does not replace suite 100 or any SuiteRegistry value. The intended distinct-field/namespace interpretation is explicit; raw equal integers alone do not prove safety | This candidate proposes no parser or typed runtime registry. Future implementation must reject a value found in the wrong field/namespace |
+| `crates/qbind-types/src/domain.rs:49-72,175-181,187-211`; `crates/qbind-wire/src/consensus.rs:126,168-185,807,867-886`; `crates/qbind-wire/src/pv_signing_domain.rs:91-94,273-291`; `crates/qbind-consensus/src/timeout.rs:50`; `crates/qbind-ledger/src/execution.rs:163-190`; `crates/qbind-ledger/src/bundle_signing_ratification.rs:92-107,1238-1246,1450-1493` | Chain-specific transaction/batch/legacy Proposal/Vote/timeout tags; transaction preimage fields; v2 Proposal/Vote domain tag, version, family, runtime and wire IDs, genesis/authority hashes, `u64_be` body length, canonical body; governance ratification v1/v2 domains and canonical v2 preimage | No exact candidate application-domain literal observed. The complete candidate message starts with a distinct 27-byte ASCII domain and NUL, followed by a fixed-width `u32_be` payload length and exactly that payload; it is not the legacy helper's raw `domain_prefix || body` | Domain separation is a byte-level contract, not inferred from the text tag alone. No cryptographic cross-protocol proof or implementation conformance is claimed |
+| `crates/qbind-node/src/pqc_trust_bundle.rs:102,1607-1642,1736-1765`; `crates/qbind-node/src/pqc_authority_state.rs:177-185,929-958`; `crates/qbind-node/src/remote_signer.rs:73,842`; `crates/qbind-node/src/pqc_remote_signer_transport.rs:88-105,297-398,950-967` | Trust-bundle signature prefix plus serialized JSON; separate fingerprint digest; persisted authority-state digest prefix; remote-signer and transport request/response/transcript domains | Inspected exact prefixes differ from the candidate literal and operate over different preimages/framing. None is substituted for the proposed bootstrap message | Repository-wide search does not cover external consumers or unindexed generated/dependency code; transport/version strings are not bootstrap registrations |
+| `crates/qbind-types/src/primitives.rs:34-146`; `crates/qbind-types/src/network_wire_alias.rs:21-29,49,66-79,110-137`; `crates/qbind-node/src/pqc_boot_genesis.rs:69-80`; `crates/qbind-node/src/genesis_authority_record_correspondence.rs:229-277,308-379`; `crates/qbind-ledger/src/genesis.rs:402-426,703-789,1300-1357` | Runtime environment enum, runtime `u64` ChainId, dormant wire `u32` aliases, non-authorizing static correspondence, serialized trust-bundle environment labels, genesis chain string, distinct genesis authority config/root | Candidate environment byte 1 is not equated with any of these values. The separate existing values do not collide by numeric comparison, and no new mapping is proposed | BR-03's environment/runtime/wire/genesis binding remains unresolved; correspondence and alias code do not serialize the candidate byte or establish production activation/authority |
+| `docs/devnet/QBIND_RUN_422_DEVNET_BOOTSTRAP_AUTHORITY_DECISION.md:301-376`; `crates/qbind-node/src/genesis_consensus_authority.rs:86,106,336-435` | Exact payload/envelope framing, positional field boundaries, member repetition/order, existing suite/weight/epoch builder behavior | No domain-prefix/concatenation ambiguity was observed for the required message: the NUL is literal, the payload length is fixed `u32_be`, the payload is consumed at that exact length, and the signature envelope is outside the signed input | This is a proposed format, not a parser audit. Existing framing/bounds remain unchanged and do not approve operational resource limits |
+
+The required signature message remains exactly:
+
+```text
+ASCII("QBIND:BOOTSTRAP-APPROVAL:v1") || 0x00 ||
+u32_be(payload_length) || payload
+```
+
+BR-01 remains pure ML-DSA-44, exact raw 1312-byte public key, exact raw
+2420-byte signature, empty algorithm context, and no application prehash.
+The complete message above—not a digest—is the verification input. This
+proposal does not substitute a digest-taking adapter, the existing chain-scope
+domain helper, another domain, or another framing. The existing profile's
+source-only errata, provenance, conformance, and signing-exhaustion limitations
+remain as recorded under BR-01; this BR-02 proposal does not repeat or close
+those reviews.
+
+Search coverage was read-only across the repository Rust source tree and
+relevant contract/status documents for candidate literals and source terms
+including `MAGIC`, `FORMAT_VERSION`, `RECORD_VERSION`, `DOMAIN`,
+`domain_prefix`, suite IDs/registries, genesis authority, environment, runtime
+chain IDs, and wire chain IDs. Relevant transaction/consensus,
+governance/trust-bundle, transport, genesis, and persisted-authority source
+families were inspected, and constructed consensus identifiers were followed
+to the genesis authority builder. Documentation, comments, and tests were
+separated from executable definitions. The bounded review excludes proving
+uniqueness in unavailable shallow-history objects, external or generated
+consumers, runtime state not represented in source, and cryptographic
+isolation/conformance. No material collision or incompatibility was observed
+within this baseline and scope that prevents recommending the unchanged
+candidate set for owner decision. If later evidence establishes one, BR-02
+must remain blocked pending an explicit owner decision; this proposal does not
+authorize silent renumbering, domain changes, layout redesign, or BR-01
+amendment.
+
+### Proposed compatibility and evolution rules
+
+These are proposed rules, not implemented behavior:
+
+* Interpret every value only within its explicitly named record, purpose,
+  environment, operation/scope, consensus-configuration, or founder-profile
+  namespace. Select the format first and parse only its exact field layout.
+* Require the exact supported record magic, record version, purpose,
+  environment, operation/scope, and profile values. Refuse unknown values and
+  inconsistent combinations. No fallback, auto-detection retry, downgrade,
+  normalization, or legacy reinterpretation is allowed.
+* Values not listed in this candidate remain unsupported. Do not allocate
+  TestNet/MainNet values or reserve broad ranges by implication.
+* Preserve each allocated value's meaning. An incompatible change requires
+  separate review, explicit version/profile decisions, and the applicable
+  authority-transition policy; never reuse an identifier with changed
+  semantics.
+* The record or envelope cannot select its own trusted root or widen policy.
+  Independently select the expected root/profile/purpose before examining
+  untrusted record bytes. The envelope profile ID must match both the
+  authenticated payload ID and independently selected trusted-root profile.
+* Matching payload, envelope, and root profile IDs is necessary but does not
+  establish authorization, freshness, unique first use, or custody.
+* Identifier allocation alone causes no registry fetching, root replacement,
+  authority transition, implementation, operational approval, or activation.
+
+### Future owner acceptance matrix — NOT EXECUTED
+
+| Future case | Proposed expected disposition | Status |
+|---|---|---|
+| Wrong or unknown record magic, version, purpose, environment, operation/scope, or profile value | Refuse; do not retry another format or value | NOT EXECUTED |
+| Interpret candidate `1` in another namespace, including suite ID / SuiteRegistry confusion | Refuse inconsistent or unsupported field/namespace use | NOT EXECUTED |
+| Envelope profile, authenticated field 21, or independently selected root profile differs | Refuse profile mismatch; envelope cannot select or replace the root | NOT EXECUTED |
+| Altered NUL separator, payload length, field order/width, member repetition, or trailing/omitted bytes | Refuse non-exact framing; preserve the existing bounds | NOT EXECUTED |
+| Substitute legacy chain-scope, Proposal/Vote, trust-bundle, or other domain framing | Refuse; only the exact BR-01 message is proposed | NOT EXECUTED |
+| Reinterpret an unallocated value under a future profile/version without explicit review | Refuse unsupported value; require separate version/profile and authority-transition decision | NOT EXECUTED |
+
+These are future cases only: no vectors, parser, test, refusal class, or
+runtime behavior is introduced here. The terminology “refuse” preserves the
+existing candidate contract; it does not claim implementation evidence.
+
+### BR-02 owner decision card
+
+**Required decision-maker role:** protocol/record contract owner.
+**Accountable person:** unassigned; no explicit BR-02 assignment is evidenced.
+
+The complete proposed set for decision is the allocation table above:
+`QBAP`; record `u16_be` version 1; purpose `u16_be` 1; environment `u8` 1;
+the exact `QBIND:BOOTSTRAP-APPROVAL:v1 || 00` domain; `SIG1`; consensus
+configuration profile `u16_be` 1; permitted operation/scope `u16_be` 1;
+founder profile `u16_be` 1; and envelope profile ID `u16_be` 1 in the same
+founder-profile namespace, required to match the payload and independent
+trusted root. The exact existing 21-field layout and compatibility rules
+above are part of the same decision. Collision review found no material
+collision in its inspected baseline/scope, with the bounded search and
+runtime/external/cryptographic limitations stated above.
+
+The owner may **ACCEPT** this exact set and rules, or **REJECT** them with the
+candidate remaining unallocated. Acceptance must be recorded later as an
+explicit BR-02 owner decision; it does not itself implement a registry or
+authorize implementation, provisioning, signing, recovery, release, or
+activation. Rejection leaves the candidate blocked and unallocated; no
+automatic renumbering or redesign follows. Any replacement proposal requires
+its own source-grounded collision review and explicit owner decision.
+
+| Decision field | Status |
+|---|---|
+| Proposal preparation | **COMPLETE** — documentation-only source review supports submitting the unchanged candidate for decision |
+| BR-02 owner disposition | **PENDING** |
+| Identifier allocation | **NOT PERFORMED** |
+| Decision date / signature / evidence | **NOT SUPPLIED** |
+| Accountable BR-02 protocol/record contract owner | **UNASSIGNED** |
+| Founder profile ID 1 | **UNALLOCATED — PENDING BR-02** |
+| BR-01 owner design acceptance | **UNCHANGED — ACCEPTED, DESIGN ONLY** |
+| Independent operational root/profile provisioning | **NOT DONE** |
+| Implementation acceptance/authorization | **PENDING** |
+| Whole native-admission and authority contracts | **DRAFT / NOT APPROVED / NOT IMPLEMENTED** |
+| Isolated implementation prerequisites | **NOT SATISFIED** |
+| Activation / public DevNet | **DISABLED / NO-GO** |
+| D7D14, D7D10, recovery, anti-rollback, resource and whole-lifecycle statuses | **UNCHANGED** |
+| Non-null `GenesisConfig.extra` | **REFUSED by the unchanged candidate; no hash-contract change proposed** |
+| BR-03–BR-11 and B/C/L/X/U | **UNCHANGED** |
+
+Preparing, reviewing, committing, or merging this proposal is not BR-02
+acceptance. No founder override, history reset, operational credential,
+runtime-to-wire mapping, recovery mechanism, new authority, source registry
+entry, operational resource approval, or lifecycle authorization is created.
+The existing isolated implementation-entry checklist remains unsatisfied and
+in force.
