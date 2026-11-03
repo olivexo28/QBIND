@@ -26537,3 +26537,37 @@ Correction: In the feasibility assessment, response-ID matching belongs specific
 The documentation-only decision `docs/devnet/QBIND_RUN_422_DEVNET_BOOTSTRAP_AUTHORITY_DECISION.md` now selects founder-authorized bootstrap as the design direction for one exact initial DevNet configuration. It supersedes only the earlier pending choice of the initial DevNet authority role. Historical “pending” statements remain attributable to their producing source/revisions and are not rewritten as evidence of an implemented ceremony.
 
 Actual credentials, independent trust-root distribution, approval verification, activation/currentness mechanisms, signing-history and lock recovery, cross-host exclusivity, operational trust assumptions, and deployment approval remain pending. This selection does not approve Profile A or alter any prior source-test result. Preserved: `D7D14_STORAGE_COMPONENT=IMPLEMENTED-ISOLATED`; `D7D14_STORAGE_ACCEPTANCE=PASS-ACCEPTED-SUBSET`; `D7D10_LOCAL_SIGNING_RESERVATION=CODE-AND-STORAGE-TEST-POSITIVE`; §13.6 whole-lifecycle `INCOMPLETE`; activation `DISABLED`; public DevNet `NO-GO`; durable anti-rollback `NOT-ESTABLISHED`; C4/C5 and RS1 `OPEN`; candidate limits `UNAPPROVED`. No F1/F2 closure, production-consistency guarantee, or release approval follows.
+
+## RUN 422 - bootstrap credential custody and recovery trust model (documentation only)
+
+`docs/devnet/QBIND_RUN_422_BOOTSTRAP_CREDENTIAL_RECOVERY_TRUST_MODEL.md`
+is DRAFT / NOT APPROVED / NOT IMPLEMENTED, inspected at starting commit
+`9cf46e641c2889cc48c04ea84228f5117fc13877`, root tree
+`1d134e347187012546f4e110b0a9ec1594ec184b`. Both objects are available; raw
+parent header `bca50c2ea896ac3041dea22659ea023fe0d45abe` names an unavailable
+parent object in this shallow checkout, not an absent historical parent. No
+older ancestry is inferred.
+
+Selected recommendations: dedicated normally offline founder PQ bootstrap
+credential with no remote signing service; independent manual founder-root and
+exact configuration/genesis provisioning; operator-controlled validator keys
+with one designated stateful signer and separate node safety state; backups as
+availability inputs, not continuity/currentness; no automatic same-key failover;
+explicit twelve-scenario recovery/refusal rules, FUTURE / NOT EXECUTED
+source/process/release/operator evidence matrix and implementation-entry
+checklist. Safe same-key recovery remains unavailable without concrete trusted
+evidence outside the affected rollback domains. Manual approval cannot reset
+history/locks, prove unique first use, or disable an exfiltrated unrestricted key.
+
+Only documentation and preservation/whitespace/source-reference/Markdown
+checks belong to this task. No tests, builds, scans, services, operational keys,
+ceremony, recovery mechanism, activation or deployment were executed or
+established; historical validation remains at its producing revisions.
+Preserved: `D7D14_STORAGE_COMPONENT=IMPLEMENTED-ISOLATED`;
+`D7D14_STORAGE_ACCEPTANCE=PASS-ACCEPTED-SUBSET`;
+`D7D10_LOCAL_SIGNING_RESERVATION=CODE-AND-STORAGE-TEST-POSITIVE`;
+whole native-admission and authority contracts DRAFT / NOT APPROVED / NOT
+IMPLEMENTED; section 13.6 whole-lifecycle INCOMPLETE; activation DISABLED;
+public DevNet NO-GO; durable anti-rollback NOT-ESTABLISHED; C4/C5 OPEN; RS1
+OPEN; candidate resource limits UNAPPROVED. No F1/F2 closure, positive
+production authority, deployment permission or release approval follows.

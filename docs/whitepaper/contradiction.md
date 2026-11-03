@@ -5238,3 +5238,27 @@ remain OPEN.
 ## RUN 422 DevNet founding-authority decision — status clarification
 
 `docs/devnet/QBIND_RUN_422_DEVNET_BOOTSTRAP_AUTHORITY_DECISION.md` records founder-authorized bootstrap as the selected design direction for one exact initial DevNet configuration. This supersedes only the previously open choice of initial DevNet authority role; historical pending statements remain scoped to their original assessments and are not retroactive implementation evidence. The decision does not approve Profile A, an authorization ceremony, deployment, or an operating profile. Credentials, independent trust-root distribution, activation/currentness, continuity, recovery, anti-rollback, cross-host exclusivity, and operational approval remain unresolved. TestNet/MainNet require separate identities, credentials, and records; joint authority before MainNet remains a planned but unspecified direction. Preserved: D7D14 remains `IMPLEMENTED-ISOLATED` / `PASS-ACCEPTED-SUBSET`; D10 remains `CODE-AND-STORAGE-TEST-POSITIVE`; §13.6 remains `INCOMPLETE`; activation remains `DISABLED`; public DevNet remains `NO-GO`; durable anti-rollback remains `NOT-ESTABLISHED`; C4/C5 and RS1 remain `OPEN`; candidate limits remain `UNAPPROVED`. No F1/F2 closure, production-consistency guarantee, or release approval is implied.
+
+## RUN 422 - proposed bootstrap custody and recovery boundary
+
+`docs/devnet/QBIND_RUN_422_BOOTSTRAP_CREDENTIAL_RECOVERY_TRUST_MODEL.md`
+advances the settled founder-authorized initial DevNet direction as DRAFT / NOT
+APPROVED / NOT IMPLEMENTED. Offline founder custody, independent manual root
+provisioning, one operator-controlled stateful validator signer, separate
+signing-history/node-lock obligations and explicit recovery refusals are
+recommendations, not established operational facts. No currentness source,
+unique-first-use mechanism, recovery authority, copied-key retirement or
+rollback protection is supplied; safe same-key recovery without the required
+independent evidence is unavailable. Restoring keys or granting manual approval
+cannot reset history/locks; local shutdown/deletion cannot disable an exfiltrated
+unrestricted key. New identities in a new network are a separate bootstrap, not
+preservation of original history/assets/authority/safety.
+
+D7D14 remains IMPLEMENTED-ISOLATED / PASS-ACCEPTED-SUBSET; D10 remains
+CODE-AND-STORAGE-TEST-POSITIVE; whole native-admission and authority contracts
+remain DRAFT / NOT APPROVED / NOT IMPLEMENTED; section 13.6 remains INCOMPLETE;
+activation DISABLED; public DevNet NO-GO; durable anti-rollback NOT-ESTABLISHED;
+C4/C5 and RS1 OPEN; candidate resource limits UNAPPROVED. No F1/F2 closure,
+positive production authority, operational ceremony/recovery/security property,
+deployment permission or release approval is implied. No tests, builds, scans,
+services, keys, activation or deployment were performed.

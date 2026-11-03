@@ -232,3 +232,16 @@ The whole native-admission and authority contracts remain
 all candidate limits `UNAPPROVED`. No F1/F2 closure,
 production-consistency guarantee, configured-authority acceptance, or release
 approval follows.
+
+## RUN 422 - proposed bootstrap custody and recovery trust model
+
+`docs/devnet/QBIND_RUN_422_BOOTSTRAP_CREDENTIAL_RECOVERY_TRUST_MODEL.md`
+is **DRAFT / NOT APPROVED / NOT IMPLEMENTED**. It advances the settled
+founder-authorized initial DevNet direction with recommended offline founder
+credential custody, independently authenticated manual root provisioning,
+operator-controlled stateful validator signers, separate history/lock owners,
+and explicit loss, uncertainty, migration, copied-key and rollback refusals.
+No credential, suite, device, custodian, ceremony, currentness/unique-first-use
+source, recovery authority or exclusivity mechanism is established. It preserves
+all verdicts above, leaves activation DISABLED and public DevNet NO-GO, and
+grants no history/lock override, implementation, deployment or release approval.

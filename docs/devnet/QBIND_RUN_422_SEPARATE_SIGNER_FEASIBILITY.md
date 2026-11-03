@@ -486,3 +486,18 @@ acceptance or release approval follows.
 The documentation-only decision in `docs/devnet/QBIND_RUN_422_DEVNET_BOOTSTRAP_AUTHORITY_DECISION.md` selects founder-authorized bootstrap as the **design direction for one exact initial DevNet configuration**. This supersedes only the earlier open choice of who may authorize that initial configuration. Earlier statements that no founder/credential/root was selected, and the owner question asking who may authenticate activation, accurately describe their historical assessment scope; they are not rewritten as implementation evidence.
 
 The founder role is not a completed cryptographic ceremony, approval of the whole Profile A contract, or approval of an operating/deployment profile. Credential/root distribution, exact record and verification, currentness, signing-history continuity, consensus-lock recovery, cross-host exclusivity, operational trust assumptions, and deployment approval remain pending. The intended split remains signer-owned per-key history and node-owned consensus-lock/recovery state; their cross-process correspondence is unimplemented. All preserved verdicts and refusal boundaries in this assessment are unchanged.
+
+## RUN 422 - custody and recovery proposal cross-reference
+
+`docs/devnet/QBIND_RUN_422_BOOTSTRAP_CREDENTIAL_RECOVERY_TRUST_MODEL.md`
+is **DRAFT / NOT APPROVED / NOT IMPLEMENTED**. It recommends a dedicated
+offline founder bootstrap credential (no remote bootstrap signer), one
+operator-controlled stateful signer per validator, independent manual public-root
+provisioning, and no automatic same-key standby/failover. Signer history remains
+authoritative for its key; node lock recovery is separate. Backups are not
+currentness or complete validator recovery, and missing/uncertain history or
+unproven exclusivity requires refusal. These are proposed custody requirements,
+not actual devices, operators, roots, rollback protection or safe same-key
+recovery. Source/response-ID/Timeout attribution and all scoped verdicts in this
+assessment remain unchanged; no service, production authority or deployment is
+established.
