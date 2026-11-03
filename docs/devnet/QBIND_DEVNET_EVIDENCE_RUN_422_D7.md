@@ -26736,3 +26736,20 @@ Prerequisites NOT SATISFIED; implementation authorization PENDING;
 founder-root/profile provisioning NOT DONE; activation DISABLED; public
 DevNet NO-GO. Accountability and reported facts are recorded, not technical
 acceptance, operational readiness or permission.
+
+## RUN 422 BR-04 owner deployment-state clarification — 2026-11-03 UTC
+
+See `docs/devnet/QBIND_RUN_422_DEVNET_BOOTSTRAP_AUTHORITY_DECISION.md`, section
+"RUN 422 BR-04 owner deployment-state clarification — 2026-11-03 UTC", for the
+verbatim owner clarification and the narrow supersession of the earlier
+currently-running description: four provisioned local development/test machines,
+all stopped, with no prior live multi-node Public DevNet consensus operation
+reported. N = 4, q = 3 and equal weights remain reported parameters only.
+
+The same section records the separately user-supplied `node-A` observation
+(2026-11-03T15:33:27.276224+00:00): visible Linux processes named exactly
+`qbind-node`, `processes: []`, `unreadable_process_names: 0`; **NO MATCH OBSERVED,
+not proof of absence**. It was not task-executed and is not authenticated
+currentness evidence or evidence about every machine/process namespace or past
+use. B/U, source-to-binary-to-runtime correspondence and all existing gates
+remain unresolved/unchanged; no technical acceptance or readiness follows.
