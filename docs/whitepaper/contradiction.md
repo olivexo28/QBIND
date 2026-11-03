@@ -5230,3 +5230,7 @@ consensus-lock recovery lack a justified trust model. Profile A remains a
 candidate, not approved policy. No implementation, activation, readiness
 change, or new validation is claimed; public DevNet remains NO-GO and C4/C5
 remain OPEN.
+
+## RUN 422 separate consensus signer feasibility boundary
+
+`docs/devnet/QBIND_RUN_422_SEPARATE_SIGNER_FEASIBILITY.md` is a source-backed DRAFT / NOT APPROVED / NOT IMPLEMENTED assessment, not closure of C4/C5. The standalone remote consensus signer does not handshake or dispatch requests; production node loading refuses remote/HSM signers; local D10 and D7D14 do not provide production cross-process continuity or durable anti-rollback. C4/C5 remain OPEN, activation remains DISABLED, durable anti-rollback remains NOT-ESTABLISHED, public DevNet remains NO-GO, and no release approval or deployment follows. No code, tests, builds, operational keys, activation or service startup were performed.

@@ -1236,3 +1236,7 @@ readiness changes.
 
 **Decision remains PENDING.** Approval fields remain PENDING; no approver,
 signature, date or authorization token is asserted.
+
+## RUN 422 separately protected consensus signer assessment
+
+`docs/devnet/QBIND_RUN_422_SEPARATE_SIGNER_FEASIBILITY.md` evaluates fixed founding-authority membership and one separately protected, stateful PQ consensus signer per validator. Profile A remains a candidate only: no activation root, currentness source, operator, rollback boundary, signer deployment, or production profile is selected. The assessment finds no live remote consensus signer and leaves activation disabled, public DevNet NO-GO, and whole-lifecycle acceptance INCOMPLETE. This cross-reference does not alter this contract's DRAFT / NOT APPROVED / NOT IMPLEMENTED status or authorize implementation, activation, F1/F2 closure, or release approval.

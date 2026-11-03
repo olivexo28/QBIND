@@ -3779,3 +3779,7 @@ signing. D10 pending, recovered-`Reserved`, or otherwise uncertain reservations
 must not be discarded because a newer checkpoint committed. The proposed
 decision binding and ordering are conditional requirements, not implemented
 production behavior and not an amendment to the accepted D7-D14 storage subset.
+
+## RUN 422 separate signer and recovery ownership boundary
+
+`docs/devnet/QBIND_RUN_422_SEPARATE_SIGNER_FEASIBILITY.md` assesses a candidate split in which the consensus node retains engine/lock/safety-record recovery while a separately protected signer owns per-key signing history. No authenticated correspondence, rollback-resistant freshness, cross-host fence, or recovery acknowledgement protocol is implemented. D7D14 remains `IMPLEMENTED-ISOLATED` / `PASS-ACCEPTED-SUBSET`; D10 remains `CODE-AND-STORAGE-TEST-POSITIVE`; durable anti-rollback remains NOT-ESTABLISHED; C4/C5 and RS1 remain OPEN. Existing scoped acceptance is not reopened, and this contract remains DRAFT / NOT APPROVED / NOT IMPLEMENTED.

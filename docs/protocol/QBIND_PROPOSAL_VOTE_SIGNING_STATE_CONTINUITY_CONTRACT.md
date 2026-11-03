@@ -1985,3 +1985,7 @@ uncertain independent evidence blocks the dependent action; exact retained
 result reuse remains subject to existing D10 binding, acknowledgement and
 revalidation rules. See the lifecycle appendix for the proposed, conditional
 sequence; it is not implemented or approved here.
+
+## RUN 422 separate-signer process-boundary finding
+
+`docs/devnet/QBIND_RUN_422_SEPARATE_SIGNER_FEASIBILITY.md` distinguishes the accepted local D10 reservation/result-reuse component from any signer-owned, cross-process history. The local reservation does not establish activation, currentness, whole-copy anti-rollback, remote acknowledgement semantics, or cross-host exclusivity; production startup still does not initialize/wire the journal. Rust-local continuations and owner tokens are not RPC credentials. No D10 scope is reopened or promoted to production acceptance; section 13.6 remains INCOMPLETE and this contract remains DRAFT / NOT APPROVED / NOT IMPLEMENTED.
