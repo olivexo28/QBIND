@@ -1266,3 +1266,60 @@ IMPLEMENTED**; section 13.6 whole-lifecycle **INCOMPLETE**; durable
 anti-rollback **NOT-ESTABLISHED**; C4/C5 and RS1 **OPEN**; candidate resource
 limits **UNAPPROVED**; isolated implementation prerequisites **NOT
 SATISFIED**; activation **DISABLED**; public DevNet **NO-GO**.
+
+## BR-01 founder verification profile owner decision — 2026-11-03
+
+**ACCEPTED — DESIGN ONLY.**
+
+| Decision field | Recorded decision |
+|---|---|
+| Disposition | **ACCEPTED — DESIGN ONLY** |
+| Public approver label | `olive` |
+| Accountable role for this decision | Founder-root policy approver |
+| Decision date | 2026-11-03 (Asia/Calcutta; calendar date only) |
+| Accepted definition | The BR-01 verification-profile design and independent-root/purpose policy recorded at commit `bc97cd5cb50341c208c4265942b05ceefb0c5c58`, tree `cdc6a432f88516bb40cb7ef567c51ea8310abdc5`, including its appended FIPS 204 potential-updates applicability review and expressly disclosed limitations |
+| Decision evidence | Explicit user confirmation conveyed through this task instruction: “yes” to “ACCEPT — olive” as founder-root policy approver, accepting the reviewed BR-01 verification-profile design only while retaining open implementation prerequisites and disabled activation |
+| Cryptographic signature | **NOT SUPPLIED OR GENERATED** |
+
+This decision supersedes earlier **PENDING** and unassigned-approver statements
+only as to the BR-01 owner's technical-profile decision and the accountable
+approver role for that decision. Those statements remain preserved above as
+historical evidence of the proposal's prior state; no other PENDING, DRAFT,
+NOT APPROVED, NOT IMPLEMENTED or disabled status is globally replaced.
+
+The accepted design is unchanged: pure ML-DSA-44; exact raw 1312-byte public
+key and 2420-byte signature; verification of the complete message
+`ASCII("QBIND:BOOTSTRAP-APPROVAL:v1") || 0x00 ||
+u32_be(payload_length) || payload`; empty algorithm context; no application
+prehash; and an independently trusted root/purpose policy for one exact
+initial DevNet configuration, with fixed membership and all existing
+lifecycle restrictions. Acceptance includes the source-only errata review
+and its provenance, conformance, source-level and signing-exhaustion
+limitations without converting those limitations into findings of executed
+conformance or operational assurance.
+
+The public label and conversational decision do not provision or authenticate
+an operational founder credential. They establish no legal identity,
+GitHub-account binding, public key, credential reference, root distribution,
+ceremony, custody, or independent root/purpose provisioning.
+
+The scope of this acceptance is limited to the owner design decision:
+
+| Status or gate | Preserved status |
+|---|---|
+| Candidate profile ID `1` | **UNALLOCATED — PENDING BR-02** |
+| Operational root/profile provisioning | **NOT DONE** |
+| Implementation acceptance/authorization | **PENDING** |
+| BR-02–BR-11 and B/C/L/X/U | **UNCHANGED** |
+| Whole native-admission and authority contracts | **DRAFT / NOT APPROVED / NOT IMPLEMENTED** |
+| Isolated implementation prerequisites | **NOT SATISFIED** |
+| Activation | **DISABLED** |
+| Public DevNet | **NO-GO** |
+| D7D14/D7D10, recovery, anti-rollback, resource and other status blocks | **UNCHANGED** |
+
+This acceptance does not authorize implementation, operational signing, key
+generation, deployment, release, or activation. It does not assign an
+operational approver or waive any prerequisite. Existing source-only errata
+evidence, source provenance limitations, and signing-counter/exhaustion
+follow-up concerns remain intact. No technical review is reopened or
+repeated by this decision record.
