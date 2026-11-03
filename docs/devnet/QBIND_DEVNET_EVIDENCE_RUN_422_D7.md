@@ -26571,3 +26571,25 @@ IMPLEMENTED; section 13.6 whole-lifecycle INCOMPLETE; activation DISABLED;
 public DevNet NO-GO; durable anti-rollback NOT-ESTABLISHED; C4/C5 OPEN; RS1
 OPEN; candidate resource limits UNAPPROVED. No F1/F2 closure, positive
 production authority, deployment permission or release approval follows.
+
+RUN 422 candidate bootstrap approval-record/verifier contract cross-reference
+---------------------------------------------------------------------------
+
+The documentation-only candidate v1 record, exact proposed signature
+framing, isolated non-authorizing verifier procedure, B/C/L/X/U lifecycle
+gates, future acceptance matrix, and unresolved-decision register are
+specified in
+`docs/devnet/QBIND_RUN_422_DEVNET_BOOTSTRAP_AUTHORITY_DECISION.md`. This is
+not approved or implemented; no founder profile/root, production wire mapping,
+B/U freshness, C/L continuity/recovery, X exclusivity, custody, activation, or
+resource profile is established. The current canonical-genesis hash body omits
+`GenesisConfig.extra` despite its adjacent comment; candidate v1 refuses
+non-null values. Preserved verdicts remain:
+`D7D14_STORAGE_COMPONENT=IMPLEMENTED-ISOLATED`,
+`D7D14_STORAGE_ACCEPTANCE=PASS-ACCEPTED-SUBSET`,
+`D7D10_LOCAL_SIGNING_RESERVATION=CODE-AND-STORAGE-TEST-POSITIVE`;
+whole native-admission and authority contracts DRAFT / NOT APPROVED / NOT
+IMPLEMENTED; §13.6 whole-lifecycle INCOMPLETE; activation DISABLED; public
+DevNet NO-GO; durable anti-rollback NOT-ESTABLISHED; C4/C5 OPEN; RS1 OPEN;
+candidate resource limits UNAPPROVED. No tests, builds, keys, activation,
+deployment, or operational evidence were created by this documentation note.

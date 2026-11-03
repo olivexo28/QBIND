@@ -453,3 +453,18 @@ Before a separately authorized implementation task, resolve and document:
    all-restart limits. Implementation acceptance, resource-policy approval,
    operational custody/provisioning evidence and explicit activation/release
    approval are separate later gates; none is satisfied by this draft.
+
+## RUN 422 candidate approval-record contract cross-reference
+
+The appended “Bootstrap approval record and verifier contract — candidate
+v1” in `QBIND_RUN_422_DEVNET_BOOTSTRAP_AUTHORITY_DECISION.md` supplies one
+byte-framed, non-authorizing candidate record, exact candidate signature
+message, verifier refusal procedure, B/C/L/X/U gates, acceptance matrix, and
+decision register. It remains **DRAFT / NOT APPROVED / NOT IMPLEMENTED**:
+founder suite/root/profile and production runtime-to-wire mapping are
+unresolved; the current canonical-genesis hash body omits `GenesisConfig.extra`
+despite its adjacent comment, so the candidate refuses non-null values. No
+lifecycle gate is established, and the existing
+implementation-entry checklist in section 10 remains in force. This
+cross-reference neither repeats nor changes custody/recovery recommendations
+or the accepted D10/D14 scopes.
