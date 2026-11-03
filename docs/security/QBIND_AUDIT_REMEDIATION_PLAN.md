@@ -856,8 +856,80 @@ source-to-binary claim. Stability checks are non-atomic and cannot detect a
 transient change-and-restore between observations. External
 build/artifact/runtime/deployment evidence remains unresolved. Current status
 remains **IMPLEMENTED — VERIFICATION PENDING** until the corrected
-implementation receives a separate independent post-change review; E07
-overall and all release/operational gates remain unchanged.
+implementation and final fixture/documentation correction receive a separate
+independent post-change review; E07 overall and all release/operational gates
+remain unchanged.
+
+### Final fixture reproducibility correction — review pending (2026-11-03)
+
+**Status remains IMPLEMENTED — VERIFICATION PENDING.** This final bounded
+correction is for **E07 / OBL-REL-1a / A48.1-C2** and does not change the
+successful disposition of the preceding fsmonitor and isolated-fixture
+corrections.
+
+| Evidence identity | Exact value |
+|---|---|
+| Pre-change commit / tree | `462ab806ecb2c49c37a5fa49275864d236e53d8f` / `8014ae31856aee626144b233e2c861b634b0157a` |
+| Corrective test commit / tree | `88ffed09929b250294b2ef3ddd2bc881c2aae545` / `9a6a799c1b995166896784292a80224c344bbd80`; direct parent is pre-change commit `462ab80` |
+| Exact validation revision | `88ffed09929b250294b2ef3ddd2bc881c2aae545` |
+| Unchanged production helper | `scripts/devnet/lib/source_tree_state.sh`, mode `100644`, blob `ebdad4a2301467e90aea7d4ebe5b9ac804023980` |
+| Corrected fixture | `scripts/devnet/tests/test_source_tree_state.sh`, mode `100644`, blob `7ba0aa1a1195579b20d50d37005a6be0a38e0aab`; deepest-clone identity setup is in the nested-submodule fixture |
+
+The pre-implementation design-review reference remains the independent
+ChatGPT review conveyed before coding and recorded above: it passed the
+bounded design, classification/error rules, observation timing, caller
+compatibility, and proposed validation matrix. The independent review
+supplied through this task reports that the previous fsmonitor, isolated
+fixture, and documentation corrections passed review; the old helper fails
+the fsmonitor regression as expected. It also found that the earlier full
+fixture run stopped with exit 128 / “Author identity unknown” when Git author
+and committer identities were not inherited: recursive submodule
+initialization creates a new deepest repository, and local identity
+configuration on its source and outer clone is not inherited by that clone.
+This is a fixture-environment reproducibility issue, not a reported failure
+of the prior runs, whose complete suite had passed with command-scoped
+synthetic identities.
+
+The fixture now configures `user.name`, `user.email`, `core.hooksPath=/dev/null`,
+and `commit.gpgsign=false` directly in `"$nested_root/outer/nested"` after
+recursive initialization and before its commit. It uses the existing
+`QBIND fixture` / `fixture@example.invalid` convention. This ensures its
+commits use disposable synthetic identity and no ordinary hooks or signing;
+the purpose-installed fsmonitor fixture hook remains intact. No user/global
+configuration is changed, and the production helper, producer, schema,
+workflow, audit register, blocker/release documents, and operational logic
+are unchanged by this correction.
+
+**Validation performed on the exact corrective test commit**
+`88ffed09929b250294b2ef3ddd2bc881c2aae545`:
+
+| Command / check | Result |
+|---|---|
+| `env -u GIT_AUTHOR_NAME -u GIT_AUTHOR_EMAIL -u GIT_COMMITTER_NAME -u GIT_COMMITTER_EMAIL -u EMAIL PATH=/tmp/qbind-e07-review-venv/bin:$PATH bash scripts/devnet/tests/test_source_tree_state.sh` | PASS; entire isolated fixture matrix completed and printed `All focused source-tree-state fixture cases passed.` |
+| `bash -n scripts/devnet/lib/source_tree_state.sh` | PASS |
+| `bash -n scripts/devnet/tests/test_source_tree_state.sh` | PASS |
+| `git diff --check HEAD^ HEAD` | PASS |
+
+The full test command explicitly unset all five inherited identity variables;
+the suite established its own synthetic identities. Its output, observed
+during validation of that exact commit, includes the nested initialized
+submodule tracked-edit, nested docs inclusion, unavailable nested submodule,
+all other Git-state classifications, output rejection, full Draft 7 schema
+validation for `clean`, `dirty`, and `unknown`, and bounded staging
+compatibility. The durable test-case evidence is the committed fixture at
+`scripts/devnet/tests/test_source_tree_state.sh` blob
+`7ba0aa1a1195579b20d50d37005a6be0a38e0aab` (nested-clone setup at lines
+291–320); no separate test-log artifact was created. These staging checks
+are synthetic and are not execution of Run 385.
+
+Remaining limitations are unchanged: classification is Git-normalized
+tracked-path state with only root `docs/**` excluded; it does not establish
+build-time cleanliness, source-to-binary correspondence, or a raw-byte or
+hermetic-build guarantee. Its stability observations are non-atomic and
+cannot detect a transient change-and-restore. External build, artifact,
+runtime, deployment, and release evidence remains unresolved. Run 384/385,
+Cargo, nodes, workflows, scanners, signing, deployment, and activation were
+not run. E07 overall and release/operational gates remain unchanged.
 
 ### A49.1 non-regression rules for every provenance task
 
