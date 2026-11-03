@@ -513,16 +513,24 @@ Baseline source grounding for this candidate:
    policy are unavailable, so current production acceptance is impossible.
 2. **Framing/resource admission.** Require the complete record byte slice and
    reject if shorter than the minimum envelope or larger than the fixed
-   local cap. Read    `payload_length` only after a four-byte availability check; use checked
+   local cap. Read `payload_length` only after a four-byte availability check; use checked
    addition for prefix, payload, envelope header, and signature length,
    compare against input length before slicing, and do not allocate in
    proportion to an untrusted length until it has passed the fixed cap. Parse
    borrowed slices; any owned result copy is allowed only after successful
-   verification and within that admitted bound. Candidate caps are label ≤255 bytes,
-   members ≤4096, public key exactly 1312 bytes, signature ≤65535 bytes,
-   fixed nesting depth 0, and fixed envelope sizes. The candidate payload
-   maximum is `390 + 255 + 4096*1394 = 5,710,469` bytes; the complete
-   record maximum is `4 + 5,710,469 + 10 + 65,535 = 5,776,018` bytes.
+   verification and within that admitted bound. Candidate caps are label
+   ≤255 bytes, members ≤4096, public key exactly 1312 bytes, signature
+   ≤65535 bytes, fixed nesting depth 0, and fixed envelope sizes. The
+   non-member field widths sum to
+   `4+2+2+1+8+4+2+32+2+32+8+2+2+32+2 = 135` bytes. Each member is
+   `8+32+32+2+1312+8 = 1394` bytes. Thus
+   `payload_length = 135 + label_len + 1394*member_count` and
+   `record_length = 4 + payload_length + 10 + signature_length`.
+   At the caps, `payload_length = 135+255+4096*1394 = 5,710,214` bytes;
+   `record_length = 4+5,710,214+10+65,535 = 5,775,763` bytes.
+   Arithmetic cross-checks: `(member_count,label_len)=(1,1)` gives
+   `payload_length=1530`; `(1,255)` gives `1784`; and `(4096,255)` gives
+   `5,710,214`.
    These are proposed format bounds, not approved operational memory,
    throughput, latency, or capacity guarantees. Any deployed cap may be
    stricter from trusted local policy, never looser because the record asks.
@@ -540,7 +548,7 @@ Baseline source grounding for this candidate:
    structures. Require magic/version/purpose exact; require the string length
    within its fixed cap and its bytes to be the permitted ASCII grammar;
    require count within 1..=4096 before iterating; checked-compute
-   `390 + label_len + count*1394` and require exact payload length. Reject
+   `135 + label_len + count*1394` and require exact payload length. Reject
    unsupported versions/suites/fields, noncanonical integers or key/address
    representation, malformed lengths, duplicates, truncation, and any
    trailing byte. There are no duplicate named fields in this positional
@@ -560,37 +568,52 @@ Baseline source grounding for this candidate:
    equality with both signed payload and independent root policy. Require the
    exact profile-defined key/signature lengths and canonical encodings, then
    verify only the reconstructed bytes
-   `D || u32_be(payload_length) || payload` under the one external root.
-   Never attempt another key, suite, context, prehash, or legacy domain after
-   refusal. The signature profile decision is unresolved, so this step cannot
-   currently produce an approved success.
+   `D || u32_be(payload_length) || payload` under the one external root,
+   using direct raw-message verification, empty algorithm context, and no
+   application-level prehash. Never attempt another key, suite, context,
+   prehash, or legacy domain after refusal. The compatible signature profile
+   decision is unresolved, so this step cannot currently produce an approved
+   success.
 6. **Restricted result.** Only after every prior step succeeds, construct an
    immutable result binding the complete payload bytes to the exact trusted
    root/profile and matched configuration. Do not expose a detached success
    Boolean or any activation/signing capability. On every refusal, return no
    partial result and perform no state mutation.
 
-For payload count `n`, label bytes `l`, and signature bytes `s`, the candidate
-encoded payload size is exactly `390 + l + 1394n`; the full record is
-`4 + payload_length + 10 + s`. The record parser and canonical-genesis
-preflight are each bounded by their admitted input sizes; let `G` be the
-pre-admitted canonical genesis encoding size, bounded by the independently
-configured `genesis_input_max`. Verification work is `O(payload_length + G)`,
-including `O(n*1312)` key/member consistency comparisons, plus one
-verification under the externally selected profile. The signature
-implementation's internal work is profile-specific and is not quantified.
-No production resource/latency guarantee is claimed.
+For member count `n`, label bytes `l`, and signature bytes `s`, the candidate
+payload length is exactly `135 + l + 1394n`; the full record length is
+`4 + payload_length + 10 + s`. With the candidate caps, framing and a
+complete sequential scan of fixed/variable fields are linear in the admitted
+record byte count. Direct equality comparisons against already supplied
+fixed-size field values have total work no greater than the scanned field
+bytes.
+
+No duplicate-detection algorithm or scratch bound is selected. Although
+addresses, IDs, keys, and signer references must be unique, their
+duplicate-detection work and memory are unresolved; no linear-time or
+constant-scratch claim is made. Genesis input preflight and canonical
+serialization/hash work are separate from record parsing. They require a
+checked walk and independently bounded input, but their total work and
+scratch/materialization costs are not established here. An immutable result
+may copy admitted payload bytes only after verification; its materialization
+allocation/copy cost is separate and no scratch bound is claimed. Exactly
+one signature verification is attempted after prior checks; the profile's
+cryptographic work and scratch are profile-specific and unquantified.
+Consequently, no overall worst-case `O(payload_length + G)` bound or
+production resource/latency guarantee is claimed. The unresolved algorithmic
+work and scratch policy remain part of BR-08.
 
 Conceptual refusals distinguish `TrustedInputUnavailable` (root, mapping,
-configuration, or policy evidence unavailable), `TrustedInputAmbiguous`, `ConfigurationResourcePolicyUnavailable`,
-`MalformedOrNonCanonical`, `UnsupportedVersionOrProfile`,
-`ConfigurationMismatch`, `RootOrPurposeMismatch`,
-`SignatureInvalid`, and `InternalVerificationFailure`. Unavailable evidence
-is not a demonstrated mismatch; neither category yields a result. Precedence
-is: missing/ambiguous trusted policy first; byte and arithmetic/resource
-admission second; structural parsing third; semantic mismatch fourth;
-cryptographic verification fifth. This avoids untrusted resource use before
-trusted policy and avoids signature work on malformed/mismatched content.
+configuration, or policy evidence unavailable), `TrustedInputAmbiguous`,
+`ConfigurationResourcePolicyUnavailable`, `MalformedOrNonCanonical`,
+`UnsupportedVersionOrProfile`, `ConfigurationMismatch`,
+`RootOrPurposeMismatch`, `SignatureInvalid`, and
+`InternalVerificationFailure`. Unavailable evidence is not a demonstrated
+mismatch; neither category yields a result. Precedence is: missing/ambiguous
+trusted policy first; byte and arithmetic/resource admission second;
+structural parsing third; semantic mismatch fourth; cryptographic
+verification fifth. This avoids untrusted resource use before trusted policy
+and avoids signature work on malformed/mismatched content.
 
 ### 6. Content identity, replay, and external lifecycle gates
 
@@ -688,13 +711,16 @@ None of these evidence levels is supplied by this documentation section.
 ### 9. Smallest next action and preserved posture
 
 The smallest next action is for an assigned founder-root policy approver to
-record one decision accepting or rejecting a complete founder verification
-profile: suite, complete public-key encoding, signature encoding, raw-message
-or prehash mode, context, profile ID, and independent root/purpose binding.
-Without that decision, the exact candidate framing is reviewable but no
-signature can be interpreted as an approved bootstrap approval. This one
-decision does not satisfy the remaining mapping, B/U, C/L/X, custody, or
-implementation-entry prerequisites.
+record acceptance or rejection of one complete verification profile
+compatible with candidate v1's specified direct raw-message verification,
+empty algorithm context, and no application-level prehash, including suite,
+public-key/signature encodings, profile ID, and independent root/purpose
+binding. No record or envelope metadata can change that mode. An incompatible
+profile requires a separately reviewed candidate revision; it is not an
+alternative interpretation of candidate v1. Without a compatible profile
+decision, no signature can be interpreted as an approved bootstrap approval.
+This one decision does not satisfy the remaining mapping, B/U, C/L/X, custody,
+or implementation-entry prerequisites.
 
 Preserved without promotion:
 
@@ -719,16 +745,3 @@ implementation-entry checklist in
 applicable. Isolated implementation prerequisites are **NOT SATISFIED**.
 This is a candidate documentation contract, not security acceptance or
 operational approval.
-
-## RUN 422 - proposed bootstrap custody and recovery trust model
-
-`docs/devnet/QBIND_RUN_422_BOOTSTRAP_CREDENTIAL_RECOVERY_TRUST_MODEL.md`
-is **DRAFT / NOT APPROVED / NOT IMPLEMENTED**. It advances the settled
-founder-authorized initial DevNet direction with recommended offline founder
-credential custody, independently authenticated manual root provisioning,
-operator-controlled stateful validator signers, separate history/lock owners,
-and explicit loss, uncertainty, migration, copied-key and rollback refusals.
-No credential, suite, device, custodian, ceremony, currentness/unique-first-use
-source, recovery authority or exclusivity mechanism is established. It preserves
-all verdicts above, leaves activation DISABLED and public DevNet NO-GO, and
-grants no history/lock override, implementation, deployment or release approval.
