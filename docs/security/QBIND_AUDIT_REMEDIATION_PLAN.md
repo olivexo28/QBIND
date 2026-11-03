@@ -295,7 +295,7 @@ statuses not supported by a current-lineage review remain provisional.
 | OBL-STO-2b | EXCLUDED audit implementation thread: RUN 422 new journal/replay, A22.1/A26 preserve | MI/ME / D10/D14 / R/C5/profile | Continue existing thread and accepted subset, no competing journal | Producing-revision/component scope plus missing production/process correspondence |
 | OBL-STO-3 | Snapshot output edge split from CONS-4, source-complete bounded section 26.3 / A22.1 identity | DD/ME / create_snapshot output / R/profile recovery | Preserve edge identity and input-to-durable-output trust question | E20/E22 snapshot anchor and epoch correspondence |
 | OBL-OPS-1 | SOURCE-PARTIAL beyond completed metrics endpoint; A15/A24-F1 | D/ME / configuration/fail-open/observability / O | Name remaining default/fallback, check real operating profile | Config-specific refusal/visibility evidence; E24 metrics remains separate |
-| OBL-REL-1a | Build/workflow source sub-boundaries complete A48.2/A49.1; constant-clean producer defect source-confirmed to its stated mechanism | D/ME / release manifest/workflows / A | Section 8 correction contract proposed and awaiting independent review; implementation authorization remains for the subsequent task | Future temporary Git-fixture regressions; four evidence planes remain separate |
+| OBL-REL-1a | Build/workflow source sub-boundaries complete A48.2/A49.1; constant-clean producer defect source-confirmed to its stated mechanism | D/ME / release manifest/workflows / A | Bounded source-state implementation tested at the revisions recorded in section 8; post-implementation independent review pending; not closed | Isolated Git fixtures cover the declared reporting boundary; external build/artifact/deployment evidence remains separate |
 | OBL-REL-1b | External CI/artifact/historical assurance remains evidence-blocked; A48.2/A49.1 | ME / artifacts/attestation / A | Obtain authorized exact run/artifact/environment evidence; source review cannot create it | Source-to-built-to-deployed correspondence; delegated attestation unexecuted |
 | OBL-EXT-1 | 14-crate/repository interface inventory **NOT REVIEWED AT CURRENT AUDIT BASELINE**; identity A:L9221. Historical detailed definition/classification at A:L19453; A23.1 precedence A:L8982-L8989 means historical status is not current-source verification | ME / crate inventory; `ledger_bridge`, `timeout_verification_bridge`, `metrics_http`, and relevant EVM/execution interfaces (`QbindTx`, `VmV0ExecutionEngine`, `BlockExecutor`) / O and A only where existing gates apply; functional EVM/auth review remains OBL-TX-1a/1b | Treat A18.1's five-level presence/callability/production-wiring/ingress/not-found classification as historical, bounded evidence. Independently re-inventory current baseline within an explicit crate/filename/server-entrypoint search scope before relying on it; internal "bridge" files are wiring, not cross-chain bridges | Record code presence, callable library interface, production wiring, external ingress, and not-found-within-search-scope separately. Historical finding: EVM/execution code and callable interfaces present but no production wiring / no external ingress located; `metrics_http` is non-transaction `/metrics`, routed to OPS-1. Historical scoped searches found no wallet/JSON-RPC/cross-chain-bridge/contract-deploy ingress, not blanket absence. No current applicability claim until checked |
 | OBL-LIVE-1 | BLOCKED on live-deployment evidence; latest owner clarification is stopped development machines | ME / deployment/launch profile / M4/M6/S5/S7/RS1 | No live probe or activation; approved profile/prerequisites first | Separately authorized external/multi-node evidence; E09, no non-use proof |
@@ -350,7 +350,7 @@ existing scoped results retained.
 | R-DEP-1/R-DEP-2/R-RUNTIME-1, A39.1-A41 | RNG source chain resolved to scope; deployed backend/build and runtime entropy remain; algorithms/constant-time not performed; ME; C5 | Pin platform/features/cfgs and exact remaining backend question | Dependency provenance + build inputs; runtime entropy separate, no generic source rerun |
 | R7.3/E12, A42.1-A45.1 | Schema/visitor/postdecode/four-channel route complete to scope; aggregate capacities/RSS/concurrency residuals; ME; O | Preserve corrected precheck/Infinite-limit and copy accounting; name unmeasured quantity | Revision-bound aggregate experiment under separate plan; no new forced defect |
 | A47.3-C1-C3/disposition, A:L1039-L1151 | Local stored n>1 -> 1 regression trace established; violated contract/harm unestablished, no new finding; DD/ME; R/profile recovery | Resolve relevant storage/transition contract and consumer impact before a transition change | Correct restore chronology, cursor-vs-DB writer, atomic visibility != power-loss durability; multi-validator residual separate |
-| A48.1-C2 / E07 / OBL-REL-1a, A:L650-L688 | Constant-clean producer evidence-assurance candidate source-confirmed to the stated mechanism; D; A | Section 8 contract proposed, awaiting independent review; no highest-severity claim | Truthful classification and future temporary Git-fixture before/after evidence |
+| A48.1-C2 / E07 / OBL-REL-1a, A:L650-L688 | Constant-clean producer evidence-assurance candidate source-confirmed to the stated mechanism; D; A | Bounded implementation and fixture evidence recorded in section 8; independent post-implementation review pending; no severity/ranking or closure change | Truthful tracked-path classification tested; build provenance and other E07 evidence planes remain outstanding |
 | A48.1-C6 + A48.2 + A49.1, A:L739-L768, A:L412-L593, A:L1-L202 | CRLF invocation, job/check/artifact ordering, external controls and delegated attestation retain qualifications; ME; A | No harness execution here; external run/environment evidence separately scoped | Actual reached stages, status/effects and source-to-artifact/deployment correspondence |
 
 Retain negative sub-dispositions as well as open work: A17.1-C1-C5 and
@@ -451,10 +451,12 @@ of code, which did not yet exist. GitHub Copilot is assigned the bounded
 implementation in this task. No operational or protocol-authority role is
 inferred from that assignment.
 
-**E07 / OBL-REL-1a / A48.1-C2. FIRST BOUNDED CANDIDATE; not highest-severity
-ranking. Owner UNASSIGNED. Finding status: SOURCE-CONFIRMED TO THE STATED
-MECHANISM. Correction contract: PROPOSED / AWAITING INDEPENDENT REVIEW.
-Implementation: NOT STARTED. Regression/runtime evidence: NOT EXECUTED.**
+**Historical task-card status at contract-proposal time (retained; subsequent
+review and implementation are recorded below): E07 / OBL-REL-1a / A48.1-C2.
+FIRST BOUNDED CANDIDATE; not highest-severity ranking. Owner UNASSIGNED.
+Finding status: SOURCE-CONFIRMED TO THE STATED MECHANISM. Correction contract:
+PROPOSED / AWAITING INDEPENDENT REVIEW. Implementation: NOT STARTED.
+Regression/runtime evidence: NOT EXECUTED.**
 
 ### Pinned evidence and scope of inspection
 
@@ -578,9 +580,11 @@ outcome rather than assume Git configuration or filesystem behavior.
   `docs/release/public-devnet/binary/VERIFY.md` (scope, timing, exclusions,
   diagnostic, and non-claims). Do not change the existing example.
 
-### Future validation matrix — all FUTURE / NOT EXECUTED
+### Historical pre-implementation validation matrix (FUTURE / NOT EXECUTED at proposal time)
 
-All rows below are future regression cases; none was run here. Use disposable
+All rows below preserve the original proposed regression cases; none had been
+run when the contract was proposed. The successor record below reports their
+bounded fixture execution. Use disposable
 temporary Git repositories and synthetic manifests, never the real checkout.
 First characterize the pinned baseline from its committed source: dirty
 worktree/index observations and failed Git observations both select constant
@@ -610,21 +614,121 @@ future classifier for the corrected outcomes.
 No Run 384/385, Cargo, node, workflow, build, scanner, signing, deployment or
 activation is part of this contract or its future fixture matrix.
 
-### Review boundary and closure
+### Historical pre-implementation review boundary
 
-This task's source finding is **confirmed to the stated mechanism**. The
-correction contract is **proposed and awaiting independent review**; no
-reviewer, assignee, completed review or operational authorization is claimed.
-No additional protocol-owner decision is required merely for this bounded
-reporting defect. The subsequent implementation task still requires its
-bounded implementation authorization and the independent pre-implementation
-review required by section 2. Implementation is **NOT STARTED**;
-regression/runtime evidence is **NOT EXECUTED**.
+At contract-proposal time, this source finding was **confirmed to the stated
+mechanism**, the correction contract was **proposed and awaiting independent
+review**, and implementation/regression evidence had **NOT STARTED / NOT
+EXECUTED**. This historical status is retained; the later pre-implementation
+review provenance and successor implementation evidence follow. No additional
+protocol-owner decision was required merely for this bounded reporting defect.
 
 Eventual closure may cover only truthful Git-observed classification within
 the declared scope and observation timing. It does not close E07 overall or
 establish build provenance, historical-artifact correctness, runtime safety,
 source-to-built or binary-to-deployed correspondence, or release eligibility.
+
+### Successor implementation and focused evidence (2026-11-03)
+
+**Disposition:** implementation and the bounded fixture matrix are
+**IMPLEMENTED / TESTED** only to the evidence below. This does not mark the
+finding CLOSED or accepted. Independent post-implementation review is
+**PENDING**. E07 overall, release approval, and all operational gates are
+unchanged.
+**Next action:** separately perform the independent post-implementation
+review against implementation commit `501db84d9671c98d55e8370e0574a823daeec466`
+and its focused evidence at `3fb3c400c0108cb30ee33a536a443ebe759e46de`.
+
+| Evidence identity | Exact value |
+|---|---|
+| Required baseline commit / tree | `6dd0bc9d4ad5426065460270bf30c2cda6b2ca37` / `1796cf4eb505c15945f5c48821cc83329fcf5305` |
+| Remote `origin/main` | `6dd0bc9d4ad5426065460270bf30c2cda6b2ca37` at task entry and before evidence recording; its tree is the required baseline tree |
+| Task branch | `copilot/audit-e07-manifest-source-tree-state-fix` |
+| Unchanged audit input | `Audit/QBIND_SECURITY_FINDINGS_REGISTER.md`, mode `100644`, blob `cd81efdbaf2bfb45e00dc3c60db3ea4f523adfa0` |
+| Implementation commit / tree | `501db84d9671c98d55e8370e0574a823daeec466` / `cb6ad721e1c0cb38baf108b2778fb3073225959c`; direct parent is the required baseline |
+| Test-coverage follow-up commit / tree | `3fb3c400c0108cb30ee33a536a443ebe759e46de` / `7dd1841a33b6ec1415f8995f60272b912c72ba34`; adds the whitespace/tab filename case and is a direct child of the implementation commit |
+| Final focused-validation revision | `3fb3c400c0108cb30ee33a536a443ebe759e46de`; the matrix below passed at this exact revision |
+| Raw parentage and ancestry check | Raw parents: `501db84` → `6dd0bc9`; `3fb3c40` → `501db84`. `git merge-base --is-ancestor` succeeded for baseline→validation revision and implementation→validation revision. |
+
+The independent pre-implementation review provenance and bounded scope are
+recorded above, before the implementation. It was conveyed by the user as an
+independent ChatGPT review **PASSED / CLOSED** for the design, classification
+and error rules, timing, caller compatibility, and future validation matrix;
+it was not a review of implementation code. GitHub Copilot performed only the
+bounded implementation assigned here; no operational or protocol-authority
+role is inferred.
+
+The implementation observes staged and worktree tracked state, excludes only
+root `docs/**`, disables relevant external-diff/textconv and mode-hiding
+settings, treats assume-unchanged/skip-worktree/sparse/unresolved states
+conservatively, and recursively checks initialized tracked submodules. It
+neutralizes inherited Git repository/index/config environment overrides and
+disables optional Git index writes. It brackets two observations with HEAD,
+index-content/stat, and recursive submodule identity checks. `unknown` is a
+valid successful result with stderr diagnostics; the producer's shared capture
+boundary rejects failed helper invocations and any output other than exactly
+one terminated enum line.
+
+Limitations remain deliberate: untracked/ignored paths, external build inputs,
+toolchains, and environment outside Git's tracked-path view are excluded;
+Git-normalized tracked state is not a raw-byte or hermetic-build claim.
+Repeated observations are not atomic and cannot detect a transient change
+that is restored between checks. Unsupported or incomplete observations
+produce `unknown`. No Run 384/385 harness, node, Cargo, workflow, scanner,
+signing, deployment, or activation was run.
+
+| Validation category (including subcases) | Expected | Observed |
+|---|---|---|
+| Pinned baseline slice: clean control; dirty fixture; failed Git/repository observation | Historical snippet selects `clean` for all three | `clean` / `clean` / `clean` |
+| Clean control; unstaged, staged, mixed staged+unstaged same/different paths | `clean`; all change cases `dirty` | `clean`; each changed case `dirty` |
+| Tracked addition, deletion, rename | `dirty` each | `dirty` each |
+| Executable-mode change with `core.filemode=false`; file-to-symlink type change | `dirty` each when supported | `dirty` each |
+| Root `docs/**` staged and unstaged changes; nested-submodule docs change | Root docs `clean`; nested docs `dirty` | `clean` / `clean` / `dirty` |
+| Root and submodule untracked/ignored-only controls | `clean` | `clean` |
+| `Audit/`, `.github/workflows/`, `scripts/`, `Cargo.lock` changes | `dirty` each | `dirty` each |
+| Initialized clean submodule; tracked edit; ignore settings; staged gitlink update; unavailable and nested-unavailable submodule; nested tracked edit | `clean`; observed changes `dirty`; incomplete/unavailable `unknown` | `clean`; `dirty` cases; `unknown` unavailable cases |
+| Space, tab, leading dash, newline, and non-ASCII tracked filenames | No parsing loss; `dirty` | `dirty` |
+| External diff, textconv, submodule-ignore, and `core.filemode=false` hiding settings | Force correct result or `unknown` | Mode and tracked change remained `dirty` |
+| Assume-unchanged, skip-worktree, sparse checkout, unresolved index, unborn/missing HEAD | `unknown` | `unknown` each |
+| Missing Git, invalid repository, and Git diff exit 2 | `unknown` with stderr diagnostic | `unknown` each; invalid-repository diagnostic verified on stderr |
+| Dirty plus failed observation; disagreement between repeated observations; controlled worktree, root-index, and submodule-index instability | `unknown` takes precedence | `unknown` each |
+| Helper nonzero, empty, unterminated, invalid, extra-line, blank-extra-line, or multiple-enum output | Reject manifest generation | Rejected each; only successful one-line enum accepted |
+| `clean`, `dirty`, and `unknown` through actual producer capture boundary, full schema validation, and bounded staged-copy validation | All accepted; diagnostics absent from JSON | All accepted; diagnostics absent from JSON |
+| Baseline versus corrected classifier on clean, dirty, and error fixtures | Baseline always `clean`; corrected truth table | Baseline `clean`; corrected `clean` / `dirty` / `unknown` |
+| Stable pre-serialization state; controlled post-build/pre-serialization mutation; detected instability | Reflect observation time; instability `unknown` | `clean`, then `dirty`; instability `unknown` |
+
+**Commands and tools:** focused matrix:
+`PATH=/tmp/qbind-e07-validator-venv/bin:$PATH bash scripts/devnet/tests/test_source_tree_state.sh`
+(PASS at `3fb3c400c0108cb30ee33a536a443ebe759e46de`). The test uses disposable
+temporary Git repositories and a synthetic manifest, with Git `2.51.1`, GNU
+Bash `5.2.21`, Python `3.12.3`, and `jsonschema 4.26.0` in a temporary venv;
+Draft 7 schema checking plus full instance validation passed for each enum.
+`bash -n scripts/devnet/lib/source_tree_state.sh
+scripts/devnet/tests/test_source_tree_state.sh` passed. Producer syntax was
+checked from a temporary LF-normalized copy created with
+`sed 's/\r$//'`; this does **not** prove execution of the committed CRLF
+harness, whose existing invocation limitation remains out of scope.
+`python3 -m json.tool` parsed the schema; comparison against the baseline
+confirmed the schema diff changes only the `source_tree_state` description.
+CRLF-aware `git -c core.whitespace=cr-at-eol diff --check` passed, and the
+checkout classifier returned `clean` at the validation revision.
+
+Source identities at the final focused-validation revision:
+
+| Path | Mode | Blob |
+|---|---:|---|
+| `scripts/devnet/lib/source_tree_state.sh` | `100644` | `f17f698febfb17bf9d83981d463661608809ebf0` |
+| `scripts/devnet/run_384_public_devnet_release_artifact_manifest.sh` | `100644` | `3027ebee8d43b7a1565c666c4008758835ad5628` |
+| `scripts/devnet/tests/test_source_tree_state.sh` | `100644` | `59dfd7d5d845a70809e9e73886721cc12a82947b` |
+| `docs/release/public-devnet/binary/RELEASE_ARTIFACT_MANIFEST.schema.json` | `100644` | `aef539a567c31a6c8bc9713598888fb7fe47d7f0` |
+
+The schema structure, enum, identifiers, schema/manifest versions, and
+historical example are unchanged. The producer and maintained README/BUILDINFO/
+VERIFY files retain CRLF; the schema, remediation plan, and new shell files
+retain LF. No protected audit register, blocker register, Run 385, workflow,
+Rust, dependency, lockfile, or historical evidence path changed. The evidence
+record is committed after validation; it does not contain its own resulting
+commit or blob identity.
 
 ### A49.1 non-regression rules for every provenance task
 
