@@ -1146,9 +1146,16 @@ PROPOSED — AWAITING INDEPENDENT CONTRACT REVIEW. Implementation: NOT STARTED.
 Regression/runtime evidence: NOT EXECUTED.**
 
 Candidate: **A21-F1 / QBIND-A1-F001**, related **OBL-PAR-1 / E12**.
-Finding reviewer: independent **ChatGPT source review supplied through this
-task**, confirming the mechanism below, not an executed exploit or approval
-of an unwritten implementation. Contract reviewer: **UNASSIGNED**.
+The supplied independent **ChatGPT** review of starting commit
+`c6f02fc73f2f2dee5eae34de08db7b8cd5d4eea7` found no blocking documentation
+issue and accepted the proposed structural preflight and cursor-preservation
+approach to its stated scope. It checked the finding's current-source
+mechanism, decoder/caller references, compatibility boundaries, documentation
+scope and retained inventories. It did **not** execute decoder tests, approve
+an unseen implementation, establish a deployment target matrix, or approve
+an allocation-observer implementation. The target/testing addendum below
+remains **AWAITING INDEPENDENT REVIEW**; its reviewer is UNASSIGNED. Finding
+confirmation is not an executed exploit or implementation approval.
 Implementation/evidence assignees and comparative priority remain UNASSIGNED /
 ASSESSMENT PENDING. This is a bounded next candidate, not a new finding,
 severity, closed obligation, policy acceptance or implementation authorization.
@@ -1160,27 +1167,29 @@ open**; the local decoder contract does not absorb or discharge it.
 | Identity | Verified value / qualification |
 |---|---|
 | Fetch/push destination | `origin`, `https://github.com/olivexo28/QBIND`, same repository for both; no remote/configuration changes |
-| Task starting commit; local main; origin/main; advertised remote main | `e9cf8e4c68a7432f36bf896955618a37461c77ba` |
-| Task starting tree | `1ff97c27f1e8105114aa743150443b314fd2a9ae` |
-| Task branch | `copilot/audit-a21-proposal-decoder-preimplementation-contract`; absent locally/remotely at entry, created from the exact starting commit |
-| Sole permitted changed path; starting mode/blob | `docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md`; `100644` / `a49bf8ab8bb8329f52eaf2605f4ed8a52daa0501` |
-| Checkout/instructions | Clean including untracked files; no applicable `AGENTS.md` in repository or ancestor locations, no tracked applicable instruction file found |
-| Starting raw parent | `93422c10b9b31215f9027aa1de880179749d21ef`; shallow checkout, parent object unavailable; no traversable ancestry claim beyond the available start |
+| Task starting commit; HEAD/local main/origin/main/advertised remote main | `c6f02fc73f2f2dee5eae34de08db7b8cd5d4eea7` |
+| Task starting tree | `b895405af455d8c700f9b51c3020c68cedef5a94` |
+| Task branch | `copilot/audit-a21-target-allocation-test-contract`; absent locally/remotely at entry, created from the exact starting commit |
+| Sole permitted changed path; starting mode/blob | `docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md`; `100644` / `da689b53bf9d18a9beb44f29d839ebd43b23df90` |
+| Checkout/instructions | Clean including untracked files; no applicable `AGENTS.md` in the repository or checked ancestor locations |
+| Starting raw parent and ancestry | Raw parent `e9cf8e4c68a7432f36bf896955618a37461c77ba`; starting commit is shallow and its parent object is unavailable. The start equals local/remote main; no ancestry beyond that identity is claimed |
 | Committed audit input | `Audit/QBIND_SECURITY_FINDINGS_REGISTER.md`, `100644` / `cd81efdbaf2bfb45e00dc3c60db3ea4f523adfa0`, A49.1 / internal v1.138; section 1 raw/normalized identities preserved |
-| Audited source baseline, NOT this task's implementation baseline | `18d71a549d868ed33d352e9fc70a9d060f75e03b`; unavailable locally as already qualified in section 1 |
+| Historical audited source baseline reference (not this task's implementation baseline) | `18d71a549d868ed33d352e9fc70a9d060f75e03b`; unavailable locally as qualified in section 1 |
 | Current decoder | `crates/qbind-wire/src/consensus.rs`, `100755` / `9233aaaa21196a3e6e9a3af8303e076671f73718` |
 | Current primitive readers | `crates/qbind-wire/src/io.rs`, `100755` / `c5df712d3bbf42e7301d63f14d6b6710eef1a1dc` |
 | Current wire NetMessage | `crates/qbind-wire/src/net.rs`, `100755` / `983a40757bfc612fc27d168014390c8be79e0187` |
-| Current binary handler, separately inspected | `crates/qbind-node/src/binary_consensus_loop.rs`, `100644` / `7a60d01841263c1425434fc48045629e0a85ab14`; audited R7.6 handler blob was `c4925ddf0977dff528dbb1815f757d67ea31e7b8` |
+| Current binary handler, separately inspected | `crates/qbind-node/src/binary_consensus_loop.rs`, `100644` / `7a60d01841263c1425434fc48045629e0a85ab14` |
+| Historical A49.1 R7.6 handler blob reference (not re-compared here) | `c4925ddf0977dff528dbb1815f757d67ea31e7b8` |
+| Rust and build configuration inspected | `qbind-wire` is edition 2021; no repository `rust-version`, `rust-toolchain*`, `.cargo` target/toolchain pin, or workflow toolchain/target pin was found. Two workflow steps are commented “pinned, stable” but run `rustup show active-toolchain || rustup toolchain install stable --profile minimal`; that floating stable fallback/comment is not an exact version pin. Workspace `[profile.test]`: `debug=0`, `strip="debuginfo"`, `incremental=false` |
+| Read-only local toolchain metadata | `rustup` selects floating `stable-x86_64-unknown-linux-gnu`, resolving here to rustc `1.99.1 (58cf8f9c3 2026-10-13)` and Cargo `1.99.1`; this is not a repository pin or the future execution compiler |
+| Existing allocator configuration | No allocator in `qbind-wire` manifests/configuration; a test-local `#[global_allocator]` exists in the separate `qbind-node` integration-test executable `run_422_d7d14_safety_record_store_tests.rs`, delegating to `System`. Cargo gives the focused `qbind-wire` integration test its own executable, so its one test-local allocator does not conflict; no dependency, manifest or production instrumentation change is anticipated |
 
 All current source locators below refer to the task starting commit, not an
-implementation revision. The supplied independent review reports that the
-decoder, readers and NetMessage blobs match the audited baseline; their
-current identities and source were checked locally. That historical equality
-is attributed to the supplied review, not a local comparison against an
-unavailable object. The binary-handler blob differs and was read separately.
-Final documentation commit/tree, manifest, remote equality and clean-worktree
-checks are reported after publication, not self-referentially embedded here.
+implementation revision. The supplied review is attributed only to the
+current-source and documentation scope stated above. No historical equality
+with an unavailable audited-source object is asserted. Final documentation
+commit/tree, remote equality and clean-worktree checks are reported after
+publication, not self-referentially embedded here.
 
 **Audit reconciliation:** R7.1, A:L14115-L14128, retains OPEN STATIC and the
 finite-u32, handshake-only, platform-dependent qualifications. A21.3,
@@ -1295,8 +1304,13 @@ Checked conversion/arithmetic failure uses existing `WireError::LengthOverflow`
 or a new public error type. Availability comparison must precede slice
 splitting; prefer advancing borrowed slices so no accumulated offset or
 `count * bytes` calculation is needed. Any introduced offset/length arithmetic
-must be checked. On supported targets where u32/u16 fit usize, these conversion
-checks do not change structural acceptance or EOF errors.
+must be checked. Use checked `usize::try_from` for transaction count, every
+transaction length and signature length in both preflight and materialization;
+the two passes must use identical conversions and map failure to
+`LengthOverflow`. Do not alter the existing `qc_len` conversion as part of this
+correction. On ordinary 32-bit and 64-bit `usize` targets all wire `u32`/`u16`
+values fit `usize`, so these checks do not change structural acceptance or EOF
+errors.
 
 For post-QC slice length `L`, each completed tx scan consumes at least four
 bytes even when its body is empty. At most `floor(L/4)` complete entries and
@@ -1315,6 +1329,20 @@ may already allocate (QC's own bitmap/signature copies/reservation remain at
 consensus.rs:351-358). Valid large proposals still materialize; allocator
 failure/capacity behavior for them is not remedied or measured here. Introduce
 no arbitrary transaction-count/byte cap or broader resource policy.
+
+Keep these four conditions distinct: (1) converting a wire `u32`/`u16` to
+`usize`; (2) whether the declared transaction/signature bytes are available;
+(3) whether the transaction-vector allocation layout is representable; and
+(4) whether the allocator actually succeeds. Ordinary 32-bit and 64-bit
+targets represent every wire integer in `usize`, but that says nothing about
+input availability, the layout for `count` elements of `Vec<u8>`, or allocator
+success. Layout depends on the selected target's `size_of`/alignment and
+rounding rules; keep it symbolic and do not assume a universal 24-byte `Vec`.
+`Vec`/`Layout` representability limits and valid-input allocation failure stay
+outside this correction's guarantee. No new recoverable allocation-failure
+policy, production count cap, platform restriction, public error type, or
+unrelated QC conversion change is authorized. Narrower or otherwise
+unreviewed targets remain unestablished.
 
 Preserve wire layout, encoders, canonical bodies/signing preimages and public
 interfaces. Preserve structurally valid zero-transaction, empty-transaction,
@@ -1338,48 +1366,182 @@ the failed slice; wrapper hides it. Those observations do **not** erase the
 public mutable-slice contract or justify changing direct callers' semantics.
 
 No consensus check, sender binding, authority activation, transaction
-execution or optional-QC policy changes. **Unresolved before implementation:**
-independent review must accept the two-pass/cursor contract and confirm the
-supported-target conversion/representability boundary. This contract does not
-choose a new recoverable policy for valid-input allocator/layout failure.
-Instrumentation feasibility and safe large-count strategy also need review;
-absence of either is not permission for OOM experimentation.
+execution or optional-QC policy changes.
 
-### Future validation plan -- every case FUTURE / NOT EXECUTED
+### Proposed target, allocator observer and containment contract
 
-| Proposed case (all FUTURE / NOT EXECUTED) | Required future observation |
-|---|---|
-| Zero transactions; empty/non-empty signature; one/many empty, non-empty and mixed transactions | Same decoded values and encoding for structurally valid controls, including empty encodings; no cryptographic acceptance inferred |
-| QC absent/present; round-trip and signing preimages | Preserve existing consensus_roundtrip_tests.rs, epoch_roundtrip_tests.rs, payload_type_roundtrip_tests.rs, net_message_limits_tests.rs and consensus_signing_preimage_tests.rs behavior; byte-for-byte encoder/preimage controls and present-QC errors/internal leftover behavior |
-| Count/body mismatch; missing/1-3-byte tx length prefix; truncated tx payload | UnexpectedEof and exact remaining-slice equality with safely bounded baseline controls, before tx-list reservation/payload copying |
-| Missing/one-byte signature length; truncated signature body | Preflight refuses before tx materialization even after a complete declared tx sequence; exact legacy EOF/cursor |
-| Truncation after earlier complete transactions | Earlier bytes consumed as before but no tx copies/list reservation; include later prefix, payload and signature failures |
-| Success with sentinel trailing bytes; direct/NetMessage/wrapper calls; error cursor | Preserve exact remaining input for direct APIs (outer discriminator included for NetMessage); wrapper still accepts trailing bytes but performs its own size precheck; compare failed primitive and previously consumed prefix cases |
-| Modest malformed-count old-path controls, e.g. count 2 or 8, qc_len=0 | Safely expose old list-reservation request before EOF; add a complete first non-empty tx followed by truncation to expose old payload copy; do not use uncontrolled large allocations |
-| Actual production `BlockProposal::decode` under bounded allocation observation | Instrument the real decoder, not only a helper or mocked preflight; qc_len=0 malformed tx/signature cases must show zero tx-list reservation requests and zero tx-payload-copy allocations, with the intended error/cursor |
-| Valid non-empty control under the same observer | Detect normal list reservation and non-empty payload materialization, proving the observer can see allocations; pin target/layout and separate fixture construction/logging from the observation window |
-| Large finite counts, including u32 boundary, with unavailable bodies | Execute only after explicit reviewed safe strategy: patched real decoder with bounded non-allocating request observer/refusal plus process resource/time isolation, or equivalent evidence that no enormous old-path request can reach an allocator; never execute these against the uncontrolled baseline |
+The proposed **initial test profile** is Linux
+`x86_64-unknown-linux-gnu`, the Cargo `test` profile from the existing workspace
+configuration, and the exact `rustc -Vv`, `cargo -V`, target and relevant build
+environment recorded when a future run is separately authorized. Use
+`cargo test --locked --target x86_64-unknown-linux-gnu -p qbind-wire --test block_proposal_preflight_tests -- --test-threads=1`.
+This is one proposed test profile, not a support decision for QBIND, a
+deployment target matrix, or a claim about the four operator machines. The
+currently observed floating `stable` toolchain is not a version pin. Record
+the future run's exact compiler; do not silently substitute a different target
+or profile.
 
-Future instrumentation must separate **allocation requests** (size/order/site)
-from actual allocator capacity and RSS; no capacity/RSS assertion from a
-request log. Use a bounded, non-recursively allocating observer with fixture
-setup outside the window and focused/isolated execution to avoid parallel-test
-noise. A process limit alone is not proof of pre-reservation refusal; attribution
-must distinguish list requests from payload copies and allowed QC/outer work.
-Review the observer's interaction with the existing allocator/test harness
-before choosing it. All pre-change controls and post-change validation need
-separately scoped execution authorization, pinned baseline/candidate/target,
-expected results, resource/time limits and cleanup. Nothing above was run.
+Use one focused integration-test executable at
+`crates/qbind-wire/tests/block_proposal_preflight_tests.rs`, with one
+test-local `#[global_allocator]` wrapper delegating `alloc`, `alloc_zeroed`,
+`realloc` and `dealloc` to `std::alloc::System`. The observation window records
+`alloc`, `alloc_zeroed` and `realloc` operation, requested size, alignment and
+monotonic event order in a fixed 256-entry event buffer. For `realloc`, record
+the new requested size and the old layout alignment. Deallocation is forwarded
+with the original pointer and layout; it does not erase cumulative
+requested-byte accounting.
 
-Anticipated implementation scope: only the decoder in
-`crates/qbind-wire/src/consensus.rs`, focused `qbind-wire` tests and this plan.
-If reliable instrumentation requires allocator/harness configuration outside
-those focused tests, or conversion handling requires shared-reader changes,
-identify the exact expansion for independent review and fresh authorization
-before editing. No silent expansion to node/transport/QC/consensus policy.
+Use const-initialized thread-local `Cell` flags for the explicitly armed owner
+thread and hook reentrancy, plus fixed static atomic counters/event slots and
+a single active-window compare/exchange. Initialize and clear all state and
+touch the TLS cells before arming. Only the owner thread is observed; other
+threads forward directly to `System`. The focused decoder path must not spawn
+work. Before each window, construct the bounded fixture and initialize/reset
+the observer; arm immediately before calling the real
+`qbind_wire::consensus::BlockProposal::decode`, and disarm immediately on its
+return. Snapshot only after disarming and before any assertion, formatting or
+reporting. An RAII guard disarms on ordinary unwinding and resets owner and
+active-window state between cases. A second arm, malformed state, reentrant
+hook, checked-counter overflow, full event buffer, or request-budget breach
+fails closed by aborting the dedicated child before delegating the offending
+request. Hook code performs no formatting, logging, dynamic growth, locking or
+potentially allocating synchronization and never panics or unwinds. Outside
+the owner window, all operations pass through unchanged.
 
-This delivery performs documentation checks only: source locators, links,
-inventory identities, scope/status/compatibility consistency, protected E07
-publication and unrelated BR/gate records, sole-path mode/EOL/EOF and
-whitespace. No implementation, project test/build, allocation experiment,
-node, network probe, PR, merge or main publication is authorized.
+Check each request **before** calling `System`: maximum single request 64 KiB,
+maximum cumulative requested bytes 256 KiB, and at most 256 recorded events.
+Use checked additions; do not delegate on overflow or a ceiling breach. The
+future candidate children also cover request budgets defensively, but an abort
+is a failed decoder case, never evidence of a successful refusal. A valid
+control must complete normally with the expected result.
+
+Set `qc_len=0` for allocation attribution so optional-QC allocations are
+excluded. Source review of reservation-before-copy order must agree with the
+ordered observations; do not identify an allocation site from size alone.
+Malformed cases must return the expected `WireError` and exact cursor with no
+transaction-list reservation or transaction-payload-copy events. Valid
+non-empty controls must show the observer can detect both ordinary list
+materialization and a payload copy. If compiler optimization/elimination or
+merging prevents the same target/profile from observing those modest expected
+baseline allocations, classify allocation evidence **INCONCLUSIVE** and stop;
+do not weaken the assertion or infer absence from a zero counter. Source review
+and calibrated real-decoder observations are jointly required.
+
+Use only small fixtures (for example `tx_count` 2 and 8) against the old
+decoder, including one complete non-empty transaction before later truncation.
+Run those pre-change controls only against the actual pinned baseline decoder
+in an isolated temporary checkout. Never pass an enormous count to the
+uncontrolled baseline. For candidate-only large-count cases, including
+`u32::MAX`, encode tiny fixed inputs without allocating from the hostile count
+and invoke each case in a dedicated child process.
+
+The proposed test-only ceilings are: encoded fixture 4 KiB; individual
+allocation request 64 KiB; cumulative requested bytes per observation 256 KiB;
+256 events; child wall deadline 10 seconds; child CPU soft/hard limit 5
+seconds; child address-space soft/hard limit 512 MiB (`536870912` bytes); core
+limit 0. Verify the small controls fit these ceilings on the selected target
+before accepting their evidence. Launch only the test child through
+`prlimit --cpu=5:5 --as=536870912:536870912 --core=0:0 -- <current_exe> --exact isolated_child_entry --nocapture --test-threads=1`,
+with one child-case name in `QBIND_A21_CHILD_CASE`. This installs limits
+before the test executable starts; do not apply process limits to Cargo
+compilation. The child must read and verify its effective CPU, address-space
+and core limits from `/proc/self/limits` before running a case. If `prlimit`,
+`/proc` verification, or any required limit is unavailable or mismatched,
+stop without fallback. The parent enforces a monotonic 10-second deadline by
+polling `Child::try_wait`; on expiry it rechecks status, kills a still-running
+child, then always calls `wait` to reap it. A child starts no grandchildren.
+Record normal exit, signal/abort, timeout, CPU/resource-limit termination and
+reap outcome separately. Only a normal child exit plus the intended decoder
+`WireError` and exact cursor is a candidate pass.
+
+Provide separately labelled guard-calibration child controls, not decoder
+regressions: a 65,537-byte single request; 65 requests of 4 KiB (the final
+request crosses 256 KiB cumulative); and 257 one-byte requests. Each is
+bounded, and the offending request must be intercepted before `System`.
+Each child runs exactly one calibration entry with initialized observer state;
+its only expected abort site is the guard's pre-delegation ceiling branch.
+If the allocation returns, the child reports a failing test rather than
+aborting. The parent accepts only the expected abort signal from that exact
+child case, after source review confirms no other abort path is reachable;
+normal return, panic exit, timeout or resource-limit termination fails
+calibration. These results never count as a decoder regression pass.
+
+Official Rust references consulted on 2026-11-03:
+[GlobalAlloc](https://doc.rust-lang.org/std/alloc/trait.GlobalAlloc.html),
+[Vec](https://doc.rust-lang.org/std/vec/struct.Vec.html), and
+[Layout](https://doc.rust-lang.org/std/alloc/struct.Layout.html). The retrieved
+current documentation says allocator hooks must not unwind and allocation
+calls can be optimized away; `Vec` capacity is not an exact allocator request
+and vectors do not allocate more than `isize::MAX` bytes; `Layout` constrains
+rounded size to `isize::MAX`. Retrieval was through official-doc search
+results (pages reported updated 2026-10-13; crawled 2026-10-30 to 2026-11-02);
+direct page fetch was unavailable and the local rustdoc component was not
+installed. This is current documentation, not the future execution toolchain.
+
+### Future execution sequence and acceptance matrix -- all FUTURE / NOT EXECUTED
+
+Keep review and evidence phases distinct:
+
+1. Obtain independent review of this target/testing addendum.
+2. Implement and validate the focused test instrumentation in the named new
+   integration-test file only.
+3. In an isolated temporary checkout, run modest pre-change controls against
+   the actual pinned baseline decoder.
+4. Implement only the independently reviewed decoder correction.
+5. Run candidate regressions and guarded boundary cases.
+6. Obtain independent implementation review.
+
+The supplied review above is pre-implementation finding/contract input, not
+approval of this target/testing addendum. The future remediation record must
+name A21-F1 / QBIND-A1-F001, pre-change and implementation SHAs, what changed
+and why, pre-implementation review reference, exact tests/results and retained
+evidence/log locations, and limitations. After implementation, status remains
+**IMPLEMENTED — VERIFICATION PENDING** until the independent implementation
+review is recorded. Do not combine pre-change, instrumentation calibration,
+candidate regression or review results into one pass.
+
+| Case (every row FUTURE / NOT EXECUTED) | Expected result | Required evidence |
+|---|---|---|
+| Zero tx; empty tx; empty and non-empty signatures; mixed empty/non-empty txs | Valid decode preserves all values and wire behavior | Exact target/profile; decoded values; encoder bytes; event order for non-empty controls |
+| QC absent/present, including nested-QC leftover behavior | Preserve `None`/present-QC errors and current outer consumption of the full QC slice; do not require nested exhaustion | Exact error/value and cursor; `qc_len=0` observer controls separated from QC cases |
+| Missing/1-3-byte tx-length prefix; truncated tx body; tx-count/body mismatch | Existing `UnexpectedEof`; failed primitive remains unconsumed; complete prefix/length consumption preserved | Error variant and exact remaining-slice bytes; no tx-list or payload-copy events |
+| Missing/one-byte signature prefix; truncated signature body, after zero or earlier complete txs | Existing `UnexpectedEof` and exact cursor; no tx materialization before full signature availability | Error variant, cursor and ordered events with `qc_len=0` |
+| Truncation after earlier complete transactions | Earlier bytes stay consumed as before; no transaction list/payload is materialized | Separate later-prefix, body and signature failures; exact cursor and no tx allocation events |
+| Successful decode with sentinel trailing bytes | Direct decoder preserves trailing bytes; no new exhaustion check | Decoded value and exact trailing slice |
+| Direct decoder, `NetMessage::decode`, `decode_from_slice` size wrapper | Same delegation, cursor/error behavior and existing wrapper size check; wrapper still accepts trailing bytes | Exact APIs, inputs/results, cursor where exposed; no broadened cap |
+| Encoder, decode/encode round trips and signing preimages | Byte-for-byte existing output and preimages | Existing focused consensus/epoch/payload/NetMessage/signing-preimage tests and exact output comparisons |
+| Old decoder controls, `tx_count` 2 and 8, including earlier non-empty copy | Safely observe baseline list reservation and copy before later truncation | Isolated checkout at pinned pre-change SHA; ordered operation/size/alignment log; no large count |
+| Malformed candidate observer cases; valid non-empty controls | Refusal has expected error/cursor and zero tx-list/payload events; valid controls reveal intended materialization | Real `BlockProposal::decode`, `qc_len=0`, source-order cross-check, fixed-buffer dump; zero expected baseline allocations means INCONCLUSIVE/STOP |
+| Conversion/layout boundary on selected 32/64-bit target | Checked conversions agree in preflight/materialization; wire integers fit `usize`, while availability/layout/allocation remain separate | Compiler/target; conversion/error source review; symbolic target layout (no assumed Vec size); no claim for unreviewed targets |
+| Guard calibration: 65,537-byte request; 65 x 4 KiB; 257 x 1 byte | Guard aborts at the single-request, cumulative-byte and event boundary before delegating the offending allocation | Separate calibration case IDs/child statuses; no decoder-pass credit |
+| Candidate large counts, including `u32::MAX`, and child containment | Tiny-input candidate returns intended `UnexpectedEof` and exact cursor with normal child exit; any abort/timeout/resource failure is failure | Per-child verified limits, command, status, elapsed time, cursor/result, termination/reap and retained logs |
+| Small-control fit and unsupported-limit handling | Small controls fit all ceilings; unavailable/mismatched controls stop the run, with no silent fallback | Actual request/event maxima; child `/proc/self/limits`; `prlimit` identity; explicit stop reason if unsupported |
+
+Future evidence must identify source and implementation revisions, focused
+test-file blob, exact compiler and Cargo versions, target/profile and relevant
+environment, exact commands, installed/verified limits, per-child and overall
+exit outcomes, case results, and retained log/evidence locations. Do not
+fabricate measurements or evidence files.
+
+### Scope and evidence status
+
+Anticipated source scope after separate authorization: decoder in
+`crates/qbind-wire/src/consensus.rs` and the single focused test file
+`crates/qbind-wire/tests/block_proposal_preflight_tests.rs`. Any need to change
+a manifest, dependency, workflow, production allocator instrumentation,
+shared reader, or other path requires a precise scope proposal and fresh
+authorization; none is silently approved here.
+
+The official references' important caveats are applied jointly with actual
+decoder source review and calibrated observations. Requests are not Vec
+capacity or RSS. The test ceilings are containment limits only, not protocol
+limits or measured production budgets. Existing valid-input layout/allocation
+failures, broader E12 dependency/aggregate-memory questions and all E13
+queue/ownership/outbound-byte questions remain open.
+
+**Status remains:** A21-F1 **OPEN, CONFIRMED TO THE STATED SOURCE MECHANISM**;
+implementation **NOT STARTED**; regression/runtime evidence **NOT EXECUTED**;
+target/test addendum **AWAITING INDEPENDENT REVIEW**; activation **DISABLED**;
+public DevNet **NO-GO**. This task performs documentation checks only. No
+implementation, build, project test, allocation experiment, scanner, node,
+signing, deployment, activation, PR, merge or main publication is authorized.
