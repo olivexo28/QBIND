@@ -168,3 +168,16 @@ MainNet readiness is claimed.**
 - `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_422_D6.md` — Run 422 D6 successor: versioned Proposal/Vote signing-domain isolation (v2) code/test-positive; activation DISABLED; D7 unresolved.
 - `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_422_D7.md` — Run 422 D7 successor: genesis-static / epoch-restore authority-lifetime guard code/test **PARTIAL** (POSITIVE closure withdrawn; DURABLE_ANTI_ROLLBACK=NOT-ESTABLISHED); activation DISABLED; RS1/C4/C5 stay OPEN.
 - `docs/whitepaper/contradiction.md` — contradiction ledger.
+
+## Audit-remediation coordination (A49.1 / internal v1.138)
+
+The [audit-remediation plan](../../security/QBIND_AUDIT_REMEDIATION_PLAN.md)
+coordinates finding/obligation ownership, dependencies and scoped evidence;
+it does not replace this register, the readiness criteria or the launch decision.
+Confirmed independent defects may proceed without waiting for unrelated audit
+questions; authority, B/U, recovery and transition work requires its relevant
+settled security requirements. Future binary/process/crash/recovery/multi-node
+evidence needs a separately scoped test plan. No finding is fixed by planning.
+RUN 422 scoped acceptances and unresolved requirements remain unchanged:
+implementation prerequisites NOT SATISFIED, activation DISABLED, public DevNet
+NO-GO, RS1 launch-blocking and C4/C5 OPEN. No deployment is authorized.
