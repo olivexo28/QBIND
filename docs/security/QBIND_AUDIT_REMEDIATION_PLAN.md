@@ -54,35 +54,70 @@ BR-04 documents and every other tracked file are protected unchanged.
 
 ## 2. Work sequence and task-entry rules
 
-1. Begin confirmed, independently fixable defects without waiting for all
-   audit questions or every BR decision. First check the exact current
-   mechanism and reachable boundary; prioritize by security impact, actual
-   reachability and dependencies, not audit pass number or raw item count.
-   The manifest candidate in section 8 is an initial bounded task, **not**
-   a claim that it is the highest-severity finding.
+Before implementing **each selected remediation**, record an independent
+pre-implementation verification. The reviewer must be independent of the
+implementation author; record the actual reviewer/evidence and outcome, or
+mark the reviewer **UNASSIGNED**. This is a bounded technical check, not an
+invented protocol-owner approval or substitute for an existing authorization
+gate. The review record covers both:
+
+* **Finding:** latest audit disposition and supersession; exact current-source
+  baseline; applicable requirement/invariant; source mechanism; reachability
+  and prerequisites; bounded effect; remaining uncertainty.
+* **Proposed correction:** intended behavior; permitted scope; compatibility
+  and caller effects; relevant security dependencies; meaningful regression
+  controls.
+
+Record supporting source/evidence references and the review outcome. The
+auditor's entry, its inclusion in this inventory, or the implementation
+author's unsupported assertion is not independent confirmation. Use an
+evidence-supported disposition such as **CONFIRMED TO [scope]**,
+**UNRESOLVED**, **SUPERSEDED**, **ALREADY ADDRESSED**, or **NOT APPLICABLE**,
+with rationale and boundaries; do not imply a reviewer approval not actually
+given. Proceed only with a remediation confirmed to its stated scope and a
+supported correction. An unresolved requirement that governs the proposed
+change remains a dependency; it does not automatically block unrelated,
+independently confirmed work. A deterministic source defect can be established
+from source without live-network reproduction. If behavior must be observed,
+a separately scoped and authorized isolated **pre-change** reproduction may
+precede implementation; it is not automatic permission to probe a live
+network.
+
+1. Begin independently verified, confirmed-to-scope, fixable defects without
+   waiting for all audit questions or every BR decision. Prioritize by
+   security impact, actual reachability and dependencies, not audit pass
+   number or raw item count. The manifest candidate in section 8 is an initial
+   bounded task, **not** a claim that it is the highest-severity finding.
 2. Triage other independently actionable defects in parallel where genuinely
    independent: for example proposal decoder reservation and evidence-harness
-   verdict aggregation, after bounded applicability checks. This plan does
-   not itself authorize source changes. Do not duplicate RUN 422 components.
+   verdict aggregation, after their separate pre-implementation checks. This
+   plan does not itself authorize source changes. Do not duplicate RUN 422
+   components.
 3. Implement bootstrap authority, B/U, recovery and transition changes only
    after their **relevant** security requirements and entry decisions are
    settled. A missing policy is a design dependency, not permission to choose
    a convenient mechanism. An unrelated pending BR does not block a manifest
-   truthfulness fix.
-4. After relevant implementation and focused regression validation, produce
-   required binary, process, crash, recovery and multi-node evidence under a
-   **separately scoped test plan** with revision, configuration, threat model,
-   expected outcomes, safe resources and cleanup pinned. Nothing here starts
-   that evidence collection or authorizes full Run 384/385 execution.
+   truthfulness fix; its pre-implementation review still applies.
+4. After any implementation, run the relevant focused regression controls and
+   obtain independent code review. Keep both distinct from pre-implementation
+   verification and from any optional pre-change behavioral reproduction.
+   Produce required binary, process, crash, recovery and multi-node evidence
+   under a **separately scoped and authorized test plan** with revision,
+   configuration, threat model, expected outcomes, safe resources and cleanup
+   pinned. Nothing here starts that evidence collection or authorizes full
+   Run 384/385 execution.
 5. Reconcile integration against concurrent main changes. Public activation
    remains subject to existing blockers, operational gates and explicit
    authorization. Planning accepts no unresolved technical policy.
 
-Keep five axes separate: **analysis completion; code completion; regression
-validation; binary/runtime validation; release eligibility**. `PASSED` or
-`CLOSED` always names its boundary, producing revision and evidence.
-Source-complete never means defect-fixed, runtime-passed or release-eligible.
-Unavailable authority is containment, not configured positive readiness.
+Keep separate: **pre-implementation finding/correction verification;
+optional pre-change behavioral reproduction; code completion; regression
+validation; independent code review; binary/runtime validation; release
+eligibility**. `PASSED` or `CLOSED` always names its boundary, producing
+revision and evidence. Source evidence can confirm a deterministic mechanism
+without runtime reproduction; source-complete never means defect-fixed,
+regression-passed, runtime-passed or release-eligible. Unavailable authority
+is containment, not configured positive readiness.
 
 ## 3. Reading rules, supersession and row metadata
 
@@ -120,7 +155,9 @@ not omitted fields):**
   bounded current script/schema/caller observations in section 8 and
   document-cited existing verification in section 7. A reference to a RUN 422
   result is only evidence for its stated scope/revision, not blanket current
-  applicability or a new source review.
+  applicability or a new source review. Before implementation, record the
+  independent pre-implementation review and its bounded outcome under section
+  2; historical status and this inventory alone are not confirmation.
 * **Owner/assignee:** **UNASSIGNED** for remediation/evidence tasks. Existing
   gate roles are not new assignees; Olive's B/U accountability in section 7
   is preserved, not generalized.
@@ -131,10 +168,12 @@ not omitted fields):**
   completion, withdrawn or excluded scope remains as explicitly recorded.
   Implementation/review/evidence references are the locators and section-7
   producing references supplied here; new remediation commits: **NONE**.
-* **Validation/closure:** establish applicability first, then demonstrate the
-  row's property at its actual entrypoint with positive/negative controls and
-  document limitations. Runtime/external work requires the separate plan in
-  section 2. No row closes solely from this inventory.
+* **Validation/closure:** establish applicability and verify the proposed
+  correction independently before implementation; record references and
+  outcome. Then use meaningful regression controls and independent code
+  review. Behavioral pre-change reproduction, when necessary, and later
+  runtime/external validation require separately scoped authorization. No row
+  closes solely from this inventory.
 
 Categories: **D** = defect (including an explicitly described assurance
 defect, not a new severity); **DD** = design dependency; **MI** = missing
@@ -258,10 +297,10 @@ statuses not supported by a current-lineage review remain provisional.
 | OBL-OPS-1 | SOURCE-PARTIAL beyond completed metrics endpoint; A15/A24-F1 | D/ME / configuration/fail-open/observability / O | Name remaining default/fallback, check real operating profile | Config-specific refusal/visibility evidence; E24 metrics remains separate |
 | OBL-REL-1a | Build/workflow source sub-boundaries complete A48.2/A49.1, constant-clean candidate retained | D/ME / release manifest/workflows / A | FIRST BOUNDED CANDIDATE section 8; only three current files inspected | Temporary Git-fixture regressions; four evidence planes remain separate |
 | OBL-REL-1b | External CI/artifact/historical assurance remains evidence-blocked; A48.2/A49.1 | ME / artifacts/attestation / A | Obtain authorized exact run/artifact/environment evidence; source review cannot create it | Source-to-built-to-deployed correspondence; delegated attestation unexecuted |
-| OBL-EXT-1 | Interface inventory NOT REVIEWED at audit baseline; A22.1 identity A:L9221 | ME / external APIs/assets/bridges / O/C4/C5 as applicable | Bound interface inventory; do not infer absence from filenames | Actual surface/caller/trust assumptions, current applicability pending |
+| OBL-EXT-1 | 14-crate/repository interface inventory **NOT REVIEWED AT CURRENT AUDIT BASELINE**; identity A:L9221. Historical detailed definition/classification at A:L19453; A23.1 precedence A:L8982-L8989 means historical status is not current-source verification | ME / crate inventory; `ledger_bridge`, `timeout_verification_bridge`, `metrics_http`, and relevant EVM/execution interfaces (`QbindTx`, `VmV0ExecutionEngine`, `BlockExecutor`) / O and A only where existing gates apply; functional EVM/auth review remains OBL-TX-1a/1b | Treat A18.1's five-level presence/callability/production-wiring/ingress/not-found classification as historical, bounded evidence. Independently re-inventory current baseline within an explicit crate/filename/server-entrypoint search scope before relying on it; internal "bridge" files are wiring, not cross-chain bridges | Record code presence, callable library interface, production wiring, external ingress, and not-found-within-search-scope separately. Historical finding: EVM/execution code and callable interfaces present but no production wiring / no external ingress located; `metrics_http` is non-transaction `/metrics`, routed to OPS-1. Historical scoped searches found no wallet/JSON-RPC/cross-chain-bridge/contract-deploy ingress, not blanket absence. No current applicability claim until checked |
 | OBL-LIVE-1 | BLOCKED on live-deployment evidence; latest owner clarification is stopped development machines | ME / deployment/launch profile / M4/M6/S5/S7/RS1 | No live probe or activation; approved profile/prerequisites first | Separately authorized external/multi-node evidence; E09, no non-use proof |
 | OBL-PROV-1 | EXCLUDED separate candidate-provenance thread; E04/section 17 | ME / Run-422 candidate 56524ee provenance / A | Preserve prior provenance work; missing shallow objects not non-ancestry | Commit/tree/object availability, proven ancestry and scoped content correspondence separately |
-| OBL-REPRO-1 | Runtime evidence, not source-completion task; unexecuted audit reproductions | ME / revision-bound reproductions / R/O/A as applicable | Per-finding safe test plan after relevant implementation; reuse applicable producing evidence | Exact binary/config/counters/logs and independent controls; no blanket completion |
+| OBL-REPRO-1 | Runtime evidence, not a source-completion task; audit reproductions remain unexecuted as stated | ME / revision-bound reproductions / R/O/A as applicable | Before implementation, verify current source applicability and the proposed correction under section 2. Decide whether behavior needs pre-change observation; if so, require its own scoped authorization and isolated controls. Then plan post-change regression/runtime evidence separately; reuse prior results only within their producing scope | Source evidence may establish a deterministic defect without live reproduction. Where needed, record exact pre-change binary/config/counters/logs and controls; post-change regression, independent code review, later binary/runtime evidence and release eligibility remain distinct |
 
 ## 6. Evidence inventory and unnumbered residuals
 
@@ -414,10 +453,19 @@ deployed-binary applicability claim follows.
 
 **Scope and prerequisites for the future implementation task:**
 
-* Pin the then-current commit/tree, A49.1 input identity and the three file
-  blobs; reconcile changes to these files before editing. Obtain bounded
-  implementation authorization and an assignee. No bootstrap B/U decision,
-  live deployment or full harness execution is prerequisite for this task.
+* Before implementation, an independent reviewer other than the
+  implementation author must record the finding and correction check required
+  in section 2. Pin the then-current commit/tree, A49.1 input identity and
+  three file blobs; record the scoped source mechanism, applicable
+  truthfulness requirement, reachability, effect/uncertainty, intended
+  behavior, checked-file/timing scope, caller/schema compatibility,
+  dependencies and fixture controls. Outcome must be supported and
+  **CONFIRMED TO [scope]** before this correction proceeds. Reviewer identity
+  and outcome are not supplied by this plan; do not treat this card or its
+  initial source observation as independent confirmation. Use the existing
+  task authorization and assignment process; no additional protocol-owner
+  decision is a prerequisite for this routine, bounded defect. No bootstrap
+  B/U decision, live deployment or full harness execution is prerequisite.
 * Define the checked-file scope explicitly in code/docs and tests. A bounded
   compatibility target is the existing **tracked repository paths excluding
   `docs/**` only**, compared HEAD -> index and index -> worktree; include
@@ -526,10 +574,18 @@ documentation in the same task**. Record finding/input version and exact
 applicability baseline; what changed and why; exact implementation commit;
 binary/schema/manifest/log or other relevant artifact identities; tests
 performed and results; review evidence; remaining limitations/dependencies
-and the next action. Use actual producing commits, not a later summary's
-HEAD label. A commit cannot contain its own final hash: record that hash in
-the subsequent evidence/delivery record, not a fabricated self-reference.
-Do not silently expand a local/component PASS into process/runtime closure.
+and the next action. Before coding, also record the independent pre-
+implementation finding/correction verification, its supporting evidence,
+actual reviewer (or UNASSIGNED) and bounded outcome. Mark unresolved,
+superseded, already-addressed and not-applicable cases with their evidence;
+do not imply review, approval or confirmation that did not occur. Where
+needed, record separately authorized pre-change behavioral reproduction
+before the change. After coding, record regression validation and independent
+code review separately; binary/runtime evidence and release eligibility
+remain separate. Use actual producing commits, not a later summary's HEAD
+label. A commit cannot contain its own final hash: record that hash in the
+subsequent evidence/delivery record, not a fabricated self-reference. Do not
+silently expand a local/component PASS into process/runtime closure.
 
 For each new Claude audit uploaded under `Audit/`:
 
