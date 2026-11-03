@@ -2618,3 +2618,62 @@ C/L/X, accepted local D10/D14 evidence and all existing lifecycle,
 cryptographic, resource and recovery limitations remain unchanged. No completed
 review is reopened. This append authorizes no implementation, machine
 operation, provisioning, key generation, signing or activation.
+
+## RUN 422 BR-04 owner deployment-state clarification — 2026-11-03 UTC
+
+Attribution: the owner's supplied clarification, recorded 2026-11-03 UTC
+(date only). Owner-selected disposition: **“Already provisioned, all currently stopped.”**
+The clarification is recorded verbatim:
+
+> “The four machines belong to our core team members locally and have been used for local code development, compilation, and isolated testing, but none have previously run as a live, multi-node Public DevNet consensus network. Actual multi-node runtime execution remains unexecuted in this audit environment.”
+
+This is owner-reported, not an independent inspection of four machines. It
+explicitly supersedes the earlier description of four currently “running”
+validators. The effective description is four provisioned local
+development/test machines, all currently stopped, with no prior operation as
+a live multi-node Public DevNet consensus network reported by the owner.
+Previously reported **N = 4, q = 3** and equal weights remain reported
+parameters only, not an executed or approved founding configuration.
+
+The owner also reports manual/Cargo launch or `target/release/qbind-node`
+through local development scripts under `scripts/devnet/`; this is only a
+reported launch method. No specific command, binary provenance,
+configuration or journal enforcement is verified.
+
+Separately, the user supplied this bounded terminal observation from the
+environment labelled `node-A`:
+
+```text
+timestamp: 2026-11-03T15:33:27.276224+00:00
+scope: visible Linux processes named exactly qbind-node
+processes: []
+unreadable_process_names: 0
+result: NO MATCH OBSERVED; not proof of absence
+```
+
+This output was not executed by this documentation task. Its timestamp is
+not authenticated currentness evidence; it covers neither all four machines
+nor every executable name, container or process namespace, and proves no
+historical non-use. It does not establish that no node process, local test,
+signature, reservation or journal state ever existed, that validator or
+bootstrap keys/approvals are unused, or that B or network-level U is
+established. It does not invalidate historical isolated or other bounded
+evidence runs, or make development machines production-ready validators.
+
+The source-containment findings and unresolved source-to-binary-to-runtime
+correspondence above remain unchanged. Local RocksDB, journal and `0600`
+keystore details remain owner-reported; they do not prove enforced production
+wiring, independent restore domains or safe recovery. Actual administrative/
+restore domains and a supported independently current evidence source remain
+unresolved. No B/U mechanism or failure-model exclusion is selected.
+
+Olive remains accountable for both B and U; this clarification changes no
+accountable role, accepted policy, cryptographic identity or operational
+authorization. BR-01/02/03 scoped acceptances and BR-03's unestablished
+overall closure remain unchanged. BR-04 technical decision **PENDING**;
+operational B/U and overall closure **NOT ESTABLISHED**; prerequisites
+**NOT SATISFIED**; implementation authorization **PENDING**; founder-root/
+profile provisioning **NOT DONE**; activation **DISABLED**; public DevNet
+**NO-GO**. BR-05–BR-11, C/L/X and all existing evidence limitations remain
+unchanged. This is a deployment-state clarification, not technical
+acceptance or operational readiness.
