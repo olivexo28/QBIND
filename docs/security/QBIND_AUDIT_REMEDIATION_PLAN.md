@@ -295,7 +295,7 @@ statuses not supported by a current-lineage review remain provisional.
 | OBL-STO-2b | EXCLUDED audit implementation thread: RUN 422 new journal/replay, A22.1/A26 preserve | MI/ME / D10/D14 / R/C5/profile | Continue existing thread and accepted subset, no competing journal | Producing-revision/component scope plus missing production/process correspondence |
 | OBL-STO-3 | Snapshot output edge split from CONS-4, source-complete bounded section 26.3 / A22.1 identity | DD/ME / create_snapshot output / R/profile recovery | Preserve edge identity and input-to-durable-output trust question | E20/E22 snapshot anchor and epoch correspondence |
 | OBL-OPS-1 | SOURCE-PARTIAL beyond completed metrics endpoint; A15/A24-F1 | D/ME / configuration/fail-open/observability / O | Name remaining default/fallback, check real operating profile | Config-specific refusal/visibility evidence; E24 metrics remains separate |
-| OBL-REL-1a | Build/workflow source sub-boundaries complete A48.2/A49.1; constant-clean producer defect source-confirmed to its stated mechanism | D/ME / release manifest/workflows / A | Bounded source-state implementation tested at the revisions recorded in section 8; post-implementation independent review pending; not closed | Isolated Git fixtures cover the declared reporting boundary; external build/artifact/deployment evidence remains separate |
+| OBL-REL-1a | Build/workflow source sub-boundaries complete A48.2/A49.1; constant-clean producer defect source-confirmed to its stated mechanism | D/ME / release manifest/workflows / A | **IMPLEMENTED — VERIFICATION PENDING**; fsmonitor false-clean corrected and fixture gaps repaired at the revisions recorded in section 8; independent review pending; not closed | Isolated Git fixtures cover the bounded reporting contract; build/artifact/deployment evidence remains separate |
 | OBL-REL-1b | External CI/artifact/historical assurance remains evidence-blocked; A48.2/A49.1 | ME / artifacts/attestation / A | Obtain authorized exact run/artifact/environment evidence; source review cannot create it | Source-to-built-to-deployed correspondence; delegated attestation unexecuted |
 | OBL-EXT-1 | 14-crate/repository interface inventory **NOT REVIEWED AT CURRENT AUDIT BASELINE**; identity A:L9221. Historical detailed definition/classification at A:L19453; A23.1 precedence A:L8982-L8989 means historical status is not current-source verification | ME / crate inventory; `ledger_bridge`, `timeout_verification_bridge`, `metrics_http`, and relevant EVM/execution interfaces (`QbindTx`, `VmV0ExecutionEngine`, `BlockExecutor`) / O and A only where existing gates apply; functional EVM/auth review remains OBL-TX-1a/1b | Treat A18.1's five-level presence/callability/production-wiring/ingress/not-found classification as historical, bounded evidence. Independently re-inventory current baseline within an explicit crate/filename/server-entrypoint search scope before relying on it; internal "bridge" files are wiring, not cross-chain bridges | Record code presence, callable library interface, production wiring, external ingress, and not-found-within-search-scope separately. Historical finding: EVM/execution code and callable interfaces present but no production wiring / no external ingress located; `metrics_http` is non-transaction `/metrics`, routed to OPS-1. Historical scoped searches found no wallet/JSON-RPC/cross-chain-bridge/contract-deploy ingress, not blanket absence. No current applicability claim until checked |
 | OBL-LIVE-1 | BLOCKED on live-deployment evidence; latest owner clarification is stopped development machines | ME / deployment/launch profile / M4/M6/S5/S7/RS1 | No live probe or activation; approved profile/prerequisites first | Separately authorized external/multi-node evidence; E09, no non-use proof |
@@ -350,7 +350,7 @@ existing scoped results retained.
 | R-DEP-1/R-DEP-2/R-RUNTIME-1, A39.1-A41 | RNG source chain resolved to scope; deployed backend/build and runtime entropy remain; algorithms/constant-time not performed; ME; C5 | Pin platform/features/cfgs and exact remaining backend question | Dependency provenance + build inputs; runtime entropy separate, no generic source rerun |
 | R7.3/E12, A42.1-A45.1 | Schema/visitor/postdecode/four-channel route complete to scope; aggregate capacities/RSS/concurrency residuals; ME; O | Preserve corrected precheck/Infinite-limit and copy accounting; name unmeasured quantity | Revision-bound aggregate experiment under separate plan; no new forced defect |
 | A47.3-C1-C3/disposition, A:L1039-L1151 | Local stored n>1 -> 1 regression trace established; violated contract/harm unestablished, no new finding; DD/ME; R/profile recovery | Resolve relevant storage/transition contract and consumer impact before a transition change | Correct restore chronology, cursor-vs-DB writer, atomic visibility != power-loss durability; multi-validator residual separate |
-| A48.1-C2 / E07 / OBL-REL-1a, A:L650-L688 | Constant-clean producer evidence-assurance candidate source-confirmed to the stated mechanism; D; A | Bounded implementation and fixture evidence recorded in section 8; independent post-implementation review pending; no severity/ranking or closure change | Truthful tracked-path classification tested; build provenance and other E07 evidence planes remain outstanding |
+| A48.1-C2 / E07 / OBL-REL-1a, A:L650-L688 | Constant-clean producer evidence-assurance candidate source-confirmed to the stated mechanism; D; A | **IMPLEMENTED — VERIFICATION PENDING** in section 8; independent review supplied through the task identified fsmonitor suppression and test-coverage gaps, now corrected; no closure change | Corrected isolated fixtures pass; build provenance and other E07 evidence planes remain outstanding |
 | A48.1-C6 + A48.2 + A49.1, A:L739-L768, A:L412-L593, A:L1-L202 | CRLF invocation, job/check/artifact ordering, external controls and delegated attestation retain qualifications; ME; A | No harness execution here; external run/environment evidence separately scoped | Actual reached stages, status/effects and source-to-artifact/deployment correspondence |
 
 Retain negative sub-dispositions as well as open work: A17.1-C1-C5 and
@@ -628,16 +628,15 @@ the declared scope and observation timing. It does not close E07 overall or
 establish build provenance, historical-artifact correctness, runtime safety,
 source-to-built or binary-to-deployed correspondence, or release eligibility.
 
-### Successor implementation and focused evidence (2026-11-03)
+### First implementation and focused evidence — historical, superseded in part (2026-11-03)
 
-**Disposition:** implementation and the bounded fixture matrix are
-**IMPLEMENTED / TESTED** only to the evidence below. This does not mark the
-finding CLOSED or accepted. Independent post-implementation review is
-**PENDING**. E07 overall, release approval, and all operational gates are
-unchanged.
-**Next action:** separately perform the independent post-implementation
-review against implementation commit `501db84d9671c98d55e8370e0574a823daeec466`
-and its focused evidence at `3fb3c400c0108cb30ee33a536a443ebe759e46de`.
+**Historical disposition as recorded at `0c23009037b75817d9ff3b97f4176ce348b2e100`:**
+the first implementation and its fixture matrix were reported
+**IMPLEMENTED / TESTED**. This report is retained as history, not current
+verification. The review supplied through the present task identified an
+fsmonitor false-clean and masked fixture cases; the corrected status and
+revision-bound follow-up evidence are recorded below. No version of this
+bounded work closes E07 overall or changes release/operational gates.
 
 | Evidence identity | Exact value |
 |---|---|
@@ -682,12 +681,12 @@ signing, deployment, or activation was run.
 | Pinned baseline slice: clean control; dirty fixture; failed Git/repository observation | Historical snippet selects `clean` for all three | `clean` / `clean` / `clean` |
 | Clean control; unstaged, staged, mixed staged+unstaged same/different paths | `clean`; all change cases `dirty` | `clean`; each changed case `dirty` |
 | Tracked addition, deletion, rename | `dirty` each | `dirty` each |
-| Executable-mode change with `core.filemode=false`; file-to-symlink type change | `dirty` each when supported | `dirty` each |
+| Executable-mode `chmod` with default `core.filemode`; file-to-symlink type change | `dirty` each when supported | Both reported `dirty`; the former did not test `core.filemode=false` |
 | Root `docs/**` staged and unstaged changes; nested-submodule docs change | Root docs `clean`; nested docs `dirty` | `clean` / `clean` / `dirty` |
 | Root and submodule untracked/ignored-only controls | `clean` | `clean` |
 | `Audit/`, `.github/workflows/`, `scripts/`, `Cargo.lock` changes | `dirty` each | `dirty` each |
 | Initialized clean submodule; tracked edit; ignore settings; staged gitlink update; unavailable and nested-unavailable submodule; nested tracked edit | `clean`; observed changes `dirty`; incomplete/unavailable `unknown` | `clean`; `dirty` cases; `unknown` unavailable cases |
-| Space, tab, leading dash, newline, and non-ASCII tracked filenames | No parsing loss; `dirty` | `dirty` |
+| Space, tab, leading dash, newline, and non-ASCII tracked filenames | No parsing loss; `dirty` | Each assertion reported `dirty`, but later cases retained earlier staged unusual paths and were not isolated |
 | External diff, textconv, submodule-ignore, and `core.filemode=false` hiding settings | Force correct result or `unknown` | Mode and tracked change remained `dirty` |
 | Assume-unchanged, skip-worktree, sparse checkout, unresolved index, unborn/missing HEAD | `unknown` | `unknown` each |
 | Missing Git, invalid repository, and Git diff exit 2 | `unknown` with stderr diagnostic | `unknown` each; invalid-repository diagnostic verified on stderr |
@@ -696,6 +695,18 @@ signing, deployment, or activation was run.
 | `clean`, `dirty`, and `unknown` through actual producer capture boundary, full schema validation, and bounded staged-copy validation | All accepted; diagnostics absent from JSON | All accepted; diagnostics absent from JSON |
 | Baseline versus corrected classifier on clean, dirty, and error fixtures | Baseline always `clean`; corrected truth table | Baseline `clean`; corrected `clean` / `dirty` / `unknown` |
 | Stable pre-serialization state; controlled post-build/pre-serialization mutation; detected instability | Reflect observation time; instability `unknown` | `clean`, then `dirty`; instability `unknown` |
+
+**Coverage qualification for this historical run:** the executable-mode
+assertion performed `chmod` while `core.filemode` remained at its default, so
+it did not establish mode detection when that config was false. A later fixture
+set `core.filemode=false` but changed file contents, not mode. The purported
+rename assertion followed a staged deletion in the same fixture, so the
+deletion alone could satisfy its `dirty` expectation. The newline, leading-dash,
+and whitespace filename assertions accumulated staged paths in one fixture;
+earlier staged names could satisfy later assertions. The historical outputs
+above remain accurate observations, but those specific assertions did not
+isolate the behavior they were labeled to cover. The current isolated controls
+are recorded below.
 
 **Commands and tools:** focused matrix:
 `PATH=/tmp/qbind-e07-validator-venv/bin:$PATH bash scripts/devnet/tests/test_source_tree_state.sh`
@@ -713,7 +724,7 @@ confirmed the schema diff changes only the `source_tree_state` description.
 CRLF-aware `git -c core.whitespace=cr-at-eol diff --check` passed, and the
 checkout classifier returned `clean` at the validation revision.
 
-Source identities at the final focused-validation revision:
+Source identities at the first focused-validation revision (historical):
 
 | Path | Mode | Blob |
 |---|---:|---|
@@ -722,13 +733,131 @@ Source identities at the final focused-validation revision:
 | `scripts/devnet/tests/test_source_tree_state.sh` | `100644` | `59dfd7d5d845a70809e9e73886721cc12a82947b` |
 | `docs/release/public-devnet/binary/RELEASE_ARTIFACT_MANIFEST.schema.json` | `100644` | `aef539a567c31a6c8bc9713598888fb7fe47d7f0` |
 
-The schema structure, enum, identifiers, schema/manifest versions, and
-historical example are unchanged. The producer and maintained README/BUILDINFO/
-VERIFY files retain CRLF; the schema, remediation plan, and new shell files
-retain LF. No protected audit register, blocker register, Run 385, workflow,
-Rust, dependency, lockfile, or historical evidence path changed. The evidence
-record is committed after validation; it does not contain its own resulting
-commit or blob identity.
+The first implementation retained the schema structure, enum, identifiers,
+schema/manifest versions, and historical example. The producer and maintained
+README/BUILDINFO/VERIFY files retain CRLF. **Correction to the earlier EOL
+statement:** the schema baseline and reviewed final schema both contain
+exactly 205 CRLF line endings and no bare LF; its bytes were preserved by the
+current correction. The remediation plan and new shell files use LF. No
+protected audit register, blocker register, Run 385, workflow, Rust,
+dependency, lockfile, or historical evidence path changed. The evidence
+record was committed after validation and did not contain its resulting
+commit/blob identity.
+
+### Corrective implementation and verification-pending review (2026-11-03)
+
+**Current status: IMPLEMENTED — VERIFICATION PENDING.** Finding identifiers:
+**E07 / OBL-REL-1a / A48.1-C2**. This bounded correction does not close the
+finding or E07 overall and does not change release or operational gates.
+Independent verification of the corrected implementation remains pending.
+
+| Evidence identity | Exact value |
+|---|---|
+| Pre-change commit / tree | `0c23009037b75817d9ff3b97f4176ce348b2e100` / `d1642178a1dd24f444d3d2e81d8790b645553b63` |
+| Expected remote `main` | `6dd0bc9d4ad5426065460270bf30c2cda6b2ca37` |
+| Corrective implementation and fixture commit / tree | `f9acef1d7f57a5bb8cb7e242450584e67d277c29` / `9a534f74f99a184f2c9e559f8f0fffadd3dcd3be`; direct parent is pre-change commit `0c23009` |
+| Validation revision | `f9acef1d7f57a5bb8cb7e242450584e67d277c29`; corrective fixture and syntax checks below were run after this commit |
+| Unchanged audit input | `Audit/QBIND_SECURITY_FINDINGS_REGISTER.md`, mode `100644`, blob `cd81efdbaf2bfb45e00dc3c60db3ea4f523adfa0` |
+| Task branch | `copilot/audit-e07-manifest-source-tree-state-fix` |
+
+The pre-implementation design-review provenance remains the user-conveyed
+independent ChatGPT review recorded at the start of section 8: **PASSED /
+CLOSED** for the bounded design, classification/error rules, observation
+timing, caller compatibility, and proposed validation matrix. It was not a
+review of code that had not yet been written. The independent
+post-implementation review evidence for this correction was supplied through
+the current task. Its bounded reproduction used Git `2.51.1`, a disposable
+repository-local protocol-v2 fsmonitor hook that returned a token followed by
+NUL and no paths, and an explicitly persisted fsmonitor-valid index entry.
+Before editing the helper, this agent reproduced the reported condition
+against the exact pre-change helper blob
+`f17f698febfb17bf9d83981d463661608809ebf0`: clean control classified `clean`;
+after a tracked edit, `git ls-files -v` remained `H`, `git ls-files -f` showed
+`h`, and the classifier still returned `clean`. The index checksum remained
+`f69c3e739ad85095128fbc3d29943de6861ad229d044c8ffec34f69fd8eee27a` across
+the calls. The same false-clean was reproduced with the exact pre-change
+helper for an initialized submodule with the equivalent persisted flag; its
+index checksum also remained unchanged. The review evidence supplied through
+the task reports that a scratch candidate with command-scoped
+`core.fsmonitor=false` returned `dirty`.
+
+The fix adds `-c core.fsmonitor=false` to the shared, isolated Git invocation.
+Recursive submodule inspection uses that same invocation boundary, so
+fsmonitor cannot suppress tracked-path comparison in either the root or
+initialized submodules. The classifier does not change repository-local
+configuration or indexes. The fixture suite installs a protocol-v2 monitor,
+verifies that it was invoked, explicitly sets and confirms `H` with
+`ls-files -v` and persisted `h` with `ls-files -f`, checks a clean control,
+then changes a tracked file and requires `dirty`; root and submodule index
+checksums must remain unchanged across classifier calls. The environment
+injects Git command-line configuration including fsmonitor=false, so the
+fixture script explicitly sets `GIT_CONFIG_COUNT=0` to ensure its local
+monitor setup is genuinely exercised.
+
+Fixture coverage was repaired rather than relabeled: addition, deletion,
+rename, mode-only, and type-only cases now use fresh repositories with clean
+controls. The mode fixture explicitly verifies `core.filemode=false`, starts
+with a non-executable tracked file, verifies `chmod +x` changed the actual
+filesystem executable bit, then requires the production helper to return
+`dirty`. Newline/non-ASCII, leading-dash/non-ASCII, and whitespace/tab filename
+cases each use a fresh clean repository and require `dirty` only after adding
+that path. The earlier staged deletion cannot satisfy the rename assertion,
+nor can an earlier unusual filename satisfy a later one. Mixed-change,
+failure-precedence, instability, malformed-output, schema, and synthetic
+staging coverage remains.
+
+| Corrected validation case | Expected | Observed |
+|---|---|---|
+| Configured root fsmonitor clean control; actual hook invocation and persisted `H`/`h` flags established | `clean` | `clean`; hook invocation recorded; flags verified |
+| Tracked edit after persisted root fsmonitor-valid entry | `dirty`; no classifier index mutation | `dirty`; root index checksum unchanged |
+| Configured initialized-submodule monitor clean control; actual hook and persisted flags established | `clean` | `clean`; hook invocation recorded; submodule flags verified |
+| Tracked submodule edit after persisted fsmonitor-valid entry | `dirty`; no classifier index mutation | `dirty`; submodule index checksum unchanged |
+| Isolated mode-only change, `core.filemode=false`, filesystem executable-bit capability | clean control then `dirty` | `clean`, then `dirty`; config false and executable-bit change both asserted |
+| Isolated staged rename, with no pending deletion or other changes | clean control then `dirty` | `clean`, then `dirty` |
+| Isolated newline/non-ASCII, leading-dash/non-ASCII, and space/tab names | Each clean control then `dirty` | Each `clean`, then `dirty` |
+| Retained classification, recursive-submodule, hidden-config, error precedence, unstable-observation, output-rejection, full Draft 7 schema and bounded staging cases | Existing contract outcomes | All passed in the full isolated suite |
+
+**Commands and evidence:** `PATH=/tmp/qbind-e07-review-venv/bin:$PATH bash
+scripts/devnet/tests/test_source_tree_state.sh` passed at corrective commit
+`f9acef1d7f57a5bb8cb7e242450584e67d277c29`, using disposable temporary Git
+repositories and a synthetic manifest. The test log at that revision includes
+pass results for root and submodule fsmonitor controls, mode-only, rename,
+and isolated unusual-filename cases. The full Draft 7 schema and bounded
+staged-copy checks accept `clean`, `dirty`, and `unknown`. Synthetic staged
+copy validation is not execution of Run 385 and does not establish hosted CI
+behavior. No Run 384/385, Cargo, nodes, workflows, scanners, signing,
+deployment, or activation was run.
+
+`bash -n scripts/devnet/lib/source_tree_state.sh
+scripts/devnet/tests/test_source_tree_state.sh` passed.
+`python3 -m json.tool
+docs/release/public-devnet/binary/RELEASE_ARTIFACT_MANIFEST.schema.json`
+parsed the schema. `git -c core.whitespace=cr-at-eol diff --check` passed.
+Run 384 syntax was checked from a temporary LF-normalized copy using
+`sed 's/\r$//'`; this is not execution of the committed CRLF producer. The
+schema bytes were not changed by this correction. The baseline and reviewed
+final schema each contain exactly **205 CRLF line endings, zero bare LF, and
+zero bare CR**; the schema's existing bytes and line-ending form are
+preserved.
+
+Corrective source identities at the validation revision:
+
+| Path | Mode | Blob |
+|---|---:|---|
+| `scripts/devnet/lib/source_tree_state.sh` | `100644` | `ebdad4a2301467e90aea7d4ebe5b9ac804023980` |
+| `scripts/devnet/tests/test_source_tree_state.sh` | `100644` | `67b1e7af03a61e8cc853120f1d0420dc5e5bd7d6` |
+| `docs/release/public-devnet/binary/RELEASE_ARTIFACT_MANIFEST.schema.json` (unchanged) | `100644` | `aef539a567c31a6c8bc9713598888fb7fe47d7f0` |
+
+Remaining limitations are explicit: the classification is Git-normalized
+tracked-path state with only root `docs/**` excluded; untracked/ignored files,
+external build inputs, toolchains, and external environment remain outside
+scope. It is not a raw-byte, build-time cleanliness, hermetic-build, or
+source-to-binary claim. Stability checks are non-atomic and cannot detect a
+transient change-and-restore between observations. External
+build/artifact/runtime/deployment evidence remains unresolved. Current status
+remains **IMPLEMENTED — VERIFICATION PENDING** until the corrected
+implementation receives a separate independent post-change review; E07
+overall and all release/operational gates remain unchanged.
 
 ### A49.1 non-regression rules for every provenance task
 
