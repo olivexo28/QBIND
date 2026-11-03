@@ -1,3 +1,207 @@
+<!-- A49.1 BUILD-PROVENANCE CORRECTION LAYER (internal v1.138) — prepended to the preserved v1.137 input below -->
+
+# QBIND Security Findings Register — A49.1 correction layer (internal v1.138)
+
+**Pass type:** bounded report amendment of A49 (not a new audit pass, not A50, not a supply-chain
+audit). Read-only.
+**Date:** 2026-11-03.
+**Audited source (unchanged):** repository `https://github.com/olivexo28/QBIND.git`, HEAD
+`18d71a549d868ed33d352e9fc70a9d060f75e03b`, root tree
+`5b6c543435ac017dd8372c93f48be397899db14a`. Delivery commits are delivery locations, not
+replacement audit baselines.
+**Input preserved below:** internal v1.137, 5,466,185 bytes, SHA-256
+`6ef2cca55d181f93552dddf43f5628d721a019adb098b22facaa7efc83a8ea88`, LF-only — verified this turn
+(bytes + SHA match; ALL SIX embedded archives preserved; A49 layer present; A49.1 absent) and
+preserved byte-for-byte exactly once beneath this layer.
+**Scope discipline:** corrects A49 wording within OBL-REL-1a only. No new finding, severity,
+closure, or blanket security verdict; no global index rewrite. All 54 obligation identities and
+all finding IDs/aliases preserved. C5 stays OPEN; runtime stays UNEXECUTED. A50 is not authorized
+and is not scheduled.
+
+---
+
+## A49.1-C1 — configured build command vs effective build environment
+
+`[SUPERSEDED-A49 → A49.1-C1]` A49-A characterized the workflow toolchain step as installing/using
+`stable`, called the host triple the build target, and spoke of "Cargo's default release profile"
+and an "empty feature set" without the external-override qualifier.
+
+**Corrected bounded statements (grounded in the committed step and `run_384`):**
+- The workflow step is `rustup show active-toolchain || rustup toolchain install stable --profile
+  minimal` (WF2 `:62-67`, WF3 `:85-89`). This does **not** unconditionally select `stable`: if a
+  toolchain is already active, `rustup show active-toolchain` succeeds and the `||` install never
+  runs; installing `stable` is not the same as selecting it. The supported facts are: **no
+  committed compiler-version pin** exists (no `rust-toolchain*`), and the **effective compiler
+  depends on the active toolchain plus applicable environment/configuration** (e.g. a `rustup`
+  override or `RUSTUP_TOOLCHAIN`), which this review does not observe.
+- The build command passes **no `--target`**. That establishes the command does **not** itself
+  explicitly select a target; it does **not** establish the effective compilation target is the
+  host. `run_384:55`'s `rustc -vV … host:` value is a recorded **label**, not proof of Cargo's
+  effective target when external target configuration (`CARGO_BUILD_TARGET`, a `.cargo/config`
+  `[build] target`) exists. No such config is committed, so absent an external override the host
+  target applies — stated conditionally, not as proof.
+- **No committed `[profile.release]`** means Cargo's release-profile **defaults apply absent
+  external overrides** (e.g. `CARGO_PROFILE_RELEASE_*`); it does **not** establish the profile
+  settings of any deployed binary.
+- The `default = []` / opt-in features (`async-peer-manager`, `hsm-pkcs11`, `test-utils`) concern
+  the **`qbind-node` package's own optional features** only. This is **not** a claim of an empty
+  dependency feature graph — transitive dependencies still resolve their own features.
+
+**Preserved (unchanged):** the supported release command
+(`cargo build -p qbind-node --release --locked --bin qbind-node`, `run_384:50`/`:160-161`) and the
+`--locked` dependency-graph enforcement against `Cargo.lock`. No expansion into a dependency-
+feature or compiler audit.
+
+**Remaining evidence requirement:** the effective compiler, target, profile, and any external
+`cargo`/`rustup` configuration are **build-environment/execution** evidence, outside committed
+source.
+
+## A49.1-C2 — build-script non-emission does not establish an absent compiler variable
+
+`[SUPERSEDED-A49 → A49.1-C2]` A49-B/C/D treated "build.rs emits no `cargo:rustc-env` directive" as
+equivalent to "`option_env!` returns `None` → the label renders `unknown`." That equivalence is
+incorrect.
+
+**Corrected bounded statement.** `option_env!` reads the environment of the **`rustc` process** at
+compile time. `cargo:rustc-env=KEY=VALUE` **sets/overrides** that variable for the crate
+compilation; the **absence** of the directive does **not clear** a value the compiler process
+already inherited. Four distinct situations must be separated — A49 collapsed them to the first:
+
+1. The variable is genuinely absent from the compiler environment → `option_env!` is `None` →
+   `unknown`.
+2. A valid build-script value overrides an inherited one → the compiler sees the **emitted**
+   (sanitized) value.
+3. The build script **rejects** an inherited value and emits **no** replacement → the compiler may
+   still see the **inherited (unsanitized)** value.
+4. Another external mechanism changes/clears the compiler environment → outside build.rs control.
+
+**Worked source/API-semantics case (not an executed reproduction).** With
+`QBIND_BUILD_ID="!!!"` present in the environment that `cargo` inherits (so it reaches both
+build.rs and, by child-process inheritance, `rustc`): build.rs `std::env::var` reads `"!!!"`,
+`sanitize("!!!")` maps all chars to `_` → `"___"` → the all-`_` rule returns `None`
+(`build.rs:50-52`) → **no** `cargo:rustc-env=QBIND_BUILD_ID` is emitted. If the compiler retains
+the inherited `QBIND_BUILD_ID=!!!`, then `metrics.rs:10557` `option_env!("QBIND_BUILD_ID")` =
+`Some("!!!")`, and `sanitize_info_label("!!!")` = `"___"` (the render sanitizer does **not** reject
+all-`_`, `:5798-5802`). The rendered label is therefore `build_id="___"`, **not** automatically
+`"unknown"`. This is a case about Cargo/`rustc` environment semantics; it is **not** a defect of
+Run-384's **canonical** injection, where `CANON_BUILD_ID`/`CANON_GIT_COMMIT` are valid sanitizable
+tokens that build.rs emits and the cross-checks then confirm.
+
+For `QBIND_GIT_COMMIT`, separate: (a) a successful git fallback that **emits** an override
+(`build.rs:96` `.or_else(git_short_commit)` → `cargo:rustc-env`), which the compiler then sees,
+from (b) a fallback that returns `None` while an **inherited** `QBIND_GIT_COMMIT` value remains in
+the compiler environment — in case (b) the inherited value, not `unknown`, is what `option_env!`
+observes.
+
+**Narrowed related wording (superseding A49 over-claims):**
+- Syntax/length sanitization (`[A-Za-z0-9._-]`, ≤64 chars) is **not** provenance authentication
+  and **not** a semantic guarantee that a value is non-sensitive — only a character/length filter.
+- The Run-382 tests assert properties of the **actually compiled** labels in the test build; they
+  do **not** prove the property holds for **every** possible input.
+- build.rs's `Result`/`Option` error handling shows no panic on the **inspected** paths; it does
+  **not** establish universal panic/abort freedom for all inputs.
+- A49's phrasing is corrected so it does **not** imply the tests require a non-`unknown` commit —
+  the relevant assertions explicitly permit `unknown`.
+
+**Documentation note.** Read-only retrieval of the four cited primary sources
+(cargo build-scripts reference, cargo config reference, `std::option_env!`, `std::process::Command`)
+was attempted this turn; `doc.rust-lang.org` does not resolve from this sandbox
+(`getaddrinfo ENOTFOUND`). The environment-inheritance / `cargo:rustc-env`-override semantics above
+are stated as **documented API semantics**; the only limitation recorded is the local retrieval
+failure. No build or test was executed.
+
+**Remaining evidence requirement:** whether the compiler actually retains a given inherited value
+in a specific build is **build-environment/execution** evidence; the semantics are **documented
+tooling behavior**, not missing QBIND source.
+
+## A49.1-C3 — restore the comparisons Run-384 actually performs
+
+`[SUPERSEDED-A49 → A49.1-C3]` A49-C stated "the ELF build-id and the metric build_id … never
+compared in source." That is incorrect. Reading `run_384:330-355`:
+
+- **Metric build ID** (`:330,332-333`): `manifest.metric_build_id == scraped METRIC_BID` **and**
+  `== CANON_BUILD_ID` (canonical injected) — three-way equality or `fail`.
+- **Metric git commit** (`:331,334-335`): `manifest.metric_git_commit == scraped METRIC_GC`
+  **and** `== CANON_GIT_COMMIT` (canonical checkout-derived) — three-way equality or `fail`.
+- **Binary SHA-256** (`:341,343`): `manifest.binary_sha256 == CANON_SHA` (captured binary SHA) or
+  `fail`.
+- **ELF build ID** (`:342,344`): `manifest.elf_build_id == CANON_ELF` (captured ELF build id) or
+  `fail`.
+- **Explicit inequality** (`:351-352`): `manifest.metric_build_id != manifest.elf_build_id` or
+  `fail` ("must be distinct planes"), plus a both-fields-present check (`:353-354`).
+
+Corrected bounded statement: withdraw "never compared." The script **does** compare the metric
+build ID and the ELF build ID — with an **inequality** assertion that they **differ**. This must
+**not** be re-stated as an expectation that these unrelated identifiers be equal; the check
+correctly asserts distinctness.
+
+These checks establish **internal consistency** between the manifest and the script's **own
+captured values** (the canonical injected/derived values, the live metric scrape, and the
+`sha256sum`/`readelf` captures), **conditional on execution reaching `:330-355`**. They do **not**
+independently prove correspondence between the **audited source** and the **compiled/deployed**
+bytes. A49's within-run-coupling characterization of `binary_sha256 ⟷ commit` therefore stands
+(the script records and echoes each captured value; it does not bind "this SHA was produced from
+this commit"); only the specific "never compared" claim about ELF-vs-metric build id is
+withdrawn.
+
+**Preserved (unchanged, not re-audited):** A48–A48.2's CRLF, execution/invocation, artifact-
+ordering, and attestation qualifications — including that WF2/WF3 invoke CRLF-committed
+`run_385`→`run_384` directly, so reaching `:330-355` is CONDITIONAL on CRLF execution.
+
+**Remaining evidence requirement:** the source-to-binary and binary-to-deployed correspondences
+remain **artifact/provenance** evidence, external to these internal cross-checks.
+
+## A49.1-C4 — classify the remaining evidence accurately
+
+`[SUPERSEDED-A49 → A49.1-C4]` Tighten A49's residual classification into four separated planes:
+
+1. **Repository-owned build inputs, directives, and consumers** — `Cargo.toml`/`Cargo.lock`
+   specifiers and `--locked` enforcement, `build.rs` injection/sanitization/fallback/rerun
+   directives, and the `metrics.rs` consumer: **source-reviewed / source-complete** within this
+   sub-boundary.
+2. **Exact Cargo/Git rebuild semantics** (the HEAD-path-only `rerun-if-changed`; `cargo:rustc-env`
+   override vs inherited-environment behavior): **dependency/tooling semantics**, documented
+   behavior — **unresolved only as to local retrieval**, and **not** missing QBIND implementation.
+3. **Effective compiler, target, configuration, and actual cache behavior**:
+   **build-environment / execution** evidence, not committed source.
+4. **Actual binary / manifest / attestation correspondence**: **artifact and provenance**
+   evidence.
+
+The configured attestation (WF3 `actions/attest-build-provenance@v2`) remains a **delegated,
+unexecuted** mechanism in this review. It is **not** described as already proving the authenticity
+of arbitrary injected labels, the source cleanliness, or the deployed binary. No recursive audit
+of Cargo, `rustup`, Git, external actions, or attestation infrastructure is performed.
+
+---
+
+## Closure of the A49 / A49.1 repository-source sub-boundary
+
+With C1–C4 applied, the **repository-owned** build-configuration and build-identity source review
+(inputs, `build.rs`, `metrics.rs` consumer, and Run-384's internal cross-checks) is **source-
+complete** to its stated scope. No material contradiction prevents closure. The following remain
+**separately classified residuals** and are **not** reasons for another source pass: documented
+Cargo/Git rebuild semantics (tooling); effective compiler/target/profile/cache (build-environment);
+and binary/manifest/attestation/deployed-binary correspondence (artifact/provenance, including the
+delegated unexecuted attestation). Checked against existing IDs and **E07**: these are
+evidence-assurance residuals consistent with the already-tracked E07 / OBL-REL-1a/1b scope; **no
+new finding ID is minted and no "no finding" is forced.**
+
+## A49.1 correction ledger
+
+| Correction | Supersedes | Grounded in | Remaining evidence |
+|---|---|---|---|
+| C1 toolchain not unconditionally stable; target/profile/features qualified | A49-A | WF2:62-67 / WF3:85-89; `run_384:50,55,160-161`; root `Cargo.toml` (no `[profile.release]`); node `Cargo.toml` features | effective compiler/target/profile (build-env) |
+| C2 non-emission ≠ absent compiler var; inherited-env case; narrowed sanitization/test/panic wording | A49-B/C/D | `build.rs:36-54,93-107`; `metrics.rs:5785-5803,10556-10576`; documented `cargo:rustc-env`/`option_env!` semantics (retrieval attempted; `doc.rust-lang.org` ENOTFOUND) | whether compiler retains inherited value (build-env) |
+| C3 restore Run-384 cross-checks incl. metric≠ELF inequality; withdraw "never compared" | A49-C | `run_384:330-355` | source↔binary↔deployed correspondence (artifact/provenance) |
+| C4 four-plane residual classification; attestation delegated/unexecuted | A49-C/disposition | WF3:99-102,124-133 (A48 context) | tooling / build-env / artifact-provenance planes |
+
+**Stopping statement.** A49.1 is complete. No finding, severity, or closure is forced; C5 remains
+OPEN; runtime remains UNEXECUTED; the baseline is unchanged. A50 is not authorized and is not
+scheduled.
+
+---
+<!-- End A49.1 correction layer. The complete, byte-for-byte preserved internal v1.137 input follows. -->
+
 <!-- A49 BUILD-CONFIGURATION & BUILD-IDENTITY PROVENANCE LAYER (internal v1.137) — prepended to the preserved v1.136 input below -->
 
 # QBIND Security Findings Register — A49 layer (internal v1.137)
