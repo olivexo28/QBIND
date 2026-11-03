@@ -154,7 +154,8 @@ not omitted fields):**
   baseline, not silently promoted to that baseline or current main.
 * **Current-code applicability:** **NOT YET CHECKED**, except the specifically
   bounded current script/schema/caller observations in section 8 and
-  document-cited existing verification in section 7. A reference to a RUN 422
+  A21-F1 mechanism verification in section 12, and document-cited existing
+  verification in section 7. A reference to a RUN 422
   result is only evidence for its stated scope/revision, not blanket current
   applicability or a new source review. Before implementation, record the
   independent pre-implementation review and its bounded outcome under section
@@ -213,7 +214,7 @@ not this task's source verification.
 | A15-F1 | OPEN supervision/observability gap; A14.1-D at A:L11708-L11728, A45.1 preserves | Consensus JoinHandle owners; D; O/R availability relevance | Check owner detection and process/task propagation; avoid rewriting component scope into protocol-safety claim | Task termination, owner detection, transport/metrics outcomes and cleanup E21; no automatic recovery claim |
 | A17-F1 | OPEN logical-only catch-up endorsements; A5/A19.3/A19.4, A:L9260; downstream disagreement unestablished | RestoreCatchupResponse/QC reconstruction; D; R-F7 relevance | Check admitted validator/anchor/chain conditions and exact current consumer; do not conflate TC setter | Missing endorsement verification, suffix/commit controls and effects; later E20 multi-node evidence; no arbitrary-finality assertion |
 | A19-F1 | OPEN parsed-but-ignored authority RemoteSigner selector; A19.1/A20, A:L9782-L10350 | Authority trust-bundle signing surfaces; D/MI; C5/O | Preserve seven-surface map; decide consume/remove selector under relevant contract, not duplicate validator signer | Selected-policy enforcement on each differing surface, clear refusal/operator documentation |
-| A21-F1 = QBIND-A1-F001 | OPEN STATIC hand-written count-driven reservation; R7.1 at A:L14115 and A44 | Proposal decoder, before body/sender checks; D; O/R availability relevance | Bounded current check, then checked count/body/resource limits; no policy bypass | Temporary hostile/truncated counts plus valid controls; reservation != RSS != guaranteed crash; E12/E13 |
+| A21-F1 = QBIND-A1-F001 | **CONFIRMED TO CURRENT SOURCE MECHANISM**; R7.1 at A:L14115-L14128 and A44 qualifications retained; section 12 | Proposal decoder, after optional QC, before tx-body/sender checks; D; O/R availability relevance | Allocation-free structural preflight contract **PROPOSED — AWAITING INDEPENDENT CONTRACT REVIEW**; implementation **NOT STARTED**; no arbitrary resource caps or policy bypass | E12 focused decoder cases in section 12 **FUTURE / NOT EXECUTED**; regression/runtime evidence **NOT EXECUTED**; E13 queue/aggregate-memory scope separate |
 | A23-F1 | OPEN K!=T ratified-target/bundle-signer gap; A9.1 at A:L13517-L13518; A26 refinements retained | V2 trust ratification/install; D; C4/O | Ratification invocation/data-dir and independent genesis provenance prerequisites; retain DevNet no-data-dir no-op qualification | K/T, external genesis and gate/config controls; E23; not automatic runtime authorization escalation |
 | A24-F1 | OPEN opt-in metrics HTTP resource limits/deadlines; A15 at A:L11446-L11489 | Metrics HTTP handlers; D; O | Check enabled/reachable endpoint and size/concurrency/deadline controls | Bounded request/header/stall/handler/shutdown evidence E24; default-disabled is reachability mitigation |
 | A25-F1 | Source-established operator-assurance gap; severity uncertain, no distinct ratification authorization bypass; A25.2 at A:L8351-L8426 | Run-163 governance-proof fixture verifier; D/MI; C4/C5/O | Preserve upstream real ratification gate; decide real independent authority proof versus truthful unavailable control | Public-data issuer-pattern/threshold controls plus approved real proof; no bypass of upstream signature inferred |
@@ -275,7 +276,7 @@ statuses not supported by a current-lineage review remain provisional.
 | OBL-AVL-4b | Eviction/reconnect full socket-release chain traced scoped; A13.1, A45.1 accounting preserves | D/ME / service shutdown / O | Abort request != blocking worker/socket completion | E14 completion and reload evidence |
 | OBL-SUP-1a | Consensus-task owner/supervision SOURCE-COMPLETE bounded; A14.1/A15-F1 | D/ME / main task ownership / O/R relevance | Preserve actual owner/caller and no-inbound persistence corrections | E21 detection/recovery/process outcomes |
 | OBL-SUP-1b | Outbound dial read-loop qualification source traced; A26 historical section 31 plus A13.1, A23.1 baseline rule | ME / dial/read ownership / O | Check precise route before applying older trace | E21 termination propagation and cleanup |
-| OBL-PAR-1 | Inner parser/allocation source inventory complete to scope, A7.1/R7 then A42.1/A43.1; A21-F1 distinct | D/ME / consensus/DAG codecs / O | Preserve hand-written versus serde distinction; no bincode limit-counter claim | Explicit input cap, availability, nesting, reservation and E12 |
+| OBL-PAR-1 | Inner parser/allocation source inventory complete to scope, A7.1/R7 then A42.1/A43.1; A21-F1 current mechanism confirmed in section 12, not fixed | D/ME / consensus/DAG codecs / O | Preserve hand-written versus serde distinction; no bincode limit-counter claim; A21-F1 preflight contract awaiting independent review, implementation NOT STARTED | Caller-specific input caps, availability, nesting, reservation and E12; section 12 cases FUTURE / NOT EXECUTED; no obligation closure |
 | OBL-PAR-2 | Outbound-size boundaries source traced scoped A21/section 26.4b; A45.1 ingress does not close outbound | ME / frame/channel encoders / O | Check caller-specific outbound size and byte ownership | E13 item count != bytes; in-flight/copies included |
 | OBL-DEP-1 | Retrievable pinned source, not availability-blocked (A23.1); bounded decoder review complete A43.1, broader residual open | ME / bincode/serde/std allocator / A/O | Do not re-queue completed schemas; pin remaining growth/aggregate question | Provenance, capacities versus requests, aggregate/runtime RSS E12 |
 | OBL-DEP-2a | Repo-owned randomness/error chain complete sub-boundary A39.1; overall not declared complete A40 | ME / qbind-crypto integration / C5/O | Keep backend correctness/entropy and secret erasure separate | A40 platform/build inputs, A41 erasure scope; E06 |
@@ -323,8 +324,8 @@ existing scoped results retained.
 | E09 | Deployment and validator launch profile | ME / live operation / M4/M6/S5/S7/RS1 | Four stopped machines are not live evidence; approved deployment/test scope first |
 | E10 | A4-F1 occupancy and A4-F2 cookie integration | ME / handshake resources / O | Occupancy/worker/socket release and complete cookie/client retry, not rate alone |
 | E11 | A5-F1 frame-timeout platform behavior | ME / read framing / O | Exact partial-consumption schedule with idle/valid controls and connection outcome |
-| E12 | Parser/dependency/aggregate memory | ME / codecs/allocator / O/A | A43.1 schema source work retained; explicit cap != heap cap, reservation != capacity/RSS; measure remaining aggregate scope |
-| E13 | Queue/ownership/outbound byte budgets | ME / channels/encoders / O | Four-channel A45.1 inventory, in-flight buffers/concurrency/outbound caller sizes; no global ceiling asserted |
+| E12 | Parser/dependency/aggregate memory; A21-F1 decoder evidence obligation retained | ME / codecs/allocator / O/A | A43.1 schema source work retained; section 12 current mechanism confirmed, correction contract proposed, regression/runtime NOT EXECUTED; explicit cap != heap cap, request != capacity/RSS; broader dependency/aggregate residuals remain open |
+| E13 | Queue/ownership/outbound byte budgets; separate queue/aggregate-memory scope, not the A21-F1 local correction | ME / channels/encoders / O | Four-channel A45.1 inventory, in-flight buffers/concurrency/outbound caller sizes and deployment-dependent effects retained; no global ceiling asserted or closed by section 12 |
 | E14 | Displaced-session/eviction/reload completion | ME / session lifecycle / O/C4 | Registered/displaced, idle/active, EOF/fatal, task and blocking worker plus socket completion |
 | E15 | Transaction families/auth/caller/state/nonce | DD/MI/ME / native/ledger/EVM / R before ingress | RUN 422 source/test slices retained; approved positive authority and actual deployed caller remain |
 | E16 | Native governance/consumers | DD/MI/ME / governance programs / R/C5 | Refusal != usable governance; name remaining consumer and prove approved authorization |
@@ -1011,8 +1012,9 @@ public DevNet **NO-GO**, and all other release/operational gates unchanged.
 This task runs no project tests or operational work.
 
 **Next action:** independent pre-implementation verification of the next
-selected candidate under section 2. This documentation task neither selects
-an unreviewed fix nor authorizes implementation.
+selected candidate under section 2; section 12 now records A21-F1's confirmed
+source mechanism and proposed contract awaiting independent contract review.
+This documentation task does not authorize implementation.
 
 ### A49.1 non-regression rules for every provenance task
 
@@ -1096,7 +1098,8 @@ For each new Claude audit uploaded under `Audit/`:
 
 The delivery scope and check results in the following paragraphs belong to
 the original coordination task, not this 2026-11-03 sole-path documentation
-record. The current task boundary is recorded in section 8 above.
+record. The E07 task boundary is recorded in section 8 above; the A21-F1
+documentation-only contract task boundary is recorded in section 12 below.
 
 This task permits only this new plan and an appended navigation/scope note in
 the blocker register. Validate committed input identities/normalization,
@@ -1128,10 +1131,255 @@ staged for delivery; final commit/tree/remote checks are reported separately
 after commit, without a self-referential hash in this document.
 
 **Next action (supersedes the completed constant-clean implementation
-instruction):** independent pre-implementation verification of the next
-selected candidate under section 2. Section 8's E07 / OBL-REL-1a / A48.1-C2
+instruction):** independent contract review of section 12's proposed A21-F1
+correction under section 2; implementation remains NOT STARTED and is not
+authorized here. Section 8's E07 / OBL-REL-1a / A48.1-C2
 bounded correction is implemented, independently verified and published;
-it is no longer the next implementation. This task neither selects an
-unreviewed fix nor authorizes implementation. Unrelated BR decisions remain
+it is no longer the next implementation. Unrelated BR decisions remain
 mandatory for their dependent authority/recovery/operational work; activation
 remains DISABLED and public DevNet NO-GO.
+
+## 12. A21-F1 candidate task card and pre-implementation contract
+
+**Finding: CONFIRMED TO CURRENT SOURCE MECHANISM. Correction contract:
+PROPOSED — AWAITING INDEPENDENT CONTRACT REVIEW. Implementation: NOT STARTED.
+Regression/runtime evidence: NOT EXECUTED.**
+
+Candidate: **A21-F1 / QBIND-A1-F001**, related **OBL-PAR-1 / E12**.
+Finding reviewer: independent **ChatGPT source review supplied through this
+task**, confirming the mechanism below, not an executed exploit or approval
+of an unwritten implementation. Contract reviewer: **UNASSIGNED**.
+Implementation/evidence assignees and comparative priority remain UNASSIGNED /
+ASSESSMENT PENDING. This is a bounded next candidate, not a new finding,
+severity, closed obligation, policy acceptance or implementation authorization.
+**E13's separate queue/aggregate-memory and deployment-effect scope remains
+open**; the local decoder contract does not absorb or discharge it.
+
+### Entry identities and verification boundary (2026-11-03)
+
+| Identity | Verified value / qualification |
+|---|---|
+| Fetch/push destination | `origin`, `https://github.com/olivexo28/QBIND`, same repository for both; no remote/configuration changes |
+| Task starting commit; local main; origin/main; advertised remote main | `e9cf8e4c68a7432f36bf896955618a37461c77ba` |
+| Task starting tree | `1ff97c27f1e8105114aa743150443b314fd2a9ae` |
+| Task branch | `copilot/audit-a21-proposal-decoder-preimplementation-contract`; absent locally/remotely at entry, created from the exact starting commit |
+| Sole permitted changed path; starting mode/blob | `docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md`; `100644` / `a49bf8ab8bb8329f52eaf2605f4ed8a52daa0501` |
+| Checkout/instructions | Clean including untracked files; no applicable `AGENTS.md` in repository or ancestor locations, no tracked applicable instruction file found |
+| Starting raw parent | `93422c10b9b31215f9027aa1de880179749d21ef`; shallow checkout, parent object unavailable; no traversable ancestry claim beyond the available start |
+| Committed audit input | `Audit/QBIND_SECURITY_FINDINGS_REGISTER.md`, `100644` / `cd81efdbaf2bfb45e00dc3c60db3ea4f523adfa0`, A49.1 / internal v1.138; section 1 raw/normalized identities preserved |
+| Audited source baseline, NOT this task's implementation baseline | `18d71a549d868ed33d352e9fc70a9d060f75e03b`; unavailable locally as already qualified in section 1 |
+| Current decoder | `crates/qbind-wire/src/consensus.rs`, `100755` / `9233aaaa21196a3e6e9a3af8303e076671f73718` |
+| Current primitive readers | `crates/qbind-wire/src/io.rs`, `100755` / `c5df712d3bbf42e7301d63f14d6b6710eef1a1dc` |
+| Current wire NetMessage | `crates/qbind-wire/src/net.rs`, `100755` / `983a40757bfc612fc27d168014390c8be79e0187` |
+| Current binary handler, separately inspected | `crates/qbind-node/src/binary_consensus_loop.rs`, `100644` / `7a60d01841263c1425434fc48045629e0a85ab14`; audited R7.6 handler blob was `c4925ddf0977dff528dbb1815f757d67ea31e7b8` |
+
+All current source locators below refer to the task starting commit, not an
+implementation revision. The supplied independent review reports that the
+decoder, readers and NetMessage blobs match the audited baseline; their
+current identities and source were checked locally. That historical equality
+is attributed to the supplied review, not a local comparison against an
+unavailable object. The binary-handler blob differs and was read separately.
+Final documentation commit/tree, manifest, remote equality and clean-worktree
+checks are reported after publication, not self-referentially embedded here.
+
+**Audit reconciliation:** R7.1, A:L14115-L14128, retains OPEN STATIC and the
+finite-u32, handshake-only, platform-dependent qualifications. A21.3,
+A:L21163-L21169, distinguishes production wiring from observed deployment,
+withdraws literal-unbounded and reservation-at-most-input language, and
+separates source inventory completion from E12/E13 evidence. A44,
+A:L2668-L2822, answers the successfully populated proposal's post-decode
+ownership/refusal boundary, not the reservation defect. Its carry-forward
+correction at A:L2446-L2458 places the metric before decode and preserves the
+production binding gate. Later authority refusal contains downstream effects,
+not earlier reservation. No older headline overrides these qualifications.
+
+### Current mechanism, callers and prerequisites
+
+`BlockProposal::decode`, consensus.rs:727-797, reads fixed fields including
+`tx_count` at :747, obtains/decodes optional QC at :756-764, then calls
+`Vec::with_capacity(tx_count as usize)` at :766 **before** reading transaction
+lengths/bodies (:767-771) or signature framing/body (:774-776).
+`get_u16`, `get_u32`, `get_bytes` (io.rs:39-55,72-79) reject unavailable bytes
+with `UnexpectedEof`; a failed primitive does not consume its own input.
+Earlier successful prefixes/fields remain consumed. Thus necessary body
+validation occurs too late to prevent the identified transaction-list
+reservation, and complete earlier transactions may already have been copied
+before a later malformed field fails.
+
+| Current route | Boundary and caller behavior |
+|---|---|
+| Direct `BlockProposal::decode(&mut slice)` | No input-size wrapper in this API. Binary handler :6191-6200 calls it directly; storage.rs:850-858,2049-2054 also decodes stored bytes directly and maps codec errors. Neither storage call checks remaining bytes. This does not equate stored-input and remote-input threat models. |
+| `NetMessage::decode` | net.rs:584-610 reads an outer discriminator and directly invokes BlockProposal at :604; no size precheck. async_peer_manager.rs:2167-2177,2426-2436 calls this API, logs errors and discards that message's slice; the first route has its own 10 MiB frame-length check at :2129, not the NetMessage wrapper's cap. No universal cap is inferred for this API. |
+| `NetMessage::decode_from_slice` | net.rs:634-644 checks `MAX_NET_MESSAGE_BYTES` (1 MiB, :11) before decoding a local slice; does not reject trailing bytes or expose its cursor. peer.rs:90-93 uses this wrapper after secure receive, mapping errors. Its cap is not inherited by the direct/binary routes. |
+| P2P `ConsensusNetMsg::Proposal(Vec<u8>)` | Not wire `NetMessage`. secure_channel.rs:415-419,650-669 receives/decrypts transport frames; framed_io.rs:110-129 checks the 16 MiB ciphertext bound before its frame-buffer allocation. p2p_tcp.rs:177-201 validates its inner frame and bincode-decodes `P2pMessage`; :1489-1519 applies any installed per-peer rate limiter and forwards the origin-carrying envelope. p2p_inbound.rs:370-386,506-518 demuxes Consensus and queues an `InboundConsensusEnvelope`. main.rs:6317 installs that handler; binary_consensus_loop.rs:3128-3147 receives and invokes the binary handler. Outer buffers/decoding and queue admission precede inner BlockProposal decode. Ciphertext capacity is not all available inner-proposal bytes. |
+
+P2P reach requires the selected P2P startup/configuration, completed KEMTLS
+handshake, decryptable admitted frame, valid outer Consensus/Proposal encoding,
+and passage through installed transport/rate/queue admission. Preserve R7.1's
+mode prerequisites: Optional/Disabled may admit certificate-less sessions;
+Required needs an accepted valid non-revoked certificate at handshake, not
+consensus binding-map membership merely to reach this earlier allocation.
+This is not transport impersonation or inner signature forgery evidence.
+LocalMesh/no-P2P is distinct; `io=None` supplies no inbound receiver
+(binary_consensus_loop.rs:2926-2933). No observed public deployment is asserted.
+
+Production builder installs `Some(binding_gate)` even with an empty authority
+map (p2p_node_builder.rs:1583-1590,1685); do not generalize the test-only no-gate
+branch. Binary metrics run before decode (:6179-6187), decode precedes
+`bind_sender` (:6191-6200), and binding refusal returns (:6201-6212).
+Consensus signature/suite checks and current-authorization admission remain
+later (:6214-6437), with embedded-QC/freshness/engine gates later still.
+Production selects Required (main.rs:8665-8682), supplies no Proposal/Vote
+authority there and no current-auth snapshot at the loop call (:3140-3141).
+Absent effective authority rejects after decode (:6423-6435); a present
+authority without current authorization also remains fail-closed under
+Required. None of these guards prevents the earlier reservation.
+
+The count is finite `u32` (at most 4,294,967,295), not literally unbounded.
+An outer wire-length cap alone does not prove consistency of that internal
+count. A reservation request is not allocator capacity, heap footprint or
+RSS; no guaranteed OOM, process failure, consensus disruption or network-wide
+impact follows from this source observation.
+
+### Structural witness on paper only
+
+Offsets are zero-based in the **inner BlockProposal**, little-endian for
+integer fields, derived from consensus.rs:689-706,727-756:
+
+| Field | Byte range |
+|---|---|
+| msg_type `0x03`; version; chain_id | 0; 1; 2-5 |
+| epoch; height; round | 6-13; 14-21; 22-29 |
+| parent_block_id; payload_hash | 30-61; 62-93 |
+| proposer_index; suite_id; tx_count | 94-95; 96-97; 98-101 |
+| timestamp; payload_kind; next_epoch | 102-109; 110; 111-118 |
+| batch_commitment; qc_len | 119-150; 151-154 |
+
+Set `qc_len=0`; no QC bytes follow, so post-QC input starts at offset 155.
+Set `tx_count=2`, provide `tx_len=1` at 155-158 and stop: total input **159
+bytes**, with no transaction body at 159 and no later signature. After fixed
+fields/QC the current decoder requests the two-entry transaction-list
+reservation, consumes the first length prefix, then returns `UnexpectedEof`
+with the cursor at 159. A symbolic larger finite count has the same structural
+failure; it is **not executed here**. No enormous count is passed to the old
+allocation path. A zero-transaction/no-QC proposal needs the two-byte
+signature length at 155-156; with empty signature its complete length is 157.
+General structural length is `155 + Q + sum(4 + tx_len_i) + 2 + S`;
+valid encodings can require more decoded storage than encoded bytes.
+
+### One proposed correction and compatibility contract
+
+After the existing optional-QC step and **before** transaction-list reservation
+or transaction-payload copying, take a borrowed copy of the remaining slice
+as a scan cursor. Perform one allocation-free structural preflight:
+
+1. Iterate the declared `u32` transaction count without count-derived storage.
+   Read each four-byte length, convert via checked `usize::try_from`, and
+   bounds-check/advance over that borrowed body using primitive slice readers.
+   Do not copy bodies, collect lengths, reserve a vector or invoke transaction
+   decoders during this scan.
+2. Read the required two-byte signature length and bounds-check/advance over
+   its declared body, including length zero. Only this successful **complete
+   structural sequence**, not merely available count prefixes or tx bodies,
+   permits materialization.
+3. On scan success keep the real input at its original post-QC position,
+   checked-convert count for reservation, and run the existing materialization
+   order to produce identical fields/owned values and consume exactly the
+   same bytes. On scan failure assign the real input to the scan's remaining
+   slice and return the same structural error, preserving legacy consumption
+   through the last successful primitive without allocating tx storage.
+
+Use existing `WireError::UnexpectedEof` for unavailable prefixes/bodies.
+Checked conversion/arithmetic failure uses existing `WireError::LengthOverflow`
+(error.rs:1-12), not truncating casts, wraparound, panic-based encoder helpers
+or a new public error type. Availability comparison must precede slice
+splitting; prefer advancing borrowed slices so no accumulated offset or
+`count * bytes` calculation is needed. Any introduced offset/length arithmetic
+must be checked. On supported targets where u32/u16 fit usize, these conversion
+checks do not change structural acceptance or EOF errors.
+
+For post-QC slice length `L`, each completed tx scan consumes at least four
+bytes even when its body is empty. At most `floor(L/4)` complete entries and
+one failing entry can be visited, plus the signature reads; a huge declared
+count with insufficient input stops at the first unavailable primitive.
+Borrowed body skipping does not inspect/copy every byte. Extra work is a
+second pass over the present length prefixes and constant-time slice bounds
+checks, bounded by input length, with constant auxiliary storage; successful
+materialization still performs its existing payload copies. This is not a
+new total CPU, concurrency, heap or RSS budget.
+
+**Guarantee:** necessary transaction-sequence **and signature** availability
+is established before the identified transaction-count reservation or any
+transaction-payload copying. Outer-message buffers and optional-QC decoding
+may already allocate (QC's own bitmap/signature copies/reservation remain at
+consensus.rs:351-358). Valid large proposals still materialize; allocator
+failure/capacity behavior for them is not remedied or measured here. Introduce
+no arbitrary transaction-count/byte cap or broader resource policy.
+
+Preserve wire layout, encoders, canonical bodies/signing preimages and public
+interfaces. Preserve structurally valid zero-transaction, empty-transaction,
+empty-signature and mixed empty/non-empty sequences; cryptographic acceptance
+is a later concern. Preserve `qc_len=0 => None`, existing present-QC decode
+errors and outer consumption of the full QC slice, including existing behavior
+when the nested QC leaves bytes within that slice. Do not require QC exhaustion,
+reinterpret an empty/invalid QC as absent, or tighten unrelated QC semantics.
+Success leaves the same remaining/trailing bytes; neither direct decode nor
+NetMessage's wrapper gains an exhaustion requirement.
+
+Header/QC failure and cursor behavior stays unchanged. For post-QC EOF,
+earlier successful fields/prefixes are consumed, a failed prefix/body remains
+unconsumed, and `UnexpectedEof` is unchanged. In particular a complete tx
+length followed by unavailable payload consumes the length, not that payload;
+signature failure after complete txs consumes those txs' bytes without copying
+them. Do not add an early count-versus-minimum-length shortcut that changes
+the error cursor. Current binary caller logs/counts decode failure and does
+not reuse `slice` (:6687-6695); storage maps errors; async peer routes discard
+the failed slice; wrapper hides it. Those observations do **not** erase the
+public mutable-slice contract or justify changing direct callers' semantics.
+
+No consensus check, sender binding, authority activation, transaction
+execution or optional-QC policy changes. **Unresolved before implementation:**
+independent review must accept the two-pass/cursor contract and confirm the
+supported-target conversion/representability boundary. This contract does not
+choose a new recoverable policy for valid-input allocator/layout failure.
+Instrumentation feasibility and safe large-count strategy also need review;
+absence of either is not permission for OOM experimentation.
+
+### Future validation plan -- every case FUTURE / NOT EXECUTED
+
+| Proposed case (all FUTURE / NOT EXECUTED) | Required future observation |
+|---|---|
+| Zero transactions; empty/non-empty signature; one/many empty, non-empty and mixed transactions | Same decoded values and encoding for structurally valid controls, including empty encodings; no cryptographic acceptance inferred |
+| QC absent/present; round-trip and signing preimages | Preserve existing consensus_roundtrip_tests.rs, epoch_roundtrip_tests.rs, payload_type_roundtrip_tests.rs, net_message_limits_tests.rs and consensus_signing_preimage_tests.rs behavior; byte-for-byte encoder/preimage controls and present-QC errors/internal leftover behavior |
+| Count/body mismatch; missing/1-3-byte tx length prefix; truncated tx payload | UnexpectedEof and exact remaining-slice equality with safely bounded baseline controls, before tx-list reservation/payload copying |
+| Missing/one-byte signature length; truncated signature body | Preflight refuses before tx materialization even after a complete declared tx sequence; exact legacy EOF/cursor |
+| Truncation after earlier complete transactions | Earlier bytes consumed as before but no tx copies/list reservation; include later prefix, payload and signature failures |
+| Success with sentinel trailing bytes; direct/NetMessage/wrapper calls; error cursor | Preserve exact remaining input for direct APIs (outer discriminator included for NetMessage); wrapper still accepts trailing bytes but performs its own size precheck; compare failed primitive and previously consumed prefix cases |
+| Modest malformed-count old-path controls, e.g. count 2 or 8, qc_len=0 | Safely expose old list-reservation request before EOF; add a complete first non-empty tx followed by truncation to expose old payload copy; do not use uncontrolled large allocations |
+| Actual production `BlockProposal::decode` under bounded allocation observation | Instrument the real decoder, not only a helper or mocked preflight; qc_len=0 malformed tx/signature cases must show zero tx-list reservation requests and zero tx-payload-copy allocations, with the intended error/cursor |
+| Valid non-empty control under the same observer | Detect normal list reservation and non-empty payload materialization, proving the observer can see allocations; pin target/layout and separate fixture construction/logging from the observation window |
+| Large finite counts, including u32 boundary, with unavailable bodies | Execute only after explicit reviewed safe strategy: patched real decoder with bounded non-allocating request observer/refusal plus process resource/time isolation, or equivalent evidence that no enormous old-path request can reach an allocator; never execute these against the uncontrolled baseline |
+
+Future instrumentation must separate **allocation requests** (size/order/site)
+from actual allocator capacity and RSS; no capacity/RSS assertion from a
+request log. Use a bounded, non-recursively allocating observer with fixture
+setup outside the window and focused/isolated execution to avoid parallel-test
+noise. A process limit alone is not proof of pre-reservation refusal; attribution
+must distinguish list requests from payload copies and allowed QC/outer work.
+Review the observer's interaction with the existing allocator/test harness
+before choosing it. All pre-change controls and post-change validation need
+separately scoped execution authorization, pinned baseline/candidate/target,
+expected results, resource/time limits and cleanup. Nothing above was run.
+
+Anticipated implementation scope: only the decoder in
+`crates/qbind-wire/src/consensus.rs`, focused `qbind-wire` tests and this plan.
+If reliable instrumentation requires allocator/harness configuration outside
+those focused tests, or conversion handling requires shared-reader changes,
+identify the exact expansion for independent review and fresh authorization
+before editing. No silent expansion to node/transport/QC/consensus policy.
+
+This delivery performs documentation checks only: source locators, links,
+inventory identities, scope/status/compatibility consistency, protected E07
+publication and unrelated BR/gate records, sole-path mode/EOL/EOF and
+whitespace. No implementation, project test/build, allocation experiment,
+node, network probe, PR, merge or main publication is authorized.
