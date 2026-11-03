@@ -86,8 +86,9 @@ network.
 1. Begin independently verified, confirmed-to-scope, fixable defects without
    waiting for all audit questions or every BR decision. Prioritize by
    security impact, actual reachability and dependencies, not audit pass
-   number or raw item count. The manifest candidate in section 8 is an initial
-   bounded task, **not** a claim that it is the highest-severity finding.
+   number or raw item count. The manifest correction in section 8 was the
+   initial bounded task and is now independently verified and published,
+   **not** a claim that it was the highest-severity finding.
 2. Triage other independently actionable defects in parallel where genuinely
    independent: for example proposal decoder reservation and evidence-harness
    verdict aggregation, after their separate pre-implementation checks. This
@@ -295,7 +296,7 @@ statuses not supported by a current-lineage review remain provisional.
 | OBL-STO-2b | EXCLUDED audit implementation thread: RUN 422 new journal/replay, A22.1/A26 preserve | MI/ME / D10/D14 / R/C5/profile | Continue existing thread and accepted subset, no competing journal | Producing-revision/component scope plus missing production/process correspondence |
 | OBL-STO-3 | Snapshot output edge split from CONS-4, source-complete bounded section 26.3 / A22.1 identity | DD/ME / create_snapshot output / R/profile recovery | Preserve edge identity and input-to-durable-output trust question | E20/E22 snapshot anchor and epoch correspondence |
 | OBL-OPS-1 | SOURCE-PARTIAL beyond completed metrics endpoint; A15/A24-F1 | D/ME / configuration/fail-open/observability / O | Name remaining default/fallback, check real operating profile | Config-specific refusal/visibility evidence; E24 metrics remains separate |
-| OBL-REL-1a | Build/workflow source sub-boundaries complete A48.2/A49.1; constant-clean producer defect source-confirmed to its stated mechanism | D/ME / release manifest/workflows / A | **IMPLEMENTED — VERIFICATION PENDING**; fsmonitor false-clean corrected and fixture gaps repaired at the revisions recorded in section 8; independent review pending; not closed | Isolated Git fixtures cover the bounded reporting contract; build/artifact/deployment evidence remains separate |
+| OBL-REL-1a | Build/workflow source sub-boundaries complete A48.2/A49.1; constant-clean producer defect source-confirmed to its stated mechanism | D/ME / release manifest/workflows / A | **IMPLEMENTED / INDEPENDENTLY VERIFIED / PUBLISHED**; **PASSED/CLOSED** only for the bounded reporting correction and its isolated validation at the revisions recorded in section 8; earlier pending states narrowly superseded | E07 overall remains **OPEN**; build/artifact/deployment evidence and release eligibility remain unestablished |
 | OBL-REL-1b | External CI/artifact/historical assurance remains evidence-blocked; A48.2/A49.1 | ME / artifacts/attestation / A | Obtain authorized exact run/artifact/environment evidence; source review cannot create it | Source-to-built-to-deployed correspondence; delegated attestation unexecuted |
 | OBL-EXT-1 | 14-crate/repository interface inventory **NOT REVIEWED AT CURRENT AUDIT BASELINE**; identity A:L9221. Historical detailed definition/classification at A:L19453; A23.1 precedence A:L8982-L8989 means historical status is not current-source verification | ME / crate inventory; `ledger_bridge`, `timeout_verification_bridge`, `metrics_http`, and relevant EVM/execution interfaces (`QbindTx`, `VmV0ExecutionEngine`, `BlockExecutor`) / O and A only where existing gates apply; functional EVM/auth review remains OBL-TX-1a/1b | Treat A18.1's five-level presence/callability/production-wiring/ingress/not-found classification as historical, bounded evidence. Independently re-inventory current baseline within an explicit crate/filename/server-entrypoint search scope before relying on it; internal "bridge" files are wiring, not cross-chain bridges | Record code presence, callable library interface, production wiring, external ingress, and not-found-within-search-scope separately. Historical finding: EVM/execution code and callable interfaces present but no production wiring / no external ingress located; `metrics_http` is non-transaction `/metrics`, routed to OPS-1. Historical scoped searches found no wallet/JSON-RPC/cross-chain-bridge/contract-deploy ingress, not blanket absence. No current applicability claim until checked |
 | OBL-LIVE-1 | BLOCKED on live-deployment evidence; latest owner clarification is stopped development machines | ME / deployment/launch profile / M4/M6/S5/S7/RS1 | No live probe or activation; approved profile/prerequisites first | Separately authorized external/multi-node evidence; E09, no non-use proof |
@@ -317,7 +318,7 @@ existing scoped results retained.
 | E04 | Excluded RUN 422 candidate provenance | ME / provenance / A | Prior thread, no inferred non-ancestry; commit/tree/content correspondence |
 | E05 | Release-binary/isolated multi-node validation | ME / real binary / R/O | Relevant implementation tested and separately approved plan; actual process configuration/artifact identities |
 | E06 | PQ trust/crypto coverage; A39.1-A41 source refinements | ME / crypto integration/backend / C5 | Pin remaining algorithm/platform/entropy scope; no wrapper review as backend correctness proof |
-| E07 | Release/CI/build/historical assurance; A48.2/A49.1 four planes | D/ME / manifest/build environment / A | Section 8 bounded reporting correction contract plus distinct effective-build/artifact evidence; no provenance closure from consistency |
+| E07 | **OPEN** overall: release/CI/build/historical assurance; A48.2/A49.1 four planes | D/ME / manifest/build environment / A | Section 8 bounded reporting correction independently verified and published; **PASSED/CLOSED** is limited to that correction and isolated validation, not effective-build/artifact evidence or provenance closure |
 | E08 | A2-F1 possession reproduction | ME / transport / R-F6/O | Disposable isolated control set; public cert versus key-holder, actual session admission |
 | E09 | Deployment and validator launch profile | ME / live operation / M4/M6/S5/S7/RS1 | Four stopped machines are not live evidence; approved deployment/test scope first |
 | E10 | A4-F1 occupancy and A4-F2 cookie integration | ME / handshake resources / O | Occupancy/worker/socket release and complete cookie/client retry, not rate alone |
@@ -350,7 +351,7 @@ existing scoped results retained.
 | R-DEP-1/R-DEP-2/R-RUNTIME-1, A39.1-A41 | RNG source chain resolved to scope; deployed backend/build and runtime entropy remain; algorithms/constant-time not performed; ME; C5 | Pin platform/features/cfgs and exact remaining backend question | Dependency provenance + build inputs; runtime entropy separate, no generic source rerun |
 | R7.3/E12, A42.1-A45.1 | Schema/visitor/postdecode/four-channel route complete to scope; aggregate capacities/RSS/concurrency residuals; ME; O | Preserve corrected precheck/Infinite-limit and copy accounting; name unmeasured quantity | Revision-bound aggregate experiment under separate plan; no new forced defect |
 | A47.3-C1-C3/disposition, A:L1039-L1151 | Local stored n>1 -> 1 regression trace established; violated contract/harm unestablished, no new finding; DD/ME; R/profile recovery | Resolve relevant storage/transition contract and consumer impact before a transition change | Correct restore chronology, cursor-vs-DB writer, atomic visibility != power-loss durability; multi-validator residual separate |
-| A48.1-C2 / E07 / OBL-REL-1a, A:L650-L688 | Constant-clean producer evidence-assurance candidate source-confirmed to the stated mechanism; D; A | **IMPLEMENTED — VERIFICATION PENDING** in section 8; independent review supplied through the task identified fsmonitor suppression and test-coverage gaps, now corrected; no closure change | Corrected isolated fixtures pass; build provenance and other E07 evidence planes remain outstanding |
+| A48.1-C2 / E07 / OBL-REL-1a, A:L650-L688 | Constant-clean producer evidence-assurance correction source-confirmed to the stated mechanism; D; A | **IMPLEMENTED / INDEPENDENTLY VERIFIED / PUBLISHED** in section 8; **PASSED/CLOSED** strictly for the bounded correction and isolated validation; historical pending states narrowly superseded | E07 overall remains **OPEN**; build provenance and other E07 evidence planes remain outstanding; no broader finding or release closure |
 | A48.1-C6 + A48.2 + A49.1, A:L739-L768, A:L412-L593, A:L1-L202 | CRLF invocation, job/check/artifact ordering, external controls and delegated attestation retain qualifications; ME; A | No harness execution here; external run/environment evidence separately scoped | Actual reached stages, status/effects and source-to-artifact/deployment correspondence |
 
 Retain negative sub-dispositions as well as open work: A17.1-C1-C5 and
@@ -436,6 +437,14 @@ M4 Yellow, M6 Yellow/Partial, S5/S7 and existing readiness distinctions
 are not changed.
 
 ## 8. First bounded candidate task card: constant-clean producer
+
+**Current bounded status (2026-11-03): IMPLEMENTED / INDEPENDENTLY VERIFIED /
+PUBLISHED. PASSED/CLOSED — independent review of the bounded E07 correction.**
+This disposition applies only to the correction and its isolated validation.
+The completed independent review and separate publication record below
+narrowly supersede the historical proposal and verification-pending states,
+which remain as history. **E07 overall remains OPEN**; activation **DISABLED**
+and public DevNet **NO-GO** remain unchanged.
 
 ### Review provenance recorded before implementation
 
@@ -744,12 +753,13 @@ dependency, lockfile, or historical evidence path changed. The evidence
 record was committed after validation and did not contain its resulting
 commit/blob identity.
 
-### Corrective implementation and verification-pending review (2026-11-03)
+### Corrective implementation and verification-pending review — historical (2026-11-03)
 
-**Current status: IMPLEMENTED — VERIFICATION PENDING.** Finding identifiers:
+**Historical status: IMPLEMENTED — VERIFICATION PENDING.** Finding identifiers:
 **E07 / OBL-REL-1a / A48.1-C2**. This bounded correction does not close the
 finding or E07 overall and does not change release or operational gates.
-Independent verification of the corrected implementation remains pending.
+Independent verification was pending at this record's producing revision;
+the completed independent review below narrowly supersedes that pending state.
 
 | Evidence identity | Exact value |
 |---|---|
@@ -854,18 +864,20 @@ external build inputs, toolchains, and external environment remain outside
 scope. It is not a raw-byte, build-time cleanliness, hermetic-build, or
 source-to-binary claim. Stability checks are non-atomic and cannot detect a
 transient change-and-restore between observations. External
-build/artifact/runtime/deployment evidence remains unresolved. Current status
-remains **IMPLEMENTED — VERIFICATION PENDING** until the corrected
+build/artifact/runtime/deployment evidence remains unresolved. Historical status
+remained **IMPLEMENTED — VERIFICATION PENDING** until the corrected
 implementation and final fixture/documentation correction receive a separate
 independent post-change review; E07 overall and all release/operational gates
-remain unchanged.
+remain unchanged. The completed review below supersedes only that bounded
+verification-pending state.
 
-### Final fixture reproducibility correction — review pending (2026-11-03)
+### Final fixture reproducibility correction — historical review pending (2026-11-03)
 
-**Status remains IMPLEMENTED — VERIFICATION PENDING.** This final bounded
+**Historical status: IMPLEMENTED — VERIFICATION PENDING.** This final bounded
 correction is for **E07 / OBL-REL-1a / A48.1-C2** and does not change the
 successful disposition of the preceding fsmonitor and isolated-fixture
-corrections.
+corrections. The completed independent review below narrowly supersedes this
+pending state, not the remaining E07 obligations.
 
 | Evidence identity | Exact value |
 |---|---|
@@ -930,6 +942,77 @@ cannot detect a transient change-and-restore. External build, artifact,
 runtime, deployment, and release evidence remains unresolved. Run 384/385,
 Cargo, nodes, workflows, scanners, signing, deployment, and activation were
 not run. E07 overall and release/operational gates remain unchanged.
+
+### Completed independent review and separate publication record (2026-11-03)
+
+**PASSED/CLOSED — independent review of the bounded E07 correction.**
+The user conveyed a completed independent **ChatGPT** review, separate from
+the **GitHub Copilot** implementation author. It covered the tracked-source-state
+classifier, producer integration, filesystem-monitor correction, isolated
+regression fixtures, and final nested-fixture identity correction. This is
+post-implementation review, distinct from the pre-implementation design
+review recorded above.
+
+| Producing-revision distinction | Exact committed identity |
+|---|---|
+| Original implementation | `501db84d9671c98d55e8370e0574a823daeec466` |
+| Fsmonitor and fixture corrections | `f9acef1d7f57a5bb8cb7e242450584e67d277c29` |
+| Final fixture identity correction | `88ffed09929b250294b2ef3ddd2bc881c2aae545` |
+| Final reviewed and published revision / tree | `93422c10b9b31215f9027aa1de880179749d21ef` / `f4c4cde7bbfe6b1e44b745ba367bf1ecde3370f9` |
+| Exact committed fixture used by the final independent run | `scripts/devnet/tests/test_source_tree_state.sh`, mode `100644`, blob `7ba0aa1a1195579b20d50d37005a6be0a38e0aab` |
+| Unchanged production helper | `scripts/devnet/lib/source_tree_state.sh`, mode `100644`, blob `ebdad4a2301467e90aea7d4ebe5b9ac804023980` |
+
+**Review results conveyed through this documentation task:** the complete
+isolated suite passed with `GIT_AUTHOR_NAME`, `GIT_AUTHOR_EMAIL`,
+`GIT_COMMITTER_NAME`, `GIT_COMMITTER_EMAIL`, and `EMAIL` removed from the
+inherited environment. Separate helper and test Bash syntax checks passed.
+The prior independent review also established that the new fsmonitor
+regression fails against the old helper with “expected dirty, observed clean.”
+These are attributed review results, not tests rerun by this documentation
+task. No execution-log artifact was supplied to or is claimed by this task.
+The committed fixture identity is evidence of the exact reviewed test source,
+not a substitute execution log.
+
+**Publication, recorded separately from review:** the user supplied terminal
+evidence of a **non-force fast-forward** publication from
+`6dd0bc9d4ad5426065460270bf30c2cda6b2ca37` to the reviewed revision
+`93422c10b9b31215f9027aa1de880179749d21ef`, followed by matching local/remote
+main, the exact reviewed tree, and a clean checkout. This describes the
+user-supplied terminal evidence; this task did **not** directly inspect the
+user's local checkout. GitHub main was independently checked at that reviewed
+revision. At entry to this documentation task, the task checkout's HEAD and
+local main, advertised remote main, and GitHub default branch main matched
+the required reviewed revision; HEAD's tree matched the exact reviewed tree
+and the task checkout was clean, including untracked files.
+
+| Documentation recording boundary | Verified entry identity / permitted scope |
+|---|---|
+| Repository fetch and push destinations | `https://github.com/olivexo28/QBIND`; GitHub repository `olivexo28/QBIND`, default branch `main` |
+| Required starting commit / tree | `93422c10b9b31215f9027aa1de880179749d21ef` / `f4c4cde7bbfe6b1e44b745ba367bf1ecde3370f9` |
+| Task branch | `copilot/audit-e07-bounded-verification-record`; documentation commit descends directly from the required starting commit |
+| Sole permitted changed path / starting mode / blob | `docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md` / `100644` / `ee660906bdeb7f304879d4ddd4344a2ac9555cc6` |
+| Applicable instructions / checkout | No applicable `AGENTS.md` in repository or ancestor locations and no repository instruction files found; clean checkout before branch creation and editing |
+| Validation boundary | Documentation integrity only: status/scope consistency, revision references, links, unchanged inventory identities, sole-path scope, mode/EOL/EOF, and whitespace; final commit/tree, manifest and remote equality are reported after commit, not self-referenced here |
+
+**Narrow supersession and remaining limits:** only the section 8 bounded
+reporting correction and isolated validation move from pending to
+**IMPLEMENTED / INDEPENDENTLY VERIFIED / PUBLISHED**, with the review
+**PASSED/CLOSED**. The dated historical implementation and pending-review
+records remain; no finding/obligation identity or unrelated disposition is
+changed. **E07 overall remains OPEN.** Build-time cleanliness,
+source-to-binary correspondence, historical artifacts, full Run 384/385
+execution, runtime/deployment evidence, and release eligibility are **not
+established**. Classification still excludes root `docs/**`, untracked and
+ignored files, external build inputs, toolchains and external environment;
+it is Git-normalized tracked-only observation, not a raw-byte or hermetic-build
+guarantee. Non-atomic observations cannot establish continuous cleanliness or
+detect every transient change-and-restore. Activation remains **DISABLED**,
+public DevNet **NO-GO**, and all other release/operational gates unchanged.
+This task runs no project tests or operational work.
+
+**Next action:** independent pre-implementation verification of the next
+selected candidate under section 2. This documentation task neither selects
+an unreviewed fix nor authorizes implementation.
 
 ### A49.1 non-regression rules for every provenance task
 
@@ -1009,7 +1092,11 @@ For each new Claude audit uploaded under `Audit/`:
    through missing objects. Commit/push the scoped task branch only under
    that task's authorization.
 
-## 11. Documentation-only delivery checks
+## 11. Historical coordination delivery checks and current next action
+
+The delivery scope and check results in the following paragraphs belong to
+the original coordination task, not this 2026-11-03 sole-path documentation
+record. The current task boundary is recorded in section 8 above.
 
 This task permits only this new plan and an appended navigation/scope note in
 the blocker register. Validate committed input identities/normalization,
@@ -1040,10 +1127,11 @@ CRLF-aware whitespace checks passed. Only the two authorized paths are
 staged for delivery; final commit/tree/remote checks are reported separately
 after commit, without a self-referential hash in this document.
 
-**Next bounded implementation:** section 8's E07 / OBL-REL-1a / A48.1-C2
-constant-clean producer. The proposed path, source baseline, scope, timing,
-error/caller/schema treatment and future Git-fixture matrix are recorded;
-independent review and the subsequent task's bounded implementation
-authorization remain outstanding. Unrelated BR decisions and public
-activation are not prerequisites for that bounded fix; they remain mandatory
-for their dependent authority/recovery/operational work.
+**Next action (supersedes the completed constant-clean implementation
+instruction):** independent pre-implementation verification of the next
+selected candidate under section 2. Section 8's E07 / OBL-REL-1a / A48.1-C2
+bounded correction is implemented, independently verified and published;
+it is no longer the next implementation. This task neither selects an
+unreviewed fix nor authorizes implementation. Unrelated BR decisions remain
+mandatory for their dependent authority/recovery/operational work; activation
+remains DISABLED and public DevNet NO-GO.
