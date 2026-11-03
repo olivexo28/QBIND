@@ -26614,3 +26614,44 @@ The exact ML-DSA-44 candidate, raw 1312-byte key/2420-byte signature, complete f
 The profile remains pure ML-DSA-44, raw 1312-byte public key/2420-byte signature, complete framed-message verification, empty context and no application prehash. Profile ID 1 remains unallocated pending BR-02; operational root/profile provisioning NOT DONE; implementation acceptance/authorization PENDING. BR-02–BR-11 and B/C/L/X/U remain unchanged; contracts remain DRAFT / NOT APPROVED / NOT IMPLEMENTED; prerequisites NOT SATISFIED; activation DISABLED; public DevNet NO-GO. Existing D7D14/D7D10, recovery, anti-rollback, resource and other statuses, errata provenance limitations, and signing-exhaustion follow-up concerns remain unchanged. No implementation, signing, key generation, deployment, release or activation is authorized.
 ## RUN 422 BR-02 identifier-allocation proposal (documentation only)
 The source-grounded BR-02 allocation and compatibility proposal is appended to `QBIND_RUN_422_DEVNET_BOOTSTRAP_AUTHORITY_DECISION.md`. It preserves BR-01 ACCEPTED — DESIGN ONLY, leaves BR-02 PENDING and founder profile ID 1 UNALLOCATED, and performs no allocation, implementation authorization, provisioning, or activation. Existing D7D14/D7D10, recovery, anti-rollback, resource, whole-lifecycle, and public DevNet NO-GO statuses are unchanged.
+
+## RUN 422 BR-02 owner acceptance and identifier allocations — 2026-11-03
+
+The dated owner-decision section in
+`docs/devnet/QBIND_RUN_422_DEVNET_BOOTSTRAP_AUTHORITY_DECISION.md` records
+**ACCEPTED — IDENTIFIER ALLOCATION AND COMPATIBILITY CONTRACT ONLY** for the
+complete corrected BR-02 proposal/allocation table, exact 21-field layout,
+and compatibility/evolution rules at commit
+`81f016a0fbc4917235080662a2bd25541e606754`, tree
+`9f56f4af81f34798399b1a7511a2fcc02ec31c94`. Its evidence is the quoted explicit
+user acceptance conveyed through this task instruction; public label olive
+is accountable as protocol/record contract owner for this BR-02 decision.
+Date: 2026-11-03, Asia/Calcutta, calendar date only. Cryptographic signature:
+**NOT SUPPLIED OR GENERATED**; no identity/account binding or operational
+credential, custody, root provisioning, or authenticated decision is inferred.
+
+The exact approved contract allocation set is recorded there: `QBAP`, record
+version 1, purpose 1, DevNet environment byte 1, the exact application domain
+plus literal NUL, `SIG1`, configuration profile 1, operation/scope 1, founder
+profile 1, and the matching envelope profile in that same founder namespace.
+Founder profile ID 1 is now **ALLOCATED** only in the bootstrap
+founder-verification-profile namespace, not the consensus suite catalog or
+`u8` SuiteRegistry. No executable registry, parser, or verifier is implemented.
+Framing, layout, semantics, no reinterpretation/fallback/automatic transition,
+and distinct candidate `u8` DevNet=1 versus TrustBundleEnvironment's `u64`
+little-endian transport-digest encoding remain unchanged; BR-03 stays open.
+
+Historical BR-02 PENDING, UNASSIGNED, NOT PERFORMED, and UNALLOCATED statements
+are superseded only for this decision, accountable owner, and exact allocation
+set; historical text and bounded collision-review limitations remain.
+No global uniqueness, executed conformance, or operational assurance follows.
+BR-01 remains ACCEPTED — DESIGN ONLY; BR-03–BR-11 and B/C/L/X/U are unchanged.
+Operational root/profile provisioning NOT DONE; implementation acceptance/
+authorization PENDING; whole native-admission and authority contracts DRAFT /
+NOT APPROVED / NOT IMPLEMENTED; isolated prerequisites NOT SATISFIED;
+activation DISABLED; public DevNet NO-GO. Existing D7D14/D7D10, recovery,
+anti-rollback, resource/whole-lifecycle statuses, errata provenance/source-only
+limits, signing-exhaustion concerns, and non-null `GenesisConfig.extra`
+refusal are unchanged. No implementation, signing, key-generation, deployment,
+release, activation, history-reset, recovery, or authority-transition
+authorization, operational root trust, or currentness is supplied.

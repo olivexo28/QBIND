@@ -1582,3 +1582,174 @@ runtime-to-wire mapping, recovery mechanism, new authority, source registry
 entry, operational resource approval, or lifecycle authorization is created.
 The existing isolated implementation-entry checklist remains unsatisfied and
 in force.
+
+## RUN 422 BR-02 owner acceptance and identifier allocations — 2026-11-03
+
+**ACCEPTED — IDENTIFIER ALLOCATION AND COMPATIBILITY CONTRACT ONLY.**
+
+### Explicit owner decision and evidence
+
+| Decision field | Recorded decision |
+|---|---|
+| Public approver label | olive |
+| Accountable role for this BR-02 decision | Protocol/record contract owner |
+| Decision date | 2026-11-03, Asia/Calcutta; calendar date only, no timestamp supplied |
+| Accepted definition | The complete corrected BR-02 proposal, its allocation table, exact 21-field layout, and complete compatibility/evolution rules at commit `81f016a0fbc4917235080662a2bd25541e606754`, tree `9f56f4af81f34798399b1a7511a2fcc02ec31c94` |
+| Decision evidence | The explicit user statement quoted below, conveyed through this task instruction |
+| Cryptographic signature | **NOT SUPPLIED OR GENERATED** |
+
+> ACCEPT BR-02 — olive, protocol/record contract owner. I accept the exact reviewed identifier-allocation proposal and compatibility rules at commit 81f016a0fbc4917235080662a2bd25541e606754.
+
+This records the supplied decision, not a new design choice. Acceptance
+includes the proposal's recorded collision-review scope and limitations.
+Bounded source observations do not become global uniqueness, executed
+conformance, runtime isolation, deployed-parser evidence, cryptographic
+assurance, or operational assurance. The closed collision and cryptographic
+reviews are not repeated or promoted by this decision.
+
+The public label and conversational statement establish no legal identity,
+GitHub-account binding, operational credentials, custody, root provisioning,
+or cryptographically authenticated decision.
+
+### Accepted allocation record
+
+These are the complete accepted allocations in the approved contract
+namespaces, not executable registry entries.
+
+| Item / layout slot | Exact allocation | Approved contract namespace / unchanged meaning |
+|---|---|---|
+| Record magic / field 1 | ASCII `QBAP` (`51 42 41 50`) | Bootstrap approval-record family |
+| Record version / field 2 | `u16_be(1)` (`00 01`) | Bootstrap approval-record schema version |
+| Authorization purpose / field 3 | `u16_be(1)` (`00 01`) | Bootstrap approval-purpose namespace; initial DevNet bootstrap only |
+| Bootstrap environment / field 4 | `u8(1)` (`01`) | Bootstrap-record environment namespace; DevNet only |
+| Application domain | `ASCII("QBIND:BOOTSTRAP-APPROVAL:v1")` followed by literal `0x00` | Dedicated bootstrap-approval message domain; unchanged 27 ASCII bytes plus the one-byte NUL separator |
+| Envelope magic | ASCII `SIG1` (`53 49 47 31`) | Bootstrap signature-envelope framing |
+| Consensus configuration profile / field 18 | `u16_be(1)` (`00 01`) | Bootstrap consensus-configuration-profile namespace; genesis-static, genesis-ordered members, existing supported suite, unit weights, founding epoch 0 |
+| Permitted operation/scope / field 19 | `u16_be(1)` (`00 01`) | Bootstrap permitted-operation/scope namespace; one initial instantiation of the exact approved DevNet configuration |
+| Founder verification profile / field 21 | `u16_be(1)` (`00 01`) | Bootstrap founder-verification-profile namespace; bound to the unchanged accepted BR-01 design |
+| Envelope profile ID | `u16_be(1)` (`00 01`) | The same founder-profile namespace/value, not a second allocation; must match authenticated field 21 and the independently selected trusted-root profile |
+
+Founder profile ID 1 is now **ALLOCATED** within that bootstrap
+founder-verification-profile namespace. This is not an allocation in the
+existing consensus suite catalog or the `u8` `SuiteRegistry`. Existing
+consensus suite ID `100` in field 13 is unchanged; field 18 and field 21 are
+separate namespaces. No executable registry entry, parser, or verifier is
+implemented by recording this decision.
+
+No additional values, future environment profiles, ranges, runtime or wire
+identities, genesis labels/hashes, validator IDs, keys, credential references,
+weights, counts, or epoch values are allocated by this acceptance.
+
+### Exact layout, framing, and compatibility retained
+
+The accepted layout is the existing candidate encoding at baseline lines
+301–376, including the exact 21-field table at lines 342–362, as incorporated
+by the corrected BR-02 proposal. That table is not rewritten: fields 1–9
+occur once, fields 10–15 repeat exactly `member_count` times in genesis order,
+and fields 16–21 occur once. All widths, unsigned big-endian integers,
+field-7 byte-length/ASCII constraints, fixed byte arrays, member/index rules,
+arithmetic and size bounds, validation/refusal rules, and the non-null
+`GenesisConfig.extra` refusal remain unchanged. No operational resource
+capacity is approved.
+
+Complete record framing remains:
+
+```text
+u32_be(payload_length) || payload || signature_envelope
+```
+
+The complete signed message remains exactly:
+
+```text
+ASCII("QBIND:BOOTSTRAP-APPROVAL:v1") || 0x00 ||
+u32_be(payload_length) || payload
+```
+
+The signature envelope remains exactly:
+
+```text
+ASCII("SIG1") || u16_be(envelope_profile_id) ||
+u32_be(signature_length) || signature_bytes
+```
+
+The length prefix and complete canonical payload are authenticated; envelope
+metadata and signature bytes are outside the signed input. No padding,
+omitted fields, extensions, trailing bytes, alternative domain framing, or
+digest substitution is accepted. BR-01 remains pure ML-DSA-44, exact raw
+1312-byte public key, exact raw 2420-byte signature, complete raw-message
+verification, empty algorithm context, and no application prehash.
+
+The complete baseline compatibility/evolution rules are accepted unchanged:
+select the exact format and positional field before interpreting its
+namespace; require the supported values and combinations; refuse unknown or
+unsupported values. No fallback, auto-detection retry, downgrade,
+normalization, legacy reinterpretation, or automatic transition is allowed.
+Allocated values must never be reinterpreted with changed semantics.
+Incompatible changes require separate review, explicit version/profile
+decisions, and applicable authority-transition policy. The record/envelope
+cannot choose or replace its own root or widen policy; independently select
+the expected root/profile/purpose, then require payload/envelope/root-profile
+equality. Equality alone establishes no authorization, freshness, unique
+first use, or custody. Allocation causes no registry fetching, root
+replacement, authority transition, implementation, operational approval,
+or activation. Future conformance cases remain **NOT EXECUTED**.
+
+Environment encodings remain separate: this candidate's one-byte `u8`
+DevNet value is `1`; `TrustBundleEnvironment::metric_code()` uses `u64`
+0=DevNet, 1=TestNet, 2=MainNet, encoded little-endian in the transport digest's
+existing domain-prefixed, labelled, length-framed input. Numeric equality,
+copying, or casting proves no correspondence. No runtime/environment/wire
+mapping is inferred or allocated, and BR-03 remains open.
+
+### Narrow supersession and unchanged gates
+
+Earlier BR-02 **PENDING**, **UNASSIGNED**, **NOT PERFORMED**, and
+**UNALLOCATED** statements are superseded only for this accepted BR-02
+decision, its accountable owner, and the exact allocation set above.
+Earlier absent-decision-date/evidence statements are historical; no
+cryptographic signature is supplied. All historical text remains evidence
+of the earlier state, including in the D7 cross-references. This does not
+globally replace statuses or alter BR-01's decision.
+
+| Gate / obligation | Status after this decision |
+|---|---|
+| BR-01 | **ACCEPTED — DESIGN ONLY; UNCHANGED** |
+| BR-02 | **ACCEPTED — IDENTIFIER ALLOCATION AND COMPATIBILITY CONTRACT ONLY**, including the exact layout |
+| BR-03–BR-11 and B/C/L/X/U | **UNCHANGED** |
+| Operational root/profile provisioning | **NOT DONE** |
+| Implementation acceptance/authorization | **PENDING** |
+| Whole native-admission and authority contracts | **DRAFT / NOT APPROVED / NOT IMPLEMENTED** |
+| Isolated implementation prerequisites | **NOT SATISFIED** |
+| Activation | **DISABLED** |
+| Public DevNet | **NO-GO** |
+| Non-null `GenesisConfig.extra` | **REFUSED** under the unchanged candidate |
+
+All existing D7D14/D7D10, recovery, anti-rollback, resource, and whole-lifecycle
+statuses remain unchanged, including
+`D7D14_STORAGE_COMPONENT=IMPLEMENTED-ISOLATED`,
+`D7D14_STORAGE_ACCEPTANCE=PASS-ACCEPTED-SUBSET`,
+`D7D10_LOCAL_SIGNING_RESERVATION=CODE-AND-STORAGE-TEST-POSITIVE`,
+section 13.6 whole-lifecycle INCOMPLETE, durable anti-rollback
+NOT-ESTABLISHED, C4/C5 OPEN, RS1 OPEN, and candidate resource limits
+UNAPPROVED. Errata provenance, source-only limitations, and signing-exhaustion
+follow-up concerns remain unchanged.
+
+This acceptance supplies no implementation, signing, key-generation,
+deployment, release, activation, history-reset, recovery, or
+authority-transition authorization. It establishes neither operational root
+trust nor currentness.
+
+### Baseline and history provenance
+
+Repository: `olivexo28/QBIND`. The clean starting worktree, local `main`,
+remote-tracking `origin/main`, and advertised remote `main` matched commit
+`81f016a0fbc4917235080662a2bd25541e606754` and tree
+`9f56f4af81f34798399b1a7511a2fcc02ec31c94`. No applicable `AGENTS.md`
+was present. The task branch created from that exact baseline is
+`copilot/run-422-br02-owner-allocation-acceptance`; `main` is not modified.
+
+The baseline commit's raw parent header names
+`0c9982a86f1707d4f7bda2fb80bc1339ed3d8a9c`. That parent object is unavailable
+in this shallow checkout: the header is recorded parentage, not locally
+proven earlier ancestry. This decision commit is to be a direct child of the
+verified baseline; no earlier ancestry is inferred from unavailable objects.
