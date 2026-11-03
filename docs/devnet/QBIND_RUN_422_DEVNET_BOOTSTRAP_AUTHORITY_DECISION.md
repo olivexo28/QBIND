@@ -1753,3 +1753,324 @@ The baseline commit's raw parent header names
 in this shallow checkout: the header is recorded parentage, not locally
 proven earlier ancestry. This decision commit is to be a direct child of the
 verified baseline; no earlier ancestry is inferred from unavailable objects.
+
+## RUN 422 BR-03 network-identity binding proposal — documentation only
+
+**Mapping-policy proposal: PREPARED; BR-03 owner disposition: PENDING.**
+This source-grounded proposal does not accept a mapping, provision an
+operational identity, implement a verifier, authorize implementation, or
+enable activation. It preserves BR-01 **ACCEPTED — DESIGN ONLY** and BR-02
+**ACCEPTED — IDENTIFIER ALLOCATION AND COMPATIBILITY CONTRACT ONLY** without
+changing either decision or any BR-02 allocation/layout.
+
+Source baseline: commit `2ab43791edca4e6b1c98464950918b417e52c21c`, tree
+`181736cbd66d376432e7f704b563b99ed8bf2250`; actual task branch:
+`copilot/run-422-br03-network-identity-binding-proposal`. The raw commit
+object names parent `81f016a0fbc4917235080662a2bd25541e606754`; this checkout
+is shallow and that parent object is unavailable. The matching branch/main
+and `origin/main` starting tips prove only the required baseline equality,
+not older ancestry.
+
+### 1. Proposed standard-DevNet tuple
+
+Use the existing standard-network definitions as a proposed policy, not as
+evidence of a production binding or operational approval. The proposal is
+for this one standard environment only. Custom runtime IDs, alternate aliases,
+and other environments are unsupported and must refuse; future support needs
+a separate decision. The wire value is selected from its existing definition,
+never derived from the runtime ID.
+
+| Component | Representation | Candidate value / status | Authoritative source | Independent provisioning required | Proposed comparison | Refusal condition |
+|---|---|---|---|---|---|---|
+| Bootstrap environment, BR-02 field 4 | `u8` in the accepted bootstrap-record namespace | `1` = DevNet; allocation is already recorded by BR-02 | Accepted BR-02 field-4 allocation; this is not a Rust enum encoding | The trusted bootstrap policy must select DevNet before reading the untrusted record | Exact equality to independently selected `u8(1)` | Any other value or unsupported combination |
+| Runtime environment | `NetworkEnvironment` enum | `NetworkEnvironment::Devnet` | `NodeConfig.environment`; standard enum definition | Trusted local/runtime selection, not the record | Exact enum equality; do not infer it from a string or the bootstrap byte | Any other environment for this policy |
+| Genesis validation policy | Separate `NetworkEnvironmentPolicy` enum | `NetworkEnvironmentPolicy::Devnet` | `pqc_boot_genesis::map_environment(NetworkEnvironment::Devnet)` | Selected by trusted runtime environment | Exact equality to the policy used to validate and hash the same genesis | Policy differs from the selected environment or relabels a validated identity |
+| Full runtime chain ID | `ChainId(u64)` | `QBIND_DEVNET_CHAIN_ID = 0x51424E4444455600` | `NetworkEnvironment::chain_id()` / existing DevNet constant | Approved mapping policy, established independently of the untrusted record and verifier domain | Full-width `ChainId` equality against `NetworkEnvironment::Devnet.chain_id()` | Any differing 64-bit value, including one with matching low 32 bits |
+| Wire `chain_id` alias | `NetworkWireAlias(u32)` / wire-domain `u32` | `QBIND_DEVNET_WIRE_ALIAS = 0x44455600` | `resolve_network_wire_alias` standard mapping | Approved mapping policy independently bound to the identity and verifier domain | Exact equality to the resolver result after full runtime-ID equality | Wrong or unsupported wire value; never truncate, cast, parse text, take a substring, or copy a record/verifier value |
+| Exact genesis chain label | Exact `GenesisConfig.chain_id` string bytes | **REQUIRED — NOT SUPPLIED** | Independently approved exact initial genesis/configuration; the label is not selected by this proposal | Yes: trusted expected label from the network-identity authority's approved provisioning | Byte-for-byte equality, with no case folding, normalization, alias, or substring substitute | Missing/untrusted expectation, mismatch, or any substitute comparison |
+| Canonical genesis identity pin | `GenesisHash` (32 bytes), formatted externally as 64 hex digits when text is needed | **REQUIRED — NOT SUPPLIED** | Independently approved initial genesis identity, computed under the accepted canonical hash contract and DevNet policy | Yes: a trusted expected pin established independently of the record and candidate file | Validate/canonicalize the admitted structured genesis under DevNet, then compare the computed canonical identity to the independent pin | Missing/untrusted pin, canonical mismatch, wrong policy, unsupported input, or non-null `extra` under unchanged BR-11 |
+| Raw genesis-file-byte digest | Digest over the exact serialized file bytes | Not a canonical identity component; not the pin in this proposal | `compute_genesis_hash_bytes` is a distinct raw-byte helper; no production `--expect-genesis-hash` or print path uses it | No: it must not be provisioned or substituted as the canonical pin | Never compare it in place of `GenesisHash` | Any substitution for the canonical identity refuses |
+| Trust-bundle environment code | `TrustBundleEnvironment` plus `metric_code(): u64` | DevNet code `0`; TestNet `1`; MainNet `2` | `TrustBundleEnvironment::metric_code`; remote-signer digest encodes this as eight little-endian bytes | Not a bootstrap/network identity source | Keep its type, width, semantics, and transport framing separate | Numeric copying/casting or equality with bootstrap `u8(1)` is not correspondence and must not select DevNet |
+
+`NetworkEnvironment` has no explicit integer wire representation in its enum
+definition. Its `ChainId` is a separate `u64`; the wire alias is a separate
+`u32`; `GenesisConfig.chain_id` is a string. The bootstrap byte `1` means
+DevNet only in the accepted BR-02 namespace, whereas `TrustBundleEnvironment`
+uses `u64` metric values with `1` meaning TestNet. These are separate
+representations and domains, not interchangeable numbers.
+
+The policy's runtime comparison must use the existing full-width mapping
+semantics: `resolve_network_wire_alias(environment, supplied_runtime)` first
+compares the supplied `ChainId` to `environment.chain_id()` and only then
+returns the environment's fixed alias. There is no low-word equivalence,
+truncation, cast, parsing, label inference, or inbound-field fallback.
+BR-03's actual official label and pin remain required inputs, not values this
+table chooses.
+
+### 2. Executable source behavior and hash distinction
+
+The following observations describe maintained code at the source baseline,
+not comments, historical claims, test-only fixtures, or future requirements:
+
+* `NodeConfig.environment` is a `NetworkEnvironment`; `NodeConfig::chain_id()`
+  returns `environment.chain_id()`. `pqc_boot_genesis::map_environment`
+  separately maps that enum to the ledger validation-policy enum.
+  `verify_boot_time_genesis` applies substring-based chain-label checks only
+  for TestNet and MainNet; it does not impose an environment-label check for
+  DevNet. The Run 127 reset path compares the canonical hash and deliberately
+  does not equate the human-readable genesis string to the numeric runtime
+  `ChainId`. Neither path supplies the proposed independent, exact DevNet
+  label comparator.
+* `resolve_network_wire_alias` defines the standard DevNet/TestNet/MainNet
+  runtime-to-wire assignments and checks full runtime equality. Its module
+  calls the assignments dormant and states they are not integrated into
+  production message construction, genesis authority, signing, verification,
+  or activation. `NetworkWireAlias` itself is publicly constructible and is
+  not proof that the resolver ran.
+* `--expect-genesis-hash` is parsed into a `GenesisHash` and stored in
+  `NodeConfig.expected_genesis_hash`. The normal external-genesis boot path
+  loads structured `GenesisConfig`, calls `verify_boot_time_genesis` under
+  the mapped environment policy, and compares the supplied expectation with
+  `compute_canonical_genesis_hash(config, policy)`. For DevNet, that function
+  currently allows a missing expected hash. If no external genesis is
+  configured, the DevNet boot-verification path returns
+  `SkippedNoExternalGenesis`; an embedded path is not a pinned external
+  identity.
+* The CLI also passes `--expect-genesis-hash` to the Run 127 authority-state
+  reset path. That path requires a value, loads the external structured
+  genesis, computes `compute_canonical_genesis_hash` under the mapped
+  environment policy, and compares the result with the parsed expectation
+  before continuing its separate reset checks. The genesis-authority loader
+  likewise passes `NodeConfig.expected_genesis_hash` into
+  `verify_boot_time_genesis` and compares its single reread snapshot's
+  canonical identity against the boot-accepted canonical hash. These paths
+  also do not consume a raw file-byte digest.
+* `--print-genesis-hash` requires an external path, parses a structured
+  `GenesisConfig`, computes and prints the canonical structured-genesis hash
+  under the selected environment policy, and exits. This print helper does
+  not run full boot-time authority validation and does not establish that the
+  printed candidate is an official or trusted identity.
+* `compute_genesis_hash_bytes` hashes raw file bytes. A source search at this
+  baseline finds its callers in tests and the helper's own documentation,
+  not in the production `--expect-genesis-hash`, normal boot, reset, or
+  `--print-genesis-hash` path. It is not interchangeable with the canonical
+  structured hash.
+* **Source-comment discrepancy relevant to BR-03:** the comment immediately
+  above `compute_canonical_genesis_hash` says the file-byte hash continues to
+  back `--expect-genesis-hash`, while the executable CLI and boot path use the
+  structured canonical hash. This proposal follows those executable paths;
+  no source contract or behavior is changed here. The bounded consequence is
+  that the stale comment must not be used to select or compare the BR-03 pin.
+* **BR-11 source discrepancy:** the `GenesisConfig.extra` field comment above
+  the canonical-hash function says `extra` is hashed, but the function body
+  does not read `config.extra`, and no `extra` refusal was found in the
+  inspected validation path. The unchanged bootstrap candidate requires
+  `extra == Null` and refuses non-null values until the canonical hash
+  contract covers them. This is a future contract requirement, not a claim
+  that current generic DevNet boot code enforces it; no hash implementation
+  change or relaxation is proposed.
+
+The canonical hash function is SHA3-256 over its structured/domain-separated
+encoding, including the selected environment scope and exact chain-label
+bytes; it is not a raw JSON-file digest. Its current omission of `extra` and
+the DevNet validator's permissive/no-pin behavior are not acceptable substitutes
+for the proposed independent pin and BR-11 refusal. The actual genesis label
+and canonical pin remain **REQUIRED — NOT SUPPLIED**. No fixture, embedded
+genesis, repository example, zero, or conveniently computed value is selected
+as the official identity.
+
+### 3. Independent expected-identity boundary
+
+The conceptual future expected identity is:
+
+```text
+ExpectedDevNetIdentity {
+    bootstrap_environment: u8(1),
+    runtime_environment: NetworkEnvironment::Devnet,
+    validation_policy: NetworkEnvironmentPolicy::Devnet,
+    runtime_chain_id: ChainId(QBIND_DEVNET_CHAIN_ID),
+    wire_chain_id: QBIND_DEVNET_WIRE_ALIAS,
+    exact_genesis_label: independently approved exact bytes,
+    canonical_genesis_pin: independently approved GenesisHash,
+}
+```
+
+This is a documentation model only: no wire format, registry, signed
+manifest, runtime API, or implementation is introduced. Every mandatory
+expected value, especially label and pin, must be established independently
+of the untrusted approval being checked. A record cannot authenticate its own
+network identity by supplying both a claimed value and its comparator.
+Repository access, transport security, a filename, an operator-entered value,
+or successful hash computation alone does not establish that a configuration
+is the intended official genesis. Preserve the existing founder-root/purpose
+provisioning model: trusted root and purpose selection remain independent of
+the approval and of any key/reference carried inside it.
+
+Future verification must, in order, require all mandatory independently
+trusted inputs and the approved resource policy; check the selected
+environment and full runtime ID against the accepted mapping; admit one
+genesis snapshot under that environment's validation policy; validate and
+canonicalize that snapshot; compare its canonical identity with the
+independent pin; compare its exact label with the trusted expected label;
+derive membership, keys, weights, and authority commitment from that same
+validated snapshot; then compare the bootstrap record's corresponding fields
+against those independently established expectations. Missing/untrusted
+inputs, unsupported combinations, mismatch, or unavailable resource policy
+must refuse without authorizing effects.
+
+One owned, admitted snapshot is necessary to avoid combining a label/hash
+from one read with membership, keys, weights, or authority commitment from
+another read. Existing `ExpectedGenesisIdentity::load_pinned` reads once and
+derives its current expected genesis-authority fields from that snapshot, but
+its input loader is not thereby an approved bounded parser. The existing
+`load_external_genesis` uses `std::fs::read` followed by JSON parsing; the
+canonical hashing and broader validation paths have not been accepted as a
+bounded record-plus-genesis parser/resource contract. BR-08's independent
+resource-admission requirements and unapproved limits remain in force. Do
+not infer safe allocation or work bounds from the available API.
+
+The non-null `GenesisConfig.extra` refusal and BR-11 remain unchanged.
+Historical/current matching identity is also insufficient for B/C/L/X/U:
+mapping and genesis identity do not prove freshness, signing-history
+continuity, lock recovery, cross-host exclusivity, or unique authorized first
+use. No actual genesis, key, credential reference, operator, device, ceremony,
+or provisioning package is created here.
+
+### 4. Existing helpers versus missing production binding
+
+What exists:
+
+* `resolve_network_wire_alias` defines a dormant standard mapping and checks
+  full runtime-ID equality. It is not production integrated.
+* `ExpectedGenesisIdentity::load_pinned` requires a caller-supplied canonical
+  pin, validates one loaded snapshot against it, and derives an immutable
+  genesis-authority identity from that same snapshot. The caller's trust
+  provenance for the pin is not authenticated by this helper.
+* `ExpectedGenesisIdentity::check_network_correspondence` compares the
+  retained validation policy against the selected environment's mapped policy
+  and invokes the full-width runtime-to-alias resolver. It returns a borrowed,
+  **non-authorizing** correspondence attached to the same identity. It does
+  not compare the label against a separately provisioned expected label, prove
+  the official pin was correctly provisioned, establish current authority,
+  or grant activation.
+* `GenesisConsensusAuthority` production construction sets
+  `authorized_wire_chain_id: None`. The `Some` setter path is in a
+  `#[cfg(test)]` verification-snapshot fixture constructor; test fixtures
+  are not production support. Production `AuthorizedProposalVoteSnapshot`
+  binding compares the owner's independently retained wire ID to the verifier
+  domain and refuses when it has none (`WireChainIdMismatch`).
+* `main` retains a startup guard: an explicit
+  `--consensus-authority-from-genesis` request exits nonzero before P2P
+  service construction or consensus tasks. The later per-mode genesis
+  authority route is unreachable in ordinary production startup. This
+  containment and activation refusal remain in force.
+
+Therefore static correspondence does not create current authority, an
+authorization ticket, an activated verifier, or a signing capability. No
+helper is wired into production and no constructor is exposed or reinterpreted
+here. Any separately authorized future integration must keep the independently
+established mapping attached to the same pinned identity and exact verifier
+domain. An inbound verifier must never supply its own expected wire ID.
+Different genesis identities may share the same standard environment/runtime/
+wire constants; those constants alone identify neither one unique network
+instance nor a one-time activation. Preserve the full genesis/configuration
+binding and U's separate obligations.
+
+### 5. Future acceptance matrix — NOT EXECUTED
+
+These are proposed contract cases only. They are not tests or vectors, and no
+new refusal class is implied. Where an existing typed outcome applies, it is
+named; otherwise the future contract must refuse without inventing an
+implemented class here.
+
+| Case | Expected result |
+|---|---|
+| Independently provisioned complete DevNet tuple, exact label/pin, and one admitted matching genesis | Correspondence may be established only; bootstrap record comparisons still require their independent checks. No activation follows from this case alone. |
+| Expected label or canonical pin missing or untrusted | Refuse future verification. Current generic DevNet boot may accept a missing hash; it is not this proposed path. |
+| Expected values copied from the record being checked | Refuse: no independent comparator exists; record self-assertion is not trust. |
+| Wrong environment, or identity validated under one policy relabelled under another | Refuse; the existing correspondence helper reports `ValidationPolicyMismatch` for policy relabelling. |
+| Wrong full runtime ID with the same low 32 bits | Refuse full-width mapping; existing resolver returns `NetworkWireAliasMismatch` (wrapped as `RuntimeMismatch` in correspondence). |
+| Wrong wire ID while runtime/genesis/authority otherwise match | Refuse exact domain binding; existing production authority remains `None`, and `try_bind` refuses with `WireChainIdMismatch`. |
+| Same environment/runtime/wire values but a different canonical genesis identity | Refuse against the independent pin; matching network constants do not identify a unique genesis instance. |
+| Exact-label mismatch, including case-only or substring-only agreement | Refuse byte-exact label comparison; no normalization or substring rule. No existing label-specific refusal class is claimed. |
+| Raw-file-byte digest substituted for canonical identity | Refuse as the wrong representation; compare only the canonical structured-genesis identity. |
+| Mixed or changed genesis snapshots across label/hash/membership/key/weight derivation | Refuse; identity and derived authority must use the same admitted snapshot. Existing activation loader has `IdentityChangedSinceBoot` for its boot/reread canonical-identity mismatch, but does not implement this complete future pipeline. |
+| Generic DevNet validation succeeds without a pin | Future identity verification still refuses missing required pin; current `verify_boot_time_genesis(Devnet, ..., None)` permits this generic case. |
+| Non-null `extra` or unavailable resource policy | Refuse under unchanged BR-11; refuse if mandatory trusted BR-08 policy is unavailable. These are not claimed as current generic boot refusals. |
+| Historical matching identity, but B or U unavailable | No activation or signing authorization; preserve unavailable currentness/unique-first-use refusal. |
+| Attempt to turn static correspondence into production authorization | No conversion exists; outcome remains non-authorizing. Production `None` cannot bind an activated verifier. |
+
+### 6. BR-03 owner decision card and explicit gaps
+
+| Decision field | Proposed record |
+|---|---|
+| Required decision-maker role | Network identity authority |
+| Accountable person | **UNASSIGNED**; no BR-03 assignment is evidenced. Do not infer this role from olive's BR-01 or BR-02 decisions. |
+| Mapping-policy proposal | **PREPARED**: standard DevNet `u8(1)`, `NetworkEnvironment::Devnet`, `NetworkEnvironmentPolicy::Devnet`, full `QBIND_DEVNET_CHAIN_ID`, and `QBIND_DEVNET_WIRE_ALIAS`, with exact independent label/pin still mandatory |
+| Owner disposition | **PENDING**; this proposal is neither acceptance nor rejection |
+| Exact operational genesis label, canonical pin, and approved configuration | **NOT SUPPLIED** |
+| Independent provisioning | **NOT DONE** |
+| Production mapping implementation/integration | **NOT IMPLEMENTED** |
+| Executed and release-binary correspondence evidence | **NOT PRODUCED by this task** |
+| Overall BR-03 closure | **NOT ESTABLISHED** |
+
+| Missing fact / accountable role | Required later evidence | Affected operation |
+|---|---|---|
+| Named BR-03 network identity authority and explicit accept/reject disposition; person remains unassigned | Explicit decision against this exact proposed standard tuple, or a separately reviewed replacement/refusal policy; role assignment must be evidenced | Approval of mapping policy; no value may be treated as approved before this decision |
+| Official exact genesis label, canonical pin, and exact approved initial configuration; network identity authority with founder-root provisioning roles | Independently authenticated provisioning/readback evidence tying exact label and canonical pin to the approved structured genesis; no value inferred from the record or example | Genesis/configuration verification and any later bootstrap approval |
+| Independent provenance/currentness and consistent distribution of expected identity; founder-root/purpose and B/U owners remain unassigned | Evidence under the existing custody/recovery model, including conflict handling and B/U; identity pin alone is historical identity, not currentness | Trust-root verification, first activation, recovery and all dependent signing |
+| Production binding of expected mapping to the same identity and verifier domain; implementation owner unassigned | Separately authorized implementation; source/unit and independent-process evidence, followed by release-binary correspondence evidence; production value must not come from inbound verifier | Configuration verification, activation and signing |
+| Approved resource-admission and bounded parsing/canonicalization policy (BR-08); parser/resource policy owner unassigned | Explicit trusted limits and checked admission evidence for record bytes, genesis input, allocation/work/scratch, and the actual parser/hash path | Safe admission and verification; absent policy must refuse |
+| Complete lifecycle proof B/C/L/X/U and existing recovery/anti-rollback contracts; relevant state owners remain unassigned as recorded | Independent, operation-specific evidence and enforcement; historical identity or mapping agreement is insufficient | First use, activation, signing, recovery and continued operation |
+| Executed correspondence and release-binary evidence | Later authorized acceptance cases and release-binary evidence against the approved exact configuration; not produced or run here | Any claim that production correspondence is implemented or operational |
+
+Policy acceptance alone would not satisfy the missing operational identity,
+independent provisioning, production integration, release evidence, or
+lifecycle requirements, and would not close BR-03.
+
+### 7. Preserved decisions and gates
+
+BR-01 remains **ACCEPTED — DESIGN ONLY**. BR-02 remains **ACCEPTED —
+IDENTIFIER ALLOCATION AND COMPATIBILITY CONTRACT ONLY**, including its exact
+layout and allocations. BR-03 remains **PENDING**; BR-04–BR-11 and B/C/L/X/U
+are unchanged. Whole native-admission and authority contracts remain
+**DRAFT / NOT APPROVED / NOT IMPLEMENTED**; implementation authorization is
+**PENDING**; prerequisites are **NOT SATISFIED**; activation is **DISABLED**;
+public DevNet is **NO-GO**.
+
+All D7D14/D7D10, recovery, anti-rollback, resource, whole-lifecycle,
+cryptographic-review limitation, and non-null `GenesisConfig.extra`/BR-11
+statuses remain unchanged. No closed review is repeated or promoted. No tests,
+builds, scanners, key generation, signing, operational commands, activation,
+deployment, actual identity provisioning, or source/dependency/configuration
+changes are performed by this documentation-only proposal.
+
+### 8. Source baseline and exact locators
+
+All source references below are from commit
+`2ab43791edca4e6b1c98464950918b417e52c21c`; executable behavior controls where
+a comment differs. The existing source supports the standard-DevNet proposal
+but does not establish its production integration or official operational
+identity.
+
+| Source locator | Relevant behavior / boundary |
+|---|---|
+| `crates/qbind-types/src/primitives.rs:34-64,105-146` | `ChainId(u64)`, `QBIND_DEVNET_CHAIN_ID`, `NetworkEnvironment`, and `chain_id()`; no explicit environment integer encoding |
+| `crates/qbind-types/src/network_wire_alias.rs:1-18,38-44,49-71,108-131` | Dormant standard aliases, publicly constructible raw `u32` alias, full runtime equality in `resolve_network_wire_alias`, and explicit non-production scope |
+| `crates/qbind-node/src/node_config.rs:3985,5301-5303,6829-6841` | Expected hash type, runtime environment-to-chain selection, and environment parser/default |
+| `crates/qbind-node/src/pqc_boot_genesis.rs:69-80,188-248,256-278` | Runtime-to-policy mapping; external genesis read and boot verification; optional DevNet expectation; canonical print computation without full authority validation |
+| `crates/qbind-node/src/cli.rs:1530-1577,2366-2384` | Canonical hash CLI documentation and actual parsing of `--expect-genesis-hash` to `GenesisHash` |
+| `crates/qbind-node/src/main.rs:2216-2234,2262-2328,2380-2417,5405-5422,5799-5859` | Reset input consumer, actual print path, normal boot path, DevNet skip/pin retention, production activation guard, and later disabled authority loader call |
+| `crates/qbind-ledger/src/genesis.rs:726-746,1300-1357,1532-1541,1569-1630,1797-1854,1984-2005,2053` | Separate validation policy, exact label/`extra` fields, canonical structured hash body, DevNet no-pin behavior, distinct raw-byte hash function, and pin parser |
+| `crates/qbind-node/src/pqc_authority_state_reset.rs:562-620` | Run 127 requires an expected hash and compares it with the canonical structured-genesis hash under the mapped policy |
+| `crates/qbind-node/src/pqc_trust_bundle.rs:105-150`; `crates/qbind-node/src/pqc_remote_signer_transport.rs:293-308` | Separate `TrustBundleEnvironment` encoding and little-endian `u64` transport-digest framing |
+| `crates/qbind-node/src/genesis_authority_record_correspondence.rs:88-181,218-282,292-399,408-426` | Independent-pin helper, same-snapshot derivation, retained validation-policy comparison, full runtime resolver, borrowed non-authorizing correspondence |
+| `crates/qbind-node/src/genesis_consensus_authority.rs:132-190,338-439,769-770,1349-1375,1404-1437` | Production authority's `None`, builder provenance, accessor, test-only `Some` fixture constructor, and shared loader behavior |
+| `crates/qbind-node/src/binary_consensus_loop.rs:1270-1314` | `try_bind` checks the independently retained owner's wire ID against the verifier domain and rejects `None`/mismatch |
+| `docs/devnet/QBIND_RUN_422_BOOTSTRAP_CREDENTIAL_RECOVERY_TRUST_MODEL.md:1-3,57-68,410-468` | Existing founder-root/purpose and B/C/L/X/U trust model and unchanged implementation-entry checklist |
+| `docs/devnet/QBIND_RUN_422_DEVNET_BOOTSTRAP_AUTHORITY_DECISION.md:301-376,510-615,664-674,1601-1729` | Accepted BR-02 layout/allocations, existing resource and BR-11 refusal requirements, decision register, and narrowly scoped accepted BR-01/BR-02 decisions |
+| `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_422_D7.md:26615-26651` | BR-02 acceptance record and preserved D7D14/D7D10, recovery, anti-rollback, resource, lifecycle, activation, and NO-GO status |
+
+This append changes no executable contract. BR-03 owner disposition remains
+**PENDING**, and no operational network identity or implementation
+authorization is established.

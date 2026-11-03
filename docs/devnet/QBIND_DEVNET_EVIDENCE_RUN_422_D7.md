@@ -26655,3 +26655,6 @@ limits, signing-exhaustion concerns, and non-null `GenesisConfig.extra`
 refusal are unchanged. No implementation, signing, key-generation, deployment,
 release, activation, history-reset, recovery, or authority-transition
 authorization, operational root trust, or currentness is supplied.
+
+## RUN 422 BR-03 network-identity binding proposal
+The documentation-only proposal appended to `QBIND_RUN_422_DEVNET_BOOTSTRAP_AUTHORITY_DECISION.md` proposes the existing standard DevNet environment/full-runtime/wire mapping, while requiring an independently provisioned exact genesis label and canonical pin. BR-03 remains PENDING; production mapping integration and operational identity are not established. The proposal records the actual canonical-hash CLI behavior, distinguishes it from raw-file hashing, and preserves BR-01/BR-02 decisions, D7D14/D7D10, recovery, anti-rollback, resource, whole-lifecycle, activation, and public DevNet NO-GO statuses. No implementation or execution evidence was produced.
