@@ -1043,3 +1043,226 @@ The existing non-null `GenesisConfig.extra` refusal and all other integrated
 contract restrictions remain unchanged. No F1/F2 closure, deployment
 permission, production authority, security acceptance, or release approval
 follows.
+
+## BR-01 FIPS 204 potential-updates applicability review - later evidence
+
+**DOCUMENTATION ONLY / SOURCE INSPECTION / OWNER DECISION PENDING**
+
+Inspection date: **2026-11-03 UTC**. This appended review follows the earlier
+retrieval failure; it does not rewrite that historical account or imply that
+the earlier task inspected the PDF or workbook. The resumed task inspected
+user-supplied copies, not files downloaded directly from NIST by this agent.
+The earlier attempt stopped without edits or commits after NIST hostname
+resolution failed. The baseline proposal's "not verified" statements describe
+that earlier evidence state; the entry coverage below is new, later evidence,
+not retroactive access or acceptance of BR-01.
+
+### Review baseline, sources, provenance and inspection method
+
+The clean starting checkout was `olivexo28/QBIND`, origin
+`https://github.com/olivexo28/QBIND`, commit
+`b53d5bf783d7314e05ac2ec1a18fc92471029984`, tree
+`8bfe69c4b810b73d6d9d798d3907c9c9da12d23d`. The raw commit has parent
+`eed99ffc3af60c1817b2fde653ddb7a65e739b52`; this is raw object parentage,
+not an inference from shallow traversal. Remote main matched that baseline.
+The existing task branch `copilot/run-422-br01-fips204-errata-review` was
+reused. No applicable `AGENTS.md` was found in the repository or ancestor
+directories. Main was not modified.
+
+The user reports that the official publication page was independently
+retrieved in the reviewing conversation and linked both files below:
+`https://csrc.nist.gov/pubs/fips/204/final`.
+That is **reported publication-page link evidence**, not a successful
+publication-page retrieval or independent origin authentication performed in
+this task. The supplied originals were uploaded after the request to download
+the official files. Their original download timestamps were not supplied.
+This task checked their exact byte counts and SHA-256 values against the
+user's supplied values, then independently read their contents on the
+inspection date. No repeated NIST network retrieval was needed.
+
+| Inspected input | Source URL associated with supplied copy | Byte count | SHA-256 | Acquisition/date evidence |
+|---|---|---|---|---|
+| `NIST.FIPS.204.pdf` | `https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.204.pdf` | 3291746 | `57239b9f84c03227eda3ca0991204dc7764c79af9ce2e6824eda774918d46b6b` | User-supplied copy; inspected 2026-11-03 UTC; original download time unknown |
+| `fips-204-potential-updates.xlsx` | `https://csrc.nist.gov/files/pubs/fips/204/final/docs/fips-204-potential-updates.xlsx` | 23071 | `5bc93ce63bc647e6d1d456cb2d3a171426c15aca4a7a0e0edd40d08b7a34c793` | User-supplied copy; inspected 2026-11-03 UTC; original download time unknown |
+| `fips204-0.4.6.crate` | `https://static.crates.io/crates/fips204/fips204-0.4.6.crate` | 1540138 | `c9fb5a367b9846933e271a3c2a992930743f82ae5e8cb7faa780715a80fa0b15` | Retrieved by this task 2026-11-03 UTC; checksum verified before source extraction/inspection |
+
+These hashes identify the inspected bytes; they do not independently
+authenticate NIST origin. Likewise, the archive checksum establishes equality
+with the locked package, not independent security assurance. Research inputs,
+extracted dependency source and inspection artifacts were kept outside the
+repository.
+
+The PDF was opened with a PDF reader and text extracted from all 65 physical
+pages; the affected prose, algorithms and appendices were read, not inferred
+from search excerpts. Its title page states "Published August 13, 2024".
+Printed standard pages 1-55 are physical PDF pages 11-65; standard locations
+below use printed pages when a page number is supplied.
+
+The workbook was inspected as ZIP/XML, without executing macros, formulas,
+external content, or package code. Inspection covered the package manifest,
+workbook/sheet XML, all populated cells and shared strings, relationships,
+core/custom properties and custom XML. There is exactly one worksheet,
+`Sheet1` (default visible state), with no hidden worksheets, hidden rows or
+hidden columns. All shared strings are referenced. There are no formula
+cells, comment/note parts, VBA parts or external-link parts; the worksheet's
+only relationship is printer settings, which were not executed. The custom
+XML contains document-library/content-type metadata, not additional errata.
+Blank formatted cells outside the table contain no further entries.
+
+`Sheet1!C1` states **"Last updated 7/31/2026"**. `B3` states "August 2024";
+`B4` is the release date 2024-08-13 (Excel serial 45517). The workbook's core
+modified timestamp is `2026-07-31T17:14:24Z`; its core created timestamp
+`2020-11-03T17:29:38Z` is metadata, not a FIPS 204 publication/retrieval date.
+The twelve entries occupy `A16:D27`: A is date identified, B standard
+location, C issue, D potential correction. Rows 8-13 expressly say these
+**potential corrections DO NOT introduce new technical requirements and ARE
+NOT official changes**; they may be corrected in a future update/revision.
+This review preserves that status instead of treating proposed wording as
+an adopted amendment. An editorial label does not by itself establish lack
+of security relevance.
+
+`Cargo.lock:1323-1333` resolves `fips204` 0.4.6 with exactly the archive
+checksum above. `crates/qbind-crypto/Cargo.toml:9` still requests `"0.4"`;
+the lockfile resolves the inspected release, while the manifest is not an
+exact version pin. No newer release was substituted. Only source and
+metadata were read; no dependency code, build scripts, examples or tests
+were executed.
+
+### Unchanged candidate and source-locator key
+
+The candidate remains **pure ML-DSA-44**, exact raw 1312-byte public key and
+raw 2420-byte signature, verifying the complete application message:
+
+```text
+ASCII("QBIND:BOOTSTRAP-APPROVAL:v1") || 0x00 ||
+u32_be(payload_length) || payload
+```
+
+Algorithm context remains empty and application prehash remains absent.
+The standard's internal pure-mode framing and hashing are not an application
+prehash: for empty context, `M' = 0x00 || 0x00 || application_message`, and
+`mu = H(tr || M', 64)`. The application's domain separator and length field
+are unchanged. No manually preframed internal API input or digest adapter is
+an alternative. Profile ID `1` remains proposal-local and **unallocated
+pending BR-02**, not consensus suite ID 100. Independent full-root and purpose
+provisioning remain unresolved; no record-carried selector can replace them.
+The fixed initial-DevNet, exact-configuration, single-instantiation scope,
+custody requirements and all lifecycle restrictions are preserved.
+
+In the applicability table, dependency paths are relative to the extracted,
+checksum-verified `fips204-0.4.6/` archive, **not repository-owned source**.
+QBIND source locations refer to the baseline above. These abbreviations give
+each table entry an explicit repository call-path locator:
+
+* **QV**: `crates/qbind-crypto/src/ml_dsa44.rs:531-572`,
+  `MlDsa44Backend::verify`/`verify_internal`, raw complete-message API, exact
+  key/signature lengths, `public_key.verify(message, &sig_array, &[])`;
+  dependency false becomes `InvalidSignature`.
+* **QS**: `crates/qbind-crypto/src/ml_dsa44.rs:386-394,412-432,484-514`,
+  key generation, signing and `sign_into`; default random generation,
+  `try_sign(message, &[])` and returned-error propagation.
+* **QD**: `crates/qbind-crypto/src/ml_dsa44_signature_suite.rs:90-98`,
+  the `Hash32` adapter. It verifies those digest bytes as its message and is
+  **not** the candidate's complete-message verifier.
+
+The shared `functionality!` macro (`src/lib.rs:116-133,254-410`) and shared
+`ml_dsa`, NTT, encoding and arithmetic helpers were checked, including the
+ML-DSA-65/87 branches in `src/high_low.rs:82-86,182-187`. Entries were not
+dismissed merely because they also concern other parameter sets or the
+non-candidate HashML-DSA APIs.
+
+### Exhaustive entry-by-entry applicability
+
+| Workbook locator | Affected standard location and potential correction | Applicability / class | Pinned dependency locator | QBIND locator | Source observation, discrepancy and remaining uncertainty | BR-01 consequence / smallest future action |
+|---|---|---|---|---|---|---|
+| `Sheet1!A16:D16` (2024-09-20) | Sections 2.5 and 7.5, immediately after equations (2.1)/(7.1), pp. 8/42: evaluation point is `zeta^(2*BitRev8(i)+1) mod q`, not that expression evaluated through `w` a second time. | Applicable shared NTT semantics; explanatory mathematical correction, not a wire-format change. | `src/ntt.rs:11-75,85-157`; `src/helpers.rs:176-190`, `gen_zeta_table_mont`/`ZETA_TABLE_MONT`; `src/ml_dsa.rs:81-92,215-223,406-419`. | QV and QS use these shared transforms. | Butterflies use powers from the bit-reversed zeta table in Montgomery form; table generation depends on `ZETA`, not on the input polynomial. No nested `w(w(...))` evaluation is observed. Full numerical transform conformance was not executed or proved here. | No candidate change indicated. Future independent conformance evidence must cover the actual transform; do not implement the erroneous explanatory composition. |
+| `Sheet1!A17:D17` (2024-10-17) | Sections 6.2/6.3, pp. 23/25: internal signing/verifying prose should refer to formatted `M'`, not unformatted `M`. | Directly applicable message framing; prose correction with security-relevant interpretation. | `src/ml_dsa.rs:143-194,335-399`; `src/lib.rs:268-295,364-379`; `src/hashing.rs:13-17`. | QV/QS pass message and empty context; QD is excluded. | Ordinary pure APIs select `nist=false` with empty OID and hash `tr`, mode byte 0, context-length byte, context, complete message in that order. Empty context produces the concatenation of `tr`, `00`, `00`, then `message`. Direct internal-vector paths are different and are not the candidate API. No framing discrepancy observed; execution not established. | Preserve full application message, not a digest or manually formatted `M'`. Future isolated verifier must wire QV with the exact framing and independent root; this review does not implement that consumer. |
+| `Sheet1!A18:D18` (2025-12-02) | Various internal PDF links: Algorithms 4, 5, 9-14, 49 and footnotes 1, 5, 6, 13; links will be repaired. | Editorial navigation, not a cryptographic algorithm or rejection change. | `src/lib.rs:297-410` (Algorithms 4/5); `src/helpers.rs:154-170` (Algorithm 49). Source paths/algorithm numbers are used rather than depending on PDF hyperlinks. | QV/QS; QD boundary unchanged. | No runtime dependency on intra-PDF links is involved in these calls. A PDF link repair does not alter source behavior. The repair itself has not been supplied as an adopted replacement PDF or validated here. | No implementation correction indicated; use stable section/algorithm locators for future evidence. No approval follows from navigation repair. |
+| `Sheet1!A19:D19` (2025-12-02) | Section 2: remove unused AES acronym; bold vector `w` in the infinity-norm definition and vectors `v[0], v[1], ...` in Section 2.4.2. | Editorial acronym/typography; vector interpretation still matters to implementation. | `src/helpers.rs:142-151`, `infinity_norm`, flattens vector rows and takes the maximum centered coefficient magnitude; `src/ml_dsa.rs:274-279,434-436`. | QV/QS norm checks. | The source norm operates across the polynomial vector, not only one selected polynomial. The acronym deletion adds no AES operation or alternate suite. No computational change indicated by this entry; numerical norm behavior not executed. | Keep current candidate and future vector/norm conformance checks; no new algorithm dependency or code change justified by typography alone. |
+| `Sheet1!A20:D20` (2025-12-02) | Section 3: bold vector `b` in footnote 2; Section 3.3 challenge-hash explanation must concatenate `mu` then `w1`, not `w1` then `mu`, consistent with Algorithm 7 line 15. | Typography is editorial; challenge-input order is directly security/interoperability relevant to signing and verification. | `src/ml_dsa.rs:230-234,426-431`; `src/hashing.rs:13-17`. | QV/QS share these paths; QD still does not satisfy application framing. | Signing hashes `&[&mu, &w1_tilde]`, verification hashes `&[&mu, &tmp]`; the hash helper absorbs slices sequentially. Both agree with Algorithms 7/8 and the potential correction, not the reversed prose order. No observed source discrepancy; hash/conformance execution absent. | No source-order fix indicated. Future cross-implementation evidence must retain the exact order; do not interpret "minor" as permission to reverse it. |
+| `Sheet1!A21:D21` (2025-12-02) | Section 5, Algorithms 1, 2, 4: replace undefined randomness-failure notation `NULL` with bottom/failure. | Failure-notation correction; applicable to key generation and randomized signing. HashML-DSA is excluded as a candidate mode, but its shared RNG/error path was inspected. | `src/ml_dsa.rs:26-45`; `src/lib.rs:268-295,311-340`; `src/traits.rs:44-46,156-158`. | QS keygen/sign/sign_into; QV performs no randomness acquisition. | Fallible `try_fill_bytes` obtains 32-byte seed/randomness; failure propagates as `Err` before the internal call. Default APIs use `OsRng`. Some pseudocode comments retain `NULL`, but no automatic deterministic fallback is observed. Source cannot establish entropy quality, RBG approval or actual failure handling in a deployed environment. | No computational discrepancy established from notation. Future authorized ceremony/signing work must preserve randomness refusal and independently evidence entropy/custody; comment cleanup is separate and not performed here. |
+| `Sheet1!A22:D22` (2025-12-02) | Section 6: call `t` (two occurrences) and hint `h` polynomial vectors, not polynomials; Algorithm 6 must say `Power2Round`, not `PowerTwoRound`; Algorithm 8 line 7 has redundant outer hash parentheses. | Editorial terminology/naming/parentheses, with shared keygen and verification interpretation checked. | `src/ml_dsa.rs:81-92,209,303-309,369-376,385-399`; `src/high_low.rs:10-47`. | QS keygen/sign; QV verification. | `t`/`h` are arrays of polynomials; keygen calls `power2round`, which maps coefficients across K polynomials. Hash-parenthesis removal does not change `mu`. No computational discrepancy observed; algebraic equivalence is not independently proved here. | No algorithm/profile change indicated. Keep vector-level and named-operation correspondence in future evidence; no code correction required solely by the editorial entry. |
+| `Sheet1!A23:D23` (2025-12-02) | Section 7, prose above Algorithm 28, p. 35: `w1Encode` is used by `Sign_internal` and `Verify_internal`, rather than merely `Sign`. | Editorial call-site description; encoding is directly shared by both candidate paths. | `src/encodings.rs:331-359`; `src/ml_dsa.rs:230-234,426-431`. | QV/QS. | Both internal routines call `w1_encode`; its bound and packing depend on gamma2. Its source comment still names old `sign_finish`/`verify_finish` functions, while actual calls establish correspondence. No missing verifier encoding call observed; runtime encoding compatibility untested. | No encoding change indicated. Smallest future documentation cleanup is correcting stale helper call-site names; preserve real signing and verifying calls and add conformance evidence later. |
+| `Sheet1!A24:D24` (2025-12-02) | Appendix A / Algorithm 49, p. 50: exclusive positive input bound; signed low-32-bit representative and sign extension of `t`; result magnitude less than q, not merely less than 2q. | Applicable shared Montgomery arithmetic, not just editorial or other-parameter-set material. | `src/helpers.rs:154-170`; uses in `src/ntt.rs:42-48,116-132`, `src/ml_dsa.rs:406-419`. | QV/QS through shared NTT/multiplication. | **Comment:** retains inclusive `-2^31*q <= a <= 2^31*q`. **Debug checks:** lower `-17996808479301632`, upper `17996808470921215`, a stricter positive bound than `2^31*q` (=17996808479301632). **Arithmetic:** signed `i32` truncation, `wrapping_mul(QINV)`, signed widening to `i64`, subtraction and arithmetic shift; debug output checks assert `-q < res < q`. Arithmetic matches the signed-representation correction in source; the stale inclusive comment does not describe the actual debug interval. Call-site range sufficiency and all outputs have not been exhaustively proved/executed. | Concrete documentation discrepancy, not an observed verification-result defect. Smallest future correction is documenting the intended helper range consistently with its checks and reviewing callers before any range/assertion change. No arithmetic patch or dependency upgrade is authorized by this review. |
+| `Sheet1!A25:D25` (2026-02-23) | Section 5.3, Algorithm 3 step 2, p. 18: return `false`, rather than bottom, when context length exceeds 255. | Verification rejection behavior; candidate always uses empty context, but shared public API was checked. | `src/lib.rs:364-379`; also `391-410` for non-candidate hash verification. | QV fixes context to `&[]` and maps false to `InvalidSignature`. | Both public verifier implementations return `false` for `ctx.len() > 255`; adjacent pseudocode comments still say bottom. Runtime source corresponds to the potential correction. No overlong context is admitted by the proposed profile; no boundary execution performed. | No behavior fix indicated. Smallest future cleanup is the stale comment; preserve mandatory empty-context policy and future boundary refusal evidence, with no alternate-context retry. |
+| `Sheet1!A26:D26` (2026-02-27) | Section 7.4, Algorithm 40, p. 41: tighten documented UseHint upper bound to `(q-1)/(2*gamma2)-1`; verification feeds this to `w1Encode`, which already requires that bound. | Applicable shared verification value range/encoding interface. Original loose inequality is technically true, not the tight bound. | `src/high_low.rs:66-95,147-190`; `src/encodings.rs:336-345`; `src/ml_dsa.rs:419-429`; ML-DSA-44 constants `src/lib.rs:640-653`. | QV. | `use_hint` doc comment retains the loose inclusive bound. For ML-DSA-44, gamma2=(q-1)/88, so m=44: `decompose` selects 0..43, h=0 returns that value, and hint adjustment explicitly wraps 43 to 0 or 0 to 43. The 65/87 branches mask to 0..15. `w1_encode` documents/checks the tight bound. No source path returning 44 for the selected branch is indicated; no exhaustive executed range check is claimed. | Documentation discrepancy only observed. Smallest future correction is tightening the helper output comment; independently validate the decompose/hint/encoding interface before implementation acceptance. Do not change the encoding or parameter set. |
+| `Sheet1!A27:D27` (2026-07-31) | Section 4 Table 1, p. 15, and Appendix C/Table 3, p. 52: expected signing repetitions 4.36/5.14/3.91 replace 4.25/5.1/3.85 after accounting for Algorithm 7 line 28; minimum permissible signing-loop limit, **if imposed**, changes 814 to 821. | Applicable signing probability/resource analysis across shared parameter sets, not a verification-encoding change or mandate to add a cap. | `src/ml_dsa.rs:204-212,274-318`; `src/hashing.rs:281-301`; `src/lib.rs:640-647` (L=4); public result wrapper `src/lib.rs:268-295`. | QS, including `sign_into`; QV does not execute this signing loop. | Both rejection checks, including line 28's norm/hint-weight check, are present. Signing uses `loop` and ordinary `u16` `kappa_ctr += L` on rejection; `expand_mask` also uses ordinary `u16` `mu + r`. There is no explicit iteration cap or checked exhaustion error return. Finite counters are not evidence of a safe resource bound or uniform exhaustion refusal: overflow behavior depends on build overflow checks (panic versus wrapping). Neither signing time nor exhaustion behavior was executed; no exploit is demonstrated. | Do not introduce 821 as a cap or claim bounded signing time. Future signing-implementation work must resolve counter representability/exhaustion, conditional-limit semantics, intermediate-result destruction and uniform failure handling if a limit is selected, with separate evidence. This does not change BR-08 or other existing gate definitions, authorize signing or require a profile change. |
+
+### Bounded findings, unresolved work and owner disposition
+
+**Coverage:** all twelve entries in the supplied, 2026-07-31-updated workbook
+are covered individually above, including the initial notes and nonvisible
+package-content inspection. This is coverage of these exact supplied bytes,
+not proof that no later official workbook exists. Reported official links
+and byte-identity checks are distinct from independent origin authentication.
+The earlier inability to retrieve NIST sources remains part of the history.
+
+**Source-level compatibility:** no applicable computational discrepancy was
+observed in the inspected candidate verification paths for pure-mode message
+formatting, challenge-input order, context-length rejection, internal
+`w1Encode` use or the selected UseHint branch. Signed Montgomery arithmetic
+also corresponds at source level, but this is not a proof of all caller
+ranges or complete arithmetic conformance. The review does not establish
+whole-package conformance or declare every erratum security-irrelevant.
+Editorial corrections in rows 18/19/22 do not change the candidate wire bytes.
+Rows 16/17/20/21/23-27 merit the specific mathematical, framing, randomness,
+encoding, rejection or resource considerations recorded above.
+
+**Concrete documentation discrepancies and smallest future corrections:**
+the dependency retains the inclusive Montgomery input comment (row 24),
+the loose UseHint bound comment (row 26), the old `w1_encode` caller names
+(row 23), and old pseudocode failure notation (rows 21/25). These do not by
+themselves show incorrect executed verification. A separately authorized
+future dependency-maintenance task could align those comments with the
+intended algorithms and actual code; the Montgomery contract requires caller
+range review, not merely replacing a bound mechanically. No source fix or
+dependency upgrade was made here.
+
+**Remaining implementation questions:** the ordinary signing-counter
+increments are not a checked, uniform exhaustion-refusal mechanism. A future
+signing implementation review must decide how to preserve distinct mask
+inputs and safely handle counter exhaustion, including build-dependent
+overflow behavior, cleanup and uncertain outcomes. If it elects a loop limit,
+the workbook's revised minimum is 821, not a directive to cap at 821;
+Appendix C's conditional cleanup/uniform-outcome requirements must be
+addressed. Expected repetitions, finite counter width and a caller-owned
+output buffer establish neither a running-time bound nor acceptable
+operational resources. This source observation does not demonstrate an
+exploit, mean a signature was produced, or permit retry after uncertainty.
+It is a future implementation concern within the existing decisions, not a
+new gate, an automatic BR-01 rejection, or an approval exception.
+
+Future executed conformance/interoperability and malformed-input evidence,
+complete arithmetic/call-site range assurance, release-binary correspondence,
+and any actual randomness, custody or offline-environment assurance remain
+absent from this task. The future bootstrap parser/consumer must still
+verify the complete framed message under an independently provisioned root
+and purpose; the digest-taking QD adapter remains unsuitable. Previously
+closed documentation findings are not reopened by this review. The custody
+model's section 10 implementation-entry checklist remains in force.
+
+**Owner acceptance/rejection: PENDING.** This review supplies later errata
+evidence for the existing decision card only; it does not allocate profile
+ID 1, select/provision a root, assign an approver, accept the cryptographic
+profile, authorize implementation, or waive any prerequisites. BR-02-BR-11
+and B/C/L/X/U remain unchanged. No keys, signatures, test vectors, tests,
+builds, scans, activation or deployment were produced/run. Source inspection
+does not establish executed conformance, FIPS algorithm/module validation,
+security acceptance or production readiness.
+
+Both authorized documents retain their complete baseline-byte prefixes and
+mode 100644. This authority document retains LF and its terminal newline;
+the evidence cross-reference uses a leading CRLF delimiter, CRLF throughout
+the append, and no final newline. The delivery checks are documentation-only:
+entry/locator correspondence, supported conclusions and explicit gaps,
+restricted changed paths, prefix/mode/EOL preservation and whitespace.
+
+All existing status blocks and gates are preserved without promotion:
+`D7D14_STORAGE_COMPONENT=IMPLEMENTED-ISOLATED`;
+`D7D14_STORAGE_ACCEPTANCE=PASS-ACCEPTED-SUBSET`;
+`D7D10_LOCAL_SIGNING_RESERVATION=CODE-AND-STORAGE-TEST-POSITIVE`;
+whole native-admission and authority contracts **DRAFT / NOT APPROVED / NOT
+IMPLEMENTED**; section 13.6 whole-lifecycle **INCOMPLETE**; durable
+anti-rollback **NOT-ESTABLISHED**; C4/C5 and RS1 **OPEN**; candidate resource
+limits **UNAPPROVED**; isolated implementation prerequisites **NOT
+SATISFIED**; activation **DISABLED**; public DevNet **NO-GO**.
