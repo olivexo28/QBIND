@@ -11,6 +11,7 @@ trap 'rm -rf -- "$TEST_ROOT"' EXIT
 
 export GIT_CONFIG_NOSYSTEM=1
 export GIT_CONFIG_GLOBAL=/dev/null
+export GIT_CONFIG_COUNT=0
 export GIT_TERMINAL_PROMPT=0
 export HOME="${TEST_ROOT}/home"
 mkdir -p "$HOME"
@@ -54,6 +55,37 @@ commit_fixture() {
   git -C "$1" -c commit.gpgsign=false commit -qm "fixture update"
 }
 
+install_clean_fsmonitor() {
+  local repo=$1 marker=$2 hook
+  git -C "$repo" config --unset core.hooksPath || true
+  hook=$(git -C "$repo" rev-parse --git-path hooks/qbind-fsmonitor-clean)
+  case "$hook" in
+    /*) ;;
+    *) hook="${repo}/${hook}" ;;
+  esac
+  mkdir -p "$(dirname "$hook")"
+  cat >"$hook" <<EOF
+#!/bin/sh
+[ "\$1" = 2 ] || exit 1
+printf '%s\\n' "\$1" >>'$marker'
+printf 'fixture-token\\000'
+EOF
+  chmod +x "$hook"
+  git -C "$repo" config core.fsmonitor "$hook"
+  GIT_OPTIONAL_LOCKS=1 git -C "$repo" status --porcelain=v1 >/dev/null
+  [ -s "$marker" ] || fail "configured fsmonitor hook was not invoked for $repo"
+}
+
+assert_fsmonitor_valid() {
+  local repo=$1 path=$2 verbose fsmonitor
+  verbose=$(git -C "$repo" ls-files -v -- "$path")
+  fsmonitor=$(git -C "$repo" ls-files -f -- "$path")
+  [ "$verbose" = "H $path" ] ||
+    fail "expected ordinary tracked flag H for $path, observed $verbose"
+  [ "$fsmonitor" = "h $path" ] ||
+    fail "expected persisted fsmonitor-valid flag h for $path, observed $fsmonitor"
+}
+
 printf '%s\n' '== Pinned baseline classification slice =='
 baseline_slice=$(git show "${BASELINE}:scripts/devnet/run_384_public_devnet_release_artifact_manifest.sh" |
   python3 -c '
@@ -92,22 +124,37 @@ printf 'new\n' >"${repo}/second.txt"
 git -C "$repo" add -- second.txt
 assert_state dirty "$repo" "staged plus unstaged different paths"
 
-printf '%s\n' '== Add, delete, rename, mode, and type changes =='
-repo="$(new_repo structural)"
+printf '%s\n' '== Isolated add, delete, rename, mode, and type changes =='
+repo="$(new_repo addition)"
+assert_state clean "$repo" "addition clean control"
 printf 'added\n' >"${repo}/added.txt"
 git -C "$repo" add -- added.txt
 assert_state dirty "$repo" "tracked staged addition"
-commit_fixture "$repo"
+
+repo="$(new_repo deletion)"
+assert_state clean "$repo" "deletion clean control"
 git -C "$repo" rm -q tracked.txt
 assert_state dirty "$repo" "tracked staged deletion"
-git -C "$repo" mv added.txt renamed.txt
-assert_state dirty "$repo" "tracked staged rename"
-commit_fixture "$repo"
-chmod +x "${repo}/renamed.txt"
-assert_state dirty "$repo" "executable mode change with core.filemode=false"
-chmod -x "${repo}/renamed.txt"
-rm -- "${repo}/renamed.txt"
-ln -s tracked.txt "${repo}/renamed.txt"
+
+repo="$(new_repo rename)"
+assert_state clean "$repo" "rename clean control"
+git -C "$repo" mv tracked.txt renamed.txt
+assert_state dirty "$repo" "tracked staged rename without other changes"
+
+repo="$(new_repo mode-only)"
+git -C "$repo" config core.filemode false
+[ "$(git -C "$repo" config --bool --get core.filemode)" = false ] ||
+  fail "mode-only fixture did not establish core.filemode=false"
+[ ! -x "${repo}/tracked.txt" ] || fail "fixture starts with executable bit set"
+assert_state clean "$repo" "mode-only clean control with core.filemode=false"
+chmod +x "${repo}/tracked.txt"
+[ -x "${repo}/tracked.txt" ] || fail "filesystem did not retain executable-bit change"
+assert_state dirty "$repo" "mode-only change with core.filemode=false"
+
+repo="$(new_repo type-only)"
+assert_state clean "$repo" "type-change clean control"
+rm -- "${repo}/tracked.txt"
+ln -s missing-target "${repo}/tracked.txt"
 assert_state dirty "$repo" "tracked regular-file to symlink type change"
 
 printf '%s\n' '== Scope, ignored files, and unusual names =='
@@ -133,18 +180,26 @@ git -C "$repo" -c commit.gpgsign=false commit -qm ignore
 printf 'untracked\n' >"${repo}/untracked.txt"
 printf 'ignored\n' >"${repo}/item.ignored"
 assert_state clean "$repo" "untracked and ignored exclusions"
+repo="$(new_repo unusual-newline)"
+assert_state clean "$repo" "newline filename clean control"
 unusual=$'line\nbreak-ñ'
 printf 'unusual\n' >"${repo}/${unusual}"
 git -C "$repo" add -- "$unusual"
-assert_state dirty "$repo" "newline, leading-dash, and non-ASCII path"
-unusual=$'-leading\nname-ñ'
+assert_state dirty "$repo" "newline and non-ASCII tracked filename"
+
+repo="$(new_repo unusual-leading-dash)"
+assert_state clean "$repo" "leading-dash filename clean control"
+unusual='-leading-name-ñ'
 printf 'unusual\n' >"${repo}/${unusual}"
 git -C "$repo" add -- "$unusual"
-assert_state dirty "$repo" "leading-dash filename with newline and non-ASCII"
+assert_state dirty "$repo" "leading-dash and non-ASCII tracked filename"
+
+repo="$(new_repo unusual-whitespace)"
+assert_state clean "$repo" "whitespace filename clean control"
 unusual=$'white space\tname'
 printf 'unusual\n' >"${repo}/${unusual}"
 git -C "$repo" add -- "$unusual"
-assert_state dirty "$repo" "space and tab in tracked filename"
+assert_state dirty "$repo" "space and tab tracked filename"
 
 printf '%s\n' '== Submodule state =='
 subsource="$(new_repo submodule-source)"
@@ -173,6 +228,54 @@ assert_state clean "$subroot" "updated initialized submodule gitlink"
 rm -rf -- "${subroot}/module"
 assert_state unknown "$subroot" "unavailable initialized submodule"
 git -C "$subroot" -c protocol.file.allow=always submodule update --init -q
+
+printf '%s\n' '== Filesystem monitor controls and persisted valid entries =='
+repo="$(new_repo fsmonitor-root)"
+monitor_log="${TEST_ROOT}/fsmonitor-root-invocations"
+install_clean_fsmonitor "$repo" "$monitor_log"
+git -C "$repo" update-index --fsmonitor-valid -- tracked.txt
+assert_fsmonitor_valid "$repo" tracked.txt
+index_path=$(git -C "$repo" rev-parse --git-path index)
+case "$index_path" in
+  /*) ;;
+  *) index_path="${repo}/${index_path}" ;;
+esac
+index_before=$(sha256sum "$index_path")
+assert_state clean "$repo" "configured fsmonitor clean control"
+printf 'tracked edit after persisted fsmonitor-valid flag\n' >>"${repo}/tracked.txt"
+assert_fsmonitor_valid "$repo" tracked.txt
+assert_state dirty "$repo" "tracked edit with persisted fsmonitor-valid flag"
+index_after=$(sha256sum "$index_path")
+[ "$index_before" = "$index_after" ] ||
+  fail "root classifier changed index while checking persisted fsmonitor-valid entry"
+pass "root fsmonitor fixture retained its index checksum across classifier calls"
+
+monitor_source="$(new_repo fsmonitor-submodule-source)"
+monitor_parent="$(new_repo fsmonitor-submodule-parent)"
+git -C "$monitor_parent" -c protocol.file.allow=always submodule add -q "$monitor_source" module
+git -C "$monitor_parent/module" config user.name "QBIND fixture"
+git -C "$monitor_parent/module" config user.email "fixture@example.invalid"
+git -C "$monitor_parent/module" config core.hooksPath /dev/null
+commit_fixture "$monitor_parent"
+monitor_log="${TEST_ROOT}/fsmonitor-submodule-invocations"
+install_clean_fsmonitor "${monitor_parent}/module" "$monitor_log"
+git -C "$monitor_parent/module" update-index --fsmonitor-valid -- tracked.txt
+assert_fsmonitor_valid "${monitor_parent}/module" tracked.txt
+submodule_index=$(git -C "$monitor_parent/module" rev-parse --git-path index)
+case "$submodule_index" in
+  /*) ;;
+  *) submodule_index="${monitor_parent}/module/${submodule_index}" ;;
+esac
+index_before=$(sha256sum "$submodule_index")
+assert_state clean "$monitor_parent" "submodule fsmonitor clean control"
+printf 'submodule tracked edit after persisted fsmonitor-valid flag\n' \
+  >>"${monitor_parent}/module/tracked.txt"
+assert_fsmonitor_valid "${monitor_parent}/module" tracked.txt
+assert_state dirty "$monitor_parent" "submodule tracked edit with persisted fsmonitor-valid flag"
+index_after=$(sha256sum "$submodule_index")
+[ "$index_before" = "$index_after" ] ||
+  fail "recursive classifier changed submodule index with persisted fsmonitor-valid entry"
+pass "submodule fsmonitor fixture retained its index checksum across classifier calls"
 
 inner="$(new_repo nested-inner)"
 printf '*.ignored\n' >"${inner}/.gitignore"

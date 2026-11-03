@@ -10,6 +10,7 @@ _qbind_source_tree_state_git() {
     GIT_OPTIONAL_LOCKS=0 \
     "$QBT_GIT_BIN" -C "$QBT_REPO_ROOT" \
       -c core.filemode=true \
+      -c core.fsmonitor=false \
       -c diff.ignoreSubmodules=untracked \
       -c diff.external= \
       "$@"
