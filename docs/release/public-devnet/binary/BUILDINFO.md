@@ -166,6 +166,13 @@ labels:
   same-input reproducibility evidence and explicitly **not** claiming cross-host or
   SLSA-grade provenance.
 
+The manifest's `source_tree_state` is a Git observation of tracked repository
+paths made immediately before manifest serialization, after the existing build
+and scrape stages; root `docs/**` paths are excluded. `dirty` and `unknown` are
+valid values. It does not establish build-time cleanliness or source-to-binary
+correspondence, and schema validation, `RESULT=POSITIVE`, or artifact staging
+does not constitute clean-source or release approval.
+
 The manifest embeds no absolute path, private hostname, external endpoint, secret,
 or raw `/metrics` dump. Generate + schema-validate it against the actual build with
 `scripts/devnet/run_384_public_devnet_release_artifact_manifest.sh` (evidence

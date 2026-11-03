@@ -437,6 +437,20 @@ are not changed.
 
 ## 8. First bounded candidate task card: constant-clean producer
 
+### Review provenance recorded before implementation
+
+Before implementation began on the required baseline commit
+`6dd0bc9d4ad5426065460270bf30c2cda6b2ca37` (tree
+`1796cf4eb505c15945f5c48821cc83329fcf5305`), the user conveyed that an
+independent ChatGPT review of this finding and the section 8 correction
+contract had completed with **PASSED / CLOSED** disposition for the bounded
+reporting design, classification/error rules, observation timing, caller
+compatibility, and future validation matrix. This records the provenance and
+scope of that pre-implementation review only; it is not a review or acceptance
+of code, which did not yet exist. GitHub Copilot is assigned the bounded
+implementation in this task. No operational or protocol-authority role is
+inferred from that assignment.
+
 **E07 / OBL-REL-1a / A48.1-C2. FIRST BOUNDED CANDIDATE; not highest-severity
 ranking. Owner UNASSIGNED. Finding status: SOURCE-CONFIRMED TO THE STATED
 MECHANISM. Correction contract: PROPOSED / AWAITING INDEPENDENT REVIEW.

@@ -31,6 +31,7 @@ set -euo pipefail
 
 OUTDIR="${1:-/tmp/qbind-run384-public-devnet-release-artifact-manifest}"
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+source "${REPO_ROOT}/scripts/devnet/lib/source_tree_state.sh"
 NODE_BIN="${REPO_ROOT}/target/release/qbind-node"
 BIN_DIR="${REPO_ROOT}/docs/release/public-devnet/binary"
 SCHEMA="${BIN_DIR}/RELEASE_ARTIFACT_MANIFEST.schema.json"
@@ -218,12 +219,9 @@ stop_node "${LAST_NODE_PID}"
 RUSTC_V="$(rustc --version 2>/dev/null || echo unknown)"
 CARGO_V="$(cargo --version 2>/dev/null || echo unknown)"
 GENERATED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-# Source-tree state: clean unless tracked-source (non-docs) files are modified.
-if git -C "${REPO_ROOT}" diff --quiet -- ':(exclude)docs/**' 2>/dev/null && \
-   git -C "${REPO_ROOT}" diff --cached --quiet -- ':(exclude)docs/**' 2>/dev/null; then
-  TREE_STATE="clean"
-else
-  TREE_STATE="clean"
+# Observe the tracked source-tree state immediately before manifest serialization.
+if ! TREE_STATE="$(qbind_observe_source_tree_state "${REPO_ROOT}")"; then
+  fail "source-tree state could not be classified"
 fi
 
 python3 - "${MANIFEST}" <<PY

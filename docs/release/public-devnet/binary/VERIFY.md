@@ -126,6 +126,13 @@ python3 -c "import json,jsonschema,sys; \
 
 Expected: `manifest OK`.
 
+`source_tree_state` is observed immediately before manifest serialization, after
+the existing build and scrape stages, for Git-tracked paths except root
+`docs/**`. `dirty` and `unknown` are valid values. This is not build-time
+cleanliness or source-to-binary correspondence. Schema validation,
+`RESULT=POSITIVE`, and artifact staging are not clean-source checks or release
+approval.
+
 ## 6c. Generate the manifest as a CI artifact (Run 385)
 
 Run 385 wires the Run 384 manifest generation into CI as a **CI artifact** (never a
@@ -143,7 +150,9 @@ schema-validate + live-cross-check, and stages only publish-safe CI artifacts
 (`RELEASE_ARTIFACT_MANIFEST.json`, `qbind-node.sha256`,
 `MANIFEST_VALIDATION_SUMMARY.txt`, `BUILDID.txt`) with raw logs / metrics / data dirs
 excluded. The generated `RELEASE_ARTIFACT_MANIFEST.json` is uploaded as a CI artifact
-and is **not** committed. Evidence: `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_385.md`.
+and is **not** committed. Schema-valid `dirty` and `unknown` values remain acceptable;
+`RESULT=POSITIVE` and artifact staging do not establish clean source or release approval.
+Evidence: `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_385.md`.
 
 ## 7. Confirm public DevNet is not claimed launch-ready
 

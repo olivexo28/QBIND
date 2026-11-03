@@ -157,7 +157,7 @@
       "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"
     },
     "source_tree_state": {
-      "description": "Source tree cleanliness at build time.",
+      "description": "Git-observed state of tracked repository paths at manifest-observation time, excluding root docs/** paths.",
       "type": "string",
       "enum": ["clean", "dirty", "unknown"]
     },

@@ -123,6 +123,13 @@ hostname, external endpoint, secret, or raw `/metrics` dump. Regenerate + valida
 with `scripts/devnet/run_384_public_devnet_release_artifact_manifest.sh` (see
 `VERIFY.md` §6b and `../../../devnet/QBIND_DEVNET_EVIDENCE_RUN_384.md`).
 
+`source_tree_state` reports Git-observed tracked-path state immediately before
+manifest serialization, after the existing build and scrape stages; root
+`docs/**` paths are excluded. `dirty` and `unknown` are valid manifest values.
+This observation does not establish build-time cleanliness or source-to-binary
+correspondence. Schema validation, `RESULT=POSITIVE`, and artifact staging do
+not mean clean source or release approval.
+
 ## 10b. CI generation of the release-artifact manifest (Run 385)
 
 Run 385 wires the Run 384 manifest generation into CI. The workflow
