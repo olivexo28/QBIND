@@ -295,7 +295,7 @@ statuses not supported by a current-lineage review remain provisional.
 | OBL-STO-2b | EXCLUDED audit implementation thread: RUN 422 new journal/replay, A22.1/A26 preserve | MI/ME / D10/D14 / R/C5/profile | Continue existing thread and accepted subset, no competing journal | Producing-revision/component scope plus missing production/process correspondence |
 | OBL-STO-3 | Snapshot output edge split from CONS-4, source-complete bounded section 26.3 / A22.1 identity | DD/ME / create_snapshot output / R/profile recovery | Preserve edge identity and input-to-durable-output trust question | E20/E22 snapshot anchor and epoch correspondence |
 | OBL-OPS-1 | SOURCE-PARTIAL beyond completed metrics endpoint; A15/A24-F1 | D/ME / configuration/fail-open/observability / O | Name remaining default/fallback, check real operating profile | Config-specific refusal/visibility evidence; E24 metrics remains separate |
-| OBL-REL-1a | Build/workflow source sub-boundaries complete A48.2/A49.1, constant-clean candidate retained | D/ME / release manifest/workflows / A | FIRST BOUNDED CANDIDATE section 8; only three current files inspected | Temporary Git-fixture regressions; four evidence planes remain separate |
+| OBL-REL-1a | Build/workflow source sub-boundaries complete A48.2/A49.1; constant-clean producer defect source-confirmed to its stated mechanism | D/ME / release manifest/workflows / A | Section 8 correction contract proposed and awaiting independent review; implementation authorization remains for the subsequent task | Future temporary Git-fixture regressions; four evidence planes remain separate |
 | OBL-REL-1b | External CI/artifact/historical assurance remains evidence-blocked; A48.2/A49.1 | ME / artifacts/attestation / A | Obtain authorized exact run/artifact/environment evidence; source review cannot create it | Source-to-built-to-deployed correspondence; delegated attestation unexecuted |
 | OBL-EXT-1 | 14-crate/repository interface inventory **NOT REVIEWED AT CURRENT AUDIT BASELINE**; identity A:L9221. Historical detailed definition/classification at A:L19453; A23.1 precedence A:L8982-L8989 means historical status is not current-source verification | ME / crate inventory; `ledger_bridge`, `timeout_verification_bridge`, `metrics_http`, and relevant EVM/execution interfaces (`QbindTx`, `VmV0ExecutionEngine`, `BlockExecutor`) / O and A only where existing gates apply; functional EVM/auth review remains OBL-TX-1a/1b | Treat A18.1's five-level presence/callability/production-wiring/ingress/not-found classification as historical, bounded evidence. Independently re-inventory current baseline within an explicit crate/filename/server-entrypoint search scope before relying on it; internal "bridge" files are wiring, not cross-chain bridges | Record code presence, callable library interface, production wiring, external ingress, and not-found-within-search-scope separately. Historical finding: EVM/execution code and callable interfaces present but no production wiring / no external ingress located; `metrics_http` is non-transaction `/metrics`, routed to OPS-1. Historical scoped searches found no wallet/JSON-RPC/cross-chain-bridge/contract-deploy ingress, not blanket absence. No current applicability claim until checked |
 | OBL-LIVE-1 | BLOCKED on live-deployment evidence; latest owner clarification is stopped development machines | ME / deployment/launch profile / M4/M6/S5/S7/RS1 | No live probe or activation; approved profile/prerequisites first | Separately authorized external/multi-node evidence; E09, no non-use proof |
@@ -317,7 +317,7 @@ existing scoped results retained.
 | E04 | Excluded RUN 422 candidate provenance | ME / provenance / A | Prior thread, no inferred non-ancestry; commit/tree/content correspondence |
 | E05 | Release-binary/isolated multi-node validation | ME / real binary / R/O | Relevant implementation tested and separately approved plan; actual process configuration/artifact identities |
 | E06 | PQ trust/crypto coverage; A39.1-A41 source refinements | ME / crypto integration/backend / C5 | Pin remaining algorithm/platform/entropy scope; no wrapper review as backend correctness proof |
-| E07 | Release/CI/build/historical assurance; A48.2/A49.1 four planes | D/ME / manifest/build environment / A | Section 8 candidate plus distinct effective-build/artifact evidence; no provenance closure from consistency |
+| E07 | Release/CI/build/historical assurance; A48.2/A49.1 four planes | D/ME / manifest/build environment / A | Section 8 bounded reporting correction contract plus distinct effective-build/artifact evidence; no provenance closure from consistency |
 | E08 | A2-F1 possession reproduction | ME / transport / R-F6/O | Disposable isolated control set; public cert versus key-holder, actual session admission |
 | E09 | Deployment and validator launch profile | ME / live operation / M4/M6/S5/S7/RS1 | Four stopped machines are not live evidence; approved deployment/test scope first |
 | E10 | A4-F1 occupancy and A4-F2 cookie integration | ME / handshake resources / O | Occupancy/worker/socket release and complete cookie/client retry, not rate alone |
@@ -350,7 +350,7 @@ existing scoped results retained.
 | R-DEP-1/R-DEP-2/R-RUNTIME-1, A39.1-A41 | RNG source chain resolved to scope; deployed backend/build and runtime entropy remain; algorithms/constant-time not performed; ME; C5 | Pin platform/features/cfgs and exact remaining backend question | Dependency provenance + build inputs; runtime entropy separate, no generic source rerun |
 | R7.3/E12, A42.1-A45.1 | Schema/visitor/postdecode/four-channel route complete to scope; aggregate capacities/RSS/concurrency residuals; ME; O | Preserve corrected precheck/Infinite-limit and copy accounting; name unmeasured quantity | Revision-bound aggregate experiment under separate plan; no new forced defect |
 | A47.3-C1-C3/disposition, A:L1039-L1151 | Local stored n>1 -> 1 regression trace established; violated contract/harm unestablished, no new finding; DD/ME; R/profile recovery | Resolve relevant storage/transition contract and consumer impact before a transition change | Correct restore chronology, cursor-vs-DB writer, atomic visibility != power-loss durability; multi-validator residual separate |
-| A48.1-C2 / E07 / OBL-REL-1a, A:L650-L688 | Constant-clean producer evidence-assurance candidate retained; D; A | Section 8, FIRST BOUNDED CANDIDATE; no highest-severity claim | Truthful classification and temporary Git-fixture before/after evidence |
+| A48.1-C2 / E07 / OBL-REL-1a, A:L650-L688 | Constant-clean producer evidence-assurance candidate source-confirmed to the stated mechanism; D; A | Section 8 contract proposed, awaiting independent review; no highest-severity claim | Truthful classification and future temporary Git-fixture before/after evidence |
 | A48.1-C6 + A48.2 + A49.1, A:L739-L768, A:L412-L593, A:L1-L202 | CRLF invocation, job/check/artifact ordering, external controls and delegated attestation retain qualifications; ME; A | No harness execution here; external run/environment evidence separately scoped | Actual reached stages, status/effects and source-to-artifact/deployment correspondence |
 
 Retain negative sub-dispositions as well as open work: A17.1-C1-C5 and
@@ -438,93 +438,179 @@ are not changed.
 ## 8. First bounded candidate task card: constant-clean producer
 
 **E07 / OBL-REL-1a / A48.1-C2. FIRST BOUNDED CANDIDATE; not highest-severity
-ranking. Owner UNASSIGNED. Status PREPARED / NOT IMPLEMENTED / NOT TESTED.**
+ranking. Owner UNASSIGNED. Finding status: SOURCE-CONFIRMED TO THE STATED
+MECHANISM. Correction contract: PROPOSED / AWAITING INDEPENDENT REVIEW.
+Implementation: NOT STARTED. Regression/runtime evidence: NOT EXECUTED.**
 
-Current-code applicability is **CONFIRMED ONLY for the inspected producer
-mechanism, schema contract and caller below**, at coordination starting commit
-`c44370ee4b77eda8b4c9966632e3b8ce796ba203`. No whole build/workflow or
-deployed-binary applicability claim follows.
+### Pinned evidence and scope of inspection
 
-| Current file / mode / blob | Bounded observation |
+| Identity | Pinned value / observation |
 |---|---|
-| [Run 384 producer](../../scripts/devnet/run_384_public_devnet_release_artifact_manifest.sh), `100644`, `53be84e52f97288a2eba0fa53eee296c8d62a2a9` | Lines 221-227: both branches assign `TREE_STATE="clean"` after worktree/index `git diff --quiet` with `:(exclude)docs/**`; Git errors also fall into constant clean. Line 261 emits the value. Does not inspect untracked files |
-| [Manifest schema](../release/public-devnet/binary/RELEASE_ARTIFACT_MANIFEST.schema.json), `100644`, `54ae5827ce5bcd749bb674742128eb1b20afce8b` | `source_tree_state` is required; enum `clean`, `dirty`, `unknown`; description says "Source tree cleanliness at build time." Enum acceptance cannot establish truthfulness |
-| [Run 385 caller](../../scripts/devnet/run_385_public_devnet_ci_release_artifact_manifest.sh), `100644`, `3c5a0f930195107b6d5a28c48ec7122140740a11` | Lines 98-109 invoke Run 384 via bash and require its positive summary; 134-177 stage/revalidate manifest. Does not recompute or correct tree state; full schema validation accepts all three enum values |
+| This task's implementation baseline | Commit `59d3021e050e289a05a2368040f7b68d52b2ce57`; tree `39ce4cd728393b7aa8ec0c8eb7e6de0c303ef032`; `origin/main` matched both at entry |
+| Task branch / starting plan blob | `copilot/audit-e07-manifest-preimplementation-contract`; plan mode `100644`, blob `9477b9bc51b7b51ed03e92233453934f5d011b46` |
+| Audited source baseline, kept distinct | A49.1 / internal v1.138 identifies commit `18d71a549d868ed33d352e9fc70a9d060f75e03b`, tree `5b6c543435ac017dd8372c93f48be397899db14a` (section 1); this is not this task's implementation baseline |
+| Committed audit input at this task baseline | `Audit/QBIND_SECURITY_FINDINGS_REGISTER.md`, mode `100644`, blob `cd81efdbaf2bfb45e00dc3c60db3ea4f523adfa0`; A49.1 / v1.138, finding A48.1-C2 at A:L650-L688 |
+| Run 384 producer | [Source](../../scripts/devnet/run_384_public_devnet_release_artifact_manifest.sh), mode `100644`, blob `53be84e52f97288a2eba0fa53eee296c8d62a2a9`; lines 221-227 assign `clean` in both branches after worktree/index diff checks, including Git-error paths; line 261 emits the field |
+| Manifest schema | [Schema](../release/public-devnet/binary/RELEASE_ARTIFACT_MANIFEST.schema.json), mode `100644`, blob `54ae5827ce5bcd749bb674742128eb1b20afce8b`; `source_tree_state` is required, enum `clean`/`dirty`/`unknown`; description currently says "Source tree cleanliness at build time" |
+| Run 385 wrapper | [Source](../../scripts/devnet/run_385_public_devnet_ci_release_artifact_manifest.sh), mode `100644`, blob `3c5a0f930195107b6d5a28c48ec7122140740a11`; lines 98-109 invoke Run 384 and require its positive summary; lines 134-178 stage and fully schema-validate the manifest; it does not recompute cleanliness |
+| Producer workflow | [Workflow](../../.github/workflows/public-devnet-release-artifact-manifest.yml), mode `100644`, blob `b77bdc58e2d323d6cb784b8e056f1adc424dc337`; lines 72-74 invoke Run 385 |
+| Additional workflow caller | `.github/workflows/public-devnet-release-signing-attestation.yml`, line 97 invokes Run 385 before attestation; it does not classify source state |
 
-**Scope and prerequisites for the future implementation task:**
+Repository-wide tracked-file searches at the pinned baseline used
+`git grep -n` for `source_tree_state`, both harness names and the schema
+filename. Direct value production is Run 384; Run 385 consumes the generated
+manifest, schema-validates it, and stages it; both workflows above invoke Run
+385. The schema defines the enum. The existing example at
+`docs/release/public-devnet/binary/RELEASE_ARTIFACT_MANIFEST.example.json:31`
+contains `clean`. Maintained descriptions relevant to the field are in
+`binary/README.md` §10a, `binary/BUILDINFO.md` under "Canonical release-artifact
+manifest", and `binary/VERIFY.md` §6b-6c. The committed A48.1 audit register
+and Run 384/385 historical evidence documents also describe the behavior; they
+are evidence, not implementation consumers, and remain unchanged. No source,
+schema, example, workflow or historical-evidence file is changed by this task.
+Other tracked matches for the schema/harness names are documentation pointers
+and evidence indexes (including `binary/REPRODUCIBILITY.md`,
+`ARTIFACT_INDEX.md`, and the Run 384/385 evidence documents), not additional
+classifiers. Run 387's schema-name reference concerns `signed_release` and
+`slsa_grade`, not `source_tree_state`.
 
-* Before implementation, an independent reviewer other than the
-  implementation author must record the finding and correction check required
-  in section 2. Pin the then-current commit/tree, A49.1 input identity and
-  three file blobs; record the scoped source mechanism, applicable
-  truthfulness requirement, reachability, effect/uncertainty, intended
-  behavior, checked-file/timing scope, caller/schema compatibility,
-  dependencies and fixture controls. Outcome must be supported and
-  **CONFIRMED TO [scope]** before this correction proceeds. Reviewer identity
-  and outcome are not supplied by this plan; do not treat this card or its
-  initial source observation as independent confirmation. Use the existing
-  task authorization and assignment process; no additional protocol-owner
-  decision is a prerequisite for this routine, bounded defect. No bootstrap
-  B/U decision, live deployment or full harness execution is prerequisite.
-* Define the checked-file scope explicitly in code/docs and tests. A bounded
-  compatibility target is the existing **tracked repository paths excluding
-  `docs/**` only**, compared HEAD -> index and index -> worktree; include
-  staged/unstaged changes, additions, deletions, renames, mode changes and
-  dirty tracked submodules regardless of user diff-ignore configuration.
-  Do not silently add an `Audit/**`, workflow, lockfile or script exclusion.
-  Untracked files (including untracked build outputs) are **not checked** by
-  this bounded tracked-only policy and must be disclosed; ignored files,
-  external configuration and dependency/build environments are not proven
-  clean. If "clean" must instead mean all build-affecting inputs, settle and
-  test the expanded scope before claiming it; do not conceal this mismatch.
-* Classify clean only when **every required observation succeeds with no
-  differences**, dirty on an observed difference, unknown on an indeterminate
-  observation. Git diff status 0, 1 and errors (>1/failed invocation) are
-  distinct. Preserve stderr/explicit diagnostic for errors; never silently
-  turn an error into clean. Define precedence for mixed dirty/error
-  observations; conservative candidate: **unknown if any required check
-  fails**, dirty only after all checks succeed. Either emit explicit unknown
-  with diagnostic or fail manifest generation according to a documented
-  caller contract; this choice must be fixed in the task before coding.
-* Resolve **timing versus wording**. Current observation is after build and
-  node/metrics runs (build lines 158-161; node launch 178 and 207; observation
-  221-227), not evidence of state "at build time." Capture at an explicitly
-  named pre-build boundary and recheck after building, or truthfully narrow
-  the schema/documentation claim to the observation instant. Pre/post equality
-  alone does not exclude transient edits during the build; do not claim a
-  continuous immutable snapshot without providing one. No node is needed to
-  validate this classification slice.
-* Preserve schema/caller compatibility: enum already permits dirty/unknown;
-  determine whether downstream policy merely records them or explicitly
-  refuses. No schema-value expansion is needed for classification alone.
-  Read Run 385 and all relevant selected callers at task entry; retain
-  existing manifest format/non-claim fields and full validation. Do not
-  alter independent metric/ELF comparisons, workflow checks or node behavior.
-  Respect committed EOL/invocation prerequisites; do not fix CRLF execution
-  or attestation in this task by incidental rewrite.
+### Proposed correction contract for a subsequent task
 
-**Focused regression evidence, future task only:** use disposable temporary
-Git fixtures outside the real checkout. Exercise the actual extracted/reused
-classification logic, not a separately reimplemented proxy. Capture before
-and after for clean, tracked unstaged, staged, staged+unstaged, added/deleted/
-renamed/mode-changed, docs-only changes, untracked-only, ignored-only,
-included Audit/script/workflow/lockfile changes, tracked submodule changes,
-and explicit Git failure/not-a-repository. Include whitespace/unusual path
-names and Git ignore/diff configuration that could hide differences. Baseline
-must show constant clean for dirty and failing observations; after must
-match the declared truth table. Test error diagnostics, chosen mixed-result
-precedence, schema acceptance of each emitted value and caller behavior with
-a synthetic manifest without executing Run 384/385. Prove observation timing
-with controlled fixture mutations. Preserve commands/results and remove only
-known temporary fixtures.
+**Classification boundary and producer integration.** Add
+`scripts/devnet/lib/source_tree_state.sh` with the single shared boundary
+`qbind_classify_source_tree_state`. Run 384 will source and call that boundary
+once immediately before manifest serialization. Future tests will source and
+exercise that exact function against disposable repositories; they must not
+reimplement its logic. The function's stdout is exactly one validated enum
+(`clean`, `dirty` or `unknown`); diagnostics go to stderr, never to the
+published manifest. Unknown is a successful classification result. A failed
+helper invocation, empty/extra/invalid output, or any result outside the
+enum fails manifest generation; none may default to `clean`.
 
-**Closure boundary:** implementation commit + review + focused regression
-evidence may close **only the constant-clean classification defect to the
-declared scope/timing**. It does not establish source-to-built or
-binary-to-deployed correspondence, effective compiler/target/profile/features,
-cache behavior, inherited environment, reproducibility, attestation authenticity,
-CRLF invocation success, historical uploaded-artifact contents, runtime safety,
-E07 overall closure or release eligibility.
+**Declared scope and exclusions.** Classify Git-observed tracked repository
+paths, excluding `docs/**` only, using both HEAD-to-index and index-to-worktree
+observations. Include staged and unstaged differences, tracked additions,
+deletions, renames, supported mode/type changes, and tracked submodule state.
+Do not silently exclude `Audit/`, workflows, scripts, lockfiles, or any other
+tracked path. Untracked and ignored files, external build inputs, toolchains,
+environment/configuration outside the repository and dependency/build
+environment state are outside this tracked-only classification. Git-normalized
+state is neither a raw-byte comparison nor a hermetic-build guarantee.
+
+**Truth table and failures.** A completed no-difference observation is
+`clean`; completed observations establishing any difference are `dirty`;
+any required indeterminate/failed observation is `unknown`. Treat Git diff
+exit 0 as no difference, 1 as difference, and other exits or invocation
+failures as errors, not differences or success. Unknown takes precedence over
+dirty if one required observation fails. Missing Git, an invalid repository,
+an unavailable required revision, or a failed required observation can never
+produce `clean`; emit a separate diagnostic explaining unknown. Invalid
+classifier output or inability to invoke the helper is a manifest-generation
+failure, not an `unknown` default.
+
+**Observation time.** Retain one bounded observation immediately before
+manifest serialization, after the existing build and scrape stages. This is
+the state observed at that point, not state "at build time", not proof that
+inputs remained unchanged throughout the build, and not source-to-binary
+correspondence. Detectable instability during classification (for example
+HEAD/index changes or repeated observations that disagree) must yield
+`unknown`; bracket the diff pass with HEAD and index identity checks and repeat
+the required observations, returning `unknown` if either pass or identity
+differs. This is a bounded instability control, not an atomic-snapshot or
+undetectable change-and-restore guarantee.
+
+**Caller and schema compatibility.** Run 385 continues full schema validation
+and records valid `dirty` and `unknown` values; when the value is `unknown`,
+retain an explicit diagnostic in the ordinary run output, separate from the
+manifest. Do not add a clean-only release gate or interpret schema-valid,
+`RESULT=POSITIVE`, or artifact staging as clean source, provenance, or release
+eligibility. Keep the enum and manifest structure unchanged. In the future
+schema edit, replace the "at build time" description with wording that names
+Git-observed tracked-path state at manifest-observation time and its
+`docs/**` exclusion. Because this corrects description only and adds/retypes
+no schema data, keep the schema's `$schema`, `$id`, `schema_version` value and
+manifest schema version at `1.0.0`; no version bump is proposed. Preserve the
+existing example's `clean` value and all historical values as historical
+evidence; do not retroactively repair or re-label them.
+
+**Unsupported or hiding conditions.** The classifier must neutralize or
+explicitly reject diff settings that can suppress required observations
+(including external diff/textconv and submodule-ignore behavior), and verify
+mode reporting rather than trusting a configuration that suppresses mode
+changes. Any relevant diff configuration it cannot neutralize yields
+`unknown`. Detect `assume-unchanged` and `skip-worktree` index flags and
+return `unknown`; sparse checkouts, unresolved index entries, or incomplete
+index/revision access likewise yield `unknown` unless the implementation can
+prove complete in-scope coverage. Force submodule dirt visibility where
+supported; an uninitialized/unavailable submodule or any submodule state that
+cannot be observed (including required nested tracked state) yields
+`unknown`. Untracked/ignored files inside submodules remain excluded under
+the declared tracked-only rule. Concurrent changes detected by stability
+checks yield `unknown`; no claim is made for undetected transient mutations.
+Tests must prove each supported mode or its explicit `unknown`/unsupported
+outcome rather than assume Git configuration or filesystem behavior.
+
+**Exact anticipated paths (not created by this task):**
+
+* Implementation: `scripts/devnet/lib/source_tree_state.sh` (shared
+  classifier); `scripts/devnet/run_384_public_devnet_release_artifact_manifest.sh`
+  (call and fail-closed output handling).
+* Regression tests: `scripts/devnet/tests/test_source_tree_state.sh` (sources
+  the production helper and builds disposable Git repositories/synthetic
+  manifests).
+* Direct documentation: `docs/release/public-devnet/binary/RELEASE_ARTIFACT_MANIFEST.schema.json`
+  (description only); `docs/release/public-devnet/binary/README.md`;
+  `docs/release/public-devnet/binary/BUILDINFO.md`; and
+  `docs/release/public-devnet/binary/VERIFY.md` (scope, timing, exclusions,
+  diagnostic, and non-claims). Do not change the existing example.
+
+### Future validation matrix — all FUTURE / NOT EXECUTED
+
+All rows below are future regression cases; none was run here. Use disposable
+temporary Git repositories and synthetic manifests, never the real checkout.
+First characterize the pinned baseline from its committed source: dirty
+worktree/index observations and failed Git observations both select constant
+`clean`; do not execute Run 384/385 to do so. Then invoke the actual shared
+future classifier for the corrected outcomes.
+
+| FUTURE case / control | Required result | Status |
+|---|---|---|
+| Clean repository; positive control with no in-scope changes | `clean` | FUTURE / NOT EXECUTED |
+| Unstaged tracked edit; staged tracked edit; staged plus unstaged edit to the same/different paths; positive controls for each layer | `dirty` | FUTURE / NOT EXECUTED |
+| Tracked addition, deletion and rename; positive controls | `dirty` | FUTURE / NOT EXECUTED |
+| Supported executable-mode, symlink/type and other Git-representable mode/type changes; filesystem/config that cannot establish them | `dirty` when observed; otherwise explicit `unknown`/unsupported | FUTURE / NOT EXECUTED |
+| `docs/**`-only tracked change; positive scope-exclusion control | `clean` | FUTURE / NOT EXECUTED |
+| Untracked-only and ignored-only changes, including generated files; positive exclusion controls | `clean`, with the tracked-only limitation documented | FUTURE / NOT EXECUTED |
+| Changes under `Audit/`, `.github/workflows/`, `scripts/`, and to `Cargo.lock`; positive inclusion controls | `dirty` for each | FUTURE / NOT EXECUTED |
+| Tracked submodule gitlink change and initialized submodule tracked edit; submodule ignore settings; unavailable/uninitialized or incompletely observed (including nested) submodule | `dirty` when observed; otherwise `unknown` | FUTURE / NOT EXECUTED |
+| Whitespace, leading-dash, newline, non-ASCII and other unusual tracked filenames | Correct `dirty`/`clean` result without path parsing loss | FUTURE / NOT EXECUTED |
+| Diff-ignore/external-diff/textconv/submodule-ignore configuration; mode-detection configuration | Force correct observation or explicit `unknown`; never hidden `clean` | FUTURE / NOT EXECUTED |
+| `assume-unchanged`, `skip-worktree`, sparse checkout, unresolved index state and missing required revision | `unknown` with separate diagnostic | FUTURE / NOT EXECUTED |
+| Missing Git executable, invalid repository, diff exit/error, and other failed required observations | `unknown` with separate diagnostic | FUTURE / NOT EXECUTED |
+| Mixed dirty observation plus an error; mutation detected between stability observations | `unknown` takes precedence; diagnostic remains separate | FUTURE / NOT EXECUTED |
+| Helper nonzero exit, empty/invalid/multiple stdout values | Manifest generation fails; no manifest falsely reports `clean` | FUTURE / NOT EXECUTED |
+| Every enum emitted by the classifier in a synthetic manifest; full schema validation; Run 385-compatible caller/staging behavior | All three enum values schema-accepted and recorded; unknown diagnostic is not in published manifest; no clean-only gate | FUTURE / NOT EXECUTED |
+| Baseline positive/negative controls versus corrected classifier on the same fixtures | Pinned baseline remains constant-clean even for dirty/error fixtures; future classifier matches the truth table | FUTURE / NOT EXECUTED |
+| Controlled post-build/pre-serialization fixture mutation and stable/unstable repeated observations | Value reflects observation-time state; detected instability is `unknown`; no build-time/continuous-snapshot claim | FUTURE / NOT EXECUTED |
+
+No Run 384/385, Cargo, node, workflow, build, scanner, signing, deployment or
+activation is part of this contract or its future fixture matrix.
+
+### Review boundary and closure
+
+This task's source finding is **confirmed to the stated mechanism**. The
+correction contract is **proposed and awaiting independent review**; no
+reviewer, assignee, completed review or operational authorization is claimed.
+No additional protocol-owner decision is required merely for this bounded
+reporting defect. The subsequent implementation task still requires its
+bounded implementation authorization and the independent pre-implementation
+review required by section 2. Implementation is **NOT STARTED**;
+regression/runtime evidence is **NOT EXECUTED**.
+
+Eventual closure may cover only truthful Git-observed classification within
+the declared scope and observation timing. It does not close E07 overall or
+establish build provenance, historical-artifact correctness, runtime safety,
+source-to-built or binary-to-deployed correspondence, or release eligibility.
 
 ### A49.1 non-regression rules for every provenance task
 
@@ -636,9 +722,9 @@ staged for delivery; final commit/tree/remote checks are reported separately
 after commit, without a self-referential hash in this document.
 
 **Next bounded implementation:** section 8's E07 / OBL-REL-1a / A48.1-C2
-constant-clean producer. Actual prerequisites are a pinned current input/
-source baseline, bounded implementation authorization and assignee, explicit
-checked-path/untracked/error/timing contract, caller/schema compatibility
-review and a no-node temporary-Git-fixture regression plan. Unrelated BR
-decisions and public activation are not prerequisites for that bounded fix;
-they remain mandatory for their dependent authority/recovery/operational work.
+constant-clean producer. The proposed path, source baseline, scope, timing,
+error/caller/schema treatment and future Git-fixture matrix are recorded;
+independent review and the subsequent task's bounded implementation
+authorization remain outstanding. Unrelated BR decisions and public
+activation are not prerequisites for that bounded fix; they remain mandatory
+for their dependent authority/recovery/operational work.
