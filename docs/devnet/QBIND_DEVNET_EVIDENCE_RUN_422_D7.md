@@ -26709,3 +26709,30 @@ scanners, keys, signing, infrastructure selection/provisioning, operational
 commands, deployment or activation. The documentation proposal is complete;
 BR-04 acceptance, B/U establishment and operational authorization remain
 unresolved.
+
+## RUN 422 BR-04 accountability and owner-reported deployment facts — 2026-11-03 UTC
+
+See `docs/devnet/QBIND_RUN_422_DEVNET_BOOTSTRAP_AUTHORITY_DECISION.md`, section
+"RUN 422 BR-04 accountable owner and reported deployment facts — 2026-11-03 UTC",
+for the verbatim user-supplied statement assigning Olive both B and U
+accountable-person roles, with shared accountability explicitly disclosed.
+Earlier UNASSIGNED/no-owner statements remain historical, superseded only
+for those two roles. The four-node/machine/operator, N = 4/q = 3, local
+RocksDB/journal/0600-keystore and manual-administration facts are
+OWNER-REPORTED, not independently machine/runtime verified; backups are
+reported unassigned/not deployed, with no automated or remote pipeline.
+Observation times and machine evidence were not supplied; no cryptographic
+signature was supplied or generated.
+
+The addendum preserves that report alongside inspected production activation
+refusal and absent owner/journal handler wiring. Deployed revisions,
+entrypoints, modes, configuration and actual journal enforcement are
+NOT SUPPLIED / NOT VERIFIED; no supported independent B/U source is supplied.
+BR-04 technical decision PENDING; closure and operational B/U NOT ESTABLISHED.
+BR-01/02/03 scoped acceptances, BR-03 unestablished overall closure,
+BR-05–BR-11, C/L/X, accepted local D10/D14 and all lifecycle/cryptographic/
+resource/recovery limits remain unchanged; no completed review is reopened.
+Prerequisites NOT SATISFIED; implementation authorization PENDING;
+founder-root/profile provisioning NOT DONE; activation DISABLED; public
+DevNet NO-GO. Accountability and reported facts are recorded, not technical
+acceptance, operational readiness or permission.

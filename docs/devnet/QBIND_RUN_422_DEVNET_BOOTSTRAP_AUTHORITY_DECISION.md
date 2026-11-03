@@ -2526,3 +2526,95 @@ source/contract correspondence, semantic and threat/effect coverage, explicit
 gaps/status/gates, paths/locators, exact prefixes, two-path diff, modes/EOLs
 and CRLF-aware whitespace. No tests, builds, scanners or operational
 execution are acceptance evidence for this proposal.
+
+## RUN 422 BR-04 accountable owner and reported deployment facts — 2026-11-03 UTC
+
+**ACCOUNTABILITY RECORDED / OWNER-REPORTED FACTS / TECHNICAL DECISION PENDING**
+
+Attribution: the user's supplied report, recorded 2026-11-03 UTC (date only).
+Deployment observation times and machine evidence were **NOT SUPPLIED**.
+No cryptographic signature was supplied or generated. The accountable-owner
+statement is recorded verbatim:
+
+> “Current-authority freshness (B) & Unique authorized first use (U): Olive (Project Lead / Lead Operator) will hold both accountable responsibilities for the initial Public DevNet bootstrap, managing the state transitions and coordinating the authority records across the founding network.”
+
+Effective B accountable person: **Olive (Project Lead / Lead Operator)**.
+Effective U accountable person: **Olive (Project Lead / Lead Operator)**.
+Both responsibilities are held by the same person: **shared accountability
+and overlapping control are explicitly disclosed**, not independent control.
+Earlier UNASSIGNED/no-owner statements, including the BR-04 obligation table,
+decision card and D7 proposal entry, remain historical and are superseded
+**only for these two accountable-person roles**. This does not assign every
+enforcing-consumer, storage-custodian, backup, incident or readback role, or
+grant conflict-resolution, root-replacement or signing-history-reset powers.
+It does not accept the BR-04 technical proposal, mechanism, failure model
+or exclusions.
+
+### Owner-reported deployment facts (not independently verified)
+
+The user reports four equal-weight validator nodes, **N = 4, q = 3**, running
+on four separate local machines with distinct IP addresses, operated by four
+core team members; local RocksDB stores using `RocksDbConsensusStorage` and
+local `SigningReservationJournal`; and local keystores configured with
+`0600` permissions. Backups are **unassigned and not deployed**: specifically,
+no automated or remote backup pipeline for consensus stores or signing
+journals is reported. Individual node operators or the lead administrator
+manually handle restore or replacement. The owner acknowledges activation
+**DISABLED** and public DevNet **NO-GO**.
+
+These are **OWNER-REPORTED**, not independent machine/runtime observations.
+Four operators/machines/IPs do not establish independent control; consensus
+q = 3 is not a B/U witness committee or authority threshold. A local journal
+and keystore do not establish a deployed separate-signer service. No automated
+backup pipeline does not establish absence of manual copies, disk/VM snapshots
+or shared administrator access. Described manual administration grants no
+operational permission to restore, replace or erase uncertain state. No
+approved founding configuration, authenticated validator identities, keys,
+genesis label or canonical pin is supplied by these facts.
+
+### Inspected source versus unresolved deployment correspondence
+
+Inspection baseline: commit `af2c596b7f6045a0b1cb0eeaea2408ae9b9b0bf1`,
+tree `497fa6c02a2530a4c3f75c4ed5357bf9755f06ad`. The existing BR-04
+source-correspondence section was read; the relevant locators below were
+checked at this baseline (paths under `crates/qbind-node/src/`).
+
+| Source locator | Inspected repository behavior, not deployed-binary evidence |
+|---|---|
+| `main.rs:5405-5418,6140-6149,8655-8685` | Explicit genesis-authority activation refusal remains before mode dispatch/startup; preflight retains Proposal/Vote authority `None` and production selects `Required`. |
+| `binary_consensus_loop.rs:2907-2940,3126-3146` | At the documented production handler call, no current-authorization owner and no signing-reservation journal are passed. Timeout/NewView context remains separate. |
+| `signing_reservation_journal.rs:2611-2645,4122-4145`; `safety_record_store/backend.rs:358-366,529-535` | Local reservation/consumption components exist; the safety backend defaults Disabled and refuses opening under that policy. Component existence and historical isolated acceptance do not demonstrate wiring or enforcement in reported deployed binaries. |
+
+Deployed binary/source revisions, entrypoints, operating modes, configuration
+and actual journal enforcement: **NOT SUPPLIED / NOT VERIFIED**. Preserve
+the owner's deployment report alongside this unresolved correspondence:
+the source inspection neither declares the reported machines nonexistent,
+infers a bypass, nor establishes that authorized public consensus is running.
+
+### Remaining facts and unchanged gates
+
+Still missing: per-machine node/signer placement; storage and copy/snapshot
+domains; administrator access and the lead administrator's cross-machine
+reach; bootstrap credential/reference and activation-state custody; an actual
+candidate independently current B/U evidence source, its authentication,
+retained history and survival across each relevant restore/compromise domain;
+and detailed conflict-observation, authorized-update, durable/current-readback
+and partial-use reconciliation responsibilities.
+
+**No supported independent source has been supplied by this report.** No
+witness, HSM, counter, external chain or quorum service is selected or
+provisioned; the failure model is not weakened. Manual attestations, local
+storage, filesystem permissions and ordinary consensus agreement are not B/U
+proof. Accountability does not establish operational B/U.
+
+BR-01 remains **ACCEPTED — DESIGN ONLY**; BR-02 **ACCEPTED — IDENTIFIER
+ALLOCATION AND COMPATIBILITY CONTRACT ONLY**; BR-03 **ACCEPTED — MAPPING
+POLICY ONLY**, with overall closure unestablished. BR-04 technical owner
+decision remains **PENDING**; overall closure and operational B/U remain
+**NOT ESTABLISHED**. Implementation prerequisites **NOT SATISFIED**;
+implementation authorization **PENDING**; founder-root/profile provisioning
+**NOT DONE**; activation **DISABLED**; public DevNet **NO-GO**. BR-05–BR-11,
+C/L/X, accepted local D10/D14 evidence and all existing lifecycle,
+cryptographic, resource and recovery limitations remain unchanged. No completed
+review is reopened. This append authorizes no implementation, machine
+operation, provisioning, key generation, signing or activation.
