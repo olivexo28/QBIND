@@ -295,6 +295,10 @@ git -C "$nested_root" -c protocol.file.allow=always submodule update --init --re
 git -C "$nested_root/outer" config user.name "QBIND fixture"
 git -C "$nested_root/outer" config user.email "fixture@example.invalid"
 git -C "$nested_root/outer" config core.hooksPath /dev/null
+git -C "$nested_root/outer/nested" config user.name "QBIND fixture"
+git -C "$nested_root/outer/nested" config user.email "fixture@example.invalid"
+git -C "$nested_root/outer/nested" config core.hooksPath /dev/null
+git -C "$nested_root/outer/nested" config commit.gpgsign false
 commit_fixture "$nested_root"
 printf 'nested edit\n' >>"${nested_root}/outer/nested/tracked.txt"
 assert_state dirty "$nested_root" "nested initialized submodule tracked edit"
