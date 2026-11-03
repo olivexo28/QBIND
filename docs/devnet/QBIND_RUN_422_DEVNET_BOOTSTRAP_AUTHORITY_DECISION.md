@@ -814,9 +814,14 @@ The source trace supports this one candidate:
 * `MlDsa44Backend::verify(pk, message, signature)` in
   `crates/qbind-crypto/src/ml_dsa44.rs` checks `pk.len() == 1312` and
   `signature.len() == 2420`, converts each to the corresponding fixed array,
-  decodes the key, then calls the pinned verifier with `message` and `&[]`.
-  It maps malformed key/signature encodings to a malformed-signature error
-  and a failed mathematical verification to `InvalidSignature`.
+  and decodes the public key. Wrong key/signature lengths, failed fixed-array
+  conversions, and public-key decoding errors map to
+  `ConsensusSigError::MalformedSignature`. Once the full-length signature
+  reaches the dependency's Boolean verifier with `message` and `&[]`, every
+  `false` result maps to `ConsensusSigError::InvalidSignature`, including
+  invalid signature encodings and failed mathematical verification. This
+  wrapper does not expose those two failure causes separately; both remain
+  rejected.
 * `MlDsa44SignatureSuite::verify` in
   `crates/qbind-crypto/src/ml_dsa44_signature_suite.rs` instead accepts a
   `Hash32` and passes those 32 digest bytes as its message. It is **not**
