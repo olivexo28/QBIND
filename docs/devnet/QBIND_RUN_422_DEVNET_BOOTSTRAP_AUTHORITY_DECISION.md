@@ -2074,3 +2074,86 @@ identity.
 This append changes no executable contract. BR-03 owner disposition remains
 **PENDING**, and no operational network identity or implementation
 authorization is established.
+
+## RUN 422 BR-03 owner mapping-policy acceptance — 2026-11-03
+
+> ACCEPT BR-03 MAPPING POLICY ONLY — olive, network identity authority. I accept the exact standard-DevNet mapping proposal and independent genesis-label/canonical-pin requirements at commit b140908ca92168e0c194a9a70ab30c8deb588aa1. This does not authorize implementation, operational provisioning, signing, or activation
+
+| Decision field | Record |
+|---|---|
+| Public approver label | `olive` |
+| Accountable role for this decision | Network identity authority |
+| Decision | **ACCEPTED — MAPPING POLICY ONLY** |
+| Decision date | 2026-11-03, Asia/Calcutta, date only |
+| Accepted proposal | The exact integrated BR-03 append at commit `b140908ca92168e0c194a9a70ab30c8deb588aa1`, tree `461f73213488ea1ec2e29fbd6f1a52f8f3aa25c3` |
+| Evidence | The explicit user statement supplied in this task |
+| Cryptographic signature | **NOT SUPPLIED OR GENERATED** |
+
+This records the supplied decision only. It does not infer legal identity,
+GitHub-account authentication, operational credentials, custody, or
+assignment of any other operational role.
+
+### Exact accepted mapping policy and comparison/refusal boundary
+
+| Component | Accepted policy |
+|---|---|
+| Bootstrap environment | Existing BR-02 allocation: `u8` value `1` |
+| Runtime environment | `NetworkEnvironment::Devnet` |
+| Genesis validation policy | `NetworkEnvironmentPolicy::Devnet` |
+| Full runtime chain ID | `QBIND_DEVNET_CHAIN_ID = 0x51424E4444455600` |
+| Dormant wire alias | `QBIND_DEVNET_WIRE_ALIAS = 0x44455600` |
+| Genesis label | An independently provisioned exact expected label is mandatory; its operational value remains **NOT SUPPLIED** |
+| Canonical genesis pin | An independently provisioned expected `GenesisHash` is mandatory; its operational value remains **NOT SUPPLIED** |
+
+These are existing identifiers, not new allocations by this decision.
+BR-02 allocations, namespaces, layout, framing, and compatibility rules
+remain unchanged. The accepted policy includes the proposal's comparison and
+refusal rules: compare full-width runtime identity before selecting the fixed
+wire alias; do not truncate, accept low-word equivalence, infer from a label,
+or derive an expected value from the record or verifier. Compare the exact
+independently trusted label byte-for-byte, with no case folding or substring
+substitute. Validate and identify the canonical structured genesis under the
+selected policy; a raw-file digest is not a substitute.
+
+All mandatory expectations must be independently established before
+checking untrusted approval claims. Identity and derived membership, keys,
+weights, and authority comparisons must use one admitted, validated genesis
+snapshot. Unsupported custom runtime IDs, aliases, and other environments
+remain outside this policy and must refuse. BR-08 resource admission and the
+BR-11 non-null `GenesisConfig.extra` refusal remain required. Static
+correspondence remains non-authorizing; production
+`authorized_wire_chain_id` remains `None`, and startup containment remains
+unchanged. Shared environment/runtime/wire constants establish neither a
+unique genesis instance nor unique authorized first use.
+
+### Narrow supersession and current status
+
+Earlier PENDING/unassigned statements are superseded only for acceptance of
+this exact BR-03 mapping policy and independent-label/pin requirements, and
+for `olive`'s accountable network-identity-authority role for this decision.
+All earlier text remains historical evidence. This acceptance does not
+supersede missing operational facts, close BR-03, or establish new source,
+test, conformance, or operational evidence.
+
+| Status | Current record |
+|---|---|
+| BR-03 mapping-policy decision | **ACCEPTED — MAPPING POLICY ONLY** |
+| Overall BR-03 | **OPEN / CLOSURE NOT ESTABLISHED** |
+| Exact operational genesis label, canonical pin, and approved configuration | **NOT SUPPLIED** |
+| Independent provisioning | **NOT DONE** |
+| Production mapping implementation/integration | **NOT IMPLEMENTED** |
+| Required BR-03 executed and release-binary correspondence evidence | **NOT PRODUCED by this task** |
+| Implementation prerequisites | **NOT SATISFIED** |
+| Implementation authorization | **PENDING** |
+| Operational founder-root/profile provisioning | **NOT DONE** |
+| Activation | **DISABLED** |
+| Public DevNet | **NO-GO** |
+
+BR-01 remains **ACCEPTED — DESIGN ONLY**. BR-02 remains **ACCEPTED —
+IDENTIFIER ALLOCATION AND COMPATIBILITY CONTRACT ONLY**. BR-04–BR-11, B/C/L/X/U,
+and all existing D7D14/D7D10, recovery, anti-rollback, resource, and
+whole-lifecycle statuses remain unchanged. Existing cryptographic-review
+and provenance limitations, signing-exhaustion concerns, and documented
+source-comment discrepancies are preserved; no completed review is reopened
+or promoted. No implementation, provisioning, signing, activation, or other
+operational action is authorized by this decision.
