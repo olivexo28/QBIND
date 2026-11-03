@@ -1240,3 +1240,9 @@ signature, date or authorization token is asserted.
 ## RUN 422 separately protected consensus signer assessment
 
 `docs/devnet/QBIND_RUN_422_SEPARATE_SIGNER_FEASIBILITY.md` evaluates fixed founding-authority membership and one separately protected, stateful PQ consensus signer per validator. Profile A remains a candidate only: no activation root, currentness source, operator, rollback boundary, signer deployment, or production profile is selected. The assessment finds no live remote consensus signer and leaves activation disabled, public DevNet NO-GO, and whole-lifecycle acceptance INCOMPLETE. This cross-reference does not alter this contract's DRAFT / NOT APPROVED / NOT IMPLEMENTED status or authorize implementation, activation, F1/F2 closure, or release approval.
+
+## RUN 422 — selected initial DevNet authority-role clarification
+
+`docs/devnet/QBIND_RUN_422_DEVNET_BOOTSTRAP_AUTHORITY_DECISION.md` records founder-authorized bootstrap as the selected **design direction** for one exact initial DevNet configuration. This resolves only the prior role-selection question for initial DevNet activation. The lifecycle contract's earlier “owner not selected” and activation-root questions remain accurate as historical statements about the source/revision they describe; the selected role does not supply a credential, independently distributed trust root, approval record, currentness source, continuity, recovery, or activation mechanism.
+
+This clarification does not approve Profile A or change this contract's `DRAFT / NOT APPROVED / NOT IMPLEMENTED` status. Activation remains disabled; §13.6 whole-lifecycle acceptance remains `INCOMPLETE`; durable anti-rollback remains `NOT-ESTABLISHED`; public DevNet remains `NO-GO`; C4/C5 and RS1 remain open. TestNet and MainNet retain separate identities, credentials, and records; joint authority before MainNet is only a planned direction, with participants, threshold, and transition mechanism unselected.

@@ -479,3 +479,10 @@ acceptance or release approval follows.
   `docs/protocol/QBIND_CONSENSUS_RECOVERY_SIGNING_HISTORY_CORRESPONDENCE_CONTRACT.md`,
   and `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_422_D7.md`. Those historical
   validations are not rerun or reattributed by this assessment.
+
+
+## RUN 422 — founding-authority decision cross-reference
+
+The documentation-only decision in `docs/devnet/QBIND_RUN_422_DEVNET_BOOTSTRAP_AUTHORITY_DECISION.md` selects founder-authorized bootstrap as the **design direction for one exact initial DevNet configuration**. This supersedes only the earlier open choice of who may authorize that initial configuration. Earlier statements that no founder/credential/root was selected, and the owner question asking who may authenticate activation, accurately describe their historical assessment scope; they are not rewritten as implementation evidence.
+
+The founder role is not a completed cryptographic ceremony, approval of the whole Profile A contract, or approval of an operating/deployment profile. Credential/root distribution, exact record and verification, currentness, signing-history continuity, consensus-lock recovery, cross-host exclusivity, operational trust assumptions, and deployment approval remain pending. The intended split remains signer-owned per-key history and node-owned consensus-lock/recovery state; their cross-process correspondence is unimplemented. All preserved verdicts and refusal boundaries in this assessment are unchanged.
