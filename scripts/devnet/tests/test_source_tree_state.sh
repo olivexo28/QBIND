@@ -141,6 +141,10 @@ unusual=$'-leading\nname-ñ'
 printf 'unusual\n' >"${repo}/${unusual}"
 git -C "$repo" add -- "$unusual"
 assert_state dirty "$repo" "leading-dash filename with newline and non-ASCII"
+unusual=$'white space\tname'
+printf 'unusual\n' >"${repo}/${unusual}"
+git -C "$repo" add -- "$unusual"
+assert_state dirty "$repo" "space and tab in tracked filename"
 
 printf '%s\n' '== Submodule state =='
 subsource="$(new_repo submodule-source)"
