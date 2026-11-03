@@ -1162,7 +1162,18 @@ severity, closed obligation, policy acceptance or implementation authorization.
 **E13's separate queue/aggregate-memory and deployment-effect scope remains
 open**; the local decoder contract does not absorb or discharge it.
 
-### Entry identities and verification boundary (2026-11-03)
+**Supplied independent-review correction (2026-11-03):** review of
+`2ecb4515ddeb8d6023407b68cc96ea56f5152eef` identified three documentation gaps:
+piped-core suppression, distinguishable guard calibration, and proof of actual
+child dispatch/completion. These are test-contract gaps, not observed runtime
+failures or implementation defects. This correction starts at that commit,
+tree `c7f2eafeba56d33aaf4fcffb44ada54f4b893e46`, plan mode/blob
+`100644` / `ad19af98a13fc7178858b7dcded4d942e77a7651`, on the existing task
+branch; advertised task tip matched and the checkout was clean. Protected
+main remains `c6f02fc73f2f2dee5eae34de08db7b8cd5d4eea7`. Only section 12 is
+edited; the revised addendum remains **AWAITING INDEPENDENT REVIEW**.
+
+### Original addendum entry identities and verification boundary (2026-11-03)
 
 | Identity | Verified value / qualification |
 |---|---|
@@ -1402,18 +1413,22 @@ the observer; arm immediately before calling the real
 return. Snapshot only after disarming and before any assertion, formatting or
 reporting. An RAII guard disarms on ordinary unwinding and resets owner and
 active-window state between cases. A second arm, malformed state, reentrant
-hook, checked-counter overflow, full event buffer, or request-budget breach
-fails closed by aborting the dedicated child before delegating the offending
-request. Hook code performs no formatting, logging, dynamic growth, locking or
-potentially allocating synchronization and never panics or unwinds. Outside
-the owner window, all operations pass through unchanged.
+hook, checked-counter overflow, next event beyond the full buffer, or
+request-budget breach fails closed by aborting the dedicated child before
+delegating the offending request. Hook code performs no formatting,
+general-purpose logging, dynamic growth, locking or potentially allocating
+synchronization and never panics or unwinds; only the bounded binary guard
+record below is permitted. Outside the owner window, all operations pass
+through unchanged.
 
 Check each request **before** calling `System`: maximum single request 64 KiB,
 maximum cumulative requested bytes 256 KiB, and at most 256 recorded events.
-Use checked additions; do not delegate on overflow or a ceiling breach. The
-future candidate children also cover request budgets defensively, but an abort
-is a failed decoder case, never evidence of a successful refusal. A valid
-control must complete normally with the expected result.
+These maxima are inclusive: exactly 65,536 bytes, 262,144 cumulative requested
+bytes, and 256 events are allowed; the next request/event exceeding a maximum
+is rejected. Use checked additions; do not delegate on overflow or a ceiling
+breach. The future candidate children also cover request budgets defensively,
+but an abort is a failed decoder case, never evidence of a successful refusal.
+A valid control must complete normally with the expected result.
 
 Set `qc_len=0` for allocation attribution so optional-QC allocations are
 excluded. Source review of reservation-before-copy order must agree with the
@@ -1445,26 +1460,128 @@ before accepting their evidence. Launch only the test child through
 with one child-case name in `QBIND_A21_CHILD_CASE`. This installs limits
 before the test executable starts; do not apply process limits to Cargo
 compilation. The child must read and verify its effective CPU, address-space
-and core limits from `/proc/self/limits` before running a case. If `prlimit`,
-`/proc` verification, or any required limit is unavailable or mismatched,
-stop without fallback. The parent enforces a monotonic 10-second deadline by
-polling `Child::try_wait`; on expiry it rechecks status, kills a still-running
-child, then always calls `wait` to reap it. A child starts no grandchildren.
-Record normal exit, signal/abort, timeout, CPU/resource-limit termination and
-reap outcome separately. Only a normal child exit plus the intended decoder
-`WireError` and exact cursor is a candidate pass.
+and core soft/hard limits from `/proc/self/limits` before running a case.
+`RLIMIT_CORE=0` alone does **not** disable Linux piped core handlers. In the
+actual child, after exec and before arming or any abort calibration, call
+`prctl(PR_SET_DUMPABLE, 0)` and require success, then require
+`prctl(PR_GET_DUMPABLE)` to return exactly 0. Retain and verify both core
+limits are 0 as an additional restriction. Proposed test-local mechanism:
+Linux x86_64 GNU libc `extern "C"` variadic `prctl(c_int, ...) -> c_int`,
+`PR_SET_DUMPABLE=4`, `PR_GET_DUMPABLE=3`, with four trailing `c_ulong` arguments
+of zero for each call (including unused arguments). Check the ABI/constants
+against target headers at instrumentation review; no new crate is needed.
+Handle `-1` with captured errno outside the observation window; any failed
+setup, nonzero GET result, unsupported FFI/platform, or mismatched limit stops
+the case without arming or calibration, with a failing child result.
+No subsequent exec, credential/capability transition, or dumpability change is
+permitted during the protected phase. The suppression guarantee begins only
+after successful child setup; earlier executable startup is not covered.
+Do not change host `core_pattern`, systemd settings or machine configuration.
+
+The parent enforces a monotonic 10-second deadline from spawn by polling
+`Child::try_wait`; on expiry it rechecks status, kills a still-running child,
+then always calls `wait` to reap it. A child starts no grandchildren. Record
+the actual exit code/signal, elapsed time, parent timeout/kill actions and reap
+outcome separately from inferred cause. An unexplained SIGKILL or SIGABRT is
+not proof of a CPU-limit or allocator-guard event. Only the matching result
+protocol below plus normal successful exit can pass a decoder case.
+
+**Per-invocation result protocol.** Before launch, the parent obtains a fresh
+128-bit invocation ID from `/dev/urandom`, assigns a known numeric case ID,
+and creates an empty regular evidence file with `create_new`, mode `0600`,
+in a private run directory. Pass the invocation ID, exact case selector and
+evidence path to the child; no destination reuse/truncation is allowed. The
+child opens and verifies that fresh destination before arming, retains its
+descriptor until teardown, requires initial length zero, rejects missing/unknown
+selectors, and dispatches exactly one case from a closed match. The sole
+`isolated_child_entry` writes:
+
+1. `ENTRY`, only once, identifying the invocation and selected case.
+2. `SETUP`, only after CPU/address-space/core soft/hard limits and dumpability
+   are verified, recording their values.
+3. Exactly one terminal `COMPLETE` after the intended decoder/control
+   assertions succeed and the observer is disarmed, or `GUARD` from the actual
+   rejecting branch before abort and before delegation to `System`.
+
+Use three sequential fixed 128-byte binary records (384 bytes maximum), with
+explicit byte encoding, magic/version, record kind/sequence, invocation ID,
+case ID, and fixed numeric fields/zero padding. `COMPLETE` identifies the
+assertion set and observed request/event totals. Ordinary serialization and
+all assertions occur outside the armed window. Enforce a single monotonic
+record-state transition; a duplicate/out-of-order write is an error, never an
+overwrite. After disarming, normal cases also persist the fixed event snapshot
+to a separately fresh/prepared regular file: a 32-byte invocation/case/count
+header and at most 256 fixed 32-byte operation/size/alignment/order entries
+(8,224 bytes maximum). Write and validate that bounded snapshot before
+`COMPLETE`; no growing storage or reporting is introduced into hooks.
+Guard records include the operation, requested size/alignment, one-based
+offending event, prior and prospective event/byte counters, and distinct reason codes for single-request,
+cumulative-byte, event-capacity, reentrancy, malformed-state, counter-overflow
+and other guard failures. Counter-overflow uses an explicit invalid-prospective
+flag, not fabricated counter values.
+
+The hook writes a stack `[u8; 128]` with test-local GNU libc
+`extern "C" pwrite(c_int, *const c_void, usize, i64) -> isize` at terminal
+offset 256, using the preopened regular-file descriptor (no `O_APPEND`).
+Use fixed byte-copy/encoding operations only: no formatting, allocation or
+allocating synchronization. Handle positive partial writes by advancing the
+buffer/offset; retry `EINTR` using test-local
+`extern "C" __errno_location() -> *mut c_int`. This assumes GNU x86_64
+`off_t=i64`, `ssize_t=isize`, and `EINTR=4`; verify these FFI assumptions
+against the execution target's headers before authorization.
+Bound the entire record write to eight calls. Zero progress, other errors,
+or incomplete output after that bound cause non-unwinding abort without
+delegating; no fallback logging. Never panic/unwind in this writer or a hook.
+Such failures cannot produce accepted guard evidence. Normal records use the
+same bounded writer outside the window. Any write failure fails the case.
+
+The parent redirects stdout/stderr to the null device, not undrained pipes;
+the bounded evidence file is read (at most 385 bytes to detect excess) only
+after termination/reap; likewise read at most 8,225 bytes from a normal-case
+event file and validate its identity/count/length. Thus output backpressure
+cannot block deadline polling.
+Require exactly `ENTRY, SETUP, COMPLETE` and exit 0 for normal cases, or
+`ENTRY, SETUP, GUARD` and SIGABRT for the specific abort calibration. Validate
+record length, magic/version, sequence, invocation/case identity, setup values,
+expected assertion set or guard reason and exact counters; reject extra,
+duplicate, stale, incomplete or mismatched records. A successful status,
+generic “test result: ok”, typoed filter or zero executed child entries is
+never sufficient. Missing setup/completion or a reason other than the expected
+ceiling fails the overall run, even with SIGABRT.
 
 Provide separately labelled guard-calibration child controls, not decoder
-regressions: a 65,537-byte single request; 65 requests of 4 KiB (the final
-request crosses 256 KiB cumulative); and 257 one-byte requests. Each is
-bounded, and the offending request must be intercepted before `System`.
-Each child runs exactly one calibration entry with initialized observer state;
-its only expected abort site is the guard's pre-delegation ceiling branch.
-If the allocation returns, the child reports a failing test rather than
-aborting. The parent accepts only the expected abort signal from that exact
-child case, after source review confirms no other abort path is reachable;
-normal return, panic exit, timeout or resource-limit termination fails
-calibration. These results never count as a decoder regression pass.
+regressions. Invoke the allocator wrapper directly with bounded `alloc`
+requests and alignment 1 for deterministic guard coverage; free each permitted
+request correctly without resetting cumulative accounting. All fixture and
+control bookkeeping is fixed/prepared outside the window, with no hidden
+observed allocations. Pair each abort case with a normal-completion control:
+
+| Calibration pair | Allowed control (`COMPLETE`, exit 0) | Next rejected request (`GUARD`, SIGABRT) |
+|---|---|---|
+| Single-request | One 65,536-byte request | One 65,537-byte request: event 1, prior bytes/events 0, prospective bytes 65,537/events 1, reason single-request |
+| Cumulative bytes | 64 requests of 4 KiB, exactly 262,144 bytes | Request 65 of 4 KiB: prior bytes 262,144/events 64, prospective bytes 266,240/events 65, reason cumulative-byte |
+| Event capacity | 256 one-byte requests, exactly filling the buffer | One-byte request 257: prior bytes/events 256, prospective bytes/events 257, reason event-capacity |
+
+For allowed controls assert exact counters and no guard record. For rejected
+requests require the matching reason/counters **and** SIGABRT; the rejecting
+branch writes its complete `GUARD` record before abort and before `System`.
+If the forbidden call returns, fail normally rather than synthesizing an abort.
+Missing/partial/mismatched reason records, unintended guards, panic exits,
+timeouts and resource failures all fail calibration. Direct wrapper calibration
+does not replace allocation observations of the real `BlockProposal` decoder
+and never counts as a decoder regression pass.
+
+Linux references consulted on 2026-11-03:
+[core(5)](https://man7.org/linux/man-pages/man5/core.5.html) documents the
+piped-handler exception to `RLIMIT_CORE`;
+[PR_SET_DUMPABLE](https://man7.org/linux/man-pages/man2/PR_SET_DUMPABLE.2const.html)
+documents nondumpable value 0 and credential/exec-related resets; and
+[PR_GET_DUMPABLE](https://man7.org/linux/man-pages/man2/PR_GET_DUMPABLE.2const.html)
+documents reading the attribute and error handling. Direct fetches failed DNS;
+man7 search-result excerpts were consulted, not a local execution or complete
+page retrieval. These are documentation references, not verified future
+kernel/libc behavior; target-header/FFI correspondence remains a future review
+requirement.
 
 Official Rust references consulted on 2026-11-03:
 [GlobalAlloc](https://doc.rust-lang.org/std/alloc/trait.GlobalAlloc.html),
@@ -1513,15 +1630,21 @@ candidate regression or review results into one pass.
 | Old decoder controls, `tx_count` 2 and 8, including earlier non-empty copy | Safely observe baseline list reservation and copy before later truncation | Isolated checkout at pinned pre-change SHA; ordered operation/size/alignment log; no large count |
 | Malformed candidate observer cases; valid non-empty controls | Refusal has expected error/cursor and zero tx-list/payload events; valid controls reveal intended materialization | Real `BlockProposal::decode`, `qc_len=0`, source-order cross-check, fixed-buffer dump; zero expected baseline allocations means INCONCLUSIVE/STOP |
 | Conversion/layout boundary on selected 32/64-bit target | Checked conversions agree in preflight/materialization; wire integers fit `usize`, while availability/layout/allocation remain separate | Compiler/target; conversion/error source review; symbolic target layout (no assumed Vec size); no claim for unreviewed targets |
-| Guard calibration: 65,537-byte request; 65 x 4 KiB; 257 x 1 byte | Guard aborts at the single-request, cumulative-byte and event boundary before delegating the offending allocation | Separate calibration case IDs/child statuses; no decoder-pass credit |
-| Candidate large counts, including `u32::MAX`, and child containment | Tiny-input candidate returns intended `UnexpectedEof` and exact cursor with normal child exit; any abort/timeout/resource failure is failure | Per-child verified limits, command, status, elapsed time, cursor/result, termination/reap and retained logs |
-| Small-control fit and unsupported-limit handling | Small controls fit all ceilings; unavailable/mismatched controls stop the run, with no silent fallback | Actual request/event maxima; child `/proc/self/limits`; `prlimit` identity; explicit stop reason if unsupported |
+| Exact-boundary wrapper calibration: 65,536 bytes; 64 x 4 KiB; 256 x 1 byte | Normal completion at the inclusive single-request, cumulative-byte and event maxima; next request/event is rejected | Matching `ENTRY, SETUP, COMPLETE`, exact event/byte totals and snapshot, exit 0; bookkeeping adds no observed allocations; no decoder-pass credit |
+| Above-boundary wrapper calibration: 65,537 bytes; 65 x 4 KiB; 257 x 1 byte | Actual pre-delegation branch records the expected ceiling and offending request, then aborts | Matching `ENTRY, SETUP, GUARD`, operation/alignment and exact prior/prospective counters plus SIGABRT; incomplete/missing/unexpected reasons fail; no decoder-pass credit |
+| Child setup and dump suppression; failed/unsupported setup controls | After exec, SET succeeds, GET returns 0, CPU/address-space/core soft/hard limits match; any failure stops before the case | Matching verified `SETUP`, including dumpability 0/core 0:0; no subsequent exec/credential transition; earlier startup explicitly outside guarantee |
+| Child dispatch negative controls: absent/unknown selector, misspelled filter, zero child entries | Overall run fails even if process exits 0 or prints “test result: ok” | Separate future case IDs and parent rejection of missing/wrong `ENTRY, SETUP, COMPLETE`; no decoder evidence |
+| Evidence negative controls: absent/duplicate completion, stale ID, mismatched case, incomplete/extra records or unexpected guard reason (including reentrancy/state/overflow) | Parent rejects every malformed sequence/outcome; SIGABRT alone cannot pass | Bounded synthetic protocol-negative fixtures and independently labelled outcomes, not decoder regressions |
+| Candidate large counts, including `u32::MAX`, and child containment | Tiny-input candidate returns intended `UnexpectedEof` and exact cursor/assertions with matching completion and exit 0; any abort/timeout/resource failure is failure | Verified limits/dumpability, invocation/case sequence, command, actual exit code/signal, elapsed time, cursor/result, parent kill/reap and logs; unexplained signals do not establish cause |
+| Small-control fit and unsupported-limit handling | Small controls fit all ceilings; unavailable/mismatched controls stop the run, with no silent fallback | Actual request/event maxima; verified setup records and `/proc/self/limits`; `prlimit` identity; explicit stop reason if unsupported |
 
 Future evidence must identify source and implementation revisions, focused
 test-file blob, exact compiler and Cargo versions, target/profile and relevant
 environment, exact commands, installed/verified limits, per-child and overall
-exit outcomes, case results, and retained log/evidence locations. Do not
-fabricate measurements or evidence files.
+exit outcomes, verified dumpability, invocation/case identities and bounded
+records, case results, parent timeout/kill/reap actions, and retained
+log/evidence locations. Keep actual process observations distinct from inferred
+causes. Do not fabricate measurements or evidence files.
 
 ### Scope and evidence status
 
