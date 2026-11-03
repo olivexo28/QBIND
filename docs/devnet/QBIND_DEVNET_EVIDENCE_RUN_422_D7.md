@@ -26665,3 +26665,47 @@ The authority decision document records `olive` as accountable network identity 
 The accepted policy retains BR-02 `u8(1)`, `NetworkEnvironment::Devnet`, `NetworkEnvironmentPolicy::Devnet`, full `QBIND_DEVNET_CHAIN_ID = 0x51424E4444455600` equality before the fixed dormant `QBIND_DEVNET_WIRE_ALIAS = 0x44455600`, plus mandatory independent exact label and canonical genesis pin. Neither operational value is supplied or provisioned. Comparison/refusal requirements, BR-08 resource admission, BR-11 non-null `extra` refusal, one admitted validated snapshot, non-authorizing static correspondence, production `authorized_wire_chain_id = None`, and startup containment remain unchanged. No unique genesis instance or authorized first use follows from shared constants.
 
 This supersedes earlier PENDING/unassigned statements only for this exact mapping-policy acceptance and `olive`'s accountable role for this decision; historical text remains preserved. **Overall BR-03 remains OPEN / CLOSURE NOT ESTABLISHED**: exact label, pin, and approved configuration **NOT SUPPLIED**; independent provisioning **NOT DONE**; production mapping **NOT IMPLEMENTED**; executed/release-binary correspondence evidence **NOT PRODUCED**; prerequisites **NOT SATISFIED**; implementation authorization **PENDING**; operational founder-root/profile provisioning **NOT DONE**; activation **DISABLED**; public DevNet **NO-GO**. BR-01, BR-02, BR-04–BR-11, B/C/L/X/U, and D7D14/D7D10, recovery, anti-rollback, resource, and whole-lifecycle statuses remain unchanged. Existing cryptographic-review/provenance limitations, signing-exhaustion concerns, and source-comment discrepancies are preserved; no review is reopened or promoted. This documentation entry is not source, test, conformance, or operational evidence.
+
+## RUN 422 BR-04 current-authority freshness and unique-first-use proposal
+
+The documentation-only proposal in
+`docs/devnet/QBIND_RUN_422_DEVNET_BOOTSTRAP_AUTHORITY_DECISION.md`, section
+"RUN 422 BR-04 current-authority freshness and unique-first-use proposal",
+is PROPOSED / OWNER DECISION PENDING / NOT IMPLEMENTED. It records B/U
+ownership/evidence obligations, exact payload/configuration identity,
+source-grounded in-process versus durable/rollback-resistant limits,
+threat/effect boundaries, missing owner facts and an entirely FUTURE / NOT
+EXECUTED acceptance matrix. Baseline: commit
+`cfdf5838064024702590bfe2c9cf318601b15c50`, tree
+`cd8a6d8f4e739fb1a67776c9939a283b2a51224b`; its raw parent
+`b140908ca92168e0c194a9a70ab30c8deb588aa1` is unavailable at the shallow
+boundary, not absent historical parentage.
+
+BR-04 owner disposition PENDING; B owner and U owner UNASSIGNED; concrete
+independently current source/control domains NOT ESTABLISHED; mechanism
+selection, operational provisioning and implementation NOT ESTABLISHED by
+this task; overall BR-04 closure NOT ESTABLISHED. Repeated stateless
+verification by multiple intended participants is non-authorizing; different
+valid signatures over one complete canonical payload grant no new bootstrap
+permission. U concerns one coordinated network instantiation, not a winning
+verifier. Unknown/partial use and lost acknowledgement remain uncertain.
+Marker/reset tools do not establish B/U or grant signing-history reset power.
+Continued refusal and production unavailable authorization remain unchanged.
+
+BR-01 ACCEPTED — DESIGN ONLY; BR-02 ACCEPTED — IDENTIFIER ALLOCATION AND
+COMPATIBILITY CONTRACT ONLY; BR-03 ACCEPTED — MAPPING POLICY ONLY, overall
+OPEN / CLOSURE NOT ESTABLISHED. Operational genesis label/pin/configuration
+NOT SUPPLIED; implementation prerequisites NOT SATISFIED; implementation
+authorization PENDING; root/profile provisioning NOT DONE; activation
+DISABLED; public DevNet NO-GO. Existing D7D14/D7D10 accepted local/isolated
+tokens, section 13.6 INCOMPLETE, anti-rollback NOT-ESTABLISHED, C4/C5 and RS1
+OPEN, resource limits UNAPPROVED, cryptographic-review/provenance limits,
+recovery, C/L/X, BR-05-BR-11 and all other gates remain unchanged. No completed
+review is reopened or historical evidence promoted.
+
+Only documentation/source-correspondence and preservation checks belong to
+this task. No source/configuration/dependency changes, project tests, builds,
+scanners, keys, signing, infrastructure selection/provisioning, operational
+commands, deployment or activation. The documentation proposal is complete;
+BR-04 acceptance, B/U establishment and operational authorization remain
+unresolved.

@@ -2157,3 +2157,372 @@ and provenance limitations, signing-exhaustion concerns, and documented
 source-comment discrepancies are preserved; no completed review is reopened
 or promoted. No implementation, provisioning, signing, activation, or other
 operational action is authorized by this decision.
+
+## RUN 422 BR-04 current-authority freshness and unique-first-use proposal
+
+**DOCUMENTATION ONLY / PROPOSED / OWNER DECISION PENDING / NOT IMPLEMENTED**
+
+This append makes the B/U obligations reviewable; it neither accepts BR-04
+nor supplies B or U. No concrete independently current source/control domain
+is established by the inspected evidence. The supported disposition remains
+**continued refusal of dependent operations when mandatory evidence cannot
+be established**, with production containment unchanged. This is not a
+successful operational design or permission to implement one.
+
+### 1. Inspection baseline and governing scope
+
+Repository fetch and push destination: `https://github.com/olivexo28/QBIND`.
+The clean starting checkout, local `main`, and advertised remote `main`
+matched commit `cfdf5838064024702590bfe2c9cf318601b15c50`, tree
+`cd8a6d8f4e739fb1a67776c9939a283b2a51224b`. The actual task branch is
+`copilot/run-422-br04-currentness-first-use-proposal`, created at that
+baseline. No applicable `AGENTS.md` was found in the repository or ancestor
+instruction locations. Only this document and the D7 cross-reference are
+appended; identifiers, accepted fields, source and configuration are unchanged.
+
+The baseline's raw commit header names parent
+`b140908ca92168e0c194a9a70ab30c8deb588aa1`. The baseline commit/tree are
+available; that parent commit object is unavailable at the shallow boundary.
+Raw parentage is not available-object traversal or proven earlier ancestry.
+The shallow boundary is not evidence that the baseline has no parent.
+Historical decisions below retain their own attribution, not an inferred
+ancestry or a new authenticated operational authorization.
+
+The effective requirements include the later scoped acceptances in this
+document: BR-01 at lines 1270-1326, BR-02 at 1586-1756, and BR-03 at
+2078-2159. Earlier pending statements are historical only within those
+acceptances' narrow scope. The complete-payload identity rule and independent
+lifecycle gates at baseline lines 618-655 remain unchanged.
+
+| Governing document at this baseline | Relevant requirements and later scope |
+|---|---|
+| `docs/devnet/QBIND_RUN_422_BOOTSTRAP_CREDENTIAL_RECOVERY_TRUST_MODEL.md:51-72,128-156,244-321,425-455` | Separate A/B/C/L/X/U owners, backups not freshness, rollback/recovery refusals and implementation-entry evidence |
+| `docs/devnet/QBIND_RUN_422_SEPARATE_SIGNER_FEASIBILITY.md:21-84,182-236,238-316,358-444,484-503` | Local/isolated versus missing remote signer; history/lock ownership and process/effect boundaries; later founder-role clarification |
+| `docs/protocol/QBIND_PROPOSAL_VOTE_AUTHORITY_LIFECYCLE_CONTRACT.md:94-156,900-1118,1174-1248` | Separate authorization/currentness/continuity, rollback domains, conditional effects, continued refusal and later founder-role clarification |
+| `docs/protocol/QBIND_PROPOSAL_VOTE_SIGNING_STATE_CONTINUITY_CONTRACT.md:1857-1968,1970-1991` | Effective D10 aggregate A-F local acceptance, uncertainty, exact reuse and independent process/currentness limits; completed review not reopened |
+| `docs/protocol/QBIND_CONSENSUS_RECOVERY_SIGNING_HISTORY_CORRESPONDENCE_CONTRACT.md:376-433,2535-2589,3771-3785` | Lock-recovery invariants, decision-time correspondence, local retention versus missing production lifecycle and separate signer boundary |
+| `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_422_D7.md:10510-10583,26432-26502,26514-26667` | Historical D10 acceptance, current readiness reconciliation, signer/custody limits and later BR-01/02/03 scoped decisions |
+
+These are baseline line locators, not producing revisions for historical
+tests. No source test, process experiment, release binary, scanner, key,
+signature, operational command, provisioning, deployment or activation was
+executed for this proposal. Documentation inspection does not promote
+historical results or reopen their completed reviews.
+
+### 2. B and U: exact obligations, not an invented mechanism
+
+**A authenticates approval content; B establishes its present applicability.**
+B must independently authenticate that the exact approval remains applicable
+under its independently trusted full root/purpose/profile, complete canonical
+payload identity and exact configuration. That binding includes environment,
+full runtime and wire identity, exact independently expected genesis label
+and canonical `GenesisHash`, ordered members/IDs, keys, suites, explicit
+weights, signer references, authority commitment, founding epoch,
+configuration profile and permitted scope. The commitment or genesis pin
+alone does not cover every approval field. B also needs the applicable
+currently authenticated conflict, supersession, retirement and root/policy
+state, including relevant updates and uncertainty; neither an old valid A
+nor the candidate's self-description proves their absence.
+
+**U is independently current evidence for one authorized network instantiation
+of that same exact approval/configuration.** Its state/history must bind
+the complete approval identity and root/profile to the authorized coordinated
+instantiation and any attempted, partial, completed or uncertain use. It
+must distinguish joining or recovering that instantiation from initializing
+another, without deriving "unused" from missing observations. No additional
+instantiation identifier, encoding, allocation or storage representation is
+defined here.
+
+Approval-content identity remains the **complete canonical payload**, not a
+signature, envelope, digest substituted for that payload, request identifier
+or download. Different valid signatures/envelopes over the same payload
+create no new bootstrap permission. Repeated stateless read-only verification
+is permitted and non-authorizing. Multiple intended nodes and signers may
+verify the same coordinated bootstrap: U is neither "only one verifier may
+succeed" nor "the first node wins." Participant restart/recovery is not
+permission to initialize a new network or erase C/L/X. A second instantiation
+requires separately authorized lifecycle policy and evidence; none is
+supplied here, including for the same payload with a new signature.
+
+| Obligation | Proposed accountable role / enforcing consumers | Exact identity and state/history binding | Authentication root / independent provenance | Required currentness and domains | Decision/effect correspondence / refusal | Existing support, gap and evidence needed |
+|---|---|---|---|---|---|---|
+| B | Current-authority evidence owner: **UNASSIGNED**; every future authority-establishment, activation, inbound consensus-effect, signing, retained-result reuse and publication consumer must enforce its applicable checks | Full root/profile/purpose, complete payload and all exact configuration fields above; applicable approved policy plus conflict/supersession/retirement history and its current status | Independently authenticated root and authorized source, with provenance not selected by the record, candidate verifier or distributor; authority to update/resolve state must already be approved | Show authenticated current observations remain trustworthy outside every defended storage, snapshot, backup, restore, administrator, provider and compromise domain, including the source's own copies | Maintain applicability at each dependent effect; bind decision, observed state and actual effect without substitution or stale check reuse. Missing/unverifiable = unavailable, not a proven mismatch; stale/conflicting = refusal; uncertainty remains explicit. None authorizes | In-process owner admission/confirmation and exact-configuration checks exist; no production established owner or independent current source. Need accountable person, real domains, provenance, update/readback and failure evidence |
+| U | Bootstrap activation-state evidence owner: **UNASSIGNED**; all future node and signer activation consumers, including concurrent/cloned starts, must enforce one coordinated instantiation | Same exact payload/root/profile/network/genesis/authority; complete relevant first-use/activation attempts, dispositions and unresolved effects, not a per-verifier success count | Independently authenticated current activation history and authorization policy; an assertion, local Boolean, use log or state absence is not provenance | Establish current unique-use state across all relevant copies/control domains, including combined node/signer and activation-source restore; coordinate concurrent observations without assuming independence | Check U atomically with the authorized activation boundary. Partial activation, possible prior use, stale/conflicting evidence or lost acknowledgement cannot become unused to permit retry. Unverifiable/unavailable state blocks activation | No network-level U consumer/mechanism is established. Local safety-store first-use intent is not U. Need actual source/control facts, approved activation scope, concurrency/crash/readback evidence and correspondence to effects |
+
+The role names allocate responsibilities for review, not people, independent
+control, staffing, a committee or a new trusted authority. Neither B nor U
+is inherited from olive's BR-01, BR-02 or BR-03 decisions. One person or
+shared provider might control multiple roles; the actual overlap must be
+disclosed, not assumed away. No accountable B/U person is assigned here.
+
+C remains authoritative per-key signer history (reservations, uncertainty,
+exact retained results); L remains node-owned lock/safety recovery and exact
+decision-time correspondence; X remains exclusive permitted key use across
+all copies and routes. B/U satisfy none of C/L/X. D10's canonical conflict
+namespace, durable-before-signing requirements and exact-result rules are
+unchanged. A recovered `Reserved` remains potentially signed. Neither
+approval nor activation evidence can reset history, release uncertainty,
+justify L0 retrospectively using L1, override a lock, or disable a copied
+unrestricted key.
+
+### 3. Current source correspondence and effect boundaries
+
+The following traces use definitions and executable consumers at the exact
+baseline, not historical module headers as proof of production support.
+Paths in this table are under `crates/qbind-node/src/`.
+
+| Baseline source locator | Actual definition/consumer and bounded conclusion |
+|---|---|
+| `genesis_consensus_authority.rs:334-440,758-890` | Builder derives genesis-order IDs, suite and unit weights, fixes founding epoch and sets `authorized_wire_chain_id: None`. `authorize_configuration` compares chain label, canonical genesis, count, commitment and epoch. `authorize_current_state` refuses missing storage/no committed epoch or diverged configuration; equality is not external freshness |
+| `genesis_consensus_authority.rs:894-962,1069-1144,1182-1220` | `AuthorizationTicket` retains issuer allocation and generation. `admit` checks exhaustion and private current state, then issues a ticket. `confirm` checks foreign issuer first, exhaustion second, generation third; it does not query any independent source, persist state or reauthenticate global currentness |
+| `genesis_consensus_authority.rs:1222-1288` | `establish_for_fixture`, `replace_for_fixture` and exhaustion-position setter are `#[cfg(test)]`. Replacement invalidates outstanding in-process tickets and exhaustion is terminal; the sole release constructor is `unavailable`, not a durable establishment path |
+| `binary_consensus_loop.rs:1258-1341` | `AuthorizedProposalVoteSnapshot::try_bind` checks actual bound genesis/commitment, shared and structurally matching membership, shared key provider, fixture chain label and independently retained wire ID. Production-built authority has no wire ID to bind. Static coherence does not establish B/U |
+| `main.rs:5405-5418,6140-6149,8655-8685`; `binary_consensus_loop.rs:2907-2940,3126-3146` | Explicit genesis-authority activation exits before mode dispatch/P2P/consensus startup. Preflight sets Proposal/Vote authority to `None`; production selects `Required` and passes no current snapshot or signing journal to the handler. Timeout/NewView context is separate |
+| `binary_consensus_loop.rs:6247-6349,6547-6580,6736-6809,6904-6925` | Present Proposal/Vote verifier without owner under `Required` refuses before crypto. With a snapshot, `owner.admit` and signed epoch check precede crypto; confirmation precedes downstream delivery/engine effects. An unavailable owner cannot admit. Absent verifier is a different branch, not an installed unavailable owner |
+| `binary_consensus_loop.rs:5569-5650,5843-6040` | Immediate Proposal, broadcast Vote and directed Vote admit/check epoch, resolve the bound original ticket, call guarded signing, then confirm before facade handoff. The final confirmation is after signing/result handling; it can suppress handoff, not undo key use |
+| `binary_consensus_loop.rs:4216-4238,4371-4465,4598-4614,4742-4792,4856-4945,4951-5031,5250-5331` | D10 guards require journal and Required admission. Preparation freezes original ticket/context/signer before journal work; fresh reservation/continuation consumption precede completion. Completion reconfirms that frozen operation before actual signer invocation or retained reuse; fresh result publication must succeed before return. Retained reuse verifies the exact result with no new signer call. This earlier local check exists; it is not independently current B |
+| `binary_consensus_loop.rs:3940-4009,4038-4097,5707-5806` | Cached re-emission obtains fresh admission, then checks originating cached provenance against the current owner and uses the same guarded-signing and final handoff-confirmation boundaries; cache presence is not new permission |
+| `signing_reservation_journal.rs:2611-2720,4122-4227` | Local supported ownership-domain coordination, reserved/potentially-signed classification, recovered-result acknowledgement, durable reservation, one-use consumption and checked publication are C components, not U's network-wide atomic first use or whole-copy anti-rollback |
+| `safety_record_store/backend.rs:358-366,529-535`; `safety_record_store/owner.rs:1329-1388` | Backend defaults Disabled and refuses opening under that policy. O1 requires `first_use_intent` and rejects existing/partial/unknown local safety state; neither the assertion nor an empty namespace authenticates unused network identity. No production B/U source is thereby created |
+| `pqc_authority_state.rs:1116-1205,1308-1388`; `pqc_authority_marker_acceptance.rs:518-541` | Trust/governance ratification marker compares persisted domain/sequence/hash/key/policy, with FirstLoad for absent prior marker, and separate persistence after the bundle commit boundary. This local marker is not consensus bootstrap approval, signing history or rollback-resistant B/U |
+| `pqc_trust_sequence.rs:542-609`; `pqc_live_trust_apply.rs:326-354`; `main.rs:6921-6929,7001-7010,7068-7077` | Startup/reload trust-bundle sequence persistence enforces local lower/equal-conflicting sequence refusal and equal-identical idempotence; authority-marker persistence is a subsequent distinct boundary. Restoring all local reference files can restore their comparison basis |
+| `pqc_authority_state_reset.rs:554-636,637-802,980-1034`; `main.rs:2222-2258` | Offline CLI dispatch constructs reset inputs and exits with result. Verification requires inputs/audit path, refuses MainNet, recomputes canonical genesis, verifies bundle and strict ratification, derives marker and captures existing-marker archive metadata. Execution writes pending audit, persists marker, then final audit. It does not reconstruct B/U or confer consensus-history reset permission |
+| `pqc_governance_production_durable_replay_rocksdb.rs:110-145,780-841,915-961` | Governance replay policy defaults Disabled; permitted source/test path checks database metadata/domain and records Observed/Consumed ordering/idempotence. No independent latest-state anchor is consulted on opening an otherwise valid old copy. The module's name does not make it live consensus signing history, B or U |
+
+Keep three states distinct: **absent authority** (actual production preflight),
+**present authority / missing owner** (Required current-state-unavailable
+rejection), and **present authority / present-but-unavailable owner** (`admit`
+refuses). A fixture-established owner is a fourth, test-only condition, not
+an operational escape hatch. `confirm_outbound_before_effect` does not itself
+require both optional inputs; the Required admission/shared guards provide
+that enforcement. Its name must not be used to claim an independent or
+earlier authentication check.
+
+Issuer/generation invalidation is process-local ordering. It is not crash
+durability and is not rollback-resistant currentness. Reconstructing an owner
+does not preserve its issuer allocation or prove current B/U; no persisted
+ticket or restart authorization is implemented. An old signature remains
+replayable evidence even though a foreign owner's in-memory ticket refuses.
+The fresh D10 path's pre-sign reconfirmation and post-sign handoff confirmation
+are both real, distinct checks; neither detects coordinated whole-copy rollback.
+
+For any separately authorized future mechanism, B must remain valid at
+**each dependent effect**, not merely when parsing a record: authority
+establishment, activation-state changes, applicable consensus mutations,
+safety-state publication, reservations, key use, retained-result reuse and
+external publication must have defined decision/effect correspondence.
+U must be checked atomically with the authorized network activation boundary,
+not with read-only verification. This is an atomicity obligation for review,
+not a selection of a transaction, protocol or implementation.
+
+| Unresolved boundary | Required evidence/correspondence before later authorization |
+|---|---|
+| Observation to effect / authority update | Exact configuration and admitted evidence must still apply at the dependent effect. Account for intervening conflict/retirement and substituted context; identify which effects need which checks. A historical check cannot certify a later effect |
+| Concurrent/cloned activation | Establish one authorized coordinated instantiation across all consumers and independent histories; two individually plausible reads cannot authorize two starts. Participant verification/joining is not another activation |
+| Crash before/after any durable change | Identify observable authoritative state and durability assumptions for each actual boundary; no recovery inference from guessed crash location. Preserve already established obligations and partial effects |
+| Lost acknowledgement / uncertain activation | Authenticate current readback and reconcile the same exact attempt/configuration. Possible prior use remains possible; no "unused" reset, automatic second start or retry permission from a timeout |
+| Signing to result persistence to facade publication | Keep these effects separate. A later refusal may suppress delivery but cannot undo a signature or durable reservation. Preserve exact retained results and uncertainty under C, and recheck applicable B/L/X before reuse/publication |
+| Recovery / cached or delayed work | Re-establish current evidence and exact correspondence; neither old ticket, cache, restored marker nor prior successful verification is authority to resume. No second independently authoritative history |
+
+No new wire format, persistent schema, lease, counter, ticket type, journal,
+cross-process protocol or absent-QC exception is designed here. Existing
+conditional safety/D10 ordering remains required within its own contracts;
+this proposal does not assert a global atomic operation or a working
+production activation boundary.
+
+### 4. Threat/evidence matrix: rollback, compromise and availability
+
+Each row states requirements, not implemented detection or an accepted
+failure-model exclusion. Every proposed outside state must authenticate the
+exact root/profile/payload/configuration and relevant ordered authority/use
+history, retain uncertainty and authenticate updates/readback. Concrete
+people, sources and independent domains in every row are **NOT ESTABLISHED**.
+
+| Affected domain / scenario | What must remain trustworthy outside it; what it must authenticate and retain | Control responsibility to identify | Required refusal / availability consequence |
+|---|---|---|---|
+| Node-only database or VM restore | Independently current B/U and identity references, unaffected C/X, and sufficient L recovery material not rewound with the node; include uncommitted restrictions | B/U owners, node L owner, signer C/X owner; actual node backup/admin/provider scope | Refuse dependent activation/signing/reuse until all correspondence is re-established. A current signer response alone does not recover L |
+| Signer-only restore, including host/key/history | Current complete C obligations/results outside that restore domain, independently current B/U/X and sufficient node L | Signer history/custody and B/U owners; signer backup/admin/provider controls | Refuse affected signer; node height/epoch or committed chain cannot reconstruct all uncommitted/uncertain history |
+| Combined node-and-signer restore | Current authenticated B/U plus complete C and required L/X evidence outside both and their shared backup/control domain | All state owners; identify common administrators/providers and all copies | Two mutually stale participants cannot certify each other; safe continuation unavailable without surviving trustworthy evidence |
+| Bootstrap credential, root-reference or activation-state restore | Independently current root/purpose/approval/conflict/retirement/use state and exact references outside the restored custody domain | Founder custody under BR-10; B/U owners; root/conflict authority under BR-09 | Restored key, matching pin or offline use log is not unused identity/current authority; block activation/transition as applicable |
+| B/U source restoration, including every replica/backup under shared control | Current authenticated authority/use history and authorized update/readback evidence that cannot be replayed with that entire source domain | Proposed source custodian, storage/backup restorer, administrators/provider and B/U accountable owners, all unassigned | Without such an outside boundary, B/U cannot be established; refuse. Two stale replicas or different accounts under the same restore control are not independence |
+| B/U source or authentication-root compromise | An unaffected, already approved authentication/policy boundary able to establish which evidence and history remain trustworthy | B/U incident owners and BR-09 authority; BR-10 custody facts | A compromised source can freshly authenticate lies/forks. Suspend dependent effects; do not invent replacement authority or claim availability after total root compromise |
+| Concurrent or cloned starts with the same approval | Independently current unique-use history and globally consistent authorized activation disposition for the one coordinated instance | U owner and every activation consumer, including separate operators and clones | Refuse a second/ambiguous instantiation; same-payload signatures and independent verification do not each grant permission |
+| Cold start | Independently authenticated root/profile/configuration and current B/U available without relying on this not-yet-authorized network | B/U and provisioning owners; all source startup dependencies | No local state is not first-use evidence; remain stopped if prerequisites unavailable |
+| All-participant restart | Current B/U and C/L/X evidence surviving their combined restart/restore and shared control planes | All owners and any proposed source's restart/backup administrators | Agreement among restored peers is not latestness; no automatic rebootstrap. Network may remain unavailable |
+| Partition / source outage | Independently current, authenticated evidence sufficient under an already accepted failure model, not just reachable peers or last cached response | B/U source availability/readback owners and relying operators | Mandatory missing currentness stops dependent effects for the outage/partition; no timeout, clock or local fallback permission |
+| Conflicting approvals / undisclosed equivocation | Independently authenticated current conflict observations, complete relevant disclosed history and any resolution under an already approved policy | B/U observation/update owners; resolution/root succession remains BR-09 | Recognized conflict blocks disputed activation; stateless verifier cannot discover withheld conflict. Do not select by convenience |
+| Stale supersession/retirement / inconsistent observations | Current authenticated applicable policy and lifecycle history, preserving conflicting observations and uncertain updates | B owner, source update/readback responsibility and BR-09 policy authority | Old signature or one favorable response does not resolve disagreement. Refuse until current applicability can be established |
+| Partial activation / lost acknowledgement | Current exact-attempt/use disposition and authenticated readback outside the failed/rewound consumer/source boundary | U owner and each actual effect/durability owner | Retain possibly-used status; no second initialization, erasure or automatic retry to regain availability |
+
+A valid old signature, QC, checkpoint or genesis pin is not currentness.
+Neither equal epoch, highest observed height, local generation, timestamp
+nor restored clock establishes it. Neither missing file, empty database,
+fresh installation, local activation marker, repeated downloads, operator
+assertions, offline use logs nor two mutually stale replicas establishes it.
+A fresh challenge proves no latestness if its responder's relevant state can
+also be rolled back: a live responder can authenticate stale history.
+
+**Indistinguishability limit:** if every relevant observation and trusted
+state can be replayed together, the restored system cannot distinguish that
+history from the earlier legitimate state. Refusal requirements do not imply
+that existing local code detects this rollback. Authentication, ordinary
+crash durability and in-process invalidation are necessary in their scopes,
+but none alone supplies rollback-resistant currentness.
+
+Do not weaken the stated failure model to obtain a positive result. An
+exclusion such as trusted non-restorable storage or a protected control plane
+requires explicit later review and remains **UNACCEPTED here**. A different
+host/account/location is not itself independent custody, administration,
+backup, provider or compromise control.
+
+No witness service, hardware counter, HSM, beacon, external chain, quorum
+service or new trusted authority is selected or provisioned. The lifecycle
+contract's existing candidate options remain unproven: any future mechanism
+must expose its authentication roots, cryptographic/PQ dependencies,
+custody/control and update boundaries, replay/fork resistance, retained
+history, failure model, compromise consequences and actual evidence.
+Repository access, HTTPS, cloud IAM and product labels are not native B/U
+authority. Any proposed promotion of such a dependency requires explicit
+trust-boundary review, not an implicit operational assumption.
+
+Using QBIND's own nascent consensus to prove initial authority is circular
+unless independently approved trusted membership, bootstrap/current-state
+roots, history survival, cold-start, all-restart and partition assumptions
+are established. A QC authenticates its statement under a membership/domain;
+it does not independently supply those premises or U.
+
+### 5. Conflict and adjacent decision boundaries
+
+Recognized conflicts, supersession and retirement require independently
+authenticated **current** evidence under an already approved policy. Do not
+choose by first arrival, timestamp, largest sequence supplied by an untrusted
+party, number of downloads or founder assertion alone. Repeated stateless
+verification cannot reveal undisclosed equivocation. B/U evidence owners
+must retain and report contradictions, not silently choose a preferred view.
+
+BR-09 retains conflict-resolution authority, root replacement and transition
+policy decisions; BR-04 does not confer those powers. BR-10 retains actual
+custody and provisioning. BR-05-BR-08 and BR-11, C/L/X, resource admission,
+non-null `GenesisConfig.extra` refusal and existing recovery restrictions
+remain independent. Marker/reset functionality is not permission to reset
+signing history, establish unused bootstrap identity or reconstruct B/U.
+
+Preserve founder-authorized **fixed initial DevNet membership**, dedicated
+bootstrap authority credentials separate from validator/governance/transport
+keys, founding epoch limits and no signing-history reset power. A future
+transition to joint authority needs separate review and authorization under
+the applicable prior policy; participants, threshold and mechanism remain
+unselected. Founder approval is configuration-level, not per transaction.
+
+Mandatory evidence refusal has an availability cost: cold start, recovery,
+activation or signing/publication can remain blocked indefinitely; multiple
+blocked validators can prevent consensus progress. No TPS, latency, recovery
+time, quorum availability or resource guarantee is made. Availability pressure
+does not supply missing B/U or relax C/L/X.
+
+### 6. Unexecuted acceptance matrix
+
+**Every row is FUTURE / NOT EXECUTED.** Outcomes below are requirements for a
+separately approved future consumer, not implemented refusal classes, PASS
+claims, test results or operational evidence. Read-only verification success
+is not activation success. Even the positive case is conditional on every
+other required gate and later explicit authorization.
+
+| Case | Required future outcome | Status |
+|---|---|---|
+| Complete independently authenticated current B/U for the same exact approval/configuration | Only the relevant B/U gate may pass under its approved policy; A/C/L/X and all other gates, actual effect correspondence and operational authorization remain required | FUTURE / NOT EXECUTED |
+| Valid historical A, B unavailable | Read-only content verification may succeed; dependent authority/activation/signing effects remain refused as unavailable, not described as an invalid signature | FUTURE / NOT EXECUTED |
+| Missing file/empty database/fresh installation offered as unused identity | Refuse activation; no inference of U or permission to initialize history | FUTURE / NOT EXECUTED |
+| Same payload with different valid signatures/envelopes | Same approval-content identity; no additional bootstrap permission | FUTURE / NOT EXECUTED |
+| Multiple legitimate participant verifications of one coordinated bootstrap | Permit repeated non-authorizing verification; do not consume per-verifier network permission or select a winning node | FUTURE / NOT EXECUTED |
+| Concurrent/cloned attempts to instantiate the same approval | Enforce one authorized coordinated instantiation at the actual boundary; second/uncertain start refuses without a separately authorized lifecycle policy | FUTURE / NOT EXECUTED |
+| Partial activation, possible prior use, uncertain/lost acknowledgement | Retain uncertainty, authenticate exact current readback and reconcile; never relabel unused or automatically retry activation | FUTURE / NOT EXECUTED |
+| Node-only rollback | Refuse dependent effects until independent B/U, C/L/X and exact recovered-state correspondence are established | FUTURE / NOT EXECUTED |
+| Signer-only rollback | Refuse restored signer without complete independently current C/B/U/X and L correspondence; committed history is insufficient | FUTURE / NOT EXECUTED |
+| Combined node-and-signer rollback | Refuse without trustworthy sufficient evidence outside their combined domains; mutual agreement is not freshness | FUTURE / NOT EXECUTED |
+| B/U source rollback, including all shared-control copies | Refuse without an independently surviving current basis; no claim that local code detects an indistinguishable old copy | FUTURE / NOT EXECUTED |
+| B/U source/root compromise | Refuse affected dependent effects pending already authorized current incident/conflict policy; no inferred replacement source/root | FUTURE / NOT EXECUTED |
+| Matching network constants, different canonical genesis or authority | Refuse exact-configuration mismatch; standard environment/runtime/wire equality does not establish identity or U | FUTURE / NOT EXECUTED |
+| Stale, retired, superseded, conflicting or unverifiable evidence | Refuse applicable effects; distinguish unavailable/unverifiable, demonstrated mismatch and unresolved conflict; preserve observations, no selection heuristic | FUTURE / NOT EXECUTED |
+| Source outage or partition | Refuse when mandatory current evidence is unavailable; no cached/clock/timeout fallback and no availability promise | FUTURE / NOT EXECUTED |
+| Cold start or all-participant restart | Require independently authenticated current B/U and applicable C/L/X outside affected domains; no circular peer bootstrap or empty-state exception | FUTURE / NOT EXECUTED |
+| In-process ticket reuse after invalidation or with a replacement owner/restart | Preserve issuer/generation/exhaustion refusal; restart must establish new current evidence, not infer durability or anti-rollback from a new owner | FUTURE / NOT EXECUTED |
+| Authority absent, owner missing, or owner present but unavailable | Preserve the distinct Required refusal paths and production containment; no fixture constructor or synthesized current state | FUTURE / NOT EXECUTED |
+| Authority changes around storage, signing or handoff | Required applicability at each effect; reject stale frozen admission before key use where checked; later handoff refusal cannot undo signing and must preserve C obligations | FUTURE / NOT EXECUTED |
+| Trust-bundle/governance marker, replay store or reset tool substituted for B/U | Refuse substitution; their local first-load/reset/replay semantics establish neither unused consensus identity nor independent latestness | FUTURE / NOT EXECUTED |
+| B/U offered to waive C/L/X or reset signing history | Refuse override; preserve reservations, potentially-signed outcomes, exact-result constraints, lock restrictions and copied-key obligations | FUTURE / NOT EXECUTED |
+
+Later evidence must remain layered: source/unit behavior; independent-process
+concurrency/crash/recovery; actual release-entrypoint correspondence; and
+actual owner, authentication, storage/backup/admin/provider/control-domain
+evidence. Each must name the revision, procedure and failure model exercised.
+None is supplied by this matrix or by the historical local D10/D7D14 tokens.
+
+### 7. BR-04 decision card, missing facts and continued refusal
+
+| Decision field | Disposition |
+|---|---|
+| BR-04 owner disposition | **PENDING** |
+| B accountable person | **UNASSIGNED** |
+| U accountable person | **UNASSIGNED** |
+| Concrete independently current source/control domains | **NOT ESTABLISHED** |
+| Mechanism selection | **NOT ESTABLISHED by this task** |
+| Operational provisioning | **NOT ESTABLISHED by this task** |
+| Implementation | **NOT ESTABLISHED by this task** |
+| Approved failure-model exclusions / operational B/U evidence | **NONE SUPPLIED** |
+| Overall BR-04 closure | **NOT ESTABLISHED** |
+| Present supported disposition | **Continued refusal; production unavailable authorization and containment preserved** |
+
+The smallest concrete owner inputs needed next are facts for a bounded
+feasibility decision, not a request to provision infrastructure:
+
+| Missing owner input | Minimum concrete information and evidence needed |
+|---|---|
+| Accountable people | Explicit assignment/consent for B and U responsibility and enforcing-consumer ownership; disclose overlapping control without inheriting olive's earlier roles |
+| Actual state/control domains | Node, signer, bootstrap credential/reference, activation state and proposed source storage, copies, backups, restore, administrators, providers and compromise domains; who can rewind or replace each and all together |
+| Candidate independent evidence source | Name an actually supported candidate, its independently authenticated roots/provenance, retained exact identity/history, cryptographic dependencies and what survives each domain; if none exists, state none and retain refusal |
+| Supported failure model | Exact crash/rollback/clone/compromise/partition/cold-start/all-restart coverage and availability consequences; any proposed exclusion remains unaccepted pending explicit review |
+| Conflict/update/readback responsibilities | Who observes/retains conflicts, can make authorized updates, verifies durable/current readback and reconciles partial/lost-ack use; refer resolution/root replacement to BR-09 and custody/provisioning to BR-10 |
+
+No concrete supported source is established here. These bounded requirements,
+missing facts and continued-refusal disposition complete the documentation
+proposal, **not BR-04 acceptance, B/U establishment or operational
+authorization**. No new trusted authority, staffing, credentials or mechanism
+is invented to close the gate.
+
+### 8. Preserved statuses and append-only scope
+
+| Existing decision / gate | Unchanged effective status |
+|---|---|
+| BR-01 | **ACCEPTED — DESIGN ONLY** (the prior accepted decision is unchanged) |
+| BR-02 | **ACCEPTED — IDENTIFIER ALLOCATION AND COMPATIBILITY CONTRACT ONLY** |
+| BR-03 | **ACCEPTED — MAPPING POLICY ONLY**; overall **OPEN / CLOSURE NOT ESTABLISHED** |
+| Operational genesis label/pin/approved configuration | **NOT SUPPLIED** |
+| Implementation prerequisites / authorization | **NOT SATISFIED / PENDING** |
+| Operational founder-root/profile provisioning | **NOT DONE** |
+| Activation / public DevNet | **DISABLED / NO-GO** |
+| D7D14 | `D7D14_STORAGE_COMPONENT=IMPLEMENTED-ISOLATED`; `D7D14_STORAGE_ACCEPTANCE=PASS-ACCEPTED-SUBSET` |
+| D7D10 | `D7D10_LOCAL_SIGNING_RESERVATION=CODE-AND-STORAGE-TEST-POSITIVE`; accepted local A-F scope unchanged |
+| Whole native-admission and authority contracts | **DRAFT / NOT APPROVED / NOT IMPLEMENTED** |
+| Section 13.6 whole-lifecycle / durable anti-rollback | **INCOMPLETE / NOT-ESTABLISHED** |
+| C4/C5 / RS1 / candidate resource limits | **OPEN / OPEN / UNAPPROVED** |
+| BR-05-BR-11, C/L/X and all other remaining gates | **UNCHANGED; not satisfied or waived by this proposal** |
+
+Existing recovery, cryptographic-review/provenance limitations,
+signing-exhaustion concerns, resource requirements, source-comment
+discrepancies, F1/F2 and release/production-consistency boundaries remain
+unchanged. No completed review is reopened or historical evidence promoted.
+The BR-01/02/03 accepted identifiers, record fields and decisions are not
+amended by the status restatement above.
+
+Protected baseline authority: mode `100644`, blob
+`08374dc06aab278feaed6d0dfefcd5c11613f489`, 185243 bytes, LF with terminal LF.
+Protected baseline D7: mode `100644`, blob
+`dcb53ba5b5462dbeebddc8f23baef22742dcb935`, 2898519 bytes, CRLF without
+final newline. Each complete baseline file must remain an exact byte prefix;
+D7 adds only the necessary CRLF delimiter before its concise append and
+retains no final newline. Verification is documentation-only:
+source/contract correspondence, semantic and threat/effect coverage, explicit
+gaps/status/gates, paths/locators, exact prefixes, two-path diff, modes/EOLs
+and CRLF-aware whitespace. No tests, builds, scanners or operational
+execution are acceptance evidence for this proposal.
