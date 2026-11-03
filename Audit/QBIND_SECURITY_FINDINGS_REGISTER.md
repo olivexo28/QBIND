@@ -1,3 +1,2220 @@
+<!-- A49 BUILD-CONFIGURATION & BUILD-IDENTITY PROVENANCE LAYER (internal v1.137) — prepended to the preserved v1.136 input below -->
+
+# QBIND Security Findings Register — A49 layer (internal v1.137)
+
+**Pass type:** bounded, read-only source review advancing OBL-REL-1a. Does **not** reopen
+A48–A48.2's workflow failure-propagation / artifact-gating review.
+**Date:** 2026-11-03.
+**Audited source (unchanged):** repository `https://github.com/olivexo28/QBIND.git`, HEAD
+`18d71a549d868ed33d352e9fc70a9d060f75e03b`, root tree
+`5b6c543435ac017dd8372c93f48be397899db14a`. Delivery commits and current development revisions
+are not replacement baselines.
+**Input preserved below:** internal v1.136, 5,450,327 bytes, SHA-256
+`5a93cb2169fadb2b7d63449f770b7208d6be1c5599f46d5cdc767623d567fe4a`, LF-only — verified this turn
+(bytes + SHA match; ALL SIX embedded archives preserved; A48.2 layer present; current-lineage A49
+absent) and preserved byte-for-byte exactly once beneath this layer.
+**Scope discipline:** no new global index, no completion percentage, no production-readiness
+verdict. All 54 obligation identities and all finding IDs/aliases preserved unchanged. C5 stays
+OPEN; runtime stays UNEXECUTED. A50 is not authorized and is not scheduled.
+
+---
+
+## The one question
+
+> For the selected `qbind-node` build path, what do committed configuration and executable source
+> establish about the build inputs and the reported commit/build identity, and which links to the
+> actual binary remain assumptions or external evidence?
+
+Answered through the finite boundaries A–D below, grounded in complete executable bodies.
+
+---
+
+## A — Build selection and configuration (source-established)
+
+Build path reviewed: the Run-384 release build invocation reused by the Run-384/385 chain
+(`scripts/devnet/run_384_...sh:50` string; actual execution at `:160–161`):
+`QBIND_GIT_COMMIT=… QBIND_BUILD_ID=… cargo build -p qbind-node --release --locked --bin qbind-node`.
+
+Separating the four distinct input mechanisms (as the boundary requires):
+
+- **Toolchain.** There is **no committed `rust-toolchain` / `rust-toolchain.toml`** and **no
+  `.cargo/config*`** anywhere in the tree (`find` → none). The workflows install the toolchain
+  with `rustup toolchain install stable --profile minimal` (WF2/WF3 `:62-67`/`:85-89`). "stable"
+  is a channel, **not** a pinned compiler version; the effective `rustc` is whatever that channel
+  resolves to at build time. No pinned compiler is inferred from any comment.
+- **Target.** No `--target` is passed. `run_384:55` derives `TARGET_TRIPLE` from
+  `rustc -vV … host:` at build time (fallback `x86_64-unknown-linux-gnu`). The target is the
+  **host** triple, discovered at build time — not a committed/pinned target.
+- **Profile.** Root `Cargo.toml` defines **only** `[profile.dev]` and `[profile.test]`
+  (`:32-40`, `debug=0`/`strip`/`incremental=false`). There is **no `[profile.release]`** in the
+  root or node manifest. `--release` therefore uses **Cargo's default release profile**; the
+  committed profile overrides do **not** apply to the release binary.
+- **Features.** `crates/qbind-node/Cargo.toml` declares `default = []` and opt-in features
+  (`async-peer-manager`, `hsm-pkcs11`, `test-utils`). The build command passes no `--features` /
+  `--all-features`, so the release binary is built with the **empty** default feature set.
+- **Dependency resolution.** Manifest dependency specifiers are **caret ranges** (e.g.
+  `rocksdb = "0.22"`, `tokio = "1.44"`). `Cargo.lock` pins exact versions. The **`--locked`**
+  flag on the command line is the enforcement that the resolved graph must equal the committed
+  lockfile (build fails if it would change). Manifest ranges, lockfile pins, and `--locked`
+  enforcement are three separate facts and are not conflated: a lockfile is not inferred from
+  ranges, and enforcement is attributed to `--locked`, not to the lockfile's mere existence.
+- **External overrides.** No committed `RUSTFLAGS`, `.cargo/config`, or target override. Any
+  deployed build flags are not inferable from committed defaults and are a named external input.
+
+Reused unchanged from A48–A48.2 (not re-audited): the WF2/WF3 invocation/CRLF qualifications
+(these workflows invoke CRLF-committed `run_385`→`run_384` directly; the downstream trace is
+CONDITIONAL on CRLF execution) and the constant-`clean` `source_tree_state` producer
+(`run_384:221-227`/`:261`). This pass inspected build-argument/input assignment only.
+
+## B — build.rs inputs and outputs (`crates/qbind-node/build.rs`, full body read; activated by `build = "build.rs"` in the node manifest)
+
+- **`QBIND_GIT_COMMIT`** (`main` :93-99): `std::env::var("QBIND_GIT_COMMIT").ok()` →
+  `.and_then(sanitize)` → `.or_else(git_short_commit)`. An explicit, non-empty, sanitizable env
+  value **wins**; otherwise the git fallback `git rev-parse --short=12 HEAD` is attempted; if that
+  too yields `None` the variable is left unset. When set, emits
+  `cargo:rustc-env=QBIND_GIT_COMMIT=<value>`.
+- **`QBIND_BUILD_ID`** (`:102-107`): `std::env::var("QBIND_BUILD_ID").ok()` → `.and_then(sanitize)`;
+  emitted via `cargo:rustc-env` **only** when present and sanitizable. **Never** derived from git
+  or the ELF (source-confirmed, matching the comment — but established from the code, not the
+  comment).
+- **`sanitize`** (`:36-54`): trims; empty → `None`; maps each of the first 64 chars to itself when
+  in `[A-Za-z0-9._-]` else `_`; **rejects an all-`_` result** → `None`. (The `.min(64)` is only a
+  capacity hint; the real cap is `.take(64)`.)
+- **`git_short_commit`** (`:61-71`): returns `None` (never panics) when `git` is absent, the
+  command errors, exits non-zero, or output is non-UTF-8; else `sanitize`d.
+- **Rebuild directives** (`:75-90`): `cargo:rerun-if-env-changed=QBIND_GIT_COMMIT` and
+  `=QBIND_BUILD_ID`; plus a single `cargo:rerun-if-changed={head_path}` where `head_path` is the
+  output of `git rev-parse --git-path HEAD` (i.e. the **git HEAD path**, typically `.git/HEAD`) —
+  **not** the commit object and **not** the tracked source files. If that git call fails or prints
+  empty, no `rerun-if-changed` is emitted.
+- **Subprocess handling:** every `Command` failure path returns `None`/no-op; the build never
+  panics on provenance.
+
+Source fact vs comment: sanitization constrains **format and cardinality** (no quotes/newlines,
+no path/host-shaped leak, ≤64 chars). It does **not** authenticate a claimed commit and does not
+make an arbitrary supplied value non-sensitive beyond the character/length filter. Actual
+environment values were not inspected.
+
+## C — Reported identity and its consumers (`metrics.rs`)
+
+Render site `metrics.rs:10556-10576` builds `qbind_node_build_info{version,build_id,git_commit,env,chain_id} 1`:
+
+- `version` = `sanitize_info_label(env!("CARGO_PKG_VERSION"))` — compile-time crate version from
+  `Cargo.toml` (`0.1.0`). Always present (`env!`, not `option_env!`); **declared**, not verified.
+- `build_id` = `sanitize_info_label(option_env!("QBIND_BUILD_ID").unwrap_or("unknown"))` — reads
+  the compile-time value build.rs emitted; absent → `"unknown"`. **Supplied** (env-only).
+- `git_commit` = `sanitize_info_label(option_env!("QBIND_GIT_COMMIT").unwrap_or("unknown"))` —
+  **reported** (injected or git-derived); absent → `"unknown"`.
+- `env` / `chain_id` = from the runtime `BuildInfoContext` RwLock; `None`/poisoned → `"unknown"`.
+- `sanitize_info_label` (`:5785-5803`) is the render-time filter; note it does **not** reject an
+  all-`_` result (unlike build.rs `sanitize`), so the two sanitizers are not identical — the gap
+  is unreachable on the normal path because inputs are either the already-`sanitize`d
+  compile-time value or the literal `"unknown"`.
+
+Keeping the identities separate and classifying each relationship:
+- **Package version** ← `Cargo.toml` (declared / compile-time).
+- **Reported source commit** ← injected `CANON_GIT_COMMIT` (`run_384:45` =
+  `git rev-parse --short=12 HEAD`), else build.rs git fallback (**supplied / reported**).
+- **Injected metric build ID** ← `CANON_BUILD_ID` (`run_384:49` =
+  `qbind-devnet-${PKG_VERSION}-${CANON_GIT_COMMIT}`) — **derived from the same commit string**, so
+  its agreement with `git_commit` is **by construction**, not an independent check.
+- **ELF build ID** (`.note.gnu.build-id`, `run_384:61` `readelf -n`) — recorded in the manifest;
+  **never computed from, or compared against, the metric build_id or git_commit in source**.
+- **Binary SHA-256** (`run_384:60` `sha256sum`) — computed from the actual built binary; recorded
+  in the manifest beside the injected commit, but **no source step binds "this SHA ⟵ this
+  commit"** beyond both being produced in the same script run (within-run coupling).
+- **Manifest claims** — record `injected_QBIND_GIT_COMMIT`, `binary_sha256`, `elf_build_id`, and
+  (A48 work) `signed_release=false` / `slsa_grade=false`.
+- **External attestation** — the only mechanism that cryptographically binds subject (binary SHA)
+  to a provenance statement is WF3 `actions/attest-build-provenance@v2`, which is dispatch-only,
+  gated, not committed, and leaves `signed_release=false`.
+
+A label matching another supplied value (e.g. `build_id` embedding `git_commit`, or the manifest
+echoing the injected commit) is therefore **not** independently verified source-to-binary
+provenance.
+
+## D — Finite cases and dispositions
+
+| # | Case | Source-supported output | Expectation / evidence limit |
+|---|---|---|---|
+| 1 | Explicit valid metadata supplied | build.rs emits sanitized `QBIND_GIT_COMMIT`/`QBIND_BUILD_ID`; metric renders those values | Labels reflect the **supplied** values; authenticity of the values is **not** verified by any source step |
+| 2 | Metadata absent, git available | `git_commit` ← `git rev-parse --short=12 HEAD` (sanitized); `build_id` env-only → **not emitted** → `"unknown"` | `git_commit` reflects the **build-directory HEAD**, not an authenticated source identity; `build_id`=`unknown` is correct |
+| 3 | Git unavailable / error | both `git_short_commit` and env `None` → neither emitted → metric `git_commit="unknown"`, `build_id="unknown"`; build never panics | Graceful degradation is source-supported |
+| 4 | Empty/invalid metadata after sanitization | `QBIND_GIT_COMMIT` sanitizing to `None` **falls through to the git fallback** (`.or_else`), not directly to `unknown`; `QBIND_BUILD_ID` sanitizing to `None` → **not emitted** → `"unknown"` (no fallback) | Asymmetry is source-supported and intentional (build_id env-only); not a defect on its face |
+| 5 | Supplied metadata inconsistent with the checkout | explicit env **wins** with **no reconciliation** against the actual tree; metric renders the supplied commit regardless of the real checkout | An **inaccurate / unauthenticated provenance label is representable**; whoever controls the build env controls the label. This is an evidence-assurance limit, **not** a node-consensus vulnerability. Premise: the build environment's trust is **not assumed** either way here |
+| 6 | Relevant input changes between builds | **Source-declared** invalidation: `rerun-if-env-changed` for both env vars, and `rerun-if-changed` for the **git HEAD path** only | **Unexecuted effective behavior:** whether every commit move rewrites the named HEAD-path file, and Cargo's fingerprint/rebuild outcome, are **documented-Cargo/git semantics not executed here**. In the injected (CI) path a changed env value is covered by `rerun-if-env-changed`; the HEAD-path-only directive is a potential staleness premise chiefly for the **non-injected local** git fallback. **No stale binary is claimed from the directive alone** — recorded as an exact unresolved premise |
+
+Test-assertion context (not source-to-binary proof):
+`crates/qbind-node/tests/run_382_...rs` asserts the info line is present with all five labels,
+that `version`/`build_id`/`git_commit` are sanitized-or-`unknown`, that no path/host/secret leaks,
+and the invariant that `build_id` is never derived from `git_commit` (env-absent → `build_id ==
+"unknown"` and `!= git_commit`). The test named `git_commit_matches_injected_provenance_when_present`
+checks only that the value is a **sanitized non-`unknown` token** — it does **not** assert the
+label equals the true source commit. These are format/invariant assertions, not authenticity
+assertions.
+
+## Bounded disposition
+
+Committed configuration and executable source **establish the build inputs** for the release path:
+`--locked` dependency enforcement against `Cargo.lock`, default-feature set, Cargo's default
+release profile (no committed `[profile.release]`), host-target selection, and an **unpinned
+`stable`** toolchain (no committed toolchain file). They also establish that the reported
+`git_commit` / `build_id` are **supplied/reported-and-sanitized** values with graceful `unknown`
+fallbacks and a format-safe render.
+
+The **source-to-binary provenance links remain assumptions or external evidence**: (a) that the
+reported commit corresponds to the bytes actually compiled (sanitization ≠ authentication; the
+injected value wins with no reconciliation — case 5); (b) that `binary_sha256 ⟵ reported commit`
+(within-run coupling only; independent binding is the dispatch-only WF3 attestation, not
+committed, `signed_release=false`); (c) that the ELF build-id and the metric build_id correspond
+(never compared in source); and (d) that any **actually deployed** binary matches any of these
+(the binary is an unavailable artifact — a runtime residual).
+
+This is an **inaccurate/unauthenticated-provenance** evidence-assurance limit, explicitly distinct
+from a node-consensus vulnerability. Checked against existing IDs and **E07**: it is consistent
+with the already-tracked E07 / OBL-REL-1a/1b assurance scope and with A48.1-C2's constant-`clean`
+observation; **no new finding ID is minted and no "no finding" is forced.** The build-input and
+reported-identity sub-boundary is marked **source-complete**; the binding-to-binary question is a
+named external/runtime residual, not an open source trace.
+
+## Progress delta
+
+- **Previously closed, carried unchanged:** A48–A48.2 workflow failure-propagation / artifact-
+  gating checks (PASSED/CLOSED); `run_385` mandatory validator; constant-`clean` producer; CRLF /
+  invocation qualifications; attestation permissions; all A47.3-and-earlier storage / consensus /
+  transport / decoder / custody / RUN-422 work.
+- **New source questions answered:** build input selection (toolchain/target/profile/features/
+  lockfile-enforcement) for the release path; the complete `build.rs` provenance-injection and
+  sanitization/fallback logic; the `qbind_node_build_info` consumer and its identity separation;
+  the six finite metadata cases.
+- **Exact remaining source questions:** none open within A–D (sub-boundary source-complete). The
+  only source-internal item deferred by choice is the precise Cargo rebuild outcome for case 6,
+  recorded as an unresolved **documented-Cargo-semantics** premise (not a source gap).
+- **Separately classified residuals:** *external* — the actual build-environment values and the
+  WF3 attestation (dispatch-only, uncommitted); *runtime* — the actually deployed binary
+  (unavailable artifact) and any effective RUSTFLAGS/toolchain at deploy time; *implementation* —
+  Cargo/git rebuild semantics for the HEAD-path-only `rerun-if-changed`. None is a reason to
+  repeat the source trace or schedule another pass.
+
+**Stopping statement.** A49 is complete. No finding, severity, or closure is forced; C5 remains
+OPEN; runtime remains UNEXECUTED; the baseline is unchanged. A50 is not authorized and is not
+scheduled.
+
+---
+<!-- End A49 layer. The complete, byte-for-byte preserved internal v1.136 input follows. -->
+
+<!-- A48.2 CI FAILURE-PROPAGATION CORRECTION LAYER (internal v1.136) — prepended to the preserved v1.135 input below -->
+
+# QBIND Security Findings Register — A48.2 correction layer (internal v1.136)
+
+**Pass type:** bounded report amendment of A48.1 (not a new audit pass). Read-only.
+**Date:** 2026-11-03.
+**Audited source (unchanged):** repository `https://github.com/olivexo28/QBIND.git`, HEAD
+`18d71a549d868ed33d352e9fc70a9d060f75e03b`, root tree
+`5b6c543435ac017dd8372c93f48be397899db14a`. Delivery commits and newer implementation
+revisions are not replacement baselines.
+**Input preserved below:** internal v1.135, 5,438,531 bytes, SHA-256
+`29c6681fb18e8a706adc6625479a998e8af76b914deb24ec3c74f9926cbd89d2`, LF-only — verified this
+turn (bytes + SHA match; ALL SIX embedded archives preserved; A48.1 layer present; A48.2
+absent) and preserved byte-for-byte exactly once beneath this layer.
+**Scope discipline:** amends wording only, within OBL-REL-1a / OBL-REL-1b / E07. No new finding,
+no finding closure, no severity change, no obligation redefinition, no new global inventory. All
+54 obligation identities and all finding IDs/aliases preserved. C5 stays OPEN; runtime stays
+UNEXECUTED; A47.3 and all earlier storage / consensus / transport / decoder / custody / RUN-422
+conclusions are untouched. A49 is not authorized.
+
+---
+
+## A48.2-C1 — skipped-job vs required-check enforcement semantics
+
+`[SUPERSEDED-A48.1 → A48.2-C1]` A48.1-C3 characterized a conditionally skipped job as
+"skipped — not success" for the purpose of check enforcement, and recorded the merge-enforcement
+treatment of a skipped required check as an *unresolved platform assumption with documentation
+provenance unavailable*. Both are corrected here.
+
+Four properties must be kept strictly separate, and A48.1 collapsed them:
+
+1. **Whether a job executed** — did its steps run at all.
+2. **Its skipped result / display** — how GitHub labels a job whose job-level `if:` evaluated
+   false (shown as *skipped*).
+3. **Whether GitHub treats that check as successful for enforcement** — how a required status
+   check gates merge.
+4. **Whether that check is applicable and required in this repository** — a repository-ruleset /
+   branch-protection fact, external to the workflow files.
+
+**Documented treatment (user-supplied official GitHub documentation; see provenance note).** A
+conditionally skipped job (job-level `if:` false) **reports success and does not prevent merging
+merely because that check is required**. A workflow **skipped by path/branch filtering** is a
+*distinct* case: its associated required checks can remain **pending** and **block** merging. An
+event that **never triggers** the workflow is a third distinct case. Crucially, the fact that a
+skipped job reports success for enforcement **does not establish that any validation executed** —
+property (3) says nothing about property (1).
+
+Accordingly:
+- Withdraw A48.1-C3's "skipped — not success" enforcement wording and its "unresolved platform
+  assumption" label for skipped-required-check merge treatment. The documented treatment above
+  replaces it; it is not retained as a contrary open assumption.
+- The withdrawal concerns only the *enforcement characterization*. It does **not** add a claim
+  that a skipped job validated anything — the opposite: a success-for-enforcement skip is
+  compatible with **zero** validation having run.
+- **Dispatch-only WF3** (`public-devnet-release-signing-attestation.yml`, `workflow_dispatch`
+  only, job gated `if: inputs.confirm == 'yes'`): generic skipped-job semantics **do not**
+  establish any effective pull-request requirement for WF3. Whether WF3's check is required at
+  all, and whether its `release-signing` environment has required reviewers, remain **external
+  evidence** (repository rules / environment protections), not facts derivable from the committed
+  workflow files.
+
+**Retained from A48.1 (shell semantics, unchanged):** a GitHub Actions `run:` step with no
+`shell:` on Linux executes `bash -e {0}` (errexit, **no** pipefail); an explicit `shell: bash`
+executes `bash --noprofile --norc -eo pipefail {0}` (adds pipefail). The three committed
+workflows set no `shell:`. A child script's own `set -euo pipefail` is a script-local option,
+separate from the step shell.
+
+**Documentation-provenance note.** Read-only retrieval of the three cited primary sources was
+attempted this turn and in A48.1; `docs.github.com` does not resolve from this sandbox
+(`getaddrinfo ENOTFOUND docs.github.com`), so the pages could not be fetched here. The
+enforcement treatment stated above is attributed to the official GitHub documentation supplied in
+the pass instruction (control-jobs-with-conditions; troubleshooting-required-status-checks;
+workflow-syntax). The only limitation recorded is the local retrieval failure; the documented
+behavior itself is **not** held open as a platform assumption.
+
+---
+
+## A48.2-C2 — the structural fallback block vs the complete validation path
+
+`[SUPERSEDED-A48.1 → A48.2-C2]` A48.1-C4 correctly located the required-key-only checks inside
+the `except ImportError` blocks of the package-integrity scripts, but then generalized that to the
+**whole** package-integrity chain ("degrades to required-key presence", "no const checks"). That
+generalization is withdrawn: the `except` block is only the schema step; executable field /
+content / integrity checks follow it unconditionally.
+
+Restored from the executable bodies (checks that run whether or not `jsonschema` is importable):
+
+- **`run_405_public_devnet_full_tree_package_integrity.sh:166–190`** — fixed fields
+  (`generated_for_run == 405`, `scope`, `coverage == "full-tree"`, `package_root`), required
+  safety-label subset, `non_claims` all `False`, `file_count == len(files)`, full-tree coverage
+  (manifest set == on-disk set, no missing / no extra), and a per-file re-hash asserting `sha256`
+  + `byte_size`. Its Run-404 anchor-manifest path retains the checks at **:225–232**
+  (`generated_for_run == 404`, path-safety regex, `sha256` + `byte_size`).
+- **`run_406_public_devnet_full_tree_ci_artifact_anchor_drift.sh:157–178`** — fixed fields
+  (`coverage == "full-tree"`, `scope`, `package_root`), `non_claims` all `False`,
+  `file_count == len(files)`, path-safety regex, coverage agreement (no missing / no extra), and
+  per-file `sha256` + `byte_size`.
+- **`run_407_public_devnet_anchor_drift_json_retention.sh:251–259`** — count-to-array-length
+  consistency for all six counters (`anchor_total`, `anchors_present_matching`, `anchors_missing`,
+  `undocumented_mismatches`, `documented_refreshes`, `full_tree_only`) and `non_claims` all
+  `False`.
+
+**Bounded conclusion.** When `jsonschema` is unavailable, these scripts perform required-key
+presence checks **plus** the explicit field / content / integrity checks above. This is **partial
+validation**; equivalence to the complete committed JSON Schema is **not** established. The
+withdrawal of the whole-chain "required-key-only / no const checks" wording is **not** reversed
+into a claim of full-schema equivalence or demonstrated safety — neither a finding nor a
+no-finding conclusion is forced.
+
+**Per-consumer label accuracy.** Do not claim every consumer explicitly labels fallback mode.
+`run_405` prints `schema_validation=structural-fallback` at **:164** at its primary schema step;
+the inspected `run_406` (**:184**) and `run_407` paths instead emit generic
+`...schema_validation=OK` / validation-success summaries, and `run_405`'s own Run-404 anchor path
+(**:219–224**) prints no fallback label. A48.1 wording implying uniform fallback labelling is
+corrected accordingly.
+
+**Run 384 fallback correction.** `run_384_...:302–310` implements, on `ModuleNotFoundError`,
+required-key presence **plus** a `const` check over applicable top-level properties
+(`for k, spec in props.items(): if k in inst and "const" in spec: assert inst[k] == spec["const"]`).
+The source comment at :302 reads "required keys + const/enum", but the executable loop implements
+**only** the `const` check — there is **no** general enum check in the fallback. A48.1's "fallback
+adds const/enum" wording is corrected to "const only."
+
+**Preserved PASSED/CLOSED (unchanged by this amendment):**
+- `run_385_...:173–177` remains a **mandatory** independent `jsonschema` validator that **fails
+  closed** (`|| fail`) when `jsonschema` is absent; it must not be transferred onto the
+  package-integrity chain.
+- Its conditional reachability stands under the existing A48.1 invocation qualifications
+  (WF2/WF3 invoke CRLF-committed `run_385` directly; downstream trace CONDITIONAL on CRLF
+  execution).
+- The distinction between *partial validation* and a *demonstrated acceptance of an invalid
+  artifact* is preserved; no malformed-manifest experiment, new schema audit, or bypass
+  investigation is opened.
+
+---
+
+## A48.2-C3 — effect-ordering wording
+
+`[SUPERSEDED-A48.1 → A48.2-C3]` Refine A48.1-C1's effect-ordering statements:
+
+- A **verification** failure causes the later **upload** step to be **skipped** (the failed step
+  exits non-zero; subsequent steps do not run by default).
+- An **upload** failure means the upload was **attempted and failed** — it was **not** skipped.
+- Neither statement establishes **rollback** of an earlier **completed** attestation; no explicit
+  revocation step was identified in the workflow.
+- Whether a **failed upload** left partial external effects is **not** inferred here.
+- Where A48.1-C2 wrote "`run_385` reaches its upload," attribute the upload to the **workflow
+  step**: `run_385` *stages* artifacts into the CI staging directory; the
+  `actions/upload-artifact` **workflow step** performs the upload.
+
+**Preserved ordering conclusions (unchanged):** WF1 (`public-devnet-package-integrity.yml`)
+uploads (:84–97) **before** its final working-tree cleanliness check (:99–106); WF3 creates the
+attestation (:99–102) **before** verification (:104–122) and upload (:124–133); no explicit
+revocation step was identified.
+
+---
+
+## Items kept closed (no reopening)
+
+The constant-`clean` manifest producer (`run_384:221–227`/`:261`, A48.1-C2); the caller chains and
+LF-normalization paths (A48.1-C5/C6); CRLF counts and checkout/runtime qualifications
+(A48.1-C6); attestation permissions `id-token: write` + `attestations: write` (A48.1-C7);
+`run_385`'s mandatory validator; and all A47.3-and-earlier storage, consensus, transport, decoder,
+custody, and RUN-422 work retain their existing bounded statuses. OBL-REL-1a, OBL-REL-1b/E07, C5,
+and runtime evidence are unchanged in status by this amendment.
+
+---
+
+## A48.2 correction ledger (exact source references)
+
+| Correction | Supersedes | Grounded in |
+|---|---|---|
+| C1 skipped-job vs required-check enforcement; withdraw "unresolved platform assumption" | A48.1-C3 | user-supplied official GitHub docs (retrieval attempted; `docs.github.com` ENOTFOUND, limitation recorded); WF3 `public-devnet-release-signing-attestation.yml:38-49,61-74` |
+| C2 restore executable field/content/integrity checks; const-only fallback; per-consumer labels | A48.1-C4 | `run_405:164,166-190,219-232`; `run_406:149-155,157-178,184`; `run_407:243-249,251-259`; `run_384:302-310`; `run_385:173-177` |
+| C3 verify-fail skips upload / upload-fail attempted; stage vs upload attribution | A48.1-C1,-C2 | WF1 `public-devnet-package-integrity.yml:84-97,99-106`; WF3 `...attestation.yml:99-102,104-122,124-133` |
+
+**Stopping statement.** A48.2 is complete. No finding, severity, or closure is forced; C5 remains
+OPEN; runtime remains UNEXECUTED; the baseline is unchanged. A49 is not authorized and is not
+scheduled.
+
+---
+<!-- End A48.2 correction layer. The complete, byte-for-byte preserved internal v1.135 input follows. -->
+
+<!-- A48.1 CI FAILURE-PROPAGATION CORRECTION & COMPLETION LAYER (internal v1.135) — prepended to the preserved v1.134 input below -->
+# QBIND Security Findings Register
+
+> **Layer A48.1 — correction and completion of A48's committed CI failure-propagation review, under
+> OBL-REL-1a (internal v1.135).** Read-only source/report amendment; no implementation/repository
+> change; A49 not authorized. Scope **Public DevNet**.
+> **Audited code baseline (unchanged, pinned):** HEAD `18d71a549d868ed33d352e9fc70a9d060f75e03b` /
+> tree `5b6c543435ac017dd8372c93f48be397899db14a` / origin `https://github.com/olivexo28/QBIND.git`.
+> Runtime remains **UNEXECUTED**; **C5** remains **OPEN**. All 54 obligation identities, finding IDs,
+> aliases, and dispositions preserved; no global index rewrite. **No plan-file was written this pass.**
+> Superseded A48 statements are marked `[SUPERSEDED-A48 → A48.1-Cn]`.
+
+## Input provenance and baseline
+
+**Input: the retained, previously delivered v1.134 master** — bytes match exactly: **5,417,633 bytes**,
+SHA-256 `cac0e4af19cd5f19889572cbd1dcd68c69c5c52bea3c695380cfaebe190f89d0`, six archives verified,
+A48 present, A48.1 absent, **0 CRLF (LF-only)**. (No separate attachment supplied this turn; the
+retained master was byte/hash-verified as the input.) Delivery commits / newer revisions are not a
+replacement baseline. Baseline re-verified before and after (HEAD/tree unchanged, clean tree); no
+checkout/metadata change. A47.3 remains **PASSED/CLOSED** (storage/consensus not reopened).
+
+**Documentation-provenance note:** official GitHub docs were not retrievable in this read-only sandbox
+(`docs.github.com` did not resolve). C3 therefore relies on the **documented shell strings supplied in
+the task prompt** and names the skipped-required-check merge semantics as a **platform assumption with
+documentation provenance unavailable** — not as observed historical execution.
+
+## Corrected caller/invocation inventory (C5)
+
+- **WF1 `public-devnet-package-integrity`** → `run_407` → (LF-normalized transient copy) `run_406` →
+  (LF-normalized transient copy) `run_405`; WF1 **also** invokes `run_410`. `run_405` **validates the
+  Run-404 manifest/schema** (files) but does **not** invoke the `run_404` shell script.
+- **WF2 `release-artifact-manifest` / WF3 `release-signing-attestation`** → `run_385` → `run_384`
+  (`run_385:104` `bash "${RUN384}" …`).
+- **Residual repaired:** `run_406` is **read** (CRLF-committed; LF-normalized by `run_407` at
+  `:136–139` `sed 's/\r$//'`; itself LF-normalizes `run_405`; its schema validation at `:149–155` uses
+  the same `try import jsonschema … except ImportError: required-key presence` fallback). It is no
+  longer an unread residual. External action internals (`checkout`/`upload-artifact`/
+  `attest-build-provenance`/`gh`) remain delegated, not audited.
+
+## C1 — Step failure vs final job status vs already-completed effects `[SUPERSEDED-A48 → A48.1-C1]`
+
+**Withdraw** the universal "a failed decisive check suppresses artifacts." In
+`public-devnet-package-integrity.yml`, **`upload-artifact` is at `:84–97` and the final working-tree
+cleanliness check is at `:99–106`** — the upload **precedes** the cleanliness check. Conditional
+sequence: preceding steps succeed → **upload succeeds** → the later cleanliness check fails → **the job
+fails, but the artifact has already been uploaded**. A step's default success condition gates it on
+**preceding** steps, not future checks. Only a failure **before** the upload suppresses it; a
+post-upload cleanliness failure does **not**.
+
+**Attestation workflow — ordered, non-reversing effects:** (1) build/manifest (`run_385`), (2)
+attestation **creation/write** (`actions/attest-build-provenance@v2`, `:99–102`), (3) `gh attestation
+verify` (`:104–122`, `set -euo pipefail`), (4) identity-summary generation/upload (`:124–133`). A
+failure at (3) or (4) **fails the job and skips the upload**, but it does **not reverse the already
+completed attestation write** at (2). **No cleanup/revocation step is present** in the committed
+workflow — so no rollback of the minted attestation is source-established. (No execution or actual
+attestation creation is claimed.)
+
+## C2 — Source-tree-state misreporting `[SUPERSEDED-A48 → A48.1-C2]`
+
+`run_384_public_devnet_release_artifact_manifest.sh:221–227`:
+```
+if git diff --quiet -- ':(exclude)docs/**' && git diff --cached --quiet -- ':(exclude)docs/**'; then
+  TREE_STATE="clean"
+else
+  TREE_STATE="clean"
+fi
+```
+The two Git predicates inspect whether any **tracked non-`docs/**` file** is modified in the working
+tree or staged. **Both branches assign `TREE_STATE="clean"`**, so the predicate result is **computed
+and discarded** — a **dirty** tracked-source tree reaches the **same** declaration as a clean one. The
+manifest then sets `"source_tree_state": "${TREE_STATE}"` (assignment around `:261`), so the field is
+**unconditionally `clean`**.
+
+Separated:
+- **Producer behavior (established):** the manifest's `source_tree_state` is always `clean`, independent
+  of the actual tree.
+- **Applicable expectation:** a provenance manifest field named `source_tree_state` is expected to
+  reflect the actual tree state; here it does not (an evidence-assurance/provenance-honesty gap on that
+  one field).
+- **Invocation prerequisites / earlier blocking:** `run_384` runs only if `run_385` reaches it, which
+  is **conditional on the CRLF-invocation premise (C6)**.
+- **Caller correction:** `run_385` re-validates the manifest against the schema but does **not**
+  recompute or override `source_tree_state`; schema validation checks the field's **type/const**, not
+  its **truthfulness**, so the caller does **not** independently reject or correct the declaration.
+- **Propagation to an uploaded artifact:** **if** `run_385` reaches its upload (conditional, C6), the
+  staged `RELEASE_ARTIFACT_MANIFEST.json` carrying `source_tree_state=clean` is uploaded as a
+  **download-only CI artifact** (not a release).
+- **Observed execution:** absent (UNEXECUTED).
+
+**Duplicate-check:** this is a **distinct script mechanism** (a discarded Git predicate forcing a
+constant provenance field) — **not** A37.1's masked-exit-status/unconditional-`verdict:PASS` harness
+pattern, and **not** the same as the general E07 external-evidence limits. Recorded as a **bounded
+evidence-assurance candidate** on the manifest's `source_tree_state` field under E07 / OBL-REL-1a;
+**no new finding ID is forced and no "no finding" is forced.** The final `RESULT=POSITIVE` placement is
+**not** used to prove tree-cleanliness was enforced; conversely, no "misleading artifact uploaded"
+claim is made beyond the conditional propagation stated above.
+
+## C3 — Shell and skipped-check semantics `[SUPERSEDED-A48 → A48.1-C3]`
+
+**Shell (corrected):** per the documented strings — an **unspecified** Linux `run:` shell is
+`bash -e {0}` (fail-fast `-e`, **no `pipefail`**); an **explicitly selected** `shell: bash` is
+`bash --noprofile --norc -eo pipefail {0}`. **None** of the three workflows sets `shell:`, so their
+`run:` steps use **`bash -e {0}`** — A48's "default `bash -eo pipefail`" is **withdrawn**. Each invoked
+script's `set -euo pipefail` is the **script's own** option set, **not** the parent workflow shell's,
+and is **not** transferred to it. Because each substantive step runs a **single** command (one script
+invocation), step-level `pipefail` is not what carries propagation — the **script's** exit code is, via
+the step's `-e`. (Comprehensive error handling is **not** inferred from `set -e` alone; the decisive
+`fail`→`exit 1` calls and the result-consumer sites in C4 are what establish it.)
+
+**Skipped-check rows (separated):**
+
+| Skip kind | Example here | Execution | Reported conclusion (platform assumption, provenance unavailable) | Artifact effect |
+| --- | --- | --- | --- | --- |
+| **Event not subscribed** | a `push` to a branch (WF2 triggers on tag `v*`/dispatch only; WF1 on PR/dispatch; WF3 on dispatch only) | workflow **does not run** | no check reported for that event | none |
+| **Workflow skipped by path/branch filter** | PR not touching WF1's `paths` | workflow **not triggered** | may appear as **pending/absent** (not success); whether a *required* such check blocks merge is a repo branch-protection setting **not in committed YAML** | none |
+| **Job skipped by its `if:`** | WF3 `attest` job `if: confirm=='yes'` with `confirm≠yes` | job **skipped** | **skipped** conclusion — **not success, not failure** | no artifact |
+| **Step skipped by its `if:` or an earlier failure** | upload steps have **no `if:`** → skipped after an earlier step fails | step **skipped** | contributes to the **failed** job (the earlier failure) | no artifact (for that run) |
+
+Execution, displayed/check conclusion, required-check treatment, and artifact effects are **distinct**;
+a **skipped** job is **not** a **passed** job. **No repository-specific merge protection is inferred**
+from general platform semantics — especially for the **dispatch-only** WF3, which cannot be a PR
+required check by its trigger.
+
+## C4 — Full schema validation vs structural fallback `[SUPERSEDED-A48 → A48.1-C4]`
+
+The `pip install jsonschema … || true` (best-effort) does not settle enforcement; the **consumers** do:
+
+| Chain / consumer | jsonschema available | jsonschema unavailable (`ImportError`/`ModuleNotFoundError`) | compensating mandatory validator? | success message |
+| --- | --- | --- | --- | --- |
+| **WF1** `run_405:156–164, 219–224` | `jsonschema.validate` (full) | **structural fallback = required-key *presence* only** | **none** | `schema_validation=jsonschema` or `=structural-fallback` (honest mode label) |
+| **WF1** `run_406:149–155`, `run_407:243–249` | full | required-key presence fallback | **none** | same pattern |
+| **WF2/WF3** `run_385:143–166` (first check) | full | structural (required-key presence) | — | `validator=jsonschema`/`structural` |
+| **WF2/WF3** `run_385:173–177` (independent) | full | **`import jsonschema` unconditional → `ModuleNotFoundError` → `\|\| fail` → exit 1 (fails closed)** | **this IS the compensating mandatory validator** | `staged_manifest_schema_valid=OK` |
+| **WF2/WF3** `run_384:293–311` | full | structural fallback **+ const/enum for critical fields** | (compensated downstream by `run_385:173–177`) | `jsonschema_ok`/`structural_ok` |
+
+**Dispositions:** the **manifest/attestation chain enforces full `jsonschema` validation** because
+`run_385:173–177` fails closed when the dependency is absent — **do not transfer this guard to the
+package-integrity chain**. The **package-integrity chain (WF1) does NOT** have such a guard: when
+`jsonschema` is unavailable (the install is best-effort), it validates by **required-key presence
+only** (`run_405/406/407`), which is **not** equivalent to full schema validation (no type/const/enum/
+format/additionalProperties checks). The scripts **honestly label** the degraded mode
+(`schema_validation=structural-fallback`). **Dependency absence alone does not demonstrate acceptance
+of an invalid artifact** — it demonstrates **weaker** validation on the WF1 path; whether a
+required-keys-present-but-otherwise-invalid manifest/report could pass WF1 under structural fallback is
+a bounded **open** sub-question (not asserted as a demonstrated bypass).
+
+## C6 — Invocation prerequisites from actual source bytes `[SUPERSEDED-A48 → A48.1-C6]`
+
+Committed blob line endings (verified): **`run_384`=CRLF (436), `run_385`=CRLF (245), `run_406`=CRLF
+(476); `run_405`=LF, `run_407`=LF`**. `.gitattributes` contains a single relevant rule:
+`/scripts/devnet/run_407_… text eol=lf` — covering **`run_407` only**.
+
+| Script | Committed bytes | `.gitattributes` eol=lf? | Checkout bytes (committed-config only) | Explicit normalization before `bash` | Invoked by |
+| --- | --- | --- | --- | --- | --- |
+| `run_407` | LF | **yes** | LF | — (self) | WF1 directly |
+| `run_406` | CRLF | no | CRLF | **`run_407` writes an LF temp copy** (`:136–139`) and runs that | `run_407` |
+| `run_405` | LF | no | LF | `run_406` LF-normalizes it | `run_406` |
+| `run_385` | **CRLF** | **no** | **CRLF** | **none** — WF2/WF3 run `bash scripts/devnet/run_385…sh` directly | WF2/WF3 directly |
+| `run_384` | **CRLF** | **no** | **CRLF** | **none** — `run_385:104` `bash "${RUN384}"` directly | `run_385` |
+
+So **WF1's chain is CRLF-safe by construction** (LF `run_407` + explicit LF temp copies of `run_406`/
+`run_405`). **WF2/WF3's chain is not:** a **CRLF-committed, non-`.gitattributes`-covered `run_385`** is
+invoked directly with `bash`, and it invokes a **CRLF-committed `run_384`** directly — **with no
+normalization**. **First source-supported invocation concern:** direct `bash` execution of the
+CRLF-committed `run_385` (then `run_384`). Distinguishing the required axes: **committed bytes** = CRLF;
+**checkout transformation supported by committed config** = none for `run_385`/`run_384` (only `run_407`
+has `eol=lf`); **external runner/Git config** (e.g. `core.autocrlf`) = **unverified**; **explicit script
+normalization** = none on this chain; **hypothetical normalized source** ≠ what CI runs; **actual
+execution** = **unobserved**. Therefore reaching WF2/WF3's downstream checks (including `run_385:173–177`
+and `run_384`'s manifest, and the C2 field) is **CONDITIONAL** on the CRLF `run_385`/`run_384` executing
+correctly under the runner's `bash`/Git configuration — a **premise not established by committed
+source**. (No file is normalized or patched here to manufacture a success path; reading an
+analytically LF-normalized copy would **not** establish that CI executes those bytes.) If this CRLF
+premise blocks invocation, the **downstream source observations (C2 constant `clean`, C4 `run_385`
+guard, C1 attestation ordering) are preserved but the longer WF2/WF3 trace is labelled CONDITIONAL.**
+
+## C7 — Permissions, attestation effects, external controls `[SUPERSEDED-A48 → A48.1-C7]`
+
+**Withdraw** A48's evidence-ledger implication that no `*: write` permission exists. The `attest` job
+(`public-devnet-release-signing-attestation.yml:69–74`) grants **`id-token: write`** and
+**`attestations: write`** (job-scoped). Separated:
+- **No committed GitHub Release / tag / deployment / registry-publication step** is identified (scoped
+  absence — unchanged);
+- the uploaded CI artifacts are **download-only**;
+- the **configured attestation creation/write** is a **real write effect** (`attest-build-provenance@v2`
+  under `attestations: write` + `id-token: write`);
+- then **verification** (`gh attestation verify`) and the **identity-summary upload**.
+
+The manifest's `signed_release=false` / `slsa_grade=false` fields **do not erase** the separate
+attestation write action. An **environment name** in YAML (`release-signing`) does **not** prove
+required reviewers or effective protection — recorded as an **external evidence limit** mapped to the
+existing **OBL-REL-1b / E07** boundary (neither obligation redefined).
+
+## Per-workflow status-and-effect table (incl. effects before a later failure)
+
+| Workflow | Trigger | Decisive gate(s) | Earlier-failure effect | Later-failure effect (after an already-completed effect) |
+| --- | --- | --- | --- | --- |
+| **WF1 package-integrity** | PR(paths)/dispatch | `run_407` (CRLF-safe chain) + `run_410` must `exit 0` before upload (`:84`) | a `fail` in `run_407`/`run_410` → job fails **before** upload → **no artifact** | cleanliness check (`:99–106`) failing **after** upload → **job fails but the download-only artifact is already uploaded** |
+| **WF2 release-artifact-manifest** | tag `v*`/dispatch | `run_385` build+schema (full via `:173–177`) before upload | `run_385` `fail` → job fails → no artifact | n/a (upload is the last step) — **conditional on C6 CRLF premise to run at all** |
+| **WF3 signing-attestation** | dispatch, `confirm==yes`, env `release-signing` | job `if` + env gate; then `run_385`; then attestation mint; then verify | job skipped (`confirm≠yes`) → nothing runs | verify/upload failure **after** the attestation mint (`:99–102`) → job fails, **no rollback of the minted attestation**; **conditional on C6** |
+
+## Bounded conclusion
+
+- **Retained (supported) non-zero propagation:** decisive `fail`→`exit 1`→ step `-e` → job failure
+  holds **where the script actually runs** — unconditionally for **WF1** (CRLF-safe chain), and for
+  **WF2/WF3 conditionally on the C6 CRLF-invocation premise**. A failure **before** an upload suppresses
+  that upload.
+- **Withdrawn universal claims:** A48's "no concealed/bypassed check" and "failed decisive check
+  **suppresses artifacts**" are **withdrawn as stated**. Counter-corrections: (i) the WF1 **cleanliness
+  check runs after the upload** (C1) so its failure does not suppress the artifact; (ii) the
+  **attestation mint completes before verification** (C1) with no revocation; (iii) `run_384`'s
+  **`source_tree_state` is a constant `clean`** regardless of the real tree (C2 — a concealed
+  tree-state in the manifest field); (iv) the **WF1 schema validation degrades to required-key-presence
+  structural fallback** when `jsonschema` is absent (C4).
+- **No blanket insecurity verdict** is substituted. These are **bounded, per-path** observations:
+  - **Source-established enforcement:** WF1 decisive-`fail` propagation (CRLF-safe); `run_385:173–177`
+    mandatory jsonschema; attestation verify under `set -euo pipefail` before the identity upload.
+  - **Assurance defects/candidates (bounded, not forced):** the `source_tree_state`-always-`clean`
+    manifest field (C2); the WF1 schema-validation fallback to key-presence-only without a compensating
+    validator (C4). Recorded under E07 / OBL-REL-1a; duplicate-checked as **distinct from A37.1** and
+    from the generic E07 external-evidence limits; **no ID or severity forced, no dismissal forced.**
+  - **External premises:** branch protection / required-status-checks / environment reviewers / org
+    settings / runner Git (`core.autocrlf`) config / external-action internals / the CRLF-execution
+    premise for WF2/WF3 — all **unverified by committed source**, mapped to **OBL-REL-1b / E07**.
+  - **Unexecuted runtime:** no observed CI run, tag build, attestation mint/verify, or release.
+
+Broader **OBL-REL-1a** is **not** closed (its other boundaries not independently covered here);
+**OBL-REL-1b, C5, and production readiness remain OPEN**; no expansion into supply-chain, consensus,
+storage, or RUN-422 work. **A15-F1 / A17-F1** and all identities preserved.
+
+## Stopping statement
+
+Stopping after A48.1. The named paths now have evidenced dispositions (C1–C7): step-vs-job-vs-effect
+ordering, the constant `source_tree_state`, the shell-default correction + skipped-check rows, the
+schema-validation fallback vs mandatory guard, the completed caller chain incl. `run_406`, the CRLF
+invocation premise for WF2/WF3, and the attestation write permissions. Missing external
+execution/settings/documentation evidence is **named, not re-derived**. A49 is not authorized.
+
+## A48.1 evidence ledger
+
+| Ref | Source | Fact |
+| --- | --- | --- |
+| C1a | `public-devnet-package-integrity.yml:84–97, 99–106` | upload precedes the cleanliness check → a post-upload failure doesn't suppress the artifact |
+| C1b | `public-devnet-release-signing-attestation.yml:99–102, 104–133` | attestation mint precedes verify/upload; no revocation/cleanup step |
+| C2 | `run_384:221–227, ~261` | both `if`/`else` set `TREE_STATE="clean"`; manifest `source_tree_state` constant `clean` |
+| C3 | task-supplied documented shell strings; workflows set no `shell:` | unspecified = `bash -e {0}` (no pipefail); explicit `shell: bash` = `… -eo pipefail`; child `set -euo pipefail` is the script's own |
+| C4 | `run_405:156–164,219–224`; `run_406:149–155`; `run_407:243–249`; `run_384:293–311`; `run_385:143–166,173–177` | WF1 structural key-presence fallback, no compensating validator; `run_385:173–177` mandatory jsonschema (fails closed) |
+| C5 | `run_407:68,135–139`; `run_385:26,104`; WF1 run_410 step | chain WF1→407→(LF)406→(LF)405 (+410); WF2/3→385→384; run_405 validates run_404 files, doesn't invoke run_404 shell |
+| C6 | CRLF counts (384=436, 385=245, 406=476; 405/407=0); `.gitattributes` (run_407 only); `run_385:104` | WF1 CRLF-safe; WF2/WF3 invoke CRLF run_385/run_384 directly, unnormalized → downstream trace conditional on CRLF execution |
+| C7 | `public-devnet-release-signing-attestation.yml:69–74` | attest job grants `id-token: write` + `attestations: write` (withdraws "no `*: write`") |
+
+---
+
+*End of A48.1 CI failure-propagation correction & completion layer (internal v1.135). The complete
+v1.134 input is preserved byte-for-byte below.*
+
+<!-- A48 COMMITTED CI/RELEASE FAILURE-PROPAGATION & ARTIFACT-GATING LAYER (internal v1.134) — prepended to the preserved v1.133 input below -->
+# QBIND Security Findings Register
+
+> **Layer A48 — committed CI/release failure propagation and artifact gating, under OBL-REL-1a
+> (internal v1.134).** Bounded, read-only source review; no implementation/repository change; A49 not
+> authorized. Scope **Public DevNet**.
+> **Audited code baseline (unchanged, pinned):** HEAD `18d71a549d868ed33d352e9fc70a9d060f75e03b` /
+> tree `5b6c543435ac017dd8372c93f48be397899db14a` / origin `https://github.com/olivexo28/QBIND.git`.
+> Runtime remains **UNEXECUTED**; **C5** remains **OPEN**. All 54 obligation identities, finding IDs,
+> aliases, and dispositions preserved; no global index rewrite. **No plan-file was written this pass.**
+
+## Input provenance and baseline
+
+**Input: the retained, previously delivered v1.133 master** — bytes match exactly: **5,402,702 bytes**,
+SHA-256 `6f43c12666cb77ecf4fbd8bfadb6f6ed919c6cbadefd9b6aa5d17bfee3a6b336`, six archives verified,
+A47.3 present, A48 absent, **0 CRLF (LF-only)**. Re-supplied copy confirmed byte-identical. **CRLF→LF
+recovery not exercised.** Delivery commits / newer revisions are not the audited baseline. Baseline
+re-verified before and after (HEAD/tree unchanged, clean tree); no checkout/reset/merge/fetch or
+metadata/GitHub change. Source read-only; no workflow dispatch, no downloaded-code execution.
+
+## Preserved closed work + one editorial correction
+
+A47.3's epoch-regression review stays **PASSED/CLOSED** (self-commit, restore, restart, writer,
+durability, contract, consequence not reopened). **Editorial correction:** A47.3 (its line attributing
+the corrected persistence call-site to "A15-F1") should read **pass A15**, not the finding **A15-F1** —
+**A15-F1 retains its supervision identity**; no storage re-audit is implied. **A37/A37.1** evidence-harness
+findings remain intact and are **not** evidence that the committed CI workflows behave the same way
+(this pass checks that directly).
+
+## 1 — Committed-path inventory (pinned revision)
+
+`.github/workflows/` contains **three** files; **no** composite actions (`.github/actions/` absent),
+**no** reusable/`workflow_call` workflows. Jobs invoke repository-owned `scripts/devnet/*.sh`.
+
+| Workflow | Trigger / filter | Checkout | Job(s) → key steps | Artifact step | Publication? |
+| --- | --- | --- | --- | --- | --- |
+| `public-devnet-package-integrity.yml` | `workflow_dispatch`; `pull_request` (paths: `docs/release/public-devnet/**`, the run_404/405/406/407/410 scripts, the workflow) | `actions/checkout@v4` (`persist-credentials:false`) | `full-tree-package-integrity`: run `run_407…sh` (reuses run_406/run_405) → run `run_410…sh` → `upload-artifact` → confirm-clean | `actions/upload-artifact@v4` **download-only** (`if-no-files-found:error`, retention 14d) | **No** (download-only CI artifact) |
+| `public-devnet-release-artifact-manifest.yml` | `workflow_dispatch`; `push` tags `v*` | `checkout@v4` (`fetch-depth:0`, `persist-credentials:false`) | `release-artifact-manifest`: install Rust → run `run_385…sh` (reuses run_384; builds real binary, generates+validates `RELEASE_ARTIFACT_MANIFEST.json`) → `upload-artifact` | `upload-artifact@v4` **download-only** (`if-no-files-found:error`, 14d) | **No** — "does NOT create a release/tag/deployment"; `signed_release=false`, `slsa_grade=false` |
+| `public-devnet-release-signing-attestation.yml` | `workflow_dispatch` only, input `confirm` default `no` | `checkout@v4` (`fetch-depth:0`) | `attest` **job-gated `if: confirm=='yes'`**, `environment: release-signing` (operator-configured reviewers), job perms `id-token:write`+`attestations:write`: run `run_385…sh` → `actions/attest-build-provenance@v2` (subject `target/release/qbind-node`) → `gh attestation verify` (`set -euo pipefail`) → `upload-artifact` | `upload-artifact@v4` **download-only** (`if-no-files-found:error`, 14d) | **No** — "creates NO release, tag, or deployment"; mints a keyless attestation + download-only identity summary |
+
+Top-level `permissions: contents: read` on all three (job-level elevation only on `attest`).
+**No** `continue-on-error`, `always()`, `strategy`/`matrix`, `workflow_call`, `git push`, `gh release`,
+`cargo publish`, registry push, deploy, or `contents/packages: write` anywhere. Categories present:
+**validation + diagnostic/manifest artifact upload**. Categories **absent in committed source (scoped
+absence, not a claim about external processes): binary *release publication*, tagged GitHub Release,
+deployment.**
+
+## 2 — Command → publication failure-propagation
+
+GitHub Actions `run:` steps use the default `bash --noprofile --norc -eo pipefail {0}` (so a non-zero
+command fails the step). The invoked scripts independently enforce `set -euo pipefail` with a
+`fail() { printf …>&2; exit 1; }` helper, and decisive checks call `fail`.
+
+| Stage | Mechanism | On failure |
+| --- | --- | --- |
+| decisive check inside script (schema-validate, SHA-256/size match, file present, dirty-tree, `gh attestation verify`) | `run_405/407/410/385/384`: `set -euo pipefail` (`:45/58/—/22/—`); `fail(){ … exit 1; }` (`run405:62`, `run407:99`, `run385:38`); e.g. `python3 … || fail "…validation failed"` (run405:101) | script **exits non-zero** |
+| command → step | GHA default `bash -eo pipefail` | **step fails** |
+| step → job | no `continue-on-error` on any decisive step | **job fails** |
+| job → artifact | `upload-artifact` steps have **no `if:`** (not `always()`) | **upload skipped** when an upstream step failed; `if-no-files-found: error` additionally fails the upload if expected files are absent |
+| non-decisive `\|\| true` | only on best-effort `pip install jsonschema` / `rustup component add`, and on grep-no-match / cleanup `kill`/`rm` / a diagnostic `diff` immediately **followed by** an unconditional `fail` | does **not** fabricate success of a decisive check |
+| `RESULT=POSITIVE` emit | the **final** line of each script, reached only after every `fail` guard passed | **not** an unconditional PASS |
+
+**This is the A37/A37.1 distinction, checked directly:** the A37.1 masking pattern (decisive node
+commands wrapped `… || true; rc=$?` + an **unconditional** `verdict: PASS`) belongs to the **separate**
+`run_216/227` governance-execution **evidence harnesses**; the committed CI scripts here
+(`run_405/407/410/385/384`) use `set -euo pipefail` + `fail(){exit 1}` on their decisive checks and
+emit `RESULT=POSITIVE` only after those pass. **The masking does not recur on the committed CI paths.**
+
+## 3 — Finite traces (event/ref assumptions → first decisive condition → status → effect)
+
+| Trace | Assumptions | First decisive condition | Status | Effect |
+| --- | --- | --- | --- | --- |
+| **Successful validation/build** | PR touching a filtered path (WF1) / tag `v*` (WF2) | all `fail` guards pass; `RESULT=POSITIVE` emitted | step 0 → job success | download-only artifact uploaded (diagnostics / manifest JSON) |
+| **Failing relevant check** | same events | a decisive `fail` fires (e.g. SHA/size/schema mismatch, dirty tree, `gh attestation verify` non-zero) | script `exit 1` → step fails → **job fails** | **no artifact uploaded** (upload step skipped); failure surfaced as a failed check |
+| **Skipped / non-applicable check** | push/merge to a branch **not** matching WF1's `pull_request` paths, or tag-less push for WF2, or WF3 with `confirm≠yes` | WF1/WF2 simply **do not trigger**; WF3 `attest` job **skipped** by `if: confirm=='yes'` | **not run / skipped** | no artifact; **no success is reported for a check that did not run** (a skipped job is not a passed job) |
+| **Artifact step after upstream failure/skip** | any of the above with an earlier failed/skipped decisive step | `upload-artifact` has no `always()` | **skipped** | no download-only artifact produced |
+
+No **publication** trace is given because **no committed workflow publishes a release** (scoped
+absence); the matrix is not invented to fill that row.
+
+## 4 — Applicable expectation and disposition (OBL-REL-1a sub-boundary)
+
+Separating the five levels for the inspected checks:
+- **a check exists / b runs on this event-ref / c its failure affects the workflow / d publication
+  depends on its success / e repository protection requires it:**
+  - WF1 run_407/run_410, WF2 run_385, WF3 attestation: **(a) exist, (b) run on their stated
+    events, (c) their failure fails the job** — **source-established** from the YAML + script bodies.
+  - **(d) publication depends on success:** **not applicable** — there is **no release-publication
+    step** in committed source; success gates only a **download-only CI artifact** (WF3 additionally
+    writes `ATTESTATION_IDENTITY.txt` only after `gh attestation verify` succeeds under `set -e`).
+  - **(e) repository protection requires the check:** **NOT established by committed YAML** — branch
+    protection, required-status-checks, the `release-signing` environment's required reviewers, org
+    settings, and deployed configuration are **external** and unexamined here.
+
+**Classification:**
+- **Source-established enforcement:** on the committed workflow→script chain, a failed decisive
+  validation/manifest/attestation check **propagates** to a failed job and **suppresses** the
+  download-only artifact; it **cannot be concealed or bypassed** by `|| true`, saved-status masking,
+  `continue-on-error`, `always()`, or an unconditional PASS, **none of which are present on decisive
+  steps**.
+- **Intentional optional/diagnostic behavior:** the `|| true` on `pip install jsonschema` /
+  `rustup component add` (best-effort deps) and on grep-no-match / cleanup / pre-`fail` diagnostics; the
+  uploaded artifacts are **diagnostic/manifest**, explicitly labelled **not a signed attestation, not
+  binary provenance, not launch evidence** (manifest pins `signed_release=false`/`slsa_grade=false`);
+  WF3 disabled-by-default (`confirm` gate + protected environment). Uploading diagnostics is **not** a
+  release-gating defect, and these optional installs are **not** a mandatory-check bypass.
+- **Supported failure-propagation or assurance defect:** **none** found in the committed
+  workflow→script chain for the inspected paths (distinct from A37.1's harness observation, which does
+  **not** extend here).
+- **Unresolved external-action/platform premise:** `actions/checkout@v4`, `actions/upload-artifact@v4`
+  (`if-no-files-found:error` semantics), `actions/attest-build-provenance@v2`, and `gh attestation
+  verify` are delegated external behavior (not recursively audited); the attestation mint/verify
+  correctness rests on those + GitHub OIDC/Sigstore (platform premise).
+- **External execution/protection evidence unavailable/unexamined:** no observed CI run or release;
+  branch protection / required checks / environment reviewers / org settings / deployed config are
+  **not** in committed YAML — recorded as **external-evidence limits under the existing release-evidence
+  obligations (E07 / OBL-REL-1a)**.
+
+**Disposition — this OBL-REL-1a sub-boundary (committed-workflow failure propagation + artifact
+gating):** **source-established** for the three committed workflows — decisive checks propagate
+fail-closed to a failed job and suppress the download-only artifact; **no release/tag/deployment
+publication path exists in committed source** (scoped absence); whether these checks are *mandatory*
+(branch protection / required checks / environment reviewers) is an **external** question not settled
+by YAML. **No finding is forced and no "no finding" is forced**: for the inspected committed paths the
+propagation is sound (no supported bypass defect), while the *mandatory-enforcement* and *release
+publication* questions are **external-evidence-limited**, recorded under E07 / OBL-REL-1a rather than
+dismissed. Duplicate-checked: **distinct from A37.1** (separate run_216/227 harnesses) and consistent
+with existing **E07** release-evidence limits; no new ID minted or forced.
+
+## 5 — Residuals (separated)
+
+- **Unread source:** the exact internals of `run_404`/`run_406` (reused transitively by run_405/407)
+  beyond the decisive `fail`/`set -euo pipefail` confirmation; non-release workflows or scripts outside
+  `.github/workflows` + the invoked `scripts/devnet/*` chain (not required for this sub-boundary).
+- **External settings / action behavior:** branch protection & required-status-checks; the
+  `release-signing` environment and its required reviewers; org/repo settings; the internal behavior of
+  `checkout`/`upload-artifact`/`attest-build-provenance`/`gh attestation verify`.
+- **Unexecuted runtime evidence:** no CI run, no tag build, no attestation mint/verify, no release
+  observed (**UNEXECUTED**).
+
+Only this OBL-REL-1a sub-boundary is addressed; **broader OBL-REL-1a is not declared complete** (its
+other boundaries are not independently covered here). **OBL-REL-1b, C5, and production readiness remain
+OPEN**; no broadening into cryptographic correctness, consensus safety, storage recovery,
+dependency-wide supply-chain, or RUN-422 provenance.
+
+## Stopping statement
+
+Stopping after A48. The three committed workflows and their invoked scripts are traced to their status
+and artifact effects: decisive-check failures propagate fail-closed and suppress the download-only
+artifacts; no committed release-publication path exists; mandatory-enforcement and platform-action
+behavior are external-evidence-limited and named, not re-derived. A49 is not authorized by this prompt.
+
+## A48 evidence ledger
+
+| Ref | Source | Fact |
+| --- | --- | --- |
+| W1 | `.github/workflows/public-devnet-package-integrity.yml:38–106` | PR(paths)+dispatch; contents:read; run_407→run_410→download-only upload (`if-no-files-found:error`)→confirm-clean |
+| W2 | `…release-artifact-manifest.yml:28–84` | dispatch + tag `v*`; run_385 build+manifest-validate → download-only upload; "does NOT create a release" |
+| W3 | `…release-signing-attestation.yml:38–133` | dispatch-only, `if: confirm=='yes'`, protected `release-signing` env; attest-build-provenance + `gh attestation verify` (`set -euo pipefail`) before identity upload |
+| P1 | `run_405:45,62,101`; `run_407:58,99`; `run_385:22,38` | `set -euo pipefail` + `fail(){…exit 1;}`; decisive checks call `fail`; `RESULT=POSITIVE` only after guards pass |
+| P2 | grep of `.github/workflows` | no `continue-on-error`/`always()`/matrix/`workflow_call`/`gh release`/`cargo publish`/push/deploy/`*: write` |
+| P3 | `run_405/407/410/385/384` `\|\| true` sites | only on best-effort dep install, grep-no-match, cleanup, and a pre-`fail` diagnostic diff — not on decisive checks |
+
+---
+
+*End of A48 committed CI/release failure-propagation & artifact-gating layer (internal v1.134). The
+complete v1.133 input is preserved byte-for-byte below.*
+
+<!-- A47.3 BOUNDED CORRECTION OF A47.2 (DURABILITY / RESTORE-ORDERING / RESTART-GUARDS) LAYER (internal v1.133) — prepended to the preserved v1.132 input below -->
+# QBIND Security Findings Register
+
+> **Layer A47.3 — bounded correction of A47.2: Run-B durability attribution, restore chronology, and
+> omitted restart prerequisites (internal v1.133).** Read-only audit-report amendment; no
+> implementation/repository change; A48 not started; investigation not broadened. Scope **Public
+> DevNet**.
+> **Audited code baseline (unchanged, pinned):** HEAD `18d71a549d868ed33d352e9fc70a9d060f75e03b` /
+> tree `5b6c543435ac017dd8372c93f48be397899db14a` / origin `https://github.com/olivexo28/QBIND.git`.
+> Runtime remains **UNEXECUTED**; **C5** remains **OPEN**. All 54 obligation identities, finding IDs,
+> aliases, and dispositions preserved; no global index rewrite. **No plan-file was written this pass.**
+> Superseded A47.2 statements are marked `[SUPERSEDED-A47.2 → A47.3-Cn]`.
+
+## Input provenance and baseline
+
+**Input: the retained, previously delivered v1.132 master** — bytes match exactly: **5,391,701 bytes**,
+SHA-256 `c16c4de135d0621c1de563ee7ea751997b264b2b91c0eade30d8bd0fee455b07`, six archives verified,
+A47.2 present, A47.3 absent, **0 CRLF (LF-only)**. Re-supplied copy confirmed byte-identical. **CRLF→LF
+recovery not exercised.** A GitHub delivery commit is not a replacement code baseline. Baseline
+re-verified before and after (HEAD/tree unchanged, clean tree); no checkout/reset/merge/fetch or
+metadata/GitHub change. Source read-only.
+
+## C1 — Corrected Run-B durability attribution `[SUPERSEDED-A47.2 → A47.3-C1]`
+
+A47.2 called Run B's overwrite a "**durable overwrite**." **Superseded.** Keep separate:
+- **Run A** (restore) uses `persist_restored_snapshot_epoch_durable`, which **requests synchronous
+  persistence** (`PersistSynced`→`put_current_epoch_synced`, `sync=true`) **or a durability barrier**
+  (`Barrier`→`flush_epoch_durable`) — durable (A47.2-C2, unchanged).
+- **Run B** (ordinary epoch transition) uses `apply_epoch_transition_atomic` → `db.write(write_batch)`
+  with the previously verified **default `sync=false`** (A46.x).
+- Successful Run-B persistence establishes an **atomic stored-value replacement through that API**; it
+  does **not** establish that the replacement crossed a **synchronous durability barrier** before
+  return.
+
+**Corrected statement:** *Under the stated prerequisites and successful I/O, Run B **atomically
+replaces** stored `meta:current_epoch = n>1` with `1`. This write does **not** request a synchronous
+durability barrier; **power-loss durability of the replacement is unestablished**.* (No inference that
+no other synchronization could occur; RocksDB defaults, native recovery, filesystem behavior, and
+runtime measurements are not reopened.)
+
+## C2 — Corrected restore chronology and Run-096 citation `[SUPERSEDED-A47.2 → A47.3-C2]`
+
+A47.2's A3/A4 presented epoch persistence after/with COMPLETE. **Corrected sequence** (success premises
+stated; no execution claimed):
+
+1. restore **validation / authorization-compatibility / destination eligibility**;
+2. **INTENT** publication (`main.rs:2791–2814`);
+3. **state materialization and synchronization**;
+4. **synchronous epoch persistence / barrier** (`persist_restored_snapshot_epoch_durable`,
+   `main.rs:5204–5234`);
+5. **COMPLETE** publication/finalization (`finalize_complete_from_intent`, `main.rs:5247–5255`), which
+   validates against the published INTENT and **suppresses COMPLETE on a wrong-epoch/state/destination/
+   nonce/digest mismatch**;
+6. required **existing account-database** validation before node dispatch (`main.rs:5357–5374`).
+
+So **epoch persistence (step 4, `:5204–5234`) precedes COMPLETE finalization (step 5, `:5247–5255`)** —
+COMPLETE is **not** presented as preceding successful epoch persistence. On a persistence failure, the
+node fails closed before COMPLETE; on a COMPLETE-validation mismatch, COMPLETE is suppressed.
+
+**Run-096 arm citation corrected:** the executable guard is the setter
+`set_pending_reconfig_next_epoch` at **`basic_hotstuff_engine.rs:2286–2301`** —
+`target_epoch == 0 → TargetEpochZero`; `target_epoch <= self.current_epoch → NonMonotonicTarget`; else
+arms the intent — **not** the error-`Display` region at `:1790–1816` (which A47.1/A47.2 cited). The
+guard compares against the **engine `current_epoch` (0 at Run-B arm)**, not the stored DB epoch.
+
+## C3 — Restart guards in the witness `[SUPERSEDED-A47.2 → A47.3-C3]`
+
+A47.2's "No Run-B guard rejects…" is **replaced** by an explicit account of the **permitting** branches.
+Run B (without `--restore-from-snapshot`) traverses:
+- `evaluate_ordinary_startup` (`main.rs:5039–5099`);
+- COMPLETE-record validation (`restore_completion.rs:988–1022`): a valid COMPLETE record must **match
+  the canonical destination** and have the **required restored state present**;
+- `require_existing_vm_v0 = admitted_via_complete || restore_outcome.is_some()` →
+  `VmV0RuntimeState::open_existing_from_config(&config)` (`main.rs:5357–5374`);
+- the account database must **open existing-only**, regardless of execution profile
+  (`vm_v0_runtime.rs:117–139, 292–305`).
+
+These guards **permit** the proposed sequence **when the completed restore and database remain valid**;
+they **do not reconcile** the fresh consensus-engine epoch (0) with the stored `n`. So the witness
+proceeds not because guards are absent, but because the guards that exist validate restore/destination/
+database integrity and are silent on the engine-epoch-vs-stored-epoch relationship.
+
+**Corrected, jointly-consistent witness premises (explicit):**
+- Run A restores an **admitted** snapshot with metadata epoch `n>1` into an **eligible destination with
+  no committed epoch**;
+- snapshot validation, applicable authority checks, materialization, synchronization, synchronous epoch
+  persistence, COMPLETE publication, and existing-database opening **succeed**;
+- Run A **does not arm a reconfiguration** that changes the stored epoch before the stated shutdown
+  (so the stored epoch remains `n` at shutdown);
+- Run B uses the **same unchanged destination** and **valid restored account database**, **omits** the
+  restore request, and uses the established single-validator LocalMesh target-1 configuration;
+- Run B's epoch-transition write **succeeds**.
+
+An admitted snapshot epoch is **accepted metadata**, not proof that consensus reached `n`. No arbitrary
+DB editing, corruption, test setter, or remote actor is introduced. RUN-422 internals and OBL-STO-2b
+work are not reopened.
+
+## Preserved as PASSED/CLOSED (source level)
+
+- The single-validator `0→1` self-commit trace (**A14.1-C3**, with **A15**'s corrected **no-inbound**
+  persistence call-site) — **not** reset to "untraced"; outbound signing/journal gates are **not**
+  transferred to internal self-voting.
+- Engine/cursor initialization and the writer's cursor-not-DB comparison (`binary_consensus_loop.rs:
+  8729–8731`).
+- The durable restore writer's `PersistSynced` vs `Barrier` behavior (A47.2-C2).
+- The finite stored-value regression under the corrected, explicit prerequisites above.
+
+## Disposition (bounded, corrected)
+
+The Run-A→shutdown→Run-B sequence remains a **finite source-established trace**, with these strictly
+separated facts:
+- **Source-established effect:** Run B **atomically replaces** stored `meta:current_epoch` from `n>1`
+  to `1` (a stored-value **regression**) through `apply_epoch_transition_atomic`; **power-loss
+  durability of that replacement is unestablished** (C1).
+- **Applicable contract:** **none identified** by this bounded review; the absence of a DB-value
+  comparison in the Run-B writer is a **neutral established implementation fact**, not a proven
+  contract violation.
+- **Capability:** **local operator** (supplies/requests the restore snapshot whose metadata declares
+  `n>1`; configures the single-validator LocalMesh target-1 node; reuses the same destination). No
+  external/network vector.
+- **Harmful downstream consequence:** **unestablished** — no automatic re-advancement, no harmful
+  trust-activation effect, no consensus failure, no remote exploit inferred; a present-but-lower epoch
+  differs from an unavailable epoch; the known consumer inventory (startup trust activation; periodic
+  snapshot metadata; SIGUSR1 snapshot metadata; restore epoch compatibility) is preserved without a
+  consumer audit.
+- **Runtime:** **UNEXECUTED**.
+- **Multi-validator catch-up:** a **separate** residual (A47.1-C3), not required here and not reopened.
+- **C5:** **OPEN**.
+
+**No new finding, severity, closure, or dismissal is required.** Duplicate-checked and **distinct from
+A15-F1** (supervision; it supplied C1's corrected call-site, not a storage-regression finding) and
+**A17-F1** (catch-up authentication) — identities unchanged. No material source contradiction prevents
+the bounded conclusion. Only this OBL-STO-2a write-back sub-boundary is updated; **broader OBL-STO-2a is
+not completed** by this amendment.
+
+## Stopping statement
+
+Stopping after A47.3. The corrections (C1 durability attribution, C2 chronology + Run-096 citation, C3
+permitting restart guards) are applied and the regression trace is restated with explicit prerequisites
+and separated effect/contract/capability/consequence/runtime lines. This same regression is **not**
+re-scheduled for another review merely because its contract, severity, downstream consequences, or
+runtime evidence remain unresolved. A48 not started.
+
+## A47.3 evidence ledger
+
+| Ref | Source | Fact |
+| --- | --- | --- |
+| C1 | `storage.rs` `apply_epoch_transition_atomic`→`db.write` (A46.x, `sync=false`) vs `put_current_epoch_synced`/`flush_epoch_durable` (A47.2-C2) | Run B atomic replacement, not a synchronous durability barrier; Run A durable |
+| C2a | `main.rs:2791–2814, 5204–5234, 5247–5255, 5357–5374` | order: INTENT → materialize/sync → epoch persist (5204–5234) → COMPLETE (5247–5255) → existing-db open (5357–5374) |
+| C2b | `basic_hotstuff_engine.rs:2286–2301` | executable Run-096 setter guard (`target<=current_epoch → NonMonotonicTarget`), compares engine epoch not DB epoch |
+| C3a | `main.rs:5039–5099`; `restore_completion.rs:988–1022` | ordinary-startup eval + COMPLETE record must match canonical destination with restored state present |
+| C3b | `main.rs:5357–5374`; `vm_v0_runtime.rs:117–139, 292–305` | `require_existing_vm_v0` → `open_existing_from_config` existing-only; guards permit but do not reconcile engine epoch vs stored `n` |
+| P1 | A14.1-C3 / A15; `binary_consensus_loop.rs:8729–8731` | single-validator `0→1` self-commit + no-inbound persistence + cursor-not-DB writer comparison — PASSED/CLOSED |
+
+---
+
+*End of A47.3 bounded correction of A47.2 (durability / restore-ordering / restart-guards) layer
+(internal v1.133). The complete v1.132 input is preserved byte-for-byte below.*
+
+<!-- A47.2 RESTORE-TO-RESTART EPOCH TRACE RECONCILIATION LAYER (internal v1.132) — prepended to the preserved v1.131 input below -->
+# QBIND Security Findings Register
+
+> **Layer A47.2 — reconcile established evidence and finish the bounded restore-to-restart epoch trace,
+> under OBL-STO-2a (internal v1.132).** Audit/reporting only; no implementation/repository change; A48
+> not started. Scope **Public DevNet**.
+> **Audited code baseline (unchanged, pinned):** HEAD `18d71a549d868ed33d352e9fc70a9d060f75e03b` /
+> tree `5b6c543435ac017dd8372c93f48be397899db14a` / origin `https://github.com/olivexo28/QBIND.git`.
+> Runtime remains **UNEXECUTED**; **C5** remains **OPEN**. All 54 obligation identities, finding IDs,
+> aliases, and dispositions preserved; no global index rewrite. **No plan-file was written this pass.**
+> Superseded A47.1 statements are marked `[SUPERSEDED-A47.1 → A47.2-Cn]`.
+
+## Input provenance and baseline
+
+**Input: the retained, previously delivered v1.131 master** — bytes match exactly: **5,379,055 bytes**,
+SHA-256 `f4a3cd395b39d4e4b19cc995e920e9c0c2811f37f4739ce7b40fcb390e9a0664`, six archives verified,
+A47.1 present, A47.2 absent, **0 CRLF**. Re-supplied copy confirmed byte-identical. **CRLF→LF recovery
+not exercised.** Delivery commits are delivery locations only. Baseline re-verified before and after
+(HEAD/tree unchanged, clean tree); no checkout/metadata change. Source read-only. **A15-F1, A17-F1**
+identities preserved; OBL-STO-2b/RUN-422 internals and general snapshot audit not reopened. The
+already-closed loader/Step-5/writer-batch-cursor/dependency-default/ingress/decoder reviews are
+referenced, not repeated.
+
+## C1 — Restore the already-established single-validator `0→1` trace `[SUPERSEDED-A47.1 → A47.2-C1]`
+
+A47.1 labeled the single-validator reconfiguration `0→1` path "untraced." **Withdrawn.** This path is
+**already SOURCE-ESTABLISHED** by **A14.1-C3** (with **A15** correcting the LocalMesh persistence
+call-site to the **no-inbound** branch); A47.1 reset it to "unresolved" only because it was omitted,
+not on contrary evidence. Carried forward as **SOURCE-ESTABLISHED / PASSED-CLOSED** under its stated
+premises (DevNet, LocalMesh, local validator 0, one validator, storage configured, target epoch 1, no
+restore on this invocation):
+
+1. startup arms the one-shot reconfig intent;
+2. `do_leader_tick` → `engine.try_propose()` (`binary_consensus_loop.rs:3683`);
+3. the leader constructor records its **internal self-vote** (`basic_hotstuff_engine.rs:4154`); a formed
+   QC advances the view (`:4183–4194`);
+4. successive certified parent-linked proposals satisfy the 3-chain commit predicate
+   (`hotstuff_state_engine.rs:1782–1937`);
+5. the locally observed reconfig header is cached (`binary_consensus_loop.rs:3701`);
+6. the detector applies `0→1`; the **no-inbound** loop calls persistence (`:3476–3499`);
+7. a successful storage return writes epoch 1 and advances the persistence cursor.
+
+Internal bookkeeping (the engine's self-vote / QC formation) is **separate from signed/network-emitted
+votes**; outbound authorization/journal gates are **not** transferred to these internal effects. The
+`run_096_single_validator_reconfig_commits_and_persists` test **corroborates** the trace (inspected,
+**not executed**). This establishes **one** transition (`0→1`) — **not** repeated transitions to `n>1`
+and **not** automatic recovery to a prior epoch.
+
+## C2 — Corrected restore writer `[SUPERSEDED-A47.1 → A47.2-C2]`
+
+A47.1 referenced the older asynchronous `put_current_epoch`. The binary actually calls
+`persist_restored_snapshot_epoch_durable` → `apply_durable_epoch_effect`
+(`main.rs:5204–5206`; `production_consensus_storage.rs:716–779, 817+`):
+
+| Compatibility decision (vs live `get_current_epoch`) | Durable effect | Result |
+| --- | --- | --- |
+| no stored epoch (`PersistAfterMaterialization{n}`) | `PersistSynced(n)` → `put_current_epoch_synced(n)` (**sync=true**) | `Ok(true)` — `n` on stable storage |
+| stored epoch `== n` (`AlreadyConsistent{n}`) | `Barrier(n)` → `flush_epoch_durable()` (**durability barrier, not an effect-free no-op**) | `Ok(false)` |
+| stored epoch `m ≠ n` | — | `RestoreEpochInconsistent` (fail-closed) |
+| read / write / barrier error | — | `EpochProbeFailed` / `RestoreEpochWriteFailed` (fail-closed) |
+
+So the restore epoch write is **durable (`sync=true`)**, distinct from the Run-094 epoch-transition
+writer (`sync=false`, A46.x — unchanged). Previously verified dependency/durability qualifications
+retained; no repeat dependency investigation.
+
+## Run-A → shutdown → Run-B chronological trace
+
+**Concrete `n`:** any snapshot-declared epoch `n > 1` whose admission conditions below hold (chosen
+after confirming admission, not an arbitrary DB value or test setter).
+
+| Step | Action | Guard / condition | Source | Effect |
+| --- | --- | --- | --- | --- |
+| A1 | Operator starts Run A with `--restore-from-snapshot <path>` | restore is operator-requested; refused on disallowed configs | `main.rs:2432, 2582` | restore pipeline entered |
+| A2 | Snapshot epoch metadata reaches the admitted restore outcome as `restore_outcome.meta.epoch = n` | epoch is **accepted from `StateSnapshotMeta`** (not proven consensus-reached) | `main.rs:5204–5205` | `snapshot_epoch = Some(n)` |
+| A3 | Restore INTENT published, state materialized, durable COMPLETE published; epoch persisted | INTENT→COMPLETE durable publication; fail-closed on publication/persist error | `main.rs:2791–2814` (INTENT), `:5204–5206` (Run-097 persist/COMPLETE) | — |
+| A4 | `persist_restored_snapshot_epoch_durable` on a DB with **no committed epoch** | `evaluate_restore_epoch_compatibility`: `None` → `PersistAfterMaterialization{n}` (a stored `m≠n` would **fail closed** here) | `production_consensus_storage.rs:535–574, 716–779` | `put_current_epoch_synced(n)` → **DB `meta:current_epoch = n`** |
+| — | **Ordinary shutdown** of Run A | — | — | DB retains `n` |
+| B1 | Operator starts Run B **without** `--restore-from-snapshot`, **same data-dir** (DB=`n`), single-validator LocalMesh (no static peers → `num_validators = 1`), target epoch 1 | fresh **engine** (epoch 0) — *not* a fresh **database** | `main.rs:5501–5503`; `binary_consensus_loop.rs:2812–2814` | engine 0, cursor 0, DB `n` |
+| B2 | Production open sequence over DB=`n` | Step 5 `verify_epoch_consistency_on_startup` reads `get_current_epoch` → valid 12-byte checksummed `n` (no marker) → OK; Step 6 probe → `CommittedEpoch(n)` → **accepted** | `production_consensus_storage.rs:415–445`; `storage.rs:1230–1247` | startup proceeds (no refusal) |
+| B3 | Arm Run-096 intent `target = 1` | `set_pending_reconfig_next_epoch`: `target(1) > engine current_epoch(0)` → armed; the guard compares against the **engine epoch (0), not the DB epoch `n`** | `basic_hotstuff_engine.rs:1790–1816` | intent armed |
+| B4 | Established `0→1` self-commit (C1) | internal self-vote/QC/3-chain commit; no-inbound persistence call | C1 citations | engine `0→1`; cached reconfig header |
+| B5 | `maybe_persist_engine_epoch_transition` | `current(1) > cursor(0)` → fires; writer compares the **in-memory cursor (0), never the DB value `n`** | `binary_consensus_loop.rs:8729–8731, 3476–3499` | `apply_epoch_transition_atomic(1)` → **DB `meta:current_epoch` overwritten `n → 1`**, cursor=1 |
+
+**No Run-B guard rejects, replaces, or prevents reaching B4/B5:** the open sequence accepts a valid
+`n`; the arm guard checks the engine epoch (0), not `n`; the writer compares the cursor (0), not `n`.
+
+## Disposition — verdict: **ESTABLISHED**
+
+All necessary source prerequisites **compose** at the pinned revision; the Run-A→Run-B sequence is a
+**finite source-established trace**.
+
+- **Source-established effect (furthest):** a **durable overwrite of the stored
+  `meta:current_epoch` from `n` (>1) down to `1`** — a stored-value **regression**. Run A's write is
+  `sync=true` (C2); Run B's overwrite is the Run-094 `sync=false` atomic batch (A46.x). The stored
+  value is *replaced*, not merely made unavailable.
+- **Applicable contract:** **none identified.** No durability/monotonicity contract for
+  `meta:current_epoch` is established at this revision; the **absence of a DB-value comparison in the
+  writer** (`binary_consensus_loop.rs:8729–8731`) is recorded **neutrally as an established
+  implementation fact**, not a proven contract violation.
+- **Actor capability / trust assumptions:** a **local operator** who (i) supplies and requests restore
+  of a snapshot whose metadata declares epoch `n>1` into a fresh-DB Run A, and (ii) configures a
+  single-validator LocalMesh node with a target-1 reconfig intent and the **same data-dir** for Run B.
+  The epoch `n` is **accepted from snapshot metadata — not proof that consensus reached `n`** (snapshot
+  admission not re-audited). **No external/network vector** is involved.
+- **Unresolved further consequences:** effects **beyond the stored-value regression** are **not**
+  established and **not** inferred — no automatic re-advancement, no harmful trust-activation effect,
+  no consensus failure, no remote exploit. A **present but lower** epoch differs from an **unavailable**
+  epoch; whether any of the known consumers (startup trust activation; periodic snapshot metadata;
+  SIGUSR1 snapshot metadata; restore epoch compatibility) acts harmfully on a regressed value is
+  **unresolved** (consumer inventory preserved; no consumer audit started).
+- **Unexecuted runtime evidence:** all of the above is static source; **no** build/test/node run.
+  Absence of runtime evidence does **not** make this completed static trace "source-unresolved."
+
+**No finding, severity, or dismissal is forced.** A demonstrated contract violation could support a
+bounded finding without a consensus-failure demonstration, but no applicable contract is identified, so
+this is recorded as a **SOURCE-ESTABLISHED stored-epoch-regression trace** on the OBL-STO-2a write-back
+sub-boundary, with the furthest effect, actor capability, and unresolved consequences stated.
+Duplicate-checked and **distinct from A15-F1** (supervision — which *corrected* the LocalMesh
+persistence call-site used by C1 but is not a storage-regression finding) and **A17-F1** (catch-up
+authentication). The **multi-validator catch-up** advance question remains **separate and
+UNRESOLVED** (A47.1-C3) and is **not** required to settle this single-validator sequence; the local
+one-shot argument is **not** turned into a global impossibility claim. Only this OBL-STO-2a
+sub-boundary is updated; broader storage coverage remains separate.
+
+## Stopping statement
+
+Stopping after A47.2. The Run-A→Run-B connection has **one supported disposition: ESTABLISHED** (finite
+source-established stored-value regression `n→1`, local-operator capability, consequences beyond the
+regression unresolved, runtime unexecuted). No regression was manufactured via crash, corruption,
+rollback, direct DB editing, or test setters; no re-investigation of the already-established self-commit,
+loader, cursor, batch, dependency defaults, ingress, or decoder behavior; no expansion into the
+multi-validator catch-up route, native RocksDB recovery, deployment behavior, or runtime testing. A48
+not started.
+
+## A47.2 evidence ledger
+
+| Ref | Source | Fact |
+| --- | --- | --- |
+| C1 | `binary_consensus_loop.rs:3683, 3701, 3476–3499`; `basic_hotstuff_engine.rs:4154, 4183–4194`; `hotstuff_state_engine.rs:1782–1937` (A14.1-C3 / A15) | single-validator `0→1` self-commit + no-inbound persistence SOURCE-ESTABLISHED |
+| C2 | `main.rs:5204–5206`; `production_consensus_storage.rs:716–779, 817+` | restore writer = `persist_restored_snapshot_epoch_durable`→`apply_durable_epoch_effect` (`PersistSynced` sync=true / `Barrier` flush / `RestoreEpochInconsistent`) |
+| A | `main.rs:2432, 2582, 2791–2814, 5204–5206`; `production_consensus_storage.rs:535–574` | Run A: operator `--restore-from-snapshot`; `meta.epoch=n`; INTENT→COMPLETE; fresh-DB `None`→persist `n` durably; `m≠n`→fail-closed |
+| B | `main.rs:5501–5503`; `binary_consensus_loop.rs:2812–2814`; `storage.rs:1230–1247`; `basic_hotstuff_engine.rs:1790–1816`; `binary_consensus_loop.rs:8729–8731` | Run B: single-validator default; fresh engine 0 / cursor 0 / DB `n`; open accepts `n`; arm checks engine-0 not `n`; writer compares cursor-0 not `n` → overwrite `n→1` |
+
+---
+
+*End of A47.2 restore-to-restart epoch trace reconciliation layer (internal v1.132). The complete
+v1.131 input is preserved byte-for-byte below.*
+
+<!-- A47.1 EPOCH WRITE-BACK REACHABILITY CORRECTION LAYER (internal v1.131) — prepended to the preserved v1.130 input below -->
+# QBIND Security Findings Register
+
+> **Layer A47.1 — correction and completion of A47's epoch write-back reachability analysis
+> (internal v1.131).** Audit/reporting only; no implementation/repository change; A48 not started.
+> Scope **Public DevNet**.
+> **Audited code baseline (unchanged, pinned):** HEAD `18d71a549d868ed33d352e9fc70a9d060f75e03b` /
+> tree `5b6c543435ac017dd8372c93f48be397899db14a` / origin `https://github.com/olivexo28/QBIND.git`.
+> Runtime remains **UNEXECUTED**; **C5** remains **OPEN**. All 54 obligation identities, finding IDs,
+> aliases, and dispositions preserved; no global index rewrite. **No plan-file was written this pass.**
+> Superseded A47 statements are marked `[SUPERSEDED-A47 → A47.1-Cn]`.
+
+## Input provenance and baseline
+
+**Input: the retained, previously delivered v1.130 master** — bytes match exactly: **5,365,453 bytes**,
+SHA-256 `56b279167bbad01267eb3af1b099a20ac229464a5b019fde0d142722fc0bd5fb`, six archives verified,
+A47 present, A47.1 absent, **0 CRLF**. Re-supplied copy confirmed byte-identical. **CRLF→LF recovery
+not exercised.** Delivery commits are not audited revisions. Baseline re-verified before and after
+(HEAD/tree unchanged, clean tree); no checkout/metadata/GitHub change. Source read-only. A46.2 stays
+**PASSED/CLOSED**; loader-format, Step-5, writer/batch/cursor, dependency-default, ingress, decoder,
+A44 reviews referenced, not repeated. **A15-F1, A17-F1** identities preserved; catch-up authentication,
+consensus safety, and OBL-STO-2b/RUN-422 internals not reopened.
+
+## C1 — Consistent reachability verdict `[SUPERSEDED-A47 → A47.1-C1]`
+
+A47 simultaneously called the regression "source-reachable" and "not demonstrated." **Withdrawn.** Each
+route below carries **one** status: **ESTABLISHED** (finite source trace, prerequisites+effects jointly
+satisfiable), **BLOCKED** (named first guard), or **UNRESOLVED** (named unestablished prerequisite). A
+conditional keeps its conditions; "plausible" ≠ established; absence of a witness ≠ impossibility. An
+**untraced existing path is incomplete source analysis, not IMPLEMENTATION-REQUIRED.**
+
+## C2 — Provenance of a prior stored `n > 1` `[SUPERSEDED-A47 → A47.1-C2]`
+
+**Engine-transition origin of `n > 1` — withdrawn as unestablished.** Production arms the Run-096
+reconfig intent **once** at startup (`binary_consensus_loop.rs:2878–2879` via
+`derive_run_096_reconfig_proposal`/`with_reconfig_proposal`, `main.rs:5538–5540`); the proposal
+constructor consumes it with `.take()` (**single-shot**, `basic_hotstuff_engine.rs:4102`); a committed
+reconfig transition requires **exactly `current+1`** (`:2355–2363`); and restart constructs a fresh
+epoch-0 engine. So a single process run advances **at most 0→1**, and no production **re-arming** route
+was found (`set_pending_reconfig_next_epoch` has only the one startup caller + test/sim). Therefore
+self-commit capability **does not** establish that a prior production run reached `n > 1` via engine
+transitions. A47's assertion of that origin is **withdrawn**.
+
+**Restore origin of `n > 1` — established with exact admission conditions.** The restore path writes a
+snapshot-declared epoch directly:
+- Trigger: an operator-requested snapshot restore (`restore_outcome`, `main.rs:5204–5206`), which
+  requires `--data-dir`.
+- Admission (`evaluate_restore_epoch_compatibility` / `persist_restored_snapshot_epoch`,
+  `production_consensus_storage.rs:535–574, 619+`): a **fresh read** of the live `meta:current_epoch`
+  decides — **no existing epoch (`None`/`PresentNoCommittedEpoch`) → writes `meta:current_epoch =
+  snapshot_epoch (n)`** (`PersistAfterMaterialization` → `put_current_epoch`); **existing `== n` →
+  no-op** (idempotent); **existing `m ≠ n` → `RestoreEpochInconsistent`, fail-closed (never silently
+  overwrites)**; read error → `EpochProbeFailed` fatal.
+- So a stored **`n > 1` is reachable** when an admitted snapshot declaring epoch `n` is restored into a
+  DB with **no committed epoch**. This epoch is **accepted from snapshot metadata — not demonstrated to
+  have been reached by consensus** (snapshot admission not re-audited; the two are different evidence
+  claims). Direct DB editing is not used.
+
+## C3 — Multi-validator argument and configuration labels `[SUPERSEDED-A47 → A47.1-C3]`
+
+**Do not transfer the A44 Proposal/Vote authority gate to every engine-entry route.** A44 gates the
+inbound **Proposal/Vote** path only. The **`RestoreCatchupResponse`** path is separate:
+`handle_restore_catchup_response` (admitted at `binary_consensus_loop.rs:7392–7409` via sender binding)
+performs **response-anchor matching** (`:8454–8475`) and the catch-up application calls the engine's
+internal **`state.on_vote`** (`basic_hotstuff_engine.rs:4014–4017`) to rebuild QC/commit state —
+**without** passing through the A44 gate. So A47's blanket "A44 blocks engine advance in
+multi-validator" is **too broad**. However, catch-up **entry alone proves neither an epoch advance nor
+a regression**: the separate stages are **admitted catch-up material → internal vote/QC processing →
+commit → a matching cached reconfiguration header → epoch transition → persistence**, and the
+reconfiguration detector requires **cached proposal metadata** (`binary_consensus_loop.rs:9020–9036`)
+that catch-up responses do not obviously populate. The multi-validator epoch-advance-via-catch-up route
+is therefore **UNRESOLVED**, with its prerequisites and first open guard named (anchor matching
+`:8454–8475`; cached-reconfig-metadata requirement `:9020–9036`) — not asserted as universal
+containment.
+
+**Configuration labels corrected.** The inspected default is **LocalMesh with no static peers**, for
+which `num_validators = static_peers.len() + 1 = 1` (`main.rs:5501–5503`) — i.e. the **default is a
+single-validator LocalMesh node**, not "multi-validator." Multi-validator arises when static peers are
+configured. Data-directory and reconfiguration opt-ins are separate configuration axes.
+
+## C4 — Recovery and consumer claims `[SUPERSEDED-A47 → A47.1-C4]`
+
+**Withdrawn:** A47's automatic "the engine re-advances and rewrites the value" reasoning — it depends
+on the same untraced 0→1 self-commit path (C2/route table) and is not independently established.
+
+**Consumer inventory corrected** (attribution repair only, not a general consumer audit). The bounded
+set of live readers of `meta:current_epoch`/`get_current_epoch` is: **startup trust activation**
+(A46.2-C1); **periodic snapshot metadata**; **SIGUSR1 snapshot metadata** (`main.rs:9299`); and
+**restore epoch compatibility** (`evaluate_restore_epoch_compatibility`, C2). A47's "sole confirmed
+consumer" phrasing is replaced by this inventory. **No harmful consequence is inferred from
+consumption**; a **present but lower epoch** differs from an **unavailable epoch** (activation rejects
+*unavailable* epoch only when a bundle declares `activation_epoch`; a present lower value is not the
+unavailable-rejection path, and whether it yields a wrong decision is **unresolved** and not traced).
+Effects beyond a **stored-value regression** are **left unresolved** within this bounded trace.
+
+## Route table (one consistent status each)
+
+| Route | Provenance of stored epoch | Admission conditions | First refusal / furthest effect | Status |
+| --- | --- | --- | --- | --- |
+| **1. Ordinary fresh single/multi-validator startup** | none (fresh DB, `None`) | `--data-dir`; no restore | engine epoch 0; inbound Proposal/Vote gated by A44 (`:6422–6435`); no `n` to regress; `maybe_persist` fires only if engine advances | **BLOCKED** (no stored `n`; no advance established) |
+| **2. Startup with an admitted restore anchor** | restore writes `n` into a **fresh** DB (`None`→persist); `m≠n`→fail-closed | operator restore request; `--data-dir`; DB has no committed epoch; snapshot declares epoch `n` | restore write of `n` **ESTABLISHED**; engine epoch still 0 after `initialize_from_snapshot_baseline` (does not set epoch); any same-run overwrite needs a 0→1 commit (route 3/4) | provenance **ESTABLISHED**; same-run overwrite **UNRESOLVED** |
+| **3. Single-validator LocalMesh + one-shot reconfig intent** | — | default no-peers (`num_validators=1`); operator arms Run-096 `target=1` | engine may propose reconfig; **single-validator self-commit 3-chain → `maybe_transition_epoch_from_committed_block` 0→1 is NOT traced end-to-end here**; one-shot `.take()` caps a run at epoch 1 | engine→1 **UNRESOLVED** (self-commit chain untraced); `n>1` via engine transitions **not established** |
+| **4. Restore-origin `n>1`, then ordinary restart, attempted write of `1`** | restore (route 2) | route-2 admission in run A; run B: ordinary restart (no restore), same DB=`n`, armed Run-096 `target=1`, single-validator | write-back **mechanism ESTABLISHED** (writer compares engine epoch vs the in-memory cursor=0, not the DB value → would overwrite `n` with `1`); the engine actually reaching epoch 1 depends on route 3 | **UNRESOLVED** — exact unestablished prerequisite: a single-validator reconfig **self-commit** driving `maybe_transition_epoch_from_committed_block` 0→1 (an untraced existing path; local-operator capability, not external) |
+
+## Disposition
+
+The exact A46.2 residual is now resolved to a **consistent** account: (i) the **stored-epoch
+write-back mechanism** is an **established implementation fact** — the writer
+(`binary_consensus_loop.rs:8729–8731`) compares `engine.current_epoch()` against the **in-memory
+cursor** (initialized to 0) and **does not read or compare the existing database epoch** before
+overwriting (recorded **neutrally**; no "contract gap"/"violation" label is applied because no
+applicable durability/monotonicity contract for this key is identified); (ii) a stored **`n > 1`** is
+reachable in production **only via the restore origin** (admitted snapshot epoch into a fresh DB;
+engine-transition origin **withdrawn** as unestablished given the one-shot Run-096 intent + sequential
+`+1` guard + fresh-0 restart); (iii) the **regression `n→1`** is **UNRESOLVED**, blocked only by the
+untraced single-validator reconfig **self-commit 0→1** chain (route 4) — an **incomplete source
+analysis**, *not* an impossibility proof and *not* IMPLEMENTATION-REQUIRED; (iv) the **multi-validator
+catch-up** advance route is **UNRESOLVED** with its anchor-matching and cached-reconfig-metadata
+prerequisites named; (v) effects **beyond a stored-value regression** (any trust-activation / snapshot
+/ restore-compat consequence) are **unresolved** and not inferred from consumption.
+
+**No finding or severity is forced.** A demonstrated contract violation could support a bounded finding
+without a consensus-failure demonstration, but **no applicable contract is identified** for the
+write-back comparison and **no finite production regression trace is demonstrated** (route 4's
+self-commit step is untraced); the regression remains a **bounded, correctly-conditioned UNRESOLVED
+source observation** on the OBL-STO-2a write-back sub-boundary, duplicate-checked and **distinct from
+A15-F1** (supervision) and **A17-F1** (catch-up authentication) — their identities are unchanged. Only
+this sub-boundary is updated; **broader OBL-STO-2a is not declared complete**. **C5** remains **OPEN**;
+runtime remains **UNEXECUTED**.
+
+## Stopping statement
+
+Stopping after A47.1. The four routes are resolved to consistent statuses (1 BLOCKED, 2 provenance
+ESTABLISHED / same-run overwrite UNRESOLVED, 3 UNRESOLVED, 4 UNRESOLVED with the exact named
+prerequisite: a single-validator reconfig self-commit 0→1). No regression trace is manufactured via
+crash, corruption, rollback, or direct DB editing; no expansion into Byzantine schedules, native
+RocksDB recovery, deployment behavior, or runtime testing. A48 not started.
+
+## A47.1 evidence ledger
+
+| Ref | Source | Fact |
+| --- | --- | --- |
+| C2a | `binary_consensus_loop.rs:2878–2879`; `main.rs:5538–5540` | Run-096 reconfig intent armed once at startup |
+| C2b | `basic_hotstuff_engine.rs:4102` | proposal constructor `.take()`s the intent (single-shot) |
+| C2c | `basic_hotstuff_engine.rs:2355–2363` | `transition_to_epoch` requires exactly `current+1` |
+| C2d | `production_consensus_storage.rs:535–574` | restore admission: fresh DB → persist `n`; existing `m≠n` → `RestoreEpochInconsistent` fail-closed; idempotent on `==` |
+| C2e | `main.rs:5204–5206` | restore writes `snapshot_epoch` via `persist_restored_snapshot_epoch_durable` (operator restore; `--data-dir`) |
+| C3a | `binary_consensus_loop.rs:7392–7409, 8454–8475`; `basic_hotstuff_engine.rs:4014–4017` | catch-up response admission + anchor matching + internal `state.on_vote` (separate from A44 gate) |
+| C3b | `binary_consensus_loop.rs:9020–9036` | reconfiguration detector requires cached proposal metadata for a transition |
+| C3c | `main.rs:5501–5503` | LocalMesh default (no static peers) → `num_validators = 1` (single-validator default) |
+| C4 | `main.rs:9299`; A46.2-C1 | consumer inventory: startup activation, periodic + SIGUSR1 snapshot metadata, restore-compat |
+| D1 | `binary_consensus_loop.rs:8729–8731` | writer compares engine epoch vs in-memory cursor, not the DB value (neutral implementation fact) |
+
+---
+
+*End of A47.1 epoch write-back reachability correction layer (internal v1.131). The complete v1.130
+input is preserved byte-for-byte below.*
+
+<!-- A47 POST-RESTART EPOCH WRITE-BACK REACHABILITY LAYER (internal v1.130) — prepended to the preserved v1.129 input below -->
+# QBIND Security Findings Register
+
+> **Layer A47 — bounded source review of post-restart epoch write-back reachability, under
+> OBL-STO-2a (internal v1.130).** Audit/reporting only; no implementation/repository change; A48 not
+> started. Scope **Public DevNet**.
+> **Audited code baseline (unchanged, pinned):** HEAD `18d71a549d868ed33d352e9fc70a9d060f75e03b` /
+> tree `5b6c543435ac017dd8372c93f48be397899db14a` / origin `https://github.com/olivexo28/QBIND.git`.
+> Runtime remains **UNEXECUTED**; **C5** remains **OPEN**. All 54 obligation identities, finding IDs,
+> aliases, and dispositions preserved; no global index rewrite. **No plan-file was written this pass.**
+
+## Input provenance and baseline
+
+**Input: the retained, previously delivered v1.129 master** — bytes match exactly: **5,353,191 bytes**,
+SHA-256 `f9f9a845bc0f220c6228cf782f323e47c4f6cd40b0a0e656b22099d34474cc5d`, six archives verified,
+A46.2 present, A47 absent, **0 CRLF**. Re-supplied copy confirmed byte-identical. **CRLF→LF recovery
+not exercised.** Delivery commits are delivery locations only. Baseline re-verified before and after
+(HEAD/tree unchanged, working tree clean); no checkout/metadata/GitHub change. Source read-only.
+
+## Question
+
+*Can a production-reachable sequence at the pinned revision first persist epoch `n`, then restart
+against the same database, admit an engine transition to `m < n`, and successfully overwrite the
+stored epoch with `m`?* Source-reachability only; **ordinary restart with successfully preserved
+storage** is the premise (no crash, corruption, rollback attack, or direct DB editing). Reusing
+A46.x established facts by reference (writer compares engine epoch vs the in-memory cursor not the DB
+epoch; stored epoch feeds startup trust activation but not the engine epoch; optional snapshot init is
+distinct from ordinary startup; `sync=false`; tests ≠ observed execution). OBL-STO-2b/RUN-422 internals
+not reopened.
+
+## Provenance of `n` (writers of `meta:current_epoch`, with admission)
+
+| Source of a stored epoch `n>0` | Production-reachable? | Mechanism / guard |
+| --- | --- | --- |
+| **Engine transition** → `maybe_persist_engine_epoch_transition` → `apply_epoch_transition_atomic` | **Only if the engine commits reconfig blocks.** The engine advances epoch **only** via `maybe_transition_epoch_from_committed_block` → `transition_to_epoch` (strictly `current+1`, `basic_hotstuff_engine.rs:2349–2371`), fired after a **committed** reconfig block (`binary_consensus_loop.rs:3182/3328/3476`). Committing requires the 3-chain QC path. | **Multi-validator default production (authority unwired):** inbound proposals/votes are rejected **before** engine ingestion (A44 `effective_pv = None` / `Required` gate), and a multi-validator node cannot self-commit (needs ≥2/3 votes from peers), so **the engine cannot advance epoch** → no engine-transition `n>0`. **Self-committing config (e.g. single validator, where `two_thirds_vp()` = 1 vote, `qc.rs:106`):** the node can self-propose+self-vote+commit a reconfig block → engine advances → `n` persisted. |
+| **Admitted restore** → `persist_restored_snapshot_epoch_durable` → `put_current_epoch_synced` (`main.rs:5206`, `production_consensus_storage.rs:824`) | **Reachable** via an admitted snapshot restore | writes the **restored snapshot's** epoch directly, **not via an engine transition**. *An admitted snapshot epoch and an epoch demonstrably reached by consensus are different evidence claims* (snapshot admission not re-audited). |
+| **Library/test setter** `set_current_epoch`, or an arbitrary stored value | **Not production** | `set_current_epoch` has **no production caller** (only tests/sim: `binary_consensus_loop.rs:21327/24338`, `hotstuff_node_sim.rs:2179`, engine unit tests). Not a witness. |
+
+So a stored `n>1` arises in production either from **engine transitions in a self-committing config**
+or from an **admitted restore** — not from library/test setters or arbitrary values.
+
+## Post-restart transition to `m` and the write-back
+
+Established startup facts (both ordinary and restore):
+- `run_binary_consensus_loop_with_io` constructs a **fresh** engine `BasicHotStuffEngine::new(…)` with
+  `current_epoch: 0` (`binary_consensus_loop.rs:2812–2814`; `basic_hotstuff_engine.rs:2099`).
+- The optional restore branch `if let Some(baseline)=cfg.restore_baseline { engine.initialize_from_snapshot_baseline(…) }`
+  (`:2838–2849`) sets `current_view = snapshot_height+1` but **does NOT set `current_epoch`**
+  (`basic_hotstuff_engine.rs:2654–2690`) — so **after restore the engine epoch is still 0**.
+- The persistence cursor `last_persisted_epoch = engine.current_epoch()` is initialized **after** both
+  (`:2979`) → **= 0** in every ordinary/restore startup.
+- The writer fires only when `engine.current_epoch() > last_persisted_epoch` (`:8729–8731`), compares
+  against the **cursor** (never the DB value), and on success overwrites `meta:current_epoch` with the
+  engine value.
+
+**Blocking / enabling table (first refusal per route):**
+
+| Route | Engine epoch advance post-restart? | Write-back / regression | First blocking guard (or enabling condition) |
+| --- | --- | --- | --- |
+| **Default multi-validator production (authority unwired)** | **No** — A44 rejects inbound proposals/votes before engine ingestion; no self-commit without ≥2/3 peer votes → engine stays at 0 (cursor 0) | **None** — `maybe_persist` never fires; stored `n` never overwritten | **A44 inbound-authority gate** (`effective_pv=None`/`Required`, `binary_consensus_loop.rs:6422–6435`), reinforced by no storage→engine epoch init (`set_current_epoch` test-only) and `initialize_from_snapshot_baseline` not setting epoch |
+| **Restore-provenance `n`, default production** | No (same as above) | **None** — restored `n` stays; engine can't advance → no write-back | same gate |
+| **Self-committing devnet (e.g. single validator) + operator-armed reconfig (Run-096)** | **Yes** — node self-commits a reconfig block → `transition_to_epoch` 0→1 | **Yes (conditional):** writer sees `1 > cursor 0` → overwrites `meta:current_epoch = 1`, a regression from a prior `n>1` | **Enabling conditions:** operator chooses a self-committing validator set, a prior run reached `n` via reconfig commits, ordinary restart (no restore), and a **re-armed** reconfig intent post-restart. Actor capability = **local operator config**, not external/network admission |
+
+## Disposition
+
+**(2) A source-established blocking guard covers the default (multi-validator, authority-unwired)
+production route:** the engine cannot advance its epoch after an ordinary restart because inbound
+proposals/votes are rejected before engine ingestion (A44) and a multi-validator node cannot
+self-commit; `set_current_epoch` is test-only and `initialize_from_snapshot_baseline` does not set the
+epoch, so neither storage nor restore lifts the engine epoch above 0. Therefore
+`maybe_persist_engine_epoch_transition` never fires post-restart and the stored epoch is **not
+overwritten** — **no finite jointly-satisfiable production regression trace exists on the default
+route**. The writer's missing DB-value comparison (A46.x) is a real **contract gap**, but by itself it
+is **not independently reachable** on this route, and *a missing database comparison alone does not
+establish a contract violation*.
+
+**(3) Remaining unresolved prerequisite (for a broader claim):** a **non-default, self-committing
+configuration** (e.g. single-validator devnet, or any config where the local node forms a QC without
+external votes) in which (a) a prior run reached and persisted `n>1` via reconfig commits, (b) an
+ordinary restart occurs against the same DB, and (c) a re-armed reconfig intent drives the fresh
+epoch-0 engine to commit a reconfig block, overwriting `meta:current_epoch` with `m<n`. In that
+configuration the regression **is** source-reachable, but with **local-operator capability** (the
+operator configures the validator set and arms the reconfig intent) — **not** an external or
+network-admitted attack. The **consequence beyond the stored-value regression is unestablished**: the
+sole confirmed consumer that reads this value into live use is **startup trust activation**
+(A46.2-C1), which rejects an unavailable/empty epoch only when a bundle/root **declares an
+`activation_epoch` requirement**, and the regressed value is re-written during the same process as the
+engine re-advances — so whether a harmful trust-activation or consensus outcome results depends on
+timing and applicable requirements **not traced here** (no general consumer audit performed).
+
+**Evidence categories of the residual:** (i) **implementation/source** — joint reachability of a
+self-committing production configuration reaching `n` then re-deriving `m<n` is plausible for
+single-validator devnet but **not demonstrated end-to-end** (the reconfig-commit replay from a fresh
+engine was not traced to a committed block); (ii) **proof/consequence** — whether a regressed
+activation epoch is admitted into a harmful effect is open (depends on a bundle declaring
+`activation_epoch` and the regression surviving past the engine's re-advance); (iii) **runtime** —
+UNEXECUTED.
+
+**No finding forced.** The stored-epoch regression is a bounded **conditional source observation** on
+the OBL-STO-2a write-back sub-boundary (writer omits a DB-value comparison; reachable only under
+operator-configured self-committing devnet, consequence unestablished), **duplicate-checked** against
+existing findings and **distinct from A15-F1** (supervision) — A15-F1's identity is unchanged; no new
+ID, severity, dismissal, or closure is forced. Relevant test bodies were **inspected, not executed**
+(the `set_current_epoch` / sim call sites above; the `run_094`/`run_093` reopen tests from A46.x). Only
+this OBL-STO-2a write-back sub-boundary is updated (default-route blocking guard established + the exact
+conditional residual named); **broader storage coverage is not declared complete**. **OBL-STO-2b /
+RUN-422** exclusion preserved. **C5** remains **OPEN**; runtime remains **UNEXECUTED**.
+
+## Stopping statement
+
+Stopping after A47. The exact A46.2 residual is resolved to a **source-established blocking guard on
+the default production route** (outcome (2)) **plus a precisely-named remaining prerequisite and its
+evidence categories** for the non-default self-committing route (outcome (3)); no finite production
+regression trace is demonstrated, and none is manufactured via crash, corruption, rollback, or direct
+DB editing. A48 not started.
+
+## A47 evidence ledger
+
+| Ref | Source | Fact |
+| --- | --- | --- |
+| P1 | `basic_hotstuff_engine.rs:2349–2371` | `transition_to_epoch` requires `new_epoch == current+1` (strictly sequential) |
+| P2 | `binary_consensus_loop.rs:3182,3328,3476` | epoch advance fired only by `maybe_transition_epoch_from_committed_block` after a committed reconfig block |
+| P3 | `basic_hotstuff_engine.rs:2654–2690` | `initialize_from_snapshot_baseline` sets `current_view`, **not** `current_epoch` |
+| P4 | `binary_consensus_loop.rs:2812–2814, 2838–2849, 2979` | fresh engine epoch 0 → optional restore → cursor init = engine epoch (0) |
+| P5 | `binary_consensus_loop.rs:21327/24338`, `hotstuff_node_sim.rs:2179`, engine tests | `set_current_epoch` has no production caller (test/sim only) |
+| P6 | `binary_consensus_loop.rs:6422–6435` (A44) | default production rejects inbound proposals/votes before engine ingestion (authority unwired / Required) |
+| P7 | `qc.rs:106` | commit needs `two_thirds_vp()` votes → single-validator can self-commit; multi-validator cannot without peers |
+| P8 | `main.rs:5206`; `production_consensus_storage.rs:824` | restore path writes epoch via `put_current_epoch_synced` (admitted snapshot epoch, not an engine-reached epoch) |
+| P9 | `binary_consensus_loop.rs:8729–8731` | writer compares engine epoch vs cursor, never the DB value |
+
+---
+
+*End of A47 post-restart epoch write-back reachability layer (internal v1.130). The complete v1.129
+input is preserved byte-for-byte below.*
+
+<!-- A46.2 NARROW REPORTING-CORRECTION AMENDMENT TO A46.1 LAYER (internal v1.129) — prepended to the preserved v1.128 input below -->
+# QBIND Security Findings Register
+
+> **Layer A46.2 — narrow reporting corrections to A46.1 (internal v1.129).** Additive report amendment
+> only; A47 not started; no general storage re-audit, no repeat dependency investigation, no new
+> exploit scenario. Scope **Public DevNet**.
+> **Audited code baseline (unchanged, pinned):** HEAD `18d71a549d868ed33d352e9fc70a9d060f75e03b` /
+> tree `5b6c543435ac017dd8372c93f48be397899db14a` / origin `https://github.com/olivexo28/QBIND.git`.
+> Runtime remains **UNEXECUTED**; **C5** remains **OPEN**. All 54 obligation identities, finding IDs,
+> aliases, and dispositions preserved; no global index rewrite. **No plan-file was written this pass.**
+> Superseded A46.1 statements are marked `[SUPERSEDED-A46.1 → A46.2-Cn]`.
+
+## Input provenance and baseline
+
+**Input: the retained, previously delivered v1.128 master** — bytes match exactly: **5,344,156 bytes**,
+SHA-256 `87635457d54cb8d4c1ab150625f79cdc3da32eab73d6979086b0ea0af487503a`, six archives verified,
+A46.1 present, A46.2 absent, **0 CRLF**. The re-supplied copy was independently confirmed
+byte-identical. **CRLF→LF recovery not exercised.** Any GitHub delivery commit is a delivery location
+only, not the baseline. Baseline re-verified before and after (HEAD/tree unchanged, working tree
+clean); no repository/config/Git change.
+
+## Kept closed (unchanged)
+
+The ingress/decoder/A44 reviews; A46.1's corrected legacy-format acceptance matrix (8-byte legacy /
+12-byte CRC / else reject); the Step-5 error attribution (`verify_epoch_consistency_on_startup`'s
+`get_current_epoch` corrupt-read → outer `IncompleteEpochTransition`); the supported writer/batch/cursor
+trace; and the verified dependency-default checks (`rocksdb 0.22.0`, `librocksdb-sys 0.16.0+8.10.0`;
+`DB::write`→`WriteOptions::default`, sync default false, WAL default active) all stay closed and are not
+re-opened here.
+
+## C1 — Activation consumption and test attribution `[SUPERSEDED-A46.1 → A46.2-C1]`
+
+**Withdraw** A46.1-C4's statement that `CommittedEpoch` is **isolated from activation**. The stored
+epoch **is** consumed by trust-bundle activation on the startup route:
+`activation_epoch_source_from_storage` reads the stored epoch
+(`pqc_trust_activation_epoch.rs:169–180`); `main.rs:6570–6587` takes that result and supplies it as
+**`ActivationContext.current_epoch = activation_epoch_source.as_option()`**, which the trust-bundle
+loader (`TrustBundle::load_..._with_...activation(path, …)`) receives. So a persisted
+`CommittedEpoch(n)` reaches **trust activation** as `Some(n)`. The **separate** established fact — that
+there is **no storage→consensus-engine epoch initialization** (the engine starts at 0) — remains true
+and unaffected; the two are distinct consumers.
+
+**Corrected test attribution.** `run_094_consensus_storage_state_committed_epoch_is_isolated_from_activation`
+(`run_094_binary_path_epoch_transition_persistence_tests.rs:331–345`) is a **smoke check of the
+`ConsensusStorageState::committed_epoch()` enum accessor only** (`NoConsensusStorage`→`None`,
+`PresentNoCommittedEpoch`→`None`, `CommittedEpoch(9)`→`Some(9)`); its own preceding comment acknowledges
+this limitation. It does **not** exercise node activation wiring, so **neither its name nor historical
+commentary establishes "isolation from activation"** at the audited revision.
+
+**Narrowed activation error statement.** On this **startup activation-read route**, an
+`activation_epoch_source_from_storage` error becomes **`UnavailableNoCommittedEpoch`** (with a WARNING
+log, `main.rs:6579–6586`). The trust activation evaluator rejects unavailable epoch information **only
+when the applicable bundle/root declares an epoch requirement** (`activation_epoch`) — this is **not**
+an unconditional refusal of every operation following an activation read error, and other admission
+checks remain separate. This behavior is **not** generalized to every CLI, SIGHUP, or candidate route;
+no wider trust-bundle audit is performed.
+
+## C2 — Conditional write-back prerequisite `[SUPERSEDED-A46.1 → A46.2-C2]`
+
+**Preserved:** a fresh engine epoch and the persistence cursor initialize to **zero**; the writer
+compares `engine.current_epoch()` against its **in-memory cursor** `last_persisted_epoch`; and that
+writer does **not** compare the proposed value against the existing database epoch.
+
+**Withdraw** A46.1-C4's claim that **snapshot restore or consensus replay is *necessarily* the missing
+prerequisite** for a post-restart regression. `run_binary_consensus_loop_with_io` constructs its engine
+**independently** of the optional `restore_baseline` branch: `BasicHotStuffEngine::new(local_id,
+validators)` runs first (`binary_consensus_loop.rs:2812–2814`), and `if let Some(baseline) =
+cfg.restore_baseline { engine.initialize_from_snapshot_baseline(…) }` is a **separate, optional** step
+(`:2838–2849`). **Ordinary startup (no `restore_baseline`) is a distinct case** and must not be folded
+into the snapshot-restore path.
+
+**Precise unresolved prerequisite:** *a production-reachable prior persisted epoch `n`, followed by an
+admitted post-restart engine transition to some `m < n`, followed by a successful write-back of `m`.*
+This sequence is **not demonstrated**. An arbitrary database value, a test-only setter, or a
+hypothetical transition is **insufficient** to establish it. The conditional observation and its
+unresolved consequence (the writer offers no DB-value write-back protection) are **preserved**; this
+amendment does **not** construct or investigate that witness, and does not reopen snapshot admission,
+consensus safety, or the completed writer trace.
+
+## C3 — Evidence-language tightening `[SUPERSEDED-A46.1 → A46.2-C3]`
+
+Across A46.1's contract/tests/disposition text:
+- Replace categorical **"not fsync'd before return"** with: **"this write does not request or require a
+  synchronous durability barrier through its `sync=false` option."** A46.2 does **not** infer that **no**
+  synchronization could occur through another mechanism (e.g. a background WAL flush, an OS flush, or a
+  later `flush_wal(true)` on a different path).
+- Replace statements that the **unexecuted** tests **"establish"** observed clean-reopen persistence
+  with: **"the inspected test bodies *assert* clean-reopen persistence."**
+- Preserve the four-level distinction throughout: **source behavior** vs **documented dependency
+  guarantees** vs **test assertions** vs **observed execution**.
+
+The verified package versions/defaults and the existing deployment/native-recovery qualifications
+(native RocksDB 8.10.0 WAL-replay/fsync timing and deployed linkage/target/filesystem unverified) are
+**retained unchanged**; no archive re-download or further RocksDB-internals review was performed.
+
+## Disposition
+
+These are wording/attribution corrections only. The conditional write-back consequence (writer compares
+only the in-memory cursor, never the DB value; regression reachability unresolved pending the precise
+prerequisite above), the broader **OBL-STO-2a** residuals, and the **OBL-STO-2b** (RUN-422) exclusion
+are **preserved**. **A15-F1's supervision identity** is preserved. **No finding, severity, or security
+conclusion is forced.** The corrected facts: (i) the persisted epoch **is** consumed by trust
+activation (while still **not** initializing the consensus engine's epoch); (ii) the mis-cited
+`run_094` test checks only the enum accessor, not activation wiring; (iii) ordinary startup is engine-
+construction-independent of snapshot restore, so the write-back prerequisite is stated directly rather
+than attributed to snapshot replay; (iv) durability language is scoped to the `sync=false` option and
+test-assertion vs observed-execution wording. **C5** remains **OPEN**; runtime remains **UNEXECUTED**.
+
+## A46.2 evidence ledger
+
+| Ref | Source | Fact |
+| --- | --- | --- |
+| C1a | `pqc_trust_activation_epoch.rs:169–180`; `main.rs:6570–6587` | stored epoch → `activation_epoch_source.as_option()` → `ActivationContext.current_epoch` → trust-bundle loader (consumed by activation) |
+| C1b | `run_094_…_tests.rs:331–345` | test checks `ConsensusStorageState::committed_epoch()` accessor only (`None`/`None`/`Some(9)`); not activation wiring |
+| C1c | `main.rs:6579–6586` | activation read error → `UnavailableNoCommittedEpoch` + WARNING; evaluator rejects only when bundle declares `activation_epoch` |
+| C2 | `binary_consensus_loop.rs:2812–2814, 2838–2849` | engine built fresh before the optional `restore_baseline` branch → ordinary startup distinct from snapshot restore |
+| C3 | A46.1 contract/tests text | `sync=false` ≠ "no sync by any mechanism"; unexecuted tests *assert* (not *establish*) clean reopen |
+
+---
+
+*End of A46.2 narrow reporting-correction amendment to A46.1 (internal v1.129). The complete v1.128
+input is preserved byte-for-byte below.*
+
+<!-- A46.1 EPOCH PERSISTENCE/RESTART CORRECTION + BOUNDED ROCKSDB DEPENDENCY LAYER (internal v1.128) — prepended to the preserved v1.127 input below -->
+# QBIND Security Findings Register
+
+> **Layer A46.1 — epoch persistence/restart corrections and bounded dependency verification
+> (internal v1.128).** Third-party audit/reporting only; no implementation or repository changes; A47
+> not started. Scope **Public DevNet**.
+> **Audited code baseline (unchanged, pinned):** HEAD `18d71a549d868ed33d352e9fc70a9d060f75e03b` /
+> tree `5b6c543435ac017dd8372c93f48be397899db14a` / origin `https://github.com/olivexo28/QBIND.git`.
+> Runtime remains **UNEXECUTED**; **C5** remains **OPEN** against its production cryptographic
+> custody / signing-lifecycle criteria. All 54 obligation identities, finding IDs, aliases, and
+> dispositions preserved; no global index rewrite. **No plan-file was written this pass.** Superseded
+> A46 statements are marked `[SUPERSEDED-A46 → A46.1-Cn]`.
+
+## Input provenance and baseline
+
+**Input: the retained, previously delivered v1.127 master** — bytes match exactly: **5,326,025
+bytes**, SHA-256 `9d8bff02c23f28408b730f32d3f06d3e7c900d1a21c091281ca6a091924feb89`, six archives
+verified, A46 present, A46.1 absent, **0 CRLF**. The re-supplied copy was independently confirmed
+byte-identical. **CRLF→LF recovery not exercised.** Any GitHub delivery commit is a delivery location
+only. Baseline re-verified before and after (HEAD/tree unchanged, working tree clean); no
+checkout/metadata change. RocksDB dependency archives retrieved read-only under `/tmp`; **no
+downloaded code executed**.
+
+## Preserved A46 facts (unchanged)
+
+The A45.1 ingress review and A46 §2 accounting repairs stay closed. Supported epoch-writer facts
+preserved: `maybe_persist_engine_epoch_transition` builds `EpochTransitionBatch::new`; the production
+caller supplies no block/QC/last-committed update; the backend submits one batch (epoch put + marker
+delete); `last_persisted_epoch` advances only after a successful return; a returned persistence error
+stops the consensus loop (which does **not** itself establish process termination or rollback of
+earlier engine mutations). General ingress/storage/snapshot-admission/supervision/consensus-safety
+audits are not repeated.
+
+## C1 — Corrected epoch-loader acceptance matrix `[SUPERSEDED-A46 → A46.1-C1]`
+
+A46 called `get_current_epoch`'s validation an unconditional "strict checksum." The complete
+`unwrap_checksummed_meta` body (`storage.rs:648–678`, `expected_payload_len = 8` for
+`meta:current_epoch`) is a three-way matrix:
+
+| Stored value length | Outcome |
+| --- | --- |
+| **exactly 8 bytes** | **accepted as legacy (no-checksum) epoch data** — `return Ok(data.to_vec())` (`:654–661`), logs `[T119] found legacy format` |
+| **exactly 12 bytes** (`4 + 8`) | checksummed representation — `unwrap_checksummed` **verifies the CRC strictly**; bad CRC → `Corruption` (`:663–667`) |
+| **any other length** | `Corruption` ("unexpected data length") (`:670–677`) |
+
+Separated cases for the reader: **missing key** → `db.get` `Ok(None)` → `Ok(None)` (no record);
+**database read error** → `Err(Io)`; **legacy 8-byte** → accepted, **no checksum checked**; **12-byte
+bad checksum / other length** → `Corruption`. The production writer stores the **12-byte checksummed**
+form (`wrap_checksummed(epoch_bytes)`), so production-written values take the CRC-verified path; the
+reader additionally **accepts an 8-byte legacy value without any checksum**. A **CRC is integrity
+(accidental-corruption detection), not cryptographic authentication or freshness protection**;
+conversely, **accepting the documented legacy representation is not, by itself, a security finding** —
+any claim would need an established write-capability contract (e.g. an actor that can place an 8-byte
+value in the local DB, a local-storage scope condition) and a demonstrated consequence, neither
+established here. Recorded as an accuracy correction, **no finding forced**.
+
+## C2 — Corrected first rejecting guard and error attribution `[SUPERSEDED-A46 → A46.1-C2]`
+
+A46's case table attributed a corrupt/bad-length epoch to the **Step-6** probe (`EpochProbeFailed`) and
+attributed `IncompleteEpochTransition` to a **present marker**. Both are wrong for the normal opener.
+`verify_epoch_consistency_on_startup` (`storage.rs:1230–1255`) itself calls
+**`self.get_current_epoch()?` at `:1247`** (after the marker check at `:1232`). Therefore a
+**persistently corrupt/bad-length `meta:current_epoch`** makes `get_current_epoch` return a
+`StorageError`, which `?`-propagates out of **Step 5**, and `production_consensus_storage.rs:431–437`
+wraps **any** Step-5 error as **`ProductionConsensusStorageError::IncompleteEpochTransition`** — the
+later Step-6 probe is never reached in that case.
+
+Keep distinct: (a) the **outer variant** `IncompleteEpochTransition` (wraps whatever Step 5 returns);
+(b) the **underlying `StorageError`** (`Corruption`/`Codec`/`Io` from the epoch read, or `Corruption`
+from a malformed marker); (c) a **genuinely present transition marker**
+(`check_for_incomplete_epoch_transition` → `Some` → the marker branch at `:1232–1244`); (d) a failure
+arising **only at the later Step-6 probe** (reachable only if Step 5 passed, e.g. a transient read
+error between the two reads). **The outer name `IncompleteEpochTransition` does not prove a marker was
+present.** The **supported startup-refusal conclusion is unchanged** (a corrupt/unreadable epoch, or a
+present marker, fails the node closed at open time); only the step/variant/citation attribution is
+corrected.
+
+## C3 — Bounded RocksDB dependency contract `[SUPERSEDED-A46 → A46.1-C3]`
+
+Locked packages verified against `Cargo.lock`, exact crates.io archives retrieved and **checksum-matched
+before inspection**: **`rocksdb 0.22.0`** (`.crate` SHA-256 `6bd13e55…a7a7`) and
+**`librocksdb-sys 0.16.0+8.10.0`** (`.crate` SHA-256 `ce3d60bc…348c`). (Package-archive evidence;
+distinct from upstream references and from deployed-binary evidence.)
+
+From the `rocksdb 0.22.0` binding source:
+- `DB::write(batch)` → `self.write_opt(batch, &WriteOptions::default())` (`src/db.rs:815–817`).
+- `WriteOptions::default()` creates a native options object with **no binding overrides**
+  (`src/db_options.rs:3521–3528`). The binding documents the native defaults: **`set_sync` default =
+  false** (`:3449`, "if true, the write will be flushed from the operating system buffer cache before
+  the write is considered complete"); **`disable_wal` default = false** (`:3460`, i.e. **WAL is
+  active**; "if true … the write may get lost after a crash"). No other buffering option is set on
+  this path.
+
+| Property | Supported from inspected evidence |
+| --- | --- |
+| **Atomic batch visibility** | **Yes** — single `WriteBatch` applied together (binding `write_batch.rs` / `db.rs:804–817`) |
+| **API success (`db.write` → `Ok`)** | the batch is applied to the memtable and **appended to the WAL in the OS buffer cache** (WAL active, sync=false) — **not** fsync'd before return |
+| **Ordinary reopen** | value present after a clean in-process reopen (established by the lifecycle/`run_093`/`run_094` reopen tests, C5) |
+| **Process-crash recovery** | **NOT listed as established** — depends on native RocksDB (librocksdb-sys 8.10.0 C++) WAL-replay-on-open semantics and the exact point WAL bytes leave userspace, **not inspected in the C++ source this pass**; the binding only establishes WAL-active + sync=false |
+| **Machine/power-loss durability** | **Not guaranteed** — sync=false means no fsync before return; the native `flush_wal(true)` barrier (`flush_epoch_durable`) is **not** called on this path |
+| **Rollback / clone resistance** | **None** — CRC is integrity only (C1); no freshness/anti-rollback on `meta:current_epoch` |
+
+**Removed from the supported column (vs A46):** "likely process-crash recovery." A repository comment
+about a "possibly un-`fsync`'d" value (`flush_epoch_durable` doc) and the production log line
+`"meta:current_epoch={} durably persisted"` (`binary_consensus_loop.rs:8767`) are **claims**, recorded
+in the claim/contract inventory; the **evidence supports only atomic-apply + WAL-append-to-OS-cache +
+API success**, not a crash-replay or power-loss guarantee. The word "durably" in that log overstates
+what a sync=false write establishes.
+
+**Linkage / deployment assumptions (unresolved):** `librocksdb-sys 0.16.0+8.10.0` bundles RocksDB
+**8.10.0** C++ source, but the sys crate can link an **externally provided** native library at build
+time (env/feature controlled). So the **bundled-source** conclusion (RocksDB 8.10.0 semantics) is
+**distinct from the unverified deployed linkage**; the deployed target, filesystem, storage hardware,
+write-cache policy, and the actual linked library/version remain **unverified** and gate every
+crash/power-loss statement. **Lack of a proven guarantee is not proof that every interruption loses
+data**; the precise claim is that the inspected evidence does not establish crash/power-loss
+durability on this path.
+
+## C4 — Corrected restart/re-derivation and write-back reasoning `[SUPERSEDED-A46 → A46.1-C4]`
+
+**Preserved:** the loop constructs an epoch-0 engine (`BasicHotStuffEngine::new` →
+`current_epoch: 0`, `basic_hotstuff_engine.rs:2099`) and initializes
+`last_persisted_epoch = engine.current_epoch()` (`= 0` at a fresh restart,
+`binary_consensus_loop.rs:2979`).
+
+**Withdrawn:** any implication that this **automatically reconstructs the pre-restart epoch from
+historical committed reconfig blocks** — that replay path is **not traced** here (the engine's
+post-restart committed state derives from the snapshot-restore path, which is **out of scope** and
+untraced). "The engine restarts at 0" is **not** used as a mitigation without demonstrating the
+recovery behavior.
+
+**Bounded question — what prevents/permits a subsequent epoch write from replacing a stored `n`?**
+The writer compares `engine.current_epoch()` against the **in-memory cursor** `*last_persisted_epoch`
+(`if current <= *last_persisted_epoch { return Ok(false) }`, `binary_consensus_loop.rs:8729–8731`) — it
+**never reads the existing DB value** before writing. So with DB=`n`, engine=0, cursor=0 at restart:
+if the engine subsequently advances to some `m > cursor` (via a committed reconfig block driving the
+engine's sequential `transition_to_epoch` guard, which checks the engine's own `current_epoch`, not the
+DB), the writer fires `apply_epoch_transition_atomic(target = m)` and **overwrites `meta:current_epoch`
+from `n` to `m`** — including when `m < n` (a DB-value regression). **Nothing in the writer or the
+engine guard consults the persisted `n`**, so the DB value has **no protection** against being
+replaced by a post-restart engine-derived value.
+
+**Conditional observation (not a forced finding):** a DB-value *regression* (`m < n`) requires the
+post-restart engine to actually re-advance epochs to a value below the previously persisted `n`. The
+**missing prerequisite** is the engine's post-restart committed-epoch source (snapshot restore +
+consensus replay), which is **untraced and out of scope** — so joint reachability of a harmful
+regression is **not established**. A **test-only `set_current_epoch`, a caller-constructed engine, or
+an arbitrary DB value is not a production witness**. Recorded as the exact conditional observation with
+its named missing prerequisite; **no exploit or finding forced**.
+
+**Narrow consumer inventory of `get_current_epoch` (error behavior noted, snapshot admission not
+reopened):** (a) the **startup open sequence** (Step 5 verify + Step 6 probe → fail-closed on error);
+(b) **activation** (`activation_epoch_source_from_storage` / `load_activation_current_epoch_for_cli`:
+`Ok(None)`→Unavailable, `Err`→caller fail-closed); (c) **restore-compatibility**
+(`evaluate_restore_epoch_compatibility`, main.rs:2691); (d) the **SIGUSR1 snapshot-metadata** reader
+(`main.rs:9299`: `Some(n)`→attach to snapshot meta, `None`→None) and the analogous **periodic
+snapshot** metadata reader. None of these feeds the recovered epoch into the **engine's
+`current_epoch`**; the `CommittedEpoch` state is isolated from activation (confirmed by
+`run_094_consensus_storage_state_committed_epoch_is_isolated_from_activation`).
+
+## C5 — Test evidence and disposition `[SUPERSEDED-A46 → A46.1-C5]`
+
+Inspected (not run) complete test bodies:
+
+| Test body | What it exercises | What it is NOT |
+| --- | --- | --- |
+| `m16_epoch_transition_hardening_tests.rs` (`m16_a1` `:87`, `m16_a2` `:126`) | atomic batch commits all writes; `m16_a2` "restart" = **handle drop + ordinary reopen** (`:146`); `set_inject_write_failure` (`:181,232`) = **pre-write injected refusal** (returns `Err` before `db.write`, `storage.rs:1155`); "simulate crash" (`:323,337,421`) = **omit the write / marker-only** logical simulation | **not** a real abrupt-process-termination, fsync, or power-loss test |
+| `run_094_binary_path_epoch_transition_persistence_tests.rs` | trigger/no-trigger, per-step-once, fail-closed via a **mock `ConsensusStorage`** returning `Err` (`:203–219`); "survives restart" = **reopen** (`:271,309`); committed-epoch **isolated from activation** (`:331`) | **not** a real RocksDB backend error; **not** an abrupt crash; does **not** initialize an engine from the stored epoch |
+| `run_093_production_consensus_storage_lifecycle_tests.rs` | fresh open → PresentNoCommittedEpoch (`:87`); committed vs present distinguishable (`:110`); committed epoch **persists across reopen** (`:140,157,166`) | **not** a crash/power-loss test; reopen only |
+
+**Scoped negative coverage (to these bodies):** there is **no** abrupt-process-termination test, **no**
+power-loss/`fsync` test, and **no** test that initializes a consensus engine from a stored epoch. The
+"survives restart" tests are **handle-drop + reopen** and establish value persistence across a clean
+reopen **only** — not power-loss durability. A **pre-write injected refusal** and a **mocked backend
+`Err`** are not generalized into a guarantee about every real backend error.
+
+**Reassessed A46 completion language:**
+- **Completed (repository tracing):** writer → batch → backend write-path → startup readers →
+  use-boundary → finite cases are source-grounded.
+- **Verified (dependency semantics):** the `rocksdb 0.22.0` binding's `DB::write`→`WriteOptions::default`
+  (sync=false, WAL active) is verified from the checksum-matched archive.
+- **Unverified (dependency):** native RocksDB 8.10.0 WAL-replay-on-open / fsync timing (C++ source not
+  inspected) and the **deployed linkage/target/filesystem/hardware**.
+- **Unresolved (production consequence):** the post-restart epoch write-back / potential DB regression
+  (C4), conditional on the untraced snapshot-restore epoch source.
+- **Unexecuted (runtime):** all crash/power-loss/durability behavior.
+
+## Disposition
+
+The baseline consensus epoch-transition **persistence-and-restart source tracing** is complete and its
+**write/read contract is now stated precisely**: atomic batch visibility + API success (memtable +
+WAL-in-OS-cache, **sync=false**) + clean-reopen persistence are supported; **process-crash recovery,
+power-loss durability, and rollback resistance are NOT established** here (native-C++ + deployed-linkage
+residuals named). The loader acceptance matrix (legacy-8 / checksummed-12 / reject) and the
+first-rejecting-guard attribution (Step-5 `verify_epoch_consistency_on_startup` corrupt-read →
+`IncompleteEpochTransition`, not a marker, not Step-6) are corrected. The restart write-back question is
+answered: the writer compares only the in-memory cursor (init 0), never the DB value, so a stored epoch
+has no write-back protection — with harmful **regression reachability left explicitly conditional** on
+the untraced snapshot-restore epoch source (missing prerequisite named). No security consequence is
+forced; the CRC-not-auth, legacy-accept, and sync=false observations are recorded as contract/accuracy
+facts, **duplicate-checked** and **not** merged into any existing finding. **A15-F1's supervision
+identity** and the **RUN-422 / OBL-STO-2b exclusion** are preserved; broader **OBL-STO-2a** questions
+remain open and are not declared reviewed. **C5** remains **OPEN**; runtime remains **UNEXECUTED**. No
+further pass is scheduled merely because runtime evidence is absent.
+
+## A46.1 evidence ledger
+
+| Ref | Source | Fact |
+| --- | --- | --- |
+| C1 | `storage.rs:648–678` | 8-byte → legacy accepted (no CRC); 12-byte → CRC-verified; else → Corruption |
+| C2a | `storage.rs:1230–1247` | `verify_epoch_consistency_on_startup` calls `get_current_epoch()?` at `:1247` after the marker check |
+| C2b | `production_consensus_storage.rs:431–437` | Step-5 error wrapped as outer `IncompleteEpochTransition` regardless of marker presence |
+| C3a | `Cargo.lock`; crates.io archives | rocksdb 0.22.0 (`6bd13e55…`), librocksdb-sys 0.16.0+8.10.0 (`ce3d60bc…`) checksum-verified |
+| C3b | `rocksdb 0.22.0 src/db.rs:815–817`; `src/db_options.rs:3449,3460,3521` | `DB::write`→`WriteOptions::default`; sync default false; WAL default active; no overrides |
+| C3c | `binary_consensus_loop.rs:8767`; `storage.rs:1071–1081` | "durably persisted" log + "possibly un-fsync'd" comment are claims, not fsync evidence |
+| C4a | `binary_consensus_loop.rs:8729–8731, 2979` | writer compares engine epoch to in-memory cursor (init 0); never reads DB value |
+| C4b | `main.rs:9299`; `pqc_trust_activation_epoch.rs` | SIGUSR1/periodic snapshot + activation + restore-compat consumers; engine epoch not sourced from storage |
+| C5 | `tests/m16_…:87,126,146,181,323`; `run_094_…:203,271,331`; `run_093_…:140,157` | pre-write injection + mocked backend Err + handle-drop-reopen; no abrupt-termination/power-loss/engine-from-stored-epoch test |
+
+---
+
+*End of A46.1 epoch persistence/restart correction + bounded RocksDB dependency layer (internal
+v1.128). The complete v1.127 input is preserved byte-for-byte below.*
+
+<!-- A46 BASELINE CONSENSUS EPOCH PERSISTENCE / RESTART LOADING LAYER (internal v1.127) — prepended to the preserved v1.126 input below -->
+# QBIND Security Findings Register
+
+> **Layer A46 — baseline consensus epoch persistence and restart loading, under OBL-STO-2a
+> (internal v1.127).** Third-party audit/reporting only; no repository code fixed or implemented; A47
+> not started. Scope **Public DevNet**.
+> **Audited code baseline (unchanged, pinned):** HEAD `18d71a549d868ed33d352e9fc70a9d060f75e03b` /
+> tree `5b6c543435ac017dd8372c93f48be397899db14a` / origin `https://github.com/olivexo28/QBIND.git`.
+> Runtime remains **UNEXECUTED**; **C5** remains **OPEN** against its production cryptographic
+> custody / signing-lifecycle criteria. All 54 obligation identities, finding IDs, aliases, and
+> dispositions preserved; no global index rewrite. **No plan-file was written this pass.**
+
+## Input provenance and baseline
+
+**Input: the retained, previously delivered v1.126 master** — bytes match the expected canonical input
+exactly: **5,306,228 bytes**, SHA-256
+`f80e49311251cbaf16fb23974b6097f61d96d9eec47b610e3eb933514f53765a`, six embedded archives verified,
+A45.1 present, A46 absent, **0 CRLF**. The re-supplied copy was independently confirmed byte-identical.
+**CRLF→LF recovery not exercised** (no mismatch). The GitHub delivery copy (`…/ff7a9751…`-sourced
+`69867501…`-lineage) remains a CRLF delivery artifact and is not the audit baseline. Source access:
+local read-only of the retained scratch master; **no** checkout reset/switch/merge/commit/push. Baseline
+re-verified before and after (HEAD/tree unchanged, working tree clean).
+
+## §2 — Carried A45.1 reporting repairs `[SUPERSEDED-A45.1 → A46-§2]`
+
+The completed four-channel ingress review stays closed; these are local accounting repairs only:
+
+- **Pending reader-worker plaintext.** The secure-channel term must show the **additional `D`** owned by
+  a worker **blocked in `blocking_send(Ok(data))`**, held **outside** the ≤32 queued frames — i.e.
+  `≤ 32·D (queued) + 1·D (blocked worker)` **per connection**, not folded into the ciphertext-only `X`.
+  Where an estimate extends through the executing **A44** handler, that handler's encoded `bytes`
+  (`D`-scale) and decoded `proposal` allocations are listed **separately**, not merged into the queue terms.
+- **Payload vs storage.** Define **`I_payload`** (the inner Proposal `Vec<u8>` content) **separately**
+  from envelope/enum/container overhead. **`D ≥ I_payload`** does **not** establish `D ≥` the decoded
+  envelope's **complete storage or capacity** (headers, enum discriminant, `Vec` capacity are additional).
+- **Framing and lifetimes.** The 16 MiB ciphertext ceiling **excludes** the 5-byte transport header; the
+  read buffer (`buf = Vec::with_capacity(5+len)`) and the re-encoded buffer **include** it. The original
+  read `buf` **drops inside `read_transport_frame`** (consumed by `TransportFrame::decode`) **before**
+  the later `frame.encode()` in `recv_app` — so `buf`, the re-encode output, and the 2nd-decode copy do
+  **not** all coexist; only `TransportFrame#1.ciphertext` overlaps the re-encode/2nd-decode copies.
+  Length / request / capacity / allocator / RSS remain distinct.
+- **Receiver ownership.** Dropping the service's `Arc<Mutex<Receiver>>` **clone** alone does **not**
+  destroy a receiver still retained by **another owning `Arc`**; the `Receiver` is destroyed only when the
+  **last** owning `Arc` drops. Distinguish **receiver destruction** vs **sender disconnection** (all
+  `inbound_tx` senders dropped → channel closed) vs **forwarder termination** (drops the mutex **guard**,
+  not the receiver). The **demuxer's current message** and the **rejected message inside
+  `TrySendError`** are **successive ownership of the same message**, not two distinct simultaneously-live
+  messages (no double-count).
+
+These repairs reopen neither the decoder/A44 reviews nor create a finding.
+
+## §3 — OBL-STO-2a sub-boundary: baseline consensus epoch persistence & restart loading
+
+**What successful persistence of a consensus epoch transition establishes, and how the next startup
+loads/validates/uses it.** Traced from the production `maybe_persist_engine_epoch_transition` route
+(A14/A14.1) to its concrete RocksDB implementation and the matching startup readers. This is the
+**baseline epoch-persistence/recovery** path — **not** the RUN-422 signing journal, **not**
+safety-record-store internals (OBL-STO-2b exclusion preserved); snapshot-anchor admission, catch-up
+authentication, consensus-task supervision, and consensus safety are **not** reopened. The earlier
+epoch-persistence **failure witness** (A14/A14.1) is reused as caller evidence; it does not by itself
+establish the durability/recovery contract. Current-baseline evidence is distinguished from historical
+embedded-lineage references throughout.
+
+### A — Activation, ownership, record contents
+
+- **Constructor / prerequisites / backend:** `open_production_consensus_storage`
+  (`production_consensus_storage.rs`) → `RocksDbConsensusStorage::open(canonical_path)`
+  (`storage.rs:754–757`, `rocksdb::Options::default()` + `create_if_missing(true)`, concrete backend =
+  **RocksDB**). Prerequisite: `config.data_dir` present (DevNet ad-hoc without `--data-dir` → no storage,
+  `ActivationEpochSource::UnavailableNoCommittedEpoch`). The loop receives this handle as
+  `cfg.consensus_storage: Option<Arc<dyn ConsensusStorage>>` (Run-093/094).
+- **Writer:** `maybe_persist_engine_epoch_transition` (`binary_consensus_loop.rs:8723–8771`): when
+  `engine.current_epoch() > last_persisted_epoch` and a `reconfig_block_id` is available, builds
+  `EpochTransitionBatch::new(current, previous, reconfig_block_id)` and calls
+  `storage.apply_epoch_transition_atomic(batch)`; on `Ok`, sets `last_persisted_epoch = current`.
+- **Record contents (production path):** `EpochTransitionBatch::new` leaves `block=None`, `qc=None`,
+  `update_last_committed=false` (`storage.rs:471–480`). So the atomic batch writes exactly
+  **`meta:current_epoch = wrap_checksummed(target_epoch.to_be_bytes())`** (`CURRENT_EPOCH_KEY`,
+  `storage.rs:1144–1147`) and **deletes `EPOCH_TRANSITION_MARKER_KEY`** (`:1151`). The `block`/`qc`/
+  `last_committed` keys are **not** written on this path. (`previous_epoch`/`reconfig_block_id` live in
+  the in-memory batch and the log line, but only `target_epoch` is persisted as the epoch value.)
+- **Startup loader:** `activation_epoch_source_from_storage` (`pqc_trust_activation_epoch.rs:169–180`) /
+  the open sequence's Step-6 probe → `storage.get_current_epoch()` (`storage.rs:1008–1040`), which
+  `db.get(CURRENT_EPOCH_KEY)` → `unwrap_checksummed_meta(..,"meta:current_epoch",8)` (strict checksum) →
+  length-8 check → `u64::from_be_bytes`.
+- **Four distinct quantities kept separate (do not advance atomically):** (1) **engine state**
+  `engine.current_epoch()` (advances when a committed reconfig block drives `transition_to_epoch`); (2)
+  **caller bookkeeping** `last_persisted_epoch` (advances **only after** the storage `Ok`); (3)
+  **storage-API success** (`db.write(batch)` returns `Ok`); (4) **recovered state** at restart. These are
+  **not** the same event.
+
+### B — Exact write contract
+
+`apply_epoch_transition_atomic` (`storage.rs:1110–1176`): one `rocksdb::WriteBatch` → (conditionally
+block/qc/last_committed, **absent on this path**) → `put(CURRENT_EPOCH_KEY, checksummed epoch)` →
+`delete(EPOCH_TRANSITION_MARKER_KEY)` → **single `self.db.write(write_batch)`** with **default
+`WriteOptions` (no `set_sync(true)`)**. There is **no pre-write marker** on this path (the
+`maybe_persist` writer never calls `write_epoch_transition_marker`), so the whole transition is **one
+atomic batch**, not two separated writes.
+
+| Property | Result (production epoch-transition path) | Evidence |
+| --- | --- | --- |
+| **Atomic visibility** | **Yes** — single `WriteBatch` (`put` epoch + `delete` marker commit together) | `storage.rs:1118,1147,1151,1162` |
+| **Successful API return** | `db.write(batch)` returns `Ok` after the WAL write (to OS), then caller sets `last_persisted_epoch` | `:1162–1164`; `binary_consensus_loop.rs:8756–8765` |
+| **Process-crash recovery** | **Likely recoverable** — default RocksDB WAL is enabled; a WAL record that reached the OS survives a process crash and is replayed on reopen (not independently re-verified against the exact pinned `rocksdb` crate's defaults — see residual) | `:754–757` (no WAL disable) |
+| **Machine/power-loss durability** | **Not guaranteed** — `db.write` uses **sync=false**; the value is explicitly "**possibly un-`fsync`'d**" until a separate `flush_wal(true)` barrier, which this path does **not** call | `:1162` vs `flush_epoch_durable` `:1071–1081` comment |
+| **Rollback / clone protection** | **None** — the checksum envelope is integrity, not freshness; no anti-rollback/monotonic-attestation on `meta:current_epoch` | `get_current_epoch` `:1008–1040` (checksum only) |
+
+Error propagation: `db.write` `Err` → `StorageError::Io` → `EpochPersistenceFailed{source:StorageWrite}`
+→ caller logs **FATAL** and `break`s the loop (`binary_consensus_loop.rs:3201–3206`) — fail-closed. The
+durable variants (`put_current_epoch_synced` `sync=true` `:1042–1060`; `flush_epoch_durable`
+`flush_wal(true)` `:1071–1081`) exist and are used on a **separate restore path**
+(`persist_restored_snapshot_epoch_durable`, main.rs:5206), **not** on this epoch-transition path — a
+distinction, not a merge. A method/variant name ("atomic", "durable", "synced") is treated as a label,
+not evidence; the conclusions above rest on the exact write-options and `flush_wal` source.
+
+### C — Restart admission and use
+
+Production open sequence (`production_consensus_storage.rs:415–445`): Step 3 `open` → `OpenFailed`;
+Step 4 `ensure_compatible_schema` → `SchemaIncompatible`; Step 5
+`verify_epoch_consistency_on_startup` → on an **incomplete-transition marker** present →
+`IncompleteEpochTransition` ("node cannot safely continue", `storage.rs:1230–1240`); Step 6
+`get_current_epoch` probe → `Ok(None)` → `PresentNoCommittedEpoch`, `Ok(Some(n))` → `CommittedEpoch(n)`,
+`Err` → `EpochProbeFailed`. Each error is **propagated fail-closed** (the opener returns `Err`, the
+node aborts).
+
+| Persisted-record case | First guard / outcome | Reaches engine? |
+| --- | --- | --- |
+| **No record** (`meta:current_epoch` absent) | `get_current_epoch` → `Ok(None)` → `PresentNoCommittedEpoch` / `UnavailableNoCommittedEpoch` — **not** an error | n/a (no committed epoch) |
+| **Unreadable / bad checksum / wrong length** | `unwrap_checksummed_meta` / length-8 check → `StorageError` → `EpochProbeFailed` → **fail-closed abort** | no |
+| **Incomplete-transition marker present** (heavier path only) | Step-5 `verify_epoch_consistency_on_startup` → `IncompleteEpochTransition` → **fail-closed abort** | no |
+| **Valid `CommittedEpoch(n)`** | consumed by the **startup consistency check**, the **pre-restore epoch-conflict check** (`evaluate_restore_epoch_compatibility`, main.rs:2691/2700), and the **trust-activation** layer (`ActivationContext.current_epoch = activation_epoch_source.as_option()`, main.rs:3014 etc.) | **Not the consensus engine's `current_epoch`** — see below |
+
+**Crucial use boundary:** `BasicHotStuffEngine::new` initializes **`current_epoch: 0`**
+(`basic_hotstuff_engine.rs:2099`, "Default to epoch 0"), and the loop sets
+`last_persisted_epoch = engine.current_epoch()` (`binary_consensus_loop.rs:2979`) — **= 0 at a fresh
+restart**. No production path feeds the recovered `meta:current_epoch` back into the engine's
+`current_epoch` (exhaustive grep: no `set_current_epoch`/`current_epoch =`/`transition_to_epoch` from
+storage at normal startup). So the recovered epoch value reaches the **open-sequence consistency gate**,
+the **restore-compatibility check**, and the **trust-activation** layer — but the consensus engine
+**re-starts at epoch 0** and re-advances only via newly committed reconfig blocks; "no record exists"
+(`Ok(None)`) and "record unreadable" (`Err`) are distinguished, and neither is silently reset into the
+engine. (This is a precise use-boundary fact, not a safety claim; snapshot restore of engine state is a
+separate, excluded mechanism.)
+
+### D — Finite failure/restart table (static, source-grounded)
+
+| # | Case | Source-grounded outcome |
+| --- | --- | --- |
+| 1 | **No prior record** | `Ok(None)` → `PresentNoCommittedEpoch` / `UnavailableNoCommittedEpoch`; engine starts epoch 0; no abort |
+| 2 | **Write then ordinary restart** | atomic batch committed; on reopen `get_current_epoch` → `CommittedEpoch(n)` consumed by consistency/activation; engine still starts epoch 0 |
+| 3 | **Returned storage error on write** | `EpochPersistenceFailed{StorageWrite}` → loop **FATAL break** (fail-closed; `last_persisted_epoch` **not** advanced) |
+| 4 | **Interruption between separate writes** | **No such boundary on this path** — the transition is a **single atomic `WriteBatch`**; no partial-write window is manufactured. (The marker-based heavier path has its own two-phase marker + Step-5 recovery; not the `maybe_persist` path.) |
+| 5 | **Malformed / inconsistent stored state** | bad checksum / wrong length → `EpochProbeFailed` fail-closed; incomplete-transition marker → `IncompleteEpochTransition` fail-closed |
+| 6 | **Process crash vs power loss** | **Process crash:** WAL (default-enabled) replayed on reopen → the committed epoch likely recovers (assumption: WAL record reached OS; pinned-`rocksdb`-default residual). **Power loss:** `db.write` was **sync=false** → the value is "possibly un-`fsync`'d" → **may be lost** (no `flush_wal(true)` on this path) |
+
+**Proposed consequence (named, not forced):** *contract* = power-loss durability of
+`meta:current_epoch` on the epoch-transition path; *reachable fault* = untimely power loss after
+`db.write` `Ok` but before OS fsync; *admitted state change* = on reopen, `meta:current_epoch` reflects
+an **older** epoch than the engine had committed pre-crash. *Remaining uncertainty / why not forced:*
+(i) the consensus **engine already restarts at epoch 0** and re-derives epoch from committed reconfig
+blocks, so the persisted value is **not** the engine's resume source (bounding the consequence to the
+consistency-gate / trust-activation / restore-compat consumers, not engine epoch); (ii) local
+power-loss durability of a devnet node's local store is a **scope condition** whose security impact
+depends on consumers not re-traced here; (iii) exact RocksDB WAL default semantics at the pinned crate
+version are an **unverified dependency boundary**. Recorded as a **durability/accounting observation**,
+duplicate-checked below — **no finding forced**.
+
+### E — Tests and bounded disposition
+
+Inspected (not run) storage test surface: the **M16 atomicity** path uses `inject_write_failure`
+(`storage.rs:731,1153–1159`, `#[cfg(any(test, feature="test-utils"))]`) to force a `StorageError` and
+assert error propagation — a **mocked error-propagation** test, **not** a crash/power-loss durability
+test. Ordinary reopen behavior is exercised via `get_current_epoch`/open-sequence tests. **No test
+exercises real `fsync`/power-loss durability** (consistent with the sync=false finding). The durable
+barrier (`flush_epoch_durable`) belongs to the Run-422 restore path, separately tested.
+
+**Duplicate check:** the sync=false / non-power-durable observation is **distinct from A14/A14.1** (which
+established the fatal epoch-persistence **failure witness**, i.e. write-error handling) and **distinct
+from A15-F1** (consensus-task **supervision**) — A15-F1 is **not** relabeled as a storage defect. It is a
+new **durability-contract** observation on OBL-STO-2a, not a duplicate; it is recorded without a forced
+ID/severity/closure.
+
+## Bounded disposition
+
+This OBL-STO-2a sub-boundary — the **baseline consensus epoch-transition persistence and restart
+loading** path — is **traced and marked complete**: production writer
+(`maybe_persist_engine_epoch_transition` → `apply_epoch_transition_atomic`), concrete backend (RocksDB),
+record (`meta:current_epoch` checksummed + marker delete, single atomic batch, **sync=false**), startup
+readers (open-sequence Steps 3–6 + `activation_epoch_source_from_storage`, fail-closed on
+error/schema/incomplete-marker, `Ok(None)`→no-committed-epoch), the use boundary (engine restarts at
+epoch 0; recovered value feeds consistency/activation, **not** engine epoch), and the finite
+failure/restart cases are all established from executable bodies. **Supported contract:** atomic
+visibility + API success + likely process-crash recovery, **without** guaranteed power-loss durability
+or rollback protection on this path.
+
+**Precise remaining evidence / residuals (named, not generic):** (1) the exact pinned `rocksdb` crate's
+**default WAL + crash-replay semantics** are not re-verified from its source this pass (dependency
+boundary — provenance-verified inspection deferred, no execution); (2) whether any production consumer
+of a stale-after-power-loss `meta:current_epoch` (consistency gate / `evaluate_restore_epoch_compatibility`
+/ trust activation) admits an unsafe transition is **outside** this write/read-contract trace and is
+left open; (3) runtime durability behavior remains **UNEXECUTED**. Broader **OBL-STO-2a** questions
+(other persisted objects, snapshot-anchor epoch barriers, the Run-422 restore durable path beyond its
+contrast here) are **explicitly preserved, not declared reviewed**; **OBL-STO-2b** exclusion preserved.
+**A14/A14.1, A15-F1, A21-F1** and all other findings keep their identities; no global index rewrite.
+**C5** remains **OPEN**; runtime remains **UNEXECUTED**.
+
+## A46 evidence ledger
+
+| Ref | Source | Fact |
+| --- | --- | --- |
+| W1 | `binary_consensus_loop.rs:8723–8771` | writer builds `EpochTransitionBatch::new` + `apply_epoch_transition_atomic`; `last_persisted_epoch` set only after `Ok` |
+| W2 | `binary_consensus_loop.rs:3195–3206` | caller: write `Err` → FATAL `break` (fail-closed) |
+| W3 | `storage.rs:471–480` | `EpochTransitionBatch::new` → block/qc None, update_last_committed false |
+| W4 | `storage.rs:1110–1176` | single `WriteBatch`: put `CURRENT_EPOCH_KEY` (checksummed) + delete marker; `db.write` **default WriteOptions (sync=false)** |
+| W5 | `storage.rs:1042–1060, 1071–1081` | durable variants `put_current_epoch_synced` (sync=true) / `flush_epoch_durable` (`flush_wal(true)`) — the comment confirms epoch writes are "possibly un-`fsync`'d"; used on the separate restore path, not here |
+| R1 | `storage.rs:754–757` | RocksDB open: `Options::default()` + `create_if_missing`; no WAL/sync/atomic_flush config |
+| R2 | `storage.rs:1008–1040` | `get_current_epoch`: checksum + length-8 validation; `Ok(None)` vs `Err` distinguished |
+| R3 | `production_consensus_storage.rs:415–445` | open sequence: open→schema→verify_epoch_consistency→epoch probe; each error fail-closed |
+| R4 | `pqc_trust_activation_epoch.rs:169–180` | `activation_epoch_source_from_storage`: None→Unavailable, Some(n)→Committed(n), Err→Err |
+| U1 | `basic_hotstuff_engine.rs:2099`; `binary_consensus_loop.rs:2979` | engine `current_epoch: 0` default; `last_persisted_epoch = engine.current_epoch()` (=0 at restart); no storage→engine epoch restore |
+| T1 | `storage.rs:731,1153–1159` | M16 `inject_write_failure` = mocked error-propagation test; no real fsync/power-loss test |
+
+---
+
+*End of A46 baseline consensus epoch persistence / restart loading layer (internal v1.127). The
+complete v1.126 input is preserved byte-for-byte below.*
+
+<!-- A45.1 INGRESS QUEUE-INVENTORY / BUFFER-LIFETIME / BACKPRESSURE CORRECTION LAYER (internal v1.126) — prepended to the preserved v1.125 input below -->
+# QBIND Security Findings Register
+
+> **Layer A45.1 — correction of A45's production ingress queue inventory, buffer lifetimes, and
+> backpressure conclusions (internal v1.126).** Third-party audit/reporting only; A46 not started.
+> Scope **Public DevNet**.
+> **Audited code baseline (unchanged, pinned):** HEAD `18d71a549d868ed33d352e9fc70a9d060f75e03b` /
+> tree `5b6c543435ac017dd8372c93f48be397899db14a` / origin `https://github.com/olivexo28/QBIND.git`.
+> Runtime remains **UNEXECUTED**; **C5** remains **OPEN** against its production cryptographic
+> custody / signing-lifecycle criteria. All obligation identities, finding IDs, aliases, and
+> dispositions preserved; no global index rewrite. **No plan-file was written this pass.**
+> Superseded A45 statements are marked `[SUPERSEDED-A45 → A45.1-C1/C2/C3/C4]`.
+
+## Input provenance and baseline
+
+**Input: the retained, previously delivered v1.125 master** — actual bytes match the expected
+canonical input exactly: **5,287,022 bytes**, SHA-256
+`b10d809ef07b545c14fa361f19b7c5b4ff6744e52524925c096613c0ada0690b`, all six embedded archives
+verified, A45 present, A45.1 absent, **0 CRLF**. The re-supplied copy was independently confirmed
+byte-identical. **CRLF→LF recovery not exercised** (no exact-match failure). The GitHub delivery copy
+(`…/69867501…/Audit/…`, 5,313,926 bytes, SHA-256 `242ca2a2…`, 26,904 CRLF) is a **CRLF delivery
+artifact, not canonical LF bytes**, and was not used. **Source-access:** local read-only of the
+retained scratch master; delivery commit `69867501…` is a **delivery location only, not the
+code-audit baseline**; no checkout reset/switch/merge.
+
+## C1 — Restore the omitted subscription queue `[SUPERSEDED-A45 → A45.1-C1]`
+
+A45 wired the demuxer directly to the shared transport-ingress channel. In fact the builder calls
+`let inbound_rx = p2p_service.subscribe().await;` (`p2p_node_builder.rs:1797`), and `subscribe()`
+(`p2p_tcp.rs:1652–1667`) **constructs another `mpsc::channel(256)`** and **spawns a forwarder task**:
+`let mut shared_rx = inbound_rx.lock().await;  while let Some(msg) = shared_rx.recv().await { if
+tx.send(msg).await.is_err() { break } }`. The corrected production chain therefore has **four**
+channels (not three):
+
+1. **Per-connection decrypted-frame channel — 32** (`mpsc<Result<Vec<u8>,_>>`, `secure_channel.rs:625`).
+2. **Shared transport-ingress channel — 256** (`mpsc<InboundP2pEnvelope>`, `p2p_tcp.rs:593`), its
+   receiver held in `self.inbound_rx: Arc<Mutex<Receiver<_>>>` (`p2p_tcp.rs:430`). Producers = C
+   read_loops (cloned `inbound_tx`, awaited send). Consumer = the **single** subscription forwarder.
+3. **Subscription-forwarding channel — 256** (`mpsc<InboundP2pEnvelope>`, `p2p_tcp.rs:1653`). Producer
+   = the forwarder task (awaited `tx.send(msg).await`, `:1660`). Consumer = the demuxer.
+4. **Consensus-ingress channel — 256** (`mpsc<InboundConsensusEnvelope>`, `main.rs:6177`). Producer =
+   demuxer via `ChannelConsensusHandler::try_send`. Consumer = the consensus loop.
+
+**Production subscription count = 1:** the only inbound-P2P `subscribe()` is `p2p_node_builder.rs:1797`
+(the other `.subscribe()` hits are unrelated `shutdown_tx`/`event_broadcast_tx` broadcast channels).
+Because the forwarder **holds the `shared_rx` mutex guard for its whole lifetime** (`:1658`), only one
+subscriber can drain channel #2 at a time; additional library/test subscriptions would serialize on
+that mutex and are kept separate.
+
+**Forwarder ownership / full / closed (through actual owners):** the forwarder holds (a) the **mutex
+guard** on #2 and (b) at most **one in-flight message** (the `msg` being awaited into #3). A full #3
+(stalled demuxer) blocks the forwarder's `tx.send().await` **while it still holds the #2 guard**,
+stalling #2 drainage → backpressure to #2 → read_loops → #1 → socket. On a **closed #3** (the demuxer
+dropped its receiver) the forwarder's `tx.send().await` returns `Err` → **`break`** → the forwarder
+task ends, which **drops the mutex guard, not the receiver**: `self.inbound_rx` is an
+`Arc<Mutex<Receiver<_>>>` retained by the service, so forwarder termination releases the lock (a
+future `subscribe()` could re-acquire it) and does **not** destroy channel #2's receiver. Dropping the
+guard ≠ dropping a clone of the `Arc` ≠ dropping the `Receiver` itself; only the service dropping the
+`Arc<Mutex<Receiver>>` (or all `inbound_tx` senders dropping) closes #2.
+
+## C2 — Buffer lifetimes and temporary copies `[SUPERSEDED-A45 → A45.1-C2]`
+
+**read_loop overlap.** A45 said the decrypted `frame_bytes` is released after `decode_frame` returns.
+Re-tracing `read_loop` (`p2p_tcp.rs:1468–1526`): the `Ok(frame_bytes) =>` arm binds `frame_bytes`,
+borrows it in `decode_frame`, builds `envelope`, and then awaits `inbound_tx.send(envelope).await`
+(`:1517`) — **there is no explicit early drop** of `frame_bytes` before that send. So at the
+source level the **decrypted frame and the decoded envelope are both owned simultaneously while the
+send to #2 is pending** (and, if #2 is full, for the whole blocked duration). This is a source-level
+overlapping-ownership statement, **not** an observed physical-memory claim.
+
+**Framing/decryption stage (previously compressed).** `SecureChannel::recv_app`
+(`secure_channel.rs:415–418`) is `let frame = read_transport_frame(&mut self.stream)?; let plaintext =
+self.conn.decrypt_app(&frame.encode()?)?; Ok(plaintext)` — a visible **decode → encode → decode**
+round-trip with several overlapping owned buffers per inbound frame:
+- `read_transport_frame` (`framed_io.rs:124–131`): `buf = Vec::with_capacity(5+len)` (header+ciphertext
+  read from the socket), then `TransportFrame::decode(&buf)`.
+- `TransportFrame::decode` (`transport.rs:49–66`): `ciphertext = buf[5..5+len].to_vec()` — **owned copy #1**.
+- `frame.encode()` (`transport.rs:33–45`): `Vec::with_capacity(1+4+len)` + extend header + extend
+  ciphertext — **owned copy #2** (the re-encoded bytes).
+- `decrypt_app` (`connection.rs:407–428`): `TransportFrame::decode(frame_bytes)` — **owned copy #3**;
+  then `decrypt_app_frame(... &frame.ciphertext)` → `direction.open(...)` → the **plaintext** `Vec<u8>`.
+These ciphertext-sized intermediates (`buf`, copy #1, copy #2, copy #3) overlap within one `recv_app`
+and are **distinct from** the returned plaintext buffer and from dependency-internal AEAD behavior.
+(Visible redundant copies are recorded as a lifetime/accounting fact; cryptographic correctness and
+the completed decoder inventory are **not** reopened.)
+
+**Outer-decode copy path (corrected wording).** The established fact stands: outer decoding
+(`decode_frame` → `bincode::deserialize::<P2pMessage>`) produces **independently owned** Proposal
+bytes that are then moved through the ingress queues. The mechanism is the **Serde `Vec<u8>`
+sequence-copy path** (`VecVisitor::visit_seq` → `with_capacity(cautious)` + element `push` loop, per
+A42), **not** a literal `.to_vec()` call inside `decode_frame`; A45's "`.to_vec()` copy during
+decode_frame" wording is corrected accordingly.
+
+## C3 — Stage-specific accounting (rebuilt) `[SUPERSEDED-A45 → A45.1-C3]`
+
+A45's single "max inner Proposal payload" multiplier cannot span every stage, because channel #1 holds
+**complete decrypted P2P frames**, not inner Proposal payloads. Separate symbols:
+
+- **`X`** = transport ciphertext / framing storage: the transient `buf` + TransportFrame copies +
+  `encode()` output inside one `recv_app`, each ≤ the 16 MiB `MAX_TRANSPORT_CIPHERTEXT` ciphertext
+  ceiling (framed_io.rs), several overlapping, **one `recv_app` at a time per connection** (on the
+  blocking reader_worker).
+- **`D`** = complete decrypted frame length (discriminator + length + outer bincode payload). Channel
+  #1 holds ≤ 32 such frames **per connection**.
+- **`I`** = decoded envelope / inner Proposal storage (the Proposal `Vec<u8>` inside an envelope, plus
+  enum/envelope overhead). `D ≥ I` (a decrypted frame is the whole P2P frame; `I` is the inner part).
+  Channels #2, #3, #4 hold envelopes each owning an `I`.
+- **Queue occupancy:** #1 ≤ 32·(per-connection), #2 ≤ 256, #3 ≤ 256, #4 ≤ 256 (message counts).
+- **Pending / in-progress ownership (outside queues):** per connection, ≤1 `recv_app` with its `X`
+  intermediates + ≤1 blocked read_loop holding `frame_bytes`(`D`)+`envelope`(`I`) during a pending
+  send; the forwarder holds the #2 **mutex guard** + ≤1 in-flight `I`; the demuxer holds ≤1 current
+  message; and a **failed `try_send` returns the rejected `InboundConsensusEnvelope` inside its
+  `Err`**, which is **held until the error-handling (logging) scope drops it** (`p2p_inbound.rs:511–519`).
+
+**`C` = the relevant live receive pipelines**, counting **displaced-but-still-live sessions** where the
+existing **A6-F1** lifecycle evidence shows a reader-failed registered session can remain alive; **do
+not** substitute peer-map cardinality. A **conservative** summed bound is
+`≤ C·(X + 32·D + 1·(D+I)) + 256·I (#2) + 1·I (forwarder) + 256·I (#3) + 1·I (demuxer) + 256·I (#4) +
+1·I (failed-try_send, during logging)` — labeled **conservative** because queued and pending states for
+a given message are **mutually exclusive**, so this is an upper bound, **not** a demonstrated
+simultaneous peak. **Logical lengths, container capacities, allocation footprint, and RSS are kept
+separate; no global memory ceiling is asserted** absent a bound on all relevant multiplicities
+(notably `C` and the per-stage payload bounds).
+
+**Run-035 diagnostic producer (scope stated):** the `sender_clone()` injection path
+(`main.rs:6186`, `forged_injection.rs`) is **DevNet-only / operator-armed** (`--env devnet` +
+`QBIND_DEVNET_FORGED_INJECTION=1`). DevNet/operator-armed code is **not automatically absent** from the
+selected binary; the normal-network trace here is **scoped to diagnostic injection disabled**, which
+is stated as a premise rather than an assertion that the code is absent.
+
+## C4 — Narrowed terminal-queue conclusions `[SUPERSEDED-A45 → A45.1-C4]`
+
+**Preserved (supported):** `ChannelConsensusHandler` forwards with **`try_send`**; on a full **or**
+closed #4 the `Err` enters the **logging arm** (`eprintln!`, `p2p_inbound.rs:515–518`) and the
+operation **does not await channel capacity and does not request transport shutdown**.
+
+**Withdrawn A45 claims:**
+- "**never memory growth**" — withdrawn (the rejected message is retained during the logging scope, and
+  continued arrivals drive **ongoing allocation/drop churn**; whether any growth occurs is a
+  **runtime-unmeasured** matter, not a source guarantee).
+- "**no socket backpressure**" as an **unconditional end-to-end** result — withdrawn (holds only for the
+  #4 boundary in isolation; a stalled forwarder/demuxer **does** backpressure #3→#2→#1→socket, C1).
+- "**transport and other connections are unaffected**" — withdrawn (not established; the logging call
+  and task scheduling are **cross-task** effects, unmeasured).
+- "**no message retained**" during error handling — withdrawn: `try_send`'s `Err` **owns the rejected
+  `InboundConsensusEnvelope`**, retained until the `if let Err(e)` scope ends.
+
+The **logging call and task scheduling are separate from the non-blocking channel operation**; logging
+is **not assumed non-blocking**, and no measured slowdown is inferred. The accurate label is **"logged
+drop-on-full/closed"** (not "silent, logged" and not an authorization-style "fail-open"). Bounded queue
+occupancy, continued allocation/drop churn, upstream buffering, and cross-task consequences are kept
+**separate**; runtime measurements remain unexecuted, and this conditional source reasoning is **not**
+re-filed as a purely runtime-only question.
+
+## Revised ownership-and-backpressure table
+
+| Stage | Message · owner | Channel · cap · scope | Producers→Consumers | Enqueue | Full | Closed | Held outside queue |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| recv_app | ciphertext/frame copies (`X`) · reader_worker | — (in `recv_app`) | — | — | — | — | ≤1 `recv_app`'s `X` intermediates per conn |
+| decrypted | `Vec<u8>` frame (`D`) · SecureChannelAsync | `mpsc(32)` · **per-conn** | 1→1 | `blocking_send` | blocks reader_worker → socket BP | worker `break` | ≤1 frame per blocked worker |
+| transport-ingress (#2) | `InboundP2pEnvelope` (`I`) · service `Arc<Mutex<Rx>>` | `mpsc(256)` · **shared** | **C→1 forwarder** | `send().await` | blocks read_loop (holds `D`+`I`) → #1 → socket BP | read_loop `break` | ≤1 `D`+`I` per blocked read_loop |
+| subscription (#3) | `InboundP2pEnvelope` (`I`) · forwarder→demuxer | `mpsc(256)` · **1 subscriber** | 1 forwarder→1 demuxer | `send().await` | blocks forwarder (**holds #2 mutex guard** + 1 `I`) → #2 BP | forwarder `break` → **drops guard, not Rx** | forwarder: guard + 1 `I` |
+| consensus-ingress (#4) | `InboundConsensusEnvelope` (`I`) · demuxer→loop | `mpsc(256)` · shared (1 producer) | 1 demuxer→1 loop | **`try_send`** | **logged drop**; `Err` holds `I` through logging | **logged drop (same arm); demuxer continues** | rejected `I` held during logging scope |
+
+## Revised finite traces (consumer-stall premises explicit)
+
+1. **Normal draining:** socket→`recv_app`(`X` transient)→#1(≤32/conn)→read_loop→#2(≤256)→forwarder
+   (holds #2 guard)→#3(≤256)→demuxer→`try_send`→#4(≤256)→`inbound_rx.recv()`→handler. All stages move
+   the payload forward; occupancy low.
+2. **Full #4 (premise: consensus loop not draining promptly):** demuxer `try_send` → `Err(Full)` →
+   **logged drop**, rejected `I` held through the `eprintln!` then dropped; demuxer continues; #3/#2
+   keep draining. Occupancy bounded at the four caps, but **continued arrival drives allocation/drop
+   churn** and the logging/scheduling cost is a cross-task, unmeasured effect — no "never memory
+   growth"/"unaffected" claim.
+3. **Closed #4 (premise: consensus receiver dropped / loop exited):** `try_send` → `Err(Closed)` →
+   **same logged-drop arm** → demuxer **keeps running and keeps dropping** consensus messages
+   indefinitely, does **not** exit or request transport shutdown (DAG/control still handled).
+4. **Stalled demuxer (premise: demuxer not draining #3):** #3 full → forwarder blocks on `send().await`
+   **holding the #2 mutex guard + 1 `I`** → #2 fills → read_loops block (awaited send, each holding
+   `D`+`I`) → #1 fills → reader_workers block on `blocking_send` → **socket TCP backpressure**; bounded
+   resident buffering (`≈ C·(X+32·D+D+I) + 256·I + I + 256·I`). If instead the **demuxer drops its #3
+   receiver**, the forwarder `break`s and releases the #2 mutex guard without destroying #2's receiver.
+
+## Disposition
+
+A45's "no source edge left unresolved" is **superseded** and now **restored as complete** with the
+corrected four-channel chain: constructors (`secure_channel.rs:625`, `p2p_tcp.rs:593`,
+`p2p_tcp.rs:1653`, `main.rs:6177`), owners (per-connection; the service's `Arc<Mutex<Receiver>>`; the
+single forwarder with its held guard; the demuxer), capacities (32 / 256 / 256 / 256), pending values
+(recv_app `X` copies, read_loop `D`+`I` overlap, forwarder guard+`I`, failed-`try_send` retained `I`),
+and full/closed consumers (blocking/awaited backpressure to the socket upstream of the demuxer;
+**logged drop-on-full/closed** at #4; forwarder-exit drops the guard not the receiver) are all
+established. The selected ingress route's resource behavior is bounded by the four message-count caps
+plus the per-pipeline pending items scaled by `C` (live receive pipelines incl. A6-F1 displaced
+sessions), with `X`/`D`/`I` kept distinct and **no global memory ceiling asserted**; the terminal
+boundary is **logged drop-on-full/closed**, not an unconditional "unaffected" guarantee.
+
+Recorded against the existing **R7.3 / E12** resource residual; original obligation definitions and the
+completed decoder / A44 post-decode sub-boundaries preserved and not reset. Existing findings kept
+distinct — **A4-F1, A6-F1, A15-F1, A21-F1, A28-F1** are cross-referenced (session lifecycle incl.
+displaced-live sessions, connection/rate limiters, parser reservation) **without** being reopened or
+merged. **No finding is forced**; the drop-on-full/closed terminal behavior and the recv_app copy
+round-trip are recorded as **liveness/accounting characteristics**, with any availability or
+memory-growth consequence left as a **runtime, UNEXECUTED** question. **C5** remains **OPEN**.
+
+## A45.1 correction ledger
+
+| Ref | Supersedes (A45) | Correction |
+| --- | --- | --- |
+| C1 | three-channel chain; demuxer on the shared queue | **four** channels: + subscription-forwarding `mpsc(256)` (`subscribe()`, `p2p_tcp.rs:1653`); forwarder holds the #2 mutex guard; closed #3 → forwarder drops the **guard, not the receiver** |
+| C2 | "frame_bytes released after decode_frame"; "`.to_vec()` in decode_frame" | `frame_bytes` **overlaps** the envelope during the pending send; the recv_app **decode→encode→decode** copies (`transport.rs:62`, `:33–45`; `connection.rs:407–428`) are visible overlapping intermediates; outer copy is the **Serde seq-copy path**, not `.to_vec()` |
+| C3 | single "max inner Proposal payload" multiplier | separate `X` (ciphertext/framing), `D` (full decrypted frame, #1), `I` (inner Proposal, #2/#3/#4); `C` = live pipelines incl. A6-F1 displaced; failed-`try_send` retains `I`; conservative-bound labeling; Run-035 scope stated |
+| C4 | "never memory growth"/"no socket backpressure"/"unaffected"/"no message retained"/"silent, logged" | **logged drop-on-full/closed**; rejected `I` retained through logging; socket backpressure is upstream-only; logging/scheduling are separate, unmeasured cross-task effects |
+
+## A45.1 evidence ledger
+
+| Ref | Source | Fact |
+| --- | --- | --- |
+| E1 | `p2p_node_builder.rs:1797`; `p2p_tcp.rs:1652–1667` | demuxer receiver = `subscribe()`'s new `mpsc(256)`; forwarder holds `Arc<Mutex<Rx>>` guard, awaited send, `break`-on-closed drops guard not Rx |
+| E2 | `p2p_tcp.rs:430,593` | shared transport-ingress `mpsc(256)` receiver held in `Arc<Mutex<Receiver>>` |
+| E3 | `p2p_tcp.rs:1468–1526` | read_loop: no early `drop(frame_bytes)`; `frame_bytes`+`envelope` overlap during awaited send |
+| E4 | `secure_channel.rs:415–418`; `transport.rs:33–45,49–66,95`; `connection.rs:407–428`; `framed_io.rs:124–131` | recv_app decode→encode→decode; `buf[5..].to_vec()` + `encode()` + 2nd decode = overlapping ciphertext copies before plaintext |
+| E5 | `p2p_inbound.rs:511–519` | `try_send` `Err` owns the rejected envelope; retained through the `eprintln!` logging scope |
+| E6 | `main.rs:6177,6186` | consensus-ingress `mpsc(256)`; Run-035 sender_clone DevNet-only/operator-armed |
+
+---
+
+*End of A45.1 ingress queue-inventory / buffer-lifetime / backpressure correction layer (internal
+v1.126). The complete v1.125 input is preserved byte-for-byte below.*
+
 <!-- A45 PRODUCTION CONSENSUS INGRESS: BUFFER OWNERSHIP / QUEUE LIMITS / BACKPRESSURE LAYER (internal v1.125) — prepended to the preserved v1.124 input below -->
 # QBIND Security Findings Register
 
