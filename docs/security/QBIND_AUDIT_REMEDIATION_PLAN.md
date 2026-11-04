@@ -214,7 +214,7 @@ not this task's source verification.
 | A15-F1 | OPEN supervision/observability gap; A14.1-D at A:L11708-L11728, A45.1 preserves | Consensus JoinHandle owners; D; O/R availability relevance | Check owner detection and process/task propagation; avoid rewriting component scope into protocol-safety claim | Task termination, owner detection, transport/metrics outcomes and cleanup E21; no automatic recovery claim |
 | A17-F1 | OPEN logical-only catch-up endorsements; A5/A19.3/A19.4, A:L9260; downstream disagreement unestablished | RestoreCatchupResponse/QC reconstruction; D; R-F7 relevance | Check admitted validator/anchor/chain conditions and exact current consumer; do not conflate TC setter | Missing endorsement verification, suffix/commit controls and effects; later E20 multi-node evidence; no arbitrary-finality assertion |
 | A19-F1 | OPEN parsed-but-ignored authority RemoteSigner selector; A19.1/A20, A:L9782-L10350 | Authority trust-bundle signing surfaces; D/MI; C5/O | Preserve seven-surface map; decide consume/remove selector under relevant contract, not duplicate validator signer | Selected-policy enforcement on each differing surface, clear refusal/operator documentation |
-| A21-F1 = QBIND-A1-F001 | **OPEN; CONFIRMED TO THE STATED SOURCE MECHANISM**; R7.1 at A:L14115-L14128 and A44 qualifications retained; section 12 | Proposal decoder, after optional QC, before tx-body/sender checks; D; O/R availability relevance | Bounded allocation-free structural preflight **IMPLEMENTED — VERIFICATION PENDING** at section 12's implementation/test revision; independent post-implementation review PENDING; no arbitrary resource caps or policy bypass | Focused E12 decoder regressions passed on the producing revision; source/runtime review and deployment evidence remain distinct; E13 queue/aggregate-memory scope separate |
+| A21-F1 = QBIND-A1-F001 | **OPEN; CONFIRMED TO THE STATED SOURCE MECHANISM**; R7.1 at A:L14115-L14128 and A44 qualifications retained; section 12 | Proposal decoder, after optional QC, before tx-body/sender checks; D; O/R availability relevance | Bounded allocation-free structural preflight **IMPLEMENTED — BOUNDED REVIEW PASSED**: independent source review and retained-evidence inspection at section 12's recorded revisions; no arbitrary resource caps or policy bypass | Author-executed focused E12 regressions recorded separately; bounded review does not close E12 or runtime/deployment evidence; E13 queue/aggregate-memory scope separate |
 | A23-F1 | OPEN K!=T ratified-target/bundle-signer gap; A9.1 at A:L13517-L13518; A26 refinements retained | V2 trust ratification/install; D; C4/O | Ratification invocation/data-dir and independent genesis provenance prerequisites; retain DevNet no-data-dir no-op qualification | K/T, external genesis and gate/config controls; E23; not automatic runtime authorization escalation |
 | A24-F1 | OPEN opt-in metrics HTTP resource limits/deadlines; A15 at A:L11446-L11489 | Metrics HTTP handlers; D; O | Check enabled/reachable endpoint and size/concurrency/deadline controls | Bounded request/header/stall/handler/shutdown evidence E24; default-disabled is reachability mitigation |
 | A25-F1 | Source-established operator-assurance gap; severity uncertain, no distinct ratification authorization bypass; A25.2 at A:L8351-L8426 | Run-163 governance-proof fixture verifier; D/MI; C4/C5/O | Preserve upstream real ratification gate; decide real independent authority proof versus truthful unavailable control | Public-data issuer-pattern/threshold controls plus approved real proof; no bypass of upstream signature inferred |
@@ -276,7 +276,7 @@ statuses not supported by a current-lineage review remain provisional.
 | OBL-AVL-4b | Eviction/reconnect full socket-release chain traced scoped; A13.1, A45.1 accounting preserves | D/ME / service shutdown / O | Abort request != blocking worker/socket completion | E14 completion and reload evidence |
 | OBL-SUP-1a | Consensus-task owner/supervision SOURCE-COMPLETE bounded; A14.1/A15-F1 | D/ME / main task ownership / O/R relevance | Preserve actual owner/caller and no-inbound persistence corrections | E21 detection/recovery/process outcomes |
 | OBL-SUP-1b | Outbound dial read-loop qualification source traced; A26 historical section 31 plus A13.1, A23.1 baseline rule | ME / dial/read ownership / O | Check precise route before applying older trace | E21 termination propagation and cleanup |
-| OBL-PAR-1 | Inner parser/allocation source inventory complete to scope, A7.1/R7 then A42.1/A43.1; bounded A21-F1 correction implemented and focused regressions passed at the section 12 producing revision; independent review PENDING | D/ME / consensus/DAG codecs / O | Preserve hand-written versus serde distinction; no bincode limit-counter claim; obtain independent implementation review; retain caller-specific input and resource questions | Caller-specific input caps, availability, nesting, reservation and E12/E13 residuals remain; no obligation closure |
+| OBL-PAR-1 | **OPEN**; inner parser/allocation source inventory complete to scope, A7.1/R7 then A42.1/A43.1; bounded A21-F1 correction **IMPLEMENTED — BOUNDED REVIEW PASSED** by independent source review and retained-evidence inspection (section 12); author-executed regressions recorded separately | D/ME / consensus/DAG codecs / O | Preserve hand-written versus serde distinction; no bincode limit-counter claim; select and independently verify the next bounded remediation from the remaining plan without authorizing implementation here | Caller-specific input caps, availability, nesting, reservation and E12/E13 residuals remain; no obligation closure |
 | OBL-PAR-2 | Outbound-size boundaries source traced scoped A21/section 26.4b; A45.1 ingress does not close outbound | ME / frame/channel encoders / O | Check caller-specific outbound size and byte ownership | E13 item count != bytes; in-flight/copies included |
 | OBL-DEP-1 | Retrievable pinned source, not availability-blocked (A23.1); bounded decoder review complete A43.1, broader residual open | ME / bincode/serde/std allocator / A/O | Do not re-queue completed schemas; pin remaining growth/aggregate question | Provenance, capacities versus requests, aggregate/runtime RSS E12 |
 | OBL-DEP-2a | Repo-owned randomness/error chain complete sub-boundary A39.1; overall not declared complete A40 | ME / qbind-crypto integration / C5/O | Keep backend correctness/entropy and secret erasure separate | A40 platform/build inputs, A41 erasure scope; E06 |
@@ -324,7 +324,7 @@ existing scoped results retained.
 | E09 | Deployment and validator launch profile | ME / live operation / M4/M6/S5/S7/RS1 | Four stopped machines are not live evidence; approved deployment/test scope first |
 | E10 | A4-F1 occupancy and A4-F2 cookie integration | ME / handshake resources / O | Occupancy/worker/socket release and complete cookie/client retry, not rate alone |
 | E11 | A5-F1 frame-timeout platform behavior | ME / read framing / O | Exact partial-consumption schedule with idle/valid controls and connection outcome |
-| E12 | Parser/dependency/aggregate memory; A21-F1 decoder evidence obligation retained | ME / codecs/allocator / O/A | A43.1 schema source work retained; bounded A21-F1 structural preflight and focused regressions passed at section 12's producing revision, independent review PENDING; explicit cap != heap cap, request != capacity/RSS; broader dependency/aggregate residuals remain open |
+| E12 | **OPEN**; parser/dependency/aggregate memory; A21-F1 decoder evidence obligation retained | ME / codecs/allocator / O/A | A43.1 schema source work retained; bounded A21-F1 structural preflight **IMPLEMENTED — BOUNDED REVIEW PASSED** by independent source review and retained-evidence inspection (section 12); author-executed focused regressions separate; explicit cap != heap cap, request != capacity/RSS; broader dependency/aggregate residuals remain open |
 | E13 | Queue/ownership/outbound byte budgets; separate queue/aggregate-memory scope, not the A21-F1 local correction | ME / channels/encoders / O | Four-channel A45.1 inventory, in-flight buffers/concurrency/outbound caller sizes and deployment-dependent effects retained; no global ceiling asserted or closed by section 12 |
 | E14 | Displaced-session/eviction/reload completion | ME / session lifecycle / O/C4 | Registered/displaced, idle/active, EOF/fatal, task and blocking worker plus socket completion |
 | E15 | Transaction families/auth/caller/state/nonce | DD/MI/ME / native/ledger/EVM / R before ingress | RUN 422 source/test slices retained; approved positive authority and actual deployed caller remain |
@@ -1130,11 +1130,13 @@ CRLF-aware whitespace checks passed. Only the two authorized paths are
 staged for delivery; final commit/tree/remote checks are reported separately
 after commit, without a self-referential hash in this document.
 
-**Next action (supersedes the prior A21-F1 contract-review instruction):**
-independent post-implementation review under section 2 of the bounded source
-and corrected test changes at the producing revisions recorded in section 12.
-Independent post-correction review is
-PENDING; this record is not an approval or a finding closure. Section 8's
+**Next action (supersedes the prior A21-F1 contract-review and bounded
+post-correction review instructions):** select and independently verify the
+next bounded remediation from the remaining plan under section 2. Section 12
+records the completed bounded A21-F1 source review and retained-evidence
+inspection; earlier pending instructions are historical for that scope only.
+This record neither chooses unresolved policy nor authorizes implementation,
+creates a finding, or closes an overall finding or evidence obligation. Section 8's
 E07 / OBL-REL-1a / A48.1-C2
 bounded correction is implemented, independently verified and published;
 it is no longer the next implementation. Unrelated BR decisions remain
@@ -1145,12 +1147,13 @@ remains DISABLED and public DevNet NO-GO.
 
 **Current status:** A21-F1 remains **OPEN, CONFIRMED TO THE STATED SOURCE
 MECHANISM**. The bounded correction and focused test implementation are
-**IMPLEMENTED — VERIFICATION PENDING**; focused regression validation passed
-on its producing revision. Independent post-implementation review is
-**PENDING**. Runtime, deployment and release evidence are **NOT EXECUTED**.
-The supplied review and corrective test/evidence run below narrowly supersede
-the earlier coverage and evidence-delivery claims, not the production
-implementation or the historical run results.
+**IMPLEMENTED — BOUNDED REVIEW PASSED**, meaning independent source review
+and offline inspection of authoritative retained evidence. Author-executed
+focused regression results remain separately attributed to their producing
+revisions; the reviewer did not rerun them. Runtime, deployment and release
+evidence are **NOT EXECUTED**. The subsequent review disposition below
+supersedes review-pending statements only within this completed bounded
+scope, not the overall finding, broader obligations or historical run results.
 
 The original pre-implementation contract, review boundary and proposed
 acceptance matrix below are retained as history. Their FUTURE / NOT EXECUTED
@@ -1165,7 +1168,8 @@ mechanism, decoder/caller references, compatibility boundaries, documentation
 scope and retained inventories. It did **not** execute decoder tests, approve
 an unseen implementation, establish a deployment target matrix, or approve
 an allocation-observer implementation. The target/testing addendum below
-remains **AWAITING INDEPENDENT REVIEW**; its reviewer is UNASSIGNED. Finding
+was then **AWAITING INDEPENDENT REVIEW**, with reviewer UNASSIGNED (historical
+proposal status, superseded only to the later recorded review scope). Finding
 confirmation is not an executed exploit or implementation approval.
 Implementation/evidence assignees and comparative priority remain UNASSIGNED /
 ASSESSMENT PENDING. This is a bounded next candidate, not a new finding,
@@ -1677,8 +1681,9 @@ causes. Do not fabricate measurements or evidence files.
 ### Original bounded implementation and verification record (historical run)
 
 The results below remain results of the original producing revision. The
-supplied subsequent review did not rerun these tests or inspect the original
-raw artifact. Its four test/evidence findings and the corrective run are
+earlier supplied source review did not rerun these tests or inspect the original
+raw artifact; the later offline inspection is recorded separately below.
+The earlier review's four test/evidence findings and the corrective run are
 recorded separately below; passing the original suite did not establish the
 missing coverage or external artifact delivery.
 
@@ -1701,19 +1706,19 @@ missing coverage or external artifact delivery.
 | Existing qbind-wire integration targets | Command `cargo test --locked --target x86_64-unknown-linux-gnu -p qbind-wire --test consensus_roundtrip_tests --test consensus_signing_preimage_tests --test epoch_roundtrip_tests --test payload_type_roundtrip_tests --test net_roundtrip_tests --test net_message_limits_tests -- --test-threads=1` passed at the same locked target/profile: `consensus_roundtrip_tests` 10; `consensus_signing_preimage_tests` 13; `epoch_roundtrip_tests` 7; `payload_type_roundtrip_tests` 6; `net_roundtrip_tests` 10; `net_message_limits_tests` 12 (58 passed total, 0 failed). |
 | Formatting and scope | `rustfmt --edition 2021 --check` passed for the test file and for the decoder source with only a temporary final newline added for the formatter; the decoder's original no-final-newline convention is preserved in the committed file. `git diff --check` passed. The baseline and current canonical-finding, obligation, and evidence identity tables are unchanged (29 findings, 54 obligations, E01–E27). No dependencies, manifests, readers, encoders, node files, audit register, RUN 422 material or other paths changed. |
 | Retained evidence | Raw Cargo logs, all 22 candidate child records and event snapshots, 6 calibration child records/snapshots, 2 baseline child records/snapshots, protocol-negative outcomes, baseline overlay identity, FFI check, and toolchain/profile capture are retained under `/root/.copilot/session-state/68e4e5078c814cc7ba7fec6c8c02e063/files/a21-f1-evidence/`. `AUTHORITATIVE-MANIFEST.txt` enumerates 102 retained files with sizes and SHA-256 values (14,480 bytes; SHA-256 `942f0041fd609d044b66db0be7581e4f096517b70abed2aa3069e00997658e3a`). The temporary baseline checkout is excluded and is not an evidence location. |
-| Review and residual disposition | Independent post-implementation review **PENDING**. A21-F1 remains **OPEN**; OBL-PAR-1, E12 and E13 remain open. Optional-QC allocations, valid-input allocation/layout failures, aggregate-memory and queue/outbound ownership, unreviewed targets, node/runtime/deployment and release evidence remain separate. No live exploit, node execution, deployment, activation or release validation was run. Activation remains **DISABLED**; public DevNet remains **NO-GO**. |
+| Historical review and residual disposition | Independent post-implementation review was **PENDING** at this original run; superseded only for the subsequent bounded review scope below. A21-F1 remains **OPEN**; OBL-PAR-1, E12 and E13 remain open. Optional-QC allocations, valid-input allocation/layout failures, aggregate-memory and queue/outbound ownership, unreviewed targets, node/runtime/deployment and release evidence remain separate. No live exploit, node execution, deployment, activation or release validation was run. Activation remains **DISABLED**; public DevNet remains **NO-GO**. |
 
 ### Supplied review and corrective test/evidence record
 
-**Supplied independent ChatGPT review:** “At revision
+**Historical supplied independent ChatGPT source review:** “At revision
 8497c7b52bbb483675ebd9be480b694f40d160bd, source review found the three
 requested code/test corrections resolved: shared real-validator negatives,
 missing matrix cases, and bounded child cleanup. The production decoder was
 unchanged. The reviewer did not rerun Rust tests or inspect the undelivered
 raw archives. Independent raw-evidence verification remains pending.”
 This is the supplied review statement, not a signed review, timestamp or
-transcript URL. It does not claim that the reviewer inspected the now-delivered
-archives.
+transcript URL. At that stage it did not claim archive inspection; the
+subsequent inspection and disposition are recorded separately below.
 
 GitHub Copilot authored the corrective tests and evidence. Entry checks
 confirmed clean tracked/untracked state on the existing task branch
@@ -1864,7 +1869,7 @@ are unchanged. Final commit/tree, task-tip equality and remote-main checks
 are reported after the subsequent evidence commit; no self-referential hash
 is invented here.
 
-**Repository evidence delivery (this task):** the exact verified original and
+**Historical repository evidence delivery:** the exact verified original and
 corrective archives, both mode `100644`, and their guide are now available in
 [`docs/security/evidence/a21-f1/README.md`](evidence/a21-f1/README.md).
 The README records archive sizes/hashes, embedded manifest names/hashes,
@@ -1873,7 +1878,8 @@ independent raw-evidence verification remains pending; repository delivery
 does not imply the reviewer inspected these archives. The prior
 session-only transfer block above is retained strictly as historical status.
 
-Independent **post-correction review remains PENDING**. A21-F1 remains
+**Historical delivery-time status (superseded only for the bounded review
+below):** independent **post-correction review remained PENDING**. A21-F1 remains
 **OPEN**; implementation **IMPLEMENTED — VERIFICATION PENDING**;
 OBL-PAR-1/E12/E13 remain open; activation **DISABLED**; public DevNet
 **NO-GO**. Production optional-QC/outer allocations, valid-input
@@ -1881,6 +1887,97 @@ allocation/layout failures, aggregate/queue/outbound ownership, unreviewed
 targets and runtime/release evidence remain separate residuals. E07's
 accepted bounded result and unrelated inventories/gates are unchanged. No
 node execution, deployment, activation or integration approval is implied.
+
+### Subsequent independent bounded review disposition
+
+**Attribution and method:** independent ChatGPT review supplied through this
+documentation task. The bounded production preflight received source review.
+Subsequent source review at
+`8497c7b52bbb483675ebd9be480b694f40d160bd` found the three requested
+code/test corrections resolved: negative controls exercise the actual
+child-result validator; missing later-body/signature-prefix, wrapped
+trailing-byte and setup-refusal cases are covered; process-management errors
+enter bounded cleanup with explicit outcomes.
+
+Independent offline inspection at delivery revision
+`2e93ba7c202898f275703c94df8ed9677aa111e6` then retrieved both committed
+archives and verified exact archive sizes, SHA-256 hashes and Git blob
+identities, safe regular-file membership and complete embedded-manifest
+coverage. All 102 original and 299 corrective manifest-listed files were
+checked (401 entries total), plus the two manifest identities. Archive and
+manifest sizes/hashes recorded above and in the committed
+[evidence README](evidence/a21-f1/README.md) are retained unchanged.
+
+| Committed evidence | Git blob identity |
+|---|---|
+| [Original archive](evidence/a21-f1/a21-f1-original-evidence.tar.gz) | `4ebfdb694599e32bd0e027e86ec3f11f1f083ad1` |
+| [Corrective archive](evidence/a21-f1/a21-f1-corrective-evidence.tar.gz) | `3489829f4734e57fe4d01f0ede73ce78520a543a` |
+
+The archived final test source matches Git blob
+`b064d22dd678593e4f7d3133d9c3679de51e5a80`. Authoritative binary records,
+event snapshots and parent logs agree on invocation/case identities, record
+sequences, setup limits/dumpability, assertion sets, request counters and
+process outcomes. The final corrective evidence supports 26 candidate
+children, six calibration children, two setup refusals, five cleanup controls
+and revised modest baseline controls. Retained logs report two shared-validator
+positive fixtures, 89 synthetic rejections, four actual dispatch-negative
+outcomes, and the focused suite result of five passed/two intentionally
+ignored. Original retained integration logs report 58 passes across the six
+unchanged targets. These are inspection conclusions about retained
+author-executed results, not new executions.
+
+**Historical evidence qualification:** the original archive's
+`original/instrumentation-final/instrumentation/*/records.bin` contains three
+GUARD records whose bytes 88–95 are zero rather than the offending-event
+values required by the final format: 1, 65 and 257. Those earlier records were
+excluded from acceptance under the final format. The original
+`postcommit/instrumentation/` and corrective `authoritative/instrumentation/`
+records contain the required values and passed independent inspection.
+This historical record-format discrepancy is distinct from the accepted
+later evidence. The historical archive is not altered, removed or regenerated,
+and its previously reported test pass is not recast as a newly executed failure.
+Earlier development evidence was not substituted for the authoritative run.
+
+| Revision role | Producing / inspected revision |
+|---|---|
+| Original implementation/test revision | `9bc10bb0313505697ce7a4e46e4612edec7e9814` |
+| Authoritative corrective test revision | `2007126aec85dcd4b470e18d08bbed01ff67a942` |
+| Corrective source-review revision | `8497c7b52bbb483675ebd9be480b694f40d160bd` |
+| Evidence delivery, independently inspected revision and published implementation tip | `2e93ba7c202898f275703c94df8ed9677aa111e6` |
+
+The production decoder remains blob
+`5a60b7a1aed1bfb93a78817224e11f89276e5868`; the focused test remains blob
+`b064d22dd678593e4f7d3133d9c3679de51e5a80`.
+
+**Conclusion:** “PASSED/CLOSED — bounded A21-F1 structural-preflight
+implementation review and inspection of its authoritative retained evidence.
+No remaining blocking issue was found within that scope.”
+
+The reviewer performed source review and offline inspection of retained
+evidence, did not rerun Rust tests, independently reproduce execution,
+authenticate a release binary or establish deployment readiness. No signature,
+transcript URL, precise review timestamp or additional approval is asserted.
+The unchanged archive/README review-pending statements describe delivery-time
+status; this plan record is the subsequent bounded review disposition.
+**IMPLEMENTED — BOUNDED REVIEW PASSED** closes only that review scope, not
+A21-F1 / QBIND-A1-F001 overall or broader evidence obligations.
+
+### Separate publication evidence
+
+Supplied user-terminal evidence reports a non-force publication from
+`73c2ad6e249ff77f6fd10761d1a2f90c34d9a903` to
+`2e93ba7c202898f275703c94df8ed9677aa111e6`, tree
+`7263b229ed2aa8e283860337c5a1a77bdd77492b`. That terminal output reports
+matching local/remote main and a clean user checkout. The user's local-checkout
+observation is attributed solely to the supplied output; this task did not
+inspect the user's machine. A subsequent GitHub read confirmed remote main at
+that commit, also matching this documentation task's entry observation.
+Publication is separate from source review, test execution and evidence
+inspection. This report does not prove ancestry across an unavailable shallow
+boundary: this task's starting commit has raw parent
+`8497c7b52bbb483675ebd9be480b694f40d160bd`, but that parent object is
+unavailable in this shallow checkout. No ancestry from the publication's
+reported starting revision is inferred from that raw parent field.
 
 ### Scope and evidence status
 
@@ -1899,9 +1996,14 @@ failures, broader E12 dependency/aggregate-memory questions and all E13
 queue/ownership/outbound-byte questions remain open.
 
 **Status remains:** A21-F1 **OPEN, CONFIRMED TO THE STATED SOURCE MECHANISM**;
-implementation **IMPLEMENTED — VERIFICATION PENDING**; focused decoder
-regressions passed on the recorded producing revision; independent
-post-implementation review **PENDING**; runtime/deployment/release evidence
+implementation **IMPLEMENTED — BOUNDED REVIEW PASSED** for independent source
+review and authoritative retained-evidence inspection only; author-executed
+focused decoder regressions passed on their recorded producing revisions;
+runtime/deployment/release evidence
 **NOT EXECUTED**; activation **DISABLED**; public DevNet **NO-GO**. This bounded
 task does not close OBL-PAR-1, E12 or E13 and does not change unrelated BR
-decisions or operational gates.
+decisions or operational gates. Optional-QC/outer allocations, valid-input
+allocation/layout failures, aggregate-memory/queue ownership, unreviewed
+targets and runtime/release evidence remain unresolved to their existing scopes.
+This documentation-only task runs no builds, project tests, scanners, nodes,
+provisioning, signing, deployment or activation and changes no evidence files.
