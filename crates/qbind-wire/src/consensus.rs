@@ -763,15 +763,18 @@ impl WireDecode for BlockProposal {
             None
         };
 
-        let mut txs = Vec::with_capacity(tx_count as usize);
-        for _ in 0..tx_count {
-            let tx_len = get_u32(input)? as usize;
+        preflight_proposal_payload(input, tx_count)?;
+
+        let tx_count_usize = usize::try_from(tx_count).map_err(|_| WireError::LengthOverflow)?;
+        let mut txs = Vec::with_capacity(tx_count_usize);
+        for _ in 0..tx_count_usize {
+            let tx_len = usize::try_from(get_u32(input)?).map_err(|_| WireError::LengthOverflow)?;
             let tx_bytes = get_bytes(input, tx_len)?.to_vec();
             txs.push(tx_bytes);
         }
 
         // Read signature (length-prefixed with u16)
-        let sig_len = get_u16(input)? as usize;
+        let sig_len = usize::try_from(get_u16(input)?).map_err(|_| WireError::LengthOverflow)?;
         let sig_bytes = get_bytes(input, sig_len)?.to_vec();
 
         Ok(BlockProposal {
@@ -796,6 +799,26 @@ impl WireDecode for BlockProposal {
             signature: sig_bytes,
         })
     }
+}
+
+fn preflight_proposal_payload(input: &mut &[u8], tx_count: u32) -> Result<(), WireError> {
+    let mut scan = *input;
+    let result = (|| {
+        let tx_count = usize::try_from(tx_count).map_err(|_| WireError::LengthOverflow)?;
+        for _ in 0..tx_count {
+            let tx_len =
+                usize::try_from(get_u32(&mut scan)?).map_err(|_| WireError::LengthOverflow)?;
+            get_bytes(&mut scan, tx_len)?;
+        }
+        let signature_len =
+            usize::try_from(get_u16(&mut scan)?).map_err(|_| WireError::LengthOverflow)?;
+        get_bytes(&mut scan, signature_len)?;
+        Ok(())
+    })();
+    if result.is_err() {
+        *input = scan;
+    }
+    result
 }
 
 /// Legacy domain separator for BlockProposal signing preimages.
