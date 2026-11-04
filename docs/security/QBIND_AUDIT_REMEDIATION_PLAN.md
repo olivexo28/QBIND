@@ -154,8 +154,10 @@ not omitted fields):**
   baseline, not silently promoted to that baseline or current main.
 * **Current-code applicability:** **NOT YET CHECKED**, except the specifically
   bounded current script/schema/caller observations in section 8 and
-  A21-F1 mechanism verification in section 12, and document-cited existing
-  verification in section 7. A reference to a RUN 422
+  A21-F1 mechanism verification in section 12, QBIND-A1-F002 source/caller
+  verification at the exact baseline in section 13 (correction contract
+  AWAITING INDEPENDENT REVIEW), and document-cited existing verification
+  in section 7. A reference to a RUN 422
   result is only evidence for its stated scope/revision, not blanket current
   applicability or a new source review. Before implementation, record the
   independent pre-implementation review and its bounded outcome under section
@@ -222,7 +224,7 @@ not this task's source verification.
 | A31-F1 | OPEN stale outbound root; A10.1 at A:L13172 | Dial retry/handshake root snapshot; D/DD; C4/O | Correct two-root witness, pinned peer KEM private-key and reload-window prerequisites | Root-signature pass, handshake completion, registry insertion separately; E26; single-root witness withdrawn |
 | A33-F1 | Conditional engine non-termination source-established; A5.3 at A:L15366; A22.1 restores current-baseline status | Block eviction ancestry walk; D; R/O availability relevance | Operator-crafted anchor and admitted catch-up construction; no hash-collision premise or anonymous attack claim | Exact registration-before-vote state/capacity, cycle termination and bounded impact E27; runtime UNEXECUTED |
 | H04-F1 | Remote signer non-functional/unwired; A18/A18.1, A:L10351-L10740 | Validator daemon accept loop/node signer mode; MI; C5, not standalone DevNet blocker by audit | Use separate-signer feasibility/approved profile; do not transfer dead handler checks to live accept loop | Actual accept/handshake/handler and required/optional-mode evidence E17; no signing-oracle claim |
-| QBIND-A1-F002 | OPEN carried offline duplicate-approval quorum bypass; A:L9280, A:L16506-L16510 | Offline qbind-gov approval counting; D; C5/O | Check distinct-signer counting in current CLI before bounded fix; not native A8-F1 | Duplicate/distinct valid approvals, threshold boundaries and offline output controls |
+| QBIND-A1-F002 | **OPEN; CONFIRMED TO THE STATED OFFLINE SOURCE MECHANISM** at `427c72a6bd2712b58c2777df2b26145463ef1257`; supplied independent source review, section 13; A:L9280, A:L16254, A:L16363, A:L16506-L16513 | Offline qbind-gov approval counting; D; C5/O | Independently review section 13's duplicate-member rejection contract before implementation; NOT STARTED; distinct from A8-F1, A23-F1 and bootstrap authority | FUTURE / NOT EXECUTED duplicate/distinct real-signature controls, threshold boundaries, both library entry points and CLI text/JSON/exit behavior; no new evidence ID |
 | QBIND-A1-F003 | Durable timeout-signing design risk; exploitability unproven; A26 at A:L8099-L8230 | Timeout/NewView cross-restart history; DD/MI/ME; R-F5/C5 | Establish operation-specific journal and continuity requirements; RUN 422 Proposal/Vote result does not close it | Exact preimages/operations, durable history, restart/uncertainty/copies under approved scope; no slashable conflict asserted |
 | QBIND-A1-F004 | Carried non-test insecure transport defaults; A:L9282, A:L16360-L16366 | Dummy providers/mutual-auth-disabled configuration axes; D/DD; O/C4/R | Check actual mode/primitive/map combination and operator-selected profile | Per-combination configured binary evidence, not source inclusion as deployed observation |
 | QBIND-A1-F006 | Carried repository-documentation overstatement; not freshly revalidated by audit; A:L9283, A:L15919 | Repository claims versus OPEN posture; D; A/O/C | Name exact present-tense claim and current applicable evidence before correction | Source/evidence-linked claim review; report corrections alone do not close this repository finding |
@@ -1130,9 +1132,12 @@ CRLF-aware whitespace checks passed. Only the two authorized paths are
 staged for delivery; final commit/tree/remote checks are reported separately
 after commit, without a self-referential hash in this document.
 
-**Next action (supersedes the prior A21-F1 contract-review and bounded
-post-correction review instructions):** select and independently verify the
-next bounded remediation from the remaining plan under section 2. Section 12
+**Current next action (supersedes the prior generic candidate-selection
+instruction):** obtain independent review of the QBIND-A1-F002 correction
+contract in section 13 under section 2; contract **AWAITING INDEPENDENT
+REVIEW**, implementation **NOT STARTED**, finding **OPEN**. The supplied
+source review confirms only the stated mechanism, not this completed contract.
+Do not implement in this documentation task. Section 12
 records the completed bounded A21-F1 source review and retained-evidence
 inspection; earlier pending instructions are historical for that scope only.
 This record neither chooses unresolved policy nor authorizes implementation,
@@ -2007,3 +2012,269 @@ allocation/layout failures, aggregate-memory/queue ownership, unreviewed
 targets and runtime/release evidence remain unresolved to their existing scopes.
 This documentation-only task runs no builds, project tests, scanners, nodes,
 provisioning, signing, deployment or activation and changes no evidence files.
+## 13. QBIND-A1-F002 pre-implementation contract: offline duplicate approvals
+
+**Finding: OPEN. Implementation commit: NONE. Implementation: NOT STARTED.
+Contract: AWAITING INDEPENDENT REVIEW. Regression/runtime evidence:
+NOT EXECUTED.** This is one concrete proposal for review, not a correction,
+implementation authorization, new audit finding or closure. Contract reviewer,
+implementation/evidence assignees: **UNASSIGNED**; comparative priority:
+**ASSESSMENT PENDING**. All BR decisions and release/operational gates remain
+unchanged; activation **DISABLED**; public DevNet **NO-GO**; RS1 and C4/C5
+remain OPEN. Sections 8 and 12, including accepted E07/A21 bounded reviews,
+historical GUARD qualification, evidence identities and publication records,
+are preserved byte-for-byte.
+
+### Entry identities and historical/current-source separation
+
+| Identity | Verified documentation-task entry |
+|---|---|
+| Repository; fetch/push destination | `olivexo28/QBIND`; `origin`, `https://github.com/olivexo28/QBIND` for both; no destination changes |
+| Starting commit; local main; fetched/advertised remote main | `427c72a6bd2712b58c2777df2b26145463ef1257` |
+| Starting tree | `a5c056a4c01bbfec7623158d60c7a9c409fd5ec8` |
+| Task branch | `copilot/audit-f002-distinct-approval-preimplementation-contract`; absent locally/remotely at entry, created from the exact start |
+| Sole permitted changed path; starting mode/blob | `docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md`; `100644` / `0543c589212cd2597e9fe720a8c4d4942e71ab63` |
+| Checkout/instructions | Clean including untracked files before editing; no applicable repository/ancestor `AGENTS.md` or repository instruction files found |
+| Raw starting parent; available-object ancestry | Raw header names `2e93ba7c202898f275703c94df8ed9677aa111e6`; that object is unavailable at the shallow boundary. No ancestry through it is inferred. Only the available start and subsequent task descent can be proven |
+| Pinned audit input, unchanged | `Audit/QBIND_SECURITY_FINDINGS_REGISTER.md`; `100644` / `cd81efdbaf2bfb45e00dc3c60db3ea4f523adfa0`; A49.1 / internal v1.138 |
+| Historical audited source, not this task's source baseline | `18d71a549d868ed33d352e9fc70a9d060f75e03b`, tree `5b6c543435ac017dd8372c93f48be397899db14a`; section 1's unavailable-object qualification remains |
+
+Audit locators retain section 1's exact input identity and line convention.
+A:L9280 carries F002 as an offline STATIC counting finding. A:L16254
+(preserved status snapshot) and A:L16363 (earlier current-baseline index)
+record confirmation at their audit baseline, no runtime evidence and offline
+CLI reachability; their word "current" is not this task's current-source
+verification. A:L16506-L16513 keeps F002 distinct from native **A8-F1**.
+A:L13684 also distinguishes **A23-F1** trust-bundle ratification. The
+historical optional approval-set digest change at A:L29118-L29119 is superseded
+by A:L28554-L28559's correction: preserve incremental signing and correct
+counting, not the digest. Its additional public-key-distinctness suggestion
+is not silently included in this member-ID proposal; key aliasing remains
+separate below. A49.1 does not close F002. RUN 422 bootstrap-authority
+decisions and native governance containment are not this finding.
+
+**Supplied independent source review (ChatGPT, as supplied in this task):**
+
+> At commit 427c72a6bd2712b58c2777df2b26145463ef1257, verify_envelope increments valid_count for every cryptographically valid approval without deduplicating member_id. With a structurally valid envelope and a validated 2-of-3 keyset, two copies of one genuine approval can therefore satisfy the current threshold. Council approvals are excluded from the signed digest; copying an approval does not change that digest. The CLI validates the keyset and envelope, then uses this verifier's result for its success verdict and exit status. This confirms the stated offline counting mechanism from source. No reproduction, deployed exploitation, signature forgery or native-consensus bypass was demonstrated.
+
+This is attributed supplied source review, not an independently retrieved
+transcript, signature, URL, precise review timestamp or approval of this
+completed contract. The author rechecked the following baseline sources.
+Source correspondence is not executed reproduction or independent contract
+acceptance.
+
+### Current source anchors and bounded caller/consumer inventory
+
+All source paths/line numbers in this section refer to the exact starting
+commit above. Each linked file is unchanged by this task.
+
+| Current source (mode `100644`) | Pinned blob | Rechecked mechanism / locator |
+|---|---|---|
+| [verify.rs](../../crates/qbind-gov/src/verify.rs) | `98c114623dcc09a1a2d505bf352e1705d4ba57de` | `VerificationResult` fields/helpers :43-78; `verify_envelope` :95-124; single-signature checks :127-189; threshold wrapper :194-208; existing real-crypto/helper tests :317-512 |
+| [council.rs](../../crates/qbind-gov/src/council.rs) | `45e87a93f97a4e75ccc1b220ead93daaac62e2cf` | Key validation :61-77; construction/parsing :108-133; thresholds/lookup/map :141-163; keyset validation :166-205; tests :208-316 |
+| [envelope.rs](../../crates/qbind-gov/src/envelope.rs) | `707483ff9213fb74e4113b09973d47482adf7fcf` | Approval fields/hex decoding :116-144; JSON parsing :200-211; structural validation :224-256; raw count helpers :263-271; errors :274-306; existing tests :308-434 |
+| [hash.rs](../../crates/qbind-gov/src/hash.rs) | `a68780a1353ce16275f5c7c470185ea3361adf7b` | Domain/digest :34-63; canonical fields exclude approvals :82-147; approval-exclusion test :219-238 |
+| [CLI](../../crates/qbind-gov/src/bin/qbind_envelope.rs) | `df952c77d6cd003794ea0b07378a6d8780502437` | Exit constants :42-46; inspect :122-182; verify/validators/error path :185-257; binary check :260-283; text :286-353; JSON :356-393 |
+| [lib.rs](../../crates/qbind-gov/src/lib.rs) | `f4e68132c05a68d77f5f24fbb91482193583b7aa` | Public modules/re-exports :63-77, including both verification entry points; ignored example :21-38 does not call structural validators |
+| [qbind-gov manifest](../../crates/qbind-gov/Cargo.toml) | `3514efce58d5bd0cfb8111ad491e9cf0a21b2d10` | Package/binary :1-9; real crypto, hex/JSON dependencies and existing `tempfile` dev-dependency :11-23 |
+
+**Search performed, bounded to tracked text at this baseline:** `git grep`
+over `crates/`, `scripts/`, `.github/`, root `Cargo.toml` and `Cargo.lock`
+for `qbind[-_]gov`, `qbind[-_]envelope`, `verify_envelope(_threshold)?`,
+`VerificationResult`, `approval_count`, `has_threshold`; supplementary
+`CouncilKeySet`, `CouncilSignature`, `UpgradeEnvelope`, `valid_members(`
+and `invalid_signatures(` searches in crates/scripts/workflows. Documentation
+search covered `docs/` (including `docs/devnet/`), root `README.md`, and tracked
+`examples/`, `tests/`, `tools/` and manifests where present. A further
+crate/verifier-name file-list-result search of tracked text outside `Audit/`,
+`docs/` and `crates/qbind-gov/` found only root manifest/lockfile and the
+release-build script. Unrelated consensus `VerificationResult` and rejected
+signature counters are different types, not envelope consumers.
+
+The shared verifier and threshold wrapper are **public library APIs**, not
+CLI-private functions. The CLI :224 is the located non-test executable caller;
+the wrapper delegates to the shared verifier at verify.rs:198. Unit tests call
+the library; docstrings in verify.rs/lib.rs show library examples (ignored,
+not executed).
+The workspace includes qbind-gov at Cargo.toml:17; the package manifest
+declares the standalone binary. [build-mainnet-release.sh](../../scripts/build-mainnet-release.sh):54-60,254-279
+maps `qbind-envelope` to qbind-gov and builds/packages it separately from
+qbind-node. Packaging does not demonstrate node invocation or deployment.
+[qbind-node/Cargo.toml](../../crates/qbind-node/Cargo.toml):28-64 has no
+qbind-gov dependency; inspection of the Cargo.lock workspace dependency
+closure rooted at qbind-node also found none. No node-side envelope API call
+was located in this bounded source search. This supports the stated offline
+boundary, not a universal proof that no external consumer exists.
+
+Protocol-report/alignment references and
+[native-governance contract](../devnet/QBIND_RUN_422_NATIVE_GOVERNANCE_AUTHORITY_CONTRACT.md):55-57,184-186,
+[RUN 422 evidence](../devnet/QBIND_DEVNET_EVIDENCE_RUN_422_D7.md):24329-24333
+and [contradiction notes](../whitepaper/contradiction.md):4265-4268
+are documentation, not executable integrations. Searches do not cover
+untracked/ignored/generated files, archive contents, external repositories,
+downstream API aliases or deployed binaries/configurations. No such absence
+is evidence of harmlessness or of no possible external library consumer.
+
+### Proposed shared-boundary refusal and compatibility contract
+
+For a **validated keyset** and structurally valid envelope, an authorization
+threshold must not be satisfied by repeatedly presenting one member's
+genuine approval. At this boundary the bounded identity is the configured
+**member ID**, not a claim about independent public keys or operators.
+
+1. At entry to `verify_envelope`, before `envelope_digest`, key-map building
+   or any cryptographic verification, scan the **entire**
+   `council_approvals` list for repeated `member_id` values. Use existing exact
+   Rust string equality, as in council.rs:152,160,191: no trimming, case
+   folding or new identity normalization. Include nonadjacent repetitions.
+2. Record the ID whose **second occurrence has the lowest input index**;
+   finish the list scan, then return
+   `EnvelopeError::VerificationFailed(format!("duplicate approval member_id: {}", member_id))`
+   for that ID if any duplicate exists. The stable payload is
+   `duplicate approval member_id: <exact ID>`; enum Display prepends
+   `verification failed: `. Selection must not depend on set iteration or
+   lexical sorting. For `[b,a,a,b]`, report `a`; reordering can change which
+   ID is first repeated, but not refusal. All repeated IDs are refused, not
+   merely the first adjacent pair.
+3. Do not count only the first occurrence, discard redundant entries,
+   short-circuit upon reaching threshold, or return any successful
+   `VerificationResult` for a duplicate-bearing input. The refusal applies
+   to identical or different signature/key/timestamp bytes; valid, invalid
+   and unknown-member duplicates; and inputs with an otherwise sufficient
+   distinct valid quorum. It takes precedence over digest/key-map/crypto
+   errors inside this function, not over earlier CLI parsing/validation.
+4. `verify_envelope_threshold` must propagate the identical refusal via its
+   existing `?`, not convert it to `ThresholdNotMet`. With no duplicate IDs,
+   retain the existing full verification path, ordered per-signature results
+   and helper semantics: unknown/mismatched/malformed/invalid extras are
+   marked invalid, and do **not** prevent success when enough other distinct
+   valid approvals meet threshold. Below threshold the main API still
+   returns a result with `is_valid()==false`; the wrapper returns
+   `ThresholdNotMet`.
+5. Preserve public signatures, result fields, serialized envelope/keyset/
+   output formats, canonical signed digest and `QBIND-ENVELOPE-v1:` domain
+   tag, ML-DSA-44 backend, configured thresholds and unrelated validation.
+   Do not add blanket structural-validation calls, public-key deduplication
+   or new policy checks as part of this bounded change.
+6. Preserve the existing CLI error path :224-230: duplicate refusal prints
+   `Error during verification: verification failed: duplicate approval member_id: <ID>`
+   plus newline to **stderr**, returns **exit 1**, and reaches neither binary
+   checking nor result rendering. For both default text and `--output json`,
+   **stdout is empty** on this early error: no success verdict, no JSON
+   result object, and no new JSON error schema. Earlier invalid keyset errors
+   remain exit 2; invalid envelope structure remains exit 1. Nonduplicate
+   result rendering and exit calculation :237-255 remain unchanged.
+
+**Compatibility trade-off:** duplicate-bearing envelopes previously accepted
+will be refused, including those with an otherwise sufficient distinct
+quorum. Removing redundant approval entries leaves the current signed digest
+unchanged because approvals are excluded; it does not supply missing distinct
+authority. This task repairs no artifact and performs no signing. External
+consumers expecting `Ok` on duplicate inputs must handle the existing error
+variant. `inspect` remains descriptive and can report duplicate entries;
+`approval_count` and `has_threshold` remain raw length helpers, **not**
+cryptographic authorization substitutes.
+
+### Adjacent gaps, dependencies and exclusions
+
+| Boundary / current source | Disposition for this proposal |
+|---|---|
+| CLI vs direct public calls: CLI :213-221; verify.rs:95-124,194-208; parsing in envelope.rs:200-211 and council.rs:119-128 | CLI explicitly validates keyset then envelope. Library parsing and both verification APIs do not automatically invoke all structural validators. Tests establishing the confirmed quorum case must validate inputs first. Do not imply this proposal closes all direct-library admission gaps |
+| Duplicate keyset IDs: council.rs:166-205 vs key_map :156-163 and find_key :151-153 | Keyset validation already rejects duplicate IDs and zero/excess thresholds; direct unvalidated calls can overwrite map entries (last entry), whereas find_key returns the first. Separate residual, not the attacker-supplied approval duplication. Preserve existing CLI rejection; do not broaden this change into keyset validation |
+| Threshold zero / emergency: council.rs:108-116,141-148,174-186; verify.rs:56-58,120-121 | Zero can pass `is_valid` on an unvalidated keyset; normal validation forbids it. The verifier uses normal threshold, not emergency threshold. No new zero/emergency/class policy selected; no claim that all library callers are safe |
+| Distinct IDs vs distinct keys/operators: council.rs:61-77,188-202; verify.rs:133-157 | Validation dedups IDs, not public keys or operators. Two configured IDs can alias a key; exact-ID rejection does not establish independent signers. Keyset authenticity, key uniqueness and operator independence remain separate unresolved authority requirements, not prerequisites to proving this limited member-ID invariant |
+| Algorithm policy: council.rs:69-75; verify.rs:171-188 | Key validation conditions length on the algorithm label; verifier always invokes ML-DSA-44. Algorithm admission/allowlisting is separate, not fixed or selected here |
+| Network/root provenance and replay/currentness: hash.rs:120-123,144; verify.rs:95-124; envelope.rs:116-144,224-256 | Envelope network is signed, but not compared with keyset/expected network; approvals/timestamps are excluded and timestamps not freshness-validated. Verifier takes supplied keyset, not an authenticated current root. No provenance, replay, currentness or one-use guarantee follows |
+| Binary-hash policy: CLI :233-255,260-283; envelope.rs:249-254 | Signature threshold is separate from checking a local binary. Missing optional check or missing platform can produce `None`, treated as true by `unwrap_or(true)`; this policy is unchanged, not endorsed or repaired |
+| Upgrade execution, native governance, trust ratification and founder-authorized bootstrap | No upgrade executor is called by CLI :185-257. A8-F1, A23-F1 and section 7's RUN 422 authority decisions remain separate; this proposal selects no operational council members, threshold, authority allocation or bootstrap policy |
+
+This is a bounded actionable authorization-counting candidate because a
+specific shared public boundary, a deterministic source mechanism and an
+offline verdict consumer are identified, with genuine-crypto positive and
+negative controls available. It is not asserted to be globally highest
+priority, a forgery, a deployed exploit or a native-consensus bypass; other
+defects are not declared harmless. No adjacent gap above is necessary to the
+exact-ID duplicate-refusal invariant. If independent review requires a
+broader identity or admission invariant, record that dependency and leave
+the contract **UNRESOLVED**, rather than claiming this proposal covers it.
+
+### Future acceptance matrix -- every case FUTURE / NOT EXECUTED
+
+All cases below are **FUTURE / NOT EXECUTED in this task**. Unless a row
+explicitly isolates direct-library residuals, use a structurally validated
+envelope and validated keyset. Use **disposable test credentials** and real
+ML-DSA-44 signing/verification, following verify.rs:324-460; never an
+always-success verifier, operational keys or operational signatures.
+Retain assertions and actual outcomes for both APIs and relevant CLI cases.
+Here, "duplicate refusal" means the exact variant/payload and no result
+specified above; "below threshold" distinguishes `Ok`/false from wrapper error.
+Row labels are local descriptions, **not new finding or evidence IDs**.
+
+| FUTURE case (all NOT EXECUTED) | Expected result and required evidence |
+|---|---|
+| Single genuine approval, threshold 1 | Main API and wrapper succeed; count 1, threshold 1, is_valid true; real-verification fixture and assertions |
+| Single genuine approval, validated 2-of-3 | Main API count 1 / false; wrapper `ThresholdNotMet { required: 2, actual: 1 }`; CLI text/JSON false and exit 1 |
+| Two distinct genuine approvals, validated 2-of-3 | Both APIs succeed with count 2; CLI text success / JSON valid true / exit 0 without binary check; controls use distinct disposable keypairs |
+| One genuine approval repeated, fewer than two distinct IDs | Duplicate refusal, not count 2 or ThresholdNotMet; separately retained baseline reproduction, if authorized, must not be mislabeled post-change regression |
+| Same ID, different key/signature bytes or timestamps | Duplicate refusal for each variation, including byte-identical copies; digest comparison remains equal when only approvals change |
+| Adjacent/nonadjacent duplicates; order variations; multiple repeated IDs | Refuse `[a,a,b]`, `[a,b,a]`, their permutations; assert first-second-occurrence rule on `[b,a,a,b]` and reordered inputs, not hash-set order |
+| Enough other distinct genuine approvals plus duplicate | Refuse even if distinct valid quorum is already met before the duplicate or would be met later; no early success |
+| Invalid-then-valid / valid-then-invalid, same ID | Same duplicate refusal in both orders, not first-wins/last-wins counting; include malformed encoding on the invalid occurrence |
+| Repeated unknown member ID | Same duplicate refusal even though neither signature could authorize; include repeated unknowns alongside a sufficient distinct quorum |
+| Distinct-ID unknown member / wrong approval public key / malformed key hex / malformed signature hex / cryptographically invalid signature | Each individually marked invalid with existing diagnostics; below-threshold result/wrapper error as appropriate. Repeat with enough other valid distinct IDs: success with invalid extras retained, not a new all-signatures-valid requirement |
+| Exact identity comparison | IDs differing only in case or whitespace are not duplicates; test membership against exact configured IDs and retain unknown-member results where absent; no new normalization |
+| Empty approvals; validated threshold boundaries | Main API count 0 / false and wrapper threshold error for valid positive thresholds. Exercise threshold 1, 2-of-3, and N-of-N with N-1/N distinct valid approvals; no zero-validations bypass in quorum fixtures |
+| Both entry points / nonduplicate helpers | Same duplicate variant/payload on both APIs. For nonduplicates assert threshold, ordered signatures, digest_hex, valid_count, is_valid, invalid_count, valid_members and invalid_signatures consistency, including mixed valid/invalid extras |
+| CLI early error, default text and `--output json` | Capture stdout/stderr/status: exact duplicate diagnostic, empty stdout, exit 1, no success or JSON object. Include optional binary path to show early return precedes binary I/O; preserve nonduplicate JSON schema and normal result/exit controls |
+| Canonical digest / existing distinct-member fixtures | Assert unchanged domain/canonical bytes and digest for unchanged payload with approvals added, removed, duplicated or reordered; existing real distinct-member success fixtures still accepted; digest test alone is not authorization |
+| Existing keyset rejection / CLI validation order | Zero threshold, threshold greater than key count, duplicate keyset IDs, invalid key material and unsupported version still fail keyset validation; CLI exit 2 before verifier, including duplicate approvals. Invalid envelope structure still exit 1 before verifier |
+| Clearly isolated direct-library residuals / precedence | Show parsing alone does not validate. Characterize unchanged zero/excess-threshold, duplicate-keyset and malformed-structure handling without presenting it as valid quorum evidence. Duplicate approvals still refuse at API entry, including when a malformed key-map hex would otherwise error; source review verifies guard precedes digest/crypto |
+| Raw helpers / inspect | Raw counts still include entries and inspect is not crypto authorization; their apparent threshold/structure output is never substituted for either verifier API |
+
+### Proposed future paths, focused commands and evidence handoff
+
+Only proposed future implementation path:
+`crates/qbind-gov/src/verify.rs` (shared preflight and its directly related
+API documentation; retain existing public types/signatures).
+Extend its existing `#[cfg(test)] mod tests` for both entry points and
+helper/real-signature controls. Extend existing
+`crates/qbind-gov/src/hash.rs` tests only for digest-invariance controls.
+Add `crates/qbind-gov/tests/envelope_cli_tests.rs` for CLI behavior, using
+`env!("CARGO_BIN_EXE_qbind-envelope")`, `std::process::Command` and existing
+`tempfile`; the repository precedent is
+`crates/qbind-node/tests/run_375_public_devnet_identity_cli_tests.rs:21-66,310`.
+This is a proposed new test target, not a file created now. Existing
+`council.rs` validation tests are preservation controls. No manifest,
+dependency, signing-format, CLI production, node or workflow change is
+anticipated; any necessary expansion needs a revised reviewed scope.
+
+**Proposed future commands, NOT RUN here** (from repository root, after
+independent contract review and separately authorized implementation):
+
+```sh
+cargo test --locked -p qbind-gov --lib --test envelope_cli_tests
+rustfmt --check --edition 2021 crates/qbind-gov/src/verify.rs crates/qbind-gov/src/hash.rs crates/qbind-gov/tests/envelope_cli_tests.rs
+```
+
+Keep independent contract review separate from any separately authorized
+**pre-change reproduction**, implementation, **post-change regressions**,
+independent code/evidence review, and later release/runtime evidence.
+Future batches must record exact producing SHAs, source/test blobs, actual
+commands/toolchain/configuration, exit statuses and pass/fail/ignored counts,
+plus retrievable logs/fixture identities and checksums without secret key
+material. Do not relabel a baseline outcome as a fixed result or use a
+later summary's HEAD as the producer. Implementation must remain
+**IMPLEMENTED — VERIFICATION PENDING** until independently reviewed; neither
+source completion nor passing tests alone closes this finding or operational
+gates. No new evidence ID is allocated; E01-E27 mappings and all 29 canonical
+finding identities, aliases and 54 obligation identities remain unchanged.
+
+This task performs only documentation/source correspondence, pinned
+identity/locator/link, scope/status/inventory, protected-section byte,
+mode/LF/terminal-newline and whitespace checks. Every other tracked file,
+including the audit register and evidence archives, is unchanged. No Cargo,
+key generation, signing, CLI execution, node or harness is run. Final
+documentation commit/tree, changed-path mode/blob manifest, raw parentage
+versus available-object ancestry, remote task-tip equality, unchanged remote
+main and clean worktree are reported after commit/push, without embedding a
+self-referential final hash.
