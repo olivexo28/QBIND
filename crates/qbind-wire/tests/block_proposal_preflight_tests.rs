@@ -1631,6 +1631,10 @@ fn wait_bounded(
     let mut injection_used = false;
     let mut kill_attempts = 0;
     loop {
+        if Instant::now() >= deadline && cleanup_deadline.is_none() {
+            outcome.timed_out = true;
+            cleanup_deadline = Some(Instant::now() + Duration::from_millis(500));
+        }
         let inject_poll = !injection_used
             && (matches!(injected, InjectedProcessError::Poll)
                 || (cleanup_deadline.is_some()
