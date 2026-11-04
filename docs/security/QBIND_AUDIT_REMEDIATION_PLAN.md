@@ -3035,3 +3035,45 @@ post-correction review remains **PENDING**. E07 / OBL-GOV-2 remain **OPEN**;
 activation **DISABLED**; public DevNet **NO-GO**. No real Cargo/Rust tests,
 release harnesses, node/helper binaries, networking, deployment, signing or
 activation are authorized or claimed by these corrections.
+
+### Watchdog-parent ownership follow-up (A37.1-C2 / A38-iv)
+
+The supplied independent review accepts the exact-destination publication
+correction within its documented GNU mv/single-writer contract, confirms
+the historical correction checksums/manifest, and retains the validity of
+its 120-invocation pass for tested conditions. It separately identified
+unowned parent-side watchdog exceptions after fork: an isolated unchanged-
+function KeyboardInterrupt reproduction left a worker/surrogate group alive,
+UNSAFE_GROUPS empty and permitted workspace deletion. Independent reviewer
+cleanup subsequently contained/reaped them. That report is not a full
+harness run or a retroactive failure of the original tested cases.
+
+Follow-up required entry: `d494ce2af1dd522e8ec0fc14c36b02a19e50b209`,
+tree `8449e9aa7683f68c113a1fb00b1491a0e6e75d5b`; clean existing task branch
+and remote tip matched. Protected main remained
+`f36e59a5e2cebab6fdfd0365920ca3e1a09444ac`. A separate local unchanged-
+function reproduction confirmed the reported leak/deletion with inert
+processes and recorded independent outer containment.
+
+The fixture now owns its watchdog worker immediately across fork with
+catchable signals deferred, a dedicated session for its guarded descendants,
+a pidfd for direct-worker signaling, and finally-backed cleanup independent
+of pipe announcements/decoding. Negative case groups stay inside that owned
+session. Cleanup is bounded, closes descriptors, reaps owned PIDs and requires
+kernel group/session absence; unresolved cleanup blocks reuse/further cases
+and retains the workspace. Original errors and separate cleanup failures
+are preserved. Linux subreaper/pidfd and validated `/proc` PID/group/session
+visibility are required. No SIGKILL/host-failure cleanup guarantee is claimed.
+Both production scripts and both historical evidence directories are
+unchanged. Historical manifests remain pinned to their historical revisions.
+
+[Watchdog follow-up evidence](evidence/a37-1-c2-supervisor-followup/README.md)
+distinguishes reviewer reporting, local reproductions, preliminary calibration
+and exact-producing-revision verification. This is a bounded implementation-
+review correction, not a new canonical audit finding.
+
+Status remains **IMPLEMENTED — VERIFICATION PENDING**; independent
+post-correction review **PENDING**. E07 / OBL-GOV-2 **OPEN**; activation
+**DISABLED**; public DevNet **NO-GO**. Only isolated inert/guarded fixtures
+are authorized, not real Cargo/builds/nodes/helpers, release execution,
+deployment, signing or activation.

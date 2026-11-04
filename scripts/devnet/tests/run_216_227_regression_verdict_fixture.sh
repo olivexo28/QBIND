@@ -262,6 +262,7 @@ RECORDS = []
 UNSAFE_GROUPS = set()
 SUPERVISION = []
 WATCHDOG_REPORT_FD = None
+WATCHDOG_SESSION = None
 
 def group_members(pgid):
     found = []
@@ -284,15 +285,22 @@ def group_alive(pgid):
         return False
 
 def validate_process_visibility():
+    assert hasattr(os, "pidfd_open") and hasattr(signal, "pidfd_send_signal"), "Linux pidfd support required"
     pid = os.getpid()
     own = Path("/proc/self/stat").read_text()
     visible_pid = int(own.split(" ", 1)[0])
     fields = own.rsplit(")", 1)[1].split()
     assert visible_pid == pid and int(fields[2]) == os.getpgrp(), (
         "unsupported /proc PID/process-group namespace", pid, visible_pid, fields[2], os.getpgrp())
+    assert int(fields[3]) == os.getsid(0), "unsupported /proc session namespace"
     assert (Path("/proc")/str(pid)/"stat").read_text().split(" ", 1)[0] == str(pid)
     assert any(member == pid for member, state in group_members(os.getpgrp())), (
         "unsupported /proc process visibility")
+    fd = os.pidfd_open(pid)
+    try:
+        signal.pidfd_send_signal(fd, 0)
+    finally:
+        os.close(fd)
     META["process_visibility"] = dict(pid=pid, pgid=os.getpgrp(), proc_pid=visible_pid,
                                       self_visible=True, kernel_group_alive=group_alive(os.getpgrp()))
 
@@ -443,7 +451,8 @@ def run_case(work, run, variant, mode, raw, targets):
     supervision = {}
     with stdout.open("wb") as so, stderr.open("wb") as se:
         p = subprocess.Popen([BASH, str(script)], cwd=work, env=env,
-                             stdout=so, stderr=se, start_new_session=True)
+                             stdout=so, stderr=se, start_new_session=WATCHDOG_SESSION is None,
+                             process_group=0 if WATCHDOG_SESSION is not None else None)
         with owned_process(p, supervision, case):
             deadline = time.monotonic()+30
             if mode.startswith(("before_", "after_", "supervisor_")):
@@ -608,12 +617,153 @@ def run_case(work, run, variant, mode, raw, targets):
                         cleanup_verified=True))
     print(case, "OK", "rc="+str(rc), "attempted="+str(len(calls)), flush=True)
 
+def session_members(sid):
+    found = []
+    for path in Path("/proc").iterdir():
+        if not path.name.isdigit():
+            continue
+        try:
+            fields = (path/"stat").read_text().rsplit(")", 1)[1].split()
+            if int(fields[3]) == sid:
+                found.append((int(path.name), int(fields[2]), fields[0]))
+        except (FileNotFoundError, ProcessLookupError):
+            pass
+    return found
+
+def cleanup_watchdog(worker, worker_reaped=False, timeout=3, worker_fd=None):
+    deadline = time.monotonic()+timeout
+    reaped = []
+    groups = {worker}
+    seen = set()
+    def signal_worker(sig):
+        try:
+            if worker_fd is None:
+                # Only possible if pidfd acquisition itself failed, while the
+                # unreaped direct child still reserves its PID.
+                os.kill(worker, sig)
+            else:
+                signal.pidfd_send_signal(worker_fd, sig)
+        except ProcessLookupError:
+            pass
+    # Stop the sole launcher before scanning. Descendants stay in its session;
+    # no announcement or successfully decoded control message grants ownership.
+    if not worker_reaped:
+        signal_worker(signal.SIGSTOP)
+    while time.monotonic() < deadline:
+        members = session_members(worker)
+        seen.update(pid for pid, pgid, state in members)
+        groups.update(pgid for pid, pgid, state in members)
+        for pgid in groups:
+            try:
+                os.killpg(pgid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+        # Also covers interruption before the worker calls setsid().
+        if not worker_reaped:
+            signal_worker(signal.SIGKILL)
+        for pid in seen | {worker}:
+            try:
+                got, status = os.waitpid(pid, os.WNOHANG)
+                if got:
+                    reaped.append([got, status])
+                    if got == worker: worker_reaped = True
+            except ChildProcessError:
+                if pid == worker: worker_reaped = True
+        remaining = session_members(worker)
+        if worker_reaped and not remaining and all(not group_alive(g) for g in groups):
+            return dict(worker=worker, worker_reaped=True, session=worker,
+                        observed_pids=sorted(seen), groups=sorted(groups), reaped=reaped,
+                        remaining=[], kernel_groups_absent=True)
+        time.sleep(.02)
+    raise AssertionError(("watchdog ownership not quiescent", worker, remaining, worker_reaped, sorted(groups)))
+
+@contextmanager
+def watchdog_owner():
+    assert not UNSAFE_GROUPS, ("refusing watchdog after unsafe cleanup", UNSAFE_GROUPS)
+    fds = []
+    worker = None
+    original = None
+    report = {}
+    worker_fd = None
+    signals = {signal.SIGINT, signal.SIGTERM, signal.SIGHUP}
+    old_mask = signal.pthread_sigmask(signal.SIG_BLOCK, signals)
+    old_handlers = {}
+    def interrupted(sig, frame):
+        raise InterruptedError("watchdog parent interrupted by "+signal.Signals(sig).name)
+    try:
+        read_fd, write_fd = os.pipe()
+        fds.extend([read_fd, write_fd])
+        worker = os.fork()
+        if worker == 0:
+            try:
+                os.setsid()
+                global WATCHDOG_SESSION
+                WATCHDOG_SESSION = os.getpid()
+                os.close(read_fd)
+                signal.pthread_sigmask(signal.SIG_SETMASK, old_mask)
+                yield 0, read_fd, write_fd, report
+            finally:
+                os._exit(1)
+        report["worker"] = worker
+        worker_fd = os.pidfd_open(worker)
+        fds.append(worker_fd)
+        for sig in signals:
+            old_handlers[sig] = signal.signal(sig, interrupted)
+        signal.pthread_sigmask(signal.SIG_SETMASK, old_mask)
+        yield worker, read_fd, write_fd, report
+    except BaseException as error:
+        original = error
+        report["original_error"] = repr(error)
+        raise
+    finally:
+        if worker != 0:
+            # Defer repeated catchable interruption until containment completes.
+            signal.pthread_sigmask(signal.SIG_BLOCK, signals)
+            failures = []
+            if worker is not None:
+                try:
+                    report["cleanup"] = cleanup_watchdog(worker, report.get("worker_reaped", False),
+                                                         worker_fd=worker_fd)
+                except BaseException as error:
+                    UNSAFE_GROUPS.add(worker)
+                    failures.append("watchdog cleanup: "+repr(error))
+            for fd in fds:
+                try:
+                    os.close(fd)
+                except OSError as error:
+                    if error.errno != 9: failures.append("descriptor cleanup: "+repr(error))
+            report["owned_descriptors"] = fds
+            report["owned_descriptors_closed"] = not failures
+            report["cleanup_failures"] = failures
+            try:
+                with (DEST/"watchdog-ownership.jsonl").open("a") as f:
+                    f.write(json.dumps(report)+"\n")
+            except BaseException as error:
+                failures.append("ownership evidence: "+repr(error))
+            for sig, handler in old_handlers.items():
+                signal.signal(sig, handler)
+            try:
+                if failures:
+                    if original is not None:
+                        for failure in failures: original.add_note(failure)
+                        print("; ".join(failures), file=sys.stderr)
+                    else:
+                        raise AssertionError(failures)
+            finally:
+                try:
+                    signal.pthread_sigmask(signal.SIG_SETMASK, old_mask)
+                except BaseException as error:
+                    if original is None:
+                        raise
+                    original.add_note("deferred watchdog interruption after cleanup: "+repr(error))
+
 def supervisor_negative(work, run, mode, raw, targets):
+    with watchdog_owner() as (worker, read_fd, write_fd, ownership):
+        return supervise_negative(work, run, mode, raw, targets, worker, read_fd, write_fd, ownership)
+
+def supervise_negative(work, run, mode, raw, targets, worker, read_fd, write_fd, ownership):
     # A separate watchdog owns the tested driver. Rescue is always a failure.
-    read_fd, write_fd = os.pipe()
-    worker = os.fork()
     if worker == 0:
-        os.close(read_fd)
         global WATCHDOG_REPORT_FD
         WATCHDOG_REPORT_FD = write_fd
         try:
@@ -643,7 +793,6 @@ def supervisor_negative(work, run, mode, raw, targets):
         except BaseException as error:
             os.write(write_fd, (json.dumps(dict(worker_error=repr(error)))+"\n").encode())
             os._exit(1)
-    os.close(write_fd)
     os.set_blocking(read_fd, False)
     data = b""
     status = None
@@ -655,6 +804,7 @@ def supervisor_negative(work, run, mode, raw, targets):
             pass
         found, status = os.waitpid(worker, os.WNOHANG)
         if found:
+            ownership["worker_reaped"] = True
             break
         time.sleep(.02)
     else:
@@ -664,26 +814,12 @@ def supervisor_negative(work, run, mode, raw, targets):
             data += chunk
     except BlockingIOError:
         pass
-    os.close(read_fd)
     messages = [json.loads(line) for line in data.splitlines()]
     groups = [m["started_group"] for m in messages if "started_group" in m]
-    rescued = []
-    for pgid in groups:
-        if group_alive(pgid):
-            rescued.append(pgid)
-            # Independent containment only; never credit it to the tested owner.
-            class Child:
-                pid = pgid
-                def wait(self, timeout):
-                    return None
-            try:
-                cleanup_group(Child())
-            except BaseException:
-                UNSAFE_GROUPS.add(pgid)
-    if status is None:
-        UNSAFE_GROUPS.add(worker)
-        os.kill(worker, signal.SIGKILL)
-        os.waitpid(worker, 0)
+    visible_groups = {pgid for pid, pgid, state in session_members(worker)}
+    rescued = sorted(g for g in visible_groups if group_alive(g))
+    ownership.update(normal_worker_status=status, messages=messages, watchdog_rescued_groups=rescued)
+    assert status == 0 and not rescued and groups, ("watchdog failure", status, rescued, messages)
     events = [json.loads(line) for line in (work/"guard.jsonl").read_text().splitlines()]
     children = [e["child"] for e in events if e["kind"] == "SUPERVISOR_CHILD"]
     record = dict(run=run, mode=mode, worker_status=status, messages=messages,
