@@ -1,0 +1,46 @@
+{
+  "repository": "olivexo28/QBIND",
+  "working_directory": "/workspaces/QBIND/olivexo28/QBIND",
+  "origin_fetch": "https://github.com/olivexo28/QBIND",
+  "origin_push": "https://github.com/olivexo28/QBIND",
+  "initial_observations": {
+    "command": "pwd && git remote -v && git status --porcelain=v1 && git branch --show-current && git rev-parse HEAD HEAD^{tree} && git ls-remote origin refs/heads/main refs/heads/copilot/audit-run216-227-regression-verdict-fix",
+    "exit_code": 0,
+    "status_porcelain": "",
+    "branch": "main",
+    "commit": "f36e59a5e2cebab6fdfd0365920ca3e1a09444ac",
+    "tree": "64011836fc74638590a8fda334f338c286156877",
+    "remote_task_tip": "6fdc0f0dcfc45c65037de3e53215121f5332689a",
+    "remote_main_tip": "f36e59a5e2cebab6fdfd0365920ca3e1a09444ac"
+  },
+  "continuing_existing_remote_branch": {
+    "fetch": "git fetch --quiet origin copilot/audit-run216-227-regression-verdict-fix",
+    "first_switch": "git switch copilot/audit-run216-227-regression-verdict-fix",
+    "first_switch_outcome": "fatal: invalid reference: copilot/audit-run216-227-regression-verdict-fix",
+    "successful_switch": "git switch -c copilot/audit-run216-227-regression-verdict-fix FETCH_HEAD",
+    "explanation": "No local task branch/tracking reference existed; continued the exact existing remote task revision through FETCH_HEAD. No branch was reset or force-pushed.",
+    "verified_commit": "6fdc0f0dcfc45c65037de3e53215121f5332689a",
+    "verified_tree": "b43769723cbe2b0319ad0b3166e8bcfe14fec5d3",
+    "verified_status_porcelain": ""
+  },
+  "repository_api_identity": {
+    "command": "gh repo view --json nameWithOwner,url",
+    "exit_code": 0,
+    "stdout": "{\"nameWithOwner\":\"olivexo28/QBIND\",\"url\":\"https://github.com/olivexo28/QBIND\"}\n"
+  },
+  "preliminary_collector_failure": {
+    "command": "python3 docs/security/evidence/a37-1-c2-correction/reproduce.py docs/security/evidence/a37-1-c2-correction/baseline",
+    "exit_code": 1,
+    "error": "KeyError: 'env'",
+    "stage": "Global Popen replacement intercepted historical source git show before surrogate launch.",
+    "publication_function_invocations_before_error": 6,
+    "surrogate_invocations": 0,
+    "raw_publication_records_from_this_attempt_retained": false,
+    "correction": "Read the historical source before replacing Popen; completed reproduction is separately retained."
+  },
+  "completed_bounded_reproduction": {
+    "command": "python3 docs/security/evidence/a37-1-c2-correction/reproduce.py docs/security/evidence/a37-1-c2-correction/baseline-completed",
+    "exit_code": 0,
+    "stdout": "Historical publication: 2 regular controls, 4 directory defects reproduced.\nHistorical supervisor: live assertion bypassed cleanup; independent outer owner contained/reaped.\n"
+  }
+}

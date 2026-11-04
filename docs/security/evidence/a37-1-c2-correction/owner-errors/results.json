@@ -1,0 +1,45 @@
+{
+  "producing_commit": "763efbbbf1141d5be264ce2fa73b10763287bb27",
+  "producing_tree": "9a2756852685c34ff7c631ce0845175ae1b047fd",
+  "fixture_sha256": "99a609eb74a511046ef419dd2b70a7188cc14aa6c2beb9fca330205a9f265de6",
+  "outcomes": [
+    {
+      "case": "cleanup_error",
+      "original": "AssertionError('original live-driver assertion')",
+      "notes": [
+        "separate fixture cleanup failure: RuntimeError('injected cleanup-report failure after independently contained group')"
+      ],
+      "supervision": {
+        "original_error": "AssertionError('original live-driver assertion')",
+        "cleanup_error": "RuntimeError('injected cleanup-report failure after independently contained group')"
+      },
+      "workspace_retained": true,
+      "independently_group_absent": true,
+      "outer_rescue": false
+    },
+    {
+      "case": "evidence_write_error",
+      "original": "KeyboardInterrupt('original unexpected driver termination')",
+      "notes": [
+        "separate supervision evidence failure: NotADirectoryError(20, 'Not a directory')"
+      ],
+      "supervision": {
+        "original_error": "KeyboardInterrupt('original unexpected driver termination')",
+        "cleanup": {
+          "pgid": 10938,
+          "initial": [
+            [
+              10938,
+              "R"
+            ]
+          ],
+          "reaped": [],
+          "remaining": [],
+          "kernel_group_absent": true
+        }
+      },
+      "independently_group_absent": true,
+      "outer_rescue": false
+    }
+  ]
+}

@@ -1,0 +1,104 @@
+{
+  "revision": "6fdc0f0dcfc45c65037de3e53215121f5332689a",
+  "outcomes": [
+    {
+      "run": 216,
+      "destination": "file",
+      "command": "publish_incomplete() {\n  local tmp\n  if ! tmp=\"$(mktemp \"${SUMMARY}.tmp.XXXXXX\")\"; then return 1; fi\n  SUMMARY_TMP=\"$tmp\"\n  if ! printf 'run_id=%s\\nverdict: INCOMPLETE\\n' \"$RUN_ID\" > \"$tmp\"; then return 1; fi\n  if ! mv -f -- \"$tmp\" \"$SUMMARY\"; then return 1; fi\n  SUMMARY_TMP=\"\"\n}\nSUMMARY=\"$1\"; RUN_ID=reproduction; publish_incomplete\n",
+      "returncode": 0,
+      "stdout": "",
+      "stderr": "",
+      "is_symlink": false,
+      "is_file": true,
+      "is_directory": false,
+      "contents": []
+    },
+    {
+      "run": 216,
+      "destination": "directory",
+      "command": "publish_incomplete() {\n  local tmp\n  if ! tmp=\"$(mktemp \"${SUMMARY}.tmp.XXXXXX\")\"; then return 1; fi\n  SUMMARY_TMP=\"$tmp\"\n  if ! printf 'run_id=%s\\nverdict: INCOMPLETE\\n' \"$RUN_ID\" > \"$tmp\"; then return 1; fi\n  if ! mv -f -- \"$tmp\" \"$SUMMARY\"; then return 1; fi\n  SUMMARY_TMP=\"\"\n}\nSUMMARY=\"$1\"; RUN_ID=reproduction; publish_incomplete\n",
+      "returncode": 0,
+      "stdout": "",
+      "stderr": "",
+      "is_symlink": false,
+      "is_file": false,
+      "is_directory": true,
+      "contents": [
+        "summary.txt.tmp.y8haHg"
+      ]
+    },
+    {
+      "run": 216,
+      "destination": "directory_symlink",
+      "command": "publish_incomplete() {\n  local tmp\n  if ! tmp=\"$(mktemp \"${SUMMARY}.tmp.XXXXXX\")\"; then return 1; fi\n  SUMMARY_TMP=\"$tmp\"\n  if ! printf 'run_id=%s\\nverdict: INCOMPLETE\\n' \"$RUN_ID\" > \"$tmp\"; then return 1; fi\n  if ! mv -f -- \"$tmp\" \"$SUMMARY\"; then return 1; fi\n  SUMMARY_TMP=\"\"\n}\nSUMMARY=\"$1\"; RUN_ID=reproduction; publish_incomplete\n",
+      "returncode": 0,
+      "stdout": "",
+      "stderr": "",
+      "is_symlink": true,
+      "is_file": false,
+      "is_directory": true,
+      "contents": [
+        "sentinel",
+        "summary.txt.tmp.9gpVwB"
+      ]
+    },
+    {
+      "run": 227,
+      "destination": "file",
+      "command": "publish_incomplete() {\n  local tmp\n  if ! tmp=\"$(mktemp \"${SUMMARY}.tmp.XXXXXX\")\"; then return 1; fi\n  SUMMARY_TMP=\"$tmp\"\n  if ! printf 'run_id=%s\\nverdict: INCOMPLETE\\n' \"$RUN_ID\" > \"$tmp\"; then return 1; fi\n  if ! mv -f -- \"$tmp\" \"$SUMMARY\"; then return 1; fi\n  SUMMARY_TMP=\"\"\n}\nSUMMARY=\"$1\"; RUN_ID=reproduction; publish_incomplete\n",
+      "returncode": 0,
+      "stdout": "",
+      "stderr": "",
+      "is_symlink": false,
+      "is_file": true,
+      "is_directory": false,
+      "contents": []
+    },
+    {
+      "run": 227,
+      "destination": "directory",
+      "command": "publish_incomplete() {\n  local tmp\n  if ! tmp=\"$(mktemp \"${SUMMARY}.tmp.XXXXXX\")\"; then return 1; fi\n  SUMMARY_TMP=\"$tmp\"\n  if ! printf 'run_id=%s\\nverdict: INCOMPLETE\\n' \"$RUN_ID\" > \"$tmp\"; then return 1; fi\n  if ! mv -f -- \"$tmp\" \"$SUMMARY\"; then return 1; fi\n  SUMMARY_TMP=\"\"\n}\nSUMMARY=\"$1\"; RUN_ID=reproduction; publish_incomplete\n",
+      "returncode": 0,
+      "stdout": "",
+      "stderr": "",
+      "is_symlink": false,
+      "is_file": false,
+      "is_directory": true,
+      "contents": [
+        "summary.txt.tmp.NGqVRb"
+      ]
+    },
+    {
+      "run": 227,
+      "destination": "directory_symlink",
+      "command": "publish_incomplete() {\n  local tmp\n  if ! tmp=\"$(mktemp \"${SUMMARY}.tmp.XXXXXX\")\"; then return 1; fi\n  SUMMARY_TMP=\"$tmp\"\n  if ! printf 'run_id=%s\\nverdict: INCOMPLETE\\n' \"$RUN_ID\" > \"$tmp\"; then return 1; fi\n  if ! mv -f -- \"$tmp\" \"$SUMMARY\"; then return 1; fi\n  SUMMARY_TMP=\"\"\n}\nSUMMARY=\"$1\"; RUN_ID=reproduction; publish_incomplete\n",
+      "returncode": 0,
+      "stdout": "",
+      "stderr": "",
+      "is_symlink": true,
+      "is_file": false,
+      "is_directory": true,
+      "contents": [
+        "sentinel",
+        "summary.txt.tmp.hdAhPZ"
+      ]
+    },
+    {
+      "supervisor_reproduction": {
+        "error": "AssertionError(('216-candidate-before_INT', 'phase not reached', ''))",
+        "cleanup_calls": [],
+        "leader_alive": true,
+        "group_alive": true,
+        "pgid": 4702,
+        "outer_cleanup_required": true,
+        "outer_reaped": [
+          [
+            4703,
+            9
+          ]
+        ],
+        "group_absent": true
+      }
+    }
+  ]
+}

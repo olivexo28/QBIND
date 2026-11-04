@@ -3001,6 +3001,35 @@ instead of regenerating that manifest against corrected files.
 reproductions, actual-script destination cases, independently watched
 supervisor negative cases and producing-revision verification records.
 
+Corrective implementation/test producing commit:
+`763efbbbf1141d5be264ce2fa73b10763287bb27`, tree
+`9a2756852685c34ff7c631ce0845175ae1b047fd`, sole parent the required entry.
+The focused suite was rerun against that exact revision with matching
+committed source/fixture identities: exit **0**, **120 actual isolated
+harness invocations**, comprising **110 normal matrix cases** (including
+all original 94 case identities and 16 new destination cases) and
+**10 supervised negative invocations**. The normal-matrix stdout footer
+counts only its 110 records; the environment's total and separate negative
+records establish the complete 120. There were **2,033 guarded stub
+regression command attempts**, **zero Rust tests** and **zero watchdog
+rescues**. All owned groups were contained/reaped; the independent negative
+checks confirmed kernel group and recorded-child absence. Seven guard
+calibrations and one visibility-probe process were separate from harness
+counts. Two further ownership-error process checks preserved original
+exceptions, separately reported cleanup/evidence-write errors and verified
+workspace retention and independent quiescence without rescue.
+
+Pre-commit calibration made 51 additional harness-copy invocations (1,444
+guarded command attempts) before a directory-symlink expectation error:
+GNU `mv -T` replaces the link itself, as permitted by the stated policy.
+That fixture expectation was corrected before the producing commit. The
+current correction task therefore made 171 full isolated harness-copy
+invocations, separately from 12 extracted baseline publisher calls and one
+inert historical supervisor surrogate. None are Rust tests or real release
+runs. Retained raw evidence, commands, checksums and a mode/blob manifest
+distinguish preliminary and producing-revision outcomes. The following
+evidence/documentation publication changes no script or fixture bytes.
+
 Status remains **IMPLEMENTED — VERIFICATION PENDING**. Independent
 post-correction review remains **PENDING**. E07 / OBL-GOV-2 remain **OPEN**;
 activation **DISABLED**; public DevNet **NO-GO**. No real Cargo/Rust tests,

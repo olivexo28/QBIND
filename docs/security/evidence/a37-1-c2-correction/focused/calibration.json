@@ -1,0 +1,62 @@
+{
+  "checks": [
+    {
+      "command": [
+        "cargo",
+        "unexpected"
+      ],
+      "expected": 97,
+      "actual": 97
+    },
+    {
+      "command": [
+        "curl",
+        "http://127.0.0.1/"
+      ],
+      "expected": 97,
+      "actual": 97
+    },
+    {
+      "command": [
+        "rm",
+        "-rf",
+        "/not-a-fixture-path"
+      ],
+      "expected": 97,
+      "actual": 97
+    },
+    {
+      "command": [
+        "git",
+        "fetch"
+      ],
+      "expected": 97,
+      "actual": 97
+    },
+    {
+      "command": [
+        "env",
+        "/bin/false"
+      ],
+      "expected": 97,
+      "actual": 97
+    },
+    {
+      "command": [
+        "xargs",
+        "sh"
+      ],
+      "expected": 97,
+      "actual": 97
+    },
+    {
+      "command": [
+        "mkdir",
+        "/tmp/qbind-verdict-fixture-s3upk0ou/calibrated"
+      ],
+      "expected": 0,
+      "actual": 0
+    }
+  ],
+  "guard_log": "{\"kind\": \"ALLOW\", \"command\": \"cargo\", \"args\": [\"unexpected\"], \"pid\": 30262}\n{\"kind\": \"REJECT\", \"command\": \"cargo\", \"args\": [\"unexpected\"], \"pid\": 30262, \"reason\": \"unexpected Cargo invocation\"}\n{\"kind\": \"ALLOW\", \"command\": \"curl\", \"args\": [\"http://127.0.0.1/\"], \"pid\": 30263}\n{\"kind\": \"REJECT\", \"command\": \"curl\", \"args\": [\"http://127.0.0.1/\"], \"pid\": 30263, \"reason\": \"unexpected executable\"}\n{\"kind\": \"ALLOW\", \"command\": \"rm\", \"args\": [\"-rf\", \"/not-a-fixture-path\"], \"pid\": 30264}\n{\"kind\": \"REJECT\", \"command\": \"rm\", \"args\": [\"-rf\", \"/not-a-fixture-path\"], \"pid\": 30264, \"reason\": \"out-of-root cleanup\"}\n{\"kind\": \"ALLOW\", \"command\": \"git\", \"args\": [\"fetch\"], \"pid\": 30265}\n{\"kind\": \"REJECT\", \"command\": \"git\", \"args\": [\"fetch\"], \"pid\": 30265, \"reason\": \"unexpected git root\"}\n{\"kind\": \"ALLOW\", \"command\": \"env\", \"args\": [\"/bin/false\"], \"pid\": 30266}\n{\"kind\": \"REJECT\", \"command\": \"env\", \"args\": [\"/bin/false\"], \"pid\": 30266, \"reason\": \"unexpected env executable\"}\n{\"kind\": \"ALLOW\", \"command\": \"xargs\", \"args\": [\"sh\"], \"pid\": 30267}\n{\"kind\": \"REJECT\", \"command\": \"xargs\", \"args\": [\"sh\"], \"pid\": 30267, \"reason\": \"unexpected xargs executable\"}\n{\"kind\": \"ALLOW\", \"command\": \"mkdir\", \"args\": [\"/tmp/qbind-verdict-fixture-s3upk0ou/calibrated\"], \"pid\": 30268}\n"
+}

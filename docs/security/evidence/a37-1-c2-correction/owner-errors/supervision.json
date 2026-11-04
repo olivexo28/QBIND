@@ -1,0 +1,7 @@
+[
+  {
+    "case": "cleanup-error-preserves-original",
+    "original_error": "AssertionError('original live-driver assertion')",
+    "cleanup_error": "RuntimeError('injected cleanup-report failure after independently contained group')"
+  }
+]

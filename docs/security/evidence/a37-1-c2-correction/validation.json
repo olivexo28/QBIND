@@ -1,0 +1,365 @@
+{
+  "command": [
+    "python3",
+    "docs/security/evidence/a37-1-c2-correction/validate.py"
+  ],
+  "entry": "6fdc0f0dcfc45c65037de3e53215121f5332689a",
+  "entry_tree": "b43769723cbe2b0319ad0b3166e8bcfe14fec5d3",
+  "protected_main": "f36e59a5e2cebab6fdfd0365920ca3e1a09444ac",
+  "producing_commit": "763efbbbf1141d5be264ce2fa73b10763287bb27",
+  "producing_tree": "9a2756852685c34ff7c631ce0845175ae1b047fd",
+  "producing_parents": [
+    "6fdc0f0dcfc45c65037de3e53215121f5332689a"
+  ],
+  "source_identity": {
+    "scripts/devnet/run_216_governance_execution_policy_release_binary.sh": {
+      "blob": "b045c15894f5ba26529c0c4a44088e2190b3ee20",
+      "sha256": "a5ac3ec784b5fb4548ab740163a1c6cf513c7c9fb78e19201cd4c77d2ed1644d"
+    },
+    "scripts/devnet/run_227_governance_evaluator_runtime_callsite_wiring_release_binary.sh": {
+      "blob": "9745a26173caeafecace20afc86b14f26dddc6dc",
+      "sha256": "d525d9ba6e1a8afdaa7aecf3dc39997146227cc4fa2960b4ba9c49c53e14c788"
+    },
+    "scripts/devnet/tests/run_216_227_regression_verdict_fixture.sh": {
+      "blob": "cda32671288b64763c616402283a5cc96e7e6f23",
+      "sha256": "99a609eb74a511046ef419dd2b70a7188cc14aa6c2beb9fca330205a9f265de6"
+    }
+  },
+  "historical_evidence": {
+    "docs/security/evidence/a37-1-c2/README.md": "33de7ffb363a943672481240f6cd61056cc5145c64999c367beac3b96dd5a7ab",
+    "docs/security/evidence/a37-1-c2/SHA256SUMS": "6d845ad91b2aec34062727f54fd19b16446eea72903bdd47af23c2492c36f2c1",
+    "docs/security/evidence/a37-1-c2/calibration.json": "03d36acaf1f337eb53edf432680eb1f5fcfa79b9e8db8e5ea67e1e95a1489f9f",
+    "docs/security/evidence/a37-1-c2/cases.json": "77aa7a0d888bd665b518776ded0130246bd76c093f7a28bdce3e717a1bdb5253",
+    "docs/security/evidence/a37-1-c2/environment.json": "5506a4329a769e4c05393c8f80f555bf7f26977d17c7a18b0c42c16862c09b56",
+    "docs/security/evidence/a37-1-c2/preliminary.json": "32eaba71843e753c7c50faedd53a72eca53e28d58a262db55bd3e29864d0495c",
+    "docs/security/evidence/a37-1-c2/preliminary.log": "f7d6b0953f1f57e52eef5fefa5693a11caa7d314b335eb0a8408c53c3987f292",
+    "docs/security/evidence/a37-1-c2/raw/run-216.jsonl": "135e606d2e30f3d78029507e2efe2c0b12ddd348b478a65cfd58b954d75752df",
+    "docs/security/evidence/a37-1-c2/raw/run-227.jsonl": "a3c532d2f01ac306cea51dbe150927d12dbf23329d51a8d3e59aaf016429dfd1",
+    "docs/security/evidence/a37-1-c2/suite.log": "b41c4819bd1473f8ac96827c6db025bab8104d13ac6465cbe2fe6b69ee0ba098",
+    "docs/security/evidence/a37-1-c2/validation.json": "4449f529dc430eb322726e4071536b7462948c88b37e4e288b72ae58289e6e08"
+  },
+  "historical_manifest_at_entry": [
+    "docs/devnet/run_216_governance_execution_policy_release_binary/README.md",
+    "docs/devnet/run_227_governance_evaluator_runtime_callsite_wiring_release_binary/README.md",
+    "docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md",
+    "docs/security/evidence/a37-1-c2/README.md",
+    "docs/security/evidence/a37-1-c2/calibration.json",
+    "docs/security/evidence/a37-1-c2/cases.json",
+    "docs/security/evidence/a37-1-c2/environment.json",
+    "docs/security/evidence/a37-1-c2/preliminary.json",
+    "docs/security/evidence/a37-1-c2/preliminary.log",
+    "docs/security/evidence/a37-1-c2/raw/run-216.jsonl",
+    "docs/security/evidence/a37-1-c2/raw/run-227.jsonl",
+    "docs/security/evidence/a37-1-c2/suite.log",
+    "docs/security/evidence/a37-1-c2/validation.json",
+    "scripts/devnet/run_216_governance_execution_policy_release_binary.sh",
+    "scripts/devnet/run_227_governance_evaluator_runtime_callsite_wiring_release_binary.sh",
+    "scripts/devnet/tests/run_216_227_regression_verdict_fixture.sh"
+  ],
+  "plan_before_section_14_identical": true,
+  "protected_sections_8_12_13_inventories_register_unrelated_source": "unchanged by scope/byte checks",
+  "scope": [
+    "docs/devnet/run_216_governance_execution_policy_release_binary/README.md",
+    "docs/devnet/run_227_governance_evaluator_runtime_callsite_wiring_release_binary/README.md",
+    "docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md",
+    "docs/security/evidence/a37-1-c2-correction/README.md",
+    "docs/security/evidence/a37-1-c2-correction/baseline-completed/reproduction.json",
+    "docs/security/evidence/a37-1-c2-correction/check_owner_errors.py",
+    "docs/security/evidence/a37-1-c2-correction/entry.json",
+    "docs/security/evidence/a37-1-c2-correction/focused.log",
+    "docs/security/evidence/a37-1-c2-correction/focused/calibration.json",
+    "docs/security/evidence/a37-1-c2-correction/focused/cases.json",
+    "docs/security/evidence/a37-1-c2-correction/focused/environment.json",
+    "docs/security/evidence/a37-1-c2-correction/focused/raw/run-216.jsonl",
+    "docs/security/evidence/a37-1-c2-correction/focused/raw/run-227.jsonl",
+    "docs/security/evidence/a37-1-c2-correction/focused/supervision.json",
+    "docs/security/evidence/a37-1-c2-correction/focused/supervisor-negative.jsonl",
+    "docs/security/evidence/a37-1-c2-correction/owner-errors.log",
+    "docs/security/evidence/a37-1-c2-correction/owner-errors/not-a-directory",
+    "docs/security/evidence/a37-1-c2-correction/owner-errors/results.json",
+    "docs/security/evidence/a37-1-c2-correction/owner-errors/supervision.json",
+    "docs/security/evidence/a37-1-c2-correction/preliminary.log",
+    "docs/security/evidence/a37-1-c2-correction/preliminary/calibration.json",
+    "docs/security/evidence/a37-1-c2-correction/preliminary/environment.json",
+    "docs/security/evidence/a37-1-c2-correction/preliminary/raw/run-216.jsonl",
+    "docs/security/evidence/a37-1-c2-correction/preliminary/supervision.json",
+    "docs/security/evidence/a37-1-c2-correction/reproduce.py",
+    "docs/security/evidence/a37-1-c2-correction/seal.py",
+    "docs/security/evidence/a37-1-c2-correction/validate.py",
+    "docs/security/evidence/a37-1-c2-correction/validation.json",
+    "scripts/devnet/run_216_governance_execution_policy_release_binary.sh",
+    "scripts/devnet/run_227_governance_evaluator_runtime_callsite_wiring_release_binary.sh",
+    "scripts/devnet/tests/run_216_227_regression_verdict_fixture.sh"
+  ],
+  "formats": {
+    "scripts/devnet/run_216_governance_execution_policy_release_binary.sh": {
+      "mode": "100644",
+      "crlf": 355,
+      "lf": 355,
+      "final_newline": false
+    },
+    "scripts/devnet/run_227_governance_evaluator_runtime_callsite_wiring_release_binary.sh": {
+      "mode": "100644",
+      "crlf": 416,
+      "lf": 416,
+      "final_newline": false
+    },
+    "scripts/devnet/tests/run_216_227_regression_verdict_fixture.sh": {
+      "mode": "100644",
+      "crlf": 0,
+      "lf": 799,
+      "final_newline": true
+    },
+    "docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md": {
+      "mode": "100644",
+      "crlf": 0,
+      "lf": 3037,
+      "final_newline": true
+    },
+    "docs/devnet/run_216_governance_execution_policy_release_binary/README.md": {
+      "mode": "100644",
+      "crlf": 117,
+      "lf": 117,
+      "final_newline": false
+    },
+    "docs/devnet/run_227_governance_evaluator_runtime_callsite_wiring_release_binary/README.md": {
+      "mode": "100644",
+      "crlf": 174,
+      "lf": 174,
+      "final_newline": false
+    }
+  },
+  "syntax": {
+    "scripts/devnet/run_216_governance_execution_policy_release_binary.sh": {
+      "command": [
+        "bash",
+        "-n"
+      ],
+      "normalized": true,
+      "returncode": 0,
+      "stderr": ""
+    },
+    "scripts/devnet/run_227_governance_evaluator_runtime_callsite_wiring_release_binary.sh": {
+      "command": [
+        "bash",
+        "-n"
+      ],
+      "normalized": true,
+      "returncode": 0,
+      "stderr": ""
+    },
+    "scripts/devnet/tests/run_216_227_regression_verdict_fixture.sh": {
+      "command": [
+        "bash",
+        "-n"
+      ],
+      "normalized": true,
+      "returncode": 0,
+      "stderr": ""
+    }
+  },
+  "embedded_and_evidence_python_syntax": "PASS",
+  "production_changes_exactly_two_mv_flags_per_script": true,
+  "whitespace": {
+    "command": [
+      "git",
+      "-c",
+      "core.whitespace=cr-at-eol",
+      "diff",
+      "--check",
+      "6fdc0f0dcfc45c65037de3e53215121f5332689a"
+    ],
+    "returncode": 0
+  },
+  "focused": {
+    "normal_matrix_invocations": 110,
+    "supervisor_negative_invocations": 10,
+    "total_harness_invocations": 120,
+    "historical_baseline_controls": 4,
+    "candidate_matrix_invocations": 106,
+    "new_destination_invocations": 16,
+    "guarded_regression_commands": 2033,
+    "matrix_guarded_regression_commands": 2023,
+    "negative_guarded_regression_commands": 10,
+    "rust_tests": 0,
+    "watchdog_rescues": 0,
+    "visibility_probe_processes": 1,
+    "guard_calibration_probes": 7,
+    "separate_owner_error_processes": 2
+  },
+  "original_94_case_ids_rerun": true,
+  "preliminary_actual_harness_invocations": 51,
+  "preliminary_assertion_failure": "directory-symlink replacement incorrectly expected refusal; corrected before producing commit",
+  "links": [
+    {
+      "source": "docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md",
+      "target": "../../Audit/QBIND_SECURITY_FINDINGS_REGISTER.md",
+      "exists": true
+    },
+    {
+      "source": "docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md",
+      "target": "../release/QBIND_PUBLIC_DEVNET_READINESS_CRITERIA.md",
+      "exists": true
+    },
+    {
+      "source": "docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md",
+      "target": "../release/public-devnet/BLOCKER_REGISTER.md",
+      "exists": true
+    },
+    {
+      "source": "docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md",
+      "target": "../release/public-devnet/LAUNCH_GO_NO_GO.md",
+      "exists": true
+    },
+    {
+      "source": "docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md",
+      "target": "../devnet/QBIND_PUBLIC_DEVNET_CRITICAL_PATH.md",
+      "exists": true
+    },
+    {
+      "source": "docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md",
+      "target": "../devnet/QBIND_DEVNET_EVIDENCE_RUN_422_D7.md",
+      "exists": true
+    },
+    {
+      "source": "docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md",
+      "target": "../devnet/QBIND_RUN_422_DEVNET_BOOTSTRAP_AUTHORITY_DECISION.md",
+      "exists": true
+    },
+    {
+      "source": "docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md",
+      "target": "../protocol/QBIND_PROPOSAL_VOTE_SIGNING_STATE_CONTINUITY_CONTRACT.md",
+      "exists": true
+    },
+    {
+      "source": "docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md",
+      "target": "../protocol/QBIND_PROPOSAL_VOTE_AUTHORITY_LIFECYCLE_CONTRACT.md",
+      "exists": true
+    },
+    {
+      "source": "docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md",
+      "target": "../protocol/QBIND_CONSENSUS_RECOVERY_SIGNING_HISTORY_CORRESPONDENCE_CONTRACT.md",
+      "exists": true
+    },
+    {
+      "source": "docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md",
+      "target": "../devnet/QBIND_RUN_422_BOOTSTRAP_CREDENTIAL_RECOVERY_TRUST_MODEL.md",
+      "exists": true
+    },
+    {
+      "source": "docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md",
+      "target": "../../scripts/devnet/run_384_public_devnet_release_artifact_manifest.sh",
+      "exists": true
+    },
+    {
+      "source": "docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md",
+      "target": "../release/public-devnet/binary/RELEASE_ARTIFACT_MANIFEST.schema.json",
+      "exists": true
+    },
+    {
+      "source": "docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md",
+      "target": "../../scripts/devnet/run_385_public_devnet_ci_release_artifact_manifest.sh",
+      "exists": true
+    },
+    {
+      "source": "docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md",
+      "target": "../../.github/workflows/public-devnet-release-artifact-manifest.yml",
+      "exists": true
+    },
+    {
+      "source": "docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md",
+      "target": "evidence/a21-f1/README.md",
+      "exists": true
+    },
+    {
+      "source": "docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md",
+      "target": "evidence/a21-f1/README.md",
+      "exists": true
+    },
+    {
+      "source": "docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md",
+      "target": "evidence/a21-f1/a21-f1-original-evidence.tar.gz",
+      "exists": true
+    },
+    {
+      "source": "docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md",
+      "target": "evidence/a21-f1/a21-f1-corrective-evidence.tar.gz",
+      "exists": true
+    },
+    {
+      "source": "docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md",
+      "target": "../../crates/qbind-gov/src/verify.rs",
+      "exists": true
+    },
+    {
+      "source": "docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md",
+      "target": "../../crates/qbind-gov/src/council.rs",
+      "exists": true
+    },
+    {
+      "source": "docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md",
+      "target": "../../crates/qbind-gov/src/envelope.rs",
+      "exists": true
+    },
+    {
+      "source": "docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md",
+      "target": "../../crates/qbind-gov/src/hash.rs",
+      "exists": true
+    },
+    {
+      "source": "docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md",
+      "target": "../../crates/qbind-gov/src/bin/qbind_envelope.rs",
+      "exists": true
+    },
+    {
+      "source": "docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md",
+      "target": "../../crates/qbind-gov/src/lib.rs",
+      "exists": true
+    },
+    {
+      "source": "docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md",
+      "target": "../../crates/qbind-gov/Cargo.toml",
+      "exists": true
+    },
+    {
+      "source": "docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md",
+      "target": "../../scripts/build-mainnet-release.sh",
+      "exists": true
+    },
+    {
+      "source": "docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md",
+      "target": "../../crates/qbind-node/Cargo.toml",
+      "exists": true
+    },
+    {
+      "source": "docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md",
+      "target": "../devnet/QBIND_RUN_422_NATIVE_GOVERNANCE_AUTHORITY_CONTRACT.md",
+      "exists": true
+    },
+    {
+      "source": "docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md",
+      "target": "../devnet/QBIND_DEVNET_EVIDENCE_RUN_422_D7.md",
+      "exists": true
+    },
+    {
+      "source": "docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md",
+      "target": "../whitepaper/contradiction.md",
+      "exists": true
+    },
+    {
+      "source": "docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md",
+      "target": "evidence/a37-1-c2-correction/README.md",
+      "exists": true
+    },
+    {
+      "source": "docs/devnet/run_216_governance_execution_policy_release_binary/README.md",
+      "target": "../../security/evidence/a37-1-c2-correction/README.md",
+      "exists": true
+    },
+    {
+      "source": "docs/devnet/run_227_governance_evaluator_runtime_callsite_wiring_release_binary/README.md",
+      "target": "../../security/evidence/a37-1-c2-correction/README.md",
+      "exists": true
+    }
+  ]
+}

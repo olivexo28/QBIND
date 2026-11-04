@@ -1,0 +1,3 @@
+cleanup failed; retaining workspace: /tmp/qbind-verdict-fixture-yl4qqupi
+supervision evidence failure: NotADirectoryError(20, 'Not a directory')
+PASS: 2 owned-process error checks; original errors preserved; outer rescue=0

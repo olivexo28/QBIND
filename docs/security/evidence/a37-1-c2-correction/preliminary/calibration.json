@@ -1,0 +1,62 @@
+{
+  "checks": [
+    {
+      "command": [
+        "cargo",
+        "unexpected"
+      ],
+      "expected": 97,
+      "actual": 97
+    },
+    {
+      "command": [
+        "curl",
+        "http://127.0.0.1/"
+      ],
+      "expected": 97,
+      "actual": 97
+    },
+    {
+      "command": [
+        "rm",
+        "-rf",
+        "/not-a-fixture-path"
+      ],
+      "expected": 97,
+      "actual": 97
+    },
+    {
+      "command": [
+        "git",
+        "fetch"
+      ],
+      "expected": 97,
+      "actual": 97
+    },
+    {
+      "command": [
+        "env",
+        "/bin/false"
+      ],
+      "expected": 97,
+      "actual": 97
+    },
+    {
+      "command": [
+        "xargs",
+        "sh"
+      ],
+      "expected": 97,
+      "actual": 97
+    },
+    {
+      "command": [
+        "mkdir",
+        "/tmp/qbind-verdict-fixture-qmfa7_gb/calibrated"
+      ],
+      "expected": 0,
+      "actual": 0
+    }
+  ],
+  "guard_log": "{\"kind\": \"ALLOW\", \"command\": \"cargo\", \"args\": [\"unexpected\"], \"pid\": 7673}\n{\"kind\": \"REJECT\", \"command\": \"cargo\", \"args\": [\"unexpected\"], \"pid\": 7673, \"reason\": \"unexpected Cargo invocation\"}\n{\"kind\": \"ALLOW\", \"command\": \"curl\", \"args\": [\"http://127.0.0.1/\"], \"pid\": 7674}\n{\"kind\": \"REJECT\", \"command\": \"curl\", \"args\": [\"http://127.0.0.1/\"], \"pid\": 7674, \"reason\": \"unexpected executable\"}\n{\"kind\": \"ALLOW\", \"command\": \"rm\", \"args\": [\"-rf\", \"/not-a-fixture-path\"], \"pid\": 7675}\n{\"kind\": \"REJECT\", \"command\": \"rm\", \"args\": [\"-rf\", \"/not-a-fixture-path\"], \"pid\": 7675, \"reason\": \"out-of-root cleanup\"}\n{\"kind\": \"ALLOW\", \"command\": \"git\", \"args\": [\"fetch\"], \"pid\": 7676}\n{\"kind\": \"REJECT\", \"command\": \"git\", \"args\": [\"fetch\"], \"pid\": 7676, \"reason\": \"unexpected git root\"}\n{\"kind\": \"ALLOW\", \"command\": \"env\", \"args\": [\"/bin/false\"], \"pid\": 7677}\n{\"kind\": \"REJECT\", \"command\": \"env\", \"args\": [\"/bin/false\"], \"pid\": 7677, \"reason\": \"unexpected env executable\"}\n{\"kind\": \"ALLOW\", \"command\": \"xargs\", \"args\": [\"sh\"], \"pid\": 7678}\n{\"kind\": \"REJECT\", \"command\": \"xargs\", \"args\": [\"sh\"], \"pid\": 7678, \"reason\": \"unexpected xargs executable\"}\n{\"kind\": \"ALLOW\", \"command\": \"mkdir\", \"args\": [\"/tmp/qbind-verdict-fixture-qmfa7_gb/calibrated\"], \"pid\": 7679}\n"
+}
