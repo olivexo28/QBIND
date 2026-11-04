@@ -1705,17 +1705,15 @@ missing coverage or external artifact delivery.
 
 ### Supplied review and corrective test/evidence record
 
-**Supplied independent source/test review:** this task conveys review of
-`b1feaf7bde9083eccaef10b6333c4bfe864c7cf0`. It found no blocking defect in
-the bounded production preflight, but identified four correction areas:
-(1) synthetic protocol negatives tested `parse_protocol_sequence`, not the
-real parent's `validate_child_evidence`; (2) missing later-body/signature-prefix,
-successful wrapped trailing-byte and setup-refusal cases; (3) early
-process-management errors could drop an unreaped child; (4) session-local
-evidence paths were not externally retrievable artifacts. The review did
-**not** rerun Rust tests or inspect the original raw artifact. This is the
-task's supplied review statement, not a signed review, retrieved transcript,
-new URL or approval of the corrected implementation.
+**Supplied independent ChatGPT review:** “At revision
+8497c7b52bbb483675ebd9be480b694f40d160bd, source review found the three
+requested code/test corrections resolved: shared real-validator negatives,
+missing matrix cases, and bounded child cleanup. The production decoder was
+unchanged. The reviewer did not rerun Rust tests or inspect the undelivered
+raw archives. Independent raw-evidence verification remains pending.”
+This is the supplied review statement, not a signed review, timestamp or
+transcript URL. It does not claim that the reviewer inspected the now-delivered
+archives.
 
 GitHub Copilot authored the corrective tests and evidence. Entry checks
 confirmed clean tracked/untracked state on the existing task branch
@@ -1735,7 +1733,7 @@ remains `9bc10bb0313505697ce7a4e46e4612edec7e9814`; the decoder's mode
 | Missing decoder/wrapper matrix | `candidate_acceptance_matrix` passed with 26 dedicated children, all matching COMPLETE and exit 0. Added `later_body` (complete non-empty tx then truncated later body), `later_signature_0` and `later_signature_1` (two complete non-empty txs then absent/one-byte signature prefix): `qc_len=0`, exact `UnexpectedEof`, exact remaining slices and zero observed allocations. Added `wrapped_trailing`: independently specified header/tx/signature values through both `NetMessage::decode` and `decode_from_slice`, exposed remaining slice `[0xFE, 0xED]`, equality of decoded results and preserved wrapper acceptance of trailing bytes. |
 | Setup refusal | `setup_refusal_controls` passed for decoder and calibration selectors. A clearly labelled **test-only injected setup-boundary failure**, after real resource-limit/dumpability verification but before SETUP, observer arming or case dispatch, produced exactly ENTRY, no snapshot and exit 42. Exit 42 occurs only after assertions that the observer has never armed and case dispatch has never occurred; the normal validator rejects these incomplete outcomes. This was not a kernel failure and did not alter host settings or weaken normal limits. Actual unavailable-prerequisite/kernel-failure and mismatched-limit executions remain **NOT EXECUTED**; the deliberately failed setup alternative was executed. |
 | Bounded cleanup | Ownership transfers to the real `wait_bounded` immediately after successful spawn. It uses nonblocking status/reap polling, records original and cleanup errors distinctly, makes at most two termination attempts, and allows at most 500 ms of bounded cleanup after timeout/management failure; no blocking `wait` or unbounded retry is used. Status/reaped are established only by an actual successful `try_wait` result. Exhausted cleanup honestly reports unestablished termination/reaping. Evidence-read/log errors retain the process outcome. `child_cleanup_controls` passed: normal completion; real 100-ms deadline/SIGKILL/reap; injected initial-poll, first-termination and cleanup-reap-poll errors followed by real cleanup. Final observed cleanup elapsed times were 107, 5, 112 and 107 ms; all four terminated children were actually reaped, and all were rejected as decoder evidence. Persistent OS failure/cleanup exhaustion was **NOT EXECUTED**; synthetic unreaped/missing-status outcomes were rejected. Injected errors are not claimed as real OS failures. |
-| Evidence transfer | Original 102-file evidence and its 14,480-byte manifest were available and all sizes/SHA-256 values revalidated; original manifest SHA-256 remains `942f0041fd609d044b66db0be7581e4f096517b70abed2aa3069e00997658e3a`. Original and corrective runs are separately packaged with relative-path/size/SHA-256 manifests outside the repository. **External transfer remains BLOCKED:** this session exposes no general file-attachment or task-artifact upload facility; a session path or a locally prepared archive is not a downloadable task attachment. No release, issue, workflow or other publication was created as a substitute. Packaging does not claim delivery, and the original files were not recreated or relabelled as a new original run. |
+| Evidence transfer | Earlier session-only delivery was blocked (historical status recorded below). This task authorizes and delivers both exact verified archives in `docs/security/evidence/a21-f1/`; their bytes and embedded manifests were rechecked after copying. Repository delivery makes the bytes retrievable but is not independent raw-evidence review. |
 
 **Producing test revisions:** the substantial correction is commit
 `9091d35b80ac30116b142adf4f8966450debba6e` (tree
@@ -1834,7 +1832,7 @@ coverage dispositions, not the reviewed correction contract.
 | Candidate large count/tiny fixture containment | `large_count`, `large_tx_len`, `max_signature_len`; passed normally with exact EOF/cursor, verified setup and COMPLETE |
 | Small-control fit and unsupported-limit handling | Normal small controls fit all ceilings; injected setup refusal tested. Real unsupported/mismatched prerequisites **NOT EXECUTED**; no fallback or broader platform claim |
 
-**Corrective evidence location:** retained separately under
+**Corrective evidence location:** retained in the session under
 `/root/.copilot/session-state/68e4e5078c814cc7ba7fec6c8c02e063/files/a21-f1-correction-evidence/`.
 Final runs are `authoritative/` and `baseline/`; `authoritative-9091d35/`
 and `baseline-9091d35/` retain the preceding committed run.
@@ -1843,13 +1841,14 @@ compile-time correction, not a decoder regression). The directory also
 retains Cargo logs, exact baseline overlay identities, toolchain/profile/FFI
 records, decoded raw-record summaries and validation checks. Locally prepared
 original/corrective archives and manifests are identified in the delivery
-report; **no external artifact reference is established**. A private session
-path alone does not satisfy the requested downloadable evidence delivery.
+report; no external artifact reference had yet been established and a private
+session path did not satisfy evidence delivery at that time.
 
-The local transfer-preparation directory is
+**Historical transfer preparation (prior to this task):** the local directory was
 `/root/.copilot/session-state/68e4e5078c814cc7ba7fec6c8c02e063/files/a21-f1-review-artifacts/`.
 Both archives were reopened and every member compared byte-for-byte with
-its selected retained source file. They are **local-only**, not attachments.
+its selected retained source file. They were then **local-only**, not attached
+or repository-delivered.
 
 | Prepared file | Bytes | SHA-256 |
 |---|---|---|
@@ -1864,6 +1863,15 @@ targets were necessary: the decoder and the six previously tested targets
 are unchanged. Final commit/tree, task-tip equality and remote-main checks
 are reported after the subsequent evidence commit; no self-referential hash
 is invented here.
+
+**Repository evidence delivery (this task):** the exact verified original and
+corrective archives, both mode `100644`, and their guide are now available in
+[`docs/security/evidence/a21-f1/README.md`](evidence/a21-f1/README.md).
+The README records archive sizes/hashes, embedded manifest names/hashes,
+producing revisions and review limits. Its supplied-review quotation says
+independent raw-evidence verification remains pending; repository delivery
+does not imply the reviewer inspected these archives. The prior
+session-only transfer block above is retained strictly as historical status.
 
 Independent **post-correction review remains PENDING**. A21-F1 remains
 **OPEN**; implementation **IMPLEMENTED — VERIFICATION PENDING**;
