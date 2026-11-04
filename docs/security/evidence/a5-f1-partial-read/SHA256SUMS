@@ -2,8 +2,8 @@
 d110d9d725b9f0ba6b2dbdf69de1a271c257baa58ce241d8de23a42b92355125  crates/qbind-node/src/secure_channel.rs
 36f73bb1043c1925abc2a8240f0682107dc407f65cc825141725a3357cfc8f04  crates/qbind-node/src/secure_channel/encrypted_write_tests.rs
 b9bc1406c77a81ec2b10ad96879223050c0eccc8dd43e87276e442bd418de4f1  crates/qbind-node/src/secure_channel/partial_read_tests.rs
-a28a11755e32335502d6dc854dc2339a2585dfe04f35b2d600d2d6157b25b851  docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md
-911dad16790eaaf5569bdcac07cc27f0a1b907a5648d31f2b9d33ed839bc1732  docs/security/evidence/a5-f1-partial-read/README.md
+e649eac0562a6a5027fc0ed171d3bfb4fa2d8a7fe0c037c70f6c045c87969160  docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md
+68596c3388f7d06d2d8403b3806d2320e7d29f3f9944a21163aea94930c4d6ee  docs/security/evidence/a5-f1-partial-read/README.md
 dc904a56227a08ff8c953f537deb95e9bef56234198ae7e067848c30e3549b18  docs/security/evidence/a5-f1-partial-read/producer.txt
 dad9e2581f23bcf5d0eb1c6e44924e7295fa378991c4705d348f1e9799273d9f  docs/security/evidence/a5-f1-partial-read/focused.log
 0613514226380880eaecaa39754588189a435dc80a1f76eedecb6d6c81be24ee  docs/security/evidence/a5-f1-partial-read/node-regressions.log
@@ -16,3 +16,4 @@ aa12c95b6cc0bd39bbc72bd8ce7b977b4014c7610ec637dac6b920cd588aed0f  docs/security/
 3d6e073c178e9975d7167d2b2148a41b0929a29b7278ef719b8dfa9b714c4aa1  docs/security/evidence/a5-f1-partial-read/dependency-install.log
 89945e83a30dce1f4005fdd1166176973d389e60258c7c298a6913e10b112ba6  docs/security/evidence/a5-f1-partial-read/preparation-retry.log
 7e871ae143aad1e5cc16a1fa44fe8127ec9c850fa9a32985202604f26e879cec  docs/security/evidence/a5-f1-partial-read/preparation-final.log
+8d20a008950b3a0645a587f56efed307e8d009ebace676ca7a1713cd016a48d7  docs/security/evidence/a5-f1-partial-read/delivery-whitespace-attempt.log

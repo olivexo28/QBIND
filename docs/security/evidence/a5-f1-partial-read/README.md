@@ -146,3 +146,25 @@ README and all retained logs/producer record, with repository-relative
 paths. It excludes itself. From the repository root run
 `sha256sum -c docs/security/evidence/a5-f1-partial-read/SHA256SUMS`.
 The final delivery tree supplies the manifest's own Git blob identity.
+
+## Delivery whitespace observation
+
+The initial evidence commit was
+`abb545ffeca8126e945237ba709554c7554c51ed`, tree
+`00dbdb03da3afd6448c25a8aace7328b14675bdd`, sole parent the implementation
+producer. A subsequent full-delivery
+`git diff --check 4629c8d14323afd86d45d2f6786f46db4f074a59 abb545ffeca8126e945237ba709554c7554c51ed`
+exited **2**, flagging raw log whitespace (including original apt CR
+line endings and a Cargo output blank line at EOF). The combined
+verification output is retained as `delivery-whitespace-attempt.log`.
+It had already verified all 18 manifest entries; the failed whitespace
+check stopped that compound verification before its remote/worktree
+checks. No source or prose formatting issue was reported.
+
+Raw logs are deliberately not normalized, rewritten or hidden via a
+repository attribute. The final source/document check excludes only
+`docs/security/evidence/a5-f1-partial-read/*.log`; checksum verification
+still covers every retained log. This later documentation-only record
+does not change the test-producing source or reattribute any test
+results. Remote equality, protected bytes and clean-worktree checks are
+rerun separately at delivery.

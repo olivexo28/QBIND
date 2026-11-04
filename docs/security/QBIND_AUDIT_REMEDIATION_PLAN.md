@@ -3637,3 +3637,15 @@ is to be pushed: no PR, merge, main push, amend or force-push.
 **A5-F1 / OBL-AVL-3a, E11, A11-F2 / OBL-TRN-3, E19, E07 and OBL-GOV-2
 remain OPEN to their remaining extent; activation DISABLED; public
 DevNet NO-GO.**
+
+Delivery qualification: the first evidence commit
+`abb545ffeca8126e945237ba709554c7554c51ed` (tree
+`00dbdb03da3afd6448c25a8aace7328b14675bdd`, parent the implementation
+producer) passed retained-file integrity checks, but a full-delivery
+`git diff --check` exited 2 on original whitespace in raw logs, including
+apt CR line endings and Cargo's blank output line. Those raw bytes are
+preserved. The evidence README and `delivery-whitespace-attempt.log`
+record this failed attempt; final source/prose whitespace checks exclude
+only raw `.log` files and all log checksums are still verified. This is
+a documentation/evidence qualification, not a change to the passing
+producer tests, a warning-free full-delivery diff claim, or closure.
