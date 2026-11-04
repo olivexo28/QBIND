@@ -42,11 +42,12 @@
 //! transport MUST:
 //!
 //! 1. Atomically drain the per-peer `PeerConnection` registry.
-//! 2. Drop the per-peer outbound `tx` channels (this closes each
-//!    write loop, releasing the AEAD key material held in the
-//!    matching `AeadSession`).
-//! 3. Abort the per-peer read-loop `JoinHandle`s so neither
-//!    direction's old session continues to read encrypted bytes.
+//! 2. Drop the per-peer outbound channels and abort the async
+//!    per-peer loop handles.
+//! 3. Retain the session-specific cleanup owner. This synchronous
+//!    hook does not wait for blocking-worker completion or prove
+//!    socket release; a later same-identity replacement or service
+//!    shutdown attempts that bounded cleanup and retains any failure.
 //! 4. Decrement `connections_current` to zero (no peer is active
 //!    after a successful drain — the listener/dialer continue
 //!    running and may accept new sessions).
@@ -84,10 +85,10 @@
 //! [`crate::pqc_trust_reload::LiveTrustApplyContext::evict_sessions`]
 //! (also sync) in a future Run 073 wiring, without forcing Run 070's
 //! sequencing contract to learn about Tokio. The concrete
-//! implementation on `TcpKemTlsP2pService` is internally race-safe
-//! because session ownership lives behind a `parking_lot::RwLock`
-//! and the per-peer task handles are `tokio::task::JoinHandle`,
-//! which can be aborted from a sync context.
+//! implementation removes active registry ownership synchronously.
+//! Its report preserves that registry-eviction result; it is not
+//! evidence that blocking I/O workers or the socket have completed
+//! cleanup.
 
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::Mutex;
@@ -141,14 +142,15 @@ pub struct EvictionReport {
     /// Total number of sessions the implementation tried to evict.
     /// Equals the registry size observed at the start of the call.
     pub attempted: usize,
-    /// Number of sessions the implementation believes were closed
-    /// (peer entry removed, outbound channel dropped, read-loop
-    /// handle aborted).
+    /// Number of sessions removed from the active registry with
+    /// outbound handles dropped and async peer-loop abort requested.
+    /// This does not certify blocking-worker completion or socket
+    /// release; the transport retains a cleanup owner for those tasks.
     pub evicted: usize,
-    /// Number of sessions the implementation could not close
-    /// safely. A non-zero value means the report is a partial
-    /// failure; callers MUST treat the eviction as not fully
-    /// successful.
+    /// Number of sessions not evicted according to this report's
+    /// semantics. A non-zero value means partial failure. For the live
+    /// TCP transport this does not encode incomplete worker/socket
+    /// cleanup; the retained owner handles that separately.
     pub failed: usize,
 }
 
@@ -181,7 +183,7 @@ impl EvictionReport {
         }
     }
 
-    /// `true` iff every attempted session was successfully evicted.
+    /// `true` iff every attempted session was evicted per this report.
     pub fn is_full_success(&self) -> bool {
         self.failed == 0
     }

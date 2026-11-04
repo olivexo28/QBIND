@@ -63,7 +63,7 @@
 
 #[cfg(test)]
 #[path = "secure_channel/encrypted_write_tests.rs"]
-mod encrypted_write_tests;
+pub(crate) mod encrypted_write_tests;
 
 #[cfg(test)]
 #[path = "secure_channel/partial_read_tests.rs"]
@@ -677,6 +677,13 @@ enum WriteCommand {
         data: Vec<u8>,
         response: tokio::sync::oneshot::Sender<Result<(), ChannelError>>,
     },
+    Retire,
+}
+
+struct WorkerTasks {
+    reader: Option<tokio::task::JoinHandle<()>>,
+    writer: Option<tokio::task::JoinHandle<()>>,
+    completion: Option<Result<(), String>>,
 }
 
 /// Async wrapper over `SecureChannel` for integration with Tokio (T92 Part B, T106 Refactor).
@@ -722,6 +729,11 @@ enum WriteCommand {
 #[allow(clippy::type_complexity)]
 pub struct SecureChannelAsync {
     invalidated: Arc<AtomicBool>,
+    shutdown_stream: Option<Arc<TcpStream>>,
+    shutdown_complete: Arc<AtomicBool>,
+    #[cfg(test)]
+    fail_shutdown: Arc<AtomicBool>,
+    worker_tasks: Arc<tokio::sync::Mutex<WorkerTasks>>,
     /// Channel for sending write commands to the writer worker.
     write_tx: tokio::sync::mpsc::Sender<WriteCommand>,
     /// Channel for receiving decrypted messages from the reader worker.
@@ -758,6 +770,22 @@ impl SecureChannelAsync {
     /// This spawns two long-lived blocking workers (reader and writer) to handle
     /// all I/O operations for this channel.
     pub fn try_new(channel: SecureChannel) -> Result<Self, AsyncChannelError> {
+        Self::try_new_with_shutdown_factory(channel, TcpStream::try_clone)
+    }
+
+    fn try_new_with_shutdown_factory(
+        channel: SecureChannel,
+        create_shutdown_stream: impl FnOnce(&TcpStream) -> io::Result<TcpStream>,
+    ) -> Result<Self, AsyncChannelError> {
+        let shutdown_stream = create_shutdown_stream(channel.stream())
+            .map_err(|e| AsyncChannelError::Channel(ChannelError::Io(e)))?;
+        Self::try_new_with_shutdown_stream(channel, shutdown_stream)
+    }
+
+    fn try_new_with_shutdown_stream(
+        channel: SecureChannel,
+        shutdown_stream: TcpStream,
+    ) -> Result<Self, AsyncChannelError> {
         if !channel.is_established() {
             return Err(AsyncChannelError::Channel(ChannelError::Net(
                 qbind_net::NetError::Protocol("channel handshake not established"),
@@ -782,18 +810,27 @@ impl SecureChannelAsync {
 
         // Spawn reader worker
         let reader_channel = Arc::clone(&channel);
-        tokio::task::spawn_blocking(move || {
+        let reader = tokio::task::spawn_blocking(move || {
             Self::reader_worker(reader_channel, read_tx);
         });
 
         // Spawn writer worker
         let writer_channel = Arc::clone(&channel);
-        tokio::task::spawn_blocking(move || {
+        let writer = tokio::task::spawn_blocking(move || {
             Self::writer_worker(writer_channel, write_rx);
         });
 
         Ok(SecureChannelAsync {
             invalidated,
+            shutdown_stream: Some(Arc::new(shutdown_stream)),
+            shutdown_complete: Arc::new(AtomicBool::new(false)),
+            #[cfg(test)]
+            fail_shutdown: Arc::new(AtomicBool::new(false)),
+            worker_tasks: Arc::new(tokio::sync::Mutex::new(WorkerTasks {
+                reader: Some(reader),
+                writer: Some(writer),
+                completion: None,
+            })),
             write_tx,
             read_rx: Arc::new(tokio::sync::Mutex::new(read_rx)),
         })
@@ -885,6 +922,7 @@ impl SecureChannelAsync {
                         break;
                     }
                 }
+                WriteCommand::Retire => break,
             }
         }
     }
@@ -896,15 +934,18 @@ impl SecureChannelAsync {
     pub fn from_shared(inner: Arc<Mutex<SecureChannel>>) -> Self {
         // Set a short read timeout to allow the reader worker to periodically release
         // the mutex, enabling the writer worker to send data.
-        let invalidated = {
+        let (invalidated, shutdown_stream) = {
             match inner.lock() {
                 Ok(ch) => {
                     let _ = ch
                         .stream()
                         .set_read_timeout(Some(Duration::from_millis(100)));
-                    Arc::clone(&ch.invalidated)
+                    (
+                        Arc::clone(&ch.invalidated),
+                        ch.stream().try_clone().ok().map(Arc::new),
+                    )
                 }
-                Err(_) => Arc::new(AtomicBool::new(true)),
+                Err(_) => (Arc::new(AtomicBool::new(true)), None),
             }
         };
 
@@ -912,23 +953,132 @@ impl SecureChannelAsync {
         let (write_tx, write_rx) = tokio::sync::mpsc::channel::<WriteCommand>(32);
         let (read_tx, read_rx) = tokio::sync::mpsc::channel::<Result<Vec<u8>, ChannelError>>(32);
 
+        if shutdown_stream.is_none() {
+            invalidated.store(true, Ordering::SeqCst);
+            drop(write_rx);
+            drop(read_tx);
+            return SecureChannelAsync {
+                invalidated,
+                shutdown_stream: None,
+                shutdown_complete: Arc::new(AtomicBool::new(false)),
+                #[cfg(test)]
+                fail_shutdown: Arc::new(AtomicBool::new(false)),
+                worker_tasks: Arc::new(tokio::sync::Mutex::new(WorkerTasks {
+                    reader: None,
+                    writer: None,
+                    completion: Some(Err(
+                        "shutdown capability unavailable; shared session refused".to_owned(),
+                    )),
+                })),
+                write_tx,
+                read_rx: Arc::new(tokio::sync::Mutex::new(read_rx)),
+            };
+        }
+
         // Spawn reader worker
         let reader_channel = Arc::clone(&inner);
-        tokio::task::spawn_blocking(move || {
+        let reader = tokio::task::spawn_blocking(move || {
             Self::reader_worker(reader_channel, read_tx);
         });
 
         // Spawn writer worker
         let writer_channel = Arc::clone(&inner);
-        tokio::task::spawn_blocking(move || {
+        let writer = tokio::task::spawn_blocking(move || {
             Self::writer_worker(writer_channel, write_rx);
         });
 
         SecureChannelAsync {
             invalidated,
+            shutdown_stream,
+            shutdown_complete: Arc::new(AtomicBool::new(false)),
+            #[cfg(test)]
+            fail_shutdown: Arc::new(AtomicBool::new(false)),
+            worker_tasks: Arc::new(tokio::sync::Mutex::new(WorkerTasks {
+                reader: Some(reader),
+                writer: Some(writer),
+                completion: None,
+            })),
             write_tx,
             read_rx: Arc::new(tokio::sync::Mutex::new(read_rx)),
         }
+    }
+
+    pub(crate) fn begin_retirement(&self) -> Result<(), AsyncChannelError> {
+        self.invalidated.store(true, Ordering::SeqCst);
+        let _ = self.write_tx.try_send(WriteCommand::Retire);
+        if self.shutdown_complete.load(Ordering::SeqCst) {
+            return Ok(());
+        }
+        #[cfg(test)]
+        if self.fail_shutdown.load(Ordering::SeqCst) {
+            return Err(AsyncChannelError::Channel(ChannelError::Io(
+                io::Error::other("injected shutdown capability failure"),
+            )));
+        }
+        let shutdown_stream = self.shutdown_stream.as_ref().ok_or_else(|| {
+            AsyncChannelError::Channel(ChannelError::Io(io::Error::other(
+                "secure-channel shutdown capability unavailable",
+            )))
+        })?;
+        match shutdown_stream.shutdown(Shutdown::Both) {
+            Ok(()) => {
+                self.shutdown_complete.store(true, Ordering::SeqCst);
+                Ok(())
+            }
+            Err(error) if error.kind() == io::ErrorKind::NotConnected => {
+                self.shutdown_complete.store(true, Ordering::SeqCst);
+                Ok(())
+            }
+            Err(error) => Err(AsyncChannelError::Channel(ChannelError::Io(error))),
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn fail_shutdown_for_test(&self, fail: bool) {
+        self.fail_shutdown.store(fail, Ordering::SeqCst);
+    }
+
+    pub(crate) fn invalidate_for_retirement(&self) {
+        self.invalidated.store(true, Ordering::SeqCst);
+        let _ = self.write_tx.try_send(WriteCommand::Retire);
+    }
+
+    pub(crate) async fn finish_retirement(&self) -> Result<(), AsyncChannelError> {
+        {
+            let mut receiver = self.read_rx.lock().await;
+            receiver.close();
+            while receiver.try_recv().is_ok() {}
+        }
+
+        let mut tasks = self.worker_tasks.lock().await;
+        if let Some(result) = &tasks.completion {
+            return result
+                .as_ref()
+                .map(|()| ())
+                .map_err(|error| AsyncChannelError::TaskJoin(error.clone()));
+        }
+
+        let mut failures = Vec::new();
+        if let Some(reader) = tasks.reader.as_mut() {
+            if let Err(error) = reader.await {
+                failures.push(format!("reader worker: {error}"));
+            }
+            tasks.reader = None;
+        }
+        if let Some(writer) = tasks.writer.as_mut() {
+            if let Err(error) = writer.await {
+                failures.push(format!("writer worker: {error}"));
+            }
+            tasks.writer = None;
+        }
+
+        let result = if failures.is_empty() {
+            Ok(())
+        } else {
+            Err(failures.join("; "))
+        };
+        tasks.completion = Some(result.clone());
+        result.map_err(AsyncChannelError::TaskJoin)
     }
 
     /// Get a clone of the inner Arc for sharing.
@@ -1139,20 +1289,8 @@ pub async fn connect_kemtls_async_with_server_identity(
     addr: String,
     cfg: ClientConnectionConfig,
 ) -> Result<(SecureChannelAsync, Option<VerifiedServerIdentity>), AsyncChannelError> {
-    // Perform the blocking connect in spawn_blocking, capturing the verified
-    // server identity from the established `Connection` before the channel is
-    // wrapped for async I/O.
     let (channel, server_identity) =
-        tokio::task::spawn_blocking(move || match SecureChannel::connect(&addr, cfg) {
-            Ok(ch) => {
-                let id = ch.verified_server_identity();
-                Ok((ch, id))
-            }
-            Err(e) => Err(e),
-        })
-        .await
-        .map_err(|e| AsyncChannelError::TaskJoin(e.to_string()))?
-        .map_err(AsyncChannelError::Channel)?;
+        connect_kemtls_secure_channel_with_server_identity(addr, cfg).await?;
 
     // Create the async wrapper outside the blocking context
     // This spawns the reader/writer workers
@@ -1162,6 +1300,22 @@ pub async fn connect_kemtls_async_with_server_identity(
     tokio::time::sleep(Duration::from_millis(100)).await;
 
     Ok((async_channel, server_identity))
+}
+
+pub async fn connect_kemtls_secure_channel_with_server_identity(
+    addr: String,
+    cfg: ClientConnectionConfig,
+) -> Result<(SecureChannel, Option<VerifiedServerIdentity>), AsyncChannelError> {
+    tokio::task::spawn_blocking(move || match SecureChannel::connect(&addr, cfg) {
+        Ok(channel) => {
+            let identity = channel.verified_server_identity();
+            Ok((channel, identity))
+        }
+        Err(error) => Err(error),
+    })
+    .await
+    .map_err(|error| AsyncChannelError::TaskJoin(error.to_string()))?
+    .map_err(AsyncChannelError::Channel)
 }
 
 /// Perform a blocking server-side KEMTLS handshake in a spawn_blocking task.
@@ -1215,14 +1369,7 @@ pub async fn accept_kemtls_async_with_peer_init(
     stream: TcpStream,
     cfg: ServerConnectionConfig,
 ) -> Result<(SecureChannelAsync, AcceptedPeerInit), AsyncChannelError> {
-    // Perform the blocking handshake in spawn_blocking. This variant
-    // also produces the parsed `AcceptedPeerInit`.
-    let (channel, peer_init) = tokio::task::spawn_blocking(move || {
-        SecureChannel::from_accepted_with_peer_init(stream, cfg)
-    })
-    .await
-    .map_err(|e| AsyncChannelError::TaskJoin(e.to_string()))?
-    .map_err(AsyncChannelError::Channel)?;
+    let (channel, peer_init) = accept_kemtls_secure_channel_with_peer_init(stream, cfg).await?;
 
     // Create the async wrapper outside the blocking context
     let async_channel = SecureChannelAsync::try_new(channel)?;
@@ -1231,4 +1378,14 @@ pub async fn accept_kemtls_async_with_peer_init(
     tokio::time::sleep(Duration::from_millis(100)).await;
 
     Ok((async_channel, peer_init))
+}
+
+pub async fn accept_kemtls_secure_channel_with_peer_init(
+    stream: TcpStream,
+    cfg: ServerConnectionConfig,
+) -> Result<(SecureChannel, AcceptedPeerInit), AsyncChannelError> {
+    tokio::task::spawn_blocking(move || SecureChannel::from_accepted_with_peer_init(stream, cfg))
+        .await
+        .map_err(|error| AsyncChannelError::TaskJoin(error.to_string()))?
+        .map_err(AsyncChannelError::Channel)
 }

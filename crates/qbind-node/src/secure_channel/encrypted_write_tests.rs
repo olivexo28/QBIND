@@ -150,6 +150,29 @@ pub(super) fn pair(peer_init: bool) -> (SecureChannel, SecureChannel, Arc<Crypto
     (client, server.join().unwrap(), trace)
 }
 
+pub(crate) fn pair_channels(peer_init: bool) -> (SecureChannel, SecureChannel) {
+    let (client, server, _) = pair(peer_init);
+    (client, server)
+}
+
+#[test]
+fn async_wrapper_refuses_when_shutdown_capability_creation_fails() {
+    let (channel, mut peer, _) = pair(false);
+    let result = SecureChannelAsync::try_new_with_shutdown_factory(channel, |_| {
+        Err(io::Error::other(
+            "injected shutdown capability creation failure",
+        ))
+    });
+    assert!(matches!(
+        result,
+        Err(AsyncChannelError::Channel(ChannelError::Io(error)))
+            if error.to_string().contains("injected shutdown capability creation failure")
+    ));
+
+    let error = peer.recv_app().unwrap_err();
+    assert!(matches!(error, ChannelError::Io(_)));
+}
+
 #[derive(Debug, Default)]
 struct IoTrace {
     bytes: Vec<u8>,
@@ -463,6 +486,14 @@ async fn queued_plaintext_is_not_released_after_invalidation() {
     read_tx.send(Ok(plaintext)).await.unwrap();
     let channel = SecureChannelAsync {
         invalidated: Arc::clone(&client.invalidated),
+        shutdown_stream: None,
+        shutdown_complete: Arc::new(AtomicBool::new(false)),
+        fail_shutdown: Arc::new(AtomicBool::new(false)),
+        worker_tasks: Arc::new(tokio::sync::Mutex::new(WorkerTasks {
+            reader: None,
+            writer: None,
+            completion: None,
+        })),
         write_tx,
         read_rx: Arc::new(tokio::sync::Mutex::new(read_rx)),
     };

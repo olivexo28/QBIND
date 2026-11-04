@@ -73,14 +73,14 @@
 //! - All tasks listen for shutdown signal
 //! - On shutdown, all connections are closed and tasks terminate
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
 use parking_lot::RwLock;
 use tokio::net::{TcpListener, TcpStream};
-use tokio::sync::{broadcast, mpsc};
+use tokio::sync::{broadcast, mpsc, watch};
 use tokio::task::JoinHandle;
 
 use crate::node_config::NetworkTransportConfig;
@@ -88,7 +88,8 @@ use crate::p2p::{NodeId, P2pMessage, P2pService};
 use crate::p2p_inbound::InboundP2pEnvelope;
 use crate::peer_consensus_binding::AuthenticatedConsensusOrigin;
 use crate::secure_channel::{
-    accept_kemtls_async_with_peer_init, connect_kemtls_async_with_server_identity, AcceptedPeerInit,
+    accept_kemtls_secure_channel_with_peer_init,
+    connect_kemtls_secure_channel_with_server_identity, AcceptedPeerInit, SecureChannel,
     SecureChannelAsync,
 };
 use qbind_crypto::CryptoProvider;
@@ -110,6 +111,8 @@ pub enum P2pTransportError {
     Handshake(String),
     /// Configuration error.
     Config(String),
+    /// A peer identity is held by an unfinished session retirement.
+    SessionRetirement(String),
 }
 
 impl std::fmt::Display for P2pTransportError {
@@ -119,6 +122,9 @@ impl std::fmt::Display for P2pTransportError {
             P2pTransportError::Encoding(msg) => write!(f, "Encoding error: {}", msg),
             P2pTransportError::Handshake(msg) => write!(f, "Handshake error: {}", msg),
             P2pTransportError::Config(msg) => write!(f, "Config error: {}", msg),
+            P2pTransportError::SessionRetirement(msg) => {
+                write!(f, "peer session retirement error: {}", msg)
+            }
         }
     }
 }
@@ -221,8 +227,7 @@ fn decode_frame(frame: &[u8]) -> Result<P2pMessage, P2pTransportError> {
 /// self-asserted by the dialer under `MutualAuthMode::Disabled`. See
 /// `secure_channel::AcceptedPeerInit` and
 /// `p2p_node_builder::parse_test_validator_id_from_client_random`.
-pub type InboundIdentityResolver =
-    Arc<dyn Fn(&AcceptedPeerInit) -> Option<NodeId> + Send + Sync>;
+pub type InboundIdentityResolver = Arc<dyn Fn(&AcceptedPeerInit) -> Option<NodeId> + Send + Sync>;
 
 /// Run 418: resolver that maps an accepted inbound session's **verified**
 /// KEMTLS identity to an [`AuthenticatedConsensusOrigin`], or `None` when the
@@ -362,10 +367,88 @@ struct PeerConnection {
     /// the caller, never as backpressure on the consensus/DAG/
     /// control encoder path.
     raw_tx: mpsc::Sender<Vec<u8>>,
-    /// Task handle for the write loop.
-    write_handle: JoinHandle<()>,
-    /// Task handle for the read loop.
-    read_handle: JoinHandle<()>,
+    retirement: Arc<PeerRetirement>,
+}
+
+struct PeerLoopTasks {
+    reader: Option<JoinHandle<()>>,
+    writer: Option<JoinHandle<()>>,
+}
+
+struct PeerRetirement {
+    session_id: u64,
+    channel: SecureChannelAsync,
+    cancel_tx: watch::Sender<bool>,
+    tasks: tokio::sync::Mutex<PeerLoopTasks>,
+    loop_failure: std::sync::Mutex<Option<String>>,
+}
+
+impl PeerRetirement {
+    fn begin(&self) {
+        self.channel.invalidate_for_retirement();
+        let _ = self.cancel_tx.send(true);
+    }
+
+    async fn finish(&self) -> Result<(), String> {
+        if let Some(error) = self.loop_failure.lock().unwrap().clone() {
+            return Err(error);
+        }
+        self.channel
+            .begin_retirement()
+            .map_err(|error| error.to_string())?;
+
+        let mut tasks = self.tasks.lock().await;
+        let mut failures = Vec::new();
+        if let Some(reader) = tasks.reader.as_mut() {
+            if let Err(error) = reader.await {
+                if !error.is_cancelled() {
+                    failures.push(format!("peer read loop: {error}"));
+                }
+            }
+            tasks.reader = None;
+        }
+        if let Some(writer) = tasks.writer.as_mut() {
+            if let Err(error) = writer.await {
+                if !error.is_cancelled() {
+                    failures.push(format!("peer write loop: {error}"));
+                }
+            }
+            tasks.writer = None;
+        }
+        drop(tasks);
+
+        self.channel
+            .finish_retirement()
+            .await
+            .map_err(|error| error.to_string())?;
+        if !failures.is_empty() {
+            let error = failures.join("; ");
+            *self.loop_failure.lock().unwrap() = Some(error.clone());
+            return Err(error);
+        }
+        Ok(())
+    }
+}
+
+#[derive(Default)]
+struct PeerRegistry {
+    active: HashMap<NodeId, PeerConnection>,
+    retiring: HashMap<NodeId, Arc<PeerRetirement>>,
+    registering: HashSet<NodeId>,
+}
+
+struct RegistrationReservation {
+    node_id: NodeId,
+    peers: Arc<RwLock<PeerRegistry>>,
+    armed: bool,
+}
+
+impl Drop for RegistrationReservation {
+    fn drop(&mut self) {
+        if self.armed {
+            self.peers.write().registering.remove(&self.node_id);
+        }
+    }
 }
 
 /// Run 080 — bounded outbound raw-frame channel capacity per peer.
@@ -375,11 +458,12 @@ struct PeerConnection {
 /// queue-full as a per-peer failure on an unhealthy peer instead of
 /// silently absorbing the frame into a long queue.
 const RAW_FRAME_CHANNEL_CAPACITY: usize = 8;
-
+const PEER_RETIREMENT_TIMEOUT: Duration = Duration::from_secs(5);
+static NEXT_PEER_SESSION_ID: AtomicU64 = AtomicU64::new(1);
 
 impl PeerConnection {
     /// Shutdown the peer connection gracefully.
-    async fn shutdown(self) {
+    async fn shutdown(self) -> Result<(), String> {
         // Close BOTH outbound channels (structured + raw). Dropping
         // either alone would not exit the multiplexed write loop;
         // dropping both causes both `recv()`s inside the select! to
@@ -388,9 +472,10 @@ impl PeerConnection {
         drop(self.tx);
         drop(self.raw_tx);
 
-        // Wait for tasks to complete
-        let _ = self.write_handle.await;
-        let _ = self.read_handle.await;
+        self.retirement.begin();
+        tokio::time::timeout(PEER_RETIREMENT_TIMEOUT, self.retirement.finish())
+            .await
+            .map_err(|_| "peer retirement timed out; ownership retained".to_owned())?
     }
 }
 
@@ -423,7 +508,7 @@ pub struct TcpKemTlsP2pService {
     /// Configuration.
     config: NetworkTransportConfig,
     /// Connected peers.
-    peers: Arc<RwLock<HashMap<NodeId, PeerConnection>>>,
+    peers: Arc<RwLock<PeerRegistry>>,
     /// Inbound message channel (sender).
     inbound_tx: mpsc::Sender<InboundP2pEnvelope>,
     /// Inbound message channel (receiver) for cloning.
@@ -512,7 +597,8 @@ pub struct TcpKemTlsP2pService {
     /// production-binary path by `p2p_node_builder` when the
     /// `--p2p-trust-bundle-peer-candidate-wire-validation-enabled`
     /// flag is set.
-    peer_candidate_wire_sink: Arc<RwLock<Option<Arc<dyn crate::pqc_peer_candidate_wire::PeerCandidateWireFrameSink>>>>,
+    peer_candidate_wire_sink:
+        Arc<RwLock<Option<Arc<dyn crate::pqc_peer_candidate_wire::PeerCandidateWireFrameSink>>>>,
     /// Run 362: optional runtime-owned abuse/DoS connection-rate limiter
     /// state consulted at the top of the accept loop, before any expensive
     /// per-connection admission work (KEMTLS handshake, trust-bundle /
@@ -527,8 +613,11 @@ pub struct TcpKemTlsP2pService {
     /// peer, never mutates trust state, and never writes any sequence/marker
     /// file. Installed via
     /// [`TcpKemTlsP2pService::set_abuse_dos_runtime_state`].
-    abuse_dos_runtime:
-        Arc<RwLock<Option<Arc<crate::public_devnet_abuse_dos_runtime::PublicDevnetAbuseDosRuntimeState>>>>,
+    abuse_dos_runtime: Arc<
+        RwLock<
+            Option<Arc<crate::public_devnet_abuse_dos_runtime::PublicDevnetAbuseDosRuntimeState>>,
+        >,
+    >,
     /// Run 369: optional deployed inbound per-peer message-rate limiter
     /// consulted by every per-peer `read_loop` AFTER a frame decodes to a
     /// structured `P2pMessage` and BEFORE it is forwarded to the inbound
@@ -544,7 +633,9 @@ pub struct TcpKemTlsP2pService {
     /// admission / trust / sequence / validator / epoch state. The default
     /// posture is `1000` msg/s + `100` burst so normal traffic is unaffected.
     inbound_per_peer_limiter: Arc<
-        RwLock<Option<Arc<crate::deployed_inbound_per_peer_limiter::DeployedInboundPerPeerLimiter>>>,
+        RwLock<
+            Option<Arc<crate::deployed_inbound_per_peer_limiter::DeployedInboundPerPeerLimiter>>,
+        >,
     >,
     /// Run 418: optional resolver that maps an accepted inbound session's
     /// **verified** KEMTLS identity to an authenticated consensus origin.
@@ -574,7 +665,7 @@ impl std::fmt::Debug for TcpKemTlsP2pService {
         f.debug_struct("TcpKemTlsP2pService")
             .field("local_node_id", &self.local_node_id)
             .field("config", &self.config)
-            .field("peer_count", &self.peers.read().len())
+            .field("peer_count", &self.peers.read().active.len())
             .finish()
     }
 }
@@ -596,7 +687,7 @@ impl TcpKemTlsP2pService {
         Ok(Self {
             local_node_id,
             config,
-            peers: Arc::new(RwLock::new(HashMap::new())),
+            peers: Arc::new(RwLock::new(PeerRegistry::default())),
             inbound_tx,
             inbound_rx: Arc::new(tokio::sync::Mutex::new(inbound_rx)),
             shutdown_tx,
@@ -648,10 +739,7 @@ impl TcpKemTlsP2pService {
     /// dialer otherwise defaults to its own local validator id which
     /// would fail this check the moment two distinct binaries try to
     /// connect to each other.
-    pub fn set_peer_validator_id_overrides(
-        &mut self,
-        overrides: HashMap<String, [u8; 32]>,
-    ) {
+    pub fn set_peer_validator_id_overrides(&mut self, overrides: HashMap<String, [u8; 32]>) {
         let mut guard = self.peer_validator_id_overrides.write();
         *guard = overrides;
     }
@@ -819,13 +907,13 @@ impl TcpKemTlsP2pService {
     /// under a Run-080-stable name so the publisher does not bind
     /// to a Run 072 method that may evolve independently.
     pub fn connected_peer_count(&self) -> usize {
-        self.peers.read().len()
+        self.peers.read().active.len()
     }
 
     /// Run 080 — snapshot the currently authenticated peer NodeIds
     /// in registration order. Cheap (single read lock).
     pub fn connected_peer_node_ids(&self) -> Vec<NodeId> {
-        self.peers.read().keys().copied().collect()
+        self.peers.read().active.keys().copied().collect()
     }
 
     /// Run 080 — enqueue `frame_bytes` for asynchronous transmission
@@ -853,13 +941,16 @@ impl TcpKemTlsP2pService {
         let peer_snapshot: Vec<(NodeId, mpsc::Sender<Vec<u8>>)> = {
             let guard = self.peers.read();
             guard
+                .active
                 .iter()
                 .map(|(id, conn)| (*id, conn.raw_tx.clone()))
                 .collect()
         };
 
-        let mut per_peer: Vec<(NodeId, crate::pqc_peer_candidate_wire::RawFramePeerSendOutcome)> =
-            Vec::with_capacity(peer_snapshot.len());
+        let mut per_peer: Vec<(
+            NodeId,
+            crate::pqc_peer_candidate_wire::RawFramePeerSendOutcome,
+        )> = Vec::with_capacity(peer_snapshot.len());
         for (peer, tx) in peer_snapshot {
             let outcome = match tx.try_send(frame_bytes.clone()) {
                 Ok(()) => crate::pqc_peer_candidate_wire::RawFramePeerSendOutcome::Enqueued,
@@ -887,12 +978,14 @@ impl TcpKemTlsP2pService {
             let guard = self.peers.read();
             selected_peers
                 .iter()
-                .filter_map(|id| guard.get(id).map(|conn| (*id, conn.raw_tx.clone())))
+                .filter_map(|id| guard.active.get(id).map(|conn| (*id, conn.raw_tx.clone())))
                 .collect()
         };
 
-        let mut per_peer: Vec<(NodeId, crate::pqc_peer_candidate_wire::RawFramePeerSendOutcome)> =
-            Vec::with_capacity(selected_peers.len());
+        let mut per_peer: Vec<(
+            NodeId,
+            crate::pqc_peer_candidate_wire::RawFramePeerSendOutcome,
+        )> = Vec::with_capacity(selected_peers.len());
         for selected in selected_peers {
             if !peer_snapshot.iter().any(|(peer, _)| peer == selected) {
                 per_peer.push((
@@ -972,8 +1065,7 @@ impl TcpKemTlsP2pService {
         let peer_candidate_wire_sink = Arc::clone(&self.peer_candidate_wire_sink);
         let abuse_dos_runtime = Arc::clone(&self.abuse_dos_runtime);
         let inbound_per_peer_limiter = Arc::clone(&self.inbound_per_peer_limiter);
-        let inbound_consensus_origin_resolver =
-            Arc::clone(&self.inbound_consensus_origin_resolver);
+        let inbound_consensus_origin_resolver = Arc::clone(&self.inbound_consensus_origin_resolver);
 
         tokio::spawn(async move {
             let mut shutdown_rx = shutdown_rx;
@@ -1094,7 +1186,7 @@ impl TcpKemTlsP2pService {
         stream: TcpStream,
         peer_addr: std::net::SocketAddr,
         server_cfg: ServerConnectionConfig,
-        peers: Arc<RwLock<HashMap<NodeId, PeerConnection>>>,
+        peers: Arc<RwLock<PeerRegistry>>,
         inbound_tx: mpsc::Sender<InboundP2pEnvelope>,
         connections_current: Arc<AtomicU64>,
         bytes_received: Arc<AtomicU64>,
@@ -1106,9 +1198,7 @@ impl TcpKemTlsP2pService {
         inbound_per_peer_limiter: Arc<
             RwLock<
                 Option<
-                    Arc<
-                        crate::deployed_inbound_per_peer_limiter::DeployedInboundPerPeerLimiter,
-                    >,
+                    Arc<crate::deployed_inbound_per_peer_limiter::DeployedInboundPerPeerLimiter>,
                 >,
             >,
         >,
@@ -1137,7 +1227,7 @@ impl TcpKemTlsP2pService {
         // `client_random` + `validator_id` from `ClientInit`. The
         // handshake itself is identical to the pre-B8 path.
         let (channel, peer_init) =
-            accept_kemtls_async_with_peer_init(std_stream, server_cfg.clone())
+            accept_kemtls_secure_channel_with_peer_init(std_stream, server_cfg.clone())
                 .await
                 .map_err(|e| P2pTransportError::Handshake(e.to_string()))?;
 
@@ -1193,8 +1283,6 @@ impl TcpKemTlsP2pService {
             guard.as_ref().and_then(|f| f(&peer_init))
         };
 
-        connections_current.fetch_add(1, Ordering::Relaxed);
-
         // Spawn read/write loops
         Self::spawn_peer_handlers(
             node_id,
@@ -1207,7 +1295,7 @@ impl TcpKemTlsP2pService {
             inbound_per_peer_limiter,
             consensus_origin,
         )
-        .await;
+        .await?;
 
         Ok(())
     }
@@ -1275,9 +1363,12 @@ impl TcpKemTlsP2pService {
         // Perform KEMTLS handshake (blocking), surfacing the ACTUAL verified
         // server identity established by the handshake (Run 418, F6).
         let (channel, verified_server_identity) =
-            connect_kemtls_async_with_server_identity(peer_addr.clone(), client_cfg.clone())
-                .await
-                .map_err(|e| P2pTransportError::Handshake(e.to_string()))?;
+            connect_kemtls_secure_channel_with_server_identity(
+                peer_addr.clone(),
+                client_cfg.clone(),
+            )
+            .await
+            .map_err(|e| P2pTransportError::Handshake(e.to_string()))?;
 
         // M7: Derive NodeId from peer's KEM public key (cryptographic binding)
         // The peer_kem_pk in client_cfg is the server's KEM public key that we
@@ -1339,8 +1430,6 @@ impl TcpKemTlsP2pService {
             None => None,
         };
 
-        self.connections_current.fetch_add(1, Ordering::Relaxed);
-
         // Spawn read/write loops
         Self::spawn_peer_handlers(
             node_id,
@@ -1353,7 +1442,7 @@ impl TcpKemTlsP2pService {
             Arc::clone(&self.inbound_per_peer_limiter),
             consensus_origin,
         )
-        .await;
+        .await?;
 
         Ok(())
     }
@@ -1361,23 +1450,86 @@ impl TcpKemTlsP2pService {
     /// Spawn read/write handlers for a peer connection.
     async fn spawn_peer_handlers(
         node_id: NodeId,
-        channel: SecureChannelAsync,
-        peers: Arc<RwLock<HashMap<NodeId, PeerConnection>>>,
+        channel: SecureChannel,
+        peers: Arc<RwLock<PeerRegistry>>,
         inbound_tx: mpsc::Sender<InboundP2pEnvelope>,
-        _connections_current: Arc<AtomicU64>,
+        connections_current: Arc<AtomicU64>,
         bytes_received: Arc<AtomicU64>,
-        peer_candidate_wire_sink: Arc<RwLock<Option<Arc<dyn crate::pqc_peer_candidate_wire::PeerCandidateWireFrameSink>>>>,
+        peer_candidate_wire_sink: Arc<
+            RwLock<Option<Arc<dyn crate::pqc_peer_candidate_wire::PeerCandidateWireFrameSink>>>,
+        >,
         inbound_per_peer_limiter: Arc<
             RwLock<
                 Option<
-                    Arc<
-                        crate::deployed_inbound_per_peer_limiter::DeployedInboundPerPeerLimiter,
-                    >,
+                    Arc<crate::deployed_inbound_per_peer_limiter::DeployedInboundPerPeerLimiter>,
                 >,
             >,
         >,
         consensus_origin: Option<AuthenticatedConsensusOrigin>,
-    ) {
+    ) -> Result<(), P2pTransportError> {
+        let retirement = {
+            let mut registry = peers.write();
+            if registry.registering.contains(&node_id) {
+                return Err(P2pTransportError::SessionRetirement(format!(
+                    "NodeId {:?} already has a registration in progress",
+                    node_id
+                )));
+            }
+            registry.registering.insert(node_id);
+
+            if let Some(retirement) = registry.retiring.get(&node_id) {
+                Some(Arc::clone(retirement))
+            } else if let Some(displaced) = registry.active.remove(&node_id) {
+                displaced.retirement.begin();
+                let retirement = Arc::clone(&displaced.retirement);
+                registry.retiring.insert(node_id, Arc::clone(&retirement));
+                drop(displaced.tx);
+                drop(displaced.raw_tx);
+                connections_current.fetch_sub(1, Ordering::Relaxed);
+                Some(retirement)
+            } else {
+                None
+            }
+        };
+        let mut reservation = RegistrationReservation {
+            node_id,
+            peers: Arc::clone(&peers),
+            armed: true,
+        };
+
+        if let Some(retirement) = retirement {
+            let result = tokio::time::timeout(PEER_RETIREMENT_TIMEOUT, retirement.finish())
+                .await
+                .map_err(|_| "peer retirement timed out; ownership retained".to_owned())
+                .and_then(|result| result);
+            if let Err(error) = result {
+                eprintln!(
+                    "[P2P] refusing replacement for {:?}: retirement of session {} is incomplete: {}",
+                    node_id, retirement.session_id, error
+                );
+                return Err(P2pTransportError::SessionRetirement(format!(
+                    "NodeId {:?} remains blocked by session {}: {}",
+                    node_id, retirement.session_id, error
+                )));
+            }
+
+            let mut registry = peers.write();
+            match registry.retiring.get(&node_id) {
+                Some(current) if Arc::ptr_eq(current, &retirement) => {
+                    registry.retiring.remove(&node_id);
+                }
+                _ => {
+                    return Err(P2pTransportError::SessionRetirement(format!(
+                        "retired session {} lost registry ownership",
+                        retirement.session_id
+                    )));
+                }
+            }
+        }
+
+        let channel = SecureChannelAsync::try_new(channel)
+            .map_err(|error| P2pTransportError::SessionRetirement(error.to_string()))?;
+
         // Create outbound channel for this peer
         let (peer_tx, peer_rx) = mpsc::channel::<P2pMessage>(64);
         // Run 080 — bounded raw-frame outbound channel. Small
@@ -1386,17 +1538,22 @@ impl TcpKemTlsP2pService {
         // uses `try_send` and treats queue-full as a per-peer
         // failure rather than backpressure on the structured
         // consensus/DAG/control encoder path).
-        let (peer_raw_tx, peer_raw_rx) =
-            mpsc::channel::<Vec<u8>>(RAW_FRAME_CHANNEL_CAPACITY);
+        let (peer_raw_tx, peer_raw_rx) = mpsc::channel::<Vec<u8>>(RAW_FRAME_CHANNEL_CAPACITY);
+
+        let (cancel_tx, cancel_rx) = watch::channel(false);
+
+        let channel_owner = channel.clone();
 
         // Spawn write loop
         let channel_write = channel.clone();
+        let write_cancel = cancel_rx.clone();
         let write_handle = tokio::spawn(async move {
-            Self::write_loop(channel_write, peer_rx, peer_raw_rx).await;
+            Self::write_loop(channel_write, peer_rx, peer_raw_rx, write_cancel).await;
         });
 
         // Spawn read loop
         let channel_read = channel;
+        let read_cancel = cancel_rx;
         let inbound_tx_clone = inbound_tx.clone();
         let bytes_received_clone = Arc::clone(&bytes_received);
         let wire_sink_clone = Arc::clone(&peer_candidate_wire_sink);
@@ -1410,8 +1567,20 @@ impl TcpKemTlsP2pService {
                 wire_sink_clone,
                 inbound_per_peer_limiter_clone,
                 consensus_origin,
+                read_cancel,
             )
             .await;
+        });
+
+        let retirement = Arc::new(PeerRetirement {
+            session_id: NEXT_PEER_SESSION_ID.fetch_add(1, Ordering::Relaxed),
+            channel: channel_owner,
+            cancel_tx,
+            tasks: tokio::sync::Mutex::new(PeerLoopTasks {
+                reader: Some(read_handle),
+                writer: Some(write_handle),
+            }),
+            loop_failure: std::sync::Mutex::new(None),
         });
 
         // Register peer connection
@@ -1419,13 +1588,27 @@ impl TcpKemTlsP2pService {
             node_id,
             tx: peer_tx,
             raw_tx: peer_raw_tx,
-            write_handle,
-            read_handle,
+            retirement,
         };
 
-        peers.write().insert(node_id, conn);
+        {
+            let mut registry = peers.write();
+            if !registry.registering.remove(&node_id)
+                || registry.active.contains_key(&node_id)
+                || registry.retiring.contains_key(&node_id)
+            {
+                return Err(P2pTransportError::SessionRetirement(format!(
+                    "NodeId {:?} registration reservation was lost",
+                    node_id
+                )));
+            }
+            registry.active.insert(node_id, conn);
+            reservation.armed = false;
+        }
+        connections_current.fetch_add(1, Ordering::Relaxed);
 
         println!("[P2P] Peer {:?} connected", node_id);
+        Ok(())
     }
 
     /// Read loop: continuously read frames and push to inbound channel.
@@ -1456,9 +1639,39 @@ impl TcpKemTlsP2pService {
         inbound_per_peer_limiter: Arc<
             RwLock<
                 Option<
-                    Arc<
-                        crate::deployed_inbound_per_peer_limiter::DeployedInboundPerPeerLimiter,
-                    >,
+                    Arc<crate::deployed_inbound_per_peer_limiter::DeployedInboundPerPeerLimiter>,
+                >,
+            >,
+        >,
+        consensus_origin: Option<AuthenticatedConsensusOrigin>,
+        mut cancel: watch::Receiver<bool>,
+    ) {
+        tokio::select! {
+            _ = cancel.changed() => {},
+            _ = Self::read_loop_inner(
+                source_peer,
+                channel,
+                inbound_tx,
+                bytes_received,
+                peer_candidate_wire_sink,
+                inbound_per_peer_limiter,
+                consensus_origin,
+            ) => {},
+        }
+    }
+
+    async fn read_loop_inner(
+        source_peer: NodeId,
+        channel: SecureChannelAsync,
+        inbound_tx: mpsc::Sender<InboundP2pEnvelope>,
+        bytes_received: Arc<AtomicU64>,
+        peer_candidate_wire_sink: Arc<
+            RwLock<Option<Arc<dyn crate::pqc_peer_candidate_wire::PeerCandidateWireFrameSink>>>,
+        >,
+        inbound_per_peer_limiter: Arc<
+            RwLock<
+                Option<
+                    Arc<crate::deployed_inbound_per_peer_limiter::DeployedInboundPerPeerLimiter>,
                 >,
             >,
         >,
@@ -1556,6 +1769,18 @@ impl TcpKemTlsP2pService {
     /// structured channel keeps flowing consensus traffic (and vice
     /// versa).
     async fn write_loop(
+        channel: SecureChannelAsync,
+        rx: mpsc::Receiver<P2pMessage>,
+        raw_rx: mpsc::Receiver<Vec<u8>>,
+        mut cancel: watch::Receiver<bool>,
+    ) {
+        tokio::select! {
+            _ = cancel.changed() => {},
+            _ = Self::write_loop_inner(channel, rx, raw_rx) => {},
+        }
+    }
+
+    async fn write_loop_inner(
         channel: SecureChannelAsync,
         mut rx: mpsc::Receiver<P2pMessage>,
         mut raw_rx: mpsc::Receiver<Vec<u8>>,
@@ -1686,14 +1911,33 @@ impl TcpKemTlsP2pService {
             let _ = h.await;
         }
 
-        // Shutdown all peer connections
-        let peers = {
+        let (peers, retiring) = {
             let mut peers_lock = self.peers.write();
-            std::mem::take(&mut *peers_lock)
+            (
+                std::mem::take(&mut peers_lock.active),
+                std::mem::take(&mut peers_lock.retiring),
+            )
         };
 
-        for (_node_id, conn) in peers {
-            conn.shutdown().await;
+        for (node_id, conn) in peers {
+            let owner = Arc::clone(&conn.retirement);
+            if let Err(error) = conn.shutdown().await {
+                eprintln!("[P2P] session {:?} shutdown incomplete: {}", node_id, error);
+                self.peers.write().retiring.insert(node_id, owner);
+            }
+        }
+        for (node_id, owner) in retiring {
+            let result = tokio::time::timeout(PEER_RETIREMENT_TIMEOUT, owner.finish())
+                .await
+                .map_err(|_| "peer retirement timed out".to_owned())
+                .and_then(|result| result);
+            if let Err(error) = result {
+                eprintln!(
+                    "[P2P] retained retirement for {:?} is incomplete: {}",
+                    node_id, error
+                );
+                self.peers.write().retiring.insert(node_id, owner);
+            }
         }
 
         // Wait for listener to terminate
@@ -1751,7 +1995,7 @@ impl TcpKemTlsP2pService {
     /// Run 072 helper: number of currently authenticated peer
     /// sessions in the registry. Cheap (single read lock).
     pub fn live_session_count(&self) -> usize {
-        self.peers.read().len()
+        self.peers.read().active.len()
     }
 
     /// Run 072 entry point: synchronously evict every currently
@@ -1766,11 +2010,12 @@ impl TcpKemTlsP2pService {
     ///   register new peers under fresh KEMTLS handshakes — these new
     ///   peers are NOT part of the eviction call's `attempted` count
     ///   and remain alive after this returns.
-    /// - For each drained `PeerConnection`, we drop `tx` (this closes
-    ///   the write loop's mpsc; the write task then exits and releases
-    ///   the `AeadSession` that holds the c2s/s2c keys) and abort the
-    ///   `read_handle` / `write_handle` task handles (this terminates
-    ///   the per-peer read loop synchronously without an `.await`).
+    /// - For each drained `PeerConnection`, we drop both outbound
+    ///   senders and abort the async peer loops. Their join results are
+    ///   later observed by the retained owner, while blocking-worker
+    ///   completion and socket release remain separate observations.
+    ///   A later replacement or service shutdown requests socket
+    ///   shutdown and joins those workers before releasing the owner.
     /// - `connections_current` is reset to the post-eviction registry
     ///   size, observed under the same write guard.
     /// - The listener task handle and the B8 initial-dial-with-retry
@@ -1795,28 +2040,34 @@ impl TcpKemTlsP2pService {
     > {
         let drained: Vec<(NodeId, PeerConnection)> = {
             let mut guard = self.peers.write();
-            let taken: HashMap<NodeId, PeerConnection> = std::mem::take(&mut *guard);
+            let taken: HashMap<NodeId, PeerConnection> = std::mem::take(&mut guard.active);
+            for (node_id, conn) in &taken {
+                conn.retirement.begin();
+                guard
+                    .retiring
+                    .insert(*node_id, Arc::clone(&conn.retirement));
+            }
             taken.into_iter().collect()
         };
         let attempted = drained.len();
         let mut evicted = 0usize;
         for (_node_id, conn) in drained {
-            // Dropping `tx` closes the outbound mpsc so the write
-            // loop's `recv()` returns `None` and the task exits,
-            // releasing the AEAD session. `abort()` on both handles
-            // ensures neither loop continues to read/write encrypted
-            // bytes if it was blocked on `read()` / `recv()`.
             let PeerConnection {
                 tx,
                 raw_tx,
-                read_handle,
-                write_handle,
-                node_id: _node_id_field,
+                retirement,
+                ..
             } = conn;
             drop(tx);
             drop(raw_tx);
-            read_handle.abort();
-            write_handle.abort();
+            if let Ok(tasks) = retirement.tasks.try_lock() {
+                if let Some(reader) = tasks.reader.as_ref() {
+                    reader.abort();
+                }
+                if let Some(writer) = tasks.writer.as_ref() {
+                    writer.abort();
+                }
+            }
             evicted += 1;
         }
         // The eviction loop above has no fallible step in Run 072;
@@ -1826,7 +2077,7 @@ impl TcpKemTlsP2pService {
         // instead of silently claiming success.)
         let failed = attempted - evicted;
         self.connections_current
-            .store(self.peers.read().len() as u64, Ordering::Relaxed);
+            .store(self.peers.read().active.len() as u64, Ordering::Relaxed);
         Ok(crate::p2p_session_eviction::EvictionReport::new(
             reason, attempted, evicted, failed,
         ))
@@ -1894,7 +2145,7 @@ struct DialerHandle {
     client_cfg: ClientConnectionConfig,
     peer_kem_pk_overrides: Arc<RwLock<HashMap<String, Vec<u8>>>>,
     peer_validator_id_overrides: Arc<RwLock<HashMap<String, [u8; 32]>>>,
-    peers: Arc<RwLock<HashMap<NodeId, PeerConnection>>>,
+    peers: Arc<RwLock<PeerRegistry>>,
     inbound_tx: mpsc::Sender<InboundP2pEnvelope>,
     connections_current: Arc<AtomicU64>,
     bytes_received: Arc<AtomicU64>,
@@ -1903,9 +2154,8 @@ struct DialerHandle {
     /// into `spawn_peer_handlers` so retry-dialed peers' read loops
     /// see the same sink the accept-loop sees. Default `None` →
     /// cheap-drop behaviour preserved bit-for-bit.
-    peer_candidate_wire_sink: Arc<
-        RwLock<Option<Arc<dyn crate::pqc_peer_candidate_wire::PeerCandidateWireFrameSink>>>,
-    >,
+    peer_candidate_wire_sink:
+        Arc<RwLock<Option<Arc<dyn crate::pqc_peer_candidate_wire::PeerCandidateWireFrameSink>>>>,
     /// Run 369: shared optional deployed inbound per-peer message-rate
     /// limiter (cloned from `TcpKemTlsP2pService::inbound_per_peer_limiter`).
     /// Threaded into `spawn_peer_handlers` so retry-dialed peers' read loops
@@ -1913,9 +2163,7 @@ struct DialerHandle {
     /// `None` → prior behaviour preserved bit-for-bit.
     inbound_per_peer_limiter: Arc<
         RwLock<
-            Option<
-                Arc<crate::deployed_inbound_per_peer_limiter::DeployedInboundPerPeerLimiter>,
-            >,
+            Option<Arc<crate::deployed_inbound_per_peer_limiter::DeployedInboundPerPeerLimiter>>,
         >,
     >,
     /// Run 418: static-peer outbound authenticated consensus origins keyed by
@@ -1983,9 +2231,12 @@ impl DialerHandle {
         // ACTUAL verified server identity established by the handshake
         // (Run 418, F6).
         let (channel, verified_server_identity) =
-            connect_kemtls_async_with_server_identity(peer_addr.clone(), client_cfg.clone())
-                .await
-                .map_err(|e| P2pTransportError::Handshake(e.to_string()))?;
+            connect_kemtls_secure_channel_with_server_identity(
+                peer_addr.clone(),
+                client_cfg.clone(),
+            )
+            .await
+            .map_err(|e| P2pTransportError::Handshake(e.to_string()))?;
 
         // B7: NodeId derived from the peer's KEM pk (deterministic,
         // matches `derive_test_node_id_from_validator_id`).
@@ -2032,8 +2283,6 @@ impl DialerHandle {
             None => None,
         };
 
-        self.connections_current.fetch_add(1, Ordering::Relaxed);
-
         // Spawn read/write loops (same as `dial_peer`).
         TcpKemTlsP2pService::spawn_peer_handlers(
             node_id,
@@ -2046,7 +2295,7 @@ impl DialerHandle {
             Arc::clone(&self.inbound_per_peer_limiter),
             consensus_origin,
         )
-        .await;
+        .await?;
 
         Ok(())
     }
@@ -2106,7 +2355,7 @@ impl DialerHandle {
 impl P2pService for TcpKemTlsP2pService {
     fn broadcast(&self, msg: P2pMessage) {
         let peers = self.peers.read();
-        for (node_id, conn) in peers.iter() {
+        for (node_id, conn) in peers.active.iter() {
             if let Err(e) = conn.tx.try_send(msg.clone()) {
                 eprintln!("[P2P] Failed to broadcast to {:?}: {}", node_id, e);
             }
@@ -2115,7 +2364,7 @@ impl P2pService for TcpKemTlsP2pService {
 
     fn send_to(&self, peer: NodeId, msg: P2pMessage) {
         let peers = self.peers.read();
-        if let Some(conn) = peers.get(&peer) {
+        if let Some(conn) = peers.active.get(&peer) {
             if let Err(e) = conn.tx.try_send(msg) {
                 eprintln!("[P2P] Failed to send to {:?}: {}", peer, e);
             }
@@ -2127,6 +2376,345 @@ impl P2pService for TcpKemTlsP2pService {
     }
 
     fn connected_peers(&self) -> Vec<NodeId> {
-        self.peers.read().keys().copied().collect()
+        self.peers.read().active.keys().copied().collect()
+    }
+}
+
+#[cfg(test)]
+mod peer_retirement_tests {
+    use super::*;
+    use crate::secure_channel::{encrypted_write_tests::pair_channels, ChannelError};
+
+    #[derive(Clone)]
+    struct Harness {
+        peers: Arc<RwLock<PeerRegistry>>,
+        inbound_tx: mpsc::Sender<InboundP2pEnvelope>,
+        inbound_rx: Arc<tokio::sync::Mutex<mpsc::Receiver<InboundP2pEnvelope>>>,
+        connections_current: Arc<AtomicU64>,
+        bytes_received: Arc<AtomicU64>,
+        peer_candidate_wire_sink: Arc<
+            RwLock<Option<Arc<dyn crate::pqc_peer_candidate_wire::PeerCandidateWireFrameSink>>>,
+        >,
+        inbound_per_peer_limiter: Arc<
+            RwLock<
+                Option<
+                    Arc<crate::deployed_inbound_per_peer_limiter::DeployedInboundPerPeerLimiter>,
+                >,
+            >,
+        >,
+    }
+
+    impl Harness {
+        fn new(inbound_capacity: usize) -> Self {
+            let (inbound_tx, inbound_rx) = mpsc::channel(inbound_capacity);
+            Self {
+                peers: Arc::new(RwLock::new(PeerRegistry::default())),
+                inbound_tx,
+                inbound_rx: Arc::new(tokio::sync::Mutex::new(inbound_rx)),
+                connections_current: Arc::new(AtomicU64::new(0)),
+                bytes_received: Arc::new(AtomicU64::new(0)),
+                peer_candidate_wire_sink: Arc::new(RwLock::new(None)),
+                inbound_per_peer_limiter: Arc::new(RwLock::new(None)),
+            }
+        }
+
+        async fn register(
+            &self,
+            node_id: NodeId,
+            channel: SecureChannel,
+        ) -> Result<(), P2pTransportError> {
+            TcpKemTlsP2pService::spawn_peer_handlers(
+                node_id,
+                channel,
+                Arc::clone(&self.peers),
+                self.inbound_tx.clone(),
+                Arc::clone(&self.connections_current),
+                Arc::clone(&self.bytes_received),
+                Arc::clone(&self.peer_candidate_wire_sink),
+                Arc::clone(&self.inbound_per_peer_limiter),
+                None,
+            )
+            .await
+        }
+
+        fn session_id(&self, node_id: NodeId) -> u64 {
+            self.peers.read().active[&node_id].retirement.session_id
+        }
+
+        async fn receive(&self) -> InboundP2pEnvelope {
+            tokio::time::timeout(Duration::from_secs(3), self.inbound_rx.lock().await.recv())
+                .await
+                .expect("inbound message should arrive")
+                .expect("inbound channel remains open")
+        }
+    }
+
+    fn node_id(byte: u8) -> NodeId {
+        NodeId::new([byte; 32])
+    }
+
+    fn heartbeat(view: u64) -> P2pMessage {
+        P2pMessage::Control(crate::p2p::ControlMsg::Heartbeat {
+            view,
+            timestamp_ms: view,
+        })
+    }
+
+    fn heartbeat_frame(view: u64) -> Vec<u8> {
+        encode_frame(&heartbeat(view)).expect("encode heartbeat")
+    }
+
+    async fn send_app(channel: SecureChannel, bytes: Vec<u8>) -> Result<(), ChannelError> {
+        tokio::task::spawn_blocking(move || {
+            let mut channel = channel;
+            channel.send_app(&bytes)
+        })
+        .await
+        .expect("loopback sender task")
+    }
+
+    async fn expect_remote_eof(channel: SecureChannel) {
+        let result = tokio::time::timeout(
+            Duration::from_secs(3),
+            tokio::task::spawn_blocking(move || {
+                let mut channel = channel;
+                channel.recv_app()
+            }),
+        )
+        .await
+        .expect("retirement should interrupt remote socket read")
+        .expect("remote reader task");
+        assert!(matches!(result, Err(ChannelError::Io(_))));
+    }
+
+    #[tokio::test]
+    async fn replacement_retires_only_displaced_session_and_preserves_new_and_other_peers() {
+        let harness = Harness::new(1);
+        let id = node_id(1);
+        let other_id = node_id(2);
+        let (old_local, old_remote) = pair_channels(true);
+        harness.register(id, old_local).await.unwrap();
+        let old_retirement = Arc::clone(&harness.peers.read().active[&id].retirement);
+        let old_session = old_retirement.session_id;
+        let (old_sender, old_raw_sender) = {
+            let connection = &harness.peers.read().active[&id];
+            (connection.tx.clone(), connection.raw_tx.clone())
+        };
+        old_sender.send(heartbeat(9)).await.unwrap();
+        let (old_remote, progressed_frame) = tokio::task::spawn_blocking(move || {
+            let mut remote = old_remote;
+            let frame = remote.recv_app();
+            (remote, frame)
+        })
+        .await
+        .expect("old peer reader");
+        let progressed_frame = progressed_frame.expect("already-progressed send is delivered");
+        assert!(matches!(
+            decode_frame(&progressed_frame).unwrap(),
+            P2pMessage::Control(crate::p2p::ControlMsg::Heartbeat { view: 9, .. })
+        ));
+
+        let (other_local, other_remote) = pair_channels(true);
+        harness.register(other_id, other_local).await.unwrap();
+        let other_session = harness.session_id(other_id);
+
+        let (new_local, new_remote) = pair_channels(true);
+        harness.register(id, new_local).await.unwrap();
+        let new_session = harness.session_id(id);
+        assert_ne!(old_session, new_session);
+        assert_eq!(harness.session_id(other_id), other_session);
+        assert!(!harness.peers.read().retiring.contains_key(&id));
+
+        expect_remote_eof(old_remote).await;
+        assert!(old_sender.send(heartbeat(10)).await.is_err());
+        assert!(old_raw_sender.send(vec![0]).await.is_err());
+
+        send_app(other_remote, heartbeat_frame(20)).await.unwrap();
+        let other_message = harness.receive().await;
+        assert!(matches!(
+            other_message.message,
+            P2pMessage::Control(crate::p2p::ControlMsg::Heartbeat { view: 20, .. })
+        ));
+
+        send_app(new_remote, heartbeat_frame(30)).await.unwrap();
+        let new_message = harness.receive().await;
+        assert!(matches!(
+            new_message.message,
+            P2pMessage::Control(crate::p2p::ControlMsg::Heartbeat { view: 30, .. })
+        ));
+
+        // A late completion observed through the old owner cannot mutate the
+        // newer registry entry because retirement is session-specific.
+        old_retirement.finish().await.unwrap();
+        assert_eq!(harness.session_id(id), new_session);
+    }
+
+    #[tokio::test]
+    async fn active_read_and_queued_inbound_work_are_interrupted_without_replay() {
+        let harness = Harness::new(1);
+        let id = node_id(3);
+        let (old_local, old_remote) = pair_channels(true);
+        harness.register(id, old_local).await.unwrap();
+
+        let sender = tokio::task::spawn_blocking(move || {
+            let mut remote = old_remote;
+            let mut sent = 0;
+            for view in 0..96 {
+                if remote.send_app(&heartbeat_frame(view)).is_err() {
+                    break;
+                }
+                sent += 1;
+            }
+            (remote, sent)
+        });
+
+        let frame_len = heartbeat_frame(0).len() as u64;
+        tokio::time::timeout(Duration::from_secs(3), async {
+            while harness.bytes_received.load(Ordering::Relaxed) < frame_len * 2 {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("read loop should block on the full inbound queue");
+        let (old_remote, sent) = sender.await.expect("sender task");
+        assert!(sent >= 2);
+        let old_sender = harness.peers.read().active[&id].tx.clone();
+        let mut queued = 0;
+        for view in 1_000..1_064 {
+            if old_sender.try_send(heartbeat(view)).is_ok() {
+                queued += 1;
+            }
+        }
+        assert!(queued > 0);
+
+        let (new_local, new_remote) = pair_channels(true);
+        harness.register(id, new_local).await.unwrap();
+        assert!(old_sender.send(heartbeat(2_000)).await.is_err());
+        let (old_frames, remote_error) = tokio::task::spawn_blocking(move || {
+            let mut remote = old_remote;
+            let mut frames = Vec::new();
+            loop {
+                match remote.recv_app() {
+                    Ok(frame) => frames.push(frame),
+                    Err(error) => return (frames, error),
+                }
+            }
+        })
+        .await
+        .expect("old peer reader");
+        assert!(matches!(remote_error, ChannelError::Io(_)));
+        assert!(old_frames.len() <= queued);
+        for frame in old_frames {
+            assert!(matches!(
+                decode_frame(&frame).unwrap(),
+                P2pMessage::Control(crate::p2p::ControlMsg::Heartbeat { view, .. })
+                    if (1_000..1_064).contains(&view)
+            ));
+        }
+
+        let first = harness.receive().await;
+        assert!(matches!(
+            first.message,
+            P2pMessage::Control(crate::p2p::ControlMsg::Heartbeat { view: 0, .. })
+        ));
+        assert!(
+            tokio::time::timeout(Duration::from_millis(100), harness.receive())
+                .await
+                .is_err()
+        );
+
+        send_app(new_remote, heartbeat_frame(100)).await.unwrap();
+        let replacement_message = harness.receive().await;
+        assert!(matches!(
+            replacement_message.message,
+            P2pMessage::Control(crate::p2p::ControlMsg::Heartbeat { view: 100, .. })
+        ));
+    }
+
+    #[tokio::test]
+    async fn concurrent_replacement_is_refused_while_owned_cleanup_is_in_progress() {
+        let harness = Harness::new(8);
+        let id = node_id(4);
+        let (old_local, old_remote) = pair_channels(true);
+        harness.register(id, old_local).await.unwrap();
+        let old_retirement = Arc::clone(&harness.peers.read().active[&id].retirement);
+        let old_session = old_retirement.session_id;
+        let held_tasks = old_retirement.tasks.lock().await;
+
+        let first_harness = harness.clone();
+        let first = tokio::spawn(async move {
+            let (channel, remote) = pair_channels(true);
+            (first_harness.register(id, channel).await, remote)
+        });
+        tokio::time::timeout(Duration::from_secs(3), async {
+            loop {
+                if harness.peers.read().registering.contains(&id) {
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("first replacement reserves identity");
+
+        let (second_channel, _second_remote) = pair_channels(true);
+        let second = harness.register(id, second_channel).await;
+        assert!(matches!(
+            second,
+            Err(P2pTransportError::SessionRetirement(_))
+        ));
+
+        drop(held_tasks);
+        let (first_result, first_remote) = first.await.expect("first replacement task");
+        first_result.unwrap();
+        let newest_session = harness.session_id(id);
+        assert_ne!(newest_session, old_session);
+        expect_remote_eof(old_remote).await;
+        old_retirement.finish().await.unwrap();
+        assert_eq!(harness.session_id(id), newest_session);
+        assert_eq!(harness.peers.read().retiring.len(), 0);
+        drop(first_remote);
+    }
+
+    #[tokio::test]
+    async fn failed_shutdown_remains_tracked_and_blocks_replacement_until_retry_succeeds() {
+        let harness = Harness::new(8);
+        let id = node_id(5);
+        let other_id = node_id(6);
+        let (old_local, old_remote) = pair_channels(true);
+        harness.register(id, old_local).await.unwrap();
+        let old = Arc::clone(&harness.peers.read().active[&id].retirement);
+        let old_session = old.session_id;
+        old.channel.fail_shutdown_for_test(true);
+
+        let (other_local, _other_remote) = pair_channels(true);
+        harness.register(other_id, other_local).await.unwrap();
+        let other_session = harness.session_id(other_id);
+
+        let (rejected_local, _rejected_remote) = pair_channels(true);
+        assert!(matches!(
+            harness.register(id, rejected_local).await,
+            Err(P2pTransportError::SessionRetirement(_))
+        ));
+        assert_eq!(harness.peers.read().retiring[&id].session_id, old_session);
+        assert!(!harness.peers.read().active.contains_key(&id));
+        assert_eq!(harness.session_id(other_id), other_session);
+
+        let (also_rejected_local, _also_rejected_remote) = pair_channels(true);
+        assert!(matches!(
+            harness.register(id, also_rejected_local).await,
+            Err(P2pTransportError::SessionRetirement(_))
+        ));
+        assert_eq!(harness.peers.read().retiring.len(), 1);
+        assert_eq!(harness.peers.read().retiring[&id].session_id, old_session);
+
+        old.channel.fail_shutdown_for_test(false);
+        let (replacement_local, _replacement_remote) = pair_channels(true);
+        harness.register(id, replacement_local).await.unwrap();
+        let replacement_session = harness.session_id(id);
+        assert_ne!(replacement_session, old_session);
+        assert!(!harness.peers.read().retiring.contains_key(&id));
+        expect_remote_eof(old_remote).await;
+        assert_eq!(harness.session_id(other_id), other_session);
     }
 }
