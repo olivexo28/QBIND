@@ -3202,18 +3202,22 @@ The review history is distinct from author-produced evidence:
 * The watchdog-parent ownership follow-up and its author-retained evidence
   are at the historical [review evidence pinned to
   `551e7cd`](https://github.com/olivexo28/QBIND/blob/551e7cdd08eb01ce05914c4bba49562d8901b7ec/docs/security/evidence/a37-1-c2-supervisor-followup/README.md).
-* The ordinary-case Popen-to-owner handoff was found in a subsequent
-  reviewer-targeted inert-child probe against
-  `551e7cdd08eb01ce05914c4bba49562d8901b7ec`; the reviewer separately
-  contained and reaped that child. The supplied reviewer report says the
-  probe was not a full matrix rerun. It also says the review environment
-  did not meet the fixture `/proc` visibility assumptions: for this
-  single-child probe, the reviewer substituted an empty process scan and
-  separately checked the child and kernel process group. This limited
-  targeted observation is not a supported-environment full-suite result.
-  No standalone raw artifact for that reviewer probe was delivered; it is
-  recorded as a user-supplied review report, not independently retrievable
-  raw evidence.
+* According to the supplied reviewer report, a targeted inert-child probe
+  against `551e7cdd08eb01ce05914c4bba49562d8901b7ec` reproduced the old
+  ordinary-case Popen-to-owner handoff defect. The child remained alive
+  after the injected interruption; separate reviewer-owned cleanup killed
+  and reaped it. This was not a full matrix run.
+* In a separate targeted probe of the corrected owner at
+  `ba2c0f381a9291bf22e1f32f9c229dc2a6add61f`, the supplied reviewer report
+  says an interruption was injected after real Popen initialization. The
+  inert child was killed and reaped before workspace deletion. The review
+  environment did not meet the fixture `/proc` visibility assumptions:
+  for this corrected single-child probe, the reviewer substituted an empty
+  process scan and separately checked the child and kernel process group.
+  This is limited evidence, not a supported-environment full-suite result
+  or an exhaustive exception-safety proof. No standalone raw artifact for
+  this final corrected probe was delivered; the observation is recorded as
+  a user-supplied review report, not independently retrievable raw evidence.
 * At final commit `ba2c0f381a9291bf22e1f32f9c229dc2a6add61f`, the reviewer
   inspected the retained [handoff follow-up evidence pinned to that
   revision](https://github.com/olivexo28/QBIND/blob/ba2c0f381a9291bf22e1f32f9c229dc2a6add61f/docs/security/evidence/a37-1-c2-handoff-followup/README.md).
@@ -3225,9 +3229,12 @@ The review history is distinct from author-produced evidence:
   tests/builds, node binaries or release harnesses. These author records
   and the independent review observations remain separately attributed.
 
-The earlier section-14 pending statements and section-11 next-action request
-are retained as historical status and superseded only for this bounded
-creation-to-ownership handoff review at `ba2c0f381a9291bf22e1f32f9c229dc2a6add61f`.
+The earlier section-14 pending statements are retained as historical status.
+Section 11's current review disposition replaced its earlier next-action
+request; that original request paragraph is not retained in the current
+text. These changes supersede the earlier pending/requested-review status
+only for this bounded creation-to-ownership handoff review at
+`ba2c0f381a9291bf22e1f32f9c229dc2a6add61f`.
 Overall status remains **IMPLEMENTED — VERIFICATION PENDING**; broader
 independent review/acceptance is **PENDING**. Real Rust regression,
 release-binary and runtime evidence remain outstanding where required.
