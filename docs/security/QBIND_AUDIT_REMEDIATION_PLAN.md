@@ -2496,7 +2496,7 @@ this proposed correction is claimed.
 
 | Harness | Pinned blob | Regression wrappers and invocation/captures | Final summary |
 |---|---|---|---|
-| Run 216, `scripts/devnet/run_216_governance_execution_policy_release_binary.sh` | `e084e64f1b7b8e3ca1af9d0419b4bd659e0644f8` | `run_test_target` / `run_lib_test`: `:145-L166`; target loop and two library invocations: `:168-L172` | Prints records at `:197`, then unconditional `verdict: PASS` at `:201`; summary redirection at `:202` |
+| Run 216, `scripts/devnet/run_216_governance_execution_policy_release_binary.sh` | `e084e64f1b7b8e3ca1af9d0419b4bd659e0644f8` | `run_test_target` / `run_lib_test`: `:145-L167`; target loop and two library invocations: `:168-L172` | Prints records at `:197`, then unconditional `verdict: PASS` at `:201`; summary redirection at `:202` |
 | Run 227, `scripts/devnet/run_227_governance_evaluator_runtime_callsite_wiring_release_binary.sh` | `ce73b752eff9fd03377582938956d7f53a470390` | `run_test_target` / `run_lib_test`: `:205-L227`; target loop and two library invocations: `:228-L232` | Prints records at `:258`, then unconditional `verdict: PASS` at `:262`; summary redirection at `:263` |
 
 Each wrapper temporarily disables `errexit`, runs Cargo with output redirected
@@ -2512,7 +2512,8 @@ a nonzero regression `rc` and still publish `verdict: PASS`. This is a static
 source/control-flow assessment, not an executed reproduction.
 
 All configured integration targets are present at this baseline: 35 for Run
-216 and 8 for Run 227. Both invoke the same two library commands. Both
+216 and 8 for Run 227: 43 configured integration-command entries in total,
+not 43 distinct target names. Both invoke the same two library commands. Both
 helpers have real accumulated assertions and nonzero failure exits (Run 216:
 `crates/qbind-node/examples/run_216_governance_execution_policy_release_binary_helper.rs:370,
 1288-L1320`; Run 227:
@@ -2523,7 +2524,7 @@ invalid-selector rejection and diagnostic (`:140-L146`); its expected
 nonzero scenario status is not a failed regression command.
 
 Both scripts reset generated subdirectories at startup but do not invalidate
-`summary.txt` there (Run 216 `:31-L35`; Run 227 `:51-L58`). They replace it
+`summary.txt` there (Run 216 `:31-L35`; Run 227 `:48-L52`). They replace it
 only at the final summary redirection. A failure/interruption before then
 can leave an earlier summary visible. This is a current-source possibility,
 not a historical incident claim.
@@ -2607,37 +2608,48 @@ Every listed command is required. Each integration target is run as
 8. `run_211_governance_execution_policy_tests`
 
 **Run 227 library commands:** the same two exact library commands listed
-for Run 216. The current baseline has all 43 integration target files; each
-future invocation must still check the complete required inventory.
+for Run 216. The configured integration inventories contain 43 command
+entries across both harnesses; the inventories need not represent 43 distinct
+target names. Each future invocation must still check its complete required
+inventory.
 
 #### Aggregation, results, summary, and exit
 
-1. Before any build/helper/node/regression operation, generate a unique
+1. **Output-directory ownership:** this contract supports one active
+   invocation/writer per `OUTDIR`, including its child processes. No
+   concurrent external process may modify that invocation's generated
+   evidence. Do not reuse an `OUTDIR` while any child from an earlier
+   invocation may still write to it. Invocation IDs identify runs; they are
+   not locks and do not protect against concurrent writers. Concurrent
+   shared-`OUTDIR` operation is unsupported, and evidence from it cannot
+   establish this contract's guarantees. Do not add a locking system or
+   broaden production scope to support concurrency.
+2. Before any build/helper/node/regression operation, generate a unique
    invocation ID and atomically replace `summary.txt` with a current-run
    `verdict: INCOMPLETE` sentinel containing that ID; emit the ID to stderr.
    If initialization/replacement fails, exit nonzero before doing work and
    warn that any existing summary may be from an earlier run and is
    untrusted. If storage is unwritable, a sentinel cannot be written; never
    report that invocation as successful.
-2. A missing required target is an explicit failure, never
+3. A missing required target is an explicit failure, never
    `skipped(not-present)` and never a smaller required set. Record it and
    continue with all other available required commands. Earlier build,
    helper, or assertion failures may stop before the regression phase; they
    leave the current summary INCOMPLETE (or a successfully written explicit
    FAIL) and return nonzero.
-3. After the regression phase begins, attempt every available required
+4. After the regression phase begins, attempt every available required
    integration and library command even after failures, to preserve later
    results and diagnostics. Keep each command's full stdout/stderr log and
    exact Cargo status. If a log cannot be opened, do not run that command
    without capture; record capture failure and continue other safely
    capturable commands. A launch failure is non-success, not a skip.
-4. Invoke wrappers directly in the parent shell; do not capture status with
+5. Invoke wrappers directly in the parent shell; do not capture status with
    command substitution or rely on changing parent state inside a
    substitution. Use an explicit conditional around the Cargo subshell,
    capture `$?` immediately, store status in parent-shell state, and print
    separately. The wrapper must propagate Cargo's captured status rather
    than a later successful `printf`.
-5. Preserve existing per-command log names and numeric
+6. Preserve existing per-command log names and numeric
    `test_<target>.rc` / `lib_<label>.rc` artifacts. Add
    `EXIT_DIR/regression_results.tsv` as the aggregation input: one
    `run_id=<id>` line, one `command_key<TAB>state<TAB>rc` header, and
@@ -2646,14 +2658,14 @@ future invocation must still check the complete required inventory.
    `missing_target` without rc, or `capture_error` without rc. Check log,
    status, and manifest writes; any failure marks the run incomplete,
    emits diagnostics, and does not stop other safely capturable tests.
-6. Before summary publication, validate the manifest's current invocation
+7. Before summary publication, validate the manifest's current invocation
    ID, schema, state and rc syntax, exact required keys, and one occurrence
    per key; cross-check each numeric `.rc` file against its manifest row.
    Reject unknown, duplicate, missing, malformed, inconsistent,
    unincorporated, or stale records. Aggregate only this literal inventory,
    never every `EXIT_DIR` file, and never infer success by grepping
    human-readable PASS.
-7. PASS requires all existing harness assertions/operations to succeed,
+8. PASS requires all existing harness assertions/operations to succeed,
    every required Cargo command to return zero, every required result to
    validate and appear in the current summary, and summary publication to
    succeed. If all records are valid but any command is nonzero or a target
@@ -2663,17 +2675,66 @@ future invocation must still check the complete required inventory.
    Both are non-PASS and exit nonzero. Publish via same-directory temporary
    file plus atomic rename; a failed final write must leave the startup
    INCOMPLETE sentinel rather than truncate it.
-8. Abort/interruption exits nonzero and leaves/restores the current-run
-   INCOMPLETE summary. A completion/exit trap must not leave an earlier
-   PASS as the current run. If summary writes fail, emit the invocation ID
-   and warning; trust a summary only when its ID matches that invocation
-   and that process exited zero.
-9. Preserve the successful summary location and PASS spelling, current
+9. **Ordinary failures and catchable termination:** ordinary failure paths
+   set a non-success outcome, run bounded cleanup, and make a best-effort
+   atomic replacement of the current run's summary with `FAIL` when all
+   required results are valid and complete, or `INCOMPLETE` otherwise. Install
+   handlers for `SIGINT`, `SIGTERM`, and `SIGHUP` in the harness shell.
+   When Bash runs a handler, it marks the run interrupted, starts no further
+   regression commands, and enters bounded ordinary cleanup; the handler
+   must not assume it runs asynchronously while Bash is blocked in a
+   foreground command. The invocation/supervisor sends catchable termination
+   to the harness process group, then waits for bounded cleanup. If the
+   harness or a child remains, the supervisor may use `SIGKILL` as
+   containment and must reap/wait for the processes; it does not claim that a
+   SIGKILL-terminated harness ran its own cleanup. Cleanup best-effort
+   publishes/restores `INCOMPLETE`; it is not an unconditional guarantee.
+   After PASS has been atomically published but
+   before the invoking parent has observed successful process completion, a
+   catchable signal triggers the same best-effort repair and nonzero exit
+   when the handler runs. `SIGKILL` cannot be caught; host failure or
+   unavailable storage can prevent traps, cleanup, or summary repair.
+   Atomic replacement concerns visibility, not power-loss durability. This
+   bounded task does not establish crash-durable evidence storage. A matching-
+   ID PASS file alone is insufficient: success is established only when the
+   invocation ID matches, all required result records validate and are
+   incorporated, and the invoking parent/operator observes normal successful
+   completion (zero exit, not signal termination). Missing completion
+   evidence or signal termination cannot establish success, even if a
+   matching-ID PASS remains on disk.
+10. Preserve the successful summary location and PASS spelling, current
    scenario/helper/denylist sections, per-command log paths and numeric
    `.rc` files. Add run identity and aggregate disposition; document the
    intentional nonzero exit on failure. Run 227 S6's expected invalid-
    selector nonzero remains a scenario assertion outside the regression
    inventory.
+
+The bounded storage assumption is single-writer, not locking or
+crash-durability. Same-directory temporary-file plus rename is proposed to
+avoid publishing a partially written summary to readers, subject to the
+target filesystem's rename semantics. `rename(2)` describes replacement
+visibility as atomic, while `fsync(2)` notes that syncing the file alone does
+not necessarily persist its directory entry; crash-durable publication would
+require additional storage-specific work and is outside this contract.
+
+**Reference retrieval provenance (2026-11-04):** the authoritative Linux
+man-pages `signal(7)`, `rename(2)`, and `fsync(2)` pages and GNU Bash
+Reference Manual “Signals” page were located and their relevant statements
+checked through the web-search index. Direct page fetches were attempted but
+failed because the environment could not resolve the hosts; therefore this
+records search-index verification, not a direct fetch or local manual-page
+inspection. The indexed `rename(2)` and `fsync(2)` entries identify Linux
+man-pages version 6.19 (2026-02-08) and the Linux man-pages project as their
+source. References:
+[`signal(7)`](https://www.man7.org/linux/man-pages/man7/signal.7.html)
+(SIGKILL/SIGSTOP are not catchable, blockable, or ignorable);
+[`rename(2)`](https://www.man7.org/linux/man-pages/man2/rename.2.html)
+(same-filesystem replacement visibility);
+[`fsync(2)`](https://www.man7.org/linux/man-pages/man2/fsync.2.html)
+(file sync does not itself ensure directory-entry persistence); and the
+[GNU Bash Signals manual](https://www.gnu.org/software/bash/manual/html_node/Signals.html)
+(shell signal and trap behavior). These references qualify the proposal;
+they are not evidence of tests or runtime behavior in QBIND.
 
 Cargo exit zero alone does not establish that a test ran, that a filter
 matched, or that coverage was achieved. This contract does not add
@@ -2693,13 +2754,18 @@ for invocation identity and failure exit semantics. Add
 to invoke both actual harness scripts against controlled fixtures and assert
 the behavior below; do not reimplement aggregation in the test.
 
-The fixture must create one temporary fake repository, copy the real
+The fixture must create one temporary fake repository with an exclusive
+`OUTDIR` for each active harness invocation, copy the real
 scripts to their expected relative paths, and invoke those copies with `bash`
 and `OUTDIR` inside the fixture. The committed scripts are CRLF with mode
 `100644`; only temporary fixture copies may be explicitly normalized to LF.
 That tests the normalized copies' actual capture/aggregation/summary/exit
 paths, not the committed full harness bytes. Preserve the committed CRLF and
-mode; do not claim a full-harness run.
+mode; do not claim a full-harness run. Sequential reuse of one fixture
+directory must also be tested by seeding an earlier PASS, waiting until all
+children from the prior invocation are confirmed complete/reaped, and then
+starting the next single writer. Do not test unsupported concurrent shared-
+`OUTDIR` writers as if their artifacts were valid evidence.
 
 Use guarded stubs for Cargo (allow only expected build/test arguments and
 configure each test status), `qbind-node` (including expected Run 227 S6
@@ -2707,7 +2773,14 @@ rejection), both helpers (minimal valid helper evidence), and provenance,
 version, or build-ID tools as needed. Stub Git and guard `curl`, `wget`,
 `ssh`, `scp`, `nc` and other network-capable commands; resolve every
 executable to a fixture stub or explicitly allowed local utility. Guard
-cleanup so all removed paths resolve beneath the fixture root. No real Cargo
+cleanup so all removed paths resolve beneath the fixture root. The fixture
+supervisor must run each harness in a controlled process group, impose a
+bounded completion wait, send a supported catchable termination signal when
+needed, allow a bounded cleanup grace period, then use an uncatchable kill
+only as containment and reap/wait for the harness and children. The
+supervisor, not a SIGKILL-terminated harness, owns and verifies child cleanup;
+do not claim a killed harness executes its cleanup. Keep each active OUTDIR
+exclusive until every child is confirmed complete or reaped. No real Cargo
 builds/tests, node/helper binaries, network, provisioning, signing,
 deployment, or activation. Assert the actual harness process exit, summary
 and invocation ID, exact manifest membership, logs/statuses, and command
@@ -2739,11 +2812,13 @@ Every case is **FUTURE / NOT EXECUTED** for this documentation task.
 | Summary initialization I/O failure | Deny startup write/rename with old PASS present | Stop before work; nonzero exit; warn old summary is untrusted | FUTURE / NOT EXECUTED |
 | Summary publication I/O failure | Deny final write/rename | Keep INCOMPLETE where storage permits; explicit error/nonzero | FUTURE / NOT EXECUTED |
 | Pre-existing PASS summary | Seed earlier PASS for both scripts | Replace with current INCOMPLETE before work; failed run not shown as current PASS | FUTURE / NOT EXECUTED |
-| Aborted/interrupted execution | Interrupt during a test and before publication | Nonzero exit; current-run INCOMPLETE; diagnostics retained | FUTURE / NOT EXECUTED |
+| Catchable interruption before publication | Send SIGINT, SIGTERM, or SIGHUP during a command | Handler attempts bounded cleanup and INCOMPLETE publication; nonzero exit; supervisor observes completion/termination; publication remains best effort | FUTURE / NOT EXECUTED |
+| Uncatchable termination before publication | SIGKILL harness before final publication | Harness performs no cleanup; supervisor reaps children; startup sentinel is not treated as proof; no successful completion evidence | FUTURE / NOT EXECUTED |
+| Termination after PASS publication, before completion | Signal or SIGKILL after atomic PASS replacement but before harness exit is observed | Matching-ID PASS may remain; parent/operator sees nonzero/signal or no completion, so success is not established; catchable repair is best effort; supervisor owns bounded child cleanup | FUTURE / NOT EXECUTED |
 | Command-substitution propagation | Inspect actual changed call sites under fixture | No substitution-based status loss; parent receives Cargo rc | FUTURE / NOT EXECUTED |
 | Run 227 expected S6 rejection | Stub nonzero invalid-selector with expected diagnostic | Scenario assertion passes; separate from regressions; regression may PASS | FUTURE / NOT EXECUTED |
 | Successful-output compatibility | Compare summary, paths, logs, numeric `.rc`, final PASS | Existing successful evidence shape retained with documented additions | FUTURE / NOT EXECUTED |
-| Fixture isolation/guards | Run both normalized copies with guarded stubs | No real Cargo/node/helper/network/out-of-root cleanup; commands accounted | FUTURE / NOT EXECUTED |
+| Fixture isolation/guards and sequential reuse | Run both normalized copies with guarded stubs and exclusive OUTDIRs; seed an old PASS for sequential reuse | No real Cargo/node/helper/network/out-of-root cleanup; no concurrent writers; children complete/reaped before OUTDIR reuse; commands accounted | FUTURE / NOT EXECUTED |
 
 ### Required future evidence and limits
 
