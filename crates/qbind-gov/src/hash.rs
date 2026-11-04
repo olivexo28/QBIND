@@ -275,4 +275,41 @@ mod tests {
         let hash3 = sha3_256_bytes(b"different");
         assert_ne!(hash, hash3);
     }
+
+    #[test]
+    fn f002_canonical_domain_and_approval_invariance() {
+        let mut envelope = test_envelope();
+        let expected = format!(
+            "{{\"activation_height\":1000000,\"binary_hashes\":{{\"linux-x86_64\":\"{}\"}},\"class\":\"c_hard_fork\",\"envelope_id\":\"T225-001\",\"envelope_version\":\"1.0\",\"network_environment\":\"mainnet\",\"notes\":\"Test upgrade\",\"protocol_version\":\"0.1.0\",\"version\":\"0.1.0\"}}",
+            "a".repeat(64)
+        );
+        assert_eq!(ENVELOPE_HASH_DOMAIN, "QBIND-ENVELOPE-v1:");
+        let mut hasher = Sha3_256::new();
+        hasher.update(b"QBIND-ENVELOPE-v1:");
+        hasher.update(expected.as_bytes());
+        let expected_digest: [u8; 32] = hasher.finalize().into();
+        let approval = crate::envelope::CouncilSignature {
+            member_id: "a".into(),
+            public_key: "test-only".into(),
+            signature: "test-only".into(),
+            timestamp: "test-only".into(),
+        };
+        let mut other = approval.clone();
+        other.member_id = "b".into();
+        for approvals in [
+            vec![],
+            vec![approval.clone()],
+            vec![approval.clone(), other.clone()],
+            vec![other.clone(), approval.clone()],
+            vec![approval.clone(), other, approval],
+            vec![],
+        ] {
+            envelope.council_approvals = approvals;
+            assert_eq!(
+                serde_json::to_string(&CanonicalEnvelope::from(&envelope)).unwrap(),
+                expected
+            );
+            assert_eq!(envelope_digest(&envelope).unwrap(), expected_digest);
+        }
+    }
 }
