@@ -173,6 +173,29 @@ fn async_wrapper_refuses_when_shutdown_capability_creation_fails() {
     assert!(matches!(error, ChannelError::Io(_)));
 }
 
+#[tokio::test]
+async fn shared_async_wrapper_fails_closed_without_shutdown_capability() {
+    let (client, mut peer, _) = pair(false);
+    let shared = Arc::new(Mutex::new(client));
+    let channel = SecureChannelAsync::from_shared_with_shutdown_stream(shared, None);
+
+    assert!(!channel.is_established());
+    assert!(channel.send(b"refused").await.is_err());
+    assert!(matches!(
+        channel.begin_retirement(),
+        Err(AsyncChannelError::Channel(ChannelError::Io(error)))
+            if error.to_string().contains("shutdown capability unavailable")
+    ));
+    let tasks = channel.worker_tasks.lock().await;
+    assert!(tasks.reader.is_none());
+    assert!(tasks.writer.is_none());
+    assert!(tasks.completion.is_some());
+    drop(tasks);
+    drop(channel);
+
+    assert!(matches!(peer.recv_app(), Err(ChannelError::Io(_))));
+}
+
 #[derive(Debug, Default)]
 struct IoTrace {
     bytes: Vec<u8>,

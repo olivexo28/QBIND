@@ -934,20 +934,29 @@ impl SecureChannelAsync {
     pub fn from_shared(inner: Arc<Mutex<SecureChannel>>) -> Self {
         // Set a short read timeout to allow the reader worker to periodically release
         // the mutex, enabling the writer worker to send data.
-        let (invalidated, shutdown_stream) = {
+        let shutdown_stream = {
             match inner.lock() {
                 Ok(ch) => {
                     let _ = ch
                         .stream()
                         .set_read_timeout(Some(Duration::from_millis(100)));
-                    (
-                        Arc::clone(&ch.invalidated),
-                        ch.stream().try_clone().ok().map(Arc::new),
-                    )
+                    ch.stream().try_clone().ok()
                 }
-                Err(_) => (Arc::new(AtomicBool::new(true)), None),
+                Err(_) => None,
             }
         };
+        Self::from_shared_with_shutdown_stream(inner, shutdown_stream)
+    }
+
+    fn from_shared_with_shutdown_stream(
+        inner: Arc<Mutex<SecureChannel>>,
+        shutdown_stream: Option<TcpStream>,
+    ) -> Self {
+        let invalidated = match inner.lock() {
+            Ok(channel) => Arc::clone(&channel.invalidated),
+            Err(_) => Arc::new(AtomicBool::new(true)),
+        };
+        let shutdown_stream = shutdown_stream.map(Arc::new);
 
         // Create channels for communication with workers
         let (write_tx, write_rx) = tokio::sync::mpsc::channel::<WriteCommand>(32);
