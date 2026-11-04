@@ -1,0 +1,48 @@
+Producing revision/tree:
+149edffd8f7fd97c821d6df9a5a546eca4992b79
+d3872f17f033b32c5cfb451bc60d96979b0aec37
+
+Command: rustfmt --check --edition 2021 crates/qbind-gov/src/verify.rs crates/qbind-gov/src/hash.rs crates/qbind-gov/tests/envelope_cli_tests.rs
+exit_status=0
+
+Toolchain:
+rustc 1.99.1 (58cf8f9c3 2026-10-13)
+binary: rustc
+commit-hash: 58cf8f9c35b355199727627d07ae34a4e2846d67
+commit-date: 2026-10-13
+host: x86_64-unknown-linux-gnu
+release: 1.99.1
+LLVM version: 23.1.1
+cargo 1.99.1 (5f94df478 2026-08-27)
+rustfmt 1.10.0-stable (58cf8f9c35 2026-10-13)
+
+Build configuration:
+[profile.dev]
+debug = 0
+strip = "debuginfo"
+incremental = false
+
+[profile.test]
+debug = 0
+strip = "debuginfo"
+incremental = false
+Cargo config files:
+
+Relevant environment (non-secret allowlist only):
+
+Pinned source and input identities:
+100644 blob cd81efdbaf2bfb45e00dc3c60db3ea4f523adfa0	Audit/QBIND_SECURITY_FINDINGS_REGISTER.md
+100755 blob 8f19cdd29d9923e04d600669fea26acd93b6d73c	Cargo.lock
+100644 blob 3514efce58d5bd0cfb8111ad491e9cf0a21b2d10	crates/qbind-gov/Cargo.toml
+100644 blob df952c77d6cd003794ea0b07378a6d8780502437	crates/qbind-gov/src/bin/qbind_envelope.rs
+100644 blob 45e87a93f97a4e75ccc1b220ead93daaac62e2cf	crates/qbind-gov/src/council.rs
+100644 blob 707483ff9213fb74e4113b09973d47482adf7fcf	crates/qbind-gov/src/envelope.rs
+100644 blob a68780a1353ce16275f5c7c470185ea3361adf7b	crates/qbind-gov/src/hash.rs
+100644 blob f4e68132c05a68d77f5f24fbb91482193583b7aa	crates/qbind-gov/src/lib.rs
+100644 blob 98c114623dcc09a1a2d505bf352e1705d4ba57de	crates/qbind-gov/src/verify.rs
+100644 blob eb4787ce154564f17364a5442331b8299eeff4c6	docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md
+
+Producing source identities:
+100644 blob e43d097e907efdc4ade723863926949187cf0727	crates/qbind-gov/src/hash.rs
+100644 blob 2595fb24ff05d128a4f0f6ec6e35c37f6c5bbe65	crates/qbind-gov/src/verify.rs
+100644 blob 329d40b74ad03813c407c9ab937d9656e9541829	crates/qbind-gov/tests/envelope_cli_tests.rs

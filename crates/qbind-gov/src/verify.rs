@@ -80,9 +80,10 @@ impl VerificationResult {
 /// Verify all council signatures on an upgrade envelope.
 ///
 /// This function:
-/// 1. Computes the canonical envelope digest
-/// 2. Verifies each signature against the council keyset
-/// 3. Returns a detailed verification result
+/// 1. Refuses duplicate approval member IDs using exact string equality
+/// 2. Computes the canonical envelope digest
+/// 3. Verifies each signature against the council keyset
+/// 4. Returns a detailed verification result
 ///
 /// # Arguments
 ///
@@ -96,6 +97,20 @@ pub fn verify_envelope(
     envelope: &UpgradeEnvelope,
     keyset: &CouncilKeySet,
 ) -> Result<VerificationResult, EnvelopeError> {
+    let mut seen = std::collections::HashSet::new();
+    let mut first_duplicate = None;
+    for approval in &envelope.council_approvals {
+        if !seen.insert(approval.member_id.as_str()) && first_duplicate.is_none() {
+            first_duplicate = Some(approval.member_id.as_str());
+        }
+    }
+    if let Some(member_id) = first_duplicate {
+        return Err(EnvelopeError::VerificationFailed(format!(
+            "duplicate approval member_id: {}",
+            member_id
+        )));
+    }
+
     // Compute envelope digest
     let digest = envelope_digest(envelope)?;
     let digest_hex = hex::encode(digest);
@@ -508,5 +523,263 @@ mod tests {
         assert_eq!(result.invalid_count(), 1);
         assert_eq!(result.valid_members(), vec!["c1", "c2", "c3"]);
         assert_eq!(result.invalid_signatures().len(), 1);
+    }
+
+    fn f002_fixture(ids: &[&str], threshold: usize) -> (UpgradeEnvelope, CouncilKeySet) {
+        let mut envelope = test_envelope();
+        let mut keys = Vec::new();
+        for id in ids {
+            let (pk, sk) = MlDsa44Backend::generate_keypair().unwrap();
+            let pk = hex::encode(pk);
+            assert!(keys.iter().all(|k: &CouncilKey| k.public_key != pk));
+            envelope
+                .council_approvals
+                .push(sign_envelope(&envelope, id, &pk, &sk).unwrap());
+            keys.push(CouncilKey::new(*id, pk));
+        }
+        let keyset = CouncilKeySet::new(threshold, keys);
+        keyset.validate().unwrap();
+        envelope.validate().unwrap();
+        (envelope, keyset)
+    }
+
+    fn f002_refuses(envelope: &UpgradeEnvelope, keyset: &CouncilKeySet, id: &str) {
+        for result in [
+            verify_envelope(envelope, keyset),
+            verify_envelope_threshold(envelope, keyset),
+        ] {
+            match result {
+                Err(EnvelopeError::VerificationFailed(message)) => {
+                    assert_eq!(message, format!("duplicate approval member_id: {id}"));
+                }
+                other => panic!("expected duplicate refusal, got {other:?}"),
+            }
+        }
+    }
+
+    fn f002_counts(envelope: &UpgradeEnvelope, keyset: &CouncilKeySet, count: usize) {
+        let result = verify_envelope(envelope, keyset).unwrap();
+        assert_eq!(result.valid_count, count);
+        assert_eq!(result.threshold, keyset.threshold());
+        assert_eq!(result.is_valid(), count >= keyset.threshold());
+        assert_eq!(
+            result.digest_hex,
+            hex::encode(envelope_digest(envelope).unwrap())
+        );
+        assert_eq!(result.signatures.len(), envelope.council_approvals.len());
+        assert_eq!(result.invalid_count(), result.invalid_signatures().len());
+        assert_eq!(result.valid_members().len(), count);
+        assert_eq!(
+            result
+                .signatures
+                .iter()
+                .map(|s| &s.member_id)
+                .collect::<Vec<_>>(),
+            envelope
+                .council_approvals
+                .iter()
+                .map(|s| &s.member_id)
+                .collect::<Vec<_>>()
+        );
+        match verify_envelope_threshold(envelope, keyset) {
+            Ok(wrapped) => {
+                assert!(result.is_valid());
+                assert_eq!(wrapped.valid_count, count);
+                assert_eq!(wrapped.digest_hex, result.digest_hex);
+                assert_eq!(wrapped.valid_members(), result.valid_members());
+            }
+            Err(EnvelopeError::ThresholdNotMet { required, actual }) => {
+                assert!(!result.is_valid());
+                assert_eq!((required, actual), (keyset.threshold(), count));
+            }
+            other => panic!("unexpected threshold result: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn f002_validated_thresholds_and_empty_approvals() {
+        for threshold in [1, 2, 3] {
+            let (full, keyset) = f002_fixture(&["a", "b", "c"], threshold);
+            for count in 0..=3 {
+                let mut envelope = full.clone();
+                envelope.council_approvals.truncate(count);
+                envelope.validate().unwrap();
+                f002_counts(&envelope, &keyset, count);
+            }
+        }
+    }
+
+    #[test]
+    fn f002_duplicate_order_and_sufficient_quorum() {
+        let (mut envelope, keyset) = f002_fixture(&["a", "b", "c"], 2);
+        let approvals = envelope.council_approvals.clone();
+        for (order, expected) in [
+            (vec![0, 0], "a"),
+            (vec![0, 0, 1], "a"),
+            (vec![0, 1, 0], "a"),
+            (vec![1, 0, 0], "a"),
+            (vec![1, 0, 0, 1], "a"),
+            (vec![0, 1, 1, 0], "b"),
+            (vec![0, 1, 2, 0], "a"),
+            (vec![0, 0, 1, 2], "a"),
+        ] {
+            envelope.council_approvals = order.iter().map(|&i| approvals[i].clone()).collect();
+            envelope.validate().unwrap();
+            f002_refuses(&envelope, &keyset, expected);
+        }
+    }
+
+    #[test]
+    fn f002_duplicate_bytes_timestamps_and_invalid_orders() {
+        let (full, keyset) = f002_fixture(&["a", "b", "c"], 2);
+        let genuine = &full.council_approvals[0];
+        let mut variants = vec![genuine.clone(); 5];
+        variants[1].timestamp = "different timestamp".into();
+        variants[2].public_key = full.council_approvals[1].public_key.clone();
+        variants[3].signature = full.council_approvals[1].signature.clone();
+        variants[4].signature = "not hex".into();
+        for variant in variants {
+            for approvals in [
+                vec![genuine.clone(), variant.clone()],
+                vec![variant.clone(), genuine.clone()],
+            ] {
+                let mut envelope = full.clone();
+                envelope.council_approvals = approvals;
+                envelope.validate().unwrap();
+                f002_refuses(&envelope, &keyset, "a");
+            }
+        }
+    }
+
+    #[test]
+    fn f002_unknown_duplicates_with_and_without_quorum() {
+        let (full, keyset) = f002_fixture(&["a", "b", "c"], 2);
+        let mut unknown = full.council_approvals[0].clone();
+        unknown.member_id = "unknown".into();
+        unknown.signature = "malformed".into();
+        for prefix in [vec![], full.council_approvals.clone()] {
+            let mut envelope = full.clone();
+            envelope.council_approvals = prefix;
+            envelope
+                .council_approvals
+                .extend([unknown.clone(), unknown.clone()]);
+            envelope.validate().unwrap();
+            f002_refuses(&envelope, &keyset, "unknown");
+        }
+    }
+
+    #[test]
+    fn f002_nonduplicate_invalid_extras_and_helpers() {
+        let (full, keyset) = f002_fixture(&["a", "b", "c"], 2);
+        let original = &full.council_approvals[2];
+        let mut extras = vec![original.clone(); 5];
+        extras[0].member_id = "unknown".into();
+        extras[1].public_key = full.council_approvals[0].public_key.clone();
+        extras[2].public_key = "not hex".into();
+        extras[3].signature = "not hex".into();
+        extras[4].signature = full.council_approvals[0].signature.clone();
+        for (extra, diagnostic) in extras.into_iter().zip([
+            "unknown council member: unknown",
+            "public key mismatch with keyset",
+            "invalid public key hex:",
+            "invalid signature hex:",
+            "signature verification failed:",
+        ]) {
+            for count in [0, 1, 2] {
+                let mut envelope = full.clone();
+                envelope.council_approvals.truncate(count);
+                envelope.council_approvals.push(extra.clone());
+                envelope.validate().unwrap();
+                f002_counts(&envelope, &keyset, count);
+                let result = verify_envelope(&envelope, &keyset).unwrap();
+                assert_eq!(result.invalid_count(), 1);
+                let invalid = result.invalid_signatures();
+                assert_eq!(invalid[0].member_id, extra.member_id);
+                assert!(invalid[0].error.as_ref().unwrap().starts_with(diagnostic));
+                assert_eq!(result.valid_members(), &["a", "b"][..count]);
+            }
+        }
+    }
+
+    #[test]
+    fn f002_exact_identity_and_membership() {
+        let (full, keyset) = f002_fixture(&["a", "A", " a", "a "], 4);
+        f002_counts(&full, &keyset, 4);
+        let mut absent_keyset = keyset.clone();
+        absent_keyset.keys.truncate(1);
+        absent_keyset.threshold = 1;
+        absent_keyset.validate().unwrap();
+        f002_counts(&full, &absent_keyset, 1);
+        let result = verify_envelope(&full, &absent_keyset).unwrap();
+        assert_eq!(result.invalid_count(), 3);
+        assert!(result
+            .invalid_signatures()
+            .iter()
+            .all(|s| s.error.as_ref().unwrap()
+                == &format!("unknown council member: {}", s.member_id)));
+        let mut duplicate = full;
+        duplicate
+            .council_approvals
+            .push(duplicate.council_approvals[2].clone());
+        f002_refuses(&duplicate, &keyset, " a");
+    }
+
+    #[test]
+    fn f002_direct_library_residuals_and_entry_precedence() {
+        // Deliberately UNVALIDATED cases, not validated quorum evidence.
+        let (full, valid_keyset) = f002_fixture(&["a", "b", "c"], 2);
+        let mut zero = valid_keyset.clone();
+        zero.threshold = 0;
+        assert!(zero.validate().is_err());
+        let mut empty = full.clone();
+        empty.council_approvals.clear();
+        f002_counts(&empty, &zero, 0);
+        let mut excess = valid_keyset.clone();
+        excess.threshold = 4;
+        assert!(excess.validate().is_err());
+        f002_counts(&full, &excess, 3);
+        let mut duplicate_keys = valid_keyset.clone();
+        let mut replacement = duplicate_keys.keys[1].clone();
+        replacement.member_id = "a".into();
+        duplicate_keys.keys.push(replacement.clone());
+        assert!(duplicate_keys.validate().is_err());
+        assert_ne!(
+            duplicate_keys.find_key("a").unwrap().public_key,
+            replacement.public_key
+        );
+        assert_eq!(
+            duplicate_keys.key_map().unwrap()["a"],
+            hex::decode(replacement.public_key).unwrap()
+        );
+        f002_counts(&full, &duplicate_keys, 2);
+        let mut malformed = full.clone();
+        malformed.protocol_version.clear();
+        let parsed = UpgradeEnvelope::from_json(&malformed.to_json_pretty().unwrap()).unwrap();
+        assert!(parsed.validate().is_err());
+        f002_counts(&parsed, &valid_keyset, 0);
+        let parsed_zero = CouncilKeySet::from_json(&zero.to_json_pretty().unwrap()).unwrap();
+        assert!(parsed_zero.validate().is_err());
+        let mut bad_map = valid_keyset.clone();
+        bad_map.keys[0].public_key = "not hex".into();
+        assert!(matches!(
+            verify_envelope(&full, &bad_map),
+            Err(EnvelopeError::InvalidSignature(_))
+        ));
+        for keyset in [zero, excess, duplicate_keys, bad_map] {
+            let mut duplicate = parsed.clone();
+            duplicate
+                .council_approvals
+                .push(duplicate.council_approvals[0].clone());
+            f002_refuses(&duplicate, &keyset, "a");
+        }
+    }
+
+    #[test]
+    fn f002_raw_helpers_do_not_authorize() {
+        let (mut envelope, keyset) = f002_fixture(&["a", "b", "c"], 2);
+        envelope.council_approvals = vec![envelope.council_approvals[0].clone(); 2];
+        assert_eq!(envelope.approval_count(), 2);
+        assert!(envelope.has_threshold(2));
+        f002_refuses(&envelope, &keyset, "a");
     }
 }

@@ -1,0 +1,130 @@
+Producing revision/tree:
+149edffd8f7fd97c821d6df9a5a546eca4992b79
+d3872f17f033b32c5cfb451bc60d96979b0aec37
+
+Command: cargo test --locked -p qbind-gov --lib --test envelope_cli_tests
+   Compiling libc v0.2.178
+   Compiling typenum v1.19.0
+   Compiling version_check v0.9.5
+   Compiling cfg-if v1.0.4
+   Compiling generic-array v0.14.7
+   Compiling getrandom v0.2.16
+   Compiling rand_core v0.6.4
+   Compiling proc-macro2 v1.0.104
+   Compiling unicode-ident v1.0.22
+   Compiling quote v1.0.42
+   Compiling crypto-common v0.1.7
+   Compiling subtle v2.6.1
+   Compiling block-buffer v0.10.4
+   Compiling digest v0.10.7
+   Compiling cpufeatures v0.2.17
+   Compiling keccak v0.1.5
+   Compiling syn v2.0.112
+   Compiling sha3 v0.10.8
+   Compiling inout v0.1.4
+   Compiling serde_core v1.0.228
+   Compiling utf8parse v0.2.2
+   Compiling anstyle-parse v0.2.7
+   Compiling sha2 v0.10.9
+   Compiling universal-hash v0.5.1
+   Compiling anstyle v1.0.13
+   Compiling opaque-debug v0.3.1
+   Compiling is_terminal_polyfill v1.70.2
+   Compiling colorchoice v1.0.4
+   Compiling anstyle-query v1.1.5
+   Compiling zmij v1.0.17
+   Compiling base64ct v1.8.3
+   Compiling qbind-types v0.1.0 (/workspaces/QBIND/olivexo28/QBIND/crates/qbind-types)
+   Compiling qbind-wire v0.1.0 (/workspaces/QBIND/olivexo28/QBIND/crates/qbind-wire)
+   Compiling password-hash v0.5.0
+   Compiling anstream v0.6.21
+   Compiling poly1305 v0.8.0
+   Compiling zeroize_derive v1.4.3
+   Compiling zeroize v1.8.2
+   Compiling cipher v0.4.4
+   Compiling chacha20 v0.9.1
+   Compiling hmac v0.12.1
+   Compiling aead v0.5.2
+   Compiling serde_json v1.0.149
+   Compiling heck v0.5.0
+   Compiling serde v1.0.228
+   Compiling strsim v0.11.1
+   Compiling thiserror v1.0.69
+   Compiling clap_lex v0.7.7
+   Compiling clap_builder v4.5.56
+   Compiling clap_derive v4.5.55
+   Compiling chacha20poly1305 v0.10.1
+   Compiling pbkdf2 v0.12.2
+   Compiling fips204 v0.4.6
+   Compiling fips203 v0.4.3
+   Compiling thiserror-impl v1.0.69
+   Compiling serde_derive v1.0.228
+   Compiling qbind-hash v0.1.0 (/workspaces/QBIND/olivexo28/QBIND/crates/qbind-hash)
+   Compiling itoa v1.0.17
+   Compiling getrandom v0.3.4
+   Compiling rustix v1.1.3
+   Compiling memchr v2.7.6
+   Compiling qbind-crypto v0.1.0 (/workspaces/QBIND/olivexo28/QBIND/crates/qbind-crypto)
+   Compiling clap v4.5.56
+   Compiling bitflags v2.10.0
+   Compiling linux-raw-sys v0.11.0
+   Compiling hex v0.4.3
+   Compiling once_cell v1.21.3
+   Compiling fastrand v2.3.0
+   Compiling qbind-gov v0.1.0 (/workspaces/QBIND/olivexo28/QBIND/crates/qbind-gov)
+   Compiling tempfile v3.24.0
+    Finished `test` profile [unoptimized] target(s) in 11.29s
+     Running unittests src/lib.rs (target/debug/deps/qbind_gov-aa7f2eb4d057d9b1)
+
+running 36 tests
+test council::tests::test_council_key_new ... ok
+test council::tests::test_council_key_validate ... ok
+test council::tests::test_council_keyset_duplicate_member_id ... ok
+test council::tests::test_council_keyset_find_key ... ok
+test council::tests::test_council_keyset_parse ... ok
+test council::tests::test_council_keyset_threshold_exceeds_keys ... ok
+test council::tests::test_council_keyset_key_map ... ok
+test council::tests::test_council_keyset_validate ... ok
+test envelope::tests::test_binary_hash_hex_to_bytes ... ok
+test envelope::tests::test_binary_hash_hex_validate ... ok
+test envelope::tests::test_envelope_approval_count ... ok
+test envelope::tests::test_envelope_validate_class_b_no_activation ... ok
+test envelope::tests::test_envelope_parse ... ok
+test envelope::tests::test_envelope_validate_missing_activation_height ... ok
+test envelope::tests::test_upgrade_class_display ... ok
+test envelope::tests::test_upgrade_class_serde ... ok
+test hash::tests::f002_canonical_domain_and_approval_invariance ... ok
+test hash::tests::test_envelope_digest_changes_with_content ... ok
+test hash::tests::test_envelope_digest_hex ... ok
+test hash::tests::test_envelope_digest_deterministic ... ok
+test hash::tests::test_sha3_256_bytes ... ok
+test hash::tests::test_envelope_digest_ignores_approvals ... ok
+test verify::tests::f002_duplicate_bytes_timestamps_and_invalid_orders ... ok
+test verify::tests::f002_duplicate_order_and_sufficient_quorum ... ok
+test verify::tests::f002_direct_library_residuals_and_entry_precedence ... ok
+test verify::tests::f002_exact_identity_and_membership ... ok
+test verify::tests::f002_raw_helpers_do_not_authorize ... ok
+test verify::tests::f002_unknown_duplicates_with_and_without_quorum ... ok
+test verify::tests::f002_nonduplicate_invalid_extras_and_helpers ... ok
+test verify::tests::test_chrono_timestamp ... ok
+test verify::tests::test_invalid_signature_detection ... ok
+test verify::tests::test_sign_and_verify ... ok
+test verify::tests::test_threshold_verification ... ok
+test verify::tests::test_unknown_member_detection ... ok
+test verify::tests::test_verification_result_helpers ... ok
+test verify::tests::f002_validated_thresholds_and_empty_approvals ... ok
+
+test result: ok. 36 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.64s
+
+     Running tests/envelope_cli_tests.rs (target/debug/deps/envelope_cli_tests-17affdfedfae1161)
+
+running 4 tests
+test f002_cli_inspect_is_descriptive_not_authorization ... ok
+test f002_cli_duplicate_text_json_and_binary_early_return ... ok
+test f002_cli_keyset_and_envelope_validation_precedence ... ok
+test f002_cli_nonduplicate_controls_schema_and_invalid_extra ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.25s
+
+
+exit_status=0

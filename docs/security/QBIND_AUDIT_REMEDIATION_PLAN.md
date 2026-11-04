@@ -224,7 +224,7 @@ not this task's source verification.
 | A31-F1 | OPEN stale outbound root; A10.1 at A:L13172 | Dial retry/handshake root snapshot; D/DD; C4/O | Correct two-root witness, pinned peer KEM private-key and reload-window prerequisites | Root-signature pass, handshake completion, registry insertion separately; E26; single-root witness withdrawn |
 | A33-F1 | Conditional engine non-termination source-established; A5.3 at A:L15366; A22.1 restores current-baseline status | Block eviction ancestry walk; D; R/O availability relevance | Operator-crafted anchor and admitted catch-up construction; no hash-collision premise or anonymous attack claim | Exact registration-before-vote state/capacity, cycle termination and bounded impact E27; runtime UNEXECUTED |
 | H04-F1 | Remote signer non-functional/unwired; A18/A18.1, A:L10351-L10740 | Validator daemon accept loop/node signer mode; MI; C5, not standalone DevNet blocker by audit | Use separate-signer feasibility/approved profile; do not transfer dead handler checks to live accept loop | Actual accept/handshake/handler and required/optional-mode evidence E17; no signing-oracle claim |
-| QBIND-A1-F002 | **OPEN; CONFIRMED TO THE STATED OFFLINE SOURCE MECHANISM** at `427c72a6bd2712b58c2777df2b26145463ef1257`; supplied independent source review, section 13; A:L9280, A:L16254, A:L16363, A:L16506-L16513 | Offline qbind-gov approval counting; D; C5/O | Independently review section 13's duplicate-member rejection contract before implementation; NOT STARTED; distinct from A8-F1, A23-F1 and bootstrap authority | FUTURE / NOT EXECUTED duplicate/distinct real-signature controls, threshold boundaries, both library entry points and CLI text/JSON/exit behavior; no new evidence ID |
+| QBIND-A1-F002 | **OPEN; IMPLEMENTED — VERIFICATION PENDING** at `149edffd8f7fd97c821d6df9a5a546eca4992b79`; supplied pre-implementation review and bounded execution record, section 13; A:L9280, A:L16254, A:L16363, A:L16506-L16513 | Offline qbind-gov approval counting; D; C5/O | Independent post-implementation code/evidence review pending; distinct from A8-F1, A23-F1 and bootstrap authority | Isolated baseline reproduction; 36 library + 4 CLI tests PASS, all 18 contract categories mapped in section 13 and retrievable F002 evidence; no new evidence ID |
 | QBIND-A1-F003 | Durable timeout-signing design risk; exploitability unproven; A26 at A:L8099-L8230 | Timeout/NewView cross-restart history; DD/MI/ME; R-F5/C5 | Establish operation-specific journal and continuity requirements; RUN 422 Proposal/Vote result does not close it | Exact preimages/operations, durable history, restart/uncertainty/copies under approved scope; no slashable conflict asserted |
 | QBIND-A1-F004 | Carried non-test insecure transport defaults; A:L9282, A:L16360-L16366 | Dummy providers/mutual-auth-disabled configuration axes; D/DD; O/C4/R | Check actual mode/primitive/map combination and operator-selected profile | Per-combination configured binary evidence, not source inclusion as deployed observation |
 | QBIND-A1-F006 | Carried repository-documentation overstatement; not freshly revalidated by audit; A:L9283, A:L15919 | Repository claims versus OPEN posture; D; A/O/C | Name exact present-tense claim and current applicable evidence before correction | Source/evidence-linked claim review; report corrections alone do not close this repository finding |
@@ -1133,11 +1133,11 @@ staged for delivery; final commit/tree/remote checks are reported separately
 after commit, without a self-referential hash in this document.
 
 **Current next action (supersedes the prior generic candidate-selection
-instruction):** obtain independent review of the QBIND-A1-F002 correction
-contract in section 13 under section 2; contract **AWAITING INDEPENDENT
-REVIEW**, implementation **NOT STARTED**, finding **OPEN**. The supplied
-source review confirms only the stated mechanism, not this completed contract.
-Do not implement in this documentation task. Section 12
+instruction):** obtain independent post-implementation review of the
+QBIND-A1-F002 correction and evidence in section 13 under section 2;
+implementation **IMPLEMENTED — VERIFICATION PENDING**, finding **OPEN**.
+The supplied pre-implementation source/design review is not an independent
+review of the implemented code or execution evidence. Section 12
 records the completed bounded A21-F1 source review and retained-evidence
 inspection; earlier pending instructions are historical for that scope only.
 This record neither chooses unresolved policy nor authorizes implementation,
@@ -2012,14 +2012,16 @@ allocation/layout failures, aggregate-memory/queue ownership, unreviewed
 targets and runtime/release evidence remain unresolved to their existing scopes.
 This documentation-only task runs no builds, project tests, scanners, nodes,
 provisioning, signing, deployment or activation and changes no evidence files.
-## 13. QBIND-A1-F002 pre-implementation contract: offline duplicate approvals
+## 13. QBIND-A1-F002 contract and bounded implementation: offline duplicate approvals
 
-**Finding: OPEN. Implementation commit: NONE. Implementation: NOT STARTED.
-Contract: AWAITING INDEPENDENT REVIEW. Regression/runtime evidence:
-NOT EXECUTED.** This is one concrete proposal for review, not a correction,
-implementation authorization, new audit finding or closure. Contract reviewer,
-implementation/evidence assignees: **UNASSIGNED**; comparative priority:
-**ASSESSMENT PENDING**. All BR decisions and release/operational gates remain
+**Finding: OPEN. Implementation: IMPLEMENTED — VERIFICATION PENDING.
+Implementation/test commit: `149edffd8f7fd97c821d6df9a5a546eca4992b79`.
+Independent post-implementation review: PENDING.** The original proposal
+and its historical documentation-only evidence remain below; the separately
+authorized implementation and execution record follows at the end of this
+section. The supplied pre-implementation review is recorded with its limits,
+not as signed approval or post-implementation verification. Comparative
+priority: **ASSESSMENT PENDING**. All BR decisions and release/operational gates remain
 unchanged; activation **DISABLED**; public DevNet **NO-GO**; RS1 and C4/C5
 remain OPEN. Sections 8 and 12, including accepted E07/A21 bounded reviews,
 historical GUARD qualification, evidence identities and publication records,
@@ -2198,9 +2200,11 @@ exact-ID duplicate-refusal invariant. If independent review requires a
 broader identity or admission invariant, record that dependency and leave
 the contract **UNRESOLVED**, rather than claiming this proposal covers it.
 
-### Future acceptance matrix -- every case FUTURE / NOT EXECUTED
+### Historical pre-implementation acceptance matrix
 
-All cases below are **FUTURE / NOT EXECUTED in this task**. Unless a row
+At the contract revision, all cases below were **FUTURE / NOT EXECUTED**;
+the implementation record below maps all 18 rows to actual execution.
+Unless a row
 explicitly isolates direct-library residuals, use a structurally validated
 envelope and validated keyset. Use **disposable test credentials** and real
 ML-DSA-44 signing/verification, following verify.rs:324-460; never an
@@ -2269,7 +2273,7 @@ source completion nor passing tests alone closes this finding or operational
 gates. No new evidence ID is allocated; E01-E27 mappings and all 29 canonical
 finding identities, aliases and 54 obligation identities remain unchanged.
 
-This task performs only documentation/source correspondence, pinned
+The original contract task performed only documentation/source correspondence, pinned
 identity/locator/link, scope/status/inventory, protected-section byte,
 mode/LF/terminal-newline and whitespace checks. Every other tracked file,
 including the audit register and evidence archives, is unchanged. No Cargo,
@@ -2278,3 +2282,124 @@ documentation commit/tree, changed-path mode/blob manifest, raw parentage
 versus available-object ancestry, remote task-tip equality, unchanged remote
 main and clean worktree are reported after commit/push, without embedding a
 self-referential final hash.
+
+### Authorized bounded implementation and supplied pre-implementation review (2026-11-04)
+
+**Status: IMPLEMENTED — VERIFICATION PENDING; overall finding OPEN.**
+This conversation separately authorized the bounded fix, isolated baseline
+reproduction, disposable-credential tests, evidence/documentation and a push
+only to `copilot/audit-f002-distinct-approval-fix`. No PR, merge, main push,
+force-push, deployment or activation is authorized or performed.
+
+The following review was supplied through this task in this conversation,
+attributed to ChatGPT, not independently retrieved or signed:
+
+> ChatGPT reviewed section 13 at commit 305640e0dffa16872692906af052dbf15937b192 and the relevant verifier, threshold-wrapper, keyset-validation, canonical-digest and CLI paths. The existing verifier counts every valid approval without deduplicating member IDs. The specified shared-entry duplicate refusal addresses that mechanism while preserving the signed digest and nonduplicate verification behavior. No blocking issue was identified within this bounded contract. This was source/design review; no reproduction or tests were executed by that reviewer.
+
+No human reviewer, external review URL, signed approval or execution evidence
+is inferred from that statement. Independent post-implementation code and
+evidence review remains **PENDING**.
+
+| Implementation entry identity | Actual observation |
+|---|---|
+| Repository; fetch/push | `olivexo28/QBIND`; `origin`, `https://github.com/olivexo28/QBIND` both directions, unchanged |
+| Required pre-change commit/tree | `305640e0dffa16872692906af052dbf15937b192` / `6529ebb5d0cefeacdc3c047d85134fe755d011da` |
+| Authoritative plan blob | `eb4787ce154564f17364a5442331b8299eeff4c6`, verified before editing |
+| Main at entry | Advertised `427c72a6bd2712b58c2777df2b26145463ef1257`; contract fetched from its existing branch, not required on main |
+| Implementation branch | `copilot/audit-f002-distinct-approval-fix`, absent locally/remotely at entry, freshly created at required commit |
+| Checkout/instructions | Initial checkout clean including untracked files; no applicable `AGENTS.md` or repository instruction files found; unrelated files preserved |
+| Producing implementation/test commit/tree | `149edffd8f7fd97c821d6df9a5a546eca4992b79` / `d3872f17f033b32c5cfb451bc60d96979b0aec37` |
+| Raw parentage versus proven ancestry | Required commit raw parent is `427c72a6bd2712b58c2777df2b26145463ef1257`; producing commit raw parent is the required commit. Available objects prove that descent. Main's raw parent `2e93ba7c202898f275703c94df8ed9677aa111e6` remains unavailable at the shallow boundary; no deeper ancestry claimed |
+
+The only production modification is the entry guard and directly related
+function documentation in `crates/qbind-gov/src/verify.rs`. A borrowed-ID
+HashSet scans every approval using exact Rust string equality, retaining the
+first failed insertion in input order without iterating the set. It completes
+the loop before returning the existing `VerificationFailed` payload.
+Digest computation, key-map construction and ML-DSA-44 verification occur
+only afterward. The threshold wrapper's existing `?` propagates refusal.
+Nonduplicate result fields/helpers, thresholds, canonical bytes, domain,
+crypto and CLI rendering/exit behavior remain unchanged. `hash.rs` changes
+are test-only; the new CLI target uses the existing dependencies.
+
+### Isolated pre-change reproduction, not post-change regression
+
+Before any production edit, a detached checkout of the exact required commit
+was created and instrumented only with
+`crates/qbind-gov/tests/f002_baseline_probe.rs`, delivered as
+[baseline_probe.rs](evidence/f002/baseline_probe.rs). It is **not** described
+as an unchanged baseline working tree: tracked production bytes were
+unchanged, with one untracked test probe. Exact source blobs and the probe
+SHA-256 are retained in [baseline.log](evidence/f002/baseline.log) and
+[toolchain-and-format.log](evidence/f002/toolchain-and-format.log).
+
+The probe validates a 2-of-3 keyset, checks all three disposable public keys
+are distinct, structurally validates each envelope and uses genuine
+ML-DSA-44 signatures. One approval gives count 1 / false and wrapper
+`ThresholdNotMet`; two distinct approvals give count 2 / true; copying the
+first genuine approval twice also gives count 2 / true in both APIs,
+reproducing the defect. **1 passed, 0 failed/ignored; exit 0.**
+An earlier probe used the wrong JSON class label `C` and failed parsing
+before reproduction: **0 passed, 1 failed, exit 101**. Its log is retained
+separately as [baseline-initial-failed.log](evidence/f002/baseline-initial-failed.log);
+the corrected delivered probe uses `c_hard_fork`. No baseline result is
+assigned to the later implementation revision.
+
+### Actual acceptance mapping at the producing implementation/test revision
+
+All rows below **PASS** in [focused-tests.log](evidence/f002/focused-tests.log),
+produced by `149edffd8f7fd97c821d6df9a5a546eca4992b79`, not by a later
+documentation-only HEAD. `verify::tests::` prefixes the library verifier
+test names below; `hash::tests::` prefixes the digest test; `f002_cli_*`
+names are in the `envelope_cli_tests` integration target.
+
+| Contract category (original row order) | Actual tests / result |
+|---|---|
+| 1. Single genuine approval, threshold 1 | `f002_validated_thresholds_and_empty_approvals` — both APIs, count/threshold/helpers PASS |
+| 2. Single approval, validated 2-of-3 | `f002_validated_thresholds_and_empty_approvals`; `f002_cli_nonduplicate_controls_schema_and_invalid_extra` — library false/wrapper exact threshold error, text/JSON exit 1 PASS |
+| 3. Two distinct approvals, validated 2-of-3 | Same tests; existing `test_threshold_verification` — both APIs and CLI text/JSON success without binary check PASS |
+| 4. One genuine approval repeated | `f002_duplicate_order_and_sufficient_quorum`; separate pre-change probe above — both APIs refuse after correction PASS |
+| 5. Same ID, different bytes/timestamps | `f002_duplicate_bytes_timestamps_and_invalid_orders`; `hash::tests::f002_canonical_domain_and_approval_invariance` — exact refusal, digest invariance PASS |
+| 6. Adjacency/permutations/multiple repeats | `f002_duplicate_order_and_sufficient_quorum` — `[b,a,a,b]` reports `a`, reordered `[a,b,b,a]` reports `b` PASS |
+| 7. Otherwise sufficient distinct quorum | `f002_duplicate_order_and_sufficient_quorum`; `f002_unknown_duplicates_with_and_without_quorum` — repeats before/after quorum refuse PASS |
+| 8. Invalid/valid same-ID ordering | `f002_duplicate_bytes_timestamps_and_invalid_orders` — both orders including malformed hex PASS |
+| 9. Repeated unknown ID | `f002_unknown_duplicates_with_and_without_quorum`; `f002_cli_duplicate_text_json_and_binary_early_return` — with/without quorum refuse PASS |
+| 10. Five distinct-ID invalid-extra classes | `f002_nonduplicate_invalid_extras_and_helpers` — each unknown/mismatch/bad-key-hex/bad-signature-hex/crypto-invalid extra, 0/1/2 genuine controls, existing diagnostics retained PASS |
+| 11. Exact identity | `f002_exact_identity_and_membership` — case/leading/trailing whitespace distinct, configured membership/unknown diagnostics, exact refusal payload PASS |
+| 12. Empty/validated threshold boundaries | `f002_validated_thresholds_and_empty_approvals` — 0 through 3 approvals at thresholds 1/2/3, including N-1/N PASS |
+| 13. Both APIs/result helpers | All library `f002_*` tests via `f002_refuses`/`f002_counts`; existing `test_verification_result_helpers` — ordered results/count/digest/members/invalids PASS |
+| 14. CLI text/JSON early error/binary | `f002_cli_duplicate_text_json_and_binary_early_return`; `f002_cli_nonduplicate_controls_schema_and_invalid_extra` — exact stderr newline/empty stdout/exit 1, missing binary not reached on duplicate, normal schema/result controls PASS |
+| 15. Canonical/domain/digest | `hash::tests::f002_canonical_domain_and_approval_invariance`; existing digest/signature fixtures — exact canonical JSON/domain, approval add/remove/copy/reorder invariance PASS |
+| 16. Keyset rejection/CLI precedence | `f002_cli_keyset_and_envelope_validation_precedence`; existing council validation tests — zero/excess threshold, duplicate IDs, malformed/wrong-size key, version reject exit 2 before invalid envelope/duplicates; valid-keyset invalid envelope exit 1 PASS |
+| 17. Direct-library residuals/entry precedence | `f002_direct_library_residuals_and_entry_precedence` — deliberately unvalidated zero/excess/duplicate-keyset/malformed-envelope cases, parsing not validation, malformed key-map duplicate refusal PASS; source inspection confirms full scan before digest/map/crypto |
+| 18. Raw helpers/inspect | `f002_raw_helpers_do_not_authorize`; `f002_cli_inspect_is_descriptive_not_authorization` — raw count/inspect descriptive success unchanged, verifier refusal PASS |
+
+Required focused command:
+`cargo test --locked -p qbind-gov --lib --test envelope_cli_tests`:
+**36 library + 4 CLI passed; 0 failed, 0 ignored, exit 0.**
+Required `rustfmt --check --edition 2021` command over the three Rust
+paths: **exit 0**. Toolchain/host/configuration, commands and exact producing
+blobs are in the retrievable logs. No code/tests changed after that run.
+Scope/mode/LF/whitespace, protected sections 8/12, hash production bytes and
+local documentation links are checked by the delivered evidence checker.
+See [evidence README](evidence/f002/README.md) and
+[SHA-256 manifest](evidence/f002/SHA256SUMS) for commands, identities,
+limitations and delivered-byte checksums. Documentation/evidence commits
+are separate; final revision/tree, delivery, main observation and complete
+changed-path manifest are reported after commit without a self-referential
+hash claim in this document.
+
+### Retained limits and operational gates
+
+Member-ID uniqueness establishes neither distinct keys nor independent
+operators. Keyset provenance, direct-library structural admission, algorithm
+policy, network binding, freshness/replay, binary-check policy and operational
+authority remain separate unresolved boundaries. These direct-library tests
+are characterizations, not validated quorum evidence or endorsements.
+No operational key/signature is used or delivered; test secret keys exist
+only in process memory. No node execution, Run 384/385, workspace-wide suite,
+scanner, live exploit, upgrade execution or release run was performed.
+Passing bounded tests is not independent review, deployed exploitation
+evidence or closure. All BR decisions, evidence qualifications and release
+gates remain unchanged. Activation remains **DISABLED**; public DevNet remains
+**NO-GO**; independent post-implementation review is **PENDING**, finding **OPEN**.
