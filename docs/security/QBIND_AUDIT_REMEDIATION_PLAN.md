@@ -350,7 +350,7 @@ existing scoped results retained.
 | A27.1-C4/C5, A:L7661-L7719: weighted library 2*total | Bounded open arithmetic observation; no selected-binary reachability; DD/ME; R relevance pending | Check actual arbitrary-weight consumer and intended numeric contract | Boundary arithmetic plus reachable caller, not unit-weight engine overflow assertion |
 | A34.1-C1/C2/C4, A:L5741-L5861 | Parent/QC binding and proposal/justify ordering remain protocol-invariant candidates, not proven defects; DD; R | Settle applicable engine-path invariant with proof/counterexample before implementation | Full conditional self-vote trace and invariant argument; production snapshot gate retained |
 | A36.1-C1 + A38.1, A:L5032-L5077, A:L4397-L4426 | Required-policy non-invocation contract/integration candidate; DD/MI; C4/C5/O | Clarify skip/v1/no-data-dir/live-0x05/drain contract; no advisory-hook overclaim | Contract decision, exact surface-specific invocation/refusal and later binary evidence |
-| A37.1-C2/C3 + A38 carry-forward, A:L4744-L4785, A:L4629-L4671 | Run-216/227 regression status not aggregated into PASS: evidence-harness assurance defect; D/ME; A | Bounded current harness check, then verdict/status fix; not node protocol defect or fabricated-run allegation | Failing regression flips verdict/status; exact harness/helper/evidence producing source, unavailable historical artifacts disclosed |
+| A37.1-C2/C3 + A38 carry-forward, A:L4744-L4785, A:L4629-L4671 | Section 14 confirms the stated current-source mechanism; evidence-harness assurance observation; D/ME; A | Correction contract **AWAITING INDEPENDENT REVIEW**; implementation **NOT STARTED**; not a node-protocol defect or fabricated-run allegation | Required regression failure yields a non-PASS summary and nonzero harness exit; retain exact harness/helper/evidence-producing source and disclose unavailable historical artifacts |
 | R-DEP-1/R-DEP-2/R-RUNTIME-1, A39.1-A41 | RNG source chain resolved to scope; deployed backend/build and runtime entropy remain; algorithms/constant-time not performed; ME; C5 | Pin platform/features/cfgs and exact remaining backend question | Dependency provenance + build inputs; runtime entropy separate, no generic source rerun |
 | R7.3/E12, A42.1-A45.1 | Schema/visitor/postdecode/four-channel route complete to scope; aggregate capacities/RSS/concurrency residuals; ME; O | Preserve corrected precheck/Infinite-limit and copy accounting; name unmeasured quantity | Revision-bound aggregate experiment under separate plan; no new forced defect |
 | A47.3-C1-C3/disposition, A:L1039-L1151 | Local stored n>1 -> 1 regression trace established; violated contract/harm unestablished, no new finding; DD/ME; R/profile recovery | Resolve relevant storage/transition contract and consumer impact before a transition change | Correct restore chronology, cursor-vs-DB writer, atomic visibility != power-loss durability; multi-validator residual separate |
@@ -1133,18 +1133,18 @@ staged for delivery; final commit/tree/remote checks are reported separately
 after commit, without a self-referential hash in this document.
 
 **Current next action (supersedes the prior generic candidate-selection
-instruction):** assess another bounded candidate under section 2. The
-QBIND-A1-F002 bounded source/retained-evidence review and separate publication
-are recorded in section 13; no further review or publication is pending within
-that scope. Earlier F002 pending-review statements remain historical and are
-superseded only for that bounded review and publication. This record neither
-selects an unverified correction nor authorizes implementation, creates a
-finding, or closes an overall finding or evidence obligation. Section 8's
-E07 / OBL-REL-1a / A48.1-C2
-bounded correction is implemented, independently verified and published;
-it is no longer the next implementation. Unrelated BR decisions remain
-mandatory for their dependent authority/recovery/operational work; activation
-remains DISABLED and public DevNet NO-GO.
+instruction):** independently review the A37.1-C2 / A38-iv pre-implementation
+correction contract in section 14. Its current-source observation is
+**CONFIRMED TO THE STATED CURRENT SOURCE MECHANISM**; the correction contract
+is **AWAITING INDEPENDENT REVIEW**; implementation is **NOT STARTED**;
+reproduction/regression/runtime evidence for this task is **NOT EXECUTED**.
+The QBIND-A1-F002 bounded source/retained-evidence review and separate
+publication remain recorded in section 13; earlier F002 pending-review
+statements remain historical and are superseded only within that bounded
+scope. This task does not authorize implementation, create a finding, or
+close an overall finding or evidence obligation. E07 and OBL-GOV-2 remain
+**OPEN**; unrelated release and operational gates remain unchanged; activation
+remains **DISABLED** and public DevNet **NO-GO**.
 
 ## 12. A21-F1 candidate task card, pre-implementation contract and bounded implementation record
 
@@ -2457,3 +2457,310 @@ authority. No additional finding or evidence ID is allocated. Activation
 remains **DISABLED**; public DevNet remains **NO-GO**. A later next action may
 assess another bounded candidate under section 2; this task selects no
 unverified correction and starts no implementation.
+
+## 14. A37.1-C2 / A38-iv pre-implementation contract: Run 216/227 regression verdict
+
+**Status:** Observation: **CONFIRMED TO THE STATED CURRENT SOURCE MECHANISM**.
+Correction contract: **AWAITING INDEPENDENT REVIEW**. Implementation:
+**NOT STARTED**. Reproduction/regression/runtime evidence for this task:
+**NOT EXECUTED**.
+
+### Entry identities and historical/current-source separation
+
+This carries forward A37.1-C2 under A38-iv without creating a canonical
+finding ID or obligation. The relationship remains the release-evidence
+aspect of **E07** and **OBL-GOV-2**, both **OPEN**. Existing release and
+operational gates are unchanged; activation remains **DISABLED** and public
+DevNet remains **NO-GO**.
+
+The committed audit input is `Audit/QBIND_SECURITY_FINDINGS_REGISTER.md`,
+blob `cd81efdbaf2bfb45e00dc3c60db3ea4f523adfa0`. Its A38 carry-forward is
+`:4629-L4670`, A37.1-C2 is `:4744-L4765`, and the separate A37.1-C3
+historical-provenance qualification is `:4767-L4785`; these locators were
+checked against the pinned bytes. The historical audited source baseline is
+`18d71a549d868ed33d352e9fc70a9d060f75e03b`, tree
+`5b6c543435ac017dd8372c93f48be397899db14a` (section 1); that historical
+source context is not this task's implementation baseline. This task inspected
+`0a35ef1fff2b7cdc15acddd9de8d5a01995418c7`, tree
+`46f717acd1fd7727c911189c11ee6d0b1bcb662c`, against the two pinned harness
+blobs below.
+
+The task baseline's raw sole-parent header is
+`e46c452cf6cfb1de4cf435a85108aa00a09761f4`, but the parent object is
+unavailable locally; this records raw parentage, not proven ancestry. Remote
+`main` initially matched the task baseline. No historical test failure,
+executed reproduction, stale-summary incident, or independent approval of
+this proposed correction is claimed.
+
+### Current source assessment
+
+| Harness | Pinned blob | Regression wrappers and invocation/captures | Final summary |
+|---|---|---|---|
+| Run 216, `scripts/devnet/run_216_governance_execution_policy_release_binary.sh` | `e084e64f1b7b8e3ca1af9d0419b4bd659e0644f8` | `run_test_target` / `run_lib_test`: `:145-L166`; target loop and two library invocations: `:168-L172` | Prints records at `:197`, then unconditional `verdict: PASS` at `:201`; summary redirection at `:202` |
+| Run 227, `scripts/devnet/run_227_governance_evaluator_runtime_callsite_wiring_release_binary.sh` | `ce73b752eff9fd03377582938956d7f53a470390` | `run_test_target` / `run_lib_test`: `:205-L227`; target loop and two library invocations: `:228-L232` | Prints records at `:258`, then unconditional `verdict: PASS` at `:262`; summary redirection at `:263` |
+
+Each wrapper temporarily disables `errexit`, runs Cargo with output redirected
+to its target log, captures Cargo's status, writes a status file, and prints
+a status record. On the normal status-write path, the final `printf`
+succeeds, so `$(run_test_target ...)` / `$(run_lib_test ...)` returns the
+print's success status, not Cargo's captured status. The command
+substitutions populate `TEST_VERDICTS`; the summary prints those strings but
+does not evaluate their `rc` values before PASS. Conditional on reaching the
+regression loop, a nonzero Cargo status, successful status write/print and
+all other required operations succeeding, either script can therefore print
+a nonzero regression `rc` and still publish `verdict: PASS`. This is a static
+source/control-flow assessment, not an executed reproduction.
+
+All configured integration targets are present at this baseline: 35 for Run
+216 and 8 for Run 227. Both invoke the same two library commands. Both
+helpers have real accumulated assertions and nonzero failure exits (Run 216:
+`crates/qbind-node/examples/run_216_governance_execution_policy_release_binary_helper.rs:370,
+1288-L1320`; Run 227:
+`crates/qbind-node/examples/run_227_governance_evaluator_runtime_callsite_wiring_release_binary_helper.rs:697,
+1540-L1568`). Both scripts enforce S1 help exit status zero (Run 216
+`:102-L106`; Run 227 `:120-L123`). Run 227 S6 deliberately asserts the
+invalid-selector rejection and diagnostic (`:140-L146`); its expected
+nonzero scenario status is not a failed regression command.
+
+Both scripts reset generated subdirectories at startup but do not invalidate
+`summary.txt` there (Run 216 `:31-L35`; Run 227 `:51-L58`). They replace it
+only at the final summary redirection. A failure/interruption before then
+can leave an earlier summary visible. This is a current-source possibility,
+not a historical incident claim.
+
+The run-specific READMEs and `QBIND_DEVNET_EVIDENCE_RUN_216.md` /
+`QBIND_DEVNET_EVIDENCE_RUN_227.md` document invocation or summary location.
+The repository search found no automated consumer parsing regression `.rc`
+files or the final verdict. Preserve the existing successful summary path,
+`verdict: PASS` spelling, scenario/helper/denylist content, log names, and
+numeric per-command `.rc` artifacts. A non-PASS verdict and nonzero process
+exit on regression failure are intentional changes. Keep scenario statuses
+separate: never aggregate all of `EXIT_DIR`, because expected scenario
+rejections (including Run 227 S6) are not failed regression commands.
+
+The audit's historical summaries report regression `rc=0`; this contract
+does not recast them as failures or fabricated runs. The A37.1-C3 limitation
+that historical recorded commits do not authenticate the harness/helper/
+evidence-doc source remains separate and unresolved. A38-ii's distinction is
+preserved: the current-tree scripts/helpers/evidence docs are present and
+buildable/runnable from current source; historical execution/build provenance
+is what remains unverified. This task did not build or run them and does not
+establish historical build/source provenance.
+
+### Proposed correction contract
+
+#### Required command inventory
+
+Every listed command is required. Each integration target is run as
+`cargo test -p qbind-node --test <target> -- --test-threads=1`.
+
+**Run 216 integration targets (35):**
+
+1. `run_215_governance_execution_policy_selector_tests`
+2. `run_213_governance_execution_payload_callsite_tests`
+3. `run_211_governance_execution_policy_tests`
+4. `run_209_custody_attestation_policy_selector_tests`
+5. `run_207_custody_attestation_payload_callsite_tests`
+6. `run_205_custody_attestation_verifier_tests`
+7. `run_203_kms_hsm_backend_boundary_tests`
+8. `run_201_remote_signer_transport_boundary_tests`
+9. `run_198_remote_signer_policy_selector_tests`
+10. `run_196_remote_signer_payload_callsite_tests`
+11. `run_194_remote_authority_signer_boundary_tests`
+12. `run_192_authority_custody_policy_selector_tests`
+13. `run_190_authority_custody_payload_callsite_tests`
+14. `run_188_authority_custody_boundary_tests`
+15. `run_186_onchain_governance_production_verifier_boundary_tests`
+16. `run_184_onchain_governance_payload_carrying_tests`
+17. `run_182_onchain_governance_production_callsite_wiring_tests`
+18. `run_180_onchain_governance_marker_integration_tests`
+19. `run_178_onchain_governance_proof_tests`
+20. `run_176_live_0x05_governance_proof_carrier_tests`
+21. `run_173_validation_only_governance_required_policy_tests`
+22. `run_171_governance_required_policy_selector_tests`
+23. `run_169_governance_proof_loader_surface_integration_tests`
+24. `run_167_governance_proof_carrier_tests`
+25. `run_165_governance_marker_integration_tests`
+26. `run_163_governance_authority_verifier_tests`
+27. `run_161_lifecycle_marker_integration_tests`
+28. `run_159_authority_signing_key_lifecycle_tests`
+29. `run_157_unified_testnet_fixture_universe_tests`
+30. `run_152_binary_reachable_peer_drain_plumbing_tests`
+31. `run_150_peer_driven_apply_drain_tests`
+32. `run_148_peer_driven_apply_devnet_tests`
+33. `run_142_live_inbound_0x05_v2_validation_tests`
+34. `run_134_reload_apply_v2_authority_marker_tests`
+35. `run_138_sighup_v2_authority_marker_tests`
+
+**Run 216 library commands:** `cargo test -p qbind-node --lib pqc_authority
+-- --test-threads=1` and `cargo test -p qbind-node --lib -- --test-threads=1`.
+
+**Run 227 integration targets (8):**
+
+1. `run_226_governance_evaluator_runtime_callsite_wiring_tests`
+2. `run_224_governance_evaluator_runtime_integration_tests`
+3. `run_222_governance_execution_evaluator_tests`
+4. `run_220_governance_execution_runtime_consumption_tests`
+5. `run_217_governance_execution_runtime_arming_tests`
+6. `run_215_governance_execution_policy_selector_tests`
+7. `run_213_governance_execution_payload_callsite_tests`
+8. `run_211_governance_execution_policy_tests`
+
+**Run 227 library commands:** the same two exact library commands listed
+for Run 216. The current baseline has all 43 integration target files; each
+future invocation must still check the complete required inventory.
+
+#### Aggregation, results, summary, and exit
+
+1. Before any build/helper/node/regression operation, generate a unique
+   invocation ID and atomically replace `summary.txt` with a current-run
+   `verdict: INCOMPLETE` sentinel containing that ID; emit the ID to stderr.
+   If initialization/replacement fails, exit nonzero before doing work and
+   warn that any existing summary may be from an earlier run and is
+   untrusted. If storage is unwritable, a sentinel cannot be written; never
+   report that invocation as successful.
+2. A missing required target is an explicit failure, never
+   `skipped(not-present)` and never a smaller required set. Record it and
+   continue with all other available required commands. Earlier build,
+   helper, or assertion failures may stop before the regression phase; they
+   leave the current summary INCOMPLETE (or a successfully written explicit
+   FAIL) and return nonzero.
+3. After the regression phase begins, attempt every available required
+   integration and library command even after failures, to preserve later
+   results and diagnostics. Keep each command's full stdout/stderr log and
+   exact Cargo status. If a log cannot be opened, do not run that command
+   without capture; record capture failure and continue other safely
+   capturable commands. A launch failure is non-success, not a skip.
+4. Invoke wrappers directly in the parent shell; do not capture status with
+   command substitution or rely on changing parent state inside a
+   substitution. Use an explicit conditional around the Cargo subshell,
+   capture `$?` immediately, store status in parent-shell state, and print
+   separately. The wrapper must propagate Cargo's captured status rather
+   than a later successful `printf`.
+5. Preserve existing per-command log names and numeric
+   `test_<target>.rc` / `lib_<label>.rc` artifacts. Add
+   `EXIT_DIR/regression_results.tsv` as the aggregation input: one
+   `run_id=<id>` line, one `command_key<TAB>state<TAB>rc` header, and
+   exactly one row per required command keyed by harness, kind, and target
+   or library label. States are `returned` with exact numeric shell status,
+   `missing_target` without rc, or `capture_error` without rc. Check log,
+   status, and manifest writes; any failure marks the run incomplete,
+   emits diagnostics, and does not stop other safely capturable tests.
+6. Before summary publication, validate the manifest's current invocation
+   ID, schema, state and rc syntax, exact required keys, and one occurrence
+   per key; cross-check each numeric `.rc` file against its manifest row.
+   Reject unknown, duplicate, missing, malformed, inconsistent,
+   unincorporated, or stale records. Aggregate only this literal inventory,
+   never every `EXIT_DIR` file, and never infer success by grepping
+   human-readable PASS.
+7. PASS requires all existing harness assertions/operations to succeed,
+   every required Cargo command to return zero, every required result to
+   validate and appear in the current summary, and summary publication to
+   succeed. If all records are valid but any command is nonzero or a target
+   is missing, publish `verdict: FAIL`. An unobservable/incomplete result,
+   invalid/missing record, or I/O failure yields `verdict: INCOMPLETE` and
+   takes precedence when a complete valid aggregate cannot be established.
+   Both are non-PASS and exit nonzero. Publish via same-directory temporary
+   file plus atomic rename; a failed final write must leave the startup
+   INCOMPLETE sentinel rather than truncate it.
+8. Abort/interruption exits nonzero and leaves/restores the current-run
+   INCOMPLETE summary. A completion/exit trap must not leave an earlier
+   PASS as the current run. If summary writes fail, emit the invocation ID
+   and warning; trust a summary only when its ID matches that invocation
+   and that process exited zero.
+9. Preserve the successful summary location and PASS spelling, current
+   scenario/helper/denylist sections, per-command log paths and numeric
+   `.rc` files. Add run identity and aggregate disposition; document the
+   intentional nonzero exit on failure. Run 227 S6's expected invalid-
+   selector nonzero remains a scenario assertion outside the regression
+   inventory.
+
+Cargo exit zero alone does not establish that a test ran, that a filter
+matched, or that coverage was achieved. This contract does not add
+test-count certification.
+
+### Bounded future implementation and fixture paths
+
+Future production changes are limited to
+`scripts/devnet/run_216_governance_execution_policy_release_binary.sh` and
+`scripts/devnet/run_227_governance_evaluator_runtime_callsite_wiring_release_binary.sh`.
+Update their run-specific READMEs,
+`docs/devnet/run_216_governance_execution_policy_release_binary/README.md`
+and
+`docs/devnet/run_227_governance_evaluator_runtime_callsite_wiring_release_binary/README.md`,
+for invocation identity and failure exit semantics. Add
+`scripts/devnet/tests/run_216_227_regression_verdict_fixture.sh` specifically
+to invoke both actual harness scripts against controlled fixtures and assert
+the behavior below; do not reimplement aggregation in the test.
+
+The fixture must create one temporary fake repository, copy the real
+scripts to their expected relative paths, and invoke those copies with `bash`
+and `OUTDIR` inside the fixture. The committed scripts are CRLF with mode
+`100644`; only temporary fixture copies may be explicitly normalized to LF.
+That tests the normalized copies' actual capture/aggregation/summary/exit
+paths, not the committed full harness bytes. Preserve the committed CRLF and
+mode; do not claim a full-harness run.
+
+Use guarded stubs for Cargo (allow only expected build/test arguments and
+configure each test status), `qbind-node` (including expected Run 227 S6
+rejection), both helpers (minimal valid helper evidence), and provenance,
+version, or build-ID tools as needed. Stub Git and guard `curl`, `wget`,
+`ssh`, `scp`, `nc` and other network-capable commands; resolve every
+executable to a fixture stub or explicitly allowed local utility. Guard
+cleanup so all removed paths resolve beneath the fixture root. No real Cargo
+builds/tests, node/helper binaries, network, provisioning, signing,
+deployment, or activation. Assert the actual harness process exit, summary
+and invocation ID, exact manifest membership, logs/statuses, and command
+guard log. The
+minimum production boundary exercised is each script's current-run setup,
+required-target enumeration, capture wrapper, manifest validation, summary
+publication, and final exit.
+
+### Acceptance matrix
+
+Every case is **FUTURE / NOT EXECUTED** for this documentation task.
+
+| Case | Fixture input / harness | Required acceptance | Status |
+|---|---|---|---|
+| All required commands succeed | Run 216 and Run 227, all commands | Current-run PASS and exit zero; all 37 / 10 records validate | FUTURE / NOT EXECUTED |
+| First integration failure | Run 216 `run_215…`; Run 227 `run_226…` | Exact rc; continue all commands; FAIL and nonzero exit | FUTURE / NOT EXECUTED |
+| Middle integration failure | Run 216 `run_180_onchain_governance_marker_integration_tests`; Run 227 `run_220_governance_execution_runtime_consumption_tests` | Continue; retain prior/later logs and records; FAIL | FUTURE / NOT EXECUTED |
+| Last integration failure | Run 216 `run_138_sighup_v2_authority_marker_tests`; Run 227 `run_211_governance_execution_policy_tests` | FAIL and nonzero exit; preserve results | FUTURE / NOT EXECUTED |
+| First library failure | Both harnesses `lib:pqc_authority` | Preserve failure; still run `lib:lib_all`; FAIL | FUTURE / NOT EXECUTED |
+| Second library failure | Both harnesses `lib:lib_all` | Preserve failure and prior results; FAIL | FUTURE / NOT EXECUTED |
+| Multiple failures then successes | Both harnesses | All commands attempted; later success cannot erase failures | FUTURE / NOT EXECUTED |
+| Missing required target | Remove one configured target in each fixture | Explicit missing record; do not shrink inventory; continue others; non-PASS | FUTURE / NOT EXECUTED |
+| Incomplete capture | Prevent log creation or capture one command | Do not run without log; report error; continue safely; INCOMPLETE | FUTURE / NOT EXECUTED |
+| Malformed stored result | Corrupt a record in each harness | Validator rejects it; no PASS | FUTURE / NOT EXECUTED |
+| Duplicated stored result | Duplicate a required key | Validator rejects duplicate; no PASS | FUTURE / NOT EXECUTED |
+| Stale stored result | Record carries a previous invocation ID | Validator rejects stale data; no PASS | FUTURE / NOT EXECUTED |
+| Missing/unincorporated result | Omit a required row or summary incorporation | Inventory validation fails; no PASS | FUTURE / NOT EXECUTED |
+| Status/manifest I/O failure | Deny `.rc` or manifest write | Explicit error; continue safe commands; INCOMPLETE and nonzero | FUTURE / NOT EXECUTED |
+| Summary initialization I/O failure | Deny startup write/rename with old PASS present | Stop before work; nonzero exit; warn old summary is untrusted | FUTURE / NOT EXECUTED |
+| Summary publication I/O failure | Deny final write/rename | Keep INCOMPLETE where storage permits; explicit error/nonzero | FUTURE / NOT EXECUTED |
+| Pre-existing PASS summary | Seed earlier PASS for both scripts | Replace with current INCOMPLETE before work; failed run not shown as current PASS | FUTURE / NOT EXECUTED |
+| Aborted/interrupted execution | Interrupt during a test and before publication | Nonzero exit; current-run INCOMPLETE; diagnostics retained | FUTURE / NOT EXECUTED |
+| Command-substitution propagation | Inspect actual changed call sites under fixture | No substitution-based status loss; parent receives Cargo rc | FUTURE / NOT EXECUTED |
+| Run 227 expected S6 rejection | Stub nonzero invalid-selector with expected diagnostic | Scenario assertion passes; separate from regressions; regression may PASS | FUTURE / NOT EXECUTED |
+| Successful-output compatibility | Compare summary, paths, logs, numeric `.rc`, final PASS | Existing successful evidence shape retained with documented additions | FUTURE / NOT EXECUTED |
+| Fixture isolation/guards | Run both normalized copies with guarded stubs | No real Cargo/node/helper/network/out-of-root cleanup; commands accounted | FUTURE / NOT EXECUTED |
+
+### Required future evidence and limits
+
+Retain the producing commit/tree, changed-path and mode/blob manifest, raw
+and normalized script-byte identities, source locators, fixture-driver
+revision, invocation IDs, stub command logs, per-case exit codes, summaries,
+manifests, per-command logs/statuses, and checksums. Independent review must
+verify inventory completeness, failure propagation, current-run summary
+behavior, unchanged Run 227 S6 semantics, and scenario/regression separation.
+Report the fixture matrix as fixture evidence only, not a full release
+harness run, Cargo result, runtime evidence, or historical source-to-binary
+provenance.
+
+No fixtures, source edits, builds, project tests, scanners, harnesses,
+provisioning, signing, deployment, or activation were performed here. The
+correction is not implemented or independently approved. Independent review
+and acceptance of this contract are the unresolved gate before
+implementation; a requested design departure must be explicit and
+re-reviewed. E07 and OBL-GOV-2 remain **OPEN**; no identity, historical
+evidence, release gate, or operational status is closed or changed.
