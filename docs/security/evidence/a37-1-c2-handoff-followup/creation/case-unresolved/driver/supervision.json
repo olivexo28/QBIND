@@ -1,0 +1,7 @@
+[
+  {
+    "case": "216-candidate-before_INT",
+    "original_error": "KeyboardInterrupt('injected owned creation handoff')",
+    "cleanup_error": "RuntimeError('deliberately unresolved child containment')"
+  }
+]

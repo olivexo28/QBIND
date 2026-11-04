@@ -1,0 +1,18 @@
+[
+  {
+    "case": "216-candidate-before_INT",
+    "original_error": "InterruptedError('fixture owner interrupted by SIGTERM')",
+    "cleanup": {
+      "pgid": 20208,
+      "initial": [
+        [
+          20208,
+          "S"
+        ]
+      ],
+      "reaped": [],
+      "remaining": [],
+      "kernel_group_absent": true
+    }
+  }
+]

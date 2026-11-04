@@ -3140,3 +3140,29 @@ correction, not a new canonical audit finding.
 Status **IMPLEMENTED — VERIFICATION PENDING**; independent review
 **PENDING**. E07 / OBL-GOV-2 **OPEN**; activation **DISABLED**; public
 DevNet **NO-GO**. Only isolated inert/guarded fixtures are authorized.
+
+Creation-handoff implementation/test producer:
+`b4669ab29ad31f82bb574800df4f5f21e8a1afb7`, tree
+`9ded09b141ef96f307cacb6ee35e20dd9a672d82`, sole parent the required entry.
+Because shared creation changed, the full existing focused suite was rerun
+against that exact revision: exit **0**, **120 actual isolated harness-copy
+invocations**, including all 110 matrix records and ten existing negative
+controls; **2,033 guarded stub regression attempts**, **zero Rust tests**,
+**zero watchdog rescues**. The visibility probe uses the same creation owner.
+
+Two completed producing-revision inert creation runs covered ordinary cases
+and visibility probes, initialization/handoff exceptions, pending INT/TERM,
+original child/parent masks (including nonempty inherited SIGUSR1), and
+unresolved cleanup. Across 24 cases, **20 cleanups passed without rescue**;
+**four deliberately failed cleanups required outer rescue**, explicitly
+not cleanup passes. The 20 successful cases observed child/group absence
+before actual workspace deletion and independent reaping; unresolved cases
+retained workspaces, preserved original errors/separate cleanup notes and
+refused reuse. A supplemental incomplete mask-readiness attempt (three
+cases) and pre-commit calibration (17 cases, including an unexpected timeout/
+outer rescue) are separately retained, not counted as completed verification.
+The historical pinned local reproduction is also distinct. The following
+evidence/documentation publication changes no fixture or producing-test bytes.
+Status remains **IMPLEMENTED — VERIFICATION PENDING**, independent review
+**PENDING**, E07 / OBL-GOV-2 **OPEN**, activation **DISABLED**, public DevNet
+**NO-GO**.

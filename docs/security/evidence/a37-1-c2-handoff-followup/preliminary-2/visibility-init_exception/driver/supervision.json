@@ -1,0 +1,18 @@
+[
+  {
+    "case": "visibility-probe",
+    "original_error": "RuntimeError('injected post-spawn initialization exception')",
+    "cleanup": {
+      "pgid": 20261,
+      "initial": [
+        [
+          20261,
+          "S"
+        ]
+      ],
+      "reaped": [],
+      "remaining": [],
+      "kernel_group_absent": true
+    }
+  }
+]

@@ -1,0 +1,15 @@
+case init_exception CLEANUP PASS
+case handoff_interrupt CLEANUP PASS
+case creation_INT CLEANUP PASS
+case creation_TERM CLEANUP PASS
+Traceback (most recent call last):
+  File "/workspaces/QBIND/olivexo28/QBIND/docs/security/evidence/a37-1-c2-handoff-followup/creation_cases.py", line 173, in <module>
+    assert status == 0, (route, mode, (folder/"error.txt").read_text())
+                                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/pathlib.py", line 1029, in read_text
+    with self.open(mode='r', encoding=encoding, errors=errors) as f:
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/pathlib.py", line 1015, in open
+    return io.open(self, mode, buffering, encoding, errors, newline)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+FileNotFoundError: [Errno 2] No such file or directory: '/workspaces/QBIND/olivexo28/QBIND/docs/security/evidence/a37-1-c2-handoff-followup/preliminary/case-child_mask/error.txt'

@@ -1,0 +1,11 @@
+{
+  "revision": "551e7cdd08eb01ce05914c4bba49562d8901b7ec",
+  "kind": "isolated function probe, not full harness",
+  "original_error": "KeyboardInterrupt('injected after Popen return before ownership entry')",
+  "child": 19453,
+  "child_alive": true,
+  "unsafe_groups": [],
+  "workspace_deleted_while_child_alive": true,
+  "outer_rescue_required": true,
+  "outer_reaped_group_absent": true
+}

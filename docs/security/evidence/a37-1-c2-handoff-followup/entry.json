@@ -1,0 +1,42 @@
+{
+  "repository": "olivexo28/QBIND",
+  "branch": "copilot/audit-run216-227-regression-verdict-fix",
+  "origin_fetch": "https://github.com/olivexo28/QBIND",
+  "origin_push": "https://github.com/olivexo28/QBIND",
+  "command": "git remote -v && git status --porcelain=v1 && git branch --show-current && git rev-parse HEAD HEAD^{tree} && git ls-remote origin refs/heads/main refs/heads/copilot/audit-run216-227-regression-verdict-fix",
+  "exit_code": 0,
+  "status_porcelain": "",
+  "starting_commit": "551e7cdd08eb01ce05914c4bba49562d8901b7ec",
+  "starting_tree": "85242ebdc73de44133a752886bccb6cd3456a261",
+  "remote_task_tip": "551e7cdd08eb01ce05914c4bba49562d8901b7ec",
+  "protected_remote_main": "f36e59a5e2cebab6fdfd0365920ca3e1a09444ac",
+  "review_reference": "User-supplied independent A37.1-C2 / A38-iv run_case/fixture_workspace creation-handoff probe; isolated targeted functions, not a 120-suite failure/rerun. No separately retrieved review artifact or post-correction acceptance claimed.",
+  "local_reproduction": {
+    "command": "python3 docs/security/evidence/a37-1-c2-handoff-followup/reproduce.py docs/security/evidence/a37-1-c2-handoff-followup/baseline",
+    "exit_code": 0,
+    "outcome": "Leaked inert child and workspace deletion reproduced; independent outer rescue/reaping required."
+  },
+  "preliminary_commands": [
+    {
+      "command": "python3 docs/security/evidence/a37-1-c2-handoff-followup/creation_cases.py docs/security/evidence/a37-1-c2-handoff-followup/preliminary",
+      "exit_code": 1,
+      "cases_started": 5,
+      "outcome": "Four cleanup passes, then mask control outer timeout/rescue. Final assertion attempted to read absent tester-error file and raised FileNotFoundError; retained results.json records timeout and rescue. Later independent /proc and killpg check confirmed that recorded child/group absent."
+    },
+    {
+      "command": "python3 docs/security/evidence/a37-1-c2-handoff-followup/creation_cases.py docs/security/evidence/a37-1-c2-handoff-followup/preliminary-2",
+      "exit_code": 0,
+      "cases_started": 12,
+      "cleanup_passes": 10,
+      "deliberately_failed_cleanup": 2,
+      "outer_rescues": 2
+    }
+  ],
+  "supplemental_nonempty_mask_calibration": {
+    "command": "python3 docs/security/evidence/a37-1-c2-handoff-followup/masked_cases.py docs/security/evidence/a37-1-c2-handoff-followup/masked-creation",
+    "exit_code": 1,
+    "cases_started": 3,
+    "outcome": "Two passes then JSONDecodeError from partial child-mask readiness marker. Ownership cleanup occurred, no outer rescue in the retained third outcome. The supplemental observer was corrected to require complete JSON readiness. Producing fixture and producing test script unchanged.",
+    "completed_retry": "masked-creation-completed"
+  }
+}

@@ -1,0 +1,20 @@
+{
+  "route": "visibility",
+  "mode": "unresolved",
+  "child": 3488,
+  "error": "KeyboardInterrupt('injected owned creation handoff')",
+  "notes": [
+    "separate fixture cleanup failure: RuntimeError('deliberately unresolved child containment')"
+  ],
+  "workspace": "/tmp/qbind-verdict-fixture-jxs623do",
+  "workspace_retained": true,
+  "deletion_observations": [],
+  "mask_restored": true,
+  "child_inherited_original_mask": true,
+  "unsafe": [
+    3488
+  ],
+  "producing_commit": "b4669ab29ad31f82bb574800df4f5f21e8a1afb7",
+  "fixture_sha256": "4f48835c582ab6be5a9e7f4c7e8e7d4cfda19131f08506bcc7fda76996600448",
+  "cleanup_pass": false
+}

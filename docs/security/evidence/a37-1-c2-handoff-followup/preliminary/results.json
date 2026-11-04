@@ -1,0 +1,124 @@
+[
+  {
+    "route": "case",
+    "mode": "init_exception",
+    "child": 19788,
+    "error": "RuntimeError('injected post-spawn initialization exception')",
+    "notes": [],
+    "workspace": "/tmp/qbind-verdict-fixture-37ee711_",
+    "workspace_retained": false,
+    "deletion_observations": [
+      {
+        "path": "/tmp/qbind-verdict-fixture-37ee711_",
+        "kernel_absent_before_delete": true
+      }
+    ],
+    "mask_restored": true,
+    "child_inherited_original_mask": true,
+    "unsafe": [],
+    "producing_commit": "551e7cdd08eb01ce05914c4bba49562d8901b7ec",
+    "fixture_sha256": "4f48835c582ab6be5a9e7f4c7e8e7d4cfda19131f08506bcc7fda76996600448",
+    "child_reaped": true,
+    "cleanup_pass": true,
+    "outer_status": 0,
+    "outer_rescues": []
+  },
+  {
+    "route": "case",
+    "mode": "handoff_interrupt",
+    "child": 19802,
+    "error": "KeyboardInterrupt('injected owned creation handoff')",
+    "notes": [],
+    "workspace": "/tmp/qbind-verdict-fixture-90vcmy9j",
+    "workspace_retained": false,
+    "deletion_observations": [
+      {
+        "path": "/tmp/qbind-verdict-fixture-90vcmy9j",
+        "kernel_absent_before_delete": true
+      }
+    ],
+    "mask_restored": true,
+    "child_inherited_original_mask": true,
+    "unsafe": [],
+    "producing_commit": "551e7cdd08eb01ce05914c4bba49562d8901b7ec",
+    "fixture_sha256": "4f48835c582ab6be5a9e7f4c7e8e7d4cfda19131f08506bcc7fda76996600448",
+    "child_reaped": true,
+    "cleanup_pass": true,
+    "outer_status": 0,
+    "outer_rescues": []
+  },
+  {
+    "route": "case",
+    "mode": "creation_INT",
+    "child": 19816,
+    "error": "InterruptedError('fixture owner interrupted by SIGINT')",
+    "notes": [],
+    "workspace": "/tmp/qbind-verdict-fixture-nwsyd61g",
+    "workspace_retained": false,
+    "deletion_observations": [
+      {
+        "path": "/tmp/qbind-verdict-fixture-nwsyd61g",
+        "kernel_absent_before_delete": true
+      }
+    ],
+    "mask_restored": true,
+    "child_inherited_original_mask": true,
+    "unsafe": [],
+    "producing_commit": "551e7cdd08eb01ce05914c4bba49562d8901b7ec",
+    "fixture_sha256": "4f48835c582ab6be5a9e7f4c7e8e7d4cfda19131f08506bcc7fda76996600448",
+    "child_reaped": true,
+    "cleanup_pass": true,
+    "outer_status": 0,
+    "outer_rescues": []
+  },
+  {
+    "route": "case",
+    "mode": "creation_TERM",
+    "child": 19855,
+    "error": "InterruptedError('fixture owner interrupted by SIGTERM')",
+    "notes": [],
+    "workspace": "/tmp/qbind-verdict-fixture-wk5rk0sa",
+    "workspace_retained": false,
+    "deletion_observations": [
+      {
+        "path": "/tmp/qbind-verdict-fixture-wk5rk0sa",
+        "kernel_absent_before_delete": true
+      }
+    ],
+    "mask_restored": true,
+    "child_inherited_original_mask": true,
+    "unsafe": [],
+    "producing_commit": "551e7cdd08eb01ce05914c4bba49562d8901b7ec",
+    "fixture_sha256": "4f48835c582ab6be5a9e7f4c7e8e7d4cfda19131f08506bcc7fda76996600448",
+    "child_reaped": true,
+    "cleanup_pass": true,
+    "outer_status": 0,
+    "outer_rescues": []
+  },
+  {
+    "route": "case",
+    "mode": "child_mask",
+    "child": 19880,
+    "error": "FileNotFoundError(2, 'No such file or directory')",
+    "notes": [],
+    "workspace": "/tmp/qbind-verdict-fixture-o3et26aq",
+    "workspace_retained": false,
+    "deletion_observations": [
+      {
+        "path": "/tmp/qbind-verdict-fixture-o3et26aq",
+        "kernel_absent_before_delete": true
+      }
+    ],
+    "mask_restored": true,
+    "child_inherited_original_mask": true,
+    "unsafe": [],
+    "producing_commit": "551e7cdd08eb01ce05914c4bba49562d8901b7ec",
+    "fixture_sha256": "4f48835c582ab6be5a9e7f4c7e8e7d4cfda19131f08506bcc7fda76996600448",
+    "child_reaped": true,
+    "cleanup_pass": true,
+    "outer_status": null,
+    "outer_rescues": [
+      19880
+    ]
+  }
+]

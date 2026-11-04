@@ -1,0 +1,14 @@
+case init_exception CLEANUP PASS
+case handoff_interrupt CLEANUP PASS
+case creation_INT CLEANUP PASS
+case creation_TERM CLEANUP PASS
+case child_mask CLEANUP PASS
+cleanup failed; retaining workspace: /tmp/qbind-verdict-fixture-mr0b56sj
+case unresolved EXPECTED CLEANUP FAILURE; outer rescue
+visibility init_exception CLEANUP PASS
+visibility handoff_interrupt CLEANUP PASS
+visibility creation_INT CLEANUP PASS
+visibility creation_TERM CLEANUP PASS
+visibility child_mask CLEANUP PASS
+cleanup failed; retaining workspace: /tmp/qbind-verdict-fixture-bioc249q
+visibility unresolved EXPECTED CLEANUP FAILURE; outer rescue

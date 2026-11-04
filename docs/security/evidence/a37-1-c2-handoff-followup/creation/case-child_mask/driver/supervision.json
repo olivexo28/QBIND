@@ -1,0 +1,18 @@
+[
+  {
+    "case": "216-candidate-before_INT",
+    "original_error": "ValueError('mask control completed; end inert case before body')",
+    "cleanup": {
+      "pgid": 21373,
+      "initial": [
+        [
+          21373,
+          "S"
+        ]
+      ],
+      "reaped": [],
+      "remaining": [],
+      "kernel_group_absent": true
+    }
+  }
+]

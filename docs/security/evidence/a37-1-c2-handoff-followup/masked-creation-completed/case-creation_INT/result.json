@@ -1,0 +1,22 @@
+{
+  "route": "case",
+  "mode": "creation_INT",
+  "child": 3270,
+  "error": "InterruptedError('fixture owner interrupted by SIGINT')",
+  "notes": [],
+  "workspace": "/tmp/qbind-verdict-fixture-lbs1_wu4",
+  "workspace_retained": false,
+  "deletion_observations": [
+    {
+      "path": "/tmp/qbind-verdict-fixture-lbs1_wu4",
+      "kernel_absent_before_delete": true
+    }
+  ],
+  "mask_restored": true,
+  "child_inherited_original_mask": true,
+  "unsafe": [],
+  "producing_commit": "b4669ab29ad31f82bb574800df4f5f21e8a1afb7",
+  "fixture_sha256": "4f48835c582ab6be5a9e7f4c7e8e7d4cfda19131f08506bcc7fda76996600448",
+  "child_reaped": true,
+  "cleanup_pass": true
+}

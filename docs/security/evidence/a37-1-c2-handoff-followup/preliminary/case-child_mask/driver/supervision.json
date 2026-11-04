@@ -1,0 +1,13 @@
+[
+  {
+    "case": "216-candidate-before_INT",
+    "original_error": "FileNotFoundError(2, 'No such file or directory')",
+    "cleanup": {
+      "pgid": 19880,
+      "initial": [],
+      "reaped": [],
+      "remaining": [],
+      "kernel_group_absent": true
+    }
+  }
+]

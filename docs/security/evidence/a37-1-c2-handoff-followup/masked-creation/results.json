@@ -1,0 +1,54 @@
+[
+  {
+    "route": "case",
+    "mode": "init_exception",
+    "child": 2093,
+    "error": "RuntimeError('injected post-spawn initialization exception')",
+    "notes": [],
+    "workspace": "/tmp/qbind-verdict-fixture-qb9omowc",
+    "workspace_retained": false,
+    "deletion_observations": [
+      {
+        "path": "/tmp/qbind-verdict-fixture-qb9omowc",
+        "kernel_absent_before_delete": true
+      }
+    ],
+    "mask_restored": true,
+    "child_inherited_original_mask": true,
+    "unsafe": [],
+    "producing_commit": "b4669ab29ad31f82bb574800df4f5f21e8a1afb7",
+    "fixture_sha256": "4f48835c582ab6be5a9e7f4c7e8e7d4cfda19131f08506bcc7fda76996600448",
+    "child_reaped": true,
+    "cleanup_pass": true,
+    "outer_status": 0,
+    "outer_rescues": []
+  },
+  {
+    "route": "case",
+    "mode": "handoff_interrupt",
+    "child": 2109,
+    "error": "KeyboardInterrupt('injected owned creation handoff')",
+    "notes": [],
+    "workspace": "/tmp/qbind-verdict-fixture-o3g6fmrw",
+    "workspace_retained": false,
+    "deletion_observations": [
+      {
+        "path": "/tmp/qbind-verdict-fixture-o3g6fmrw",
+        "kernel_absent_before_delete": true
+      }
+    ],
+    "mask_restored": true,
+    "child_inherited_original_mask": true,
+    "unsafe": [],
+    "producing_commit": "b4669ab29ad31f82bb574800df4f5f21e8a1afb7",
+    "fixture_sha256": "4f48835c582ab6be5a9e7f4c7e8e7d4cfda19131f08506bcc7fda76996600448",
+    "child_reaped": true,
+    "cleanup_pass": true,
+    "outer_status": 0,
+    "outer_rescues": []
+  },
+  {
+    "outer_status": 256,
+    "outer_rescues": []
+  }
+]

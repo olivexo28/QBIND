@@ -1,0 +1,18 @@
+[
+  {
+    "case": "visibility-probe",
+    "original_error": "InterruptedError('fixture owner interrupted by SIGTERM')",
+    "cleanup": {
+      "pgid": 21503,
+      "initial": [
+        [
+          21503,
+          "S"
+        ]
+      ],
+      "reaped": [],
+      "remaining": [],
+      "kernel_group_absent": true
+    }
+  }
+]

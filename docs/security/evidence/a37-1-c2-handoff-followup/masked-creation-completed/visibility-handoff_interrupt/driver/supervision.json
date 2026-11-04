@@ -1,0 +1,18 @@
+[
+  {
+    "case": "visibility-probe",
+    "original_error": "KeyboardInterrupt('injected owned creation handoff')",
+    "cleanup": {
+      "pgid": 3402,
+      "initial": [
+        [
+          3402,
+          "S"
+        ]
+      ],
+      "reaped": [],
+      "remaining": [],
+      "kernel_group_absent": true
+    }
+  }
+]

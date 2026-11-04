@@ -1,0 +1,22 @@
+{
+  "route": "visibility",
+  "mode": "creation_TERM",
+  "child": 20337,
+  "error": "InterruptedError('fixture owner interrupted by SIGTERM')",
+  "notes": [],
+  "workspace": "/tmp/qbind-verdict-fixture-oyobwnnh",
+  "workspace_retained": false,
+  "deletion_observations": [
+    {
+      "path": "/tmp/qbind-verdict-fixture-oyobwnnh",
+      "kernel_absent_before_delete": true
+    }
+  ],
+  "mask_restored": true,
+  "child_inherited_original_mask": true,
+  "unsafe": [],
+  "producing_commit": "551e7cdd08eb01ce05914c4bba49562d8901b7ec",
+  "fixture_sha256": "4f48835c582ab6be5a9e7f4c7e8e7d4cfda19131f08506bcc7fda76996600448",
+  "child_reaped": true,
+  "cleanup_pass": true
+}

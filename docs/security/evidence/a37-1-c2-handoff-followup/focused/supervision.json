@@ -1,0 +1,1270 @@
+[
+  {
+    "case": "visibility-probe",
+    "cleanup": {
+      "pgid": 20756,
+      "initial": [
+        [
+          20756,
+          "R"
+        ]
+      ],
+      "reaped": [],
+      "remaining": [],
+      "kernel_group_absent": true
+    }
+  },
+  {
+    "case": "216-baseline-success",
+    "cleanup": {
+      "pgid": 20815,
+      "initial": [],
+      "reaped": [],
+      "remaining": [],
+      "kernel_group_absent": true
+    }
+  },
+  {
+    "case": "216-baseline-first",
+    "cleanup": {
+      "pgid": 21336,
+      "initial": [],
+      "reaped": [],
+      "remaining": [],
+      "kernel_group_absent": true
+    }
+  },
+  {
+    "case": "216-candidate-success",
+    "cleanup": {
+      "pgid": 21960,
+      "initial": [],
+      "reaped": [],
+      "remaining": [],
+      "kernel_group_absent": true
+    }
+  },
+  {
+    "case": "216-candidate-first",
+    "cleanup": {
+      "pgid": 22388,
+      "initial": [],
+      "reaped": [],
+      "remaining": [],
+      "kernel_group_absent": true
+    }
+  },
+  {
+    "case": "216-candidate-middle",
+    "cleanup": {
+      "pgid": 22816,
+      "initial": [],
+      "reaped": [],
+      "remaining": [],
+      "kernel_group_absent": true
+    }
+  },
+  {
+    "case": "216-candidate-last",
+    "cleanup": {
+      "pgid": 23244,
+      "initial": [],
+      "reaped": [],
+      "remaining": [],
+      "kernel_group_absent": true
+    }
+  },
+  {
+    "case": "216-candidate-lib_first",
+    "cleanup": {
+      "pgid": 23673,
+      "initial": [],
+      "reaped": [],
+      "remaining": [],
+      "kernel_group_absent": true
+    }
+  },
+  {
+    "case": "216-candidate-lib_last",
+    "cleanup": {
+      "pgid": 24101,
+      "initial": [],
+      "reaped": [],
+      "remaining": [],
+      "kernel_group_absent": true
+    }
+  },
+  {
+    "case": "216-candidate-multiple",
+    "cleanup": {
+      "pgid": 24529,
+      "initial": [],
+      "reaped": [],
+      "remaining": [],
+      "kernel_group_absent": true
+    }
+  },
+  {
+    "case": "216-candidate-missing",
+    "cleanup": {
+      "pgid": 24957,
+      "initial": [],
+      "reaped": [],
+      "remaining": [],
+      "kernel_group_absent": true
+    }
+  },
+  {
+    "case": "216-candidate-log_error",
+    "cleanup": {
+      "pgid": 25385,
+      "initial": [],
+      "reaped": [],
+      "remaining": [],
+      "kernel_group_absent": true
+    }
+  },
+  {
+    "case": "216-candidate-failure_and_capture",
+    "cleanup": {
+      "pgid": 25812,
+      "initial": [],
+      "reaped": [],
+      "remaining": [],
+      "kernel_group_absent": true
+    }
+  },
+  {
+    "case": "216-candidate-launch_failure",
+    "cleanup": {
+      "pgid": 26239,
+      "initial": [],
+      "reaped": [],
+      "remaining": [],
+      "kernel_group_absent": true
+    }
+  },
+  {
+    "case": "216-candidate-malformed_state",
+    "cleanup": {
+      "pgid": 26667,
+      "initial": [],
+      "reaped": [],
+      "remaining": [],
+      "kernel_group_absent": true
+    }
+  },
+  {
+    "case": "216-candidate-malformed_rc",
+    "cleanup": {
+      "pgid": 27059,
+      "initial": [],
+      "reaped": [],
+      "remaining": [],
+      "kernel_group_absent": true
+    }
+  },
+  {
+    "case": "216-candidate-duplicate",
+    "cleanup": {
+      "pgid": 27450,
+      "initial": [],
+      "reaped": [],
+      "remaining": [],
+      "kernel_group_absent": true
+    }
+  },
+  {
+    "case": "216-candidate-stale",
+    "cleanup": {
+      "pgid": 27877,
+      "initial": [],
+      "reaped": [],
+      "remaining": [],
+      "kernel_group_absent": true
+    }
+  },
+  {
+    "case": "216-candidate-missing_row",
+    "cleanup": {
+      "pgid": 28268,
+      "initial": [],
+      "reaped": [],
+      "remaining": [],
+      "kernel_group_absent": true
+    }
+  },
+  {
+    "case": "216-candidate-unknown",
+    "cleanup": {
+      "pgid": 28696,
+      "initial": [],
+      "reaped": [],
+      "remaining": [],
+      "kernel_group_absent": true
+    }
+  },
+  {
+    "case": "216-candidate-manifest_header",
+    "cleanup": {
+      "pgid": 29087,
+      "initial": [],
+      "reaped": [],
+      "remaining": [],
+      "kernel_group_absent": true
+    }
+  },
+  {
+    "case": "216-candidate-unterminated",
+    "cleanup": {
+      "pgid": 29478,
+      "initial": [],
+      "reaped": [],
+      "remaining": [],
+      "kernel_group_absent": true
+    }
+  },
+  {
+    "case": "216-candidate-status_mismatch",
+    "cleanup": {
+      "pgid": 29904,
+      "initial": [],
+      "reaped": [],
+      "remaining": [],
+      "kernel_group_absent": true
+    }
+  },
+  {
+    "case": "216-candidate-status_missing",
+    "cleanup": {
+      "pgid": 30296,
+      "initial": [],
+      "reaped": [],
+      "remaining": [],
+      "kernel_group_absent": true
+    }
+  },
+  {
+    "case": "216-candidate-status_extra",
+    "cleanup": {
+      "pgid": 30760,
+      "initial": [],
+      "reaped": [],
+      "remaining": [],
+      "kernel_group_absent": true
+    }
+  },
+  {
+    "case": "216-candidate-manifest_nul",
+    "cleanup": {
+      "pgid": 31153,
+      "initial": [],
+      "reaped": [],
+      "remaining": [],
+      "kernel_group_absent": true
+    }
+  },
+  {
+    "case": "216-candidate-status_nul",
+    "cleanup": {
+      "pgid": 31544,
+      "initial": [],
+      "reaped": [],
+      "remaining": [],
+      "kernel_group_absent": true
+    }
+  },
+  {
+    "case": "216-candidate-rc_io",
+    "cleanup": {
+      "pgid": 31936,
+      "initial": [],
+      "reaped": [],
+      "remaining": [],
+      "kernel_group_absent": true
+    }
+  },
+  {
+    "case": "216-candidate-manifest_io",
+    "cleanup": {
+      "pgid": 32328,
+      "initial": [],
+      "reaped": [],
+      "remaining": [],
+      "kernel_group_absent": true
+    }
+  },
+  {
+    "case": "216-candidate-startup_write",
+    "cleanup": {
+      "pgid": 436,
+      "initial": [],
+      "reaped": [],
+      "remaining": [],
+      "kernel_group_absent": true
+    }
+  },
+  {
+    "case": "216-candidate-startup_rename",
+    "cleanup": {
+      "pgid": 442,
+      "initial": [],
+      "reaped": [],
+      "remaining": [],
+      "kernel_group_absent": true
+    }
+  },
+  {
+    "case": "216-candidate-final_write",
+    "cleanup": {
+      "pgid": 457,
+      "initial": [],
+      "reaped": [],
+      "remaining": [],
+      "kernel_group_absent": true
+    }
+  },
+  {
+    "case": "216-candidate-final_rename",
+    "cleanup": {
+      "pgid": 888,
+      "initial": [],
+      "reaped": [],
+      "remaining": [],
+      "kernel_group_absent": true
+    }
+  },
+  {
+    "case": "216-candidate-seeded_pass_build_failure",
+    "cleanup": {
+      "pgid": 1393,
+      "initial": [],
+      "reaped": [],
+      "remaining": [],
+      "kernel_group_absent": true
+    }
+  },
+  {
+    "case": "216-candidate-early_build",
+    "cleanup": {
+      "pgid": 1450,
+      "initial": [],
+      "reaped": [],
+      "remaining": [],
+      "kernel_group_absent": true
+    }
+  },
+  {
+    "case": "216-candidate-helper_fail",
+    "cleanup": {
+      "pgid": 1500,
+      "initial": [],
+      "reaped": [],
+      "remaining": [],
+      "kernel_group_absent": true
+    }
+  },
+  {
+    "case": "216-candidate-help_fail",
+    "cleanup": {
+      "pgid": 1573,
+      "initial": [],
+      "reaped": [],
+      "remaining": [],
+      "kernel_group_absent": true
+    }
+  },
+  {
+    "case": "216-candidate-denylist",
+    "cleanup": {
+      "pgid": 1658,
+      "initial": [],
+      "reaped": [],
+      "remaining": [],
+      "kernel_group_absent": true
+    }
+  },
+  {
+    "case": "216-candidate-before_INT",
+    "phase": "before",
+    "alive_before_signal": true,
+    "summary_before_signal": "run_id=run216-1793812578826733-1992-29377\nverdict: INCOMPLETE\n",
+    "signal": "INT",
+    "pgid": 1992,
+    "cleanup": {
+      "pgid": 1992,
+      "initial": [],
+      "reaped": [],
+      "remaining": [],
+      "kernel_group_absent": true
+    }
+  },
+  {
+    "case": "216-candidate-before_TERM",
+    "phase": "before",
+    "alive_before_signal": true,
+    "summary_before_signal": "run_id=run216-1793812584971293-2478-12704\nverdict: INCOMPLETE\n",
+    "signal": "TERM",
+    "pgid": 2478,
+    "cleanup": {
+      "pgid": 2478,
+      "initial": [],
+      "reaped": [],
+      "remaining": [],
+      "kernel_group_absent": true
+    }
+  },
+  {
+    "case": "216-candidate-before_HUP",
+    "phase": "before",
+    "alive_before_signal": true,
+    "summary_before_signal": "run_id=run216-1793812590909178-2788-31926\nverdict: INCOMPLETE\n",
+    "signal": "HUP",
+    "pgid": 2788,
+    "cleanup": {
+      "pgid": 2788,
+      "initial": [],
+      "reaped": [],
+      "remaining": [],
+      "kernel_group_absent": true
+    }
+  },
+  {
+    "case": "216-candidate-before_KILL",
+    "phase": "before",
+    "alive_before_signal": true,
+    "summary_before_signal": "run_id=run216-1793812596975314-3300-8858\nverdict: INCOMPLETE\n",
+    "signal": "KILL",
+    "pgid": 3300,
+    "cleanup": {
+      "pgid": 3300,
+      "initial": [
+        [
+          3849,
+          "Z"
+        ]
+      ],
+      "reaped": [
+        [
+          3849,
+          9
+        ]
+      ],
+      "remaining": [],
+      "kernel_group_absent": true
+    }
+  },
+  {
+    "case": "216-candidate-after_INT",
+    "phase": "after",
+    "alive_before_signal": true,
+    "summary_before_signal": "run_id=run216-1793812602778847-3850-20193\nRun 216 \u2014 release-binary governance-execution policy-selector evidence\ngit_commit: b4669ab29ad31f82bb574800df4f5f21e8a1afb7\n\nbuild:\n  rustc_version:      rustc fixture (not executed)\n  cargo_version:      cargo fixture (not executed)\n  qbind_node_sha256:  574efca309d2dbe1cec417c9ecc808985d906d9cb9b5ac9095e4028946b1aede\n  qbind_node_buildid: BuildID[sha1]=0000\n  helper_216_sha256:  574efca309d2dbe1cec417c9ecc808985d906d9cb9b5ac9095e4028946b1aede\n  helper_216_buildid: BuildID[sha1]=0000\n\nrelease-binary scenario verdicts:\n  S1_helprc=0\n  S2_default_devnetrc=0\n  S3_default_testnetrc=0\n  S4_default_mainnetrc=0\n  S5_cli_selector_devnetrc=0\n  S6_env_selector_devnetrc=0\n  S7_cli_over_env_devnetrc=0\n  S8_invalid_selector_devnetrc=0\n  S9_mainnet_armedrc=0\n  S10_legacy_selectors_compatrc=0\n\nrelease-helper verdicts:\n  helper_run_216rc=0verdict: PASS\n\nhelper selector + A1-A16 / R1-R40 corpus verdicts (release mode, production library symbols):\n  table fixture\n  total_pass: 1\n  total_fail: 0\n  verdict: PASS\n\ndenylist result:\n  verdict: PASS (all 21 forbidden patterns proven empty across captured logs)\n\nregression test verdicts:\n  test:run_215_governance_execution_policy_selector_tests\trc=0\n  test:run_213_governance_execution_payload_callsite_tests\trc=0\n  test:run_211_governance_execution_policy_tests\trc=0\n  test:run_209_custody_attestation_policy_selector_tests\trc=0\n  test:run_207_custody_attestation_payload_callsite_tests\trc=0\n  test:run_205_custody_attestation_verifier_tests\trc=0\n  test:run_203_kms_hsm_backend_boundary_tests\trc=0\n  test:run_201_remote_signer_transport_boundary_tests\trc=0\n  test:run_198_remote_signer_policy_selector_tests\trc=0\n  test:run_196_remote_signer_payload_callsite_tests\trc=0\n  test:run_194_remote_authority_signer_boundary_tests\trc=0\n  test:run_192_authority_custody_policy_selector_tests\trc=0\n  test:run_190_authority_custody_payload_callsite_tests\trc=0\n  test:run_188_authority_custody_boundary_tests\trc=0\n  test:run_186_onchain_governance_production_verifier_boundary_tests\trc=0\n  test:run_184_onchain_governance_payload_carrying_tests\trc=0\n  test:run_182_onchain_governance_production_callsite_wiring_tests\trc=0\n  test:run_180_onchain_governance_marker_integration_tests\trc=0\n  test:run_178_onchain_governance_proof_tests\trc=0\n  test:run_176_live_0x05_governance_proof_carrier_tests\trc=0\n  test:run_173_validation_only_governance_required_policy_tests\trc=0\n  test:run_171_governance_required_policy_selector_tests\trc=0\n  test:run_169_governance_proof_loader_surface_integration_tests\trc=0\n  test:run_167_governance_proof_carrier_tests\trc=0\n  test:run_165_governance_marker_integration_tests\trc=0\n  test:run_163_governance_authority_verifier_tests\trc=0\n  test:run_161_lifecycle_marker_integration_tests\trc=0\n  test:run_159_authority_signing_key_lifecycle_tests\trc=0\n  test:run_157_unified_testnet_fixture_universe_tests\trc=0\n  test:run_152_binary_reachable_peer_drain_plumbing_tests\trc=0\n  test:run_150_peer_driven_apply_drain_tests\trc=0\n  test:run_148_peer_driven_apply_devnet_tests\trc=0\n  test:run_142_live_inbound_0x05_v2_validation_tests\trc=0\n  test:run_134_reload_apply_v2_authority_marker_tests\trc=0\n  test:run_138_sighup_v2_authority_marker_tests\trc=0\n  lib:pqc_authority\trc=0\n  lib:lib_all\trc=0\nregression result records:\n  run216:test:run_215_governance_execution_policy_selector_tests\treturned\t0\n  run216:test:run_213_governance_execution_payload_callsite_tests\treturned\t0\n  run216:test:run_211_governance_execution_policy_tests\treturned\t0\n  run216:test:run_209_custody_attestation_policy_selector_tests\treturned\t0\n  run216:test:run_207_custody_attestation_payload_callsite_tests\treturned\t0\n  run216:test:run_205_custody_attestation_verifier_tests\treturned\t0\n  run216:test:run_203_kms_hsm_backend_boundary_tests\treturned\t0\n  run216:test:run_201_remote_signer_transport_boundary_tests\treturned\t0\n  run216:test:run_198_remote_signer_policy_selector_tests\treturned\t0\n  run216:test:run_196_remote_signer_payload_callsite_tests\treturned\t0\n  run216:test:run_194_remote_authority_signer_boundary_tests\treturned\t0\n  run216:test:run_192_authority_custody_policy_selector_tests\treturned\t0\n  run216:test:run_190_authority_custody_payload_callsite_tests\treturned\t0\n  run216:test:run_188_authority_custody_boundary_tests\treturned\t0\n  run216:test:run_186_onchain_governance_production_verifier_boundary_tests\treturned\t0\n  run216:test:run_184_onchain_governance_payload_carrying_tests\treturned\t0\n  run216:test:run_182_onchain_governance_production_callsite_wiring_tests\treturned\t0\n  run216:test:run_180_onchain_governance_marker_integration_tests\treturned\t0\n  run216:test:run_178_onchain_governance_proof_tests\treturned\t0\n  run216:test:run_176_live_0x05_governance_proof_carrier_tests\treturned\t0\n  run216:test:run_173_validation_only_governance_required_policy_tests\treturned\t0\n  run216:test:run_171_governance_required_policy_selector_tests\treturned\t0\n  run216:test:run_169_governance_proof_loader_surface_integration_tests\treturned\t0\n  run216:test:run_167_governance_proof_carrier_tests\treturned\t0\n  run216:test:run_165_governance_marker_integration_tests\treturned\t0\n  run216:test:run_163_governance_authority_verifier_tests\treturned\t0\n  run216:test:run_161_lifecycle_marker_integration_tests\treturned\t0\n  run216:test:run_159_authority_signing_key_lifecycle_tests\treturned\t0\n  run216:test:run_157_unified_testnet_fixture_universe_tests\treturned\t0\n  run216:test:run_152_binary_reachable_peer_drain_plumbing_tests\treturned\t0\n  run216:test:run_150_peer_driven_apply_drain_tests\treturned\t0\n  run216:test:run_148_peer_driven_apply_devnet_tests\treturned\t0\n  run216:test:run_142_live_inbound_0x05_v2_validation_tests\treturned\t0\n  run216:test:run_134_reload_apply_v2_authority_marker_tests\treturned\t0\n  run216:test:run_138_sighup_v2_authority_marker_tests\treturned\t0\n  run216:lib:pqc_authority\treturned\t0\n  run216:lib:lib_all\treturned\t0\n\nhonest_limits: default Disabled; hidden CLI/env selectors additive; CLI-over-env deterministic; invalid values fail closed; fixture DevNet/TestNet only; emergency explicit non-production; production/on-chain/MainNet unavailable; MainNet peer-driven apply refused; no real governance engine/on-chain verifier/KMS-HSM/RemoteSigner/validator-set rotation; existing paths compatible; full C4 and C5 remain OPEN.\n\naggregate: PASS\nverdict: PASS\n",
+    "signal": "INT",
+    "pgid": 3850,
+    "cleanup": {
+      "pgid": 3850,
+      "initial": [],
+      "reaped": [],
+      "remaining": [],
+      "kernel_group_absent": true
+    }
+  },
+  {
+    "case": "216-candidate-after_TERM",
+    "phase": "after",
+    "alive_before_signal": true,
+    "summary_before_signal": "run_id=run216-1793812611047508-4387-12159\nRun 216 \u2014 release-binary governance-execution policy-selector evidence\ngit_commit: b4669ab29ad31f82bb574800df4f5f21e8a1afb7\n\nbuild:\n  rustc_version:      rustc fixture (not executed)\n  cargo_version:      cargo fixture (not executed)\n  qbind_node_sha256:  574efca309d2dbe1cec417c9ecc808985d906d9cb9b5ac9095e4028946b1aede\n  qbind_node_buildid: BuildID[sha1]=0000\n  helper_216_sha256:  574efca309d2dbe1cec417c9ecc808985d906d9cb9b5ac9095e4028946b1aede\n  helper_216_buildid: BuildID[sha1]=0000\n\nrelease-binary scenario verdicts:\n  S1_helprc=0\n  S2_default_devnetrc=0\n  S3_default_testnetrc=0\n  S4_default_mainnetrc=0\n  S5_cli_selector_devnetrc=0\n  S6_env_selector_devnetrc=0\n  S7_cli_over_env_devnetrc=0\n  S8_invalid_selector_devnetrc=0\n  S9_mainnet_armedrc=0\n  S10_legacy_selectors_compatrc=0\n\nrelease-helper verdicts:\n  helper_run_216rc=0verdict: PASS\n\nhelper selector + A1-A16 / R1-R40 corpus verdicts (release mode, production library symbols):\n  table fixture\n  total_pass: 1\n  total_fail: 0\n  verdict: PASS\n\ndenylist result:\n  verdict: PASS (all 21 forbidden patterns proven empty across captured logs)\n\nregression test verdicts:\n  test:run_215_governance_execution_policy_selector_tests\trc=0\n  test:run_213_governance_execution_payload_callsite_tests\trc=0\n  test:run_211_governance_execution_policy_tests\trc=0\n  test:run_209_custody_attestation_policy_selector_tests\trc=0\n  test:run_207_custody_attestation_payload_callsite_tests\trc=0\n  test:run_205_custody_attestation_verifier_tests\trc=0\n  test:run_203_kms_hsm_backend_boundary_tests\trc=0\n  test:run_201_remote_signer_transport_boundary_tests\trc=0\n  test:run_198_remote_signer_policy_selector_tests\trc=0\n  test:run_196_remote_signer_payload_callsite_tests\trc=0\n  test:run_194_remote_authority_signer_boundary_tests\trc=0\n  test:run_192_authority_custody_policy_selector_tests\trc=0\n  test:run_190_authority_custody_payload_callsite_tests\trc=0\n  test:run_188_authority_custody_boundary_tests\trc=0\n  test:run_186_onchain_governance_production_verifier_boundary_tests\trc=0\n  test:run_184_onchain_governance_payload_carrying_tests\trc=0\n  test:run_182_onchain_governance_production_callsite_wiring_tests\trc=0\n  test:run_180_onchain_governance_marker_integration_tests\trc=0\n  test:run_178_onchain_governance_proof_tests\trc=0\n  test:run_176_live_0x05_governance_proof_carrier_tests\trc=0\n  test:run_173_validation_only_governance_required_policy_tests\trc=0\n  test:run_171_governance_required_policy_selector_tests\trc=0\n  test:run_169_governance_proof_loader_surface_integration_tests\trc=0\n  test:run_167_governance_proof_carrier_tests\trc=0\n  test:run_165_governance_marker_integration_tests\trc=0\n  test:run_163_governance_authority_verifier_tests\trc=0\n  test:run_161_lifecycle_marker_integration_tests\trc=0\n  test:run_159_authority_signing_key_lifecycle_tests\trc=0\n  test:run_157_unified_testnet_fixture_universe_tests\trc=0\n  test:run_152_binary_reachable_peer_drain_plumbing_tests\trc=0\n  test:run_150_peer_driven_apply_drain_tests\trc=0\n  test:run_148_peer_driven_apply_devnet_tests\trc=0\n  test:run_142_live_inbound_0x05_v2_validation_tests\trc=0\n  test:run_134_reload_apply_v2_authority_marker_tests\trc=0\n  test:run_138_sighup_v2_authority_marker_tests\trc=0\n  lib:pqc_authority\trc=0\n  lib:lib_all\trc=0\nregression result records:\n  run216:test:run_215_governance_execution_policy_selector_tests\treturned\t0\n  run216:test:run_213_governance_execution_payload_callsite_tests\treturned\t0\n  run216:test:run_211_governance_execution_policy_tests\treturned\t0\n  run216:test:run_209_custody_attestation_policy_selector_tests\treturned\t0\n  run216:test:run_207_custody_attestation_payload_callsite_tests\treturned\t0\n  run216:test:run_205_custody_attestation_verifier_tests\treturned\t0\n  run216:test:run_203_kms_hsm_backend_boundary_tests\treturned\t0\n  run216:test:run_201_remote_signer_transport_boundary_tests\treturned\t0\n  run216:test:run_198_remote_signer_policy_selector_tests\treturned\t0\n  run216:test:run_196_remote_signer_payload_callsite_tests\treturned\t0\n  run216:test:run_194_remote_authority_signer_boundary_tests\treturned\t0\n  run216:test:run_192_authority_custody_policy_selector_tests\treturned\t0\n  run216:test:run_190_authority_custody_payload_callsite_tests\treturned\t0\n  run216:test:run_188_authority_custody_boundary_tests\treturned\t0\n  run216:test:run_186_onchain_governance_production_verifier_boundary_tests\treturned\t0\n  run216:test:run_184_onchain_governance_payload_carrying_tests\treturned\t0\n  run216:test:run_182_onchain_governance_production_callsite_wiring_tests\treturned\t0\n  run216:test:run_180_onchain_governance_marker_integration_tests\treturned\t0\n  run216:test:run_178_onchain_governance_proof_tests\treturned\t0\n  run216:test:run_176_live_0x05_governance_proof_carrier_tests\treturned\t0\n  run216:test:run_173_validation_only_governance_required_policy_tests\treturned\t0\n  run216:test:run_171_governance_required_policy_selector_tests\treturned\t0\n  run216:test:run_169_governance_proof_loader_surface_integration_tests\treturned\t0\n  run216:test:run_167_governance_proof_carrier_tests\treturned\t0\n  run216:test:run_165_governance_marker_integration_tests\treturned\t0\n  run216:test:run_163_governance_authority_verifier_tests\treturned\t0\n  run216:test:run_161_lifecycle_marker_integration_tests\treturned\t0\n  run216:test:run_159_authority_signing_key_lifecycle_tests\treturned\t0\n  run216:test:run_157_unified_testnet_fixture_universe_tests\treturned\t0\n  run216:test:run_152_binary_reachable_peer_drain_plumbing_tests\treturned\t0\n  run216:test:run_150_peer_driven_apply_drain_tests\treturned\t0\n  run216:test:run_148_peer_driven_apply_devnet_tests\treturned\t0\n  run216:test:run_142_live_inbound_0x05_v2_validation_tests\treturned\t0\n  run216:test:run_134_reload_apply_v2_authority_marker_tests\treturned\t0\n  run216:test:run_138_sighup_v2_authority_marker_tests\treturned\t0\n  run216:lib:pqc_authority\treturned\t0\n  run216:lib:lib_all\treturned\t0\n\nhonest_limits: default Disabled; hidden CLI/env selectors additive; CLI-over-env deterministic; invalid values fail closed; fixture DevNet/TestNet only; emergency explicit non-production; production/on-chain/MainNet unavailable; MainNet peer-driven apply refused; no real governance engine/on-chain verifier/KMS-HSM/RemoteSigner/validator-set rotation; existing paths compatible; full C4 and C5 remain OPEN.\n\naggregate: PASS\nverdict: PASS\n",
+    "signal": "TERM",
+    "pgid": 4387,
+    "cleanup": {
+      "pgid": 4387,
+      "initial": [],
+      "reaped": [],
+      "remaining": [],
+      "kernel_group_absent": true
+    }
+  },
+  {
+    "case": "216-candidate-after_HUP",
+    "phase": "after",
+    "alive_before_signal": true,
+    "summary_before_signal": "run_id=run216-1793812619061773-4820-20637\nRun 216 \u2014 release-binary governance-execution policy-selector evidence\ngit_commit: b4669ab29ad31f82bb574800df4f5f21e8a1afb7\n\nbuild:\n  rustc_version:      rustc fixture (not executed)\n  cargo_version:      cargo fixture (not executed)\n  qbind_node_sha256:  574efca309d2dbe1cec417c9ecc808985d906d9cb9b5ac9095e4028946b1aede\n  qbind_node_buildid: BuildID[sha1]=0000\n  helper_216_sha256:  574efca309d2dbe1cec417c9ecc808985d906d9cb9b5ac9095e4028946b1aede\n  helper_216_buildid: BuildID[sha1]=0000\n\nrelease-binary scenario verdicts:\n  S1_helprc=0\n  S2_default_devnetrc=0\n  S3_default_testnetrc=0\n  S4_default_mainnetrc=0\n  S5_cli_selector_devnetrc=0\n  S6_env_selector_devnetrc=0\n  S7_cli_over_env_devnetrc=0\n  S8_invalid_selector_devnetrc=0\n  S9_mainnet_armedrc=0\n  S10_legacy_selectors_compatrc=0\n\nrelease-helper verdicts:\n  helper_run_216rc=0verdict: PASS\n\nhelper selector + A1-A16 / R1-R40 corpus verdicts (release mode, production library symbols):\n  table fixture\n  total_pass: 1\n  total_fail: 0\n  verdict: PASS\n\ndenylist result:\n  verdict: PASS (all 21 forbidden patterns proven empty across captured logs)\n\nregression test verdicts:\n  test:run_215_governance_execution_policy_selector_tests\trc=0\n  test:run_213_governance_execution_payload_callsite_tests\trc=0\n  test:run_211_governance_execution_policy_tests\trc=0\n  test:run_209_custody_attestation_policy_selector_tests\trc=0\n  test:run_207_custody_attestation_payload_callsite_tests\trc=0\n  test:run_205_custody_attestation_verifier_tests\trc=0\n  test:run_203_kms_hsm_backend_boundary_tests\trc=0\n  test:run_201_remote_signer_transport_boundary_tests\trc=0\n  test:run_198_remote_signer_policy_selector_tests\trc=0\n  test:run_196_remote_signer_payload_callsite_tests\trc=0\n  test:run_194_remote_authority_signer_boundary_tests\trc=0\n  test:run_192_authority_custody_policy_selector_tests\trc=0\n  test:run_190_authority_custody_payload_callsite_tests\trc=0\n  test:run_188_authority_custody_boundary_tests\trc=0\n  test:run_186_onchain_governance_production_verifier_boundary_tests\trc=0\n  test:run_184_onchain_governance_payload_carrying_tests\trc=0\n  test:run_182_onchain_governance_production_callsite_wiring_tests\trc=0\n  test:run_180_onchain_governance_marker_integration_tests\trc=0\n  test:run_178_onchain_governance_proof_tests\trc=0\n  test:run_176_live_0x05_governance_proof_carrier_tests\trc=0\n  test:run_173_validation_only_governance_required_policy_tests\trc=0\n  test:run_171_governance_required_policy_selector_tests\trc=0\n  test:run_169_governance_proof_loader_surface_integration_tests\trc=0\n  test:run_167_governance_proof_carrier_tests\trc=0\n  test:run_165_governance_marker_integration_tests\trc=0\n  test:run_163_governance_authority_verifier_tests\trc=0\n  test:run_161_lifecycle_marker_integration_tests\trc=0\n  test:run_159_authority_signing_key_lifecycle_tests\trc=0\n  test:run_157_unified_testnet_fixture_universe_tests\trc=0\n  test:run_152_binary_reachable_peer_drain_plumbing_tests\trc=0\n  test:run_150_peer_driven_apply_drain_tests\trc=0\n  test:run_148_peer_driven_apply_devnet_tests\trc=0\n  test:run_142_live_inbound_0x05_v2_validation_tests\trc=0\n  test:run_134_reload_apply_v2_authority_marker_tests\trc=0\n  test:run_138_sighup_v2_authority_marker_tests\trc=0\n  lib:pqc_authority\trc=0\n  lib:lib_all\trc=0\nregression result records:\n  run216:test:run_215_governance_execution_policy_selector_tests\treturned\t0\n  run216:test:run_213_governance_execution_payload_callsite_tests\treturned\t0\n  run216:test:run_211_governance_execution_policy_tests\treturned\t0\n  run216:test:run_209_custody_attestation_policy_selector_tests\treturned\t0\n  run216:test:run_207_custody_attestation_payload_callsite_tests\treturned\t0\n  run216:test:run_205_custody_attestation_verifier_tests\treturned\t0\n  run216:test:run_203_kms_hsm_backend_boundary_tests\treturned\t0\n  run216:test:run_201_remote_signer_transport_boundary_tests\treturned\t0\n  run216:test:run_198_remote_signer_policy_selector_tests\treturned\t0\n  run216:test:run_196_remote_signer_payload_callsite_tests\treturned\t0\n  run216:test:run_194_remote_authority_signer_boundary_tests\treturned\t0\n  run216:test:run_192_authority_custody_policy_selector_tests\treturned\t0\n  run216:test:run_190_authority_custody_payload_callsite_tests\treturned\t0\n  run216:test:run_188_authority_custody_boundary_tests\treturned\t0\n  run216:test:run_186_onchain_governance_production_verifier_boundary_tests\treturned\t0\n  run216:test:run_184_onchain_governance_payload_carrying_tests\treturned\t0\n  run216:test:run_182_onchain_governance_production_callsite_wiring_tests\treturned\t0\n  run216:test:run_180_onchain_governance_marker_integration_tests\treturned\t0\n  run216:test:run_178_onchain_governance_proof_tests\treturned\t0\n  run216:test:run_176_live_0x05_governance_proof_carrier_tests\treturned\t0\n  run216:test:run_173_validation_only_governance_required_policy_tests\treturned\t0\n  run216:test:run_171_governance_required_policy_selector_tests\treturned\t0\n  run216:test:run_169_governance_proof_loader_surface_integration_tests\treturned\t0\n  run216:test:run_167_governance_proof_carrier_tests\treturned\t0\n  run216:test:run_165_governance_marker_integration_tests\treturned\t0\n  run216:test:run_163_governance_authority_verifier_tests\treturned\t0\n  run216:test:run_161_lifecycle_marker_integration_tests\treturned\t0\n  run216:test:run_159_authority_signing_key_lifecycle_tests\treturned\t0\n  run216:test:run_157_unified_testnet_fixture_universe_tests\treturned\t0\n  run216:test:run_152_binary_reachable_peer_drain_plumbing_tests\treturned\t0\n  run216:test:run_150_peer_driven_apply_drain_tests\treturned\t0\n  run216:test:run_148_peer_driven_apply_devnet_tests\treturned\t0\n  run216:test:run_142_live_inbound_0x05_v2_validation_tests\treturned\t0\n  run216:test:run_134_reload_apply_v2_authority_marker_tests\treturned\t0\n  run216:test:run_138_sighup_v2_authority_marker_tests\treturned\t0\n  run216:lib:pqc_authority\treturned\t0\n  run216:lib:lib_all\treturned\t0\n\nhonest_limits: default Disabled; hidden CLI/env selectors additive; CLI-over-env deterministic; invalid values fail closed; fixture DevNet/TestNet only; emergency explicit non-production; production/on-chain/MainNet unavailable; MainNet peer-driven apply refused; no real governance engine/on-chain verifier/KMS-HSM/RemoteSigner/validator-set rotation; existing paths compatible; full C4 and C5 remain OPEN.\n\naggregate: PASS\nverdict: PASS\n",
+    "signal": "HUP",
+    "pgid": 4820,
+    "cleanup": {
+      "pgid": 4820,
+      "initial": [],
+      "reaped": [],
+      "remaining": [],
+      "kernel_group_absent": true
+    }
+  },
+  {
+    "case": "216-candidate-after_KILL",
+    "phase": "after",
+    "alive_before_signal": true,
+    "summary_before_signal": "run_id=run216-1793812627135659-5253-2887\nRun 216 \u2014 release-binary governance-execution policy-selector evidence\ngit_commit: b4669ab29ad31f82bb574800df4f5f21e8a1afb7\n\nbuild:\n  rustc_version:      rustc fixture (not executed)\n  cargo_version:      cargo fixture (not executed)\n  qbind_node_sha256:  574efca309d2dbe1cec417c9ecc808985d906d9cb9b5ac9095e4028946b1aede\n  qbind_node_buildid: BuildID[sha1]=0000\n  helper_216_sha256:  574efca309d2dbe1cec417c9ecc808985d906d9cb9b5ac9095e4028946b1aede\n  helper_216_buildid: BuildID[sha1]=0000\n\nrelease-binary scenario verdicts:\n  S1_helprc=0\n  S2_default_devnetrc=0\n  S3_default_testnetrc=0\n  S4_default_mainnetrc=0\n  S5_cli_selector_devnetrc=0\n  S6_env_selector_devnetrc=0\n  S7_cli_over_env_devnetrc=0\n  S8_invalid_selector_devnetrc=0\n  S9_mainnet_armedrc=0\n  S10_legacy_selectors_compatrc=0\n\nrelease-helper verdicts:\n  helper_run_216rc=0verdict: PASS\n\nhelper selector + A1-A16 / R1-R40 corpus verdicts (release mode, production library symbols):\n  table fixture\n  total_pass: 1\n  total_fail: 0\n  verdict: PASS\n\ndenylist result:\n  verdict: PASS (all 21 forbidden patterns proven empty across captured logs)\n\nregression test verdicts:\n  test:run_215_governance_execution_policy_selector_tests\trc=0\n  test:run_213_governance_execution_payload_callsite_tests\trc=0\n  test:run_211_governance_execution_policy_tests\trc=0\n  test:run_209_custody_attestation_policy_selector_tests\trc=0\n  test:run_207_custody_attestation_payload_callsite_tests\trc=0\n  test:run_205_custody_attestation_verifier_tests\trc=0\n  test:run_203_kms_hsm_backend_boundary_tests\trc=0\n  test:run_201_remote_signer_transport_boundary_tests\trc=0\n  test:run_198_remote_signer_policy_selector_tests\trc=0\n  test:run_196_remote_signer_payload_callsite_tests\trc=0\n  test:run_194_remote_authority_signer_boundary_tests\trc=0\n  test:run_192_authority_custody_policy_selector_tests\trc=0\n  test:run_190_authority_custody_payload_callsite_tests\trc=0\n  test:run_188_authority_custody_boundary_tests\trc=0\n  test:run_186_onchain_governance_production_verifier_boundary_tests\trc=0\n  test:run_184_onchain_governance_payload_carrying_tests\trc=0\n  test:run_182_onchain_governance_production_callsite_wiring_tests\trc=0\n  test:run_180_onchain_governance_marker_integration_tests\trc=0\n  test:run_178_onchain_governance_proof_tests\trc=0\n  test:run_176_live_0x05_governance_proof_carrier_tests\trc=0\n  test:run_173_validation_only_governance_required_policy_tests\trc=0\n  test:run_171_governance_required_policy_selector_tests\trc=0\n  test:run_169_governance_proof_loader_surface_integration_tests\trc=0\n  test:run_167_governance_proof_carrier_tests\trc=0\n  test:run_165_governance_marker_integration_tests\trc=0\n  test:run_163_governance_authority_verifier_tests\trc=0\n  test:run_161_lifecycle_marker_integration_tests\trc=0\n  test:run_159_authority_signing_key_lifecycle_tests\trc=0\n  test:run_157_unified_testnet_fixture_universe_tests\trc=0\n  test:run_152_binary_reachable_peer_drain_plumbing_tests\trc=0\n  test:run_150_peer_driven_apply_drain_tests\trc=0\n  test:run_148_peer_driven_apply_devnet_tests\trc=0\n  test:run_142_live_inbound_0x05_v2_validation_tests\trc=0\n  test:run_134_reload_apply_v2_authority_marker_tests\trc=0\n  test:run_138_sighup_v2_authority_marker_tests\trc=0\n  lib:pqc_authority\trc=0\n  lib:lib_all\trc=0\nregression result records:\n  run216:test:run_215_governance_execution_policy_selector_tests\treturned\t0\n  run216:test:run_213_governance_execution_payload_callsite_tests\treturned\t0\n  run216:test:run_211_governance_execution_policy_tests\treturned\t0\n  run216:test:run_209_custody_attestation_policy_selector_tests\treturned\t0\n  run216:test:run_207_custody_attestation_payload_callsite_tests\treturned\t0\n  run216:test:run_205_custody_attestation_verifier_tests\treturned\t0\n  run216:test:run_203_kms_hsm_backend_boundary_tests\treturned\t0\n  run216:test:run_201_remote_signer_transport_boundary_tests\treturned\t0\n  run216:test:run_198_remote_signer_policy_selector_tests\treturned\t0\n  run216:test:run_196_remote_signer_payload_callsite_tests\treturned\t0\n  run216:test:run_194_remote_authority_signer_boundary_tests\treturned\t0\n  run216:test:run_192_authority_custody_policy_selector_tests\treturned\t0\n  run216:test:run_190_authority_custody_payload_callsite_tests\treturned\t0\n  run216:test:run_188_authority_custody_boundary_tests\treturned\t0\n  run216:test:run_186_onchain_governance_production_verifier_boundary_tests\treturned\t0\n  run216:test:run_184_onchain_governance_payload_carrying_tests\treturned\t0\n  run216:test:run_182_onchain_governance_production_callsite_wiring_tests\treturned\t0\n  run216:test:run_180_onchain_governance_marker_integration_tests\treturned\t0\n  run216:test:run_178_onchain_governance_proof_tests\treturned\t0\n  run216:test:run_176_live_0x05_governance_proof_carrier_tests\treturned\t0\n  run216:test:run_173_validation_only_governance_required_policy_tests\treturned\t0\n  run216:test:run_171_governance_required_policy_selector_tests\treturned\t0\n  run216:test:run_169_governance_proof_loader_surface_integration_tests\treturned\t0\n  run216:test:run_167_governance_proof_carrier_tests\treturned\t0\n  run216:test:run_165_governance_marker_integration_tests\treturned\t0\n  run216:test:run_163_governance_authority_verifier_tests\treturned\t0\n  run216:test:run_161_lifecycle_marker_integration_tests\treturned\t0\n  run216:test:run_159_authority_signing_key_lifecycle_tests\treturned\t0\n  run216:test:run_157_unified_testnet_fixture_universe_tests\treturned\t0\n  run216:test:run_152_binary_reachable_peer_drain_plumbing_tests\treturned\t0\n  run216:test:run_150_peer_driven_apply_drain_tests\treturned\t0\n  run216:test:run_148_peer_driven_apply_devnet_tests\treturned\t0\n  run216:test:run_142_live_inbound_0x05_v2_validation_tests\treturned\t0\n  run216:test:run_134_reload_apply_v2_authority_marker_tests\treturned\t0\n  run216:test:run_138_sighup_v2_authority_marker_tests\treturned\t0\n  run216:lib:pqc_authority\treturned\t0\n  run216:lib:lib_all\treturned\t0\n\nhonest_limits: default Disabled; hidden CLI/env selectors additive; CLI-over-env deterministic; invalid values fail closed; fixture DevNet/TestNet only; emergency explicit non-production; production/on-chain/MainNet unavailable; MainNet peer-driven apply refused; no real governance engine/on-chain verifier/KMS-HSM/RemoteSigner/validator-set rotation; existing paths compatible; full C4 and C5 remain OPEN.\n\naggregate: PASS\nverdict: PASS\n",
+    "signal": "KILL",
+    "pgid": 5253,
+    "cleanup": {
+      "pgid": 5253,
+      "initial": [
+        [
+          5681,
+          "Z"
+        ]
+      ],
+      "reaped": [
+        [
+          5681,
+          9
+        ]
+      ],
+      "remaining": [],
+      "kernel_group_absent": true
+    }
+  },
+  {
+    "case": "216-candidate-reuse_success",
+    "cleanup": {
+      "pgid": 5683,
+      "initial": [],
+      "reaped": [],
+      "remaining": [],
+      "kernel_group_absent": true
+    }
+  },
+  {
+    "case": "216-candidate-reuse_failure",
+    "cleanup": {
+      "pgid": 6111,
+      "initial": [],
+      "reaped": [],
+      "remaining": [],
+      "kernel_group_absent": true
+    }
+  },
+  {
+    "case": "216-candidate-startup_file",
+    "cleanup": {
+      "pgid": 6539,
+      "initial": [],
+      "reaped": [],
+      "remaining": [],
+      "kernel_group_absent": true
+    }
+  },
+  {
+    "case": "216-candidate-startup_file_symlink",
+    "cleanup": {
+      "pgid": 6967,
+      "initial": [],
+      "reaped": [],
+      "remaining": [],
+      "kernel_group_absent": true
+    }
+  },
+  {
+    "case": "216-candidate-startup_directory",
+    "cleanup": {
+      "pgid": 7396,
+      "initial": [],
+      "reaped": [],
+      "remaining": [],
+      "kernel_group_absent": true
+    }
+  },
+  {
+    "case": "216-candidate-startup_directory_symlink",
+    "cleanup": {
+      "pgid": 7403,
+      "initial": [],
+      "reaped": [],
+      "remaining": [],
+      "kernel_group_absent": true
+    }
+  },
+  {
+    "case": "216-candidate-final_file",
+    "cleanup": {
+      "pgid": 7831,
+      "initial": [],
+      "reaped": [],
+      "remaining": [],
+      "kernel_group_absent": true
+    }
+  },
+  {
+    "case": "216-candidate-final_file_symlink",
+    "cleanup": {
+      "pgid": 8259,
+      "initial": [],
+      "reaped": [],
+      "remaining": [],
+      "kernel_group_absent": true
+    }
+  },
+  {
+    "case": "216-candidate-final_directory",
+    "cleanup": {
+      "pgid": 8687,
+      "initial": [],
+      "reaped": [],
+      "remaining": [],
+      "kernel_group_absent": true
+    }
+  },
+  {
+    "case": "216-candidate-final_directory_symlink",
+    "cleanup": {
+      "pgid": 9121,
+      "initial": [],
+      "reaped": [],
+      "remaining": [],
+      "kernel_group_absent": true
+    }
+  },
+  {
+    "case": "227-baseline-success",
+    "cleanup": {
+      "pgid": 11177,
+      "initial": [],
+      "reaped": [],
+      "remaining": [],
+      "kernel_group_absent": true
+    }
+  },
+  {
+    "case": "227-baseline-first",
+    "cleanup": {
+      "pgid": 11552,
+      "initial": [],
+      "reaped": [],
+      "remaining": [],
+      "kernel_group_absent": true
+    }
+  },
+  {
+    "case": "227-candidate-success",
+    "cleanup": {
+      "pgid": 11927,
+      "initial": [],
+      "reaped": [],
+      "remaining": [],
+      "kernel_group_absent": true
+    }
+  },
+  {
+    "case": "227-candidate-first",
+    "cleanup": {
+      "pgid": 12305,
+      "initial": [],
+      "reaped": [],
+      "remaining": [],
+      "kernel_group_absent": true
+    }
+  },
+  {
+    "case": "227-candidate-middle",
+    "cleanup": {
+      "pgid": 12683,
+      "initial": [],
+      "reaped": [],
+      "remaining": [],
+      "kernel_group_absent": true
+    }
+  },
+  {
+    "case": "227-candidate-last",
+    "cleanup": {
+      "pgid": 13060,
+      "initial": [],
+      "reaped": [],
+      "remaining": [],
+      "kernel_group_absent": true
+    }
+  },
+  {
+    "case": "227-candidate-lib_first",
+    "cleanup": {
+      "pgid": 13574,
+      "initial": [],
+      "reaped": [],
+      "remaining": [],
+      "kernel_group_absent": true
+    }
+  },
+  {
+    "case": "227-candidate-lib_last",
+    "cleanup": {
+      "pgid": 13951,
+      "initial": [],
+      "reaped": [],
+      "remaining": [],
+      "kernel_group_absent": true
+    }
+  },
+  {
+    "case": "227-candidate-multiple",
+    "cleanup": {
+      "pgid": 14406,
+      "initial": [],
+      "reaped": [],
+      "remaining": [],
+      "kernel_group_absent": true
+    }
+  },
+  {
+    "case": "227-candidate-missing",
+    "cleanup": {
+      "pgid": 14923,
+      "initial": [],
+      "reaped": [],
+      "remaining": [],
+      "kernel_group_absent": true
+    }
+  },
+  {
+    "case": "227-candidate-log_error",
+    "cleanup": {
+      "pgid": 15408,
+      "initial": [],
+      "reaped": [],
+      "remaining": [],
+      "kernel_group_absent": true
+    }
+  },
+  {
+    "case": "227-candidate-failure_and_capture",
+    "cleanup": {
+      "pgid": 15784,
+      "initial": [],
+      "reaped": [],
+      "remaining": [],
+      "kernel_group_absent": true
+    }
+  },
+  {
+    "case": "227-candidate-launch_failure",
+    "cleanup": {
+      "pgid": 16160,
+      "initial": [],
+      "reaped": [],
+      "remaining": [],
+      "kernel_group_absent": true
+    }
+  },
+  {
+    "case": "227-candidate-malformed_state",
+    "cleanup": {
+      "pgid": 16544,
+      "initial": [],
+      "reaped": [],
+      "remaining": [],
+      "kernel_group_absent": true
+    }
+  },
+  {
+    "case": "227-candidate-malformed_rc",
+    "cleanup": {
+      "pgid": 16911,
+      "initial": [],
+      "reaped": [],
+      "remaining": [],
+      "kernel_group_absent": true
+    }
+  },
+  {
+    "case": "227-candidate-duplicate",
+    "cleanup": {
+      "pgid": 17278,
+      "initial": [],
+      "reaped": [],
+      "remaining": [],
+      "kernel_group_absent": true
+    }
+  },
+  {
+    "case": "227-candidate-stale",
+    "cleanup": {
+      "pgid": 17654,
+      "initial": [],
+      "reaped": [],
+      "remaining": [],
+      "kernel_group_absent": true
+    }
+  },
+  {
+    "case": "227-candidate-missing_row",
+    "cleanup": {
+      "pgid": 18021,
+      "initial": [],
+      "reaped": [],
+      "remaining": [],
+      "kernel_group_absent": true
+    }
+  },
+  {
+    "case": "227-candidate-unknown",
+    "cleanup": {
+      "pgid": 18400,
+      "initial": [],
+      "reaped": [],
+      "remaining": [],
+      "kernel_group_absent": true
+    }
+  },
+  {
+    "case": "227-candidate-manifest_header",
+    "cleanup": {
+      "pgid": 18767,
+      "initial": [],
+      "reaped": [],
+      "remaining": [],
+      "kernel_group_absent": true
+    }
+  },
+  {
+    "case": "227-candidate-unterminated",
+    "cleanup": {
+      "pgid": 19134,
+      "initial": [],
+      "reaped": [],
+      "remaining": [],
+      "kernel_group_absent": true
+    }
+  },
+  {
+    "case": "227-candidate-status_mismatch",
+    "cleanup": {
+      "pgid": 19509,
+      "initial": [],
+      "reaped": [],
+      "remaining": [],
+      "kernel_group_absent": true
+    }
+  },
+  {
+    "case": "227-candidate-status_missing",
+    "cleanup": {
+      "pgid": 19876,
+      "initial": [],
+      "reaped": [],
+      "remaining": [],
+      "kernel_group_absent": true
+    }
+  },
+  {
+    "case": "227-candidate-status_extra",
+    "cleanup": {
+      "pgid": 20244,
+      "initial": [],
+      "reaped": [],
+      "remaining": [],
+      "kernel_group_absent": true
+    }
+  },
+  {
+    "case": "227-candidate-manifest_nul",
+    "cleanup": {
+      "pgid": 20616,
+      "initial": [],
+      "reaped": [],
+      "remaining": [],
+      "kernel_group_absent": true
+    }
+  },
+  {
+    "case": "227-candidate-status_nul",
+    "cleanup": {
+      "pgid": 20991,
+      "initial": [],
+      "reaped": [],
+      "remaining": [],
+      "kernel_group_absent": true
+    }
+  },
+  {
+    "case": "227-candidate-rc_io",
+    "cleanup": {
+      "pgid": 21358,
+      "initial": [],
+      "reaped": [],
+      "remaining": [],
+      "kernel_group_absent": true
+    }
+  },
+  {
+    "case": "227-candidate-manifest_io",
+    "cleanup": {
+      "pgid": 21725,
+      "initial": [],
+      "reaped": [],
+      "remaining": [],
+      "kernel_group_absent": true
+    }
+  },
+  {
+    "case": "227-candidate-startup_write",
+    "cleanup": {
+      "pgid": 22093,
+      "initial": [],
+      "reaped": [],
+      "remaining": [],
+      "kernel_group_absent": true
+    }
+  },
+  {
+    "case": "227-candidate-startup_rename",
+    "cleanup": {
+      "pgid": 22099,
+      "initial": [],
+      "reaped": [],
+      "remaining": [],
+      "kernel_group_absent": true
+    }
+  },
+  {
+    "case": "227-candidate-final_write",
+    "cleanup": {
+      "pgid": 22132,
+      "initial": [],
+      "reaped": [],
+      "remaining": [],
+      "kernel_group_absent": true
+    }
+  },
+  {
+    "case": "227-candidate-final_rename",
+    "cleanup": {
+      "pgid": 22473,
+      "initial": [],
+      "reaped": [],
+      "remaining": [],
+      "kernel_group_absent": true
+    }
+  },
+  {
+    "case": "227-candidate-seeded_pass_build_failure",
+    "cleanup": {
+      "pgid": 22854,
+      "initial": [],
+      "reaped": [],
+      "remaining": [],
+      "kernel_group_absent": true
+    }
+  },
+  {
+    "case": "227-candidate-early_build",
+    "cleanup": {
+      "pgid": 22983,
+      "initial": [],
+      "reaped": [],
+      "remaining": [],
+      "kernel_group_absent": true
+    }
+  },
+  {
+    "case": "227-candidate-helper_fail",
+    "cleanup": {
+      "pgid": 23050,
+      "initial": [],
+      "reaped": [],
+      "remaining": [],
+      "kernel_group_absent": true
+    }
+  },
+  {
+    "case": "227-candidate-help_fail",
+    "cleanup": {
+      "pgid": 23122,
+      "initial": [],
+      "reaped": [],
+      "remaining": [],
+      "kernel_group_absent": true
+    }
+  },
+  {
+    "case": "227-candidate-denylist",
+    "cleanup": {
+      "pgid": 23196,
+      "initial": [],
+      "reaped": [],
+      "remaining": [],
+      "kernel_group_absent": true
+    }
+  },
+  {
+    "case": "227-candidate-before_INT",
+    "phase": "before",
+    "alive_before_signal": true,
+    "summary_before_signal": "run_id=run227-1793812931278409-23509-11451\nverdict: INCOMPLETE\n",
+    "signal": "INT",
+    "pgid": 23509,
+    "cleanup": {
+      "pgid": 23509,
+      "initial": [],
+      "reaped": [],
+      "remaining": [],
+      "kernel_group_absent": true
+    }
+  },
+  {
+    "case": "227-candidate-before_TERM",
+    "phase": "before",
+    "alive_before_signal": true,
+    "summary_before_signal": "run_id=run227-1793812936610469-23831-30180\nverdict: INCOMPLETE\n",
+    "signal": "TERM",
+    "pgid": 23831,
+    "cleanup": {
+      "pgid": 23831,
+      "initial": [],
+      "reaped": [],
+      "remaining": [],
+      "kernel_group_absent": true
+    }
+  },
+  {
+    "case": "227-candidate-before_HUP",
+    "phase": "before",
+    "alive_before_signal": true,
+    "summary_before_signal": "run_id=run227-1793812942054286-24153-427\nverdict: INCOMPLETE\n",
+    "signal": "HUP",
+    "pgid": 24153,
+    "cleanup": {
+      "pgid": 24153,
+      "initial": [],
+      "reaped": [],
+      "remaining": [],
+      "kernel_group_absent": true
+    }
+  },
+  {
+    "case": "227-candidate-before_KILL",
+    "phase": "before",
+    "alive_before_signal": true,
+    "summary_before_signal": "run_id=run227-1793812947488231-24476-2437\nverdict: INCOMPLETE\n",
+    "signal": "KILL",
+    "pgid": 24476,
+    "cleanup": {
+      "pgid": 24476,
+      "initial": [
+        [
+          24793,
+          "Z"
+        ]
+      ],
+      "reaped": [
+        [
+          24793,
+          9
+        ]
+      ],
+      "remaining": [],
+      "kernel_group_absent": true
+    }
+  },
+  {
+    "case": "227-candidate-after_INT",
+    "phase": "after",
+    "alive_before_signal": true,
+    "summary_before_signal": "run_id=run227-1793812952828936-24794-1366\nRun 227 \u2014 release-binary governance evaluator runtime call-site wiring evidence\ngit_commit: b4669ab29ad31f82bb574800df4f5f21e8a1afb7\n\nbuild:\n  rustc_version:      rustc fixture (not executed)\n  cargo_version:      cargo fixture (not executed)\n  qbind_node_sha256:  574efca309d2dbe1cec417c9ecc808985d906d9cb9b5ac9095e4028946b1aede\n  qbind_node_buildid: BuildID[sha1]=0000\n  helper_227_sha256:  574efca309d2dbe1cec417c9ecc808985d906d9cb9b5ac9095e4028946b1aede\n  helper_227_buildid: BuildID[sha1]=0000\n\nrelease-binary scenario verdicts:\n  S1_helprc=0\n  S2_default_devnetrc=0\n  S3_default_testnetrc=0\n  S4_default_mainnetrc=0\n  S5_selector_parsesrc=0\n  S6_selector_invalidrc=2\n  note: S6 (invalid selector) is expected non-zero (fail-closed before mutation).\n\nrelease-helper verdicts:\n  helper_run_227rc=0verdict: PASS\n\nhelper A1-A23 / R1-R31 corpus verdicts (release mode, Run 226 call-site wiring symbols):\n  table fixture\n  total_pass: 1\n  total_fail: 0\n  verdict: PASS\n\ndenylist result:\n  verdict: PASS (all 26 forbidden patterns proven empty across captured logs)\n\nregression test verdicts:\n  test:run_226_governance_evaluator_runtime_callsite_wiring_tests\trc=0\n  test:run_224_governance_evaluator_runtime_integration_tests\trc=0\n  test:run_222_governance_execution_evaluator_tests\trc=0\n  test:run_220_governance_execution_runtime_consumption_tests\trc=0\n  test:run_217_governance_execution_runtime_arming_tests\trc=0\n  test:run_215_governance_execution_policy_selector_tests\trc=0\n  test:run_213_governance_execution_payload_callsite_tests\trc=0\n  test:run_211_governance_execution_policy_tests\trc=0\n  lib:pqc_authority\trc=0\n  lib:lib_all\trc=0\nregression result records:\n  run227:test:run_226_governance_evaluator_runtime_callsite_wiring_tests\treturned\t0\n  run227:test:run_224_governance_evaluator_runtime_integration_tests\treturned\t0\n  run227:test:run_222_governance_execution_evaluator_tests\treturned\t0\n  run227:test:run_220_governance_execution_runtime_consumption_tests\treturned\t0\n  run227:test:run_217_governance_execution_runtime_arming_tests\treturned\t0\n  run227:test:run_215_governance_execution_policy_selector_tests\treturned\t0\n  run227:test:run_213_governance_execution_payload_callsite_tests\treturned\t0\n  run227:test:run_211_governance_execution_policy_tests\treturned\t0\n  run227:lib:pqc_authority\treturned\t0\n  run227:lib:lib_all\treturned\t0\n\nhonest_limits: the Run 226 call-site wiring routes the representable Run 220 runtime call sites (reload-check, reload-apply, startup --p2p-trust-bundle, SIGHUP, local peer-candidate-check) through the Run 224 integration layer; the binary marker/candidate metadata cannot yet carry a governance proposal/decision evaluator binding, so the live inbound 0x05 and peer-driven drain surfaces are wired but their full positive evaluator binding is not yet representable from the binary (only the Disabled + absent legacy bypass is Ok at those binary call sites; a present carrier fails closed); the default Disabled legacy bypass is preserved bit-for-bit; the integration outcome is consumed, not discarded; present carrier without evaluator context fails closed; no real governance execution engine; no real on-chain governance proof verifier; fixture evaluator DevNet/TestNet evidence-only; emergency fixture explicit non-production; production/on-chain/MainNet evaluator unavailable/fail-closed; MainNet peer-driven apply refused; validator-set rotation unsupported; existing Run 221 runtime-consumption, Run 223 evaluator-interface, and Run 225 integration-layer behaviour compatible; no KMS/HSM/RemoteSigner backend; full C4 and C5 remain OPEN.\n\naggregate: PASS\nverdict: PASS\n",
+    "signal": "INT",
+    "pgid": 24794,
+    "cleanup": {
+      "pgid": 24794,
+      "initial": [],
+      "reaped": [],
+      "remaining": [],
+      "kernel_group_absent": true
+    }
+  },
+  {
+    "case": "227-candidate-after_TERM",
+    "phase": "after",
+    "alive_before_signal": true,
+    "summary_before_signal": "run_id=run227-1793812959296794-25176-2598\nRun 227 \u2014 release-binary governance evaluator runtime call-site wiring evidence\ngit_commit: b4669ab29ad31f82bb574800df4f5f21e8a1afb7\n\nbuild:\n  rustc_version:      rustc fixture (not executed)\n  cargo_version:      cargo fixture (not executed)\n  qbind_node_sha256:  574efca309d2dbe1cec417c9ecc808985d906d9cb9b5ac9095e4028946b1aede\n  qbind_node_buildid: BuildID[sha1]=0000\n  helper_227_sha256:  574efca309d2dbe1cec417c9ecc808985d906d9cb9b5ac9095e4028946b1aede\n  helper_227_buildid: BuildID[sha1]=0000\n\nrelease-binary scenario verdicts:\n  S1_helprc=0\n  S2_default_devnetrc=0\n  S3_default_testnetrc=0\n  S4_default_mainnetrc=0\n  S5_selector_parsesrc=0\n  S6_selector_invalidrc=2\n  note: S6 (invalid selector) is expected non-zero (fail-closed before mutation).\n\nrelease-helper verdicts:\n  helper_run_227rc=0verdict: PASS\n\nhelper A1-A23 / R1-R31 corpus verdicts (release mode, Run 226 call-site wiring symbols):\n  table fixture\n  total_pass: 1\n  total_fail: 0\n  verdict: PASS\n\ndenylist result:\n  verdict: PASS (all 26 forbidden patterns proven empty across captured logs)\n\nregression test verdicts:\n  test:run_226_governance_evaluator_runtime_callsite_wiring_tests\trc=0\n  test:run_224_governance_evaluator_runtime_integration_tests\trc=0\n  test:run_222_governance_execution_evaluator_tests\trc=0\n  test:run_220_governance_execution_runtime_consumption_tests\trc=0\n  test:run_217_governance_execution_runtime_arming_tests\trc=0\n  test:run_215_governance_execution_policy_selector_tests\trc=0\n  test:run_213_governance_execution_payload_callsite_tests\trc=0\n  test:run_211_governance_execution_policy_tests\trc=0\n  lib:pqc_authority\trc=0\n  lib:lib_all\trc=0\nregression result records:\n  run227:test:run_226_governance_evaluator_runtime_callsite_wiring_tests\treturned\t0\n  run227:test:run_224_governance_evaluator_runtime_integration_tests\treturned\t0\n  run227:test:run_222_governance_execution_evaluator_tests\treturned\t0\n  run227:test:run_220_governance_execution_runtime_consumption_tests\treturned\t0\n  run227:test:run_217_governance_execution_runtime_arming_tests\treturned\t0\n  run227:test:run_215_governance_execution_policy_selector_tests\treturned\t0\n  run227:test:run_213_governance_execution_payload_callsite_tests\treturned\t0\n  run227:test:run_211_governance_execution_policy_tests\treturned\t0\n  run227:lib:pqc_authority\treturned\t0\n  run227:lib:lib_all\treturned\t0\n\nhonest_limits: the Run 226 call-site wiring routes the representable Run 220 runtime call sites (reload-check, reload-apply, startup --p2p-trust-bundle, SIGHUP, local peer-candidate-check) through the Run 224 integration layer; the binary marker/candidate metadata cannot yet carry a governance proposal/decision evaluator binding, so the live inbound 0x05 and peer-driven drain surfaces are wired but their full positive evaluator binding is not yet representable from the binary (only the Disabled + absent legacy bypass is Ok at those binary call sites; a present carrier fails closed); the default Disabled legacy bypass is preserved bit-for-bit; the integration outcome is consumed, not discarded; present carrier without evaluator context fails closed; no real governance execution engine; no real on-chain governance proof verifier; fixture evaluator DevNet/TestNet evidence-only; emergency fixture explicit non-production; production/on-chain/MainNet evaluator unavailable/fail-closed; MainNet peer-driven apply refused; validator-set rotation unsupported; existing Run 221 runtime-consumption, Run 223 evaluator-interface, and Run 225 integration-layer behaviour compatible; no KMS/HSM/RemoteSigner backend; full C4 and C5 remain OPEN.\n\naggregate: PASS\nverdict: PASS\n",
+    "signal": "TERM",
+    "pgid": 25176,
+    "cleanup": {
+      "pgid": 25176,
+      "initial": [],
+      "reaped": [],
+      "remaining": [],
+      "kernel_group_absent": true
+    }
+  },
+  {
+    "case": "227-candidate-after_HUP",
+    "phase": "after",
+    "alive_before_signal": true,
+    "summary_before_signal": "run_id=run227-1793812965743341-25558-3034\nRun 227 \u2014 release-binary governance evaluator runtime call-site wiring evidence\ngit_commit: b4669ab29ad31f82bb574800df4f5f21e8a1afb7\n\nbuild:\n  rustc_version:      rustc fixture (not executed)\n  cargo_version:      cargo fixture (not executed)\n  qbind_node_sha256:  574efca309d2dbe1cec417c9ecc808985d906d9cb9b5ac9095e4028946b1aede\n  qbind_node_buildid: BuildID[sha1]=0000\n  helper_227_sha256:  574efca309d2dbe1cec417c9ecc808985d906d9cb9b5ac9095e4028946b1aede\n  helper_227_buildid: BuildID[sha1]=0000\n\nrelease-binary scenario verdicts:\n  S1_helprc=0\n  S2_default_devnetrc=0\n  S3_default_testnetrc=0\n  S4_default_mainnetrc=0\n  S5_selector_parsesrc=0\n  S6_selector_invalidrc=2\n  note: S6 (invalid selector) is expected non-zero (fail-closed before mutation).\n\nrelease-helper verdicts:\n  helper_run_227rc=0verdict: PASS\n\nhelper A1-A23 / R1-R31 corpus verdicts (release mode, Run 226 call-site wiring symbols):\n  table fixture\n  total_pass: 1\n  total_fail: 0\n  verdict: PASS\n\ndenylist result:\n  verdict: PASS (all 26 forbidden patterns proven empty across captured logs)\n\nregression test verdicts:\n  test:run_226_governance_evaluator_runtime_callsite_wiring_tests\trc=0\n  test:run_224_governance_evaluator_runtime_integration_tests\trc=0\n  test:run_222_governance_execution_evaluator_tests\trc=0\n  test:run_220_governance_execution_runtime_consumption_tests\trc=0\n  test:run_217_governance_execution_runtime_arming_tests\trc=0\n  test:run_215_governance_execution_policy_selector_tests\trc=0\n  test:run_213_governance_execution_payload_callsite_tests\trc=0\n  test:run_211_governance_execution_policy_tests\trc=0\n  lib:pqc_authority\trc=0\n  lib:lib_all\trc=0\nregression result records:\n  run227:test:run_226_governance_evaluator_runtime_callsite_wiring_tests\treturned\t0\n  run227:test:run_224_governance_evaluator_runtime_integration_tests\treturned\t0\n  run227:test:run_222_governance_execution_evaluator_tests\treturned\t0\n  run227:test:run_220_governance_execution_runtime_consumption_tests\treturned\t0\n  run227:test:run_217_governance_execution_runtime_arming_tests\treturned\t0\n  run227:test:run_215_governance_execution_policy_selector_tests\treturned\t0\n  run227:test:run_213_governance_execution_payload_callsite_tests\treturned\t0\n  run227:test:run_211_governance_execution_policy_tests\treturned\t0\n  run227:lib:pqc_authority\treturned\t0\n  run227:lib:lib_all\treturned\t0\n\nhonest_limits: the Run 226 call-site wiring routes the representable Run 220 runtime call sites (reload-check, reload-apply, startup --p2p-trust-bundle, SIGHUP, local peer-candidate-check) through the Run 224 integration layer; the binary marker/candidate metadata cannot yet carry a governance proposal/decision evaluator binding, so the live inbound 0x05 and peer-driven drain surfaces are wired but their full positive evaluator binding is not yet representable from the binary (only the Disabled + absent legacy bypass is Ok at those binary call sites; a present carrier fails closed); the default Disabled legacy bypass is preserved bit-for-bit; the integration outcome is consumed, not discarded; present carrier without evaluator context fails closed; no real governance execution engine; no real on-chain governance proof verifier; fixture evaluator DevNet/TestNet evidence-only; emergency fixture explicit non-production; production/on-chain/MainNet evaluator unavailable/fail-closed; MainNet peer-driven apply refused; validator-set rotation unsupported; existing Run 221 runtime-consumption, Run 223 evaluator-interface, and Run 225 integration-layer behaviour compatible; no KMS/HSM/RemoteSigner backend; full C4 and C5 remain OPEN.\n\naggregate: PASS\nverdict: PASS\n",
+    "signal": "HUP",
+    "pgid": 25558,
+    "cleanup": {
+      "pgid": 25558,
+      "initial": [],
+      "reaped": [],
+      "remaining": [],
+      "kernel_group_absent": true
+    }
+  },
+  {
+    "case": "227-candidate-after_KILL",
+    "phase": "after",
+    "alive_before_signal": true,
+    "summary_before_signal": "run_id=run227-1793812972197048-25941-22498\nRun 227 \u2014 release-binary governance evaluator runtime call-site wiring evidence\ngit_commit: b4669ab29ad31f82bb574800df4f5f21e8a1afb7\n\nbuild:\n  rustc_version:      rustc fixture (not executed)\n  cargo_version:      cargo fixture (not executed)\n  qbind_node_sha256:  574efca309d2dbe1cec417c9ecc808985d906d9cb9b5ac9095e4028946b1aede\n  qbind_node_buildid: BuildID[sha1]=0000\n  helper_227_sha256:  574efca309d2dbe1cec417c9ecc808985d906d9cb9b5ac9095e4028946b1aede\n  helper_227_buildid: BuildID[sha1]=0000\n\nrelease-binary scenario verdicts:\n  S1_helprc=0\n  S2_default_devnetrc=0\n  S3_default_testnetrc=0\n  S4_default_mainnetrc=0\n  S5_selector_parsesrc=0\n  S6_selector_invalidrc=2\n  note: S6 (invalid selector) is expected non-zero (fail-closed before mutation).\n\nrelease-helper verdicts:\n  helper_run_227rc=0verdict: PASS\n\nhelper A1-A23 / R1-R31 corpus verdicts (release mode, Run 226 call-site wiring symbols):\n  table fixture\n  total_pass: 1\n  total_fail: 0\n  verdict: PASS\n\ndenylist result:\n  verdict: PASS (all 26 forbidden patterns proven empty across captured logs)\n\nregression test verdicts:\n  test:run_226_governance_evaluator_runtime_callsite_wiring_tests\trc=0\n  test:run_224_governance_evaluator_runtime_integration_tests\trc=0\n  test:run_222_governance_execution_evaluator_tests\trc=0\n  test:run_220_governance_execution_runtime_consumption_tests\trc=0\n  test:run_217_governance_execution_runtime_arming_tests\trc=0\n  test:run_215_governance_execution_policy_selector_tests\trc=0\n  test:run_213_governance_execution_payload_callsite_tests\trc=0\n  test:run_211_governance_execution_policy_tests\trc=0\n  lib:pqc_authority\trc=0\n  lib:lib_all\trc=0\nregression result records:\n  run227:test:run_226_governance_evaluator_runtime_callsite_wiring_tests\treturned\t0\n  run227:test:run_224_governance_evaluator_runtime_integration_tests\treturned\t0\n  run227:test:run_222_governance_execution_evaluator_tests\treturned\t0\n  run227:test:run_220_governance_execution_runtime_consumption_tests\treturned\t0\n  run227:test:run_217_governance_execution_runtime_arming_tests\treturned\t0\n  run227:test:run_215_governance_execution_policy_selector_tests\treturned\t0\n  run227:test:run_213_governance_execution_payload_callsite_tests\treturned\t0\n  run227:test:run_211_governance_execution_policy_tests\treturned\t0\n  run227:lib:pqc_authority\treturned\t0\n  run227:lib:lib_all\treturned\t0\n\nhonest_limits: the Run 226 call-site wiring routes the representable Run 220 runtime call sites (reload-check, reload-apply, startup --p2p-trust-bundle, SIGHUP, local peer-candidate-check) through the Run 224 integration layer; the binary marker/candidate metadata cannot yet carry a governance proposal/decision evaluator binding, so the live inbound 0x05 and peer-driven drain surfaces are wired but their full positive evaluator binding is not yet representable from the binary (only the Disabled + absent legacy bypass is Ok at those binary call sites; a present carrier fails closed); the default Disabled legacy bypass is preserved bit-for-bit; the integration outcome is consumed, not discarded; present carrier without evaluator context fails closed; no real governance execution engine; no real on-chain governance proof verifier; fixture evaluator DevNet/TestNet evidence-only; emergency fixture explicit non-production; production/on-chain/MainNet evaluator unavailable/fail-closed; MainNet peer-driven apply refused; validator-set rotation unsupported; existing Run 221 runtime-consumption, Run 223 evaluator-interface, and Run 225 integration-layer behaviour compatible; no KMS/HSM/RemoteSigner backend; full C4 and C5 remain OPEN.\n\naggregate: PASS\nverdict: PASS\n",
+    "signal": "KILL",
+    "pgid": 25941,
+    "cleanup": {
+      "pgid": 25941,
+      "initial": [
+        [
+          26317,
+          "Z"
+        ]
+      ],
+      "reaped": [
+        [
+          26317,
+          9
+        ]
+      ],
+      "remaining": [],
+      "kernel_group_absent": true
+    }
+  },
+  {
+    "case": "227-candidate-reuse_success",
+    "cleanup": {
+      "pgid": 26319,
+      "initial": [],
+      "reaped": [],
+      "remaining": [],
+      "kernel_group_absent": true
+    }
+  },
+  {
+    "case": "227-candidate-reuse_failure",
+    "cleanup": {
+      "pgid": 26696,
+      "initial": [],
+      "reaped": [],
+      "remaining": [],
+      "kernel_group_absent": true
+    }
+  },
+  {
+    "case": "227-candidate-startup_file",
+    "cleanup": {
+      "pgid": 27073,
+      "initial": [],
+      "reaped": [],
+      "remaining": [],
+      "kernel_group_absent": true
+    }
+  },
+  {
+    "case": "227-candidate-startup_file_symlink",
+    "cleanup": {
+      "pgid": 27450,
+      "initial": [],
+      "reaped": [],
+      "remaining": [],
+      "kernel_group_absent": true
+    }
+  },
+  {
+    "case": "227-candidate-startup_directory",
+    "cleanup": {
+      "pgid": 27828,
+      "initial": [],
+      "reaped": [],
+      "remaining": [],
+      "kernel_group_absent": true
+    }
+  },
+  {
+    "case": "227-candidate-startup_directory_symlink",
+    "cleanup": {
+      "pgid": 27835,
+      "initial": [],
+      "reaped": [],
+      "remaining": [],
+      "kernel_group_absent": true
+    }
+  },
+  {
+    "case": "227-candidate-final_file",
+    "cleanup": {
+      "pgid": 28212,
+      "initial": [],
+      "reaped": [],
+      "remaining": [],
+      "kernel_group_absent": true
+    }
+  },
+  {
+    "case": "227-candidate-final_file_symlink",
+    "cleanup": {
+      "pgid": 28589,
+      "initial": [],
+      "reaped": [],
+      "remaining": [],
+      "kernel_group_absent": true
+    }
+  },
+  {
+    "case": "227-candidate-final_directory",
+    "cleanup": {
+      "pgid": 28966,
+      "initial": [],
+      "reaped": [],
+      "remaining": [],
+      "kernel_group_absent": true
+    }
+  },
+  {
+    "case": "227-candidate-final_directory_symlink",
+    "cleanup": {
+      "pgid": 29349,
+      "initial": [],
+      "reaped": [],
+      "remaining": [],
+      "kernel_group_absent": true
+    }
+  },
+  {
+    "case": "227-candidate-supervisor_exception",
+    "original_error": "KeyboardInterrupt('injected driver BaseException')",
+    "cleanup": {
+      "pgid": 31008,
+      "initial": [
+        [
+          31008,
+          "S"
+        ],
+        [
+          31394,
+          "S"
+        ],
+        [
+          31395,
+          "S"
+        ]
+      ],
+      "reaped": [
+        [
+          31394,
+          9
+        ],
+        [
+          31395,
+          9
+        ]
+      ],
+      "remaining": [],
+      "kernel_group_absent": true
+    }
+  }
+]

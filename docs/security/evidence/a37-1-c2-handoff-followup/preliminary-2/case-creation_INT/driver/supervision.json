@@ -1,0 +1,18 @@
+[
+  {
+    "case": "216-candidate-before_INT",
+    "original_error": "InterruptedError('fixture owner interrupted by SIGINT')",
+    "cleanup": {
+      "pgid": 20169,
+      "initial": [
+        [
+          20169,
+          "S"
+        ]
+      ],
+      "reaped": [],
+      "remaining": [],
+      "kernel_group_absent": true
+    }
+  }
+]

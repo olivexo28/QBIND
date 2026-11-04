@@ -1,0 +1,18 @@
+[
+  {
+    "case": "visibility-probe",
+    "original_error": "InterruptedError('fixture owner interrupted by SIGINT')",
+    "cleanup": {
+      "pgid": 3433,
+      "initial": [
+        [
+          3433,
+          "S"
+        ]
+      ],
+      "reaped": [],
+      "remaining": [],
+      "kernel_group_absent": true
+    }
+  }
+]

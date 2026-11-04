@@ -1,0 +1,18 @@
+[
+  {
+    "case": "216-candidate-before_INT",
+    "original_error": "KeyboardInterrupt('injected owned creation handoff')",
+    "cleanup": {
+      "pgid": 2109,
+      "initial": [
+        [
+          2109,
+          "S"
+        ]
+      ],
+      "reaped": [],
+      "remaining": [],
+      "kernel_group_absent": true
+    }
+  }
+]
