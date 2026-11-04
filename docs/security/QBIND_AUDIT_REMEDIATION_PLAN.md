@@ -3649,3 +3649,163 @@ record this failed attempt; final source/prose whitespace checks exclude
 only raw `.log` files and all log checksums are still verified. This is
 a documentation/evidence qualification, not a change to the passing
 producer tests, a warning-free full-delivery diff claim, or closure.
+
+## 18. A6-F1 / OBL-AVL-4a displaced peer-session cleanup
+
+**IMPLEMENTED — INDEPENDENT REVIEW PENDING.** This is bounded
+implementation evidence for the same-`NodeId` replacement route only.
+**A6-F1 / OBL-AVL-4a and E14 remain OPEN to their remaining extent.**
+A5-F1 / OBL-AVL-3a and E11, A11-F2 / OBL-TRN-3 and E19, E07, and
+OBL-GOV-2 also remain **OPEN** to their remaining extent. Activation
+remains **DISABLED**; public DevNet remains **NO-GO**.
+
+### Entry, review scope and source verification
+
+The repository was verified as `olivexo28/QBIND`; the checkout was
+clean on `main` at required commit
+`64ce7131340a861d8b33063f430dfc0beab531b3`, tree
+`612512d8ac47bce6f587c028836b631d84da3275`, and `origin/main` matched
+that commit/tree. No applicable `AGENTS.md` was found. The suggested
+task branch did not exist locally or remotely and was created from that
+baseline. The implementation producer is a direct child; see the
+evidence README for exact identities and bounded commands.
+
+The supplied independent pre-implementation review was verified against
+the baseline callers and ownership path. `spawn_peer_handlers` started
+async peer loops and inserted by `NodeId`; replacement dropped the
+displaced `PeerConnection`, detaching its task handles. `SecureChannelAsync`
+started separate `spawn_blocking` reader/writer workers without retained
+join handles or an independent socket-shutdown handle. Its socket mutex
+is held during blocking I/O, so using that mutex to close a blocked read
+could wait on that same I/O. The inbound registry identity decision and
+the authenticated consensus-origin decision are separate; the change
+does not alter either resolver, handshake, mutual-auth condition, or
+consensus gate. No contradiction with the supplied review was found.
+This review did not reproduce a live resource-exhaustion event or
+establish a consensus effect. Registered-session read failure,
+eviction, trust-reload cleanup and deployment/platform behavior remain
+separate lifecycle questions.
+
+### Ownership contract and compatibility
+
+Each registered session now has an atomic diagnostic session ID and a
+retained retirement owner containing its guarded async channel, both
+peer-loop `JoinHandle`s, both blocking-worker join handles, and an
+independently cloned socket-shutdown capability. The registry tracks
+active, retiring and registering state per exact `NodeId`; at most one
+unfinished owner can occupy a retiring entry for one identity. A
+registration reservation prevents concurrent same-identity handoffs.
+Session ownership is checked by exact registry identity and
+`Arc::ptr_eq`, not by the diagnostic number. The new session's registry
+insertion is the linearization point and occurs only after old-session
+socket shutdown, async-loop joins and blocking-worker joins have
+succeeded. Cleanup and all waits occur after
+the registry lock is released; the lock only reserves identity, latches
+the old session invalid, signals cancellation, and transfers ownership.
+
+Retirement first invalidates guarded application handles and signals
+both loops, then requests `Shutdown::Both` through the independent
+socket clone, then joins loop tasks and blocking workers. A five-second
+per-attempt watchdog bounds each wait. The shutdown handle alone is not
+counted as task or worker completion. A failed capability creation
+returns an error from the fallible channel constructor before workers
+are spawned. The legacy infallible shared wrapper instead returns a
+non-established, invalidated handle without workers; sends refuse and
+retirement reports the missing capability. A shutdown failure
+returns a registration error, retains the old owner, removes the
+reservation, and blocks further replacements for that identity until a
+later retry succeeds; repeated candidates do not create new I/O workers.
+Service shutdown preserves owners whose bounded cleanup fails.
+
+Same-identity replacement no longer drops the displaced connection
+untracked. Its intentional compatibility effect is that a replacement
+waits for verified retirement and can be refused, rather than silently
+registering while old work remains live. Sender clones that outlive the
+old registry entry cannot enqueue after the old write loop exits. A
+send already past its invalidation check may have advanced encryption or
+delivered bytes; an already-delivered message and inbound work already
+forwarded to the application cannot be retracted. Queued work not yet
+progressed is dropped/refused, never replayed, and there is no delivery
+acknowledgement.
+
+The synchronous eviction hook keeps its existing `attempted` /
+`evicted` / `failed` counts and Run 072 / Run 074 result behavior.
+Documentation now makes the compatibility boundary explicit:
+`evicted` means removed from the active registry with outbound handles
+dropped and async-loop abort requested; it does **not** certify blocking
+worker completion or socket release. The cleanup owner remains retained
+until a same-identity replacement or service shutdown attempts and
+verifies that cleanup. Trust-reload policy/control tests pass, but do
+not prove live trust-reload socket cleanup or add a production reload
+caller. No automatic replay, identity/authentication relaxation, or
+consensus-origin change was made.
+
+### Producing revision and retained validation
+
+Implementation commit:
+`0bba1ebb4d73d52073c0891b97491d59874bc911`, tree
+`ba2dd48e0d5ff01105ea2773097b70c9983a7865`, sole parent
+`64ce7131340a861d8b33063f430dfc0beab531b3`. Test/validation producer:
+`b4020969dcc5c3fbeebed44a357163fed0baaf1b`, tree
+`e10bcf27a37fbac86c8e310479880205ffb19e18`, sole parent
+`731be6398dbc687bd421ac49b334bfca1a088655`. The intermediate
+cleanup-owner test commit is `731be6398dbc687bd421ac49b334bfca1a088655`,
+tree `c310eae4a1fed6623468fad99fc95c5c7d54e741`, parent
+`0bba1ebb4d73d52073c0891b97491d59874bc911`. The later
+source-documentation-only commit is
+`7f91712c5596bc846b6cf2299282e1cb9cad4d2c`, tree
+`0c59e5269af3e31d8764998b1b161a7c3b5582ce`, parent
+`b4020969dcc5c3fbeebed44a357163fed0baaf1b`; it changes no behavior or
+test outcome. Producer paths are
+`crates/qbind-node/src/p2p_tcp.rs`,
+`crates/qbind-node/src/secure_channel.rs`,
+`crates/qbind-node/src/secure_channel/encrypted_write_tests.rs`, and
+`crates/qbind-node/src/p2p_session_eviction.rs`. Source blob identities,
+the exact producer-pinned commands, raw outputs, exit statuses and
+checksums are retained in
+[`evidence/a6-f1-displaced-peer-cleanup/README.md`](evidence/a6-f1-displaced-peer-cleanup/README.md).
+
+At the final producer, the four isolated local-loopback replacement tests
+passed (idle replacement, active/backpressured receive with queued
+inbound and outbound work, serialized concurrent replacements and late
+old completion, and repeated shutdown-capability failure with retained
+ownership/refusal). The secure-channel regression selection passed 15
+tests, including current A5-F1 receive and A11-F2 encrypted-write
+controls. Run 072 eviction controls passed 8 tests; Run 074 live-reload
+controller controls passed 10 tests. `cargo check --locked --offline
+-p qbind-node --lib`, targeted formatting and CRLF-aware whitespace
+checks passed. Compiler warnings were present and retained in the raw
+logs; this is not a warning-free build, full-workspace build, deployment
+test or independent acceptance.
+
+The real loopback fixture uses real ML-KEM-768 and real
+ChaCha20-Poly1305 traffic; its certificate-signature verifier is a
+test-only dummy, so it does not establish production certificate
+admission. Remote peer EOF and retained registry ownership were checked
+separately from task/worker join outcomes. These isolated tests establish
+neither platform-wide shutdown timing nor deployment assurance.
+
+The earlier bounded A5-F1 review is recorded distinctly from these
+producer tests: **19 checksums verified**; the reviewer reported that
+author logs recorded **69 selected tests**, but did **not** rerun Rust
+tests because Cargo was unavailable. The raw-log whitespace limitation
+documented in section 17 and the A5-F1 evidence README remains preserved;
+the cited author test logs are not relabeled as reviewer-executed tests.
+
+### Remaining lifecycle limitations
+
+The replacement path proves local handle invalidation, remote EOF in
+the loopback controls, async-loop completion, blocking-worker completion,
+and release of the registry's retiring owner before inserting its
+replacement. A weak-owner assertion verifies that normal replacement
+drops the registry-owned owner after cleanup. It does not prove OS-wide
+resource reclamation, prompt cleanup on every platform, upper-layer
+delivery/queue semantics, registered-session read-failure cleanup,
+eviction cleanup without a later replacement/shutdown, or live
+trust-reload cleanup. A permanent
+shutdown or worker-join failure leaves one tracked owner for that
+identity and refuses replacement; operational recovery beyond retry or
+service shutdown remains open. E14 and the broader A6-F1 / OBL-AVL-4a
+finding therefore remain open. No live DevNet, external peer, real
+signing, deployment or activation was run; only the task branch is to
+be pushed, with no PR, merge, `main` push, amend or force-push.

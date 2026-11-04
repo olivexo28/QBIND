@@ -1,0 +1,5 @@
+producer: b4020969dcc5c3fbeebed44a357163fed0baaf1b
+command: bash -c rustfmt --edition 2021 --check --config skip_children=true crates/qbind-node/src/secure_channel.rs crates/qbind-node/src/secure_channel/encrypted_write_tests.rs crates/qbind-node/src/p2p_tcp.rs && git -c core.whitespace=cr-at-eol diff --check 64ce7131340a861d8b33063f430dfc0beab531b3 HEAD
+
+
+exit status: 0
