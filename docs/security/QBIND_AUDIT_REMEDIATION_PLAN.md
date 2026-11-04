@@ -350,7 +350,7 @@ existing scoped results retained.
 | A27.1-C4/C5, A:L7661-L7719: weighted library 2*total | Bounded open arithmetic observation; no selected-binary reachability; DD/ME; R relevance pending | Check actual arbitrary-weight consumer and intended numeric contract | Boundary arithmetic plus reachable caller, not unit-weight engine overflow assertion |
 | A34.1-C1/C2/C4, A:L5741-L5861 | Parent/QC binding and proposal/justify ordering remain protocol-invariant candidates, not proven defects; DD; R | Settle applicable engine-path invariant with proof/counterexample before implementation | Full conditional self-vote trace and invariant argument; production snapshot gate retained |
 | A36.1-C1 + A38.1, A:L5032-L5077, A:L4397-L4426 | Required-policy non-invocation contract/integration candidate; DD/MI; C4/C5/O | Clarify skip/v1/no-data-dir/live-0x05/drain contract; no advisory-hook overclaim | Contract decision, exact surface-specific invocation/refusal and later binary evidence |
-| A37.1-C2/C3 + A38 carry-forward, A:L4744-L4785, A:L4629-L4671 | Section 14 confirms the stated current-source mechanism; evidence-harness assurance observation; D/ME; A | A37.1-C2 / A38-iv **IMPLEMENTED — VERIFICATION PENDING**; supplied bounded pre-implementation review recorded in section 14; independent post-implementation review **PENDING**; historical provenance unresolved; not a node-protocol defect or fabricated-run allegation | Independently review the bounded correction and isolated fixture evidence in section 14; retain exact producing source and disclose unavailable historical artifacts; E07 / OBL-GOV-2 remain OPEN |
+| A37.1-C2/C3 + A38 carry-forward, A:L4744-L4785, A:L4629-L4671 | Section 14 confirms the stated current-source mechanism; evidence-harness assurance observation; D/ME; A | A37.1-C2 / A38-iv **IMPLEMENTED — VERIFICATION PENDING**; bounded creation-to-ownership handoff review **PASSED/CLOSED only at ba2c0f381a9291bf22e1f32f9c229dc2a6add61f**; broader independent review/acceptance **PENDING**; historical provenance unresolved; not a node-protocol defect or fabricated-run allegation | Preserve the bounded scope and evidence distinction in section 14; retain exact producing source and disclose unavailable historical artifacts; E07 / OBL-GOV-2 remain OPEN |
 | R-DEP-1/R-DEP-2/R-RUNTIME-1, A39.1-A41 | RNG source chain resolved to scope; deployed backend/build and runtime entropy remain; algorithms/constant-time not performed; ME; C5 | Pin platform/features/cfgs and exact remaining backend question | Dependency provenance + build inputs; runtime entropy separate, no generic source rerun |
 | R7.3/E12, A42.1-A45.1 | Schema/visitor/postdecode/four-channel route complete to scope; aggregate capacities/RSS/concurrency residuals; ME; O | Preserve corrected precheck/Infinite-limit and copy accounting; name unmeasured quantity | Revision-bound aggregate experiment under separate plan; no new forced defect |
 | A47.3-C1-C3/disposition, A:L1039-L1151 | Local stored n>1 -> 1 regression trace established; violated contract/harm unestablished, no new finding; DD/ME; R/profile recovery | Resolve relevant storage/transition contract and consumer impact before a transition change | Correct restore chronology, cursor-vs-DB writer, atomic visibility != power-loss durability; multi-validator residual separate |
@@ -1132,20 +1132,25 @@ CRLF-aware whitespace checks passed. Only the two authorized paths are
 staged for delivery; final commit/tree/remote checks are reported separately
 after commit, without a self-referential hash in this document.
 
-**Current next action (supersedes the prior generic candidate-selection
-instruction):** independently review the A37.1-C2 / A38-iv bounded
-implementation and isolated fixture evidence in section 14. The supplied
-pre-implementation review supersedes the earlier awaiting-contract-review
-state only for this correction. Current implementation status is
-**IMPLEMENTED — VERIFICATION PENDING**; independent post-implementation
-review remains **PENDING**.
+**Current review disposition (supersedes the prior next-action request only
+for the bounded creation-to-ownership handoff):** the supplied independent
+review reports that this handoff correction **PASSED/CLOSED** at
+`ba2c0f381a9291bf22e1f32f9c229dc2a6add61f`; section 14 records the exact
+scope, evidence and limitations. Earlier pending/review requests remain
+historical and are superseded only for that bounded correction. Current
+implementation status remains **IMPLEMENTED — VERIFICATION PENDING**;
+broader independent review and acceptance remain **PENDING**.
 The QBIND-A1-F002 bounded source/retained-evidence review and separate
 publication remain recorded in section 13; earlier F002 pending-review
 statements remain historical and are superseded only within that bounded
 scope. This bounded implementation does not create a finding or
-close an overall finding or evidence obligation. E07 and OBL-GOV-2 remain
-**OPEN**; unrelated release and operational gates remain unchanged; activation
-remains **DISABLED** and public DevNet **NO-GO**.
+close an overall finding or evidence obligation. E07 remains **OPEN** for
+historical provenance, release/CI/build and artifact assurance; OBL-GOV-2
+remains **OPEN** for governance contract/integration and applicable process/
+binary evidence. Required real Rust regression, release-binary and runtime
+evidence, and any broader review/acceptance not established by this bounded
+review remain outstanding. Unrelated release and operational gates remain
+unchanged; activation remains **DISABLED** and public DevNet **NO-GO**.
 
 ## 12. A21-F1 candidate task card, pre-implementation contract and bounded implementation record
 
@@ -3165,4 +3170,70 @@ The historical pinned local reproduction is also distinct. The following
 evidence/documentation publication changes no fixture or producing-test bytes.
 Status remains **IMPLEMENTED — VERIFICATION PENDING**, independent review
 **PENDING**, E07 / OBL-GOV-2 **OPEN**, activation **DISABLED**, public DevNet
+**NO-GO**.
+
+### Independent bounded review record — creation-to-ownership handoff
+
+**Review date / reviewed revision:** 2026-11-04; final commit
+`ba2c0f381a9291bf22e1f32f9c229dc2a6add61f`, tree
+`2e618b20ad470dc47bf4b00d330622de0c49d1c8`. The supplied local push output
+and GitHub `main` identity establish that this exact commit was published
+to `main`. This plan update is a separate task-branch change and is not
+represented as already published to `main`.
+
+**Bounded disposition: creation-to-ownership handoff review
+PASSED/CLOSED at the reviewed revision only.** The supplied independent
+review verified the documented exact-destination correction within its GNU
+`mv` and single-writer assumptions; reviewed the watchdog-parent and
+ordinary-case creation-to-ownership follow-ups; checked the 220 manifest
+rows plus the separately supplied manifest/checksum identities; and
+verified all 221 listed SHA-256 checksums. This closes only the bounded
+handoff review at the named revision. It is not an exhaustive
+exception-safety proof or broader post-implementation/release acceptance.
+
+The review history is distinct from author-produced evidence:
+
+* The earlier directory-destination defect and its corrected GNU `mv -T`
+  behavior are recorded in the historical [A37.1-C2 evidence at
+  `6fdc0f0`](https://github.com/olivexo28/QBIND/blob/6fdc0f0dcfc45c65037de3e53215121f5332689a/docs/security/evidence/a37-1-c2/README.md)
+  and [bounded publication/supervisor corrections at
+  `d494ce2`](https://github.com/olivexo28/QBIND/blob/d494ce2af1dd522e8ec0fc14c36b02a19e50b209/docs/security/evidence/a37-1-c2-correction/README.md).
+  Their manifests remain tied to those historical revisions.
+* The watchdog-parent ownership follow-up and its author-retained evidence
+  are at the historical [review evidence pinned to
+  `551e7cd`](https://github.com/olivexo28/QBIND/blob/551e7cdd08eb01ce05914c4bba49562d8901b7ec/docs/security/evidence/a37-1-c2-supervisor-followup/README.md).
+* The ordinary-case Popen-to-owner handoff was found in a subsequent
+  reviewer-targeted inert-child probe against
+  `551e7cdd08eb01ce05914c4bba49562d8901b7ec`; the reviewer separately
+  contained and reaped that child. The supplied reviewer report says the
+  probe was not a full matrix rerun. It also says the review environment
+  did not meet the fixture `/proc` visibility assumptions: for this
+  single-child probe, the reviewer substituted an empty process scan and
+  separately checked the child and kernel process group. This limited
+  targeted observation is not a supported-environment full-suite result.
+  No standalone raw artifact for that reviewer probe was delivered; it is
+  recorded as a user-supplied review report, not independently retrievable
+  raw evidence.
+* At final commit `ba2c0f381a9291bf22e1f32f9c229dc2a6add61f`, the reviewer
+  inspected the retained [handoff follow-up evidence pinned to that
+  revision](https://github.com/olivexo28/QBIND/blob/ba2c0f381a9291bf22e1f32f9c229dc2a6add61f/docs/security/evidence/a37-1-c2-handoff-followup/README.md).
+  It records the author's producing-revision results: 110 ordinary matrix
+  records plus ten supervisor-negative records; two completed sets of
+  twelve inert boundary cases, of which twenty cleanups passed and four
+  deliberately unresolved cleanups required outer rescue. Those four are
+  failures, not passes. The reviewer did not rerun this matrix, real Cargo
+  tests/builds, node binaries or release harnesses. These author records
+  and the independent review observations remain separately attributed.
+
+The earlier section-14 pending statements and section-11 next-action request
+are retained as historical status and superseded only for this bounded
+creation-to-ownership handoff review at `ba2c0f381a9291bf22e1f32f9c229dc2a6add61f`.
+Overall status remains **IMPLEMENTED — VERIFICATION PENDING**; broader
+independent review/acceptance is **PENDING**. Real Rust regression,
+release-binary and runtime evidence remain outstanding where required.
+**E07 remains OPEN** for historical provenance and remaining release/CI/
+build/artifact assurance. **OBL-GOV-2 remains OPEN** for governance contract/
+integration and applicable process/binary evidence. No overall finding,
+evidence obligation, release gate or operational authority is closed by this
+bounded review. Activation remains **DISABLED**; public DevNet remains
 **NO-GO**.
