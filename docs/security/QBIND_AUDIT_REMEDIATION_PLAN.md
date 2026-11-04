@@ -1132,7 +1132,8 @@ after commit, without a self-referential hash in this document.
 
 **Next action (supersedes the prior A21-F1 contract-review instruction):**
 independent post-implementation review under section 2 of the bounded source
-and test changes at the producing revision recorded in section 12. Review is
+and corrected test changes at the producing revisions recorded in section 12.
+Independent post-correction review is
 PENDING; this record is not an approval or a finding closure. Section 8's
 E07 / OBL-REL-1a / A48.1-C2
 bounded correction is implemented, independently verified and published;
@@ -1147,6 +1148,9 @@ MECHANISM**. The bounded correction and focused test implementation are
 **IMPLEMENTED — VERIFICATION PENDING**; focused regression validation passed
 on its producing revision. Independent post-implementation review is
 **PENDING**. Runtime, deployment and release evidence are **NOT EXECUTED**.
+The supplied review and corrective test/evidence run below narrowly supersede
+the earlier coverage and evidence-delivery claims, not the production
+implementation or the historical run results.
 
 The original pre-implementation contract, review boundary and proposed
 acceptance matrix below are retained as history. Their FUTURE / NOT EXECUTED
@@ -1670,7 +1674,13 @@ records, case results, parent timeout/kill/reap actions, and retained
 log/evidence locations. Keep actual process observations distinct from inferred
 causes. Do not fabricate measurements or evidence files.
 
-### Bounded implementation and verification record
+### Original bounded implementation and verification record (historical run)
+
+The results below remain results of the original producing revision. The
+supplied subsequent review did not rerun these tests or inspect the original
+raw artifact. Its four test/evidence findings and the corrective run are
+recorded separately below; passing the original suite did not establish the
+missing coverage or external artifact delivery.
 
 | Item | Recorded value |
 |---|---|
@@ -1692,6 +1702,177 @@ causes. Do not fabricate measurements or evidence files.
 | Formatting and scope | `rustfmt --edition 2021 --check` passed for the test file and for the decoder source with only a temporary final newline added for the formatter; the decoder's original no-final-newline convention is preserved in the committed file. `git diff --check` passed. The baseline and current canonical-finding, obligation, and evidence identity tables are unchanged (29 findings, 54 obligations, E01–E27). No dependencies, manifests, readers, encoders, node files, audit register, RUN 422 material or other paths changed. |
 | Retained evidence | Raw Cargo logs, all 22 candidate child records and event snapshots, 6 calibration child records/snapshots, 2 baseline child records/snapshots, protocol-negative outcomes, baseline overlay identity, FFI check, and toolchain/profile capture are retained under `/root/.copilot/session-state/68e4e5078c814cc7ba7fec6c8c02e063/files/a21-f1-evidence/`. `AUTHORITATIVE-MANIFEST.txt` enumerates 102 retained files with sizes and SHA-256 values (14,480 bytes; SHA-256 `942f0041fd609d044b66db0be7581e4f096517b70abed2aa3069e00997658e3a`). The temporary baseline checkout is excluded and is not an evidence location. |
 | Review and residual disposition | Independent post-implementation review **PENDING**. A21-F1 remains **OPEN**; OBL-PAR-1, E12 and E13 remain open. Optional-QC allocations, valid-input allocation/layout failures, aggregate-memory and queue/outbound ownership, unreviewed targets, node/runtime/deployment and release evidence remain separate. No live exploit, node execution, deployment, activation or release validation was run. Activation remains **DISABLED**; public DevNet remains **NO-GO**. |
+
+### Supplied review and corrective test/evidence record
+
+**Supplied independent source/test review:** this task conveys review of
+`b1feaf7bde9083eccaef10b6333c4bfe864c7cf0`. It found no blocking defect in
+the bounded production preflight, but identified four correction areas:
+(1) synthetic protocol negatives tested `parse_protocol_sequence`, not the
+real parent's `validate_child_evidence`; (2) missing later-body/signature-prefix,
+successful wrapped trailing-byte and setup-refusal cases; (3) early
+process-management errors could drop an unreaped child; (4) session-local
+evidence paths were not externally retrievable artifacts. The review did
+**not** rerun Rust tests or inspect the original raw artifact. This is the
+task's supplied review statement, not a signed review, retrieved transcript,
+new URL or approval of the corrected implementation.
+
+GitHub Copilot authored the corrective tests and evidence. Entry checks
+confirmed clean tracked/untracked state on the existing task branch
+`copilot/audit-a21-proposal-decoder-preflight-fix`, commit
+`b1feaf7bde9083eccaef10b6333c4bfe864c7cf0`, tree
+`7f3f40a71512e53be6d570902eb074cd364fc9c2`. Both origin destinations identify
+`https://github.com/olivexo28/QBIND`; the advertised task tip matched entry
+HEAD and advertised main was
+`73c2ad6e249ff77f6fd10761d1a2f90c34d9a903`. No applicable `AGENTS.md` was
+found. Only the focused test and this plan change. The production implementation
+remains `9bc10bb0313505697ce7a4e46e4612edec7e9814`; the decoder's mode
+`100755` and blob `5a60b7a1aed1bfb93a78817224e11f89276e5868` are unchanged.
+
+| Correction | Change, producing revision and actual result |
+|---|---|
+| Real acceptance logic | Removed the redundant parser. Both synthetic COMPLETE/GUARD positives and all synthetic negatives call `validate_child_evidence`, also used for actual children. `protocol_negative_controls` passed: two positive fixtures accepted, 89 explicitly labelled synthetic invalid outcomes rejected, and four actual dispatch-negative executions rejected by that same validator. Mutations cover absent/partial/extra/duplicate/out-of-order records, identities, setup and reserved fields, assertions, exit/signal/timeout/reap/status, guard operation/reason/prior/prospective counters, and missing/malformed/inconsistent event snapshots. Unexpected reentrancy/state/overflow/other reasons are **synthetic evidence controls**, not observed allocator failures. Missing/unknown selectors actually exited 101; two misspelled exact filters exited 0 with empty evidence, which the validator rejected. A negative-control pass is never a child/decoder pass. |
+| Missing decoder/wrapper matrix | `candidate_acceptance_matrix` passed with 26 dedicated children, all matching COMPLETE and exit 0. Added `later_body` (complete non-empty tx then truncated later body), `later_signature_0` and `later_signature_1` (two complete non-empty txs then absent/one-byte signature prefix): `qc_len=0`, exact `UnexpectedEof`, exact remaining slices and zero observed allocations. Added `wrapped_trailing`: independently specified header/tx/signature values through both `NetMessage::decode` and `decode_from_slice`, exposed remaining slice `[0xFE, 0xED]`, equality of decoded results and preserved wrapper acceptance of trailing bytes. |
+| Setup refusal | `setup_refusal_controls` passed for decoder and calibration selectors. A clearly labelled **test-only injected setup-boundary failure**, after real resource-limit/dumpability verification but before SETUP, observer arming or case dispatch, produced exactly ENTRY, no snapshot and exit 42. Exit 42 occurs only after assertions that the observer has never armed and case dispatch has never occurred; the normal validator rejects these incomplete outcomes. This was not a kernel failure and did not alter host settings or weaken normal limits. Actual unavailable-prerequisite/kernel-failure and mismatched-limit executions remain **NOT EXECUTED**; the deliberately failed setup alternative was executed. |
+| Bounded cleanup | Ownership transfers to the real `wait_bounded` immediately after successful spawn. It uses nonblocking status/reap polling, records original and cleanup errors distinctly, makes at most two termination attempts, and allows at most 500 ms of bounded cleanup after timeout/management failure; no blocking `wait` or unbounded retry is used. Status/reaped are established only by an actual successful `try_wait` result. Exhausted cleanup honestly reports unestablished termination/reaping. Evidence-read/log errors retain the process outcome. `child_cleanup_controls` passed: normal completion; real 100-ms deadline/SIGKILL/reap; injected initial-poll, first-termination and cleanup-reap-poll errors followed by real cleanup. Final observed cleanup elapsed times were 107, 5, 112 and 107 ms; all four terminated children were actually reaped, and all were rejected as decoder evidence. Persistent OS failure/cleanup exhaustion was **NOT EXECUTED**; synthetic unreaped/missing-status outcomes were rejected. Injected errors are not claimed as real OS failures. |
+| Evidence transfer | Original 102-file evidence and its 14,480-byte manifest were available and all sizes/SHA-256 values revalidated; original manifest SHA-256 remains `942f0041fd609d044b66db0be7581e4f096517b70abed2aa3069e00997658e3a`. Original and corrective runs are separately packaged with relative-path/size/SHA-256 manifests outside the repository. **External transfer remains BLOCKED:** this session exposes no general file-attachment or task-artifact upload facility; a session path or a locally prepared archive is not a downloadable task attachment. No release, issue, workflow or other publication was created as a substitute. Packaging does not claim delivery, and the original files were not recreated or relabelled as a new original run. |
+
+**Producing test revisions:** the substantial correction is commit
+`9091d35b80ac30116b142adf4f8966450debba6e` (tree
+`7b61ab780631c42621b2fc8a81f3d72628247b99`, test blob
+`61193c46e738c5feef0cbbf0535f7a15f4025a53`). A subsequent conservative
+deadline correction, commit
+`2007126aec85dcd4b470e18d08bbed01ff67a942` (tree
+`8cea98ad08ccfb739ecc3879f147e4ce9fd7a728`, final test mode `100644`, blob
+`b064d22dd678593e4f7d3133d9c3679de51e5a80`), classifies a status first
+observed at/after the parent deadline as timed out. Both states were committed
+before their runs; both focused and modest baseline runs passed at each state.
+The **authoritative corrective results** are the repeated runs using the
+final `2007126...` test bytes. Earlier corrective/development runs remain
+separately labelled and do not replace the original historical results.
+
+At `2007126...`, the exact authoritative command was:
+
+```text
+cargo test --locked --target x86_64-unknown-linux-gnu -p qbind-wire --test block_proposal_preflight_tests -- --test-threads=1
+```
+
+Result: **5 passed, 0 failed, 2 intentionally ignored** (the separately
+selected baseline parent and context-requiring child entry). The five executed
+tests were `candidate_acceptance_matrix`, `child_cleanup_controls`,
+`instrumentation_calibration`, `protocol_negative_controls` and
+`setup_refusal_controls`. Normal decoder/calibration children retained CPU
+5:5 s, address space 536,870,912:536,870,912 bytes, core 0:0, verified
+post-exec dumpability 0, private fresh invocation/case files and the original
+65,536-byte/request, 262,144-byte/cumulative, 256-event inclusive ceilings.
+The normal wall limit remains 10 seconds, with a separate bounded 500-ms
+cleanup allowance; only the benign cleanup controls use a shorter 100-ms
+supervision deadline. Guard calibration observed the expected SIGABRT with
+exact GUARD counters; decoder cases had no unexpected timeout, termination
+or process-management error.
+
+**Revised baseline controls:** a detached isolated worktree at exact
+`73c2ad6e249ff77f6fd10761d1a2f90c34d9a903` / tree
+`cee733f72d38de1f67fa6965b61cd10cb0744ce6`, decoder blob
+`9233aaaa21196a3e6e9a3af8303e076671f73718`, was overlaid only with final test
+blob `b064d22dd678593e4f7d3133d9c3679de51e5a80`. This augmented worktree was
+not called pristine. The same Cargo target/profile ran only:
+
+```text
+cargo test --locked --target x86_64-unknown-linux-gnu -p qbind-wire --test block_proposal_preflight_tests -- --ignored --exact baseline_small_controls --test-threads=1
+```
+
+Result: **1 passed, 0 failed, 6 filtered out**. Counts 2 and 8 each completed
+with expected EOF/cursor assertions and observed ordered allocations:
+48 bytes/alignment 8 then 3 bytes/alignment 1, and 192 bytes/alignment 8 then
+3 bytes/alignment 1, respectively. Their source-order correspondence remains
+the baseline list reservation followed by the earlier complete transaction's
+payload copy, not allocation-size-only attribution. No huge baseline count
+or full candidate suite was run there. The isolated worktree/build output is
+temporary, not a retained evidence location.
+
+**Compiler/profile/FFI:** observed `rustc -Vv` was
+`rustc 1.99.1 (58cf8f9c3 2026-10-13)`, commit
+`58cf8f9c35b355199727627d07ae34a4e2846d67`, host
+`x86_64-unknown-linux-gnu`, LLVM 23.1.1; Cargo
+`1.99.1 (5f94df478 2026-08-27)`. This is an observed floating compiler, not a
+pin. The unchanged unoptimized test profile has `debug=0`,
+`strip="debuginfo"`, `incremental=false`; `CARGO_HOME=/usr/local/cargo`,
+no Rust flags/target-dir override for the authoritative suite, and a separate
+temporary target directory for baseline compilation. `/usr/bin/prlimit`
+is util-linux 2.39.3, SHA-256
+`17064f67e650d6152a6902b013aab496b54c87587c8eea6f5023aafee6154069`.
+Before executing controls, the retained C prerequisite check was executed
+anew with GCC 13.3.0/glibc 2.39: `prctl`, `pwrite`, errno declarations,
+integer widths, `PR_SET_DUMPABLE=4`, `PR_GET_DUMPABLE=3`, `EINTR=4`
+matched actual target headers. No compatibility fallback was used.
+
+### Historical matrix reconciliation at the corrective producing revision
+
+All rows below refer to the final `2007126...` focused run unless expressly
+marked historical or not executed. This table supersedes only execution and
+coverage dispositions, not the reviewed correction contract.
+
+| Historical acceptance row | Concrete tests/cases and disposition |
+|---|---|
+| Zero tx, empty tx/signature, mixed/non-empty values | `candidate_acceptance_matrix`: `zero`, `empty_tx`, `nonempty_tx`, `mixed_tx`; passed |
+| QC absent/present/errors/nested leftover | `present_qc`, `bad_qc`, qc-absent fixtures; passed; existing nested leftover acceptance preserved |
+| Tx prefix/body/count mismatch | `prefix_0`–`prefix_3`, `body_truncated`, `count_mismatch`; passed, exact error/cursor and zero allocation |
+| Missing/one-byte signature prefix/body after zero/earlier txs | `signature_prefix_0`, `signature_prefix_1`, `signature_body`, `signature_after_tx`, `later_signature_0`, `later_signature_1`; passed |
+| Truncation after earlier complete tx | `count_mismatch`, `later_body`, `later_signature_0`, `later_signature_1`, `signature_after_tx`; passed |
+| Successful sentinel trailing bytes | `trailing` direct, `wrapped_trailing` through both wrapper entrypoints; passed |
+| Direct/NetMessage/slice wrapper delegation and size boundary | Direct cases, `wrapped_net`, `wrapped_trailing`; passed. Existing size-cap results remain historical at `9bc10bb...`; unchanged targets were not rerun |
+| Encoder/roundtrips/signing preimages | Original six integration targets: 58 passed at `9bc10bb...`; source and these targets unchanged, **NOT RERUN** in corrective task |
+| Actual old decoder counts 2/8, earlier copy | Separate ignored `baseline_small_controls` on exact baseline plus revised overlay; passed |
+| Malformed zero-allocation vs observable valid materialization | Malformed qc-absent candidate cases, `empty_tx`, `nonempty_tx`, `mixed_tx`, `wrapped_trailing`; passed |
+| Selected-target conversion/layout | `target_layout_boundaries` within candidate test; passed, no enormous allocation; 32-bit/other-target execution **NOT EXECUTED** |
+| Inclusive calibration boundaries | `instrumentation_calibration`: `single_allowed`, `bytes_allowed`, `events_allowed`; passed with exact snapshots and exit 0 |
+| Above-boundary calibration | `single_rejected`, `bytes_rejected`, `events_rejected`; expected GUARD plus SIGABRT validated; control passed, not decoder credit |
+| Verified setup/dump suppression and failed setup | Normal dedicated children plus `setup_refusal_controls`; passed. Failure injection is synthetic; actual unavailable/kernel-failure/mismatched-limit cases **NOT EXECUTED** |
+| Missing/unknown selector and zero-match dispatch | Four actual executions in `protocol_negative_controls`; shared validator rejected all, including two successful zero-match processes |
+| Malformed evidence and unexpected guard reasons | Same real validator tested by two synthetic positives and 89 invalid synthetic mutations; all expected decisions obtained; not observed allocator failures |
+| Candidate large count/tiny fixture containment | `large_count`, `large_tx_len`, `max_signature_len`; passed normally with exact EOF/cursor, verified setup and COMPLETE |
+| Small-control fit and unsupported-limit handling | Normal small controls fit all ceilings; injected setup refusal tested. Real unsupported/mismatched prerequisites **NOT EXECUTED**; no fallback or broader platform claim |
+
+**Corrective evidence location:** retained separately under
+`/root/.copilot/session-state/68e4e5078c814cc7ba7fec6c8c02e063/files/a21-f1-correction-evidence/`.
+Final runs are `authoritative/` and `baseline/`; `authoritative-9091d35/`
+and `baseline-9091d35/` retain the preceding committed run.
+`development/` is explicitly non-authoritative (including an initial
+compile-time correction, not a decoder regression). The directory also
+retains Cargo logs, exact baseline overlay identities, toolchain/profile/FFI
+records, decoded raw-record summaries and validation checks. Locally prepared
+original/corrective archives and manifests are identified in the delivery
+report; **no external artifact reference is established**. A private session
+path alone does not satisfy the requested downloadable evidence delivery.
+
+The local transfer-preparation directory is
+`/root/.copilot/session-state/68e4e5078c814cc7ba7fec6c8c02e063/files/a21-f1-review-artifacts/`.
+Both archives were reopened and every member compared byte-for-byte with
+its selected retained source file. They are **local-only**, not attachments.
+
+| Prepared file | Bytes | SHA-256 |
+|---|---|---|
+| `a21-f1-original-evidence.tar.gz` (102 original files plus unchanged original manifest) | 17,251 | `5b1356c1d731caf1cbe3d2a05faa23c433de275591f770d6e736098b1293fa76` |
+| `a21-f1-corrective-evidence.tar.gz` (299 corrective/provenance/development files plus corrective manifest) | 73,138 | `437d11defd1a8017f9b04f2da58b62e3f1d5b563fbc37f4dd52282384153d1cd` |
+| Corrective `MANIFEST.txt` (relative paths, sizes, SHA-256) | 42,422 | `42d05cf978609726db91485e8df8787769e118a454fc72263e166d9503f102b3` |
+
+Focused formatting, relative-documentation-link, whitespace, two-path scope,
+identity-table/alias reconciliation and mode/LF/EOF checks passed. The entire
+accepted E07 section is byte-for-byte unchanged. No additional integration
+targets were necessary: the decoder and the six previously tested targets
+are unchanged. Final commit/tree, task-tip equality and remote-main checks
+are reported after the subsequent evidence commit; no self-referential hash
+is invented here.
+
+Independent **post-correction review remains PENDING**. A21-F1 remains
+**OPEN**; implementation **IMPLEMENTED — VERIFICATION PENDING**;
+OBL-PAR-1/E12/E13 remain open; activation **DISABLED**; public DevNet
+**NO-GO**. Production optional-QC/outer allocations, valid-input
+allocation/layout failures, aggregate/queue/outbound ownership, unreviewed
+targets and runtime/release evidence remain separate residuals. E07's
+accepted bounded result and unrelated inventories/gates are unchanged. No
+node execution, deployment, activation or integration approval is implied.
 
 ### Scope and evidence status
 
