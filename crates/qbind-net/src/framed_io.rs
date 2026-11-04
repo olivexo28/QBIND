@@ -106,6 +106,10 @@ pub fn write_transport_frame<W: Write>(writer: &mut W, frame: &TransportFrame) -
 /// - Returns `io::ErrorKind::UnexpectedEof` if the stream is truncated.
 /// - Returns `io::ErrorKind::InvalidData` if the length exceeds `MAX_TRANSPORT_CIPHERTEXT`
 ///   or if decoding fails.
+///
+/// This stateless helper does not retain partial-frame progress on error.
+/// Callers that retry idle timeouts must track successful byte reads across
+/// the entire call and abandon the session on an error after any consumption.
 pub fn read_transport_frame<R: Read>(reader: &mut R) -> io::Result<TransportFrame> {
     // Read the 5-byte header: msg_type (u8) + len (u32 BE)
     let mut header = [0u8; 5];

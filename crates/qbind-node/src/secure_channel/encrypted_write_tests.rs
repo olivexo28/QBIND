@@ -15,9 +15,9 @@ use qbind_net::{ClientHandshakeConfig, KemPrivateKey, MutualAuthMode, ServerHand
 use qbind_wire::{io::WireEncode, net::NetworkDelegationCert};
 
 #[derive(Debug, Default)]
-struct CryptoTrace {
-    nonces: Mutex<Vec<Vec<u8>>>,
-    opens: AtomicUsize,
+pub(super) struct CryptoTrace {
+    pub(super) nonces: Mutex<Vec<Vec<u8>>>,
+    pub(super) opens: AtomicUsize,
     fail_seal: AtomicBool,
 }
 
@@ -78,7 +78,7 @@ impl SignatureSuite for TestSignature {
     }
 }
 
-fn pair(peer_init: bool) -> (SecureChannel, SecureChannel, Arc<CryptoTrace>) {
+pub(super) fn pair(peer_init: bool) -> (SecureChannel, SecureChannel, Arc<CryptoTrace>) {
     let trace = Arc::new(CryptoTrace::default());
     let provider = Arc::new(
         StaticCryptoProvider::new()
@@ -305,10 +305,19 @@ fn sync_zero_partial_flush_and_shutdown_failures_both_directions() {
                     assert_invalidated(sender.recv_app().map(|_| ()));
                     assert_eq!(crypto.opens.load(Ordering::SeqCst), 0);
                 } else {
-                    assert!(matches!(
-                        peer.recv_app(),
-                        Err(ChannelError::Io(ref e)) if e.kind() == io::ErrorKind::UnexpectedEof
-                    ));
+                    let error = peer.recv_app().unwrap_err();
+                    if limit == 0 {
+                        assert!(
+                            matches!(error, ChannelError::Io(ref e) if e.kind() == io::ErrorKind::UnexpectedEof)
+                        );
+                    } else {
+                        assert!(matches!(error, ChannelError::Io(ref e)
+                            if e.kind() == io::ErrorKind::InvalidData
+                                && e.get_ref().unwrap().downcast_ref::<PartialFrameError>()
+                                    .is_some_and(|detail| detail.consumed == limit
+                                        && detail.cause.kind() == io::ErrorKind::UnexpectedEof)));
+                        assert!(!peer.is_established());
+                    }
                 }
             }
             assert!(SecureChannelAsync::try_new(sender).is_err());

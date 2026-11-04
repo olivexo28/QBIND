@@ -65,7 +65,11 @@
 #[path = "secure_channel/encrypted_write_tests.rs"]
 mod encrypted_write_tests;
 
-use std::io;
+#[cfg(test)]
+#[path = "secure_channel/partial_read_tests.rs"]
+mod partial_read_tests;
+
+use std::io::{self, Read};
 use std::net::{Shutdown, TcpStream};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -197,6 +201,52 @@ impl From<NetError> for ChannelError {
     }
 }
 
+struct FrameProgress<'a, R> {
+    reader: &'a mut R,
+    consumed: usize,
+}
+
+impl<R: Read> Read for FrameProgress<'_, R> {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        let n = self.reader.read(buf)?;
+        self.consumed += n;
+        Ok(n)
+    }
+    // Use Read's default read_exact, so every successful read is counted,
+    // even if the underlying reader overrides read_exact.
+}
+
+fn read_counted_frame<R: Read>(reader: &mut R) -> (io::Result<TransportFrame>, usize) {
+    let mut progress = FrameProgress {
+        reader,
+        consumed: 0,
+    };
+    let result = read_transport_frame(&mut progress);
+    (result, progress.consumed)
+}
+
+#[derive(Debug)]
+struct PartialFrameError {
+    consumed: usize,
+    cause: io::Error,
+}
+
+impl std::fmt::Display for PartialFrameError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "transport frame failed after {} bytes; session invalidated: {}",
+            self.consumed, self.cause
+        )
+    }
+}
+
+impl std::error::Error for PartialFrameError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        Some(&self.cause)
+    }
+}
+
 /// Configure socket options for responsiveness.
 fn configure_socket(stream: &TcpStream) {
     stream.set_nodelay(true).ok();
@@ -224,6 +274,8 @@ pub struct SecureChannel {
     invalidated: Arc<AtomicBool>,
     #[cfg(test)]
     write_fault: Option<encrypted_write_tests::WriteFault>,
+    #[cfg(test)]
+    read_fault: Option<partial_read_tests::ReadFault>,
 }
 
 impl SecureChannel {
@@ -234,6 +286,8 @@ impl SecureChannel {
             invalidated: Arc::new(AtomicBool::new(false)),
             #[cfg(test)]
             write_fault: None,
+            #[cfg(test)]
+            read_fault: None,
         }
     }
 
@@ -451,6 +505,10 @@ impl SecureChannel {
 
     fn shutdown_socket(&self) -> io::Result<()> {
         #[cfg(test)]
+        if let Some(fault) = &self.read_fault {
+            fault.before_shutdown()?;
+        }
+        #[cfg(test)]
         if let Some(fault) = &self.write_fault {
             fault.before_shutdown()?;
         }
@@ -475,11 +533,38 @@ impl SecureChannel {
     ///
     /// # Errors
     ///
-    /// Returns `ChannelError` if the session was invalidated by a send error,
-    /// the TCP read fails or decryption fails.
+    /// Zero-progress idle WouldBlock/TimedOut errors remain retryable. Any
+    /// framing error after consuming bytes invalidates the shared session and
+    /// attempts socket shutdown. It returns Io(InvalidData) with the original
+    /// I/O error as a source, never a retryable timeout-shaped error.
+    /// Also fails if already invalidated, or if decryption fails.
     pub fn recv_app(&mut self) -> Result<Vec<u8>, ChannelError> {
         self.ensure_usable()?;
-        let frame = read_transport_frame(&mut self.stream)?;
+        #[cfg(test)]
+        let (result, consumed) = if let Some(fault) = &mut self.read_fault {
+            read_counted_frame(&mut fault.reader(&mut self.stream))
+        } else {
+            read_counted_frame(&mut self.stream)
+        };
+        #[cfg(not(test))]
+        let (result, consumed) = read_counted_frame(&mut self.stream);
+        let frame = match result {
+            Ok(frame) => frame,
+            Err(cause) if consumed > 0 => {
+                self.invalidated.store(true, Ordering::SeqCst);
+                if let Err(error) = self.shutdown_socket() {
+                    eprintln!(
+                        "[SecureChannel] socket shutdown failed after frame read failure; session remains invalidated: {}",
+                        error
+                    );
+                }
+                return Err(ChannelError::Io(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    PartialFrameError { consumed, cause },
+                )));
+            }
+            Err(error) => return Err(error.into()),
+        };
         let plaintext = self.conn.decrypt_app(&frame.encode()?)?;
         Ok(plaintext)
     }
@@ -740,9 +825,7 @@ impl SecureChannelAsync {
                         break;
                     }
                 }
-                // Both TimedOut and WouldBlock are treated as non-fatal, retryable conditions:
-                // - TimedOut: socket read timeout expired, no data available yet
-                // - WouldBlock: on some Linux systems, socket timeouts return EAGAIN instead of ETIMEDOUT
+                // recv_app preserves timeout kinds only with zero frame progress.
                 Err(ChannelError::Io(io_err))
                     if io_err.kind() == io::ErrorKind::TimedOut
                         || io_err.kind() == io::ErrorKind::WouldBlock =>
@@ -888,7 +971,7 @@ impl SecureChannelAsync {
     /// - Encryption fails
     /// - TCP write fails
     /// - The writer worker has terminated
-    /// - The session was invalidated by a previous send failure
+    /// - The session was invalidated by a send or partial-frame read failure
     pub async fn send(&self, plaintext: &[u8]) -> Result<(), AsyncChannelError> {
         if self.invalidated.load(Ordering::SeqCst) {
             return Err(SecureChannel::invalidated_error().into());
@@ -928,7 +1011,7 @@ impl SecureChannelAsync {
     /// - TCP read fails (including timeout or EOF)
     /// - Decryption fails
     /// - The reader worker has terminated
-    /// - The session was invalidated by a send failure
+    /// - The session was invalidated by a send or partial-frame read failure
     pub async fn recv(&self) -> Result<Vec<u8>, AsyncChannelError> {
         if self.invalidated.load(Ordering::SeqCst) {
             return Err(SecureChannel::invalidated_error().into());
@@ -940,8 +1023,9 @@ impl SecureChannelAsync {
             .await
             .ok_or(AsyncChannelError::ChannelClosed)?
             .map_err(AsyncChannelError::Channel);
-        // Do not release already-queued plaintext after a failed send.
-        if self.invalidated.load(Ordering::SeqCst) {
+        // Keep fatal error details, but never release queued plaintext after
+        // session invalidation.
+        if result.is_ok() && self.invalidated.load(Ordering::SeqCst) {
             return Err(SecureChannel::invalidated_error().into());
         }
         result
@@ -949,7 +1033,7 @@ impl SecureChannelAsync {
 
     /// Check if the underlying connection is established.
     ///
-    /// Requires an open writer queue and a session not invalidated by a send
+    /// Requires an open writer queue and a session not invalidated by an I/O
     /// failure. This does not establish reader/worker completion or peer removal.
     ///
     /// # Returns
