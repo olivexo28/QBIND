@@ -2933,7 +2933,7 @@ publication (observed 130/143/129), and SIGKILL before/after (observed -9).
 The after-PASS tests synchronized actual replacement while the harness was
 still alive; matching-ID PASS after SIGKILL did not count as success.
 
-[Retained evidence README](evidence/a37-1-c2/README.md) maps all matrix
+[Retained historical evidence README](https://github.com/olivexo28/QBIND/blob/6fdc0f0dcfc45c65037de3e53215121f5332689a/docs/security/evidence/a37-1-c2/README.md) maps all matrix
 categories to actual modes and limitations. It links the raw case logs,
 per-case results, invocation identities, manifests, per-command logs/statuses,
 guard/fault evidence, signal supervision/reaping, environment/tool versions,
@@ -2960,3 +2960,49 @@ post-implementation review is **PENDING**; E07 / OBL-GOV-2 remain **OPEN**.
 Historical source/build/execution provenance, real runtime and release
 evidence remain unresolved. Activation remains **DISABLED**; public DevNet
 remains **NO-GO**.
+
+### Bounded implementation-review corrections: exact publication and supervision
+
+Two independently identified review issues are corrected before integration.
+These are bounded A37.1-C2 / A38-iv implementation-review corrections, not new
+canonical audit findings. The required correction entry was
+`6fdc0f0dcfc45c65037de3e53215121f5332689a`, tree
+`b43769723cbe2b0319ad0b3166e8bcfe14fec5d3`; origin task tip matched and the
+checkout was clean after continuing that existing branch. Protected remote
+main remained `f36e59a5e2cebab6fdfd0365920ca3e1a09444ac`.
+
+The actual entry publishers reproduced zero status while moving a temporary
+summary inside an existing directory or directory symlink. Both startup/
+repair and final publishers now require GNU `mv -fT`, replacing the exact
+destination entry. Real directories fail without deletion; symlinks are
+replaced themselves, leaving referents untouched. Startup directory failure
+precedes build/helper/node/regression work; invalid final publication cannot
+complete successfully. Same-directory temporaries, single-writer assumptions
+and crash-durability limitations are unchanged.
+
+The historical driver also reproduced an assertion escaping while its inert
+surrogate and sleeping child remained alive, without calling driver cleanup.
+The reproducer's independent outer owner contained/reaped those processes.
+The corrected fixture owns every launched case in a finally-backed scope,
+retains the original exception, separately reports cleanup failures and
+retains unsafe workspaces rather than deleting/reusing live-child output.
+It validates Linux subreaper and `/proc` PID/process-group visibility before
+launching cases; kernel group absence plus reaping is required, not just an
+empty scan. The reviewer-environment visibility mismatch is not attributed
+to the original Copilot run.
+
+The original **94-case pass remains historical evidence**, with coverage
+limitations: directory-target interpretation, exceptional driver cleanup
+and namespace visibility were not established by that pass. Every original
+`evidence/a37-1-c2/` byte, including its historical checksum manifest, is
+unchanged; historical references are pinned to the required entry revision
+instead of regenerating that manifest against corrected files.
+[Corrective evidence](evidence/a37-1-c2-correction/README.md) retains bounded
+reproductions, actual-script destination cases, independently watched
+supervisor negative cases and producing-revision verification records.
+
+Status remains **IMPLEMENTED — VERIFICATION PENDING**. Independent
+post-correction review remains **PENDING**. E07 / OBL-GOV-2 remain **OPEN**;
+activation **DISABLED**; public DevNet **NO-GO**. No real Cargo/Rust tests,
+release harnesses, node/helper binaries, networking, deployment, signing or
+activation are authorized or claimed by these corrections.

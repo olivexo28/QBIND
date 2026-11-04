@@ -59,7 +59,7 @@ publish_incomplete() {
   if ! tmp="$(mktemp "${SUMMARY}.tmp.XXXXXX")"; then return 1; fi
   SUMMARY_TMP="$tmp"
   if ! printf 'run_id=%s\nverdict: INCOMPLETE\n' "$RUN_ID" > "$tmp"; then return 1; fi
-  if ! mv -f -- "$tmp" "$SUMMARY"; then return 1; fi
+  if ! mv -fT -- "$tmp" "$SUMMARY"; then return 1; fi
   SUMMARY_TMP=""
 }
 finish() {
@@ -407,7 +407,7 @@ SUMMARY_TMP="$(mktemp "${SUMMARY}.tmp.XXXXXX")" || fail "cannot create final sum
 for v in "${TEST_VERDICTS[@]}"; do
   [[ "$(grep -Fxc -- "  ${v}" "${SUMMARY_TMP}")" == 1 ]] || fail "unincorporated regression result"
 done
-mv -f -- "${SUMMARY_TMP}" "${SUMMARY}" || fail "cannot publish final summary"
+mv -fT -- "${SUMMARY_TMP}" "${SUMMARY}" || fail "cannot publish final summary"
 SUMMARY_TMP=""
 COMPLETED=1
 log "done — summary at ${SUMMARY}"

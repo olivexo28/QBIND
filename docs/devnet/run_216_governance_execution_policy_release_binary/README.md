@@ -62,6 +62,11 @@ successful atomic summary publication, not human-readable PASS text alone.
 Scenario/helper/denylist assertions remain separate.
 
 Summary writes use checked same-directory temporary files and rename.
+GNU coreutils `mv` with `-T` is required: `summary.txt` is an exact
+destination, never a destination directory. Existing directories are refused
+without removing their contents; a destination symlink is replaced itself
+(its referent is untouched). Invalid final destinations cannot complete
+successfully. Single-writer and crash-durability limitations are unchanged.
 Initialization failure stops work and warns that any old summary is
 untrusted. SIGINT/SIGTERM/SIGHUP trigger best-effort INCOMPLETE repair and
 nonzero exit when Bash runs the handler; foreground commands can defer it.
@@ -80,7 +85,12 @@ bash scripts/devnet/tests/run_216_227_regression_verdict_fixture.sh /tmp/new-exc
 
 It executes LF-normalized temporary copies with guarded stubs, not real
 Cargo/node/helper binaries or the committed CRLF full release harness.
-See [bounded evidence](../../security/evidence/a37-1-c2/README.md).
+The fixture requires Linux subreaper support and a `/proc` PID/process-group
+namespace matching Python and `killpg`; it refuses unsupported visibility
+before cases launch. Cleanup is exception-safe and kernel group absence is
+required before directory reuse/removal.
+See [historical bounded evidence](https://github.com/olivexo28/QBIND/blob/6fdc0f0dcfc45c65037de3e53215121f5332689a/docs/security/evidence/a37-1-c2/README.md)
+and [bounded review corrections](../../security/evidence/a37-1-c2-correction/README.md).
 
 ## Honest limitations
 
