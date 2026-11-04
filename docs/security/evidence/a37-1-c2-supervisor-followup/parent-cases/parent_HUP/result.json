@@ -1,0 +1,22 @@
+{
+  "mode": "parent_HUP",
+  "original_error": "InterruptedError('watchdog parent interrupted by SIGHUP')",
+  "notes": [],
+  "identity": {
+    "worker": 6802,
+    "group": 6803,
+    "session": 6802,
+    "child": 6807
+  },
+  "workspace": "/tmp/qbind-verdict-fixture-sm1l4g0_",
+  "workspace_exists": false,
+  "unsafe_groups": [],
+  "descriptors": [
+    3,
+    4,
+    5
+  ],
+  "descriptors_closed": true,
+  "worker_reaped": true,
+  "tested_cleanup": "quiescent before workspace deletion"
+}

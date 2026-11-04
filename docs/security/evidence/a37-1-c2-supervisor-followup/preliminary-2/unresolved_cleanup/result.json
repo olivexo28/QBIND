@@ -1,0 +1,24 @@
+{
+  "mode": "unresolved_cleanup",
+  "original_error": "KeyboardInterrupt('injected parent interruption unresolved_cleanup')",
+  "notes": [
+    "watchdog cleanup: RuntimeError('injected unresolved containment; no success claimed')"
+  ],
+  "identity": {
+    "worker": 928,
+    "group": 929,
+    "session": 928,
+    "child": 930
+  },
+  "workspace": "/tmp/qbind-verdict-fixture-4u2340cj",
+  "workspace_exists": true,
+  "unsafe_groups": [
+    928
+  ],
+  "descriptors": [
+    3,
+    4
+  ],
+  "descriptors_closed": true,
+  "tested_cleanup": "FAILED; expected unresolved refusal; outer containment required"
+}

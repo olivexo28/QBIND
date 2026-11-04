@@ -1,0 +1,22 @@
+{
+  "mode": "timeout",
+  "original_error": "AssertionError(('watchdog failure', None, [19964, 19965], [{'started_group': 19965}]))",
+  "notes": [],
+  "identity": {
+    "worker": 19964,
+    "group": 19965,
+    "session": 19964,
+    "child": 19967
+  },
+  "workspace": "/tmp/qbind-verdict-fixture-qeabj77z",
+  "workspace_exists": false,
+  "unsafe_groups": [],
+  "descriptors": [
+    3,
+    4,
+    5
+  ],
+  "descriptors_closed": true,
+  "worker_reaped": true,
+  "tested_cleanup": "quiescent before workspace deletion"
+}

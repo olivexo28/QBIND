@@ -1,0 +1,21 @@
+{
+  "mode": "malformed",
+  "original_error": "JSONDecodeError('Expecting value: line 1 column 8 (char 7)')",
+  "notes": [],
+  "identity": {
+    "worker": 779,
+    "group": 780,
+    "session": 779,
+    "child": 781
+  },
+  "workspace": "/tmp/qbind-verdict-fixture-l8n1b8hb",
+  "workspace_exists": false,
+  "unsafe_groups": [],
+  "descriptors": [
+    3,
+    4
+  ],
+  "descriptors_closed": true,
+  "worker_reaped": true,
+  "tested_cleanup": "quiescent before workspace deletion"
+}

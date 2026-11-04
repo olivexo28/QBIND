@@ -1,0 +1,22 @@
+{
+  "mode": "pipe_error",
+  "original_error": "OSError('injected parent pipe read failure')",
+  "notes": [],
+  "identity": {
+    "worker": 19803,
+    "group": 19804,
+    "session": 19803,
+    "child": 19806
+  },
+  "workspace": "/tmp/qbind-verdict-fixture-yp2ggbgg",
+  "workspace_exists": false,
+  "unsafe_groups": [],
+  "descriptors": [
+    3,
+    4,
+    5
+  ],
+  "descriptors_closed": true,
+  "worker_reaped": true,
+  "tested_cleanup": "quiescent before workspace deletion"
+}

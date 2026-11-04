@@ -1,0 +1,5 @@
+Traceback (most recent call last):
+  File "/workspaces/QBIND/olivexo28/QBIND/docs/security/evidence/a37-1-c2-supervisor-followup/watchdog_cases.py", line 190, in <module>
+    assert status == 0, (mode, status, (case / "tester-error.txt").read_text())
+           ^^^^^^^^^^^
+AssertionError: ('before_registration', 256, "FileNotFoundError(2, 'No such file or directory')")

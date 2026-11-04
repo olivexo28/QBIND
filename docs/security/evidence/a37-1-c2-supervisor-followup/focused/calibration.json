@@ -1,0 +1,62 @@
+{
+  "checks": [
+    {
+      "command": [
+        "cargo",
+        "unexpected"
+      ],
+      "expected": 97,
+      "actual": 97
+    },
+    {
+      "command": [
+        "curl",
+        "http://127.0.0.1/"
+      ],
+      "expected": 97,
+      "actual": 97
+    },
+    {
+      "command": [
+        "rm",
+        "-rf",
+        "/not-a-fixture-path"
+      ],
+      "expected": 97,
+      "actual": 97
+    },
+    {
+      "command": [
+        "git",
+        "fetch"
+      ],
+      "expected": 97,
+      "actual": 97
+    },
+    {
+      "command": [
+        "env",
+        "/bin/false"
+      ],
+      "expected": 97,
+      "actual": 97
+    },
+    {
+      "command": [
+        "xargs",
+        "sh"
+      ],
+      "expected": 97,
+      "actual": 97
+    },
+    {
+      "command": [
+        "mkdir",
+        "/tmp/qbind-verdict-fixture-_cxp6p65/calibrated"
+      ],
+      "expected": 0,
+      "actual": 0
+    }
+  ],
+  "guard_log": "{\"kind\": \"ALLOW\", \"command\": \"cargo\", \"args\": [\"unexpected\"], \"pid\": 6653}\n{\"kind\": \"REJECT\", \"command\": \"cargo\", \"args\": [\"unexpected\"], \"pid\": 6653, \"reason\": \"unexpected Cargo invocation\"}\n{\"kind\": \"ALLOW\", \"command\": \"curl\", \"args\": [\"http://127.0.0.1/\"], \"pid\": 6655}\n{\"kind\": \"REJECT\", \"command\": \"curl\", \"args\": [\"http://127.0.0.1/\"], \"pid\": 6655, \"reason\": \"unexpected executable\"}\n{\"kind\": \"ALLOW\", \"command\": \"rm\", \"args\": [\"-rf\", \"/not-a-fixture-path\"], \"pid\": 6656}\n{\"kind\": \"REJECT\", \"command\": \"rm\", \"args\": [\"-rf\", \"/not-a-fixture-path\"], \"pid\": 6656, \"reason\": \"out-of-root cleanup\"}\n{\"kind\": \"ALLOW\", \"command\": \"git\", \"args\": [\"fetch\"], \"pid\": 6658}\n{\"kind\": \"REJECT\", \"command\": \"git\", \"args\": [\"fetch\"], \"pid\": 6658, \"reason\": \"unexpected git root\"}\n{\"kind\": \"ALLOW\", \"command\": \"env\", \"args\": [\"/bin/false\"], \"pid\": 6669}\n{\"kind\": \"REJECT\", \"command\": \"env\", \"args\": [\"/bin/false\"], \"pid\": 6669, \"reason\": \"unexpected env executable\"}\n{\"kind\": \"ALLOW\", \"command\": \"xargs\", \"args\": [\"sh\"], \"pid\": 6674}\n{\"kind\": \"REJECT\", \"command\": \"xargs\", \"args\": [\"sh\"], \"pid\": 6674, \"reason\": \"unexpected xargs executable\"}\n{\"kind\": \"ALLOW\", \"command\": \"mkdir\", \"args\": [\"/tmp/qbind-verdict-fixture-_cxp6p65/calibrated\"], \"pid\": 6676}\n"
+}

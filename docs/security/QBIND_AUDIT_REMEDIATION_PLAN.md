@@ -2997,7 +2997,7 @@ and namespace visibility were not established by that pass. Every original
 `evidence/a37-1-c2/` byte, including its historical checksum manifest, is
 unchanged; historical references are pinned to the required entry revision
 instead of regenerating that manifest against corrected files.
-[Corrective evidence](evidence/a37-1-c2-correction/README.md) retains bounded
+[Historical corrective evidence](https://github.com/olivexo28/QBIND/blob/d494ce2af1dd522e8ec0fc14c36b02a19e50b209/docs/security/evidence/a37-1-c2-correction/README.md) retains bounded
 reproductions, actual-script destination cases, independently watched
 supervisor negative cases and producing-revision verification records.
 
@@ -3071,6 +3071,33 @@ unchanged. Historical manifests remain pinned to their historical revisions.
 distinguishes reviewer reporting, local reproductions, preliminary calibration
 and exact-producing-revision verification. This is a bounded implementation-
 review correction, not a new canonical audit finding.
+
+Implementation/test producing commit:
+`e02047003a3ac5d099a12268dda5fb210ef69902`, tree
+`7323a8e2faaf69361559b6cac6c675abfc8b0789`, sole parent the required entry
+`d494ce2af1dd522e8ec0fc14c36b02a19e50b209`. Because negative-worker session
+setup changed, the **full existing suite** was rerun against that exact
+revision: exit **0**, **120 actual isolated harness-copy invocations**,
+including all 110 matrix identities and all ten supervisor-negative controls.
+There were **2,033 guarded stub regression command attempts**, **zero Rust
+tests**, and **zero watchdog rescues** in those 120 invocations. Parent
+worker reaping, session/kernel group absence and descriptor closure are
+additionally retained for all ten controls.
+
+Two producing-revision inert parent-fault executions each ran ten function
+cases, not full harnesses: interruption before/after announcement, pipe/wait
+errors, actual TERM/HUP, malformed/incomplete messages, timeout and deliberate
+unresolved cleanup. Across those 20 cases, **18 cleanups succeeded without
+outer rescue** and **two deliberately failed cleanups required outer rescue**;
+those failures are not counted as successful tested-watchdog cleanup.
+The latter verified original-error preservation, separate cleanup notes,
+unsafe-state/reuse refusal and workspace retention. A separate observer
+checked kernel/group/recorded-child absence at all ten actual deletion
+boundaries in the second execution, including outer deletion only after
+quiescence. Pre-commit calibration (nine worker cases, including an early
+descriptor failure) and the separate local historical reproduction are
+retained distinctly, not included in the authoritative 120 invocation count.
+The following evidence/documentation commit changes no fixture/test bytes.
 
 Status remains **IMPLEMENTED — VERIFICATION PENDING**; independent
 post-correction review **PENDING**. E07 / OBL-GOV-2 **OPEN**; activation

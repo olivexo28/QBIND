@@ -1,0 +1,1 @@
+{"worker": 651, "original_error": "KeyboardInterrupt('injected parent interruption before_registration')", "cleanup": {"worker": 651, "worker_reaped": true, "session": 651, "observed_pids": [651, 652, 653], "groups": [651, 652], "reaped": [[651, 9], [652, 9], [653, 9]], "remaining": [], "kernel_groups_absent": true}, "owned_descriptors_closed": true, "cleanup_failures": []}

@@ -1,0 +1,1152 @@
+[
+  {
+    "case": "216-baseline-success",
+    "verdict": "PASS",
+    "returncode": 0,
+    "required_count": 37,
+    "attempted_count": 37,
+    "fault_triggers": [],
+    "cleanup_verified": true
+  },
+  {
+    "case": "216-baseline-first",
+    "verdict": "PASS",
+    "returncode": 0,
+    "required_count": 37,
+    "attempted_count": 37,
+    "fault_triggers": [
+      "cargo:test:run_215_governance_execution_policy_selector_tests:17"
+    ],
+    "cleanup_verified": true
+  },
+  {
+    "case": "216-candidate-success",
+    "verdict": "PASS",
+    "returncode": 0,
+    "required_count": 37,
+    "attempted_count": 37,
+    "fault_triggers": [],
+    "cleanup_verified": true
+  },
+  {
+    "case": "216-candidate-first",
+    "verdict": "FAIL",
+    "returncode": 1,
+    "required_count": 37,
+    "attempted_count": 37,
+    "fault_triggers": [
+      "cargo:test:run_215_governance_execution_policy_selector_tests:17"
+    ],
+    "cleanup_verified": true
+  },
+  {
+    "case": "216-candidate-middle",
+    "verdict": "FAIL",
+    "returncode": 1,
+    "required_count": 37,
+    "attempted_count": 37,
+    "fault_triggers": [
+      "cargo:test:run_180_onchain_governance_marker_integration_tests:23"
+    ],
+    "cleanup_verified": true
+  },
+  {
+    "case": "216-candidate-last",
+    "verdict": "FAIL",
+    "returncode": 1,
+    "required_count": 37,
+    "attempted_count": 37,
+    "fault_triggers": [
+      "cargo:test:run_138_sighup_v2_authority_marker_tests:29"
+    ],
+    "cleanup_verified": true
+  },
+  {
+    "case": "216-candidate-lib_first",
+    "verdict": "FAIL",
+    "returncode": 1,
+    "required_count": 37,
+    "attempted_count": 37,
+    "fault_triggers": [
+      "cargo:lib:pqc_authority:31"
+    ],
+    "cleanup_verified": true
+  },
+  {
+    "case": "216-candidate-lib_last",
+    "verdict": "FAIL",
+    "returncode": 1,
+    "required_count": 37,
+    "attempted_count": 37,
+    "fault_triggers": [
+      "cargo:lib:lib_all:37"
+    ],
+    "cleanup_verified": true
+  },
+  {
+    "case": "216-candidate-multiple",
+    "verdict": "FAIL",
+    "returncode": 1,
+    "required_count": 37,
+    "attempted_count": 37,
+    "fault_triggers": [
+      "cargo:test:run_215_governance_execution_policy_selector_tests:17",
+      "cargo:lib:pqc_authority:31"
+    ],
+    "cleanup_verified": true
+  },
+  {
+    "case": "216-candidate-missing",
+    "verdict": "FAIL",
+    "returncode": 1,
+    "required_count": 37,
+    "attempted_count": 36,
+    "fault_triggers": [],
+    "cleanup_verified": true
+  },
+  {
+    "case": "216-candidate-log_error",
+    "verdict": "INCOMPLETE",
+    "returncode": 1,
+    "required_count": 37,
+    "attempted_count": 36,
+    "fault_triggers": [
+      "log_error"
+    ],
+    "cleanup_verified": true
+  },
+  {
+    "case": "216-candidate-failure_and_capture",
+    "verdict": "INCOMPLETE",
+    "returncode": 1,
+    "required_count": 37,
+    "attempted_count": 36,
+    "fault_triggers": [
+      "failure_and_capture",
+      "cargo:test:run_215_governance_execution_policy_selector_tests:17"
+    ],
+    "cleanup_verified": true
+  },
+  {
+    "case": "216-candidate-launch_failure",
+    "verdict": "FAIL",
+    "returncode": 1,
+    "required_count": 37,
+    "attempted_count": 37,
+    "fault_triggers": [
+      "cargo:test:run_215_governance_execution_policy_selector_tests:127"
+    ],
+    "cleanup_verified": true
+  },
+  {
+    "case": "216-candidate-malformed_state",
+    "verdict": "INCOMPLETE",
+    "returncode": 1,
+    "required_count": 37,
+    "attempted_count": 37,
+    "fault_triggers": [
+      "malformed_state"
+    ],
+    "cleanup_verified": true
+  },
+  {
+    "case": "216-candidate-malformed_rc",
+    "verdict": "INCOMPLETE",
+    "returncode": 1,
+    "required_count": 37,
+    "attempted_count": 37,
+    "fault_triggers": [
+      "malformed_rc"
+    ],
+    "cleanup_verified": true
+  },
+  {
+    "case": "216-candidate-duplicate",
+    "verdict": "INCOMPLETE",
+    "returncode": 1,
+    "required_count": 37,
+    "attempted_count": 37,
+    "fault_triggers": [
+      "duplicate"
+    ],
+    "cleanup_verified": true
+  },
+  {
+    "case": "216-candidate-stale",
+    "verdict": "INCOMPLETE",
+    "returncode": 1,
+    "required_count": 37,
+    "attempted_count": 37,
+    "fault_triggers": [
+      "stale"
+    ],
+    "cleanup_verified": true
+  },
+  {
+    "case": "216-candidate-missing_row",
+    "verdict": "INCOMPLETE",
+    "returncode": 1,
+    "required_count": 37,
+    "attempted_count": 37,
+    "fault_triggers": [
+      "missing_row"
+    ],
+    "cleanup_verified": true
+  },
+  {
+    "case": "216-candidate-unknown",
+    "verdict": "INCOMPLETE",
+    "returncode": 1,
+    "required_count": 37,
+    "attempted_count": 37,
+    "fault_triggers": [
+      "unknown"
+    ],
+    "cleanup_verified": true
+  },
+  {
+    "case": "216-candidate-manifest_header",
+    "verdict": "INCOMPLETE",
+    "returncode": 1,
+    "required_count": 37,
+    "attempted_count": 37,
+    "fault_triggers": [
+      "manifest_header"
+    ],
+    "cleanup_verified": true
+  },
+  {
+    "case": "216-candidate-unterminated",
+    "verdict": "INCOMPLETE",
+    "returncode": 1,
+    "required_count": 37,
+    "attempted_count": 37,
+    "fault_triggers": [
+      "unterminated"
+    ],
+    "cleanup_verified": true
+  },
+  {
+    "case": "216-candidate-status_mismatch",
+    "verdict": "INCOMPLETE",
+    "returncode": 1,
+    "required_count": 37,
+    "attempted_count": 37,
+    "fault_triggers": [
+      "status_mismatch"
+    ],
+    "cleanup_verified": true
+  },
+  {
+    "case": "216-candidate-status_missing",
+    "verdict": "INCOMPLETE",
+    "returncode": 1,
+    "required_count": 37,
+    "attempted_count": 37,
+    "fault_triggers": [
+      "status_missing"
+    ],
+    "cleanup_verified": true
+  },
+  {
+    "case": "216-candidate-status_extra",
+    "verdict": "INCOMPLETE",
+    "returncode": 1,
+    "required_count": 37,
+    "attempted_count": 37,
+    "fault_triggers": [
+      "status_extra"
+    ],
+    "cleanup_verified": true
+  },
+  {
+    "case": "216-candidate-manifest_nul",
+    "verdict": "INCOMPLETE",
+    "returncode": 1,
+    "required_count": 37,
+    "attempted_count": 37,
+    "fault_triggers": [
+      "manifest_nul"
+    ],
+    "cleanup_verified": true
+  },
+  {
+    "case": "216-candidate-status_nul",
+    "verdict": "INCOMPLETE",
+    "returncode": 1,
+    "required_count": 37,
+    "attempted_count": 37,
+    "fault_triggers": [
+      "status_nul"
+    ],
+    "cleanup_verified": true
+  },
+  {
+    "case": "216-candidate-rc_io",
+    "verdict": "INCOMPLETE",
+    "returncode": 1,
+    "required_count": 37,
+    "attempted_count": 37,
+    "fault_triggers": [
+      "rc_io"
+    ],
+    "cleanup_verified": true
+  },
+  {
+    "case": "216-candidate-manifest_io",
+    "verdict": "INCOMPLETE",
+    "returncode": 1,
+    "required_count": 37,
+    "attempted_count": 37,
+    "fault_triggers": [
+      "manifest_io"
+    ],
+    "cleanup_verified": true
+  },
+  {
+    "case": "216-candidate-startup_write",
+    "verdict": "OLD_UNTRUSTED",
+    "returncode": 1,
+    "required_count": 37,
+    "attempted_count": 0,
+    "fault_triggers": [
+      "startup_write"
+    ],
+    "cleanup_verified": true
+  },
+  {
+    "case": "216-candidate-startup_rename",
+    "verdict": "OLD_UNTRUSTED",
+    "returncode": 1,
+    "required_count": 37,
+    "attempted_count": 0,
+    "fault_triggers": [
+      "startup_rename"
+    ],
+    "cleanup_verified": true
+  },
+  {
+    "case": "216-candidate-final_write",
+    "verdict": "INCOMPLETE",
+    "returncode": 1,
+    "required_count": 37,
+    "attempted_count": 37,
+    "fault_triggers": [
+      "final_write"
+    ],
+    "cleanup_verified": true
+  },
+  {
+    "case": "216-candidate-final_rename",
+    "verdict": "INCOMPLETE",
+    "returncode": 1,
+    "required_count": 37,
+    "attempted_count": 37,
+    "fault_triggers": [
+      "final_rename"
+    ],
+    "cleanup_verified": true
+  },
+  {
+    "case": "216-candidate-seeded_pass_build_failure",
+    "verdict": "INCOMPLETE",
+    "returncode": 1,
+    "required_count": 37,
+    "attempted_count": 0,
+    "fault_triggers": [
+      "seeded_pass_build_failure"
+    ],
+    "cleanup_verified": true
+  },
+  {
+    "case": "216-candidate-early_build",
+    "verdict": "INCOMPLETE",
+    "returncode": 1,
+    "required_count": 37,
+    "attempted_count": 0,
+    "fault_triggers": [
+      "early_build"
+    ],
+    "cleanup_verified": true
+  },
+  {
+    "case": "216-candidate-helper_fail",
+    "verdict": "INCOMPLETE",
+    "returncode": 1,
+    "required_count": 37,
+    "attempted_count": 0,
+    "fault_triggers": [
+      "helper_fail"
+    ],
+    "cleanup_verified": true
+  },
+  {
+    "case": "216-candidate-help_fail",
+    "verdict": "INCOMPLETE",
+    "returncode": 1,
+    "required_count": 37,
+    "attempted_count": 0,
+    "fault_triggers": [
+      "help_fail"
+    ],
+    "cleanup_verified": true
+  },
+  {
+    "case": "216-candidate-denylist",
+    "verdict": "INCOMPLETE",
+    "returncode": 7,
+    "required_count": 37,
+    "attempted_count": 0,
+    "fault_triggers": [
+      "denylist"
+    ],
+    "cleanup_verified": true
+  },
+  {
+    "case": "216-candidate-before_INT",
+    "verdict": "INCOMPLETE",
+    "returncode": 130,
+    "required_count": 37,
+    "attempted_count": 1,
+    "fault_triggers": [],
+    "cleanup_verified": true
+  },
+  {
+    "case": "216-candidate-before_TERM",
+    "verdict": "INCOMPLETE",
+    "returncode": 143,
+    "required_count": 37,
+    "attempted_count": 1,
+    "fault_triggers": [],
+    "cleanup_verified": true
+  },
+  {
+    "case": "216-candidate-before_HUP",
+    "verdict": "INCOMPLETE",
+    "returncode": 129,
+    "required_count": 37,
+    "attempted_count": 1,
+    "fault_triggers": [],
+    "cleanup_verified": true
+  },
+  {
+    "case": "216-candidate-before_KILL",
+    "verdict": "INCOMPLETE",
+    "returncode": -9,
+    "required_count": 37,
+    "attempted_count": 1,
+    "fault_triggers": [],
+    "cleanup_verified": true
+  },
+  {
+    "case": "216-candidate-after_INT",
+    "verdict": "INCOMPLETE",
+    "returncode": 130,
+    "required_count": 37,
+    "attempted_count": 37,
+    "fault_triggers": [],
+    "cleanup_verified": true
+  },
+  {
+    "case": "216-candidate-after_TERM",
+    "verdict": "INCOMPLETE",
+    "returncode": 143,
+    "required_count": 37,
+    "attempted_count": 37,
+    "fault_triggers": [],
+    "cleanup_verified": true
+  },
+  {
+    "case": "216-candidate-after_HUP",
+    "verdict": "INCOMPLETE",
+    "returncode": 129,
+    "required_count": 37,
+    "attempted_count": 37,
+    "fault_triggers": [],
+    "cleanup_verified": true
+  },
+  {
+    "case": "216-candidate-after_KILL",
+    "verdict": "PASS_WITHOUT_SUCCESSFUL_COMPLETION",
+    "returncode": -9,
+    "required_count": 37,
+    "attempted_count": 37,
+    "fault_triggers": [],
+    "cleanup_verified": true
+  },
+  {
+    "case": "216-candidate-reuse_success",
+    "verdict": "PASS",
+    "returncode": 0,
+    "required_count": 37,
+    "attempted_count": 37,
+    "fault_triggers": [],
+    "cleanup_verified": true
+  },
+  {
+    "case": "216-candidate-reuse_failure",
+    "verdict": "FAIL",
+    "returncode": 1,
+    "required_count": 37,
+    "attempted_count": 37,
+    "fault_triggers": [
+      "cargo:test:run_215_governance_execution_policy_selector_tests:17"
+    ],
+    "cleanup_verified": true
+  },
+  {
+    "case": "216-candidate-startup_file",
+    "verdict": "PASS",
+    "returncode": 0,
+    "required_count": 37,
+    "attempted_count": 37,
+    "fault_triggers": [],
+    "cleanup_verified": true
+  },
+  {
+    "case": "216-candidate-startup_file_symlink",
+    "verdict": "PASS",
+    "returncode": 0,
+    "required_count": 37,
+    "attempted_count": 37,
+    "fault_triggers": [],
+    "cleanup_verified": true
+  },
+  {
+    "case": "216-candidate-startup_directory",
+    "verdict": "DIRECTORY_REFUSED",
+    "returncode": 1,
+    "required_count": 37,
+    "attempted_count": 0,
+    "fault_triggers": [],
+    "cleanup_verified": true
+  },
+  {
+    "case": "216-candidate-startup_directory_symlink",
+    "verdict": "PASS",
+    "returncode": 0,
+    "required_count": 37,
+    "attempted_count": 37,
+    "fault_triggers": [],
+    "cleanup_verified": true
+  },
+  {
+    "case": "216-candidate-final_file",
+    "verdict": "PASS",
+    "returncode": 0,
+    "required_count": 37,
+    "attempted_count": 37,
+    "fault_triggers": [
+      "final_file"
+    ],
+    "cleanup_verified": true
+  },
+  {
+    "case": "216-candidate-final_file_symlink",
+    "verdict": "PASS",
+    "returncode": 0,
+    "required_count": 37,
+    "attempted_count": 37,
+    "fault_triggers": [
+      "final_file_symlink"
+    ],
+    "cleanup_verified": true
+  },
+  {
+    "case": "216-candidate-final_directory",
+    "verdict": "DIRECTORY_REFUSED",
+    "returncode": 1,
+    "required_count": 37,
+    "attempted_count": 37,
+    "fault_triggers": [
+      "final_directory"
+    ],
+    "cleanup_verified": true
+  },
+  {
+    "case": "216-candidate-final_directory_symlink",
+    "verdict": "PASS",
+    "returncode": 0,
+    "required_count": 37,
+    "attempted_count": 37,
+    "fault_triggers": [
+      "final_directory_symlink"
+    ],
+    "cleanup_verified": true
+  },
+  {
+    "case": "227-baseline-success",
+    "verdict": "PASS",
+    "returncode": 0,
+    "required_count": 10,
+    "attempted_count": 10,
+    "fault_triggers": [],
+    "cleanup_verified": true
+  },
+  {
+    "case": "227-baseline-first",
+    "verdict": "PASS",
+    "returncode": 0,
+    "required_count": 10,
+    "attempted_count": 10,
+    "fault_triggers": [
+      "cargo:test:run_226_governance_evaluator_runtime_callsite_wiring_tests:17"
+    ],
+    "cleanup_verified": true
+  },
+  {
+    "case": "227-candidate-success",
+    "verdict": "PASS",
+    "returncode": 0,
+    "required_count": 10,
+    "attempted_count": 10,
+    "fault_triggers": [],
+    "cleanup_verified": true
+  },
+  {
+    "case": "227-candidate-first",
+    "verdict": "FAIL",
+    "returncode": 1,
+    "required_count": 10,
+    "attempted_count": 10,
+    "fault_triggers": [
+      "cargo:test:run_226_governance_evaluator_runtime_callsite_wiring_tests:17"
+    ],
+    "cleanup_verified": true
+  },
+  {
+    "case": "227-candidate-middle",
+    "verdict": "FAIL",
+    "returncode": 1,
+    "required_count": 10,
+    "attempted_count": 10,
+    "fault_triggers": [
+      "cargo:test:run_220_governance_execution_runtime_consumption_tests:23"
+    ],
+    "cleanup_verified": true
+  },
+  {
+    "case": "227-candidate-last",
+    "verdict": "FAIL",
+    "returncode": 1,
+    "required_count": 10,
+    "attempted_count": 10,
+    "fault_triggers": [
+      "cargo:test:run_211_governance_execution_policy_tests:29"
+    ],
+    "cleanup_verified": true
+  },
+  {
+    "case": "227-candidate-lib_first",
+    "verdict": "FAIL",
+    "returncode": 1,
+    "required_count": 10,
+    "attempted_count": 10,
+    "fault_triggers": [
+      "cargo:lib:pqc_authority:31"
+    ],
+    "cleanup_verified": true
+  },
+  {
+    "case": "227-candidate-lib_last",
+    "verdict": "FAIL",
+    "returncode": 1,
+    "required_count": 10,
+    "attempted_count": 10,
+    "fault_triggers": [
+      "cargo:lib:lib_all:37"
+    ],
+    "cleanup_verified": true
+  },
+  {
+    "case": "227-candidate-multiple",
+    "verdict": "FAIL",
+    "returncode": 1,
+    "required_count": 10,
+    "attempted_count": 10,
+    "fault_triggers": [
+      "cargo:test:run_226_governance_evaluator_runtime_callsite_wiring_tests:17",
+      "cargo:lib:pqc_authority:31"
+    ],
+    "cleanup_verified": true
+  },
+  {
+    "case": "227-candidate-missing",
+    "verdict": "FAIL",
+    "returncode": 1,
+    "required_count": 10,
+    "attempted_count": 9,
+    "fault_triggers": [],
+    "cleanup_verified": true
+  },
+  {
+    "case": "227-candidate-log_error",
+    "verdict": "INCOMPLETE",
+    "returncode": 1,
+    "required_count": 10,
+    "attempted_count": 9,
+    "fault_triggers": [
+      "log_error"
+    ],
+    "cleanup_verified": true
+  },
+  {
+    "case": "227-candidate-failure_and_capture",
+    "verdict": "INCOMPLETE",
+    "returncode": 1,
+    "required_count": 10,
+    "attempted_count": 9,
+    "fault_triggers": [
+      "failure_and_capture",
+      "cargo:test:run_226_governance_evaluator_runtime_callsite_wiring_tests:17"
+    ],
+    "cleanup_verified": true
+  },
+  {
+    "case": "227-candidate-launch_failure",
+    "verdict": "FAIL",
+    "returncode": 1,
+    "required_count": 10,
+    "attempted_count": 10,
+    "fault_triggers": [
+      "cargo:test:run_226_governance_evaluator_runtime_callsite_wiring_tests:127"
+    ],
+    "cleanup_verified": true
+  },
+  {
+    "case": "227-candidate-malformed_state",
+    "verdict": "INCOMPLETE",
+    "returncode": 1,
+    "required_count": 10,
+    "attempted_count": 10,
+    "fault_triggers": [
+      "malformed_state"
+    ],
+    "cleanup_verified": true
+  },
+  {
+    "case": "227-candidate-malformed_rc",
+    "verdict": "INCOMPLETE",
+    "returncode": 1,
+    "required_count": 10,
+    "attempted_count": 10,
+    "fault_triggers": [
+      "malformed_rc"
+    ],
+    "cleanup_verified": true
+  },
+  {
+    "case": "227-candidate-duplicate",
+    "verdict": "INCOMPLETE",
+    "returncode": 1,
+    "required_count": 10,
+    "attempted_count": 10,
+    "fault_triggers": [
+      "duplicate"
+    ],
+    "cleanup_verified": true
+  },
+  {
+    "case": "227-candidate-stale",
+    "verdict": "INCOMPLETE",
+    "returncode": 1,
+    "required_count": 10,
+    "attempted_count": 10,
+    "fault_triggers": [
+      "stale"
+    ],
+    "cleanup_verified": true
+  },
+  {
+    "case": "227-candidate-missing_row",
+    "verdict": "INCOMPLETE",
+    "returncode": 1,
+    "required_count": 10,
+    "attempted_count": 10,
+    "fault_triggers": [
+      "missing_row"
+    ],
+    "cleanup_verified": true
+  },
+  {
+    "case": "227-candidate-unknown",
+    "verdict": "INCOMPLETE",
+    "returncode": 1,
+    "required_count": 10,
+    "attempted_count": 10,
+    "fault_triggers": [
+      "unknown"
+    ],
+    "cleanup_verified": true
+  },
+  {
+    "case": "227-candidate-manifest_header",
+    "verdict": "INCOMPLETE",
+    "returncode": 1,
+    "required_count": 10,
+    "attempted_count": 10,
+    "fault_triggers": [
+      "manifest_header"
+    ],
+    "cleanup_verified": true
+  },
+  {
+    "case": "227-candidate-unterminated",
+    "verdict": "INCOMPLETE",
+    "returncode": 1,
+    "required_count": 10,
+    "attempted_count": 10,
+    "fault_triggers": [
+      "unterminated"
+    ],
+    "cleanup_verified": true
+  },
+  {
+    "case": "227-candidate-status_mismatch",
+    "verdict": "INCOMPLETE",
+    "returncode": 1,
+    "required_count": 10,
+    "attempted_count": 10,
+    "fault_triggers": [
+      "status_mismatch"
+    ],
+    "cleanup_verified": true
+  },
+  {
+    "case": "227-candidate-status_missing",
+    "verdict": "INCOMPLETE",
+    "returncode": 1,
+    "required_count": 10,
+    "attempted_count": 10,
+    "fault_triggers": [
+      "status_missing"
+    ],
+    "cleanup_verified": true
+  },
+  {
+    "case": "227-candidate-status_extra",
+    "verdict": "INCOMPLETE",
+    "returncode": 1,
+    "required_count": 10,
+    "attempted_count": 10,
+    "fault_triggers": [
+      "status_extra"
+    ],
+    "cleanup_verified": true
+  },
+  {
+    "case": "227-candidate-manifest_nul",
+    "verdict": "INCOMPLETE",
+    "returncode": 1,
+    "required_count": 10,
+    "attempted_count": 10,
+    "fault_triggers": [
+      "manifest_nul"
+    ],
+    "cleanup_verified": true
+  },
+  {
+    "case": "227-candidate-status_nul",
+    "verdict": "INCOMPLETE",
+    "returncode": 1,
+    "required_count": 10,
+    "attempted_count": 10,
+    "fault_triggers": [
+      "status_nul"
+    ],
+    "cleanup_verified": true
+  },
+  {
+    "case": "227-candidate-rc_io",
+    "verdict": "INCOMPLETE",
+    "returncode": 1,
+    "required_count": 10,
+    "attempted_count": 10,
+    "fault_triggers": [
+      "rc_io"
+    ],
+    "cleanup_verified": true
+  },
+  {
+    "case": "227-candidate-manifest_io",
+    "verdict": "INCOMPLETE",
+    "returncode": 1,
+    "required_count": 10,
+    "attempted_count": 10,
+    "fault_triggers": [
+      "manifest_io"
+    ],
+    "cleanup_verified": true
+  },
+  {
+    "case": "227-candidate-startup_write",
+    "verdict": "OLD_UNTRUSTED",
+    "returncode": 1,
+    "required_count": 10,
+    "attempted_count": 0,
+    "fault_triggers": [
+      "startup_write"
+    ],
+    "cleanup_verified": true
+  },
+  {
+    "case": "227-candidate-startup_rename",
+    "verdict": "OLD_UNTRUSTED",
+    "returncode": 1,
+    "required_count": 10,
+    "attempted_count": 0,
+    "fault_triggers": [
+      "startup_rename"
+    ],
+    "cleanup_verified": true
+  },
+  {
+    "case": "227-candidate-final_write",
+    "verdict": "INCOMPLETE",
+    "returncode": 1,
+    "required_count": 10,
+    "attempted_count": 10,
+    "fault_triggers": [
+      "final_write"
+    ],
+    "cleanup_verified": true
+  },
+  {
+    "case": "227-candidate-final_rename",
+    "verdict": "INCOMPLETE",
+    "returncode": 1,
+    "required_count": 10,
+    "attempted_count": 10,
+    "fault_triggers": [
+      "final_rename"
+    ],
+    "cleanup_verified": true
+  },
+  {
+    "case": "227-candidate-seeded_pass_build_failure",
+    "verdict": "INCOMPLETE",
+    "returncode": 1,
+    "required_count": 10,
+    "attempted_count": 0,
+    "fault_triggers": [
+      "seeded_pass_build_failure"
+    ],
+    "cleanup_verified": true
+  },
+  {
+    "case": "227-candidate-early_build",
+    "verdict": "INCOMPLETE",
+    "returncode": 1,
+    "required_count": 10,
+    "attempted_count": 0,
+    "fault_triggers": [
+      "early_build"
+    ],
+    "cleanup_verified": true
+  },
+  {
+    "case": "227-candidate-helper_fail",
+    "verdict": "INCOMPLETE",
+    "returncode": 1,
+    "required_count": 10,
+    "attempted_count": 0,
+    "fault_triggers": [
+      "helper_fail"
+    ],
+    "cleanup_verified": true
+  },
+  {
+    "case": "227-candidate-help_fail",
+    "verdict": "INCOMPLETE",
+    "returncode": 1,
+    "required_count": 10,
+    "attempted_count": 0,
+    "fault_triggers": [
+      "help_fail"
+    ],
+    "cleanup_verified": true
+  },
+  {
+    "case": "227-candidate-denylist",
+    "verdict": "INCOMPLETE",
+    "returncode": 7,
+    "required_count": 10,
+    "attempted_count": 0,
+    "fault_triggers": [
+      "denylist"
+    ],
+    "cleanup_verified": true
+  },
+  {
+    "case": "227-candidate-before_INT",
+    "verdict": "INCOMPLETE",
+    "returncode": 130,
+    "required_count": 10,
+    "attempted_count": 1,
+    "fault_triggers": [],
+    "cleanup_verified": true
+  },
+  {
+    "case": "227-candidate-before_TERM",
+    "verdict": "INCOMPLETE",
+    "returncode": 143,
+    "required_count": 10,
+    "attempted_count": 1,
+    "fault_triggers": [],
+    "cleanup_verified": true
+  },
+  {
+    "case": "227-candidate-before_HUP",
+    "verdict": "INCOMPLETE",
+    "returncode": 129,
+    "required_count": 10,
+    "attempted_count": 1,
+    "fault_triggers": [],
+    "cleanup_verified": true
+  },
+  {
+    "case": "227-candidate-before_KILL",
+    "verdict": "INCOMPLETE",
+    "returncode": -9,
+    "required_count": 10,
+    "attempted_count": 1,
+    "fault_triggers": [],
+    "cleanup_verified": true
+  },
+  {
+    "case": "227-candidate-after_INT",
+    "verdict": "INCOMPLETE",
+    "returncode": 130,
+    "required_count": 10,
+    "attempted_count": 10,
+    "fault_triggers": [],
+    "cleanup_verified": true
+  },
+  {
+    "case": "227-candidate-after_TERM",
+    "verdict": "INCOMPLETE",
+    "returncode": 143,
+    "required_count": 10,
+    "attempted_count": 10,
+    "fault_triggers": [],
+    "cleanup_verified": true
+  },
+  {
+    "case": "227-candidate-after_HUP",
+    "verdict": "INCOMPLETE",
+    "returncode": 129,
+    "required_count": 10,
+    "attempted_count": 10,
+    "fault_triggers": [],
+    "cleanup_verified": true
+  },
+  {
+    "case": "227-candidate-after_KILL",
+    "verdict": "PASS_WITHOUT_SUCCESSFUL_COMPLETION",
+    "returncode": -9,
+    "required_count": 10,
+    "attempted_count": 10,
+    "fault_triggers": [],
+    "cleanup_verified": true
+  },
+  {
+    "case": "227-candidate-reuse_success",
+    "verdict": "PASS",
+    "returncode": 0,
+    "required_count": 10,
+    "attempted_count": 10,
+    "fault_triggers": [],
+    "cleanup_verified": true
+  },
+  {
+    "case": "227-candidate-reuse_failure",
+    "verdict": "FAIL",
+    "returncode": 1,
+    "required_count": 10,
+    "attempted_count": 10,
+    "fault_triggers": [
+      "cargo:test:run_226_governance_evaluator_runtime_callsite_wiring_tests:17"
+    ],
+    "cleanup_verified": true
+  },
+  {
+    "case": "227-candidate-startup_file",
+    "verdict": "PASS",
+    "returncode": 0,
+    "required_count": 10,
+    "attempted_count": 10,
+    "fault_triggers": [],
+    "cleanup_verified": true
+  },
+  {
+    "case": "227-candidate-startup_file_symlink",
+    "verdict": "PASS",
+    "returncode": 0,
+    "required_count": 10,
+    "attempted_count": 10,
+    "fault_triggers": [],
+    "cleanup_verified": true
+  },
+  {
+    "case": "227-candidate-startup_directory",
+    "verdict": "DIRECTORY_REFUSED",
+    "returncode": 1,
+    "required_count": 10,
+    "attempted_count": 0,
+    "fault_triggers": [],
+    "cleanup_verified": true
+  },
+  {
+    "case": "227-candidate-startup_directory_symlink",
+    "verdict": "PASS",
+    "returncode": 0,
+    "required_count": 10,
+    "attempted_count": 10,
+    "fault_triggers": [],
+    "cleanup_verified": true
+  },
+  {
+    "case": "227-candidate-final_file",
+    "verdict": "PASS",
+    "returncode": 0,
+    "required_count": 10,
+    "attempted_count": 10,
+    "fault_triggers": [
+      "final_file"
+    ],
+    "cleanup_verified": true
+  },
+  {
+    "case": "227-candidate-final_file_symlink",
+    "verdict": "PASS",
+    "returncode": 0,
+    "required_count": 10,
+    "attempted_count": 10,
+    "fault_triggers": [
+      "final_file_symlink"
+    ],
+    "cleanup_verified": true
+  },
+  {
+    "case": "227-candidate-final_directory",
+    "verdict": "DIRECTORY_REFUSED",
+    "returncode": 1,
+    "required_count": 10,
+    "attempted_count": 10,
+    "fault_triggers": [
+      "final_directory"
+    ],
+    "cleanup_verified": true
+  },
+  {
+    "case": "227-candidate-final_directory_symlink",
+    "verdict": "PASS",
+    "returncode": 0,
+    "required_count": 10,
+    "attempted_count": 10,
+    "fault_triggers": [
+      "final_directory_symlink"
+    ],
+    "cleanup_verified": true
+  }
+]

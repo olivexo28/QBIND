@@ -1,0 +1,1 @@
+{"worker": 691, "original_error": "OSError('injected parent pipe read failure')", "cleanup": {"worker": 691, "worker_reaped": true, "session": 691, "observed_pids": [691, 692, 708], "groups": [691, 692], "reaped": [[708, 9], [691, 9], [692, 9]], "remaining": [], "kernel_groups_absent": true}, "owned_descriptors_closed": true, "cleanup_failures": []}

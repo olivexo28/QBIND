@@ -1,0 +1,587 @@
+{
+  "command": [
+    "python3",
+    "docs/security/evidence/a37-1-c2-supervisor-followup/validate.py"
+  ],
+  "entry": "d494ce2af1dd522e8ec0fc14c36b02a19e50b209",
+  "entry_tree": "8449e9aa7683f68c113a1fb00b1491a0e6e75d5b",
+  "producing_commit": "e02047003a3ac5d099a12268dda5fb210ef69902",
+  "producing_tree": "7323a8e2faaf69361559b6cac6c675abfc8b0789",
+  "producing_parents": [
+    "d494ce2af1dd522e8ec0fc14c36b02a19e50b209"
+  ],
+  "producing_files": {
+    "scripts/devnet/tests/run_216_227_regression_verdict_fixture.sh": {
+      "blob": "c4df59442b358cf8282647f768d68a861df0db34",
+      "sha256": "2de6ca4f0078823c4d2dd4ca8715a2e29f4f047b801f1b5fb089b649e165c5d9"
+    },
+    "docs/security/evidence/a37-1-c2-supervisor-followup/watchdog_cases.py": {
+      "blob": "ff59eb4f63f745eb0c3774ed1575f76256ac4c7f",
+      "sha256": "0685f9b75f298490cb43addc576c51c65feac586b1ebe9e2018a62a18cd03e10"
+    },
+    "docs/security/evidence/a37-1-c2-supervisor-followup/reproduce.py": {
+      "blob": "6b6bb4f9d2fc767e1a0400da1bfef817b1ecbee3",
+      "sha256": "1a52e902df4184dcdbc5a53f2434d8e27eae847614e1cf04184905aba2622733"
+    }
+  },
+  "historical_files": {
+    "docs/security/evidence/a37-1-c2/README.md": {
+      "revision": "6fdc0f0dcfc45c65037de3e53215121f5332689a",
+      "sha256": "33de7ffb363a943672481240f6cd61056cc5145c64999c367beac3b96dd5a7ab"
+    },
+    "docs/security/evidence/a37-1-c2/SHA256SUMS": {
+      "revision": "6fdc0f0dcfc45c65037de3e53215121f5332689a",
+      "sha256": "6d845ad91b2aec34062727f54fd19b16446eea72903bdd47af23c2492c36f2c1"
+    },
+    "docs/security/evidence/a37-1-c2/calibration.json": {
+      "revision": "6fdc0f0dcfc45c65037de3e53215121f5332689a",
+      "sha256": "03d36acaf1f337eb53edf432680eb1f5fcfa79b9e8db8e5ea67e1e95a1489f9f"
+    },
+    "docs/security/evidence/a37-1-c2/cases.json": {
+      "revision": "6fdc0f0dcfc45c65037de3e53215121f5332689a",
+      "sha256": "77aa7a0d888bd665b518776ded0130246bd76c093f7a28bdce3e717a1bdb5253"
+    },
+    "docs/security/evidence/a37-1-c2/environment.json": {
+      "revision": "6fdc0f0dcfc45c65037de3e53215121f5332689a",
+      "sha256": "5506a4329a769e4c05393c8f80f555bf7f26977d17c7a18b0c42c16862c09b56"
+    },
+    "docs/security/evidence/a37-1-c2/preliminary.json": {
+      "revision": "6fdc0f0dcfc45c65037de3e53215121f5332689a",
+      "sha256": "32eaba71843e753c7c50faedd53a72eca53e28d58a262db55bd3e29864d0495c"
+    },
+    "docs/security/evidence/a37-1-c2/preliminary.log": {
+      "revision": "6fdc0f0dcfc45c65037de3e53215121f5332689a",
+      "sha256": "f7d6b0953f1f57e52eef5fefa5693a11caa7d314b335eb0a8408c53c3987f292"
+    },
+    "docs/security/evidence/a37-1-c2/raw/run-216.jsonl": {
+      "revision": "6fdc0f0dcfc45c65037de3e53215121f5332689a",
+      "sha256": "135e606d2e30f3d78029507e2efe2c0b12ddd348b478a65cfd58b954d75752df"
+    },
+    "docs/security/evidence/a37-1-c2/raw/run-227.jsonl": {
+      "revision": "6fdc0f0dcfc45c65037de3e53215121f5332689a",
+      "sha256": "a3c532d2f01ac306cea51dbe150927d12dbf23329d51a8d3e59aaf016429dfd1"
+    },
+    "docs/security/evidence/a37-1-c2/suite.log": {
+      "revision": "6fdc0f0dcfc45c65037de3e53215121f5332689a",
+      "sha256": "b41c4819bd1473f8ac96827c6db025bab8104d13ac6465cbe2fe6b69ee0ba098"
+    },
+    "docs/security/evidence/a37-1-c2/validation.json": {
+      "revision": "6fdc0f0dcfc45c65037de3e53215121f5332689a",
+      "sha256": "4449f529dc430eb322726e4071536b7462948c88b37e4e288b72ae58289e6e08"
+    },
+    "docs/security/evidence/a37-1-c2-correction/MANIFEST.tsv": {
+      "revision": "d494ce2af1dd522e8ec0fc14c36b02a19e50b209",
+      "sha256": "3a686b636d7b712c315e6f3162d1ea502d8952b855e8738b6c7b451d12249212"
+    },
+    "docs/security/evidence/a37-1-c2-correction/README.md": {
+      "revision": "d494ce2af1dd522e8ec0fc14c36b02a19e50b209",
+      "sha256": "5a5e54d20979193352ab918d1f80f65c979ae262f139c0282e4484c0676cf494"
+    },
+    "docs/security/evidence/a37-1-c2-correction/SHA256SUMS": {
+      "revision": "d494ce2af1dd522e8ec0fc14c36b02a19e50b209",
+      "sha256": "70caf4651a3bd4266996334158f3c404728f54d19dadb6da5dd6343635f5490e"
+    },
+    "docs/security/evidence/a37-1-c2-correction/baseline-completed/reproduction.json": {
+      "revision": "d494ce2af1dd522e8ec0fc14c36b02a19e50b209",
+      "sha256": "6dc9bc41f8748defa7dd8346ac5095c9ebf4662450465f8593112147256f94c8"
+    },
+    "docs/security/evidence/a37-1-c2-correction/check_owner_errors.py": {
+      "revision": "d494ce2af1dd522e8ec0fc14c36b02a19e50b209",
+      "sha256": "343c9be5df4f315db7c37a1f96ddabe480a7fb6afd307942f0f5f7eb1baac74a"
+    },
+    "docs/security/evidence/a37-1-c2-correction/entry.json": {
+      "revision": "d494ce2af1dd522e8ec0fc14c36b02a19e50b209",
+      "sha256": "28331c93e8ecdc6aada1cbc8c8517c4242de9f38b839c638f1e3050ddb841d8a"
+    },
+    "docs/security/evidence/a37-1-c2-correction/focused.log": {
+      "revision": "d494ce2af1dd522e8ec0fc14c36b02a19e50b209",
+      "sha256": "0024e0204730a4e631c5bd1557ddf56941b4d5d26b9e55acca99adc677c40b40"
+    },
+    "docs/security/evidence/a37-1-c2-correction/focused/calibration.json": {
+      "revision": "d494ce2af1dd522e8ec0fc14c36b02a19e50b209",
+      "sha256": "079f43f8d56fa84ae037fd7cebfe9af3fca00fe21e0d7498f9f6aae08b7d0bf6"
+    },
+    "docs/security/evidence/a37-1-c2-correction/focused/cases.json": {
+      "revision": "d494ce2af1dd522e8ec0fc14c36b02a19e50b209",
+      "sha256": "8813b7716fe93c4300d5721e66c765ec9a19f2dc13b0d86301533fb4b32aec12"
+    },
+    "docs/security/evidence/a37-1-c2-correction/focused/environment.json": {
+      "revision": "d494ce2af1dd522e8ec0fc14c36b02a19e50b209",
+      "sha256": "e6ccbdb72fa5c0eb2f45151a0db3f571f7a5fb02e433ef7f8878125c4d1eb28f"
+    },
+    "docs/security/evidence/a37-1-c2-correction/focused/raw/run-216.jsonl": {
+      "revision": "d494ce2af1dd522e8ec0fc14c36b02a19e50b209",
+      "sha256": "733786c0b3b20656ec37487895ddefc90603105a06c29440be19b3ec04b28191"
+    },
+    "docs/security/evidence/a37-1-c2-correction/focused/raw/run-227.jsonl": {
+      "revision": "d494ce2af1dd522e8ec0fc14c36b02a19e50b209",
+      "sha256": "3eef3e616ef964aca2a600ce0d7268ad5a5bd54de14e1471e7b11d6c8e925573"
+    },
+    "docs/security/evidence/a37-1-c2-correction/focused/supervision.json": {
+      "revision": "d494ce2af1dd522e8ec0fc14c36b02a19e50b209",
+      "sha256": "b8eafc1413697f56b18bbdb7ee3418739cc9ea5fbdfb891c6562f6cac10e2ca3"
+    },
+    "docs/security/evidence/a37-1-c2-correction/focused/supervisor-negative.jsonl": {
+      "revision": "d494ce2af1dd522e8ec0fc14c36b02a19e50b209",
+      "sha256": "6b1c1ca7821598eb5de9d1831169f47c9e090b629f781400b4b217725bd75390"
+    },
+    "docs/security/evidence/a37-1-c2-correction/owner-errors.log": {
+      "revision": "d494ce2af1dd522e8ec0fc14c36b02a19e50b209",
+      "sha256": "afd96c873c81bc48efc5dbd11852ad8bbea07e01ddfe627df3067a707d857df3"
+    },
+    "docs/security/evidence/a37-1-c2-correction/owner-errors/not-a-directory": {
+      "revision": "d494ce2af1dd522e8ec0fc14c36b02a19e50b209",
+      "sha256": "a8701d71b52f122436dc42db18e5a9d6b0c6791943f0ed3ce05975d3daceb27b"
+    },
+    "docs/security/evidence/a37-1-c2-correction/owner-errors/results.json": {
+      "revision": "d494ce2af1dd522e8ec0fc14c36b02a19e50b209",
+      "sha256": "886b49c216488ebbbde5de41ad3ff576f467cda778663e53803e7817b83200e5"
+    },
+    "docs/security/evidence/a37-1-c2-correction/owner-errors/supervision.json": {
+      "revision": "d494ce2af1dd522e8ec0fc14c36b02a19e50b209",
+      "sha256": "dea229f2d44231243fe8056c1b0c7081be59bb6ed39ad06e961e1b317b269dfd"
+    },
+    "docs/security/evidence/a37-1-c2-correction/preliminary.log": {
+      "revision": "d494ce2af1dd522e8ec0fc14c36b02a19e50b209",
+      "sha256": "fd3e3696ca150635a90c3b4e4ab0d5c7948f52a6830357878b411d1036e6e9f9"
+    },
+    "docs/security/evidence/a37-1-c2-correction/preliminary/calibration.json": {
+      "revision": "d494ce2af1dd522e8ec0fc14c36b02a19e50b209",
+      "sha256": "04062caf8df74793544d75f93d8f9fad6b6ba56a9da49444c802d45e41da2340"
+    },
+    "docs/security/evidence/a37-1-c2-correction/preliminary/environment.json": {
+      "revision": "d494ce2af1dd522e8ec0fc14c36b02a19e50b209",
+      "sha256": "cf91294616d2171e9ad14f03ef8f1e971c945f8e999382fb3f5d93dfe4b4aabc"
+    },
+    "docs/security/evidence/a37-1-c2-correction/preliminary/raw/run-216.jsonl": {
+      "revision": "d494ce2af1dd522e8ec0fc14c36b02a19e50b209",
+      "sha256": "34a832bc907779e677616577f06e6b15b7295023476459a110507ff3e4f7b025"
+    },
+    "docs/security/evidence/a37-1-c2-correction/preliminary/supervision.json": {
+      "revision": "d494ce2af1dd522e8ec0fc14c36b02a19e50b209",
+      "sha256": "4a5f86bb41cbfa6a7b590d8b9b2ced27cddcb2839f8ed5dc3e898a16221f252f"
+    },
+    "docs/security/evidence/a37-1-c2-correction/reproduce.py": {
+      "revision": "d494ce2af1dd522e8ec0fc14c36b02a19e50b209",
+      "sha256": "aee8f8c5401cec3034eb56e0d7d5e9aee5815f3dd1ee31019a9d6a08add5f3fb"
+    },
+    "docs/security/evidence/a37-1-c2-correction/seal.py": {
+      "revision": "d494ce2af1dd522e8ec0fc14c36b02a19e50b209",
+      "sha256": "cf10ff92d08425980e046188e1c3930ccde8c8f867833a9abc94fed766b4f656"
+    },
+    "docs/security/evidence/a37-1-c2-correction/validate.py": {
+      "revision": "d494ce2af1dd522e8ec0fc14c36b02a19e50b209",
+      "sha256": "f6f6bbc14499caf554a05dbabaabbb969f71091203b251d65d0d9fb86ea2335a"
+    },
+    "docs/security/evidence/a37-1-c2-correction/validation.json": {
+      "revision": "d494ce2af1dd522e8ec0fc14c36b02a19e50b209",
+      "sha256": "5fe00d833c395900df18aee02d6775553dfd97d37cf7420e0f583a51a3396670"
+    }
+  },
+  "historical_manifest_verification": {
+    "docs/security/evidence/a37-1-c2/": {
+      "revision": "6fdc0f0dcfc45c65037de3e53215121f5332689a",
+      "entries": 16
+    },
+    "docs/security/evidence/a37-1-c2-correction/": {
+      "revision": "d494ce2af1dd522e8ec0fc14c36b02a19e50b209",
+      "entries": 32
+    }
+  },
+  "production_scripts_unchanged": true,
+  "plan_prefix_before_section_14_identical": true,
+  "changed_paths": [
+    "docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md",
+    "docs/security/evidence/a37-1-c2-supervisor-followup/README.md",
+    "docs/security/evidence/a37-1-c2-supervisor-followup/baseline/reproduction.json",
+    "docs/security/evidence/a37-1-c2-supervisor-followup/check_refusal.py",
+    "docs/security/evidence/a37-1-c2-supervisor-followup/deletion-boundary-deletion.jsonl",
+    "docs/security/evidence/a37-1-c2-supervisor-followup/deletion-boundary.log",
+    "docs/security/evidence/a37-1-c2-supervisor-followup/deletion-boundary/after_registration/child",
+    "docs/security/evidence/a37-1-c2-supervisor-followup/deletion-boundary/after_registration/driver/watchdog-ownership.jsonl",
+    "docs/security/evidence/a37-1-c2-supervisor-followup/deletion-boundary/after_registration/identity.json",
+    "docs/security/evidence/a37-1-c2-supervisor-followup/deletion-boundary/after_registration/result.json",
+    "docs/security/evidence/a37-1-c2-supervisor-followup/deletion-boundary/before_registration/child",
+    "docs/security/evidence/a37-1-c2-supervisor-followup/deletion-boundary/before_registration/driver/watchdog-ownership.jsonl",
+    "docs/security/evidence/a37-1-c2-supervisor-followup/deletion-boundary/before_registration/identity.json",
+    "docs/security/evidence/a37-1-c2-supervisor-followup/deletion-boundary/before_registration/result.json",
+    "docs/security/evidence/a37-1-c2-supervisor-followup/deletion-boundary/incomplete/child",
+    "docs/security/evidence/a37-1-c2-supervisor-followup/deletion-boundary/incomplete/driver/watchdog-ownership.jsonl",
+    "docs/security/evidence/a37-1-c2-supervisor-followup/deletion-boundary/incomplete/identity.json",
+    "docs/security/evidence/a37-1-c2-supervisor-followup/deletion-boundary/incomplete/result.json",
+    "docs/security/evidence/a37-1-c2-supervisor-followup/deletion-boundary/malformed/child",
+    "docs/security/evidence/a37-1-c2-supervisor-followup/deletion-boundary/malformed/driver/watchdog-ownership.jsonl",
+    "docs/security/evidence/a37-1-c2-supervisor-followup/deletion-boundary/malformed/identity.json",
+    "docs/security/evidence/a37-1-c2-supervisor-followup/deletion-boundary/malformed/result.json",
+    "docs/security/evidence/a37-1-c2-supervisor-followup/deletion-boundary/parent_HUP/child",
+    "docs/security/evidence/a37-1-c2-supervisor-followup/deletion-boundary/parent_HUP/driver/watchdog-ownership.jsonl",
+    "docs/security/evidence/a37-1-c2-supervisor-followup/deletion-boundary/parent_HUP/identity.json",
+    "docs/security/evidence/a37-1-c2-supervisor-followup/deletion-boundary/parent_HUP/result.json",
+    "docs/security/evidence/a37-1-c2-supervisor-followup/deletion-boundary/parent_TERM/child",
+    "docs/security/evidence/a37-1-c2-supervisor-followup/deletion-boundary/parent_TERM/driver/watchdog-ownership.jsonl",
+    "docs/security/evidence/a37-1-c2-supervisor-followup/deletion-boundary/parent_TERM/identity.json",
+    "docs/security/evidence/a37-1-c2-supervisor-followup/deletion-boundary/parent_TERM/result.json",
+    "docs/security/evidence/a37-1-c2-supervisor-followup/deletion-boundary/pipe_error/child",
+    "docs/security/evidence/a37-1-c2-supervisor-followup/deletion-boundary/pipe_error/driver/watchdog-ownership.jsonl",
+    "docs/security/evidence/a37-1-c2-supervisor-followup/deletion-boundary/pipe_error/identity.json",
+    "docs/security/evidence/a37-1-c2-supervisor-followup/deletion-boundary/pipe_error/result.json",
+    "docs/security/evidence/a37-1-c2-supervisor-followup/deletion-boundary/results.json",
+    "docs/security/evidence/a37-1-c2-supervisor-followup/deletion-boundary/timeout/child",
+    "docs/security/evidence/a37-1-c2-supervisor-followup/deletion-boundary/timeout/driver/watchdog-ownership.jsonl",
+    "docs/security/evidence/a37-1-c2-supervisor-followup/deletion-boundary/timeout/identity.json",
+    "docs/security/evidence/a37-1-c2-supervisor-followup/deletion-boundary/timeout/result.json",
+    "docs/security/evidence/a37-1-c2-supervisor-followup/deletion-boundary/unresolved_cleanup/child",
+    "docs/security/evidence/a37-1-c2-supervisor-followup/deletion-boundary/unresolved_cleanup/driver/watchdog-ownership.jsonl",
+    "docs/security/evidence/a37-1-c2-supervisor-followup/deletion-boundary/unresolved_cleanup/identity.json",
+    "docs/security/evidence/a37-1-c2-supervisor-followup/deletion-boundary/unresolved_cleanup/result.json",
+    "docs/security/evidence/a37-1-c2-supervisor-followup/deletion-boundary/wait_error/child",
+    "docs/security/evidence/a37-1-c2-supervisor-followup/deletion-boundary/wait_error/driver/watchdog-ownership.jsonl",
+    "docs/security/evidence/a37-1-c2-supervisor-followup/deletion-boundary/wait_error/identity.json",
+    "docs/security/evidence/a37-1-c2-supervisor-followup/deletion-boundary/wait_error/result.json",
+    "docs/security/evidence/a37-1-c2-supervisor-followup/entry.json",
+    "docs/security/evidence/a37-1-c2-supervisor-followup/focused.log",
+    "docs/security/evidence/a37-1-c2-supervisor-followup/focused/calibration.json",
+    "docs/security/evidence/a37-1-c2-supervisor-followup/focused/cases.json",
+    "docs/security/evidence/a37-1-c2-supervisor-followup/focused/environment.json",
+    "docs/security/evidence/a37-1-c2-supervisor-followup/focused/raw/run-216.jsonl",
+    "docs/security/evidence/a37-1-c2-supervisor-followup/focused/raw/run-227.jsonl",
+    "docs/security/evidence/a37-1-c2-supervisor-followup/focused/supervision.json",
+    "docs/security/evidence/a37-1-c2-supervisor-followup/focused/supervisor-negative.jsonl",
+    "docs/security/evidence/a37-1-c2-supervisor-followup/focused/watchdog-ownership.jsonl",
+    "docs/security/evidence/a37-1-c2-supervisor-followup/observe_deletion.py",
+    "docs/security/evidence/a37-1-c2-supervisor-followup/parent-cases.log",
+    "docs/security/evidence/a37-1-c2-supervisor-followup/parent-cases/after_registration/child",
+    "docs/security/evidence/a37-1-c2-supervisor-followup/parent-cases/after_registration/driver/watchdog-ownership.jsonl",
+    "docs/security/evidence/a37-1-c2-supervisor-followup/parent-cases/after_registration/identity.json",
+    "docs/security/evidence/a37-1-c2-supervisor-followup/parent-cases/after_registration/result.json",
+    "docs/security/evidence/a37-1-c2-supervisor-followup/parent-cases/before_registration/child",
+    "docs/security/evidence/a37-1-c2-supervisor-followup/parent-cases/before_registration/driver/watchdog-ownership.jsonl",
+    "docs/security/evidence/a37-1-c2-supervisor-followup/parent-cases/before_registration/identity.json",
+    "docs/security/evidence/a37-1-c2-supervisor-followup/parent-cases/before_registration/result.json",
+    "docs/security/evidence/a37-1-c2-supervisor-followup/parent-cases/incomplete/child",
+    "docs/security/evidence/a37-1-c2-supervisor-followup/parent-cases/incomplete/driver/watchdog-ownership.jsonl",
+    "docs/security/evidence/a37-1-c2-supervisor-followup/parent-cases/incomplete/identity.json",
+    "docs/security/evidence/a37-1-c2-supervisor-followup/parent-cases/incomplete/result.json",
+    "docs/security/evidence/a37-1-c2-supervisor-followup/parent-cases/malformed/child",
+    "docs/security/evidence/a37-1-c2-supervisor-followup/parent-cases/malformed/driver/watchdog-ownership.jsonl",
+    "docs/security/evidence/a37-1-c2-supervisor-followup/parent-cases/malformed/identity.json",
+    "docs/security/evidence/a37-1-c2-supervisor-followup/parent-cases/malformed/result.json",
+    "docs/security/evidence/a37-1-c2-supervisor-followup/parent-cases/parent_HUP/child",
+    "docs/security/evidence/a37-1-c2-supervisor-followup/parent-cases/parent_HUP/driver/watchdog-ownership.jsonl",
+    "docs/security/evidence/a37-1-c2-supervisor-followup/parent-cases/parent_HUP/identity.json",
+    "docs/security/evidence/a37-1-c2-supervisor-followup/parent-cases/parent_HUP/result.json",
+    "docs/security/evidence/a37-1-c2-supervisor-followup/parent-cases/parent_TERM/child",
+    "docs/security/evidence/a37-1-c2-supervisor-followup/parent-cases/parent_TERM/driver/watchdog-ownership.jsonl",
+    "docs/security/evidence/a37-1-c2-supervisor-followup/parent-cases/parent_TERM/identity.json",
+    "docs/security/evidence/a37-1-c2-supervisor-followup/parent-cases/parent_TERM/result.json",
+    "docs/security/evidence/a37-1-c2-supervisor-followup/parent-cases/pipe_error/child",
+    "docs/security/evidence/a37-1-c2-supervisor-followup/parent-cases/pipe_error/driver/watchdog-ownership.jsonl",
+    "docs/security/evidence/a37-1-c2-supervisor-followup/parent-cases/pipe_error/identity.json",
+    "docs/security/evidence/a37-1-c2-supervisor-followup/parent-cases/pipe_error/result.json",
+    "docs/security/evidence/a37-1-c2-supervisor-followup/parent-cases/results.json",
+    "docs/security/evidence/a37-1-c2-supervisor-followup/parent-cases/timeout/child",
+    "docs/security/evidence/a37-1-c2-supervisor-followup/parent-cases/timeout/driver/watchdog-ownership.jsonl",
+    "docs/security/evidence/a37-1-c2-supervisor-followup/parent-cases/timeout/identity.json",
+    "docs/security/evidence/a37-1-c2-supervisor-followup/parent-cases/timeout/result.json",
+    "docs/security/evidence/a37-1-c2-supervisor-followup/parent-cases/unresolved_cleanup/child",
+    "docs/security/evidence/a37-1-c2-supervisor-followup/parent-cases/unresolved_cleanup/driver/watchdog-ownership.jsonl",
+    "docs/security/evidence/a37-1-c2-supervisor-followup/parent-cases/unresolved_cleanup/identity.json",
+    "docs/security/evidence/a37-1-c2-supervisor-followup/parent-cases/unresolved_cleanup/result.json",
+    "docs/security/evidence/a37-1-c2-supervisor-followup/parent-cases/wait_error/child",
+    "docs/security/evidence/a37-1-c2-supervisor-followup/parent-cases/wait_error/driver/watchdog-ownership.jsonl",
+    "docs/security/evidence/a37-1-c2-supervisor-followup/parent-cases/wait_error/identity.json",
+    "docs/security/evidence/a37-1-c2-supervisor-followup/parent-cases/wait_error/result.json",
+    "docs/security/evidence/a37-1-c2-supervisor-followup/preliminary-2.log",
+    "docs/security/evidence/a37-1-c2-supervisor-followup/preliminary-2/after_registration/child",
+    "docs/security/evidence/a37-1-c2-supervisor-followup/preliminary-2/after_registration/driver/watchdog-ownership.jsonl",
+    "docs/security/evidence/a37-1-c2-supervisor-followup/preliminary-2/after_registration/identity.json",
+    "docs/security/evidence/a37-1-c2-supervisor-followup/preliminary-2/after_registration/result.json",
+    "docs/security/evidence/a37-1-c2-supervisor-followup/preliminary-2/before_registration/child",
+    "docs/security/evidence/a37-1-c2-supervisor-followup/preliminary-2/before_registration/driver/watchdog-ownership.jsonl",
+    "docs/security/evidence/a37-1-c2-supervisor-followup/preliminary-2/before_registration/identity.json",
+    "docs/security/evidence/a37-1-c2-supervisor-followup/preliminary-2/before_registration/result.json",
+    "docs/security/evidence/a37-1-c2-supervisor-followup/preliminary-2/incomplete/child",
+    "docs/security/evidence/a37-1-c2-supervisor-followup/preliminary-2/incomplete/driver/watchdog-ownership.jsonl",
+    "docs/security/evidence/a37-1-c2-supervisor-followup/preliminary-2/incomplete/identity.json",
+    "docs/security/evidence/a37-1-c2-supervisor-followup/preliminary-2/incomplete/result.json",
+    "docs/security/evidence/a37-1-c2-supervisor-followup/preliminary-2/malformed/child",
+    "docs/security/evidence/a37-1-c2-supervisor-followup/preliminary-2/malformed/driver/watchdog-ownership.jsonl",
+    "docs/security/evidence/a37-1-c2-supervisor-followup/preliminary-2/malformed/identity.json",
+    "docs/security/evidence/a37-1-c2-supervisor-followup/preliminary-2/malformed/result.json",
+    "docs/security/evidence/a37-1-c2-supervisor-followup/preliminary-2/pipe_error/child",
+    "docs/security/evidence/a37-1-c2-supervisor-followup/preliminary-2/pipe_error/driver/watchdog-ownership.jsonl",
+    "docs/security/evidence/a37-1-c2-supervisor-followup/preliminary-2/pipe_error/identity.json",
+    "docs/security/evidence/a37-1-c2-supervisor-followup/preliminary-2/pipe_error/result.json",
+    "docs/security/evidence/a37-1-c2-supervisor-followup/preliminary-2/results.json",
+    "docs/security/evidence/a37-1-c2-supervisor-followup/preliminary-2/timeout/child",
+    "docs/security/evidence/a37-1-c2-supervisor-followup/preliminary-2/timeout/driver/watchdog-ownership.jsonl",
+    "docs/security/evidence/a37-1-c2-supervisor-followup/preliminary-2/timeout/identity.json",
+    "docs/security/evidence/a37-1-c2-supervisor-followup/preliminary-2/timeout/result.json",
+    "docs/security/evidence/a37-1-c2-supervisor-followup/preliminary-2/unresolved_cleanup/child",
+    "docs/security/evidence/a37-1-c2-supervisor-followup/preliminary-2/unresolved_cleanup/driver/watchdog-ownership.jsonl",
+    "docs/security/evidence/a37-1-c2-supervisor-followup/preliminary-2/unresolved_cleanup/identity.json",
+    "docs/security/evidence/a37-1-c2-supervisor-followup/preliminary-2/unresolved_cleanup/result.json",
+    "docs/security/evidence/a37-1-c2-supervisor-followup/preliminary-2/wait_error/child",
+    "docs/security/evidence/a37-1-c2-supervisor-followup/preliminary-2/wait_error/driver/watchdog-ownership.jsonl",
+    "docs/security/evidence/a37-1-c2-supervisor-followup/preliminary-2/wait_error/identity.json",
+    "docs/security/evidence/a37-1-c2-supervisor-followup/preliminary-2/wait_error/result.json",
+    "docs/security/evidence/a37-1-c2-supervisor-followup/preliminary.log",
+    "docs/security/evidence/a37-1-c2-supervisor-followup/preliminary/before_registration/driver/watchdog-ownership.jsonl",
+    "docs/security/evidence/a37-1-c2-supervisor-followup/preliminary/before_registration/tester-error.txt",
+    "docs/security/evidence/a37-1-c2-supervisor-followup/preliminary/results.json",
+    "docs/security/evidence/a37-1-c2-supervisor-followup/reproduce.py",
+    "docs/security/evidence/a37-1-c2-supervisor-followup/seal.py",
+    "docs/security/evidence/a37-1-c2-supervisor-followup/unsafe-refusal.log",
+    "docs/security/evidence/a37-1-c2-supervisor-followup/unsafe-refusal/results.json",
+    "docs/security/evidence/a37-1-c2-supervisor-followup/validate.py",
+    "docs/security/evidence/a37-1-c2-supervisor-followup/watchdog_cases.py",
+    "scripts/devnet/tests/run_216_227_regression_verdict_fixture.sh"
+  ],
+  "formats": {
+    "scripts/devnet/tests/run_216_227_regression_verdict_fixture.sh": {
+      "mode": "100644",
+      "crlf": 0,
+      "lf": 935,
+      "final_newline": true
+    },
+    "docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md": {
+      "mode": "100644",
+      "crlf": 0,
+      "lf": 3106,
+      "final_newline": true
+    }
+  },
+  "syntax": {
+    "bash": 0,
+    "embedded_python": "PASS",
+    "evidence_python": "PASS"
+  },
+  "whitespace": {
+    "command": [
+      "git",
+      "-c",
+      "core.whitespace=cr-at-eol",
+      "diff",
+      "--check",
+      "d494ce2af1dd522e8ec0fc14c36b02a19e50b209"
+    ],
+    "returncode": 0
+  },
+  "focused": {
+    "harness_invocations": 120,
+    "matrix": 110,
+    "supervisor_controls": 10,
+    "guarded_regression_commands": 2033,
+    "rust_tests": 0,
+    "rescues": 0,
+    "historical_case_ids_equal": true,
+    "producing_fixture_sha256": "2de6ca4f0078823c4d2dd4ca8715a2e29f4f047b801f1b5fb089b649e165c5d9"
+  },
+  "parent_faults": {
+    "parent-cases": {
+      "cases": 10,
+      "cleanup_passes": 9,
+      "deliberate_unresolved_cleanup_failures": 1,
+      "outer_rescue_only_for_deliberate_failure": true
+    },
+    "deletion-boundary": {
+      "cases": 10,
+      "cleanup_passes": 9,
+      "deliberate_unresolved_cleanup_failures": 1,
+      "outer_rescue_only_for_deliberate_failure": true
+    }
+  },
+  "independently_observed_quiescent_deletions": 10,
+  "unsafe_launch_refusal": {
+    "producing_commit": "e02047003a3ac5d099a12268dda5fb210ef69902",
+    "fixture_sha256": "2de6ca4f0078823c4d2dd4ca8715a2e29f4f047b801f1b5fb089b649e165c5d9",
+    "launch_attempts": [],
+    "outcomes": [
+      {
+        "entry": "run_case",
+        "refused": "AssertionError(('refusing cases after unsafe cleanup', {6150}))"
+      },
+      {
+        "entry": "supervisor_negative",
+        "refused": "AssertionError(('refusing watchdog after unsafe cleanup', {6150}))"
+      }
+    ]
+  },
+  "baseline": {
+    "revision": "d494ce2af1dd522e8ec0fc14c36b02a19e50b209",
+    "kind": "isolated unchanged-function reproduction; not a harness run",
+    "original_error": "KeyboardInterrupt('injected historical parent waitpid interruption')",
+    "worker": 26628,
+    "group": 26629,
+    "child": 26630,
+    "worker_alive": true,
+    "group_alive": true,
+    "unsafe_groups": [],
+    "workspace_deleted_while_owned_processes_alive": true,
+    "independent_outer_cleanup": true,
+    "worker_reaped": true,
+    "group_absent": true
+  },
+  "links": [
+    {
+      "source": "docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md",
+      "target": "../../Audit/QBIND_SECURITY_FINDINGS_REGISTER.md",
+      "exists": true
+    },
+    {
+      "source": "docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md",
+      "target": "../release/QBIND_PUBLIC_DEVNET_READINESS_CRITERIA.md",
+      "exists": true
+    },
+    {
+      "source": "docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md",
+      "target": "../release/public-devnet/BLOCKER_REGISTER.md",
+      "exists": true
+    },
+    {
+      "source": "docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md",
+      "target": "../release/public-devnet/LAUNCH_GO_NO_GO.md",
+      "exists": true
+    },
+    {
+      "source": "docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md",
+      "target": "../devnet/QBIND_PUBLIC_DEVNET_CRITICAL_PATH.md",
+      "exists": true
+    },
+    {
+      "source": "docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md",
+      "target": "../devnet/QBIND_DEVNET_EVIDENCE_RUN_422_D7.md",
+      "exists": true
+    },
+    {
+      "source": "docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md",
+      "target": "../devnet/QBIND_RUN_422_DEVNET_BOOTSTRAP_AUTHORITY_DECISION.md",
+      "exists": true
+    },
+    {
+      "source": "docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md",
+      "target": "../protocol/QBIND_PROPOSAL_VOTE_SIGNING_STATE_CONTINUITY_CONTRACT.md",
+      "exists": true
+    },
+    {
+      "source": "docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md",
+      "target": "../protocol/QBIND_PROPOSAL_VOTE_AUTHORITY_LIFECYCLE_CONTRACT.md",
+      "exists": true
+    },
+    {
+      "source": "docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md",
+      "target": "../protocol/QBIND_CONSENSUS_RECOVERY_SIGNING_HISTORY_CORRESPONDENCE_CONTRACT.md",
+      "exists": true
+    },
+    {
+      "source": "docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md",
+      "target": "../devnet/QBIND_RUN_422_BOOTSTRAP_CREDENTIAL_RECOVERY_TRUST_MODEL.md",
+      "exists": true
+    },
+    {
+      "source": "docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md",
+      "target": "../../scripts/devnet/run_384_public_devnet_release_artifact_manifest.sh",
+      "exists": true
+    },
+    {
+      "source": "docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md",
+      "target": "../release/public-devnet/binary/RELEASE_ARTIFACT_MANIFEST.schema.json",
+      "exists": true
+    },
+    {
+      "source": "docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md",
+      "target": "../../scripts/devnet/run_385_public_devnet_ci_release_artifact_manifest.sh",
+      "exists": true
+    },
+    {
+      "source": "docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md",
+      "target": "../../.github/workflows/public-devnet-release-artifact-manifest.yml",
+      "exists": true
+    },
+    {
+      "source": "docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md",
+      "target": "evidence/a21-f1/README.md",
+      "exists": true
+    },
+    {
+      "source": "docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md",
+      "target": "evidence/a21-f1/README.md",
+      "exists": true
+    },
+    {
+      "source": "docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md",
+      "target": "evidence/a21-f1/a21-f1-original-evidence.tar.gz",
+      "exists": true
+    },
+    {
+      "source": "docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md",
+      "target": "evidence/a21-f1/a21-f1-corrective-evidence.tar.gz",
+      "exists": true
+    },
+    {
+      "source": "docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md",
+      "target": "../../crates/qbind-gov/src/verify.rs",
+      "exists": true
+    },
+    {
+      "source": "docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md",
+      "target": "../../crates/qbind-gov/src/council.rs",
+      "exists": true
+    },
+    {
+      "source": "docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md",
+      "target": "../../crates/qbind-gov/src/envelope.rs",
+      "exists": true
+    },
+    {
+      "source": "docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md",
+      "target": "../../crates/qbind-gov/src/hash.rs",
+      "exists": true
+    },
+    {
+      "source": "docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md",
+      "target": "../../crates/qbind-gov/src/bin/qbind_envelope.rs",
+      "exists": true
+    },
+    {
+      "source": "docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md",
+      "target": "../../crates/qbind-gov/src/lib.rs",
+      "exists": true
+    },
+    {
+      "source": "docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md",
+      "target": "../../crates/qbind-gov/Cargo.toml",
+      "exists": true
+    },
+    {
+      "source": "docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md",
+      "target": "../../scripts/build-mainnet-release.sh",
+      "exists": true
+    },
+    {
+      "source": "docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md",
+      "target": "../../crates/qbind-node/Cargo.toml",
+      "exists": true
+    },
+    {
+      "source": "docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md",
+      "target": "../devnet/QBIND_RUN_422_NATIVE_GOVERNANCE_AUTHORITY_CONTRACT.md",
+      "exists": true
+    },
+    {
+      "source": "docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md",
+      "target": "../devnet/QBIND_DEVNET_EVIDENCE_RUN_422_D7.md",
+      "exists": true
+    },
+    {
+      "source": "docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md",
+      "target": "../whitepaper/contradiction.md",
+      "exists": true
+    },
+    {
+      "source": "docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md",
+      "target": "evidence/a37-1-c2-supervisor-followup/README.md",
+      "exists": true
+    }
+  ]
+}

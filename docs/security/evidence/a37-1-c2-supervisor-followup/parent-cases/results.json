@@ -1,0 +1,258 @@
+[
+  {
+    "mode": "before_registration",
+    "original_error": "KeyboardInterrupt('injected parent interruption before_registration')",
+    "notes": [],
+    "identity": {
+      "worker": 6651,
+      "group": 6652,
+      "session": 6651,
+      "child": 6654
+    },
+    "workspace": "/tmp/qbind-verdict-fixture-6shw7juz",
+    "workspace_exists": false,
+    "unsafe_groups": [],
+    "descriptors": [
+      3,
+      4,
+      5
+    ],
+    "descriptors_closed": true,
+    "worker_reaped": true,
+    "tested_cleanup": "quiescent before workspace deletion",
+    "outer_status": 0,
+    "outer_rescued_groups": [],
+    "cleanup_pass": true
+  },
+  {
+    "mode": "after_registration",
+    "original_error": "KeyboardInterrupt('injected parent interruption after_registration')",
+    "notes": [],
+    "identity": {
+      "worker": 6672,
+      "group": 6673,
+      "session": 6672,
+      "child": 6675
+    },
+    "workspace": "/tmp/qbind-verdict-fixture-dflneqaf",
+    "workspace_exists": false,
+    "unsafe_groups": [],
+    "descriptors": [
+      3,
+      4,
+      5
+    ],
+    "descriptors_closed": true,
+    "worker_reaped": true,
+    "tested_cleanup": "quiescent before workspace deletion",
+    "outer_status": 0,
+    "outer_rescued_groups": [],
+    "cleanup_pass": true
+  },
+  {
+    "mode": "pipe_error",
+    "original_error": "OSError('injected parent pipe read failure')",
+    "notes": [],
+    "identity": {
+      "worker": 6698,
+      "group": 6699,
+      "session": 6698,
+      "child": 6701
+    },
+    "workspace": "/tmp/qbind-verdict-fixture-2k5sq_kw",
+    "workspace_exists": false,
+    "unsafe_groups": [],
+    "descriptors": [
+      3,
+      4,
+      5
+    ],
+    "descriptors_closed": true,
+    "worker_reaped": true,
+    "tested_cleanup": "quiescent before workspace deletion",
+    "outer_status": 0,
+    "outer_rescued_groups": [],
+    "cleanup_pass": true
+  },
+  {
+    "mode": "wait_error",
+    "original_error": "OSError('injected parent wait failure')",
+    "notes": [],
+    "identity": {
+      "worker": 6720,
+      "group": 6721,
+      "session": 6720,
+      "child": 6722
+    },
+    "workspace": "/tmp/qbind-verdict-fixture-dgc__js3",
+    "workspace_exists": false,
+    "unsafe_groups": [],
+    "descriptors": [
+      3,
+      4,
+      5
+    ],
+    "descriptors_closed": true,
+    "worker_reaped": true,
+    "tested_cleanup": "quiescent before workspace deletion",
+    "outer_status": 0,
+    "outer_rescued_groups": [],
+    "cleanup_pass": true
+  },
+  {
+    "mode": "parent_TERM",
+    "original_error": "InterruptedError('watchdog parent interrupted by SIGTERM')",
+    "notes": [],
+    "identity": {
+      "worker": 6751,
+      "group": 6752,
+      "session": 6751,
+      "child": 6771
+    },
+    "workspace": "/tmp/qbind-verdict-fixture-3id5fziu",
+    "workspace_exists": false,
+    "unsafe_groups": [],
+    "descriptors": [
+      3,
+      4,
+      5
+    ],
+    "descriptors_closed": true,
+    "worker_reaped": true,
+    "tested_cleanup": "quiescent before workspace deletion",
+    "outer_status": 0,
+    "outer_rescued_groups": [],
+    "cleanup_pass": true
+  },
+  {
+    "mode": "parent_HUP",
+    "original_error": "InterruptedError('watchdog parent interrupted by SIGHUP')",
+    "notes": [],
+    "identity": {
+      "worker": 6802,
+      "group": 6803,
+      "session": 6802,
+      "child": 6807
+    },
+    "workspace": "/tmp/qbind-verdict-fixture-sm1l4g0_",
+    "workspace_exists": false,
+    "unsafe_groups": [],
+    "descriptors": [
+      3,
+      4,
+      5
+    ],
+    "descriptors_closed": true,
+    "worker_reaped": true,
+    "tested_cleanup": "quiescent before workspace deletion",
+    "outer_status": 0,
+    "outer_rescued_groups": [],
+    "cleanup_pass": true
+  },
+  {
+    "mode": "malformed",
+    "original_error": "JSONDecodeError('Expecting value: line 1 column 8 (char 7)')",
+    "notes": [],
+    "identity": {
+      "worker": 6826,
+      "group": 6827,
+      "session": 6826,
+      "child": 6829
+    },
+    "workspace": "/tmp/qbind-verdict-fixture-y_w_jmc_",
+    "workspace_exists": false,
+    "unsafe_groups": [],
+    "descriptors": [
+      3,
+      4,
+      5
+    ],
+    "descriptors_closed": true,
+    "worker_reaped": true,
+    "tested_cleanup": "quiescent before workspace deletion",
+    "outer_status": 0,
+    "outer_rescued_groups": [],
+    "cleanup_pass": true
+  },
+  {
+    "mode": "incomplete",
+    "original_error": "AssertionError(('watchdog failure', 0, [6847], [{'started_group': 6847}]))",
+    "notes": [],
+    "identity": {
+      "worker": 6846,
+      "group": 6847,
+      "session": 6846,
+      "child": 6848
+    },
+    "workspace": "/tmp/qbind-verdict-fixture-64eps0ju",
+    "workspace_exists": false,
+    "unsafe_groups": [],
+    "descriptors": [
+      3,
+      4,
+      5
+    ],
+    "descriptors_closed": true,
+    "worker_reaped": true,
+    "tested_cleanup": "quiescent before workspace deletion",
+    "outer_status": 0,
+    "outer_rescued_groups": [],
+    "cleanup_pass": true
+  },
+  {
+    "mode": "timeout",
+    "original_error": "AssertionError(('watchdog failure', None, [6893, 6894], [{'started_group': 6894}]))",
+    "notes": [],
+    "identity": {
+      "worker": 6893,
+      "group": 6894,
+      "session": 6893,
+      "child": 6904
+    },
+    "workspace": "/tmp/qbind-verdict-fixture-9kqawpnc",
+    "workspace_exists": false,
+    "unsafe_groups": [],
+    "descriptors": [
+      3,
+      4,
+      5
+    ],
+    "descriptors_closed": true,
+    "worker_reaped": true,
+    "tested_cleanup": "quiescent before workspace deletion",
+    "outer_status": 0,
+    "outer_rescued_groups": [],
+    "cleanup_pass": true
+  },
+  {
+    "mode": "unresolved_cleanup",
+    "original_error": "KeyboardInterrupt('injected parent interruption unresolved_cleanup')",
+    "notes": [
+      "watchdog cleanup: RuntimeError('injected unresolved containment; no success claimed')"
+    ],
+    "identity": {
+      "worker": 7640,
+      "group": 7641,
+      "session": 7640,
+      "child": 7644
+    },
+    "workspace": "/tmp/qbind-verdict-fixture-q63oah0z",
+    "workspace_exists": true,
+    "unsafe_groups": [
+      7640
+    ],
+    "descriptors": [
+      3,
+      4,
+      5
+    ],
+    "descriptors_closed": true,
+    "tested_cleanup": "FAILED; expected unresolved refusal; outer containment required",
+    "outer_status": 0,
+    "outer_rescued_groups": [
+      7640,
+      7641
+    ],
+    "cleanup_pass": false
+  }
+]

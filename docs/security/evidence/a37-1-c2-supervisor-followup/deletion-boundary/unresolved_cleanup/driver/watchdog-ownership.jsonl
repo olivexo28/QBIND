@@ -1,0 +1,1 @@
+{"worker": 20669, "original_error": "KeyboardInterrupt('injected parent interruption unresolved_cleanup')", "owned_descriptors": [3, 4, 5], "owned_descriptors_closed": false, "cleanup_failures": ["watchdog cleanup: RuntimeError('injected unresolved containment; no success claimed')"]}

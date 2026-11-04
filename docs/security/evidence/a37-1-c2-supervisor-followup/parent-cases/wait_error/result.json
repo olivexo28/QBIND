@@ -1,0 +1,22 @@
+{
+  "mode": "wait_error",
+  "original_error": "OSError('injected parent wait failure')",
+  "notes": [],
+  "identity": {
+    "worker": 6720,
+    "group": 6721,
+    "session": 6720,
+    "child": 6722
+  },
+  "workspace": "/tmp/qbind-verdict-fixture-dgc__js3",
+  "workspace_exists": false,
+  "unsafe_groups": [],
+  "descriptors": [
+    3,
+    4,
+    5
+  ],
+  "descriptors_closed": true,
+  "worker_reaped": true,
+  "tested_cleanup": "quiescent before workspace deletion"
+}

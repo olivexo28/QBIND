@@ -1,0 +1,18 @@
+{
+  "repository": "olivexo28/QBIND",
+  "branch": "copilot/audit-run216-227-regression-verdict-fix",
+  "origin_fetch": "https://github.com/olivexo28/QBIND",
+  "origin_push": "https://github.com/olivexo28/QBIND",
+  "command": "git remote -v && git status --porcelain=v1 && git branch --show-current && git rev-parse HEAD HEAD^{tree} && git ls-remote origin refs/heads/main refs/heads/copilot/audit-run216-227-regression-verdict-fix",
+  "exit_code": 0,
+  "status_porcelain": "",
+  "starting_commit": "d494ce2af1dd522e8ec0fc14c36b02a19e50b209",
+  "starting_tree": "8449e9aa7683f68c113a1fb00b1491a0e6e75d5b",
+  "remote_task_tip": "d494ce2af1dd522e8ec0fc14c36b02a19e50b209",
+  "protected_remote_main": "f36e59a5e2cebab6fdfd0365920ca3e1a09444ac",
+  "review_reference": "User-supplied independent A37.1-C2 / A38-iv watchdog-parent ownership review in the follow-up request; no separately retrieved review artifact or post-correction acceptance is claimed.",
+  "historical_evidence_revisions": {
+    "docs/security/evidence/a37-1-c2/": "6fdc0f0dcfc45c65037de3e53215121f5332689a",
+    "docs/security/evidence/a37-1-c2-correction/": "d494ce2af1dd522e8ec0fc14c36b02a19e50b209"
+  }
+}

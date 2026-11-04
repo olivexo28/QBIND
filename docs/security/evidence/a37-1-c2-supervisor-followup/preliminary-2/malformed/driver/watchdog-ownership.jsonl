@@ -1,0 +1,1 @@
+{"worker": 779, "worker_reaped": true, "original_error": "JSONDecodeError('Expecting value: line 1 column 8 (char 7)')", "cleanup": {"worker": 779, "worker_reaped": true, "session": 779, "observed_pids": [780, 781], "groups": [779, 780], "reaped": [[780, 9], [781, 9]], "remaining": [], "kernel_groups_absent": true}, "owned_descriptors_closed": true, "cleanup_failures": []}

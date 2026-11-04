@@ -1,0 +1,1 @@
+{"worker": 749, "original_error": "OSError('injected parent wait failure')", "cleanup": {"worker": 749, "worker_reaped": true, "session": 749, "observed_pids": [749, 755, 763], "groups": [749, 755], "reaped": [[755, 9], [749, 9], [763, 9]], "remaining": [], "kernel_groups_absent": true}, "owned_descriptors_closed": true, "cleanup_failures": []}

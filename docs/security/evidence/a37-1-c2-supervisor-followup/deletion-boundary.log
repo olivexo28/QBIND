@@ -1,0 +1,12 @@
+before_registration PASS
+after_registration PASS
+pipe_error PASS
+wait_error PASS
+parent_TERM PASS
+parent_HUP PASS
+malformed PASS
+incomplete PASS
+timeout PASS
+watchdog cleanup: RuntimeError('injected unresolved containment; no success claimed')
+cleanup failed; retaining workspace: /tmp/qbind-verdict-fixture-jau4gtva
+unresolved_cleanup EXPECTED CLEANUP FAILURE; outer rescue recorded

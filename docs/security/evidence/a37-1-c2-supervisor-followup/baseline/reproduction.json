@@ -1,0 +1,15 @@
+{
+  "revision": "d494ce2af1dd522e8ec0fc14c36b02a19e50b209",
+  "kind": "isolated unchanged-function reproduction; not a harness run",
+  "original_error": "KeyboardInterrupt('injected historical parent waitpid interruption')",
+  "worker": 26628,
+  "group": 26629,
+  "child": 26630,
+  "worker_alive": true,
+  "group_alive": true,
+  "unsafe_groups": [],
+  "workspace_deleted_while_owned_processes_alive": true,
+  "independent_outer_cleanup": true,
+  "worker_reaped": true,
+  "group_absent": true
+}

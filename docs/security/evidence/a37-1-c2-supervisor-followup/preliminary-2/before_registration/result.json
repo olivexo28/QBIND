@@ -1,0 +1,21 @@
+{
+  "mode": "before_registration",
+  "original_error": "KeyboardInterrupt('injected parent interruption before_registration')",
+  "notes": [],
+  "identity": {
+    "worker": 651,
+    "group": 652,
+    "session": 651,
+    "child": 653
+  },
+  "workspace": "/tmp/qbind-verdict-fixture-v115eq6o",
+  "workspace_exists": false,
+  "unsafe_groups": [],
+  "descriptors": [
+    3,
+    4
+  ],
+  "descriptors_closed": true,
+  "worker_reaped": true,
+  "tested_cleanup": "quiescent before workspace deletion"
+}

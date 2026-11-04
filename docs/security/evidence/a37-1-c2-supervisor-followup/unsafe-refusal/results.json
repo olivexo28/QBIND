@@ -1,0 +1,15 @@
+{
+  "producing_commit": "e02047003a3ac5d099a12268dda5fb210ef69902",
+  "fixture_sha256": "2de6ca4f0078823c4d2dd4ca8715a2e29f4f047b801f1b5fb089b649e165c5d9",
+  "launch_attempts": [],
+  "outcomes": [
+    {
+      "entry": "run_case",
+      "refused": "AssertionError(('refusing cases after unsafe cleanup', {6150}))"
+    },
+    {
+      "entry": "supervisor_negative",
+      "refused": "AssertionError(('refusing watchdog after unsafe cleanup', {6150}))"
+    }
+  ]
+}
