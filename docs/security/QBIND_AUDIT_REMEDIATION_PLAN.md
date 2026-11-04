@@ -214,7 +214,7 @@ not this task's source verification.
 | A15-F1 | OPEN supervision/observability gap; A14.1-D at A:L11708-L11728, A45.1 preserves | Consensus JoinHandle owners; D; O/R availability relevance | Check owner detection and process/task propagation; avoid rewriting component scope into protocol-safety claim | Task termination, owner detection, transport/metrics outcomes and cleanup E21; no automatic recovery claim |
 | A17-F1 | OPEN logical-only catch-up endorsements; A5/A19.3/A19.4, A:L9260; downstream disagreement unestablished | RestoreCatchupResponse/QC reconstruction; D; R-F7 relevance | Check admitted validator/anchor/chain conditions and exact current consumer; do not conflate TC setter | Missing endorsement verification, suffix/commit controls and effects; later E20 multi-node evidence; no arbitrary-finality assertion |
 | A19-F1 | OPEN parsed-but-ignored authority RemoteSigner selector; A19.1/A20, A:L9782-L10350 | Authority trust-bundle signing surfaces; D/MI; C5/O | Preserve seven-surface map; decide consume/remove selector under relevant contract, not duplicate validator signer | Selected-policy enforcement on each differing surface, clear refusal/operator documentation |
-| A21-F1 = QBIND-A1-F001 | **CONFIRMED TO CURRENT SOURCE MECHANISM**; R7.1 at A:L14115-L14128 and A44 qualifications retained; section 12 | Proposal decoder, after optional QC, before tx-body/sender checks; D; O/R availability relevance | Allocation-free structural preflight contract **PROPOSED — AWAITING INDEPENDENT CONTRACT REVIEW**; implementation **NOT STARTED**; no arbitrary resource caps or policy bypass | E12 focused decoder cases in section 12 **FUTURE / NOT EXECUTED**; regression/runtime evidence **NOT EXECUTED**; E13 queue/aggregate-memory scope separate |
+| A21-F1 = QBIND-A1-F001 | **OPEN; CONFIRMED TO THE STATED SOURCE MECHANISM**; R7.1 at A:L14115-L14128 and A44 qualifications retained; section 12 | Proposal decoder, after optional QC, before tx-body/sender checks; D; O/R availability relevance | Bounded allocation-free structural preflight **IMPLEMENTED — VERIFICATION PENDING** at section 12's implementation/test revision; independent post-implementation review PENDING; no arbitrary resource caps or policy bypass | Focused E12 decoder regressions passed on the producing revision; source/runtime review and deployment evidence remain distinct; E13 queue/aggregate-memory scope separate |
 | A23-F1 | OPEN K!=T ratified-target/bundle-signer gap; A9.1 at A:L13517-L13518; A26 refinements retained | V2 trust ratification/install; D; C4/O | Ratification invocation/data-dir and independent genesis provenance prerequisites; retain DevNet no-data-dir no-op qualification | K/T, external genesis and gate/config controls; E23; not automatic runtime authorization escalation |
 | A24-F1 | OPEN opt-in metrics HTTP resource limits/deadlines; A15 at A:L11446-L11489 | Metrics HTTP handlers; D; O | Check enabled/reachable endpoint and size/concurrency/deadline controls | Bounded request/header/stall/handler/shutdown evidence E24; default-disabled is reachability mitigation |
 | A25-F1 | Source-established operator-assurance gap; severity uncertain, no distinct ratification authorization bypass; A25.2 at A:L8351-L8426 | Run-163 governance-proof fixture verifier; D/MI; C4/C5/O | Preserve upstream real ratification gate; decide real independent authority proof versus truthful unavailable control | Public-data issuer-pattern/threshold controls plus approved real proof; no bypass of upstream signature inferred |
@@ -276,7 +276,7 @@ statuses not supported by a current-lineage review remain provisional.
 | OBL-AVL-4b | Eviction/reconnect full socket-release chain traced scoped; A13.1, A45.1 accounting preserves | D/ME / service shutdown / O | Abort request != blocking worker/socket completion | E14 completion and reload evidence |
 | OBL-SUP-1a | Consensus-task owner/supervision SOURCE-COMPLETE bounded; A14.1/A15-F1 | D/ME / main task ownership / O/R relevance | Preserve actual owner/caller and no-inbound persistence corrections | E21 detection/recovery/process outcomes |
 | OBL-SUP-1b | Outbound dial read-loop qualification source traced; A26 historical section 31 plus A13.1, A23.1 baseline rule | ME / dial/read ownership / O | Check precise route before applying older trace | E21 termination propagation and cleanup |
-| OBL-PAR-1 | Inner parser/allocation source inventory complete to scope, A7.1/R7 then A42.1/A43.1; A21-F1 current mechanism confirmed in section 12, not fixed | D/ME / consensus/DAG codecs / O | Preserve hand-written versus serde distinction; no bincode limit-counter claim; A21-F1 preflight contract awaiting independent review, implementation NOT STARTED | Caller-specific input caps, availability, nesting, reservation and E12; section 12 cases FUTURE / NOT EXECUTED; no obligation closure |
+| OBL-PAR-1 | Inner parser/allocation source inventory complete to scope, A7.1/R7 then A42.1/A43.1; bounded A21-F1 correction implemented and focused regressions passed at the section 12 producing revision; independent review PENDING | D/ME / consensus/DAG codecs / O | Preserve hand-written versus serde distinction; no bincode limit-counter claim; obtain independent implementation review; retain caller-specific input and resource questions | Caller-specific input caps, availability, nesting, reservation and E12/E13 residuals remain; no obligation closure |
 | OBL-PAR-2 | Outbound-size boundaries source traced scoped A21/section 26.4b; A45.1 ingress does not close outbound | ME / frame/channel encoders / O | Check caller-specific outbound size and byte ownership | E13 item count != bytes; in-flight/copies included |
 | OBL-DEP-1 | Retrievable pinned source, not availability-blocked (A23.1); bounded decoder review complete A43.1, broader residual open | ME / bincode/serde/std allocator / A/O | Do not re-queue completed schemas; pin remaining growth/aggregate question | Provenance, capacities versus requests, aggregate/runtime RSS E12 |
 | OBL-DEP-2a | Repo-owned randomness/error chain complete sub-boundary A39.1; overall not declared complete A40 | ME / qbind-crypto integration / C5/O | Keep backend correctness/entropy and secret erasure separate | A40 platform/build inputs, A41 erasure scope; E06 |
@@ -324,7 +324,7 @@ existing scoped results retained.
 | E09 | Deployment and validator launch profile | ME / live operation / M4/M6/S5/S7/RS1 | Four stopped machines are not live evidence; approved deployment/test scope first |
 | E10 | A4-F1 occupancy and A4-F2 cookie integration | ME / handshake resources / O | Occupancy/worker/socket release and complete cookie/client retry, not rate alone |
 | E11 | A5-F1 frame-timeout platform behavior | ME / read framing / O | Exact partial-consumption schedule with idle/valid controls and connection outcome |
-| E12 | Parser/dependency/aggregate memory; A21-F1 decoder evidence obligation retained | ME / codecs/allocator / O/A | A43.1 schema source work retained; section 12 current mechanism confirmed, correction contract proposed, regression/runtime NOT EXECUTED; explicit cap != heap cap, request != capacity/RSS; broader dependency/aggregate residuals remain open |
+| E12 | Parser/dependency/aggregate memory; A21-F1 decoder evidence obligation retained | ME / codecs/allocator / O/A | A43.1 schema source work retained; bounded A21-F1 structural preflight and focused regressions passed at section 12's producing revision, independent review PENDING; explicit cap != heap cap, request != capacity/RSS; broader dependency/aggregate residuals remain open |
 | E13 | Queue/ownership/outbound byte budgets; separate queue/aggregate-memory scope, not the A21-F1 local correction | ME / channels/encoders / O | Four-channel A45.1 inventory, in-flight buffers/concurrency/outbound caller sizes and deployment-dependent effects retained; no global ceiling asserted or closed by section 12 |
 | E14 | Displaced-session/eviction/reload completion | ME / session lifecycle / O/C4 | Registered/displaced, idle/active, EOF/fatal, task and blocking worker plus socket completion |
 | E15 | Transaction families/auth/caller/state/nonce | DD/MI/ME / native/ledger/EVM / R before ingress | RUN 422 source/test slices retained; approved positive authority and actual deployed caller remain |
@@ -1130,20 +1130,27 @@ CRLF-aware whitespace checks passed. Only the two authorized paths are
 staged for delivery; final commit/tree/remote checks are reported separately
 after commit, without a self-referential hash in this document.
 
-**Next action (supersedes the completed constant-clean implementation
-instruction):** independent contract review of section 12's proposed A21-F1
-correction under section 2; implementation remains NOT STARTED and is not
-authorized here. Section 8's E07 / OBL-REL-1a / A48.1-C2
+**Next action (supersedes the prior A21-F1 contract-review instruction):**
+independent post-implementation review under section 2 of the bounded source
+and test changes at the producing revision recorded in section 12. Review is
+PENDING; this record is not an approval or a finding closure. Section 8's
+E07 / OBL-REL-1a / A48.1-C2
 bounded correction is implemented, independently verified and published;
 it is no longer the next implementation. Unrelated BR decisions remain
 mandatory for their dependent authority/recovery/operational work; activation
 remains DISABLED and public DevNet NO-GO.
 
-## 12. A21-F1 candidate task card and pre-implementation contract
+## 12. A21-F1 candidate task card, pre-implementation contract and bounded implementation record
 
-**Finding: CONFIRMED TO CURRENT SOURCE MECHANISM. Correction contract:
-PROPOSED — AWAITING INDEPENDENT CONTRACT REVIEW. Implementation: NOT STARTED.
-Regression/runtime evidence: NOT EXECUTED.**
+**Current status:** A21-F1 remains **OPEN, CONFIRMED TO THE STATED SOURCE
+MECHANISM**. The bounded correction and focused test implementation are
+**IMPLEMENTED — VERIFICATION PENDING**; focused regression validation passed
+on its producing revision. Independent post-implementation review is
+**PENDING**. Runtime, deployment and release evidence are **NOT EXECUTED**.
+
+The original pre-implementation contract, review boundary and proposed
+acceptance matrix below are retained as history. Their FUTURE / NOT EXECUTED
+labels describe the proposal state, not the execution record appended below.
 
 Candidate: **A21-F1 / QBIND-A1-F001**, related **OBL-PAR-1 / E12**.
 The supplied independent **ChatGPT** review of starting commit
@@ -1161,6 +1168,18 @@ ASSESSMENT PENDING. This is a bounded next candidate, not a new finding,
 severity, closed obligation, policy acceptance or implementation authorization.
 **E13's separate queue/aggregate-memory and deployment-effect scope remains
 open**; the local decoder contract does not absorb or discharge it.
+
+**Supplied independent pre-implementation review evidence (as conveyed in
+this task):** the supplied ChatGPT review of `c6f02fc73f2f2dee5eae34de08db7b8cd5d4eea7`
+accepted the current-source finding and the bounded structural-preflight /
+cursor-preservation contract. The supplied review of the corrected addendum at
+`73c2ad6e249ff77f6fd10761d1a2f90c34d9a903` found no remaining blocking
+documentation issue; its three corrections address post-exec dump
+suppression, distinguishable inclusive-boundary guard calibration, and
+parent-validated proof of child execution/completion. These reviews did not
+execute tests, approve an unseen implementation, or establish operational
+readiness. This is the review evidence supplied by the task, not a signed
+review, independently retrieved transcript, PR, URL or timestamp.
 
 **Supplied independent-review correction (2026-11-03):** review of
 `2ecb4515ddeb8d6023407b68cc96ea56f5152eef` identified three documentation gaps:
@@ -1595,7 +1614,12 @@ results (pages reported updated 2026-10-13; crawled 2026-10-30 to 2026-11-02);
 direct page fetch was unavailable and the local rustdoc component was not
 installed. This is current documentation, not the future execution toolchain.
 
-### Future execution sequence and acceptance matrix -- all FUTURE / NOT EXECUTED
+### Pre-implementation execution sequence and acceptance matrix (historical)
+
+The sequence and FUTURE / NOT EXECUTED labels in this matrix record the
+proposal state before the implementation below. The appended execution record
+supersedes only the cases it explicitly names; no unrun or broader assurance
+is implied.
 
 Keep review and evidence phases distinct:
 
@@ -1646,9 +1670,32 @@ records, case results, parent timeout/kill/reap actions, and retained
 log/evidence locations. Keep actual process observations distinct from inferred
 causes. Do not fabricate measurements or evidence files.
 
+### Bounded implementation and verification record
+
+| Item | Recorded value |
+|---|---|
+| Finding and related identities | **A21-F1 / QBIND-A1-F001**; **OBL-PAR-1 / E12**; E13 remains a separate queue/ownership/outbound-byte obligation |
+| Starting commit/tree and advertised main | `73c2ad6e249ff77f6fd10761d1a2f90c34d9a903` / `cee733f72d38de1f67fa6965b61cd10cb0744ce6`; fetch/push `origin` both resolved to `https://github.com/olivexo28/QBIND`; local and advertised `main` matched the required commit at entry |
+| Task branch and entry state | `copilot/audit-a21-proposal-decoder-preflight-fix`; branch absent locally/remotely before use; checkout clean including untracked files; no applicable `AGENTS.md` found |
+| Raw parentage and available ancestry | The starting commit object has raw `parent 2ecb4515ddeb8d6023407b68cc96ea56f5152eef`; `.git/shallow` marks the starting commit and that parent object is unavailable. `git rev-list --parents -n 1` lists only the starting commit, so no ancestry through that shallow boundary is claimed. Implementation commit `9bc10bb0313505697ce7a4e46e4612edec7e9814` has raw parent `73c2ad6e249ff77f6fd10761d1a2f90c34d9a903`. |
+| Protected input identities | Remediation plan `100644` / `dd5e16a1e8206b7ba187524644cc3d4c315fae76`; decoder `100755` / `9233aaaa21196a3e6e9a3af8303e076671f73718`; primitive readers `100755` / `c5df712d3bbf42e7301d63f14d6b6710eef1a1dc`; audit register `100644` / `cd81efdbaf2bfb45e00dc3c60db3ea4f523adfa0` |
+| Supplied pre-implementation review | The task-supplied ChatGPT review of `c6f02fc73f2f2dee5eae34de08db7b8cd5d4eea7` accepted the current-source finding and bounded structural-preflight/cursor-preservation contract. The task-supplied review of the corrected addendum at `73c2ad6e249ff77f6fd10761d1a2f90c34d9a903` found no remaining blocking documentation issue; its three corrections concern post-exec dump suppression, distinguishable inclusive-boundary calibration, and parent-validated proof of child execution/completion. Neither review ran tests, approved an unseen implementation, or established operational readiness. No signed review, retrieved transcript, URL, PR or review timestamp is asserted. |
+| Instrumentation identity / author | GitHub Copilot authored the test instrumentation and implementation. There was no separate instrumentation-only commit: the final test file was overlaid in the isolated baseline checkout with mode `100644`, blob `0474b043a8f623935669f98eb8d7b32f1830bfae`, then committed with the decoder in implementation/test commit `9bc10bb0313505697ce7a4e46e4612edec7e9814` (tree `ae81a2432e5112af782484eb809308a67dea994a`). |
+| Baseline controls | In an isolated checkout at exact source commit `73c2ad6e249ff77f6fd10761d1a2f90c34d9a903`, overlaid only with that focused test file, `baseline_small_controls` passed for `tx_count=2` and `8`. Both returned `UnexpectedEof` with the expected cursor after one complete non-empty transaction and a missing next prefix. Ordered events were allocation requests `(alloc, 48, align 8)` then `(alloc, 3, align 1)` for count 2, and `(alloc, 192, align 8)` then `(alloc, 3, align 1)` for count 8. This matches the old decoder's list reservation followed by payload copy; no large count was run on the baseline. |
+| Header/toolchain prerequisites | Linux `x86_64-unknown-linux-gnu`; `rustc 1.99.1 (58cf8f9c3 2026-10-13)`, Cargo `1.99.1 (5f94df478 2026-08-27)`; this floating stable compiler is recorded, not treated as a repository pin. Workspace test profile: `debug=0`, `strip="debuginfo"`, `incremental=false`; relevant environment included `CARGO_HOME=/usr/local/cargo`, with no target override or Rust flags set. `/usr/bin/prlimit`, util-linux `2.39.3`, SHA-256 `17064f67e650d6152a6902b013aab496b54c87587c8eea6f5023aafee6154069`. |
+| FFI assumptions checked before controls | Target headers confirmed `PR_SET_DUMPABLE=4`, `PR_GET_DUMPABLE=3`, `EINTR=4`; GNU declarations for variadic `prctl`, `pwrite(int,const void *,size_t,off_t)` and `__errno_location`; target widths `off_t=8`, `ssize_t=8`, `size_t=8`, `c_ulong=8`. The retained `ffi-abi-check.c` passed `cc -std=c11 -Wall -Wextra -Werror -fsyntax-only`; compiler was Ubuntu GCC `13.3.0`, libc was glibc `2.39`. No fallback was used. |
+| Instrumentation calibration and containment | Dedicated children verified `/proc/self/limits` as CPU `5:5`, address-space `536870912:536870912`, core `0:0`, then verified `PR_SET_DUMPABLE=0` and `PR_GET_DUMPABLE=0` before arming or calibration. All three inclusive controls completed normally: one 65,536-byte request; 64 requests × 4 KiB; 256 one-byte requests. Each paired next request/event wrote the corresponding pre-delegation `GUARD` record with exact counters and exited by `SIGABRT`. Parent validation checked record identity, case, exact event sequence, setup, terminal kind, counters and actual outcome. All child records were reaped; no wall timeout or parent kill occurred. Deliberately failed/unsupported setup and unavailable/mismatched-limit controls were **NOT EXECUTED** because the target prerequisites and requested limits were available; no fallback was used. This is instrumentation calibration, not decoder regression evidence. |
+| Candidate decoder matrix | Required command `cargo test --locked --target x86_64-unknown-linux-gnu -p qbind-wire --test block_proposal_preflight_tests -- --test-threads=1` passed after commit `9bc10bb0313505697ce7a4e46e4612edec7e9814`: 3 passed, 0 failed, 2 intentionally ignored (the separately selected baseline parent and child entry). All 22 candidate child cases completed with `ENTRY, SETUP, COMPLETE`, exit code 0, and exact case/cursor assertions: `large_count`, `zero`, `empty_tx`, `nonempty_tx`, `mixed_tx`, `prefix_0`–`prefix_3`, `body_truncated`, `count_mismatch`, `signature_prefix_0`, `signature_prefix_1`, `signature_body`, `signature_after_tx`, `trailing`, `present_qc`, `bad_qc`, `bad_header`, `wrapped_net`, `large_tx_len`, and `max_signature_len`. These cover zero/empty/mixed/nonempty materialization; tx-prefix/body/signature truncation and count mismatch; `u32::MAX` count with a tiny fixture; maximum transaction and signature lengths with truncated bodies; successful trailing bytes; QC errors and nested-QC leftover; direct and wrapped `NetMessage` decode plus `decode_from_slice`. Malformed post-QC allocation-attribution cases use `qc_len=0` and observed no allocation events; valid controls observed reservation and payload/signature copies. Abort, timeout, signal-only or resource failure is not counted as success. |
+| Conversion/layout boundary | On the selected 64-bit target, all `u32`/`u16` wire values tested fit `usize`; `u32::MAX` conversion succeeded. Observed `size_of::<Vec<u8>>()=24`, alignment 8, and `Layout::array::<Vec<u8>>(u32::MAX)` was representable at 103,079,215,080 bytes. No such vector was allocated. **32-bit execution and its conversion/layout behavior were NOT EXECUTED.** This reports one target only and does not conflate integer conversion, byte availability, layout representability or allocator success. |
+| Protocol-negative results | Missing and unknown child selectors failed with exit 101 and no records. Two misspelled exact filters exited 0 with no child entries or evidence and were explicitly rejected as zero-match outcomes. Synthetic incomplete, extra, duplicate/out-of-order, stale-ID, wrong-case and wrong-guard-reason records were rejected. These are separately labelled protocol/dispatch controls, not decoder regressions. |
+| Existing qbind-wire integration targets | Command `cargo test --locked --target x86_64-unknown-linux-gnu -p qbind-wire --test consensus_roundtrip_tests --test consensus_signing_preimage_tests --test epoch_roundtrip_tests --test payload_type_roundtrip_tests --test net_roundtrip_tests --test net_message_limits_tests -- --test-threads=1` passed at the same locked target/profile: `consensus_roundtrip_tests` 10; `consensus_signing_preimage_tests` 13; `epoch_roundtrip_tests` 7; `payload_type_roundtrip_tests` 6; `net_roundtrip_tests` 10; `net_message_limits_tests` 12 (58 passed total, 0 failed). |
+| Formatting and scope | `rustfmt --edition 2021 --check` passed for the test file and for the decoder source with only a temporary final newline added for the formatter; the decoder's original no-final-newline convention is preserved in the committed file. `git diff --check` passed. The baseline and current canonical-finding, obligation, and evidence identity tables are unchanged (29 findings, 54 obligations, E01–E27). No dependencies, manifests, readers, encoders, node files, audit register, RUN 422 material or other paths changed. |
+| Retained evidence | Raw Cargo logs, all 22 candidate child records and event snapshots, 6 calibration child records/snapshots, 2 baseline child records/snapshots, protocol-negative outcomes, baseline overlay identity, FFI check, and toolchain/profile capture are retained under `/root/.copilot/session-state/68e4e5078c814cc7ba7fec6c8c02e063/files/a21-f1-evidence/`. `AUTHORITATIVE-MANIFEST.txt` enumerates 102 retained files with sizes and SHA-256 values (14,480 bytes; SHA-256 `942f0041fd609d044b66db0be7581e4f096517b70abed2aa3069e00997658e3a`). The temporary baseline checkout is excluded and is not an evidence location. |
+| Review and residual disposition | Independent post-implementation review **PENDING**. A21-F1 remains **OPEN**; OBL-PAR-1, E12 and E13 remain open. Optional-QC allocations, valid-input allocation/layout failures, aggregate-memory and queue/outbound ownership, unreviewed targets, node/runtime/deployment and release evidence remain separate. No live exploit, node execution, deployment, activation or release validation was run. Activation remains **DISABLED**; public DevNet remains **NO-GO**. |
+
 ### Scope and evidence status
 
-Anticipated source scope after separate authorization: decoder in
+Delivered bounded source scope: decoder in
 `crates/qbind-wire/src/consensus.rs` and the single focused test file
 `crates/qbind-wire/tests/block_proposal_preflight_tests.rs`. Any need to change
 a manifest, dependency, workflow, production allocator instrumentation,
@@ -1663,8 +1710,9 @@ failures, broader E12 dependency/aggregate-memory questions and all E13
 queue/ownership/outbound-byte questions remain open.
 
 **Status remains:** A21-F1 **OPEN, CONFIRMED TO THE STATED SOURCE MECHANISM**;
-implementation **NOT STARTED**; regression/runtime evidence **NOT EXECUTED**;
-target/test addendum **AWAITING INDEPENDENT REVIEW**; activation **DISABLED**;
-public DevNet **NO-GO**. This task performs documentation checks only. No
-implementation, build, project test, allocation experiment, scanner, node,
-signing, deployment, activation, PR, merge or main publication is authorized.
+implementation **IMPLEMENTED — VERIFICATION PENDING**; focused decoder
+regressions passed on the recorded producing revision; independent
+post-implementation review **PENDING**; runtime/deployment/release evidence
+**NOT EXECUTED**; activation **DISABLED**; public DevNet **NO-GO**. This bounded
+task does not close OBL-PAR-1, E12 or E13 and does not change unrelated BR
+decisions or operational gates.
