@@ -1,0 +1,5 @@
+Producer: cbfaa4150465f3e3c3dfb45ee7887d961f087d36
+Command: rustfmt --edition 2021 --check --config skip_children=true crates/qbind-net/src/framed_io.rs crates/qbind-node/src/secure_channel.rs crates/qbind-node/src/secure_channel/encrypted_write_tests.rs crates/qbind-node/src/secure_channel/partial_read_tests.rs
+Exit status: 0
+Command: git diff --check 4629c8d14323afd86d45d2f6786f46db4f074a59 HEAD
+Exit status: 0

@@ -1,0 +1,14 @@
+Baseline-only author checksum verification: 4629c8d14323afd86d45d2f6786f46db4f074a59
+Command: sha256sum -c docs/security/evidence/a11-f2-encrypted-write/SHA256SUMS
+crates/qbind-node/src/secure_channel.rs: OK
+crates/qbind-node/src/secure_channel/encrypted_write_tests.rs: OK
+docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md: OK
+docs/security/evidence/a11-f2-encrypted-write/README.md: OK
+docs/security/evidence/a11-f2-encrypted-write/producer.txt: OK
+docs/security/evidence/a11-f2-encrypted-write/focused.log: OK
+docs/security/evidence/a11-f2-encrypted-write/node-regressions.log: OK
+docs/security/evidence/a11-f2-encrypted-write/framing-regressions.log: OK
+docs/security/evidence/a11-f2-encrypted-write/production-check.log: OK
+docs/security/evidence/a11-f2-encrypted-write/formatting.log: OK
+docs/security/evidence/a11-f2-encrypted-write/whitespace.log: OK
+Exit status: 0

@@ -3433,3 +3433,207 @@ multi-node/deployment outcome, platform-wide timeout guarantee, message
 delivery guarantee or overall audit closure is claimed. Only the task
 branch is published; no PR, merge, main push, amend or force-push is part
 of this correction.
+
+## 16. Supplied bounded independent A11-F2 source and retained-evidence review
+
+This append records the **supplied independent review** at
+`4629c8d14323afd86d45d2f6786f46db4f074a59`, tree
+`5bcf469421d0d0232f603bb41788e694b6326d83`. The reviewer checked the
+implementation and **all 11 retained checksums**. The author's retained
+logs report **46 selected Rust tests passed**. The reviewer **did not
+independently rerun those tests: Cargo was unavailable in the reviewer
+environment**. The supplied material does not identify a named reviewer;
+none is invented here. This agent's implementation and validation work
+is author work, not an additional independent review.
+
+Disposition: **CONFIRMED TO bounded source and retained-evidence review
+scope**, not independently reproduced execution. This is not real
+binary/runtime/deployment evidence, full lifecycle assurance, release
+authorization, or closure of A11-F2 / OBL-TRN-3. Section 15's historical
+implementation/evidence identities and results remain unchanged.
+The new A5-F1 author additionally verified all 11 checksums against an
+extraction of that exact baseline, recorded in
+[`a11-baseline-checksums.log`](evidence/a5-f1-partial-read/a11-baseline-checksums.log).
+That is a separate baseline-only author integrity check, not an
+independent rerun of the historical tests. The old manifest intentionally
+remains unchanged: it checks baseline source/plan bytes, not later edits.
+
+**A11-F2 / OBL-TRN-3 and E19 remain OPEN to their remaining extent**,
+including broader session freshness/replay and lifecycle/evidence
+obligations. **E07 and OBL-GOV-2 remain OPEN to their remaining extent**.
+Activation remains **DISABLED**; public DevNet remains **NO-GO**.
+
+## 17. A5-F1 / OBL-AVL-3a bounded receive-side partial-frame correction
+
+**IMPLEMENTED — INDEPENDENT REVIEW PENDING.** This is the current bounded
+implementation status for A5-F1; the earlier finding/obligation/evidence
+registers and plan history are preserved, not closure claims.
+**A5-F1 / OBL-AVL-3a and E11 remain OPEN to their remaining extent**.
+A11-F2 / OBL-TRN-3, E19, E07 and OBL-GOV-2 also remain **OPEN** to their
+remaining extent. Activation remains **DISABLED**; public DevNet remains
+**NO-GO**.
+
+### Entry and exact supplied source-review scope
+
+Entry verified the fetch/push repository as `olivexo28/QBIND`, a clean
+checkout (including untracked files), and HEAD/local `main`/advertised
+remote `main` at required commit
+`4629c8d14323afd86d45d2f6786f46db4f074a59`, required tree
+`5bcf469421d0d0232f603bb41788e694b6326d83`. Its raw parent is
+`5815346afcdd70323dad2bae1d01bf46c132cf81`; this is a shallow checkout,
+not a claim of traversed earlier ancestry. No applicable `AGENTS.md` was
+found in the repository or ancestor instruction locations.
+`copilot/audit-a5-f1-partial-read` did not exist locally or remotely and
+was created directly from the required baseline.
+
+The **supplied independent pre-implementation source review** confirmed
+the five-byte-header/body separate `read_exact` calls, `recv_app`'s use
+of that stateless reader, and the async worker's retry of `WouldBlock`
+and `TimedOut`. A failed read after header/body consumption loses the
+frame position if retried; zero-consumption idle attempts differ.
+It noted direct/shared async callers, remote-signer timeout handling and
+the existing A11-F2 latch as dependencies requiring author verification.
+Disposition: **CONFIRMED TO that source-mechanism scope**. This was
+**not a full caller, platform or runtime review**. It ran no runtime
+reproduction and made no deployment-specific timeout-mapping claim.
+No independent post-implementation reviewer or approval is invented.
+
+The author separately inspected the current `secure_channel.rs`
+constructors, receive path, guards, status, owned/shared async
+construction, clone handling and both workers; `qbind-net` framing,
+transport, connection and session code; `peer.rs`/`peer_manager.rs`;
+the node remote-signer client and remote-signer daemon; and the secure
+reader error paths in `async_peer_manager.rs` and `p2p_tcp.rs`.
+Repository Rust searches for `recv_app`, `read_transport_frame`,
+`from_shared`, `is_timeout` and async receive uses located these routes
+and their tests. The only production direct transport-frame read found
+was in `SecureChannel`; standalone framing-helper uses found outside it
+were tests. This is a bounded current-source caller inventory, not proof
+about arbitrary downstream/dynamic/future callers. No material caller
+dependency contradicted the bounded correction.
+
+### Correction, Rust contract and compatibility
+
+`FrameProgress::read` counts successful byte returns across the **whole
+existing `read_transport_frame` call**, including all five header bytes
+when the body immediately fails. It implements no `read_exact` override:
+the adapter's default `Read::read_exact` calls its counting `read`, rather
+than the underlying reader's potentially overridden `read_exact`.
+The private controlled reader deliberately panics if its own
+`read_exact` is reached; the real framing/channel tests pass through the
+adapter without reaching it.
+
+This uses the supplied Rust `Read` contract, not the failed
+`read_exact`'s unspecified progress or the error kind to infer bytes.
+Successful `read` returns establish consumption; default `read_exact`
+preserves ordinary `Interrupted` retry behavior. The error return itself
+does not supply a byte count. Both timeout kinds are injected explicitly;
+no platform mapping is assumed. Attempts to retrieve the official Rust
+documentation via the web tool and direct curl failed DNS resolution in
+this environment; no fresh documentation fetch is claimed.
+
+Zero-progress `WouldBlock`/`TimedOut` are returned unchanged and remain
+retryable on the same session. **Any framing failure after consumption**
+(also EOF, reset, invalid length or decode failure) sets the existing
+shared invalidation latch before attempting `shutdown(Both)`. Shutdown
+failure is logged and cannot restore usability. The returned
+`ChannelError::Io` has outer kind `InvalidData`, with byte count and the
+original `io::Error` retained in its error-source chain. This is an
+intentional compatibility change: callers must not classify that outer
+error as idle just because its source was a timeout. Public signatures
+and error variants remain unchanged.
+
+The actual async reader consequently forwards a fatal error and exits,
+instead of retrying at a lost frame boundary. Synchronous `Peer` and
+peer-manager receive methods propagate it (both peer-manager timeout
+filters no longer match). The daemon breaks its request loop rather
+than continuing its idle-timeout branch. The client maps a partial-frame
+timeout to **SignerUnavailable / transport**, rather than **Timeout**;
+its zero-progress timeout mapping is unchanged. Async peer-manager
+`is_timeout` is false and its secure reader stops; P2P secure read errors
+likewise leave the read loop. These are source-reviewed caller effects,
+not live daemon/signing or end-to-end registry-cleanup observations.
+
+Subsequent guarded synchronous, cloned and independently shared async
+sends/receives refuse via the same monotonic A11-F2 latch.
+Async receive still refuses queued plaintext after invalidation; a
+receive already awaiting a fatal error can preserve that error instead
+of overwriting it with generic invalidation. A receive entered after
+invalidation may report generic fatal invalidation instead. The
+encrypted-send path still encrypts each command once, never retries
+uncertain ciphertext delivery by re-encrypting/replaying plaintext, and
+keeps its existing send/shutdown behavior.
+
+Successful frame encoding/decryption, wire format, the **16 MiB**
+ciphertext ceiling and validation **before body allocation** are
+unchanged. The adapter adds no buffer, reads only the buffers supplied
+by the existing framer, and retains no partial frame for later reuse.
+The standalone stateless helper's caller obligation is now documented;
+it does not itself own a session or make arbitrary callers stateful.
+Decryption-error policy and zero-progress non-timeout fatal errors are
+not broadened by this correction.
+
+### Producing identity and deterministic evidence
+
+Implementation/test producer:
+`cbfaa4150465f3e3c3dfb45ee7887d961f087d36`, tree
+`69ab5828fde0d07f043e5169968c70e129f66e7f`, sole parent
+`4629c8d14323afd86d45d2f6786f46db4f074a59`.
+The producer changes exactly four paths: `qbind-node` secure-channel
+source, its new partial-read tests, the existing encrypted-write test
+fixture/assertions, and `qbind-net` framing rustdoc. Full paths, Git
+blobs, exact commands, raw outputs and preparation failures are in
+[`evidence/a5-f1-partial-read/README.md`](evidence/a5-f1-partial-read/README.md).
+Evidence/this append are later documentation, not the test-producing tree.
+
+At that clean producer, **69 selected Rust tests passed**:
+6 new receive tests, all 7 A11-F2 encrypted-write tests, 30 existing node
+channel/peer tests and 26 network framing/roundtrip tests. Production
+`cargo check` for node library/binaries and remote-signer binary
+passed, as did targeted `rustfmt --check` and `git diff --check`.
+Existing compiler warnings are retained. This is not a full-workspace
+or release-binary result. Preparation had missing-cache and missing-
+libclang failures, then 12/13 passing with the coupled historical EOF
+assertion failing; after correcting that assertion, preparation passed
+13/13. Those uncommitted precursor outputs are separately labelled,
+not attributed to the clean producing revision.
+
+The private `cfg(test)` reader controls exact successful byte budgets
+(1, 4, 5 and 7), then `WouldBlock`, `TimedOut`, EOF or reset through the
+actual framing and `recv_app`. Real ML-KEM-768/ChaCha20-Poly1305 traffic
+exercises both directions, idle retry followed by consecutive valid
+frames, ordinary `Interrupted`, no AEAD open on incomplete frames, no
+additional seal on refused sends, shutdown attempts/failure, and
+sync/owned/cloned/independent shared refusal. Since receive counter
+advancement is inside the unentered decrypt/open path, incomplete
+frames cannot advance it. The actual reader worker returns the fatal
+cause and terminates with queue capacity available; idle controls retry
+and deliver a valid frame on the same session before a controlled EOF.
+Framing-only cursor controls separately check exact-limit acceptance,
+limit-plus-one rejection after only five consumed bytes and no
+over-read. Real-AEAD full ciphertext at the 16 MiB limit succeeds in
+both directions (plaintext size limit minus the 16-byte AEAD tag).
+Certificate verification is dummy in the shared fixture; this is not
+production certificate-admission evidence. Existing dummy/framing
+controls are not represented as real-AEAD tests.
+
+### Remaining limitations and gates
+
+This correction proves bounded local guarded application refusal, not
+all worker/socket/registry cleanup. A full reader notification queue can
+still block fatal-error delivery/worker exit; idle shared writer workers
+can wait for commands. Mutex scheduling, timeouts/setup failures, task
+joining, cancellation/draining, prompt registry removal, raw socket
+access, OS shutdown/delivery, owner drop/key erasure and upper-layer
+queue/delivery acknowledgement remain separate concerns. Already
+completed operations/higher-layer deliveries cannot be retracted.
+
+Deterministic injected errors and isolated loopback controls establish
+neither platform-wide timeout semantics nor a particular deployment's
+failure mapping, live-network outcome, full lifecycle assurance or
+independent post-implementation acceptance. No live DevNet, external
+peers, deployment, signing or activation was run. Only the task branch
+is to be pushed: no PR, merge, main push, amend or force-push.
+**A5-F1 / OBL-AVL-3a, E11, A11-F2 / OBL-TRN-3, E19, E07 and OBL-GOV-2
+remain OPEN to their remaining extent; activation DISABLED; public
+DevNet NO-GO.**
