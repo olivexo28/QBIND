@@ -80,8 +80,52 @@ mutation_proof.txt / no_mutation_proof.txt
 bash scripts/devnet/run_227_governance_evaluator_runtime_callsite_wiring_release_binary.sh
 ```
 
-The harness is idempotent: it wipes and regenerates generated artifacts while
-preserving the three tracked files.
+The harness regenerates artifacts and atomically replaces `summary.txt`.
+Use an exclusive `OUTDIR`: one invocation/writer, including its children,
+until all children have completed. Invocation IDs are not locks.
+
+## Current-run regression verdict
+
+Before any work, stderr identifies `run_id` and the summary is replaced with
+that invocation's `verdict: INCOMPLETE`. All eight integration targets and
+both library commands are required. Ordinary Cargo failures do not stop later
+safely capturable commands; missing targets fail rather than skip.
+Existing logs and numeric `.rc` files remain. The aggregation input is
+`exit_codes/regression_results.tsv`: `run_id=<id>`, then the TSV header
+`command_key`, `state`, `rc`, and exactly 10 rows. Keys are
+`run227:test:<target>` and `run227:lib:<label>`; library labels are
+`pqc_authority` and `lib_all`. States are `returned` with shell status 0-255,
+or `missing_target` / `capture_error` with an empty status.
+
+The harness validates identity, schema, exact inventory, uniqueness and
+status-file consistency before incorporating records into the summary.
+Complete nonzero/missing-target results yield `FAIL`; invalid/incomplete
+records or I/O errors yield `INCOMPLETE`, taking precedence over failure.
+Both exit nonzero. PASS requires every required result to be zero and
+successful atomic summary publication, not human-readable PASS text alone.
+Scenario/helper/denylist assertions remain separate. In particular S6's
+expected invalid-selector rejection is not a regression failure.
+
+Summary writes use checked same-directory temporary files and rename.
+Initialization failure stops work and warns that any old summary is
+untrusted. SIGINT/SIGTERM/SIGHUP trigger best-effort INCOMPLETE repair and
+nonzero exit when Bash runs the handler; foreground commands can defer it.
+The invoking supervisor must signal the process group, allow bounded cleanup,
+contain survivors if needed, and reap children before OUTDIR reuse.
+SIGKILL, host failure or unavailable storage may prevent repair. Atomic
+visibility is not crash durability. Success requires matching invocation
+identity, validated incorporated records, and parent/operator-observed normal
+zero exit; a PASS file without that completion evidence is insufficient.
+
+The isolated fixture command (from the repository root) is:
+
+```bash
+bash scripts/devnet/tests/run_216_227_regression_verdict_fixture.sh /tmp/new-exclusive-fixture-evidence
+```
+
+It executes LF-normalized temporary copies with guarded stubs, not real
+Cargo/node/helper binaries or the committed CRLF full release harness.
+See [bounded evidence](../../security/evidence/a37-1-c2/README.md).
 
 ## Honest limitations
 

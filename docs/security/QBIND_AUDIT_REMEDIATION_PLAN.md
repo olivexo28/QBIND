@@ -350,7 +350,7 @@ existing scoped results retained.
 | A27.1-C4/C5, A:L7661-L7719: weighted library 2*total | Bounded open arithmetic observation; no selected-binary reachability; DD/ME; R relevance pending | Check actual arbitrary-weight consumer and intended numeric contract | Boundary arithmetic plus reachable caller, not unit-weight engine overflow assertion |
 | A34.1-C1/C2/C4, A:L5741-L5861 | Parent/QC binding and proposal/justify ordering remain protocol-invariant candidates, not proven defects; DD; R | Settle applicable engine-path invariant with proof/counterexample before implementation | Full conditional self-vote trace and invariant argument; production snapshot gate retained |
 | A36.1-C1 + A38.1, A:L5032-L5077, A:L4397-L4426 | Required-policy non-invocation contract/integration candidate; DD/MI; C4/C5/O | Clarify skip/v1/no-data-dir/live-0x05/drain contract; no advisory-hook overclaim | Contract decision, exact surface-specific invocation/refusal and later binary evidence |
-| A37.1-C2/C3 + A38 carry-forward, A:L4744-L4785, A:L4629-L4671 | Section 14 confirms the stated current-source mechanism; evidence-harness assurance observation; D/ME; A | Correction contract **AWAITING INDEPENDENT REVIEW**; implementation **NOT STARTED**; not a node-protocol defect or fabricated-run allegation | Required regression failure yields a non-PASS summary and nonzero harness exit; retain exact harness/helper/evidence-producing source and disclose unavailable historical artifacts |
+| A37.1-C2/C3 + A38 carry-forward, A:L4744-L4785, A:L4629-L4671 | Section 14 confirms the stated current-source mechanism; evidence-harness assurance observation; D/ME; A | A37.1-C2 / A38-iv **IMPLEMENTED — VERIFICATION PENDING**; supplied bounded pre-implementation review recorded in section 14; independent post-implementation review **PENDING**; historical provenance unresolved; not a node-protocol defect or fabricated-run allegation | Independently review the bounded correction and isolated fixture evidence in section 14; retain exact producing source and disclose unavailable historical artifacts; E07 / OBL-GOV-2 remain OPEN |
 | R-DEP-1/R-DEP-2/R-RUNTIME-1, A39.1-A41 | RNG source chain resolved to scope; deployed backend/build and runtime entropy remain; algorithms/constant-time not performed; ME; C5 | Pin platform/features/cfgs and exact remaining backend question | Dependency provenance + build inputs; runtime entropy separate, no generic source rerun |
 | R7.3/E12, A42.1-A45.1 | Schema/visitor/postdecode/four-channel route complete to scope; aggregate capacities/RSS/concurrency residuals; ME; O | Preserve corrected precheck/Infinite-limit and copy accounting; name unmeasured quantity | Revision-bound aggregate experiment under separate plan; no new forced defect |
 | A47.3-C1-C3/disposition, A:L1039-L1151 | Local stored n>1 -> 1 regression trace established; violated contract/harm unestablished, no new finding; DD/ME; R/profile recovery | Resolve relevant storage/transition contract and consumer impact before a transition change | Correct restore chronology, cursor-vs-DB writer, atomic visibility != power-loss durability; multi-validator residual separate |
@@ -1133,15 +1133,16 @@ staged for delivery; final commit/tree/remote checks are reported separately
 after commit, without a self-referential hash in this document.
 
 **Current next action (supersedes the prior generic candidate-selection
-instruction):** independently review the A37.1-C2 / A38-iv pre-implementation
-correction contract in section 14. Its current-source observation is
-**CONFIRMED TO THE STATED CURRENT SOURCE MECHANISM**; the correction contract
-is **AWAITING INDEPENDENT REVIEW**; implementation is **NOT STARTED**;
-reproduction/regression/runtime evidence for this task is **NOT EXECUTED**.
+instruction):** independently review the A37.1-C2 / A38-iv bounded
+implementation and isolated fixture evidence in section 14. The supplied
+pre-implementation review supersedes the earlier awaiting-contract-review
+state only for this correction. Current implementation status is
+**IMPLEMENTED — VERIFICATION PENDING**; independent post-implementation
+review remains **PENDING**.
 The QBIND-A1-F002 bounded source/retained-evidence review and separate
 publication remain recorded in section 13; earlier F002 pending-review
 statements remain historical and are superseded only within that bounded
-scope. This task does not authorize implementation, create a finding, or
+scope. This bounded implementation does not create a finding or
 close an overall finding or evidence obligation. E07 and OBL-GOV-2 remain
 **OPEN**; unrelated release and operational gates remain unchanged; activation
 remains **DISABLED** and public DevNet **NO-GO**.
@@ -2460,10 +2461,19 @@ unverified correction and starts no implementation.
 
 ## 14. A37.1-C2 / A38-iv pre-implementation contract: Run 216/227 regression verdict
 
-**Status:** Observation: **CONFIRMED TO THE STATED CURRENT SOURCE MECHANISM**.
-Correction contract: **AWAITING INDEPENDENT REVIEW**. Implementation:
-**NOT STARTED**. Reproduction/regression/runtime evidence for this task:
-**NOT EXECUTED**.
+**Current status:** Observation: **CONFIRMED TO THE STATED CURRENT SOURCE
+MECHANISM**. Implementation: **IMPLEMENTED — VERIFICATION PENDING**.
+The user supplied the completed bounded independent pre-implementation
+source/contract review described below. Independent post-implementation
+review remains **PENDING**.
+
+**Historical preparation status (superseded only within this bounded
+correction):** Correction contract: **AWAITING INDEPENDENT REVIEW**.
+Implementation: **NOT STARTED**. Reproduction/regression/runtime evidence
+for the contract-preparation task: **NOT EXECUTED**. The future/NOT EXECUTED
+matrix and closing preparation statements below retain that historical
+meaning; the implementation record at the end of this section supplies
+the current evidence, without backdating execution.
 
 ### Entry identities and historical/current-source separation
 
@@ -2839,3 +2849,60 @@ and acceptance of this contract are the unresolved gate before
 implementation; a requested design departure must be explicit and
 re-reviewed. E07 and OBL-GOV-2 remain **OPEN**; no identity, historical
 evidence, release gate, or operational status is closed or changed.
+
+### Bounded implementation record (A37.1-C2 / A38-iv)
+
+The user authorized this implementation and isolated fixture execution.
+The supplied pre-implementation review was completed by ChatGPT against
+`c176056a22a965b5d0411495a55a0517453fa907`, after correction of interruption
+guarantees and output-directory ownership assumptions. Its reported tree
+equals the published baseline tree below. Manual publication created a
+different commit and parentage: tree equality establishes neither ancestry
+nor identity. This records the user's supplied review, not a locally
+retrieved review artifact or post-implementation acceptance.
+
+Entry baseline: `f36e59a5e2cebab6fdfd0365920ca3e1a09444ac`, tree
+`64011836fc74638590a8fda334f338c286156877`, raw sole parent
+`0a35ef1fff2b7cdc15acddd9de8d5a01995418c7`. The checkout was clean,
+origin fetch/push identity was `https://github.com/olivexo28/QBIND`, and
+remote main matched. No applicable AGENTS.md was found. Fetching available
+history established the raw parent as an available ancestor of the baseline.
+The reviewed `c176056...` object was unavailable; no ancestry to that object
+is claimed. The entry controlling-plan blob was
+`d44b11fe875343cae49d2823c4f02d3733283f0a`, SHA-256
+`87d6c75594571925eeac8867f7ce14f2bb0807efd47b6c70cfff0648a468315a`.
+Both entry production-script blobs matched the table above.
+
+The two production scripts now capture Cargo statuses directly in the parent
+shell, attempt all safely capturable literal required commands, record
+missing targets and capture errors, and validate invocation-bound TSV records
+against exact inventories and numeric status artifacts. Checked startup and
+final same-directory temporary summary writes/renames prevent ordinary
+stale-summary success. Complete regression failures produce FAIL/nonzero;
+unobservable, invalid or incomplete results take precedence as
+INCOMPLETE/nonzero. Existing scenario/helper/denylist paths and successful
+sections remain; Run 227 S6 stays outside the regression inventory.
+Catchable-signal traps attempt INCOMPLETE repair and exit nonzero when Bash
+dispatches them, including after PASS publication. No concurrency support,
+production test bypass, test-count certification or new release claim was
+added.
+
+The new fixture executes only LF-normalized temporary copies of the actual
+baseline/candidate scripts. It uses guarded Cargo/node/helper/provenance
+stubs, explicitly allowed local utilities, fake textual reachability files,
+exclusive fixture OUTDIRs and Linux process-group/subreaper supervision.
+It does not substitute an aggregation model or edit temporary script bodies.
+Preliminary calibration and authoritative producing-revision execution are
+recorded separately in the retained-evidence addendum below. The exact
+implementation/test commit and authoritative results will be recorded by the
+following evidence/documentation commit; they cannot be self-referentially
+embedded in the implementation commit.
+
+Limits remain those of the contract: single-writer ownership, foreground
+Bash trap deferral, best-effort repair with available storage, no SIGKILL or
+host-failure cleanup guarantee, and atomic visibility rather than crash
+durability. Matching-ID PASS requires validated incorporated records and
+parent/operator-observed normal zero completion. Fixture success is not a
+QBIND Rust test, release-harness run, runtime evidence, historical provenance,
+or independent acceptance. E07 / OBL-GOV-2 remain **OPEN**; activation remains
+**DISABLED** and public DevNet remains **NO-GO**.

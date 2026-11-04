@@ -28,8 +28,57 @@ build_id() { if command -v file >/dev/null 2>&1; then file "$1" | grep -oE 'Buil
 assert_grep() { grep -E -i -q "$2" "$1" || fail "expected pattern '$2' in $1"; }
 assert_not_grep() { if grep -E -i -q "$2" "$1"; then fail "forbidden pattern '$2' present in $1"; fi; }
 
+RUN_ID="run216-${EPOCHREALTIME//[.,]/}-$$-${RANDOM}"
+RESULTS="${EXIT_DIR}/regression_results.tsv"
+SUMMARY_TMP=""
+STARTED=0
+COMPLETED=0
+INCOMPLETE=0
+REGRESSION_FAILED=0
+TEST_VERDICTS=()
+
+publish_incomplete() {
+  local tmp
+  if ! tmp="$(mktemp "${SUMMARY}.tmp.XXXXXX")"; then return 1; fi
+  SUMMARY_TMP="$tmp"
+  if ! printf 'run_id=%s\nverdict: INCOMPLETE\n' "$RUN_ID" > "$tmp"; then return 1; fi
+  if ! mv -f -- "$tmp" "$SUMMARY"; then return 1; fi
+  SUMMARY_TMP=""
+}
+finish() {
+  local rc=$?
+  local abandoned_tmp="$SUMMARY_TMP"
+  trap - EXIT INT TERM HUP
+  if [[ "$COMPLETED" -ne 1 || "$rc" -ne 0 ]]; then
+    [[ "$rc" -ne 0 ]] || rc=1
+    if [[ "$STARTED" -eq 1 ]]; then
+      publish_incomplete || log "cannot repair summary; any PASS is untrusted without normal zero completion"
+    fi
+  fi
+  if [[ -n "$SUMMARY_TMP" ]]; then
+    rm -f -- "$SUMMARY_TMP" || log "cannot remove summary temporary file"
+  fi
+  if [[ -n "$abandoned_tmp" && "$abandoned_tmp" != "$SUMMARY_TMP" ]]; then
+    rm -f -- "$abandoned_tmp" || log "cannot remove abandoned summary temporary file"
+  fi
+  exit "$rc"
+}
+interrupted() {
+  log "interrupted by $1; foreground-command traps may be deferred"
+  COMPLETED=0
+  exit "$2"
+}
+trap finish EXIT
+trap 'interrupted SIGINT 130' INT
+trap 'interrupted SIGTERM 143' TERM
+trap 'interrupted SIGHUP 129' HUP
+
 log "OUTDIR=${OUTDIR}"
-mkdir -p "${OUTDIR}"
+log "run_id=${RUN_ID}"
+if ! mkdir -p "${OUTDIR}" || ! publish_incomplete; then
+  fail "summary initialization failed; any existing summary may be from an earlier run and is untrusted"
+fi
+STARTED=1
 rm -rf "${HELPER_216_OUT}" "${LOGS_DIR}" "${EXIT_DIR}" "${GREP_DIR}" "${REACH_DIR}" "${TEST_LOGS}" "${DATA_DIR}"
 mkdir -p "${HELPER_216_OUT}" "${LOGS_DIR}" "${EXIT_DIR}" "${GREP_DIR}" "${REACH_DIR}" "${TEST_LOGS}" "${DATA_DIR}"
 : > "${PROVENANCE}"; : > "${DENYLIST}"; : > "${MUT_PROOF}"; : > "${NOMUT_PROOF}"
@@ -142,36 +191,123 @@ grep -RIn --include='*.rs' 'p2p_trust_bundle_governance_execution_policy' "${SRC
   echo "Run 216 mutation proof (release-binary scope): selector resolution occurs before governance-execution material parse; material parse before marker decision; governance execution, lifecycle, governance-proof, custody and custody-attestation validation occur before apply/mutation; accepted mutating compatibility remains subject to Run 055 sequence commit before v2 marker persist. No mutation is performed by this fixture-only helper."
 } > "${MUT_PROOF}"
 
-run_test_target() {
-  local target="$1"
-  local logf="${TEST_LOGS}/test_${target}.log"
-  log "cargo test -p qbind-node --test ${target}"
-  set +e
-  ( cd "${REPO_ROOT}" && cargo test -p qbind-node --test "$target" -- --test-threads=1 ) > "$logf" 2>&1
-  local rc=$?
-  set -e
-  echo "$rc" > "${EXIT_DIR}/test_${target}.rc"
-  printf '%s\trc=%d\n' "test:${target}" "$rc"
+record_result() {
+  if ! printf '%s\t%s\t%s\n' "$1" "$2" "$3" >> "$RESULTS"; then
+    log "manifest write failed for $1"
+    INCOMPLETE=1
+    return 1
+  fi
 }
-run_lib_test() {
-  local filter="$1"
-  local label="${2:-${filter:-lib_all}}"
-  local logf="${TEST_LOGS}/lib_${label}.log"
-  log "cargo test -p qbind-node --lib ${filter}"
-  set +e
-  ( cd "${REPO_ROOT}" && cargo test -p qbind-node --lib ${filter} -- --test-threads=1 ) > "$logf" 2>&1
-  local rc=$?
-  set -e
-  echo "$rc" > "${EXIT_DIR}/lib_${label}.rc"
-  printf '%s\trc=%d\n' "lib:${label}" "$rc"
+run_regression() {
+  local kind="$1" label="$2"; shift 2
+  local key="run216:${kind}:${label}" stem logf rc fd
+  if [[ "$kind" == test ]]; then stem="test_${label}"; else stem="lib_${label}"; fi
+  logf="${TEST_LOGS}/${stem}.log"
+  if [[ "$kind" == test && ! -f "${REPO_ROOT}/crates/qbind-node/tests/${label}.rs" ]]; then
+    log "missing required target: $key"
+    REGRESSION_FAILED=1
+    record_result "$key" missing_target "" || INCOMPLETE=1
+    return 1
+  fi
+  if ! exec {fd}> "$logf"; then
+    log "cannot capture $key; command not launched"
+    INCOMPLETE=1
+    record_result "$key" capture_error "" || INCOMPLETE=1
+    return 1
+  fi
+  log "regression $key"
+  if ( cd "${REPO_ROOT}" && cargo test -p qbind-node "$@" -- --test-threads=1 ) >&"$fd" 2>&1; then
+    rc=0
+  else
+    rc=$?
+  fi
+  if ! exec {fd}>&-; then log "log close failed: $key"; INCOMPLETE=1; fi
+  if ! printf '%s\n' "$rc" > "${EXIT_DIR}/${stem}.rc"; then
+    log "status write failed: $key"
+    INCOMPLETE=1
+  fi
+  record_result "$key" returned "$rc" || INCOMPLETE=1
+  if ! printf '%s\trc=%d\n' "$key" "$rc"; then log "result output failed: $key"; INCOMPLETE=1; fi
+  [[ "$rc" -eq 0 ]] || REGRESSION_FAILED=1
+  return "$rc"
 }
-TEST_VERDICTS=()
+validate_results() {
+  local line key state rc stem stored extra fd status_fd count=0
+  local -A expected=() seen=()
+  TEST_VERDICTS=()
+  for key in "${TEST_TARGETS[@]}"; do expected["run216:test:${key}"]="test_${key}"; done
+  expected["run216:lib:pqc_authority"]="lib_pqc_authority"
+  expected["run216:lib:lib_all"]="lib_lib_all"
+  if IFS= read -r -d '' line < "$RESULTS"; then log "NUL in manifest"; return 1; fi
+  if ! exec {fd}< "$RESULTS"; then log "cannot read regression manifest"; return 1; fi
+  if ! IFS= read -r line <&"$fd" || [[ "$line" != "run_id=${RUN_ID}" ]]; then
+    exec {fd}<&-; log "stale/missing manifest invocation"; return 1
+  fi
+  if ! IFS= read -r line <&"$fd" || [[ "$line" != $'command_key\tstate\trc' ]]; then
+    exec {fd}<&-; log "invalid manifest schema"; return 1
+  fi
+  while true; do
+    line=""
+    if ! IFS= read -r line <&"$fd"; then
+      if [[ -n "$line" ]]; then exec {fd}<&-; log "unterminated result"; return 1; fi
+      break
+    fi
+    if [[ ! "$line" =~ ^([^$'\t']+)$'\t'(returned|missing_target|capture_error)$'\t'([0-9]*)$ ]]; then
+      exec {fd}<&-; log "malformed result"; return 1
+    fi
+    key="${BASH_REMATCH[1]}"; state="${BASH_REMATCH[2]}"; rc="${BASH_REMATCH[3]}"
+    if [[ -z "${expected[$key]+present}" || -n "${seen[$key]+present}" ]]; then
+      exec {fd}<&-; log "unknown/duplicate result: $key"; return 1
+    fi
+    seen["$key"]=1; stem="${expected[$key]}"; count=$((count + 1))
+    if [[ "$state" == returned ]]; then
+      if [[ ! "$rc" =~ ^(0|[1-9][0-9]{0,2})$ ]] || (( rc > 255 )); then
+        exec {fd}<&-; log "invalid status: $key"; return 1
+      fi
+      if [[ ! -f "${TEST_LOGS}/${stem}.log" || ! -f "${EXIT_DIR}/${stem}.rc" ]] ||
+         ! exec {status_fd}< "${EXIT_DIR}/${stem}.rc"; then
+        exec {fd}<&-; log "missing/unreadable status/log: $key"; return 1
+      fi
+      extra=""
+      if IFS= read -r -d '' stored < "${EXIT_DIR}/${stem}.rc"; then
+        exec {status_fd}<&-; exec {fd}<&-; log "NUL in status: $key"; return 1
+      fi
+      if IFS= read -r stored <&"$status_fd" && ! IFS= read -r extra <&"$status_fd" &&
+         [[ -z "$extra" && "$stored" == "$rc" ]]; then
+        if ! exec {status_fd}<&-; then exec {fd}<&-; log "status close failed"; return 1; fi
+      else
+        exec {status_fd}<&-
+        exec {fd}<&-; log "status/log mismatch: $key"; return 1
+      fi
+      [[ "$rc" -eq 0 ]] || REGRESSION_FAILED=1
+    else
+      if [[ -n "$rc" || -e "${EXIT_DIR}/${stem}.rc" || ( "$state" == missing_target && "$key" != run216:test:* ) ]]; then
+        exec {fd}<&-; log "invalid non-returned result: $key"; return 1
+      fi
+      if [[ "$state" == capture_error ]]; then INCOMPLETE=1; else REGRESSION_FAILED=1; fi
+    fi
+    TEST_VERDICTS+=( "$line" )
+  done
+  if ! exec {fd}<&-; then log "manifest close failed"; return 1; fi
+  if [[ "$count" -ne "${#expected[@]}" ]]; then log "missing required results"; return 1; fi
+}
 TEST_TARGETS=(run_215_governance_execution_policy_selector_tests run_213_governance_execution_payload_callsite_tests run_211_governance_execution_policy_tests run_209_custody_attestation_policy_selector_tests run_207_custody_attestation_payload_callsite_tests run_205_custody_attestation_verifier_tests run_203_kms_hsm_backend_boundary_tests run_201_remote_signer_transport_boundary_tests run_198_remote_signer_policy_selector_tests run_196_remote_signer_payload_callsite_tests run_194_remote_authority_signer_boundary_tests run_192_authority_custody_policy_selector_tests run_190_authority_custody_payload_callsite_tests run_188_authority_custody_boundary_tests run_186_onchain_governance_production_verifier_boundary_tests run_184_onchain_governance_payload_carrying_tests run_182_onchain_governance_production_callsite_wiring_tests run_180_onchain_governance_marker_integration_tests run_178_onchain_governance_proof_tests run_176_live_0x05_governance_proof_carrier_tests run_173_validation_only_governance_required_policy_tests run_171_governance_required_policy_selector_tests run_169_governance_proof_loader_surface_integration_tests run_167_governance_proof_carrier_tests run_165_governance_marker_integration_tests run_163_governance_authority_verifier_tests run_161_lifecycle_marker_integration_tests run_159_authority_signing_key_lifecycle_tests run_157_unified_testnet_fixture_universe_tests run_152_binary_reachable_peer_drain_plumbing_tests run_150_peer_driven_apply_drain_tests run_148_peer_driven_apply_devnet_tests run_142_live_inbound_0x05_v2_validation_tests run_134_reload_apply_v2_authority_marker_tests run_138_sighup_v2_authority_marker_tests)
-for t in "${TEST_TARGETS[@]}"; do if [[ -f "${REPO_ROOT}/crates/qbind-node/tests/${t}.rs" ]]; then TEST_VERDICTS+=( "$(run_test_target "$t")" ); else TEST_VERDICTS+=( "test:${t}rc=skipped(not-present)" ); fi; done
-TEST_VERDICTS+=( "$(run_lib_test pqc_authority pqc_authority)" )
-TEST_VERDICTS+=( "$(run_lib_test '' lib_all)" )
+if ! printf 'run_id=%s\ncommand_key\tstate\trc\n' "$RUN_ID" > "$RESULTS"; then
+  log "manifest initialization failed"; INCOMPLETE=1
+fi
+for t in "${TEST_TARGETS[@]}"; do
+  if run_regression test "$t" --test "$t"; then :; else :; fi
+done
+if run_regression lib pqc_authority --lib pqc_authority; then :; else :; fi
+if run_regression lib lib_all --lib; then :; else :; fi
+if ! validate_results; then INCOMPLETE=1; fi
+VERDICT=PASS
+if [[ "$REGRESSION_FAILED" -ne 0 ]]; then VERDICT=FAIL; fi
+if [[ "$INCOMPLETE" -ne 0 ]]; then VERDICT=INCOMPLETE; fi
+SUMMARY_TMP="$(mktemp "${SUMMARY}.tmp.XXXXXX")" || fail "cannot create final summary temporary file"
 
 {
+  echo "run_id=${RUN_ID}"
   echo "Run 216 — release-binary governance-execution policy-selector evidence"
   echo "git_commit: $(git -C "${REPO_ROOT}" rev-parse HEAD 2>/dev/null || echo unknown)"
   echo
@@ -194,10 +330,27 @@ TEST_VERDICTS+=( "$(run_lib_test '' lib_all)" )
   echo
   echo "denylist result:"; echo "  verdict: PASS (all $(grep -c '^ok-empty:' "${DENYLIST}" || echo 0) forbidden patterns proven empty across captured logs)"
   echo
-  echo "regression test verdicts:"; for v in "${TEST_VERDICTS[@]}"; do echo "  ${v}"; done
+  echo "regression test verdicts:"
+  for v in "${TEST_VERDICTS[@]}"; do
+    IFS=$'\t' read -r key state rc <<< "$v"
+    printf '  %s\trc=%s\n' "${key#run216:}" "${rc:-${state}}"
+  done
+  echo "regression result records:"
+  for v in "${TEST_VERDICTS[@]}"; do printf '  %s\n' "$v"; done
   echo
   echo "honest_limits: default Disabled; hidden CLI/env selectors additive; CLI-over-env deterministic; invalid values fail closed; fixture DevNet/TestNet only; emergency explicit non-production; production/on-chain/MainNet unavailable; MainNet peer-driven apply refused; no real governance engine/on-chain verifier/KMS-HSM/RemoteSigner/validator-set rotation; existing paths compatible; full C4 and C5 remain OPEN."
   echo
-  echo "verdict: PASS"
-} > "${SUMMARY}"
+  echo "aggregate: ${VERDICT}"
+  echo "verdict: ${VERDICT}"
+} > "${SUMMARY_TMP}"
+for v in "${TEST_VERDICTS[@]}"; do
+  [[ "$(grep -Fxc -- "  ${v}" "${SUMMARY_TMP}")" == 1 ]] || fail "unincorporated regression result"
+done
+mv -f -- "${SUMMARY_TMP}" "${SUMMARY}" || fail "cannot publish final summary"
+SUMMARY_TMP=""
+COMPLETED=1
 log "done — summary at ${SUMMARY}"
+[[ "$VERDICT" == PASS ]] && exit 0
+# A complete FAIL is retained; abnormal exits and signals restore INCOMPLETE.
+trap - EXIT
+exit 1
