@@ -1,0 +1,21 @@
+?? crates/qbind-gov/tests/
+305640e0dffa16872692906af052dbf15937b192
+6529ebb5d0cefeacdc3c047d85134fe755d011da
+100755 blob 8f19cdd29d9923e04d600669fea26acd93b6d73c	Cargo.lock
+100644 blob 3514efce58d5bd0cfb8111ad491e9cf0a21b2d10	crates/qbind-gov/Cargo.toml
+040000 tree b05691d0996fde3d7b5352301530605862a3562c	crates/qbind-gov/src
+44d04ac1cdbfdbc9395b42a5d61fe3a979728444b575bd0e837e782a3ac069be  crates/qbind-gov/tests/f002_baseline_probe.rs
+   Compiling qbind-gov v0.1.0 (/root/.copilot/session-state/7604990edff942548800b4f30ecba02d/files/f002-baseline/crates/qbind-gov)
+    Finished `test` profile [unoptimized] target(s) in 0.30s
+     Running tests/f002_baseline_probe.rs (target/debug/deps/f002_baseline_probe-45a06cbe101fd67a)
+
+running 1 test
+single genuine approval: count=1 threshold=2 valid=false; wrapper rejects
+two distinct genuine approvals: count=2 threshold=2 valid=true; wrapper accepts
+one genuine approval copied twice: count=2 threshold=2 valid=true; wrapper accepts (baseline defect)
+test baseline_one_copied_approval_satisfies_two_of_three ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.08s
+
+
+exit_status=0

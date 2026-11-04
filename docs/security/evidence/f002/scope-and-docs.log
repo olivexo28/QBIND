@@ -1,0 +1,34 @@
+Command: python docs/security/evidence/f002/check_scope.py
+Checked HEAD: 149edffd8f7fd97c821d6df9a5a546eca4992b79
+Code/test producer: 149edffd8f7fd97c821d6df9a5a546eca4992b79
+Section 1 byte-identical SHA-256: b9b96c840ed0345b6c6791abed24b4da05f12baafcd0d8e9d72e31989d4c8bcc
+Section 2 byte-identical SHA-256: ac6e4a336122d1d479e31b68350737aacc15cdf42fef15b880fb5c6de2c29480
+Section 3 byte-identical SHA-256: 9eb2f851091a4738d2a361cd5fccea76cd0b05def822f5d62b76b47fe883b7d1
+Section 5 byte-identical SHA-256: 653694fc2f3262c4bcba18655927d60c571931283fafc6c14c5072761988b726
+Section 6 byte-identical SHA-256: 178a351832bc391f46307f627b4ab5710ff135a453f8a2528460b746915b1eee
+Section 7 byte-identical SHA-256: a98e167e94e4ef9e7a333c3d0399f6ca91571ccbaa2f3a003350bb229d927492
+Section 8 byte-identical SHA-256: cdde4ae9ebf64ffd51a0d742b687e4fe0acb462d0f6c62bce17976de610db052
+Section 9 byte-identical SHA-256: 4683e3b7de377b2f48ea1ddc96da1624774ad2bdf3bce892ef652fad788626ad
+Section 10 byte-identical SHA-256: ddad15203c1e53079e18e2250fa47f3939967ea0bcc532f54217b2cb8641a34c
+Section 12 byte-identical SHA-256: 47b986087c6ed2717820549f67adc0ccfe583ea905bc9d148dca07d6c4dbd447
+Section 4 unchanged except F002 row; all other finding/alias rows retained
+Audit register byte-identical
+hash.rs production bytes byte-identical
+All three Rust paths equal exact tested producing revision
+Allowed path / mode 100644 / LF (logs may retain CRLF) / final newline: crates/qbind-gov/src/hash.rs
+Allowed path / mode 100644 / LF (logs may retain CRLF) / final newline: crates/qbind-gov/src/verify.rs
+Allowed path / mode 100644 / LF (logs may retain CRLF) / final newline: crates/qbind-gov/tests/envelope_cli_tests.rs
+Allowed path / mode 100644 / LF (logs may retain CRLF) / final newline: docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md
+Allowed path / mode 100644 / LF (logs may retain CRLF) / final newline: docs/security/evidence/f002/README.md
+Allowed path / mode 100644 / LF (logs may retain CRLF) / final newline: docs/security/evidence/f002/SHA256SUMS
+Allowed path / mode 100644 / LF (logs may retain CRLF) / final newline: docs/security/evidence/f002/baseline-initial-failed.log
+Allowed path / mode 100644 / LF (logs may retain CRLF) / final newline: docs/security/evidence/f002/baseline.log
+Allowed path / mode 100644 / LF (logs may retain CRLF) / final newline: docs/security/evidence/f002/baseline_probe.rs
+Allowed path / mode 100644 / LF (logs may retain CRLF) / final newline: docs/security/evidence/f002/check_scope.py
+Allowed path / mode 100644 / LF (logs may retain CRLF) / final newline: docs/security/evidence/f002/focused-tests.log
+Allowed path / mode 100644 / LF (logs may retain CRLF) / final newline: docs/security/evidence/f002/scope-and-docs.log
+Allowed path / mode 100644 / LF (logs may retain CRLF) / final newline: docs/security/evidence/f002/toolchain-and-format.log
+Section 13 and evidence README relative links resolve
+git -c core.whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol diff --check baseline: exit 0
+Available-object ancestry baseline -> producer -> checked HEAD: exit 0
+PASS; exit_status=0
