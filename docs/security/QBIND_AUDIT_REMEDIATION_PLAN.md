@@ -2893,10 +2893,11 @@ stubs, explicitly allowed local utilities, fake textual reachability files,
 exclusive fixture OUTDIRs and Linux process-group/subreaper supervision.
 It does not substitute an aggregation model or edit temporary script bodies.
 Preliminary calibration and authoritative producing-revision execution are
-recorded separately in the retained-evidence addendum below. The exact
-implementation/test commit and authoritative results will be recorded by the
-following evidence/documentation commit; they cannot be self-referentially
-embedded in the implementation commit.
+recorded separately in the retained-evidence addendum below. The
+implementation/test commit is `9b3458b7674140569b550fb7f6034fe0eb9a83f3`,
+tree `55177a97b3cd0ad521cfe5d5400961652e6624d3`, sole parent the entry
+baseline. Its exact source/fixture bytes produced the authoritative suite.
+This following evidence/documentation commit changes no script or fixture.
 
 Limits remain those of the contract: single-writer ownership, foreground
 Bash trap deferral, best-effort repair with available storage, no SIGKILL or
@@ -2906,3 +2907,56 @@ parent/operator-observed normal zero completion. Fixture success is not a
 QBIND Rust test, release-harness run, runtime evidence, historical provenance,
 or independent acceptance. E07 / OBL-GOV-2 remain **OPEN**; activation remains
 **DISABLED** and public DevNet remains **NO-GO**.
+
+### Retained producing-revision verification
+
+Authoritative command, from repository root after committing the above
+implementation/test revision:
+
+```bash
+bash scripts/devnet/tests/run_216_227_regression_verdict_fixture.sh docs/security/evidence/a37-1-c2
+```
+
+Captured with `tee` under `pipefail`, exit **0**: **94 actual harness
+invocations**, comprising **4 pinned-baseline controls/reproductions** and
+**90 candidate cases** (45 per harness), covering all 24 contract matrix
+categories and their applicable subcases. The harnesses attempted **1,694
+guarded stub regression commands** (94 baseline, 1,600 candidate); these are
+not Rust tests. Seven separate command-guard calibration probes passed.
+All 94 child/process-group cleanup checks passed. Positive controls reached
+the regression phase and accounted for all 37 / 10 required commands.
+The controlled baseline first-regression status 17 coexisted with PASS and
+exit zero in both scripts; this is not evidence of historical failures.
+Candidate cases retained exact statuses and refused invalid/incomplete
+aggregates. Signal cases covered SIGINT, SIGTERM and SIGHUP before and after
+publication (observed 130/143/129), and SIGKILL before/after (observed -9).
+The after-PASS tests synchronized actual replacement while the harness was
+still alive; matching-ID PASS after SIGKILL did not count as success.
+
+[Retained evidence README](evidence/a37-1-c2/README.md) maps all matrix
+categories to actual modes and limitations. It links the raw case logs,
+per-case results, invocation identities, manifests, per-command logs/statuses,
+guard/fault evidence, signal supervision/reaping, environment/tool versions,
+raw/normalized byte identities, preliminary debugging history, syntax,
+scope/format/documentation checks and non-circular checksum manifest.
+Raw candidate identities matched the committed producing blobs.
+Only LF-normalized temporary copies executed; syntax checking them is not
+execution of committed CRLF full release scripts. No actual Cargo tests,
+release builds or node/helper binaries ran. Production/fixture files were
+unchanged after the authoritative suite, so it was not rerun merely for
+evidence/documentation publication.
+
+Preliminary attempts were separate pre-commit calibration: the first exposed
+an over-restrictive env-stub symlink comparison; the second exposed a Bash
+negated-group redirection edge case in status validation; the third exposed
+a Run 227 bulk-edit boundary error. These were corrected before the
+producing commit. A fourth preliminary suite passed all 94 invocations.
+The authoritative committed suite then passed separately. Historical
+NOT EXECUTED statements above are retained as preparation evidence, not
+rewritten as though these later tests occurred then.
+
+Status remains **IMPLEMENTED — VERIFICATION PENDING**. Independent
+post-implementation review is **PENDING**; E07 / OBL-GOV-2 remain **OPEN**.
+Historical source/build/execution provenance, real runtime and release
+evidence remain unresolved. Activation remains **DISABLED**; public DevNet
+remains **NO-GO**.

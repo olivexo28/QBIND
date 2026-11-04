@@ -1,0 +1,158 @@
+{
+  "command": [
+    "bash",
+    "scripts/devnet/tests/run_216_227_regression_verdict_fixture.sh",
+    "/workspaces/QBIND/olivexo28/QBIND/docs/security/evidence/a37-1-c2"
+  ],
+  "producing_commit": "9b3458b7674140569b550fb7f6034fe0eb9a83f3",
+  "producing_tree": "55177a97b3cd0ad521cfe5d5400961652e6624d3",
+  "baseline": "f36e59a5e2cebab6fdfd0365920ca3e1a09444ac",
+  "python": "3.12.3 (main, Aug 31 2026, 10:18:26) [GCC 13.3.0]",
+  "bash": "GNU bash, version 5.2.21(1)-release (x86_64-pc-linux-gnu)\nCopyright (C) 2022 Free Software Foundation, Inc.\nLicense GPLv3+: GNU GPL version 3 or later <http://gnu.org/licenses/gpl.html>\n\nThis is free software; you are free to change and redistribute it.\nThere is NO WARRANTY, to the extent permitted by law.\n",
+  "platform": [
+    "Linux",
+    "adc-sandbox",
+    "6.12.8+",
+    "#1 SMP Thu Jul 30 23:01:31 UTC 2026",
+    "x86_64"
+  ],
+  "uid": 0,
+  "utilities": {
+    "awk": "/usr/bin/awk",
+    "basename": "/usr/bin/basename",
+    "cat": "/usr/bin/cat",
+    "dirname": "/usr/bin/dirname",
+    "env": "/usr/bin/env",
+    "find": "/usr/bin/find",
+    "grep": "/usr/bin/grep",
+    "head": "/usr/bin/head",
+    "ls": "/usr/bin/ls",
+    "mkdir": "/usr/bin/mkdir",
+    "mktemp": "/usr/bin/mktemp",
+    "mv": "/usr/bin/mv",
+    "rm": "/usr/bin/rm",
+    "sed": "/usr/bin/sed",
+    "sha256sum": "/usr/bin/sha256sum",
+    "uname": "/usr/bin/uname",
+    "xargs": "/usr/bin/xargs"
+  },
+  "identities": {
+    "216": {
+      "baseline": {
+        "raw_sha256": "8e3203864ac666d177f36d4de22f44cba82beb20270c14dc1c1d713a2bcf3af9",
+        "normalized_sha256": "ac5b187371cb3336f49da1e611b97aad56e68212248ba7ada435a8625babacdd",
+        "raw_blob": "e084e64f1b7b8e3ca1af9d0419b4bd659e0644f8",
+        "matches_committed_blob": true,
+        "normalized_bytes": 16817,
+        "raw_bytes": 17019
+      },
+      "candidate": {
+        "raw_sha256": "d157cd4c440b8d040a62bb0c4484cbf11d7763227df9281f2be3c48babb6cb88",
+        "normalized_sha256": "9c0e052fa02f9a77f904ace461ee0ed4470e9a727463502e4b0b976975171e59",
+        "raw_blob": "7f0f90f5649e5f2b7bc84464f192a86118fdd2ef",
+        "matches_committed_blob": true,
+        "normalized_bytes": 22765,
+        "raw_bytes": 23120
+      }
+    },
+    "227": {
+      "baseline": {
+        "raw_sha256": "52cff0d3e6a0a3c069e04eb9de6e2177e546dc75874ca3f8b7896777273e2079",
+        "normalized_sha256": "7cb40c2a2772fac4acaf0ea8c7b88b1bfa6fd5be3954188746b5716d48fef9bd",
+        "raw_blob": "ce73b752eff9fd03377582938956d7f53a470390",
+        "matches_committed_blob": true,
+        "normalized_bytes": 22386,
+        "raw_bytes": 22649
+      },
+      "candidate": {
+        "raw_sha256": "fd5b1d42d0e4857952d9515798f7207f2069eeb748e79fe7e630befd35a209d1",
+        "normalized_sha256": "20e63b5feac01c20e4c8df276bf823f7f493eb8df546d0812ad29c1ea8c0af8b",
+        "raw_blob": "f24f8284092f1fd14337e48fe65a1df05cbfce79",
+        "matches_committed_blob": true,
+        "normalized_bytes": 28334,
+        "raw_bytes": 28750
+      }
+    }
+  },
+  "started_utc": "2026-11-04T15:24:48.769895+00:00",
+  "fixture_sha256": "1d9ce9514e2dc74ac5e1c5c161e59e37a5c082b31fc09a8aeced3a61de689445",
+  "tool_versions": {
+    "git": {
+      "command": [
+        "git",
+        "--version"
+      ],
+      "exit_code": 0,
+      "output": "git version 2.51.1\n"
+    },
+    "mktemp": {
+      "command": [
+        "mktemp",
+        "--version"
+      ],
+      "exit_code": 0,
+      "output": "mktemp (GNU coreutils) 9.4\nCopyright (C) 2023 Free Software Foundation, Inc.\nLicense GPLv3+: GNU GPL version 3 or later <https://gnu.org/licenses/gpl.html>.\nThis is free software: you are free to change and redistribute it.\nThere is NO WARRANTY, to the extent permitted by law.\n\nWritten by Jim Meyering and Eric Blake.\n"
+    },
+    "mv": {
+      "command": [
+        "mv",
+        "--version"
+      ],
+      "exit_code": 0,
+      "output": "mv (GNU coreutils) 9.4\nCopyright (C) 2023 Free Software Foundation, Inc.\nLicense GPLv3+: GNU GPL version 3 or later <https://gnu.org/licenses/gpl.html>.\nThis is free software: you are free to change and redistribute it.\nThere is NO WARRANTY, to the extent permitted by law.\n\nWritten by Mike Parker, David MacKenzie, and Jim Meyering.\n"
+    },
+    "grep": {
+      "command": [
+        "grep",
+        "--version"
+      ],
+      "exit_code": 0,
+      "output": "grep (GNU grep) 3.11\nCopyright (C) 2023 Free Software Foundation, Inc.\nLicense GPLv3+: GNU GPL version 3 or later <https://gnu.org/licenses/gpl.html>.\nThis is free software: you are free to change and redistribute it.\nThere is NO WARRANTY, to the extent permitted by law.\n\nWritten by Mike Haertel and others; see\n<https://git.savannah.gnu.org/cgit/grep.git/tree/AUTHORS>.\n\ngrep -P uses PCRE2 10.42 2022-12-11\n"
+    },
+    "sed": {
+      "command": [
+        "sed",
+        "--version"
+      ],
+      "exit_code": 0,
+      "output": "/usr/bin/sed (GNU sed) 4.9\nPackaged by Debian\nCopyright (C) 2022 Free Software Foundation, Inc.\nLicense GPLv3+: GNU GPL version 3 or later <https://gnu.org/licenses/gpl.html>.\nThis is free software: you are free to change and redistribute it.\nThere is NO WARRANTY, to the extent permitted by law.\n\nWritten by Jay Fenlason, Tom Lord, Ken Pizzini,\nPaolo Bonzini, Jim Meyering, and Assaf Gordon.\n\nThis sed program was built with SELinux support.\nSELinux is disabled on this system.\n\nGNU sed home page: <https://www.gnu.org/software/sed/>.\nGeneral help using GNU software: <https://www.gnu.org/gethelp/>.\nE-mail bug reports to: <bug-sed@gnu.org>.\n"
+    },
+    "sha256sum": {
+      "command": [
+        "sha256sum",
+        "--version"
+      ],
+      "exit_code": 0,
+      "output": "sha256sum (GNU coreutils) 9.4\nCopyright (C) 2023 Free Software Foundation, Inc.\nLicense GPLv3+: GNU GPL version 3 or later <https://gnu.org/licenses/gpl.html>.\nThis is free software: you are free to change and redistribute it.\nThere is NO WARRANTY, to the extent permitted by law.\n\nWritten by Ulrich Drepper, Scott Miller, and David Madore.\n"
+    },
+    "find": {
+      "command": [
+        "find",
+        "--version"
+      ],
+      "exit_code": 0,
+      "output": "find (GNU findutils) 4.9.0\nCopyright (C) 2022 Free Software Foundation, Inc.\nLicense GPLv3+: GNU GPL version 3 or later <https://gnu.org/licenses/gpl.html>.\nThis is free software: you are free to change and redistribute it.\nThere is NO WARRANTY, to the extent permitted by law.\n\nWritten by Eric B. Decker, James Youngman, and Kevin Dalley.\nFeatures enabled: D_TYPE O_NOFOLLOW(enabled) LEAF_OPTIMISATION FTS(FTS_CWDFD) CBO(level=2) \n"
+    },
+    "xargs": {
+      "command": [
+        "xargs",
+        "--version"
+      ],
+      "exit_code": 0,
+      "output": "xargs (GNU findutils) 4.9.0\nCopyright (C) 2022 Free Software Foundation, Inc.\nLicense GPLv3+: GNU GPL version 3 or later <https://gnu.org/licenses/gpl.html>.\nThis is free software: you are free to change and redistribute it.\nThere is NO WARRANTY, to the extent permitted by law.\n\nWritten by Eric B. Decker, James Youngman, and Kevin Dalley.\n"
+    },
+    "awk": {
+      "command": [
+        "awk",
+        "-W",
+        "version"
+      ],
+      "exit_code": 0,
+      "output": "mawk 1.3.4 20240123\nCopyright 2008-2023,2024, Thomas E. Dickey\nCopyright 1991-1996,2014, Michael D. Brennan\n\nrandom-funcs:       arc4random_stir/arc4random\nregex-funcs:        internal\n\ncompiled limits:\nsprintf buffer      8192\nmaximum-integer     9223372036854775808\n"
+    }
+  },
+  "case_count": 94,
+  "candidate_case_count": 90,
+  "exit_code": 0,
+  "finished_utc": "2026-11-04T15:34:56.132948+00:00"
+}

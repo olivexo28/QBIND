@@ -1,0 +1,760 @@
+{
+  "status": "PASS",
+  "baseline": "f36e59a5e2cebab6fdfd0365920ca3e1a09444ac",
+  "producing_commit": "9b3458b7674140569b550fb7f6034fe0eb9a83f3",
+  "producing_tree": "55177a97b3cd0ad521cfe5d5400961652e6624d3",
+  "entry_control_plan_blob": "d44b11fe875343cae49d2823c4f02d3733283f0a",
+  "raw_sole_baseline_parent": "0a35ef1fff2b7cdc15acddd9de8d5a01995418c7",
+  "raw_sole_producing_parent": "f36e59a5e2cebab6fdfd0365920ca3e1a09444ac",
+  "proven_ancestry": "available parent -> baseline -> implementation/test producing commit",
+  "unavailable_reviewed_object": "c176056a22a965b5d0411495a55a0517453fa907",
+  "review_tree_equality_is_user_supplied_not_ancestry": true,
+  "audit_blob": "cd81efdbaf2bfb45e00dc3c60db3ea4f523adfa0",
+  "protected_sections": {
+    "8": {
+      "old_sha256": "cdde4ae9ebf64ffd51a0d742b687e4fe0acb462d0f6c62bce17976de610db052",
+      "new_sha256": "cdde4ae9ebf64ffd51a0d742b687e4fe0acb462d0f6c62bce17976de610db052",
+      "equal": true
+    },
+    "12": {
+      "old_sha256": "47b986087c6ed2717820549f67adc0ccfe583ea905bc9d148dca07d6c4dbd447",
+      "new_sha256": "47b986087c6ed2717820549f67adc0ccfe583ea905bc9d148dca07d6c4dbd447",
+      "equal": true
+    },
+    "13": {
+      "old_sha256": "209352bca2494e38e5f4fa5d5636e304e1eb73d570e8e18437309562880a75dd",
+      "new_sha256": "209352bca2494e38e5f4fa5d5636e304e1eb73d570e8e18437309562880a75dd",
+      "equal": true
+    }
+  },
+  "source_compatibility": {
+    "216": {
+      "required_integrations": 35,
+      "required_libraries": 2,
+      "inventory": [
+        "run_215_governance_execution_policy_selector_tests",
+        "run_213_governance_execution_payload_callsite_tests",
+        "run_211_governance_execution_policy_tests",
+        "run_209_custody_attestation_policy_selector_tests",
+        "run_207_custody_attestation_payload_callsite_tests",
+        "run_205_custody_attestation_verifier_tests",
+        "run_203_kms_hsm_backend_boundary_tests",
+        "run_201_remote_signer_transport_boundary_tests",
+        "run_198_remote_signer_policy_selector_tests",
+        "run_196_remote_signer_payload_callsite_tests",
+        "run_194_remote_authority_signer_boundary_tests",
+        "run_192_authority_custody_policy_selector_tests",
+        "run_190_authority_custody_payload_callsite_tests",
+        "run_188_authority_custody_boundary_tests",
+        "run_186_onchain_governance_production_verifier_boundary_tests",
+        "run_184_onchain_governance_payload_carrying_tests",
+        "run_182_onchain_governance_production_callsite_wiring_tests",
+        "run_180_onchain_governance_marker_integration_tests",
+        "run_178_onchain_governance_proof_tests",
+        "run_176_live_0x05_governance_proof_carrier_tests",
+        "run_173_validation_only_governance_required_policy_tests",
+        "run_171_governance_required_policy_selector_tests",
+        "run_169_governance_proof_loader_surface_integration_tests",
+        "run_167_governance_proof_carrier_tests",
+        "run_165_governance_marker_integration_tests",
+        "run_163_governance_authority_verifier_tests",
+        "run_161_lifecycle_marker_integration_tests",
+        "run_159_authority_signing_key_lifecycle_tests",
+        "run_157_unified_testnet_fixture_universe_tests",
+        "run_152_binary_reachable_peer_drain_plumbing_tests",
+        "run_150_peer_driven_apply_drain_tests",
+        "run_148_peer_driven_apply_devnet_tests",
+        "run_142_live_inbound_0x05_v2_validation_tests",
+        "run_134_reload_apply_v2_authority_marker_tests",
+        "run_138_sighup_v2_authority_marker_tests"
+      ],
+      "scenario_helper_denylist_prefix_identical": true,
+      "summary_scenarios_helpers_denylist_and_limits_identical": true
+    },
+    "227": {
+      "required_integrations": 8,
+      "required_libraries": 2,
+      "inventory": [
+        "run_226_governance_evaluator_runtime_callsite_wiring_tests",
+        "run_224_governance_evaluator_runtime_integration_tests",
+        "run_222_governance_execution_evaluator_tests",
+        "run_220_governance_execution_runtime_consumption_tests",
+        "run_217_governance_execution_runtime_arming_tests",
+        "run_215_governance_execution_policy_selector_tests",
+        "run_213_governance_execution_payload_callsite_tests",
+        "run_211_governance_execution_policy_tests"
+      ],
+      "scenario_helper_denylist_prefix_identical": true,
+      "summary_scenarios_helpers_denylist_and_limits_identical": true
+    }
+  },
+  "case_count": 94,
+  "attempted_stub_regressions": 1694,
+  "signal_case_count": 16,
+  "all_cleanup_verified": true,
+  "raw_crlf_syntax_exit_2_is_expected_not_execution_evidence": true,
+  "normalized_syntax_exit_0": true,
+  "embedded_python_ast_parse": "PASS",
+  "allowed_tracked_paths": [
+    "scripts/devnet/run_216_governance_execution_policy_release_binary.sh",
+    "scripts/devnet/run_227_governance_evaluator_runtime_callsite_wiring_release_binary.sh",
+    "docs/devnet/run_216_governance_execution_policy_release_binary/README.md",
+    "docs/devnet/run_227_governance_evaluator_runtime_callsite_wiring_release_binary/README.md",
+    "docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md",
+    "scripts/devnet/tests/run_216_227_regression_verdict_fixture.sh"
+  ],
+  "changed_paths": [
+    "docs/devnet/run_216_governance_execution_policy_release_binary/README.md",
+    "docs/devnet/run_227_governance_evaluator_runtime_callsite_wiring_release_binary/README.md",
+    "docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md",
+    "docs/security/evidence/a37-1-c2/README.md",
+    "docs/security/evidence/a37-1-c2/SHA256SUMS",
+    "docs/security/evidence/a37-1-c2/calibration.json",
+    "docs/security/evidence/a37-1-c2/cases.json",
+    "docs/security/evidence/a37-1-c2/environment.json",
+    "docs/security/evidence/a37-1-c2/preliminary.json",
+    "docs/security/evidence/a37-1-c2/preliminary.log",
+    "docs/security/evidence/a37-1-c2/raw/run-216.jsonl",
+    "docs/security/evidence/a37-1-c2/raw/run-227.jsonl",
+    "docs/security/evidence/a37-1-c2/suite.log",
+    "docs/security/evidence/a37-1-c2/validation.json",
+    "scripts/devnet/run_216_governance_execution_policy_release_binary.sh",
+    "scripts/devnet/run_227_governance_evaluator_runtime_callsite_wiring_release_binary.sh",
+    "scripts/devnet/tests/run_216_227_regression_verdict_fixture.sh"
+  ],
+  "identity_exclusions": [
+    "docs/security/evidence/a37-1-c2/validation.json",
+    "docs/security/evidence/a37-1-c2/SHA256SUMS"
+  ],
+  "identity_exclusion_reason": "No circular/self-referential hashing; both final identities are in delivery handoff",
+  "file_manifest": [
+    {
+      "path": "docs/devnet/run_216_governance_execution_policy_release_binary/README.md",
+      "old_mode": "100644",
+      "old_blob": "9ace23d803f21425aba9b33fcf19ced896dd94ee",
+      "new_mode": "100644",
+      "new_blob": "aa818372a4bf5fe0c1970ff9798e3c069c8b143e",
+      "sha256": "e5e4a4ca8391f67b2ccbb6ded3f1e6ff6468207d5ac29a04a938f07f5cf732cb",
+      "bytes": 5438,
+      "eol_eof": "CRLF; no terminal newline"
+    },
+    {
+      "path": "docs/devnet/run_227_governance_evaluator_runtime_callsite_wiring_release_binary/README.md",
+      "old_mode": "100644",
+      "old_blob": "c25d93085468e6f8b447f5695064f3ee7169cc58",
+      "new_mode": "100644",
+      "new_blob": "c382faf7c59cec1dde2b027e7da9cb0f3e467e1c",
+      "sha256": "3a8326e528fadd341e65be63adebe06816f62b10cabd67e315e81daa8fd133e6",
+      "bytes": 8531,
+      "eol_eof": "CRLF; no terminal newline"
+    },
+    {
+      "path": "docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md",
+      "old_mode": "100644",
+      "old_blob": "d44b11fe875343cae49d2823c4f02d3733283f0a",
+      "new_mode": "100644",
+      "new_blob": "e6ec0fecb55ef8082b5455cfc789fd3797efa5f6",
+      "sha256": "216288394e5b20c5b42d8c5fe2d0227e04b317dc4ec2ccd6968ccb85dab16a97",
+      "bytes": 267505,
+      "eol_eof": "LF; terminal newline"
+    },
+    {
+      "path": "docs/security/evidence/a37-1-c2/README.md",
+      "old_mode": "-",
+      "old_blob": "-",
+      "new_mode": "100644",
+      "new_blob": "391bc27b356d5c24432b9c23a9aca486df9a7737",
+      "sha256": "33de7ffb363a943672481240f6cd61056cc5145c64999c367beac3b96dd5a7ab",
+      "bytes": 11422,
+      "eol_eof": "LF; terminal newline"
+    },
+    {
+      "path": "docs/security/evidence/a37-1-c2/calibration.json",
+      "old_mode": "-",
+      "old_blob": "-",
+      "new_mode": "100644",
+      "new_blob": "a90752bd1c8c53b5ab9d8d55c31e029805b2c5a9",
+      "sha256": "03d36acaf1f337eb53edf432680eb1f5fcfa79b9e8db8e5ea67e1e95a1489f9f",
+      "bytes": 2403,
+      "eol_eof": "LF; terminal newline"
+    },
+    {
+      "path": "docs/security/evidence/a37-1-c2/cases.json",
+      "old_mode": "-",
+      "old_blob": "-",
+      "new_mode": "100644",
+      "new_blob": "9b716e466daeed552ba952b2287747c26af63ddc",
+      "sha256": "77aa7a0d888bd665b518776ded0130246bd76c093f7a28bdce3e717a1bdb5253",
+      "bytes": 22248,
+      "eol_eof": "LF; terminal newline"
+    },
+    {
+      "path": "docs/security/evidence/a37-1-c2/environment.json",
+      "old_mode": "-",
+      "old_blob": "-",
+      "new_mode": "100644",
+      "new_blob": "46d4b0fea4e630cb80b2b8b9200a7b65ca17d165",
+      "sha256": "5506a4329a769e4c05393c8f80f555bf7f26977d17c7a18b0c42c16862c09b56",
+      "bytes": 7631,
+      "eol_eof": "LF; terminal newline"
+    },
+    {
+      "path": "docs/security/evidence/a37-1-c2/preliminary.json",
+      "old_mode": "-",
+      "old_blob": "-",
+      "new_mode": "100644",
+      "new_blob": "8eec3691bf7c318cff1234ddb9afb685a7cd62a9",
+      "sha256": "32eaba71843e753c7c50faedd53a72eca53e28d58a262db55bd3e29864d0495c",
+      "bytes": 197917,
+      "eol_eof": "LF; terminal newline"
+    },
+    {
+      "path": "docs/security/evidence/a37-1-c2/preliminary.log",
+      "old_mode": "-",
+      "old_blob": "-",
+      "new_mode": "100644",
+      "new_blob": "dfc83b88c136e906043f9c2f6145fca1c6979a66",
+      "sha256": "f7d6b0953f1f57e52eef5fefa5693a11caa7d314b335eb0a8408c53c3987f292",
+      "bytes": 178344,
+      "eol_eof": "LF; terminal newline"
+    },
+    {
+      "path": "docs/security/evidence/a37-1-c2/raw/run-216.jsonl",
+      "old_mode": "-",
+      "old_blob": "-",
+      "new_mode": "100644",
+      "new_blob": "bcced9e2dad7258fd1f3950c50be56168b6c4cce",
+      "sha256": "135e606d2e30f3d78029507e2efe2c0b12ddd348b478a65cfd58b954d75752df",
+      "bytes": 5363215,
+      "eol_eof": "LF; terminal newline"
+    },
+    {
+      "path": "docs/security/evidence/a37-1-c2/raw/run-227.jsonl",
+      "old_mode": "-",
+      "old_blob": "-",
+      "new_mode": "100644",
+      "new_blob": "928b2361215ac9c2e69571be0e086258ffbea92b",
+      "sha256": "a3c532d2f01ac306cea51dbe150927d12dbf23329d51a8d3e59aaf016429dfd1",
+      "bytes": 3925176,
+      "eol_eof": "LF; terminal newline"
+    },
+    {
+      "path": "docs/security/evidence/a37-1-c2/suite.log",
+      "old_mode": "-",
+      "old_blob": "-",
+      "new_mode": "100644",
+      "new_blob": "f77e4d3db57dba2d9c6f47a98f1e4e9ef255cf74",
+      "sha256": "b41c4819bd1473f8ac96827c6db025bab8104d13ac6465cbe2fe6b69ee0ba098",
+      "bytes": 4428,
+      "eol_eof": "LF; terminal newline"
+    },
+    {
+      "path": "scripts/devnet/run_216_governance_execution_policy_release_binary.sh",
+      "old_mode": "100644",
+      "old_blob": "e084e64f1b7b8e3ca1af9d0419b4bd659e0644f8",
+      "new_mode": "100644",
+      "new_blob": "7f0f90f5649e5f2b7bc84464f192a86118fdd2ef",
+      "sha256": "d157cd4c440b8d040a62bb0c4484cbf11d7763227df9281f2be3c48babb6cb88",
+      "bytes": 23120,
+      "eol_eof": "CRLF; no terminal newline"
+    },
+    {
+      "path": "scripts/devnet/run_227_governance_evaluator_runtime_callsite_wiring_release_binary.sh",
+      "old_mode": "100644",
+      "old_blob": "ce73b752eff9fd03377582938956d7f53a470390",
+      "new_mode": "100644",
+      "new_blob": "f24f8284092f1fd14337e48fe65a1df05cbfce79",
+      "sha256": "fd5b1d42d0e4857952d9515798f7207f2069eeb748e79fe7e630befd35a209d1",
+      "bytes": 28750,
+      "eol_eof": "CRLF; no terminal newline"
+    },
+    {
+      "path": "scripts/devnet/tests/run_216_227_regression_verdict_fixture.sh",
+      "old_mode": "-",
+      "old_blob": "-",
+      "new_mode": "100644",
+      "new_blob": "d6f3e700961161776619c3ae9db73418bad41ece",
+      "sha256": "1d9ce9514e2dc74ac5e1c5c161e59e37a5c082b31fc09a8aeced3a61de689445",
+      "bytes": 28195,
+      "eol_eof": "LF; terminal newline"
+    }
+  ],
+  "local_links": [
+    {
+      "source": "docs/devnet/run_216_governance_execution_policy_release_binary/README.md",
+      "target": "../../security/evidence/a37-1-c2/README.md",
+      "exists_at_final_check": true
+    },
+    {
+      "source": "docs/devnet/run_227_governance_evaluator_runtime_callsite_wiring_release_binary/README.md",
+      "target": "../../security/evidence/a37-1-c2/README.md",
+      "exists_at_final_check": true
+    },
+    {
+      "source": "docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md",
+      "target": "../../Audit/QBIND_SECURITY_FINDINGS_REGISTER.md",
+      "exists_at_final_check": true
+    },
+    {
+      "source": "docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md",
+      "target": "../release/QBIND_PUBLIC_DEVNET_READINESS_CRITERIA.md",
+      "exists_at_final_check": true
+    },
+    {
+      "source": "docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md",
+      "target": "../release/public-devnet/BLOCKER_REGISTER.md",
+      "exists_at_final_check": true
+    },
+    {
+      "source": "docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md",
+      "target": "../release/public-devnet/LAUNCH_GO_NO_GO.md",
+      "exists_at_final_check": true
+    },
+    {
+      "source": "docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md",
+      "target": "../devnet/QBIND_PUBLIC_DEVNET_CRITICAL_PATH.md",
+      "exists_at_final_check": true
+    },
+    {
+      "source": "docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md",
+      "target": "../devnet/QBIND_DEVNET_EVIDENCE_RUN_422_D7.md",
+      "exists_at_final_check": true
+    },
+    {
+      "source": "docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md",
+      "target": "../devnet/QBIND_RUN_422_DEVNET_BOOTSTRAP_AUTHORITY_DECISION.md",
+      "exists_at_final_check": true
+    },
+    {
+      "source": "docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md",
+      "target": "../protocol/QBIND_PROPOSAL_VOTE_SIGNING_STATE_CONTINUITY_CONTRACT.md",
+      "exists_at_final_check": true
+    },
+    {
+      "source": "docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md",
+      "target": "../protocol/QBIND_PROPOSAL_VOTE_AUTHORITY_LIFECYCLE_CONTRACT.md",
+      "exists_at_final_check": true
+    },
+    {
+      "source": "docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md",
+      "target": "../protocol/QBIND_CONSENSUS_RECOVERY_SIGNING_HISTORY_CORRESPONDENCE_CONTRACT.md",
+      "exists_at_final_check": true
+    },
+    {
+      "source": "docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md",
+      "target": "../devnet/QBIND_RUN_422_BOOTSTRAP_CREDENTIAL_RECOVERY_TRUST_MODEL.md",
+      "exists_at_final_check": true
+    },
+    {
+      "source": "docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md",
+      "target": "../../scripts/devnet/run_384_public_devnet_release_artifact_manifest.sh",
+      "exists_at_final_check": true
+    },
+    {
+      "source": "docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md",
+      "target": "../release/public-devnet/binary/RELEASE_ARTIFACT_MANIFEST.schema.json",
+      "exists_at_final_check": true
+    },
+    {
+      "source": "docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md",
+      "target": "../../scripts/devnet/run_385_public_devnet_ci_release_artifact_manifest.sh",
+      "exists_at_final_check": true
+    },
+    {
+      "source": "docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md",
+      "target": "../../.github/workflows/public-devnet-release-artifact-manifest.yml",
+      "exists_at_final_check": true
+    },
+    {
+      "source": "docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md",
+      "target": "evidence/a21-f1/README.md",
+      "exists_at_final_check": true
+    },
+    {
+      "source": "docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md",
+      "target": "evidence/a21-f1/README.md",
+      "exists_at_final_check": true
+    },
+    {
+      "source": "docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md",
+      "target": "evidence/a21-f1/a21-f1-original-evidence.tar.gz",
+      "exists_at_final_check": true
+    },
+    {
+      "source": "docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md",
+      "target": "evidence/a21-f1/a21-f1-corrective-evidence.tar.gz",
+      "exists_at_final_check": true
+    },
+    {
+      "source": "docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md",
+      "target": "../../crates/qbind-gov/src/verify.rs",
+      "exists_at_final_check": true
+    },
+    {
+      "source": "docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md",
+      "target": "../../crates/qbind-gov/src/council.rs",
+      "exists_at_final_check": true
+    },
+    {
+      "source": "docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md",
+      "target": "../../crates/qbind-gov/src/envelope.rs",
+      "exists_at_final_check": true
+    },
+    {
+      "source": "docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md",
+      "target": "../../crates/qbind-gov/src/hash.rs",
+      "exists_at_final_check": true
+    },
+    {
+      "source": "docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md",
+      "target": "../../crates/qbind-gov/src/bin/qbind_envelope.rs",
+      "exists_at_final_check": true
+    },
+    {
+      "source": "docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md",
+      "target": "../../crates/qbind-gov/src/lib.rs",
+      "exists_at_final_check": true
+    },
+    {
+      "source": "docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md",
+      "target": "../../crates/qbind-gov/Cargo.toml",
+      "exists_at_final_check": true
+    },
+    {
+      "source": "docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md",
+      "target": "../../scripts/build-mainnet-release.sh",
+      "exists_at_final_check": true
+    },
+    {
+      "source": "docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md",
+      "target": "../../crates/qbind-node/Cargo.toml",
+      "exists_at_final_check": true
+    },
+    {
+      "source": "docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md",
+      "target": "../devnet/QBIND_RUN_422_NATIVE_GOVERNANCE_AUTHORITY_CONTRACT.md",
+      "exists_at_final_check": true
+    },
+    {
+      "source": "docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md",
+      "target": "../devnet/QBIND_DEVNET_EVIDENCE_RUN_422_D7.md",
+      "exists_at_final_check": true
+    },
+    {
+      "source": "docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md",
+      "target": "../whitepaper/contradiction.md",
+      "exists_at_final_check": true
+    },
+    {
+      "source": "docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md",
+      "target": "evidence/a37-1-c2/README.md",
+      "exists_at_final_check": true
+    },
+    {
+      "source": "docs/security/evidence/a37-1-c2/README.md",
+      "target": "environment.json",
+      "exists_at_final_check": true
+    },
+    {
+      "source": "docs/security/evidence/a37-1-c2/README.md",
+      "target": "validation.json",
+      "exists_at_final_check": true
+    },
+    {
+      "source": "docs/security/evidence/a37-1-c2/README.md",
+      "target": "cases.json",
+      "exists_at_final_check": true
+    },
+    {
+      "source": "docs/security/evidence/a37-1-c2/README.md",
+      "target": "raw/run-216.jsonl",
+      "exists_at_final_check": true
+    },
+    {
+      "source": "docs/security/evidence/a37-1-c2/README.md",
+      "target": "raw/run-227.jsonl",
+      "exists_at_final_check": true
+    },
+    {
+      "source": "docs/security/evidence/a37-1-c2/README.md",
+      "target": "suite.log",
+      "exists_at_final_check": true
+    },
+    {
+      "source": "docs/security/evidence/a37-1-c2/README.md",
+      "target": "calibration.json",
+      "exists_at_final_check": true
+    },
+    {
+      "source": "docs/security/evidence/a37-1-c2/README.md",
+      "target": "environment.json",
+      "exists_at_final_check": true
+    },
+    {
+      "source": "docs/security/evidence/a37-1-c2/README.md",
+      "target": "preliminary.log",
+      "exists_at_final_check": true
+    },
+    {
+      "source": "docs/security/evidence/a37-1-c2/README.md",
+      "target": "preliminary.json",
+      "exists_at_final_check": true
+    },
+    {
+      "source": "docs/security/evidence/a37-1-c2/README.md",
+      "target": "validation.json",
+      "exists_at_final_check": true
+    },
+    {
+      "source": "docs/security/evidence/a37-1-c2/README.md",
+      "target": "SHA256SUMS",
+      "exists_at_final_check": true
+    },
+    {
+      "source": "docs/security/evidence/a37-1-c2/README.md",
+      "target": "../../QBIND_AUDIT_REMEDIATION_PLAN.md",
+      "exists_at_final_check": true
+    }
+  ],
+  "commands": [
+    {
+      "command": [
+        "git",
+        "rev-parse",
+        "HEAD"
+      ],
+      "input_sha256": null,
+      "exit_code": 0,
+      "stdout": "9b3458b7674140569b550fb7f6034fe0eb9a83f3\n",
+      "stderr": ""
+    },
+    {
+      "command": [
+        "git",
+        "cat-file",
+        "-p",
+        "f36e59a5e2cebab6fdfd0365920ca3e1a09444ac"
+      ],
+      "input_sha256": null,
+      "exit_code": 0,
+      "stdout": "tree 64011836fc74638590a8fda334f338c286156877\nparent 0a35ef1fff2b7cdc15acddd9de8d5a01995418c7\nauthor olivexo28 <saeedolive@ondrat.com> 1793802993 +0000\ncommitter olivexo28 <saeedolive@ondrat.com> 1793802993 +0000\n\ndocs(security): record Run 216/227 verdict contract\n",
+      "stderr": ""
+    },
+    {
+      "command": [
+        "git",
+        "cat-file",
+        "-p",
+        "9b3458b7674140569b550fb7f6034fe0eb9a83f3"
+      ],
+      "input_sha256": null,
+      "exit_code": 0,
+      "stdout": "tree 55177a97b3cd0ad521cfe5d5400961652e6624d3\nparent f36e59a5e2cebab6fdfd0365920ca3e1a09444ac\nauthor olivexo28 <158057167+olivexo28@users.noreply.github.com> 1793805878 +0000\ncommitter olivexo28 <158057167+olivexo28@users.noreply.github.com> 1793805878 +0000\n\nfix(devnet): bind Run 216/227 verdicts to required regression results\n\nImplement the reviewed bounded A37.1-C2 / A38-iv contract with isolated actual-script fixtures. Authoritative producing-revision verification and retained evidence follow separately.\n\nCo-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>\n",
+      "stderr": ""
+    },
+    {
+      "command": [
+        "git",
+        "merge-base",
+        "--is-ancestor",
+        "0a35ef1fff2b7cdc15acddd9de8d5a01995418c7",
+        "f36e59a5e2cebab6fdfd0365920ca3e1a09444ac"
+      ],
+      "input_sha256": null,
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "command": [
+        "git",
+        "merge-base",
+        "--is-ancestor",
+        "f36e59a5e2cebab6fdfd0365920ca3e1a09444ac",
+        "9b3458b7674140569b550fb7f6034fe0eb9a83f3"
+      ],
+      "input_sha256": null,
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "command": [
+        "git",
+        "cat-file",
+        "-e",
+        "c176056a22a965b5d0411495a55a0517453fa907^{commit}"
+      ],
+      "input_sha256": null,
+      "exit_code": 128,
+      "stdout": "",
+      "stderr": "fatal: Not a valid object name c176056a22a965b5d0411495a55a0517453fa907^{commit}\n"
+    },
+    {
+      "command": [
+        "git",
+        "ls-remote",
+        "origin",
+        "refs/heads/main",
+        "refs/heads/copilot/audit-run216-227-regression-verdict-fix"
+      ],
+      "input_sha256": null,
+      "exit_code": 0,
+      "stdout": "f36e59a5e2cebab6fdfd0365920ca3e1a09444ac\trefs/heads/main\n",
+      "stderr": ""
+    },
+    {
+      "command": [
+        "git",
+        "hash-object",
+        "Audit/QBIND_SECURITY_FINDINGS_REGISTER.md"
+      ],
+      "input_sha256": null,
+      "exit_code": 0,
+      "stdout": "cd81efdbaf2bfb45e00dc3c60db3ea4f523adfa0\n",
+      "stderr": ""
+    },
+    {
+      "command": [
+        "git",
+        "-c",
+        "core.whitespace=cr-at-eol",
+        "diff",
+        "--check",
+        "f36e59a5e2cebab6fdfd0365920ca3e1a09444ac"
+      ],
+      "input_sha256": null,
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "command": [
+        "git",
+        "rev-parse",
+        "9b3458b7674140569b550fb7f6034fe0eb9a83f3^{tree}"
+      ],
+      "input_sha256": null,
+      "exit_code": 0,
+      "stdout": "55177a97b3cd0ad521cfe5d5400961652e6624d3\n",
+      "stderr": ""
+    },
+    {
+      "command": [
+        "bash",
+        "-n"
+      ],
+      "input_sha256": "8e3203864ac666d177f36d4de22f44cba82beb20270c14dc1c1d713a2bcf3af9",
+      "exit_code": 2,
+      "stdout": "",
+      "stderr": "bash: line 79: syntax error near unexpected token `}'\nbash: line 79: `} > \"${GREP_DIR}/governance_execution_fixture_inventory.txt\"\r'\n"
+    },
+    {
+      "command": [
+        "bash",
+        "-n"
+      ],
+      "input_sha256": "ac5b187371cb3336f49da1e611b97aad56e68212248ba7ada435a8625babacdd",
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "command": [
+        "bash",
+        "-n"
+      ],
+      "input_sha256": "d157cd4c440b8d040a62bb0c4484cbf11d7763227df9281f2be3c48babb6cb88",
+      "exit_code": 2,
+      "stdout": "",
+      "stderr": "bash: line 40: syntax error near unexpected token `$'{\\r''\nbash: line 40: `publish_incomplete() {\r'\n"
+    },
+    {
+      "command": [
+        "bash",
+        "-n"
+      ],
+      "input_sha256": "9c0e052fa02f9a77f904ace461ee0ed4470e9a727463502e4b0b976975171e59",
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "command": [
+        "bash",
+        "-n"
+      ],
+      "input_sha256": "52cff0d3e6a0a3c069e04eb9de6e2177e546dc75874ca3f8b7896777273e2079",
+      "exit_code": 2,
+      "stdout": "",
+      "stderr": "bash: line 94: syntax error near unexpected token `}'\nbash: line 94: `} > \"${GREP_DIR}/callsite_fixture_inventory.txt\"\r'\n"
+    },
+    {
+      "command": [
+        "bash",
+        "-n"
+      ],
+      "input_sha256": "7cb40c2a2772fac4acaf0ea8c7b88b1bfa6fd5be3954188746b5716d48fef9bd",
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "command": [
+        "bash",
+        "-n"
+      ],
+      "input_sha256": "fd5b1d42d0e4857952d9515798f7207f2069eeb748e79fe7e630befd35a209d1",
+      "exit_code": 2,
+      "stdout": "",
+      "stderr": "bash: line 57: syntax error near unexpected token `$'{\\r''\nbash: line 57: `publish_incomplete() {\r'\n"
+    },
+    {
+      "command": [
+        "bash",
+        "-n"
+      ],
+      "input_sha256": "20e63b5feac01c20e4c8df276bf823f7f493eb8df546d0812ad29c1ea8c0af8b",
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "command": [
+        "bash",
+        "-n",
+        "scripts/devnet/tests/run_216_227_regression_verdict_fixture.sh"
+      ],
+      "input_sha256": null,
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "command": [
+        "git",
+        "diff",
+        "--name-only",
+        "f36e59a5e2cebab6fdfd0365920ca3e1a09444ac"
+      ],
+      "input_sha256": null,
+      "exit_code": 0,
+      "stdout": "docs/devnet/run_216_governance_execution_policy_release_binary/README.md\ndocs/devnet/run_227_governance_evaluator_runtime_callsite_wiring_release_binary/README.md\ndocs/security/QBIND_AUDIT_REMEDIATION_PLAN.md\ndocs/security/evidence/a37-1-c2/README.md\ndocs/security/evidence/a37-1-c2/SHA256SUMS\ndocs/security/evidence/a37-1-c2/calibration.json\ndocs/security/evidence/a37-1-c2/cases.json\ndocs/security/evidence/a37-1-c2/environment.json\ndocs/security/evidence/a37-1-c2/preliminary.json\ndocs/security/evidence/a37-1-c2/preliminary.log\ndocs/security/evidence/a37-1-c2/raw/run-216.jsonl\ndocs/security/evidence/a37-1-c2/raw/run-227.jsonl\ndocs/security/evidence/a37-1-c2/suite.log\ndocs/security/evidence/a37-1-c2/validation.json\nscripts/devnet/run_216_governance_execution_policy_release_binary.sh\nscripts/devnet/run_227_governance_evaluator_runtime_callsite_wiring_release_binary.sh\nscripts/devnet/tests/run_216_227_regression_verdict_fixture.sh\n",
+      "stderr": ""
+    },
+    {
+      "command": [
+        "git",
+        "ls-files",
+        "--others",
+        "--exclude-standard"
+      ],
+      "input_sha256": null,
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    }
+  ],
+  "final_commit_push_and_clean_worktree_checks": "Performed after the evidence commit; recorded in delivery handoff, not self-referentially in this report",
+  "validation_program": "import ast\nimport hashlib\nimport json\nfrom pathlib import Path\nimport re\nimport stat\nimport subprocess\n\nBASE = \"f36e59a5e2cebab6fdfd0365920ca3e1a09444ac\"\nPROD = \"9b3458b7674140569b550fb7f6034fe0eb9a83f3\"\nEVIDENCE = Path(\"docs/security/evidence/a37-1-c2\")\nREPORT = EVIDENCE / \"validation.json\"\nCHECKSUMS = EVIDENCE / \"SHA256SUMS\"\nPLAN = \"docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md\"\nFIXTURE = \"scripts/devnet/tests/run_216_227_regression_verdict_fixture.sh\"\nPATHS = [\n    \"scripts/devnet/run_216_governance_execution_policy_release_binary.sh\",\n    \"scripts/devnet/run_227_governance_evaluator_runtime_callsite_wiring_release_binary.sh\",\n    \"docs/devnet/run_216_governance_execution_policy_release_binary/README.md\",\n    \"docs/devnet/run_227_governance_evaluator_runtime_callsite_wiring_release_binary/README.md\",\n    PLAN, FIXTURE,\n]\nCOMMANDS = []\n\n\ndef command(args, data=None, expected=0):\n    p = subprocess.run(args, input=data, capture_output=True)\n    record = dict(command=args, input_sha256=sha(data) if data is not None else None,\n                  exit_code=p.returncode, stdout=p.stdout.decode(), stderr=p.stderr.decode())\n    COMMANDS.append(record)\n    if expected is not None:\n        assert p.returncode == expected, record\n    return p.stdout.decode().strip()\n\n\ndef sha(b):\n    return hashlib.sha256(b).hexdigest()\n\n\ndef blob(rev, path):\n    return subprocess.check_output([\"git\", \"show\", rev+\":\"+path])\n\n\ndef norm(b):\n    return b.replace(b\"\\r\\n\", b\"\\n\")\n\n\ndef object_id(b):\n    return hashlib.sha1(b\"blob \"+str(len(b)).encode()+b\"\\0\"+b).hexdigest()\n\n\nassert command([\"git\", \"rev-parse\", \"HEAD\"]) == PROD\nbase_header = command([\"git\", \"cat-file\", \"-p\", BASE]).split(\"\\n\\n\", 1)[0]\nprod_header = command([\"git\", \"cat-file\", \"-p\", PROD]).split(\"\\n\\n\", 1)[0]\nassert re.findall(r\"^parent (.+)$\", base_header, re.M) == [\"0a35ef1fff2b7cdc15acddd9de8d5a01995418c7\"]\nassert re.findall(r\"^parent (.+)$\", prod_header, re.M) == [BASE]\ncommand([\"git\", \"merge-base\", \"--is-ancestor\", \"0a35ef1fff2b7cdc15acddd9de8d5a01995418c7\", BASE])\ncommand([\"git\", \"merge-base\", \"--is-ancestor\", BASE, PROD])\ncommand([\"git\", \"cat-file\", \"-e\", \"c176056a22a965b5d0411495a55a0517453fa907^{commit}\"], expected=128)\nremote = command([\"git\", \"ls-remote\", \"origin\", \"refs/heads/main\",\n                  \"refs/heads/copilot/audit-run216-227-regression-verdict-fix\"])\nassert remote.split() == [BASE, \"refs/heads/main\"]\nassert object_id(blob(BASE, PLAN)) == \"d44b11fe875343cae49d2823c4f02d3733283f0a\"\nassert sha(blob(BASE, PLAN)) == \"87d6c75594571925eeac8867f7ce14f2bb0807efd47b6c70cfff0648a468315a\"\naudit = command([\"git\", \"hash-object\", \"Audit/QBIND_SECURITY_FINDINGS_REGISTER.md\"])\nassert audit == \"cd81efdbaf2bfb45e00dc3c60db3ea4f523adfa0\"\ncommand([\"git\", \"-c\", \"core.whitespace=cr-at-eol\", \"diff\", \"--check\", BASE])\n\nold_plan = blob(BASE, PLAN)\nnew_plan = Path(PLAN).read_bytes()\nprotected = {}\nfor section in (8, 12, 13):\n    pattern = rb\"^## \"+str(section).encode()+rb\"\\. .*?(?=^## \\d+\\.|\\Z)\"\n    old = re.search(pattern, old_plan, re.M | re.S)[0]\n    new = re.search(pattern, new_plan, re.M | re.S)[0]\n    assert old == new\n    protected[str(section)] = dict(old_sha256=sha(old), new_sha256=sha(new), equal=True)\n\ncompatibility = {}\nenv = json.loads((EVIDENCE/\"environment.json\").read_text())\nassert env[\"producing_commit\"] == PROD\nassert env[\"producing_tree\"] == command([\"git\", \"rev-parse\", PROD+\"^{tree}\"])\nassert env[\"exit_code\"] == 0 and env[\"case_count\"] == 94 and env[\"candidate_case_count\"] == 90\nassert env[\"fixture_sha256\"] == sha(Path(FIXTURE).read_bytes())\nfor run, path in zip((216, 227), PATHS[:2]):\n    old = norm(blob(BASE, path))\n    new = norm(Path(path).read_bytes())\n    assert Path(path).read_bytes() == blob(PROD, path)\n    assert old[old.index(b\"rm -rf\"):old.index(b\"run_test_target()\")] == new[new.index(b\"rm -rf\"):new.index(b\"record_result()\")]\n    inventory = re.search(rb\"^TEST_TARGETS=\\(([^)]+)\\)\", new, re.M)[1].split()\n    assert inventory == re.search(rb\"^TEST_TARGETS=\\(([^)]+)\\)\", old, re.M)[1].split()\n    assert len(inventory) == (35 if run == 216 else 8)\n    summary_start = f'  echo \"Run {run} \u2014 release-binary'.encode()\n    assert old[old.index(summary_start):old.index(b'  echo \"regression test verdicts:\"')] == new[new.index(summary_start):new.index(b'  echo \"regression test verdicts:\"')]\n    limits_start = b'  echo \"honest_limits:'\n    assert old[old.index(limits_start):old.index(b'  echo \"verdict: PASS\"', old.index(limits_start))] == new[new.index(limits_start):new.index(b'  echo \"aggregate:', new.index(limits_start))]\n    assert b\"$(run_test_target\" not in new and b\"$(run_lib_test\" not in new\n    for rev in (BASE, PROD):\n        raw = blob(rev, path)\n        command([\"bash\", \"-n\"], data=raw, expected=2)\n        command([\"bash\", \"-n\"], data=norm(raw))\n    compatibility[str(run)] = dict(required_integrations=len(inventory), required_libraries=2,\n                                  inventory=[i.decode() for i in inventory],\n                                  scenario_helper_denylist_prefix_identical=True,\n                                  summary_scenarios_helpers_denylist_and_limits_identical=True)\n    identities = env[\"identities\"][str(run)]\n    for variant, rev in ((\"baseline\", BASE), (\"candidate\", PROD)):\n        assert identities[variant][\"matches_committed_blob\"]\n        assert identities[variant][\"raw_sha256\"] == sha(blob(rev, path))\n        assert identities[variant][\"normalized_sha256\"] == sha(norm(blob(rev, path)))\ncommand([\"bash\", \"-n\", FIXTURE])\nast.parse(Path(FIXTURE).read_text().split(\"<<'PY'\\n\", 1)[1].rsplit(\"\\nPY\", 1)[0])\nassert Path(FIXTURE).read_bytes() == blob(PROD, FIXTURE)\n\ncases = json.loads((EVIDENCE/\"cases.json\").read_text())\nassert len(cases) == 94 and sum(c[\"attempted_count\"] for c in cases) == 1694\nassert all(c[\"cleanup_verified\"] for c in cases)\nraw_cases = []\nfor p in sorted((EVIDENCE/\"raw\").glob(\"*.jsonl\")):\n    raw_cases.extend(json.loads(line) for line in p.read_text().splitlines())\nassert [c[\"case\"] for c in raw_cases] == [c[\"case\"] for c in cases]\nassert len(raw_cases) == 94\nfor c in raw_cases:\n    assert c[\"supervision\"][\"cleanup\"][\"remaining\"] == []\n    assert all(json.loads(e)[\"kind\"] != \"REJECT\" for e in c[\"guard_log\"].splitlines())\nsignal_cases = [c for c in raw_cases if c[\"mode\"].startswith((\"before_\", \"after_\"))]\nassert len(signal_cases) == 16\nassert not any(c[\"supervision\"].get(\"containment_kill\") for c in signal_cases)\nfor c in signal_cases:\n    assert c[\"supervision\"][\"alive_before_signal\"]\n\ntracked_changed = command([\"git\", \"diff\", \"--name-only\", BASE]).splitlines()\nuntracked = command([\"git\", \"ls-files\", \"--others\", \"--exclude-standard\"]).splitlines()\nchanged = sorted(set(tracked_changed+untracked))\nassert all(p in PATHS or p.startswith(str(EVIDENCE)+\"/\") for p in changed)\nassert sorted(p for p in tracked_changed if not p.startswith(str(EVIDENCE)+\"/\")) == sorted(PATHS)\nidentities = []\nfor path in changed:\n    p = Path(path)\n    b = p.read_bytes()\n    mode = stat.S_IMODE(p.stat().st_mode)\n    assert mode == 0o644, (path, mode)\n    if path in PATHS[:4]:\n        assert b.count(b\"\\n\") == b.count(b\"\\r\\n\") and b\"\\r\\n\" in b and not b.endswith(b\"\\n\")\n        style = \"CRLF; no terminal newline\"\n    else:\n        assert b\"\\r\" not in b and b.endswith(b\"\\n\"), path\n        style = \"LF; terminal newline\"\n    if path in (str(REPORT), str(CHECKSUMS)):\n        continue\n    old_entry = subprocess.check_output([\"git\", \"ls-tree\", BASE, \"--\", path]).decode().strip()\n    old_mode, old_blob = (\"-\", \"-\") if not old_entry else (old_entry.split()[0], old_entry.split()[2])\n    identities.append(dict(path=path, old_mode=old_mode, old_blob=old_blob,\n                           new_mode=\"100644\", new_blob=object_id(b), sha256=sha(b), bytes=len(b), eol_eof=style))\n\nlinks = []\nfor path in [*PATHS[2:5], str(EVIDENCE/\"README.md\")]:\n    for target in re.findall(r\"\\[[^\\]]*\\]\\(([^)]+)\\)\", Path(path).read_text()):\n        if target.startswith((\"http:\", \"https:\", \"#\")):\n            continue\n        target = target.split(\"#\", 1)[0]\n        if not target:\n            continue\n        resolved = (Path(path).parent/target).resolve()\n        # These two generated files are written immediately below.\n        assert resolved.exists() or resolved in (REPORT.resolve(), CHECKSUMS.resolve()), (path, target)\n        links.append(dict(source=path, target=target, exists_at_final_check=True))\n\nreport = dict(\n    status=\"PASS\",\n    baseline=BASE, producing_commit=PROD, producing_tree=env[\"producing_tree\"],\n    entry_control_plan_blob=\"d44b11fe875343cae49d2823c4f02d3733283f0a\",\n    raw_sole_baseline_parent=\"0a35ef1fff2b7cdc15acddd9de8d5a01995418c7\",\n    raw_sole_producing_parent=BASE,\n    proven_ancestry=\"available parent -> baseline -> implementation/test producing commit\",\n    unavailable_reviewed_object=\"c176056a22a965b5d0411495a55a0517453fa907\",\n    review_tree_equality_is_user_supplied_not_ancestry=True,\n    audit_blob=audit, protected_sections=protected,\n    source_compatibility=compatibility, case_count=94, attempted_stub_regressions=1694,\n    signal_case_count=16, all_cleanup_verified=True,\n    raw_crlf_syntax_exit_2_is_expected_not_execution_evidence=True,\n    normalized_syntax_exit_0=True, embedded_python_ast_parse=\"PASS\",\n    allowed_tracked_paths=PATHS, changed_paths=changed,\n    identity_exclusions=[str(REPORT), str(CHECKSUMS)],\n    identity_exclusion_reason=\"No circular/self-referential hashing; both final identities are in delivery handoff\",\n    file_manifest=identities, local_links=links, commands=COMMANDS,\n    final_commit_push_and_clean_worktree_checks=\"Performed after the evidence commit; recorded in delivery handoff, not self-referentially in this report\",\n    validation_program=Path(__file__).read_text(),\n)\nREPORT.write_text(json.dumps(report, indent=2)+\"\\n\")\n# Hash every changed file except this manifest itself. The report has its final bytes now.\nfinal_paths = sorted(set(changed+[str(REPORT)]))\nCHECKSUMS.write_text(\"\".join(sha(Path(p).read_bytes())+\"  \"+p+\"\\n\"\n                            for p in final_paths if p != str(CHECKSUMS)))\nfor link in links:\n    assert (Path(link[\"source\"]).parent/link[\"target\"]).resolve().exists(), link\nsize = sum(p.stat().st_size for p in EVIDENCE.rglob(\"*\") if p.is_file())\nassert size < 12*1024*1024, size\nprint(\"PASS: syntax, scope, mode/EOL/EOF, CRLF whitespace, protected sections 8/12/13, audit blob, source compatibility, identities, 94 case records, signal cleanup and relative links\")\nprint(\"Evidence bytes:\", size)\nprint(\"Checksums:\", len(CHECKSUMS.read_text().splitlines()), \"files; excludes only SHA256SUMS itself\")\n"
+}
