@@ -931,6 +931,11 @@ impl SecureChannelAsync {
     ///
     /// This allows sharing a channel between multiple async handles.
     /// This method spawns new workers for the shared channel.
+    ///
+    /// If cloning the independent shutdown handle fails, this legacy
+    /// infallible constructor returns a non-established, invalidated wrapper
+    /// without spawning workers. Sends are refused and the failed wrapper
+    /// does not retain the shared channel.
     pub fn from_shared(inner: Arc<Mutex<SecureChannel>>) -> Self {
         // Set a short read timeout to allow the reader worker to periodically release
         // the mutex, enabling the writer worker to send data.
