@@ -61,8 +61,13 @@
 //! 3. After handshake, the channel is wrapped in `SecureChannelAsync`
 //! 4. Reader/writer tasks use `SecureChannelAsync::recv()`/`send()` for encrypted I/O
 
+#[cfg(test)]
+#[path = "secure_channel/encrypted_write_tests.rs"]
+mod encrypted_write_tests;
+
 use std::io;
-use std::net::TcpStream;
+use std::net::{Shutdown, TcpStream};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -216,12 +221,37 @@ fn configure_socket(stream: &TcpStream) {
 pub struct SecureChannel {
     stream: TcpStream,
     conn: Connection,
+    invalidated: Arc<AtomicBool>,
+    #[cfg(test)]
+    write_fault: Option<encrypted_write_tests::WriteFault>,
 }
 
 impl SecureChannel {
+    fn established(stream: TcpStream, conn: Connection) -> Self {
+        Self {
+            stream,
+            conn,
+            invalidated: Arc::new(AtomicBool::new(false)),
+            #[cfg(test)]
+            write_fault: None,
+        }
+    }
+
+    fn ensure_usable(&self) -> Result<(), ChannelError> {
+        if self.invalidated.load(Ordering::SeqCst) {
+            return Err(Self::invalidated_error());
+        }
+        Ok(())
+    }
+
+    fn invalidated_error() -> ChannelError {
+        ChannelError::Net(NetError::Protocol("secure channel session invalidated"))
+    }
+
     /// Get a reference to the underlying TCP stream.
     ///
     /// This is useful for setting socket options like timeouts.
+    /// Raw socket I/O is outside the guarded application-message API.
     pub fn stream(&self) -> &TcpStream {
         &self.stream
     }
@@ -269,7 +299,7 @@ impl SecureChannel {
             return Err(NetError::Protocol("client handshake not established").into());
         }
 
-        Ok(SecureChannel { stream, conn })
+        Ok(Self::established(stream, conn))
     }
 
     /// Blocking server-side handshake on an already-accepted `TcpStream`.
@@ -311,7 +341,7 @@ impl SecureChannel {
             return Err(NetError::Protocol("server handshake not established").into());
         }
 
-        Ok(SecureChannel { stream, conn })
+        Ok(Self::established(stream, conn))
     }
 
     /// Like [`SecureChannel::from_accepted`], but additionally surfaces
@@ -390,17 +420,51 @@ impl SecureChannel {
             mutual_auth_complete,
         };
 
-        Ok((SecureChannel { stream, conn }, peer_init))
+        Ok((Self::established(stream, conn), peer_init))
     }
 
     /// Encrypt and send an application message.
     ///
     /// # Errors
     ///
-    /// Returns `ChannelError` if encryption fails or the TCP write fails.
+    /// Returns the original error if encryption, framing, write or flush fails.
+    /// Such failures permanently invalidate application sends and receives,
+    /// including shared handles: encryption may already have advanced a nonce
+    /// and a failed write may have delivered any prefix (or the entire frame).
+    /// Socket shutdown is attempted, but invalidation does not depend on it.
+    /// Delivery is uncertain; this method never replays the plaintext.
     pub fn send_app(&mut self, plaintext: &[u8]) -> Result<(), ChannelError> {
+        self.ensure_usable()?;
+        let result = self.encrypt_and_write(plaintext);
+        if result.is_err() {
+            self.invalidated.store(true, Ordering::SeqCst);
+            let shutdown_result = self.shutdown_socket();
+            if let Err(error) = shutdown_result {
+                eprintln!(
+                    "[SecureChannel] socket shutdown failed after send failure; session remains invalidated: {}",
+                    error
+                );
+            }
+        }
+        result
+    }
+
+    fn shutdown_socket(&self) -> io::Result<()> {
+        #[cfg(test)]
+        if let Some(fault) = &self.write_fault {
+            fault.before_shutdown()?;
+        }
+        self.stream.shutdown(Shutdown::Both)
+    }
+
+    fn encrypt_and_write(&mut self, plaintext: &[u8]) -> Result<(), ChannelError> {
         let frame_bytes = self.conn.encrypt_app(plaintext)?;
         let frame = TransportFrame::decode(&frame_bytes)?;
+        #[cfg(test)]
+        if let Some(fault) = &mut self.write_fault {
+            write_transport_frame(&mut fault.writer(&mut self.stream), &frame)?;
+            return Ok(());
+        }
         write_transport_frame(&mut self.stream, &frame)?;
         Ok(())
     }
@@ -411,8 +475,10 @@ impl SecureChannel {
     ///
     /// # Errors
     ///
-    /// Returns `ChannelError` if the TCP read fails or decryption fails.
+    /// Returns `ChannelError` if the session was invalidated by a send error,
+    /// the TCP read fails or decryption fails.
     pub fn recv_app(&mut self) -> Result<Vec<u8>, ChannelError> {
+        self.ensure_usable()?;
         let frame = read_transport_frame(&mut self.stream)?;
         let plaintext = self.conn.decrypt_app(&frame.encode()?)?;
         Ok(plaintext)
@@ -420,7 +486,7 @@ impl SecureChannel {
 
     /// Check if the connection is established and ready for app data.
     pub fn is_established(&self) -> bool {
-        self.conn.is_established()
+        !self.invalidated.load(Ordering::SeqCst) && self.conn.is_established()
     }
 
     /// Run 418 (F6): the verified server identity established by a successful
@@ -570,6 +636,7 @@ enum WriteCommand {
 #[derive(Clone)]
 #[allow(clippy::type_complexity)]
 pub struct SecureChannelAsync {
+    invalidated: Arc<AtomicBool>,
     /// Channel for sending write commands to the writer worker.
     write_tx: tokio::sync::mpsc::Sender<WriteCommand>,
     /// Channel for receiving decrypted messages from the reader worker.
@@ -624,6 +691,7 @@ impl SecureChannelAsync {
         let (write_tx, write_rx) = tokio::sync::mpsc::channel::<WriteCommand>(32);
         let (read_tx, read_rx) = tokio::sync::mpsc::channel::<Result<Vec<u8>, ChannelError>>(32);
 
+        let invalidated = Arc::clone(&channel.invalidated);
         // Wrap the channel in Arc<Mutex> for sharing between workers
         let channel = Arc::new(Mutex::new(channel));
 
@@ -640,6 +708,7 @@ impl SecureChannelAsync {
         });
 
         Ok(SecureChannelAsync {
+            invalidated,
             write_tx,
             read_rx: Arc::new(tokio::sync::Mutex::new(read_rx)),
         })
@@ -705,34 +774,21 @@ impl SecureChannelAsync {
         while let Some(cmd) = rx.blocking_recv() {
             match cmd {
                 WriteCommand::Send { data, response } => {
-                    // Retry loop for WouldBlock errors
-                    let result = loop {
-                        let send_result = {
-                            let mut ch = match channel.lock() {
-                                Ok(ch) => ch,
-                                Err(_) => {
-                                    // Mutex poisoned, signal error and terminate
-                                    let _ = response.send(Err(ChannelError::Io(io::Error::other(
-                                        "mutex poisoned",
-                                    ))));
-                                    // Terminate the worker thread
-                                    return;
-                                }
-                            };
-                            ch.send_app(&data)
-                        };
-
-                        match send_result {
-                            Ok(()) => break Ok(()),
-                            Err(ChannelError::Io(ref io_err))
-                                if io_err.kind() == io::ErrorKind::WouldBlock =>
-                            {
-                                // WouldBlock is retryable - yield briefly and retry
-                                std::thread::sleep(Duration::from_millis(1));
-                                continue;
+                    // A failed encrypted write has uncertain delivery, even on
+                    // WouldBlock. Never re-encrypt or replay this command.
+                    let result = {
+                        let mut ch = match channel.lock() {
+                            Ok(ch) => ch,
+                            Err(_) => {
+                                // Mutex poisoned, signal error and terminate
+                                let _ = response.send(Err(ChannelError::Io(io::Error::other(
+                                    "mutex poisoned",
+                                ))));
+                                // Terminate the worker thread
+                                return;
                             }
-                            Err(e) => break Err(e),
-                        }
+                        };
+                        ch.send_app(&data)
                     };
 
                     // Check if result is error before sending (to avoid move)
@@ -757,13 +813,17 @@ impl SecureChannelAsync {
     pub fn from_shared(inner: Arc<Mutex<SecureChannel>>) -> Self {
         // Set a short read timeout to allow the reader worker to periodically release
         // the mutex, enabling the writer worker to send data.
-        {
-            if let Ok(ch) = inner.lock() {
-                let _ = ch
-                    .stream()
-                    .set_read_timeout(Some(Duration::from_millis(100)));
+        let invalidated = {
+            match inner.lock() {
+                Ok(ch) => {
+                    let _ = ch
+                        .stream()
+                        .set_read_timeout(Some(Duration::from_millis(100)));
+                    Arc::clone(&ch.invalidated)
+                }
+                Err(_) => Arc::new(AtomicBool::new(true)),
             }
-        }
+        };
 
         // Create channels for communication with workers
         let (write_tx, write_rx) = tokio::sync::mpsc::channel::<WriteCommand>(32);
@@ -782,6 +842,7 @@ impl SecureChannelAsync {
         });
 
         SecureChannelAsync {
+            invalidated,
             write_tx,
             read_rx: Arc::new(tokio::sync::Mutex::new(read_rx)),
         }
@@ -827,7 +888,11 @@ impl SecureChannelAsync {
     /// - Encryption fails
     /// - TCP write fails
     /// - The writer worker has terminated
+    /// - The session was invalidated by a previous send failure
     pub async fn send(&self, plaintext: &[u8]) -> Result<(), AsyncChannelError> {
+        if self.invalidated.load(Ordering::SeqCst) {
+            return Err(SecureChannel::invalidated_error().into());
+        }
         let (response_tx, response_rx) = tokio::sync::oneshot::channel();
 
         let cmd = WriteCommand::Send {
@@ -863,25 +928,35 @@ impl SecureChannelAsync {
     /// - TCP read fails (including timeout or EOF)
     /// - Decryption fails
     /// - The reader worker has terminated
+    /// - The session was invalidated by a send failure
     pub async fn recv(&self) -> Result<Vec<u8>, AsyncChannelError> {
+        if self.invalidated.load(Ordering::SeqCst) {
+            return Err(SecureChannel::invalidated_error().into());
+        }
         let mut rx = self.read_rx.lock().await;
 
-        rx.recv()
+        let result = rx
+            .recv()
             .await
             .ok_or(AsyncChannelError::ChannelClosed)?
-            .map_err(AsyncChannelError::Channel)
+            .map_err(AsyncChannelError::Channel);
+        // Do not release already-queued plaintext after a failed send.
+        if self.invalidated.load(Ordering::SeqCst) {
+            return Err(SecureChannel::invalidated_error().into());
+        }
+        result
     }
 
     /// Check if the underlying connection is established.
     ///
-    /// With the new architecture, we consider the connection established if
-    /// the write channel is still open (i.e., the writer worker is still running).
+    /// Requires an open writer queue and a session not invalidated by a send
+    /// failure. This does not establish reader/worker completion or peer removal.
     ///
     /// # Returns
     ///
-    /// `true` if the connection is established and workers are running.
+    /// `true` if the session is not invalidated and the writer queue is open.
     pub fn is_established(&self) -> bool {
-        !self.write_tx.is_closed()
+        !self.invalidated.load(Ordering::SeqCst) && !self.write_tx.is_closed()
     }
 
     /// Set the socket timeout for blocking operations.
