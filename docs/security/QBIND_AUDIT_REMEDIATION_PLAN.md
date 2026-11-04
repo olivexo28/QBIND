@@ -224,7 +224,7 @@ not this task's source verification.
 | A31-F1 | OPEN stale outbound root; A10.1 at A:L13172 | Dial retry/handshake root snapshot; D/DD; C4/O | Correct two-root witness, pinned peer KEM private-key and reload-window prerequisites | Root-signature pass, handshake completion, registry insertion separately; E26; single-root witness withdrawn |
 | A33-F1 | Conditional engine non-termination source-established; A5.3 at A:L15366; A22.1 restores current-baseline status | Block eviction ancestry walk; D; R/O availability relevance | Operator-crafted anchor and admitted catch-up construction; no hash-collision premise or anonymous attack claim | Exact registration-before-vote state/capacity, cycle termination and bounded impact E27; runtime UNEXECUTED |
 | H04-F1 | Remote signer non-functional/unwired; A18/A18.1, A:L10351-L10740 | Validator daemon accept loop/node signer mode; MI; C5, not standalone DevNet blocker by audit | Use separate-signer feasibility/approved profile; do not transfer dead handler checks to live accept loop | Actual accept/handshake/handler and required/optional-mode evidence E17; no signing-oracle claim |
-| QBIND-A1-F002 | **OPEN; IMPLEMENTED — VERIFICATION PENDING** at `149edffd8f7fd97c821d6df9a5a546eca4992b79`; supplied pre-implementation review and bounded execution record, section 13; A:L9280, A:L16254, A:L16363, A:L16506-L16513 | Offline qbind-gov approval counting; D; C5/O | Independent post-implementation code/evidence review pending; distinct from A8-F1, A23-F1 and bootstrap authority | Isolated baseline reproduction; 36 library + 4 CLI tests PASS, all 18 contract categories mapped in section 13 and retrievable F002 evidence; no new evidence ID |
+| QBIND-A1-F002 | **OPEN; IMPLEMENTED — BOUNDED REVIEW PASSED** at `149edffd8f7fd97c821d6df9a5a546eca4992b79`; bounded source/retained-evidence review and separate manual publication at `e46c452cf6cfb1de4cf435a85108aa00a09761f4`, section 13; A:L9280, A:L16254, A:L16363, A:L16506-L16513 | Offline qbind-gov approval counting; D; C5/O | Bounded review and publication recorded; distinct from A8-F1, A23-F1 and bootstrap authority | Original isolated baseline reproduction and producing-revision regressions remain separately attributed; all 18 contract categories mapped in section 13; residual boundaries remain open; no new evidence ID |
 | QBIND-A1-F003 | Durable timeout-signing design risk; exploitability unproven; A26 at A:L8099-L8230 | Timeout/NewView cross-restart history; DD/MI/ME; R-F5/C5 | Establish operation-specific journal and continuity requirements; RUN 422 Proposal/Vote result does not close it | Exact preimages/operations, durable history, restart/uncertainty/copies under approved scope; no slashable conflict asserted |
 | QBIND-A1-F004 | Carried non-test insecure transport defaults; A:L9282, A:L16360-L16366 | Dummy providers/mutual-auth-disabled configuration axes; D/DD; O/C4/R | Check actual mode/primitive/map combination and operator-selected profile | Per-combination configured binary evidence, not source inclusion as deployed observation |
 | QBIND-A1-F006 | Carried repository-documentation overstatement; not freshly revalidated by audit; A:L9283, A:L15919 | Repository claims versus OPEN posture; D; A/O/C | Name exact present-tense claim and current applicable evidence before correction | Source/evidence-linked claim review; report corrections alone do not close this repository finding |
@@ -1133,15 +1133,13 @@ staged for delivery; final commit/tree/remote checks are reported separately
 after commit, without a self-referential hash in this document.
 
 **Current next action (supersedes the prior generic candidate-selection
-instruction):** obtain independent post-implementation review of the
-QBIND-A1-F002 correction and evidence in section 13 under section 2;
-implementation **IMPLEMENTED — VERIFICATION PENDING**, finding **OPEN**.
-The supplied pre-implementation source/design review is not an independent
-review of the implemented code or execution evidence. Section 12
-records the completed bounded A21-F1 source review and retained-evidence
-inspection; earlier pending instructions are historical for that scope only.
-This record neither chooses unresolved policy nor authorizes implementation,
-creates a finding, or closes an overall finding or evidence obligation. Section 8's
+instruction):** assess another bounded candidate under section 2. The
+QBIND-A1-F002 bounded source/retained-evidence review and separate publication
+are recorded in section 13; no further review or publication is pending within
+that scope. Earlier F002 pending-review statements remain historical and are
+superseded only for that bounded review and publication. This record neither
+selects an unverified correction nor authorizes implementation, creates a
+finding, or closes an overall finding or evidence obligation. Section 8's
 E07 / OBL-REL-1a / A48.1-C2
 bounded correction is implemented, independently verified and published;
 it is no longer the next implementation. Unrelated BR decisions remain
@@ -2014,14 +2012,17 @@ This documentation-only task runs no builds, project tests, scanners, nodes,
 provisioning, signing, deployment or activation and changes no evidence files.
 ## 13. QBIND-A1-F002 contract and bounded implementation: offline duplicate approvals
 
-**Finding: OPEN. Implementation: IMPLEMENTED — VERIFICATION PENDING.
+**Finding: OPEN. Implementation: IMPLEMENTED — BOUNDED REVIEW PASSED.
 Implementation/test commit: `149edffd8f7fd97c821d6df9a5a546eca4992b79`.
-Independent post-implementation review: PENDING.** The original proposal
-and its historical documentation-only evidence remain below; the separately
-authorized implementation and execution record follows at the end of this
-section. The supplied pre-implementation review is recorded with its limits,
-not as signed approval or post-implementation verification. Comparative
-priority: **ASSESSMENT PENDING**. All BR decisions and release/operational gates remain
+Bounded source/retained-evidence review record: PASSED; separate publication
+record: CLOSED at `e46c452cf6cfb1de4cf435a85108aa00a09761f4`.** The original proposal,
+implementation record and dated historical pending-review statements remain
+below; this completed review supersedes pending status only within the exact
+member-ID duplicate-refusal correction and retained-evidence scope recorded
+at the end of this section. This is not a human audit, signed approval,
+independently reproduced test execution, cryptographic validation or
+operational acceptance. The supplied pre-implementation review remains
+separate. Comparative priority: **ASSESSMENT PENDING**. All BR decisions and release/operational gates remain
 unchanged; activation **DISABLED**; public DevNet **NO-GO**; RS1 and C4/C5
 remain OPEN. Sections 8 and 12, including accepted E07/A21 bounded reviews,
 historical GUARD qualification, evidence identities and publication records,
@@ -2260,9 +2261,10 @@ cargo test --locked -p qbind-gov --lib --test envelope_cli_tests
 rustfmt --check --edition 2021 crates/qbind-gov/src/verify.rs crates/qbind-gov/src/hash.rs crates/qbind-gov/tests/envelope_cli_tests.rs
 ```
 
-Keep independent contract review separate from any separately authorized
-**pre-change reproduction**, implementation, **post-change regressions**,
-independent code/evidence review, and later release/runtime evidence.
+At that contract-revision stage, independent contract review was to remain
+separate from any separately authorized **pre-change reproduction**,
+implementation, **post-change regressions**, independent code/evidence
+review, and later release/runtime evidence.
 Future batches must record exact producing SHAs, source/test blobs, actual
 commands/toolchain/configuration, exit statuses and pass/fail/ignored counts,
 plus retrievable logs/fixture identities and checksums without secret key
@@ -2327,11 +2329,11 @@ are test-only; the new CLI target uses the existing dependencies.
 Before any production edit, a detached checkout of the exact required commit
 was created and instrumented only with
 `crates/qbind-gov/tests/f002_baseline_probe.rs`, delivered as
-[baseline_probe.rs](evidence/f002/baseline_probe.rs). It is **not** described
+[baseline_probe.rs](https://github.com/olivexo28/QBIND/blob/1e0e96454fa4b907d61377809752105cc09b041b/docs/security/evidence/f002/baseline_probe.rs). It is **not** described
 as an unchanged baseline working tree: tracked production bytes were
 unchanged, with one untracked test probe. Exact source blobs and the probe
-SHA-256 are retained in [baseline.log](evidence/f002/baseline.log) and
-[toolchain-and-format.log](evidence/f002/toolchain-and-format.log).
+SHA-256 are retained in [baseline.log](https://github.com/olivexo28/QBIND/blob/1e0e96454fa4b907d61377809752105cc09b041b/docs/security/evidence/f002/baseline.log) and
+[toolchain-and-format.log](https://github.com/olivexo28/QBIND/blob/1e0e96454fa4b907d61377809752105cc09b041b/docs/security/evidence/f002/toolchain-and-format.log).
 
 The probe validates a 2-of-3 keyset, checks all three disposable public keys
 are distinct, structurally validates each envelope and uses genuine
@@ -2341,13 +2343,13 @@ first genuine approval twice also gives count 2 / true in both APIs,
 reproducing the defect. **1 passed, 0 failed/ignored; exit 0.**
 An earlier probe used the wrong JSON class label `C` and failed parsing
 before reproduction: **0 passed, 1 failed, exit 101**. Its log is retained
-separately as [baseline-initial-failed.log](evidence/f002/baseline-initial-failed.log);
+separately as [baseline-initial-failed.log](https://github.com/olivexo28/QBIND/blob/1e0e96454fa4b907d61377809752105cc09b041b/docs/security/evidence/f002/baseline-initial-failed.log);
 the corrected delivered probe uses `c_hard_fork`. No baseline result is
 assigned to the later implementation revision.
 
 ### Actual acceptance mapping at the producing implementation/test revision
 
-All rows below **PASS** in [focused-tests.log](evidence/f002/focused-tests.log),
+All rows below **PASS** in [focused-tests.log](https://github.com/olivexo28/QBIND/blob/1e0e96454fa4b907d61377809752105cc09b041b/docs/security/evidence/f002/focused-tests.log),
 produced by `149edffd8f7fd97c821d6df9a5a546eca4992b79`, not by a later
 documentation-only HEAD. `verify::tests::` prefixes the library verifier
 test names below; `hash::tests::` prefixes the digest test; `f002_cli_*`
@@ -2382,12 +2384,17 @@ paths: **exit 0**. Toolchain/host/configuration, commands and exact producing
 blobs are in the retrievable logs. No code/tests changed after that run.
 Scope/mode/LF/whitespace, protected sections 8/12, hash production bytes and
 local documentation links are checked by the delivered evidence checker.
-See [evidence README](evidence/f002/README.md) and
-[SHA-256 manifest](evidence/f002/SHA256SUMS) for commands, identities,
-limitations and delivered-byte checksums. Documentation/evidence commits
-are separate; final revision/tree, delivery, main observation and complete
-changed-path manifest are reported after commit without a self-referential
-hash claim in this document.
+See the commit-pinned [evidence README](https://github.com/olivexo28/QBIND/blob/1e0e96454fa4b907d61377809752105cc09b041b/docs/security/evidence/f002/README.md)
+and [SHA-256 manifest](https://github.com/olivexo28/QBIND/blob/1e0e96454fa4b907d61377809752105cc09b041b/docs/security/evidence/f002/SHA256SUMS)
+for the original commands, identities, limitations and delivered-byte
+checksums. These instructions and checksums apply to reviewed delivery commit
+`1e0e96454fa4b907d61377809752105cc09b041b`, including its then-current plan
+bytes (`1f78ac848429b1aaa3186d0adba417c7a2ea4ce1147d25117e61e3aebc45e35f`);
+the manifest is not a checksum manifest for this updated plan or its new
+HEAD. The historical `check_scope.py` includes producer-to-HEAD ancestry
+assumptions for that delivery history; it is not run against this manual
+publication history or treated as a universal requirement. The evidence
+files and instructions are unchanged.
 
 ### Retained limits and operational gates
 
@@ -2402,4 +2409,51 @@ scanner, live exploit, upgrade execution or release run was performed.
 Passing bounded tests is not independent review, deployed exploitation
 evidence or closure. All BR decisions, evidence qualifications and release
 gates remain unchanged. Activation remains **DISABLED**; public DevNet remains
-**NO-GO**; independent post-implementation review is **PENDING**, finding **OPEN**.
+**NO-GO**; the overall finding remains **OPEN** despite the bounded review
+recorded below.
+
+### Bounded independent review and separate manual publication (2026-11-04)
+
+**Implementation: IMPLEMENTED — BOUNDED REVIEW PASSED. Overall finding:
+OPEN. Review disposition PASSED only for the bounded source review and
+retained-evidence inspection below; publication is separately recorded and
+does not close the overall finding or operational gates.**
+
+The following statement was supplied through this task conversation and is
+attributed to ChatGPT:
+
+> ChatGPT independently inspected the F002 implementation, test assertions, retained baseline-reproduction and regression evidence, checksums, producing-revision correspondence and complete changed-file scope at commit 1e0e96454fa4b907d61377809752105cc09b041b. No blocking issue was identified within the agreed exact-member-ID duplicate-refusal correction. The guard completes its scan before digest, key-map or cryptographic work, deterministically reports the first second-occurrence in input order, and preserves the existing nonduplicate verifier body. The retained logs record 36 library and 4 CLI tests passing at producing commit 149edffd8f7fd97c821d6df9a5a546eca4992b79. Rust/Cargo were unavailable in the reviewer’s environment; no independent Rust test rerun was performed.
+
+This is bounded source review and retained-evidence inspection, not a human
+audit, signed approval, independently reproduced test execution, independent
+cryptographic validation or operational acceptance. The original author-
+executed pre-change reproduction and post-change regressions remain those
+recorded above, produced at their stated revisions and attributed separately.
+The user also supplied Copilot's report of a supplemental 40-test rerun at
+the then-existing final revision. No additional retained rerun log was
+supplied for independent inspection; this report does not replace or
+re-attribute the original producing-revision logs.
+
+| Publication identity | Verified record |
+|---|---|
+| Original implementation/test producer | `149edffd8f7fd97c821d6df9a5a546eca4992b79`, tree `d3872f17f033b32c5cfb451bc60d96979b0aec37`; raw parent `305640e0dffa16872692906af052dbf15937b192` |
+| Original reviewed delivery | [`1e0e96454fa4b907d61377809752105cc09b041b`](https://github.com/olivexo28/QBIND/commit/1e0e96454fa4b907d61377809752105cc09b041b), tree `21cf2372845a407620dd063b64b6ecc455c75fd0`; raw parent `149edffd8f7fd97c821d6df9a5a546eca4992b79` |
+| Manual publication | [`e46c452cf6cfb1de4cf435a85108aa00a09761f4`](https://github.com/olivexo28/QBIND/commit/e46c452cf6cfb1de4cf435a85108aa00a09761f4), tree `21cf2372845a407620dd063b64b6ecc455c75fd0`; sole raw parent `305640e0dffa16872692906af052dbf15937b192` |
+| Tree and ancestry distinction | Reviewed delivery and manual publication have identical repository contents by equal tree ID. The producing and delivery commits are not ancestors of manual publication; equal trees do not imply shared commit ancestry. |
+| Local publication observations | The supplied terminal output reports successful SSH publication, matching local/remote main and a clean checkout. Those observations are attributed to that supplied output. GitHub commit metadata independently confirms the recorded commit IDs, parentage and tree equality. |
+
+The historical `SHA256SUMS`, README and checker are not modified. Their
+evidence instructions, manifest and producer-to-HEAD checks apply to reviewed
+delivery commit `1e0e96454fa4b907d61377809752105cc09b041b`; pinned browser
+references above identify those historical bytes. The manual publication
+commit has different ancestry notwithstanding identical repository contents.
+The new plan blob and SHA-256 are reported separately in the delivery
+handoff, not inserted into this file as a self-referential hash.
+
+The bounded review does not resolve or reduce residuals: distinct keys or
+operators, keyset provenance, direct-library structural admission, algorithm
+or network policy, freshness/replay, binary-check policy, or operational
+authority. No additional finding or evidence ID is allocated. Activation
+remains **DISABLED**; public DevNet remains **NO-GO**. A later next action may
+assess another bounded candidate under section 2; this task selects no
+unverified correction and starts no implementation.
