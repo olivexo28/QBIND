@@ -2555,6 +2555,9 @@ mod peer_retirement_tests {
         let id = node_id(3);
         let (old_local, old_remote) = pair_channels(true);
         harness.register(id, old_local).await.unwrap();
+        let old_owner = Arc::clone(&harness.peers.read().active[&id].retirement);
+        let old_owner_weak = Arc::downgrade(&old_owner);
+        drop(old_owner);
 
         let sender = tokio::task::spawn_blocking(move || {
             let mut remote = old_remote;
@@ -2589,6 +2592,7 @@ mod peer_retirement_tests {
 
         let (new_local, new_remote) = pair_channels(true);
         harness.register(id, new_local).await.unwrap();
+        assert!(old_owner_weak.upgrade().is_none());
         assert!(old_sender.send(heartbeat(2_000)).await.is_err());
         let (old_frames, remote_error) = tokio::task::spawn_blocking(move || {
             let mut remote = old_remote;
