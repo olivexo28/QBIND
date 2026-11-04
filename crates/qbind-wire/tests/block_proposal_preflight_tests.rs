@@ -78,6 +78,16 @@ const CASE_BAD_HEADER: u32 = 43;
 const CASE_WRAPPED_NET: u32 = 44;
 const CASE_LARGE_TX_LEN: u32 = 46;
 const CASE_MAX_SIGNATURE_LEN: u32 = 47;
+const CASE_LATER_BODY: u32 = 48;
+const CASE_LATER_SIGNATURE_0: u32 = 49;
+const CASE_LATER_SIGNATURE_1: u32 = 50;
+const CASE_WRAPPED_TRAILING: u32 = 51;
+const CASE_SETUP_DECODER: u32 = 60;
+const CASE_SETUP_CALIBRATION: u32 = 61;
+const CASE_CLEANUP_IDLE: u32 = 62;
+
+static OBSERVER_ARMED_ONCE: AtomicBool = AtomicBool::new(false);
+static CASE_DISPATCHED: AtomicBool = AtomicBool::new(false);
 
 thread_local! {
     static OBSERVER_OWNER: Cell<bool> = const { Cell::new(false) };
@@ -443,6 +453,7 @@ struct ObservationGuard {
 
 impl ObservationGuard {
     fn arm() -> Self {
+        OBSERVER_ARMED_ONCE.store(true, Ordering::Relaxed);
         if ACTIVE
             .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
             .is_err()
@@ -613,6 +624,13 @@ fn write_entry_and_setup() -> Result<(), String> {
         return Err(format!(
             "PR_GET_DUMPABLE returned {get_result}, expected 0, errno={errno}"
         ));
+    }
+
+    if matches!(
+        CASE_ID.load(Ordering::Relaxed),
+        CASE_SETUP_DECODER | CASE_SETUP_CALIBRATION
+    ) {
+        return Err("test-only injected setup-boundary failure".into());
     }
 
     if !write_record(REC_SETUP, 1, |record| {
@@ -800,6 +818,20 @@ fn case_by_name(name: &str) -> Option<ChildCase> {
         "wrapped_net" => (CASE_WRAPPED_NET, REC_COMPLETE, 0, Some(0), Some(0), 3),
         "large_tx_len" => (CASE_LARGE_TX_LEN, REC_COMPLETE, 0, Some(0), Some(0), 3),
         "max_signature_len" => (CASE_MAX_SIGNATURE_LEN, REC_COMPLETE, 0, Some(0), Some(0), 3),
+        "later_body" => (CASE_LATER_BODY, REC_COMPLETE, 0, Some(0), Some(0), 3),
+        "later_signature_0" => (CASE_LATER_SIGNATURE_0, REC_COMPLETE, 0, Some(0), Some(0), 3),
+        "later_signature_1" => (CASE_LATER_SIGNATURE_1, REC_COMPLETE, 0, Some(0), Some(0), 3),
+        "wrapped_trailing" => (CASE_WRAPPED_TRAILING, REC_COMPLETE, 0, None, None, 4),
+        "setup_decoder" => (CASE_SETUP_DECODER, REC_COMPLETE, 0, Some(0), Some(0), 3),
+        "setup_calibration" => (
+            CASE_SETUP_CALIBRATION,
+            REC_COMPLETE,
+            0,
+            Some(1),
+            Some(65_536),
+            1,
+        ),
+        "cleanup_idle" => (CASE_CLEANUP_IDLE, REC_COMPLETE, 0, Some(0), Some(0), 1),
         _ => return None,
     };
     Some(ChildCase {
@@ -834,6 +866,13 @@ fn case_by_name(name: &str) -> Option<ChildCase> {
             "wrapped_net" => "wrapped_net",
             "large_tx_len" => "large_tx_len",
             "max_signature_len" => "max_signature_len",
+            "later_body" => "later_body",
+            "later_signature_0" => "later_signature_0",
+            "later_signature_1" => "later_signature_1",
+            "wrapped_trailing" => "wrapped_trailing",
+            "setup_decoder" => "setup_decoder",
+            "setup_calibration" => "setup_calibration",
+            "cleanup_idle" => "cleanup_idle",
             _ => unreachable!(),
         },
         id,
@@ -894,6 +933,15 @@ fn isolated_child_entry_impl() -> Result<(), String> {
     EVIDENCE_FD.store(evidence.into_raw_fd(), Ordering::Relaxed);
     EVENT_FD.store(event_file.into_raw_fd(), Ordering::Relaxed);
     if let Err(error) = write_entry_and_setup() {
+        if matches!(case.id, CASE_SETUP_DECODER | CASE_SETUP_CALIBRATION)
+            && error == "test-only injected setup-boundary failure"
+            && !OBSERVER_ARMED_ONCE.load(Ordering::Relaxed)
+            && !CASE_DISPATCHED.load(Ordering::Relaxed)
+            && !ACTIVE.load(Ordering::Relaxed)
+        {
+            // Exit 42 certifies these assertions, not a real kernel failure.
+            std::process::exit(42);
+        }
         return Err(format!("child setup failed before observation: {error}"));
     }
 
@@ -922,6 +970,7 @@ fn isolated_child_entry_impl() -> Result<(), String> {
 }
 
 fn run_child_case(case: &ChildCase) -> Result<Snapshot, String> {
+    CASE_DISPATCHED.store(true, Ordering::Relaxed);
     match case.id {
         CASE_SINGLE_ALLOWED => allocation_calibration(case, &[65_536]),
         CASE_SINGLE_REJECTED => allocation_calibration(case, &[65_537]),
@@ -930,6 +979,11 @@ fn run_child_case(case: &ChildCase) -> Result<Snapshot, String> {
         CASE_EVENTS_ALLOWED => allocation_calibration(case, &[1; 256]),
         CASE_EVENTS_REJECTED => allocation_calibration(case, &[1; 257]),
         CASE_BASELINE_TWO | CASE_BASELINE_EIGHT => baseline_case(case),
+        CASE_SETUP_CALIBRATION => allocation_calibration(case, &[65_536]),
+        CASE_CLEANUP_IDLE => {
+            std::thread::sleep(Duration::from_secs(60));
+            Ok(snapshot())
+        }
         _ => decoder_case(case),
     }
 }
@@ -989,15 +1043,33 @@ fn decoder_case(case: &ChildCase) -> Result<Snapshot, String> {
     if bytes.len() > 4_096 {
         return Err("encoded fixture exceeds the reviewed 4 KiB ceiling".into());
     }
-    if case.id == CASE_WRAPPED_NET {
+    if matches!(case.id, CASE_WRAPPED_NET | CASE_WRAPPED_TRAILING) {
         let mut wrapped = vec![qbind_wire::net::MSG_TYPE_NET_BLOCK_PROPOSAL];
         wrapped.extend_from_slice(&bytes);
         let mut input = wrapped.as_slice();
         let mut guard = ObservationGuard::arm();
-        let result = qbind_wire::net::NetMessage::decode(&mut input).map(|_| ());
+        let result = qbind_wire::net::NetMessage::decode(&mut input);
         guard.disarm();
         let remaining = input.to_vec();
         let first = snapshot();
+        if case.id == CASE_WRAPPED_TRAILING {
+            let decoded = result.map_err(|error| format!("{error:?}"))?;
+            check_wrapped_values(&decoded)?;
+            if remaining != [0xFE, 0xED] {
+                return Err("wrapped successful trailing cursor changed".into());
+            }
+            reset_observer();
+            let mut guard = ObservationGuard::arm();
+            let result = qbind_wire::net::NetMessage::decode_from_slice(&wrapped);
+            guard.disarm();
+            let observed = snapshot();
+            let decoded_again = result.map_err(|error| format!("{error:?}"))?;
+            check_wrapped_values(&decoded_again)?;
+            if decoded != decoded_again || first.count == 0 || observed.count == 0 {
+                return Err("successful wrapper values/materialization differ".into());
+            }
+            return Ok(observed);
+        }
         let error = result
             .err()
             .ok_or_else(|| "malformed wrapped proposal decoded".to_string())?;
@@ -1061,12 +1133,39 @@ fn decoder_case(case: &ChildCase) -> Result<Snapshot, String> {
     Ok(observed)
 }
 
+fn check_wrapped_values(message: &qbind_wire::net::NetMessage) -> Result<(), String> {
+    let qbind_wire::net::NetMessage::BlockProposal(proposal) = message else {
+        return Err("expected wrapped BlockProposal".into());
+    };
+    if proposal.header.version != 1
+        || proposal.header.chain_id != 7
+        || proposal.header.epoch != 2
+        || proposal.header.height != 3
+        || proposal.header.round != 4
+        || proposal.header.parent_block_id != [0x11; 32]
+        || proposal.header.payload_hash != [0x22; 32]
+        || proposal.header.proposer_index != 5
+        || proposal.header.suite_id != qbind_wire::DEFAULT_CONSENSUS_SUITE_ID
+        || proposal.header.tx_count != 1
+        || proposal.header.timestamp != 6
+        || proposal.header.payload_kind != qbind_wire::PAYLOAD_KIND_NORMAL
+        || proposal.header.next_epoch != 0
+        || proposal.header.batch_commitment != [0x33; 32]
+        || proposal.qc.is_some()
+        || proposal.txs != [vec![0xA1, 0xB2, 0xC3]]
+        || proposal.signature != [0xEE]
+    {
+        return Err("wrapped decoded fields do not match independently specified fixture".into());
+    }
+    Ok(())
+}
+
 fn decoder_fixture(case: &ChildCase) -> Result<(Vec<u8>, Result<(), WireError>, Vec<u8>), String> {
     let mut bytes = proposal_prefix(0);
     let mut expected = Ok(());
     let mut remaining = Vec::new();
     match case.id {
-        CASE_LARGE_COUNT => {
+        CASE_LARGE_COUNT | CASE_SETUP_DECODER => {
             bytes = proposal_prefix(u32::MAX);
             bytes.extend_from_slice(&[0x01, 0x02, 0x03]);
             expected = Err(WireError::UnexpectedEof);
@@ -1105,6 +1204,22 @@ fn decoder_fixture(case: &ChildCase) -> Result<(Vec<u8>, Result<(), WireError>, 
             bytes.extend_from_slice(&[0xAA, 0xBB]);
             expected = Err(WireError::UnexpectedEof);
             remaining = vec![0xAA, 0xBB];
+        }
+        CASE_LATER_BODY => {
+            bytes = proposal_prefix(2);
+            append_tx(&mut bytes, &[0x31, 0x32]);
+            bytes.extend_from_slice(&5u32.to_le_bytes());
+            bytes.extend_from_slice(&[0xAA, 0xBB]);
+            expected = Err(WireError::UnexpectedEof);
+            remaining = vec![0xAA, 0xBB];
+        }
+        CASE_LATER_SIGNATURE_0 | CASE_LATER_SIGNATURE_1 => {
+            bytes = proposal_prefix(2);
+            append_tx(&mut bytes, &[0x31, 0x32]);
+            append_tx(&mut bytes, &[0x41]);
+            remaining = vec![0xCC; (case.id - CASE_LATER_SIGNATURE_0) as usize];
+            bytes.extend_from_slice(&remaining);
+            expected = Err(WireError::UnexpectedEof);
         }
         CASE_COUNT_MISMATCH => {
             bytes = proposal_prefix(2);
@@ -1159,6 +1274,12 @@ fn decoder_fixture(case: &ChildCase) -> Result<(Vec<u8>, Result<(), WireError>, 
             bytes.extend_from_slice(&[1, 0, 0xAA]);
             expected = Err(WireError::UnexpectedEof);
             remaining = vec![1, 0, 0xAA];
+        }
+        CASE_WRAPPED_TRAILING => {
+            bytes = proposal_prefix(1);
+            append_tx(&mut bytes, &[0xA1, 0xB2, 0xC3]);
+            bytes.extend_from_slice(&[1, 0, 0xEE, 0xFE, 0xED]);
+            remaining = vec![0xFE, 0xED];
         }
         CASE_LARGE_TX_LEN => {
             bytes = proposal_prefix(1);
@@ -1247,6 +1368,9 @@ fn should_have_no_transaction_allocation(case: u32) -> bool {
                 | CASE_WRAPPED_NET
                 | CASE_LARGE_TX_LEN
                 | CASE_MAX_SIGNATURE_LEN
+                | CASE_LATER_BODY
+                | CASE_LATER_SIGNATURE_0
+                | CASE_LATER_SIGNATURE_1
     )
 }
 
@@ -1343,16 +1467,64 @@ fn simple_qc_bytes() -> Vec<u8> {
     bytes
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 struct ChildOutcome {
-    status: ExitStatus,
+    status: Option<ExitStatus>,
     elapsed_ms: u128,
     timed_out: bool,
     killed: bool,
     reaped: bool,
+    management_errors: Vec<String>,
+}
+
+impl ChildOutcome {
+    fn code(&self) -> Option<i32> {
+        self.status.and_then(|status| status.code())
+    }
+
+    fn signal(&self) -> Option<i32> {
+        self.status.and_then(|status| status.signal())
+    }
+
+    fn success(&self) -> bool {
+        self.status.is_some_and(|status| status.success())
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+enum InjectedProcessError {
+    #[default]
+    None,
+    Poll,
+    Kill,
+    ReapPoll,
+}
+
+struct ChildEvidence {
+    invocation: [u8; 16],
+    outcome: ChildOutcome,
+    records: Vec<u8>,
+    events: Vec<u8>,
 }
 
 fn launch_child(case: &ChildCase, evidence_root: &std::path::Path) -> Result<ChildOutcome, String> {
+    let evidence = collect_child(case, evidence_root, WALL_LIMIT, InjectedProcessError::None)?;
+    validate_child_evidence(
+        case,
+        &evidence.invocation,
+        &evidence.outcome,
+        &evidence.records,
+        &evidence.events,
+    )?;
+    Ok(evidence.outcome)
+}
+
+fn collect_child(
+    case: &ChildCase,
+    evidence_root: &std::path::Path,
+    wall_limit: Duration,
+    injected: InjectedProcessError,
+) -> Result<ChildEvidence, String> {
     let mut invocation = [0u8; 16];
     File::open("/dev/urandom")
         .and_then(|mut source| source.read_exact(&mut invocation))
@@ -1375,7 +1547,7 @@ fn launch_child(case: &ChildCase, evidence_root: &std::path::Path) -> Result<Chi
     create_private_file(&event_path)?;
     let executable = std::env::current_exe().map_err(|error| error.to_string())?;
     let start = Instant::now();
-    let mut child = Command::new("/usr/bin/prlimit")
+    let child = Command::new("/usr/bin/prlimit")
         .args(["--cpu=5:5", "--as=536870912:536870912", "--core=0:0", "--"])
         .arg(executable)
         .args([
@@ -1395,30 +1567,39 @@ fn launch_child(case: &ChildCase, evidence_root: &std::path::Path) -> Result<Chi
         .stderr(Stdio::null())
         .spawn()
         .map_err(|error| format!("cannot spawn contained child: {error}"))?;
-    let outcome = wait_bounded(&mut child, start)?;
-    let evidence = read_bounded(&evidence_path, EVIDENCE_MAX + 1)?;
-    let events = read_bounded(&event_path, EVENT_FILE_MAX + 1)?;
-    #[cfg(target_os = "linux")]
-    use std::os::unix::process::ExitStatusExt;
+    // Ownership transfers immediately after spawn; supervision never returns early
+    // on a management error and never uses an unbounded blocking wait.
+    let outcome = wait_bounded(child, start, wall_limit, injected);
+    let evidence = read_bounded(&evidence_path, EVIDENCE_MAX + 1);
+    let events = read_bounded(&event_path, EVENT_FILE_MAX + 1);
     append_parent_log(
         evidence_root,
         &format!(
-            "case={} id={} invocation={} exit_code={:?} signal={:?} elapsed_ms={} timed_out={} killed={} reaped={} evidence={} events={}\n",
+            "case={} id={} invocation={} exit_code={:?} signal={:?} elapsed_ms={} timed_out={} killed={} reaped={} evidence={:?} events={:?} injected={injected:?} management_errors={:?}\n",
             case.name,
             case.id,
             invocation_hex,
-            outcome.status.code(),
-            outcome.status.signal(),
+            outcome.code(),
+            outcome.signal(),
             outcome.elapsed_ms,
             outcome.timed_out,
             outcome.killed,
             outcome.reaped,
-            evidence.len(),
-            events.len()
+            evidence.as_ref().map(Vec::len),
+            events.as_ref().map(Vec::len),
+            outcome.management_errors,
         ),
-    )?;
-    validate_child_evidence(case, &invocation, &outcome, &evidence, &events)?;
-    Ok(outcome)
+    ).map_err(|error| format!("outcome log failed: {error}; retained process outcome: {outcome:?}"))?;
+    let evidence = evidence
+        .map_err(|error| format!("record read failed: {error}; process outcome: {outcome:?}"))?;
+    let events = events
+        .map_err(|error| format!("event read failed: {error}; process outcome: {outcome:?}"))?;
+    Ok(ChildEvidence {
+        invocation,
+        outcome,
+        records: evidence,
+        events,
+    })
 }
 
 fn create_private_file(path: &std::path::Path) -> Result<(), String> {
@@ -1431,48 +1612,90 @@ fn create_private_file(path: &std::path::Path) -> Result<(), String> {
         .map_err(|error| format!("cannot create fresh private evidence file: {error}"))
 }
 
-fn wait_bounded(child: &mut Child, start: Instant) -> Result<ChildOutcome, String> {
-    let deadline = start + WALL_LIMIT;
-    let mut timed_out = false;
-    let mut killed = false;
+fn wait_bounded(
+    mut child: Child,
+    start: Instant,
+    wall_limit: Duration,
+    injected: InjectedProcessError,
+) -> ChildOutcome {
+    let deadline = start + wall_limit;
+    let mut outcome = ChildOutcome {
+        status: None,
+        elapsed_ms: 0,
+        timed_out: false,
+        killed: false,
+        reaped: false,
+        management_errors: Vec::new(),
+    };
+    let mut cleanup_deadline = None;
+    let mut injection_used = false;
+    let mut kill_attempts = 0;
     loop {
-        if let Some(status) = child.try_wait().map_err(|error| error.to_string())? {
-            return Ok(ChildOutcome {
-                status,
-                elapsed_ms: start.elapsed().as_millis(),
-                timed_out,
-                killed,
-                reaped: true,
-            });
-        }
-        if Instant::now() >= deadline {
-            timed_out = true;
-            if let Some(status) = child.try_wait().map_err(|error| error.to_string())? {
-                return Ok(ChildOutcome {
-                    status,
-                    elapsed_ms: start.elapsed().as_millis(),
-                    timed_out,
-                    killed,
-                    reaped: true,
-                });
+        let inject_poll = !injection_used
+            && (matches!(injected, InjectedProcessError::Poll)
+                || (cleanup_deadline.is_some()
+                    && matches!(injected, InjectedProcessError::ReapPoll)));
+        let poll = if inject_poll {
+            injection_used = true;
+            Err(std::io::Error::other(
+                "test-only injected status/reap polling error",
+            ))
+        } else {
+            child.try_wait()
+        };
+        match poll {
+            Ok(Some(status)) => {
+                outcome.status = Some(status);
+                outcome.reaped = true;
+                break;
             }
-            child
-                .kill()
-                .map_err(|error| format!("deadline kill failed: {error}"))?;
-            killed = true;
-            let status = child
-                .wait()
-                .map_err(|error| format!("child reap failed: {error}"))?;
-            return Ok(ChildOutcome {
-                status,
-                elapsed_ms: start.elapsed().as_millis(),
-                timed_out,
-                killed,
-                reaped: true,
-            });
+            Ok(None) => {}
+            Err(error) => {
+                outcome.management_errors.push(format!(
+                    "{}: {error}",
+                    if cleanup_deadline.is_some() {
+                        "cleanup status/reap"
+                    } else {
+                        "initial poll"
+                    }
+                ));
+                cleanup_deadline.get_or_insert_with(|| Instant::now() + Duration::from_millis(500));
+            }
+        }
+        let now = Instant::now();
+        if now >= deadline && cleanup_deadline.is_none() {
+            outcome.timed_out = true;
+            cleanup_deadline = Some(now + Duration::from_millis(500));
+        }
+        if let Some(end) = cleanup_deadline {
+            if kill_attempts < 2 && !outcome.killed {
+                kill_attempts += 1;
+                let result = if !injection_used && matches!(injected, InjectedProcessError::Kill) {
+                    injection_used = true;
+                    Err(std::io::Error::other(
+                        "test-only injected termination error",
+                    ))
+                } else {
+                    child.kill()
+                };
+                match result {
+                    Ok(()) => outcome.killed = true,
+                    Err(error) => outcome
+                        .management_errors
+                        .push(format!("termination attempt {kill_attempts}: {error}")),
+                }
+            }
+            if now >= end {
+                outcome
+                    .management_errors
+                    .push("bounded cleanup exhausted; termination/reaping not established".into());
+                break;
+            }
         }
         std::thread::sleep(Duration::from_millis(5));
     }
+    outcome.elapsed_ms = start.elapsed().as_millis();
+    outcome
 }
 
 fn read_bounded(path: &std::path::Path, maximum: usize) -> Result<Vec<u8>, String> {
@@ -1498,7 +1721,11 @@ fn validate_child_evidence(
     records: &[u8],
     events: &[u8],
 ) -> Result<(), String> {
-    if outcome.timed_out || outcome.killed || !outcome.reaped {
+    if outcome.timed_out
+        || outcome.killed
+        || !outcome.reaped
+        || !outcome.management_errors.is_empty()
+    {
         return Err(format!(
             "child did not complete within deadline: {outcome:?}"
         ));
@@ -1545,7 +1772,7 @@ fn validate_child_evidence(
     if case.terminal == REC_COMPLETE {
         let actual_events = u64_at(terminal, 32);
         let actual_bytes = u64_at(terminal, 40);
-        if !outcome.status.success()
+        if !outcome.success()
             || terminal[48..].iter().any(|byte| *byte != 0)
             || u32::from_le_bytes(terminal[28..32].try_into().unwrap()) != case.expected_assertions
             || actual_events > EVENT_LIMIT as u64
@@ -1567,7 +1794,7 @@ fn validate_child_evidence(
             u64_at(terminal, 40),
         )?;
     } else {
-        if outcome.status.signal() != Some(6) {
+        if outcome.signal() != Some(6) {
             return Err("guard record did not accompany SIGABRT".into());
         }
         let reason = u32::from_le_bytes(terminal[28..32].try_into().unwrap());
@@ -1751,6 +1978,10 @@ fn candidate_acceptance_matrix() {
             "wrapped_net",
             "large_tx_len",
             "max_signature_len",
+            "later_body",
+            "later_signature_0",
+            "later_signature_1",
+            "wrapped_trailing",
         ],
         "candidate",
     )
@@ -1762,48 +1993,230 @@ fn candidate_acceptance_matrix() {
 fn protocol_negative_controls() {
     let root = evidence_root("protocol-negative").unwrap();
     let invocation = [0x5Au8; 16];
-    let valid = make_protocol_records(CASE_SINGLE_REJECTED, &invocation);
-    if parse_protocol_sequence(
-        &valid,
-        CASE_SINGLE_REJECTED,
-        &invocation,
-        REC_GUARD,
-        GUARD_SINGLE_REQUEST,
-    )
-    .is_err()
-    {
-        panic!("well-formed calibrated guard evidence was rejected");
-    }
-    let mut malformed = vec![
-        valid[..2 * RECORD_LEN].to_vec(),
-        [valid.as_slice(), &[0u8; RECORD_LEN]].concat(),
-    ];
-    let mut duplicate = valid;
-    duplicate[RECORD_LEN + 5] = REC_GUARD;
-    malformed.push(duplicate);
-    let mut stale_id = make_protocol_records(CASE_SINGLE_REJECTED, &invocation);
-    stale_id[8] ^= 1;
-    malformed.push(stale_id);
-    let mut wrong_case = make_protocol_records(CASE_SINGLE_REJECTED, &invocation);
-    wrong_case[24] ^= 1;
-    malformed.push(wrong_case);
-    let mut wrong_reason = make_protocol_records(CASE_SINGLE_REJECTED, &invocation);
-    wrong_reason[2 * RECORD_LEN + 28] ^= 1;
-    malformed.push(wrong_reason);
-    let mut out_of_order = make_protocol_records(CASE_SINGLE_REJECTED, &invocation);
-    out_of_order[RECORD_LEN + 6] = 2;
-    malformed.push(out_of_order);
-    for candidate in malformed {
-        if parse_protocol_sequence(
-            &candidate,
-            CASE_SINGLE_REJECTED,
-            &invocation,
-            REC_GUARD,
-            GUARD_SINGLE_REQUEST,
+    for name in ["single_allowed", "single_rejected"] {
+        let case = case_by_name(name).unwrap();
+        let (valid, events, outcome) = synthetic_evidence(&case, &invocation);
+        validate_child_evidence(&case, &invocation, &outcome, &valid, &events)
+            .expect("shared real-child validator must accept the synthetic positive");
+        append_parent_log(
+            &root,
+            &format!("synthetic positive {name}: accepted by real-child validator\n"),
         )
-        .is_ok()
-        {
-            panic!("malformed/stale/duplicate evidence sequence was accepted");
+        .unwrap();
+
+        for (label, length) in [
+            ("missing", 0),
+            ("missing-completion", 2 * RECORD_LEN),
+            ("incomplete", EVIDENCE_MAX - 1),
+        ] {
+            reject_synthetic(
+                &root,
+                label,
+                &case,
+                &invocation,
+                &outcome,
+                &valid[..length],
+                &events,
+            );
+        }
+        let extra = [valid.as_slice(), &[0; RECORD_LEN]].concat();
+        reject_synthetic(
+            &root,
+            "extra",
+            &case,
+            &invocation,
+            &outcome,
+            &extra,
+            &events,
+        );
+        let mut duplicate = valid.clone();
+        duplicate[RECORD_LEN..2 * RECORD_LEN].copy_from_slice(&valid[..RECORD_LEN]);
+        reject_synthetic(
+            &root,
+            "duplicate",
+            &case,
+            &invocation,
+            &outcome,
+            &duplicate,
+            &events,
+        );
+
+        for (label, offset) in [
+            ("out-of-order", RECORD_LEN + 6),
+            ("wrong-invocation", 8),
+            ("wrong-case", 24),
+            ("header-reserved", 7),
+            ("entry-reserved", 28),
+            ("setup-reserved", RECORD_LEN + 28),
+            ("setup-tail-reserved", RECORD_LEN + 88),
+            ("terminal-reserved", 2 * RECORD_LEN + 100),
+        ] {
+            let mut records = valid.clone();
+            records[offset] ^= 1;
+            reject_synthetic(
+                &root,
+                label,
+                &case,
+                &invocation,
+                &outcome,
+                &records,
+                &events,
+            );
+        }
+        for offset in [32, 40, 48, 56, 64, 72, 80] {
+            let mut records = valid.clone();
+            records[RECORD_LEN + offset] ^= 1;
+            reject_synthetic(
+                &root,
+                &format!("wrong-setup-field-{offset}"),
+                &case,
+                &invocation,
+                &outcome,
+                &records,
+                &events,
+            );
+        }
+        for label in [
+            "wrong-exit",
+            "wrong-signal",
+            "timeout",
+            "unreaped",
+            "management-error",
+            "missing-status",
+            "killed",
+        ] {
+            let mut bad = outcome.clone();
+            match label {
+                "wrong-exit" => bad.status = Some(ExitStatus::from_raw(101 << 8)),
+                "wrong-signal" => bad.status = Some(ExitStatus::from_raw(9)),
+                "timeout" => bad.timed_out = true,
+                "unreaped" => bad.reaped = false,
+                "management-error" => bad.management_errors.push("synthetic process error".into()),
+                "missing-status" => bad.status = None,
+                "killed" => bad.killed = true,
+                _ => unreachable!(),
+            }
+            reject_synthetic(&root, label, &case, &invocation, &bad, &valid, &events);
+        }
+        if case.terminal == REC_COMPLETE {
+            let mut records = valid.clone();
+            records[2 * RECORD_LEN + 28] ^= 1;
+            reject_synthetic(
+                &root,
+                "wrong-assertion-set",
+                &case,
+                &invocation,
+                &outcome,
+                &records,
+                &events,
+            );
+            for (label, snapshot) in [
+                ("missing-snapshot", vec![]),
+                ("truncated-snapshot", events[..events.len() - 1].to_vec()),
+                ("extra-snapshot", [events.as_slice(), &[0]].concat()),
+            ] {
+                reject_synthetic(
+                    &root,
+                    label,
+                    &case,
+                    &invocation,
+                    &outcome,
+                    &valid,
+                    &snapshot,
+                );
+            }
+            for (label, offset) in [
+                ("snapshot-magic", 0),
+                ("snapshot-reserved", 5),
+                ("snapshot-invocation", 8),
+                ("snapshot-case", 24),
+                ("snapshot-count", 28),
+                ("snapshot-operation", EVENT_HEADER_LEN),
+                ("snapshot-event-reserved", EVENT_HEADER_LEN + 1),
+                ("snapshot-bytes", EVENT_HEADER_LEN + 8),
+                ("snapshot-alignment", EVENT_HEADER_LEN + 16),
+                ("snapshot-order", EVENT_HEADER_LEN + 24),
+            ] {
+                let mut snapshot = events.clone();
+                snapshot[offset] ^= 1;
+                reject_synthetic(
+                    &root,
+                    label,
+                    &case,
+                    &invocation,
+                    &outcome,
+                    &valid,
+                    &snapshot,
+                );
+            }
+            for offset in [32, 40] {
+                let mut records = valid.clone();
+                records[2 * RECORD_LEN + offset] ^= 1;
+                reject_synthetic(
+                    &root,
+                    "inconsistent-terminal-counters",
+                    &case,
+                    &invocation,
+                    &outcome,
+                    &records,
+                    &events,
+                );
+            }
+        } else {
+            for (label, reason) in [
+                ("wrong-calibration-reason", GUARD_CUMULATIVE_BYTES),
+                ("unexpected-reentrancy-SYNTHETIC", GUARD_REENTRANCY),
+                ("unexpected-state-SYNTHETIC", GUARD_MALFORMED_STATE),
+                ("unexpected-overflow-SYNTHETIC", GUARD_COUNTER_OVERFLOW),
+                ("unexpected-other-SYNTHETIC", GUARD_OTHER),
+                ("unknown-reason-SYNTHETIC", u32::MAX),
+            ] {
+                let mut records = valid.clone();
+                records[2 * RECORD_LEN + 28..2 * RECORD_LEN + 32]
+                    .copy_from_slice(&reason.to_le_bytes());
+                reject_synthetic(
+                    &root,
+                    label,
+                    &case,
+                    &invocation,
+                    &outcome,
+                    &records,
+                    &events,
+                );
+            }
+            for offset in [32, 33, 34, 40, 48, 56, 64, 72, 80, 88, 96] {
+                let mut records = valid.clone();
+                records[2 * RECORD_LEN + offset] ^= 1;
+                reject_synthetic(
+                    &root,
+                    &format!("wrong-guard-operation-padding-counters-{offset}"),
+                    &case,
+                    &invocation,
+                    &outcome,
+                    &records,
+                    &events,
+                );
+            }
+            reject_synthetic(
+                &root,
+                "guard-with-normal-snapshot",
+                &case,
+                &invocation,
+                &outcome,
+                &valid,
+                &[0; EVENT_HEADER_LEN],
+            );
+            let mut successful = outcome.clone();
+            successful.status = Some(ExitStatus::from_raw(0));
+            reject_synthetic(
+                &root,
+                "guard-with-success-exit",
+                &case,
+                &invocation,
+                &successful,
+                &valid,
+                &events,
+            );
         }
     }
     for (selector, filter, expected_code) in [
@@ -1813,6 +2226,118 @@ fn protocol_negative_controls() {
         (Some("single_allowed"), "no_such_child_test", true),
     ] {
         verify_dispatch_negative(selector, filter, expected_code, &root).unwrap();
+    }
+}
+
+fn reject_synthetic(
+    root: &std::path::Path,
+    label: &str,
+    case: &ChildCase,
+    invocation: &[u8; 16],
+    outcome: &ChildOutcome,
+    records: &[u8],
+    events: &[u8],
+) {
+    let error = validate_child_evidence(case, invocation, outcome, records, events)
+        .expect_err("synthetic invalid outcome accepted by real-child validator");
+    append_parent_log(root, &format!("synthetic negative {} {label}: rejected ({error}); not an observed allocator failure\n", case.name)).unwrap();
+}
+
+#[test]
+fn setup_refusal_controls() {
+    let root = evidence_root("setup-refusal").unwrap();
+    for name in ["setup_decoder", "setup_calibration"] {
+        let case = case_by_name(name).unwrap();
+        let evidence = collect_child(&case, &root, WALL_LIMIT, InjectedProcessError::None).unwrap();
+        assert_eq!(evidence.outcome.code(), Some(42));
+        assert_eq!(evidence.outcome.signal(), None);
+        assert!(evidence.outcome.reaped);
+        assert!(!evidence.outcome.timed_out);
+        assert!(!evidence.outcome.killed);
+        assert!(evidence.outcome.management_errors.is_empty());
+        let mut entry = vec![0; RECORD_LEN];
+        entry[..4].copy_from_slice(MAGIC);
+        entry[4] = 1;
+        entry[5] = REC_ENTRY;
+        entry[8..24].copy_from_slice(&evidence.invocation);
+        entry[24..28].copy_from_slice(&case.id.to_le_bytes());
+        assert_eq!(
+            evidence.records, entry,
+            "only ENTRY may precede setup refusal"
+        );
+        assert!(evidence.events.is_empty());
+        let rejection = validate_child_evidence(
+            &case,
+            &evidence.invocation,
+            &evidence.outcome,
+            &evidence.records,
+            &evidence.events,
+        )
+        .expect_err("setup refusal must not pass the child validator");
+        append_parent_log(&root, &format!(
+            "test-only injected setup-boundary failure {name}: exit42 certifies observer_never_armed=true case_never_dispatched=true; ENTRY only; negative-control passed; child REJECTED ({rejection}); not a kernel failure\n"
+        )).unwrap();
+    }
+}
+
+#[test]
+fn child_cleanup_controls() {
+    let root = evidence_root("cleanup").unwrap();
+    let normal = case_by_name("single_allowed").unwrap();
+    let evidence = collect_child(&normal, &root, WALL_LIMIT, InjectedProcessError::None).unwrap();
+    validate_child_evidence(
+        &normal,
+        &evidence.invocation,
+        &evidence.outcome,
+        &evidence.records,
+        &evidence.events,
+    )
+    .unwrap();
+    for injected in [
+        InjectedProcessError::None,
+        InjectedProcessError::Poll,
+        InjectedProcessError::Kill,
+        InjectedProcessError::ReapPoll,
+    ] {
+        let case = case_by_name("cleanup_idle").unwrap();
+        let evidence = collect_child(&case, &root, Duration::from_millis(100), injected).unwrap();
+        assert!(evidence.outcome.killed, "{:?}", evidence.outcome);
+        assert!(evidence.outcome.reaped, "{:?}", evidence.outcome);
+        assert_eq!(evidence.outcome.signal(), Some(9));
+        assert!(
+            evidence.outcome.elapsed_ms < 2_000,
+            "{:?}",
+            evidence.outcome
+        );
+        if matches!(injected, InjectedProcessError::None) {
+            assert!(evidence.outcome.timed_out);
+            assert!(evidence.outcome.management_errors.is_empty());
+            assert_eq!(evidence.records.len(), 2 * RECORD_LEN);
+            let (mut expected, _, _) = synthetic_evidence(&normal, &evidence.invocation);
+            for record in expected.chunks_exact_mut(RECORD_LEN) {
+                record[24..28].copy_from_slice(&case.id.to_le_bytes());
+            }
+            assert_eq!(evidence.records, expected[..2 * RECORD_LEN]);
+        } else {
+            assert!(evidence
+                .outcome
+                .management_errors
+                .iter()
+                .any(|error| error.contains("test-only injected")));
+            if matches!(injected, InjectedProcessError::Kill) {
+                assert!(evidence.outcome.management_errors[0].starts_with("termination attempt 1:"));
+            }
+        }
+        assert!(evidence.events.is_empty());
+        let rejection = validate_child_evidence(
+            &case,
+            &evidence.invocation,
+            &evidence.outcome,
+            &evidence.records,
+            &evidence.events,
+        )
+        .expect_err("cleanup-terminated child must not count as a decoder pass");
+        append_parent_log(&root, &format!("cleanup-control {injected:?}: passed; child REJECTED ({rejection}); injected errors are not real OS failures\n")).unwrap();
     }
 }
 
@@ -1831,91 +2356,19 @@ fn isolated_child_entry() {
     }
 }
 
-fn parse_protocol_sequence(
-    bytes: &[u8],
-    case_id: u32,
-    invocation: &[u8; 16],
-    terminal_kind: u8,
-    expected_reason: u32,
-) -> Result<(), String> {
-    if bytes.len() != EVIDENCE_MAX {
-        return Err("record length is invalid".into());
-    }
-    for sequence in 0..3 {
-        let record = &bytes[sequence * RECORD_LEN..][..RECORD_LEN];
-        if &record[..4] != MAGIC
-            || record[4] != 1
-            || record[6] != sequence as u8
-            || record[7] != 0
-            || &record[8..24] != invocation
-            || u32::from_le_bytes(record[24..28].try_into().unwrap()) != case_id
-        {
-            return Err("record sequence is invalid".into());
-        }
-    }
-    if bytes[5] != REC_ENTRY
-        || bytes[RECORD_LEN + 5] != REC_SETUP
-        || bytes[2 * RECORD_LEN + 5] != terminal_kind
-        || bytes[28..RECORD_LEN].iter().any(|byte| *byte != 0)
-        || bytes[RECORD_LEN + 28..RECORD_LEN + 32]
-            .iter()
-            .any(|byte| *byte != 0)
-        || bytes[RECORD_LEN + 88..2 * RECORD_LEN]
-            .iter()
-            .any(|byte| *byte != 0)
-        || !matches!(terminal_kind, REC_COMPLETE | REC_GUARD)
-        || u64_at(bytes, RECORD_LEN + 32) != CPU_LIMIT
-        || u64_at(bytes, RECORD_LEN + 40) != CPU_LIMIT
-        || u64_at(bytes, RECORD_LEN + 48) != ADDRESS_LIMIT
-        || u64_at(bytes, RECORD_LEN + 56) != ADDRESS_LIMIT
-        || u64_at(bytes, RECORD_LEN + 64) != 0
-        || u64_at(bytes, RECORD_LEN + 72) != 0
-        || u64_at(bytes, RECORD_LEN + 80) != 0
-    {
-        return Err("record setup or terminal state is invalid".into());
-    }
-    if terminal_kind == REC_GUARD
-        && (u32::from_le_bytes(
-            bytes[2 * RECORD_LEN + 28..2 * RECORD_LEN + 32]
-                .try_into()
-                .unwrap(),
-        ) != expected_reason
-            || !known_guard_reason(expected_reason))
-    {
-        return Err("guard reason is invalid".into());
-    }
-    if terminal_kind == REC_GUARD {
-        validate_guard_counters(case_id, &bytes[2 * RECORD_LEN..])?;
-        if bytes[2 * RECORD_LEN + 34..2 * RECORD_LEN + 40]
-            .iter()
-            .any(|byte| *byte != 0)
-            || bytes[2 * RECORD_LEN + 96..].iter().any(|byte| *byte != 0)
-        {
-            return Err("guard record padding is invalid".into());
-        }
-    }
-    if terminal_kind == REC_COMPLETE
-        && u32::from_le_bytes(
-            bytes[2 * RECORD_LEN + 28..2 * RECORD_LEN + 32]
-                .try_into()
-                .unwrap(),
-        ) == 0
-    {
-        return Err("completion assertion set is empty".into());
-    }
-    Ok(())
-}
-
-fn make_protocol_records(case_id: u32, invocation: &[u8; 16]) -> Vec<u8> {
+fn synthetic_evidence(case: &ChildCase, invocation: &[u8; 16]) -> (Vec<u8>, Vec<u8>, ChildOutcome) {
     let mut records = vec![0u8; EVIDENCE_MAX];
-    for (sequence, kind) in [REC_ENTRY, REC_SETUP, REC_GUARD].into_iter().enumerate() {
+    for (sequence, kind) in [REC_ENTRY, REC_SETUP, case.terminal]
+        .into_iter()
+        .enumerate()
+    {
         let record = &mut records[sequence * RECORD_LEN..(sequence + 1) * RECORD_LEN];
         record[..4].copy_from_slice(MAGIC);
         record[4] = 1;
         record[5] = kind;
         record[6] = sequence as u8;
         record[8..24].copy_from_slice(invocation);
-        record[24..28].copy_from_slice(&case_id.to_le_bytes());
+        record[24..28].copy_from_slice(&case.id.to_le_bytes());
     }
     let setup = &mut records[RECORD_LEN..2 * RECORD_LEN];
     setup[32..40].copy_from_slice(&CPU_LIMIT.to_le_bytes());
@@ -1930,7 +2383,38 @@ fn make_protocol_records(case_id: u32, invocation: &[u8; 16]) -> Vec<u8> {
     guard[72..80].copy_from_slice(&1u64.to_le_bytes());
     guard[80..88].copy_from_slice(&65_537u64.to_le_bytes());
     guard[88..96].copy_from_slice(&1u64.to_le_bytes());
-    records
+    let mut events = Vec::new();
+    if case.terminal == REC_COMPLETE {
+        let terminal = &mut records[2 * RECORD_LEN..];
+        terminal[28..].fill(0);
+        terminal[28..32].copy_from_slice(&case.expected_assertions.to_le_bytes());
+        terminal[32..40].copy_from_slice(&1u64.to_le_bytes());
+        terminal[40..48].copy_from_slice(&65_536u64.to_le_bytes());
+        events = vec![0; EVENT_HEADER_LEN + EVENT_LEN];
+        events[..4].copy_from_slice(EVENT_MAGIC);
+        events[4] = 1;
+        events[8..24].copy_from_slice(invocation);
+        events[24..28].copy_from_slice(&case.id.to_le_bytes());
+        events[28..32].copy_from_slice(&1u32.to_le_bytes());
+        events[EVENT_HEADER_LEN] = OP_ALLOC;
+        events[EVENT_HEADER_LEN + 8..EVENT_HEADER_LEN + 16]
+            .copy_from_slice(&65_536u64.to_le_bytes());
+        events[EVENT_HEADER_LEN + 16..EVENT_HEADER_LEN + 24].copy_from_slice(&1u64.to_le_bytes());
+        events[EVENT_HEADER_LEN + 24..EVENT_HEADER_LEN + 32].copy_from_slice(&1u64.to_le_bytes());
+    }
+    let outcome = ChildOutcome {
+        status: Some(ExitStatus::from_raw(if case.terminal == REC_GUARD {
+            6
+        } else {
+            0
+        })),
+        elapsed_ms: 1,
+        timed_out: false,
+        killed: false,
+        reaped: true,
+        management_errors: Vec::new(),
+    };
+    (records, events, outcome)
 }
 
 fn verify_dispatch_negative(
@@ -1982,30 +2466,39 @@ fn verify_dispatch_negative(
         command.env("QBIND_A21_CHILD_CASE", selector);
     }
     let start = Instant::now();
-    let mut child = command.spawn().map_err(|error| error.to_string())?;
-    let outcome = wait_bounded(&mut child, start)?;
+    let child = command.spawn().map_err(|error| error.to_string())?;
+    let outcome = wait_bounded(child, start, WALL_LIMIT, InjectedProcessError::None);
     let records = read_bounded(&evidence_path, EVIDENCE_MAX + 1)?;
     let events = read_bounded(&event_path, EVENT_FILE_MAX + 1)?;
     if outcome.timed_out
         || outcome.killed
         || !outcome.reaped
+        || !outcome.management_errors.is_empty()
         || !records.is_empty()
         || !events.is_empty()
     {
         return Err("invalid child dispatch unexpectedly entered or failed containment".into());
     }
-    if expect_zero_matches != outcome.status.success() {
+    if expect_zero_matches != outcome.success() {
         return Err("zero-match test filter did not have its reviewed exit outcome".into());
     }
-    if !expect_zero_matches && outcome.status.success() {
+    if !expect_zero_matches && outcome.success() {
         return Err("missing/unknown selector was accepted".into());
     }
+    let rejection = validate_child_evidence(
+        &case_by_name("single_allowed").unwrap(),
+        &invocation,
+        &outcome,
+        &records,
+        &events,
+    )
+    .expect_err("dispatch-negative outcome accepted by real-child validator");
     append_parent_log(
         root,
         &format!(
-            "dispatch selector={selector:?} filter={test_filter} zero_matches={expect_zero_matches} exit_code={:?} signal={:?} records={} elapsed_ms={} timed_out={} killed={} reaped={}\n",
-            outcome.status.code(),
-            outcome.status.signal(),
+            "dispatch negative-control passed; child REJECTED ({rejection}); selector={selector:?} filter={test_filter} zero_matches={expect_zero_matches} exit_code={:?} signal={:?} records={} elapsed_ms={} timed_out={} killed={} reaped={}\n",
+            outcome.code(),
+            outcome.signal(),
             records.len(),
             outcome.elapsed_ms,
             outcome.timed_out,
