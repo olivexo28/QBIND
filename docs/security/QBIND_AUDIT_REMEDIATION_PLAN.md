@@ -3104,3 +3104,39 @@ post-correction review **PENDING**. E07 / OBL-GOV-2 **OPEN**; activation
 **DISABLED**; public DevNet **NO-GO**. Only isolated inert/guarded fixtures
 are authorized, not real Cargo/builds/nodes/helpers, release execution,
 deployment, signing or activation.
+
+### Creation-to-owner handoff follow-up (A37.1-C2 / A38-iv)
+
+The user-supplied independent review identified a remaining ordinary-case
+handoff: KeyboardInterrupt after Popen returned but before owned_process
+entry left a live child, UNSAFE_GROUPS empty and allowed workspace deletion.
+Separate reviewer containment reaped it. That targeted function probe is
+not a failure or rerun of the historical 120-invocation suite.
+Required entry was `551e7cdd08eb01ce05914c4bba49562d8901b7ec`, tree
+`85242ebdc73de44133a752886bccb6cd3456a261`; clean existing task branch
+and remote task tip matched. Protected main remained
+`f36e59a5e2cebab6fdfd0365920ca3e1a09444ac`. A separate local unchanged-
+function reproduction confirmed the boundary defect using an inert child
+and distinct outer containment.
+
+The fixture creation owner now receives commands, allocates its Popen object
+inside its exception-safe scope, and owns initialization/handoff failures.
+Both run_case and the visibility probe use it. Catchable signals are blocked
+across creation/registration; a Python exec launcher restores the child's
+original signal mask before the actual command, without preexec_fn. Parent
+mask/handlers restore after bounded cleanup. Original failures and separate
+cleanup errors remain reported; unsafe cleanup blocks further cases/creation
+and retains the workspace. Owned-group signaling/reaping and validated
+Linux visibility/session/pidfd requirements are preserved. No cleanup
+guarantee after SIGKILL, host failure or other uncatchable termination is made.
+
+[Creation-handoff evidence](evidence/a37-1-c2-handoff-followup/README.md)
+separates reviewer reporting, local reproduction, calibration and exact-
+producing-revision verification. Both production scripts and all three
+historical evidence directories remain byte-identical, with manifests
+pinned to their respective historical revisions. This is a bounded review
+correction, not a new canonical audit finding.
+
+Status **IMPLEMENTED — VERIFICATION PENDING**; independent review
+**PENDING**. E07 / OBL-GOV-2 **OPEN**; activation **DISABLED**; public
+DevNet **NO-GO**. Only isolated inert/guarded fixtures are authorized.

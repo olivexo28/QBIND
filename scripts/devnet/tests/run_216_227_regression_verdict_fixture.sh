@@ -332,9 +332,27 @@ def cleanup_group(p, timeout=3):
     raise AssertionError(("children survived cleanup", p.pid, left, group_alive(p.pid)))
 
 @contextmanager
-def owned_process(p, supervision, case):
+def owned_process(command, supervision, case, **kwargs):
+    assert not UNSAFE_GROUPS, ("refusing creation after unsafe cleanup", UNSAFE_GROUPS)
+    # Keep the object reachable even if initialization returns/raises across
+    # an injected handoff exception. No spawned Popen is passed into this scope.
+    p = subprocess.Popen.__new__(subprocess.Popen)
     original = None
+    signals = {signal.SIGINT, signal.SIGTERM, signal.SIGHUP}
+    old_mask = signal.pthread_sigmask(signal.SIG_BLOCK, signals)
+    handlers = {}
+    def interrupted(sig, frame):
+        raise InterruptedError("fixture owner interrupted by "+signal.Signals(sig).name)
     try:
+        for sig in signals:
+            handlers[sig] = signal.signal(sig, interrupted)
+        # The single-threaded parent must not use preexec_fn. An exec launcher
+        # restores the child's original mask before running the actual command.
+        launcher = ("import os,signal,sys;"
+                    "signal.pthread_sigmask(signal.SIG_SETMASK, "+repr(sorted(int(s) for s in old_mask))+");"
+                    "os.execv(sys.argv[1],sys.argv[1:])")
+        subprocess.Popen.__init__(p, [PYTHON, "-c", launcher, *command], **kwargs)
+        signal.pthread_sigmask(signal.SIG_SETMASK, old_mask)
         if WATCHDOG_REPORT_FD is not None:
             os.write(WATCHDOG_REPORT_FD, (json.dumps(dict(started_group=p.pid))+"\n").encode())
         yield p
@@ -343,8 +361,12 @@ def owned_process(p, supervision, case):
         supervision["original_error"] = repr(error)
         raise
     finally:
+        signal.pthread_sigmask(signal.SIG_BLOCK, signals)
         try:
-            supervision["cleanup"] = cleanup_group(p)
+            if getattr(p, "pid", None) is not None:
+                supervision["cleanup"] = cleanup_group(p)
+            else:
+                supervision["no_child_created"] = True
         except BaseException as error:
             UNSAFE_GROUPS.add(p.pid)
             supervision["cleanup_error"] = repr(error)
@@ -362,6 +384,15 @@ def owned_process(p, supervision, case):
                     raise
                 original.add_note("separate supervision evidence failure: "+repr(error))
                 print("supervision evidence failure: "+repr(error), file=sys.stderr)
+            finally:
+                for sig, handler in handlers.items():
+                    signal.signal(sig, handler)
+                try:
+                    signal.pthread_sigmask(signal.SIG_SETMASK, old_mask)
+                except BaseException as error:
+                    if original is None:
+                        raise
+                    original.add_note("deferred fixture interruption after cleanup: "+repr(error))
 
 @contextmanager
 def fixture_workspace():
@@ -450,10 +481,9 @@ def run_case(work, run, variant, mode, raw, targets):
     stderr = work/"stderr"
     supervision = {}
     with stdout.open("wb") as so, stderr.open("wb") as se:
-        p = subprocess.Popen([BASH, str(script)], cwd=work, env=env,
-                             stdout=so, stderr=se, start_new_session=WATCHDOG_SESSION is None,
-                             process_group=0 if WATCHDOG_SESSION is not None else None)
-        with owned_process(p, supervision, case):
+        with owned_process([BASH, str(script)], supervision, case, cwd=work, env=env,
+                           stdout=so, stderr=se, start_new_session=WATCHDOG_SESSION is None,
+                           process_group=0 if WATCHDOG_SESSION is not None else None) as p:
             deadline = time.monotonic()+30
             if mode.startswith(("before_", "after_", "supervisor_")):
                 phase, sig = mode.split("_") if not mode.startswith("supervisor_") else ("before", "INT")
@@ -852,8 +882,8 @@ try:
         group_members = real_members
     with fixture_workspace() as temp:
         work = Path(temp)
-        with owned_process(subprocess.Popen([PYTHON, "-c", "import time; time.sleep(20)"],
-                                            start_new_session=True), {}, "visibility-probe") as probe:
+        with owned_process([PYTHON, "-c", "import time; time.sleep(20)"],
+                           {}, "visibility-probe", start_new_session=True) as probe:
             assert os.getpgid(probe.pid) == probe.pid
             assert any(pid == probe.pid for pid, state in group_members(probe.pid)), (
                 "unsupported owned-group /proc visibility")
