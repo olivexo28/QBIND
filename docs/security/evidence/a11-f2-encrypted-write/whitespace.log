@@ -1,0 +1,4 @@
+producing_revision 5815346afcdd70323dad2bae1d01bf46c132cf81
+command: git diff --check cb03d25e9c4c06046ff95eda70c089e94cea7577 HEAD
+
+exit_status 0

@@ -3244,3 +3244,192 @@ integration and applicable process/binary evidence. No overall finding,
 evidence obligation, release gate or operational authority is closed by this
 bounded review. Activation remains **DISABLED**; public DevNet remains
 **NO-GO**.
+
+## 15. A11-F2 / OBL-TRN-3 bounded encrypted-send correction
+
+**IMPLEMENTED — INDEPENDENT REVIEW PENDING.** A11-F2 / OBL-TRN-3 remain
+**OPEN** until the correction and retained evidence are independently
+reviewed. This section supplements, and does not rewrite, the finding,
+obligation and evidence registers or historical results above. E19 remains
+**OPEN** for its remaining replay/session-freshness and write-retry review
+obligations; E07 and OBL-GOV-2 remain **OPEN** to their remaining extent.
+Activation remains **DISABLED**; public DevNet remains **NO-GO**.
+
+### Entry and bounded author source review
+
+Entry verified `origin` as `https://github.com/olivexo28/QBIND`, an empty
+`git status --short`, local `main` and HEAD at required baseline commit
+`cb03d25e9c4c06046ff95eda70c089e94cea7577`, with tree
+`eace7e8db1374b2f4a37bca6af8ec3d210af6856`. Remote `main` advertised that
+same commit. The suggested task branch did not exist locally or remotely;
+it was created from this baseline. No applicable `AGENTS.md` was found in
+the repository or ancestor directories.
+
+The author verified the supplied independent review against baseline
+source, rather than treating it as an exhaustive caller inventory:
+
+* `qbind-node/src/secure_channel.rs`: all three synchronous constructors,
+  `send_app`, `recv_app`, `stream`, `is_established`; async `try_new`,
+  `from_shared`, clones, send/receive queues, both workers, and all four
+  async handshake helpers. `shared()` is an existing deprecated panic,
+  not a working alternative handle route.
+* `qbind-net/src/connection.rs`, `session.rs`, `transport.rs`, and
+  `framed_io.rs`: client sends select c2s, server sends select s2c;
+  `next_nonce` advances before AEAD `seal` returns; encryption precedes
+  frame decoding, encoding, `write_all` and `flush`. A write/flush error
+  conveys no reliable byte-progress information. Baseline writer retry on
+  `WouldBlock` calls encryption again.
+* `qbind-node/src/peer.rs` and `peer_manager.rs`: synchronous sends
+  propagate errors through `send_msg`, send-to and broadcast; the mutable
+  channel accessor can reach the same send/receive methods. Peer removal
+  is separate. The node remote signer creates a channel per request and
+  maps send errors to signer-unavailable; the remote-signer daemon exits
+  its request loop on failed response sends.
+* `qbind-node/src/async_peer_manager.rs`: accepted and dialed KEMTLS paths
+  create async workers and register cloned handles; secure writers break
+  on send error, readers distinguish timeouts from fatal errors, and peer
+  map removal is separate. `p2p_tcp.rs` accepted/dialed helpers likewise
+  create workers; structured/raw write loops break/return on send errors;
+  read loops break on receive errors. Initial-dial retry is not application
+  message replay.
+* Repository Rust text searches for `send_app`, `write_transport_frame`,
+  `writer_worker`, async construction/shared handles and stream access
+  located these production routes and existing transport tests. No
+  pre-existing `from_shared` call site outside its definition was found.
+  This is a bounded current-source review, not proof about every dynamic,
+  downstream or future caller.
+
+No material contradiction of the supplied mechanism was found.
+Two stale baseline comments are not implementation guarantees:
+`async_peer_manager.rs` still describes an earlier unencrypted-message
+transition, whereas its inspected paths use encrypted async workers;
+`p2p_tcp.rs` says `try_new` flips nonblocking mode, whereas it actually
+sets a read timeout. The correction does not depend on either comment or
+on a platform-specific mapping of socket timeouts to `WouldBlock`.
+The additional counter-before-`seal` observation motivates invalidation on
+encryption errors too. There is no dependency on reconnect/replay policy
+to enforce local application invalidation.
+
+### Exact implementation and compatibility boundary
+
+The implementation adds a private, monotonic invalidation latch owned by
+each `SecureChannel`, shared with async wrappers and clones. There is no
+reset operation. Before any application send/receive, the synchronous
+channel checks the latch. Every error once encryption is attempted
+(encryption, subsequent framing, write or flush) sets it before attempting
+`shutdown(Both)`. The original send error is returned, including
+`WouldBlock`, timeout, write-zero or other I/O errors; no partial/full
+delivery is reported as success. Shutdown failure is explicitly logged
+without plaintext/key material and cannot clear the latch. Subsequent
+application operations return a fatal `NetError::Protocol` invalidation
+error, not a read-timeout-shaped error.
+
+The production writer executes each command once, returns its result
+through the existing oneshot, and exits on error. Queued commands in that
+writer lose their completion sender and fail as channel-closed; they are
+not encrypted or replayed. Other workers sharing the same synchronous
+channel cannot bypass its latch. Async send/receive entrypoints and
+`is_established` observe that same latch, including independently created
+`from_shared` wrappers. Async receive also rechecks after dequeuing so
+previously buffered plaintext is refused following invalidation. An
+operation already completed/linearized before invalidation cannot be
+retracted, nor can data already delivered to a higher-layer queue.
+
+Public method signatures and `ChannelError` variants are unchanged.
+Successful complete writes still use the same AEAD selection, frame
+encoder, `write_all` and `flush`. Authentication configuration, key
+schedule, nonces and direction mapping are unchanged. Intentional
+compatibility change: even a zero-byte transient send failure now makes
+that session unusable, and `is_established` becomes false. Encryption
+errors are also terminal because the sending counter may already have
+advanced. Retrying the same session is no longer supported; reconnect,
+delivery acknowledgement, deduplication and higher-level replay require
+separate decisions. This is not the A11-F1 nonce-reuse correction.
+
+### Deterministic verification and producing identity
+
+The implementation/test producing revision is
+`5815346afcdd70323dad2bae1d01bf46c132cf81`, tree
+`861a94a19c218b66e30f1a5b8bf0e8ba2a4844ca`, whose sole parent is the
+required baseline `cb03d25e9c4c06046ff95eda70c089e94cea7577`.
+The exact commands,
+exit statuses, retained outputs and file identities are recorded in
+[`evidence/a11-f2-encrypted-write/README.md`](evidence/a11-f2-encrypted-write/README.md).
+Evidence/documentation are committed later than the implementation;
+their revision is not represented as the revision which produced the
+test results. The test seam is private `cfg(test)` code, not an operational
+feature or bypass. It injects write/flush faults into the same
+`write_transport_frame` called by production `send_app`, and exercises
+the production writer and reader workers.
+
+The focused suite uses real ML-KEM-768 and counted, real
+ChaCha20-Poly1305 seal/open operations, not a dummy AEAD or framing-only
+substitute. Certificate signature verification is a dummy fixture and
+mutual authentication is disabled only in test configuration; this is not
+production-authentication evidence. Both c2s and s2c are exercised:
+successful repeated full-send/decrypt controls; zero-byte failure after
+encryption; seven-byte progress then `WouldBlock` or broken-pipe;
+write-zero; whole-frame writes followed by timeout/other flush errors;
+original-error propagation; refusal of later sends/receives and wrapping;
+exactly one seal at counter zero for a failed command; queued-command
+cancellation; owned async, cloned and independent shared-worker routes;
+buffered/pending async receive refusal; and production reader exit when
+its notification queue has room. An injected post-counter encryption
+failure is also terminal.
+
+The shutdown-failure control deliberately leaves the socket live and
+proves that valid peer traffic still cannot reach local application
+decryption. Successful shutdown controls observe local loopback peer EOF
+after zero/partial output. Flush-failure controls prove that the peer may
+decrypt a complete frame while the caller still correctly receives an
+error. These are isolated loopback and controlled-I/O observations, not a
+runtime reproduction of platform-specific timeouts or network-wide
+consequences. Existing framing/dummy-AEAD regression controls are kept
+distinct from these real-AEAD results.
+
+At that producing revision, all **46 selected Rust tests passed**:
+7 focused unit tests, 13 existing node transport tests and 26 existing
+network framing/roundtrip tests. Production `cargo check` for the node
+library/binary and remote-signer binary passed; both changed Rust files
+passed `rustfmt --check`, and the implementation diff passed
+`git diff --check`. All six retained validation commands exited zero.
+This is selected regression coverage, not a full-workspace test result.
+
+### Residual lifecycle and assurance limits
+
+The latch establishes local application-session invalidation, not complete
+connection cleanup. The implementation requests OS socket shutdown in
+both directions; OS delivery, buffering, peer observations and shutdown
+success are not guaranteed. The pre-existing raw `stream()` accessor can
+expose/clone a socket for caller-managed I/O; it cannot expose the private
+AEAD connection or reset invalidation, but arbitrary raw-socket operations
+are not guarded application send/receive APIs.
+
+Error propagation is at `SecureChannel::send_app` and
+`SecureChannelAsync::send`, and their direct awaiting callers. Existing
+higher-level peer-manager/P2P APIs may acknowledge only enqueueing (or
+return no result); broadcast may be best-effort. They do not gain
+end-to-end send/delivery acknowledgement in this correction. A prior
+enqueue success cannot be retracted when a later worker write fails.
+Their workers observe the send error and stop using the invalidated
+session; changing those queue API contracts is separate work.
+
+Reader workers refuse further reads on their next channel access.
+The reader and writer serialize socket I/O through the existing mutex:
+a reader already holding it can delay a send reaching the failure path.
+A reader blocked on a full notification queue can remain blocked; an idle
+writer belonging to another `from_shared` wrapper can remain waiting for
+commands until handles are dropped. Existing timeout setup failures,
+mutex scheduling, receive-side partial-read retry/framing policy, task
+joining, cancellation/draining, prompt worker completion and registry
+removal remain separate lifecycle concerns. No bounded reader/task
+termination time or automatic removal from either peer registry is
+claimed from one writer returning. Sockets and retained key material are
+not claimed dropped/zeroized until their existing owners are dropped.
+
+No live DevNet, external peer, deployment, release, signing or activation
+was exercised. No independent post-implementation review, real
+multi-node/deployment outcome, platform-wide timeout guarantee, message
+delivery guarantee or overall audit closure is claimed. Only the task
+branch is published; no PR, merge, main push, amend or force-push is part
+of this correction.

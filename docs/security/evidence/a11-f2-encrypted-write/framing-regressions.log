@@ -1,0 +1,43 @@
+producing_revision 5815346afcdd70323dad2bae1d01bf46c132cf81
+command: timeout 180s cargo test --locked --offline -p qbind-net --test framed_io_tests --test full_channel_roundtrip_tests -- --test-threads=1
+    Finished `test` profile [unoptimized] target(s) in 0.17s
+     Running tests/framed_io_tests.rs (target/debug/deps/framed_io_tests-5f36d9180db0a191)
+
+running 22 tests
+test test_handshake_empty_payload ... ok
+test test_handshake_length_exceeds_max ... ok
+test test_handshake_max_valid_payload ... ok
+test test_handshake_read_with_fragmented_stream_chunk_1 ... ok
+test test_handshake_read_with_fragmented_stream_chunk_2 ... ok
+test test_handshake_roundtrip ... ok
+test test_handshake_roundtrip_with_cursor ... ok
+test test_multiple_handshake_packets_sequential ... ok
+test test_multiple_transport_frames_sequential ... ok
+test test_transport_empty_ciphertext ... ok
+test test_transport_large_ciphertext ... ok
+test test_transport_length_exceeds_max ... ok
+test test_transport_read_with_fragmented_stream_chunk_1 ... ok
+test test_transport_read_with_fragmented_stream_chunk_2 ... ok
+test test_transport_roundtrip ... ok
+test test_transport_roundtrip_with_cursor ... ok
+test test_truncated_handshake_header_1_byte ... ok
+test test_truncated_handshake_header_2_bytes ... ok
+test test_truncated_handshake_payload ... ok
+test test_truncated_transport_header_1_byte ... ok
+test test_truncated_transport_header_4_bytes ... ok
+test test_truncated_transport_payload ... ok
+
+test result: ok. 22 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests/full_channel_roundtrip_tests.rs (target/debug/deps/full_channel_roundtrip_tests-78077ca4a1d9b88a)
+
+running 4 tests
+test app_data_roundtrip_with_fragmented_reads ... ok
+test full_handshake_and_app_roundtrip_over_framed_io ... ok
+test handshake_with_fragmented_reads ... ok
+test multiple_app_messages_sequential_over_framed_io ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+
+exit_status 0

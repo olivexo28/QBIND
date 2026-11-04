@@ -1,0 +1,4 @@
+producing_revision 5815346afcdd70323dad2bae1d01bf46c132cf81
+command: rustfmt --edition 2021 --check --config skip_children=true crates/qbind-node/src/secure_channel.rs crates/qbind-node/src/secure_channel/encrypted_write_tests.rs
+
+exit_status 0
