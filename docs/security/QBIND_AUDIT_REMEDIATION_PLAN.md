@@ -4131,3 +4131,67 @@ completion. Queue-blocked fatal detection remains unclosed until the
 downstream consumer resumes. No live network, deployment, operational
 signing, or activation was run. Independent review remains **PENDING** and
 all applicable audit obligations and release gates remain **OPEN**.
+
+## 22. A6-F1 monitor join ownership and retry correction
+
+**IMPLEMENTED — INDEPENDENT REVIEW PENDING.** This append records the
+bounded monitor-ownership correction on the existing A6-F1 branch; it does
+not rewrite the audit register, sections 18-21, or prior evidence.
+A6-F1 / OBL-AVL-4a / E14 and all other remaining obligations stay **OPEN**;
+activation **DISABLED**; public DevNet **NO-GO**.
+
+Entry verified the existing task branch at
+`40938fb25b82823d699731a95d42f5d2b0931a5d`, tree
+`9bf91ac24f75f64cd2add05f49bb7cc35c925fab`, with a clean worktree. Local
+and remote `main` both matched the protected commit
+`50bf93d8b1b6b0739cdce5e95334cd726af2386e`, tree
+`dfe11db1e9b55de89df1a565b2df83cdba7d91c0`. The applicable audit input and
+anchors remain those recorded in section 21 and the separate follow-up
+evidence record. The starting source confirmed the review finding: the
+monitor took the reader handle before awaiting it, and `finish_and_wait`
+cleared the monitor handle before returning a join error.
+
+The reader/writer handles now remain in a shared task owner while the
+monitor awaits the reader. Monitor outcomes are durably retained on that
+owner as `Completed`, retryable `OperationFailed`, `Cancelled`, or `Failed`;
+retries cannot clear an already-observed monitor result. Cleanup records
+each join outcome before releasing its handle and refuses success when a
+reader or writer join has no retained handle or observed outcome. An
+operation-level cleanup failure remains retryable; cancellation or failure
+of the monitor/task is separately observable. A monitor failure cannot
+release the identity merely because a retry ran: cleanup must independently
+observe the relevant task joins and worker/socket cleanup. The panic-after-
+reader-join control exercises the case where the reader is already observed
+but retirement publication is interrupted; the monitor failure remains
+recorded while the retry independently completes cleanup.
+
+The monitor's long wait strongly owns only the shared task store and uses
+weak registry/retirement references. After an observed fatal read it
+temporarily upgrades the owner and bounds cleanup. Dropping the service
+without shutdown releases the registry and retirement owner, but a monitor
+waiting on a still-connected peer can remain detached until peer closure or
+runtime teardown; no socket/worker cleanup guarantee follows from dropping
+the service. The test closes the peer and confirms the task store is then
+released. This limitation and the exact boundary are documented in
+[`evidence/a6-f1-monitor-ownership-review/README.md`](../../evidence/a6-f1-monitor-ownership-review/README.md).
+
+Final author-run focused lifecycle tests passed **32/32**, secure-channel
+tests **16/16**, B8 **6/6**, Run 072 **8/8**, Run 074 **10/10**, Run 418
+authenticated-peer tests **18/18**, and Run 418 NewView/demux tests **4/4**;
+`cargo check` and targeted formatting also passed. The review-correction
+evidence retains exact commands, outputs/checksums, a resolved intermediate
+test failure, and its limits. Injected monitor panic/cancellation are
+test controls, not production incidents. The logs do not themselves embed
+their producer identity; the separate record pins them to source commit
+`d62eecc306d545cfb945f640de0f727e2624f923`, tree
+`134a661d1fc314bed6fdd417a427726875d95a01`. These author tests are not
+independent review.
+
+The terminal shutdown fence, connection counts, snapshot-based eviction,
+one-connection outbound behavior, zero-progress idle timeout retry, A5-F1
+partial-frame failure, and A11-F2 no-re-encryption/no-replay behavior remain
+covered by the retained regression controls. Queue-blocked fatal detection,
+complete eviction/trust-reload cleanup, broader E14, full socket reclamation,
+and platform/runtime assurance remain **OPEN**. No live network, deployment,
+operational signing, or activation was run; independent review remains
+**PENDING**.
