@@ -1,0 +1,72 @@
+A33-F1 quarantine backend contract documentation checks
+========================================================
+
+Entry verification:
+
+  branch: copilot/a33-f1-bounded-eviction
+  starting task/local/remote tip: 777e0659eebac8e1c7c6aa27a7bd14dd63478a4c
+  starting tree: 331c3dc0404bf8ecc704f2a5591bf65a853eaea6
+  protected local/remote main: c9aaef40b045e896ddfa8b01bad230f6b680715e
+  starting worktree/index: clean
+
+Documentation checks:
+
+  PASS relevant relative Markdown links in the new contract and plan section 48.
+  PASS candidate field-table check: 25 contiguous fields, total 416 bytes.
+  PASS plan exact-prefix check against starting tip (420300 bytes).
+  PASS SHA256SUMS exact-prefix check against starting tip (13810 bytes).
+  PASS git -c core.whitespace=cr-at-eol,-blank-at-eof diff --check.
+  Changed scope: contract proposal, appended plan section, append-only manifest,
+  this integrity record. No source or test code changed.
+
+A broad link scan over the full historical plan found an earlier missing
+target, evidence/a33_f1/authority-reset-ownership-evidence.md. The new
+contract and appended plan section link checks passed; the old historical
+reference was not changed.
+
+Revision-aware checksum method:
+
+  For each SHA256SUMS line, normalize its path relative to
+  docs/security/evidence/a33_f1. If current bytes match, accept as current.
+  Otherwise search Git revisions touching that path and compare the stored
+  digest with the blob bytes. Require every non-current entry to have a
+  producing revision. Separately require the plan and manifest current bytes
+  to start with their exact bytes at the starting task tip.
+
+Observed historical entries:
+
+  772cc9df58bdeb052c56be30540c4db333e0ba1dc63f9bb0110e2501b7b60423  crates/qbind-node/tests/a33_f1_authority_reset_quarantine_model_tests.rs  producer=ce2fa5f2c6239df60497ecb811fc5e38bc5f9f5a
+  f13f88f6162695acf3c3aba1a98897d26c67b600e9ecedd50e28bd4507bf831b  crates/qbind-node/tests/a33_f1_authority_reset_quarantine_model_tests.rs  producer=9fc107c9717e6b71ac7f694a0c3472d7d2f2608d
+  6dfb3d572c62c183a3046de80d99be8c292f2554915684d14a0599df095c4896  crates/qbind-node/src/pqc_reset_quarantine.rs  producer=f853ad7c301f9b5f0311792a8d85baae44c49960
+  11bdc6f92dff40609f54c38631774abd2fc408370f9010fe4e71afbc01b4432a  crates/qbind-node/tests/a33_f1_quarantine_read_interface_tests.rs  producer=f853ad7c301f9b5f0311792a8d85baae44c49960
+  42566ea597436fb6f30f3110d11fb6c4da3451d7324a45f9e4adb85140eb3fd9  docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md  producer=f853ad7c301f9b5f0311792a8d85baae44c49960
+  34b7a2c8a80c6f28eca5dfa9922bd46727445134cdd18eb8972d49a1166f6d7c  docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md  producer=777e0659eebac8e1c7c6aa27a7bd14dd63478a4c
+
+PASS: every other manifest line matched current file bytes; all six
+historical entries matched a Git revision; plan and manifest prefixes match.
+
+Current appended document hashes:
+
+  ac1786c59079a62f0611ab6932f74a2387d150adc636d09b25ee2e21be867b7c  docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md
+  60d0304ec6f8f3d6b79206e8c6b8a0175b2f9c67e89d1474eb67e31ecf6a80d0  docs/security/evidence/a33_f1/quarantine-backend-contract-proposal.md
+
+Ordinary checksum command:
+
+  (cd docs/security/evidence/a33_f1 && sha256sum --check SHA256SUMS)
+
+Expected final result after this integrity record's digest is appended:
+
+  exit=1
+  failed_count=6
+  passing_entries=123
+  FAILED: ../../../../crates/qbind-node/tests/a33_f1_authority_reset_quarantine_model_tests.rs
+  FAILED: ../../../../crates/qbind-node/tests/a33_f1_authority_reset_quarantine_model_tests.rs
+  FAILED: ../../../../crates/qbind-node/src/pqc_reset_quarantine.rs
+  FAILED: ../../../../crates/qbind-node/tests/a33_f1_quarantine_read_interface_tests.rs
+  FAILED: ../../../../docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md
+  FAILED: ../../../../docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md
+
+The six ordinary mismatches are preserved historical hashes with the
+producing revisions shown above; they are not represented as a full ordinary
+checksum pass. No earlier manifest entry was rewritten. No Rust, filesystem,
+crash, CLI, node, signer or network test was run.

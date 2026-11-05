@@ -5503,3 +5503,38 @@ No persistent backend, production caller, reset/startup gate, allow,
 currentness authority, clear/resume, signer or network behavior was added.
 A33-F1 / E27 and all other unresolved obligations remain **OPEN**; activation
 **DISABLED**; public DevNet **NO-GO**.
+
+## 48. Propose quarantine backend contract for independent review
+
+**BACKEND CONTRACT PROPOSED — INDEPENDENT REVIEW PENDING.** Entry checks
+matched branch `copilot/a33-f1-bounded-eviction`, task/local/remote tip
+`777e0659eebac8e1c7c6aa27a7bd14dd63478a4c`, clean worktree/staging, and
+protected local/remote main `c9aaef40b045e896ddfa8b01bad230f6b680715e`.
+
+Added [the documentation-only backend contract proposal](evidence/a33_f1/quarantine-backend-contract-proposal.md).
+It proposes, but does not approve, a fixed 416-byte v1 latch layout with
+checked field accounting, full-width digest bindings, sticky simultaneous
+effect/unresolved/conflict flags, and a separate evidence store whose
+capacity remains unresolved. It treats 324, 340, 416 and 65,536 bytes as
+unapproved candidates. Missing or unrecorded evidence remains unknown and
+closed. It proposes a narrow Linux/local-ext4 threat profile for review,
+separates path protections from assumptions, and specifies fail-closed read
+and cross-store publication ordering without claiming durability or RocksDB
+object continuity.
+
+The contract maps the existing reset CLI/library/startup boundaries and
+requires classification before every reset audit, temporary audit, marker
+and temporary marker write. It explicitly notes that the current
+`classify_for_reset -> ResetRefusal` interface refuses every result and
+cannot provide an allow decision. The acceptance matrix is proposed and
+unexecuted. No backend, codec, marker, gate, initialization, migration,
+clear/resume, test, Rust build, filesystem/crash test, node, signer or network
+behavior was run or changed.
+
+Only documentation and append-only plan/checksum data changed. The prior
+plan and manifest bytes remain exact prefixes. Historical-aware verification
+checks preserved hashes against producing Git revisions and appended hashes
+against current bytes. The ordinary checksum command's exact failures and
+the documentation/link/scope/whitespace checks are recorded in the proposal
+evidence. A33-F1 / E27 and other unresolved obligations remain **OPEN**;
+activation **DISABLED**; public DevNet **NO-GO**.
