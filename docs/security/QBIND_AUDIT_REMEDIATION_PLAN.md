@@ -4035,3 +4035,99 @@ tracked-incomplete cleanup remain. Global resource/admission bounds,
 registered-session fatal-read cleanup, complete eviction/trust-reload
 reclamation and OS-wide timing remain unresolved. All obligations and
 operational gates above remain unchanged; independent review **PENDING**.
+
+## 21. A6-F1 bounded registered-session fatal-read cleanup
+
+**IMPLEMENTED — INDEPENDENT REVIEW PENDING.** This append records the bounded
+registered-session fatal-read correction. It does not rewrite the audit
+register, sections 18-20, earlier plan history, or historical evidence.
+A6-F1 / OBL-AVL-4a / E14 and all other remaining obligations stay **OPEN**;
+activation **DISABLED**; public DevNet **NO-GO**.
+
+### Entry, input and pre-implementation review
+
+Entry verified `olivexo28/QBIND`, clean `main` at
+`50bf93d8b1b6b0739cdce5e95334cd726af2386e`, tree
+`dfe11db1e9b55de89df1a565b2df83cdba7d91c0`; local and `origin/main`
+matched. The dedicated task branch was created from that commit.
+
+The controlling input was
+`Audit/QBIND_SECURITY_FINDINGS_REGISTER.md`, blob
+`cd81efdbaf2bfb45e00dc3c60db3ea4f523adfa0`, SHA-256
+`6e68d3d05964f9a6dc0384ffda2bb53d81d7da97ffb786ce84f4bd5a4360c0d9`.
+The verified applicable anchors are A:L17267-L17269 (fatal worker delivery
+and distinct read-loop exits), A:L17271-L17279 (A6-F1 eviction/trust-reload
+scope, required outcome, and E14 evidence), and A:L17282 (supersession and
+retained disposition). The current remediation plan at entry was blob
+`e7f3dbb91903e76cfe5daa147cc3a454279d795a`; sections 18, 19, and 20 were
+read in full before implementation.
+
+The supplied independent pre-implementation source review is attributed to
+**ChatGPT**, as reported in the task: inspection of `p2p_tcp.rs` at the
+expected main found that the registered read loop returns on observed
+receive/frame-decode errors while active registry ownership holds retirement
+handles. That supports the bounded stale-entry correction. It was source
+inspection, not runtime reproduction or review of the full audit-register
+text. The implementer separately verified the applicable audit disposition
+and plan before implementation. This is not a post-implementation
+independent review or approval.
+
+### Implemented scope and compatibility
+
+The registered read loop records only terminal `recv` and frame-decode
+failures. A separately tracked monitor observes the reader join, avoids
+self-join, and uses exact retirement-owner identity under the registry lock
+when transitioning only that session from active to retiring. It updates the
+active connection count in the same critical section, drops outbound senders
+outside the lock, and attempts bounded cleanup without holding the registry
+lock. The retirement owner remains available for retry after timeout,
+cancellation, or cleanup failure; it is removed only after observed cleanup
+succeeds. A delayed old failure cannot remove a newer replacement.
+
+The terminal shutdown fence, replacement refusal while prior cleanup is
+unresolved, eviction snapshot/report semantics, and the one-connection
+outbound correction are preserved. No authentication or crypto settings
+changed. Zero-progress idle timeout remains retryable; A5-F1 partial-frame
+failure and A11-F2 no-re-encryption/no-replay controls remain in the
+secure-channel regression suite. Already-delivered messages or already
+progressed operations are not retractable.
+
+This only handles fatal read/decode errors **after the registered read loop
+observes them**. An error whose delivery is blocked by a full secure-channel
+or downstream queue is a separate limitation; a deterministic test confirms
+the transport does not claim retirement before the downstream queue drains
+and the fatal condition becomes observable.
+
+### Producing evidence
+
+The final source/test producer is commit
+`e53765832fadff1a1dff0188ac1268d572fddd1b`, tree
+`d8ddef30300c9900ec756c4d6a507bb88c43d702`. The preceding implementation
+commit is `23a9e7badce2bdbf8b3116485ece0767126a3e0a`; both descend directly
+from the expected starting main. The separate evidence record
+[`evidence/a6-f1-fatal-read-cleanup/README.md`](../../evidence/a6-f1-fatal-read-cleanup/README.md)
+pins baseline reproduction, exact commands, all author-run results, raw-log
+checksums, source blob identities, failures, and limits.
+
+At the final producer, 29 P2P retirement tests, 16 secure-channel tests,
+6 B8 tests, 8 Run 072 tests, 10 Run 074 tests, 18 Run 418 authenticated-peer
+tests, and 4 Run 418 NewView/demux tests passed. The isolated test-only EOF
+control on the unchanged starting revision observed the stale active entry
+and count after the reader task ended; the producing revision retires
+observed EOF and decode failures. Library `cargo check`, targeted rustfmt,
+and source whitespace checks passed with existing warnings retained.
+The regression logs and the exact final lifecycle test output remain in the
+separate evidence directory. These are author-run tests, not independent
+review.
+
+### Remaining lifecycle limitations
+
+This bounded change does not establish complete eviction or trust-reload
+cleanup, cleanup of all displaced sessions through every lifecycle route,
+OS-wide socket reclamation, platform/runtime assurance, global admission
+bounds, or E14 exhaustion thresholds. Existing eviction remains a snapshot
+operation; its report does not certify task, blocking-worker, or socket
+completion. Queue-blocked fatal detection remains unclosed until the
+downstream consumer resumes. No live network, deployment, operational
+signing, or activation was run. Independent review remains **PENDING** and
+all applicable audit obligations and release gates remain **OPEN**.
