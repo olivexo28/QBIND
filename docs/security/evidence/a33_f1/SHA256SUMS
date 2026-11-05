@@ -117,3 +117,10 @@ bb89f8b9fd0d340b66129361fffbca335ebe6a3064af9fb9d4ba528968e09489  ../../../../cr
 e3bd628227491ed7886bf1c098905aefea04bde6646be97b64f0dc2ba5169ce8  quarantine-read-interface-evidence.md
 9d9776c62ec2fd40d737a2aecce4c61c12cd8247c32c328c9d7a061a1d403bb6  quarantine-read-interface-bounded-read.log
 20f0ae417b06bc5a06c8a01047777a59f76b7fee47de5407befd8ba0b1968473  quarantine-read-interface-focused.log
+56fcf5293afa9b4db92a0cc44fa10623c8d6720209be91b70e53712840520111  ../../../../crates/qbind-node/src/pqc_reset_quarantine.rs
+7926c734dbc8802cf46906ae8c42c87794e9cee252714b1a6edcc03ee03b7668  ../../../../crates/qbind-node/tests/a33_f1_quarantine_read_interface_tests.rs
+34b7a2c8a80c6f28eca5dfa9922bd46727445134cdd18eb8972d49a1166f6d7c  ../../../../docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md
+43276b71b39a78eb8584be1094f43ca3ba8e6ff71fcef76769017b16cc0b8736  quarantine-read-interface-return-type-correction.md
+5e5c21d1cac3c48273a3fc307d032baf93fe2a01183b1a09ab89650538233862  quarantine-read-interface-return-type-bounded-read.log
+5c8eeee086d6c1ff4524e152d4a301eecf591fbcd57a6473002548f285813ba1  quarantine-read-interface-return-type-focused.log
+848cef9cf560d12cbd53391b1614d5f4bafecd4b721145b611b947ab95f5a1f0  quarantine-read-interface-return-type-integrity.log

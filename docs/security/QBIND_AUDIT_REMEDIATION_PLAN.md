@@ -5473,3 +5473,33 @@ ordering, path identity, concurrent writers, failure-after-publication and
 full process/CLI coverage remain backend/integration obligations. A33-F1 /
 E27 and all other unresolved obligations remain **OPEN**; activation
 **DISABLED**; public DevNet **NO-GO**.
+
+## 47. Make quarantine classification refusal-only by type
+
+**NON-WIRED INTERFACE CORRECTION — INDEPENDENT REVIEW PENDING.** Entry checks
+matched task tip `f853ad7c301f9b5f0311792a8d85baae44c49960`, tree
+`cd4cacd4f0f4684c3ea09fcb24f48873e05c5cdb`, clean worktree/staging, remote
+task tip, and protected local/remote main
+`c9aaef40b045e896ddfa8b01bad230f6b680715e`.
+
+`classify_for_reset` now returns `ResetRefusal` directly instead of
+`Result<(), ResetRefusal>`, so an allow value is unrepresentable in the
+public return type. Fake-reader tests assert direct distinct refusal values
+and a concrete function-pointer type assertion. `read_bounded` behavior was
+not changed. Its bound is caller-supplied; any backend must bound allocation
+while reading, since the post-return length check cannot prevent
+over-allocation.
+
+Focused bounded-read test: **1 passed**. Focused fake-reader interface suite:
+**6 passed**. Targeted rustfmt, whitespace, scope, append-only and
+revision-aware integrity checks are recorded in
+[the correction evidence](evidence/a33_f1/quarantine-read-interface-return-type-correction.md).
+The prior plan/manifest bytes and earlier evidence remain preserved. The
+ordinary checksum check's exact result is reported there; historical hashes
+are verified against producing revisions and appended current hashes against
+current bytes.
+
+No persistent backend, production caller, reset/startup gate, allow,
+currentness authority, clear/resume, signer or network behavior was added.
+A33-F1 / E27 and all other unresolved obligations remain **OPEN**; activation
+**DISABLED**; public DevNet **NO-GO**.

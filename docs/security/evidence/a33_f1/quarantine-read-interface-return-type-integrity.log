@@ -1,0 +1,38 @@
+Revision-aware integrity verification
+=====================================
+
+Command:
+
+  python <inline revision-aware SHA256SUMS verifier>
+
+Result:
+
+  PASS append-only prefix: docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md
+  PASS append-only prefix: docs/security/evidence/a33_f1/SHA256SUMS
+  PASS historical hash: crates/qbind-node/tests/a33_f1_authority_reset_quarantine_model_tests.rs producer=ce2fa5f2c6239df60497ecb811fc5e38bc5f9f5a
+  PASS historical hash: crates/qbind-node/tests/a33_f1_authority_reset_quarantine_model_tests.rs producer=9fc107c9717e6b71ac7f694a0c3472d7d2f2608d
+  PASS historical hash: crates/qbind-node/src/pqc_reset_quarantine.rs producer=f853ad7c301f9b5f0311792a8d85baae44c49960
+  PASS historical hash: crates/qbind-node/tests/a33_f1_quarantine_read_interface_tests.rs producer=f853ad7c301f9b5f0311792a8d85baae44c49960
+  PASS historical hash: docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md producer=f853ad7c301f9b5f0311792a8d85baae44c49960
+  PASS appended current hashes; exactly five revision-verified historical mismatches
+
+Ordinary checksum command:
+
+  (cd docs/security/evidence/a33_f1 && sha256sum --check SHA256SUMS)
+
+Observed result before this log was added:
+
+  exit=1
+  failed_count=5
+  ../../../../crates/qbind-node/tests/a33_f1_authority_reset_quarantine_model_tests.rs: FAILED
+  ../../../../crates/qbind-node/tests/a33_f1_authority_reset_quarantine_model_tests.rs: FAILED
+  ../../../../crates/qbind-node/src/pqc_reset_quarantine.rs: FAILED
+  ../../../../crates/qbind-node/tests/a33_f1_quarantine_read_interface_tests.rs: FAILED
+  ../../../../docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md: FAILED
+  passing_entries=120
+
+The five failures are preserved historical hashes, not failures of the
+revision-aware verification: the two model-source hashes resolve to their
+listed producing revisions, and the interface source, test, and plan hashes
+resolve to the starting task tip. Appended current hashes resolve against
+current bytes. The ordinary checksum command is not a full pass.

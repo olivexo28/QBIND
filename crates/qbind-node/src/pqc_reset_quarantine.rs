@@ -110,52 +110,51 @@ fn probe_limit(max_bytes: usize) -> Option<u64> {
         .and_then(|value| u64::try_from(value).ok())
 }
 
-/// Classify one read for reset refusal only. Every outcome is a refusal;
-/// there is intentionally no production allow, clear, or resume variant.
+/// Classify one read for reset refusal only. The direct return type makes an
+/// allow result unrepresentable; there is intentionally no production allow,
+/// clear, or resume variant.
 pub fn classify_for_reset<R: QuarantineReader, D: RecordDecoder>(
     expected: &StoreIdentity,
     max_bytes: usize,
     reader: &mut R,
     decoder: &D,
-) -> Result<(), ResetRefusal> {
+) -> ResetRefusal {
     if !expected.is_well_formed() {
-        return Err(ResetRefusal::InvalidExpectedIdentity);
+        return ResetRefusal::InvalidExpectedIdentity;
     }
     if max_bytes == 0 || probe_limit(max_bytes).is_none() {
-        return Err(ResetRefusal::InvalidReadLimit);
+        return ResetRefusal::InvalidReadLimit;
     }
 
     let bytes = match reader.read_record(max_bytes) {
         Ok(Some(bytes)) if bytes.len() > max_bytes => {
-            return Err(ResetRefusal::Oversized { limit: max_bytes });
+            return ResetRefusal::Oversized { limit: max_bytes };
         }
         Ok(Some(bytes)) => bytes,
-        Ok(None) => return Err(ResetRefusal::Absent),
-        Err(ReadError::Unavailable) => return Err(ResetRefusal::Unavailable),
-        Err(ReadError::Oversized { limit }) => return Err(ResetRefusal::Oversized { limit }),
+        Ok(None) => return ResetRefusal::Absent,
+        Err(ReadError::Unavailable) => return ResetRefusal::Unavailable,
+        Err(ReadError::Oversized { limit }) => return ResetRefusal::Oversized { limit },
         Err(ReadError::ReadFailed { bytes_read, kind }) => {
-            return Err(ResetRefusal::ReadFailure { bytes_read, kind });
+            return ResetRefusal::ReadFailure { bytes_read, kind };
         }
-        Err(ReadError::Uncertain) => return Err(ResetRefusal::Uncertain),
-        Err(ReadError::InvalidLimit) => return Err(ResetRefusal::InvalidReadLimit),
+        Err(ReadError::Uncertain) => return ResetRefusal::Uncertain,
+        Err(ReadError::InvalidLimit) => return ResetRefusal::InvalidReadLimit,
     };
 
     let record = match decoder.decode(&bytes) {
         Ok(record) => record,
-        Err(DecodeError::MalformedOrCorrupt) => {
-            return Err(ResetRefusal::MalformedOrCorrupt);
-        }
+        Err(DecodeError::MalformedOrCorrupt) => return ResetRefusal::MalformedOrCorrupt,
         Err(DecodeError::UnsupportedVersion { version }) => {
-            return Err(ResetRefusal::UnsupportedVersion { version });
+            return ResetRefusal::UnsupportedVersion { version };
         }
-        Err(DecodeError::Uncertain) => return Err(ResetRefusal::Uncertain),
+        Err(DecodeError::Uncertain) => return ResetRefusal::Uncertain,
     };
     if record.identity != *expected {
-        return Err(ResetRefusal::ForeignOrMismatchedIdentity);
+        return ResetRefusal::ForeignOrMismatchedIdentity;
     }
     match record.state {
-        ObservedState::Quarantined(state) => Err(ResetRefusal::Quarantined(state)),
-        ObservedState::CleanLooking => Err(ResetRefusal::CleanLookingRequiresSeparateAuthority),
+        ObservedState::Quarantined(state) => ResetRefusal::Quarantined(state),
+        ObservedState::CleanLooking => ResetRefusal::CleanLookingRequiresSeparateAuthority,
     }
 }
 

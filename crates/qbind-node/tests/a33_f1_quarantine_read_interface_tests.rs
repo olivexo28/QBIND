@@ -33,7 +33,7 @@ fn decoded(state: ObservedState) -> DecodedRecord {
     }
 }
 
-fn classify(reader: FakeReader, decoder: FakeDecoder) -> Result<(), ResetRefusal> {
+fn classify(reader: FakeReader, decoder: FakeDecoder) -> ResetRefusal {
     let mut reader = reader;
     classify_for_reset(&expected_identity(), 16, &mut reader, &decoder)
 }
@@ -55,7 +55,7 @@ fn supported_quarantined_states_refuse_reset() {
                 FakeReader(Ok(Some(vec![1]))),
                 FakeDecoder(Ok(decoded(ObservedState::Quarantined(state)))),
             ),
-            Err(expected)
+            expected
         );
     }
 }
@@ -67,14 +67,14 @@ fn absence_and_clean_looking_observations_do_not_authorize_reset() {
             FakeReader(Ok(None)),
             FakeDecoder(Ok(decoded(ObservedState::CleanLooking))),
         ),
-        Err(ResetRefusal::Absent)
+        ResetRefusal::Absent
     );
     assert_eq!(
         classify(
             FakeReader(Ok(Some(vec![1]))),
             FakeDecoder(Ok(decoded(ObservedState::CleanLooking))),
         ),
-        Err(ResetRefusal::CleanLookingRequiresSeparateAuthority)
+        ResetRefusal::CleanLookingRequiresSeparateAuthority
     );
 }
 
@@ -93,7 +93,7 @@ fn malformed_unsupported_and_decoder_uncertainty_refuse_reset() {
     ] {
         assert_eq!(
             classify(FakeReader(Ok(Some(vec![1]))), FakeDecoder(Err(error)),),
-            Err(expected)
+            expected
         );
     }
 }
@@ -118,7 +118,7 @@ fn foreign_store_or_chain_identity_refuses_reset() {
                     state: ObservedState::CleanLooking,
                 })),
             ),
-            Err(ResetRefusal::ForeignOrMismatchedIdentity)
+            ResetRefusal::ForeignOrMismatchedIdentity
         );
     }
 }
@@ -148,7 +148,7 @@ fn unavailable_oversized_partial_and_uncertain_reads_refuse_reset() {
                 FakeReader(read),
                 FakeDecoder(Ok(decoded(ObservedState::CleanLooking)))
             ),
-            Err(expected)
+            expected
         );
     }
     assert_eq!(
@@ -156,22 +156,26 @@ fn unavailable_oversized_partial_and_uncertain_reads_refuse_reset() {
             FakeReader(Ok(Some(vec![0; 17]))),
             FakeDecoder(Ok(decoded(ObservedState::CleanLooking))),
         ),
-        Err(ResetRefusal::Oversized { limit: 16 })
+        ResetRefusal::Oversized { limit: 16 }
     );
 }
 
 #[test]
 fn invalid_identity_or_limit_refuses_before_reading() {
+    let classify: fn(&StoreIdentity, usize, &mut FakeReader, &FakeDecoder) -> ResetRefusal =
+        classify_for_reset;
+    let _ = classify;
+
     let mut reader = FakeReader(Ok(None));
     let decoder = FakeDecoder(Ok(decoded(ObservedState::CleanLooking)));
     let mut invalid_identity = expected_identity();
     invalid_identity.store_id.clear();
     assert_eq!(
         classify_for_reset(&invalid_identity, 16, &mut reader, &decoder),
-        Err(ResetRefusal::InvalidExpectedIdentity)
+        ResetRefusal::InvalidExpectedIdentity
     );
     assert_eq!(
         classify_for_reset(&expected_identity(), 0, &mut reader, &decoder),
-        Err(ResetRefusal::InvalidReadLimit)
+        ResetRefusal::InvalidReadLimit
     );
 }
