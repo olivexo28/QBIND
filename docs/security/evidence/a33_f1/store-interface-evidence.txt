@@ -1,0 +1,177 @@
+A33-F1 / E27 dedicated quarantine-store interface prototype
+
+TEST-ONLY INTERFACE PROTOTYPE -- INDEPENDENT REVIEW PENDING.
+A33-F1 / E27 and all other unresolved obligations OPEN.
+Activation DISABLED; public DevNet NO-GO.
+
+1. Entry and review attribution
+
+Repository: olivexo28/QBIND
+Branch: copilot/a33-f1-bounded-eviction
+Entry commit: fd8f2f8ff286973f2f11e265a5612fea4d9db6a5
+Entry tree: a9e4deee2c93a5423678a5f5d0ec3875910884f2
+Protected local/remote main: c9aaef40b045e896ddfa8b01bad230f6b680715e
+Repository URL/root, branch, exact tip/tree, clean worktree/staging and
+local/remote main were verified before editing. The remote task tip matched
+entry HEAD, so no fast-forward or other branch update was needed.
+
+Controlling input: stay-closed-contract.md (unchanged), SHA-256
+cb71b4424f0b05cf94df40e68a59234594f4c541e2c62328c08fccf77fd0bf4b.
+Prior model: a33_f1_stay_closed_quarantine_model_tests.rs (unchanged),
+SHA-256 cf7631950e1bb611f1450f73ff67ce64b5397437cd830becce7da2594c1706a3.
+Its separate-domain, sticky-effect/conflict and no-clear semantics inform
+this interface; the prototype neither imports nor modifies that model.
+
+The owner supplied an independent review accepting the Phase 1 interface
+design as a pre-implementation boundary. This acceptance is USER-SUPPLIED
+review evidence only. No reviewer identity or raw review artifact was
+provided; neither is invented. No production backend approval is inferred.
+The owner also supplied the earlier model-correction source/evidence review
+disposition PASS WITH LIMITATIONS. That reviewer did NOT independently
+rerun the author-reported 33 tests because Cargo was unavailable in the
+review environment. The historical author's 33-pass result is distinct
+from review evidence and from the new prototype tests below.
+
+2. Interface and semantics
+
+Only executable addition:
+  crates/qbind-consensus/tests/a33_f1_quarantine_store_interface_tests.rs
+SHA-256: 8d545d0fdb58a0e406abaa39c0019cbc64214815d2a71e6266ed307e57e95d07
+This is self-contained test-only Rust, with no production imports, callers,
+dependencies or persistent encoding. Field values are fixture labels.
+
+Source anchors in that file:
+  4-6: fixture bounds/version, NOT a future production format.
+  9-14: store/incarnation/operation/writer identity.
+  102-143: bounded sticky outcome merge.
+  194-229: store-issued intent token, scoped outcome acknowledgement,
+    typed recording failure and QuarantineStore trait.
+  246-303: local fake writer claim, ownership and separate barrier check,
+    modeled restart without reconstructed acknowledgement.
+  305-400: inspect, publish_applying and record_outcome fake implementation.
+  421-965: deterministic controls (test names retained in raw output).
+
+inspect(&self) returns classification without creation, replacement,
+repair or clearing. Missing, corrupt, truncated, unsupported, foreign,
+unreadable and unavailable observations refuse participation. Valid local
+records also refuse: no currentness/exclusivity authority exists here.
+
+publish_applying requires matching store/incarnation, claimed writer,
+expected revision, supported fixture version and a fixture with no prior
+intent attempt or existing observation. It issues IntentAck only for
+Acknowledged publication. Failed, Uncertain and VisibleButError return an
+error and no token. Visibility is separate from acknowledgement. A failed
+attempt cannot simply be replaced by another attempt in the same fixture.
+The initial Missing fixture is an explicit test precondition for interface
+exercise, NOT a migration, fresh-store initialization or startup procedure.
+Modeled restart, including Missing after uncertain publication, cannot
+reconstruct permission to initialize or a usable intent token.
+
+IntentAck binds store identity, incarnation, operation, writer and intent
+revision. record_outcome also requires the exact current expected revision;
+successful publication issues a separate OutcomeAck with the new revision.
+Checked revision increment refuses overflow. Failed updates that visibly
+publish advance the fake visible revision without issuing acknowledgement.
+Scope/revision/ownership failures do not replace existing evidence.
+
+An intent token does not establish an operation barrier. The separate
+mutation_gate takes a scripted barrier observation; it is only a fixture
+check, not real engine ownership or worker drain. Once an outcome attempt
+has progressed, even a failed recording cannot reopen fixture mutation.
+No API authorizes signing, startup or participation; no clear/resume API
+exists. Complete, no-effect refusal, timeout, late completion and modeled
+restart all remain quarantined.
+
+Outcome state retains the completed prefix, all distinct supplied prefix
+observations and a sticky prefix-conflict bit. A shorter or different
+prefix cannot overwrite the accepted prefix. Each of current-item,
+signing, storage-worker, callback and outbound domains has separate known
+effect and completion state. Unknown can become resolved; duplicates are
+harmless; a different observation after resolved completion, including
+Unknown, becomes sticky Conflict. Known effects never reset.
+Complete is a retained observation, NOT a clear transition.
+
+Recording first merges valid input into volatile fake observed evidence.
+Failure returns RecordFailure with that observed candidate and leaves the
+operation unresolved; this is explicitly NOT an acknowledged persistent
+record of Unknown. For failed-before-publication and uncertain outcomes,
+inspect still returns the prior visible record. VisibleButError can expose
+the new record but still returns no acknowledgement. A later successful
+retry merges the retained volatile observations, not a fictional recovered
+process-crash history. Rejected invalid input remains with the caller;
+the interface does not claim it was recorded.
+
+The bounds are synthetic: at most 4 prefix entries per update, 16 evidence
+bytes per update, 16 distinct evidence payloads and 16 distinct prefix
+observations. Version 1 is a fixture label. Overflow, unsupported version,
+or oversized input/aggregate is rejected before store mutation; no
+truncation, eviction or fallback serialization occurs.
+
+Fake serialization is sequential &mut access, a one-owner claim and exact
+revision comparison inside one object. Store/incarnation labels are
+fixture identities, not trusted copy detection or cryptographic tokens.
+Different stores/operations/writers/incarnations reject cross-use, including
+when the destination has acknowledged its own intent. Copied data with
+identical labels cannot be distinguished by a local interface alone.
+Separate copies can claim different local writers: no cross-process
+fencing, exclusive signer ownership or anti-rollback is demonstrated.
+
+3. Focused validation and historical preservation
+
+Working directory: /workspaces/QBIND/olivexo28/QBIND
+rustc 1.99.1 (58cf8f9c3 2026-10-13)
+cargo 1.99.1 (5f94df478 2026-08-27)
+
+Exact formatting commands:
+  rustfmt --edition 2021 crates/qbind-consensus/tests/a33_f1_quarantine_store_interface_tests.rs
+  rustfmt --edition 2021 --check crates/qbind-consensus/tests/a33_f1_quarantine_store_interface_tests.rs
+Both exit 0. Check stdout/stderr: store-interface-format.log (empty,
+as emitted); SHA-256
+e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855.
+
+Exact focused command:
+  cargo test -p qbind-consensus --test a33_f1_quarantine_store_interface_tests -- --nocapture
+Final exit 0: 15 passed, 0 failed, 0 ignored, 0 measured, 0 filtered out.
+Raw stdout/stderr: store-interface-focused-tests.log; SHA-256
+c460ff6b7bdbc6ac61d7a74674d94fad0c3a26e4becf5a2be840da93201545c4.
+The log retains 37 existing library warnings; no prototype warning.
+An intermediate run passed 13 tests before two additional scope/barrier
+controls were added. It is not retained as a separate log; the final log
+is the necessary rerun after those additions. There was no failing baseline
+experiment or unsuccessful prototype test run. Old passing suites were
+not rerun; historical results retain their original scope.
+
+Whitespace commands after staging:
+  git -c core.whitespace=-blank-at-eof diff --cached --check
+  git diff --cached --check -- . ':!docs/security/evidence/a33_f1/store-interface-focused-tests.log'
+Both must exit 0. Raw Cargo trailing blank line is preserved, not trimmed.
+Historical verification:
+  (cd docs/security/evidence/a33_f1 && sha256sum -c SHA256SUMS)
+All entries verified. Entry plan/manifest bytes are preserved as exact
+prefixes; every historical evidence file, prior model and audit register
+is byte-identical to entry HEAD. The audit-register SHA-256 remains
+6e68d3d05964f9a6dc0384ffda2bb53d81d7da97ffb786ce84f4bd5a4360c0d9.
+Only the new test target, appended plan, appended manifest and new
+evidence/logs are delivered. Final commit/tree/parent and remote equality
+are reported after commit/push; no self-referential identity is fabricated.
+
+4. Limits and dependencies
+
+This is not a storage backend or production integration. Fake visibility,
+acknowledgement, writer serialization, barrier and restart do not prove
+filesystem/device durability, process/power-loss safety, real startup-path
+coverage, signer fencing, rollback protection or network delivery.
+No persistent schema, durability profile, migration, currentness source,
+signer-exclusivity mechanism, recovery/reconciliation authority or
+clear/resume procedure is selected. Production marker/startup/signing/
+catch-up wiring remains absent. Actual engine/node, retained-evidence
+accounting, A17-F1 authentication and later binary/process/storage/multi-node/
+deployment assurance remain separate open scopes. Conditional operator
+anchor/admission prerequisites are unchanged; no anonymous remote attack
+or production failure is claimed.
+
+No live network, operational signing, deployment or activation was run.
+Only the existing task branch is committed/pushed; no main update, PR,
+merge or force-push. TEST-ONLY INTERFACE PROTOTYPE -- INDEPENDENT REVIEW
+PENDING. A33-F1 / E27 and all unresolved obligations OPEN.
+Activation DISABLED; public DevNet NO-GO.

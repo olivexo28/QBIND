@@ -4844,3 +4844,49 @@ or deployment assurance. All unresolved trust/recovery/integration decisions,
 A17-F1 and global-capacity scope remain separate. A33-F1 / E27 and other
 remaining obligations stay **OPEN**; activation **DISABLED**; public DevNet
 **NO-GO**.
+
+## 31. A33-F1 / E27 dedicated quarantine-store interface prototype
+
+**TEST-ONLY INTERFACE PROTOTYPE — INDEPENDENT REVIEW PENDING.** The owner
+supplied an independent review accepting the Phase 1 interface design as
+a pre-implementation boundary, not approval of a production backend.
+Reviewer identity/raw artifact were unavailable and are not invented.
+The owner also supplied **PASS WITH LIMITATIONS** for the earlier
+model-correction source/evidence review: that reviewer did not independently
+rerun the author-reported 33 tests because Cargo was unavailable.
+These user-supplied review observations remain distinct from author tests.
+
+Entry repository/branch, clean worktree/staging, task tip/tree and local/
+remote main were verified against `fd8f2f8ff286973f2f11e265a5612fea4d9db6a5`,
+`a9e4deee2c93a5423678a5f5d0ec3875910884f2` and protected main
+`c9aaef40b045e896ddfa8b01bad230f6b680715e`. Remote task matched local;
+no fast-forward was necessary.
+
+The self-contained test target
+`crates/qbind-consensus/tests/a33_f1_quarantine_store_interface_tests.rs`
+defines read-only inspection, acknowledged Applying publication and scoped
+outcome recording with deterministic fake storage. Store/incarnation,
+operation, writer, intent revision and expected current revision are
+explicit. Failed or uncertain publication, including visible-before-error,
+issues no acknowledgement. Outcome errors distinguish retained volatile
+observations from acknowledged publication. Known prefixes, conflicting
+prefix reports and separate domain effects survive repeated, late and
+contradictory updates. Fixture bounds reject rather than truncate evidence.
+Intent acknowledgement remains separate from the scripted operation barrier;
+neither authorizes participation, and no clear procedure exists.
+
+The focused prototype suite passed **15 tests**; targeted formatting and
+whitespace checks passed. The [interface evidence](evidence/a33_f1/store-interface-evidence.txt)
+records semantics, source anchors/hash, exact commands, raw-output hashes,
+exit status, test counts and limitations. Earlier plan/evidence bytes,
+audit register and both historical model results remain unchanged.
+
+Fake synchronization/visibility, local writer serialization, revision checks,
+barrier and restart are not durability, process-crash, anti-rollback,
+cross-process signer-fencing, actual startup or delivery evidence. No
+persistent schema, durability profile, migration, currentness source,
+exclusivity mechanism, reconciliation authority or resume procedure is
+selected. Production integration and all other unresolved work, including
+A17-F1 and global-capacity scope, remain separate. A33-F1 / E27 and all
+other unresolved obligations remain **OPEN**; activation **DISABLED**;
+public DevNet **NO-GO**.
