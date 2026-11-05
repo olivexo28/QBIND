@@ -322,7 +322,13 @@ impl SecureChannel {
     /// Returns `ChannelError` if the TCP connection fails, the handshake fails,
     /// or the protocol is violated.
     pub fn connect(addr: &str, cfg: ClientConnectionConfig) -> Result<Self, ChannelError> {
-        let mut stream = TcpStream::connect(addr)?;
+        Self::connect_on_stream(TcpStream::connect(addr)?, cfg)
+    }
+
+    pub(crate) fn connect_on_stream(
+        mut stream: TcpStream,
+        cfg: ClientConnectionConfig,
+    ) -> Result<Self, ChannelError> {
         configure_socket(&stream);
 
         // 1. Create client Connection
@@ -684,6 +690,25 @@ struct WorkerTasks {
     reader: Option<tokio::task::JoinHandle<()>>,
     writer: Option<tokio::task::JoinHandle<()>>,
     completion: Option<Result<(), String>>,
+    reader_outcome: Option<TaskOutcome>,
+    writer_outcome: Option<TaskOutcome>,
+}
+
+#[derive(Debug)]
+pub(crate) enum TaskOutcome {
+    Completed,
+    Cancelled(String),
+    Failed(String),
+}
+
+impl TaskOutcome {
+    pub(crate) fn from_join(result: Result<(), tokio::task::JoinError>) -> Self {
+        match result {
+            Ok(()) => Self::Completed,
+            Err(error) if error.is_cancelled() => Self::Cancelled(error.to_string()),
+            Err(error) => Self::Failed(error.to_string()),
+        }
+    }
 }
 
 /// Async wrapper over `SecureChannel` for integration with Tokio (T92 Part B, T106 Refactor).
@@ -830,6 +855,8 @@ impl SecureChannelAsync {
                 reader: Some(reader),
                 writer: Some(writer),
                 completion: None,
+                reader_outcome: None,
+                writer_outcome: None,
             })),
             write_tx,
             read_rx: Arc::new(tokio::sync::Mutex::new(read_rx)),
@@ -983,6 +1010,8 @@ impl SecureChannelAsync {
                     completion: Some(Err(
                         "shutdown capability unavailable; shared session refused".to_owned(),
                     )),
+                    reader_outcome: None,
+                    writer_outcome: None,
                 })),
                 write_tx,
                 read_rx: Arc::new(tokio::sync::Mutex::new(read_rx)),
@@ -1011,6 +1040,8 @@ impl SecureChannelAsync {
                 reader: Some(reader),
                 writer: Some(writer),
                 completion: None,
+                reader_outcome: None,
+                writer_outcome: None,
             })),
             write_tx,
             read_rx: Arc::new(tokio::sync::Mutex::new(read_rx)),
@@ -1052,6 +1083,26 @@ impl SecureChannelAsync {
         self.fail_shutdown.store(fail, Ordering::SeqCst);
     }
 
+    #[cfg(test)]
+    pub(crate) async fn inject_worker_failure_for_test(&self) -> std::sync::mpsc::Sender<()> {
+        self.begin_retirement().unwrap();
+        self.finish_retirement().await.unwrap();
+        let (release, pending) = std::sync::mpsc::channel();
+        let reader = tokio::task::spawn_blocking(|| panic!("retained blocking failure"));
+        while !reader.is_finished() {
+            tokio::task::yield_now().await;
+        }
+        let mut tasks = self.worker_tasks.lock().await;
+        tasks.reader = Some(reader);
+        tasks.writer = Some(tokio::task::spawn_blocking(move || {
+            pending.recv().unwrap();
+        }));
+        tasks.completion = None;
+        tasks.reader_outcome = None;
+        tasks.writer_outcome = None;
+        release
+    }
+
     pub(crate) fn invalidate_for_retirement(&self) {
         self.invalidated.store(true, Ordering::SeqCst);
         let _ = self.write_tx.try_send(WriteCommand::Retire);
@@ -1072,20 +1123,29 @@ impl SecureChannelAsync {
                 .map_err(|error| AsyncChannelError::TaskJoin(error.clone()));
         }
 
-        let mut failures = Vec::new();
         if let Some(reader) = tasks.reader.as_mut() {
-            if let Err(error) = reader.await {
-                failures.push(format!("reader worker: {error}"));
-            }
+            // Retain the outcome before another cancellable join; a retry
+            // cannot turn an already-observed failure into success.
+            tasks.reader_outcome = Some(TaskOutcome::from_join(reader.await));
             tasks.reader = None;
         }
         if let Some(writer) = tasks.writer.as_mut() {
-            if let Err(error) = writer.await {
-                failures.push(format!("writer worker: {error}"));
-            }
+            tasks.writer_outcome = Some(TaskOutcome::from_join(writer.await));
             tasks.writer = None;
         }
 
+        let failures: Vec<_> = [
+            ("reader worker", &tasks.reader_outcome),
+            ("writer worker", &tasks.writer_outcome),
+        ]
+        .into_iter()
+        .filter_map(|(name, outcome)| match outcome {
+            Some(TaskOutcome::Failed(error) | TaskOutcome::Cancelled(error)) => {
+                Some(format!("{name}: {error}"))
+            }
+            _ => None,
+        })
+        .collect();
         let result = if failures.is_empty() {
             Ok(())
         } else {

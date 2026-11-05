@@ -88,9 +88,7 @@ use crate::p2p::{NodeId, P2pMessage, P2pService};
 use crate::p2p_inbound::InboundP2pEnvelope;
 use crate::peer_consensus_binding::AuthenticatedConsensusOrigin;
 use crate::secure_channel::{
-    accept_kemtls_secure_channel_with_peer_init,
-    connect_kemtls_secure_channel_with_server_identity, AcceptedPeerInit, SecureChannel,
-    SecureChannelAsync,
+    AcceptedPeerInit, ChannelError, SecureChannel, SecureChannelAsync, TaskOutcome,
 };
 use qbind_crypto::CryptoProvider;
 use qbind_hash::{derive_node_id_from_pubkey, INBOUND_SESSION_DOMAIN_TAG};
@@ -373,6 +371,8 @@ struct PeerConnection {
 struct PeerLoopTasks {
     reader: Option<JoinHandle<()>>,
     writer: Option<JoinHandle<()>>,
+    reader_outcome: Option<TaskOutcome>,
+    writer_outcome: Option<TaskOutcome>,
 }
 
 struct PeerRetirement {
@@ -390,29 +390,27 @@ impl PeerRetirement {
     }
 
     async fn finish(&self) -> Result<(), String> {
-        if let Some(error) = self.loop_failure.lock().unwrap().clone() {
-            return Err(error);
-        }
         self.channel
             .begin_retirement()
             .map_err(|error| error.to_string())?;
 
         let mut tasks = self.tasks.lock().await;
-        let mut failures = Vec::new();
+        // A later join may remain pending across timeout/cancellation.
+        // Save each observed outcome before relinquishing its handle.
         if let Some(reader) = tasks.reader.as_mut() {
-            if let Err(error) = reader.await {
-                if !error.is_cancelled() {
-                    failures.push(format!("peer read loop: {error}"));
-                }
+            let outcome = TaskOutcome::from_join(reader.await);
+            if let TaskOutcome::Failed(error) = &outcome {
+                self.record_loop_failure(format!("peer read loop: {error}"));
             }
+            tasks.reader_outcome = Some(outcome);
             tasks.reader = None;
         }
         if let Some(writer) = tasks.writer.as_mut() {
-            if let Err(error) = writer.await {
-                if !error.is_cancelled() {
-                    failures.push(format!("peer write loop: {error}"));
-                }
+            let outcome = TaskOutcome::from_join(writer.await);
+            if let TaskOutcome::Failed(error) = &outcome {
+                self.record_loop_failure(format!("peer write loop: {error}"));
             }
+            tasks.writer_outcome = Some(outcome);
             tasks.writer = None;
         }
         drop(tasks);
@@ -421,12 +419,21 @@ impl PeerRetirement {
             .finish_retirement()
             .await
             .map_err(|error| error.to_string())?;
-        if !failures.is_empty() {
-            let error = failures.join("; ");
-            *self.loop_failure.lock().unwrap() = Some(error.clone());
+        if let Some(error) = self.loop_failure.lock().unwrap().clone() {
             return Err(error);
         }
         Ok(())
+    }
+
+    fn record_loop_failure(&self, error: String) {
+        let mut failure = self.loop_failure.lock().unwrap();
+        match failure.as_mut() {
+            Some(existing) => {
+                existing.push_str("; ");
+                existing.push_str(&error);
+            }
+            None => *failure = Some(error),
+        }
     }
 }
 
@@ -435,6 +442,57 @@ struct PeerRegistry {
     active: HashMap<NodeId, PeerConnection>,
     retiring: HashMap<NodeId, Arc<PeerRetirement>>,
     registering: HashSet<NodeId>,
+    candidates: HashMap<NodeId, Arc<std::net::TcpStream>>,
+    closed: bool,
+    handshakes: HashMap<u64, Arc<PendingHandshake>>,
+    #[cfg(test)]
+    before_publish: Option<Arc<RegistrationPause>>,
+    #[cfg(test)]
+    after_publish: Option<Arc<RegistrationPause>>,
+    #[cfg(test)]
+    after_eviction_snapshot: Option<Arc<(std::sync::Barrier, std::sync::Barrier)>>,
+}
+
+#[cfg(test)]
+#[derive(Default)]
+struct RegistrationPause {
+    entered: tokio::sync::Notify,
+    release: tokio::sync::Notify,
+}
+
+#[cfg(test)]
+impl RegistrationPause {
+    async fn wait(&self) {
+        self.entered.notify_one();
+        self.release.notified().await;
+    }
+}
+
+type HandshakeResult = Result<(SecureChannel, Option<AcceptedPeerInit>), ChannelError>;
+
+struct PendingHandshake {
+    shutdown_stream: std::net::TcpStream,
+    task: tokio::sync::Mutex<Option<JoinHandle<HandshakeResult>>>,
+    failure: std::sync::Mutex<Option<String>>,
+}
+
+impl PendingHandshake {
+    async fn join(&self) -> Result<Option<HandshakeResult>, String> {
+        let mut task = self.task.lock().await;
+        if let Some(handle) = task.as_mut() {
+            let result = handle.await;
+            // Persist the join outcome before relinquishing its handle.
+            if let Err(error) = &result {
+                *self.failure.lock().unwrap() = Some(error.to_string());
+            }
+            *task = None;
+            return result.map(Some).map_err(|error| error.to_string());
+        }
+        match self.failure.lock().unwrap().clone() {
+            Some(error) => Err(error),
+            None => Ok(None),
+        }
+    }
 }
 
 struct RegistrationReservation {
@@ -446,7 +504,9 @@ struct RegistrationReservation {
 impl Drop for RegistrationReservation {
     fn drop(&mut self) {
         if self.armed {
-            self.peers.write().registering.remove(&self.node_id);
+            let mut registry = self.peers.write();
+            registry.registering.remove(&self.node_id);
+            registry.candidates.remove(&self.node_id);
         }
     }
 }
@@ -460,24 +520,6 @@ impl Drop for RegistrationReservation {
 const RAW_FRAME_CHANNEL_CAPACITY: usize = 8;
 const PEER_RETIREMENT_TIMEOUT: Duration = Duration::from_secs(5);
 static NEXT_PEER_SESSION_ID: AtomicU64 = AtomicU64::new(1);
-
-impl PeerConnection {
-    /// Shutdown the peer connection gracefully.
-    async fn shutdown(self) -> Result<(), String> {
-        // Close BOTH outbound channels (structured + raw). Dropping
-        // either alone would not exit the multiplexed write loop;
-        // dropping both causes both `recv()`s inside the select! to
-        // resolve to `None`, the loop exits, and the AEAD session
-        // is released.
-        drop(self.tx);
-        drop(self.raw_tx);
-
-        self.retirement.begin();
-        tokio::time::timeout(PEER_RETIREMENT_TIMEOUT, self.retirement.finish())
-            .await
-            .map_err(|_| "peer retirement timed out; ownership retained".to_owned())?
-    }
-}
 
 // ============================================================================
 // TcpKemTlsP2pService
@@ -1020,6 +1062,11 @@ impl TcpKemTlsP2pService {
     /// previous "no-static-peers / single-validator" behaviour exactly
     /// (no dial tasks are spawned in that case).
     pub async fn start(&mut self) -> Result<(), P2pTransportError> {
+        if self.peers.read().closed {
+            return Err(P2pTransportError::SessionRetirement(
+                "service shutdown is terminal; construct a new service to restart".to_owned(),
+            ));
+        }
         // Start listener if configured
         if let Some(listen_addr) = &self.config.listen_addr {
             let listener = TcpListener::bind(listen_addr).await?;
@@ -1069,11 +1116,17 @@ impl TcpKemTlsP2pService {
 
         tokio::spawn(async move {
             let mut shutdown_rx = shutdown_rx;
+            let mut handlers = tokio::task::JoinSet::new();
 
             loop {
                 tokio::select! {
                     _ = shutdown_rx.recv() => {
                         break;
+                    }
+                    result = handlers.join_next(), if !handlers.is_empty() => {
+                        if let Some(Err(error)) = result {
+                            eprintln!("[P2P] inbound handler failed: {error}");
+                        }
                     }
                     result = listener.accept() => {
                         match result {
@@ -1121,7 +1174,7 @@ impl TcpKemTlsP2pService {
                                 let inbound_consensus_origin_resolver_clone =
                                     Arc::clone(&inbound_consensus_origin_resolver);
 
-                                tokio::spawn(async move {
+                                handlers.spawn(async move {
                                     if let Err(e) = Self::handle_inbound_connection(
                                         stream,
                                         peer_addr,
@@ -1146,6 +1199,14 @@ impl TcpKemTlsP2pService {
                                 eprintln!("[P2P] Accept error: {}", e);
                             }
                         }
+                    }
+                }
+            }
+            handlers.abort_all();
+            while let Some(result) = handlers.join_next().await {
+                if let Err(error) = result {
+                    if !error.is_cancelled() {
+                        eprintln!("[P2P] inbound handler failed during shutdown: {error}");
                     }
                 }
             }
@@ -1226,10 +1287,16 @@ impl TcpKemTlsP2pService {
         // B8: perform the KEMTLS handshake AND surface the dialer's
         // `client_random` + `validator_id` from `ClientInit`. The
         // handshake itself is identical to the pre-B8 path.
+        let handshake_cfg = server_cfg.clone();
         let (channel, peer_init) =
-            accept_kemtls_secure_channel_with_peer_init(std_stream, server_cfg.clone())
-                .await
-                .map_err(|e| P2pTransportError::Handshake(e.to_string()))?;
+            Self::tracked_handshake(Arc::clone(&peers), std_stream, move |stream| {
+                SecureChannel::from_accepted_with_peer_init(stream, handshake_cfg)
+                    .map(|(channel, init)| (channel, Some(init)))
+            })
+            .await?;
+        let peer_init = peer_init.ok_or_else(|| {
+            P2pTransportError::Handshake("inbound handshake omitted peer init".to_owned())
+        })?;
 
         // B8: ask the optional inbound identity resolver whether this
         // accepted session should be registered under a deterministic
@@ -1362,13 +1429,9 @@ impl TcpKemTlsP2pService {
 
         // Perform KEMTLS handshake (blocking), surfacing the ACTUAL verified
         // server identity established by the handshake (Run 418, F6).
-        let (channel, verified_server_identity) =
-            connect_kemtls_secure_channel_with_server_identity(
-                peer_addr.clone(),
-                client_cfg.clone(),
-            )
-            .await
-            .map_err(|e| P2pTransportError::Handshake(e.to_string()))?;
+        let channel =
+            Self::tracked_dial(Arc::clone(&self.peers), &peer_addr, client_cfg.clone()).await?;
+        let verified_server_identity = channel.verified_server_identity();
 
         // M7: Derive NodeId from peer's KEM public key (cryptographic binding)
         // The peer_kem_pk in client_cfg is the server's KEM public key that we
@@ -1447,6 +1510,76 @@ impl TcpKemTlsP2pService {
         Ok(())
     }
 
+    async fn tracked_handshake(
+        peers: Arc<RwLock<PeerRegistry>>,
+        stream: std::net::TcpStream,
+        handshake: impl FnOnce(std::net::TcpStream) -> HandshakeResult + Send + 'static,
+    ) -> Result<(SecureChannel, Option<AcceptedPeerInit>), P2pTransportError> {
+        let shutdown_stream = stream.try_clone().map_err(P2pTransportError::Io)?;
+        let id = NEXT_PEER_SESSION_ID.fetch_add(1, Ordering::Relaxed);
+        let owner = {
+            let mut registry = peers.write();
+            if registry.closed {
+                return Err(P2pTransportError::SessionRetirement(
+                    "service shutdown refuses handshake".to_owned(),
+                ));
+            }
+            let owner = Arc::new(PendingHandshake {
+                shutdown_stream,
+                task: tokio::sync::Mutex::new(Some(tokio::task::spawn_blocking(move || {
+                    handshake(stream)
+                }))),
+                failure: std::sync::Mutex::new(None),
+            });
+            registry.handshakes.insert(id, Arc::clone(&owner));
+            owner
+        };
+        let result = owner.join().await.map_err(P2pTransportError::Handshake)?;
+        {
+            let mut registry = peers.write();
+            if registry
+                .handshakes
+                .get(&id)
+                .is_some_and(|current| Arc::ptr_eq(current, &owner))
+            {
+                registry.handshakes.remove(&id);
+            }
+        }
+        result
+            .ok_or_else(|| {
+                P2pTransportError::SessionRetirement(
+                    "handshake consumed by service shutdown".to_owned(),
+                )
+            })?
+            .map_err(|error| P2pTransportError::Handshake(format!("{error:?}")))
+    }
+
+    async fn tracked_dial(
+        peers: Arc<RwLock<PeerRegistry>>,
+        addr: &str,
+        cfg: ClientConnectionConfig,
+    ) -> Result<SecureChannel, P2pTransportError> {
+        // Tokio owns a cancellable TCP connect; after establishment the
+        // registry retains the independent shutdown handle and blocking join.
+        if peers.read().closed {
+            return Err(P2pTransportError::SessionRetirement(
+                "service shutdown refuses dial".to_owned(),
+            ));
+        }
+        let stream = TcpStream::connect(addr)
+            .await
+            .map_err(P2pTransportError::Io)?;
+        let stream = stream.into_std().map_err(P2pTransportError::Io)?;
+        stream
+            .set_nonblocking(false)
+            .map_err(P2pTransportError::Io)?;
+        Self::tracked_handshake(peers, stream, move |stream| {
+            SecureChannel::connect_on_stream(stream, cfg).map(|channel| (channel, None))
+        })
+        .await
+        .map(|(channel, _)| channel)
+    }
+
     /// Spawn read/write handlers for a peer connection.
     async fn spawn_peer_handlers(
         node_id: NodeId,
@@ -1467,8 +1600,19 @@ impl TcpKemTlsP2pService {
         >,
         consensus_origin: Option<AuthenticatedConsensusOrigin>,
     ) -> Result<(), P2pTransportError> {
+        let candidate_shutdown = Arc::new(
+            channel
+                .stream()
+                .try_clone()
+                .map_err(P2pTransportError::Io)?,
+        );
         let retirement = {
             let mut registry = peers.write();
+            if registry.closed {
+                return Err(P2pTransportError::SessionRetirement(
+                    "service shutdown refuses registration".to_owned(),
+                ));
+            }
             if registry.registering.contains(&node_id) {
                 return Err(P2pTransportError::SessionRetirement(format!(
                     "NodeId {:?} already has a registration in progress",
@@ -1476,6 +1620,7 @@ impl TcpKemTlsP2pService {
                 )));
             }
             registry.registering.insert(node_id);
+            registry.candidates.insert(node_id, candidate_shutdown);
 
             if let Some(retirement) = registry.retiring.get(&node_id) {
                 Some(Arc::clone(retirement))
@@ -1485,7 +1630,7 @@ impl TcpKemTlsP2pService {
                 registry.retiring.insert(node_id, Arc::clone(&retirement));
                 drop(displaced.tx);
                 drop(displaced.raw_tx);
-                connections_current.fetch_sub(1, Ordering::Relaxed);
+                connections_current.store(registry.active.len() as u64, Ordering::Relaxed);
                 Some(retirement)
             } else {
                 None
@@ -1527,85 +1672,113 @@ impl TcpKemTlsP2pService {
             }
         }
 
-        let channel = SecureChannelAsync::try_new(channel)
-            .map_err(|error| P2pTransportError::SessionRetirement(error.to_string()))?;
+        #[cfg(test)]
+        {
+            let pause = peers.write().before_publish.take();
+            if let Some(pause) = pause {
+                pause.wait().await;
+            }
+        }
 
-        // Create outbound channel for this peer
-        let (peer_tx, peer_rx) = mpsc::channel::<P2pMessage>(64);
-        // Run 080 — bounded raw-frame outbound channel. Small
-        // capacity so a slow / unhealthy peer cannot accumulate an
-        // unbounded backlog of out-of-band frames (the producer
-        // uses `try_send` and treats queue-full as a per-peer
-        // failure rather than backpressure on the structured
-        // consensus/DAG/control encoder path).
-        let (peer_raw_tx, peer_raw_rx) = mpsc::channel::<Vec<u8>>(RAW_FRAME_CHANNEL_CAPACITY);
-
-        let (cancel_tx, cancel_rx) = watch::channel(false);
-
-        let channel_owner = channel.clone();
-
-        // Spawn write loop
-        let channel_write = channel.clone();
-        let write_cancel = cancel_rx.clone();
-        let write_handle = tokio::spawn(async move {
-            Self::write_loop(channel_write, peer_rx, peer_raw_rx, write_cancel).await;
-        });
-
-        // Spawn read loop
-        let channel_read = channel;
-        let read_cancel = cancel_rx;
-        let inbound_tx_clone = inbound_tx.clone();
-        let bytes_received_clone = Arc::clone(&bytes_received);
-        let wire_sink_clone = Arc::clone(&peer_candidate_wire_sink);
-        let inbound_per_peer_limiter_clone = Arc::clone(&inbound_per_peer_limiter);
-        let read_handle = tokio::spawn(async move {
-            Self::read_loop(
-                node_id,
-                channel_read,
-                inbound_tx_clone,
-                bytes_received_clone,
-                wire_sink_clone,
-                inbound_per_peer_limiter_clone,
-                consensus_origin,
-                read_cancel,
-            )
-            .await;
-        });
-
-        let retirement = Arc::new(PeerRetirement {
-            session_id: NEXT_PEER_SESSION_ID.fetch_add(1, Ordering::Relaxed),
-            channel: channel_owner,
-            cancel_tx,
-            tasks: tokio::sync::Mutex::new(PeerLoopTasks {
-                reader: Some(read_handle),
-                writer: Some(write_handle),
-            }),
-            loop_failure: std::sync::Mutex::new(None),
-        });
-
-        // Register peer connection
-        let conn = PeerConnection {
-            node_id,
-            tx: peer_tx,
-            raw_tx: peer_raw_tx,
-            retirement,
-        };
-
+        // No await occurs between this admission check, worker creation and
+        // registry publication. Shutdown/eviction see either no candidate
+        // workers or a fully owned registered session.
         {
             let mut registry = peers.write();
-            if !registry.registering.remove(&node_id)
+            if registry.closed {
+                return Err(P2pTransportError::SessionRetirement(
+                    "service shutdown refuses reserved registration".to_owned(),
+                ));
+            }
+            if !registry.registering.contains(&node_id)
                 || registry.active.contains_key(&node_id)
                 || registry.retiring.contains_key(&node_id)
             {
-                return Err(P2pTransportError::SessionRetirement(format!(
-                    "NodeId {:?} registration reservation was lost",
-                    node_id
-                )));
+                return Err(P2pTransportError::SessionRetirement(
+                    "registration reservation was lost before worker creation".to_owned(),
+                ));
             }
-            registry.active.insert(node_id, conn);
-            reservation.armed = false;
+            let channel = SecureChannelAsync::try_new(channel)
+                .map_err(|error| P2pTransportError::SessionRetirement(error.to_string()))?;
+
+            // Create outbound channel for this peer
+            let (peer_tx, peer_rx) = mpsc::channel::<P2pMessage>(64);
+            // Run 080 — bounded raw-frame outbound channel. Small
+            // capacity so a slow / unhealthy peer cannot accumulate an
+            // unbounded backlog of out-of-band frames (the producer
+            // uses `try_send` and treats queue-full as a per-peer
+            // failure rather than backpressure on the structured
+            // consensus/DAG/control encoder path).
+            let (peer_raw_tx, peer_raw_rx) = mpsc::channel::<Vec<u8>>(RAW_FRAME_CHANNEL_CAPACITY);
+
+            let (cancel_tx, cancel_rx) = watch::channel(false);
+
+            let channel_owner = channel.clone();
+
+            // Spawn write loop
+            let channel_write = channel.clone();
+            let write_cancel = cancel_rx.clone();
+            let write_handle = tokio::spawn(async move {
+                Self::write_loop(channel_write, peer_rx, peer_raw_rx, write_cancel).await;
+            });
+
+            // Spawn read loop
+            let channel_read = channel;
+            let read_cancel = cancel_rx;
+            let inbound_tx_clone = inbound_tx.clone();
+            let bytes_received_clone = Arc::clone(&bytes_received);
+            let wire_sink_clone = Arc::clone(&peer_candidate_wire_sink);
+            let inbound_per_peer_limiter_clone = Arc::clone(&inbound_per_peer_limiter);
+            let read_handle = tokio::spawn(async move {
+                Self::read_loop(
+                    node_id,
+                    channel_read,
+                    inbound_tx_clone,
+                    bytes_received_clone,
+                    wire_sink_clone,
+                    inbound_per_peer_limiter_clone,
+                    consensus_origin,
+                    read_cancel,
+                )
+                .await;
+            });
+
+            let retirement = Arc::new(PeerRetirement {
+                session_id: NEXT_PEER_SESSION_ID.fetch_add(1, Ordering::Relaxed),
+                channel: channel_owner,
+                cancel_tx,
+                tasks: tokio::sync::Mutex::new(PeerLoopTasks {
+                    reader: Some(read_handle),
+                    writer: Some(write_handle),
+                    reader_outcome: None,
+                    writer_outcome: None,
+                }),
+                loop_failure: std::sync::Mutex::new(None),
+            });
+
+            // Register peer connection
+            let conn = PeerConnection {
+                node_id,
+                tx: peer_tx,
+                raw_tx: peer_raw_tx,
+                retirement,
+            };
+
+            {
+                registry.registering.remove(&node_id);
+                registry.candidates.remove(&node_id);
+                registry.active.insert(node_id, conn);
+                connections_current.store(registry.active.len() as u64, Ordering::Relaxed);
+                reservation.armed = false;
+            }
         }
-        connections_current.fetch_add(1, Ordering::Relaxed);
+        #[cfg(test)]
+        {
+            let pause = peers.write().after_publish.take();
+            if let Some(pause) = pause {
+                pause.wait().await;
+            }
+        }
 
         println!("[P2P] Peer {:?} connected", node_id);
         Ok(())
@@ -1891,41 +2064,93 @@ impl TcpKemTlsP2pService {
         rx
     }
 
-    /// Shutdown the service gracefully.
+    /// Terminal registration fence followed by bounded cleanup attempts.
+    /// Failures are logged and their owners retained for another shutdown
+    /// attempt; returning does not certify complete socket reclamation.
     pub async fn shutdown(&mut self) {
-        // Send shutdown signal to all tasks
-        let _ = self.shutdown_tx.send(());
-
-        // B8: abort any in-flight initial-dial-with-retry tasks.
-        // Aborting is safe: each task only writes to `connections_current`
-        // / `peers` AFTER a successful dial, and a successful dial has
-        // already produced a registered `PeerConnection` whose
-        // `tx`/`read_handle`/`write_handle` will be drained by the
-        // peer-shutdown loop below.
-        let dial_handles = {
-            let mut guard = self.dial_handles.write();
-            std::mem::take(&mut *guard)
+        // The fence is terminal and precedes every cancellable await.
+        // Cleanup owners stay in the registry until their joins succeed.
+        let candidate_sockets = {
+            let mut registry = self.peers.write();
+            registry.closed = true;
+            let active = std::mem::take(&mut registry.active);
+            for (id, conn) in active {
+                conn.retirement.begin();
+                registry.retiring.insert(id, Arc::clone(&conn.retirement));
+            }
+            self.connections_current.store(0, Ordering::Relaxed);
+            registry.candidates.values().cloned().collect::<Vec<_>>()
         };
-        for h in dial_handles {
-            h.abort();
-            let _ = h.await;
-        }
-
-        let (peers, retiring) = {
-            let mut peers_lock = self.peers.write();
-            (
-                std::mem::take(&mut peers_lock.active),
-                std::mem::take(&mut peers_lock.retiring),
-            )
-        };
-
-        for (node_id, conn) in peers {
-            let owner = Arc::clone(&conn.retirement);
-            if let Err(error) = conn.shutdown().await {
-                eprintln!("[P2P] session {:?} shutdown incomplete: {}", node_id, error);
-                self.peers.write().retiring.insert(node_id, owner);
+        // Reserved candidates have no application workers yet, but their
+        // sockets remain owned and independently interruptible until their
+        // registration futures observe the fence or are dropped.
+        for socket in candidate_sockets {
+            if let Err(error) = socket.shutdown(std::net::Shutdown::Both) {
+                if error.kind() != std::io::ErrorKind::NotConnected {
+                    eprintln!(
+                        "[P2P] candidate shutdown failed; reservation retains ownership: {error}"
+                    );
+                }
             }
         }
+        let _ = self.shutdown_tx.send(());
+
+        // Dial cancellation cannot erase ownership: established handshake
+        // workers and registered peers are already retained by the registry.
+        // Abort is only a request. Keep the handles in the service if this
+        // shutdown future is cancelled before their completion is observed.
+        for handle in self.dial_handles.read().iter() {
+            handle.abort();
+        }
+        let dial_joins = std::future::poll_fn(|cx| {
+            use std::future::Future;
+            let mut handles = self.dial_handles.write();
+            let mut index = 0;
+            while index < handles.len() {
+                match std::pin::Pin::new(&mut handles[index]).poll(cx) {
+                    std::task::Poll::Ready(result) => {
+                        drop(handles.swap_remove(index));
+                        if let Err(error) = result {
+                            if !error.is_cancelled() {
+                                eprintln!("[P2P] dial task failed during shutdown: {error}");
+                            }
+                        }
+                    }
+                    std::task::Poll::Pending => index += 1,
+                }
+            }
+            if handles.is_empty() {
+                std::task::Poll::Ready(())
+            } else {
+                std::task::Poll::Pending
+            }
+        });
+        if tokio::time::timeout(PEER_RETIREMENT_TIMEOUT, dial_joins)
+            .await
+            .is_err()
+        {
+            eprintln!("[P2P] dial task shutdown timed out; handles retained");
+        }
+
+        // The listener owns its inbound JoinSet (including handlers not yet
+        // polled). Its shutdown aborts and observes those async tasks; any
+        // blocking handshake work remains in the registry for the next pass.
+        if let Some(handle) = self.listener_handle.as_mut() {
+            match tokio::time::timeout(PEER_RETIREMENT_TIMEOUT, handle).await {
+                Ok(result) => {
+                    if let Err(error) = result {
+                        eprintln!("[P2P] listener task failed during shutdown: {error}");
+                    }
+                    self.listener_handle = None;
+                }
+                Err(_) => eprintln!("[P2P] listener shutdown timed out; handle retained"),
+            }
+        }
+
+        let (retiring, handshakes) = {
+            let registry = self.peers.read();
+            (registry.retiring.clone(), registry.handshakes.clone())
+        };
         for (node_id, owner) in retiring {
             let result = tokio::time::timeout(PEER_RETIREMENT_TIMEOUT, owner.finish())
                 .await
@@ -1936,16 +2161,45 @@ impl TcpKemTlsP2pService {
                     "[P2P] retained retirement for {:?} is incomplete: {}",
                     node_id, error
                 );
-                self.peers.write().retiring.insert(node_id, owner);
+            } else {
+                let mut registry = self.peers.write();
+                if registry
+                    .retiring
+                    .get(&node_id)
+                    .is_some_and(|current| Arc::ptr_eq(current, &owner))
+                {
+                    registry.retiring.remove(&node_id);
+                }
             }
         }
-
-        // Wait for listener to terminate
-        if let Some(handle) = self.listener_handle.take() {
-            let _ = handle.await;
+        for (id, owner) in handshakes {
+            let result = async {
+                match owner.shutdown_stream.shutdown(std::net::Shutdown::Both) {
+                    Ok(()) => {}
+                    Err(error) if error.kind() == std::io::ErrorKind::NotConnected => {}
+                    Err(error) => return Err(error.to_string()),
+                }
+                // The handshake's protocol refusal after socket shutdown is
+                // expected. Only worker join failure makes cleanup incomplete.
+                drop(owner.join().await?);
+                Ok::<_, String>(())
+            };
+            match tokio::time::timeout(PEER_RETIREMENT_TIMEOUT, result).await {
+                Ok(Ok(())) => {
+                    let mut registry = self.peers.write();
+                    if registry
+                        .handshakes
+                        .get(&id)
+                        .is_some_and(|current| Arc::ptr_eq(current, &owner))
+                    {
+                        registry.handshakes.remove(&id);
+                    }
+                }
+                outcome => eprintln!(
+                    "[P2P] handshake {id} shutdown incomplete; owner retained: {outcome:?}"
+                ),
+            }
         }
-
-        self.connections_current.store(0, Ordering::Relaxed);
     }
 
     /// Build a [`DialerHandle`] that can be moved into a `tokio::spawn`
@@ -1967,7 +2221,9 @@ impl TcpKemTlsP2pService {
         }
     }
 
-    /// Get current connection count.
+    /// Active registry entries, not live sockets, authenticated origins, or
+    /// pending handshakes/retirements. Updated with every active-map mutation
+    /// under the registry write lock; it is an atomic instantaneous snapshot.
     pub fn connections_current(&self) -> u64 {
         self.connections_current.load(Ordering::Relaxed)
     }
@@ -2047,9 +2303,19 @@ impl TcpKemTlsP2pService {
                     .retiring
                     .insert(*node_id, Arc::clone(&conn.retirement));
             }
+            self.connections_current
+                .store(guard.active.len() as u64, Ordering::Relaxed);
             taken.into_iter().collect()
         };
         let attempted = drained.len();
+        #[cfg(test)]
+        {
+            let barriers = self.peers.write().after_eviction_snapshot.take();
+            if let Some(barriers) = barriers {
+                barriers.0.wait();
+                barriers.1.wait();
+            }
+        }
         let mut evicted = 0usize;
         for (_node_id, conn) in drained {
             let PeerConnection {
@@ -2076,8 +2342,6 @@ impl TcpKemTlsP2pService {
         // close path, it MUST flip individual entries into `failed`
         // instead of silently claiming success.)
         let failed = attempted - evicted;
-        self.connections_current
-            .store(self.peers.read().active.len() as u64, Ordering::Relaxed);
         Ok(crate::p2p_session_eviction::EvictionReport::new(
             reason, attempted, evicted, failed,
         ))
@@ -2230,13 +2494,13 @@ impl DialerHandle {
         // Perform KEMTLS handshake (blocking, in spawn_blocking), surfacing the
         // ACTUAL verified server identity established by the handshake
         // (Run 418, F6).
-        let (channel, verified_server_identity) =
-            connect_kemtls_secure_channel_with_server_identity(
-                peer_addr.clone(),
-                client_cfg.clone(),
-            )
-            .await
-            .map_err(|e| P2pTransportError::Handshake(e.to_string()))?;
+        let channel = TcpKemTlsP2pService::tracked_dial(
+            Arc::clone(&self.peers),
+            &peer_addr,
+            client_cfg.clone(),
+        )
+        .await?;
+        let verified_server_identity = channel.verified_server_identity();
 
         // B7: NodeId derived from the peer's KEM pk (deterministic,
         // matches `derive_test_node_id_from_validator_id`).
@@ -2384,6 +2648,7 @@ impl P2pService for TcpKemTlsP2pService {
 mod peer_retirement_tests {
     use super::*;
     use crate::secure_channel::{encrypted_write_tests::pair_channels, ChannelError};
+    use std::future::Future;
 
     #[derive(Clone)]
     struct Harness {
@@ -2405,6 +2670,18 @@ mod peer_retirement_tests {
     }
 
     impl Harness {
+        fn for_service(service: &TcpKemTlsP2pService) -> Self {
+            Self {
+                peers: Arc::clone(&service.peers),
+                inbound_tx: service.inbound_tx.clone(),
+                inbound_rx: Arc::clone(&service.inbound_rx),
+                connections_current: Arc::clone(&service.connections_current),
+                bytes_received: Arc::clone(&service.bytes_received),
+                peer_candidate_wire_sink: Arc::clone(&service.peer_candidate_wire_sink),
+                inbound_per_peer_limiter: Arc::clone(&service.inbound_per_peer_limiter),
+            }
+        }
+
         fn new(inbound_capacity: usize) -> Self {
             let (inbound_tx, inbound_rx) = mpsc::channel(inbound_capacity);
             Self {
@@ -2451,6 +2728,31 @@ mod peer_retirement_tests {
 
     fn node_id(byte: u8) -> NodeId {
         NodeId::new([byte; 32])
+    }
+
+    fn service() -> TcpKemTlsP2pService {
+        let (client, server) = crate::secure_channel::encrypted_write_tests::channel_configs();
+        TcpKemTlsP2pService::new(
+            node_id(99),
+            NetworkTransportConfig::default(),
+            Arc::clone(&server.handshake_config.crypto),
+            server,
+            client,
+        )
+        .unwrap()
+    }
+
+    fn assert_registry_count(harness: &Harness, expected: u64) {
+        let registry = harness.peers.read();
+        assert_eq!(registry.active.len() as u64, expected);
+        assert_eq!(
+            harness.connections_current.load(Ordering::Relaxed),
+            expected
+        );
+        assert!(registry
+            .active
+            .keys()
+            .all(|id| !registry.retiring.contains_key(id)));
     }
 
     fn heartbeat(view: u64) -> P2pMessage {
@@ -2720,5 +3022,396 @@ mod peer_retirement_tests {
         assert!(!harness.peers.read().retiring.contains_key(&id));
         expect_remote_eof(old_remote).await;
         assert_eq!(harness.session_id(other_id), other_session);
+    }
+
+    #[tokio::test]
+    async fn peer_join_failure_survives_timeout_and_cancelled_retry() {
+        for timed_out in [true, false] {
+            let harness = Harness::new(8);
+            let id = node_id(7);
+            let (local, remote) = pair_channels(true);
+            harness.register(id, local).await.unwrap();
+            let owner = Arc::clone(&harness.peers.read().active[&id].retirement);
+            owner.begin();
+            owner.finish().await.unwrap();
+            expect_remote_eof(remote).await;
+            let (release, pending) = tokio::sync::oneshot::channel::<()>();
+            let reader = tokio::spawn(async { panic!("retained peer failure") });
+            while !reader.is_finished() {
+                tokio::task::yield_now().await;
+            }
+            {
+                let mut tasks = owner.tasks.lock().await;
+                tasks.reader = Some(reader);
+                tasks.writer = Some(tokio::spawn(async move {
+                    pending.await.unwrap();
+                }));
+            }
+            let mut attempt = Box::pin(owner.finish());
+            let mut cx = std::task::Context::from_waker(std::task::Waker::noop());
+            assert!(attempt.as_mut().poll(&mut cx).is_pending());
+            if timed_out {
+                assert!(tokio::time::timeout(Duration::from_millis(20), attempt)
+                    .await
+                    .is_err());
+            } else {
+                drop(attempt);
+            }
+            assert!(owner.tasks.lock().await.reader.is_none());
+            assert!(
+                matches!(owner.tasks.lock().await.reader_outcome, Some(TaskOutcome::Failed(ref error))
+                if error.contains("retained peer failure"))
+            );
+            release.send(()).unwrap();
+            assert!(owner
+                .finish()
+                .await
+                .unwrap_err()
+                .contains("retained peer failure"));
+            let (candidate, candidate_remote) = pair_channels(true);
+            let result = harness.register(id, candidate).await;
+            assert!(
+                matches!(result, Err(P2pTransportError::SessionRetirement(ref error))
+                if error.contains("retained peer failure"))
+            );
+            expect_remote_eof(candidate_remote).await;
+            assert!(!harness.peers.read().active.contains_key(&id));
+            assert!(Arc::ptr_eq(&harness.peers.read().retiring[&id], &owner));
+        }
+    }
+
+    #[tokio::test]
+    async fn blocking_failure_after_interrupted_retirement_refuses_replacement() {
+        let harness = Harness::new(8);
+        let id = node_id(8);
+        let (local, remote) = pair_channels(true);
+        harness.register(id, local).await.unwrap();
+        let owner = Arc::clone(&harness.peers.read().active[&id].retirement);
+        owner.begin();
+        owner.finish().await.unwrap();
+        let release = owner.channel.inject_worker_failure_for_test().await;
+        let mut attempt = Box::pin(owner.finish());
+        let mut cx = std::task::Context::from_waker(std::task::Waker::noop());
+        assert!(attempt.as_mut().poll(&mut cx).is_pending());
+        assert!(tokio::time::timeout(Duration::from_millis(20), attempt)
+            .await
+            .is_err());
+        release.send(()).unwrap();
+        assert!(owner
+            .finish()
+            .await
+            .unwrap_err()
+            .contains("retained blocking failure"));
+        let (candidate, candidate_remote) = pair_channels(true);
+        let error = harness.register(id, candidate).await.unwrap_err();
+        assert!(error.to_string().contains("retained blocking failure"));
+        assert_registry_count(&harness, 0);
+        assert!(Arc::ptr_eq(&harness.peers.read().retiring[&id], &owner));
+        expect_remote_eof(remote).await;
+        expect_remote_eof(candidate_remote).await;
+    }
+
+    #[tokio::test]
+    async fn shutdown_fences_inflight_registration_and_retains_cleanup_until_retry() {
+        for fail in [false, true] {
+            let mut service = service();
+            let harness = Harness::for_service(&service);
+            let id = node_id(9);
+            let (local, remote) = pair_channels(true);
+            harness.register(id, local).await.unwrap();
+            let owner = Arc::clone(&harness.peers.read().active[&id].retirement);
+            let held_tasks = owner.tasks.lock().await;
+            owner.channel.fail_shutdown_for_test(fail);
+            let mut shutdown = Box::pin(service.shutdown());
+            let mut cx = std::task::Context::from_waker(std::task::Waker::noop());
+            if fail {
+                shutdown.as_mut().await;
+            } else {
+                assert!(shutdown.as_mut().poll(&mut cx).is_pending());
+            }
+            assert!(harness.peers.read().closed);
+            assert!(Arc::ptr_eq(&harness.peers.read().retiring[&id], &owner));
+            assert_registry_count(&harness, 0);
+            let (candidate, candidate_remote) = pair_channels(true);
+            assert!(harness.register(id, candidate).await.is_err());
+            expect_remote_eof(candidate_remote).await;
+            drop(held_tasks);
+            if !fail {
+                shutdown.await;
+            } else {
+                drop(shutdown);
+            }
+            assert_registry_count(&harness, 0);
+            if fail {
+                assert_eq!(harness.peers.read().retiring.len(), 1);
+                owner.channel.fail_shutdown_for_test(false);
+                service.shutdown().await;
+            }
+            assert!(harness.peers.read().retiring.is_empty());
+            assert!(harness.peers.read().handshakes.is_empty());
+            expect_remote_eof(remote).await;
+            assert!(service.start().await.is_err());
+        }
+    }
+
+    #[tokio::test]
+    async fn reserved_registration_cannot_publish_after_shutdown() {
+        let mut service = service();
+        let harness = Harness::for_service(&service);
+        let pause = Arc::new(RegistrationPause::default());
+        harness.peers.write().before_publish = Some(Arc::clone(&pause));
+        let (candidate, remote) = pair_channels(true);
+        let registering = {
+            let harness = harness.clone();
+            tokio::spawn(async move { harness.register(node_id(10), candidate).await })
+        };
+        pause.entered.notified().await;
+        assert_eq!(harness.peers.read().registering.len(), 1);
+        service.shutdown().await;
+        assert_registry_count(&harness, 0);
+        assert_eq!(harness.peers.read().candidates.len(), 1);
+        expect_remote_eof(remote).await;
+        pause.release.notify_one();
+        assert!(registering.await.unwrap().is_err());
+        assert!(harness.peers.read().registering.is_empty());
+        assert!(harness.peers.read().retiring.is_empty());
+        assert!(harness.peers.read().candidates.is_empty());
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn published_count_cannot_wrap_when_replaced_before_caller_returns() {
+        let harness = Harness::new(8);
+        let pause = Arc::new(RegistrationPause::default());
+        harness.peers.write().after_publish = Some(Arc::clone(&pause));
+        let id = node_id(11);
+        let (local, remote) = pair_channels(true);
+        let registering = {
+            let harness = harness.clone();
+            tokio::spawn(async move { harness.register(id, local).await })
+        };
+        pause.entered.notified().await;
+        assert_registry_count(&harness, 1);
+        let (replacement, replacement_remote) = pair_channels(true);
+        harness.register(id, replacement).await.unwrap();
+        assert_registry_count(&harness, 1);
+        expect_remote_eof(remote).await;
+        pause.release.notify_one();
+        registering.await.unwrap().unwrap();
+        assert_registry_count(&harness, 1);
+        drop(replacement_remote);
+    }
+
+    #[tokio::test]
+    async fn shutdown_owns_published_session_before_registration_returns() {
+        let mut service = service();
+        let harness = Harness::for_service(&service);
+        let pause = Arc::new(RegistrationPause::default());
+        harness.peers.write().after_publish = Some(Arc::clone(&pause));
+        let (local, remote) = pair_channels(true);
+        let registering = {
+            let harness = harness.clone();
+            tokio::spawn(async move { harness.register(node_id(14), local).await })
+        };
+        pause.entered.notified().await;
+        assert_registry_count(&harness, 1);
+        service.shutdown().await;
+        assert_registry_count(&harness, 0);
+        expect_remote_eof(remote).await;
+        pause.release.notify_one();
+        // Publication preceded shutdown. Successful registration is not a
+        // delivery/liveness acknowledgement after that linearization point.
+        registering.await.unwrap().unwrap();
+        assert_registry_count(&harness, 0);
+        assert!(harness.peers.read().retiring.is_empty());
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn eviction_snapshot_preserves_later_admission_and_count() {
+        let service = Arc::new(service());
+        let harness = Harness::for_service(&service);
+        let (local, remote) = pair_channels(true);
+        harness.register(node_id(12), local).await.unwrap();
+        let barriers = Arc::new((std::sync::Barrier::new(2), std::sync::Barrier::new(2)));
+        harness.peers.write().after_eviction_snapshot = Some(Arc::clone(&barriers));
+        let evicting = {
+            let service = Arc::clone(&service);
+            tokio::task::spawn_blocking(move || {
+                service
+                    .evict_all_sessions(crate::p2p_session_eviction::EvictionReason::OperatorTest)
+            })
+        };
+        let reached = Arc::clone(&barriers);
+        tokio::task::spawn_blocking(move || {
+            reached.0.wait();
+        })
+        .await
+        .unwrap();
+        assert_registry_count(&harness, 0);
+        let pause = Arc::new(RegistrationPause::default());
+        harness.peers.write().after_publish = Some(Arc::clone(&pause));
+        let (later, later_remote) = pair_channels(true);
+        let registering = {
+            let harness = harness.clone();
+            tokio::spawn(async move { harness.register(node_id(13), later).await })
+        };
+        pause.entered.notified().await;
+        assert_registry_count(&harness, 1);
+        barriers.1.wait();
+        let report = evicting.await.unwrap().unwrap();
+        assert_eq!((report.attempted, report.evicted, report.failed), (1, 1, 0));
+        assert_registry_count(&harness, 1);
+        pause.release.notify_one();
+        registering.await.unwrap().unwrap();
+        assert_registry_count(&harness, 1);
+        send_app(later_remote, heartbeat_frame(13)).await.unwrap();
+        harness.receive().await;
+        let old = Arc::clone(&harness.peers.read().retiring[&node_id(12)]);
+        old.finish().await.unwrap();
+        expect_remote_eof(remote).await;
+    }
+
+    #[tokio::test]
+    async fn service_shutdown_joins_blocked_inbound_handshake() {
+        let mut service = service();
+        let harness = Harness::for_service(&service);
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        service.listener_handle = Some(service.spawn_accept_loop(listener));
+        let mut remote = TcpStream::connect(addr).await.unwrap();
+        // Registration of the join/shutdown owner is the barrier, not a sleep.
+        tokio::time::timeout(Duration::from_secs(3), async {
+            while harness.peers.read().handshakes.is_empty() {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        let owner = Arc::clone(harness.peers.read().handshakes.values().next().unwrap());
+        service.shutdown().await;
+        assert!(service.listener_handle.is_none());
+        assert!(owner.task.lock().await.is_none());
+        assert!(harness.peers.read().handshakes.is_empty());
+        assert_registry_count(&harness, 0);
+        use tokio::io::AsyncReadExt;
+        let mut byte = [0];
+        assert_eq!(remote.read(&mut byte).await.unwrap(), 0);
+    }
+
+    #[tokio::test]
+    async fn successful_inbound_handshake_reserved_during_shutdown_is_refused() {
+        for fail in [false, true] {
+            let mut service = service();
+            let harness = Harness::for_service(&service);
+            let (old, old_remote) = pair_channels(true);
+            harness.register(node_id(15), old).await.unwrap();
+            let old_owner = Arc::clone(&harness.peers.read().active[&node_id(15)].retirement);
+            old_owner.channel.fail_shutdown_for_test(fail);
+            let pause = Arc::new(RegistrationPause::default());
+            harness.peers.write().before_publish = Some(Arc::clone(&pause));
+            let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let addr = listener.local_addr().unwrap().to_string();
+            let cfg = service.client_cfg.clone();
+            let client =
+                tokio::task::spawn_blocking(move || SecureChannel::connect(&addr, cfg).unwrap());
+            let (stream, addr) = listener.accept().await.unwrap();
+            let handler = {
+                let cfg = service.server_cfg.clone();
+                let harness = harness.clone();
+                tokio::spawn(async move {
+                    TcpKemTlsP2pService::handle_inbound_connection(
+                        stream,
+                        addr,
+                        cfg,
+                        harness.peers,
+                        harness.inbound_tx,
+                        harness.connections_current,
+                        harness.bytes_received,
+                        Arc::new(AtomicU64::new(0)),
+                        Arc::new(RwLock::new(None)),
+                        harness.peer_candidate_wire_sink,
+                        harness.inbound_per_peer_limiter,
+                        Arc::new(RwLock::new(None)),
+                    )
+                    .await
+                })
+            };
+            pause.entered.notified().await;
+            let client = client.await.unwrap();
+            assert!(client.is_established());
+            assert_eq!(harness.peers.read().candidates.len(), 1);
+            assert!(harness.peers.read().handshakes.is_empty());
+            service.shutdown().await;
+            assert_registry_count(&harness, 0);
+            expect_remote_eof(client).await;
+            pause.release.notify_one();
+            assert!(handler.await.unwrap().is_err());
+            assert!(harness.peers.read().registering.is_empty());
+            assert!(harness.peers.read().candidates.is_empty());
+            if fail {
+                assert!(Arc::ptr_eq(
+                    &harness.peers.read().retiring[&node_id(15)],
+                    &old_owner
+                ));
+                old_owner.channel.fail_shutdown_for_test(false);
+                service.shutdown().await;
+            }
+            assert!(harness.peers.read().retiring.is_empty());
+            expect_remote_eof(old_remote).await;
+        }
+    }
+
+    #[tokio::test]
+    async fn cancelled_shutdown_keeps_old_owner_for_later_join() {
+        let mut service = service();
+        let harness = Harness::for_service(&service);
+        let (local, remote) = pair_channels(true);
+        harness.register(node_id(16), local).await.unwrap();
+        let owner = Arc::clone(&harness.peers.read().active[&node_id(16)].retirement);
+        let held = owner.tasks.lock().await;
+        let mut shutdown = Box::pin(service.shutdown());
+        let mut cx = std::task::Context::from_waker(std::task::Waker::noop());
+        assert!(shutdown.as_mut().poll(&mut cx).is_pending());
+        drop(shutdown);
+        assert!(Arc::ptr_eq(
+            &harness.peers.read().retiring[&node_id(16)],
+            &owner
+        ));
+        assert_registry_count(&harness, 0);
+        drop(held);
+        service.shutdown().await;
+        assert!(harness.peers.read().retiring.is_empty());
+        expect_remote_eof(remote).await;
+    }
+
+    #[tokio::test]
+    async fn cancelled_outbound_dial_keeps_handshake_worker_for_shutdown() {
+        let mut service = service();
+        let harness = Harness::for_service(&service);
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap().to_string();
+        let dial = {
+            let cfg = service.client_cfg.clone();
+            let peers = Arc::clone(&harness.peers);
+            tokio::spawn(async move { TcpKemTlsP2pService::tracked_dial(peers, &addr, cfg).await })
+        };
+        let (mut remote, _) = listener.accept().await.unwrap();
+        tokio::time::timeout(Duration::from_secs(3), async {
+            while harness.peers.read().handshakes.is_empty() {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        let owner = Arc::clone(harness.peers.read().handshakes.values().next().unwrap());
+        dial.abort();
+        assert!(dial.await.unwrap_err().is_cancelled());
+        assert_eq!(harness.peers.read().handshakes.len(), 1);
+        service.shutdown().await;
+        assert!(owner.task.lock().await.is_none());
+        assert!(harness.peers.read().handshakes.is_empty());
+        assert_registry_count(&harness, 0);
+        use tokio::io::AsyncReadExt;
+        let mut bytes = Vec::new();
+        remote.read_to_end(&mut bytes).await.unwrap();
     }
 }

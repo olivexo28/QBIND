@@ -78,7 +78,11 @@ impl SignatureSuite for TestSignature {
     }
 }
 
-pub(super) fn pair(peer_init: bool) -> (SecureChannel, SecureChannel, Arc<CryptoTrace>) {
+fn configs() -> (
+    ClientConnectionConfig,
+    ServerConnectionConfig,
+    Arc<CryptoTrace>,
+) {
     let trace = Arc::new(CryptoTrace::default());
     let provider = Arc::new(
         StaticCryptoProvider::new()
@@ -134,6 +138,16 @@ pub(super) fn pair(peer_init: bool) -> (SecureChannel, SecureChannel, Arc<Crypto
         validator_id: [7; 32],
         peer_kem_pk: pk,
     };
+    (client_cfg, server_cfg, trace)
+}
+
+pub(crate) fn channel_configs() -> (ClientConnectionConfig, ServerConnectionConfig) {
+    let (client, server, _) = configs();
+    (client, server)
+}
+
+pub(super) fn pair(peer_init: bool) -> (SecureChannel, SecureChannel, Arc<CryptoTrace>) {
+    let (client_cfg, server_cfg, trace) = configs();
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let addr = listener.local_addr().unwrap();
     let server = std::thread::spawn(move || {
@@ -516,6 +530,8 @@ async fn queued_plaintext_is_not_released_after_invalidation() {
             reader: None,
             writer: None,
             completion: None,
+            reader_outcome: None,
+            writer_outcome: None,
         })),
         write_tx,
         read_rx: Arc::new(tokio::sync::Mutex::new(read_rx)),
@@ -535,4 +551,51 @@ async fn queued_plaintext_is_not_released_after_invalidation() {
         channel.recv().await,
         Err(AsyncChannelError::Channel(ChannelError::Net(_)))
     ));
+}
+
+#[tokio::test]
+async fn blocking_join_failure_survives_timeout_and_cancelled_retry() {
+    for timed_out in [true, false] {
+        let (client, _peer, _) = pair(false);
+        let channel = SecureChannelAsync::try_new(client).unwrap();
+        channel.begin_retirement().unwrap();
+        channel.finish_retirement().await.unwrap();
+        let (release, pending) = std::sync::mpsc::channel::<()>();
+        let reader = tokio::task::spawn_blocking(|| panic!("retained blocking failure"));
+        while !reader.is_finished() {
+            tokio::task::yield_now().await;
+        }
+        {
+            let mut tasks = channel.worker_tasks.lock().await;
+            tasks.reader = Some(reader);
+            tasks.writer = Some(tokio::task::spawn_blocking(move || {
+                pending.recv().unwrap();
+            }));
+            tasks.completion = None;
+        }
+        let mut attempt = Box::pin(channel.finish_retirement());
+        let mut cx = std::task::Context::from_waker(std::task::Waker::noop());
+        assert!(attempt.as_mut().poll(&mut cx).is_pending());
+        if timed_out {
+            assert!(tokio::time::timeout(Duration::from_millis(20), attempt)
+                .await
+                .is_err());
+        } else {
+            drop(attempt);
+        }
+        {
+            let tasks = channel.worker_tasks.lock().await;
+            assert!(tasks.reader.is_none());
+            assert!(tasks.writer.is_some());
+            assert!(
+                matches!(tasks.reader_outcome, Some(TaskOutcome::Failed(ref error))
+                if error.contains("retained blocking failure"))
+            );
+        }
+        release.send(()).unwrap();
+        let error = channel.finish_retirement().await.unwrap_err();
+        assert!(error.to_string().contains("retained blocking failure"));
+        let repeated = channel.finish_retirement().await.unwrap_err();
+        assert!(repeated.to_string().contains("retained blocking failure"));
+    }
 }
