@@ -1095,6 +1095,30 @@ where
         drop(removed);
     }
 
+    /// Prove that a complete retained ancestry excludes `block_id`.
+    ///
+    /// An acyclic chain can visit at most `blocks.len()` retained nodes.
+    /// Exhaustion or an absent node leaves ancestry indeterminate, not excluded.
+    fn ancestry_excludes_block<'a>(
+        &'a self,
+        mut current_id: &'a BlockIdT,
+        block_id: &BlockIdT,
+    ) -> bool {
+        for _ in 0..self.blocks.len() {
+            if current_id == block_id {
+                return false;
+            }
+            let Some(current) = self.blocks.get(current_id) else {
+                return false;
+            };
+            match current.parent_id.as_ref() {
+                Some(parent_id) => current_id = parent_id,
+                None => return true,
+            }
+        }
+        false
+    }
+
     /// Check if a block is safe to evict.
     ///
     /// A block is NOT safe to evict if:
@@ -1102,6 +1126,8 @@ where
     /// 2. It is an ancestor of the locked block (if we have a lock)
     /// 3. It is an ancestor of any block with own_qc (part of a 3-chain)
     /// 4. It is the locked block itself
+    /// Cyclic or missing locked/QC ancestry also prevents safe eviction from
+    /// being established. A complete acyclic chain must reach a parentless node.
     fn is_block_safe_to_evict(&self, block_id: &BlockIdT) -> bool {
         // 1. Check if block is committed
         if let Some(committed_height) = self.committed_height {
@@ -1114,21 +1140,8 @@ where
 
         // 2. Check if block is locked block or its ancestor
         if let Some(locked_qc) = &self.locked_qc {
-            let locked_block_id = &locked_qc.block_id;
-            if block_id == locked_block_id {
+            if !self.ancestry_excludes_block(&locked_qc.block_id, block_id) {
                 return false;
-            }
-            // Walk up from locked block to see if this block is an ancestor
-            let mut current_id = locked_block_id;
-            while let Some(current) = self.blocks.get(current_id) {
-                if let Some(parent_id) = &current.parent_id {
-                    if parent_id == block_id {
-                        return false;
-                    }
-                    current_id = parent_id;
-                } else {
-                    break;
-                }
             }
         }
 
@@ -1141,19 +1154,8 @@ where
 
         // 4. Check if block is an ancestor of any block with own_qc
         for (other_id, other_block) in &self.blocks {
-            if other_block.own_qc.is_some() {
-                // Walk up from this block to see if block_id is an ancestor
-                let mut current_id = other_id;
-                while let Some(current) = self.blocks.get(current_id) {
-                    if let Some(parent_id) = &current.parent_id {
-                        if parent_id == block_id {
-                            return false;
-                        }
-                        current_id = parent_id;
-                    } else {
-                        break;
-                    }
-                }
+            if other_block.own_qc.is_some() && !self.ancestry_excludes_block(other_id, block_id) {
+                return false;
             }
         }
 
@@ -2388,6 +2390,44 @@ mod received_vote_admission_tests {
             }])
             .expect("valid validator set"),
         )
+    }
+
+    #[test]
+    fn a33_f1_exact_retained_cardinality_reaches_root() {
+        let mut state = new_state();
+        for id in 1..=16 {
+            state.register_block(
+                [id; 32],
+                u64::from(id),
+                (id > 1).then_some([id - 1; 32]),
+                None,
+            );
+        }
+        assert!(state.ancestry_excludes_block(&[16; 32], &[99; 32]));
+        assert!(!state.ancestry_excludes_block(&[16; 32], &[1; 32]));
+        assert!(!state.ancestry_excludes_block(&[16; 32], &[16; 32]));
+        state.register_block([1; 32], 1, Some([16; 32]), None);
+        assert!(!state.ancestry_excludes_block(&[16; 32], &[99; 32]));
+        assert!(!new_state().ancestry_excludes_block(&[1; 32], &[99; 32]));
+    }
+
+    #[test]
+    fn a33_f1_leader_capacity_refusal_keeps_state_unchanged() {
+        let mut state = HotStuffStateEngine::with_limits(
+            new_state().validators().clone(),
+            ConsensusLimitsConfig {
+                max_pending_blocks: 1,
+                ..Default::default()
+            },
+        );
+        // Leader admission refuses at capacity without running eviction.
+        state.register_block([1; 32], 0, Some([1; 32]), None);
+        let before = format!("{state:?}");
+        assert!(matches!(
+            state.plan_leader_registration([0xFF; 32], 1, None, None),
+            Err(LeaderRegistrationRefusal::Capacity)
+        ));
+        assert_eq!(format!("{state:?}"), before);
     }
 
     #[test]

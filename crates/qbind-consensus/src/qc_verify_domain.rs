@@ -1460,6 +1460,240 @@ mod c3f_expected_charge_tests {
     }
 
     #[test]
+    fn a33_f1_indeterminate_ancestry_refuses_retention_without_mutation() {
+        use crate::hotstuff_state_engine::{EvidenceRetentionError, HotStuffStateEngine};
+        use crate::qc::QuorumCertificate;
+        use crate::received_vote_evidence::EvidenceBudget;
+        use crate::vote_accumulator::ConsensusLimitsConfig;
+
+        let fixture = uniform_fixture(4);
+        let domain = base_domain();
+        let qc = build_signed_qc(&fixture, &domain, &[0, 1, 2]);
+        let evidence = Arc::new(
+            verify_quorum_certificate_with_domain(
+                &qc,
+                &domain,
+                EPOCH,
+                &fixture.validators,
+                &fixture.kp,
+                &real_registry(),
+            )
+            .expect("genuine fixture QC"),
+        );
+        let charge = evidence.retained_byte_size().unwrap();
+        for shared in [false, true] {
+            for own_qc in [false, true] {
+                for shape in 0..3 {
+                    let capacity = if shape == 1 { 3 } else { 2 };
+                    let mut state = HotStuffStateEngine::with_limits(
+                        fixture.validators.clone(),
+                        ConsensusLimitsConfig {
+                            max_pending_blocks: capacity,
+                            ..Default::default()
+                        },
+                    );
+                    let budget = EvidenceBudget::try_new(u64::MAX, 0).unwrap();
+                    let empty_occupancy = budget.full_occupancy_for_test();
+                    if shared {
+                        state
+                            .install_received_vote_budget(budget.try_clone().unwrap())
+                            .unwrap();
+                    }
+                    let a = [0xA1; 32];
+                    let b = [0xA2; 32];
+                    let root = [0xA3; 32];
+                    let candidate = [0xA4; 32];
+                    let parent = match shape {
+                        0 => a,
+                        1 => b,
+                        _ => [0xFF; 32],
+                    };
+                    state
+                        .register_block_with_verified_justification(
+                            a,
+                            1,
+                            Some(parent),
+                            Arc::clone(&evidence),
+                        )
+                        .unwrap();
+                    if shape == 1 {
+                        state.register_block(b, 2, Some(a), None);
+                    }
+                    state.register_block(root, 0, None, None);
+                    if own_qc {
+                        for signer in 0..3 {
+                            state.on_vote(ValidatorId(signer), 1, &a).unwrap();
+                        }
+                        assert!(state.get_block(&a).unwrap().own_qc.is_some());
+                        state.set_locked_qc(QuorumCertificate::new(root, 0, vec![]));
+                    } else {
+                        state.set_locked_qc(QuorumCertificate::new(a, 1, vec![]));
+                    }
+                    let before = format!("{state:?}");
+                    let occupancy = budget.full_occupancy_for_test();
+                    assert!(
+                        state.can_admit_block_slot(&a),
+                        "replacement needs no new slot"
+                    );
+                    assert!(!state.can_admit_block_slot(&candidate));
+                    assert_eq!(
+                        state.register_block_with_verified_justification(
+                            candidate,
+                            3,
+                            Some(a),
+                            Arc::clone(&evidence),
+                        ),
+                        Err(EvidenceRetentionError::SlotCapacityUnavailable {
+                            block_count: capacity,
+                            max_pending_blocks: capacity,
+                        }),
+                    );
+                    assert_eq!(format!("{state:?}"), before);
+                    assert_eq!(budget.full_occupancy_for_test(), occupancy);
+                    assert_eq!(state.retained_evidence_bytes(), charge);
+                    assert_eq!(state.map_qc_charge_checked().unwrap(), charge);
+                    assert_eq!(state.evicted_blocks(), 0);
+                    assert!(state.get_block(&candidate).is_none());
+                    assert!(std::ptr::eq(
+                        state.verified_justification(&a).unwrap(),
+                        evidence.as_ref(),
+                    ));
+                    drop(state);
+                    assert_eq!(budget.full_occupancy_for_test(), empty_occupancy);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn a33_f1_verified_registration_reclaims_acyclic_evidence() {
+        use crate::hotstuff_state_engine::HotStuffStateEngine;
+        use crate::received_vote_evidence::EvidenceBudget;
+        use crate::vote_accumulator::ConsensusLimitsConfig;
+
+        let fixture = uniform_fixture(4);
+        let domain = base_domain();
+        let qc = build_signed_qc(&fixture, &domain, &[0, 1, 2]);
+        let evidence = Arc::new(
+            verify_quorum_certificate_with_domain(
+                &qc,
+                &domain,
+                EPOCH,
+                &fixture.validators,
+                &fixture.kp,
+                &real_registry(),
+            )
+            .unwrap(),
+        );
+        let charge = evidence.retained_byte_size().unwrap();
+        for shared in [false, true] {
+            let mut state = HotStuffStateEngine::with_limits(
+                fixture.validators.clone(),
+                ConsensusLimitsConfig {
+                    max_pending_blocks: 1,
+                    ..Default::default()
+                },
+            );
+            let budget = EvidenceBudget::try_new(u64::MAX, 0).unwrap();
+            let empty_occupancy = budget.full_occupancy_for_test();
+            if shared {
+                state
+                    .install_received_vote_budget(budget.try_clone().unwrap())
+                    .unwrap();
+            }
+            state
+                .register_block_with_verified_justification([1; 32], 1, None, Arc::clone(&evidence))
+                .unwrap();
+            let occupancy = budget.full_occupancy_for_test();
+            assert!(state.can_admit_block_slot(&[2; 32]));
+            state
+                .register_block_with_verified_justification(
+                    [2; 32],
+                    2,
+                    Some([1; 32]),
+                    Arc::clone(&evidence),
+                )
+                .unwrap();
+            assert!(state.get_block(&[1; 32]).is_none());
+            assert_eq!(state.get_block(&[2; 32]).unwrap().height, 1);
+            assert_eq!(state.evicted_blocks(), 1);
+            assert_eq!(state.retained_evidence_bytes(), charge);
+            assert_eq!(state.map_qc_charge_checked().unwrap(), charge);
+            assert_eq!(budget.full_occupancy_for_test(), occupancy);
+            drop(state);
+            assert_eq!(budget.full_occupancy_for_test(), empty_occupancy);
+        }
+    }
+
+    #[test]
+    fn a33_f1_verified_proposal_preflight_refuses_before_view_or_vote_effects() {
+        use crate::basic_hotstuff_engine::{BasicHotStuffEngine, VerifiedProposalIngestError};
+        use crate::qc::QuorumCertificate;
+        use crate::vote_accumulator::ConsensusLimitsConfig;
+        use qbind_wire::consensus::{BlockHeader, BlockProposal};
+
+        let fixture = uniform_fixture(4);
+        let domain = base_domain();
+        let qc = build_signed_qc(&fixture, &domain, &[0, 1, 2]);
+        let evidence = Arc::new(
+            verify_quorum_certificate_with_domain(
+                &qc,
+                &domain,
+                EPOCH,
+                &fixture.validators,
+                &fixture.kp,
+                &real_registry(),
+            )
+            .unwrap(),
+        );
+        let mut engine = BasicHotStuffEngine::with_state_limits(
+            ValidatorId(0),
+            fixture.validators.clone(),
+            ConsensusLimitsConfig {
+                max_pending_blocks: 1,
+                ..Default::default()
+            },
+        );
+        engine
+            .state_mut()
+            .register_block([1; 32], 1, Some([1; 32]), None);
+        engine
+            .state_mut()
+            .set_locked_qc(QuorumCertificate::new([1; 32], 1, vec![]));
+        let proposer = engine.leader_for_view(10);
+        let proposal = BlockProposal {
+            header: BlockHeader {
+                version: 1,
+                chain_id: WIRE_CHAIN,
+                epoch: EPOCH,
+                height: 10,
+                round: 10,
+                parent_block_id: [1; 32],
+                payload_hash: [0; 32],
+                proposer_index: proposer.0 as u16,
+                suite_id: TEST_SUITE_U16,
+                tx_count: 0,
+                timestamp: 0,
+                payload_kind: qbind_wire::PAYLOAD_KIND_NORMAL,
+                next_epoch: 0,
+                batch_commitment: [0; 32],
+            },
+            qc: Some(qc),
+            txs: vec![],
+            signature: vec![],
+        };
+        let before = format!("{engine:?}");
+        assert!(matches!(
+            engine.on_verified_proposal_event(proposer, &proposal, evidence),
+            Err(VerifiedProposalIngestError::RetentionCapacityUnavailable {
+                block_count: 1,
+                max_pending_blocks: 1,
+            }),
+        ));
+        assert_eq!(format!("{engine:?}"), before);
+    }
+
+    #[test]
     fn run422_f7_retained_qc_lookup_projection_and_ambiguity_are_deterministic() {
         use crate::hotstuff_state_engine::{HotStuffStateEngine, RetainedQcLookupError};
         use crate::qc::QuorumCertificate;
