@@ -4723,3 +4723,44 @@ as alternatives only; none is selected or approved.
 
 Independent contract review remains **PENDING**. Activation **DISABLED**;
 public DevNet **NO-GO**.
+
+
+## 28. A33-F1 stay-closed quarantine: pre-implementation contract
+
+**DESIGN ONLY — INDEPENDENT REVIEW PENDING.** This section records the
+owner-authorized preparation of a stay-closed contract; it does not approve
+or implement a marker, startup gate, recovery authority or deployment.
+A33-F1 / E27 and all other obligations remain **OPEN**; activation remains
+**DISABLED** and public DevNet remains **NO-GO**.
+
+The bounded, read-only feasibility inspection was against main
+`c9aaef40b045e896ddfa8b01bad230f6b680715e`; the existing task branch
+entered at `c07099b229563e7acd8a6253e3e6d28b309261d0`. The inspected
+catch-up handler lacks a dedicated marker; existing synced epoch operations
+and restore-record publication are precedents with different scopes.
+Ordinary startup currently spawns the optional metrics server before the
+ordinary restore guard and storage open. The P2P signer preflight and builder
+are later; the complete CLI and alternate-runtime ordering remains to be
+verified. The production Proposal/Vote signing journal is unwired, and the
+P2P facade/transport does not establish peer-delivery acknowledgement.
+
+The new [stay-closed contract](evidence/a33_f1/stay-closed-contract.md)
+defines a dedicated versioned marker interface and fail-closed handling for
+missing data directories, unavailable storage and uncertain synchronization;
+a startup gate before enabled metrics networking, signer preflight, P2P,
+consensus and snapshot tasks; and a per-domain ownership and unknown-outcome
+boundary for in-flight work. It calls for a separately reviewed CLI/mode
+matrix and does not treat a lock, marker or checksum as proof of currentness
+or exclusive signing. This first slice has no automatic clear or resume.
+
+Marker schema, durability profile, initialization/migration, startup-path
+coverage, process-wide barrier and effect-report interfaces remain blocking
+implementation dependencies. Independent currentness, anti-rollback,
+signer exclusivity, reconciliation and clear authority remain necessary
+before resumption; none is selected here. This design does not close
+A17-F1, E27, general capacity or any deployment/runtime evidence.
+
+No project tests, builds, nodes, process-crash experiments, operational
+signing or deployment were run for this documentation task. Existing
+historical evidence is retained; the new artifact is added to its checksum
+manifest. Independent contract review remains pending.
