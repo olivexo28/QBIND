@@ -5105,3 +5105,45 @@ codec, recovery, fencing or clear/resume is introduced. Alias coverage,
 durability and production startup safety are not established.
 A33-F1 / E27 and all other unresolved obligations remain **OPEN**;
 activation **DISABLED**; public DevNet **NO-GO**.
+
+## 38. Bounded authority-reset audit/marker separation correction
+
+**IMPLEMENTED — INDEPENDENT REVIEW PENDING.**
+Repository, existing task branch, exact local/remote tip
+`e8f58a5c391f282c1996f4306c02743ace056fa5`, tree
+`79d70e25bbdfeae5e3168d5f7c7ddb7887c20fb4`, parent
+`6597596abe69f739ec5d3130cdb20413f0cf0c36`, protected local/remote main
+and clean worktree/staging were verified before editing. Main remains
+`c9aaef40b045e896ddfa8b01bad230f6b680715e`.
+
+The reset orchestrator checks audit/marker path separation before input
+verification; the shared audit writer rechecks before every publication.
+It covers final and derived temporary paths, canonical parent spellings
+and existing hard-link identities. Unsafe/indeterminate paths return
+`UnsafeAuditPath` without attempting that audit publication. Supported
+profile: stable, operator-controlled Linux case-sensitive filesystem;
+no concurrent namespace/mount/hard-link mutation. Other targets refuse.
+Canonicalization and identity inspection do not defeat hostile races.
+Missing parents and non-regular leaves fail closed; this intentionally
+narrows the former audit-directory-creation behavior.
+
+[Correction evidence and limits](evidence/a33_f1/authority-reset-correction-evidence.md)
+retain exact commands, outputs and attempted coverage. **6 focused tests /
+18 isolated scenarios passed**, plus **18 existing authority-reset
+regressions**. Every corrected scenario preserves loadable marker bytes;
+safe distinct destinations retain the refusal audit. Intermediate and
+incompletely registered runs are retained separately, not called final
+coverage. Full successful reset remains **UNTESTED**; the guard precedes
+verification and is shared by pending/refused/success audit calls.
+The old two-test baseline and all historical bytes remain unchanged;
+that pass reproduced the defect and was not a security pass.
+
+Observable changes include unsafe-path error precedence, explicit data-dir
+binding in the writer, refusal on indeterminate/missing parents and surfaced
+refusal-audit publication errors. A returned error is not a general
+no-filesystem-effect guarantee after earlier audit/marker publication.
+Pending → marker → success ordering and marker codec remain unchanged.
+No quarantine store, startup gate, recovery/clear, currentness or fencing
+is introduced; no operational keys/signing, node/network or activation.
+Audit register and all other unresolved obligations are preserved.
+A33-F1 / E27 remain **OPEN**; activation **DISABLED**; public DevNet **NO-GO**.

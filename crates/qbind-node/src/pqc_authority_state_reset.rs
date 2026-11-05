@@ -56,8 +56,9 @@
 //! outcome. A crash before the audit record is written leaves the on-disk
 //! marker untouched.
 //!
-//! Refusal audit records are written with `result = "refused"` and a typed
-//! `refusal_reason`; the marker file is never touched on any refusal path.
+//! Refusal audits require established audit/marker path separation. Unsafe or
+//! indeterminate paths return `UnsafeAuditPath` without audit publication.
+//! Other failures after persistence do not imply an unchanged marker.
 //!
 //! # Determinism
 //!
@@ -108,10 +109,9 @@ pub const AUTHORITY_RESET_AUDIT_ACTION: &str = "authority_state_reset";
 
 /// Typed reason an offline authority-state reset attempt was refused.
 ///
-/// Every variant is fail-closed: the marker file is never written and the
-/// old marker bytes are never modified. An audit record is emitted with
-/// `result = "refused"` and the `refusal_reason` so operators have a paper
-/// trail. New variants may be added in future runs; stable string identifiers
+/// Verification does not modify marker bytes. A safely separated refusal audit
+/// is attempted, except when path separation itself refuses. I/O failures after
+/// marker persistence do not imply an unchanged marker. Stable string identifiers
 /// (from [`Self::stable_id`]) are part of the audit-log surface and MUST NOT
 /// be renamed without a documented schema migration.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -169,8 +169,10 @@ pub enum AuthorityResetRefusal {
     ExistingMarkerCorrupt(String),
     /// Audit output file could not be written.
     AuditWriteFailed(String),
-    /// Marker atomic persist failed. On-disk marker is unchanged (Run 117
-    /// tmp+rename never produces a partial file).
+    /// Audit/marker separation failed or could not be established; no audit
+    /// publication is attempted at this check.
+    UnsafeAuditPath(String),
+    /// Marker persist failed; an error after rename can leave new bytes visible.
     MarkerPersistFailed(String),
 }
 
@@ -200,6 +202,7 @@ impl AuthorityResetRefusal {
             Self::TargetMarkerDerivationFailed(_) => "TargetMarkerDerivationFailed",
             Self::ExistingMarkerCorrupt(_) => "ExistingMarkerCorrupt",
             Self::AuditWriteFailed(_) => "AuditWriteFailed",
+            Self::UnsafeAuditPath(_) => "UnsafeAuditPath",
             Self::MarkerPersistFailed(_) => "MarkerPersistFailed",
         }
     }
@@ -306,9 +309,10 @@ impl AuthorityResetRefusal {
                 s
             ),
             Self::AuditWriteFailed(s) => format!("audit record write failed: {}", s),
+            Self::UnsafeAuditPath(s) => format!("audit path separation refused: {}", s),
             Self::MarkerPersistFailed(s) => format!(
-                "authority marker atomic persist failed: {}. The on-disk marker file is \
-                 unchanged (Run 117 tmp+rename never produces a partial file)",
+                "authority marker persist failed: {}. An error after rename may leave \
+                 new marker bytes visible; inspect marker and audit before further action",
                 s
             ),
         }
@@ -921,11 +925,107 @@ pub fn build_refusal_audit_record(
     }
 }
 
-/// Persist an audit record atomically (tmp + rename).
+/// Check final and temporary audit/marker paths without creating anything.
+///
+/// Supported profile: Linux, case-sensitive filesystem, stable operator-owned
+/// directories and no concurrent namespace/hard-link changes. Parent symlinks
+/// are resolved; leaf symlinks/special files and unavailable parents refuse.
+/// Canonicalization/inode checks are not protection against hostile races.
+fn check_authority_reset_audit_path(
+    data_dir: &Path,
+    audit_path: &Path,
+) -> Result<(), AuthorityResetRefusal> {
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = (data_dir, audit_path);
+        Err(AuthorityResetRefusal::UnsafeAuditPath(
+            "path separation is supported only on the Linux profile".to_string(),
+        ))
+    }
+    #[cfg(target_os = "linux")]
+    {
+        use std::os::unix::fs::MetadataExt;
+
+        fn inspect(
+            path: &Path,
+        ) -> Result<(PathBuf, (u64, u64), Option<(u64, u64)>), AuthorityResetRefusal> {
+            let refuse = |detail| AuthorityResetRefusal::UnsafeAuditPath(detail);
+            let name = path
+                .file_name()
+                .ok_or_else(|| refuse(format!("no file name in {}", path.display())))?;
+            let parent = path
+                .parent()
+                .filter(|p| !p.as_os_str().is_empty())
+                .unwrap_or_else(|| Path::new("."));
+            let parent = std::fs::canonicalize(parent).map_err(|e| {
+                refuse(format!(
+                    "cannot resolve parent of {}: {}",
+                    path.display(),
+                    e
+                ))
+            })?;
+            let parent_meta = std::fs::metadata(&parent)
+                .map_err(|e| refuse(format!("cannot inspect {}: {}", parent.display(), e)))?;
+            if !parent_meta.is_dir() {
+                return Err(refuse(format!(
+                    "parent is not a directory: {}",
+                    parent.display()
+                )));
+            }
+            let resolved = parent.join(name);
+            let identity = match std::fs::symlink_metadata(&resolved) {
+                Ok(meta) if meta.is_file() => Some((meta.dev(), meta.ino())),
+                Ok(_) => {
+                    return Err(refuse(format!(
+                        "symlink or non-regular path: {}",
+                        resolved.display()
+                    )))
+                }
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
+                Err(e) => {
+                    return Err(refuse(format!(
+                        "cannot inspect {}: {}",
+                        resolved.display(),
+                        e
+                    )))
+                }
+            };
+            Ok((resolved, (parent_meta.dev(), parent_meta.ino()), identity))
+        }
+
+        let marker = authority_state_file_path(data_dir);
+        let mut marker_tmp = marker.as_os_str().to_owned();
+        marker_tmp.push(".tmp");
+        let paths = [
+            inspect(audit_path)?,
+            inspect(&audit_path.with_extension("json.tmp"))?,
+            inspect(&marker)?,
+            inspect(&PathBuf::from(marker_tmp))?,
+        ];
+        for (i, j) in [(0, 1), (0, 2), (0, 3), (1, 2), (1, 3)] {
+            if paths[i].0 == paths[j].0
+                || (paths[i].1 == paths[j].1 && paths[i].0.file_name() == paths[j].0.file_name())
+                || (paths[i].2.is_some() && paths[i].2 == paths[j].2)
+            {
+                return Err(AuthorityResetRefusal::UnsafeAuditPath(format!(
+                    "{} aliases {}",
+                    paths[i].0.display(),
+                    paths[j].0.display()
+                )));
+            }
+        }
+        Ok(())
+    }
+}
+
+/// Persist an audit record (tmp + rename) only after checking marker separation.
+/// An error after I/O is not a general no-filesystem-effect guarantee.
 pub fn write_authority_reset_audit(
+    data_dir: &Path,
     audit_path: &Path,
     record: &AuthorityResetAuditRecord,
 ) -> Result<(), AuthorityResetRefusal> {
+    check_authority_reset_audit_path(data_dir, audit_path)?;
     let bytes = record
         .to_canonical_json()
         .map_err(|e| AuthorityResetRefusal::AuditWriteFailed(format!("serialise: {}", e)))?;
@@ -976,10 +1076,20 @@ pub struct AuthorityResetSuccess {
 ///    via Run 117 [`persist_authority_state_atomic`], then finalise the
 ///    audit record as `"success"`.
 ///
-/// No disk write ever touches the marker file on any refusal path.
+/// Path-separation refusal attempts no audit write. Other I/O errors, especially
+/// after marker persistence, do not imply that the marker is unchanged.
 pub fn execute_authority_state_reset(
     inputs: &AuthorityResetInputs,
 ) -> Result<AuthorityResetSuccess, AuthorityResetRefusal> {
+    let data_dir = inputs
+        .data_dir
+        .as_ref()
+        .ok_or(AuthorityResetRefusal::MissingDataDir)?;
+    let audit_path = inputs
+        .audit_output_path
+        .as_ref()
+        .ok_or(AuthorityResetRefusal::AuditOutputMissing)?;
+    check_authority_reset_audit_path(data_dir, audit_path)?;
     // Step 1 — pure verification.
     let plan = match verify_authority_reset_inputs(inputs) {
         Ok(p) => p,
@@ -987,7 +1097,7 @@ pub fn execute_authority_state_reset(
             // Step 2 — write the refusal audit record where possible.
             if let Some(audit_path) = inputs.audit_output_path.as_ref() {
                 let record = build_refusal_audit_record(inputs, None, &refusal);
-                let _ = write_authority_reset_audit(audit_path, &record);
+                write_authority_reset_audit(data_dir, audit_path, &record)?;
             }
             return Err(refusal);
         }
@@ -1002,7 +1112,7 @@ pub fn execute_authority_state_reset(
 
     // Step 3a — write the "pending" audit record BEFORE marker persist.
     let pending_record = build_success_audit_record(&plan, PlanResultState::Pending);
-    if let Err(e) = write_authority_reset_audit(&audit_path, &pending_record) {
+    if let Err(e) = write_authority_reset_audit(data_dir, &audit_path, &pending_record) {
         // Marker is still untouched at this point.
         return Err(e);
     }
@@ -1013,13 +1123,13 @@ pub fn execute_authority_state_reset(
     {
         let refusal = AuthorityResetRefusal::MarkerPersistFailed(persist_err.to_string());
         let final_record = build_refusal_audit_record(inputs, Some(&plan), &refusal);
-        let _ = write_authority_reset_audit(&audit_path, &final_record);
+        write_authority_reset_audit(data_dir, &audit_path, &final_record)?;
         return Err(refusal);
     }
 
     // Step 3c — finalise the audit record as "success".
     let final_record = build_success_audit_record(&plan, PlanResultState::Success);
-    write_authority_reset_audit(&audit_path, &final_record)?;
+    write_authority_reset_audit(data_dir, &audit_path, &final_record)?;
 
     let new_marker_hash_hex = final_record
         .new_marker_hash
