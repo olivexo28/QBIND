@@ -1,0 +1,29 @@
+$ cargo test -p qbind-node --test a33_f1_authority_reset_quarantine_model_tests -- --ignored --exact negative_control_before_ownership_must_fail --nocapture --test-threads=1
+exit=101
+shared ordering checker rejected write before ownership
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 14 filtered out; finished in 0.00s
+
+$ cargo test -p qbind-node --test a33_f1_authority_reset_quarantine_model_tests -- --ignored --exact negative_control_before_classification_must_fail --nocapture --test-threads=1
+exit=101
+shared ordering checker rejected write before classification
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 14 filtered out; finished in 0.00s
+
+$ cargo test -p qbind-node --test a33_f1_authority_reset_quarantine_model_tests -- --ignored --exact negative_control_after_refusal_must_fail --nocapture --test-threads=1
+exit=101
+shared ordering checker rejected write after quarantine refusal
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 14 filtered out; finished in 0.00s
+
+$ cargo test -p qbind-node --test a33_f1_authority_reset_quarantine_model_tests -- --ignored --exact negative_control_after_passive_event_must_fail --nocapture --test-threads=1
+exit=101
+shared ordering checker rejected write after passive latch event
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 14 filtered out; finished in 0.00s
+
+$ cargo test -p qbind-node --test a33_f1_authority_reset_quarantine_model_tests -- --ignored --exact negative_control_after_passive_reclassification_must_fail --nocapture --test-threads=1
+exit=101
+shared ordering checker rejected write after passive event and attempted reclassification
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 14 filtered out; finished in 0.00s
+
+$ cargo test -p qbind-node --test a33_f1_authority_reset_quarantine_model_tests -- --ignored --exact negative_control_after_passive_restart_reacquire_reclassification_must_fail --nocapture --test-threads=1
+exit=101
+shared ordering checker rejected write after passive event, restart, reacquisition and reclassification
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 14 filtered out; finished in 0.00s

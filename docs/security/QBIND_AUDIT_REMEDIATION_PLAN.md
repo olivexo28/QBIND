@@ -5392,3 +5392,42 @@ executed by the model. Abstract restart, paths and authorization do not prove
 process-crash, filesystem, durability, actual startup, signer-fencing or
 production-quarantine behavior. A33-F1 / E27 remain **OPEN**; activation
 **DISABLED**; public DevNet **NO-GO**.
+
+## 45. Passive-event latch coverage in reset quarantine trace checker
+
+**CORRECTED TEST MODEL — INDEPENDENT REVIEW PENDING.** Entry checks matched
+task tip `9fc107c9717e6b71ac7f694a0c3472d7d2f2608d`, tree
+`c5b7893cfaabd3a4da59b536335f1bb83746d4e1`, clean worktree/staging, remote
+task tip, and protected local/remote main
+`c9aaef40b045e896ddfa8b01bad230f6b680715e`.
+
+The shared model trace checker now treats every `PassiveStatus` as
+latch-setting, consistent with `passive_event()` for every status. It
+rejects deliberately defective writes after passive events, including
+after attempted reclassification and after restart/reacquisition/
+reclassification. All six modeled write stages are included in complete
+model-generated trace validation after write attempts. The explicitly
+hypothetical, unlatched positive sequence remains accepted.
+
+Historical correction: the prior correction evidence described the latch
+test as beginning with Applying/no authority. The test actually begins with
+`LocalCleanLooking` and no separate authority, which refuses and latches.
+The historical evidence bytes remain unchanged; the append-only correction
+record states the accurate setup.
+
+Focused model suite: **9 passed, 0 failed, 6 ignored**. Each of the six
+deliberately defective sensitivity children separately exited **101** with
+the expected shared-checker diagnostic; their output is retained separately.
+Targeted formatting, whitespace, exact scope and historical-aware checksum
+checks are documented in
+[the correction evidence](evidence/a33_f1/authority-reset-quarantine-trace-checker-correction-evidence.md).
+The ordinary checksum command is expected to report the two preserved
+historical source hashes as mismatches against the now-changed current file;
+each historical hash is verified against its own revision and the current
+hash against current bytes.
+
+This remains a self-contained model and does not establish production
+quarantine, actual CLI/filesystem behavior, process restart or durable
+persistence. No production storage, startup gate, clear/resume authority,
+signer fencing or network behavior was added. A33-F1 / E27 remain **OPEN**;
+activation **DISABLED**; public DevNet **NO-GO**.

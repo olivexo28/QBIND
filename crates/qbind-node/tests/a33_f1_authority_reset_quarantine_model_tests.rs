@@ -46,6 +46,7 @@ enum Event {
     OwnershipAcquired,
     OwnershipFailed,
     QuarantineClassified(Observation, Decision),
+    ResetWriteAttempted(WriteStage, PathBuf, bool),
     ResetWriteInvoked(WriteStage, PathBuf),
     WriteRefusedByPathGuard(WriteStage),
     Restarted,
@@ -121,11 +122,16 @@ impl ResetModel {
         quarantine_paths: &[PathBuf],
         separation: Separation,
     ) -> bool {
-        if self.quarantine_latched
-            || !self.ownership
-            || !self.classified
-            || self.decision != Some(Decision::HypotheticallyAuthorize)
-        {
+        let eligible = !self.quarantine_latched
+            && self.ownership
+            && self.classified
+            && self.decision == Some(Decision::HypotheticallyAuthorize);
+        if !eligible {
+            self.events.push(Event::ResetWriteAttempted(
+                stage,
+                destination.to_path_buf(),
+                false,
+            ));
             return false;
         }
         if separation != Separation::Separate
@@ -134,8 +140,18 @@ impl ResetModel {
                 .any(|protected| lexical_identity(destination) == lexical_identity(protected))
         {
             self.events.push(Event::WriteRefusedByPathGuard(stage));
+            self.events.push(Event::ResetWriteAttempted(
+                stage,
+                destination.to_path_buf(),
+                false,
+            ));
             return false;
         }
+        self.events.push(Event::ResetWriteAttempted(
+            stage,
+            destination.to_path_buf(),
+            true,
+        ));
         self.events
             .push(Event::ResetWriteInvoked(stage, destination.to_path_buf()));
         true
@@ -195,6 +211,11 @@ fn trace_is_valid(trace: &[Event]) -> bool {
                     return false;
                 }
             }
+            Event::ResetWriteAttempted(_, _, admitted) => {
+                if *admitted && (!ownership || !classified || !authorized || latched) {
+                    return false;
+                }
+            }
             Event::Restarted => {
                 ownership = false;
                 classified = false;
@@ -202,8 +223,8 @@ fn trace_is_valid(trace: &[Event]) -> bool {
             }
             Event::DataDirectoryCreated
             | Event::LockFileCreated
-            | Event::WriteRefusedByPathGuard(_)
-            | Event::PassiveStatus(_) => {}
+            | Event::WriteRefusedByPathGuard(_) => {}
+            Event::PassiveStatus(_) => latched = true,
         }
     }
     true
@@ -273,6 +294,7 @@ fn ownership_then_classification_then_authorization_precedes_every_reset_write()
     for (stage, path) in &paths {
         assert!(model.admit_write(*stage, path, &[], Separation::Separate,));
     }
+    assert!(trace_is_valid(&model.events));
     let classified_at = model
         .events
         .iter()
@@ -312,6 +334,7 @@ fn ownership_failure_skips_classification_and_reset_writes_but_records_setup_eff
         Event::QuarantineClassified(..) | Event::ResetWriteInvoked(..)
     )));
     assert!(model.events.contains(&Event::OwnershipFailed));
+    assert!(trace_is_valid(&model.events));
     println!("MODEL PASS: directory/lock setup artifacts distinct; ownership failure skips classification and writes");
 }
 
@@ -344,6 +367,7 @@ fn every_local_observation_refuses_without_invoking_any_reset_write() {
         model.passive_event("outbound-enqueued");
         model.restart();
         assert!(model.quarantine_latched, "{observation:?}");
+        assert!(trace_is_valid(&model.events), "{observation:?}");
     }
     println!("MODEL PASS: 10 local observations refuse; no reset write invoked; success/refusal/audit/marker/restart do not clear latch");
 }
@@ -421,6 +445,7 @@ fn reset_write_destinations_cannot_alias_synthetic_quarantine_record_or_publish_
             .events
             .iter()
             .any(|event| matches!(event, Event::ResetWriteInvoked(..))));
+        assert!(trace_is_valid(&model.events), "{name}");
         println!("MODEL PASS path case {name}: no write admitted");
     }
     // Exercise every instrumented reset stage against each reserved
@@ -443,24 +468,47 @@ fn reset_write_destinations_cannot_alias_synthetic_quarantine_record_or_publish_
                 !model.admit_write(stage, protected, &quarantine_paths, Separation::Separate),
                 "{stage:?} overwrote {protected:?}"
             );
+            assert!(trace_is_valid(&model.events));
         }
     }
 }
 
 #[test]
 fn cancellation_timeout_and_enqueue_are_not_completion_observations() {
-    let mut model = ResetModel::default();
-    model.quarantine_latched = true;
     for status in [
+        "audit-published",
+        "marker-replaced",
+        "cancellation-requested",
         "signing-cancel-requested",
         "storage-timeout",
         "outbound-enqueued",
         "worker-completion-unknown",
+        "refusal-audit-published",
+        "pending-audit-published",
+        "final-audit-published",
+        "authority-marker-replaced",
+        "marker-persistence-acknowledged",
     ] {
+        let mut model = ResetModel::default();
+        model.setup_destination(true);
+        assert_eq!(
+            model.classify(
+                Observation::LocalCleanLooking,
+                SeparateAuthority::HypotheticalApprovedCurrentAndReconciled
+            ),
+            Decision::HypotheticallyAuthorize
+        );
         model.passive_event(status);
         assert!(model.quarantine_latched);
+        let mut trace = model.events.clone();
+        trace.push(Event::ResetWriteInvoked(
+            WriteStage::RefusalAuditFinal,
+            PathBuf::from("/synthetic-reset-model/reset-audit.json"),
+        ));
+        assert!(!trace_is_valid(&trace), "{status}");
+        assert!(trace_is_valid(&model.events), "{status}");
     }
-    println!("MODEL PASS: passive cancellation/timeout/enqueue/unknown statuses retain quarantine");
+    println!("MODEL PASS: all 12 modeled passive statuses latch quarantine and make later writes invalid");
 }
 
 #[test]
@@ -514,6 +562,7 @@ fn reset_success_audit_marker_replacement_and_restart_never_clear_latched_quaran
     }
     model.restart();
     assert!(model.quarantine_latched);
+    assert!(trace_is_valid(&model.events));
     println!("MODEL PASS: first refusal latches; later hypothetical Clean classification and all six writes refuse; reset/audit/marker/restart do not clear latch");
 }
 
@@ -545,6 +594,7 @@ fn restart_invalidates_process_local_authorization_until_reacquired_and_reclassi
     for (stage, path) in reset_write_paths(root) {
         assert!(model.admit_write(stage, &path, &[], Separation::Separate));
     }
+    assert!(trace_is_valid(&model.events));
     println!("MODEL PASS: restart invalidates ownership/classification/authorization; reacquisition permits only unlatched hypothetical control");
 }
 
@@ -559,6 +609,52 @@ fn defective_trace(kind: &str) -> Vec<Event> {
         "after-refusal" => vec![
             Event::OwnershipAcquired,
             Event::QuarantineClassified(Observation::Applying, Decision::Refuse),
+            write,
+        ],
+        "after-passive-event" => vec![
+            Event::OwnershipAcquired,
+            Event::QuarantineClassified(
+                Observation::LocalCleanLooking,
+                Decision::HypotheticallyAuthorize,
+            ),
+            Event::PassiveStatus("storage-timeout"),
+            Event::ResetWriteAttempted(
+                WriteStage::RefusalAuditFinal,
+                PathBuf::from("/synthetic-reset-model/reset-audit.json"),
+                true,
+            ),
+            write,
+        ],
+        "after-passive-reclassification" => vec![
+            Event::OwnershipAcquired,
+            Event::QuarantineClassified(
+                Observation::LocalCleanLooking,
+                Decision::HypotheticallyAuthorize,
+            ),
+            Event::PassiveStatus("outbound-enqueued"),
+            Event::QuarantineClassified(Observation::LocalCleanLooking, Decision::Refuse),
+            Event::ResetWriteAttempted(
+                WriteStage::RefusalAuditFinal,
+                PathBuf::from("/synthetic-reset-model/reset-audit.json"),
+                true,
+            ),
+            write,
+        ],
+        "after-passive-restart-reacquire-reclassification" => vec![
+            Event::OwnershipAcquired,
+            Event::QuarantineClassified(
+                Observation::LocalCleanLooking,
+                Decision::HypotheticallyAuthorize,
+            ),
+            Event::PassiveStatus("worker-completion-unknown"),
+            Event::Restarted,
+            Event::OwnershipAcquired,
+            Event::QuarantineClassified(Observation::LocalCleanLooking, Decision::Refuse),
+            Event::ResetWriteAttempted(
+                WriteStage::RefusalAuditFinal,
+                PathBuf::from("/synthetic-reset-model/reset-audit.json"),
+                true,
+            ),
             write,
         ],
         _ => panic!("unknown defective trace"),
@@ -579,10 +675,17 @@ fn shared_trace_checker_accepts_valid_order_and_rejects_all_defective_orders() {
         ),
     ];
     assert!(trace_is_valid(&valid));
-    for kind in ["before-ownership", "before-classification", "after-refusal"] {
+    for kind in [
+        "before-ownership",
+        "before-classification",
+        "after-refusal",
+        "after-passive-event",
+        "after-passive-reclassification",
+        "after-passive-restart-reacquire-reclassification",
+    ] {
         assert!(!trace_is_valid(&defective_trace(kind)), "{kind}");
     }
-    println!("MODEL PASS: shared trace checker accepts valid sequence and rejects writes before ownership, before classification and after refusal");
+    println!("MODEL PASS: shared trace checker accepts valid sequence and rejects all six defective orderings, including writes after passive latch events");
 }
 
 #[test]
@@ -613,6 +716,35 @@ fn negative_control_after_refusal_must_fail() {
 }
 
 #[test]
+#[ignore = "parent test launches this deliberately defective ordering as a sensitivity control"]
+fn negative_control_after_passive_event_must_fail() {
+    assert!(
+        trace_is_valid(&defective_trace("after-passive-event")),
+        "shared ordering checker rejected write after passive latch event"
+    );
+}
+
+#[test]
+#[ignore = "parent test launches this deliberately defective ordering as a sensitivity control"]
+fn negative_control_after_passive_reclassification_must_fail() {
+    assert!(
+        trace_is_valid(&defective_trace("after-passive-reclassification")),
+        "shared ordering checker rejected write after passive event and attempted reclassification"
+    );
+}
+
+#[test]
+#[ignore = "parent test launches this deliberately defective ordering as a sensitivity control"]
+fn negative_control_after_passive_restart_reacquire_reclassification_must_fail() {
+    assert!(
+        trace_is_valid(&defective_trace(
+            "after-passive-restart-reacquire-reclassification"
+        )),
+        "shared ordering checker rejected write after passive event, restart, reacquisition and reclassification"
+    );
+}
+
+#[test]
 fn negative_control_children_fail_and_corrected_shared_checker_passes() {
     use std::process::Command;
 
@@ -628,6 +760,18 @@ fn negative_control_children_fail_and_corrected_shared_checker_passes() {
         (
             "negative_control_after_refusal_must_fail",
             "shared ordering checker rejected write after quarantine refusal",
+        ),
+        (
+            "negative_control_after_passive_event_must_fail",
+            "shared ordering checker rejected write after passive latch event",
+        ),
+        (
+            "negative_control_after_passive_reclassification_must_fail",
+            "shared ordering checker rejected write after passive event and attempted reclassification",
+        ),
+        (
+            "negative_control_after_passive_restart_reacquire_reclassification_must_fail",
+            "shared ordering checker rejected write after passive event, restart, reacquisition and reclassification",
         ),
     ] {
         let output = Command::new(std::env::current_exe().unwrap())
