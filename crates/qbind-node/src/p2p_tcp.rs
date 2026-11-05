@@ -1380,12 +1380,6 @@ impl TcpKemTlsP2pService {
     async fn dial_peer(&self, peer_addr: String) -> Result<(), P2pTransportError> {
         println!("[P2P] Dialing {}", peer_addr);
 
-        // Connect via TCP
-        let stream = TcpStream::connect(&peer_addr).await?;
-
-        // Convert to std::net::TcpStream for KEMTLS handshake
-        let _std_stream = stream.into_std().map_err(P2pTransportError::Io)?;
-
         // B7: clone the template `client_cfg` and, if a per-peer override
         // exists for this address, replace `peer_kem_pk` (so the KEMTLS
         // KEM ciphertext actually encapsulates to the peer's static
@@ -2456,10 +2450,6 @@ impl DialerHandle {
         // which already holds its own crypto reference).
         let _crypto: &Arc<dyn CryptoProvider> = &self.crypto;
 
-        // Connect via TCP
-        let stream = TcpStream::connect(&peer_addr).await?;
-        let _std_stream = stream.into_std().map_err(P2pTransportError::Io)?;
-
         // Build the per-peer ClientConnectionConfig (B7).
         let client_cfg = {
             let mut cfg = self.client_cfg.clone();
@@ -3413,5 +3403,171 @@ mod peer_retirement_tests {
         use tokio::io::AsyncReadExt;
         let mut bytes = Vec::new();
         remote.read_to_end(&mut bytes).await.unwrap();
+    }
+
+    async fn outbound_single_connection(retry_path: bool, budget: usize) {
+        let mut service = service();
+        let harness = Harness::for_service(&service);
+        let dialer = service.dialer_handle();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap().to_string();
+        let server_cfg = service.server_cfg.clone();
+        let server = async move {
+            let mut workers = tokio::task::JoinSet::new();
+            let mut accepted = 0;
+            let mut rejected = 0;
+            let channel = loop {
+                tokio::select! {
+                    incoming = listener.accept() => {
+                        let (stream, _) = incoming.unwrap();
+                        accepted += 1;
+                        if accepted > budget {
+                            rejected += 1;
+                            drop(stream);
+                            continue;
+                        }
+                        let cfg = server_cfg.clone();
+                        workers.spawn_blocking(move || {
+                            let stream = stream.into_std().unwrap();
+                            stream.set_nonblocking(false).unwrap();
+                            stream.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
+                            SecureChannel::from_accepted(stream, cfg)
+                        });
+                    }
+                    result = workers.join_next(), if !workers.is_empty() => {
+                        match result.unwrap().unwrap() {
+                            Ok(channel) => break Ok(channel),
+                            Err(error) if workers.is_empty() => break Err(error),
+                            Err(_) => {}
+                        }
+                    }
+                }
+            };
+            while workers.join_next().await.is_some() {}
+            (accepted, rejected, channel)
+        };
+        let dial = async {
+            if retry_path {
+                dialer.dial_once(addr).await
+            } else {
+                service.dial_peer(addr).await
+            }
+        };
+        let (dial_result, (accepted, rejected, channel)) =
+            tokio::time::timeout(Duration::from_secs(6), async { tokio::join!(dial, server) })
+                .await
+                .unwrap();
+        println!(
+            "outbound retry_path={retry_path} budget={budget} accepted={accepted} \
+             rejected={rejected} dial_ok={} handshake_ok={}",
+            dial_result.is_ok(),
+            channel.is_ok()
+        );
+        // Observe cleanup even when the baseline dial/handshake failed.
+        service.shutdown().await;
+        assert_eq!(accepted, 1, "one accepted socket per outbound attempt");
+        assert_eq!(rejected, 0, "one-slot admission budget must suffice");
+        dial_result.expect("outbound entry point should complete handshake");
+        let channel = channel.expect("the sole accepted socket must carry KEMTLS");
+        expect_remote_eof(channel).await;
+        assert_registry_count(&harness, 0);
+        assert!(harness.peers.read().handshakes.is_empty());
+    }
+
+    #[tokio::test]
+    async fn outbound_service_single_connection_carries_handshake() {
+        outbound_single_connection(false, usize::MAX).await;
+    }
+
+    #[tokio::test]
+    async fn outbound_retry_single_connection_carries_handshake() {
+        outbound_single_connection(true, usize::MAX).await;
+    }
+
+    #[tokio::test]
+    async fn outbound_service_single_connection_budget() {
+        outbound_single_connection(false, 1).await;
+    }
+
+    #[tokio::test]
+    async fn outbound_retry_single_connection_budget() {
+        outbound_single_connection(true, 1).await;
+    }
+
+    async fn outbound_entry_cancellation(retry_path: bool) {
+        use tokio::io::AsyncReadExt;
+
+        let mut service = service();
+        let harness = Harness::for_service(&service);
+        let dialer = service.dialer_handle();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap().to_string();
+        let mut remote = {
+            let dial = async {
+                if retry_path {
+                    dialer.dial_once(addr).await
+                } else {
+                    service.dial_peer(addr).await
+                }
+            };
+            tokio::pin!(dial);
+            let (mut remote, _) = tokio::select! {
+                incoming = listener.accept() => incoming.unwrap(),
+                result = &mut dial => panic!("dial completed without server handshake: {result:?}"),
+            };
+            tokio::time::timeout(Duration::from_secs(3), async {
+                tokio::select! {
+                    result = &mut dial => panic!("pending handshake completed: {result:?}"),
+                    result = remote.read_u8() => { result.expect("first socket carries handshake bytes"); }
+                }
+                assert_eq!(harness.peers.read().handshakes.len(), 1);
+                assert!(harness.peers.read().active.is_empty());
+            })
+            .await
+            .unwrap();
+            remote
+            // Dropping this scope cancels the actual entry-point future.
+        };
+        let owner = Arc::clone(harness.peers.read().handshakes.values().next().unwrap());
+        assert!(owner.task.lock().await.is_some());
+        assert_eq!(harness.peers.read().handshakes.len(), 1);
+        service.shutdown().await;
+        assert!(owner.task.lock().await.is_none());
+        assert!(harness.peers.read().handshakes.is_empty());
+        assert_registry_count(&harness, 0);
+        assert!(harness.peers.read().closed);
+        let mut remaining = Vec::new();
+        tokio::time::timeout(Duration::from_secs(3), remote.read_to_end(&mut remaining))
+            .await
+            .unwrap()
+            .unwrap();
+        let refused = if retry_path {
+            dialer
+                .dial_once(listener.local_addr().unwrap().to_string())
+                .await
+        } else {
+            service
+                .dial_peer(listener.local_addr().unwrap().to_string())
+                .await
+        };
+        assert!(matches!(
+            refused,
+            Err(P2pTransportError::SessionRetirement(_))
+        ));
+        assert!(
+            tokio::time::timeout(Duration::from_millis(50), listener.accept())
+                .await
+                .is_err()
+        );
+    }
+
+    #[tokio::test]
+    async fn outbound_service_cancellation_retains_handshake_owner() {
+        outbound_entry_cancellation(false).await;
+    }
+
+    #[tokio::test]
+    async fn outbound_retry_cancellation_retains_handshake_owner() {
+        outbound_entry_cancellation(true).await;
     }
 }
