@@ -2942,8 +2942,7 @@ mod peer_retirement_tests {
             Some(TaskOutcome::Completed)
         ));
         let workers = owner.channel.worker_outcomes_for_test().await;
-        assert!(workers.0.is_some());
-        assert!(workers.1.is_some());
+        assert_eq!(workers, (Some("completed"), Some("completed")));
         assert!(owner
             .read_failure
             .lock()
@@ -2972,6 +2971,10 @@ mod peer_retirement_tests {
         .expect("registered read loop should observe frame-decode failure");
         owner.finish_and_wait().await.unwrap();
         assert_eq!(harness.connections_current.load(Ordering::Relaxed), 0);
+        assert_eq!(
+            owner.channel.worker_outcomes_for_test().await,
+            (Some("completed"), Some("completed"))
+        );
         assert!(owner
             .read_failure
             .lock()
