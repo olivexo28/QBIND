@@ -1,0 +1,3 @@
+PASS: 6 local documentation links; 10 source anchor groups.
+PASS: historical plan/manifest prefixes and evidence/register/crates bytes preserved.
+PASS: balanced code fences; proposal status present. No Rust or runtime tests run.

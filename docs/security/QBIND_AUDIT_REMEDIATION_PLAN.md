@@ -4930,3 +4930,43 @@ durability, restart safety, signer fencing or actual node enforcement.
 A33-F1 / E27 and all other unresolved obligations remain **OPEN**;
 independent review **PENDING**; activation **DISABLED**; public DevNet
 **NO-GO**.
+
+## 33. A33-F1 / E27 proposed concrete storage candidate
+
+**STORAGE DESIGN PROPOSED — INDEPENDENT REVIEW PENDING.** Repository,
+branch, exact task tip/tree, clean worktree/staging, remote task and protected
+local/remote main were verified at
+`cbb66b1fe63d37909718e27a037b973dc6009508`, tree
+`1d5922681ece5ff90d0ad9b858c2ced2d18bf33d`; main remains
+`c9aaef40b045e896ddfa8b01bad230f6b680715e`.
+
+The [candidate design and acceptance matrix](evidence/a33_f1/storage-candidate-design.md)
+compares a dedicated consensus RocksDB namespace with an external marker.
+It recommends the external marker as **PROPOSED**, primarily to permit
+bounded existing-only inspection before a potentially creating DB open.
+Neither current backend meets the boundary unchanged. Proposed format,
+64-KiB storage bound, identity allocation/binding, handle continuity,
+publication/sync sequence, durability profile and startup order all require
+review and evidence; none is approved or implemented.
+
+Source facts are pinned separately from design and assumptions. The document
+addresses visible-before-error publication, active-owner rejection latching,
+caller-owned unrecorded effects, partial prefixes, local-lock/copy limits,
+ordinary/restore startup and optional metrics ordering. The matrix names
+failpoint, input, observable result and required layer. Recording/initialization
+decisions are separate from later currentness, signer-exclusivity,
+reconciliation and clear/resume authority; no such authority is selected.
+
+The owner's supplied Phase 1 acceptance is attributed as user-supplied
+pre-implementation review, not backend approval. The supplied source/evidence
+review of the 19-test correction did not independently rerun Rust tests.
+No reviewer identity/raw artifact is invented. Prior author test results
+remain historical, not validation of the proposed storage backend.
+
+Documentation links, source anchors, append-only preservation, whitespace and
+checksums were checked; [commands and hashes](evidence/a33_f1/storage-candidate-checks.txt)
+record the scope. No Rust tests, backend/process/power-loss experiments,
+binary, live network, signing or deployment ran for this documentation task.
+Historical plan/evidence bytes and audit register remain preserved.
+A33-F1 / E27 and all other unresolved obligations remain **OPEN**;
+activation **DISABLED**; public DevNet **NO-GO**.

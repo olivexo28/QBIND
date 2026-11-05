@@ -1,0 +1,96 @@
+A33-F1 / E27 proposed storage design: documentation checks and hashes
+
+STORAGE DESIGN PROPOSED -- INDEPENDENT REVIEW PENDING.
+A33-F1 / E27 and all other unresolved obligations OPEN.
+Activation DISABLED; public DevNet NO-GO.
+
+Entry commit: cbb66b1fe63d37909718e27a037b973dc6009508
+Entry tree: 1d5922681ece5ff90d0ad9b858c2ced2d18bf33d
+Protected local/remote main: c9aaef40b045e896ddfa8b01bad230f6b680715e
+Repository/branch/tip/tree, clean worktree/staging and remote task verified
+before editing; no divergence or fast-forward. Only documentation changes.
+
+Candidate design SHA-256:
+e78a465d3c66a1dc0f9a65e09903c6d50b820f5510437b27cdd29e27f501d660
+  docs/security/evidence/a33_f1/storage-candidate-design.md
+
+Inspected source SHA-256 at entry (source remains unchanged):
+c401479dcc3d40bcc208c3f2a098f49026cc82c4481f996f37d8dfc36f21af9a
+  crates/qbind-node/src/storage.rs
+732f09eab5b65897cf79010f2a2358ba5ee4191c773e82441f5185ae341e82ec
+  crates/qbind-node/src/production_consensus_storage.rs
+a459f4f498c8d908ffa81ef9c46370efa74b5affd47a812c55ab8979671e2b8d
+  crates/qbind-node/src/restore_completion.rs
+0018b1d4f8b57da5eb89e5d27a761adaea367eb6a2866d4ac8a7a986f707fb9a
+  crates/qbind-node/src/main.rs
+87a6dc3870308838c58cb1ecfe8ca3f527b941517dcf3735cdf596c2005d06f7
+  crates/qbind-node/src/binary_consensus_loop.rs
+d37b522a478d524962c1d62b08ca111ffffa2392a6911453b7b8b584a28568e3
+  crates/qbind-consensus/src/basic_hotstuff_engine.rs
+23fa1680b367a03bd02d09f1c5a2b16b62c2809bc1550a3e82c9b6eb2ad30041
+  crates/qbind-consensus/tests/a33_f1_quarantine_store_interface_tests.rs
+
+Documentation validation, from /workspaces/QBIND/olivexo28/QBIND:
+
+python - <<'PY'
+import pathlib, re, subprocess
+base = 'cbb66b1fe63d37909718e27a037b973dc6009508'
+plan = pathlib.Path('docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md')
+manifest = pathlib.Path('docs/security/evidence/a33_f1/SHA256SUMS')
+design = pathlib.Path('docs/security/evidence/a33_f1/storage-candidate-design.md')
+for path in (plan, manifest):
+    old = subprocess.check_output(['git', 'show', f'{base}:{path}'])
+    assert path.read_bytes().startswith(old), path
+historical = subprocess.check_output([
+    'git', 'ls-tree', '-r', '--name-only', base,
+    'docs/security/evidence/a33_f1', 'Audit/QBIND_SECURITY_FINDINGS_REGISTER.md'
+]).decode().splitlines()
+for name in historical:
+    if name != str(manifest):
+        assert pathlib.Path(name).read_bytes() == subprocess.check_output(
+            ['git', 'show', f'{base}:{name}']), name
+subprocess.run(['git', 'diff', '--exit-code', base, '--', 'crates'], check=True)
+links = 0
+for path, text in (
+    (design, design.read_text()),
+    (plan, plan.read_text().split('## 33. A33-F1', 1)[1]),
+):
+    for target in re.findall(r'\[[^\]]+\]\(([^)]+)\)', text):
+        assert '://' not in target, target
+        assert (path.parent / target).is_file(), (path, target)
+        links += 1
+anchors = re.findall(r'`(crates/[^`:]+):(\d+)(?:-(\d+))?[^`]*`', design.read_text())
+for name, start, end in anchors:
+    count = len(pathlib.Path(name).read_text().splitlines())
+    assert 1 <= int(start) <= int(end or start) <= count, (name, start, end)
+assert design.read_text().count('```') % 2 == 0
+assert 'STORAGE DESIGN PROPOSED' in design.read_text()
+print(f'PASS: {links} local documentation links; {len(anchors)} source anchor groups.')
+print('PASS: historical plan/manifest prefixes and evidence/register/crates bytes preserved.')
+print('PASS: balanced code fences; proposal status present. No Rust or runtime tests run.')
+PY
+
+Result: exit 0. Output retained in storage-candidate-doc-checks.log.
+This checks link existence and source line-range validity, not semantic
+correctness of the proposal or comprehensive Markdown rendering. Source
+statements were inspected directly; no repository Markdown checker was
+found in the bounded filename search for markdownlint/lychee/remark.
+
+Additional exact commands:
+  git diff --check
+  git diff --cached --check
+  (cd docs/security/evidence/a33_f1 && sha256sum -c SHA256SUMS)
+Results: exit 0. Manifest includes new design, this check record and raw
+documentation check output; old entries retained. No whitespace exception
+is needed for these documentation additions.
+
+No Rust tests/builds, new prototype controls, real-backend failpoints,
+binary startup, process-kill/restart, power-loss, concurrent-process,
+network, signer or deployment experiments were run. This documentation task
+does not rerun or relabel historical passing tests. Every implementation
+acceptance matrix experiment is proposed, not executed.
+
+Only the existing task branch is committed and pushed. Final commit/tree/
+parent, changed paths and hashes are reported after commit; remote equality,
+unchanged protected main and clean worktree are checked. No self-referential
+commit or evidence hash is asserted in this file.
