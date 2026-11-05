@@ -1,0 +1,331 @@
+A33-F1 / A17-F1 catch-up containment contract review proposal (v2)
+
+Status: DOCUMENTATION / CONTRACT PROPOSAL ONLY. Owner direction for contract
+design is acknowledged; no implementation/deployment approval is inferred.
+No production source or tests changed and no tests were run for this follow-up.
+The exact six baseline timeouts and six corrected returns from section 24
+remain untouched and retain their original meaning.
+
+Verified entry:
+  repository olivexo28/QBIND
+  branch copilot/a33-f1-bounded-eviction
+  expected tip 74c692bb57b306ab8e1d4628e1f5836e4200a61d
+  protected main c9aaef40b045e896ddfa8b01bad230f6b680715e
+  worktree clean; remote refs equal those values before review.
+Source under review is the existing implementation producer
+38a0180c3905d02ff252f4b98915265271c730b4, not a new source revision.
+
+Controlling review inputs:
+- Project-owner direction supplied in the current task: no new catch-up
+  block/signers without an obtainable safe slot; truthful effects; include
+  the current block; unresolved partial results cannot resume normal
+  participation before anchor/view/retry/safety reconciliation; other legacy
+  registration remains separate.
+- Audit register at the protected main: A5.3 A:L15337-L15465 and A22.1-C2/C3
+  A:L9230-L9263 for conditional A33-F1; A17-F1 catch-up effect review
+  A:L15805-L15859; accepted-prefix behavior A:L15953-L15963; catch-up current
+  index A:L15785 and A:L15911. Exact input is commit
+  c9aaef40b045e896ddfa8b01bad230f6b680715e,
+  `Audit/QBIND_SECURITY_FINDINGS_REGISTER.md`, mode 100644, Git blob
+  cd81efdbaf2bfb45e00dc3c60db3ea4f523adfa0, SHA-256
+  6e68d3d05964f9a6dc0384ffda2bb53d81d7da97ffb786ce84f4bd5a4360c0d9.
+  The register itself is not modified.
+- Prior section-24 A33-F1 implementation/evidence is preserved. Its own
+  producing test and all six before/after process observations remain
+  separately identified. No production runtime result is imported.
+
+1. Precise current engine behavior and effect order
+
+Source locations below are in 38a0180 unless explicitly qualified:
+
+1. `basic_hotstuff_engine.rs:3954-3970`: an empty response returns Ok(0);
+   otherwise local committed height/block seed the expected next height and
+   parent, and prior_qc is copied from current lock. If no committed anchor
+   exists, return MissingLocalAnchor before mutation.
+2. `:3972-4016`: for each item in sequence, contiguous height, exact parent,
+   height==view, scheduled proposer, deterministic block id, then logical
+   QC validation run before this item mutates engine state. The logical QC
+   validation proves configured membership, distinct signers and quorum
+   voting power; it does not verify signatures (A17-F1 remains open).
+3. `:4018-4024`: `state.register_block` is called before this item's signer
+   replay. At the state layer `hotstuff_state_engine.rs:1455-1488`, height is
+   calculated using the currently resident parent (missing parent => height
+   zero); an existing id replaces the entire node, while a new id is queued;
+   then legacy best-effort eviction runs. Replacement resets the node's
+   `own_qc` and verified justification, and retained byte accounting releases
+   the replaced node's charge via `insert_block_node`; a replacement is not
+   queued again. If no safe block exists, registration returns normally with
+   the new id resident and the tree over `max_pending_blocks`.
+4. `:4025-4030`: for each supplied signer, `state.on_vote` is invoked. In
+   `hotstuff_state_engine.rs:1639-1671`, vote history is examined/mutated
+   first: a new membership may evict old vote-history views and insert
+   `(view, validator)->block`; conflicting prior history records equivocation
+   and suppresses accumulator insertion. For first/duplicate-same history,
+   `:1751-1792` passes through `VoteAccumulator::on_vote_detailed`; it may
+   evict old accumulator views, insert/duplicate/drop a vote, or return
+   NonMemberSigner. CapacityDropped is Ok, increments dropped-vote count,
+   and does not stop the signer loop. `maybe_qc_for` may return no QC, a QC,
+   or a QC-validation error. A produced QC is synchronously sent to `on_qc`
+   at :1703-1714.
+5. `on_qc` at :1794-1819 updates the lock first if the QC view is higher,
+   sets the block's own_qc if the node remains resident, then attempts
+   fixed-depth 3-chain commit. The current implementation's `on_qc` returns
+   Ok after these effects. `try_commit_with_qc` at :1822-1927 has no
+   recoverable error return; it either updates committed block/height/log
+   according to existing predicates or returns without commit.
+6. Only after every signer loop returns Ok does catch-up replace previous_qc,
+   advance local expected parent/height and increment local `applied`
+   (:4027-4030). Only after all response items does it call `set_view`
+   (:4034-4036). `applied` is returned only on complete response success.
+   Any error returns `Err(RestoreCatchupError)` without the local completed
+   prefix count; no rollback restores a prefix, a current registered block,
+   signers, QCs, lock, commits, evictions/accounting or history. Error skips
+   final view advancement.
+
+Within-item error boundary:
+- The only ordinary `on_vote` error is NonMemberSigner. It is checked by the
+  accumulator after vote-history work. Because this same item first passed
+  `qc.validate` against the same immutable validator set and iterates that
+  unchanged distinct signer vector, this error is not expected for an
+  invariant-consistent execution. No normal callback mutates validators
+  between these stages. `on_vote_detailed` still calls
+  `reconcile_received_vote_evidence` after the vote result, including an
+  error; this may prune received-vote evidence memberships and associated
+  accounting, so a partial-current report must include that reconciliation
+  effect too.
+- `maybe_qc_for` can surface a QC validation error after accumulator insertion;
+  under normal invariants its signers came from validated member votes. This
+  too is not expected, but if it occurs, that vote's history/accumulator
+  effects have occurred, then received-vote evidence reconciliation runs;
+  earlier signers in the same item may have formed/applied QCs and commits.
+- No `on_qc` recoverable failure exists after its lock/own_qc/commit effects
+  in this implementation. Do not fabricate a rollback/error stage there.
+- An equivocation or accumulator CapacityDropped is not an error. Catch-up
+  continues, increments `applied` for the item after all listed signers, and
+  can return Ok even if some supplied signers did not add accumulator weight
+  in this pass. If old accumulator votes suffice, `maybe_qc_for` can still
+  form/apply a QC.
+
+Thus a future typed catch-up result cannot safely label only “N complete
+blocks” as the entire effect summary when an unexpected signer-stage error
+occurs: the current block is already inserted/replaced, earlier signers may
+have changed history/accumulator/QC/lock/commit, and registration may have
+evicted nodes and reclaimed their evidence; the failing `on_vote` also
+reconciles received-vote evidence. Conversely, capacity refusal
+placed before registration and signer replay can guarantee **zero effects
+for the rejected new item**, while preceding completed items may remain.
+
+2. Admission/capacity and replacement cases
+
+The corrected `can_admit_block_slot` / `reserve_block_slot_for_new` in
+`hotstuff_state_engine.rs:896-984` are appropriate source mechanisms for a
+catch-up new-id preflight, but `register_block` does not call them:
+
+- Below capacity (`block_count < max_pending_blocks`): current code can add
+  one new id without eviction. A new cap contract may continue this.
+- At capacity: one safe-to-evict other node is enough. An indeterminate
+  (cycle, absent locked/QC ancestor, exhausted traversal) candidate is not
+  safe and cannot be selected. If no safe slot is available, owner direction
+  requires refuse before inserting the new item or replaying its signers.
+- Already above capacity: a hard cap needs `current + 1 - max` safely
+  evictable other nodes before a new item, not just one; if the full deficit
+  cannot be met, refuse that new item without further eviction or insertion.
+- Safe acyclic candidates: preserve present eviction ordering, pre-eviction
+  height, exact removal accounting, counters and QC/lock/committed/ancestor
+  protections. Review whether reserve's fallback ordering is acceptable for
+  catch-up; it differs from pending queue ordering if that queue is incomplete.
+- Existing id: current slot query treats it as admissible with no new slot.
+  But catch-up replacement resets own_qc/verified evidence and may rewrite
+  `parent_id`/height/justification, alter ancestry, reclaim evidence bytes,
+  preserve but not re-add its pending-order position, and then replay votes.
+  A full-map replacement therefore is not a no-op and can weaken retained
+  protection. Direction 1 is explicitly for a **new** block; it does not
+  authorize arbitrary existing-id replacement. A reviewed policy must choose
+  among: (a) allow only a demonstrably idempotent matching replacement,
+  (b) refuse any replacement while catch-up is unresolved, or
+  (c) define a separately justified replacement transition. Current source
+  has no such equivalence/identity predicate; equality of derived 32-byte id
+  alone is insufficient proof of identical full parent or node state.
+
+`register_block` is also called by ordinary Proposal paths
+(`basic_hotstuff_engine.rs:4095,4703`) and leader proposal creation
+(`:4088-4097`). Applying a hard cap to all legacy registration is a separate
+open scope per owner direction. A catch-up-only refusal would not justify
+claiming a system-wide limit; unrelated legacy calls can retain over capacity.
+
+3. Catch-up result and node caller contract candidate
+
+Current `RestoreCatchupError` (`basic_hotstuff_engine.rs:1939-1969`) has no
+capacity variant, prefix count, current-item phase or effect report. Its
+existing errors arise before mutation of the *current* item, but can follow
+prior applied items. A future result should distinguish at least:
+
+- clean refusal/rejection: no current item mutation; completed prefix count
+  and prefix effects still reported if nonzero;
+- capacity refusal before a new item: rejected index/id, completed prefix,
+  no insertion/vote/eviction for that current item;
+- current-item error before registration: zero current-item mutation;
+- current-item signer-stage error after registration: current item registered
+  or replaced, attempted/replayed signer boundary, completed prefix count,
+  and explicit partial-current effects; no false “current block not applied”
+  or “no mutation” claim;
+- complete success: fully processed item count and existing normal final-view
+  behavior.
+
+Proposed compact typed envelope, shape only (not an API decision):
+`CatchupApplyReport { completed_items, outcome, current_item_effects,
+pre/post_committed_anchor, pre/post_lock, pre/post_view, retained_bytes_delta,
+evicted_ids_or_count, view_advanced }`, with `outcome` distinguishing
+Complete, RejectedBeforeMutation, CapacityRefused, and FailedDuringItem.
+The current stage/effect fields must be populated from actual mutation
+boundaries, not reconstructed from the error enum after the fact. Include
+block id/index, whether registered/replaced, signer-attempt count, vote
+history/accumulator dispositions (including conflict/capacity-drop),
+QCs applied, and commit/lock changes if needed to identify effects. If
+capturing exact objects is too costly, document the narrower guarantee:
+state snapshot/delta can be queried by caller while engine is exclusively
+borrowed, and result marks current item as mutated/partial. Do not infer the
+results only from whether `Err` was returned.
+
+At `binary_consensus_loop.rs:8437-8506`, current Ok adds `applied` counter and
+evaluates peer-target/restore-mode exit; current Err increments only rejected
+responses, skips target tracking and mode evaluation, and contains an
+inaccurate no-mutation comment. The corrected handler must:
+1. log/status the typed outcome and prefix/current-item effects truthfully;
+2. account completed prefix blocks even when the response terminates with
+   capacity refusal/error, without conflating response rejection and applied
+   prefix;
+3. not treat the peer-reported height as usable progress from an unresolved
+   partial response;
+4. set a sticky unresolved-catch-up condition before another normal effect
+   can execute, unless the approved reconciliation result explicitly clears
+   it; and
+5. specify the exact outbound-request/response retry anchor, application
+   ordering, inbound proposal handling, local leader/vote/timeout/QC behavior,
+   metrics and exit transition while unresolved.
+
+Current restore mode is not itself a full participation freeze. It sends
+requests based on the current committed pair (`binary_consensus_loop.rs:
+8350-8370`), defers only certain future/wrong-parent proposals
+(:8372-8392, :6571-6595), and suppresses view timeouts while active
+(:2435-2448); it does not encode a partial-application checkpoint. On an
+error the handler remains active and does not feed responder height to the
+tracker, but a committed prefix can already have changed the local anchor.
+`current_view` is not set by the catch-up function on that error; later
+ordinary Proposal handlers and other consumers may still mutate engine
+state. The requirement to prevent resumption therefore needs a defined
+gate/state-machine integration, not the existing active bit alone.
+
+4. Contract rules; basis, candidate, compatibility, open decision, tests
+
+| Rule | Source/owner basis | Proposed behavior for review | Compatibility effect | Unresolved decision | Required test |
+|---|---|---|---|---|---|
+| R1: protect uncertainty | Owner direction 1; corrected `ancestry_excludes_block`; state `:1098-1175` | Never classify cycle, missing protected node/parent or exhausted traversal as evictable | Existing conservative fix retained | None for “uncertainty is not safe”; provenance cannot distinguish never-known from evicted parent | Self/two-node cycle and missing-lock/QC-parent predicate controls; protected ancestor remains; no false safe result |
+| R2: admit new catch-up id | Owner direction 1; state pure slot query/reservation `:910-984`; legacy gap `:1455-1488` | Before registration, calculate full deficit; evict only enough blocks already proven safe; if impossible, refuse current new id and replay no signers | Catch-up stops at protected/indeterminate capacity instead of growing tree; valid acyclic eviction remains | Is max a catch-up hard cap for this engine instance even if already over capacity? How to handle max=0 and over-capacity excess? | New id below, exactly at, and already above cap; safe versus indeterminate candidates; exact eviction identity/order/counter and rejected-id absence |
+| R3: existing-id update | State `insert_block_node` `:1000-1026`; catch-up `:4018`; same-id legacy overwrite | Do not call an update a zero-slot no-op. No replacement during unresolved catch-up absent an approved equivalence/transition rule | Could refuse currently accepted retries/id re-registration; preserving repeated deterministic catch-up may require explicit idempotency semantics | Choose matching/idempotent-only, refuse-while-unresolved, or separately specified replacement. Define full-parent/QC/height/evidence equivalence and whether own_qc may be reset | Same id/same fields; same derived ID with different full parent; changed justification; own_qc present; verified evidence retained; queue position and scalar/shared charge |
+| R4: current item gate | Owner direction 1; per-item prevalidation `basic:3972-4016`; verified Proposal refusal is separate | Capacity refusal occurs before register, queue, evidence reclamation, eviction, vote history/accumulator, QC, lock and commit for rejected new item | Adds a typed catch-up capacity outcome | Which status enum/API shape and exact error caller map | Exact capacity refusal snapshot before/after for current item; no signer replay/QC application |
+| R5: prior prefix | Audit A17-F1 §3.4 A:L15953-L15963 explicitly documents persistence, no rollback | Never claim response error means no state mutation; separately report completed prefix and all prefix effects | Error API/caller metrics/log schema changes; prefix remains stateful | Prefix preservation is owner-directed but no approved retry/reconciliation semantics; count “fully processed” even if signers were dropped/conflicted? | valid prefix then capacity refusal; valid prefix then malformed suffix; exact commit/lock/votes/tree and returned prefix count |
+| R6: within-item failure | State `:1639-1819`; vote accumulator `vote_accumulator.rs:379-414,514-543`; QC validation `qc.rs:70-118` | Report registration/replacement and signer-stage effects separately from completed earlier items. No rollback claim. Prevalidated member set means ordinary NonMemberSigner should be unreachable; future/injected invariant error must remain truthful | Requires richer result or narrowly defined current-stage marker | Whether a test-only fault injector is acceptable and which effect detail is contractually required; current nonmember error follows vote-history mutation but is prevented by prior QC validation | Inject failure after registration and after signer k; assert history/accumulator/view evictions, QC/lock/commit, current id and report. Also normal validated signer list proves no such error without injection |
+| R7: vote dispositions | `record_vote_history` and accumulator code; QC formed from current accumulator | Report equivocation suppression and CapacityDropped as non-error dispositions; they do not prove each supplied signer was newly applied. QC may form from pre-existing accumulator signers | Existing `applied` counter semantics may be too coarse if renamed as fully certified/fully replayed | Which counters describe accepted blocks, new votes, dropped votes and QCs; avoid API claim that all signer ids contributed | conflict-history signers, view-entry eviction, max-votes capacity drop, old quorum already present; exact outcome while method returns Ok |
+| R8: lock/commit | `on_vote_detailed`/`on_qc` `hotstuff_state_engine.rs:1703-1819`; commit predicates `:1822-1927` | Carry observed pre/post lock and committed anchor when any item can apply QC; do not claim a block count alone captures state effect | More outcome/report data; no consensus rule change intended | Whether success means syntactically/replay-processed vs QC-certified vs committed; current method counts one after signer loop regardless | Prefix commits at first/middle/current item; exact 3-chain prerequisites and no arbitrary-finality assertion |
+| R9: view | Catch-up final set_view only `basic:4034-4036`; error skips it | On any unresolved partial result, freeze ordinary participation until a reviewed reconciliation explicitly aligns view with committed anchor/retry position | Requires sticky pause/reconciliation gate; current mode does not suffice | Choose view target (prefix expected height, committed height+1, or reconciliation-derived) and who clears pause | Failure before first item, after prefix/no commit, after commit, and within current item; assert no local leader proposal/vote/timeout or accepted ordinary proposal before clear |
+| R10: anchor/retry | Matching request anchor `node:8465-8481`; request uses current committed pair; errors skip tracker update `:8506-8525` | Keep matching-anchor admission; don't advance trusted peer target on unresolved result. Retry only after explicit anchor/retry reconciliation | Changes repeated response acceptance and may require response position state | Whether restart from current committed pair is sufficient when uncommitted prefix nodes/votes remain, or preserve exact item/signer cursor, or require reset/recovery; existing-id overwrite makes blind replay unsafe to assume | No-commit prefix then same response retry; committed prefix then new anchor response; stale original anchor; repeated capacity refusal; no duplicate/lost QC/commit |
+| R11: normal operation gate | Owner direction 4; current restore mode only partially gates proposals/timeouts | Sticky `CatchupIncomplete` should block normal proposal/vote/leader/QC-producing catch-up effects until reconciliation sets verified anchor, view and retry boundary; keep only explicitly approved recovery messages available | Stronger liveness restriction and new runtime integration; not implied by `restore_mode.active` | Exact blocked event set, persistence across restart, clearing authority, behavior when no safe retry path exists | Actual node handler + loop event matrix while unresolved and after clear; assert no unsolicited peer-height advancement or mode exit |
+| R12: caller/error accounting | Node caller `:8506-8525`; audit identifies false no-mutation statement | Distinguish response rejected, completed prefix applied, current partial effects, and unresolved gate; log no unconditional no-mutation on any prefix/current mutation | Metric/log/dashboard interpretation changes; existing response rejection count may increase alongside prefix count | Exact counter compatibility and whether malformed suffix is “rejected” as well as prefix-applied; metric cardinality constraints | Actual `handle_restore_catchup_response` zero-effect refusal, prefix refusal, prefix+later-invalid, within-item error; exact counters/log/mode tracker |
+| R13: accounting | state remove/insert accounting `:1000-1095`; verified retained QC path `:1539-1634` | Safe evictions/replacements release exactly their existing charges; refusal before current registration leaves evidence/ledger unchanged; partial prefix deltas remain reported | No formula change; partial result must expose/retain truthful accounting | Replacement/evidence semantics in R3; metrics/report granularity | Scalar/shared evidence at each pressure case; exact per-map charge and shared occupancy before/after refusal, eviction, replacement and state drop |
+| R14: scope | Owner direction 5; Proposal paths `basic:4095,4703`, leader registration `:4088-4097` | Catch-up-only contract does not claim global cap. Other legacy callers remain a separate audit/contract question | Leaves other paths potentially over configured capacity | Whether/when to define broader common admission contract | Catch-up cap test plus explicit control showing no unsupported system-wide claim; do not alter non-catch-up tests in this task |
+
+5. Concrete alternatives requiring decision
+
+A. Prefix-preserving pause and resume:
+   Keep completed effects. Return prefix/current-stage report and a sticky
+   incomplete status. Choose a safe reconciliation algorithm that accounts
+   for committed advancement, uncommitted nodes and votes, replacement
+   semantics, view, request anchor, retry index and all normal event gates.
+   Resume only after this state machine has a reviewed, testable transition.
+   This is aligned with owner direction but not yet sufficiently specified
+   to code safely.
+
+B. Reinitialize/recover after partial effects:
+   Quarantine normal operation and rebuild from an explicitly trusted
+   committed checkpoint. Must handle a prefix that already committed: a
+   restart cannot discard durable/committed advancement. Requires approved
+   snapshot/anchor provenance and durable/volatile state correspondence;
+   not currently established by this task.
+
+C. Stage and atomically publish a complete response:
+   Validate all structure first, then stage all block, history, accumulator,
+   QC, lock, commit, evidence and view effects in an isolated state and swap
+   only after complete success. This is a substantial new transactional
+   mechanism and still requires an approved policy for capacity, replacement,
+   memory overhead and externally observable effects. Current source provides
+   no rollback/transaction; do not claim that syntax prevalidation alone
+   implements this alternative.
+
+D. Explicit resumable item/signer cursor:
+   Preserve prefix and current-item partial effects, persist a cursor plus
+   exact current state identity, and replay only remaining work after
+   revalidation. Must define duplicate/equivocation behavior, QC idempotency,
+   replacement, crash/restart persistence, and signer-level failure. No such
+   cursor or durable state correspondence exists today.
+
+Required owner/contract decision is therefore not merely “hard cap or not.”
+It must select a partial-state recovery alternative and specify the safe
+resume gate, replacement semantics, report shape and node caller behavior.
+Until then, implement only the already landed finite eviction walks; no
+catch-up source/test behavior is changed by this proposal.
+
+6. Reviewable test matrix after decision (all PROPOSED / NOT RUN)
+
+- Capacity admission: count max-1, max, max+1; one versus full deficit of
+  safe candidates; no safe candidate; indeterminate/cyclic locked/QC chain;
+  assert rejected new id absent and no signer vote replay.
+- Protected ancestry: committed, locked, lock ancestors, own-QC blocks and
+  own-QC ancestors remain; unrelated complete acyclic blocks retain existing
+  eviction identity/order/counter behavior.
+- Missing ancestry: unprotected absent parent retains current height-zero
+  behavior; missing locked/QC ancestor is indeterminate; no inference that
+  absent id was never retained.
+- Replacement: same id and same fields, same ID but different full parent,
+  different view/justify, current own_qc, retained verified evidence, at
+  capacity and over capacity; assert exact node/QC/queue/height/accounting
+  outcome under the selected explicit rule.
+- Prefix outcomes: capacity refused before item 0; prefix then capacity
+  refusal; prefix then structural failure; prefix then QC-validation failure.
+  Assert return reports prefix length separately from error, prior side
+  effects retained, rejected/current item untouched if pre-registration
+  refusal, and final set_view behavior is specified.
+- Within-item outcomes: fail after registration but before first signer;
+  inject after signer k; fail after accumulator mutation/QC formation and
+  after lock/commit if a test hook can be safely introduced. Check current
+  block stage and all effects; no rollback claim. Separately establish that
+  validated signer inputs preclude ordinary NonMemberSigner absent injected
+  invariant change.
+- Vote dispositions: prior equivocation history; vote-history eviction;
+  accumulator view eviction; CapacityDropped; duplicate same-block vote;
+  existing quorum in accumulator. Assert method return/counters/own_qc/lock/
+  commit and whether a listed signer actually contributed.
+- Anchor/retry: no commit prefix, commit-in-prefix, exact current anchor,
+  stale request anchor, repeated same response, suffix from new committed
+  anchor; assert no replayed replacement erases own_qc/evidence or silently
+  duplicates/misses effects.
+- Pause/resume actual node path: while incomplete, ordinary Proposal,
+  leader tick, local timeout, remote Vote/QC, catch-up request/response,
+  restore-mode target and metrics/log behavior; after reconciliation clear,
+  resume only at reviewed view/anchor/retry position.
+- Accounting: scalar and shared ledger, current-block refusal, safe eviction,
+  replacement and partial prefix; assert map charge equals sum of node
+  charges and ledger occupancy is unchanged for zero-effect refusal or
+  changes only by reported mutations.
+- Acyclic recovery: valid suffix at/below capacity and capacity pressure
+  where enough safe unrelated nodes exist; assert same return/commit behavior
+  under selected policy.
+- Preserve the distinct verified Proposal path's existing zero-mutation
+  capacity refusal regression; do not infer A17-F1 closure or transplant
+  its result to catch-up.
+
+No whole-response atomicity, catch-up hard-cap implementation, all-legacy
+cap, source/test run, runtime/binary/multi-node/deployment assurance or
+production reachability is claimed. Independent contract review remains
+PENDING. A33-F1/E27 and other obligations OPEN; activation DISABLED; public
+DevNet NO-GO.

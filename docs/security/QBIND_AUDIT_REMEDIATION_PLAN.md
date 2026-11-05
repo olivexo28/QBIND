@@ -4619,3 +4619,48 @@ No source or test change, runtime run, evidence-stage reclassification or
 new finding closure occurred here. Independent policy review is
 **NOT ASSIGNED / PENDING**. A33-F1 / E27 and all remaining obligations stay
 **OPEN**; activation **DISABLED**; public DevNet **NO-GO**.
+
+## 26. A33-F1 catch-up containment contract — owner direction and decision gaps
+
+**Status: DOCUMENTATION / CONTRACT PROPOSAL ONLY.** The owner has approved
+direction for contract design, not an implementation, test change or
+deployment. The exact current engine and node mutation boundaries are traced
+in
+[`catchup-contract-review-proposal-v2.txt`](evidence/a33_f1/catchup-contract-review-proposal-v2.txt),
+including existing-id replacement, vote-history and accumulator effects,
+QC/lock/commit, completed-prefix reporting, caller counters/logging, restore
+mode, view/anchor/retry state and retained-evidence accounting. The audit
+register, section 24 implementation, six baseline timeout observations and
+six corrected returns remain unchanged.
+
+The approved direction requires a new catch-up item to be refused before
+insertion and signer replay if a safe slot cannot be obtained; all effects,
+including effects within the current item, must be reported truthfully; and
+normal participation cannot resume from unresolved partial state before a
+reviewed anchor/view/retry/safety reconciliation. It explicitly does not
+make legacy registration a system-wide hard-cap scope.
+
+The current source has no rollback boundary or typed prefix/current-item
+effect result. Validated logical-QC signers make the ordinary per-signer
+NonMemberSigner error unreachable under the current invariant, but vote
+history precedes that check, accumulator/QC processing is stateful, and a
+future/invariant failure after registration cannot be represented as a
+zero-effect error. Existing requirements document accepted-prefix mutation
+(A17-F1 §3.4) but do not select a capacity refusal implementation, retry or
+partial-current-item recovery, replacement equivalence, or the required
+normal-operation gate. Existing verified-Proposal refusal is a separate
+pre-effect contract and does not settle catch-up behavior.
+
+The v2 proposal inventories each rule's source basis, proposed behavior,
+compatibility effect, unresolved decision and required test. It offers
+prefix-preserving pause/reconciliation, checkpoint recovery, staged atomic
+publication, and an explicit resumable cursor as distinct alternatives; none
+is selected. Required decisions and the full zero-effect, partial-prefix,
+within-item, repeated-capacity, protected-ancestor, accounting and actual
+node-caller test matrix are recorded there. No production source or tests
+changed, and no tests/runtime/deployment evidence were run for this
+documentation follow-up.
+
+Independent contract review remains **PENDING**. A33-F1 / E27 and all other
+remaining obligations remain **OPEN**; activation **DISABLED**; public
+DevNet **NO-GO**.
