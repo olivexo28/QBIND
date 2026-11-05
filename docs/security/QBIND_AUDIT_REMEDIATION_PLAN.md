@@ -4764,3 +4764,45 @@ No project tests, builds, nodes, process-crash experiments, operational
 signing or deployment were run for this documentation task. Existing
 historical evidence is retained; the new artifact is added to its checksum
 manifest. Independent contract review remains pending.
+
+## 29. A33-F1 / E27 stay-closed quarantine test model
+
+**IMPLEMENTED TEST MODEL — INDEPENDENT REVIEW PENDING.** This slice adds
+only an isolated test model and deterministic controls, not production
+marker, startup, signer, network or catch-up enforcement. The user supplied
+the contract-review disposition **PASS WITH LIMITATIONS**; reviewer identity
+and the raw report were not provided. This is attributed user-supplied
+evidence, not a new independent review or an invented review artifact.
+The original contract and all preceding plan/evidence text are preserved.
+
+After the explicitly authorized guarded one-commit fast-forward, the model
+was based on task tip `c18443870306dade124281b1c8fa07ecaddec32a`, tree
+`a7417ce70d37da17df2e18c7a136c15f4bdb5a70`. Local and remote main remain
+`c9aaef40b045e896ddfa8b01bad230f6b680715e`. The self-contained
+`crates/qbind-consensus/tests/a33_f1_stay_closed_quarantine_model_tests.rs`
+has no production imports or caller. It models acknowledged intent and an
+operation barrier before fixture mutation, separate prefix/current-item
+effects, domain-specific unknown outcomes, terminal quarantine without any
+clear procedure, and deterministic writer/store-identity controls.
+
+The focused Cargo target passed **23 tests**; targeted formatting also
+passed. The [model evidence](evidence/a33_f1/stay-closed-model-evidence.txt)
+records input/review provenance, commands, source/log hashes, results,
+controls and residuals. The [raw focused log](evidence/a33_f1/stay-closed-model-focused-tests.log)
+retains Cargo's existing library warnings and individual test results.
+Earlier passing suites and the original six baseline timeouts/six corrected
+returns were not rerun or relabeled.
+
+Mocked synchronization, writer serialization, publication and restart do
+not prove filesystem durability, actual startup coverage, cross-copy signer
+fencing, process-crash behavior or network delivery. A copied-store control
+explicitly demonstrates that separate valid local acknowledgements cannot
+establish global exclusive ownership. No persistent schema, recovery/clear
+authority, currentness source, exclusivity mechanism or automatic clear was
+chosen. Production integration, real engine/accounting and node-caller
+assurance, A17-F1 authentication and all later process/storage/deployment
+evidence remain separate open work.
+
+A33-F1 / E27 and all remaining obligations remain **OPEN**. Independent
+review of this test model is **PENDING**; activation **DISABLED**; public
+DevNet **NO-GO**.

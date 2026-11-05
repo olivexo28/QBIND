@@ -1,0 +1,190 @@
+A33-F1 / E27 stay-closed quarantine test-model evidence
+
+Status: IMPLEMENTED TEST MODEL -- INDEPENDENT REVIEW PENDING.
+A33-F1 / E27 and all remaining obligations OPEN; activation DISABLED;
+public DevNet NO-GO. This is not a production quarantine implementation.
+
+1. Entry and input identity
+
+Repository: olivexo28/QBIND
+Branch: copilot/a33-f1-bounded-eviction
+Verified initial local HEAD: c07099b229563e7acd8a6253e3e6d28b309261d0
+Verified remote task tip: c18443870306dade124281b1c8fa07ecaddec32a
+Verified expected task-tip tree: a7417ce70d37da17df2e18c7a136c15f4bdb5a70
+Protected local/remote main: c9aaef40b045e896ddfa8b01bad230f6b680715e
+
+The user explicitly authorized a guarded fast-forward from the initial
+local HEAD. Before updating, repository/branch/tip, clean worktree/staging
+area and absence of merge/rebase/cherry-pick/revert/sequencer/bisect operation
+state were checked. Task branch and main were fetched; both tips and the
+task-tip tree matched. `git merge-base --is-ancestor HEAD
+origin/copilot/a33-f1-bounded-eviction` succeeded and
+`git rev-list --count HEAD..origin/copilot/a33-f1-bounded-eviction` was 1.
+`git merge --ff-only origin/copilot/a33-f1-bounded-eviction` succeeded.
+HEAD, tree and clean worktree then matched the task entry. Main was not
+updated. New model work is based on c184438, not the earlier local tip.
+
+Controlling contract:
+  docs/security/evidence/a33_f1/stay-closed-contract.md
+  producing commit: c18443870306dade124281b1c8fa07ecaddec32a
+  SHA-256: cb71b4424f0b05cf94df40e68a59234594f4c541e2c62328c08fccf77fd0bf4b
+
+The user supplied the review disposition "PASS WITH LIMITATIONS" and
+described the stay-closed contract as independently reviewed. This is
+USER-SUPPLIED review evidence, not a review performed or independently
+authenticated in this session. Reviewer identity is NOT PROVIDED; no raw
+review artifact or detailed report text was available. No reviewer identity,
+additional approval, quotation of unavailable limitations, or raw artifact
+is invented. The contract's original pending-review text is preserved as
+historical input. Review of this new model is still PENDING.
+
+The source-stage contract and the owner-approved defaults remain unchanged:
+existing-ID refusal; safe new-ID admission; truthful prefix/current-item
+effects; stay closed after unresolved effects and restart; no automatic
+clear/resume; no global capacity or authentication closure claim.
+
+2. Isolated implementation
+
+Only executable addition:
+  crates/qbind-consensus/tests/a33_f1_stay_closed_quarantine_model_tests.rs
+  SHA-256: 255c1f1a5ea9d41f77f5473c9ebe841c56ef8a0471a4bb6e0b33ffe3e70b34c4
+
+This is a self-contained Rust integration-test target using std collections
+and deterministic fixture state. It imports no consensus engine, node,
+signer, transport or storage implementation. No production module includes
+the model. No dependency manifest, source file, production caller, runtime
+flag, crypto setting, operational gate or existing test was modified.
+
+The model has an explicitly named AlreadyRunningFixture precondition for
+testing transition into quarantine, not a startup/clear authorization path.
+Modeled startup refuses every local observation, including parsed Clean or
+Complete. There is no clear operation, currentness authority, cryptographic
+mechanism, persistent record schema, recovery procedure or signer-fencing
+mechanism. Store and writer IDs are fixture labels, not a persistence format.
+
+The positive control permits only fixture item insertion after acknowledged
+intent, closed admission, observed preexisting worker completion and matching
+store/writer labels. A barrier or intent failure latches closed. Once a
+response terminates, even Complete, acknowledged outcome, empty response or
+no-effect refusal remains closed. Intent/outcome publication is intentionally
+separate from engine effects and acknowledgement.
+
+Fixture engine state is a small map of IDs and abstract charge units. All
+resident entries are treated as protected; capacity refusal and existing-ID
+refusal remove/replace nothing. Prefix and observed current-item insertions
+remain in the map; Unknown marks unavailable effects, not a proven absence
+of effects. This does not implement or test real ancestry eviction, QCs,
+vote replay, locks, commits, actual retained-evidence accounting or the
+node caller. The earlier real-engine evidence is preserved separately.
+
+Worker fixtures distinguish ordinary admission, cancellation request,
+observed completion, outbound enqueue and peer-delivery observation.
+Signing-stage fixtures distinguish request, reservation, key invocation and
+signature observations from worker completion. These are scripted
+observations only: no threads, locks, filesystem, key operations or sockets
+are involved. Multiple outstanding workers retain Unknown until each
+required completion is observed. Late completion does not reopen admission.
+
+Local mock writer serialization refuses a competing writer in either
+deterministic claim order; changed owner/store and foreign-store fixtures
+invalidate admission. A separate control deliberately demonstrates that
+two copied stores can each acknowledge their own local writer. Neither copy
+can authorize participation from its parsed record. This models the limit
+of local ownership, not actual concurrency or cross-copy signer fencing.
+
+3. Focused controls and exact commands
+
+Working directory for all commands:
+  /workspaces/QBIND/olivexo28/QBIND
+Toolchain observed:
+  rustc 1.99.1 (58cf8f9c3 2026-10-13)
+  cargo 1.99.1 (5f94df478 2026-08-27)
+
+Formatting:
+  rustfmt --edition 2021 crates/qbind-consensus/tests/a33_f1_stay_closed_quarantine_model_tests.rs
+  rustfmt --edition 2021 --check crates/qbind-consensus/tests/a33_f1_stay_closed_quarantine_model_tests.rs
+Result: exit 0.
+
+Final focused run:
+  cargo test -p qbind-consensus --test a33_f1_stay_closed_quarantine_model_tests -- --nocapture
+Captured stdout and stderr, without warning suppression, in:
+  docs/security/evidence/a33_f1/stay-closed-model-focused-tests.log
+  SHA-256: 560515f86a82dae4e5e24040329117cc4a77e83ed44d4df3a8441bb10f6f1764
+Result: exit 0; 23 passed, 0 failed, 0 ignored, 0 measured, 0 filtered out.
+Cargo emitted 37 pre-existing library dead-code warnings; no model warning
+was emitted. The raw log includes the warnings and individual test results.
+
+A development run used the same cargo selector before additional worker,
+signing-stage and copied-store controls were added: 19 passed, 0 failed.
+Its output was observed in the session, not retained as a separate raw
+artifact. The final rerun was necessary to validate those additions and the
+changed per-domain observation aggregation. No historical passing suite or
+baseline witness was rerun.
+
+The raw Cargo log ends with its emitted blank line. Default `git diff
+--check` flags that one new-blank-at-EOF artifact; the log is deliberately
+retained byte-for-byte, not trimmed. Whitespace validation for the staged
+change uses `git -c core.whitespace=-blank-at-eof diff --cached --check`;
+the default check is also applied to every staged path except this raw log.
+All earlier plan and checksum-manifest bytes are verified as unchanged
+prefixes. Historical checksum verification uses, from the evidence directory,
+`sha256sum -c SHA256SUMS`.
+
+Deterministic controls:
+- All ten startup observation classes refuse ordinary effects and mutation.
+- Positive acknowledged-intent/barrier control inserts one fixture item.
+- Absent acknowledgement and open admission refuse mutation.
+- Failed, uncertain and publication-visible-but-error intent results remain
+  unresolved even when bytes are modeled as readable.
+- Cancellation does not establish completion for snapshot, epoch, callback,
+  signing, outbound or storage work; late completion never clears the latch.
+- Observed preexisting signer work can satisfy the barrier without erasing
+  the already-observed signing effect.
+- Enqueue and worker completion alone do not establish peer delivery.
+- Capacity refusal after a valid prefix preserves/reports that prefix and
+  does not insert the rejected item.
+- Existing-ID refusal leaves its fixture charge/state unchanged; intent and
+  outcome remain distinct storage effects even for engine no-effect refusal.
+- Repeated ID in a response preserves the prefix without replacement.
+- Observed within-item insertion failure is separate from completed prefix.
+- Unknown current-item effects retain the known prefix and block continuation.
+- Failed/uncertain outcome acknowledgements keep effects and quarantine;
+  outcome visibility on an error is not successful completion.
+- Complete, empty result, zero-capacity no-effect refusal, stale/empty input,
+  timeout, operator acknowledgement, local checksum and generation match
+  never clear the latch.
+- Modeled restart with valid local records, including copied/older state,
+  never establishes currentness, continuity or signer exclusivity.
+- Both deterministic writer claim orders reject the second writer; foreign
+  store and changed identity/owner invalidate admission before mutation.
+- Signing request/reservation/key/signature observations do not replace
+  worker completion or clear a previously latched state.
+- One completed worker cannot conceal another unknown worker.
+- Repeated response after partial application cannot reenter catch-up.
+- Copied-store local acknowledgements demonstrate the absence of a shared
+  anti-rollback/exclusivity authority rather than simulate a proven fence.
+
+4. Limits and residual work
+
+The executable controls validate this abstract stay-closed model, not the
+production source contract. No claim is made for OS/filesystem durability,
+sync/write atomicity, actual startup/CLI coverage, real concurrent writers,
+signer fencing, production journal integration, process-crash/restart
+behavior, peer delivery, binary/multi-node behavior or deployment.
+Publication and restart are modeled observations, not persistence proofs.
+
+No persistent schema, currentness source, recovery/clear authority,
+exclusivity mechanism or automatic clear has been selected. Production
+marker publication, startup gating, all-producer barriers and outcome
+observation remain unimplemented and require separate decisions/review.
+The model does not resolve valid acyclic eviction compatibility, full
+eviction-deficit handling in the actual engine, node-caller propagation,
+authentication or A17-F1. Historical operator-controlled anchor and catch-up
+admission prerequisites remain conditional; no anonymous remote attack or
+observed production failure is claimed.
+
+Actual engine/node integration, process/recovery, power-loss, storage,
+signer/backend and network evidence require separately authorized plans;
+none ran here. No live network, operational signing, deployment or
+activation occurred. A33-F1 / E27 and all remaining obligations OPEN;
+activation DISABLED; public DevNet NO-GO.
