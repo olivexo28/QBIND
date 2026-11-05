@@ -116,6 +116,13 @@ pub const AUTHORITY_RESET_AUDIT_ACTION: &str = "authority_state_reset";
 /// be renamed without a documented schema migration.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AuthorityResetRefusal {
+    /// Stage-aware failure retaining operation and audit errors independently.
+    AttemptFailed {
+        stage: AuthorityResetStage,
+        marker: MarkerPersistenceOutcome,
+        operation_failure: Option<Box<AuthorityResetRefusal>>,
+        audit_failure: Option<Box<AuthorityResetRefusal>>,
+    },
     /// `--data-dir` was not supplied.
     MissingDataDir,
     /// `--genesis-path` was not supplied.
@@ -180,6 +187,7 @@ impl AuthorityResetRefusal {
     /// Stable identifier used in the audit record's `refusal_reason` field.
     pub fn stable_id(&self) -> &'static str {
         match self {
+            Self::AttemptFailed { .. } => "AttemptFailed",
             Self::MissingDataDir => "MissingDataDir",
             Self::MissingGenesisPath => "MissingGenesisPath",
             Self::MissingExpectedGenesisHash => "MissingExpectedGenesisHash",
@@ -211,6 +219,15 @@ impl AuthorityResetRefusal {
     /// never contains secret material.
     pub fn detail(&self) -> String {
         match self {
+            Self::AttemptFailed {
+                stage,
+                marker,
+                operation_failure,
+                audit_failure,
+            } => format!(
+                "stage={stage:?}; marker={marker:?}; operation_failure={operation_failure:?}; \
+                 audit_failure={audit_failure:?}; no rollback or broader durability implied"
+            ),
             Self::MissingDataDir => {
                 "--data-dir is required for authority-state-reset (no implicit default)"
                     .to_string()
@@ -326,6 +343,37 @@ impl std::fmt::Display for AuthorityResetRefusal {
 }
 
 impl std::error::Error for AuthorityResetRefusal {}
+
+/// Stage at which the reset could not complete.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AuthorityResetStage {
+    VerificationRefusalAudit,
+    PendingAudit,
+    MarkerPersistence,
+    SuccessAudit,
+}
+
+/// Acknowledgments refer only to the existing persistence API, not power loss.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MarkerPersistenceOutcome {
+    NotAttempted,
+    AttemptedUncertain,
+    Acknowledged,
+}
+
+fn attempt_failure(
+    stage: AuthorityResetStage,
+    marker: MarkerPersistenceOutcome,
+    operation_failure: Option<AuthorityResetRefusal>,
+    audit_failure: Option<AuthorityResetRefusal>,
+) -> AuthorityResetRefusal {
+    AuthorityResetRefusal::AttemptFailed {
+        stage,
+        marker,
+        operation_failure: operation_failure.map(Box::new),
+        audit_failure: audit_failure.map(Box::new),
+    }
+}
 
 // ============================================================================
 // Input bundle
@@ -1076,10 +1124,19 @@ pub struct AuthorityResetSuccess {
 ///    via Run 117 [`persist_authority_state_atomic`], then finalise the
 ///    audit record as `"success"`.
 ///
-/// Path-separation refusal attempts no audit write. Other I/O errors, especially
-/// after marker persistence, do not imply that the marker is unchanged.
+/// Path-separation refusal attempts no audit write. `AttemptFailed` preserves
+/// operation/audit failures and the stage-specific persistence outcome.
+/// An acknowledged persistence call is not an audit acknowledgment or a
+/// power-loss guarantee; errors after persistence do not imply rollback.
 pub fn execute_authority_state_reset(
     inputs: &AuthorityResetInputs,
+) -> Result<AuthorityResetSuccess, AuthorityResetRefusal> {
+    execute_authority_state_reset_with_audit(inputs, write_authority_reset_audit)
+}
+
+fn execute_authority_state_reset_with_audit(
+    inputs: &AuthorityResetInputs,
+    mut audit: impl FnMut(&Path, &Path, &AuthorityResetAuditRecord) -> Result<(), AuthorityResetRefusal>,
 ) -> Result<AuthorityResetSuccess, AuthorityResetRefusal> {
     let data_dir = inputs
         .data_dir
@@ -1097,12 +1154,44 @@ pub fn execute_authority_state_reset(
             // Step 2 — write the refusal audit record where possible.
             if let Some(audit_path) = inputs.audit_output_path.as_ref() {
                 let record = build_refusal_audit_record(inputs, None, &refusal);
-                write_authority_reset_audit(data_dir, audit_path, &record)?;
+                if let Err(audit_error) = audit(data_dir, audit_path, &record) {
+                    return Err(attempt_failure(
+                        AuthorityResetStage::VerificationRefusalAudit,
+                        MarkerPersistenceOutcome::NotAttempted,
+                        Some(refusal),
+                        Some(audit_error),
+                    ));
+                }
             }
             return Err(refusal);
         }
     };
 
+    execute_verified_authority_reset(inputs, plan, audit, |path, record| {
+        persist_authority_state_atomic(path, record)
+            .map_err(|e| AuthorityResetRefusal::MarkerPersistFailed(e.to_string()))
+    })
+}
+
+// Private sequencing seam: production reaches this only after real verification.
+fn execute_verified_authority_reset(
+    inputs: &AuthorityResetInputs,
+    plan: VerifiedAuthorityResetPlan,
+    mut audit: impl FnMut(&Path, &Path, &AuthorityResetAuditRecord) -> Result<(), AuthorityResetRefusal>,
+    mut persist: impl FnMut(&Path, &PersistentAuthorityStateRecord) -> Result<(), AuthorityResetRefusal>,
+) -> Result<AuthorityResetSuccess, AuthorityResetRefusal> {
+    let data_dir = inputs
+        .data_dir
+        .as_ref()
+        .ok_or(AuthorityResetRefusal::MissingDataDir)?;
+    // Keep the guard even for direct private sequencing tests.
+    check_authority_reset_audit_path(
+        data_dir,
+        inputs
+            .audit_output_path
+            .as_ref()
+            .ok_or(AuthorityResetRefusal::AuditOutputMissing)?,
+    )?;
     // audit_output_path is guaranteed present (verified above).
     let audit_path = inputs
         .audit_output_path
@@ -1112,24 +1201,38 @@ pub fn execute_authority_state_reset(
 
     // Step 3a — write the "pending" audit record BEFORE marker persist.
     let pending_record = build_success_audit_record(&plan, PlanResultState::Pending);
-    if let Err(e) = write_authority_reset_audit(data_dir, &audit_path, &pending_record) {
+    if let Err(e) = audit(data_dir, &audit_path, &pending_record) {
         // Marker is still untouched at this point.
-        return Err(e);
+        return Err(attempt_failure(
+            AuthorityResetStage::PendingAudit,
+            MarkerPersistenceOutcome::NotAttempted,
+            None,
+            Some(e),
+        ));
     }
 
     // Step 3b — persist the marker atomically.
-    if let Err(persist_err) =
-        persist_authority_state_atomic(&plan.marker_path, &plan.new_marker)
-    {
-        let refusal = AuthorityResetRefusal::MarkerPersistFailed(persist_err.to_string());
+    if let Err(refusal) = persist(&plan.marker_path, &plan.new_marker) {
         let final_record = build_refusal_audit_record(inputs, Some(&plan), &refusal);
-        write_authority_reset_audit(data_dir, &audit_path, &final_record)?;
-        return Err(refusal);
+        let audit_error = audit(data_dir, &audit_path, &final_record).err();
+        return Err(attempt_failure(
+            AuthorityResetStage::MarkerPersistence,
+            MarkerPersistenceOutcome::AttemptedUncertain,
+            Some(refusal),
+            audit_error,
+        ));
     }
 
     // Step 3c — finalise the audit record as "success".
     let final_record = build_success_audit_record(&plan, PlanResultState::Success);
-    write_authority_reset_audit(data_dir, &audit_path, &final_record)?;
+    audit(data_dir, &audit_path, &final_record).map_err(|e| {
+        attempt_failure(
+            AuthorityResetStage::SuccessAudit,
+            MarkerPersistenceOutcome::Acknowledged,
+            None,
+            Some(e),
+        )
+    })?;
 
     let new_marker_hash_hex = final_record
         .new_marker_hash
@@ -1146,6 +1249,10 @@ pub fn execute_authority_state_reset(
 // ============================================================================
 // Tests
 // ============================================================================
+
+#[cfg(all(test, target_os = "linux"))]
+#[path = "pqc_authority_state_reset_error_tests.rs"]
+mod error_tests;
 
 #[cfg(test)]
 mod tests {

@@ -5147,3 +5147,41 @@ No quarantine store, startup gate, recovery/clear, currentness or fencing
 is introduced; no operational keys/signing, node/network or activation.
 Audit register and all other unresolved obligations are preserved.
 A33-F1 / E27 remain **OPEN**; activation **DISABLED**; public DevNet **NO-GO**.
+
+## 39. Authority-reset stage-aware operation and audit errors
+
+**IMPLEMENTED — INDEPENDENT REVIEW PENDING.**
+Repository, existing task branch, exact local/remote tip
+`6506faf18485769a2c852b7609149f908b807848`, tree
+`335acda5ba0d43dec5e30c9d34c5754649209f5e`, parent
+`e8f58a5c391f282c1996f4306c02743ace056fa5`, protected local/remote main
+and clean worktree/staging were verified before editing. Main remains
+`c9aaef40b045e896ddfa8b01bad230f6b680715e`.
+
+The reset result retains its signature but gains an inspectable
+`AttemptFailed` variant carrying stage, typed marker-persistence outcome,
+primary operation error and independent audit error. Verification refusal
+plus failed audit retains both and `NotAttempted`; persistence error
+always retains `AttemptedUncertain` and the audit result; successful
+persistence followed by audit failure retains `Acknowledged` separately.
+Error diagnostics expose the context; no rollback, audit acknowledgment
+or broader durability is implied by marker persistence acknowledgment.
+Early path refusals and normally audited verification refusals retain
+their existing direct errors. Exhaustive enum consumers must handle
+the new variant. Existing path guard, verification, audit writer,
+Linux filesystem assumptions and persistence ordering are unchanged.
+
+[Evidence and exact limits](evidence/a33_f1/authority-reset-errors-evidence.md)
+retain commands/raw outputs: **22 module tests passed** (four new error
+controls plus 18 regressions) and **6 path tests / 18 scenarios passed**.
+Private deterministic sequencing seams exercise real synthetic marker/audit
+writes and injected failures; persistence-stage tests construct a private
+synthetic plan, not a fully verified successful reset ceremony. That
+end-to-end success case remains **UNTESTED**; no verification was weakened.
+Historical plan/evidence bytes and audit register remain unchanged.
+
+No quarantine store, startup gate, automatic clear/resume, currentness,
+signer fencing or authority-reset redesign is introduced; no operational
+keys/signing, node/network, deployment or activation.
+A33-F1 / E27 and all other unresolved obligations remain **OPEN**.
+Activation **DISABLED**; public DevNet **NO-GO**.

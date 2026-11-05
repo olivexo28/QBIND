@@ -1,0 +1,16 @@
+PASS: new helper/sequencing/test formatting; legacy formatting retained.
+PASS: verification, path guard, audit writer and legacy module tests unchanged.
+PASS: 9 links, fences, test counts, stages and marker outcomes.
+PASS: previous plan/manifest prefixes and all non-whitelisted tracked bytes preserved.
+PASS: changed paths confined to the following whitelist:
+crates/qbind-node/src/pqc_authority_state_reset.rs
+crates/qbind-node/src/pqc_authority_state_reset_error_tests.rs
+docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md
+docs/security/evidence/a33_f1/SHA256SUMS
+docs/security/evidence/a33_f1/authority-reset-errors-checks.log
+docs/security/evidence/a33_f1/authority-reset-errors-checks.py
+docs/security/evidence/a33_f1/authority-reset-errors-evidence.md
+docs/security/evidence/a33_f1/authority-reset-errors-format.log
+docs/security/evidence/a33_f1/authority-reset-errors-paths.log
+docs/security/evidence/a33_f1/authority-reset-errors-platform.log
+docs/security/evidence/a33_f1/authority-reset-errors-unit.log
