@@ -391,8 +391,12 @@ struct PeerRetirement {
     tasks: Arc<tokio::sync::Mutex<PeerLoopTasks>>,
     loop_failure: std::sync::Mutex<Option<String>>,
     read_failure: Arc<std::sync::Mutex<Option<String>>>,
-    monitor: tokio::sync::Mutex<Option<JoinHandle<Result<(), String>>>>,
-    monitor_outcome: std::sync::Mutex<Option<PeerMonitorOutcome>>,
+    monitor: Arc<tokio::sync::Mutex<Option<JoinHandle<Result<(), String>>>>>,
+    monitor_outcome: Arc<std::sync::Mutex<Option<PeerMonitorOutcome>>>,
+    supervisor: tokio::sync::Mutex<Option<JoinHandle<Result<(), String>>>>,
+    supervisor_outcome: std::sync::Mutex<Option<PeerMonitorOutcome>>,
+    #[cfg(test)]
+    monitor_abort: std::sync::Mutex<Option<tokio::task::AbortHandle>>,
     peers: std::sync::Weak<RwLock<PeerRegistry>>,
     connections_current: Arc<AtomicU64>,
     #[cfg(test)]
@@ -453,8 +457,34 @@ impl PeerRetirement {
 
     async fn finish_and_wait(self: &Arc<Self>) -> Result<(), String> {
         self.begin();
+        Self::observe_monitor(
+            &self.supervisor,
+            &self.supervisor_outcome,
+            self.node_id,
+            self.session_id,
+            "supervisor",
+        )
+        .await?;
+        Self::observe_monitor(
+            &self.monitor,
+            &self.monitor_outcome,
+            self.node_id,
+            self.session_id,
+            "monitor",
+        )
+        .await?;
+        self.finish_registered().await
+    }
+
+    async fn observe_monitor(
+        slot: &tokio::sync::Mutex<Option<JoinHandle<Result<(), String>>>>,
+        saved: &std::sync::Mutex<Option<PeerMonitorOutcome>>,
+        node_id: NodeId,
+        session_id: u64,
+        role: &str,
+    ) -> Result<PeerMonitorOutcome, String> {
         use std::future::Future;
-        let mut monitor = self.monitor.lock().await;
+        let mut monitor = slot.lock().await;
         if let Some(task) = monitor.as_mut() {
             let result = std::future::poll_fn(|cx| std::pin::Pin::new(&mut *task).poll(cx)).await;
             let outcome = match result {
@@ -465,28 +495,32 @@ impl PeerRetirement {
                 }
                 Err(error) => PeerMonitorOutcome::Failed(error.to_string()),
             };
-            *self.monitor_outcome.lock().unwrap() = Some(outcome.clone());
+            *saved.lock().unwrap() = Some(outcome.clone());
             *monitor = None;
             match outcome {
                 PeerMonitorOutcome::Completed => {}
                 PeerMonitorOutcome::OperationFailed(error) => eprintln!(
-                    "[P2P] reader monitor cleanup for {:?}/{} needs retry: {}",
-                    self.node_id, self.session_id, error
+                    "[P2P] reader {role} cleanup for {:?}/{} needs retry: {}",
+                    node_id, session_id, error
                 ),
                 PeerMonitorOutcome::Cancelled(error) => eprintln!(
-                    "[P2P] reader monitor for {:?}/{} was cancelled: {}",
-                    self.node_id, self.session_id, error
+                    "[P2P] reader {role} for {:?}/{} was cancelled: {}",
+                    node_id, session_id, error
                 ),
                 PeerMonitorOutcome::Failed(error) => eprintln!(
-                    "[P2P] reader monitor for {:?}/{} failed: {}",
-                    self.node_id, self.session_id, error
+                    "[P2P] reader {role} for {:?}/{} failed: {}",
+                    node_id, session_id, error
                 ),
             }
-        } else if self.monitor_outcome.lock().unwrap().is_none() {
-            return Err("peer reader monitor outcome is unobserved; ownership retained".to_owned());
         }
-        drop(monitor);
+        saved
+            .lock()
+            .unwrap()
+            .clone()
+            .ok_or_else(|| format!("peer reader {role} outcome is unobserved; ownership retained"))
+    }
 
+    async fn finish_registered(self: &Arc<Self>) -> Result<(), String> {
         if let Some(peers) = self.peers.upgrade() {
             TcpKemTlsP2pService::mark_failed_peer_retiring(
                 self.node_id,
@@ -501,7 +535,7 @@ impl PeerRetirement {
             if registry
                 .retiring
                 .get(&self.node_id)
-                .is_some_and(|current| std::ptr::eq(Arc::as_ptr(current), self.as_ref()))
+                .is_some_and(|current| Arc::ptr_eq(current, self))
             {
                 registry.retiring.remove(&self.node_id);
             }
@@ -1855,8 +1889,12 @@ impl TcpKemTlsP2pService {
                 tasks: Arc::clone(&tasks),
                 loop_failure: std::sync::Mutex::new(None),
                 read_failure: Arc::clone(&read_failure),
-                monitor: tokio::sync::Mutex::new(None),
-                monitor_outcome: std::sync::Mutex::new(None),
+                monitor: Arc::new(tokio::sync::Mutex::new(None)),
+                monitor_outcome: Arc::new(std::sync::Mutex::new(None)),
+                supervisor: tokio::sync::Mutex::new(None),
+                supervisor_outcome: std::sync::Mutex::new(None),
+                #[cfg(test)]
+                monitor_abort: std::sync::Mutex::new(None),
                 peers: Arc::downgrade(&peers),
                 connections_current: Arc::clone(&connections_current),
                 #[cfg(test)]
@@ -1894,7 +1932,23 @@ impl TcpKemTlsP2pService {
                     #[cfg(test)]
                     retirement.panic_monitor_before_publication,
                 )));
+                #[cfg(test)]
+                {
+                    *retirement.monitor_abort.lock().unwrap() =
+                        monitor.as_ref().map(JoinHandle::abort_handle);
+                }
             }
+            *retirement
+                .supervisor
+                .try_lock()
+                .expect("new peer supervisor slot is not contended") =
+                Some(tokio::spawn(Self::supervise_peer_reader(
+                    node_id,
+                    retirement.session_id,
+                    Arc::clone(&retirement.monitor),
+                    Arc::clone(&retirement.monitor_outcome),
+                    Arc::downgrade(&retirement),
+                )));
 
             {
                 registry.registering.remove(&node_id);
@@ -1914,6 +1968,55 @@ impl TcpKemTlsP2pService {
 
         println!("[P2P] Peer {:?} connected", node_id);
         Ok(())
+    }
+
+    async fn supervise_peer_reader(
+        node_id: NodeId,
+        session_id: u64,
+        monitor: Arc<tokio::sync::Mutex<Option<JoinHandle<Result<(), String>>>>>,
+        monitor_outcome: Arc<std::sync::Mutex<Option<PeerMonitorOutcome>>>,
+        retirement: std::sync::Weak<PeerRetirement>,
+    ) -> Result<(), String> {
+        let outcome = PeerRetirement::observe_monitor(
+            &monitor,
+            &monitor_outcome,
+            node_id,
+            session_id,
+            "monitor",
+        )
+        .await?;
+        match outcome {
+            PeerMonitorOutcome::Completed => return Ok(()),
+            PeerMonitorOutcome::OperationFailed(error) => return Err(error),
+            PeerMonitorOutcome::Cancelled(_) | PeerMonitorOutcome::Failed(_) => {}
+        }
+        let Some(retirement) = retirement.upgrade() else {
+            return Err("retirement owner dropped before monitor recovery".to_owned());
+        };
+        if retirement.read_failure.lock().unwrap().is_none() {
+            return Ok(());
+        }
+        // Publish the exact observed-failed identity before any cancellable wait.
+        // This supervisor never joins itself; retries observe it before cleanup.
+        if let Some(peers) = retirement.peers.upgrade() {
+            Self::mark_failed_peer_retiring(
+                node_id,
+                &peers,
+                &retirement.connections_current,
+                &retirement,
+            );
+        }
+        let result = tokio::time::timeout(PEER_RETIREMENT_TIMEOUT, retirement.finish_registered())
+            .await
+            .map_err(|_| "peer monitor recovery timed out; ownership retained".to_owned())
+            .and_then(|result| result);
+        if let Err(error) = &result {
+            eprintln!(
+                "[P2P] monitor recovery for {:?}/{} incomplete; ownership retained: {}",
+                node_id, session_id, error
+            );
+        }
+        result
     }
 
     async fn monitor_peer_reader(
@@ -3209,7 +3312,13 @@ mod peer_retirement_tests {
         tokio::time::timeout(PEER_RETIREMENT_TIMEOUT, pause.entered.notified())
             .await
             .expect("reader monitor should acquire its task store");
-        owner.monitor.lock().await.as_ref().unwrap().abort();
+        owner
+            .monitor_abort
+            .lock()
+            .unwrap()
+            .as_ref()
+            .unwrap()
+            .abort();
 
         {
             let tasks = owner.tasks.lock().await;
@@ -3282,6 +3391,162 @@ mod peer_retirement_tests {
         assert_ne!(harness.session_id(id), old_session);
         drop(remote);
         drop(replacement_remote);
+    }
+
+    #[tokio::test]
+    async fn interrupted_fatal_handoff_autonomously_retires_and_retains_failed_cleanup() {
+        for panic_monitor in [true, false] {
+            let harness = Harness::new(8);
+            let id = node_id(34);
+            let pause = Arc::new(RegistrationPause::default());
+            {
+                let mut registry = harness.peers.write();
+                registry.monitor_before_publication = Some(Arc::clone(&pause));
+                registry.panic_monitor_before_publication = panic_monitor;
+            }
+            let (local, remote) = pair_channels(true);
+            harness.register(id, local).await.unwrap();
+            let owner = Arc::clone(&harness.peers.read().active[&id].retirement);
+            owner.channel.fail_shutdown_for_test(true);
+            let (remote, result) = send_app_and_return(remote, vec![0xff, 0, 0, 0, 0]).await;
+            result.unwrap();
+            tokio::time::timeout(Duration::from_secs(3), pause.entered.notified())
+                .await
+                .expect("fatal reader should reach the publication window");
+            assert!(owner.read_failure.lock().unwrap().is_some());
+            assert!(matches!(
+                owner.tasks.lock().await.reader_outcome,
+                Some(TaskOutcome::Completed)
+            ));
+            assert_registry_count(&harness, 1);
+            if panic_monitor {
+                pause.release.notify_one();
+            } else {
+                owner
+                    .monitor_abort
+                    .lock()
+                    .unwrap()
+                    .as_ref()
+                    .unwrap()
+                    .abort();
+            }
+            // No replacement, shutdown, or finish_and_wait drives this handoff.
+            tokio::time::timeout(Duration::from_secs(3), async {
+                while !owner
+                    .supervisor
+                    .lock()
+                    .await
+                    .as_ref()
+                    .unwrap()
+                    .is_finished()
+                {
+                    tokio::task::yield_now().await;
+                }
+            })
+            .await
+            .expect("supervisor should autonomously attempt and report cleanup");
+            assert_registry_count(&harness, 0);
+            assert!(Arc::ptr_eq(&harness.peers.read().retiring[&id], &owner));
+            assert!(
+                matches!(
+                    owner.monitor_outcome.lock().unwrap().as_ref(),
+                    Some(PeerMonitorOutcome::Failed(_)) if panic_monitor
+                ) || matches!(
+                    owner.monitor_outcome.lock().unwrap().as_ref(),
+                    Some(PeerMonitorOutcome::Cancelled(_)) if !panic_monitor
+                )
+            );
+            assert_eq!(owner.channel.worker_outcomes_for_test().await, (None, None));
+            for _ in 0..2 {
+                assert!(owner.finish_and_wait().await.is_err());
+                assert!(matches!(
+                    owner.supervisor_outcome.lock().unwrap().as_ref(),
+                    Some(PeerMonitorOutcome::OperationFailed(error))
+                        if error.contains("injected shutdown capability failure")
+                ));
+                assert!(Arc::ptr_eq(&harness.peers.read().retiring[&id], &owner));
+            }
+            owner.channel.fail_shutdown_for_test(false);
+            owner.finish_and_wait().await.unwrap();
+            assert_eq!(
+                owner.channel.worker_outcomes_for_test().await,
+                (Some("completed"), Some("completed"))
+            );
+            expect_remote_eof(remote).await;
+            harness.wait_until_retired(id).await;
+        }
+    }
+
+    #[tokio::test]
+    async fn interrupted_fatal_handoff_completes_without_external_cleanup_and_is_identity_checked()
+    {
+        for panic_monitor in [true, false] {
+            let harness = Harness::new(8);
+            let id = node_id(35);
+            let pause = Arc::new(RegistrationPause::default());
+            {
+                let mut registry = harness.peers.write();
+                registry.monitor_before_publication = Some(Arc::clone(&pause));
+                registry.panic_monitor_before_publication = panic_monitor;
+            }
+            let (local, remote) = pair_channels(true);
+            harness.register(id, local).await.unwrap();
+            let owner = Arc::clone(&harness.peers.read().active[&id].retirement);
+            let (remote, result) = send_app_and_return(remote, vec![0xff, 0, 0, 0, 0]).await;
+            result.unwrap();
+            tokio::time::timeout(Duration::from_secs(3), pause.entered.notified())
+                .await
+                .unwrap();
+            if panic_monitor {
+                pause.release.notify_one();
+            } else {
+                owner
+                    .monitor_abort
+                    .lock()
+                    .unwrap()
+                    .as_ref()
+                    .unwrap()
+                    .abort();
+            }
+            harness.wait_until_retired(id).await;
+            assert_registry_count(&harness, 0);
+            {
+                let tasks = owner.tasks.lock().await;
+                assert!(matches!(tasks.reader_outcome, Some(TaskOutcome::Completed)));
+                assert!(matches!(tasks.writer_outcome, Some(TaskOutcome::Completed)));
+                assert!(tasks.reader.is_none() && tasks.writer.is_none());
+            }
+            assert_eq!(
+                owner.channel.worker_outcomes_for_test().await,
+                (Some("completed"), Some("completed"))
+            );
+            expect_remote_eof(remote).await;
+
+            let (replacement, replacement_remote) = pair_channels(true);
+            harness.register(id, replacement).await.unwrap();
+            let new_session = harness.session_id(id);
+            assert_ne!(new_session, owner.session_id);
+            // Replay the actual recovery route with the old, retained failure.
+            TcpKemTlsP2pService::supervise_peer_reader(
+                id,
+                owner.session_id,
+                Arc::clone(&owner.monitor),
+                Arc::clone(&owner.monitor_outcome),
+                Arc::downgrade(&owner),
+            )
+            .await
+            .unwrap();
+            assert_registry_count(&harness, 1);
+            assert_eq!(harness.session_id(id), new_session);
+            let (replacement_remote, result) =
+                send_app_and_return(replacement_remote, heartbeat_frame(35)).await;
+            result.unwrap();
+            assert!(matches!(
+                harness.receive().await.message,
+                P2pMessage::Control(crate::p2p::ControlMsg::Heartbeat { view: 35, .. })
+            ));
+            drop(replacement_remote);
+        }
     }
 
     #[tokio::test]
@@ -3390,7 +3655,7 @@ mod peer_retirement_tests {
         tokio::time::timeout(Duration::from_secs(3), async {
             loop {
                 if owner
-                    .monitor
+                    .supervisor
                     .lock()
                     .await
                     .as_ref()
