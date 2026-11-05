@@ -4978,3 +4978,47 @@ activation **DISABLED**; public DevNet **NO-GO**.
 The proposed boundary keeps missing, partial or mismatched marker/database pairs closed, separates local initialization from permission to participate, and requires explicit handling of clones, shutdown, process death, path replacement and restore rebind. It does not claim that descriptors, matching labels or local locks establish currentness or exclusive signing. The earlier Python temporary-directory observations are reported local controls without a separately retained raw repository artifact, not independent reproduction or evidence of Rust-backend, power-loss or production-capacity behavior.
 
 All acceptance cases are proposed and not run for this document. The 64 KiB ceiling remains unapproved and unproven. No production implementation, startup integration, automatic clear, operational signer or deployment is approved by this amendment. A33-F1 / E27 and all remaining obligations remain **OPEN**; activation **DISABLED**; public DevNet **NO-GO**.
+
+## 35. A33-F1 / E27 isolated Rust filesystem publication experiment
+
+**TEST-ONLY FILESYSTEM PROTOTYPE — INDEPENDENT REVIEW PENDING.** After
+repository/branch/cleanliness and protected-ref checks, the task branch was
+ancestry-verified and fast-forwarded from
+`83ec48cf37d71c53d4e623b7a9ff8227f0008250` to expected input
+`acf557bc9c15ef5018d2f86e8efc8aa07367edbc`, tree
+`a97557b62accd17cc423c1e29c4ce5045bec17b9`. Local/remote main remain
+`c9aaef40b045e896ddfa8b01bad230f6b680715e`.
+
+The owner-supplied **PASS WITH LIMITATIONS** review of that input is
+attributed as user-supplied; reviewer identity/separate raw artifact were
+unavailable. Earlier Python controls remain local reported observations,
+not independent reproduction, Rust-backend, crash, power-loss or whole-record
+capacity evidence.
+
+The self-contained test target
+`crates/qbind-consensus/tests/a33_f1_marker_filesystem_tests.rs` exercises
+actual Linux exclusive temp creation, bounded complete write, file sync,
+same-directory rename and directory sync in newly created isolated temporary
+directories. Acknowledgement follows only successful completion of all
+stages. Failure stage/cause and final visibility remain separate: new bytes
+after rename without acknowledged completion are not prior-record retention.
+Deterministic harness failures/uncertain completions are explicitly separated
+from actual OS exclusive-create errors.
+
+The focused suite passed **11 tests** on Linux/ext4, including exact readback/
+stage order, per-stage failures, partial write, leftover artifacts, bounded
+special-file/no-follow reads, scripted directory/final replacement and
+repeated publication. The 65,536/65,537-byte controls test synthetic fixture
+limits only, not the complete cumulative record format. Non-Linux controls
+are explicitly unsupported, not counted as passes. Formatting, whitespace,
+historical-preservation and checksum checks passed; the earlier 9-test run
+is retained separately. See [revision-pinned experiment evidence](evidence/a33_f1/filesystem-prototype-evidence.txt)
+for exact commands, raw logs, hashes, platform and threat-model limits.
+
+Held descriptors and checks do not fence hostile concurrent filesystem
+changes. No crash, power-loss, full-format-capacity, startup, database-binding,
+signer-fencing, process or network assurance is established. No production
+wiring or format/initialization/authority/clear procedure is selected.
+Historical plan/evidence bytes, source and audit register are preserved.
+A33-F1 / E27 and all unresolved obligations remain **OPEN**; activation
+**DISABLED**; public DevNet **NO-GO**.

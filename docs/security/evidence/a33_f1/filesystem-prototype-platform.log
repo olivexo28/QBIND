@@ -1,0 +1,7 @@
+Linux 6.12.8+ x86_64 GNU/Linux
+rustc 1.99.1 (58cf8f9c3 2026-10-13)
+cargo 1.99.1 (5f94df478 2026-08-27)
+Filesystem     Type 1K-blocks    Used Available Use% Mounted on
+/dev/vdb       ext4  19047124 8824520   9229740  49% /
+/dev/vdb       ext4  19047124 8824520   9229740  49% /
+ext4   rw,relatime

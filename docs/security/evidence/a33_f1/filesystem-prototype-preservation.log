@@ -1,0 +1,3 @@
+PASS: historical plan/manifest prefixes preserved.
+PASS: all historical evidence, audit register and pre-existing crates unchanged.
+PASS: new plan local evidence link resolves.

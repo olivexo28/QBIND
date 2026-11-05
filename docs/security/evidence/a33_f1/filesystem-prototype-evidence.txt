@@ -1,0 +1,195 @@
+A33-F1 / E27 isolated Rust filesystem publication prototype
+
+TEST-ONLY FILESYSTEM PROTOTYPE -- INDEPENDENT REVIEW PENDING.
+A33-F1 / E27 and all other unresolved obligations OPEN.
+Activation DISABLED; public DevNet NO-GO.
+
+1. Entry, producer and review attribution
+
+Repository: olivexo28/QBIND
+Branch: copilot/a33-f1-bounded-eviction
+Initial local tip: 83ec48cf37d71c53d4e623b7a9ff8227f0008250
+Verified remote/expected producer parent: acf557bc9c15ef5018d2f86e8efc8aa07367edbc
+Verified expected tree: a97557b62accd17cc423c1e29c4ce5045bec17b9
+Protected local/remote main: c9aaef40b045e896ddfa8b01bad230f6b680715e
+Repository root/URL, branch, clean worktree/staging and local/remote main
+were checked before editing. The local branch was behind the exact expected
+remote tip. An initial fetch by branch names did not update the stale
+origin/task tracking ref; that stale tracking ref was NOT used as task input.
+Exact expected commits were fetched; expected tree and ancestry were checked:
+  git fetch origin acf557bc9c15ef5018d2f86e8efc8aa07367edbc c9aaef40b045e896ddfa8b01bad230f6b680715e
+  git merge-base --is-ancestor HEAD acf557bc9c15ef5018d2f86e8efc8aa07367edbc
+  git merge --ff-only acf557bc9c15ef5018d2f86e8efc8aa07367edbc
+All exit 0. HEAD/tree and clean worktree then matched expected input.
+No reset, overwrite, force update or main change occurred.
+
+Inputs preserved: stay-closed-contract.md, storage-candidate-design.md and
+initialization-binding-continuity.md.
+The owner supplied PASS WITH LIMITATIONS independent review of acf557bc.
+This is USER-SUPPLIED attribution. Reviewer identity and separate raw review
+artifact were not provided; neither is invented. Earlier Python temporary-
+directory controls were reported local observations, NOT independently
+reproduced by that reviewer, Rust-backend evidence, crash/power-loss evidence
+or full-record capacity evidence. This Rust prototype is new author-produced
+evidence, not independent review or production approval.
+
+Producer source:
+  crates/qbind-consensus/tests/a33_f1_marker_filesystem_tests.rs
+SHA-256: b01e7e8a770c06c90da540a3ce65ae6af3c1e1b0c1184fad4c6e02395e42b457
+Producer identity is the pinned parent plus this source hash and final
+delivery commit reported after commit. No self-referential commit hash is
+fabricated. No dependency manifest or prior source changed.
+
+2. Isolation and explicit filesystem threat model
+
+The test target imports only std. Linux-only openat/renameat/mkfifoat calls
+use fixed relative fixture names and Linux flag constants. Every test creates
+its own unique directory under std::env::temp_dir using exclusive create_dir,
+then creates its own marker subdirectory and opens that directory descriptor.
+All marker, temp, FIFO, symlink, moved-directory and target artifacts are
+inside that test-created root. Drop removes ONLY that exact unique root;
+cleanup errors fail the test. No operational paths, keys or node data are
+opened. No workers/signers/network/database/startup path are involved.
+
+Profile exercised: Linux 6.12.8+, x86_64 GNU/Linux; /tmp on ext4 at /dev/vdb.
+Toolchain: rustc 1.99.1 (58cf8f9c3 2026-10-13);
+cargo 1.99.1 (5f94df478 2026-08-27).
+Exact uname/toolchain/filesystem/mount observations:
+  filesystem-prototype-platform.log
+SHA-256: 31c1cd1708d5139694b7a674caaadea6331291622ab3c3e40a61140fdb01f654
+Device cache, virtualization, kernel/filesystem implementation and actual
+flush-to-media behavior were NOT validated. This is not a durability profile.
+
+Assumption: each fixture is single-threaded, with cooperating access and
+controlled replacement at explicit boundaries (independent tests may run in
+parallel). No hostile concurrent mutation inside identity-check/syscall
+windows. Directory dev/inode checks detect scripted replacement before
+publication/rename; held-descriptor relative operations avoid reopening the
+marker directory for writes. Final observation is bounded and rechecked
+before rename. These checks are NOT an atomic transaction: same-content
+replacement, races after checks, lock/mount swaps, symlinked ancestors,
+malicious inode reuse and hostile temp replacement are not fenced.
+Descriptors/content equality do not establish continuity/currentness for all
+participants. Such threats require a reviewed profile or refusal.
+
+3. Executed publication sequence and failures
+
+Success executes actual OS operations in order:
+  openat(marker.tmp, O_CREAT|O_EXCL|O_WRONLY|O_NOFOLLOW|O_NONBLOCK|O_CLOEXEC)
+  bounded write_all of the complete supplied synthetic bytes
+  File::sync_all on temporary file
+  same-held-directory renameat(marker.tmp -> marker)
+  File::sync_all on held directory
+Only after all five return success is Ack returned. Ack contains the fixture
+bytes, NOT a durable marker protocol, identity token or participation permit.
+Stage trace records completed successful calls. Exact final readback is
+checked separately. File and directory sync success is an observed API
+result, not proof of process-crash or device power-loss persistence.
+
+Harness injections:
+  Before(stage): simulated failure before that stage's syscall.
+  UnknownAfter(stage): syscall actually succeeded and trace advanced, but
+    the harness simulates lost/uncertain completion and returns no Ack.
+  PartialWrite: actual half-buffer write, followed by simulated error.
+  ReplaceDirectoryBeforeRename / ReplaceFinalBeforeRename: actual controlled
+    filesystem modification by harness before continuity checks.
+These are not OS-returned write/sync faults. No real EIO, ENOSPC, sync-error
+or interrupted kernel operation is claimed. Actual OS exclusive-create
+AlreadyExists errors are checked for existing temporary artifacts; no
+truncation, deletion or promotion occurs. No OS fault is invented from a
+simulated failure.
+
+Failure carries Stage, Cause (Harness, Os, Rejected) and Visibility:
+  PriorRetained only for established pre-rename failure under the fixture
+    threat model (no final replacement has occurred).
+  NewVisible after successful rename, including before directory sync or
+    unknown completion of directory sync. No Ack; NOT old-marker retention
+    or acknowledged durability.
+  Unknown for changed directory/final or an OS rename error whose replacement
+    result was not established. No prior-retention inference from that error.
+No error path issues an Ack. Errors do not erase old Ack objects; those
+describe earlier observations, NOT necessarily current final bytes.
+Repeated success/failure controls check this distinction. Leftover temp files
+block subsequent exclusive-create publication; they are never auto-promoted.
+
+inspect uses held-directory openat with O_NOFOLLOW|O_NONBLOCK, validates the
+opened object is regular, and reads at most LIMIT+1 detection bytes.
+It distinguishes Missing, Malformed, Oversized, Refused, and synthetic Bytes.
+FIFO observation returns without waiting for a writer; directories and
+symlinks are refused. No persistent encoding is chosen: "fixture:" is merely
+a synthetic test prefix. A readable synthetic file is never startup/clear
+permission. This prototype implements no participation API.
+
+LIMIT=65,536 bytes is a FIXTURE bound on synthetic bytes only.
+65,536 succeeds and reads back exactly; 65,537 refuses before temp creation
+or final replacement. This does NOT establish that an entire encoded record,
+envelope, bindings, cumulative effects/conflicts and checksum fit in 64 KiB.
+The full-capacity derivation remains an unresolved prerequisite.
+
+4. Exact commands, raw results and unsupported cases
+
+Working directory: /workspaces/QBIND/olivexo28/QBIND
+  rustfmt --edition 2021 crates/qbind-consensus/tests/a33_f1_marker_filesystem_tests.rs
+  rustfmt --edition 2021 --check crates/qbind-consensus/tests/a33_f1_marker_filesystem_tests.rs
+Both exit 0. Check stdout/stderr is empty as emitted:
+  filesystem-prototype-format.log
+SHA-256: e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+
+  cargo test -p qbind-consensus --test a33_f1_marker_filesystem_tests -- --nocapture
+Final exit 0: 11 passed, 0 failed, 0 ignored, 0 measured, 0 filtered out.
+  filesystem-prototype-focused-tests.log
+SHA-256: ff158b02ca6bd119e4fb07b17b8141a4ec926dad0e128a9c879e4c6af5970b1f
+37 pre-existing library warnings, no test-target warning.
+All Linux controls ran; zero Linux skips. Non-Linux is unsupported: the
+target exposes a single explicitly ignored unsupported-profile test there;
+no other platform was run or counted as passing. Actual OS sync faults,
+process-kill/restart, power-loss and hostile simultaneous races were NOT run.
+
+An intermediate run of the same Cargo command passed 9 tests, exit 0,
+before before-rename continuity and repeated-leftover controls were added.
+Its raw output is preserved separately:
+  filesystem-prototype-intermediate-9-tests.log
+SHA-256: 37a92fff2a646171ef061906310875ef34f03ca6b1fcd7e6fcbf09993eed52dc
+No failing Rust run or baseline experiment occurred. Two manual patch
+attempts failed (format context mismatch and empty hunk), applying no changes;
+corrected patches then applied. These are not test results. Existing
+passing suites were not rerun without need.
+
+Platform capture command (exit 0):
+  { uname -srmo; rustc --version; cargo --version; df -T . /tmp; findmnt -no FSTYPE,OPTIONS -T /tmp; }
+Output retained separately as named above.
+
+Final whitespace/checksum commands:
+  git -c core.whitespace=-blank-at-eof diff --cached --check
+  git diff --cached --check -- . ':!docs/security/evidence/a33_f1/filesystem-prototype-focused-tests.log' ':!docs/security/evidence/a33_f1/filesystem-prototype-intermediate-9-tests.log'
+  (cd docs/security/evidence/a33_f1 && sha256sum -c SHA256SUMS)
+All exit 0. Only Cargo raw trailing blank lines are exempted from default
+whitespace checking; raw output bytes are preserved. Historical plan and
+manifest prefixes are unchanged; all historical evidence, audit register
+and pre-existing source remain byte-identical to acf557bc.
+The Python preservation check compared entry Git blobs byte-for-byte, checked
+plan/manifest prefixes, checked `git diff --exit-code` for existing crates,
+and resolved the new plan link. Exit 0; output:
+  filesystem-prototype-preservation.log
+SHA-256: 05bbc47e5b7dc74073a957eadc260ef98347cd0166d5aa01a1af425b2edd7580
+
+5. Delivery limits and residuals
+
+Changed paths: new test target; append-only remediation plan and SHA256SUMS;
+new evidence and five new logs listed here. New fixture roots are
+removed after tests; no diagnostic artifact is promoted to operational state.
+Only the existing task branch is committed/pushed; final commit/tree/parent,
+source/evidence hashes and remote equality are reported after delivery.
+
+No production storage backend, startup gate, database binding, signing,
+networking, catch-up, persistent format, initialization/migration, recovery
+authority, currentness source, signer exclusivity or clear/resume procedure
+is selected or wired. No cross-process fence, durability, production startup,
+binary/multi-node behavior or delivery assurance is established. Earlier
+acknowledged-intent and barrier obligations remain separate and unimplemented
+in production. No main update, PR, merge, force-push, deployment, live node,
+operational signing or activation occurred.
+
+TEST-ONLY FILESYSTEM PROTOTYPE -- INDEPENDENT REVIEW PENDING.
+A33-F1 / E27 and all other unresolved obligations OPEN.
+Activation DISABLED; public DevNet NO-GO.
