@@ -5022,3 +5022,46 @@ wiring or format/initialization/authority/clear procedure is selected.
 Historical plan/evidence bytes, source and audit register are preserved.
 A33-F1 / E27 and all unresolved obligations remain **OPEN**; activation
 **DISABLED**; public DevNet **NO-GO**.
+
+## 36. A33-F1 / E27 source-pinned quarantine capacity inventory
+
+**CAPACITY INVENTORY — INDEPENDENT REVIEW PENDING.** Entry branch,
+tip/tree, clean worktree/staging, remote task and protected local/remote main
+were verified at `bf2e2020e981697e1fb44cf65fe44b6b57303767`, tree
+`46d6968f81c6d6175c4322f6043f561abd3b819c`; main remains
+`c9aaef40b045e896ddfa8b01bad230f6b680715e`.
+
+The [source-pinned inventory](evidence/a33_f1/capacity-inventory.md) traces
+catch-up production, transport framing/decode, sender/anchor admission,
+engine insertion/vote replay, prefix/current-item effects and pre-barrier
+signing/storage/callback/snapshot/epoch/outbound observations. It separates
+the 128-block producer cap from absent semantic receiver enforcement at the
+inspected handler/engine, transport-specific framing from typed input, and
+validated signer membership/cardinality from unvalidated vectors. Local
+queue/runtime/journal bounds do not establish an unresolved operation's
+global evidence-history capacity.
+
+The complete symbolic formula includes framing, identities, anchors,
+revisions, block/signer material, prefix/current effects, all worker domains,
+Unknown/conflict histories, rejected/unrecorded diagnostics and integrity.
+No numeric maximum is derived: representation and cumulative count/size
+rules remain unspecified. **65,536-byte production sufficiency remains
+UNESTABLISHED**; the filesystem byte fixture is not a full-record encoder.
+
+The additional user-supplied conditional example is retained: separate
+32-byte-ID lists for prefixes 1 through 128 require **264,192 bytes** for IDs
+alone. This is neither implemented encoding nor an inbound 128-block
+guarantee. Compact canonical-prefix/index observations are assessed as a
+proposal requiring explicit conflict/provenance/retry/late-effect retention
+and enforceable maxima, not a silent-loss or approved compression rule.
+
+The user-supplied filesystem review disposition **PASS WITH LIMITATIONS**
+covered source/evidence, not independent rerunning of the author's 11 Rust
+tests. Reviewer identity/raw artifact are not invented. That checkpoint and
+all historical plan/evidence bytes remain unchanged. Documentation links,
+anchors, conditional arithmetic, whitespace, preservation and checksums were
+checked; [commands and source hashes](evidence/a33_f1/capacity-inventory-checks.txt)
+record limits. No earlier Rust/filesystem suite or live operation was rerun.
+No production encoding, protocol limit, backend, gate or clear procedure is
+introduced. A33-F1 / E27 and all remaining obligations **OPEN**; activation
+**DISABLED**; public DevNet **NO-GO**.

@@ -1,0 +1,112 @@
+A33-F1 / E27 source-pinned capacity inventory: checks and provenance
+
+CAPACITY INVENTORY -- INDEPENDENT REVIEW PENDING.
+65,536-byte production sufficiency UNESTABLISHED.
+A33-F1 / E27 and all remaining obligations OPEN.
+Activation DISABLED; public DevNet NO-GO.
+
+Entry/producer parent: bf2e2020e981697e1fb44cf65fe44b6b57303767
+Entry tree: 46d6968f81c6d6175c4322f6043f561abd3b819c
+Repository: olivexo28/QBIND
+Branch: copilot/a33-f1-bounded-eviction
+Protected local/remote main: c9aaef40b045e896ddfa8b01bad230f6b680715e
+Repository/branch/tip/tree, clean worktree/staging, remote task and main were
+verified before editing; no divergence or fast-forward was necessary.
+
+Inventory SHA-256:
+ad16b191fc34ca6ad354251323b3f0787a3cd9d0bf1b649d80f2dcc6cd77fb73
+  docs/security/evidence/a33_f1/capacity-inventory.md
+Inspected source-hash list:
+  capacity-inventory-source-hashes.log
+SHA-256: a2cc9ec91f006f9e12b11f6f00847c30dd649786ed3da640529211d1ffbe848e
+Every listed source is unchanged and pinned to the entry revision above.
+
+Source-hash capture command (exit 0):
+  sha256sum crates/qbind-node/src/p2p.rs crates/qbind-node/src/p2p_tcp.rs crates/qbind-node/src/p2p_inbound.rs crates/qbind-node/src/secure_channel.rs crates/qbind-net/src/framed_io.rs crates/qbind-consensus/src/qc.rs crates/qbind-consensus/src/validator_set.rs crates/qbind-consensus/src/ids.rs crates/qbind-consensus/src/basic_hotstuff_engine.rs crates/qbind-node/src/binary_consensus_loop.rs crates/qbind-node/src/signing_reservation_journal.rs crates/qbind-node/src/consensus_net_p2p.rs crates/qbind-node/src/main.rs crates/qbind-node/src/vm_v0_runtime.rs crates/qbind-node/src/hotstuff_node_sim.rs crates/qbind-node/src/storage.rs crates/qbind-consensus/tests/a33_f1_quarantine_store_interface_tests.rs crates/qbind-consensus/tests/a33_f1_marker_filesystem_tests.rs
+Raw stdout retained in the source-hash list, stderr empty.
+
+Documentation validation command (from /workspaces/QBIND/olivexo28/QBIND):
+
+python - <<'PY'
+import pathlib, re, subprocess
+base = 'bf2e2020e981697e1fb44cf65fe44b6b57303767'
+plan = pathlib.Path('docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md')
+manifest = pathlib.Path('docs/security/evidence/a33_f1/SHA256SUMS')
+inventory = pathlib.Path('docs/security/evidence/a33_f1/capacity-inventory.md')
+for path in (plan, manifest):
+    assert path.read_bytes().startswith(
+        subprocess.check_output(['git', 'show', f'{base}:{path}'])), path
+historical = subprocess.check_output([
+    'git', 'ls-tree', '-r', '--name-only', base,
+    'docs/security/evidence/a33_f1', 'Audit/QBIND_SECURITY_FINDINGS_REGISTER.md'
+]).decode().splitlines()
+for name in historical:
+    if name != str(manifest):
+        assert pathlib.Path(name).read_bytes() == subprocess.check_output(
+            ['git', 'show', f'{base}:{name}']), name
+subprocess.run(['git', 'diff', '--exit-code', base, '--', 'crates'], check=True)
+links = 0
+for path, text in (
+    (inventory, inventory.read_text()),
+    (plan, plan.read_text().split('## 36. A33-F1', 1)[1]),
+):
+    text = re.sub(r'```.*?```', '', text, flags=re.S)
+    for target in re.findall(r'\[[^\]]+\]\(([^)]+)\)', text):
+        assert '://' not in target, target
+        assert (path.parent / target).is_file(), (path, target)
+        links += 1
+ranges = 0
+for name, suffix in re.findall(
+    r'`(crates/[^`:]+):([\d,\-]+)`', inventory.read_text()
+):
+    count = len(pathlib.Path(name).read_text().splitlines())
+    for span in suffix.split(','):
+        start, _, end = span.partition('-')
+        assert 1 <= int(start) <= int(end or start) <= count, (name, span)
+        ranges += 1
+assert inventory.read_text().count('```') % 2 == 0
+assert 'UNESTABLISHED' in inventory.read_text()
+assert sum(range(1, 129)) == 8_256
+assert 32 * sum(range(1, 129)) == 264_192
+assert 32 * 128 == 4_096
+print(f'PASS: {links} local documentation/source links; {ranges} source ranges.')
+print('PASS: historical plan/manifest prefixes, evidence/register and existing crates preserved.')
+print('PASS: balanced fences; UNESTABLISHED status present.')
+print('PASS: conditional prefix arithmetic 264192 IDs bytes; compact canonical IDs 4096 bytes.')
+print('NO Rust/filesystem/crash/power-loss/runtime tests run; no whole-record numeric maximum.')
+PY
+
+Exit 0. Raw output: capacity-inventory-doc-checks.log.
+An earlier documentation-check attempt exited 1: the same Python command
+above without the re.sub line interpreted SUM[r=...](...) inside the
+formula code fence as a Markdown link. Raw failed output is retained as
+capacity-inventory-doc-checks-attempt-1.log. This was an unsuccessful
+validator attempt, not a passing check or Rust test. The corrected link
+check excludes fenced code; no inventory/source change was required.
+These checks validate local links/line ranges, append-only bytes and stated
+conditional arithmetic; they are not a semantic proof of source claims,
+codec correctness, enforceable production capacity or Rust test results.
+No new Markdown tooling or dependencies were installed.
+
+Additional exact commands:
+  git diff --check
+  git diff --cached --check
+  (cd docs/security/evidence/a33_f1 && sha256sum -c SHA256SUMS)
+  sha256sum -c docs/security/evidence/a33_f1/capacity-inventory-source-hashes.log
+All exit 0. Existing evidence checksums were reverified, but no earlier
+filesystem test or its review checkpoint was changed/rerun. Historical
+evidence bytes, audit register, source and previous plan text are unchanged.
+
+No Rust tests/builds, new filesystem calls against fixtures, process-kill,
+restart, power-loss, binary, node, network or signing experiments ran.
+The owner's supplied PASS WITH LIMITATIONS filesystem review verified source/
+evidence without independently rerunning the author's 11 tests. Reviewer
+identity/standalone raw artifact are unavailable and not invented.
+The additional user-supplied 264,192-byte observation remains conditional,
+not an encoding or receiver count limit. Compact-history analysis selects
+no schema, new protocol/resource cap or evidence-dropping rule.
+
+Changed paths: appended remediation plan and manifest; new inventory, this
+check record, source-hash list and both raw documentation-check outputs. Only
+existing task branch is committed/pushed. Final commit/tree/parent, hashes,
+remote equality, unchanged main and clean worktree are reported after commit.

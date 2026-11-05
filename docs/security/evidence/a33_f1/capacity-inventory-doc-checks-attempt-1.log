@@ -1,0 +1,3 @@
+Traceback (most recent call last):
+  File "<stdin>", line 25, in <module>
+AssertionError: (PosixPath('docs/security/evidence/a33_f1/capacity-inventory.md'), 'ResponseBinding_r + BlockEvidence_r')

@@ -1,0 +1,5 @@
+PASS: 12 local documentation/source links; 55 source ranges.
+PASS: historical plan/manifest prefixes, evidence/register and existing crates preserved.
+PASS: balanced fences; UNESTABLISHED status present.
+PASS: conditional prefix arithmetic 264192 IDs bytes; compact canonical IDs 4096 bytes.
+NO Rust/filesystem/crash/power-loss/runtime tests run; no whole-record numeric maximum.
