@@ -5312,3 +5312,46 @@ previous test suites were repeated. Only append-only, checksum and whitespace
 documentation checks were run; exact command outcomes appear in the evidence
 record. A33-F1 / E27 and all other unresolved obligations remain **OPEN**.
 Activation **DISABLED**; public DevNet **NO-GO**.
+
+## 43. Test-only reset-specific quarantine decision controls
+
+**TEST-ONLY RESET CONTROLS — INDEPENDENT REVIEW PENDING.** Entry checks
+matched task tip `42b4c49e46c75f9ec8ffa758b4821bc3123aded5`, tree
+`ab72e6bb0d33f59a61dc967500f2268296a0dcad`, parent
+`bc33bca493c154dac47c797c518b77290da61566`, clean worktree/staging,
+remote tip and protected local/remote main
+`c9aaef40b045e896ddfa8b01bad230f6b680715e`.
+
+The test-only target
+`crates/qbind-node/tests/a33_f1_authority_reset_quarantine_model_tests.rs`
+fills reset-specific gaps not covered by the existing isolated catch-up
+quarantine model or actual reset/CLI tests. It asserts ownership, then
+classification/explicit hypothetical authority, then each of six modeled
+reset-write stages; ownership failure skips classification and writers while
+directory/lock setup artifacts are recorded separately. Ten local
+observations, including Applying, recorded outcome, absent-only, uncertain
+and locally Clean-looking without separate authority, refuse all writers.
+Synthetic equal, lexically equivalent, modeled parent-symlink, audit-temp,
+marker-final/temp and indeterminate path cases refuse; every modeled write
+stage is checked against synthetic quarantine record/publication paths.
+Reset success/refusal, audits, marker replacement, restart, cancellation,
+timeout and enqueue do not clear a preexisting modeled latch.
+
+Focused suite: **7 passed, 0 failed, 1 ignored**. The deliberately misplaced
+write is separately run as an expected negative control and exits **101**
+after the ordering assertion detects the write-before-classification. This
+defect is not reported as a security pass; corrected control passes. See
+[the detailed mapping, outputs and limits](evidence/a33_f1/authority-reset-quarantine-model-evidence.md),
+including raw focused and negative-control logs.
+
+All new controls are abstract test models. No new test invokes actual reset,
+CLI, lock, storage, filesystem, startup, signer or transport code. The actual
+reset/CLI tests cited in the mapping are prior evidence and were not rerun.
+Synthetic path normalization and alias/indeterminate outcomes do not prove
+real symlink, race, durability or alias coverage. No production quarantine
+wire-up or clear authority is introduced. Marker/interface design,
+initialization/migration, durability, startup coverage, currentness, signer
+exclusivity and separate clear/resume authority remain unresolved. The audit
+register and historical bytes are unchanged; only the new test and
+append-only plan/evidence/checksum entries change. A33-F1 / E27 remain
+**OPEN**; activation **DISABLED**; public DevNet **NO-GO**.
