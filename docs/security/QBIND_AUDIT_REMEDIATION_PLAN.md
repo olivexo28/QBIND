@@ -5223,3 +5223,46 @@ activation; no new recovery/clear, startup gate, quarantine or fencing.
 No power-loss, hostile-filesystem, complete-alias or startup assurance.
 A33-F1 / E27 and all other unresolved obligations remain **OPEN**.
 Activation **DISABLED**; public DevNet **NO-GO**.
+
+## 41. Bounded authority-reset CLI destination ownership
+
+**IMPLEMENTED — INDEPENDENT REVIEW PENDING.**
+Entry checks matched repository, existing task branch, clean worktree/staging,
+local/remote tip `f30cae3f502020101edf5e447bdf26aea9c9f0e1`, tree
+`9392002ff7bed9b824d92f0eb4a8426890e01442`, parent
+`11bb930e005abd082a1dbb296f0b8fe90dcf4fc0`, and protected local/remote main
+`c9aaef40b045e896ddfa8b01bad230f6b680715e`.
+
+[Source anchors, exact commands, outputs, attempts and limits](
+evidence/a33_f1/authority-reset-ownership-evidence.md) distinguish source
+review from actual isolated process observations. Baseline actual CLI reset
+wrote a refusal audit while another process held the real destination lock;
+marker bytes remained unchanged. This baseline is a reproduction, not a
+security pass. Corrected CLI acquires and retains real destination ownership
+before invoking reset, including verification-refusal audit effects. Missing
+data-dir, unsupported platform, directory/lock failures and contention refuse
+without reset marker/audit output. Explicit directory/lock-file creation
+effects are not hidden behind a no-filesystem-effect claim.
+
+The existing Linux stable-filesystem guard additionally refuses audit and
+marker final/temp paths aliasing `restore.lock`, avoiding self-replacement
+of a held lock inode. Verification and typed operation/audit error context
+remain intact. Direct public callers still must acquire ownership themselves;
+the CLI lock is not an implicit library lock. Other early exits are inventoried
+without silently extending this correction to unrelated utilities.
+
+Final **5 ownership tests** (one holder entry), **1 existing lock regression**,
+**1 fully verified synthetic fixture test / 7 scenarios**, **6 path tests /
+18 scenarios**, and **22 reset/typed-error regressions** passed. CLI-level
+verified success and valid-input equal-path refusal were exercised using
+synthetic signed inputs, real verifier, guarded writers and marker loader.
+Children/locks/temp files are owned and cleaned on failure/timeouts.
+No operational credentials, node/network, deployment or activation.
+
+Prior plan/evidence bytes and audit register are preserved. No quarantine
+store/startup gate, automatic clear/resume, recovery authority or signer
+fencing is implemented. Future quarantine classification belongs after
+ownership but before any reset effects and remains **OPEN**. No hostile-path,
+copied-store/cross-host, crash-durability or recovery assurance.
+A33-F1 / E27 and all other unresolved obligations remain **OPEN**.
+Activation **DISABLED**; public DevNet **NO-GO**.

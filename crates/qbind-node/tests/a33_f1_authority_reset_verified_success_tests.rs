@@ -3,6 +3,10 @@
 
 use std::fs;
 
+#[cfg(target_os = "linux")]
+#[path = "support/authority_reset_cli.rs"]
+mod cli;
+
 use qbind_crypto::MlDsa44Backend;
 use qbind_ledger::bundle_signing_ratification::test_helpers::build_signed_ratification;
 use qbind_ledger::genesis::{
@@ -227,9 +231,36 @@ fn verified_synthetic_reset_success_tampering_and_path_refusal() {
     assert_eq!(fs::read(&marker_path).unwrap(), before);
     println!("repeat reset: verified existing-marker success; archive and final audit consistent");
 
+    let (code, diagnostic) = cli::run(&inputs, dir.path());
+    assert_eq!(code, 0, "{diagnostic}");
+    assert!(diagnostic.contains("authority-state-reset: SUCCESS"));
+    let cli_marker = load_authority_state(&marker_path).unwrap().unwrap();
+    let mut expected = repeat_plan.new_marker.clone();
+    expected.updated_at_unix_secs = cli_marker.updated_at_unix_secs;
+    assert_eq!(cli_marker, expected);
+    let cli_audit: AuthorityResetAuditRecord =
+        serde_json::from_slice(&fs::read(audit_path).unwrap()).unwrap();
+    assert_eq!(cli_audit.result, "success");
+    assert_eq!(cli_audit.new_marker_record.as_ref(), Some(&cli_marker));
+    assert_eq!(
+        cli_audit.new_marker_hash.as_deref(),
+        Some(hex(&canonical_authority_state_digest(&cli_marker)).as_str())
+    );
+    assert!(dir.path().join("restore.lock").is_file());
+    let before = fs::read(&marker_path).unwrap();
+    println!(
+        "CLI reset: fully verified success under destination lock; loader/final audit consistent"
+    );
+
     let success_audit = fs::read(audit_path).unwrap();
     let mut collision = inputs.clone();
     collision.audit_output_path = Some(marker_path.clone());
+    let (code, diagnostic) = cli::run(&collision, dir.path());
+    assert_eq!(code, 1);
+    assert!(diagnostic.contains("UnsafeAuditPath"));
+    assert_eq!(fs::read(&marker_path).unwrap(), before);
+    assert_eq!(fs::read(audit_path).unwrap(), success_audit);
+    println!("CLI valid-input equal path: ownership acquired then UnsafeAuditPath; marker/audit unchanged");
     assert!(
         verify_authority_reset_inputs(&collision).is_ok(),
         "inputs otherwise valid"

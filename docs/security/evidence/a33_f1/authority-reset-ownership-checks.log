@@ -1,0 +1,29 @@
+append-only: docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md
+append-only: docs/security/evidence/a33_f1/SHA256SUMS
+changed: crates/qbind-node/src/main.rs
+changed: crates/qbind-node/src/pqc_authority_state_reset.rs
+changed: crates/qbind-node/tests/a33_f1_authority_reset_destination_lock_tests.rs
+changed: crates/qbind-node/tests/a33_f1_authority_reset_verified_success_tests.rs
+changed: crates/qbind-node/tests/support/authority_reset_cli.rs
+changed: docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md
+changed: docs/security/evidence/a33_f1/SHA256SUMS
+changed: docs/security/evidence/a33_f1/authority-reset-ownership-baseline.log
+changed: docs/security/evidence/a33_f1/authority-reset-ownership-build-attempt-1.log
+changed: docs/security/evidence/a33_f1/authority-reset-ownership-checks.log
+changed: docs/security/evidence/a33_f1/authority-reset-ownership-checks.py
+changed: docs/security/evidence/a33_f1/authority-reset-ownership-cli-attempt-2.log
+changed: docs/security/evidence/a33_f1/authority-reset-ownership-cli-attempt-3.log
+changed: docs/security/evidence/a33_f1/authority-reset-ownership-evidence.md
+changed: docs/security/evidence/a33_f1/authority-reset-ownership-final-controls.log
+changed: docs/security/evidence/a33_f1/authority-reset-ownership-format-attempt.log
+changed: docs/security/evidence/a33_f1/authority-reset-ownership-integration.log
+changed: docs/security/evidence/a33_f1/authority-reset-ownership-reset-regressions.log
+all historical evidence checksums verified; audit register outside permitted scope
+rustfmt: all changed/new test files passed
+rustfmt changed-line check passed (legacy differences excluded): crates/qbind-node/src/main.rs
+baseline sha256: 0018b1d4f8b57da5eb89e5d27a761adaea367eb6a2866d4ac8a7a986f707fb9a crates/qbind-node/src/main.rs
+corrected sha256: e234fcfb2d54628dec76c51162ed7b45a7baab7d960d6585e40c274eb555aca3 crates/qbind-node/src/main.rs
+rustfmt changed-line check passed (legacy differences excluded): crates/qbind-node/src/pqc_authority_state_reset.rs
+baseline sha256: 31858871b21358d1f8135bfc40fae347dbfbfafb685f4af3414ddcab9cf150e7 crates/qbind-node/src/pqc_authority_state_reset.rs
+corrected sha256: 2dd1fc709675c57726a404601808bf5fcd2465cc157412b2923f7f3a2cc95305 crates/qbind-node/src/pqc_authority_state_reset.rs
+code/docs whitespace passed; raw task logs excluded to preserve formatter diff context/Cargo EOF blanks

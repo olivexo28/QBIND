@@ -56,7 +56,7 @@
 //! outcome. A crash before the audit record is written leaves the on-disk
 //! marker untouched.
 //!
-//! Refusal audits require established audit/marker path separation. Unsafe or
+//! Refusal audits require established audit/marker/lock path separation. Unsafe or
 //! indeterminate paths return `UnsafeAuditPath` without audit publication.
 //! Other failures after persistence do not imply an unchanged marker.
 //!
@@ -973,7 +973,7 @@ pub fn build_refusal_audit_record(
     }
 }
 
-/// Check final and temporary audit/marker paths without creating anything.
+/// Check final and temporary audit/marker paths and the destination lock.
 ///
 /// Supported profile: Linux, case-sensitive filesystem, stable operator-owned
 /// directories and no concurrent namespace/hard-link changes. Parent symlinks
@@ -1049,8 +1049,19 @@ fn check_authority_reset_audit_path(
             inspect(&audit_path.with_extension("json.tmp"))?,
             inspect(&marker)?,
             inspect(&PathBuf::from(marker_tmp))?,
+            inspect(&data_dir.join(crate::restore_completion::RESTORE_LOCK_FILENAME))?,
         ];
-        for (i, j) in [(0, 1), (0, 2), (0, 3), (1, 2), (1, 3)] {
+        for (i, j) in [
+            (0, 1),
+            (0, 2),
+            (0, 3),
+            (1, 2),
+            (1, 3),
+            (0, 4),
+            (1, 4),
+            (2, 4),
+            (3, 4),
+        ] {
             if paths[i].0 == paths[j].0
                 || (paths[i].1 == paths[j].1 && paths[i].0.file_name() == paths[j].0.file_name())
                 || (paths[i].2.is_some() && paths[i].2 == paths[j].2)
@@ -1066,7 +1077,7 @@ fn check_authority_reset_audit_path(
     }
 }
 
-/// Persist an audit record (tmp + rename) only after checking marker separation.
+/// Persist an audit (tmp + rename) only after checking marker/lock separation.
 /// An error after I/O is not a general no-filesystem-effect guarantee.
 pub fn write_authority_reset_audit(
     data_dir: &Path,
@@ -1128,6 +1139,10 @@ pub struct AuthorityResetSuccess {
 /// operation/audit failures and the stage-specific persistence outcome.
 /// An acknowledged persistence call is not an audit acknowledgment or a
 /// power-loss guarantee; errors after persistence do not imply rollback.
+///
+/// Direct callers must acquire and retain destination ownership themselves
+/// before calling (including refusal-audit effects). This function does not
+/// acquire a lock; the CLI's lock does not protect arbitrary library callers.
 pub fn execute_authority_state_reset(
     inputs: &AuthorityResetInputs,
 ) -> Result<AuthorityResetSuccess, AuthorityResetRefusal> {
