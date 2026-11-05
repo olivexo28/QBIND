@@ -461,3 +461,184 @@ binary, process-crash, multi-node, deployment or live-network evidence was
 collected for this proposal. Independent contract review remains PENDING;
 A33-F1 / E27 and all other unresolved obligations remain OPEN; activation
 DISABLED; public DevNet NO-GO.
+
+7. Threat and failure models: local marker limits
+
+A quarantine marker is local evidence that a particular record was written
+and can be read under a particular storage interpretation. Even with a valid
+checksum, signature (if later designed), and internally consistent
+generation field, the marker by itself does not establish that it is the
+latest copy, that no state was rolled back, that this process exclusively
+owns a validator identity, or that consensus/signing history is continuous.
+“Synced” only has meaning under an explicitly selected and independently
+verified durability profile. No such catch-up journal profile or deployment
+profile was verified in this documentation task.
+
+| Threat/failure case | What a local marker might establish, conditional on its storage contract | What it cannot establish by itself | Required posture and independent evidence before clear |
+|---|---|---|---|
+| Ordinary process crash / orderly or abrupt process termination | If a durable `Applying` record was completed before mutation, reopening the same non-rolled-back data directory may show an unresolved intent. A synced terminal record may show what the previous process recorded. | Cannot establish the marker was written before every engine/signer/external effect unless ordering and in-flight work were fenced; cannot establish engine volatile state survived; a record of `Complete` is not a full consensus checkpoint. | Keep quarantined after any `Applying`, incomplete outcome or unknown completion. Reconcile from independently trusted current committed state plus retained/vote/lock/signing evidence, or replay a separately verified durable journal. Do not equate restart with clear. |
+| Power loss | Under a named, tested storage/filesystem/device profile, a successful durability barrier may establish that specified bytes reached the profile's stated persistence boundary. | The word `fsync`, a RocksDB API return, valid checksum or in-memory test does not alone establish controller cache, filesystem, virtualization, replication or device behavior. A marker may survive while mutations it was meant to bracket do not, or vice versa, unless the same atomic/durability contract covers them. | No claim until storage API, write options, WAL/manifest behavior, flush/barrier ordering, filesystem, device cache/power-loss assumptions and fault evidence are independently verified. On any uncertain write/read, remain quarantined. |
+| Absent, corrupt, truncated, unsupported or partially written records | A record parser can classify a readable supported record and detect specified integrity failures. A durable intent may remain if a later record is torn, if the storage guarantees preserve it. | Absence cannot distinguish fresh initialization from deletion/rollback; checksum detects accidental alteration only under its assumptions, not freshness or authorized origin; a valid older record is still valid; record-chain gaps do not identify which effects occurred. | Fail closed. Preserve bytes for diagnosis. No automatic repair, deletion, fallback-to-clean or operator-ack clear. Require trusted store identity/currentness and full reconciliation evidence; if quarantine itself cannot be established reliably, refuse startup. |
+| Restore an older but internally valid data-directory copy | The marker may consistently describe that copied directory's own generation and history. | Matching local generation, valid checksum, valid state-machine transition or same data-dir path cannot prove the copy is current. Restoring an older copy can erase a later quarantine/clear record, commits, vote history, signing reservations or a fencing token. | Need anti-rollback/currentness evidence anchored outside the rollback domain or a separately trusted quorum/checkpoint/reconciliation procedure. If unavailable, quarantine; never infer currentness from local contents alone. |
+| Two copies attempt to use the same signing identity | Each copy can report its own valid local marker and journal. | Neither local marker proves exclusive signer ownership, that the other copy is stopped, or that both have the same latest signing history. A lease without fencing/expiry semantics, operator statement, process ID, file lock on copied storage, or identical generation is not by itself proof against split-brain. | Need an approved exclusive-ownership mechanism with enforceable fencing at the signer/admission boundary, or a separately approved shared anti-equivocation authority/journal; establish latest signing state and prove other copies cannot sign. If no approved mechanism exists, neither copy may resume operational signing. |
+
+8. Independently trusted currentness, exclusivity and reconciliation evidence
+
+The marker is a local recovery hint and fail-closed latch, not the root of
+trust. Before clearing, a reviewed procedure must establish all applicable
+facts using a source independent of the possibly rolled-back or duplicated
+data directory:
+
+- **Currentness / anti-rollback:** identify the approved current chain,
+  validator set, epoch, committed anchor and software/schema generation;
+  establish that this state is newer than or exactly matches an authority
+  outside the local rollback domain. Candidate mechanisms to evaluate (not
+  selected) include a quorum-attested checkpoint/recovery certificate, an
+  independently administered monotonic/fenced state service, or a separately
+  controlled trusted checkpoint plus an auditable monotonic ledger. Each has
+  different trust, availability and compromise assumptions. A local sequence
+  number or checksum is insufficient.
+- **Exclusive identity ownership:** establish which instance may use the
+  validator identity and ensure any previous copy is unable to issue new
+  signatures. Candidate mechanisms to evaluate (not selected) include
+  hardware-backed monotonic fencing/lease enforced by the signer, a shared
+  authoritative anti-equivocation journal, or a protocol-level key rotation
+  that revokes/fences the prior identity. A copied database, operator
+  acknowledgement, local lockfile or journal equality is insufficient.
+- **Signing continuity:** reconcile durable signing reservations and completed
+  Proposal/Vote/Timeout signatures against the authoritative current
+  anti-equivocation history, including requests that may have left the
+  process before a local completion record. The current repository does not
+  thereby establish production journal construction or durable integration;
+  that remains separate open work.
+- **Consensus-state reconciliation:** independently validate committed anchor
+  and ancestry, commit/QC evidence, lock, view/timeout state, retained blocks
+  and evidence, vote history, accumulator and received-vote evidence. Establish
+  a deterministic retry boundary or build a complete trusted checkpoint.
+  Evidence that covers only the committed block cannot automatically restore
+  uncommitted vote/lock state.
+- **Clear authority and audit:** the contract owner must identify who/what
+  verifies evidence, which validator-set/genesis/software versions it trusts,
+  how conflicting witnesses are handled, and which signed/durable record
+  authorizes transition to `Reconciled`. Operator acknowledgement can initiate
+  evidence collection but is not the verification or clear event.
+
+Alternative authority models that require explicit review:
+1. A quorum of currently authorized validators attests to a checkpoint and
+   recovery boundary. Decide quorum rules, signer freshness, membership
+   provenance, equivocation handling and protection against a stale quorum.
+2. An external monotonic/fencing service attests current generation and
+   exclusive owner. Decide service trust, outage behavior, fencing
+   enforcement point, token rollback resistance and key custody.
+3. A separately governed offline checkpoint/recovery ceremony. Decide
+   independent evidence sources, approver separation, artifact authenticity,
+   monotonic publication and how a second copy is fenced.
+4. A hybrid that requires consensus attestation plus external fencing or
+   checkpoint evidence. Decide the failure/availability and trust composition.
+
+No trust authority, cryptographic mechanism, quorum threshold, storage
+profile, hardware feature or recovery operator is selected or implicitly
+approved here. If the required source cannot be reached or evidence conflicts,
+the only proposed result is continued quarantine / startup refusal.
+
+9. Quarantine transition with in-flight work and bounded no-effect proof
+
+Setting a quarantine bit after detecting a catch-up error is not sufficient.
+The node may already have concurrent work admitted under the old clean state.
+The implementation contract must provide an ownership barrier before it
+begins catch-up mutation and a drain/observation barrier when entering
+quarantine:
+
+1. **Admission gate and serialization.** A shared consensus-operation gate
+   must prevent new proposal, vote, timeout, catch-up, reconfiguration,
+   snapshot and signing operations from entering while a catch-up transaction
+   is being admitted or quarantine is being established. The catch-up
+   operation obtains exclusive state ownership; independent signers, storage
+   workers and outbound queues must participate in the same barrier or be
+   separately fenced.
+2. **Before first mutation.** Persist and verify the `Applying` intent under
+   the approved durability profile before engine mutation. Keep the durable
+   marker unresolved while catch-up and any admitted effect are in flight.
+   Failure/uncertainty at this point refuses catch-up and does not permit
+   normal operation.
+3. **On partial/error result.** Atomically close admission to normal work,
+   mark in-memory quarantine, stop future local tick admissions and inbound
+   engine dispatch, and fence outbound/signing admission. This is a gate for
+   *future* work, not retraction of work already admitted.
+4. **Drain and observe.** Wait for or cancel only work whose cancellation
+   semantics are proven. Track each admitted signing request, signing
+   reservation, signer completion, storage operation, engine callback,
+   outbound serialization/enqueue and network send/ack if available. A
+   request accepted by a signer may complete after quarantine begins; an
+   already-enqueued or transmitted message cannot be recalled. If completion
+   or external delivery cannot be observed, record it as `Unknown` and retain
+   quarantine. Do not use a timeout as proof of non-completion.
+5. **Durable terminal record.** After all admitted work is drained/observed
+   to the degree the interfaces guarantee, append the outcome and uncertainty
+   set; sync it. Failure or uncertain sync leaves `Applying`/quarantine.
+   Startup always processes unresolved intent before any signer or network
+   path is enabled.
+
+Current code exposes places where these barriers would need integration:
+leader tick calls `try_propose` before outbound signing/forwarding;
+late-peer re-emission forwards cached proposal/vote; local timeout signs,
+marks, ingests and broadcasts; inbound Proposal/Vote can synchronously mutate
+engine and hand actions to forwarding; Timeout/NewView can mutate timeout/QC/
+lock/view; reconfiguration and periodic snapshots run after ticks; catch-up
+response applies synchronously while separate loop work is scheduled.
+`SigningReservationJournal`/guarded signing paths have reservation and
+completion boundaries, but this proposal has not traced every implementation
+of signer/backend cancellation or durable outbound delivery. The complete
+queue/worker lifecycle, callback threading and transport delivery guarantees
+were not inspected; they remain explicit implementation-review dependencies.
+Never claim a previously signed, reserved, persisted, queued or transmitted
+effect was retracted by the gate.
+
+“No effect” must be scoped, not a single boolean:
+
+| Domain | Required observation for a positive no-effect claim | If unavailable |
+|---|---|---|
+| Catch-up item / engine | No insertion/replacement, eviction, queue mutation, vote-history/accumulator/evidence reconciliation, QC, lock, commit, view or callback mutation; compare an authoritative pre/post state generation or prove the path returned before all such operations | Engine effects `Unknown`; quarantine |
+| Earlier response prefix | Exact count/IDs and post-state effects, including commit/lock/QC and retained accounting | Prefix effects `Unknown` or incomplete; quarantine |
+| Signer / signing reservation | No request admitted, reservation/journal advanced, key operation started/completed, or signature produced for this transaction; observations must come from the signer/reservation authority, not a caller's local flag | Signing effect `Unknown`; quarantine and treat identity as potentially consumed |
+| Durable storage | No intent/outcome/checkpoint/consensus write committed or left with uncertain sync; backend's durability contract and read-after-write/recovery result cover the relevant records | Durable effect `Unknown`; do not clear |
+| External messages | No outbound bytes enqueued/transmitted/accepted by a facade/transport; if no delivery acknowledgement exists, local absence of a log entry is not proof of no peer observation | External effect `Unknown`; quarantine |
+| Other callbacks / snapshots / epoch | No transition, snapshot publication, storage write, reconfig effect or asynchronous callback was admitted or is still running | Effect `Unknown`; quarantine |
+
+No-effect for the rejected current item does not mean no effect for the
+response, signer, storage or network. A durable `Applying` marker itself is
+an intentional durable effect even when the engine item is refused. Report
+each domain separately; any unknown domain bars clearing quarantine.
+
+10. Expanded test and evidence matrix (proposed; not run)
+
+| Scenario | Synthetic/unit evidence | Later authorized evidence and boundary | Required assertions |
+|---|---|---|---|
+| Ordinary process crash at each marker/mutation/result boundary | Deterministic fault injection around store and engine steps; reconstruct same store and invoke startup gate | Child-process kill/restart requires a scoped process-test plan; no production process claim from unit tests | Applying/unknown stays quarantined; no engine/network/signer admission before startup gate |
+| Power loss under a stated profile | Mock storage errors do not establish power-loss durability | Requires separately authorized isolated power-cut/fault harness, pinned RocksDB options, filesystem, device/cache profile, hardware and cleanup; independent review of barrier contract | Only claim exact tested profile; detect torn/reordered state; quarantine on any uncertainty |
+| Absent/corrupt/truncated/partial/unsupported marker | Unit codec/storage tests for absent, malformed, checksum, version, chain gap and failed writes | Filesystem/process crash evidence only under a separately approved isolated plan | Never default to Clean; preserve evidence; fail closed |
+| Older but internally valid data-directory backup restored | Synthetic snapshots with valid older Clean, Applying and Reconciled journals and matching local generation | Actual backup/restore and anti-rollback test requires authorized copy of isolated data dir; no production data | Local validity/generation is insufficient; independent currentness evidence mismatch or absence keeps quarantine |
+| Two copies using same signing identity | Synthetic two-store/two-node model that forks from identical bytes; race admission and fencing interfaces | Any real signer, hardware, network or operational key use requires separate authorization; no operational signing in this task | Both local markers cannot self-authorize. Without approved exclusive fence, no copy may sign; test stale fencing token and split-brain |
+| In-flight signer and reservation | Controlled fake signer with barriers at request admission, reservation, key invocation, signature return, journal completion; race quarantine gate | Real signer/backend process test needs separate authorization and test-only keys; no production key | Gate blocks new request; admitted work is drained or Unknown; reservation/signature and outbound state are recorded; no claim of retraction |
+| In-flight engine callback / outbound action | Fake callback/facade barriers around engine mutation, serialization, enqueue and completion | Network delivery tests require separately scoped isolated process/multi-node plan, not live network | Gate prevents later callbacks; already-progressed actions remain reported; missing delivery observation becomes Unknown |
+| Storage completion failure/uncertain result | Fault-inject before write, after write-before-sync, sync error, readback error, terminal-record error | Power-loss behavior separately authorized as above | Applying remains; startup quarantines; no clean fallback even if caller saw an error |
+| Existing-ID or repeated response | Engine/node harness: repeated same response, prior prefix, current item inserted then failure; no comparison-based acceptance | Actual node caller integration test once implementation is approved | Existing ID refused before replacement/release/queue/signer effects; prior prefix preserved/reported; quarantine persists |
+| No-effect proof domains | Test per-engine snapshot, signer mock, durable fake, outbound facade, callback counters independently and in combinations | External network absence/receipt cannot be proved by ordinary unit test; isolated network evidence needs a separate plan | Engine-only equality never claims global no effect; any unavailable observation is Unknown |
+| Attempted participation while quarantined | Node handler/loop tests for leader, late peer, inbound Proposal/Vote/Timeout/NewView, catch-up request/response, snapshot/reconfig and all signing admission paths | Full binary/multi-node restart test requires separately authorized process/recovery plan | Each gate is before first effect; diagnostics/shutdown only as approved; no outbound consensus or peer-anchor advancement |
+| Reconciliation and clear | Synthetic signed/verified evidence fixtures for each candidate authority, stale/conflicting checkpoint, missing vote history and fenced/unfenced signer | Real authority, external service, key custody and deployment tests require explicit independent authorization and trust decision | Clear only with selected authority, currentness, continuity, exclusivity and durable checkpoint; otherwise remain quarantined |
+
+Testing sequence after contract decisions: unit/specification tests; fake
+storage and signer fault tests; scoped process restart tests; only then any
+separately approved hardware/power-loss, multi-node, binary or deployment
+evidence. The latter are not implied by this proposal and must identify
+revision, test authority, trust model, data directory, test keys, durability
+profile, expected evidence and cleanup.
+
+No owner-approved default above has been changed. No new trust authority,
+anti-rollback mechanism, signer exclusivity mechanism, cryptographic scheme
+or clear authority has been selected. Those decisions, full in-flight
+completion/cancellation interfaces, storage durability/currentness semantics,
+legacy-store migration, complete state capture/replay and startup enforcement
+remain blockers. Independent contract review remains PENDING. A33-F1 / E27
+and all other unresolved obligations remain OPEN; activation DISABLED; public
+DevNet NO-GO.

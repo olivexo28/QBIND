@@ -4709,5 +4709,17 @@ were produced. A17-F1 logical-QC/authentication, the audit's operator-
 controlled prerequisites, A33-F1 / E27 and all other obligations remain
 open to their remaining extent.
 
+The latest proposal refinement separately models ordinary process crash,
+power loss under a yet-to-be-verified durability profile, missing/corrupt or
+partial records, restoration of an older but internally valid store, and
+multiple copies using one signing identity. It makes explicit that local
+checksums and generation fields cannot prove currentness, anti-rollback or
+exclusive signer ownership. It also adds the in-flight signer/reservation,
+callback, storage and outbound drain boundary; scopes “no effect” across
+engine, signer, durable storage and external effects; and separates synthetic
+tests from later authorized process, storage and deployment evidence.
+Candidate external currentness/fencing/reconciliation authorities are listed
+as alternatives only; none is selected or approved.
+
 Independent contract review remains **PENDING**. Activation **DISABLED**;
 public DevNet **NO-GO**.
