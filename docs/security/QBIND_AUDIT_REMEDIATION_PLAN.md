@@ -5266,3 +5266,49 @@ ownership but before any reset effects and remains **OPEN**. No hostile-path,
 copied-store/cross-host, crash-durability or recovery assurance.
 A33-F1 / E27 and all other unresolved obligations remain **OPEN**.
 Activation **DISABLED**; public DevNet **NO-GO**.
+
+## 42. Authority-reset quarantine decision boundary
+
+**QUARANTINE DECISION INVESTIGATION — INDEPENDENT REVIEW PENDING.**
+Entry checks matched the existing branch at
+`bc33bca493c154dac47c797c518b77290da61566`, tree
+`97aa67e5a7e36e86b7592b93bc0cfbcb24a3c0d5`, parent
+`f30cae3f502020101edf5e447bdf26aea9c9f0e1`, clean worktree/staging,
+remote task tip and protected local/remote main
+`c9aaef40b045e896ddfa8b01bad230f6b680715e`.
+
+[The decision-boundary record](evidence/a33_f1/authority-reset-quarantine-boundary.md)
+traces current reset effects and sets the earliest possible CLI classification
+point: after explicit destination setup and successful lock acquisition, but
+before reset orchestration, refusal/pending/final audit publication or
+authority-marker persistence. Data-directory and `restore.lock` creation are
+separately identified as ownership setup effects, not reset writes or
+quarantine evidence.
+
+The stay-closed disposition has no current local “Clean” allow case. Applying,
+any recorded outcome, absent-only, malformed/corrupt, unsupported, foreign,
+mismatched, unreadable/unavailable, interruption or uncertain publication
+all refuse reset effects. Even a locally valid Clean-looking record,
+checksum, generation or matching lock is not currentness, rollback protection,
+or signer exclusivity. Missing data-dir or ownership failure refuses before
+reset effects; any setup artifacts already created are not claimed absent.
+The evidence needed to authorize any future clean-state decision remains
+unselected and unresolved.
+
+Authority reset cannot clear/release catch-up quarantine through success,
+refusal, audit, marker replacement, persistence acknowledgment or restart.
+Previously admitted signing, storage, engine/callback and outbound work must
+be classified per domain: observed completion is distinct from cancellation,
+timeout, enqueue success and unknown result. This CLI boundary cannot drain
+or fence work it cannot observe. Direct library callers remain separate:
+the public reset function does not acquire ownership or classify quarantine.
+
+This is documentation only; no model, production marker, startup gate,
+clear/resume, recovery procedure, signing/network behavior or audit-register
+change. Marker/interface design, initialization/migration, filesystem and
+durability profile, complete startup coverage, currentness, signer
+exclusivity, and independent clear authority remain open dependencies. No
+previous test suites were repeated. Only append-only, checksum and whitespace
+documentation checks were run; exact command outcomes appear in the evidence
+record. A33-F1 / E27 and all other unresolved obligations remain **OPEN**.
+Activation **DISABLED**; public DevNet **NO-GO**.
