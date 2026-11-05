@@ -1,0 +1,168 @@
+A33-F1 follow-up: catch-up capacity containment contract proposal
+
+Status: PROPOSAL ONLY; NOT APPROVED; NO IMPLEMENTATION OR TEST EXECUTION.
+Review baseline/task tip: 3926fd4d9e7c1ec68c4b22610e154f9e90460f1c
+Protected main remains: c9aaef40b045e896ddfa8b01bad230f6b680715e
+Scope: actual restore-catchup admission/effects after finite, conservative
+eviction ancestry. Do not revise or relabel the six baseline timeout
+observations or the six corrected returns in the adjacent directories.
+
+Independent follow-up observation
+---------------------------------
+The existing corrected test `registration_before_vote_catchup_witness_default_capacity`
+reaches `apply_restore_catchup_blocks` with a 4097-block suffix and a
+4096-block configured maximum. The anchor becomes cyclic; conservative
+eviction protects the indeterminate ancestry. The legacy registration
+continues, the engine retains 4097 nodes, and later signer replay forms QCs,
+advances the lock and commits. This is an engine test observation only.
+It is not a production-path failure or an anonymous remote attack.
+
+Exact source/effect boundaries at the preserved source producer
+-----------------------------------------------------------------
+- `crates/qbind-consensus/src/hotstuff_state_engine.rs:1098-1175`:
+  cycle/missing-parent ancestry is now finite and cannot prove safe eviction.
+- `:896-984`: `can_admit_block_slot` and the existing verified-slot
+  reservation/refusal path; failed reservation is decided before mutation.
+- `:1455-1488`: legacy `register_block` computes height, inserts or replaces
+  the node, queues a new id, then evicts. It returns unit and has no capacity
+  error or rollback.
+- `crates/qbind-consensus/src/basic_hotstuff_engine.rs:3954-4030`:
+  catch-up validates one block at a time; each block passes structure,
+  deterministic proposer/id and logical quorum checks, then is registered
+  before its signer IDs are replayed through `on_vote`. `on_vote` can form a
+  QC and synchronously run `on_qc`, changing `own_qc`, lock, and possibly
+  committed block/height. Only after the signer loop does the function
+  advance its local expected parent/height/applied count. A later error
+  returns immediately; there is no rollback and the final `set_view` is
+  skipped on that error.
+- `crates/qbind-node/src/binary_consensus_loop.rs:8437-8506`:
+  the response anchor is checked before application. On Ok, the caller adds
+  the returned count and evaluates restore-mode progress. On Err, it counts
+  a rejected response and logs that engine state did not mutate. That
+  assertion is false for a later malformed block after an accepted prefix,
+  as already identified by the audit.
+- `basic_hotstuff_engine.rs:1871-1920` defines
+  `RetentionCapacityUnavailable` for verified Proposal ingestion. It is
+  returned before view/block/vote/outbound effects. State-level
+  `EvidenceRetentionError::SlotCapacityUnavailable` similarly refuses
+  verified registration before insertion/eviction and preserves accounting.
+  Those contracts are scoped to verified Proposal/QC evidence retention;
+  they do not automatically specify restore-catchup refusal.
+- `basic_hotstuff_engine.rs:1939-1969` has catch-up errors for missing
+  anchor, structural/deterministic mismatch and invalid logical QC, but no
+  slot-capacity error and no applied-prefix/effects field.
+
+Ordinary missing-parent operation is not always distinguishable from a
+truncated or previously evicted protected ancestry with current state. A
+registered node may point to a parent id absent from `blocks` because the
+parent was never locally known or was removed earlier; no tombstone records
+which case occurred. A repeated id encountered while following *retained*
+parents is a detectable cycle. Missing protected ancestry remains
+indeterminate and must not become permission to evict. Any distinction
+between a benign missing parent and a missing previously-protected ancestor
+requires an independently specified invariant or retained provenance; it
+cannot safely be guessed from this map.
+
+Existing requirements and missing decision
+-----------------------------------------
+The A17-F1 audit already source-establishes accepted-prefix mutation:
+`Audit/QBIND_SECURITY_FINDINGS_REGISTER.md` A5 / §3.4, lines
+15953-15963; A5.3 catch-up effects at 15805-15859; and the current A5.3
+A33-F1 disposition at 15337-15465. The remediation plan's A17-F1,
+OBL-CONS-4a and OBL-CONS-10 rows retain downstream/error-prefix/effect
+evidence as open work. These findings describe source behavior and
+remaining assurance; they do not approve atomic rollback, prefix-commit
+semantics, a catch-up capacity refusal rule or an error-propagation format.
+
+In the reviewed sources no approved catch-up requirement specifies:
+1. whether a full tree with no safely evictable block rejects the next new
+   catch-up block, continues retaining over capacity, or uses another policy;
+2. whether refusal preserves an already-applied prefix, makes the complete
+   response atomic, or requires another recovery behavior;
+3. how the caller represents partial success, updates applied/rejected
+   counters, logs state effects, or changes restore-mode peer-target tracking;
+4. how later retry/replay avoids duplicate effects after a partial prefix; or
+5. whether the block-count limit is a hard invariant across legacy
+   registration and repeated responses, rather than a best-effort eviction
+   threshold.
+
+The existing verified-ingestion refusal is a precedent for one distinct
+route, not an approved policy for catch-up. Choosing catch-up semantics
+changes externally visible consensus/recovery behavior. No all-or-nothing
+claim is supported by the current implementation; the source and audit
+explicitly show the opposite for a valid prefix followed by an invalid
+suffix.
+
+Concrete contract candidate, pending explicit decision
+-------------------------------------------------------
+Recommended to take to the consensus/recovery contract owner, but not
+selected here:
+
+1. Keep the existing safe-eviction predicate: cycles, absent protected
+   nodes/parents and exhausted traversal are never proof of safe eviction.
+2. Decide whether `max_pending_blocks` is a hard admission limit for
+   restore catch-up. If yes, perform a pure preflight immediately before
+   each *new-id* registration. If no other block can safely be evicted,
+   do not insert that next block and do not replay its signers.
+3. Do not implicitly make an already-processed prefix atomic. If the
+   approved behavior is prefix-preserving refusal, define a typed capacity
+   result that carries the exact number of fully applied prefix blocks and
+   the rejected block position; specify that completed prefix block/QC/
+   lock/commit effects remain. Define whether current view advances to the
+   prefix boundary and how restore-mode target tracking treats the response.
+4. Require the caller to distinguish clean rejection (zero effects) from
+   refusal after a nonempty prefix. It must not state “no mutation” for a
+   nonempty prefix; metric/counter behavior, log severity and retry
+   semantics must be specified. Preserve the matching-anchor gate.
+5. Preserve valid acyclic admission/eviction and block replacement behavior,
+   committed/locked/QC ancestors and evidence accounting. Existing-block
+   replacement needs an explicit rule because it consumes no new slot but
+   can change ancestry metadata.
+6. Separately decide whether this hard capacity contract covers every
+   legacy `register_block` caller (Proposal, catch-up, tests/restore), or is
+   scoped to catch-up. Do not silently leave repeated legacy registrations
+   able to grow without bound while claiming a system-wide cap.
+
+Alternative all-or-nothing response semantics would require a designed and
+reviewed staging/commit or rollback boundary covering vote history,
+accumulator state, QC/own-QC, lock, commits, block insertion/replacement,
+evidence/accounting, view, and caller effects. It must not be approximated
+by pre-validating syntax alone: quorum/commit effects are stateful, and a
+later invalid block currently follows completed effects. No such mechanism
+or approval was found.
+
+Required tests after the decision (PROPOSED / NOT RUN)
+------------------------------------------------------
+- Exact-capacity cyclic catch-up: confirm the chosen behavior at the next
+  new block; assert block count, queue/order, votes, own-QC, lock, commit,
+  view and retained-evidence accounting.
+- Repeated catch-up registrations/responses while all resident blocks are
+  protected or indeterminate: assert no unbounded growth if the contract
+  selects a hard cap; confirm retry/anchor behavior.
+- Acyclic chain with a safely evictable unrelated block: admission,
+  eviction identity/counter and evidence reclaim remain unchanged.
+- Existing-id replacement at capacity: assert the reviewed replacement
+  rule, ancestry, evidence charge, lock/commit and queue identity.
+- Missing parent ordinary case vs retained cycle: height-zero behavior,
+  eviction uncertainty, and no fabricated inference that a missing block
+  was never present.
+- Valid prefix then capacity refusal; valid prefix then malformed suffix;
+  malformed first block. Assert exact returned applied-prefix count/effects,
+  view boundary, caller metrics/log branch, mode-target behavior, and no
+  false no-mutation assertion.
+- QC threshold boundary: the rejected current candidate gets no signer
+  replay/QC/lock/commit; previously completed prefix effects match the
+  approved contract.
+- Existing verified Proposal capacity refusal plus scalar/shared retained
+  evidence controls remain unchanged; full state and budget occupancy are
+  unchanged on its zero-effect refusal.
+- Normal valid restore suffix still advances only through existing QC and
+  three-chain predicates; no arbitrary-finality assertion.
+
+No code or tests were changed in this follow-up. The six baseline timeout
+files and six corrected return files remain byte-for-byte unchanged.
+Decision status: REQUIRED BEFORE CATCH-UP CAPACITY IMPLEMENTATION.
+Independent policy review: NOT ASSIGNED / PENDING.
+Production process, binary, multi-node, deployment and live-network evidence:
+NOT RUN. A33-F1 / E27 and remaining obligations OPEN; activation DISABLED;
+public DevNet NO-GO.

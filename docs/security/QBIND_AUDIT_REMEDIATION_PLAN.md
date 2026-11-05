@@ -4526,3 +4526,96 @@ unresolved obligations remain **OPEN**. No authentication, signing,
 cryptography settings, operational gates, RUN 422 production interfaces,
 audit-register bytes or previous evidence were altered. No live network,
 node activation, deployment, PR, merge or main/force push was performed.
+
+## 25. A33-F1 follow-up — catch-up capacity and partial-prefix contract
+
+**Status: DOCUMENTATION / EVIDENCE PROPOSAL ONLY; POLICY DECISION REQUIRED;
+NO IMPLEMENTATION.** This follow-up preserves section 24's code, tests,
+commits, original six baseline timeouts and six corrected returns byte for
+byte. A review observation is confirmed by the existing engine test:
+`registration_before_vote_catchup_witness_default_capacity` returns from
+the crafted cyclic state while retaining 4097 blocks against its configured
+4096 limit and progressing through vote replay, QC/lock and commit. This is
+an engine-test result, not a production-path observation or remote-attack
+claim.
+
+### Effects and contract inventory
+
+At the preserved implementation producer `38a0180c3905d02ff252f4b98915265271c730b4`,
+`hotstuff_state_engine.rs:1098-1175` makes eviction ancestry finite and
+conservative; it deliberately does not enforce a hard limit on legacy
+registration. `:1455-1488` computes height, inserts or replaces the
+candidate, queues a new id, then attempts best-effort eviction. With an
+indeterminate protected chain and no other evictable node, it returns
+normally over capacity.
+
+`basic_hotstuff_engine.rs:3954-4030` validates each catch-up item just
+before applying it. For each item, its deterministic/structural and
+logical-QC checks precede mutation; then registration and any eviction
+precede signer replay. A quorum during replay can set `own_qc`, update the
+lock, and run commit logic. Only after that per-block vote loop does the
+function increment its local applied count and continue. A later invalid
+item returns `Err` without rolling back earlier effects; the terminal
+`set_view` is skipped. Registration-time over-capacity does not return an
+error, so the existing suffix can continue to replay votes/QCs/commits.
+
+At the node caller `binary_consensus_loop.rs:8437-8506`, a matching response
+anchor permits application. Success updates the applied-block counter and
+evaluates restore-mode progress. Any returned error increments the rejected
+response counter and follows a comment/log that says no engine mutation
+occurred. For an error after a valid prefix, that statement is source-false.
+The response's peer-reported height is not used for transition evaluation
+on this error arm. Correcting error propagation/counters/mode semantics is
+coupled to defining what a partial prefix means; it is not merely a wording
+cleanup.
+
+Existing requirements do **not** approve a refusal rule for the catch-up
+path, define a hard block-count invariant for legacy registration, define
+all-or-nothing suffix application, define capacity-error prefix reporting,
+or direct how the caller represents a partially applied response. The
+audit's A17-F1 §3.4 (`Audit/QBIND_SECURITY_FINDINGS_REGISTER.md:
+15953-15963`) explicitly documents valid-prefix state mutations without
+rollback and identifies the no-mutation caller statement as inaccurate.
+The current A17-F1, OBL-CONS-4a, OBL-CONS-10 and E20 entries retain effect,
+error-prefix, input and downstream evidence as open work; they do not
+approve a new policy. By contrast, verified Proposal admission explicitly
+refuses atomically before mutation (`basic_hotstuff_engine.rs:1871-1920`,
+:4584-4605; state `SlotCapacityUnavailable` at
+`hotstuff_state_engine.rs:910-984,1539-1634`). That contract is scoped to
+that path and does not specify restore-catch-up semantics.
+
+Ordinary absent-parent operation cannot always be distinguished from a
+parent that was once retained and later evicted: the block map has no
+tombstone/provenance for either case. A cycle can be detected when a
+traversal revisits a retained id; a missing parent cannot be classified
+from current state alone. Neither condition permits eviction of a block
+when protected ancestry remains indeterminate.
+
+### Decision required before implementation
+
+The attached
+[`catchup-capacity-followup-proposal.txt`](evidence/a33_f1/catchup-capacity-followup-proposal.txt)
+records the full source trace and a reviewable, **not approved** containment
+contract and regression matrix. The required decision is whether catch-up
+capacity is a hard pre-registration limit and, if so, whether refusal
+preserves an already-applied prefix with an exact applied/effect result or
+requires designed staging/rollback for response atomicity. The decision must
+also state whether that limit covers only catch-up or every legacy
+`register_block` caller, and specify caller counters/logging, view boundary,
+restore-mode target behavior and retry semantics. Existing code offers no
+all-or-nothing boundary to assume.
+
+No behavior is chosen in this follow-up. In particular, do not treat the
+verified Proposal refusal as authority to change catch-up, do not report
+all-or-nothing behavior, and do not claim a hard capacity bound. After an
+approved contract, implement only its selected semantics and test exact
+capacity, repeated registration, replacement, safe acyclic eviction,
+missing ancestry, valid-prefix/capacity refusal, valid-prefix/invalid
+suffix, zero-prefix refusal, QC/lock/commit effects, caller propagation and
+retained-evidence non-mutation/reclamation. Preserve all valid acyclic
+behavior and protected ancestors.
+
+No source or test change, runtime run, evidence-stage reclassification or
+new finding closure occurred here. Independent policy review is
+**NOT ASSIGNED / PENDING**. A33-F1 / E27 and all remaining obligations stay
+**OPEN**; activation **DISABLED**; public DevNet **NO-GO**.
