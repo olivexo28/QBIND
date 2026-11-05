@@ -4970,3 +4970,11 @@ binary, live network, signing or deployment ran for this documentation task.
 Historical plan/evidence bytes and audit register remain preserved.
 A33-F1 / E27 and all other unresolved obligations remain **OPEN**;
 activation **DISABLED**; public DevNet **NO-GO**.
+
+## 34. A33-F1 / E27 initialization, binding and continuity contract
+
+**DESIGN PROPOSED — INDEPENDENT REVIEW PENDING.** The [contract](evidence/a33_f1/initialization-binding-continuity.md) addresses the owner-supplied review of the candidate at `83ec48cf37d71c53d4e623b7a9ff8227f0008250`: existing-only database opens may still have effects; checked ownership must cover the complete mutation path; filesystem replacement claims require an explicit threat model; and capacity must include the complete cumulative encoding. The supplied review is not a new review performed by this author.
+
+The proposed boundary keeps missing, partial or mismatched marker/database pairs closed, separates local initialization from permission to participate, and requires explicit handling of clones, shutdown, process death, path replacement and restore rebind. It does not claim that descriptors, matching labels or local locks establish currentness or exclusive signing. The earlier Python temporary-directory observations are reported local controls without a separately retained raw repository artifact, not independent reproduction or evidence of Rust-backend, power-loss or production-capacity behavior.
+
+All acceptance cases are proposed and not run for this document. The 64 KiB ceiling remains unapproved and unproven. No production implementation, startup integration, automatic clear, operational signer or deployment is approved by this amendment. A33-F1 / E27 and all remaining obligations remain **OPEN**; activation **DISABLED**; public DevNet **NO-GO**.
