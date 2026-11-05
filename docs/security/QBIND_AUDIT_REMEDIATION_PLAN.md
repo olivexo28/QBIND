@@ -5065,3 +5065,43 @@ record limits. No earlier Rust/filesystem suite or live operation was rerun.
 No production encoding, protocol limit, backend, gate or clear procedure is
 introduced. A33-F1 / E27 and all remaining obligations **OPEN**; activation
 **DISABLED**; public DevNet **NO-GO**.
+
+## 37. Authority-reset audit/marker collision: isolated baseline investigation
+
+**TEST-ONLY INVESTIGATION — INDEPENDENT REVIEW PENDING.**
+Starting local/remote task commit
+`6597596abe69f739ec5d3130cdb20413f0cf0c36`, tree
+`3a3155972f013298ee3735d30371ccef735fa52d`, parent
+`bf2e2020e981697e1fb44cf65fe44b6b57303767`, existing task branch,
+repository, protected local/remote main and clean worktree/staging were
+verified before editing. Main remains
+`c9aaef40b045e896ddfa8b01bad230f6b680715e`.
+
+The new test
+`crates/qbind-node/tests/a33_f1_authority_reset_audit_collision_tests.rs`
+uses the actual verifier/reset/marker loader and temporary synthetic files.
+It reproduced that a Devnet malformed-expected-hash refusal returns
+`MalformedExpectedGenesisHash` while the refusal audit **replaces** an
+existing loader-accepted marker when the supplied audit destination equals
+`<data_dir>/pqc_authority_state.json`. The distinct-audit-path control
+preserved marker bytes and separately produced the refusal audit.
+**2 tests passed**, no failed/ignored/filtered cases. These are baseline
+reproduction/control assertions, not a fix or security pass.
+
+[Evidence, exact commands, source pins and limits](evidence/a33_f1/authority-reset-collision-evidence.md)
+retain raw returned result, before/after marker bytes and audit bytes,
+plus unsuccessful formatting/native-build attempts. Installing missing
+`libclang-dev` after the build failure permitted the focused test retry;
+no dependency manifest changed. Full successful reset remains
+**UNTESTED**: no reusable successful reset fixture was located, and no
+signing fixture was assembled or validation weakened. The final-success
+audit replacement remains a source prediction, not a runtime observation.
+
+Changes are test-only code and new/append-only task evidence/plan/checksums.
+Production source, audit register, previous plan and historical evidence
+remain unchanged. No operational files/keys, node, network, signing or
+activation was used. No path rejection, quarantine backend, startup gate,
+codec, recovery, fencing or clear/resume is introduced. Alias coverage,
+durability and production startup safety are not established.
+A33-F1 / E27 and all other unresolved obligations remain **OPEN**;
+activation **DISABLED**; public DevNet **NO-GO**.

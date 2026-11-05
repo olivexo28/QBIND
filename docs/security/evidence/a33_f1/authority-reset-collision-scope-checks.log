@@ -1,0 +1,18 @@
+PASS: 7 local documentation links; balanced fences.
+PASS: historical plan/manifest prefixes preserved.
+PASS: tracked production/source/audit/evidence bytes unchanged.
+PASS: only whitelisted test/new evidence/append-only paths changed.
+PASS: retained focused output has 2 baseline/control passes and both marker outcomes.
+crates/qbind-node/tests/a33_f1_authority_reset_audit_collision_tests.rs
+docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md
+docs/security/evidence/a33_f1/SHA256SUMS
+docs/security/evidence/a33_f1/authority-reset-collision-build-attempt-1.log
+docs/security/evidence/a33_f1/authority-reset-collision-dependency-install.log
+docs/security/evidence/a33_f1/authority-reset-collision-evidence.md
+docs/security/evidence/a33_f1/authority-reset-collision-focused-tests.log
+docs/security/evidence/a33_f1/authority-reset-collision-format-attempt-1.log
+docs/security/evidence/a33_f1/authority-reset-collision-format.log
+docs/security/evidence/a33_f1/authority-reset-collision-platform.log
+docs/security/evidence/a33_f1/authority-reset-collision-scope-attempt-1.log
+docs/security/evidence/a33_f1/authority-reset-collision-scope-checks.log
+docs/security/evidence/a33_f1/authority-reset-collision-whitespace-attempts.log

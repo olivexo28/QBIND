@@ -1,0 +1,15 @@
+Command:
+rustfmt --check --edition 2021 crates/qbind-node/tests/a33_f1_authority_reset_audit_collision_tests.rs
+
+Exit status: 1. Formatting attempt only; tests did not run.
+Raw stdout:
+Diff in /workspaces/QBIND/olivexo28/QBIND/crates/qbind-node/tests/a33_f1_authority_reset_audit_collision_tests.rs:91:
+         assert_ne!(after, audit_bytes);
+     }
+     assert!(!audit_path.with_extension("json.tmp").exists());
+-    dir.close().expect("remove only this test's temporary files");
++    dir.close()
++        .expect("remove only this test's temporary files");
+ }
+ 
+ #[test]
