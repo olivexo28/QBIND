@@ -1,0 +1,160 @@
+A33-F1 / E27 test-model observation aggregation correction
+
+Status: IMPLEMENTED TEST MODEL -- INDEPENDENT REVIEW PENDING.
+A33-F1 / E27 and other remaining obligations OPEN; activation DISABLED;
+public DevNet NO-GO. No production quarantine enforcement is added.
+
+1. Inputs and reproduction
+
+Repository: olivexo28/QBIND
+Branch: copilot/a33-f1-bounded-eviction
+Verified entry HEAD: ddc85bd7da2f331b65970417c59c17238c460a34
+Entry tree: 2a9789dd3ca647e53d40d2431a58d128e80cf5d3
+Protected local/remote main: c9aaef40b045e896ddfa8b01bad230f6b680715e
+Repository, branch, exact tip, clean staging/worktree and protected refs
+were checked before editing; remote task/main tips also matched.
+
+The user supplied the independent-review finding: a signing request with
+SignatureObserved followed by NoEffect completion could summarize signing
+as NoEffect. Reviewer identity and a raw review artifact were not supplied;
+this is attributed user-supplied input, not a review performed here.
+The controlling stay-closed contract and its owner-approved defaults remain
+unchanged. The earlier user-supplied PASS WITH LIMITATIONS disposition and
+its provenance remain recorded in stay-closed-model-evidence.txt.
+
+A new regression on the entry implementation reproduced the finding:
+  cargo test -p qbind-consensus --test a33_f1_stay_closed_quarantine_model_tests signature_then_no_effect_completion_cannot_claim_no_effect -- --exact --nocapture
+Result: exit 101; 1 failed, 23 filtered out; retained NoEffect summary.
+Raw output: stay-closed-aggregation-baseline.log
+SHA-256: cb626ba8fcdda257b4a8b71b15f49f7d1dc08fa30e8cd5bcb03961b361a864ee
+This is the expected failing baseline, NOT passing validation.
+A preliminary invocation accidentally nested the new control and selected
+zero tests; placement was corrected before the captured reproduction.
+That preliminary invocation was not a reproduction or a passing control.
+
+2. Exact model semantics
+
+Only the self-contained integration-test model changes:
+  crates/qbind-consensus/tests/a33_f1_stay_closed_quarantine_model_tests.rs
+SHA-256: cf7631950e1bb611f1450f73ff67ce64b5397437cd830becce7da2594c1706a3
+
+Each worker retains a sticky known_effect bit, sticky conflict bit, its
+highest observed signing stage, enqueue observation, completion observation
+and separate peer-delivery observation. Known reservation, key invocation,
+signature, enqueue, delivery and generic worker effects cannot be reset by
+completion, repeated refresh, cancellation or late observations.
+
+Completion/delivery observations start Unknown. Unknown can become NoEffect
+or EffectObserved; exact duplicates are harmless. A different observation
+after a resolved observation, including a later Unknown, is sticky Conflict.
+Conflict cannot become resolved through subsequent updates.
+
+Signing stages progress in fixture order from request through reservation,
+key invocation and signature. Exact repeated stages are harmless. Backward
+stages preserve the highest observed stage and mark conflict. A changed
+stage after terminal completion also conflicts: this model has no trusted
+ordering evidence to resolve the late update. A NoEffect completion after
+a known worker effect conflicts regardless of arrival order. These are
+conservative model rules, not a newly approved production event protocol.
+
+Enqueue is a known effect, NOT peer delivery. First enqueue after terminal
+completion conflicts; repeated enqueue does not erase the first effect.
+Worker completion and delivery remain separate: completed enqueue can
+consistently coexist with NoEffect delivery, but enqueue cannot support a
+claim that the worker itself had NoEffect. Contradictory delivery updates
+conflict independently.
+
+Domain summaries inspect ALL relevant workers:
+  Conflict: at least one conflicting worker, with per-worker known_effect
+    and highest stage/enqueue still retained. Conflict does not mean that
+    observed effects disappeared or that their absence is established.
+  EffectUnresolved: known effect AND unresolved completion/delivery,
+    including a separate unknown worker in either worker order.
+  EffectObserved: known effect, all required observations resolved.
+  Unknown: unresolved observations without any known effect.
+  NoEffect: all required observations consistently resolve without effects
+    (or no workers in that domain).
+Only consistent NoEffect/EffectObserved completion can satisfy a worker
+barrier; outbound also requires resolved delivery. Conflict immediately
+latches quarantine. Late updates never reopen admission or clear a latch.
+Effects from snapshot/epoch/callback workers, signing, outbound and storage
+workers use the same aggregation rule.
+
+Related non-worker summaries also retain known effects: an accepted engine
+prefix plus uncertain current item becomes EffectUnresolved, not Unknown;
+an acknowledged intent plus uncertain outcome remains EffectUnresolved;
+publication visibly present despite an intent error is EffectUnresolved.
+No intent acknowledgement or successful completion is inferred from visible
+publication. The intent gate, engine prefix/report/map and storage outcome
+remain separate; no rollback or response-level atomicity is claimed.
+
+3. Controls and validation
+
+Working directory: /workspaces/QBIND/olivexo28/QBIND
+Formatting commands:
+  rustfmt --edition 2021 crates/qbind-consensus/tests/a33_f1_stay_closed_quarantine_model_tests.rs
+  rustfmt --edition 2021 --check crates/qbind-consensus/tests/a33_f1_stay_closed_quarantine_model_tests.rs
+Result: exit 0.
+
+Focused command:
+  cargo test -p qbind-consensus --test a33_f1_stay_closed_quarantine_model_tests -- --nocapture
+Final result: exit 0; 33 passed, 0 failed, 0 ignored, 0 measured,
+0 filtered out. Raw stdout/stderr: stay-closed-aggregation-corrected.log
+SHA-256: 9fa0b36be7ae9485658b2d8ca1a55f8d3612602134d0355fbea240f8479dc46a
+The raw log retains 37 existing library warnings; no model warning.
+An intermediate focused run passed 32 controls before the final
+enqueue-after-completion/reversed-delivery control was added; its output
+was superseded by this necessary final rerun, not retained separately.
+
+Ten new controls cover:
+- Signature followed by NoEffect completion (the reproduced defect).
+- Reservation/key effects followed by contradictory late completions after
+  barrier refusal, then additional updates without clearing conflict.
+- Duplicate/backward stages retaining the highest observed signature.
+- Every worker domain retaining effects across repeated/reversed completion.
+- Terminal completion followed by Unknown.
+- New signing-stage observations after terminal completion.
+- Known effect plus unknown second worker in both orders, all six domains.
+- Repeated enqueue and contradictory completion/delivery.
+- Consistent signing progression, duplicate observations, satisfied fixture
+  barrier and Complete response, with continued stay-closed behavior.
+- Enqueue after completed NoEffect and reversed delivery without enqueue.
+
+Existing controls remain, with assertions updated only where the new
+explicit unresolved-known-effect representation replaces Unknown. The prior
+23-pass log/evidence/source hash remain historical evidence, not rewritten
+as results for the corrected source. Original six timeout baselines and six
+corrected ancestry returns are neither rerun nor relabeled.
+
+Historical verification:
+  (cd docs/security/evidence/a33_f1 && sha256sum -c SHA256SUMS)
+The plan and checksum manifest retain their entry bytes as exact prefixes;
+the audit register and every other historical evidence file are unchanged.
+Raw Cargo output ends with its emitted blank line. As in prior evidence,
+whitespace checking preserves those bytes:
+  git -c core.whitespace=-blank-at-eof diff --cached --check
+Default staged diff checking excludes only the two new raw .log files.
+
+4. Limits and unresolved work
+
+This validates deterministic model observations only. No production source,
+dependencies, marker schema, startup gate, signer, catch-up, authentication,
+crypto configuration or operational gate is changed. No threads, real
+signing, storage durability, process crash/restart, worker fencing, peer
+delivery, binary, multi-node or deployment assurance is established.
+Generic EffectObserved records existence of an effect, not its magnitude
+or an inventory of actual signer/storage/network operations.
+
+No persistent schema, currentness or anti-rollback source, exclusive signer
+authority, reconciliation authority or automatic clear has been selected.
+Those dependencies and actual engine/node integration remain open. A17-F1,
+global capacity and all other obligations remain separate. Conditional
+operator-controlled anchor/admission prerequisites are unchanged; no
+anonymous remote attack or observed production failure is claimed.
+No live operation, operational signing, PR, merge, main push, force-push,
+deployment or activation is authorized or performed by this correction.
+Commit/push is restricted to the existing task branch.
+
+IMPLEMENTED TEST MODEL -- INDEPENDENT REVIEW PENDING.
+A33-F1 / E27 and other remaining obligations OPEN.
+Activation DISABLED; public DevNet NO-GO.

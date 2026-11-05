@@ -4806,3 +4806,41 @@ evidence remain separate open work.
 A33-F1 / E27 and all remaining obligations remain **OPEN**. Independent
 review of this test model is **PENDING**; activation **DISABLED**; public
 DevNet **NO-GO**.
+
+## 30. A33-F1 / E27 test-model observation aggregation correction
+
+**IMPLEMENTED TEST MODEL — INDEPENDENT REVIEW PENDING.** The user-supplied
+independent-review finding identified that `SignatureObserved` followed by
+`NoEffect` completion could erase the model's signing-domain effect summary.
+Reviewer identity/raw artifact were not supplied. Entry branch/tip,
+clean worktree and protected main were verified against
+`ddc85bd7da2f331b65970417c59c17238c460a34` and
+`c9aaef40b045e896ddfa8b01bad230f6b680715e`, respectively.
+
+The isolated model now retains sticky per-worker known effects, highest
+signing stage and conflict evidence. Contradictory or backward/late updates
+cannot support a no-effect claim or satisfy the barrier; conflict latches
+closed. `EffectUnresolved` explicitly combines known effects with unknown
+completion, including another unknown worker. Enqueue remains separate from
+delivery. Consistent duplicates remain harmless. Known engine-prefix and
+intent-publication effects likewise survive uncertain later observations.
+No clear operation, production event protocol or new trust authority is added.
+
+The regression reproduced the original summary error: **1 expected failure**
+on the entry implementation, separately retained from passing validation.
+After correction, the focused suite passed **33 tests**, including ten new
+controls for contradictory signing/completion histories, out-of-order and
+repeated updates, multi-worker aggregation, enqueue/delivery and consistent
+completion with continued quarantine. Targeted formatting passed.
+The [correction evidence](evidence/a33_f1/stay-closed-aggregation-evidence.txt)
+defines the representations, commands, hashes, controls and limits; separate
+baseline/corrected raw logs preserve the reproduction and final result.
+Earlier plan text, the audit register, original timeout/return evidence and
+the historical 23-pass model result are preserved, not relabeled.
+
+This is test-model assurance only, not filesystem durability, actual startup,
+signer fencing, process/restart, network delivery, engine/node integration
+or deployment assurance. All unresolved trust/recovery/integration decisions,
+A17-F1 and global-capacity scope remain separate. A33-F1 / E27 and other
+remaining obligations stay **OPEN**; activation **DISABLED**; public DevNet
+**NO-GO**.

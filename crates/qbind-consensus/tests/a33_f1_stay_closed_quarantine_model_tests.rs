@@ -10,6 +10,26 @@ enum Observation {
     Unknown,
     NoEffect,
     EffectObserved,
+    EffectUnresolved,
+    Conflict,
+}
+
+impl Observation {
+    fn resolved(self) -> bool {
+        matches!(self, Self::NoEffect | Self::EffectObserved)
+    }
+
+    fn merge_completion(self, next: Self) -> Self {
+        assert!(matches!(
+            next,
+            Self::Unknown | Self::NoEffect | Self::EffectObserved
+        ));
+        match (self, next) {
+            (Self::Unknown, next) => next,
+            (previous, next) if previous == next => previous,
+            _ => Self::Conflict,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -108,7 +128,7 @@ enum Domain {
     Storage,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 enum SigningStage {
     RequestAdmitted,
     ReservationObserved,
@@ -133,12 +153,31 @@ struct Work {
     completion: Observation,
     enqueued: bool,
     peer_delivery: Observation,
+    known_effect: bool,
+    conflict: bool,
 }
 
 impl Work {
     fn accounted_for(&self) -> bool {
-        self.completion != Observation::Unknown
-            && (self.domain != Domain::Outbound || self.peer_delivery != Observation::Unknown)
+        !self.conflict
+            && self.completion.resolved()
+            && (self.domain != Domain::Outbound || self.peer_delivery.resolved())
+    }
+
+    fn summary(&self) -> Observation {
+        if self.conflict {
+            Observation::Conflict
+        } else if !self.accounted_for() {
+            if self.known_effect {
+                Observation::EffectUnresolved
+            } else {
+                Observation::Unknown
+            }
+        } else if self.known_effect {
+            Observation::EffectObserved
+        } else {
+            Observation::NoEffect
+        }
     }
 }
 
@@ -282,6 +321,8 @@ impl Model {
             completion: Observation::Unknown,
             enqueued: false,
             peer_delivery: Observation::Unknown,
+            known_effect: false,
+            conflict: false,
         });
         self.refresh_work_observations();
         Ok(self.work.len() - 1)
@@ -303,7 +344,11 @@ impl Model {
         if self.phase != Phase::Preparing {
             return Err(Refusal::Gate);
         }
-        self.effects.durable_record = Observation::Unknown;
+        self.effects.durable_record = if self.intent.is_some() {
+            Observation::EffectUnresolved
+        } else {
+            Observation::Unknown
+        };
         match store.publish_intent(self.expected, publication) {
             Ok(receipt) => {
                 self.intent = Some(receipt);
@@ -311,6 +356,9 @@ impl Model {
                 Ok(())
             }
             Err(error) => {
+                if store.visible_intent == Some(self.expected) {
+                    self.effects.durable_record = Observation::EffectUnresolved;
+                }
                 self.phase = Phase::Latched;
                 Err(error)
             }
@@ -318,54 +366,57 @@ impl Model {
     }
 
     fn observe_completion(&mut self, index: usize, observation: Observation) {
-        self.work[index].completion = observation;
+        let work = &mut self.work[index];
+        work.completion = work.completion.merge_completion(observation);
+        work.conflict |= work.completion == Observation::Conflict
+            || (observation == Observation::NoEffect && work.known_effect);
+        work.known_effect |= observation == Observation::EffectObserved;
         self.refresh_work_observations();
     }
 
     fn refresh_work_observations(&mut self) {
         let summarize = |domains: &[Domain]| {
-            let mut result = Observation::NoEffect;
-            for work in self
+            let workers: Vec<_> = self
                 .work
                 .iter()
                 .filter(|work| domains.contains(&work.domain))
+                .collect();
+            if workers
+                .iter()
+                .any(|work| work.summary() == Observation::Conflict)
             {
-                if work.completion == Observation::Unknown {
-                    return Observation::Unknown;
-                }
-                if work.completion == Observation::EffectObserved {
-                    result = Observation::EffectObserved;
-                }
+                return Observation::Conflict;
             }
-            result
+            let known_effect = workers.iter().any(|work| work.known_effect);
+            let unresolved = workers.iter().any(|work| !work.accounted_for());
+            match (known_effect, unresolved) {
+                (true, true) => Observation::EffectUnresolved,
+                (true, false) => Observation::EffectObserved,
+                (false, true) => Observation::Unknown,
+                (false, false) => Observation::NoEffect,
+            }
         };
         self.effects.signing = summarize(&[Domain::Signing]);
         self.effects.storage_workers = summarize(&[Domain::Storage]);
         self.effects.callbacks = summarize(&[Domain::Snapshot, Domain::Epoch, Domain::Callback]);
-        let outbound: Vec<_> = self
-            .work
-            .iter()
-            .filter(|work| work.domain == Domain::Outbound)
-            .collect();
-        self.effects.external = if outbound
-            .iter()
-            .any(|work| work.enqueued || work.peer_delivery == Observation::EffectObserved)
-        {
-            Observation::EffectObserved
-        } else if outbound.iter().any(|work| {
-            work.completion == Observation::Unknown || work.peer_delivery == Observation::Unknown
-        }) {
-            Observation::Unknown
-        } else {
-            Observation::NoEffect
-        };
+        self.effects.external = summarize(&[Domain::Outbound]);
+        if self.work.iter().any(|work| work.conflict) {
+            self.phase = Phase::Latched;
+        }
     }
 
     fn observe_signing_stage(&mut self, index: usize, stage: SigningStage) {
-        assert_eq!(self.work[index].domain, Domain::Signing);
-        self.work[index].signing_stage = Some(stage);
-        // A reservation/key/signature observation is not worker completion.
-        self.effects.signing = Observation::Unknown;
+        let work = &mut self.work[index];
+        assert_eq!(work.domain, Domain::Signing);
+        let previous = work.signing_stage.unwrap();
+        // Keep the highest observed stage. New stages after a terminal
+        // completion or backward stages conflict; exact repeats are harmless.
+        work.conflict |=
+            stage < previous || (stage != previous && work.completion != Observation::Unknown);
+        work.signing_stage = Some(previous.max(stage));
+        work.known_effect |= stage > SigningStage::RequestAdmitted;
+        work.conflict |= work.known_effect && work.completion == Observation::NoEffect;
+        self.refresh_work_observations();
     }
 
     fn request_cancel(&mut self, index: usize) {
@@ -373,14 +424,21 @@ impl Model {
     }
 
     fn enqueue(&mut self, index: usize) {
-        assert_eq!(self.work[index].domain, Domain::Outbound);
-        self.work[index].enqueued = true;
+        let work = &mut self.work[index];
+        assert_eq!(work.domain, Domain::Outbound);
+        work.conflict |= !work.enqueued && work.completion != Observation::Unknown;
+        work.enqueued = true;
+        work.known_effect = true;
         self.refresh_work_observations();
     }
 
     fn observe_delivery(&mut self, index: usize, observation: Observation) {
-        assert_eq!(self.work[index].domain, Domain::Outbound);
-        self.work[index].peer_delivery = observation;
+        let work = &mut self.work[index];
+        assert_eq!(work.domain, Domain::Outbound);
+        work.peer_delivery = work.peer_delivery.merge_completion(observation);
+        work.known_effect |= observation == Observation::EffectObserved;
+        work.conflict |= work.peer_delivery == Observation::Conflict
+            || (work.known_effect && work.completion == Observation::NoEffect);
         self.refresh_work_observations();
     }
 
@@ -421,7 +479,11 @@ impl Model {
         };
         for (index, item) in items.iter().enumerate() {
             if *item == Item::UnknownDuringItem {
-                self.effects.engine = Observation::Unknown;
+                self.effects.engine = if report.completed_prefix.is_empty() {
+                    Observation::Unknown
+                } else {
+                    Observation::EffectUnresolved
+                };
                 report.current = CurrentItem::Unknown { index };
                 report.complete = false;
                 break;
@@ -457,7 +519,9 @@ impl Model {
         // Even Complete/no-effect refusal and acknowledged outcome stay closed.
         self.phase = Phase::Latched;
         self.report = Some(report.clone());
-        self.effects.durable_record = Observation::Unknown;
+        // The acknowledged intent remains a known storage effect even when
+        // publication/completion of the outcome is uncertain.
+        self.effects.durable_record = Observation::EffectUnresolved;
         store.publish_outcome(&report, outcome);
         self.outcome_acknowledged = outcome == Publication::Acknowledged;
         if self.outcome_acknowledged {
@@ -585,7 +649,14 @@ fn failed_uncertain_and_visible_but_error_intents_stay_unresolved() {
             result == Publication::VisibleButError
         );
         assert_eq!(model.intent, None);
-        assert_eq!(model.effects.durable_record, Observation::Unknown);
+        assert_eq!(
+            model.effects.durable_record,
+            if result == Publication::VisibleButError {
+                Observation::EffectUnresolved
+            } else {
+                Observation::Unknown
+            }
+        );
         assert_eq!(
             model.apply(&mut store, &[Item::New(1)], Publication::Acknowledged),
             Err(Refusal::Gate)
@@ -765,7 +836,7 @@ fn unknown_current_item_effects_never_erase_known_prefix() {
         .unwrap();
     assert_eq!(report.completed_prefix, vec![10]);
     assert_eq!(report.current, CurrentItem::Unknown { index: 1 });
-    assert_eq!(model.effects.engine, Observation::Unknown);
+    assert_eq!(model.effects.engine, Observation::EffectUnresolved);
     assert_eq!(model.blocks.get(&10), Some(&1));
     assert_closed(&mut model);
 }
@@ -790,7 +861,7 @@ fn failed_and_uncertain_outcomes_keep_effects_and_never_clear() {
             }
         );
         assert!(!model.outcome_acknowledged);
-        assert_eq!(model.effects.durable_record, Observation::Unknown);
+        assert_eq!(model.effects.durable_record, Observation::EffectUnresolved);
         assert_eq!(model.blocks.len(), 1);
         assert_closed(&mut model);
     }
@@ -918,7 +989,14 @@ fn reservation_key_invocation_and_signature_do_not_replace_worker_completion() {
             .unwrap();
         assert_eq!(model.work[request].signing_stage, Some(stage));
         assert_eq!(model.work[request].completion, Observation::Unknown);
-        assert_eq!(model.effects.signing, Observation::Unknown);
+        assert_eq!(
+            model.effects.signing,
+            if stage == SigningStage::RequestAdmitted {
+                Observation::Unknown
+            } else {
+                Observation::EffectUnresolved
+            }
+        );
         assert_eq!(
             model.apply(&mut store, &[Item::New(1)], Publication::Acknowledged),
             Err(Refusal::Barrier)
@@ -1000,4 +1078,234 @@ fn local_writer_serialization_does_not_prove_exclusivity_across_copies() {
         let mut restarted = Model::startup(MarkerRead::ParsedApplying, 1, 7);
         assert_closed(&mut restarted);
     }
+}
+
+#[test]
+fn signature_then_no_effect_completion_cannot_claim_no_effect() {
+    let mut model = Model::already_running_fixture(1, 7);
+    let worker = model.admit_ordinary(Domain::Signing).unwrap();
+    model.observe_signing_stage(worker, SigningStage::SignatureObserved);
+    model.observe_completion(worker, Observation::NoEffect);
+    assert_eq!(model.effects.signing, Observation::Conflict);
+    assert!(model.work[worker].known_effect);
+    assert_eq!(
+        model.work[worker].signing_stage,
+        Some(SigningStage::SignatureObserved)
+    );
+    assert!(!model.work[worker].accounted_for());
+    assert_closed(&mut model);
+}
+
+#[test]
+fn reservation_and_key_effects_survive_contradictory_late_completion() {
+    for stage in [
+        SigningStage::ReservationObserved,
+        SigningStage::KeyInvocationObserved,
+    ] {
+        let mut model = Model::already_running_fixture(1, 7);
+        let worker = model.admit_ordinary(Domain::Signing).unwrap();
+        model.observe_signing_stage(worker, stage);
+        model.close_admission().unwrap();
+        let mut store = MockStore::new(1);
+        assert!(store.claim(7));
+        model
+            .acknowledge_intent(&mut store, Publication::Acknowledged)
+            .unwrap();
+        assert_eq!(
+            model.apply(&mut store, &[Item::New(1)], Publication::Acknowledged),
+            Err(Refusal::Barrier)
+        );
+        for completion in [
+            Observation::NoEffect,
+            Observation::EffectObserved,
+            Observation::Unknown,
+        ] {
+            model.observe_completion(worker, completion);
+            assert!(model.work[worker].known_effect);
+            assert_eq!(model.effects.signing, Observation::Conflict);
+            assert!(!model.work[worker].accounted_for());
+            assert_closed(&mut model);
+        }
+    }
+}
+
+#[test]
+fn backward_signing_stages_preserve_highest_stage_and_latch_conflict() {
+    let mut model = Model::already_running_fixture(1, 7);
+    let worker = model.admit_ordinary(Domain::Signing).unwrap();
+    model.observe_signing_stage(worker, SigningStage::SignatureObserved);
+    model.observe_signing_stage(worker, SigningStage::SignatureObserved);
+    assert_eq!(model.effects.signing, Observation::EffectUnresolved);
+    for stage in [
+        SigningStage::KeyInvocationObserved,
+        SigningStage::RequestAdmitted,
+        SigningStage::SignatureObserved,
+    ] {
+        model.observe_signing_stage(worker, stage);
+        model.observe_completion(worker, Observation::EffectObserved);
+        assert_eq!(
+            model.work[worker].signing_stage,
+            Some(SigningStage::SignatureObserved)
+        );
+        assert_eq!(model.effects.signing, Observation::Conflict);
+        assert!(model.work[worker].known_effect);
+        assert_closed(&mut model);
+    }
+}
+
+#[test]
+fn every_worker_domain_keeps_effects_when_completion_is_repeated_or_reversed() {
+    for domain in DOMAINS {
+        let mut model = Model::already_running_fixture(1, 7);
+        let worker = model.admit_ordinary(domain).unwrap();
+        model.observe_completion(worker, Observation::EffectObserved);
+        model.observe_completion(worker, Observation::EffectObserved);
+        assert!(model.work[worker].known_effect);
+        assert!(!model.work[worker].conflict);
+        model.observe_completion(worker, Observation::NoEffect);
+        model.observe_completion(worker, Observation::EffectObserved);
+        model.observe_completion(worker, Observation::Unknown);
+        assert!(model.work[worker].known_effect);
+        assert_eq!(model.work[worker].summary(), Observation::Conflict);
+        assert!(!model.work[worker].accounted_for());
+        assert_closed(&mut model);
+    }
+}
+
+#[test]
+fn terminal_completion_followed_by_unknown_is_not_a_new_no_effect_proof() {
+    for completion in [Observation::NoEffect, Observation::EffectObserved] {
+        let mut model = Model::already_running_fixture(1, 7);
+        let worker = model.admit_ordinary(Domain::Callback).unwrap();
+        model.observe_completion(worker, completion);
+        model.observe_completion(worker, Observation::Unknown);
+        assert_eq!(model.effects.callbacks, Observation::Conflict);
+        assert!(!model.work[worker].accounted_for());
+        assert_closed(&mut model);
+    }
+}
+
+#[test]
+fn late_stage_after_completion_cannot_rewrite_the_completed_history() {
+    for completion in [Observation::NoEffect, Observation::EffectObserved] {
+        let mut model = Model::already_running_fixture(1, 7);
+        let worker = model.admit_ordinary(Domain::Signing).unwrap();
+        model.observe_completion(worker, completion);
+        model.observe_signing_stage(worker, SigningStage::ReservationObserved);
+        assert_eq!(model.effects.signing, Observation::Conflict);
+        assert!(model.work[worker].known_effect);
+        assert!(!model.work[worker].accounted_for());
+        assert_closed(&mut model);
+    }
+}
+
+#[test]
+fn known_effect_and_unknown_worker_are_reported_together_in_either_order() {
+    for domain in DOMAINS {
+        for known_first in [false, true] {
+            let mut model = Model::already_running_fixture(1, 7);
+            let first = model.admit_ordinary(domain).unwrap();
+            let second = model.admit_ordinary(domain).unwrap();
+            let (known, unknown) = if known_first {
+                (first, second)
+            } else {
+                (second, first)
+            };
+            model.observe_completion(known, Observation::EffectObserved);
+            if domain == Domain::Outbound {
+                model.observe_delivery(known, Observation::EffectObserved);
+            }
+            model.refresh_work_observations();
+            let summary = match domain {
+                Domain::Signing => model.effects.signing,
+                Domain::Outbound => model.effects.external,
+                Domain::Storage => model.effects.storage_workers,
+                _ => model.effects.callbacks,
+            };
+            assert_eq!(summary, Observation::EffectUnresolved);
+            assert!(model.work[known].known_effect);
+            assert_eq!(model.work[unknown].completion, Observation::Unknown);
+            model.close_admission().unwrap();
+            let mut store = MockStore::new(1);
+            assert!(store.claim(7));
+            model
+                .acknowledge_intent(&mut store, Publication::Acknowledged)
+                .unwrap();
+            assert_eq!(model.mutation_gate(&store), Err(Refusal::Barrier));
+        }
+    }
+}
+
+#[test]
+fn enqueue_and_delivery_effects_survive_contradictory_updates() {
+    let mut model = Model::already_running_fixture(1, 7);
+    let worker = model.admit_ordinary(Domain::Outbound).unwrap();
+    model.enqueue(worker);
+    model.enqueue(worker);
+    assert_eq!(model.effects.external, Observation::EffectUnresolved);
+    model.observe_completion(worker, Observation::NoEffect);
+    assert_eq!(model.effects.external, Observation::Conflict);
+    assert!(model.work[worker].enqueued);
+    assert!(model.work[worker].known_effect);
+    model.observe_completion(worker, Observation::EffectObserved);
+    model.observe_delivery(worker, Observation::EffectObserved);
+    model.observe_delivery(worker, Observation::NoEffect);
+    assert_eq!(model.work[worker].peer_delivery, Observation::Conflict);
+    assert_eq!(model.effects.external, Observation::Conflict);
+    assert_closed(&mut model);
+}
+
+#[test]
+fn consistent_signing_sequence_and_repeated_observations_still_stay_closed() {
+    let mut model = Model::already_running_fixture(1, 7);
+    let worker = model.admit_ordinary(Domain::Signing).unwrap();
+    for stage in [
+        SigningStage::ReservationObserved,
+        SigningStage::KeyInvocationObserved,
+        SigningStage::SignatureObserved,
+    ] {
+        model.observe_signing_stage(worker, stage);
+        model.observe_signing_stage(worker, stage);
+        assert_eq!(model.effects.signing, Observation::EffectUnresolved);
+    }
+    model.observe_completion(worker, Observation::EffectObserved);
+    model.observe_completion(worker, Observation::EffectObserved);
+    model.observe_signing_stage(worker, SigningStage::SignatureObserved);
+    assert!(model.work[worker].accounted_for());
+    assert_eq!(model.effects.signing, Observation::EffectObserved);
+    model.close_admission().unwrap();
+    let mut store = MockStore::new(1);
+    assert!(store.claim(7));
+    model
+        .acknowledge_intent(&mut store, Publication::Acknowledged)
+        .unwrap();
+    assert_eq!(model.mutation_gate(&store), Ok(()));
+    model
+        .apply(&mut store, &[Item::New(1)], Publication::Acknowledged)
+        .unwrap();
+    assert_eq!(model.effects.signing, Observation::EffectObserved);
+    assert_closed(&mut model);
+}
+
+#[test]
+fn enqueue_after_completion_and_reversed_delivery_cannot_erase_effects() {
+    let mut model = Model::already_running_fixture(1, 7);
+    let worker = model.admit_ordinary(Domain::Outbound).unwrap();
+    model.observe_completion(worker, Observation::NoEffect);
+    model.observe_delivery(worker, Observation::NoEffect);
+    assert_eq!(model.effects.external, Observation::NoEffect);
+    model.enqueue(worker);
+    assert!(model.work[worker].known_effect);
+    assert_eq!(model.effects.external, Observation::Conflict);
+    assert_closed(&mut model);
+
+    let mut model = Model::already_running_fixture(1, 7);
+    let worker = model.admit_ordinary(Domain::Outbound).unwrap();
+    model.observe_delivery(worker, Observation::EffectObserved);
+    model.observe_delivery(worker, Observation::NoEffect);
+    model.observe_delivery(worker, Observation::EffectObserved);
+    assert!(model.work[worker].known_effect);
+    assert_eq!(model.work[worker].peer_delivery, Observation::Conflict);
+    assert_eq!(model.effects.external, Observation::Conflict);
+    assert_closed(&mut model);
 }
