@@ -110,3 +110,10 @@ bb89f8b9fd0d340b66129361fffbca335ebe6a3064af9fb9d4ba528968e09489  ../../../../cr
 0030388705fd3d818f8e71637fe2ae28284434c3d70f48c53d6fb4e26965d08a  authority-reset-quarantine-trace-checker-correction-focused.log
 2d3f20539c85f7aa2b1294d660c6603bf39cae578a20eff84e8c076ab0de9ffe  authority-reset-quarantine-trace-checker-correction-negative-controls.log
 411c0ea84e1ad08bbf92968c80720dd8731b4c0b02d750ffcf9e74790a184f0c  authority-reset-quarantine-trace-checker-correction-evidence.md
+81d7a6558231e6c000a5163941e86ad7f23c3e5a22c946034d35ea72eab0f0ed  ../../../../crates/qbind-node/src/lib.rs
+6dfb3d572c62c183a3046de80d99be8c292f2554915684d14a0599df095c4896  ../../../../crates/qbind-node/src/pqc_reset_quarantine.rs
+11bdc6f92dff40609f54c38631774abd2fc408370f9010fe4e71afbc01b4432a  ../../../../crates/qbind-node/tests/a33_f1_quarantine_read_interface_tests.rs
+42566ea597436fb6f30f3110d11fb6c4da3451d7324a45f9e4adb85140eb3fd9  ../../../../docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md
+e3bd628227491ed7886bf1c098905aefea04bde6646be97b64f0dc2ba5169ce8  quarantine-read-interface-evidence.md
+9d9776c62ec2fd40d737a2aecce4c61c12cd8247c32c328c9d7a061a1d403bb6  quarantine-read-interface-bounded-read.log
+20f0ae417b06bc5a06c8a01047777a59f76b7fee47de5407befd8ba0b1968473  quarantine-read-interface-focused.log

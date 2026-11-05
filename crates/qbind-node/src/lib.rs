@@ -185,6 +185,9 @@ pub mod pqc_authority_marker_acceptance;
 // `docs/protocol/QBIND_TRUST_ANCHOR_AUTHORITY_MODEL.md` Run 127 update,
 // and `docs/whitepaper/contradiction.md` C4.
 pub mod pqc_authority_state_reset;
+/// Non-wired read/classification boundary for a future reset-quarantine
+/// backend. No production reset, CLI, startup, signer, or network path calls it.
+pub mod pqc_reset_quarantine;
 // Run 159 — typed pure transition validator for the v2 bundle-signing-key
 // lifecycle (ActivateInitial / Rotate / Retire / Revoke / EmergencyRevoke).
 // Source/test only. No release-binary evidence in this run; release-binary

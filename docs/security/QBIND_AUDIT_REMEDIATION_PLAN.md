@@ -5431,3 +5431,45 @@ quarantine, actual CLI/filesystem behavior, process restart or durable
 persistence. No production storage, startup gate, clear/resume authority,
 signer fencing or network behavior was added. A33-F1 / E27 remain **OPEN**;
 activation **DISABLED**; public DevNet **NO-GO**.
+
+## 46. Non-wired reset quarantine read/classification interface
+
+**NON-WIRED QUARANTINE INTERFACE — INDEPENDENT REVIEW PENDING.** Entry checks
+matched task tip `7069ab7a2202ce2eb1a1f1422f831d283455e08d`, tree
+`50dc2d62e7fb537c50c85dafd4d669c5bc4a9247`, clean worktree/staging, remote
+task tip, and protected local/remote main
+`c9aaef40b045e896ddfa8b01bad230f6b680715e`.
+
+Added public `pqc_reset_quarantine` with typed opaque store/chain identity,
+reader/decoder seams, bounded-read helper, typed quarantine/absence/
+malformed/unsupported/mismatch/unavailable/oversized/partial/uncertain/
+Clean-looking refusal outcomes. There is no allow, clear or resume result,
+format codec, persistence backend, or caller. A matching local identity does
+not prove currentness, anti-rollback, reconciliation or signer exclusivity.
+
+The evidence document records the reset refusal mapping, bounded/error
+behavior, backend obligations, and the actual source integration boundary:
+ownership before any future CLI classification; classification before every
+refusal/pending/final audit and marker write; separate directory/lock-file
+setup effects; direct library callers; ordinary and restore startup; and
+early CLI exits. The interface remains unwired to all those paths.
+
+The isolated generic bounded-read unit test passed (**1 passed**); fake-reader
+and fake-decoder classification tests passed (**6 passed**). Targeted
+formatting, whitespace, scope, append-only and historical-aware checksum
+checks passed. The ordinary `sha256sum --check` outcome continues to be exit
+1 solely on the two preserved historical model-source hashes; both are
+verified at their original revisions and the current source hash is checked
+against current bytes. See
+[interface evidence and remaining obligations](evidence/a33_f1/quarantine-read-interface-evidence.md).
+Targeted formatting passed for the new module and integration test. The
+crate-root rustfmt check was attempted but reports existing unrelated
+formatting differences in `lib.rs`; no formatter rewrote unrelated files.
+
+No persistent schema, fixed byte limit, initialization/migration, currentness
+source, signer exclusivity, production allow, reset gate, startup gate or
+clear/resume authority was selected. Filesystem durability, publication
+ordering, path identity, concurrent writers, failure-after-publication and
+full process/CLI coverage remain backend/integration obligations. A33-F1 /
+E27 and all other unresolved obligations remain **OPEN**; activation
+**DISABLED**; public DevNet **NO-GO**.
