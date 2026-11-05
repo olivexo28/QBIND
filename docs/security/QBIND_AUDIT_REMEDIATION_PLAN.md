@@ -4664,3 +4664,50 @@ documentation follow-up.
 Independent contract review remains **PENDING**. A33-F1 / E27 and all other
 remaining obligations remain **OPEN**; activation **DISABLED**; public
 DevNet **NO-GO**.
+
+## 27. A33-F1 catch-up durable quarantine — owner design direction
+
+**Status: DOCUMENTATION / CONTRACT DESIGN ONLY; NO IMPLEMENTATION.** The
+owner-approved defaults now require refusing catch-up replacement of existing
+IDs before any replacement/evidence/queue/signer effect; safe pre-insertion
+capacity refusal for new IDs; truthful reporting of prefixes and possible
+current-item effects; quarantine through restart after unresolved partial
+application; and no normal participation until verified reconciliation.
+These are design directions, not implementation, independent-review or
+deployment approvals. Catch-up scope does not create a system-wide capacity
+claim.
+
+The separate
+[`catchup-quarantine-contract-proposal-v3.txt`](evidence/a33_f1/catchup-quarantine-contract-proposal-v3.txt)
+defines new-ID capacity behavior below/at/above the limit, zero capacity and
+full eviction deficit; existing-ID refusal; no-effect/prefix/partial-current
+outcomes; event gates; crash ordering; restart handling for absent/corrupt
+state; compatibility and a proposed test/evidence matrix.
+
+The persistence inspection found a blocking gap, not an available
+implementation: the binary loop creates a fresh engine and its restore
+baseline supplies snapshot height and opaque block ID without reconstructing
+pre-snapshot QC/vote history. Existing `ConsensusStorage` has no generic
+catch-up quarantine journal, and its synced epoch operations/transition
+marker are scoped to epoch changes. No current source establishes a durable
+quarantine-before-mutation boundary or a verifier-controlled restart
+reconciliation for anchor, view, retained blocks/votes, lock/commit and
+signing anti-equivocation state. Therefore the crash-safe marker, storage
+schema/durability profile, startup gate, state capture or verified replay,
+missing/corrupt-state behavior, and clear authority remain blocking
+dependencies. The proposal does not claim that a loop-local flag, restart,
+operator acknowledgement, marker written after an error, or existing epoch
+marker satisfies them.
+
+The proposal inventories local leader/timeout/re-emission, inbound Proposal,
+Vote, Timeout, NewView and catch-up paths, catch-up response serving,
+reconfiguration/epoch persistence, snapshots and signing. It explicitly
+limits its traced surface to the cited binary loop; alternate runners,
+complete RocksDB power-loss behavior and all deployment compositions were not
+inspected. No prior tests were rerun, and no new tests or runtime evidence
+were produced. A17-F1 logical-QC/authentication, the audit's operator-
+controlled prerequisites, A33-F1 / E27 and all other obligations remain
+open to their remaining extent.
+
+Independent contract review remains **PENDING**. Activation **DISABLED**;
+public DevNet **NO-GO**.

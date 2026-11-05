@@ -1,0 +1,463 @@
+A33-F1 / A17-F1 catch-up containment and restart-quarantine contract
+proposal (v3)
+
+Status: DOCUMENTATION / CONTRACT DESIGN ONLY. The owner-approved defaults
+below direct design; they are not implementation approval, independent
+contract review, operational authorization or deployment approval. No
+production source or tests changed for this proposal. No test was run.
+
+Verified entry:
+  repository: olivexo28/QBIND
+  branch: copilot/a33-f1-bounded-eviction
+  task tip before this documentation change:
+    4a8813c331a6f4d2c1684e6de08f94d59fb5bd7b
+  protected local and remote main:
+    c9aaef40b045e896ddfa8b01bad230f6b680715e
+  worktree clean at entry
+
+Source under discussion is the retained implementation producer
+38a0180c3905d02ff252f4b98915265271c730b4. The controlling audit input is
+the protected-main commit above, `Audit/QBIND_SECURITY_FINDINGS_REGISTER.md`,
+mode 100644, Git blob cd81efdbaf2bfb45e00dc3c60db3ea4f523adfa0, SHA-256
+6e68d3d05964f9a6dc0384ffda2bb53d81d7da97ffb786ce84f4bd5a4360c0d9.
+Relevant audit locators remain A5.3 A:L15337-L15465 and A22.1-C2/C3
+A:L9230-L9263 for conditional A33-F1; A17-F1 catch-up effects
+A:L15805-L15859; accepted-prefix behavior A:L15953-L15963; catch-up
+current index A:L15785 and A:L15911. The register is not modified.
+
+Prior evidence is preserved, including the original six baseline timeout
+observations and six corrected return observations. Those are source-level
+child-process witnesses as previously classified, not binary, restart,
+multi-node, deployed-path or production reachability evidence. The corrected
+registration-before-vote engine test is a separate engine-level result.
+
+1. Owner-approved design direction (not implementation authorization)
+
+The project owner has approved these defaults for contract design:
+
+1. Refuse catch-up replacement of an existing block ID before replacement,
+   evidence release, queue change or signer replay. Equal IDs do not prove
+   equal parent, QC, retained evidence or effects.
+2. Keep a node quarantined across restart after unresolved partial catch-up
+   until a verified reconciliation procedure exists. Restart or operator
+   acknowledgement alone is not reconciliation.
+3. Refuse a new catch-up block before insertion or vote replay when a safe
+   slot cannot be obtained.
+4. Report completed-prefix and possible current-item effects truthfully; do
+   not imply rollback or state atomicity.
+5. Do not resume normal participation while partial effects are unresolved.
+6. Do not turn a catch-up-only capacity rule into a global limit claim.
+
+These defaults do not settle the full recovery-state schema, marker/storage
+implementation, complete-vs-partial response lifecycle, replacement rule
+after a separate review, or evidence threshold and authority for clearing
+quarantine. The proposal therefore does not select an implementation.
+
+2. Admission and refusal contract
+
+2.1 Classification and admission order
+
+For each next response item, perform non-mutating structural, anchor,
+proposer, deterministic-ID and logical-QC validation first. Then classify the
+ID against the current engine map. This classification and the capacity
+preflight must be rechecked under exclusive engine ownership immediately
+before any state-changing operation. No intervening handler may mutate the
+map between preflight and admission.
+
+Existing ID:
+- If `blocks` already contains the ID, return `ExistingIdRefused` before
+  `register_block`, node replacement, evidence accounting/release, pending
+  queue edits, eviction, vote-history mutation, signer replay, QC, lock or
+  commit.
+- Equal ID is not an idempotency proof. Do not compare only ID, view or
+  serialized fields and silently proceed. Any future idempotent retry rule
+  needs separate review establishing exact parent/height/QC/evidence/state
+  equality and whether replaying signers is effect-free.
+- Existing-ID refusal at item zero is no-effect refusal for the item and
+  response. If prior items completed, it is a partial response: report those
+  prefix effects and retain quarantine. The current item has no effects.
+
+New ID and configured maximum M:
+- Let N be current block-map cardinality, including pre-existing over-limit
+  state. The number of additional safe evictions required before inserting
+  one new ID is `max(0, N + 1 - M)`, with checked arithmetic. The admission
+  decision must not overflow or wrap.
+- If M is zero, every new ID is refused; no insertion or signer replay.
+- If N < M, admit without eviction (including N=0, M>0).
+- If N+1 <= M, admit without eviction. If N+1 > M, precompute the entire
+  required eviction set before removing anything. Every removed ID must be
+  established safe by the existing conservative predicate. Committed,
+  locked, lock-ancestor, QC-bearing and QC-ancestor nodes remain protected;
+  cyclic, missing/indeterminate protected ancestry and exhausted traversal
+  never prove safety.
+- At N=M, require one safe eviction. If none exists, refuse the new ID.
+- At N>M, require the full excess-plus-one deficit; one safe eviction is
+  insufficient if `N+1-M > 1`. If fewer than the full deficit are safe,
+  perform no eviction and refuse the current new ID. This avoids partial
+  capacity cleanup being misreported as a zero-effect item refusal.
+- If the complete set is safe, evict exactly the set chosen by the reviewed
+  policy, preserve current valid acyclic victim ordering where it is
+  specified, perform the existing exact per-node/shared evidence releases,
+  then insert and replay signers. Any failure after eviction begins is an
+  uncertain current-item effect and quarantines; no rollback is assumed.
+- This rule governs only catch-up new-ID admission. Other legacy
+  `register_block` callers remain outside scope; do not claim a system-wide
+  capacity invariant.
+
+2.2 Effect classification and returned outcome
+
+The future result must separate response validation, per-item admission and
+state effects. At minimum it must report:
+
+- `NoEffectRefusal`: no item in the response changed engine state. Include
+  the rejected index/ID and refusal reason. If durable intent was written
+  before preflight, clear it only after an exact no-mutation check and a
+  successful synced marker transition; otherwise leave quarantine.
+- `PartialPrefix`: exact number and IDs of items whose signer loop completed,
+  with retained prefix effects. State whether a rejected next item had no
+  current-item effects. Never call this response a no-mutation rejection.
+- `PartialCurrentItem`: the current item was registered/replaced or
+  eviction began and a later step failed. Report all observed completed
+  effects and every effect boundary not provable as `Unknown`; keep
+  quarantine. Current-item insertion, eviction, queue, evidence,
+  vote-history, accumulator, received-vote-evidence reconciliation, QC,
+  lock, commit and view effects are separate categories.
+- `Complete`: all response items passed the defined processing path and the
+  final view update ran. This is not a claim that every listed signer
+  contributed a new accumulator vote: equivocation suppression, duplicate
+  votes and CapacityDropped are non-error dispositions in existing code.
+
+Report the pre/post committed anchor, lock, current view, retained block
+count, evidence bytes (per-map and shared accounting where installed),
+evicted IDs or a precise auditable equivalent, insertion/replacement status,
+signer-loop progress and vote dispositions when observable. A value that
+cannot be known after a failure is `Unknown`, not zero or “not applied”.
+Response-level rollback is not part of this proposal.
+
+The catch-up method currently returns `Result<usize, RestoreCatchupError>`
+and loses `applied` on error. Per block it registers before replay; `on_vote`
+records vote history before accumulator membership checking, may evict vote
+history/accumulator views, can produce a QC and update lock/own-QC/commit,
+then reconciles received-vote evidence. A valid QC signer list makes the
+ordinary non-member error unreachable absent invariant changes, but that
+does not authorize a false error guarantee. Catch-up increments its local
+applied count only after all item signers return and calls final `set_view`
+only after the whole response succeeds. These effect boundaries are at
+`basic_hotstuff_engine.rs:3954-4043`,
+`hotstuff_state_engine.rs:1455-1488,1639-1671,1703-1819`,
+`hotstuff_state_engine.rs:713-727`, and
+`vote_accumulator.rs:379-419,514-541`.
+
+3. Quarantine contract and covered effects
+
+3.1 Quarantine state machine
+
+Design a persistent fail-closed state, not just a loop-local bool:
+
+- `Clean`: only established from a durable, validated initial/reconciled
+  state. Existing installations with no versioned quarantine record cannot
+  be assumed clean merely because the key is absent.
+- `Applying`: a synced intent record has been written before any catch-up
+  engine mutation. It identifies the starting committed anchor, starting
+  view/lock and state generation, response digest/source identity, and
+  application position sufficiently to correlate evidence. This state is
+  treated as unresolved on every restart.
+- `Unresolved`: a refusal occurred after a nonempty prefix or any mutation
+  may have occurred in the current item; an effect was unknown; marker or
+  result persistence failed; or restart found `Applying`. Only verified
+  reconciliation can clear it.
+- `Reconciled`: a verifier-authenticated recovery transition has checked
+  all required evidence and durably recorded the selected clean anchor,
+  view, retry point, retained-state generation and signing-safety state.
+  Transition to `Clean`/participation-eligible only after durable completion.
+
+Operator acknowledgement cannot transition `Unresolved` to `Clean`.
+Shutdown, restart, timeout, elapsed time, new peer response or a changed
+snapshot baseline cannot clear it. If the verifier or required evidence is
+unavailable, ambiguous, corrupt, stale or incomplete, remain quarantined.
+
+For an in-process `NoEffectRefusal` with no completed prefix, release
+quarantine only after proving the whole engine and accounting state equals
+the pre-response state and durably recording that outcome. A prefix refusal
+is unresolved even when the rejected current item is proven effect-free.
+A full successful response may leave in-process quarantine only under an
+approved completed-response rule. On restart, a marker not backed by a
+complete durable consensus/safety checkpoint still requires reconciliation;
+do not clear it merely because the last process returned `Complete`.
+
+3.2 Event and effect gates
+
+Install the quarantine gate before the binary loop can tick, receive
+consensus messages, sign or broadcast. Gate must be before, not after, the
+first stateful/crypto/externally visible effect:
+
+| Surface | Effect to block while unresolved | Proposed allowed behavior |
+|---|---|---|
+| Local leader tick / `try_propose` | New block registration, view/proposal state, self-vote, QC/commit and outbound Proposal/Vote | Do not call leader step. Read-only status/metrics and shutdown remain |
+| Late-peer re-emission | Re-broadcast cached Proposal or paired self-Vote; possible reserved/operational signing and network effect | Do not inspect-and-forward as a substitute for the gate; suppress both |
+| Local timeout tick | Timeout signing/reservation, timeout-emitted latch, local timeout ingestion, TC, lock/view change, Timeout/NewView broadcast | Do not run the local timeout effect path |
+| Inbound Proposal | Delivery/reconfig observation, engine registration/view/vote, immediate outbound vote | Decode/authentication may reject/count; before reconfig or engine effect, reject/defer as quarantined |
+| Inbound Vote | Vote history/accumulator, QC/lock/commit/view effects | Verify/transport checks may remain read-only; do not deliver to engine |
+| Inbound Timeout | Timeout accumulation, TC, lock/view and NewView effects | Read-only validation/rejection only; do not deliver |
+| Inbound NewView/TC | QC retention, lock and view advancement; possible downstream effects | Read-only validation/rejection only; do not call engine |
+| Catch-up Response | New/existing block registration, eviction, replay, QC/lock/commit/view | May retain bounded response bytes in isolated recovery staging only if separately specified and durably accounted; current handler must not apply to engine |
+| Catch-up Request / response service | Export of a possibly partial or unverified engine suffix and peer assertion of trusted committed height | Do not serve from quarantined engine state. A read-only recovery endpoint may serve only an independently verified durable checkpoint under a reviewed format |
+| Reconfiguration / epoch persistence | Epoch transition or storage write based on a possibly partial commit | Suppress; do not infer epoch from current engine while unresolved |
+| Periodic snapshot | Publication of partial engine/ledger view as a clean recovery base | Suppress snapshots sourced from quarantined state; preserve diagnostic evidence separately |
+| Proposal/Vote/Timeout signing | Any operational consensus signature, signing reservation, journal advancement or outbound signed action | Prohibit until clean/reconciled; no special exception for timeout or cached signatures |
+| Diagnostics | Metrics/logging and immutable evidence capture | Allowed if it does not inspect secrets or cause consensus/storage state changes; identify quarantined status explicitly |
+
+This is the minimum proposed event matrix for the binary loop, not a claim
+that all other node runtimes or libraries were audited. Existing `restore_mode`
+is not this gate: it is loop-local, initialized from snapshot configuration,
+and only suppresses local timeout plus defers selected proposals while active.
+It does not block all vote, NewView, leader or signing surfaces, and does not
+survive restart. Relevant current paths:
+`binary_consensus_loop.rs:2347-2420,3062-3070,3224-3445`,
+`:3657-3765,6097-6235,6571-6595,6640-6695,6918-6928`,
+`:6951-7420,7464-7833,8392-8580`.
+
+3.3 Crash window and durable ordering
+
+The marker must precede the first state-changing operation. Writing
+`Unresolved` only after a catch-up error is insufficient: a process or power
+failure can occur after `register_block`, vote-history/accumulator insertion,
+QC/lock/commit, or received-vote-evidence reconciliation and before the
+error handler writes that marker. Therefore:
+
+1. Before catch-up can mutate the engine, acquire a durable serialized
+   catch-up transaction/lease and synchronously persist `Applying`. If this
+   write/flush/verification fails or storage is absent, do not apply the
+   response.
+2. Keep `Applying` durable throughout every mutation and until the outcome
+   record is synced. A crash at any point in a mutator leaves startup in
+   quarantine, even if the precise mutation is unknowable.
+3. Persist an exact result/effect record after an outcome. If result write
+   fails, `Applying` remains and restart treats effects as unknown.
+4. Only a reviewed reconciliation or a fully durable, complete safety
+   checkpoint plus reviewed completion transition may clear quarantine.
+   The clear record must be synced before normal event gates are enabled.
+5. Startup must open/check the journal and establish the gate before
+   constructing or starting any consensus loop, timer, inbound delivery,
+   signer, outbound callback or snapshotter. If the record is absent on a
+   previously initialized store, corrupt, unsupported-version, unreadable,
+   inconsistent, or cannot be proven to describe this exact data directory
+   and engine generation, fail closed into quarantine (or refuse startup if
+   even quarantine cannot be reliably established).
+
+A marker alone does not make engine mutations durable, nor does it provide
+enough evidence to reconcile them. To clear after restart, durable evidence
+must establish the actual agreed continuation, not simply record the intended
+one. Depending on the selected recovery protocol this requires either a
+complete consistent engine checkpoint or independently verifiable replay
+materials and a deterministic replay procedure. The record/checkpoint must
+bind at least: chain/genesis/validator-set and software/schema identity;
+trusted committed block ID and height plus commit log; full retained block
+ancestry and QCs/justifications; lock QC; current view and timeout/TC state;
+vote-history anti-equivocation table; vote accumulator; received-vote
+evidence and its accounting; exact catch-up response digest and item/signer
+cursor or completed outcome; retained evidence ownership/budgets; epoch and
+restore baseline correspondence; and signing reservation/journal or other
+durable anti-equivocation state. Any unavailable field must be justified by
+an approved reconstruction invariant, not assumed irrelevant.
+
+The active implementation does not supply this guarantee. `run_binary...`
+constructs a fresh engine and `initialize_from_snapshot_baseline` installs
+only snapshot height and opaque block ID; comments explicitly do not claim
+reconstruction of pre-snapshot QC/vote history
+(`binary_consensus_loop.rs:2795-2860,3052-3070`;
+`main.rs:2860-2869`). `ConsensusStorage` exposes block/QC, last-committed,
+epoch/schema and epoch-transition operations but no catch-up journal or
+general sync marker (`storage.rs:142-321`). Its transition marker and
+consistency checks are specifically for epoch transitions, not a catch-up
+quarantine contract. Production opening checks schema/epoch only
+(`production_consensus_storage.rs:391-455`). The binary loop comment says
+storage is wired for epoch transitions (`binary_consensus_loop.rs:5514-5532`).
+The restore baseline is not a vote-history/safety-state snapshot.
+
+Accordingly, durable quarantine storage, version/migration policy, atomic
+sync semantics, pre-loop startup admission, complete state capture or
+verified replay, and durable signing-state correspondence are BLOCKING
+implementation dependencies. Existing `put_current_epoch_synced`,
+`flush_epoch_durable` and epoch marker methods cannot be reused as a catch-up
+marker without separately reviewed API/schema semantics.
+
+3.4 Missing, corrupt and uncertain journal policy
+
+- New/fresh store: establish clean state only after the trusted genesis or
+  snapshot identity and all required startup state are validated, and persist
+  a synced versioned clean record before networking/consensus starts.
+- Existing store without the new record: absence is ambiguous between legacy
+  never-initialized and lost/deleted marker. Do not infer clean. Quarantine
+  until an authorized migration/reconciliation proves a safe baseline.
+- Read/deserialize/checksum/version failure, marker-chain discontinuity,
+  wrong store identity, partial write, missing referenced checkpoint,
+  conflicting anchors or unsupported state: fail closed; retain evidence;
+  no automatic cleanup or operator-ack clear.
+- Failure to write the initial `Applying` intent: no catch-up engine effect.
+  If the result of the write itself is uncertain, startup must treat absent,
+  malformed or inconsistent state as quarantined; there is no attempt to
+  continue on the current process as clean.
+- Crash after intent but before first engine mutation: restart still
+  quarantines. A verified no-effect abort can clear only with proof that no
+  engine mutation occurred and a synced resolution record; otherwise it is
+  indistinguishable from a crash in the mutation window.
+- Crash during or after a state mutation but before outcome sync: restart
+  quarantines with effects unknown. Do not replay into the engine or accept
+  ordinary consensus until evidence reconciliation chooses a safe procedure.
+- Crash after outcome sync but before checkpoint/clear: restart still
+  quarantines unless the synced outcome and checkpoint jointly prove the
+  complete safety state needed for the exact build/configuration.
+- Reconciliation failure, missing peers/material, or conflicting evidence:
+  remain quarantined indefinitely; manual acknowledgement does not change
+  this rule.
+
+4. Compatibility, scope and remaining open findings
+
+Existing-ID refusal changes current catch-up retry compatibility. A repeated
+response may contain IDs already inserted by a prior accepted prefix or by
+the current item before an earlier error. Under this contract it refuses at
+the first such ID before modifying it or replaying its signer set. If there
+is a prior prefix in that response, the result is partial and quarantined.
+This intentionally prevents “same ID means safe replay” but can block
+legitimate retries until a separate reviewed idempotency/reconciliation rule
+exists. Recovery may need a response suffix rooted at a reconciled anchor,
+but that is not permission to skip an existing item or invent a cursor.
+
+Capacity is catch-up-only. Other legacy registration callers may still exceed
+the configured threshold; their behavior and any global bound remain
+separate work. Valid acyclic chains should preserve current protection and
+safe-eviction behavior when the full admission deficit can be met. Missing
+parent provenance remains unavailable: absent parent alone cannot prove
+whether it was never seen or previously evicted. Uncertainty continues to
+protect.
+
+Logical catch-up QC validation is not cryptographic QC signature
+authentication. A17-F1 remains open and separate; this proposal does not
+enable catch-up. Other unresolved signing, timeout/NewView verification,
+authority, recovery, storage, deployment and operational gates remain open.
+The conditional A33-F1 construction still requires the audit's operator-
+controlled anchor and admitted catch-up prerequisites. It is not an
+anonymous-remote attack claim or observed production failure.
+
+Evidence boundaries remain separate: source inspection; engine/unit tests;
+storage-fault tests; child-process crash/restart tests; multi-node/binary
+tests; deployed-path/network evidence. None implies a later stage. No live
+network, operational signing, deployment or activation is authorized.
+
+5. Contract choices still requiring review/decision
+
+1. Exact persistent record format/version, identity fields, sync primitive,
+   atomicity and corruption-detection requirements; whether to extend
+   ConsensusStorage or introduce a separate mandatory safety store.
+2. Upgrade semantics for existing stores with no marker: startup refusal,
+   one-time trusted migration, or a separately approved baseline-import
+   procedure. Never default missing marker to clean.
+3. Whether a full successful response may enable in-process participation
+   before a full durable safety checkpoint; restart behavior remains
+   quarantine absent that checkpoint.
+4. Exact result structure and sufficient observation boundary for uncertain
+   within-item effects, including counts/IDs versus snapshots/deltas.
+5. What trusted sources and quorum/authority establish reconciliation; which
+   validator-set/genesis/software changes invalidate it; how conflict or
+   unavailable evidence is handled; who can initiate but not unilaterally
+   approve a clear.
+6. Whether reconciliation rebuilds from a trusted committed checkpoint,
+   verifies/replays a recorded suffix, or uses another reviewed algorithm.
+   It must account for already durable commits and cannot roll them back by
+   assertion.
+7. Whether a bounded durable staging area for recovery responses is allowed,
+   its capacity/accounting and eviction policy, and whether serving
+   catch-up responses from any local committed state is permitted while
+   quarantined.
+8. The exact complete-response peer-target/restore-mode exit semantics,
+   final view target, retry anchor and clearing gate. Current restore mode
+   is not a durable quarantine state.
+9. How to preserve/reconstruct signing anti-equivocation state and the
+   signing-reservation journal across restart before any Proposal, Vote or
+   Timeout signing is enabled.
+10. Which storage durability profile and hardware/filesystem crash model the
+    guarantee covers. Existing epoch fsync documentation is not proof of
+    new journal durability.
+
+Until these are decided and independently reviewed, no source/test
+implementation is authorized by this proposal. The exact locations that
+remain uninspected for this bounded review are: the complete RocksDB
+implementation's power-loss behavior and hardware/filesystem profile beyond
+the trait's explicit epoch guarantees; all alternate consensus runners,
+simulation harnesses and non-binary callers outside the cited binary loop;
+and a complete production startup/deployment composition trace for every
+network mode. No conclusion about those areas is claimed.
+
+6. Proposed tests and evidence plan (all NOT RUN)
+
+Unit/engine admission and accounting:
+- New ID below max, exactly filling max, at max requiring one safe eviction,
+  over max requiring the full deficit, max=0, and arithmetic boundary.
+- Acyclic safe candidates sufficient for the full deficit: exact victim/order,
+  committed/locked/QC ancestry preserved, map count, queue, evidence bytes,
+  shared ledger and counters.
+- Insufficient safe candidates at/over capacity and cyclic, absent protected
+  ancestry or exhausted walk: no partial eviction, no new block, no signer
+  replay, unchanged evidence and engine state for the rejected item.
+- Existing ID: refusal before replacement, own-QC/evidence release, queue
+  change and replay; test same fields, changed parent/justify and preexisting
+  verified evidence. Equal ID never becomes implicit acceptance.
+- Zero-effect refusal at item zero; prefix then capacity refusal; prefix then
+  malformed item; prefix then QC-validation failure; explicit unknown
+  current-stage effect injection after insertion, signer k, QC/lock/commit,
+  and received-evidence reconciliation. Assert exact result categories and
+  no response-level rollback claim.
+- Existing conflict, duplicate, CapacityDropped, vote-history/accumulator
+  eviction and old quorum cases: report signer dispositions, QCs, lock,
+  commit and view accurately.
+- All refusal cases verify block map charge equals node-charge sum and shared
+  evidence ledger occupancy remains unchanged if no eviction/insertion ran;
+  successful eviction/replacement tests verify exact release (replacement
+  itself remains refused under this contract).
+
+Persistent journal/storage tests (require implementation and a separately
+authorized storage-failure plan):
+- Sync marker absent, valid Clean, Applying, Unresolved, Reconciled;
+  unsupported version, corrupt checksum, truncation, wrong data-dir identity,
+  missing checkpoint, failed write and failed flush.
+- Verify startup reads and gates the marker before constructing/starting
+  consensus loop, inbound handlers, timers, snapshotter or signer.
+- Fault injection/crash at every boundary: before intent write; after intent
+  write; after each eviction; after block insertion; after each vote-history
+  update; accumulator/view eviction; vote insertion/drop; received-evidence
+  reconciliation; QC formation; lock update; commit; final view update;
+  outcome write; checkpoint write; clear write; after clear before gate
+  enablement. Restart must remain quarantined unless a complete durable
+  checkpoint plus verified clear record is present.
+- Distinguish a crash before any mutation from a crash after a mutation where
+  effect completion is uncertain. Missing/corrupt state never resumes.
+- Disk/process crash tests and durability claims require explicit test
+  authorization, isolated data directory, pinned filesystem/RocksDB
+  durability profile and cleanup. Ordinary unit tests do not establish
+  power-loss behavior.
+
+Node caller/event-gate tests:
+- Exercise actual `handle_restore_catchup_response`: clean zero-effect
+  refusal; completed prefix then capacity refusal; current-item uncertain
+  error; exact applied/rejected counters, logs, anchor/tracker and view
+  behavior; no false no-mutation statement.
+- While unresolved, deliver Proposal, Vote, Timeout, NewView, catch-up
+  Request and Response; tick leader, timeout, late-peer reconnect,
+  reconfiguration/epoch persistence and periodic snapshot. Verify every
+  listed mutation/signing/outbound path is gated before its first effect.
+- Verify only explicitly authorized diagnostic/shutdown/recovery-control
+  paths remain available, and quarantined state is not exported as a trusted
+  catch-up response.
+- After successful verifier-controlled reconciliation, restart and verify
+  exact anchor/view/retry position and signing-safety proof before any
+  participation. Operator acknowledgement alone remains ineffective.
+- Actual binary restart, multi-node, and any deployment/network test require
+  a separately authorized recovery/evidence plan; no live-network or
+  operational-signing tests are part of this task.
+
+No prior passing tests were rerun. No source or tests were changed. No
+binary, process-crash, multi-node, deployment or live-network evidence was
+collected for this proposal. Independent contract review remains PENDING;
+A33-F1 / E27 and all other unresolved obligations remain OPEN; activation
+DISABLED; public DevNet NO-GO.
