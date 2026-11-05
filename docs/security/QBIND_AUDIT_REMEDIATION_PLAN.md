@@ -4890,3 +4890,43 @@ selected. Production integration and all other unresolved work, including
 A17-F1 and global-capacity scope, remain separate. A33-F1 / E27 and all
 other unresolved obligations remain **OPEN**; activation **DISABLED**;
 public DevNet **NO-GO**.
+
+## 32. A33-F1 / E27 prototype active-outcome rejection containment
+
+**TEST-ONLY INTERFACE PROTOTYPE — INDEPENDENT REVIEW PENDING.** Entry
+repository, branch, exact tip/tree, clean worktree/staging and protected
+local/remote main were verified at
+`6fd4986d8e71329f0f6d39da093f84b377c68fa3`, tree
+`53b311b86e08827dc8462d63eb9c2ac5d5af02bd`; protected main remains
+`c9aaef40b045e896ddfa8b01bad230f6b680715e`.
+
+The user-supplied source-review witness was reproduced with a valid active
+intent acknowledgement: both oversized evidence and unsupported version
+carrying known effects were rejected while the scripted mutation gate
+still returned `Ok(())`. The new regression recorded **1 expected baseline
+failure**, not passing validation. Reviewer identity/raw artifact were not
+supplied; no production review approval is inferred.
+
+The fake store now closes the recognized active operation before fallible
+ownership, revision, version and bounded-merge checks. Subsequent repair
+or retry cannot restore fixture mutation authority. Typed failures separate
+unrecorded rejected input, still borrowed and owned by the caller, from
+unacknowledged publication with volatile observed evidence. No truncation,
+durability claim or clear transition is introduced. Foreign or unrelated
+tokens cannot latch or modify another operation; the active operation's
+owner retains responsibility for its own errors, evidence and barrier.
+
+The focused suite passed **19 tests**, preserving all 15 existing controls
+and adding rejection, owner/revision, retry and foreign-attempt controls.
+Formatting, whitespace and checksum checks passed. The separate
+[rejection evidence](evidence/a33_f1/store-interface-rejection-evidence.txt)
+retains exact commands, baseline and corrected raw outputs, hashes, error
+semantics, unsuccessful preliminary invocation and scope limitations.
+Earlier plan/evidence bytes and audit register remain preserved.
+
+No production wiring, persistent schema or clear/resume procedure is added.
+Fake ownership/barriers and caller-held rejected evidence prove no storage
+durability, restart safety, signer fencing or actual node enforcement.
+A33-F1 / E27 and all other unresolved obligations remain **OPEN**;
+independent review **PENDING**; activation **DISABLED**; public DevNet
+**NO-GO**.

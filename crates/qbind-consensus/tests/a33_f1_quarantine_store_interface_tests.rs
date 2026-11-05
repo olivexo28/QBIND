@@ -203,9 +203,17 @@ struct OutcomeAck {
 }
 
 #[derive(Debug, PartialEq, Eq)]
+enum Recording {
+    RejectedUnrecorded,
+    PublicationUnresolved,
+}
+
+#[derive(Debug, PartialEq, Eq)]
 struct RecordFailure {
     error: Error,
+    recording: Recording,
     // Volatile attempted/observed evidence, NOT acknowledged persistence.
+    // On pre-merge rejection, the unchanged borrowed Update stays with caller.
     observed: Option<Outcome>,
 }
 
@@ -356,12 +364,21 @@ impl QuarantineStore for FakeStore {
         update: &Update,
         publication: Publication,
     ) -> Result<OutcomeAck, RecordFailure> {
+        // Only the acknowledged active operation owns this latch. Foreign
+        // requests cannot change another operation's evidence or authorization.
+        let active = ack.scope == scope
+            && scope.store == self.store
+            && scope.incarnation == self.incarnation
+            && self.acknowledged_intent == Some((scope, ack.intent_revision));
+        if active {
+            self.outcome_attempted = true;
+            self.unresolved = true;
+        }
         let validate = || {
-            self.check_scope(scope)?;
-            if ack.scope != scope || self.acknowledged_intent != Some((scope, ack.intent_revision))
-            {
+            if !active {
                 return Err(Error::Scope);
             }
+            self.check_scope(scope)?;
             if expected_revision != self.revision {
                 return Err(Error::StaleRevision);
             }
@@ -369,10 +386,12 @@ impl QuarantineStore for FakeStore {
         };
         let revision = validate().map_err(|error| RecordFailure {
             error,
+            recording: Recording::RejectedUnrecorded,
             observed: None,
         })?;
         let merged = self.observed.merge(update).map_err(|error| RecordFailure {
             error,
+            recording: Recording::RejectedUnrecorded,
             observed: None,
         })?;
         self.outcome_attempted = true;
@@ -392,6 +411,7 @@ impl QuarantineStore for FakeStore {
         if publication != Publication::Acknowledged {
             return Err(RecordFailure {
                 error: Error::PublicationUnresolved,
+                recording: Recording::PublicationUnresolved,
                 observed: Some(merged),
             });
         }
@@ -536,7 +556,8 @@ fn acknowledgements_bind_every_scope_field_and_store_incarnation() {
 fn writer_serialization_and_revision_compare_are_fixture_local_only() {
     let (mut store, ack) = prepared();
     assert_eq!(store.claim(5), Err(Error::Ownership));
-    let before = store.clone();
+    let mut before = store.clone();
+    before.outcome_attempted = true;
     assert_eq!(
         store
             .publish_applying(scope(), 0, FIXTURE_VERSION, Publication::Acknowledged)
@@ -662,6 +683,7 @@ fn failed_outcome_recording_is_not_acknowledged_recorded_uncertainty() {
             .record_outcome(&ack, scope(), 1, &update, publication)
             .unwrap_err();
         assert_eq!(failure.error, Error::PublicationUnresolved);
+        assert_eq!(failure.recording, Recording::PublicationUnresolved);
         assert_eq!(failure.observed, Some(store.observed.clone()));
         assert!(store.observed.domains[1].known);
         if publication != Publication::VisibleButError {
@@ -736,11 +758,13 @@ fn fixture_bounds_versions_and_overflow_refuse_without_truncation() {
             ..Update::unknown(&[])
         },
     ] {
-        let before = store.clone();
+        let mut before = store.clone();
+        before.outcome_attempted = true;
         assert!(store
             .record_outcome(&ack, scope(), 1, &update, Publication::Acknowledged)
             .is_err());
         assert_eq!(store, before);
+        assert_eq!(store.mutation_gate(&ack, true), Err(Error::Barrier));
     }
     for index in 0..MAX_EVIDENCE {
         let update = Update {
@@ -962,4 +986,200 @@ fn outcome_attempts_never_reauthorize_fixture_mutation_even_on_error() {
         assert!(!store.inspect().permits_participation());
         assert!(store.unresolved);
     }
+}
+
+#[test]
+fn rejected_active_outcome_with_known_effect_must_close_mutation_gate() {
+    let mut gates = Vec::new();
+    for mut update in [
+        Update {
+            evidence: vec![1; MAX_EVIDENCE + 1],
+            ..Update::unknown(&[10])
+        },
+        Update {
+            version: 2,
+            ..Update::unknown(&[10])
+        },
+    ] {
+        let (mut store, ack) = prepared();
+        update.domains[1] = Observation::Effect;
+        let failure = store
+            .record_outcome(&ack, scope(), 1, &update, Publication::Acknowledged)
+            .unwrap_err();
+        let gate = store.mutation_gate(&ack, true);
+        println!(
+            "rejected {:?}; scripted mutation gate: {:?}",
+            failure.error, gate
+        );
+        assert!(update.domains[1] == Observation::Effect);
+        assert_eq!(failure.recording, Recording::RejectedUnrecorded);
+        assert_eq!(failure.observed, None);
+        gates.push(gate);
+    }
+    assert_eq!(gates, vec![Err(Error::Barrier); 2]);
+}
+
+#[test]
+fn rejected_payload_remains_caller_owned_and_retries_cannot_reopen_mutation() {
+    for mut rejected in [
+        Update {
+            prefix: vec![10; MAX_PREFIX + 1],
+            ..Update::unknown(&[])
+        },
+        Update {
+            evidence: vec![7; MAX_EVIDENCE + 1],
+            ..Update::unknown(&[10])
+        },
+        Update {
+            version: 2,
+            ..Update::unknown(&[10])
+        },
+    ] {
+        let (mut store, ack) = prepared();
+        rejected.domains = [Observation::Effect; 5];
+        let original = rejected.clone();
+        let visible = store.inspect();
+        for _ in 0..2 {
+            let failure = store
+                .record_outcome(&ack, scope(), 1, &rejected, Publication::Acknowledged)
+                .unwrap_err();
+            assert_eq!(failure.recording, Recording::RejectedUnrecorded);
+            assert_eq!(failure.observed, None);
+            assert_eq!(rejected, original);
+            assert_eq!(store.inspect(), visible);
+            assert_eq!(store.observed, Outcome::empty());
+            assert_eq!(store.mutation_gate(&ack, true), Err(Error::Barrier));
+        }
+        // A valid recording retry does not repair or replace the rejected
+        // caller-owned payload, nor establish its effects were absent.
+        store
+            .record_outcome(
+                &ack,
+                scope(),
+                1,
+                &Update::unknown(&[]),
+                Publication::Acknowledged,
+            )
+            .unwrap();
+        assert_eq!(rejected, original);
+        assert!(store
+            .observed
+            .domains
+            .iter()
+            .all(|domain| domain.completion == Completion::Unknown));
+        assert_eq!(store.mutation_gate(&ack, true), Err(Error::Barrier));
+        assert!(store.unresolved);
+        assert!(!store.inspect().permits_participation());
+        assert!(store.modeled_restart().mutation_gate(&ack, true).is_err());
+    }
+}
+
+#[test]
+fn active_revision_and_ownership_errors_latch_before_validation() {
+    for error in [Error::StaleRevision, Error::Ownership] {
+        let (mut store, ack) = prepared();
+        let mut update = Update::unknown(&[10]);
+        update.domains[1] = Observation::Effect;
+        if error == Error::Ownership {
+            store.owner = Some(99);
+        }
+        let expected_revision = if error == Error::StaleRevision { 0 } else { 1 };
+        let before = store.inspect();
+        let failure = store
+            .record_outcome(
+                &ack,
+                scope(),
+                expected_revision,
+                &update,
+                Publication::Acknowledged,
+            )
+            .unwrap_err();
+        assert_eq!(failure.error, error);
+        assert_eq!(failure.recording, Recording::RejectedUnrecorded);
+        assert_eq!(failure.observed, None);
+        assert_eq!(store.inspect(), before);
+        assert!(store.outcome_attempted);
+        // Even restoring fixture ownership/revision inputs cannot unlatch.
+        store.owner = Some(4);
+        assert_eq!(store.mutation_gate(&ack, true), Err(Error::Barrier));
+        store
+            .record_outcome(&ack, scope(), 1, &update, Publication::Acknowledged)
+            .unwrap();
+        assert!(store.observed.domains[1].known);
+        assert_eq!(store.mutation_gate(&ack, true), Err(Error::Barrier));
+    }
+    let (mut store, ack) = prepared();
+    store.revision = u64::MAX;
+    let failure = store
+        .record_outcome(
+            &ack,
+            scope(),
+            u64::MAX,
+            &Update::unknown(&[]),
+            Publication::Acknowledged,
+        )
+        .unwrap_err();
+    assert_eq!(failure.error, Error::StaleRevision);
+    assert_eq!(failure.recording, Recording::RejectedUnrecorded);
+    assert_eq!(store.mutation_gate(&ack, true), Err(Error::Barrier));
+}
+
+#[test]
+fn foreign_attempts_cannot_latch_or_modify_another_active_operation() {
+    let (mut store, own) = prepared();
+    let mut invalid = Update::unknown(&[10]);
+    invalid.domains[1] = Observation::Effect;
+    invalid.version = 2;
+    for foreign_scope in [
+        Scope {
+            store: 99,
+            ..scope()
+        },
+        Scope {
+            incarnation: 99,
+            ..scope()
+        },
+        Scope {
+            operation: 99,
+            ..scope()
+        },
+        Scope {
+            writer: 99,
+            ..scope()
+        },
+    ] {
+        let foreign = IntentAck {
+            scope: foreign_scope,
+            intent_revision: 1,
+        };
+        for (ack, requested) in [
+            (&foreign, scope()),
+            (&foreign, foreign_scope),
+            (&own, foreign_scope),
+        ] {
+            let before = store.clone();
+            let failure = store
+                .record_outcome(ack, requested, 1, &invalid, Publication::Acknowledged)
+                .unwrap_err();
+            assert_eq!(failure.recording, Recording::RejectedUnrecorded);
+            assert_eq!(failure.observed, None);
+            assert_eq!(store, before);
+            assert_eq!(store.mutation_gate(&own, true), Ok(()));
+        }
+    }
+    let foreign = IntentAck {
+        scope: scope(),
+        intent_revision: 99,
+    };
+    let before = store.clone();
+    assert!(store
+        .record_outcome(&foreign, scope(), 1, &invalid, Publication::Acknowledged)
+        .is_err());
+    assert_eq!(store, before);
+    assert_eq!(store.mutation_gate(&own, true), Ok(()));
+    // The real owner submits its own failed attempt and closes its gate.
+    assert!(store
+        .record_outcome(&own, scope(), 1, &invalid, Publication::Acknowledged)
+        .is_err());
+    assert_eq!(store.mutation_gate(&own, true), Err(Error::Barrier));
 }

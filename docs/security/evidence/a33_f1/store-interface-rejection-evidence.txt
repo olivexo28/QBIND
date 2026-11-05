@@ -1,0 +1,145 @@
+A33-F1 / E27 active-operation outcome rejection correction
+
+TEST-ONLY INTERFACE PROTOTYPE -- INDEPENDENT REVIEW PENDING.
+A33-F1 / E27 and all unresolved obligations OPEN.
+Activation DISABLED; public DevNet NO-GO.
+
+1. Entry and reproduced witness
+
+Repository: olivexo28/QBIND
+Branch: copilot/a33-f1-bounded-eviction
+Entry commit: 6fd4986d8e71329f0f6d39da093f84b377c68fa3
+Entry tree: 53b311b86e08827dc8462d63eb9c2ac5d5af02bd
+Protected local/remote main: c9aaef40b045e896ddfa8b01bad230f6b680715e
+Repository root/URL, exact branch/tip/tree, clean worktree/staging and local/
+remote main were verified before editing. Remote task also matched entry.
+
+The source-review witness was supplied by the user. Reviewer identity and
+raw review artifact were unavailable; neither is invented. Earlier review
+attributions and their limitations remain unchanged in historical evidence.
+
+With only the new regression added to the entry implementation:
+  cargo test -p qbind-consensus --test a33_f1_quarantine_store_interface_tests rejected_active_outcome_with_known_effect_must_close_mutation_gate -- --exact --nocapture
+Result: Cargo exit 101; 1 failed, 15 filtered out.
+Both updates carried a known signing effect and the valid current-operation
+intent acknowledgement. Oversized evidence and unsupported version were
+rejected, but mutation_gate with the scripted barrier returned Ok(()) for
+BOTH. The assertion requiring Err(Barrier) failed as expected.
+This is a failing baseline observation, NOT passing validation.
+Raw output: store-interface-rejection-baseline.log
+SHA-256: 0d99a203a5b63c27ab6e355b48f30bc0737568a3ce2a9f52055e607218fc304b
+
+A preliminary invocation of that exact Cargo command accidentally nested
+the new test, selecting 0 tests (15 filtered out), Cargo exit 0 with two
+test-target warnings. The wrapper requiring exit 101 exited 1. This was an
+unsuccessful reproduction attempt, not a passing test. Placement was fixed
+before the captured one-test failing baseline; preliminary raw output was
+not retained as a separate artifact.
+
+2. Correction and ownership boundary
+
+Only executable change:
+  crates/qbind-consensus/tests/a33_f1_quarantine_store_interface_tests.rs
+SHA-256: 23fa1680b367a03bd02d09f1c5a2b16b62c2809bc1550a3e82c9b6eb2ad30041
+
+record_outcome now recognizes the active operation before fallible checks:
+the supplied scope must equal the token scope, store/incarnation must match
+this fake store and the stored acknowledged intent must match that exact
+scope/intent revision. Recognition closes outcome_attempted and keeps
+unresolved true BEFORE checking current writer ownership, expected revision,
+revision overflow, version, input bounds or aggregate merge bounds.
+Therefore legitimate active-operation errors cannot leave or restore the
+fixture mutation gate, even if ownership/revision inputs are later repaired
+or a valid recording retry succeeds. No latch-clearing operation is added.
+
+RecordFailure explicitly distinguishes:
+  RejectedUnrecorded: no submitted update was merged or published; observed
+    is None. The unchanged borrowed Update remains with its caller/owner,
+    including all rejected bytes, prefix and known effects.
+  PublicationUnresolved: valid evidence merged into volatile fake state;
+    publication failed, was uncertain or was visible before error. An
+    observed candidate is returned, NOT an acknowledged durability claim.
+Previous visible records, known prefix/effects and revision remain unchanged
+on pre-merge rejection; only the recognized active operation's latch changes.
+No oversized or unsupported input is truncated, downgraded or silently
+replaced. A later Unknown retry does not establish that the rejected
+owner-held effects were absent or durably recorded. The caller must retain
+the rejected update and failure alongside any later acknowledgement.
+
+Unauthorized scope, foreign token, foreign store/incarnation/operation/writer
+or wrong intent revision do not identify this active operation. They return
+RejectedUnrecorded without changing its gate, evidence or revision. The
+active acknowledged operation's owner is responsible for closing its own
+operation when its recording fails; the store performs this closure when
+that operation is recognized. An unrelated caller cannot latch or overwrite
+someone else's acknowledged operation. A caller that supplies mismatched
+credentials cannot infer that its own operation was latched elsewhere;
+it must preserve its own evidence/error and withhold further effects under
+its own owner/barrier. No production owner orchestration or authentication
+mechanism is implemented by this fake interface.
+
+Writer ownership loss with an otherwise recognized active token is different
+from a foreign-writer token: it closes the active operation before returning
+Ownership. Restoring the local fixture owner does not reopen the gate.
+Stale expected revisions and revision overflow similarly close the active
+operation. Scope errors intentionally precede ownership errors for unrelated
+tokens; no remote reachability or production authorization is asserted.
+
+3. Focused controls and exact validation
+
+Working directory: /workspaces/QBIND/olivexo28/QBIND
+rustc 1.99.1 (58cf8f9c3 2026-10-13)
+cargo 1.99.1 (5f94df478 2026-08-27)
+
+  rustfmt --edition 2021 crates/qbind-consensus/tests/a33_f1_quarantine_store_interface_tests.rs
+  rustfmt --edition 2021 --check crates/qbind-consensus/tests/a33_f1_quarantine_store_interface_tests.rs
+Both exit 0. Check stdout/stderr is empty as emitted:
+  store-interface-rejection-format.log
+SHA-256: e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+
+  cargo test -p qbind-consensus --test a33_f1_quarantine_store_interface_tests -- --nocapture
+Exit 0: 19 passed, 0 failed, 0 ignored, 0 measured, 0 filtered out.
+Raw output: store-interface-rejection-corrected.log
+SHA-256: a27e2559d9338ca025f396e3acceb615eb30fa80643ed0a51aa725787c505ed1
+37 existing library warnings; no prototype warning.
+The regression now prints Err(Barrier) for both rejected inputs.
+
+All 15 previous controls remain. Assertions allowing all-state equality
+after a legitimate rejection now allow ONLY the newly required latch change;
+visible/observed evidence and accounting labels remain unchanged. Four new
+controls cover the baseline witness; repeated oversized-prefix/evidence and
+unsupported-version rejection with known effects retained by caller; valid
+Unknown retries without gate restoration; active stale-revision/overflow/
+ownership errors and later retries; and foreign-scope/token attempts that
+leave the real owner's acknowledged operation untouched.
+Restart, publication-error, Complete, no-effect and late-update controls
+remain in the focused target. Historical 15-pass/33-pass model results,
+six timeout baselines and prior corrected results are not rerun or relabeled.
+
+Staged whitespace checks:
+  git -c core.whitespace=-blank-at-eof diff --cached --check
+  git diff --cached --check -- . ':!docs/security/evidence/a33_f1/store-interface-rejection-baseline.log' ':!docs/security/evidence/a33_f1/store-interface-rejection-corrected.log'
+Both exit 0; raw Cargo trailing blank lines are deliberately preserved.
+Checksum validation:
+  (cd docs/security/evidence/a33_f1 && sha256sum -c SHA256SUMS)
+All entries verified. Plan/manifest entry bytes remain exact prefixes;
+historical evidence, prior stay-closed model and audit register remain
+byte-identical to entry HEAD. The final commit/tree/parent and remote
+equality are reported after commit/push, without self-referential hashes.
+
+4. Scope and residuals
+
+This only corrects a deterministic test-only interface. Caller retention,
+local fake ownership, acknowledged labels, scripted barrier and modeled
+restart do not establish persistent recording, filesystem durability,
+process-crash safety, rollback protection, startup coverage, signer fencing
+or network delivery. Rejected evidence held in memory is not crash durable.
+No production backend, startup gate, signer, network or catch-up is wired;
+no persistent schema, durability profile, recovery authority or clear/resume
+procedure is selected. All real engine/node, storage, process and deployment
+evidence remains separate. No operational action, PR, merge, main push,
+force-push, live network, signing or activation is performed.
+
+TEST-ONLY INTERFACE PROTOTYPE -- INDEPENDENT REVIEW PENDING.
+A33-F1 / E27 and all other unresolved obligations OPEN.
+Activation DISABLED; public DevNet NO-GO.
