@@ -1,0 +1,6 @@
+Producer commit: 74b8a952e0d61b02a14f615e9c4153852dc61ba8
+Producer tree: 9fca8d7869a35822f2983f63e340afc2658c307a
+Source blob: 2430abbb742aa698caa056d04009a33efa4f40de
+Command: rustfmt --edition 2021 --config skip_children=true crates/qbind-node/src/p2p_tcp.rs --check 
+
+Exit status: 0

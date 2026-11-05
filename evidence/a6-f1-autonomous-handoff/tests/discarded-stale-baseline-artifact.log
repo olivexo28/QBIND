@@ -1,0 +1,540 @@
+warning: enum `VerifiedVoteInvocationRefusal` is never used
+    --> crates/qbind-consensus/src/basic_hotstuff_engine.rs:1456:17
+     |
+1456 | pub(crate) enum VerifiedVoteInvocationRefusal {
+     |                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+     |
+     = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: enum `ReceivedVoteEvidenceDisposition` is never used
+    --> crates/qbind-consensus/src/basic_hotstuff_engine.rs:1469:17
+     |
+1469 | pub(crate) enum ReceivedVoteEvidenceDisposition {
+     |                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: enum `VerifiedVoteInvocation` is never used
+    --> crates/qbind-consensus/src/basic_hotstuff_engine.rs:1479:17
+     |
+1479 | pub(crate) enum VerifiedVoteInvocation {
+     |                 ^^^^^^^^^^^^^^^^^^^^^^
+
+warning: enum `ReceivedVoteQcRefusalReason` is never used
+    --> crates/qbind-consensus/src/basic_hotstuff_engine.rs:1492:17
+     |
+1492 | pub(crate) enum ReceivedVoteQcRefusalReason {
+     |                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: struct `ReceivedVoteQcRefusal` is never constructed
+    --> crates/qbind-consensus/src/basic_hotstuff_engine.rs:1498:19
+     |
+1498 | pub(crate) struct ReceivedVoteQcRefusal {
+     |                   ^^^^^^^^^^^^^^^^^^^^^
+
+warning: enum `ReceivedVoteQcIncomplete` is never used
+    --> crates/qbind-consensus/src/basic_hotstuff_engine.rs:1504:17
+     |
+1504 | pub(crate) enum ReceivedVoteQcIncomplete {
+     |                 ^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: struct `ReceivedVoteQcEventSummary` is never constructed
+    --> crates/qbind-consensus/src/basic_hotstuff_engine.rs:1518:19
+     |
+1518 | pub(crate) struct ReceivedVoteQcEventSummary {
+     |                   ^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: enum `ReceivedQcGateRefusal` is never used
+    --> crates/qbind-consensus/src/basic_hotstuff_engine.rs:1528:17
+     |
+1528 | pub(crate) enum ReceivedQcGateRefusal {
+     |                 ^^^^^^^^^^^^^^^^^^^^^
+
+warning: enum `ReceivedQcGateDecision` is never used
+    --> crates/qbind-consensus/src/basic_hotstuff_engine.rs:1534:17
+     |
+1534 | pub(crate) enum ReceivedQcGateDecision {
+     |                 ^^^^^^^^^^^^^^^^^^^^^^
+
+warning: enum `ReceivedQcApplication` is never used
+    --> crates/qbind-consensus/src/basic_hotstuff_engine.rs:1540:17
+     |
+1540 | pub(crate) enum ReceivedQcApplication {
+     |                 ^^^^^^^^^^^^^^^^^^^^^
+
+warning: struct `ReceivedQcEffectView` is never constructed
+    --> crates/qbind-consensus/src/basic_hotstuff_engine.rs:1549:19
+     |
+1549 | pub(crate) struct ReceivedQcEffectView<'a> {
+     |                   ^^^^^^^^^^^^^^^^^^^^
+
+warning: multiple methods are never used
+    --> crates/qbind-consensus/src/basic_hotstuff_engine.rs:1561:19
+     |
+1560 | impl ReceivedQcEffectView<'_> {
+     | ----------------------------- methods in this implementation
+1561 |     pub(crate) fn logical(&self) -> &QuorumCertificate<[u8; 32]> { self.logical }
+     |                   ^^^^^^^
+1562 |     pub(crate) fn wire(&self) -> &qbind_wire::consensus::QuorumCertificate { self.wire }
+     |                   ^^^^
+1563 |     pub(crate) fn locked(&self) -> Option<ReceivedVoteQcSummary> { self.locked }
+     |                   ^^^^^^
+1564 |     pub(crate) fn target_own_qc(&self) -> Option<&QuorumCertificate<[u8; 32]>> {
+     |                   ^^^^^^^^^^^^^
+...
+1567 |     pub(crate) fn committed_block(&self) -> Option<&[u8; 32]> { self.committed_block }
+     |                   ^^^^^^^^^^^^^^^
+1568 |     pub(crate) fn committed_height(&self) -> Option<u64> { self.committed_height }
+     |                   ^^^^^^^^^^^^^^^^
+1569 |     pub(crate) fn commit_log(&self) -> &[CommittedEntry<[u8; 32]>] { self.commit_log }
+     |                   ^^^^^^^^^^
+1570 |     pub(crate) fn current_view(&self) -> u64 { self.current_view }
+     |                   ^^^^^^^^^^^^
+
+warning: trait `ReceivedQcEffectGate` is never used
+    --> crates/qbind-consensus/src/basic_hotstuff_engine.rs:1573:18
+     |
+1573 | pub(crate) trait ReceivedQcEffectGate {
+     |                  ^^^^^^^^^^^^^^^^^^^^
+
+warning: struct `ReceivedQcGateAdapter` is never constructed
+    --> crates/qbind-consensus/src/basic_hotstuff_engine.rs:1577:8
+     |
+1577 | struct ReceivedQcGateAdapter<'a> {
+     |        ^^^^^^^^^^^^^^^^^^^^^
+
+warning: struct `ReceivedVoteQcSummary` is never constructed
+    --> crates/qbind-consensus/src/basic_hotstuff_engine.rs:1639:19
+     |
+1639 | pub(crate) struct ReceivedVoteQcSummary {
+     |                   ^^^^^^^^^^^^^^^^^^^^^
+
+warning: enum `ReceivedVoteQcOutcome` is never used
+    --> crates/qbind-consensus/src/basic_hotstuff_engine.rs:1645:17
+     |
+1645 | pub(crate) enum ReceivedVoteQcOutcome {
+     |                 ^^^^^^^^^^^^^^^^^^^^^
+
+warning: struct `ReceivedVoteQcCandidateSeal` is never constructed
+    --> crates/qbind-consensus/src/basic_hotstuff_engine.rs:1689:8
+     |
+1689 | struct ReceivedVoteQcCandidateSeal {
+     |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: struct `ReceivedVoteQcRouteControlFrame` is never constructed
+    --> crates/qbind-consensus/src/basic_hotstuff_engine.rs:1697:8
+     |
+1697 | struct ReceivedVoteQcRouteControlFrame {
+     |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: struct `ReceivedQcGateControlFrame` is never constructed
+    --> crates/qbind-consensus/src/basic_hotstuff_engine.rs:1735:8
+     |
+1735 | struct ReceivedQcGateControlFrame {
+     |        ^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: struct `VerifiedVotePreflight` is never constructed
+    --> crates/qbind-consensus/src/basic_hotstuff_engine.rs:1755:8
+     |
+1755 | struct VerifiedVotePreflight {
+     |        ^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `same_vote_signed_fields` is never used
+    --> crates/qbind-consensus/src/basic_hotstuff_engine.rs:2803:4
+     |
+2803 | fn same_vote_signed_fields(
+     |    ^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `map_received_vote_qc_incomplete` is never used
+    --> crates/qbind-consensus/src/basic_hotstuff_engine.rs:2818:4
+     |
+2818 | fn map_received_vote_qc_incomplete(
+     |    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `received_vote_qc_control_charge` is never used
+    --> crates/qbind-consensus/src/basic_hotstuff_engine.rs:2844:4
+     |
+2844 | fn received_vote_qc_control_charge() -> Result<u64, ReceivedVoteQcStageError> {
+     |    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `qc_matches_projected_membership` is never used
+    --> crates/qbind-consensus/src/basic_hotstuff_engine.rs:2859:4
+     |
+2859 | fn qc_matches_projected_membership(
+     |    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `compare_actual_qc_failure` is never used
+    --> crates/qbind-consensus/src/basic_hotstuff_engine.rs:2889:4
+     |
+2889 | fn compare_actual_qc_failure(
+     |    ^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: multiple methods are never used
+    --> crates/qbind-consensus/src/basic_hotstuff_engine.rs:2938:19
+     |
+2937 | impl BasicHotStuffEngine<[u8; 32]> {
+     | ---------------------------------- methods in this implementation
+2938 |     pub(crate) fn invoke_verified_received_vote_qc(
+     |                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+2945 |     pub(crate) fn invoke_verified_received_vote_qc_effect_gated(
+     |                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+2953 |     fn invoke_received_vote_qc_inner(
+     |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+3264 |     pub(crate) fn install_received_vote_context(
+     |                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+3376 |     pub(crate) fn admit_verified_received_vote(
+     |                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+3398 |     pub(crate) fn invoke_verified_received_vote(
+     |                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+3496 |     fn preflight_verified_received_vote(
+     |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: struct `ReceivedVoteQcReport` is never constructed
+    --> crates/qbind-consensus/src/basic_hotstuff_engine.rs:1657:23
+     |
+1657 |     pub(crate) struct ReceivedVoteQcReport {
+     |                       ^^^^^^^^^^^^^^^^^^^^
+
+warning: associated items `new`, `actual`, and `outcome` are never used
+    --> crates/qbind-consensus/src/basic_hotstuff_engine.rs:1664:23
+     |
+1663 |     impl ReceivedVoteQcReport {
+     |     ------------------------- associated items in this implementation
+1664 |         pub(super) fn new(
+     |                       ^^^
+...
+1672 |         pub(crate) fn actual(&self) -> &ReceivedVoteQcEventSummary {
+     |                       ^^^^^^
+...
+1676 |         pub(crate) fn outcome(&self) -> &ReceivedVoteQcOutcome {
+     |                       ^^^^^^^
+
+warning: field `accumulator` is never read
+   --> crates/qbind-consensus/src/hotstuff_state_engine.rs:193:16
+    |
+191 | pub(crate) struct VoteMutationReport<BlockIdT> {
+    |                   ------------------ field in this struct
+192 |     pub(crate) history: VoteHistoryOutcome<BlockIdT>,
+193 |     pub(crate) accumulator:
+    |                ^^^^^^^^^^^
+
+warning: trait `VoteQcEffectGate` is never used
+   --> crates/qbind-consensus/src/hotstuff_state_engine.rs:198:18
+    |
+198 | pub(crate) trait VoteQcEffectGate<BlockIdT: Eq + std::hash::Hash + Clone> {
+    |                  ^^^^^^^^^^^^^^^^
+
+warning: method `is_equivocation` is never used
+   --> crates/qbind-consensus/src/hotstuff_state_engine.rs:212:19
+    |
+211 | impl<BlockIdT> VoteMutationReport<BlockIdT> {
+    | ------------------------------------------- method in this implementation
+212 |     pub(crate) fn is_equivocation(&self) -> bool {
+    |                   ^^^^^^^^^^^^^^^
+
+warning: enum `VoteEvidencePreflightError` is never used
+   --> crates/qbind-consensus/src/hotstuff_state_engine.rs:218:17
+    |
+218 | pub(crate) enum VoteEvidencePreflightError {
+    |                 ^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: enum `VoteEvidencePlan` is never used
+   --> crates/qbind-consensus/src/hotstuff_state_engine.rs:225:17
+    |
+225 | pub(crate) enum VoteEvidencePlan {
+    |                 ^^^^^^^^^^^^^^^^
+
+warning: multiple methods are never used
+    --> crates/qbind-consensus/src/hotstuff_state_engine.rs:567:19
+     |
+ 361 | / impl<BlockIdT> HotStuffStateEngine<BlockIdT>
+ 362 | | where
+ 363 | |     BlockIdT: Eq + std::hash::Hash + Clone,
+     | |___________________________________________- methods in this implementation
+...
+ 567 |       pub(crate) fn received_vote_budget(&self) -> Option<&EvidenceBudget> {
+     |                     ^^^^^^^^^^^^^^^^^^^^
+...
+ 571 |       pub(crate) fn received_vote_evidence_table(
+     |                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+ 577 |       pub(crate) fn install_received_vote_evidence_table(
+     |                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+ 598 |       pub(crate) fn prepare_received_vote_evidence(
+     |                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+ 641 |       pub(crate) fn project_received_vote_accumulator<'a>(
+     |                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+ 651 |       pub(crate) fn has_conflicting_vote_history(
+     |                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+ 662 |       pub(crate) fn has_vote_memberships(
+     |                     ^^^^^^^^^^^^^^^^^^^^
+...
+ 700 |       pub(crate) fn retain_received_vote_token(
+     |                     ^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+ 729 |       pub(crate) fn map_qc_charge_checked(&self) -> Result<u64, EvidenceRetentionError> {
+     |                     ^^^^^^^^^^^^^^^^^^^^^
+...
+ 737 |       pub(crate) fn install_received_vote_budget(
+     |                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+1717 |       pub(crate) fn on_vote_detailed_effect_gated(
+     |                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: struct `VoteAccumulatorProjection` is never constructed
+   --> crates/qbind-consensus/src/vote_accumulator.rs:223:19
+    |
+223 | pub(crate) struct VoteAccumulatorProjection<'a, BlockIdT> {
+    |                   ^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: methods `disposition`, `projected_count`, and `next_signer` are never used
+   --> crates/qbind-consensus/src/vote_accumulator.rs:236:19
+    |
+232 | / impl<BlockIdT> VoteAccumulatorProjection<'_, BlockIdT>
+233 | | where
+234 | |     BlockIdT: Eq + std::hash::Hash + Clone,
+    | |___________________________________________- methods in this implementation
+235 |   {
+236 |       pub(crate) fn disposition(&self) -> VoteAccumulatorDisposition {
+    |                     ^^^^^^^^^^^
+...
+240 |       pub(crate) fn projected_count(&self) -> usize {
+    |                     ^^^^^^^^^^^^^^^
+...
+244 |       pub(crate) fn next_signer(&self, after: Option<ValidatorId>) -> Option<ValidatorId> {
+    |                     ^^^^^^^^^^^
+
+warning: methods `project_vote` and `will_contain_after_on_vote` are never used
+   --> crates/qbind-consensus/src/vote_accumulator.rs:438:19
+    |
+282 | / impl<BlockIdT> VoteAccumulator<BlockIdT>
+283 | | where
+284 | |     BlockIdT: Eq + std::hash::Hash + Clone,
+    | |___________________________________________- methods in this implementation
+...
+438 |       pub(crate) fn project_vote<'a>(
+    |                     ^^^^^^^^^^^^
+...
+489 |       pub(crate) fn will_contain_after_on_vote(
+    |                     ^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: `qbind-consensus` (lib) generated 37 warnings
+warning: unused doc comment
+    --> crates/qbind-node/src/signing_reservation_journal.rs:1624:1
+     |
+1624 | / /// Run 422 (test-only) — force [`LiveContainer::construct`] to report an
+1625 | | /// INJECTED allocation failure after admission, so a test can exercise the real
+1626 | | /// constructor error-cleanup (automatic coverage release) and the
+1627 | | /// `enter_bounded_live_mode` rollback. It is NOT a demonstrated system OOM.
+...    |
+1635 | | /// execution. Armed/disarmed through the RAII [`InjectedConstructAllocFailure`]
+1636 | | /// guard so it cannot leak across tests even on panic.
+     | |_------------------------------------------------------^
+     |   |
+     |   rustdoc does not generate documentation for macro invocations
+     |
+     = help: to document an item produced by a macro, the macro must produce the documentation as part of its expansion
+     = note: `#[warn(unused_doc_comments)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused variable: `limits`
+     --> crates/qbind-node/src/safety_record_store/owner/model.rs:19050:25
+      |
+19050 |                         limits,
+      |                         ^^^^^^ help: try ignoring the field: `limits: _`
+      |
+      = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused variable: `out`
+    --> crates/qbind-node/src/signing_journal_admission.rs:2047:17
+     |
+2047 |             let out = RetrievalWorkspaceOwner::new(backend).admit_output().unwrap();
+     |                 ^^^ help: if this is intentional, prefix it with an underscore: `_out`
+
+warning: function `signed_vote_v1_legacy` is never used
+     --> crates/qbind-node/src/binary_consensus_loop.rs:15167:12
+      |
+15167 |         fn signed_vote_v1_legacy(voter: u16, fixture: &Fixture) -> Vote {
+      |            ^^^^^^^^^^^^^^^^^^^^^
+      |
+      = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: function `cert_bound_node_id` is never used
+   --> crates/qbind-node/src/p2p_node_builder.rs:678:4
+    |
+678 | fn cert_bound_node_id(cert_bytes: &[u8]) -> Result<NodeId, String> {
+    |    ^^^^^^^^^^^^^^^^^^
+
+warning: `qbind-node` (lib test) generated 5 warnings (run `cargo fix --lib -p qbind-node --tests` to apply 2 suggestions)
+    Finished `test` profile [unoptimized] target(s) in 0.22s
+     Running unittests src/lib.rs (target/debug/deps/qbind_node-8eb69ae0327091d4)
+
+running 33 tests
+[P2P] Peer NodeId(2222222222222222) connected
+[P2P] Peer NodeId(0303030303030303) connected
+[P2P] Frame decode error: Encoding error: io error: unexpected end of file
+
+thread 'p2p_tcp::peer_retirement_tests::baseline_interrupted_fatal_handoff_remains_active_without_external_cleanup' (31232) panicked at crates/qbind-node/src/p2p_tcp.rs:1974:17:
+injected test monitor failure before retirement publication
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+BASELINE panic_monitor=true fatal_observed=true reader_join=completed monitor_finished=true active=1 retiring=0
+[P2P] reader monitor for NodeId(2222222222222222)/2 failed: task 9 panicked with message "injected test monitor failure before retirement publication"
+[P2P] Peer NodeId(2222222222222222) connected
+[P2P] Frame decode error: Encoding error: io error: unexpected end of file
+BASELINE panic_monitor=false fatal_observed=true reader_join=completed monitor_finished=true active=1 retiring=0
+[P2P] reader monitor for NodeId(2222222222222222)/3 was cancelled: task 17 was cancelled
+test p2p_tcp::peer_retirement_tests::baseline_interrupted_fatal_handoff_remains_active_without_external_cleanup ... ok
+[P2P] Write error: channel error: Net(Protocol("secure channel session invalidated"))
+[P2P] Peer NodeId(0303030303030303) connected
+[P2P] Peer NodeId(0808080808080808) connected
+[P2P] Read error: channel error: Net(Protocol("secure channel session invalidated"))
+
+thread 'tokio-runtime-worker' (31245) panicked at crates/qbind-node/src/secure_channel.rs:1109:53:
+retained blocking failure
+[P2P] refusing replacement for NodeId(0808080808080808): retirement of session 5 is incomplete: task join error: reader worker: task 30 panicked with message "retained blocking failure"
+test p2p_tcp::peer_retirement_tests::blocking_failure_after_interrupted_retirement_refuses_replacement ... ok
+[P2P] Peer NodeId(1f1f1f1f1f1f1f1f) connected
+[P2P] reader monitor for NodeId(1f1f1f1f1f1f1f1f)/6 was cancelled: task 38 was cancelled
+[P2P] refusing replacement for NodeId(1f1f1f1f1f1f1f1f): retirement of session 6 is incomplete: channel error: Io(Custom { kind: Other, error: "injected shutdown capability failure" })
+[P2P] Peer NodeId(1f1f1f1f1f1f1f1f) connected
+test p2p_tcp::peer_retirement_tests::cancelled_monitor_retains_reader_handle_until_cleanup_observes_completion ... ok
+test p2p_tcp::peer_retirement_tests::cancelled_outbound_dial_keeps_handshake_worker_for_shutdown ... ok
+[P2P] Peer NodeId(1010101010101010) connected
+test p2p_tcp::peer_retirement_tests::cancelled_shutdown_keeps_old_owner_for_later_join ... ok
+[P2P] Peer NodeId(0404040404040404) connected
+[P2P] Peer NodeId(0404040404040404) connected
+test p2p_tcp::peer_retirement_tests::concurrent_replacement_is_refused_while_owned_cleanup_is_in_progress ... ok
+[P2P] Peer NodeId(1717171717171717) connected
+[P2P] Read error: channel error: Io(Error { kind: UnexpectedEof, message: "failed to fill whole buffer" })
+test p2p_tcp::peer_retirement_tests::active_read_and_queued_inbound_work_are_interrupted_without_replay ... ok
+[P2P] retired session 12 for NodeId(1717171717171717) after terminal read failure: read error: channel error: Io(Error { kind: UnexpectedEof, message: "failed to fill whole buffer" })
+[P2P] Peer NodeId(1717171717171717) connected
+test p2p_tcp::peer_retirement_tests::delayed_old_failure_cannot_retire_replacement_session ... ok
+[P2P] Peer NodeId(0c0c0c0c0c0c0c0c) connected
+[P2P] Peer NodeId(0505050505050505) connected
+[P2P] Peer NodeId(0d0d0d0d0d0d0d0d) connected
+[P2P] Read error: channel error: Io(Error { kind: UnexpectedEof, message: "failed to fill whole buffer" })
+[P2P] retired session 16 for NodeId(0d0d0d0d0d0d0d0d) after terminal read failure: read error: channel error: Io(Error { kind: UnexpectedEof, message: "failed to fill whole buffer" })
+test p2p_tcp::peer_retirement_tests::eviction_snapshot_preserves_later_admission_and_count ... ok
+[P2P] Peer NodeId(0606060606060606) connected
+[P2P] Peer NodeId(1919191919191919) connected
+[P2P] Frame decode error: Encoding error: io error: unexpected end of file
+[P2P] fatal read for NodeId(1919191919191919) left session 18 in owned retirement: channel error: Io(Custom { kind: Other, error: "injected shutdown capability failure" })
+[P2P] reader monitor cleanup for NodeId(1919191919191919)/18 needs retry: channel error: Io(Custom { kind: Other, error: "injected shutdown capability failure" })
+[P2P] Read error: channel error: Net(Protocol("secure channel session invalidated"))
+[P2P] refusing replacement for NodeId(0505050505050505): retirement of session 15 is incomplete: channel error: Io(Custom { kind: Other, error: "injected shutdown capability failure" })
+[P2P] Peer NodeId(1919191919191919) connected
+test p2p_tcp::peer_retirement_tests::fatal_read_cleanup_failure_stays_owned_and_replacement_retries ... ok
+[P2P] refusing replacement for NodeId(0505050505050505): retirement of session 15 is incomplete: channel error: Io(Custom { kind: Other, error: "injected shutdown capability failure" })
+[P2P] Peer NodeId(1b1b1b1b1b1b1b1b) connected
+[P2P] Read error: channel error: Io(Error { kind: UnexpectedEof, message: "failed to fill whole buffer" })
+[P2P] Peer NodeId(0505050505050505) connected
+test p2p_tcp::peer_retirement_tests::failed_shutdown_remains_tracked_and_blocks_replacement_until_retry_succeeds ... ok
+[P2P] Peer NodeId(1c1c1c1c1c1c1c1c) connected
+[P2P] retired session 20 for NodeId(1b1b1b1b1b1b1b1b) after terminal read failure: read error: channel error: Io(Error { kind: UnexpectedEof, message: "failed to fill whole buffer" })
+test p2p_tcp::peer_retirement_tests::fatal_read_racing_eviction_preserves_later_unrelated_peer ... ok
+[P2P] Peer NodeId(1a1a1a1a1a1a1a1a) connected
+[P2P] Read error: channel error: Io(Error { kind: UnexpectedEof, message: "failed to fill whole buffer" })
+[P2P] Peer NodeId(1313131313131313) connected
+[P2P] Peer NodeId(1414141414141414) connected
+[P2P] retired session 23 for NodeId(1a1a1a1a1a1a1a1a) after terminal read failure: read error: channel error: Io(Error { kind: UnexpectedEof, message: "failed to fill whole buffer" })
+test p2p_tcp::peer_retirement_tests::fatal_read_racing_shutdown_keeps_owner_across_cancelled_cleanup ... ok
+[P2P] Peer NodeId(2020202020202020) connected
+[P2P] Frame decode error: Encoding error: io error: unexpected end of file
+
+thread 'p2p_tcp::peer_retirement_tests::monitor_panic_after_reader_join_is_retained_across_replacement' (31316) panicked at crates/qbind-node/src/p2p_tcp.rs:1974:17:
+injected test monitor failure before retirement publication
+[P2P] reader monitor for NodeId(2020202020202020)/26 failed: task 153 panicked with message "injected test monitor failure before retirement publication"
+[P2P] Peer NodeId(2020202020202020) connected
+test p2p_tcp::peer_retirement_tests::monitor_panic_after_reader_join_is_retained_across_replacement ... ok
+[P2P] Peer NodeId(2121212121212121) connected
+[P2P] Read error: channel error: Io(Error { kind: UnexpectedEof, message: "failed to fill whole buffer" })
+test p2p_tcp::peer_retirement_tests::monitor_wait_uses_weak_registry_and_does_not_cycle_on_service_drop ... ok
+[P2P] Peer NodeId(1111111111111111) connected
+[P2P] Read error: channel error: Io(Error { kind: UnexpectedEof, message: "failed to fill whole buffer" })
+[P2P] retired session 29 for NodeId(1111111111111111) after terminal read failure: read error: channel error: Io(Error { kind: UnexpectedEof, message: "failed to fill whole buffer" })
+test p2p_tcp::peer_retirement_tests::observed_eof_retires_registered_session_and_joins_workers ... ok
+[P2P] Peer NodeId(1212121212121212) connected
+[P2P] Frame decode error: Encoding error: io error: unexpected end of file
+[P2P] retired session 30 for NodeId(1212121212121212) after terminal read failure: frame decode error: Encoding error: io error: unexpected end of file
+test p2p_tcp::peer_retirement_tests::observed_frame_decode_failure_retires_and_closes_remote_socket ... ok
+[P2P] WARN: dialing 127.0.0.1:38653 without a per-peer KEM pk override; handshake will only succeed if the peer happens to share this node's KEM keypair (single-validator / smoke only).
+[P2P] WARN: dialing 127.0.0.1:38653 without a per-peer KEM pk override; handshake will only succeed if the peer happens to share this node's KEM keypair (single-validator / smoke only).
+test p2p_tcp::peer_retirement_tests::outbound_retry_cancellation_retains_handshake_owner ... ok
+[P2P] WARN: dialing 127.0.0.1:42941 without a per-peer KEM pk override; handshake will only succeed if the peer happens to share this node's KEM keypair (single-validator / smoke only).
+[P2P] Peer NodeId(c5877ce7d2f44d28) connected
+outbound retry_path=true budget=1 accepted=1 rejected=0 dial_ok=true handshake_ok=true
+test p2p_tcp::peer_retirement_tests::outbound_retry_single_connection_budget ... ok
+[P2P] WARN: dialing 127.0.0.1:44875 without a per-peer KEM pk override; handshake will only succeed if the peer happens to share this node's KEM keypair (single-validator / smoke only).
+[P2P] Peer NodeId(86265442d1837964) connected
+outbound retry_path=true budget=18446744073709551615 accepted=1 rejected=0 dial_ok=true handshake_ok=true
+test p2p_tcp::peer_retirement_tests::outbound_retry_single_connection_carries_handshake ... ok
+[P2P] Dialing 127.0.0.1:33421
+[P2P] WARN: dialing 127.0.0.1:33421 without a per-peer KEM pk override; handshake will only succeed if the peer happens to share this node's KEM keypair (single-validator / smoke only). Multi-validator binary-path runs must use --p2p-peer 'vid@addr' so the dialer can derive the peer's KEM pk.
+[P2P] Dialing 127.0.0.1:33421
+[P2P] WARN: dialing 127.0.0.1:33421 without a per-peer KEM pk override; handshake will only succeed if the peer happens to share this node's KEM keypair (single-validator / smoke only). Multi-validator binary-path runs must use --p2p-peer 'vid@addr' so the dialer can derive the peer's KEM pk.
+test p2p_tcp::peer_retirement_tests::outbound_service_cancellation_retains_handshake_owner ... ok
+[P2P] Dialing 127.0.0.1:45301
+[P2P] WARN: dialing 127.0.0.1:45301 without a per-peer KEM pk override; handshake will only succeed if the peer happens to share this node's KEM keypair (single-validator / smoke only). Multi-validator binary-path runs must use --p2p-peer 'vid@addr' so the dialer can derive the peer's KEM pk.
+[P2P] Peer NodeId(7aa4e2a26526c849) connected
+outbound retry_path=false budget=1 accepted=1 rejected=0 dial_ok=true handshake_ok=true
+test p2p_tcp::peer_retirement_tests::outbound_service_single_connection_budget ... ok
+[P2P] Dialing 127.0.0.1:45733
+[P2P] WARN: dialing 127.0.0.1:45733 without a per-peer KEM pk override; handshake will only succeed if the peer happens to share this node's KEM keypair (single-validator / smoke only). Multi-validator binary-path runs must use --p2p-peer 'vid@addr' so the dialer can derive the peer's KEM pk.
+[P2P] Peer NodeId(dc9743f09f9ac18d) connected
+outbound retry_path=false budget=18446744073709551615 accepted=1 rejected=0 dial_ok=true handshake_ok=true
+test p2p_tcp::peer_retirement_tests::outbound_service_single_connection_carries_handshake ... ok
+[P2P] Peer NodeId(0707070707070707) connected
+
+thread 'p2p_tcp::peer_retirement_tests::peer_join_failure_survives_timeout_and_cancelled_retry' (31352) panicked at crates/qbind-node/src/p2p_tcp.rs:3857:47:
+retained peer failure
+[P2P] refusing replacement for NodeId(0707070707070707): retirement of session 41 is incomplete: peer read loop: task 219 panicked with message "retained peer failure"
+[P2P] Peer NodeId(0707070707070707) connected
+
+thread 'p2p_tcp::peer_retirement_tests::peer_join_failure_survives_timeout_and_cancelled_retry' (31352) panicked at crates/qbind-node/src/p2p_tcp.rs:3857:47:
+retained peer failure
+[P2P] Read error: channel error: Io(Error { kind: UnexpectedEof, message: "failed to fill whole buffer" })
+[P2P] retired session 24 for NodeId(1313131313131313) after terminal read failure: read error: channel error: Io(Error { kind: UnexpectedEof, message: "failed to fill whole buffer" })
+test p2p_tcp::peer_retirement_tests::idle_healthy_and_unrelated_peer_remain_registered_after_fatal_read ... ok
+[P2P] refusing replacement for NodeId(0707070707070707): retirement of session 42 is incomplete: peer read loop: task 228 panicked with message "retained peer failure"
+test p2p_tcp::peer_retirement_tests::peer_join_failure_survives_timeout_and_cancelled_retry ... ok
+[P2P] Peer NodeId(1e1e1e1e1e1e1e1e) connected
+[P2P] Read error: channel error: Io(Error { kind: UnexpectedEof, message: "failed to fill whole buffer" })
+[P2P] retired session 44 for NodeId(1e1e1e1e1e1e1e1e) after terminal read failure: read error: channel error: Io(Error { kind: UnexpectedEof, message: "failed to fill whole buffer" })
+test p2p_tcp::peer_retirement_tests::queue_blocked_read_does_not_claim_fatal_error_observed ... ok
+[P2P] Peer NodeId(0b0b0b0b0b0b0b0b) connected
+[P2P] Peer NodeId(0b0b0b0b0b0b0b0b) connected
+[P2P] Read error: channel error: Io(Error { kind: UnexpectedEof, message: "failed to fill whole buffer" })
+[P2P] retired session 45 for NodeId(0b0b0b0b0b0b0b0b) after terminal read failure: read error: channel error: Io(Error { kind: UnexpectedEof, message: "failed to fill whole buffer" })
+test p2p_tcp::peer_retirement_tests::published_count_cannot_wrap_when_replaced_before_caller_returns ... ok
+[P2P] Peer NodeId(0101010101010101) connected
+test p2p_tcp::peer_retirement_tests::reserved_registration_cannot_publish_after_shutdown ... ok
+[P2P] Accepted connection from 127.0.0.1:34388
+test p2p_tcp::peer_retirement_tests::service_shutdown_joins_blocked_inbound_handshake ... ok
+[P2P] Peer NodeId(0909090909090909) connected
+[P2P] Peer NodeId(0909090909090909) connected
+[P2P] Peer NodeId(0202020202020202) connected
+[P2P] Peer NodeId(0101010101010101) connected
+[P2P] Read error: channel error: Io(Error { kind: UnexpectedEof, message: "failed to fill whole buffer" })
+[P2P] retired session 50 for NodeId(0202020202020202) after terminal read failure: read error: channel error: Io(Error { kind: UnexpectedEof, message: "failed to fill whole buffer" })
+test p2p_tcp::peer_retirement_tests::replacement_retires_only_displaced_session_and_preserves_new_and_other_peers ... ok
+[P2P] Peer NodeId(0e0e0e0e0e0e0e0e) connected
+test p2p_tcp::peer_retirement_tests::shutdown_owns_published_session_before_registration_returns ... ok
+[P2P] Peer NodeId(0f0f0f0f0f0f0f0f) connected
+[P2P] Inbound connection from 127.0.0.1:37356 assigned temporary session NodeId NodeId(87143a3bc28f4b00) (no inbound identity resolver / resolver returned None)
+[P2P] Peer NodeId(0f0f0f0f0f0f0f0f) connected
+[P2P] Inbound connection from 127.0.0.1:47728 assigned temporary session NodeId NodeId(6069d06aa14ff3a4) (no inbound identity resolver / resolver returned None)
+[P2P] retained retirement for NodeId(0f0f0f0f0f0f0f0f) is incomplete: channel error: Io(Custom { kind: Other, error: "injected shutdown capability failure" })
+test p2p_tcp::peer_retirement_tests::successful_inbound_handshake_reserved_during_shutdown_is_refused ... ok
+[P2P] retained retirement for NodeId(0909090909090909) is incomplete: peer retirement timed out
+test p2p_tcp::peer_retirement_tests::shutdown_fences_inflight_registration_and_retains_cleanup_until_retry ... ok
+
+test result: ok. 33 passed; 0 failed; 0 ignored; 0 measured; 2188 filtered out; finished in 5.53s
+

@@ -4195,3 +4195,83 @@ complete eviction/trust-reload cleanup, broader E14, full socket reclamation,
 and platform/runtime assurance remain **OPEN**. No live network, deployment,
 operational signing, or activation was run; independent review remains
 **PENDING**.
+
+## 23. A6-F1 autonomous interrupted-monitor fatal handoff
+
+**IMPLEMENTED — INDEPENDENT REVIEW PENDING.** This append addresses the
+follow-up finding that a monitor panic/cancellation after an observed fatal
+reader error but before retirement publication could leave the session
+active until replacement or shutdown. It does not rewrite sections 18-22,
+the audit register, or earlier evidence. A6-F1 / OBL-AVL-4a / E14 and all
+other remaining obligations stay **OPEN**; activation **DISABLED**; public
+DevNet **NO-GO**.
+
+Entry verified the clean existing task branch at
+`86f606382fbb3efe70b838e5b0d021211334283f`, tree
+`99970b270acfb6323c0377314a46299de46ae086`, with local and remote task
+refs matching. Local and remote protected `main` remained
+`50bf93d8b1b6b0739cdce5e95334cd726af2386e`, tree
+`dfe11db1e9b55de89df1a565b2df83cdba7d91c0`. The unchanged controlling
+audit input and exact anchors are recorded in the separate
+[`evidence/a6-f1-autonomous-handoff/README.md`](../../evidence/a6-f1-autonomous-handoff/README.md).
+
+An isolated test-only patch on that exact starting revision reproduced the
+gap for both injected monitor panic and cancellation: fatal read observed,
+reader join completed, monitor finished, but active count one and no
+retirement owner published before external cleanup. The baseline test
+passed because it asserts the defect, not because cleanup succeeded.
+Its exact patch, command, baseline identities and raw result are retained.
+These are deterministic author test injections, not production incidents.
+
+An owned supervisor now observes the actual monitor through its retained
+join handle. On monitor panic/cancellation with a recorded terminal read
+failure it autonomously performs the identity-checked active-to-retiring
+transition and attempts bounded cleanup, without waiting for replacement
+or shutdown. Monitor and supervisor outcomes persist separately from
+retryable cleanup-operation errors. Reader/writer handles and observed
+outcomes remain owned across interruption; cleanup independently verifies
+task/worker joins before releasing the exact retirement identity.
+No shutdown or abort request is counted as completed cleanup.
+
+The supervisor uses a weak retirement reference while waiting and owns
+only the shared monitor slot/outcome. The monitor retains weak
+registry/retirement references. Temporary strong upgrades during fatal
+recovery are bounded by the cleanup timeout, avoiding a persistent idle
+ownership cycle. Service drop without completed shutdown still does not
+establish worker/socket reclamation: detached tasks can wait for remote
+closure or runtime teardown. The retained service-drop control confirms
+owner release and task-store release after peer closure, not reclamation
+while that peer remains connected.
+
+Source/test producer is
+`74b8a952e0d61b02a14f615e9c4153852dc61ba8`, tree
+`9fca8d7869a35822f2983f63e340afc2658c307a`. Producer-pinned raw logs embed
+commit/tree/source blob, commands and exit statuses. Lifecycle tests passed
+**34/34**, secure-channel **16/16**, B8 **6/6**, current Run 072 regressions
+**8/8**, Run 074 **10/10**, Run 418 sender binding **18/18** and NewView
+demux **4/4**; library check, targeted formatting and source whitespace
+checks passed. The separate evidence records checksums and a discarded
+validation attempt that reused the baseline executable from the shared
+Cargo target; forced recompilation and final commit-pinned runs exercised
+the intended source. Earlier author logs remain unchanged and do not
+themselves embed producer identities. None of these author runs constitutes
+independent review.
+
+New controls establish autonomous retirement after injected monitor
+panic/cancellation, retained failed cleanup and truthful worker outcomes,
+successful joins/socket EOF without explicit cleanup, and a delayed old
+recovery route leaving a newer session and its traffic unaffected.
+Existing replacement, cancelled-shutdown, eviction-snapshot, queue-blocked,
+healthy/idle/unrelated-peer, A5-F1 partial-read, A11-F2 no-replay, terminal
+shutdown and one-connection outbound controls remain covered.
+
+The supervisor is not recursively supervised; arbitrary supervisor
+failure/runtime teardown and monitor interruption before a terminal read
+failure is recorded are not established autonomous-recovery cases.
+Queue-blocked detection, broader E14, complete eviction/trust-reload and
+all-displaced-session cleanup, resource/exhaustion bounds, OS reclamation
+and platform/runtime assurance remain **OPEN**. Authentication/crypto are
+unchanged; delivered messages or progressed operations cannot be retracted.
+No live network, deployment, operational signing or activation was run.
+Independent review remains **PENDING**; activation **DISABLED**; public
+DevNet **NO-GO**.

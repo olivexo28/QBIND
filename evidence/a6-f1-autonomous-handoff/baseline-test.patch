@@ -1,0 +1,59 @@
+diff --git a/crates/qbind-node/src/p2p_tcp.rs b/crates/qbind-node/src/p2p_tcp.rs
+index 876c08f..79ce851 100644
+--- a/crates/qbind-node/src/p2p_tcp.rs
++++ b/crates/qbind-node/src/p2p_tcp.rs
+@@ -3348,6 +3348,54 @@ mod peer_retirement_tests {
+         drop(new_remote);
+     }
+ 
++    #[tokio::test]
++    async fn baseline_interrupted_fatal_handoff_remains_active_without_external_cleanup() {
++        for panic_monitor in [true, false] {
++            let harness = Harness::new(8);
++            let id = node_id(34);
++            let pause = Arc::new(RegistrationPause::default());
++            {
++                let mut registry = harness.peers.write();
++                registry.monitor_before_publication = Some(Arc::clone(&pause));
++                registry.panic_monitor_before_publication = panic_monitor;
++            }
++            let (local, remote) = pair_channels(true);
++            harness.register(id, local).await.unwrap();
++            let owner = Arc::clone(&harness.peers.read().active[&id].retirement);
++            let (remote, result) =
++                send_app_and_return(remote, vec![0xff, 0, 0, 0, 0]).await;
++            result.unwrap();
++            tokio::time::timeout(Duration::from_secs(3), pause.entered.notified())
++                .await
++                .unwrap();
++            assert!(owner.read_failure.lock().unwrap().is_some());
++            assert!(matches!(
++                owner.tasks.lock().await.reader_outcome,
++                Some(TaskOutcome::Completed)
++            ));
++            if panic_monitor {
++                pause.release.notify_one();
++            } else {
++                owner.monitor.lock().await.as_ref().unwrap().abort();
++            }
++            tokio::time::timeout(Duration::from_secs(3), async {
++                while !owner.monitor.lock().await.as_ref().unwrap().is_finished() {
++                    tokio::task::yield_now().await;
++                }
++            })
++            .await
++            .unwrap();
++            assert_registry_count(&harness, 1);
++            assert!(!harness.peers.read().retiring.contains_key(&id));
++            println!(
++                "BASELINE panic_monitor={panic_monitor} fatal_observed=true reader_join=completed monitor_finished=true active=1 retiring=0"
++            );
++            drop(remote);
++            // External cleanup is only used after observing the baseline defect.
++            owner.finish_and_wait().await.unwrap();
++        }
++    }
++
+     #[tokio::test]
+     async fn monitor_wait_uses_weak_registry_and_does_not_cycle_on_service_drop() {
+         let service = service();
