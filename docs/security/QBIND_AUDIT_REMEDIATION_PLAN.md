@@ -5355,3 +5355,40 @@ exclusivity and separate clear/resume authority remain unresolved. The audit
 register and historical bytes are unchanged; only the new test and
 append-only plan/evidence/checksum entries change. A33-F1 / E27 remain
 **OPEN**; activation **DISABLED**; public DevNet **NO-GO**.
+
+## 44. Corrected reset quarantine model latch, restart and trace checker
+
+**CORRECTED TEST MODEL — INDEPENDENT REVIEW PENDING.** Entry checks matched
+task tip `ce2fa5f2c6239df60497ecb811fc5e38bc5f9f5a`, tree
+`9aaf0eed7e0cb1abd20268d07f61d00fb269208f`, parent
+`42b4c49e46c75f9ec8ffa758b4821bc3123aded5`, clean worktree/staging,
+remote task tip and protected local/remote main
+`c9aaef40b045e896ddfa8b01bad230f6b680715e`.
+
+The prior model's latch was not consulted by write admission or
+reclassification; restart left process-local ownership and authorization
+intact. Its sensitivity control checked only one write-before-classification
+case and did not apply one checker to all requested trace defects. Those
+passing results were insufficient for the current requirements.
+
+The self-contained test now makes a prior refusal latch dominant over later
+Clean-looking/hypothetical reclassification and all six write stages.
+Restart invalidates ownership/classification/authorization; an unlatched
+test-only positive sequence must reacquire/reclassify, while a latched
+sequence remains refused even after reacquisition. One shared trace checker
+accepts ownership → classification → hypothetical authorization → write and
+rejects writes before ownership, before classification and after refusal.
+
+Focused corrected suite: **9 passed, 0 failed, 3 ignored**; ignored tests are
+the deliberately failing sensitivity children, separately run with expected
+exit **101** for all three cases. Corrected acceptance and expected negative
+outputs are separate. See
+[correction evidence and exact results](evidence/a33_f1/authority-reset-quarantine-model-correction-evidence.md);
+previous model and negative-control evidence remains preserved.
+
+Only the model, append-only plan/evidence and checksum entries change. No
+production reset/CLI, quarantine, storage, startup, signer or network code is
+executed by the model. Abstract restart, paths and authorization do not prove
+process-crash, filesystem, durability, actual startup, signer-fencing or
+production-quarantine behavior. A33-F1 / E27 remain **OPEN**; activation
+**DISABLED**; public DevNet **NO-GO**.

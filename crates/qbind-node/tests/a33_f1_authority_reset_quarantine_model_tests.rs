@@ -45,7 +45,7 @@ enum Event {
     LockFileCreated,
     OwnershipAcquired,
     OwnershipFailed,
-    QuarantineClassified(Observation),
+    QuarantineClassified(Observation, Decision),
     ResetWriteInvoked(WriteStage, PathBuf),
     WriteRefusedByPathGuard(WriteStage),
     Restarted,
@@ -72,6 +72,9 @@ impl ResetModel {
     fn setup_destination(&mut self, lock_succeeds: bool) {
         self.events.push(Event::DataDirectoryCreated);
         self.events.push(Event::LockFileCreated);
+        self.ownership = false;
+        self.classified = false;
+        self.decision = None;
         if lock_succeeds {
             self.ownership = true;
             self.events.push(Event::OwnershipAcquired);
@@ -89,15 +92,21 @@ impl ResetModel {
             self.ownership,
             "classification requires destination ownership"
         );
-        self.events.push(Event::QuarantineClassified(observation));
-        self.classified = true;
-        let decision = match (observation, separate_authority) {
+        let requested_decision = match (observation, separate_authority) {
             (
                 Observation::LocalCleanLooking,
                 SeparateAuthority::HypotheticalApprovedCurrentAndReconciled,
             ) => Decision::HypotheticallyAuthorize,
             _ => Decision::Refuse,
         };
+        let decision = if self.quarantine_latched {
+            Decision::Refuse
+        } else {
+            requested_decision
+        };
+        self.events
+            .push(Event::QuarantineClassified(observation, decision));
+        self.classified = true;
         self.decision = Some(decision);
         if decision == Decision::Refuse {
             self.quarantine_latched = true;
@@ -112,7 +121,8 @@ impl ResetModel {
         quarantine_paths: &[PathBuf],
         separation: Separation,
     ) -> bool {
-        if !self.ownership
+        if self.quarantine_latched
+            || !self.ownership
             || !self.classified
             || self.decision != Some(Decision::HypotheticallyAuthorize)
         {
@@ -145,8 +155,58 @@ impl ResetModel {
 
     fn restart(&mut self) {
         self.events.push(Event::Restarted);
-        self.quarantine_latched = true;
+        self.ownership = false;
+        self.classified = false;
+        self.decision = None;
     }
+}
+
+fn trace_is_valid(trace: &[Event]) -> bool {
+    let mut ownership = false;
+    let mut classified = false;
+    let mut authorized = false;
+    let mut latched = false;
+    for event in trace {
+        match event {
+            Event::OwnershipAcquired => {
+                ownership = true;
+                classified = false;
+                authorized = false;
+            }
+            Event::OwnershipFailed => {
+                ownership = false;
+                classified = false;
+                authorized = false;
+            }
+            Event::QuarantineClassified(_, decision) => {
+                if !ownership {
+                    return false;
+                }
+                classified = true;
+                if latched || *decision == Decision::Refuse {
+                    latched = true;
+                    authorized = false;
+                } else {
+                    authorized = true;
+                }
+            }
+            Event::ResetWriteInvoked(..) => {
+                if !ownership || !classified || !authorized || latched {
+                    return false;
+                }
+            }
+            Event::Restarted => {
+                ownership = false;
+                classified = false;
+                authorized = false;
+            }
+            Event::DataDirectoryCreated
+            | Event::LockFileCreated
+            | Event::WriteRefusedByPathGuard(_)
+            | Event::PassiveStatus(_) => {}
+        }
+    }
+    true
 }
 
 fn lexical_identity(path: &Path) -> PathBuf {
@@ -198,6 +258,10 @@ fn ownership_then_classification_then_authorization_precedes_every_reset_write()
     let paths = reset_write_paths(root);
     let mut model = ResetModel::default();
     model.setup_destination(true);
+    assert!(
+        !model.quarantine_latched,
+        "hypothetical-authority positive control starts unlatched"
+    );
     assert_eq!(
         model.classify(
             Observation::LocalCleanLooking,
@@ -205,13 +269,14 @@ fn ownership_then_classification_then_authorization_precedes_every_reset_write()
         ),
         Decision::HypotheticallyAuthorize
     );
+    assert!(trace_is_valid(&model.events));
     for (stage, path) in &paths {
         assert!(model.admit_write(*stage, path, &[], Separation::Separate,));
     }
     let classified_at = model
         .events
         .iter()
-        .position(|event| matches!(event, Event::QuarantineClassified(_)))
+        .position(|event| matches!(event, Event::QuarantineClassified(..)))
         .unwrap();
     let first_write_at = model
         .events
@@ -244,7 +309,7 @@ fn ownership_failure_skips_classification_and_reset_writes_but_records_setup_eff
     assert!(model.events.contains(&Event::LockFileCreated));
     assert!(!model.events.iter().any(|event| matches!(
         event,
-        Event::QuarantineClassified(_) | Event::ResetWriteInvoked(..)
+        Event::QuarantineClassified(..) | Event::ResetWriteInvoked(..)
     )));
     assert!(model.events.contains(&Event::OwnershipFailed));
     println!("MODEL PASS: directory/lock setup artifacts distinct; ownership failure skips classification and writes");
@@ -402,17 +467,22 @@ fn cancellation_timeout_and_enqueue_are_not_completion_observations() {
 fn reset_success_audit_marker_replacement_and_restart_never_clear_latched_quarantine() {
     let root = Path::new("/synthetic-reset-model");
     let mut model = ResetModel::default();
-    model.quarantine_latched = true;
     model.setup_destination(true);
+    assert_eq!(
+        model.classify(Observation::LocalCleanLooking, SeparateAuthority::None),
+        Decision::Refuse
+    );
+    model.reset_result(false);
     assert_eq!(
         model.classify(
             Observation::LocalCleanLooking,
             SeparateAuthority::HypotheticalApprovedCurrentAndReconciled
         ),
-        Decision::HypotheticallyAuthorize
+        Decision::Refuse,
+        "hypothetical authority cannot override the first refusal"
     );
     for (stage, path) in reset_write_paths(root) {
-        assert!(model.admit_write(stage, &path, &[], Separation::Separate));
+        assert!(!model.admit_write(stage, &path, &[], Separation::Separate));
     }
     for success in [true, false] {
         model.reset_result(success);
@@ -430,52 +500,161 @@ fn reset_success_audit_marker_replacement_and_restart_never_clear_latched_quaran
     }
     model.restart();
     assert!(model.quarantine_latched);
-    println!("MODEL PASS: preexisting catch-up latch remains closed across reset success/refusal, each audit stage, marker replacement, acknowledgment and restart");
+    model.setup_destination(true);
+    assert_eq!(
+        model.classify(
+            Observation::LocalCleanLooking,
+            SeparateAuthority::HypotheticalApprovedCurrentAndReconciled
+        ),
+        Decision::Refuse,
+        "reacquisition and reclassification cannot bypass latch"
+    );
+    for (stage, path) in reset_write_paths(root) {
+        assert!(!model.admit_write(stage, &path, &[], Separation::Separate));
+    }
+    model.restart();
+    assert!(model.quarantine_latched);
+    println!("MODEL PASS: first refusal latches; later hypothetical Clean classification and all six writes refuse; reset/audit/marker/restart do not clear latch");
 }
 
 #[test]
-#[ignore = "parent test launches this deliberately defective ordering as a negative control"]
-fn negative_control_misplaced_write_before_classification_must_fail() {
+fn restart_invalidates_process_local_authorization_until_reacquired_and_reclassified() {
+    let root = Path::new("/synthetic-reset-model");
     let mut model = ResetModel::default();
     model.setup_destination(true);
-    // Deliberately misplace a refusal audit before classification, as the
-    // reviewed ordering control is required to detect.
-    model.events.push(Event::ResetWriteInvoked(
+    assert_eq!(
+        model.classify(
+            Observation::LocalCleanLooking,
+            SeparateAuthority::HypotheticalApprovedCurrentAndReconciled
+        ),
+        Decision::HypotheticallyAuthorize
+    );
+    model.restart();
+    assert!(!model.ownership && !model.classified && model.decision.is_none());
+    for (stage, path) in reset_write_paths(root) {
+        assert!(!model.admit_write(stage, &path, &[], Separation::Separate));
+    }
+    model.setup_destination(true);
+    assert_eq!(
+        model.classify(
+            Observation::LocalCleanLooking,
+            SeparateAuthority::HypotheticalApprovedCurrentAndReconciled
+        ),
+        Decision::HypotheticallyAuthorize
+    );
+    for (stage, path) in reset_write_paths(root) {
+        assert!(model.admit_write(stage, &path, &[], Separation::Separate));
+    }
+    println!("MODEL PASS: restart invalidates ownership/classification/authorization; reacquisition permits only unlatched hypothetical control");
+}
+
+fn defective_trace(kind: &str) -> Vec<Event> {
+    let write = Event::ResetWriteInvoked(
         WriteStage::RefusalAuditFinal,
         PathBuf::from("/synthetic-reset-model/reset-audit.json"),
-    ));
+    );
+    match kind {
+        "before-ownership" => vec![write],
+        "before-classification" => vec![Event::OwnershipAcquired, write],
+        "after-refusal" => vec![
+            Event::OwnershipAcquired,
+            Event::QuarantineClassified(Observation::Applying, Decision::Refuse),
+            write,
+        ],
+        _ => panic!("unknown defective trace"),
+    }
+}
+
+#[test]
+fn shared_trace_checker_accepts_valid_order_and_rejects_all_defective_orders() {
+    let valid = [
+        Event::OwnershipAcquired,
+        Event::QuarantineClassified(
+            Observation::LocalCleanLooking,
+            Decision::HypotheticallyAuthorize,
+        ),
+        Event::ResetWriteInvoked(
+            WriteStage::RefusalAuditFinal,
+            PathBuf::from("/synthetic-reset-model/reset-audit.json"),
+        ),
+    ];
+    assert!(trace_is_valid(&valid));
+    for kind in ["before-ownership", "before-classification", "after-refusal"] {
+        assert!(!trace_is_valid(&defective_trace(kind)), "{kind}");
+    }
+    println!("MODEL PASS: shared trace checker accepts valid sequence and rejects writes before ownership, before classification and after refusal");
+}
+
+#[test]
+#[ignore = "parent test launches this deliberately defective ordering as a sensitivity control"]
+fn negative_control_before_ownership_must_fail() {
     assert!(
-        !model
-            .events
-            .iter()
-            .any(|event| matches!(event, Event::ResetWriteInvoked(..))),
-        "reset ordering control detected write before classification"
+        trace_is_valid(&defective_trace("before-ownership")),
+        "shared ordering checker rejected write before ownership"
     );
 }
 
 #[test]
-fn negative_control_child_fails_and_corrected_ordering_control_passes() {
+#[ignore = "parent test launches this deliberately defective ordering as a sensitivity control"]
+fn negative_control_before_classification_must_fail() {
+    assert!(
+        trace_is_valid(&defective_trace("before-classification")),
+        "shared ordering checker rejected write before classification"
+    );
+}
+
+#[test]
+#[ignore = "parent test launches this deliberately defective ordering as a sensitivity control"]
+fn negative_control_after_refusal_must_fail() {
+    assert!(
+        trace_is_valid(&defective_trace("after-refusal")),
+        "shared ordering checker rejected write after quarantine refusal"
+    );
+}
+
+#[test]
+fn negative_control_children_fail_and_corrected_shared_checker_passes() {
     use std::process::Command;
 
-    let output = Command::new(std::env::current_exe().unwrap())
-        .args([
-            "--ignored",
-            "--exact",
-            "negative_control_misplaced_write_before_classification_must_fail",
-            "--nocapture",
-        ])
-        .output()
-        .unwrap();
-    assert!(
-        !output.status.success(),
-        "deliberately misplaced write escaped detection"
-    );
-    let combined = String::from_utf8_lossy(&output.stdout).to_string()
-        + &String::from_utf8_lossy(&output.stderr);
-    assert!(combined.contains("reset ordering control detected write before classification"));
+    for (name, expected_diagnostic) in [
+        (
+            "negative_control_before_ownership_must_fail",
+            "shared ordering checker rejected write before ownership",
+        ),
+        (
+            "negative_control_before_classification_must_fail",
+            "shared ordering checker rejected write before classification",
+        ),
+        (
+            "negative_control_after_refusal_must_fail",
+            "shared ordering checker rejected write after quarantine refusal",
+        ),
+    ] {
+        let output = Command::new(std::env::current_exe().unwrap())
+            .args(["--ignored", "--exact", name, "--nocapture"])
+            .output()
+            .unwrap();
+        assert!(!output.status.success(), "{name} did not fail");
+        let combined = String::from_utf8_lossy(&output.stdout).to_string()
+            + &String::from_utf8_lossy(&output.stderr);
+        assert!(combined.contains(expected_diagnostic), "{name}: {combined}");
+        println!(
+            "EXPECTED NEGATIVE CONTROL: {name} failed (status {:?}); shared checker detected defect",
+            output.status.code()
+        );
+    }
+    assert!(trace_is_valid(&[
+        Event::OwnershipAcquired,
+        Event::QuarantineClassified(
+            Observation::LocalCleanLooking,
+            Decision::HypotheticallyAuthorize,
+        ),
+        Event::ResetWriteInvoked(
+            WriteStage::RefusalAuditFinal,
+            PathBuf::from("/synthetic-reset-model/reset-audit.json"),
+        ),
+    ]));
     println!(
-        "EXPECTED NEGATIVE CONTROL: child test failed (status {:?}); misplaced write detected",
-        output.status.code()
+        "CORRECTED CONTROL: shared checker accepts ownership -> classification -> authorized write"
     );
-    println!("CORRECTED CONTROL: ownership_then_classification_then_authorization_precedes_every_reset_write passes in parent suite");
 }

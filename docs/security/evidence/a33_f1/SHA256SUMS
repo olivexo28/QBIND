@@ -101,3 +101,8 @@ e0ef7ac58e9afc76202b926efea5fe8839b44f1ed2f29c937656f725e98f41ca  authority-rese
 468f4e0a1b7ab39e15af52ad38242fef469910b575266d983b9bf5d09077d697  authority-reset-quarantine-negative-control.log
 7e2e352a548af1d07f25e3e21ee77c3912c6d4d1296f289a928c70db34f53b48  authority-reset-quarantine-model-evidence.md
 772cc9df58bdeb052c56be30540c4db333e0ba1dc63f9bb0110e2501b7b60423  ../../../../crates/qbind-node/tests/a33_f1_authority_reset_quarantine_model_tests.rs
+f13f88f6162695acf3c3aba1a98897d26c67b600e9ecedd50e28bd4507bf831b  ../../../../crates/qbind-node/tests/a33_f1_authority_reset_quarantine_model_tests.rs
+b0655fa9237f74a7793d3f7efc5b95a876af214d965c09d7654399d330dc376b  authority-reset-quarantine-model-correction-focused.log
+a66f61621af69484f5dfd5fa36761b3c482e79eaa46886be8ddd5e02ffb6c300  authority-reset-quarantine-model-correction-negative-controls.log
+48ab6ed3655658a027462ce3ca385541c994747bc8a740777d8d954df430e761  authority-reset-quarantine-model-correction-evidence.md
+3016b33f35d3b82a8c5d3e051131d68bd1928c6b33d2846cba62e9696df48428  authority-reset-quarantine-correction-manifest-check.log
