@@ -3952,3 +3952,86 @@ assurance remain outside this correction. No live DevNet, external
 peers, real signing, deployment or activation was run. All listed open
 obligations and operational gates remain unchanged; independent
 post-correction review is still **PENDING**.
+
+## 20. A6-F1 pre-existing outbound double-connection correction
+
+**IMPLEMENTED — INDEPENDENT REVIEW PENDING.** This append addresses
+the independently identified pre-existing outbound double connection,
+not a new canonical finding or closure. A6-F1 / OBL-AVL-4a / E14,
+A5-F1 / E11, A11-F2 / E19, E07 and OBL-GOV-2 remain **OPEN** to their
+remaining extent. Activation **DISABLED**; public DevNet **NO-GO**.
+
+Entry matched repository `olivexo28/QBIND`, the existing
+`copilot/audit-a6-f1-displaced-peer-cleanup` branch, clean worktree, exact
+local/remote starting tip `7268cbd047b559291cb5472f9c702543c6397f09`
+(tree `8fec7fc6d5f5243a345c53ce1b6975fcd7cd1e58`) and protected remote
+main `64ce7131340a861d8b33063f430dfc0beab531b3`. No `AGENTS.md` was found.
+
+### Mechanism, correction and compatibility
+
+Both `TcpKemTlsP2pService::dial_peer` and `DialerHandle::dial_once`
+opened an unused TCP socket before calling `tracked_dial`, which
+opened the second socket for KEMTLS. The production fix removes only
+these preliminary connects. One attempt now uses the existing single
+tracked connection, with Tokio-owned cancellable establishment and the
+registry-owned shutdown clone/blocking handshake join after establishment.
+Later retry attempts remain separate attempts.
+
+No terminal shutdown fence, retained retirement outcome, ownership,
+origin admission, authentication, cryptographic setting, retry policy
+or eviction snapshot semantics changes. Already-progressed work cannot
+be retracted; no replay or acknowledgement is added.
+
+### Producer and actual verification
+
+Source/test producer `4b055bd529ba6f19cec9619addeb08dc02e19347`,
+tree `2922d66a7f96dd6f12190fb5561fb532793226fc`, sole parent the starting
+tip. Only `crates/qbind-node/src/p2p_tcp.rs` changes (mode `100644`,
+blob `0dd88492a6576b1184d8f7473fd0953043ea614e`).
+
+A test-only patch applied to unchanged starting production in an
+isolated worktree reproduced **0 passed, 4 failed, exit 101**: both actual
+entry points accepted two connections; a one-slot server budget rejected
+the second, handshake-carrying connection. The isolated worktree was
+removed. A post-run wrapper `tail` used the wrong relative directory and
+failed; the correctly located raw baseline log was subsequently read.
+This does not change the recorded Cargo failure. An overly broad
+pre-commit `outbound_` smoke selector passed 27 tests, including unrelated
+local signing unit fixtures; it is not producer-pinned required evidence
+or operational signing.
+
+At the exact producer, **79 selected author-run tests passed**: lifecycle
+21 (all previous 15 plus six actual-entry controls), secure-channel 16,
+B8 6, Run 072 8, Run 074 10 and Run 418 18. Production library check and
+targeted formatting/source whitespace checks passed with existing
+warnings retained. Exact bounded commands, raw outputs, failures,
+checksums and test qualifications are in the new separate
+[`evidence/a6-f1-outbound-single-connection/README.md`](evidence/a6-f1-outbound-single-connection/README.md).
+
+Four controls prove one accepted connection carrying real KEMTLS and
+successful admission under the one-slot budget in both actual entry
+points. Two controls cancel the actual outbound future after receiving
+the first handshake byte, observe retained blocking ownership, then
+observe shutdown join consumption, registry removal and remote EOF.
+Post-shutdown actual-entry attempts refuse without accepting a socket.
+These are deterministic local fixture observations, not platform timing
+or deployment assurances.
+
+### Evidence continuity and unresolved limits
+
+Both historical A6-F1 evidence directories and all preceding plan bytes
+are preserved; the audit register is unchanged. Original 4 + 15 + 8 + 10
+and subsequent 73-test author evidence remains valid for its tested
+conditions, not independently rerun by this task's reviewer. Preserve
+the bounded A5-F1 review's 19 verified checksums, 69 author-log tests,
+reviewer Cargo-unavailable limitation and raw-log whitespace qualification.
+
+Applicable fixture crypto is real ML-KEM-768/ChaCha20-Poly1305 with
+dummy certificate signature verification and synthetic identities;
+production authentication is not inferred from those fixtures. No live
+DevNet, external peers, operational signing, deployment or activation.
+Existing terminal shutdown/new-service restart policy and truthful
+tracked-incomplete cleanup remain. Global resource/admission bounds,
+registered-session fatal-read cleanup, complete eviction/trust-reload
+reclamation and OS-wide timing remain unresolved. All obligations and
+operational gates above remain unchanged; independent review **PENDING**.

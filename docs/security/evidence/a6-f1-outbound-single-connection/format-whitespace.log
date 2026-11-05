@@ -1,0 +1,5 @@
+producer: 4b055bd529ba6f19cec9619addeb08dc02e19347
+tree: 2922d66a7f96dd6f12190fb5561fb532793226fc
+parent: 7268cbd047b559291cb5472f9c702543c6397f09
+command: bash -c rustfmt\ --edition\ 2021\ --check\ --config\ skip_children=true\ crates/qbind-node/src/p2p_tcp.rs\ \&\&\ git\ diff\ --check\ 7268cbd047b559291cb5472f9c702543c6397f09\ HEAD
+exit status: 0

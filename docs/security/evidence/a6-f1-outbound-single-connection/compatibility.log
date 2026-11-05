@@ -1,0 +1,479 @@
+producer: 4b055bd529ba6f19cec9619addeb08dc02e19347
+tree: 2922d66a7f96dd6f12190fb5561fb532793226fc
+parent: 7268cbd047b559291cb5472f9c702543c6397f09
+command: timeout 360s cargo test --locked --offline -p qbind-node --test b8_listener_identity_closure_and_dial_retry_tests --test run_072_p2p_session_eviction_tests --test run_074_pqc_trust_bundle_live_reload_tests --test run_418_authenticated_peer_consensus_sender_binding_tests -- --test-threads=1
+warning: enum `VerifiedVoteInvocationRefusal` is never used
+    --> crates/qbind-consensus/src/basic_hotstuff_engine.rs:1456:17
+     |
+1456 | pub(crate) enum VerifiedVoteInvocationRefusal {
+     |                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+     |
+     = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: enum `ReceivedVoteEvidenceDisposition` is never used
+    --> crates/qbind-consensus/src/basic_hotstuff_engine.rs:1469:17
+     |
+1469 | pub(crate) enum ReceivedVoteEvidenceDisposition {
+     |                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: enum `VerifiedVoteInvocation` is never used
+    --> crates/qbind-consensus/src/basic_hotstuff_engine.rs:1479:17
+     |
+1479 | pub(crate) enum VerifiedVoteInvocation {
+     |                 ^^^^^^^^^^^^^^^^^^^^^^
+
+warning: enum `ReceivedVoteQcRefusalReason` is never used
+    --> crates/qbind-consensus/src/basic_hotstuff_engine.rs:1492:17
+     |
+1492 | pub(crate) enum ReceivedVoteQcRefusalReason {
+     |                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: struct `ReceivedVoteQcRefusal` is never constructed
+    --> crates/qbind-consensus/src/basic_hotstuff_engine.rs:1498:19
+     |
+1498 | pub(crate) struct ReceivedVoteQcRefusal {
+     |                   ^^^^^^^^^^^^^^^^^^^^^
+
+warning: enum `ReceivedVoteQcIncomplete` is never used
+    --> crates/qbind-consensus/src/basic_hotstuff_engine.rs:1504:17
+     |
+1504 | pub(crate) enum ReceivedVoteQcIncomplete {
+     |                 ^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: struct `ReceivedVoteQcEventSummary` is never constructed
+    --> crates/qbind-consensus/src/basic_hotstuff_engine.rs:1518:19
+     |
+1518 | pub(crate) struct ReceivedVoteQcEventSummary {
+     |                   ^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: enum `ReceivedQcGateRefusal` is never used
+    --> crates/qbind-consensus/src/basic_hotstuff_engine.rs:1528:17
+     |
+1528 | pub(crate) enum ReceivedQcGateRefusal {
+     |                 ^^^^^^^^^^^^^^^^^^^^^
+
+warning: enum `ReceivedQcGateDecision` is never used
+    --> crates/qbind-consensus/src/basic_hotstuff_engine.rs:1534:17
+     |
+1534 | pub(crate) enum ReceivedQcGateDecision {
+     |                 ^^^^^^^^^^^^^^^^^^^^^^
+
+warning: enum `ReceivedQcApplication` is never used
+    --> crates/qbind-consensus/src/basic_hotstuff_engine.rs:1540:17
+     |
+1540 | pub(crate) enum ReceivedQcApplication {
+     |                 ^^^^^^^^^^^^^^^^^^^^^
+
+warning: struct `ReceivedQcEffectView` is never constructed
+    --> crates/qbind-consensus/src/basic_hotstuff_engine.rs:1549:19
+     |
+1549 | pub(crate) struct ReceivedQcEffectView<'a> {
+     |                   ^^^^^^^^^^^^^^^^^^^^
+
+warning: multiple methods are never used
+    --> crates/qbind-consensus/src/basic_hotstuff_engine.rs:1561:19
+     |
+1560 | impl ReceivedQcEffectView<'_> {
+     | ----------------------------- methods in this implementation
+1561 |     pub(crate) fn logical(&self) -> &QuorumCertificate<[u8; 32]> { self.logical }
+     |                   ^^^^^^^
+1562 |     pub(crate) fn wire(&self) -> &qbind_wire::consensus::QuorumCertificate { self.wire }
+     |                   ^^^^
+1563 |     pub(crate) fn locked(&self) -> Option<ReceivedVoteQcSummary> { self.locked }
+     |                   ^^^^^^
+1564 |     pub(crate) fn target_own_qc(&self) -> Option<&QuorumCertificate<[u8; 32]>> {
+     |                   ^^^^^^^^^^^^^
+...
+1567 |     pub(crate) fn committed_block(&self) -> Option<&[u8; 32]> { self.committed_block }
+     |                   ^^^^^^^^^^^^^^^
+1568 |     pub(crate) fn committed_height(&self) -> Option<u64> { self.committed_height }
+     |                   ^^^^^^^^^^^^^^^^
+1569 |     pub(crate) fn commit_log(&self) -> &[CommittedEntry<[u8; 32]>] { self.commit_log }
+     |                   ^^^^^^^^^^
+1570 |     pub(crate) fn current_view(&self) -> u64 { self.current_view }
+     |                   ^^^^^^^^^^^^
+
+warning: trait `ReceivedQcEffectGate` is never used
+    --> crates/qbind-consensus/src/basic_hotstuff_engine.rs:1573:18
+     |
+1573 | pub(crate) trait ReceivedQcEffectGate {
+     |                  ^^^^^^^^^^^^^^^^^^^^
+
+warning: struct `ReceivedQcGateAdapter` is never constructed
+    --> crates/qbind-consensus/src/basic_hotstuff_engine.rs:1577:8
+     |
+1577 | struct ReceivedQcGateAdapter<'a> {
+     |        ^^^^^^^^^^^^^^^^^^^^^
+
+warning: struct `ReceivedVoteQcSummary` is never constructed
+    --> crates/qbind-consensus/src/basic_hotstuff_engine.rs:1639:19
+     |
+1639 | pub(crate) struct ReceivedVoteQcSummary {
+     |                   ^^^^^^^^^^^^^^^^^^^^^
+
+warning: enum `ReceivedVoteQcOutcome` is never used
+    --> crates/qbind-consensus/src/basic_hotstuff_engine.rs:1645:17
+     |
+1645 | pub(crate) enum ReceivedVoteQcOutcome {
+     |                 ^^^^^^^^^^^^^^^^^^^^^
+
+warning: struct `ReceivedVoteQcCandidateSeal` is never constructed
+    --> crates/qbind-consensus/src/basic_hotstuff_engine.rs:1689:8
+     |
+1689 | struct ReceivedVoteQcCandidateSeal {
+     |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: struct `ReceivedVoteQcRouteControlFrame` is never constructed
+    --> crates/qbind-consensus/src/basic_hotstuff_engine.rs:1697:8
+     |
+1697 | struct ReceivedVoteQcRouteControlFrame {
+     |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: struct `ReceivedQcGateControlFrame` is never constructed
+    --> crates/qbind-consensus/src/basic_hotstuff_engine.rs:1735:8
+     |
+1735 | struct ReceivedQcGateControlFrame {
+     |        ^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: struct `VerifiedVotePreflight` is never constructed
+    --> crates/qbind-consensus/src/basic_hotstuff_engine.rs:1755:8
+     |
+1755 | struct VerifiedVotePreflight {
+     |        ^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `same_vote_signed_fields` is never used
+    --> crates/qbind-consensus/src/basic_hotstuff_engine.rs:2803:4
+     |
+2803 | fn same_vote_signed_fields(
+     |    ^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `map_received_vote_qc_incomplete` is never used
+    --> crates/qbind-consensus/src/basic_hotstuff_engine.rs:2818:4
+     |
+2818 | fn map_received_vote_qc_incomplete(
+     |    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `received_vote_qc_control_charge` is never used
+    --> crates/qbind-consensus/src/basic_hotstuff_engine.rs:2844:4
+     |
+2844 | fn received_vote_qc_control_charge() -> Result<u64, ReceivedVoteQcStageError> {
+     |    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `qc_matches_projected_membership` is never used
+    --> crates/qbind-consensus/src/basic_hotstuff_engine.rs:2859:4
+     |
+2859 | fn qc_matches_projected_membership(
+     |    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `compare_actual_qc_failure` is never used
+    --> crates/qbind-consensus/src/basic_hotstuff_engine.rs:2889:4
+     |
+2889 | fn compare_actual_qc_failure(
+     |    ^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: multiple methods are never used
+    --> crates/qbind-consensus/src/basic_hotstuff_engine.rs:2938:19
+     |
+2937 | impl BasicHotStuffEngine<[u8; 32]> {
+     | ---------------------------------- methods in this implementation
+2938 |     pub(crate) fn invoke_verified_received_vote_qc(
+     |                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+2945 |     pub(crate) fn invoke_verified_received_vote_qc_effect_gated(
+     |                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+2953 |     fn invoke_received_vote_qc_inner(
+     |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+3264 |     pub(crate) fn install_received_vote_context(
+     |                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+3376 |     pub(crate) fn admit_verified_received_vote(
+     |                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+3398 |     pub(crate) fn invoke_verified_received_vote(
+     |                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+3496 |     fn preflight_verified_received_vote(
+     |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: struct `ReceivedVoteQcReport` is never constructed
+    --> crates/qbind-consensus/src/basic_hotstuff_engine.rs:1657:23
+     |
+1657 |     pub(crate) struct ReceivedVoteQcReport {
+     |                       ^^^^^^^^^^^^^^^^^^^^
+
+warning: associated items `new`, `actual`, and `outcome` are never used
+    --> crates/qbind-consensus/src/basic_hotstuff_engine.rs:1664:23
+     |
+1663 |     impl ReceivedVoteQcReport {
+     |     ------------------------- associated items in this implementation
+1664 |         pub(super) fn new(
+     |                       ^^^
+...
+1672 |         pub(crate) fn actual(&self) -> &ReceivedVoteQcEventSummary {
+     |                       ^^^^^^
+...
+1676 |         pub(crate) fn outcome(&self) -> &ReceivedVoteQcOutcome {
+     |                       ^^^^^^^
+
+warning: field `accumulator` is never read
+   --> crates/qbind-consensus/src/hotstuff_state_engine.rs:193:16
+    |
+191 | pub(crate) struct VoteMutationReport<BlockIdT> {
+    |                   ------------------ field in this struct
+192 |     pub(crate) history: VoteHistoryOutcome<BlockIdT>,
+193 |     pub(crate) accumulator:
+    |                ^^^^^^^^^^^
+
+warning: trait `VoteQcEffectGate` is never used
+   --> crates/qbind-consensus/src/hotstuff_state_engine.rs:198:18
+    |
+198 | pub(crate) trait VoteQcEffectGate<BlockIdT: Eq + std::hash::Hash + Clone> {
+    |                  ^^^^^^^^^^^^^^^^
+
+warning: method `is_equivocation` is never used
+   --> crates/qbind-consensus/src/hotstuff_state_engine.rs:212:19
+    |
+211 | impl<BlockIdT> VoteMutationReport<BlockIdT> {
+    | ------------------------------------------- method in this implementation
+212 |     pub(crate) fn is_equivocation(&self) -> bool {
+    |                   ^^^^^^^^^^^^^^^
+
+warning: enum `VoteEvidencePreflightError` is never used
+   --> crates/qbind-consensus/src/hotstuff_state_engine.rs:218:17
+    |
+218 | pub(crate) enum VoteEvidencePreflightError {
+    |                 ^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: enum `VoteEvidencePlan` is never used
+   --> crates/qbind-consensus/src/hotstuff_state_engine.rs:225:17
+    |
+225 | pub(crate) enum VoteEvidencePlan {
+    |                 ^^^^^^^^^^^^^^^^
+
+warning: multiple methods are never used
+    --> crates/qbind-consensus/src/hotstuff_state_engine.rs:567:19
+     |
+ 361 | / impl<BlockIdT> HotStuffStateEngine<BlockIdT>
+ 362 | | where
+ 363 | |     BlockIdT: Eq + std::hash::Hash + Clone,
+     | |___________________________________________- methods in this implementation
+...
+ 567 |       pub(crate) fn received_vote_budget(&self) -> Option<&EvidenceBudget> {
+     |                     ^^^^^^^^^^^^^^^^^^^^
+...
+ 571 |       pub(crate) fn received_vote_evidence_table(
+     |                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+ 577 |       pub(crate) fn install_received_vote_evidence_table(
+     |                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+ 598 |       pub(crate) fn prepare_received_vote_evidence(
+     |                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+ 641 |       pub(crate) fn project_received_vote_accumulator<'a>(
+     |                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+ 651 |       pub(crate) fn has_conflicting_vote_history(
+     |                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+ 662 |       pub(crate) fn has_vote_memberships(
+     |                     ^^^^^^^^^^^^^^^^^^^^
+...
+ 700 |       pub(crate) fn retain_received_vote_token(
+     |                     ^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+ 729 |       pub(crate) fn map_qc_charge_checked(&self) -> Result<u64, EvidenceRetentionError> {
+     |                     ^^^^^^^^^^^^^^^^^^^^^
+...
+ 737 |       pub(crate) fn install_received_vote_budget(
+     |                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+1717 |       pub(crate) fn on_vote_detailed_effect_gated(
+     |                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: struct `VoteAccumulatorProjection` is never constructed
+   --> crates/qbind-consensus/src/vote_accumulator.rs:223:19
+    |
+223 | pub(crate) struct VoteAccumulatorProjection<'a, BlockIdT> {
+    |                   ^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: methods `disposition`, `projected_count`, and `next_signer` are never used
+   --> crates/qbind-consensus/src/vote_accumulator.rs:236:19
+    |
+232 | / impl<BlockIdT> VoteAccumulatorProjection<'_, BlockIdT>
+233 | | where
+234 | |     BlockIdT: Eq + std::hash::Hash + Clone,
+    | |___________________________________________- methods in this implementation
+235 |   {
+236 |       pub(crate) fn disposition(&self) -> VoteAccumulatorDisposition {
+    |                     ^^^^^^^^^^^
+...
+240 |       pub(crate) fn projected_count(&self) -> usize {
+    |                     ^^^^^^^^^^^^^^^
+...
+244 |       pub(crate) fn next_signer(&self, after: Option<ValidatorId>) -> Option<ValidatorId> {
+    |                     ^^^^^^^^^^^
+
+warning: methods `project_vote` and `will_contain_after_on_vote` are never used
+   --> crates/qbind-consensus/src/vote_accumulator.rs:438:19
+    |
+282 | / impl<BlockIdT> VoteAccumulator<BlockIdT>
+283 | | where
+284 | |     BlockIdT: Eq + std::hash::Hash + Clone,
+    | |___________________________________________- methods in this implementation
+...
+438 |       pub(crate) fn project_vote<'a>(
+    |                     ^^^^^^^^^^^^
+...
+489 |       pub(crate) fn will_contain_after_on_vote(
+    |                     ^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: `qbind-consensus` (lib) generated 37 warnings
+   Compiling qbind-node v0.1.0 (/workspaces/QBIND/olivexo28/QBIND/crates/qbind-node)
+warning: function `maybe_emit_view_timeout` is never used
+    --> crates/qbind-node/src/binary_consensus_loop.rs:7512:4
+     |
+7512 | fn maybe_emit_view_timeout(
+     |    ^^^^^^^^^^^^^^^^^^^^^^^
+     |
+     = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: function `apply_local_tc_and_broadcast_new_view` is never used
+    --> crates/qbind-node/src/binary_consensus_loop.rs:7869:4
+     |
+7869 | fn apply_local_tc_and_broadcast_new_view(
+     |    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: method `same_ledger` is never used
+   --> crates/qbind-node/src/safety_record_store/accounting.rs:699:19
+    |
+676 | impl SharedAccountant {
+    | --------------------- method in this implementation
+...
+699 |     pub(crate) fn same_ledger(&self, other: &SharedAccountant) -> bool {
+    |                   ^^^^^^^^^^^
+
+warning: associated function `construct` is never used
+    --> crates/qbind-node/src/signing_reservation_journal.rs:1699:8
+     |
+1691 | impl LiveContainer {
+     | ------------------ associated function in this implementation
+...
+1699 |     fn construct(
+     |        ^^^^^^^^^
+
+warning: variant `Bounded` is never constructed
+    --> crates/qbind-node/src/signing_reservation_journal.rs:1799:5
+     |
+1797 | enum LiveMode {
+     |      -------- variant in this enum
+1798 |     Legacy(HashMap<SigningPosition, LiveState>),
+1799 |     Bounded(LiveContainer),
+     |     ^^^^^^^
+     |
+     = note: `LiveMode` has a derived impl for the trait `Debug`, but this is intentionally ignored during dead code analysis
+
+warning: methods `contains_key`, `len`, and `legacy_len_capacity` are never used
+    --> crates/qbind-node/src/signing_reservation_journal.rs:1817:8
+     |
+1802 | impl LiveMode {
+     | ------------- methods in this implementation
+...
+1817 |     fn contains_key(&self, pos: &SigningPosition) -> bool {
+     |        ^^^^^^^^^^^^
+...
+1821 |     fn len(&self) -> usize {
+     |        ^^^
+...
+1865 |     fn legacy_len_capacity(&self) -> Option<(usize, usize)> {
+     |        ^^^^^^^^^^^^^^^^^^^
+
+warning: enum `AdmissionInstallError` is never used
+    --> crates/qbind-node/src/signing_reservation_journal.rs:1991:17
+     |
+1991 | pub(crate) enum AdmissionInstallError {
+     |                 ^^^^^^^^^^^^^^^^^^^^^
+
+warning: methods `install_accountant_association` and `enter_bounded_live_mode` are never used
+    --> crates/qbind-node/src/signing_reservation_journal.rs:2190:19
+     |
+2159 | impl SigningReservationJournal {
+     | ------------------------------ methods in this implementation
+...
+2190 |     pub(crate) fn install_accountant_association(
+     |                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+2228 |     pub(crate) fn enter_bounded_live_mode(
+     |                   ^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: `qbind-node` (lib) generated 8 warnings
+    Finished `test` profile [unoptimized] target(s) in 19.13s
+     Running tests/b8_listener_identity_closure_and_dial_retry_tests.rs (target/debug/deps/b8_listener_identity_closure_and_dial_retry_tests-dcdd22cbe3b0eb2e)
+
+running 6 tests
+test b8_a_parse_validator_id_from_client_random_round_trips ... ok
+test b8_b_listener_side_accepted_session_bound_to_deterministic_node_id ... ok
+test b8_c_initial_dial_retry_recovers_from_stagger ... ok
+test b8_d_two_node_bidirectional_send_precondition_holds ... ok
+test b8_dial_retry_policy_no_retry_pinned ... ok
+test b8_e_single_validator_no_peers_does_not_regress ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.02s
+
+     Running tests/run_072_p2p_session_eviction_tests.rs (target/debug/deps/run_072_p2p_session_eviction_tests-94bce4ea5642ecb0)
+
+running 8 tests
+test run072_empty_registry_eviction_returns_zero_attempted_and_zero_evicted ... ok
+test run072_eviction_on_not_started_transport_returns_empty_report ... ok
+test run072_mock_evictor_satisfies_run070_evict_sessions_contract ... ok
+test run072_n2_kemtls_bringup_then_evict_drains_connected_peers ... ok
+test run072_no_trigger_path_leaves_session_eviction_metrics_at_zero ... ok
+test run072_record_session_eviction_helper_composes_truthfully ... ok
+test run072_tcp_kem_tls_service_implements_p2p_session_evictor_dyn ... ok
+test run072_unsupported_session_eviction_display_surfaces_no_mutation_safely ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.11s
+
+     Running tests/run_074_pqc_trust_bundle_live_reload_tests.rs (target/debug/deps/run_074_pqc_trust_bundle_live_reload_tests-c377dbf608912228)
+
+running 10 tests
+test run074_already_in_progress_guard_rejects_concurrent_trigger_without_mutation ... ok
+test run074_freshly_constructed_controller_has_no_side_effects ... ok
+test run074_happy_path_trigger_swaps_state_evicts_and_commits_with_metrics_bumped ... ok
+test run074_metric_family_renders_alongside_run_072_after_apply ... ok
+test run074_reapply_same_candidate_is_idempotent_and_metrics_remain_truthful ... ok
+test run074_sequence_commit_failure_rolls_back_live_state_and_preserves_seq_file ... ok
+test run074_session_eviction_partial_failure_rolls_back_live_state ... ok
+test run074_try_trigger_with_activation_forwards_override_height ... ok
+test run074_validation_rollback_failure_leaves_state_seq_evictor_unchanged ... ok
+test run074_validation_tampered_signature_leaves_state_seq_evictor_unchanged ... ok
+
+test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.41s
+
+     Running tests/run_418_authenticated_peer_consensus_sender_binding_tests.rs (target/debug/deps/run_418_authenticated_peer_consensus_sender_binding_tests-2dfe6acd6758007c)
+
+running 18 tests
+test run418_authorize_origin_fails_closed_and_classifies ... ok
+test run418_duplicate_or_ambiguous_map_fails_startup ... ok
+test run418_gate_fails_closed_on_absent_origin ... ok
+test run418_matching_proposal_accepted_and_client_identity_propagates ... ok
+test run418_matching_vote_accepted_by_gate ... ok
+test run418_metrics_fixed_labels_and_live_surface ... ok
+test run418_missing_origin_rejected ... ok
+test run418_newview_authenticated_origin_admitted_then_engine_rules_apply ... ok
+test run418_newview_binding_metric_increments_exactly_once ... ok
+test run418_newview_conflicting_pair_rejected ... ok
+test run418_newview_missing_origin_rejected_before_delivered ... ok
+test run418_newview_unknown_nodeid_rejected ... ok
+test run418_origin_absent_from_serialized_wire_bytes ... ok
+test run418_outbound_unexpected_server_identity_cannot_inherit_configured_origin ... ok
+test run418_proposal_impersonation_rejected_no_side_effects ... ok
+test run418_strict_validator_id_parsing ... ok
+test run418_unconfigured_and_colliding_nodeids_rejected ... ok
+test run418_vote_impersonation_rejected_no_side_effects ... ok
+
+test result: ok. 18 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 4.98s
+
+exit status: 0

@@ -1,0 +1,33 @@
+command: python3 docs/security/evidence/a6-f1-outbound-single-connection/verify.py
+Producer parent/tree and source mode/blob verified
+All earlier plan bytes preserved
+Historical evidence unchanged: a6-f1-displaced-peer-cleanup: 7 files
+Historical evidence unchanged: a6-f1-implementation-correction: 14 files
+79 selected producer tests passed
+Producer checks passed; four expected baseline double-connect failures verified
+SHA256SUMS: all 10 evidence files verified
+exit status: 0
+command: git diff --cached --check
+exit status: 0
+command: git diff --check START HEAD -- crates/qbind-node/src
+exit status: 0
+command: rustc --version; cargo --version
+rustc 1.99.1 (58cf8f9c3 2026-10-13)
+cargo 1.99.1 (5f94df478 2026-08-27)
+command: git ls-remote origin refs/heads/main refs/heads/copilot/audit-a6-f1-displaced-peer-cleanup
+7268cbd047b559291cb5472f9c702543c6397f09	refs/heads/copilot/audit-a6-f1-displaced-peer-cleanup
+64ce7131340a861d8b33063f430dfc0beab531b3	refs/heads/main
+command: git diff --cached --name-only
+docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md
+docs/security/evidence/a6-f1-outbound-single-connection/README.md
+docs/security/evidence/a6-f1-outbound-single-connection/SHA256SUMS
+docs/security/evidence/a6-f1-outbound-single-connection/baseline-probes.patch
+docs/security/evidence/a6-f1-outbound-single-connection/baseline.log
+docs/security/evidence/a6-f1-outbound-single-connection/compatibility.log
+docs/security/evidence/a6-f1-outbound-single-connection/format-whitespace.log
+docs/security/evidence/a6-f1-outbound-single-connection/lifecycle.log
+docs/security/evidence/a6-f1-outbound-single-connection/precursor-outbound.log
+docs/security/evidence/a6-f1-outbound-single-connection/production-check.log
+docs/security/evidence/a6-f1-outbound-single-connection/secure-channel.log
+docs/security/evidence/a6-f1-outbound-single-connection/verify.py
+exit status: 0
