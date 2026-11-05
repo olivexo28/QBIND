@@ -1,0 +1,25 @@
+starting commit: cbb774d438361f5787eced49b546cc886e90b59c
+producer: e2e7bca7da935f1ecf46f83ba5abac2fc14857d3
+UNCHANGED cfc8005c1b97659dd21813ccefe25de758bc9f2785a3eeb24325c55602f82cb5 docs/security/evidence/a6-f1-displaced-peer-cleanup/README.md
+UNCHANGED 494d7b5d3056e096abe51f1c98e20e1c8269ff33e65a3803b5ab03027e4374d3 docs/security/evidence/a6-f1-displaced-peer-cleanup/eviction-trust-reload-regressions.log
+UNCHANGED 7e61be703a9e70c9f02f473d645c42e04b1ab68a5e35f4cbfae9a612c1626fbb docs/security/evidence/a6-f1-displaced-peer-cleanup/formatting-whitespace.log
+UNCHANGED 925ae8a27490c2bf0d739426663f7137e342e42aed220cc89bb6123f6fdb4aa7 docs/security/evidence/a6-f1-displaced-peer-cleanup/peer-retirement.log
+UNCHANGED 349e4f990a21deb7fcfd46c3b4b18b59e7bf62a14302b18e3be5cd22f85d25d2 docs/security/evidence/a6-f1-displaced-peer-cleanup/producer.txt
+UNCHANGED 3d5b3a83be0e86906deabf60aab83ab4e252a7e1fbf5aa987bb6562b1461eb68 docs/security/evidence/a6-f1-displaced-peer-cleanup/production-check.log
+UNCHANGED 29bc98e4f53a7f731569c99ece6acab81126a3e8de1901e701acb0ca663e9190 docs/security/evidence/a6-f1-displaced-peer-cleanup/secure-channel-regressions.log
+historical evidence files verified: 7
+plan unchanged before correction append: b0fe8a8a386b8b8d91305534d61f6da51dc650d37a6a214adbbab3238ff7f27e
+producer changed paths:
+crates/qbind-node/src/p2p_tcp.rs
+crates/qbind-node/src/secure_channel.rs
+crates/qbind-node/src/secure_channel/encrypted_write_tests.rs
+audit register and every other tracked path unchanged at producer
+tracked worktree diff exit: 0
+log SHA-256: 667c72ab2be5a09069332ac0d8df010f4a153160f65679c39b5f0dc9805353ea baseline-outcome-reproduction.log
+log SHA-256: 97a661b1daf1aa10d43083bd921d308b6d2ae0837d3f9b2fe4002f9c0b4b10ea compatibility.log
+log SHA-256: d5b06a07457b5d1325e6fcb80cb91d14e94263735bee27454cec86f8e703fc04 format-whitespace.log
+log SHA-256: ca7acd64f4b9d30633e80f0d3744381cc6a7d39aac594af8c898ad303739a3b2 lifecycle.log
+log SHA-256: d668c41f3b75d5547343059807a6743c8242fed225c74afef6fdef1cb6229e7e precursor-compile-failure.log
+log SHA-256: ba849a9a815c044a007755eeb92606524dab47f7df5330f371e2c0fcb1c13331 production-check.log
+log SHA-256: cfe9f12d76c99d9201722f988eb79279dafe4b77782bcfdb7ccddb69dd8c3c6a secure-channel.log
+exit status: 0

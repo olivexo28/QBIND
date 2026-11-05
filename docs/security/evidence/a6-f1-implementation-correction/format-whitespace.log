@@ -1,0 +1,6 @@
+producer: e2e7bca7da935f1ecf46f83ba5abac2fc14857d3
+tree: a4f87173d1e8da13e80fb1789cbc9fc767d419d6
+command: bash -c rustfmt\ --edition\ 2021\ --check\ --config\ skip_children=true\ crates/qbind-node/src/p2p_tcp.rs\ crates/qbind-node/src/secure_channel.rs\ crates/qbind-node/src/secure_channel/encrypted_write_tests.rs\ \&\&\ git\ diff\ --check\ cbb774d438361f5787eced49b546cc886e90b59c\ HEAD
+
+
+exit status: 0

@@ -3809,3 +3809,146 @@ service shutdown remains open. E14 and the broader A6-F1 / OBL-AVL-4a
 finding therefore remain open. No live DevNet, external peer, real
 signing, deployment or activation was run; only the task branch is to
 be pushed, with no PR, merge, `main` push, amend or force-push.
+
+## 19. A6-F1 bounded implementation-review corrections
+
+**IMPLEMENTED — INDEPENDENT REVIEW PENDING.** This append records
+bounded implementation-review issues, not new canonical findings or
+rewritten history. A6-F1 / OBL-AVL-4a and E14 remain **OPEN** to their
+remaining extent; A5-F1 / E11, A11-F2 / E19, E07 and OBL-GOV-2 also
+remain **OPEN** to their remaining extent. Activation **DISABLED**;
+public DevNet **NO-GO**.
+
+Entry verified `olivexo28/QBIND`, a clean checkout on the existing
+`copilot/audit-a6-f1-displaced-peer-cleanup` branch, local and remote task
+tip `cbb774d438361f5787eced49b546cc886e90b59c`, tree
+`50b951aa69df198323c1699539c2db0a8c949294`, and protected remote `main`
+`64ce7131340a861d8b33063f430dfc0beab531b3`. No applicable repository
+`AGENTS.md` was found. The correction continues that history without
+amending or replacing commits.
+
+### Supplied review and verified mechanisms
+
+The independent review inspected source and retained evidence and did
+not run Rust probes because Cargo was unavailable. The original
+**4 + 15 + 8 + 10 author-run tests remain valid for their tested
+conditions**; those tests did not exercise these interruption/race
+schedules. Both retirement functions accumulated failure locally
+before later awaits; shutdown removed owners from the registry while
+registrations could still publish; and count increments/resets could
+race locked registry removals. These three bounded review mechanisms
+were verified in source.
+
+Two new test-only probes applied to the unchanged starting production
+functions in an isolated checkout reproduced false-success retries
+after a first task panic and a timeout while a later join was pending:
+**0 passed, 2 failed, exit 101**. The exact test-only patch and raw log
+are retained separately. No unrun baseline race experiment is claimed;
+shutdown/count evidence is source review plus producer-side deterministic
+barrier controls.
+
+### Correction and compatibility contract
+
+Both `PeerRetirement::finish` and
+`SecureChannelAsync::finish_retirement` now persist each observed
+completed/cancelled/failed task outcome before another cancellable
+await or handle removal. Pending handles remain owned on cancellation
+or timeout. An observed peer-loop panic or blocking-worker failure stays
+visible on retry and prevents replacement acceptance. Observed
+async-loop cancellation remains compatible with eviction's abort
+semantics, but is distinct from blocking-worker/socket completion.
+
+Service shutdown sets a **terminal registration fence** under the
+registry lock, transfers active owners into `retiring`, and leaves
+unfinished owners in the registry throughout cleanup. Successful
+cleanup removes only the identical `Arc`; no failed local owner is
+reinserted over a newer session. Reserved candidates retain independent
+socket-shutdown capabilities until their futures observe the fence or
+drop. Worker construction, publication and active-count update share
+one registry guard without an intervening await. Shutdown therefore
+cannot admit a late application session or lose a reserved candidate's
+socket ownership.
+
+Established inbound/outbound handshake sockets and blocking joins are
+also retained. The listener owns async inbound handlers through a
+`JoinSet`, including not-yet-polled handlers; shutdown observes their
+termination while registry-owned handshake workers are separately
+interrupted/joined. Pending listener/dial handles and cleanup owners
+remain retained if shutdown is interrupted. Failed cleanup is logged,
+not silently declared complete. A later shutdown can retry cleanup,
+but **restarting admission requires a new service instance**. This
+terminal shutdown policy is an intentional compatibility change,
+separate from eviction.
+
+`connections_current` is now precisely an **active registry entry
+count**, excluding pending handshakes/reservations/retirements and
+making no authenticated-origin or live-socket assertion. Every count
+store and active-map mutation occur under the registry write lock.
+No unlocked delayed increment or post-snapshot reset remains. The
+transport counter is distinct from `P2pMetrics`' similarly named gauge;
+source search does not establish endpoint wiring to this counter.
+
+Eviction does **not** set the terminal fence. Its snapshot, report
+counts, and treatment of subsequently admitted sessions remain as
+documented. Deterministic post-snapshot admission preserves the newer
+peer and count. Authentication, resolver, verified consensus-origin,
+A5-F1 receive and A11-F2 send behavior remain intact. No replay or
+delivery acknowledgement is added; already-progressed operations and
+messages forwarded to application code cannot be retracted.
+
+### Producer, validation and preserved evidence
+
+Correction/test producer:
+`e2e7bca7da935f1ecf46f83ba5abac2fc14857d3`, tree
+`a4f87173d1e8da13e80fb1789cbc9fc767d419d6`, sole parent the required
+starting commit `cbb774d438361f5787eced49b546cc886e90b59c`.
+Only `crates/qbind-node/src/p2p_tcp.rs`,
+`crates/qbind-node/src/secure_channel.rs`, and
+`crates/qbind-node/src/secure_channel/encrypted_write_tests.rs` change
+in the producer; full modes/blob identities are retained in
+[`evidence/a6-f1-implementation-correction/README.md`](evidence/a6-f1-implementation-correction/README.md).
+
+At that exact producer, **73 selected author-run tests passed**:
+15 lifecycle controls (including the original 4), 16 secure-channel
+controls (including the original 15), Run 072's 8, Run 074's 10, B8's 6,
+and Run 418 origin-binding's 18. The production library check and
+targeted formatting/source whitespace checks passed. Exact bounded
+commands, raw outputs, exit statuses, source-reproduction patch,
+pre-commit compilation failure, integrity records and checksums are
+retained only in the **new correction evidence directory**. Existing
+compiler warnings are retained; no full-workspace or independent
+post-correction execution is claimed.
+
+The correction evidence's full staged whitespace check exits **2**
+on the preserved test-only patch's single-space blank context lines
+(lines 4 and 10). The patch is not rewritten to hide this result.
+Producer-source and correction-prose whitespace checks pass; the new
+documentation integrity log records the distinction.
+
+All **7 existing A6-F1 evidence files are preserved byte-for-byte**.
+The audit register and prior plan text are unchanged. The earlier
+bounded A5-F1 review remains accurately attributed: **19 checksums
+verified**, **69 selected tests reported in author logs**, no reviewer
+Rust rerun because Cargo was unavailable, and the documented raw-log
+whitespace limitation preserved.
+
+### Residual lifecycle limits
+
+Private scheduling barriers and owned test task panics exercise the
+actual retirement/registration/shutdown operations; they are not claims
+of production cryptographic failures. Applicable loopback sessions use
+real ML-KEM-768/ChaCha20-Poly1305 with test-only certificate verification
+and synthetic routing identities. Raw blocked-handshake controls prove
+ownership and EOF, not authenticated AEAD admission.
+
+A shutdown return is not OS-wide reclamation assurance. Unfinished
+reservations may remain tracked after return until their futures resume
+or drop, with their sockets shutdown-requested and worker publication
+fenced. Permanent shutdown/task failure can keep an identity blocked;
+retry cannot erase an observed failure. General admission/global
+resource bounds, registered-session fatal-read cleanup, complete
+eviction/live trust-reload cleanup, platform timing and deployment
+assurance remain outside this correction. No live DevNet, external
+peers, real signing, deployment or activation was run. All listed open
+obligations and operational gates remain unchanged; independent
+post-correction review is still **PENDING**.

@@ -1,0 +1,115 @@
+--- a/crates/qbind-node/src/p2p_tcp.rs
++++ b/crates/qbind-node/src/p2p_tcp.rs
+@@ -2382,6 +2382,7 @@
+ 
+ #[cfg(test)]
+ mod peer_retirement_tests {
++    use std::future::Future;
+     use super::*;
+     use crate::secure_channel::{encrypted_write_tests::pair_channels, ChannelError};
+ 
+@@ -2721,4 +2722,55 @@
+         expect_remote_eof(old_remote).await;
+         assert_eq!(harness.session_id(other_id), other_session);
+     }
++    #[tokio::test]
++    async fn peer_join_failure_survives_timeout_and_cancelled_retry() {
++        for timed_out in [true, false] {
++            let harness = Harness::new(8);
++            let id = node_id(7);
++            let (local, remote) = pair_channels(true);
++            harness.register(id, local).await.unwrap();
++            let owner = Arc::clone(&harness.peers.read().active[&id].retirement);
++            owner.begin();
++            owner.finish().await.unwrap();
++            expect_remote_eof(remote).await;
++            let (release, pending) = tokio::sync::oneshot::channel::<()>();
++            let reader = tokio::spawn(async { panic!("retained peer failure") });
++            while !reader.is_finished() {
++                tokio::task::yield_now().await;
++            }
++            {
++                let mut tasks = owner.tasks.lock().await;
++                tasks.reader = Some(reader);
++                tasks.writer = Some(tokio::spawn(async move {
++                    pending.await.unwrap();
++                }));
++            }
++            let mut attempt = Box::pin(owner.finish());
++            let mut cx = std::task::Context::from_waker(std::task::Waker::noop());
++            assert!(attempt.as_mut().poll(&mut cx).is_pending());
++            if timed_out {
++                assert!(tokio::time::timeout(Duration::from_millis(20), attempt)
++                    .await
++                    .is_err());
++            } else {
++                drop(attempt);
++            }
++            assert!(owner.tasks.lock().await.reader.is_none());
++            release.send(()).unwrap();
++            assert!(owner
++                .finish()
++                .await
++                .unwrap_err()
++                .contains("retained peer failure"));
++            let (candidate, candidate_remote) = pair_channels(true);
++            let result = harness.register(id, candidate).await;
++            assert!(
++                matches!(result, Err(P2pTransportError::SessionRetirement(ref error))
++                if error.contains("retained peer failure"))
++            );
++            expect_remote_eof(candidate_remote).await;
++            assert!(!harness.peers.read().active.contains_key(&id));
++            assert!(Arc::ptr_eq(&harness.peers.read().retiring[&id], &owner));
++        }
++    }
+ }
+--- a/crates/qbind-node/src/secure_channel/encrypted_write_tests.rs
++++ b/crates/qbind-node/src/secure_channel/encrypted_write_tests.rs
+@@ -536,3 +536,46 @@
+         Err(AsyncChannelError::Channel(ChannelError::Net(_)))
+     ));
+ }
++
++#[tokio::test]
++async fn blocking_join_failure_survives_timeout_and_cancelled_retry() {
++    for timed_out in [true, false] {
++        let (client, _peer, _) = pair(false);
++        let channel = SecureChannelAsync::try_new(client).unwrap();
++        channel.begin_retirement().unwrap();
++        channel.finish_retirement().await.unwrap();
++        let (release, pending) = std::sync::mpsc::channel::<()>();
++        let reader = tokio::task::spawn_blocking(|| panic!("retained blocking failure"));
++        while !reader.is_finished() {
++            tokio::task::yield_now().await;
++        }
++        {
++            let mut tasks = channel.worker_tasks.lock().await;
++            tasks.reader = Some(reader);
++            tasks.writer = Some(tokio::task::spawn_blocking(move || {
++                pending.recv().unwrap();
++            }));
++            tasks.completion = None;
++        }
++        let mut attempt = Box::pin(channel.finish_retirement());
++        let mut cx = std::task::Context::from_waker(std::task::Waker::noop());
++        assert!(attempt.as_mut().poll(&mut cx).is_pending());
++        if timed_out {
++            assert!(tokio::time::timeout(Duration::from_millis(20), attempt)
++                .await
++                .is_err());
++        } else {
++            drop(attempt);
++        }
++        {
++            let tasks = channel.worker_tasks.lock().await;
++            assert!(tasks.reader.is_none());
++            assert!(tasks.writer.is_some());
++        }
++        release.send(()).unwrap();
++        let error = channel.finish_retirement().await.unwrap_err();
++        assert!(error.to_string().contains("retained blocking failure"));
++        let repeated = channel.finish_retirement().await.unwrap_err();
++        assert!(repeated.to_string().contains("retained blocking failure"));
++    }
++}

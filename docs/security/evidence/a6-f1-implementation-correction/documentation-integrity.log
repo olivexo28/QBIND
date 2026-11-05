@@ -1,0 +1,19 @@
+source producer: e2e7bca7da935f1ecf46f83ba5abac2fc14857d3
+command: python3 docs/security/evidence/a6-f1-implementation-correction/verify.py
+Starting plan bytes preserved; correction append verified
+All 7 historical evidence files unchanged
+100644 blob 1546d018e8c5fd4fc94533ca22a10fd2453f73df	crates/qbind-node/src/p2p_tcp.rs
+100755 blob f06a31986f01a8527a4f4af8fb5547d8cf150ff3	crates/qbind-node/src/secure_channel.rs
+100644 blob 0d7e0ee8032a280730ce0472cf7aa2f9c6dcee4b	crates/qbind-node/src/secure_channel/encrypted_write_tests.rs
+73 selected producer tests passed
+Producer checks and expected baseline failures verified
+SHA256SUMS: all entries verified
+exit status: 0
+command: git diff --cached --check
+docs/security/evidence/a6-f1-implementation-correction/baseline-probes.patch:4: trailing whitespace.
++ 
+docs/security/evidence/a6-f1-implementation-correction/baseline-probes.patch:10: trailing whitespace.
++ 
+exit status: 2 (expected preserved patch context whitespace)
+command: git diff --cached --check -- docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md docs/security/evidence/a6-f1-implementation-correction/README.md docs/security/evidence/a6-f1-implementation-correction/SHA256SUMS docs/security/evidence/a6-f1-implementation-correction/verify.py
+exit status: 0
