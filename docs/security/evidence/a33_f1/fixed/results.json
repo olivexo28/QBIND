@@ -1,0 +1,49 @@
+{
+  "producer": "38a0180c3905d02ff252f4b98915265271c730b4",
+  "binary_sha256": "900e781142f4b429140c9613016c22a08a703ca5e5145f28c403ecb39df40fee",
+  "outer_timeout_seconds": 3,
+  "cases": [
+    {
+      "case": "locked_self_cycle_outside_candidate",
+      "observation": "RETURNED",
+      "elapsed_seconds": 0.003,
+      "child_returncode": 0,
+      "child_reaped": true
+    },
+    {
+      "case": "locked_multi_cycle_outside_candidate",
+      "observation": "RETURNED",
+      "elapsed_seconds": 0.004,
+      "child_returncode": 0,
+      "child_reaped": true
+    },
+    {
+      "case": "own_qc_self_cycle_outside_candidate",
+      "observation": "RETURNED",
+      "elapsed_seconds": 0.003,
+      "child_returncode": 0,
+      "child_reaped": true
+    },
+    {
+      "case": "own_qc_multi_cycle_outside_candidate",
+      "observation": "RETURNED",
+      "elapsed_seconds": 0.002,
+      "child_returncode": 0,
+      "child_reaped": true
+    },
+    {
+      "case": "registration_before_vote_catchup_witness_scaled",
+      "observation": "RETURNED",
+      "elapsed_seconds": 0.003,
+      "child_returncode": 0,
+      "child_reaped": true
+    },
+    {
+      "case": "registration_before_vote_catchup_witness_default_capacity",
+      "observation": "RETURNED",
+      "elapsed_seconds": 0.113,
+      "child_returncode": 0,
+      "child_reaped": true
+    }
+  ]
+}

@@ -4275,3 +4275,254 @@ unchanged; delivered messages or progressed operations cannot be retracted.
 No live network, deployment, operational signing or activation was run.
 Independent review remains **PENDING**; activation **DISABLED**; public
 DevNet **NO-GO**.
+
+## 24. A33-F1 / E27 bounded eviction-ancestry remediation
+
+**Status: IMPLEMENTED — INDEPENDENT REVIEW PENDING. A33-F1 / E27 remain
+OPEN to their remaining extent. Activation DISABLED; public DevNet NO-GO.**
+All other unresolved findings, obligations, RS1 and C4/C5 retain their
+existing dispositions. This section supplements, rather than edits, the
+audit register, inventory rows, prior evidence and RUN 422 work.
+
+### Entry, audit input and pre-implementation verification
+
+The separately authorized task verified `olivexo28/QBIND`, both origin URLs
+(`https://github.com/olivexo28/QBIND`), clean checkout including untracked
+files, current branch `main`, local main and advertised remote main at
+`c9aaef40b045e896ddfa8b01bad230f6b680715e`, tree
+`e3da4541de6cea1ff696c6232229d2eb1a74fc9d`, before creating
+`copilot/a33-f1-bounded-eviction` directly from that main. No applicable
+repository `AGENTS.md` was found. Only that new task branch is published;
+no PR, merge, main push or force-push is authorized.
+
+Audit input is the unchanged **A49.1 / internal v1.138** register,
+`Audit/QBIND_SECURITY_FINDINGS_REGISTER.md`, mode `100644`, blob
+`cd81efdbaf2bfb45e00dc3c60db3ea4f523adfa0`, SHA-256
+`6e68d3d05964f9a6dc0384ffda2bb53d81d7da97ffb786ce84f4bd5a4360c0d9`.
+Its own source baseline remains `18d71a549d868ed33d352e9fc70a9d060f75e03b`,
+tree `5b6c543435ac017dd8372c93f48be397899db14a`, not this task's baseline.
+No deeper ancestry or transfer of all audit conclusions is inferred.
+
+Controlling locators in that exact input: **A5.3, A:L15337-L15465**, especially
+the current finding at L15366, registration-before-vote corrections and
+intermediate state at L15370-L15410, admission/prerequisites at
+L15412-L15447; **A22.1-C2/C3, A:L9230-L9263** restores that conditional
+current-baseline disposition. A5.1 at L15625-L15680 withdraws the false
+hash-collision premise. A5.2 at L15495-L15545 is preserved but superseded
+where it reasons from post-vote state, requires an orphan or describes the
+legacy eviction break as capacity refusal. The older A33.4/5 witness at
+L21474-L21558 is historical, not substituted for A5.3.
+
+The user supplied independent source inspection attributed to **ChatGPT**:
+both eviction walks lack a cycle bound, so an off-cycle candidate can make
+them non-terminating. It asserted neither execution nor anonymous remote
+reachability. Before edits, a separate **rubber-duck AI reviewer,
+`eviction-contract-review`**, checked the finding and proposed correction
+against the audit and current source. Outcome: **CONFIRMED TO bounded
+source/design scope; no blocking issue identified**. This is not human,
+auditor or protocol-owner approval. The review and its non-blocking capacity
+and CPU-cost cautions are retained in
+[`pre-implementation-review.txt`](evidence/a33_f1/pre-implementation-review.txt).
+The implementation author separately verified those source mechanisms.
+Independent **post-implementation** review remains pending.
+
+### Source anchors, caller effects and correction
+
+Anchors without another revision label in this paragraph refer to the entry
+commit. `crates/qbind-consensus/src/hotstuff_state_engine.rs:1105-1161`
+contains both unbounded eviction walks. Slot classification/preflight and
+reservation are at :896-984; removal/accounting at :1013-1095; leader
+admission at :1227-1264; legacy registration at :1455-1488; verified
+registration/admission at :1539-1634.
+`crates/qbind-consensus/src/basic_hotstuff_engine.rs:3875-3890` concatenates
+the block id; :3954-4030 checks catch-up structure/logical quorum and calls
+registration **before** replaying the candidate's votes; :4584-4605 performs
+verified-evidence reservation and slot preflight before proposal effects;
+:4680-4720 registers before the voting decision.
+`crates/qbind-node/src/binary_consensus_loop.rs:8437-8506` checks the response
+anchor and maps inbound blocks into that catch-up call; the honest export
+cap at :248/:8408 is not an inbound count cap.
+
+The corrected shared private `ancestry_excludes_block` visits **at most the
+actual retained map's `blocks.len()` nodes**, borrowing state without a
+visited allocation or evidence clone. An acyclic retained ancestry contains
+at most that many distinct nodes, including its parentless root. A candidate
+match, absent node or exhausted traversal returns **false**: exclusion was
+not established. Only reaching a retained node with `parent_id=None`
+establishes complete exclusion. Both locked-QC and each own-QC ancestry use
+this predicate. The first-iteration equality test subsumes the old explicit
+locked-id check. Committed-height and direct own-QC protection remain.
+Producer anchors: `hotstuff_state_engine.rs:1098-1165`.
+
+This is a finite-graph termination bound, **not** a new configured hop
+limit, resource policy, tree-validity rule, or cycle-admission policy.
+Complete acyclic chains retain their eviction behavior. **Intentional
+compatibility change:** a missing protected parent, or a lock whose block
+is absent, previously ended the walk as though exclusion were proven; it
+now protects the candidate as indeterminate. An unprotected block's own
+missing parent still computes height zero and does not by itself prevent
+eviction. A retained parentless root remains a determinate endpoint.
+
+Verified slot preflight now terminates and may return the existing
+`RetentionCapacityUnavailable`; direct verified registration returns
+`SlotCapacityUnavailable` before insertion/eviction when insufficient safe
+slots exist. The existing byte reservation drops on refusal, releasing
+pending shared-ledger charges. Existing node evidence, scalar charge, shared
+occupancy/handles, queue, tree, votes, lock, commits and counters remain
+unchanged. Successful acyclic reservation still reclaims evicted evidence
+through the existing removal choke point; height is computed before eviction.
+No accounting formula, limit, admission error type or RUN 422 component was
+replaced.
+
+**Legacy residual:** `register_block` still inserts and queues, then attempts
+eviction. If every candidate is protected/indeterminate it returns with the
+tree **over configured capacity**; it does not roll back or report refusal.
+The conservative missing-parent change can cause this under more conditions.
+The catch-up regression deliberately asserts this behavior, not a new
+hard-cap guarantee. Leader reservation remains its separate, pre-existing
+collision/capacity refusal, with no eviction attempt. Selecting hard-refusal,
+rollback, graph repair or truncation policy is outside this correction.
+
+Related walk inventory (unchanged): `hotstuff_state_engine.rs:2130-2180`
+at the producer still implements the **unbounded voting** ancestry branch
+of `safety_decision`; no-lock/view-sufficiency short-circuits remain.
+`:2200-2249` is the separate explicit-hop `bounded_safety_decision`.
+`basic_hotstuff_engine.rs:262-365` provides bounded `for_each_ancestor` and
+`ancestry_relation_to_lock` queries, not a voting-predicate repair.
+`hotstuff_state_engine.rs:1830-1927` uses fixed parent/grandparent accesses
+for 3-chain commit, not an arbitrary-depth walk. Node
+`safety_record_store/decision_capture.rs:377-454` and `owner.rs:2096-2114`
+consume bounded queries; their policies and RUN 422 binding work are
+untouched. No other arbitrary-depth ancestry traversal was located in the
+other consensus parent-reference surfaces (block storage, network,
+driver and proposal/vote verification). This is a related-walk inventory,
+not a whole-repository audit.
+
+### Exact producers and executed evidence
+
+| Producer | Exact identity and boundary |
+|---|---|
+| Test-only baseline | `60c03f9fc3f9860a14a971c0923363d7257059ac`, tree `4ae34b986f1d79ab69468912e5f197eeb6b29587`; direct child of required main, only the integration witness added; production source unchanged |
+| Corrected source/tests | `38a0180c3905d02ff252f4b98915265271c730b4`, tree `42eac8a1f92859e02d801478c60cbc4ea051ac5e`; direct child of test-only baseline |
+| State-engine source | Mode `100755`; baseline blob `4e50ba0ce55d8b852d9d36222401665d914371e3`; producer blob `fad57bb0582dd9e6e0ad1440b5f522b4b7c6a39b` |
+| QC-domain source/tests | Mode `100644`; baseline blob `1b4ef3a2943cc0471ebbeb925133856e7da84eac`; producer blob `f2232d62327529f91f5edf8798c60b81624f8272`; production verification unchanged, test-only additions reuse genuine fixture verification |
+| Integration witnesses | `crates/qbind-consensus/tests/a33_f1_eviction_ancestry_tests.rs`, mode `100644`, blob `837681735b173ae9eb1562714725f7be194ab83a`, identical for both producers |
+| Toolchain/configuration | Linux; `rustc 1.99.1 (58cf8f9c3 2026-10-13)`, `cargo 1.99.1 (5f94df478 2026-08-27)`; existing workspace test profile, `--locked`, default features, no manifest/dependency/crypto-setting changes |
+
+Retrievable artifacts are under [`evidence/a33_f1/`](evidence/a33_f1/).
+`SHA256SUMS` covers the retained files except itself. The manifest binds
+commit/tree/source/test and executable identities; the final documentation
+commit is **not** relabeled as the executable producer.
+
+**Baseline observation, not a passing regression:** after building the
+test-only producer with
+`cargo test --locked -p qbind-consensus --test a33_f1_eviction_ancestry_tests --no-run`,
+an inline Python driver launched six exact-test executable children, each
+with `communicate(timeout=3)`, then `kill()` and `communicate(timeout=3)`
+on expiry. **All six timed out** (about 3.004-3.015 seconds), return code
+`-9` after the outer kill, and were reaped. Their timeout does **not** mean
+the witness completed, cleanup was tested, or source terminated.
+`baseline/results.json`, per-case stdout and `baseline/build.log` retain
+the actual observations. The committed `run_witnesses.py` expresses the
+same bounded driver and records timeout/return separately; the original
+baseline run was inline, not falsely attributed to that later script.
+
+Four witnesses isolate lock/own-QC walks on self/two-node cycles, with the
+eviction candidate outside the cycle. Their first baseline hang is in
+`can_admit_block_slot`. Two additional witnesses exercise **actual
+`apply_restore_catchup_blocks -> register_block -> eviction`** at capacities
+4 and 4096. The default witness supplies 4097 engine blocks, constructs
+`A=P16||P16` from leader/view 2, overwrites the snapshot anchor into a
+self-loop, and reaches registration of B4096 before its votes. On corrected
+source it returns, retains 4097 blocks with zero evictions, then forms the
+last QC and commits height 4096. This is an engine construction, not a
+bootable snapshot/transport/serialized-frame test.
+
+At the clean corrected producer, the same six witnesses returned exit zero
+under the **same three-second deadline**, 0.002-0.113 seconds observed;
+`fixed/results.json` and six per-case outputs retain these results. Invocation:
+
+```sh
+python docs/security/evidence/a33_f1/run_witnesses.py \
+  target/debug/deps/a33_f1_eviction_ancestry_tests-57741b928d56a895 \
+  38a0180c3905d02ff252f4b98915265271c730b4 return OUTPUT_DIRECTORY
+```
+
+The executable filename is build-specific; rebuild the pinned producer and
+use Cargo's emitted path, not an arbitrary cached binary. For an isolated
+baseline rebuild, use a separate checkout/target directory at the test-only
+producer, and run the driver with that producer and `timeout` expectation.
+
+Final producer-pinned command and complete output are in
+`producer-regressions.log`: `cargo test --locked -p qbind-consensus --lib`
+with the eleven explicit integration targets listed below. Exit **0**:
+
+| Target | Passed / failed / ignored |
+|---|---|
+| Library (including five new A33-F1 tests and existing retention/accounting tests) | 312 / 0 / 0 |
+| `a33_f1_eviction_ancestry_tests` | 10 / 0 / 0 |
+| `commit_log_memory_limits_tests` | 6 / 0 / 1 (pre-existing ignored control) |
+| `consensus_memory_limits_tests`; `consensus_state_memory_limits_tests` | 19 + 7 / 0 / 0 |
+| `hotstuff_locked_block_safety_tests` | 9 / 0 / 0 |
+| `run_422_d7c3d_qc_domain_verification_tests` | 46 / 0 / 0 |
+| `run_422_decision_view_queries_tests` | 5 / 0 / 0 |
+| `run_422_leader_owning_handoff_tests`; `run_422_owning_decision_vote_handoff_tests` | 7 + 6 / 0 / 0 |
+| `run_422_safety_decision_gate_tests`; `run_422_safety_decision_observer_spike_tests` | 9 + 12 / 0 / 0 |
+| **Total** | **448 / 0 / 1** |
+
+New controls cover candidate-in-cycle protection and off-cycle candidates;
+complete acyclic protected ancestors/unrelated eviction; committed protection;
+protected missing parent and absent lock; unprotected missing-parent behavior;
+exact N-node root termination and empty-state uncertainty; leader capacity
+refusal; and actual verified proposal preflight before view/vote effects.
+The genuine-QC retention matrix covers lock/own-QC x self-cycle/two-node
+cycle/missing parent x scalar/shared ledgers (12 cases). It compares full
+state debug snapshots and all shared occupancy fields across refusal,
+evidence pointer identity and exact retained-map charges, then checks
+release back to the ledger's initial standing occupancy on state drop.
+Acyclic successful reservation checks evidence reclamation and pre-eviction
+height in both accounting modes. Only disposable existing ML-DSA-44 test
+fixtures sign; no operational signing occurs.
+
+Targeted `rustfmt --edition 2021 --check` passed for the new integration file
+and extracted edited-method/new-test fragments; unrelated pre-existing
+formatting was not rewritten. `git -c core.whitespace=cr-at-eol diff --check`
+passed for source/prose (excluding `*.log`); the existing QC-domain CRLF and
+state-engine LF/modes were preserved. The six raw successful child logs have
+libtest's extra blank line at EOF, which the all-artifact whitespace check
+flags; those bytes are deliberately retained, not reformatted as evidence.
+During author iteration, the initial integration build needed an explicit
+collection type, the module import and local reproduction of the private
+id derivation; two initial accounting tests incorrectly expected zero
+instead of the ledger's 80-byte standing ownership. Those **test** mistakes
+were corrected before the final producer; they are not passing evidence
+or production fixes. Early overwritten author logs are not independent
+evidence. The pinned final logs, not those attempts, support these results.
+
+### Remaining extent and assurance boundary
+
+The source proof establishes finite traversal per immutable retained graph,
+and isolated **engine test processes** establish these particular observed
+timeouts/returns. They do **not** establish deployed-binary or production
+process liveness, bootable snapshot admission, actual encrypted/admitted
+catch-up delivery, serialization/size observations, recovery/crash behavior,
+multi-node effects, deployment assurance, or universal performance bounds.
+None of those later evidence stages ran. A5.3's local/operator-crafted
+anchor plus valid state/authority/epoch/genesis, admitted responder,
+anchor-equality, stable four-validator membership and no-interleaving
+prerequisites remain conditional. No anonymous remote exploit is claimed.
+
+Each predicate can still cost O((R+1)N), with N retained nodes and R own-QC
+roots; full slot classification can cost O((R+1)N^2), cubic when R scales
+with N. Repeated eviction can add work. Legacy capacity can remain exceeded
+and grow on further registrations; the mathematical finite bound is not a
+global memory or latency ceiling. The separate voting walk is **not fixed**.
+Any broader consensus admission, ancestry-validity, hard-cap/refusal,
+recovery/trust or performance policy requires its own resolved contract.
+
+Independent code/evidence review, E27's remaining production prerequisites
+and runtime impact/assurance, the voting-path residual and all other
+unresolved obligations remain **OPEN**. No authentication, signing,
+cryptography settings, operational gates, RUN 422 production interfaces,
+audit-register bytes or previous evidence were altered. No live network,
+node activation, deployment, PR, merge or main/force push was performed.

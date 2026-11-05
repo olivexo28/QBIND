@@ -1,0 +1,70 @@
+A33-F1 bounded pre-implementation verification, 2026-11-05
+
+Input baseline: c9aaef40b045e896ddfa8b01bad230f6b680715e
+Input tree: e3da4541de6cea1ff696c6232229d2eb1a74fc9d
+Implementation author: GitHub Copilot coding agent in this task.
+Independent bounded reviewer: rubber-duck subagent named
+eviction-contract-review, invoked before implementation or test edits.
+This is an AI source/design review, not human or auditor approval, a signed
+attestation, runtime reproduction, or post-implementation review.
+
+The user supplied separate pre-implementation source inspection attributed
+to ChatGPT: both is_block_safe_to_evict walks lack cycle bounds; a cycle
+excluding the eviction candidate can cause non-termination. That supplied
+statement did not claim runtime reproduction or anonymous remote reachability.
+The implementation author separately checked the controlling audit and source.
+
+Reviewed proposed correction:
+- Shared private borrowed ancestry exclusion predicate.
+- Visit at most blocks.len() nodes, using actual retained-map cardinality,
+  not configured capacity, a new constant, or a protocol hop policy.
+- Current id equals candidate: protect.
+- Missing current node: indeterminate, protect.
+- Parentless retained root: complete exclusion established.
+- Exhaustion: indeterminate, protect.
+- Both lock and each own-QC root must establish exclusion to permit eviction.
+- Preserve committed, direct own-QC, and locked-block protections.
+- Leave voting semantics and legacy insert-then-evict capacity behavior alone.
+
+Independent review outcome: CONFIRMED TO the bounded source/design scope;
+no blocking issue identified for this correction. The N-node bound reaches
+the root of an acyclic N-node chain (no off-by-one), while cycles and missing
+protected ancestry cannot establish safe eviction. Direct-id checks may be
+subsumed by the helper's first comparison without changing protection.
+
+Reviewer-identified non-blocking residuals:
+1. Missing ancestry now protects more candidates. Consequently legacy
+   register_block can retain over-capacity trees under more conditions.
+   Do not silently introduce hard-refusal/rollback policy in this task.
+2. Termination does not establish practical CPU/resource bounds. With N
+   retained nodes and R own-QC roots, eviction classification can remain
+   O((R+1)*N), and slot preflight O((R+1)*N^2), cubic when R scales with N.
+3. safety_decision's separate ancestry walk remains unbounded. Existing
+   bounded_safety_decision and observer queries are separate, unchanged APIs.
+
+Controlling audit anchors, in pinned A49.1/internal-v1.138 input:
+Audit/QBIND_SECURITY_FINDINGS_REGISTER.md:15337-15465 (A5.3);
+:9230-9263 (A22.1-C2/C3 restores conditional current-baseline disposition).
+The audit's own source baseline is 18d71a549d868ed33d352e9fc70a9d060f75e03b,
+not the remediation baseline above; no deeper Git relationship was inferred.
+
+Current-baseline source anchors:
+crates/qbind-consensus/src/hotstuff_state_engine.rs:1105-1161 (both walks);
+:896-984 (count, slot preflight and atomic reservation);
+:1455-1488 (legacy insertion before eviction);
+:1539-1634 (verified registration and reservation);
+:2128-2179 (separate voting decision);
+:2198-2247 (separate bounded voting decision).
+crates/qbind-consensus/src/basic_hotstuff_engine.rs:3875-3890
+(concatenating block-id construction, no hash-collision prerequisite);
+:3954-4030 (catch-up structural/logical QC checks, registration then votes);
+:4584-4605 (verified preflight and capacity refusal).
+
+Production prerequisites remain conditional: operator-crafted bootable
+snapshot anchor and valid state/authority/epoch/genesis, admitted catch-up
+responder and anchor correspondence, stable four-validator membership,
+quorum logical signer set, and no interfering traffic. This review did not
+boot a validator, admit a transport peer, serialize/deliver the stated
+approximately 393-KB response, or establish anonymous remote reachability.
+
+Independent post-implementation code/evidence review: PENDING.

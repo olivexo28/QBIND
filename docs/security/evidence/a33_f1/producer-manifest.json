@@ -1,0 +1,33 @@
+{
+  "entry_commit": "c9aaef40b045e896ddfa8b01bad230f6b680715e",
+  "entry_tree": "e3da4541de6cea1ff696c6232229d2eb1a74fc9d",
+  "baseline_commit": "60c03f9fc3f9860a14a971c0923363d7257059ac",
+  "baseline_tree": "4ae34b986f1d79ab69468912e5f197eeb6b29587",
+  "corrected_commit": "38a0180c3905d02ff252f4b98915265271c730b4",
+  "corrected_tree": "42eac8a1f92859e02d801478c60cbc4ea051ac5e",
+  "source_manifest": [
+    "100755 blob fad57bb0582dd9e6e0ad1440b5f522b4b7c6a39b\tcrates/qbind-consensus/src/hotstuff_state_engine.rs",
+    "100644 blob f2232d62327529f91f5edf8798c60b81624f8272\tcrates/qbind-consensus/src/qc_verify_domain.rs",
+    "100644 blob 837681735b173ae9eb1562714725f7be194ab83a\tcrates/qbind-consensus/tests/a33_f1_eviction_ancestry_tests.rs",
+    "100644 blob 71e59bba3d9fb5f20b7cc34665a8bcff97e5a8d5\tdocs/security/evidence/a33_f1/run_witnesses.py"
+  ],
+  "audit_input": "100644 blob cd81efdbaf2bfb45e00dc3c60db3ea4f523adfa0\tAudit/QBIND_SECURITY_FINDINGS_REGISTER.md",
+  "cargo_lock_sha256": "70aec07f6e1eb8ea3e98634acefdd92bf9f9ea03929d2821e3cc04c75bb1baaf",
+  "workspace_cargo_blob": "481a266fffad82c5982c85eaf557cbc18f77627e",
+  "crate_cargo_blob": "137ea97c2909883f825e547f0504957c1c60f7f4",
+  "rustc_verbose": "rustc 1.99.1 (58cf8f9c3 2026-10-13)\nbinary: rustc\ncommit-hash: 58cf8f9c35b355199727627d07ae34a4e2846d67\ncommit-date: 2026-10-13\nhost: x86_64-unknown-linux-gnu\nrelease: 1.99.1\nLLVM version: 23.1.1\n",
+  "cargo": "cargo 1.99.1 (5f94df478 2026-08-27)",
+  "platform": "Linux x86_64",
+  "build_environment": {
+    "RUSTFLAGS": null,
+    "CARGO_ENCODED_RUSTFLAGS": null,
+    "CARGO_TARGET_DIR": null,
+    "CARGO_BUILD_TARGET": null
+  },
+  "features": "default; --locked; existing workspace test profile",
+  "baseline_driver": "inline Python subprocess.Popen; communicate(timeout=3); on TimeoutExpired kill(); communicate(timeout=3); child exit -9 after outer kill; six exact-test names as in results.json",
+  "corrected_driver": "python docs/security/evidence/a33_f1/run_witnesses.py target/debug/deps/a33_f1_eviction_ancestry_tests-57741b928d56a895 38a0180c3905d02ff252f4b98915265271c730b4 return OUTPUT_DIRECTORY",
+  "post_implementation_independent_review": "PENDING",
+  "activation": "DISABLED",
+  "public_devnet": "NO-GO"
+}

@@ -1,0 +1,49 @@
+{
+  "producer": "60c03f9fc3f9860a14a971c0923363d7257059ac",
+  "binary_sha256": "bab86898bdc4aae9df9937fb9eef38f8da1acf41a71d629a5e75d68dd121616a",
+  "outer_timeout_seconds": 3,
+  "cases": [
+    {
+      "case": "locked_self_cycle_outside_candidate",
+      "observation": "EXPECTED_BASELINE_TIMEOUT",
+      "elapsed_seconds": 3.006,
+      "child_returncode": -9,
+      "child_reaped": true
+    },
+    {
+      "case": "locked_multi_cycle_outside_candidate",
+      "observation": "EXPECTED_BASELINE_TIMEOUT",
+      "elapsed_seconds": 3.015,
+      "child_returncode": -9,
+      "child_reaped": true
+    },
+    {
+      "case": "own_qc_self_cycle_outside_candidate",
+      "observation": "EXPECTED_BASELINE_TIMEOUT",
+      "elapsed_seconds": 3.01,
+      "child_returncode": -9,
+      "child_reaped": true
+    },
+    {
+      "case": "own_qc_multi_cycle_outside_candidate",
+      "observation": "EXPECTED_BASELINE_TIMEOUT",
+      "elapsed_seconds": 3.006,
+      "child_returncode": -9,
+      "child_reaped": true
+    },
+    {
+      "case": "registration_before_vote_catchup_witness_scaled",
+      "observation": "EXPECTED_BASELINE_TIMEOUT",
+      "elapsed_seconds": 3.005,
+      "child_returncode": -9,
+      "child_reaped": true
+    },
+    {
+      "case": "registration_before_vote_catchup_witness_default_capacity",
+      "observation": "EXPECTED_BASELINE_TIMEOUT",
+      "elapsed_seconds": 3.004,
+      "child_returncode": -9,
+      "child_reaped": true
+    }
+  ]
+}
