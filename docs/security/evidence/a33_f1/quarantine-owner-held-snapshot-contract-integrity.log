@@ -1,0 +1,55 @@
+A33-F1 owner-held snapshot contract documentation checks
+========================================================
+
+Entry verification:
+
+  repository: olivexo28/QBIND
+  branch: copilot/a33-f1-bounded-eviction
+  starting task/local/remote tip:
+    35b10e210ba9c8db8ef61546aab9eb96f4438e08
+  protected local/remote main:
+    c9aaef40b045e896ddfa8b01bad230f6b680715e
+  worktree and index: clean
+
+Scope: documentation only. No source, tests, codec, backend, gate,
+initialization, signing, node or network operations changed or ran.
+
+Checks:
+
+  PASS local Markdown links in the proposal and plan addition.
+  PASS cited current handler, empty-response, loop-owner and engine source
+       ranges exist at the exact starting task tip.
+  PASS exact append-only plan prefix: 426617 bytes.
+  PASS exact append-only SHA256SUMS prefix: 14860 bytes.
+  PASS changed scope is the plan, this contract, this log and appended
+       manifest entries only.
+  PASS whitespace and `git diff --check`.
+  PASS revision-aware checksum verification: nine preserved historical
+       entries match their producing revisions; all other entries match
+       current bytes.
+
+The direct handler inspection at `binary_consensus_loop.rs:8437-8538`
+confirms that a non-self empty response evaluates restore-mode transition
+from peer-reported height before any local anchor comparison, while
+nonempty responses check the local request anchor before applying blocks.
+This is source inspection only, not a binary or runtime test.
+
+Ordinary command:
+
+  (cd docs/security/evidence/a33_f1 && sha256sum --check SHA256SUMS)
+
+Observed result with this log's checksum appended:
+
+  exit=1
+  passing_entries=129
+  failed_entries=9
+
+The nine ordinary failures are preserved historical entries: two prior
+model-test source hashes, one quarantine-interface source hash, one
+quarantine-interface test hash, and five prior remediation-plan hashes.
+Each mismatch was matched to the exact file bytes at its producing Git
+revision. This is not a full ordinary-checksum pass.
+
+All acceptance cases in the contract are proposed and unexecuted.
+A33-F1 / E27 and remaining obligations remain **OPEN**; activation
+**DISABLED**; public DevNet **NO-GO**.

@@ -5607,3 +5607,35 @@ The prior user-supplied PASS WITH LIMITATIONS review attribution is retained
 without reviewer identity or raw-artifact claims. A33-F1 / E27 and all
 other unresolved obligations remain **OPEN**; activation **DISABLED**;
 public DevNet **NO-GO**.
+
+## 51. Define owner-held starting-anchor snapshot contract
+
+**SNAPSHOT CONTRACT PROPOSED — INDEPENDENT REVIEW PENDING.** Entry checks
+matched branch `copilot/a33-f1-bounded-eviction`, task/local/remote tip
+`35b10e210ba9c8db8ef61546aab9eb96f4438e08`, clean worktree/staging, and
+protected local/remote main `c9aaef40b045e896ddfa8b01bad230f6b680715e`.
+
+Added [the owner-held snapshot contract and unexecuted acceptance matrix](evidence/a33_f1/quarantine-owner-held-snapshot-contract.md).
+The proposal retains a paired committed block ID/height, separate engine
+current view, and explicit optional lock ID/view; historical committed-block
+view is never inferred. The current mutable engine is locally owned by the
+binary consensus-loop task, whose inbound dispatch is synchronous. The
+verified response handler shows that nonempty responses check the local
+request anchor before application, while non-self empty responses skip that
+check and can update restore-mode exit tracking from peer-reported height.
+The supplied reviewer reported inability to retrieve that handler range;
+this task inspected the current source directly and does not attribute that
+verification to the reviewer.
+
+The proposed owner lease spans intent/evidence publication and revalidation,
+with independent fencing required for non-engine effects. Existing APIs do
+not provide a cancellation-safe lease, engine generation, durable publisher,
+startup refusal, or complete external-producer barrier. Those remain
+implementation blockers; no persistent format, durability/currentness or
+signer authority, startup coverage, clear/resume, or allow state is selected.
+The user-supplied PASS WITH LIMITATIONS filesystem-prototype review remains
+as recorded in the capacity inventory; it was not rerun and no reviewer
+identity or raw artifact is claimed. All acceptance cases are proposed and
+unexecuted. No source, tests, backend, gate, initialization, signing, node,
+or network operations changed or ran. A33-F1 / E27 and remaining
+obligations remain **OPEN**; activation **DISABLED**; public DevNet **NO-GO**.
