@@ -1,0 +1,48 @@
+A33-F1 committed-anchor proposal documentation and integrity checks
+===================================================================
+
+Scope: documentation only. No Rust tests, backend, filesystem, crash, CLI,
+node, signer or network tests were run. No production or test source changed.
+
+Documentation checks:
+
+  PASS local Markdown links in the proposal and appended plan section.
+  PASS 14 contiguous candidate-layout fields; offsets and widths end at 424.
+  PASS checked total:
+       224 + 8 + 8 + 32 + 8 + 32 + 3*8 + 8 + 8 + 32 + 8 + 32 = 424.
+  PASS revised candidate-version note: v1 reserves state flag bits after bit
+       6, so proposed bits 7 and 8 require a versioned candidate revision.
+  PASS plan historical prefix at starting tip
+       3a56674277fc7be992c81a235652dcd27a72fc15: 424504 bytes.
+  PASS SHA256SUMS historical prefix at starting tip: 14513 bytes.
+  PASS exact documentation-only scope: plan, proposal, integrity log and
+       append-only SHA256SUMS entries.
+  PASS whitespace and changed-file trailing-whitespace checks.
+
+Revision-aware checksum method:
+
+  Each manifest entry was checked against current bytes. Mismatches were
+  matched to the exact file bytes at a Git revision found in the repository
+  history. Eight preserved historical entries matched producing revisions;
+  all other entries, including the current proposal, plan and this log,
+  match current bytes. The plan and manifest prefixes at the starting tip
+  remain byte-for-byte unchanged.
+
+Ordinary command, run against the final manifest including this log's hash:
+
+  (cd docs/security/evidence/a33_f1 && sha256sum --check SHA256SUMS)
+
+Observed result with the final log hash appended:
+
+  exit=1
+  passing_entries=127
+  failed_entries=8
+
+The eight failures are preserved historical hashes: two prior versions of
+`a33_f1_authority_reset_quarantine_model_tests.rs`, one prior version each
+of `pqc_reset_quarantine.rs` and `a33_f1_quarantine_read_interface_tests.rs`,
+and four prior plan versions. They are separately verified against their
+producing Git revisions; this is not a full ordinary-checksum pass.
+
+A33-F1 / E27 and all other unresolved obligations remain **OPEN**; activation
+**DISABLED**; public DevNet **NO-GO**.

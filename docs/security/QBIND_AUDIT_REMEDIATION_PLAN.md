@@ -5573,3 +5573,37 @@ correction evidence. The ordinary checksum command's observed result and
 historical mismatches are reported separately there; historical lines were
 not rewritten. A33-F1 / E27 and all other unresolved obligations remain
 **OPEN**; activation **DISABLED**; public DevNet **NO-GO**.
+
+## 50. Propose source-backed catch-up anchor representation
+
+**COMMITTED-ANCHOR PROPOSAL — INDEPENDENT REVIEW PENDING.** Entry checks
+matched branch `copilot/a33-f1-bounded-eviction`, task/local/remote tip
+`3a56674277fc7be992c81a235652dcd27a72fc15`, clean worktree/staging, and
+protected local/remote main `c9aaef40b045e896ddfa8b01bad230f6b680715e`.
+
+Added [the source-backed anchor decision proposal](evidence/a33_f1/quarantine-committed-anchor-proposal.md).
+Source inspection distinguishes the optional committed block ID and height,
+the independent engine `current_view`, and the separately available but
+not-always-retained committed-entry view. It records that restart/snapshot
+paths have different information and that catch-up may partially update
+block/vote/QC/lock/commit/view state. The recommendation for review is to
+retain block ID, committed height, and engine current view distinctly,
+alongside the starting lock identity/view; it is conditional on a future
+coherent owner-held snapshot and is not an implemented source API. A
+committed-block view required for future recovery remains unavailable in
+some source paths and therefore a blocker to such recovery, not an inferred
+value.
+
+The candidate layout is recalculated at 424 bytes for the explicit
+committed-height plus current-engine-view values; this and the prior 416-byte
+candidate remain unapproved. Its proposed presence-flag assignments require
+a revised candidate version because the earlier v1 reserves all bits after
+bit 6. Proposed acceptance tests are unexecuted. Documentation, layout,
+scope, prefix and checksum results are recorded in the
+[append-only integrity log](evidence/a33_f1/quarantine-committed-anchor-proposal-integrity.log).
+Historical plan/evidence remain unchanged; this task runs documentation
+checks only, not Rust, storage, crash, CLI, node, signer or network tests.
+The prior user-supplied PASS WITH LIMITATIONS review attribution is retained
+without reviewer identity or raw-artifact claims. A33-F1 / E27 and all
+other unresolved obligations remain **OPEN**; activation **DISABLED**;
+public DevNet **NO-GO**.
