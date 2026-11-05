@@ -5185,3 +5185,41 @@ signer fencing or authority-reset redesign is introduced; no operational
 keys/signing, node/network, deployment or activation.
 A33-F1 / E27 and all other unresolved obligations remain **OPEN**.
 Activation **DISABLED**; public DevNet **NO-GO**.
+
+## 40. Fully verified synthetic public authority-reset success
+
+**TEST-ONLY ACCEPTANCE EVIDENCE — INDEPENDENT REVIEW PENDING.**
+Repository, existing branch, exact local/remote task tip
+`11bb930e005abd082a1dbb296f0b8fe90dcf4fc0`, tree
+`9106f4e4e6123c072239ed7f46e90155edbc269d`, parent
+`6506faf18485769a2c852b7609149f908b807848`, protected local/remote main
+and clean worktree/staging matched before editing. Main remains
+`c9aaef40b045e896ddfa8b01bad230f6b680715e`.
+
+The new test
+`crates/qbind-node/tests/a33_f1_authority_reset_verified_success_tests.rs`
+assembles synthetic genesis, signed trust bundle and signed v1
+ratification with existing test helpers. It passes actual production
+verification/Strict enforcement and calls the public reset orchestrator,
+without constructing a private verified plan or injecting writer results.
+Fresh and existing-marker resets succeed; marker derivation/load/digests
+and final success audit agree. A valid-input equal destination refuses
+at the public pre-verification path guard with marker/audit unchanged.
+Tampered bundle and ratification signature are refused by real verification;
+marker bytes remain unchanged and separate refusal audits are checked.
+Ephemeral private test keys stay in memory, never logs/evidence.
+
+[Exact commands, outputs and limits](evidence/a33_f1/authority-reset-verified-evidence.md)
+record **1 focused test / five scenarios**, **6 path tests / 18 scenarios**
+and **22 module regressions**, all passed. Earlier intermediate success
+output is retained separately. This adds the previously untested
+function-level verified success evidence; prior historical "untested"
+statements remain accurate for their producer revisions.
+
+Only test code and append-only evidence/plan/checksums change. Production
+verification/reset/guard, audit register and historical bytes are preserved.
+No operational keys/signing service, live node/network, deployment or
+activation; no new recovery/clear, startup gate, quarantine or fencing.
+No power-loss, hostile-filesystem, complete-alias or startup assurance.
+A33-F1 / E27 and all other unresolved obligations remain **OPEN**.
+Activation **DISABLED**; public DevNet **NO-GO**.

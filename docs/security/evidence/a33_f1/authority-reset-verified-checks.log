@@ -1,0 +1,15 @@
+PASS: verified success/negative controls, six path tests and 22 module regressions.
+PASS: 11 local documentation links; balanced fences and test formatting.
+PASS: plan/manifest historical prefixes; production/audit/prior evidence unchanged.
+PASS: only the following test/new evidence/append-only paths changed:
+crates/qbind-node/tests/a33_f1_authority_reset_verified_success_tests.rs
+docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md
+docs/security/evidence/a33_f1/SHA256SUMS
+docs/security/evidence/a33_f1/authority-reset-verified-checks.log
+docs/security/evidence/a33_f1/authority-reset-verified-checks.py
+docs/security/evidence/a33_f1/authority-reset-verified-evidence.md
+docs/security/evidence/a33_f1/authority-reset-verified-focused.log
+docs/security/evidence/a33_f1/authority-reset-verified-format.log
+docs/security/evidence/a33_f1/authority-reset-verified-intermediate.log
+docs/security/evidence/a33_f1/authority-reset-verified-platform.log
+docs/security/evidence/a33_f1/authority-reset-verified-regressions.log
