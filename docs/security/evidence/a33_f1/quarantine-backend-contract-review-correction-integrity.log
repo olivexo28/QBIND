@@ -1,0 +1,61 @@
+A33-F1 quarantine backend contract correction checks
+====================================================
+
+Entry verification:
+
+  branch: copilot/a33-f1-bounded-eviction
+  starting task/local/remote tip: 45eb183ee85348bba2efa0bf759a3255720d8c01
+  protected local/remote main: c9aaef40b045e896ddfa8b01bad230f6b680715e
+  starting worktree/index: clean
+
+Documentation checks:
+
+  PASS local Markdown links in the correction, proposal references, and plan section 49.
+  PASS candidate layout table: 25 contiguous fields, total 416 bytes.
+  PASS conditional two-anchor scalar alternative: +8 bytes, shifted ending 392..424, total 424 bytes.
+  PASS exact plan prefix at starting tip (422419 bytes).
+  PASS exact SHA256SUMS prefix at starting tip (14148 bytes).
+  PASS no trailing whitespace in new correction.
+  PASS git -c core.whitespace=cr-at-eol,-blank-at-eof diff --check.
+  Changed scope: appended plan section, correction record, append-only checksums and this log.
+  No production source, tests, backend, codec, gate or operational behavior changed.
+
+Revision-aware checksum method:
+
+  For each SHA256SUMS row, normalize its path relative to
+  docs/security/evidence/a33_f1. Accept a row if its digest matches current
+  bytes. Otherwise locate a Git revision containing that exact path/blob and
+  require the stored digest to match that revision. Also compare plan and
+  manifest current bytes against their exact starting-tip prefixes.
+
+The prior plan digest ac1786c59079a62f0611ab6932f74a2387d150adc636d09b25ee2e21be867b7c
+is historical after the appended section and matches commit
+45eb183ee85348bba2efa0bf759a3255720d8c01. The other existing historical
+rows are retained unchanged and verified against their producing commits.
+New current plan/correction/integrity-log rows are verified against current
+bytes.
+
+Ordinary checksum command, run after current hashes and this log hash were
+appended:
+
+  (cd docs/security/evidence/a33_f1 && sha256sum --check SHA256SUMS)
+
+Observed result:
+
+  exit=1
+  failed_count=7
+  passing_entries=125
+  FAILED: ../../../../crates/qbind-node/tests/a33_f1_authority_reset_quarantine_model_tests.rs
+  FAILED: ../../../../crates/qbind-node/tests/a33_f1_authority_reset_quarantine_model_tests.rs
+  FAILED: ../../../../crates/qbind-node/src/pqc_reset_quarantine.rs
+  FAILED: ../../../../crates/qbind-node/tests/a33_f1_quarantine_read_interface_tests.rs
+  FAILED: ../../../../docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md
+  FAILED: ../../../../docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md
+  FAILED: ../../../../docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md
+
+These are preserved historical hashes, not a full ordinary-checksum pass.
+The two model-source hashes, interface source/test hashes and three plan
+hashes were each matched to their producing Git revisions. Revision-aware
+current/historical verification and append-only prefix checks passed. No
+Rust test, build, filesystem/crash test, CLI, node, signer or network test
+was run.

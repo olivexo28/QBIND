@@ -5538,3 +5538,38 @@ against current bytes. The ordinary checksum command's exact failures and
 the documentation/link/scope/whitespace checks are recorded in the proposal
 evidence. A33-F1 / E27 and other unresolved obligations remain **OPEN**;
 activation **DISABLED**; public DevNet **NO-GO**.
+
+## 49. Correct backend contract from user-supplied review
+
+**BACKEND CONTRACT CORRECTED — INDEPENDENT REVIEW PENDING.** Entry checks
+matched branch `copilot/a33-f1-bounded-eviction`, task/local/remote tip
+`45eb183ee85348bba2efa0bf759a3255720d8c01`, clean worktree/staging, and
+protected local/remote main `c9aaef40b045e896ddfa8b01bad230f6b680715e`.
+The report was supplied by the user; no reviewer identity or raw report
+artifact was supplied or inferred.
+
+Added [an append-only correction record](evidence/a33_f1/quarantine-backend-contract-review-correction.md)
+that supersedes only four statements in the prior contract: exact raw store
+ID/incarnation values would be stored in dedicated RocksDB metadata, while
+the latch holds full domain-separated digests compared by a future backend;
+the current classifier compares only `store_id` and `chain_id` strings, not
+typed incarnation or operation identities; update failure after rename may
+expose new bytes and requires closed/uncertain refusal without claiming
+unchanged earlier bytes; and the committed-anchor scalar's view/height
+semantics are undecided. A conditional two-scalar layout is calculated at
+424 bytes without selecting it or treating any candidate as a production
+limit.
+
+The original proposal, accepted stay-closed boundary and prior evidence are
+preserved. Identity authority, evidence bounds, initialization/migration,
+RocksDB object continuity, filesystem/durability profile, currentness,
+anti-rollback, signer exclusivity, and clear/resume authority remain
+unresolved. This is documentation only: no code, tests, backend, gate,
+initialization, signing, node/network operation or activation.
+
+Changed-document links, byte-layout arithmetic, scope, whitespace,
+append-only prefixes and revision-aware checksums are recorded in the
+correction evidence. The ordinary checksum command's observed result and
+historical mismatches are reported separately there; historical lines were
+not rewritten. A33-F1 / E27 and all other unresolved obligations remain
+**OPEN**; activation **DISABLED**; public DevNet **NO-GO**.
