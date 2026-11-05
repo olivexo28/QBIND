@@ -1084,6 +1084,24 @@ impl SecureChannelAsync {
     }
 
     #[cfg(test)]
+    pub(crate) async fn worker_outcomes_for_test(
+        &self,
+    ) -> (Option<&'static str>, Option<&'static str>) {
+        let tasks = self.worker_tasks.lock().await;
+        let outcome_name = |outcome: &Option<TaskOutcome>| {
+            outcome.as_ref().map(|outcome| match outcome {
+                TaskOutcome::Completed => "completed",
+                TaskOutcome::Cancelled(_) => "cancelled",
+                TaskOutcome::Failed(_) => "failed",
+            })
+        };
+        (
+            outcome_name(&tasks.reader_outcome),
+            outcome_name(&tasks.writer_outcome),
+        )
+    }
+
+    #[cfg(test)]
     pub(crate) async fn inject_worker_failure_for_test(&self) -> std::sync::mpsc::Sender<()> {
         self.begin_retirement().unwrap();
         self.finish_retirement().await.unwrap();
