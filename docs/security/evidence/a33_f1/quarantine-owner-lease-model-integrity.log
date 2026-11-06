@@ -385,3 +385,108 @@ Post-append verification:
   139 OK; 26 historical FAILED.
   Revision-aware verification: 165 entries; 139 current; 26 verified
   against producing Git revisions; zero unverified.
+
+Tokio successful-operation retirement correction
+===============================================
+
+Entry verification:
+  repository: /workspaces/QBIND/olivexo28/QBIND
+  branch: copilot/a33-f1-bounded-eviction
+  HEAD/task tip: fc2b7d4ce9c141525ac67a71ebe1e5510c1b14b7
+  direct remote task tip: fc2b7d4ce9c141525ac67a71ebe1e5510c1b14b7
+  local/direct remote protected main:
+    c9aaef40b045e896ddfa8b01bad230f6b680715e
+  worktree was clean before changes.
+
+The supplied reviewer report raised the post-success retirement gap. No
+reviewer identity or raw report artifact was provided or inferred. The
+correction changes only the test-only Tokio harness and appends its plan and
+evidence; the substituted-snapshot test and prior raw artifacts are
+unchanged.
+
+Expected seven changed paths:
+  crates/qbind-node/tests/a33_f1_quarantine_tokio_owner_lease_tests.rs
+  docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md
+  docs/security/evidence/a33_f1/SHA256SUMS
+  docs/security/evidence/a33_f1/quarantine-owner-lease-model-integrity.log
+  docs/security/evidence/a33_f1/quarantine-owner-lease-tokio-retirement.md
+  docs/security/evidence/a33_f1/quarantine-owner-lease-tokio-retirement-raw.log
+  docs/security/evidence/a33_f1/quarantine-owner-lease-tokio-retirement-sensitivity-raw.log
+
+The successful async test joins the application task, observes cleanup of
+the remaining pending task, then explicitly retires the operation. Refusal
+ownership remains Initiator; task completion does not set operation
+cancellation. A post-retirement second mutation is refused for the
+retirement reason with no count increment. A live control permits two
+mutations, avoiding an unsupported one-mutation rule. Late Unknown outcome
+and publication uncertainty are retained without restoring authority.
+
+The omitted-retirement sensitivity control has a valid published, resolved,
+first-mutation, application-completion, and cleanup prefix. It deliberately
+omits retirement; the shared post-completion assertion detects the second
+mutation admitted and asserts the exact expected diagnostic. This expected
+defect is an assertion within a passing test, not a counted failing test.
+
+Exact commands:
+  rustfmt --edition 2021 crates/qbind-node/tests/a33_f1_quarantine_tokio_owner_lease_tests.rs
+  rustfmt --edition 2021 --check crates/qbind-node/tests/a33_f1_quarantine_tokio_owner_lease_tests.rs
+  cargo test -p qbind-node --test a33_f1_quarantine_tokio_owner_lease_tests -- --nocapture --test-threads=1
+  cargo test -p qbind-node --test a33_f1_quarantine_tokio_owner_lease_tests omitted_retirement_sensitivity_detects_post_completion_mutation -- --exact --nocapture --test-threads=1
+
+Final raw output is preserved in
+`quarantine-owner-lease-tokio-retirement-raw.log`: 12 passed, 0 failed,
+0 ignored. The test binary emitted no warnings; the existing qbind-node
+library emitted eight dead-code warnings. The isolated omitted-retirement
+sensitivity command reported 1 passed, 0 failed, 0 ignored, 11 filtered out;
+its exact output is preserved in
+`quarantine-owner-lease-tokio-retirement-sensitivity-raw.log`.
+
+Starting byte prefixes:
+  plan: 440895 bytes
+  SHA256SUMS: 18380 bytes
+  this integrity log: 19216 bytes
+  substituted-snapshot model test: unchanged
+  prior Tokio raw-output artifacts: unchanged
+  prior task's ordinary and substituted-snapshot evidence: unchanged
+
+Final scope, prefix, formatting, whitespace, and checksum results are
+appended after verification.
+
+Final verification:
+  PASS exact seven-path allowlist; no production wiring, backend, startup/CLI,
+       generation, clear/resume, or operational change.
+  PASS append-only prefixes: plan 440895 bytes, SHA256SUMS 18380 bytes,
+       prior integrity log 19216 bytes.
+  PASS prior raw-output artifacts and substituted-snapshot test unchanged.
+  PASS targeted rustfmt and whitespace checks for source, plan, and
+       documentation. Full `git diff --check` reports only the expected
+       extra blank line at EOF in each exact captured raw transcript; both
+       are excluded from normalized whitespace checking to preserve output.
+  PASS deterministic focused target:
+       cargo test -p qbind-node --test a33_f1_quarantine_tokio_owner_lease_tests -- --nocapture --test-threads=1
+       12 passed, 0 failed, 0 ignored. The omitted-retirement sensitivity
+       asserts the expected detector error inside a passing test.
+  PASS live-operation positive control admits two mutations; retired
+       operation refuses the subsequent mutation without increasing count.
+  Ordinary checksum before final integrity-hash append:
+       `sha256sum --check SHA256SUMS` exit=1; 170 entries; 141 OK;
+       29 mismatches.
+  Revision-aware before final integrity-hash append: 170 entries; 141
+       current, 29 resolved to producing Git revisions, zero unverified.
+
+The 29 ordinary mismatches include preserved historical checksums for prior
+plan/integrity revisions and are not an ordinary full pass. Post-append
+counts are recorded after replacing only the newest integrity-row hash.
+
+Final post-append checksum verification:
+  Ordinary `sha256sum --check SHA256SUMS`: exit=1; 170 entries;
+  141 OK; 29 FAILED (historical or prior-revision entries).
+  Revision-aware verification: 170 entries; 141 current; 29 verified
+  against producing Git revisions; zero unverified.
+
+After adding the isolated sensitivity output as a separately checksummed
+artifact, final checksum verification is:
+  Ordinary `sha256sum --check SHA256SUMS`: exit=1; 171 entries;
+  142 OK; 29 FAILED.
+  Revision-aware verification: 171 entries; 142 current, 29 verified
+  against producing Git revisions; zero unverified.

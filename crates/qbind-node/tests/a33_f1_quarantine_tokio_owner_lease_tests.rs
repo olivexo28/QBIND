@@ -41,6 +41,9 @@ struct SyntheticState {
     handoff_offered: bool,
     handoff_accepted: bool,
     operation_cancelled: bool,
+    operation_retired: bool,
+    application_task_completed: bool,
+    cleanup_observed: bool,
     refusal_closed: bool,
     participation_allowed: bool,
     publication: Publication,
@@ -59,6 +62,9 @@ impl SyntheticState {
             handoff_offered: false,
             handoff_accepted: false,
             operation_cancelled: false,
+            operation_retired: false,
+            application_task_completed: false,
+            cleanup_observed: false,
             refusal_closed: true,
             participation_allowed: false,
             publication: Publication::None,
@@ -165,6 +171,58 @@ impl SyntheticState {
         Ok(())
     }
 
+    fn observe_application_task_completion(&mut self) -> Result<(), &'static str> {
+        if self.operation_cancelled || self.owner_task_terminated {
+            return Err("cancelled or terminated owner cannot complete operation");
+        }
+        self.application_task_completed = true;
+        Ok(())
+    }
+
+    fn observe_cleanup_completion(&mut self) -> Result<(), &'static str> {
+        if !self.application_task_completed {
+            return Err("cleanup cannot precede observed application completion");
+        }
+        self.cleanup_observed = true;
+        Ok(())
+    }
+
+    fn retire_operation(&mut self, actor: Owner) -> Result<(), &'static str> {
+        if actor != self.owner || !matches!(actor, Owner::Initiator | Owner::Supervisor) {
+            return Err("operation retirement requires current refusal owner");
+        }
+        if self.operation_cancelled {
+            return Err("cancelled operation cannot retire as successful");
+        }
+        if !self.application_task_completed || !self.cleanup_observed {
+            return Err("operation retirement requires observed completion and cleanup");
+        }
+        if self.publication != Publication::Acknowledged
+            || self.work_pending
+            || !self.worker_completed
+            || !self.effect_known
+        {
+            return Err("operation retirement requires acknowledged, resolved effects");
+        }
+        self.operation_retired = true;
+        self.refusal_closed = true;
+        self.participation_allowed = false;
+        Ok(())
+    }
+
+    fn record_late_outcome(&mut self, actor: Owner, outcome: Outcome) -> Result<(), &'static str> {
+        if !self.operation_retired {
+            return Err("late outcome recording requires retired operation");
+        }
+        if actor != self.owner || !matches!(actor, Owner::Initiator | Owner::Supervisor) {
+            return Err("late outcome requires current refusal owner");
+        }
+        self.outcomes.push(outcome);
+        self.refusal_closed = true;
+        self.participation_allowed = false;
+        Ok(())
+    }
+
     fn lose_owner(&mut self) -> Result<(), &'static str> {
         if !self.owner_task_terminated {
             return Err("ownership loss requires observed owner task termination");
@@ -188,6 +246,9 @@ impl SyntheticState {
     fn admit_protected_mutation(&mut self, actor: Owner) -> Result<(), &'static str> {
         if self.operation_cancelled {
             return Err("operation cancellation forbids protected mutation");
+        }
+        if self.operation_retired {
+            return Err("completed operation authority is retired");
         }
         if actor != self.owner || !matches!(actor, Owner::Initiator | Owner::Supervisor) {
             return Err("mutation actor does not own refusal responsibility");
@@ -348,6 +409,17 @@ async fn lock_state(
         .map_err(|_| "state lock watchdog expired".to_owned())
 }
 
+fn require_completed_authority_refusal(
+    state: &mut SyntheticState,
+    actor: Owner,
+) -> Result<(), &'static str> {
+    match state.admit_protected_mutation(actor) {
+        Err("completed operation authority is retired") => Ok(()),
+        Err(_) => Err("mutation refused for a reason other than operation retirement"),
+        Ok(()) => Err("retirement check detected mutation admitted after completion"),
+    }
+}
+
 #[tokio::test]
 async fn cancellation_before_acceptance_does_not_transfer_responsibility() {
     let state = std::sync::Arc::new(Mutex::new(SyntheticState::new()));
@@ -467,7 +539,11 @@ async fn accepted_supervisor_outlives_initiator_and_observes_outstanding_result(
             .map_err(|error| format!("supervisor join failed: {error}"))?;
         supervisor.map_err(str::to_owned)?;
         let state = lock_state(&state).await?;
-        if state.owner != Owner::Supervisor || state.work_pending || !state.refusal_closed {
+        if state.owner != Owner::Supervisor
+            || state.work_pending
+            || !state.refusal_closed
+            || state.operation_cancelled
+        {
             return Err("supervisor did not retain and discharge responsibility".into());
         }
         if state.participation_allowed {
@@ -916,15 +992,104 @@ async fn successful_application_and_cleanup_do_not_reopen_participation() {
             .await
             .map_err(|error| format!("application join failed: {error}"))?;
         result.map_err(str::to_owned)?;
+        {
+            let mut state = lock_state(&state).await?;
+            state
+                .observe_application_task_completion()
+                .map_err(str::to_owned)?;
+            if state.owner != Owner::Initiator || state.operation_cancelled {
+                return Err("task completion incorrectly changed owner or cancellation".into());
+            }
+        }
         Ok::<(), String>(())
     }
     .await;
     let cleanup = tasks.cleanup().await;
     assert!(cleanup.is_ok(), "{cleanup:?}");
     assert!(scenario.is_ok(), "{scenario:?}");
-    let state = state.lock().await;
-    assert_eq!(state.protected_mutations, 1);
-    state.validate_refusal_closed().unwrap();
+    {
+        let mut state = state.lock().await;
+        state.observe_cleanup_completion().unwrap();
+        assert_eq!(state.owner, Owner::Initiator);
+        assert!(state.application_task_completed);
+        assert!(state.cleanup_observed);
+        assert!(!state.operation_cancelled);
+        assert!(!state.operation_retired);
+        state.retire_operation(Owner::Initiator).unwrap();
+        assert!(state.operation_retired);
+        assert_eq!(state.protected_mutations, 1);
+        assert_eq!(
+            require_completed_authority_refusal(&mut state, Owner::Initiator),
+            Ok(())
+        );
+        assert_eq!(state.protected_mutations, 1);
+
+        state
+            .record_late_outcome(Owner::Initiator, Outcome::Unknown)
+            .unwrap();
+        assert_eq!(
+            state.observe_publication(Publication::Uncertain),
+            Ok(()),
+            "late uncertainty may be recorded after retirement"
+        );
+        assert_eq!(
+            state.observe_publication(Publication::Acknowledged),
+            Err("publication attempt is uncertain and terminal")
+        );
+        assert_eq!(
+            require_completed_authority_refusal(&mut state, Owner::Initiator),
+            Ok(()),
+            "late outcomes cannot restore retired authority"
+        );
+        assert_eq!(state.protected_mutations, 1);
+        assert_eq!(state.outcomes, [Outcome::Observed, Outcome::Unknown]);
+        assert_eq!(state.effect_known, true);
+        assert!(state.validate_refusal_closed().is_ok());
+    }
+
+    let mut live = SyntheticState::new();
+    live.observe_publication(Publication::Pending).unwrap();
+    live.observe_publication(Publication::Visible).unwrap();
+    live.observe_publication(Publication::Acknowledged).unwrap();
+    live.begin_work().unwrap();
+    live.observe_outcome(Outcome::Observed).unwrap();
+    assert!(!live.operation_retired);
+    assert_eq!(live.admit_protected_mutation(Owner::Initiator), Ok(()));
+    assert_eq!(live.admit_protected_mutation(Owner::Initiator), Ok(()));
+    assert_eq!(
+        live.protected_mutations, 2,
+        "live operation may perform multiple mutations; retirement is the boundary"
+    );
+}
+
+#[tokio::test]
+async fn omitted_retirement_sensitivity_detects_post_completion_mutation() {
+    let mut state = SyntheticState::new();
+    state.observe_publication(Publication::Pending).unwrap();
+    state.observe_publication(Publication::Visible).unwrap();
+    state
+        .observe_publication(Publication::Acknowledged)
+        .unwrap();
+    state.begin_work().unwrap();
+    state.observe_outcome(Outcome::Observed).unwrap();
+    assert_eq!(state.admit_protected_mutation(Owner::Initiator), Ok(()));
+    state.observe_application_task_completion().unwrap();
+    state.observe_cleanup_completion().unwrap();
+
+    assert!(state.application_task_completed);
+    assert!(state.cleanup_observed);
+    assert!(!state.operation_cancelled);
+    assert!(
+        !state.operation_retired,
+        "defective trace deliberately omits retirement"
+    );
+    assert!(state.validate_refusal_closed().is_ok());
+    assert_eq!(
+        require_completed_authority_refusal(&mut state, Owner::Initiator),
+        Err("retirement check detected mutation admitted after completion"),
+        "valid completed prefix must detect the omitted retirement transition"
+    );
+    assert_eq!(state.protected_mutations, 2);
 }
 
 #[tokio::test]

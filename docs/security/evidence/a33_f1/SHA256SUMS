@@ -163,3 +163,9 @@ af3acb61cc028fad68b89e0e0b0b04a57ee7a0a34e2320d347fc4ff4431fc340  ../../../../do
 5b38998e83dc115036dab94c6f542e4ffbb8af728ca77cd96aea4ef1a2007c28  quarantine-owner-lease-tokio-correction-raw.log
 fe77714162dc5fb6311dc0c1070ed3721c3fab62024fdff769304c173c54a1c2  quarantine-owner-lease-tokio-prior-raw.log
 47df41472e1e7121178fb8723b8af2d63b7aa7c3e2f13369d2bbf63d5bacff7a  quarantine-owner-lease-model-integrity.log
+669d636e81b35750295b9a5b3d8646a37c19691e4bb89a0f5c5a85153edec1b8  ../../../../crates/qbind-node/tests/a33_f1_quarantine_tokio_owner_lease_tests.rs
+abfc96d975d444011e1d53a2b7ee7e49ab8b63f8395b7120332b7c92144fdb42  ../../../../docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md
+25e49fc391d9925666549a758152523f539fb2aa507e7eafee952c6f29528ebc  quarantine-owner-lease-tokio-retirement.md
+f707780dda232e372adf8a02671321b3f891c5196b2aeff9a24e87c2b7fb01bf  quarantine-owner-lease-tokio-retirement-raw.log
+d26a0a9237257928c7530ba6082a985b1f2a6e15ca3cd49f3cc58c0ce05aa8bb  quarantine-owner-lease-model-integrity.log
+e8890620dadc4e6aa138cd8c7e95a8de4640c9646a6fac1cf42aab0b2015e582  quarantine-owner-lease-tokio-retirement-sensitivity-raw.log

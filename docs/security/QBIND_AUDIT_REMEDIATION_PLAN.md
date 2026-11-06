@@ -5838,3 +5838,47 @@ filesystem or crash durability, OS resource reclamation, supervisor survival
 across process/runtime loss, or fencing of production signer, storage,
 snapshot, callback, or outbound work. A33-F1 / E27 and remaining obligations
 remain **OPEN**; activation **DISABLED**; public DevNet **NO-GO**.
+
+## 57. Retire completed-operation mutation authority in the Tokio harness
+
+**TOKIO COMPLETION-RETIREMENT CORRECTION — INDEPENDENT REVIEW PENDING.**
+Repository, branch, clean worktree, and direct remote refs were verified at
+task entry. The existing task branch was at
+`fc2b7d4ce9c141525ac67a71ebe1e5510c1b14b7`; protected local and remote main
+were `c9aaef40b045e896ddfa8b01bad230f6b680715e`.
+
+The supplied reviewer report identified a test-harness-only gap: after
+successful application and cleanup, the same operation authority still
+passed mutation admission. No probe had been executed. The harness now
+requires an explicit `retire_operation` transition after successful
+application-task join and observed cleanup. Retirement records completion
+without changing owner to Lost or setting operation cancellation; the
+current refusal owner remains responsible for observing later outcomes.
+An accepted initiator task ending does not imply operation cancellation;
+the supervisor remains owner in the existing handoff path.
+
+The successful async path retires, then verifies a second mutation is
+refused specifically as `completed operation authority is retired`, with
+the mutation counter unchanged. An otherwise equivalent live operation
+admits two mutations, so the model does not impose a one-mutation protocol.
+A valid completed prefix that deliberately omits retirement is checked by
+the same post-completion assertion; it detects the admitted mutation for
+the intended retirement failure. Late Unknown outcomes and publication
+uncertainty remain recordable after retirement but cannot restore authority
+or reopen participation.
+
+The focused Tokio target reports **12 passed, 0 failed, 0 ignored**. Exact
+command and raw output, source-backed test contract, and sensitivity result
+are recorded in
+[the retirement evidence](evidence/a33_f1/quarantine-owner-lease-tokio-retirement.md).
+The prior substituted-snapshot test remains unchanged and PASSED/CLOSED;
+previous owner/lease controls and raw-output artifacts are preserved.
+
+No production source, consensus wiring, backend, startup/CLI gate,
+generation mechanism, clear/resume path, live node/network, signing, or
+activation changed. Mock publication is not filesystem/crash durability;
+Tokio task results do not prove OS reclamation; the in-memory supervisor
+does not survive process/runtime loss; and the harness does not fence
+production signer, storage, snapshot, callback, or outbound work. A33-F1 /
+E27 and other unresolved obligations remain **OPEN**; activation
+**DISABLED**; public DevNet **NO-GO**.
