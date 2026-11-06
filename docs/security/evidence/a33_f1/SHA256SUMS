@@ -190,3 +190,11 @@ db6533d2f91bf5dea9f5d6a9b23fd4bb109f770b727b98a5b08f2b858f792ac6  quarantine-own
 6cda2f256dfed4163352f5056a685c8daf92a812900ab66af19c686bc687f85a  quarantine-owner-lease-worker-observation-focused.log
 c53b4c6dc22b677a9a22a82e4c595ceb27c66b6ace53c810a917d813e0a65c12  quarantine-owner-lease-worker-observation-regression.log
 80bb50e867f2450db5280d84f8e737d33134e374ccce33ffc2da82bdd3a917f9  quarantine-owner-lease-model-integrity.log
+c55b313061f87c16c62434731993f642a6d0d06564f02efce6ccb99ccc05c858  ../../../../crates/qbind-node/tests/support/a33_f1_inprocess_owner.rs
+b32a6298aa1592505c330d919f7a12573d4c348ab3ab710f6f37fd51ff432b75  ../../../../crates/qbind-node/tests/a33_f1_inprocess_owner_prototype_tests.rs
+a9533f8f53b0e9f274ed0457df8fed273ffc323b82915621b93d6c0ac3af0894  ../../../../docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md
+56f7a5e8011433d79f12fc662c014f7ac9b4d902a13c8ae2a8942db52487f36d  quarantine-owner-lease-worker-accounting-correction.md
+102b7e87c35897be73ea836f2641b6db7477fe183fc5341b88fb25e0062a0bdf  quarantine-owner-lease-accounting-focused.log
+6254c97709c6ce4e1f21f985eeae51b2a427b8f3341a98db7a2c42522d520358  quarantine-owner-lease-accounting-regression.log
+5364938cc21485eb09adbb3f2050194295cf6546310e05a0391410828c26c0f5  quarantine-owner-lease-accounting-diagnostic-failure.log
+16c06ab9531ac3658902d4771dd51d0bd540886e72832a1da4a6d90f8fd4053d  quarantine-owner-lease-model-integrity.log

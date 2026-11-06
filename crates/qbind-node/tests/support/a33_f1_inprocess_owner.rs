@@ -58,6 +58,26 @@ pub(crate) enum WorkerStatus {
     Panicked,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(u8)]
+pub(crate) enum WorkerResultDisposition {
+    Pending = 0,
+    NotObserved = 1,
+    ObservedUnrecorded = 2,
+    Recorded = 3,
+}
+
+impl WorkerResultDisposition {
+    fn from_code(code: u8) -> Self {
+        match code {
+            1 => Self::NotObserved,
+            2 => Self::ObservedUnrecorded,
+            3 => Self::Recorded,
+            _ => Self::Pending,
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct Snapshot {
     pub(crate) owner: OwnerRole,
@@ -77,9 +97,12 @@ pub(crate) struct Snapshot {
     pub(crate) coordinator_abort_requested: bool,
     pub(crate) coordinator_join_observed: bool,
     pub(crate) coordinator_future_dropped: bool,
+    pub(crate) coordinator_future_polled: bool,
     pub(crate) worker_abort_requested: bool,
+    pub(crate) worker_future_entered: bool,
     pub(crate) worker_join_observed: bool,
     pub(crate) worker_result_unobserved: bool,
+    pub(crate) worker_result_disposition: WorkerResultDisposition,
     pub(crate) protected_admissions: usize,
 }
 
@@ -103,9 +126,12 @@ impl Snapshot {
             coordinator_abort_requested: false,
             coordinator_join_observed: false,
             coordinator_future_dropped: false,
+            coordinator_future_polled: false,
             worker_abort_requested: false,
+            worker_future_entered: false,
             worker_join_observed: false,
             worker_result_unobserved: false,
+            worker_result_disposition: WorkerResultDisposition::Pending,
             protected_admissions: 0,
         }
     }
@@ -204,9 +230,12 @@ struct Shared {
     coordinator_abort_requested: Arc<AtomicBool>,
     coordinator_join_observed: Arc<AtomicBool>,
     coordinator_future_dropped: Arc<AtomicBool>,
+    coordinator_future_polled: Arc<AtomicBool>,
     worker_abort_requested: Arc<AtomicBool>,
+    worker_future_entered: Arc<AtomicBool>,
     worker_join_observed: Arc<AtomicBool>,
     worker_result_unobserved: Arc<AtomicBool>,
+    worker_result_disposition: Arc<AtomicU8>,
     current_owner: Arc<AtomicU8>,
 }
 
@@ -219,9 +248,12 @@ struct ReadShared {
     coordinator_abort_requested: Arc<AtomicBool>,
     coordinator_join_observed: Arc<AtomicBool>,
     coordinator_future_dropped: Arc<AtomicBool>,
+    coordinator_future_polled: Arc<AtomicBool>,
     worker_abort_requested: Arc<AtomicBool>,
+    worker_future_entered: Arc<AtomicBool>,
     worker_join_observed: Arc<AtomicBool>,
     worker_result_unobserved: Arc<AtomicBool>,
+    worker_result_disposition: Arc<AtomicU8>,
     current_owner: Arc<AtomicU8>,
 }
 
@@ -235,9 +267,12 @@ impl Shared {
             coordinator_abort_requested: self.coordinator_abort_requested.clone(),
             coordinator_join_observed: self.coordinator_join_observed.clone(),
             coordinator_future_dropped: self.coordinator_future_dropped.clone(),
+            coordinator_future_polled: self.coordinator_future_polled.clone(),
             worker_abort_requested: self.worker_abort_requested.clone(),
+            worker_future_entered: self.worker_future_entered.clone(),
             worker_join_observed: self.worker_join_observed.clone(),
             worker_result_unobserved: self.worker_result_unobserved.clone(),
+            worker_result_disposition: self.worker_result_disposition.clone(),
             current_owner: self.current_owner.clone(),
         }
     }
@@ -579,10 +614,16 @@ impl StateReader {
             .shared
             .coordinator_future_dropped
             .load(Ordering::SeqCst);
+        state.coordinator_future_polled |=
+            self.shared.coordinator_future_polled.load(Ordering::SeqCst);
         state.worker_abort_requested |= self.shared.worker_abort_requested.load(Ordering::SeqCst);
+        state.worker_future_entered |= self.shared.worker_future_entered.load(Ordering::SeqCst);
         state.worker_join_observed |= self.shared.worker_join_observed.load(Ordering::SeqCst);
         state.worker_result_unobserved |=
             self.shared.worker_result_unobserved.load(Ordering::SeqCst);
+        state.worker_result_disposition = WorkerResultDisposition::from_code(
+            self.shared.worker_result_disposition.load(Ordering::SeqCst),
+        );
         if self.shared.current_owner.load(Ordering::SeqCst) == OwnerRole::Lost.code() {
             state.owner = OwnerRole::Lost;
             state.refusal_closed = true;
@@ -650,6 +691,17 @@ impl StateReader {
     }
 
     #[cfg(test)]
+    pub(crate) fn classify_worker_result_for_sensitivity_test(
+        &self,
+        disposition: WorkerResultDisposition,
+    ) {
+        self.shared
+            .worker_result_disposition
+            .store(disposition as u8, Ordering::SeqCst);
+        self.shared.state_updates.send_modify(|_| {});
+    }
+
+    #[cfg(test)]
     pub(crate) fn fill_command_queue_for_test(&self) -> Result<(), ()> {
         let (reply, result) = oneshot::channel();
         drop(result);
@@ -693,6 +745,7 @@ impl MockPublisher {
 pub(crate) struct SupervisorTask {
     join: Option<JoinHandle<()>>,
     abort: tokio::task::AbortHandle,
+    worker_abort_for_test: tokio::task::AbortHandle,
     shared: ReadShared,
 }
 
@@ -801,6 +854,11 @@ impl SupervisorTask {
         self.join.is_some() || self.shared.coordinator_join_observed.load(Ordering::SeqCst)
     }
 
+    #[cfg(test)]
+    pub(crate) fn abort_worker_without_observer_for_test(&self) {
+        self.worker_abort_for_test.abort();
+    }
+
     async fn wait_after_abort(
         &mut self,
         watchdog: Duration,
@@ -854,7 +912,9 @@ where
     F: FnOnce(MockPublisher) -> Fut + Send + 'static,
     Fut: Future<Output = EffectObservation> + Send + 'static,
 {
-    spawn_operation_inner(command_capacity, outcome_capacity, work, None)
+    let (owner, supervisor, _) =
+        spawn_operation_inner(command_capacity, outcome_capacity, work, None, None, true);
+    (owner, supervisor)
 }
 
 #[cfg(test)]
@@ -876,7 +936,7 @@ where
     let (result_ready_tx, result_ready_rx) = oneshot::channel();
     let (release_result_tx, release_result_rx) = oneshot::channel();
     let (worker_dropped_tx, worker_dropped_rx) = oneshot::channel();
-    let (owner, supervisor) = spawn_operation_inner(
+    let (owner, supervisor, _) = spawn_operation_inner(
         command_capacity,
         outcome_capacity,
         work,
@@ -885,6 +945,8 @@ where
             release_result: release_result_rx,
             worker_dropped: worker_dropped_tx,
         }),
+        None,
+        true,
     );
     (
         owner,
@@ -895,12 +957,85 @@ where
     )
 }
 
+#[cfg(test)]
+pub(crate) fn spawn_operation_without_early_worker_guard_for_test<F, Fut>(
+    command_capacity: usize,
+    outcome_capacity: usize,
+    work: F,
+) -> (
+    OperationOwner,
+    SupervisorTask,
+    oneshot::Receiver<()>,
+    oneshot::Sender<()>,
+    oneshot::Receiver<()>,
+)
+where
+    F: FnOnce(MockPublisher) -> Fut + Send + 'static,
+    Fut: Future<Output = EffectObservation> + Send + 'static,
+{
+    let (result_ready_tx, result_ready_rx) = oneshot::channel();
+    let (release_result_tx, release_result_rx) = oneshot::channel();
+    let (worker_dropped_tx, worker_dropped_rx) = oneshot::channel();
+    let (owner, supervisor, _) = spawn_operation_inner(
+        command_capacity,
+        outcome_capacity,
+        work,
+        Some(WorkerResultGate {
+            result_ready: result_ready_tx,
+            release_result: release_result_rx,
+            worker_dropped: worker_dropped_tx,
+        }),
+        None,
+        false,
+    );
+    (
+        owner,
+        supervisor,
+        result_ready_rx,
+        release_result_tx,
+        worker_dropped_rx,
+    )
+}
+
+#[cfg(test)]
+pub(crate) fn spawn_operation_with_join_apply_gate_for_test<F, Fut>(
+    command_capacity: usize,
+    outcome_capacity: usize,
+    work: F,
+) -> (
+    OperationOwner,
+    SupervisorTask,
+    oneshot::Receiver<()>,
+    oneshot::Sender<()>,
+)
+where
+    F: FnOnce(MockPublisher) -> Fut + Send + 'static,
+    Fut: Future<Output = EffectObservation> + Send + 'static,
+{
+    let (observed_tx, observed_rx) = oneshot::channel();
+    let (release_apply_tx, release_apply_rx) = oneshot::channel();
+    let (owner, supervisor, _) = spawn_operation_inner(
+        command_capacity,
+        outcome_capacity,
+        work,
+        None,
+        Some(JoinApplyGate {
+            result_observed: observed_tx,
+            release_application: release_apply_rx,
+        }),
+        true,
+    );
+    (owner, supervisor, observed_rx, release_apply_tx)
+}
+
 fn spawn_operation_inner<F, Fut>(
     command_capacity: usize,
     outcome_capacity: usize,
     work: F,
     result_gate: Option<WorkerResultGate>,
-) -> (OperationOwner, SupervisorTask)
+    join_apply_gate: Option<JoinApplyGate>,
+    guard_worker_before_coordinator_spawn: bool,
+) -> (OperationOwner, SupervisorTask, tokio::task::AbortHandle)
 where
     F: FnOnce(MockPublisher) -> Fut + Send + 'static,
     Fut: Future<Output = EffectObservation> + Send + 'static,
@@ -919,9 +1054,12 @@ where
     let coordinator_abort_requested = Arc::new(AtomicBool::new(false));
     let coordinator_join_observed = Arc::new(AtomicBool::new(false));
     let coordinator_future_dropped = Arc::new(AtomicBool::new(false));
+    let coordinator_future_polled = Arc::new(AtomicBool::new(false));
     let worker_abort_requested = Arc::new(AtomicBool::new(false));
+    let worker_future_entered = Arc::new(AtomicBool::new(false));
     let worker_join_observed = Arc::new(AtomicBool::new(false));
     let worker_result_unobserved = Arc::new(AtomicBool::new(false));
+    let worker_result_disposition = Arc::new(AtomicU8::new(WorkerResultDisposition::Pending as u8));
     let current_owner = Arc::new(AtomicU8::new(OwnerRole::Initiator.code()));
     let shared = Shared {
         state,
@@ -931,9 +1069,12 @@ where
         coordinator_abort_requested,
         coordinator_join_observed,
         coordinator_future_dropped,
+        coordinator_future_polled,
         worker_abort_requested,
+        worker_future_entered,
         worker_join_observed,
         worker_result_unobserved,
+        worker_result_disposition,
         current_owner,
     };
 
@@ -941,14 +1082,20 @@ where
         commands: commands.clone(),
         shared: shared.clone(),
     };
+    let (result_gate, worker_drop_notify) = match result_gate {
+        Some(gate) => (
+            Some((gate.result_ready, gate.release_result)),
+            Some(WorkerDropNotify(Some(gate.worker_dropped))),
+        ),
+        None => (None, None),
+    };
+    let worker_shared = shared.clone();
     let worker = tokio::spawn(async move {
-        let (result_gate, _drop_notify) = match result_gate {
-            Some(gate) => (
-                Some((gate.result_ready, gate.release_result)),
-                Some(WorkerDropNotify(Some(gate.worker_dropped))),
-            ),
-            None => (None, None),
-        };
+        let _drop_notify = worker_drop_notify;
+        worker_shared
+            .worker_future_entered
+            .store(true, Ordering::SeqCst);
+        let result_gate = result_gate;
         let result = work(publisher).await;
         if let Some((result_ready, release_result)) = result_gate {
             let _ = result_ready.send(());
@@ -956,10 +1103,31 @@ where
         }
         result
     });
+    let worker_abort_for_test = worker.abort_handle();
+    let worker = if guard_worker_before_coordinator_spawn {
+        WorkerForCoordinator::Guarded(WorkerJoin::new(worker, shared.clone()))
+    } else {
+        WorkerForCoordinator::Raw(worker)
+    };
     let supervisor_shared = shared.clone();
+    let coordinator_drop_notify = CoordinatorDropNotify(supervisor_shared.clone());
     let join = tokio::spawn(async move {
-        let _drop_notify = CoordinatorDropNotify(supervisor_shared.clone());
-        run_supervisor(receiver, worker, supervisor_shared, outcome_capacity).await;
+        let _drop_notify = coordinator_drop_notify;
+        supervisor_shared
+            .coordinator_future_polled
+            .store(true, Ordering::SeqCst);
+        let worker = match worker {
+            WorkerForCoordinator::Guarded(worker) => worker,
+            WorkerForCoordinator::Raw(worker) => WorkerJoin::new(worker, supervisor_shared.clone()),
+        };
+        run_supervisor(
+            receiver,
+            worker,
+            supervisor_shared,
+            outcome_capacity,
+            join_apply_gate,
+        )
+        .await;
     });
     let abort = join.abort_handle();
 
@@ -973,8 +1141,10 @@ where
         SupervisorTask {
             join: Some(join),
             abort,
+            worker_abort_for_test: worker_abort_for_test.clone(),
             shared: shared.read_shared(),
         },
+        worker_abort_for_test,
     )
 }
 
@@ -983,6 +1153,12 @@ struct WorkerResultGate {
     result_ready: oneshot::Sender<()>,
     release_result: oneshot::Receiver<()>,
     worker_dropped: oneshot::Sender<()>,
+}
+
+#[cfg(test)]
+struct JoinApplyGate {
+    result_observed: oneshot::Sender<()>,
+    release_application: oneshot::Receiver<()>,
 }
 
 #[cfg(test)]
@@ -995,6 +1171,11 @@ impl Drop for WorkerDropNotify {
             let _ = sender.send(());
         }
     }
+}
+
+enum WorkerForCoordinator {
+    Guarded(WorkerJoin),
+    Raw(JoinHandle<EffectObservation>),
 }
 
 struct CoordinatorDropNotify(Shared);
@@ -1048,11 +1229,11 @@ enum Command {
 
 async fn run_supervisor(
     mut commands: mpsc::Receiver<Command>,
-    worker: JoinHandle<EffectObservation>,
+    mut worker: WorkerJoin,
     shared: Shared,
     outcome_capacity: usize,
+    mut join_apply_gate: Option<JoinApplyGate>,
 ) {
-    let mut worker = WorkerJoin::new(worker, shared.clone());
     let mut task_done = false;
     let mut commands_open = true;
     loop {
@@ -1074,9 +1255,22 @@ async fn run_supervisor(
             joined = worker.join(), if !task_done => {
                 task_done = true;
                 worker.shared.worker_join_observed.store(true, Ordering::SeqCst);
+                worker.shared.worker_result_unobserved.store(false, Ordering::SeqCst);
+                worker.shared.worker_result_disposition.store(
+                    WorkerResultDisposition::ObservedUnrecorded as u8,
+                    Ordering::SeqCst,
+                );
                 worker.handle.take();
+                if let Some(gate) = join_apply_gate.take() {
+                    let _ = gate.result_observed.send(());
+                    let _ = gate.release_application.await;
+                }
                 let mut state = shared.state.lock().await;
                 apply_worker_join(&mut state, joined, outcome_capacity, &shared);
+                worker.shared.worker_result_disposition.store(
+                    WorkerResultDisposition::Recorded as u8,
+                    Ordering::SeqCst,
+                );
                 publish(&shared, &state);
             }
         }
@@ -1407,6 +1601,9 @@ impl Drop for WorkerJoin {
             self.shared
                 .worker_result_unobserved
                 .store(true, Ordering::SeqCst);
+            self.shared
+                .worker_result_disposition
+                .store(WorkerResultDisposition::NotObserved as u8, Ordering::SeqCst);
             self.request_abort();
         }
     }

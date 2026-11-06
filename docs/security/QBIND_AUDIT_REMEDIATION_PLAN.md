@@ -6029,3 +6029,83 @@ delivery, or recovery claim is made. The coordinator/worker observation
 boundary remains open beyond what the test prototype can observe. A33-F1 /
 E27 and all other unresolved obligations remain **OPEN**; activation
 **DISABLED**; public DevNet **NO-GO**.
+
+## 61. Correct worker-loss accounting before coordinator poll and result recording
+
+**TEST-ONLY WORKER-ACCOUNTING CORRECTION — INDEPENDENT REVIEW PENDING.**
+W1 and W2 are attributed to the user-supplied review text in the task
+request; no reviewer identity, reviewer-executed counterexample, or
+reviewer-run test is claimed.
+
+W1: `WorkerJoin` is now constructed before coordinator spawning and captured
+as an already-owned guard in the coordinator future. Its drop before the
+first poll requests worker abort and marks the result `NotObserved`. The
+coordinator future-drop guard is also constructed before spawning, while a
+separate flag distinguishes first poll from future destruction. A
+deterministic pre-poll control confirms the coordinator body has not run
+before abort, then observes the coordinator join result and independently
+checks coordinator drop, worker abort request, worker entry/drop when
+observable, worker JoinHandle result (unobserved), and unresolved
+classification. It does not require a worker-future drop signal if entry
+never occurred. A test-only defective path omits the preinstalled guard and
+is rejected by the same `NotObserved` lifecycle checker. Its cleanup uses a
+separate test abort handle and does not manufacture worker JoinHandle
+observation.
+
+W2: the explicit `WorkerResultDisposition` distinguishes Pending,
+NotObserved, ObservedUnrecorded, and Recorded. After the coordinator
+obtains the real worker join result, it records join observation and
+ObservedUnrecorded before awaiting or applying owner state; Recorded is set
+only after owner-state application. A barrier cancels the coordinator in
+that interval. No independent result owner exists: the unrecorded result is
+transiently held in the coordinator future and becomes unavailable when
+that future is cancelled. The phase-specific
+`check_observed_unrecorded_boundary` checks truthful classification and
+real admission refusal with no counter increment. Its sensitivity control
+injects a false Recorded state and is rejected by that same checker. The
+older loss-before-observation checker is now named and scoped only to that
+phase; it is not asserted as a general coordinator-loss oracle. The normal
+control confirms Recorded only when the owner snapshot contains the result.
+
+The final focused target
+`cargo test -p qbind-node --test a33_f1_inprocess_owner_prototype_tests -- --nocapture`
+reports **28 passed, 0 failed, 0 ignored**. The directly affected
+regression
+`cargo test -p qbind-node --test a33_f1_quarantine_tokio_owner_lease_tests -- --nocapture`
+reports **12 passed, 0 failed, 0 ignored**. Both sensitivity rejections
+are assertions inside passing tests, not separate failing-child runs. An
+initial exact-filter diagnostic run reported **0 passed, 1 failed, 27
+filtered out** because its admission check ran before requesting
+coordinator loss while the coordinator was held at the result barrier. The
+check was moved to the post-loss phase; the retained diagnostic output and
+final suite outputs are recorded in
+`evidence/a33_f1/quarantine-owner-lease-worker-accounting-correction.md`
+and its raw logs. The failed diagnostic is not represented as a security
+pass or finding.
+
+Whitespace evidence correction: the preceding worker-observation integrity
+entry's statement that `git diff --check` passed was not a complete delivery
+scope check. The user-supplied review noted terminal blank-line diagnostics
+in the three preserved worker-observation raw logs. The correction evidence
+verifies those files byte-for-byte against the parent (including their
+two-LF endings), and independently checks source/prose and the complete new
+delivery scope. Historical logs were not altered to make whitespace checks
+appear clean; actual ordinary and terminal-blank-aware results are recorded
+separately in the integrity log.
+
+Only the test-support prototype, its focused tests, and append-only
+plan/evidence change. P1/P2, substituted-snapshot, retirement, and earlier
+worker-observation acceptances remain within their prior bounded scopes and
+are not rewritten or weakened. The prototype does not establish worker
+reclamation, external-effect absence, independent result recovery,
+production ownership, durability, startup enforcement, signer fencing, or
+network delivery. A33-F1 / E27 and all other unresolved obligations remain
+**OPEN**; activation **DISABLED**; public DevNet **NO-GO**.
+
+The first full focused run reported 27 passed and 1 failed on the same
+pre-loss admission-check ordering; the exact-filter reproduction reported
+0 passed, 1 failed, and 27 filtered out, and its raw output is retained.
+The failed check ran while the coordinator was still deliberately paused,
+before cancellation had established the loss phase. A first formatting
+check also reported source formatting differences; `rustfmt` was applied
+and the final targeted formatting check passed.

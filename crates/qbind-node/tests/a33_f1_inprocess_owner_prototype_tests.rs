@@ -5,7 +5,7 @@ mod candidate;
 
 use candidate::{
     EffectObservation, HandoffError, OwnerRole, Publication, RecordError, Refusal,
-    SupervisorJoinError, WorkerStatus,
+    SupervisorJoinError, WorkerResultDisposition, WorkerStatus,
 };
 use std::sync::Arc;
 use tokio::sync::{mpsc, oneshot, Barrier, Mutex as AsyncMutex};
@@ -29,8 +29,13 @@ enum WorkerBoundaryError {
     CoordinatorFutureDropNotObserved,
     CoordinatorJoinObservationMismatch,
     WorkerAbortNotRequested,
+    WorkerJoinNotObserved,
     WorkerJoinUnexpectedlyObserved,
     WorkerResultNotMarkedUnobserved,
+    WorkerResultDispositionMismatch {
+        expected: WorkerResultDisposition,
+        actual: WorkerResultDisposition,
+    },
     WorkerReportedCompleted,
     AdmissionWaitTimedOut,
     SyntheticAdmissionAccepted,
@@ -38,33 +43,34 @@ enum WorkerBoundaryError {
     AdmissionCounterChanged,
 }
 
-async fn check_abandoned_worker_boundary(
+async fn check_worker_loss_before_observation_boundary(
     reader: &candidate::StateReader,
     owner: &candidate::OperationOwner,
     coordinator_join_observed: bool,
 ) -> Result<(), WorkerBoundaryError> {
     let before = reader.snapshot().await;
-    if !before.supervisor_lost {
-        return Err(WorkerBoundaryError::SupervisorLossNotRecorded);
-    }
-    if !before.coordinator_future_dropped {
-        return Err(WorkerBoundaryError::CoordinatorFutureDropNotObserved);
-    }
-    if before.coordinator_join_observed != coordinator_join_observed {
-        return Err(WorkerBoundaryError::CoordinatorJoinObservationMismatch);
-    }
-    if !before.worker_abort_requested {
-        return Err(WorkerBoundaryError::WorkerAbortNotRequested);
-    }
-    if before.worker_join_observed {
-        return Err(WorkerBoundaryError::WorkerJoinUnexpectedlyObserved);
-    }
-    if !before.worker_result_unobserved {
-        return Err(WorkerBoundaryError::WorkerResultNotMarkedUnobserved);
-    }
-    if before.worker_completed || before.worker_status != WorkerStatus::Running {
-        return Err(WorkerBoundaryError::WorkerReportedCompleted);
-    }
+    let state_error = if !before.supervisor_lost {
+        Some(WorkerBoundaryError::SupervisorLossNotRecorded)
+    } else if !before.coordinator_future_dropped {
+        Some(WorkerBoundaryError::CoordinatorFutureDropNotObserved)
+    } else if before.coordinator_join_observed != coordinator_join_observed {
+        Some(WorkerBoundaryError::CoordinatorJoinObservationMismatch)
+    } else if !before.worker_abort_requested {
+        Some(WorkerBoundaryError::WorkerAbortNotRequested)
+    } else if before.worker_join_observed {
+        Some(WorkerBoundaryError::WorkerJoinUnexpectedlyObserved)
+    } else if !before.worker_result_unobserved {
+        Some(WorkerBoundaryError::WorkerResultNotMarkedUnobserved)
+    } else if before.worker_result_disposition != WorkerResultDisposition::NotObserved {
+        Some(WorkerBoundaryError::WorkerResultDispositionMismatch {
+            expected: WorkerResultDisposition::NotObserved,
+            actual: before.worker_result_disposition,
+        })
+    } else if before.worker_completed || before.worker_status != WorkerStatus::Running {
+        Some(WorkerBoundaryError::WorkerReportedCompleted)
+    } else {
+        None
+    };
 
     match tokio::time::timeout(candidate::WATCHDOG, owner.admit_protected_operation()).await {
         Err(_) => return Err(WorkerBoundaryError::AdmissionWaitTimedOut),
@@ -75,7 +81,43 @@ async fn check_abandoned_worker_boundary(
     if reader.snapshot().await.protected_admissions != before.protected_admissions {
         return Err(WorkerBoundaryError::AdmissionCounterChanged);
     }
-    Ok(())
+    state_error.map_or(Ok(()), Err)
+}
+
+async fn check_observed_unrecorded_boundary(
+    reader: &candidate::StateReader,
+    owner: &candidate::OperationOwner,
+) -> Result<(), WorkerBoundaryError> {
+    let before = reader.snapshot().await;
+    let state_error = if !before.supervisor_lost || !before.coordinator_future_dropped {
+        Some(WorkerBoundaryError::SupervisorLossNotRecorded)
+    } else if !before.coordinator_join_observed {
+        Some(WorkerBoundaryError::CoordinatorJoinObservationMismatch)
+    } else if !before.worker_join_observed {
+        Some(WorkerBoundaryError::WorkerJoinNotObserved)
+    } else if before.worker_result_unobserved {
+        Some(WorkerBoundaryError::WorkerResultNotMarkedUnobserved)
+    } else if before.worker_result_disposition != WorkerResultDisposition::ObservedUnrecorded {
+        Some(WorkerBoundaryError::WorkerResultDispositionMismatch {
+            expected: WorkerResultDisposition::ObservedUnrecorded,
+            actual: before.worker_result_disposition,
+        })
+    } else if before.worker_completed || !before.observations.is_empty() {
+        Some(WorkerBoundaryError::WorkerReportedCompleted)
+    } else {
+        None
+    };
+
+    match tokio::time::timeout(candidate::WATCHDOG, owner.admit_protected_operation()).await {
+        Err(_) => return Err(WorkerBoundaryError::AdmissionWaitTimedOut),
+        Ok(Err(Refusal::SupervisorLost)) => {}
+        Ok(Err(reason)) => return Err(WorkerBoundaryError::UnexpectedAdmissionRefusal(reason)),
+        Ok(Ok(())) => return Err(WorkerBoundaryError::SyntheticAdmissionAccepted),
+    }
+    if reader.snapshot().await.protected_admissions != before.protected_admissions {
+        return Err(WorkerBoundaryError::AdmissionCounterChanged);
+    }
+    state_error.map_or(Ok(()), Err)
 }
 
 fn require_join_observer(supervisor: &candidate::SupervisorTask) -> Result<(), &'static str> {
@@ -533,6 +575,101 @@ async fn coordinator_abort_is_joined_and_marks_supervisor_lost() {
 }
 
 #[tokio::test]
+async fn coordinator_abort_before_first_poll_drops_preinstalled_worker_guard() {
+    let (owner, mut supervisor_task, _result_ready, _release_result, worker_dropped) =
+        candidate::spawn_operation_with_result_gate_for_test(8, 2, |_| async {
+            EffectObservation::Known(60)
+        });
+    let reader = owner.reader();
+
+    let before_poll = reader.snapshot().await;
+    assert!(!before_poll.coordinator_future_polled);
+    assert!(!before_poll.coordinator_future_dropped);
+    assert!(!before_poll.worker_future_entered);
+    assert_eq!(
+        before_poll.worker_result_disposition,
+        WorkerResultDisposition::Pending
+    );
+
+    assert!(matches!(
+        supervisor_task.abort_and_join().await,
+        Err(SupervisorJoinError::Task(error)) if error.is_cancelled()
+    ));
+    let destroyed = reader.snapshot().await;
+    assert!(destroyed.coordinator_future_dropped);
+    assert!(!destroyed.coordinator_future_polled);
+    assert!(destroyed.coordinator_abort_requested);
+    assert!(destroyed.coordinator_join_observed);
+    assert!(destroyed.worker_abort_requested);
+    assert!(!destroyed.worker_join_observed);
+    assert!(destroyed.worker_result_unobserved);
+    assert_eq!(
+        destroyed.worker_result_disposition,
+        WorkerResultDisposition::NotObserved
+    );
+    assert!(!destroyed.worker_completed);
+    assert_eq!(destroyed.observations, Vec::new());
+
+    let drop_signal = tokio::time::timeout(candidate::WATCHDOG, worker_dropped).await;
+    if destroyed.worker_future_entered {
+        drop_signal
+            .expect("entered worker drop notification watchdog")
+            .expect("entered worker future drop notification");
+    } else if let Ok(result) = drop_signal {
+        result.expect("pre-poll worker future drop notification");
+    }
+
+    assert_eq!(
+        check_worker_loss_before_observation_boundary(&reader, &owner, true).await,
+        Ok(())
+    );
+    drop(owner);
+    drop(reader);
+}
+
+#[tokio::test]
+async fn omitted_pre_poll_worker_guard_is_rejected_by_loss_phase_checker() {
+    let (owner, mut supervisor_task, _result_ready, _release_result, worker_dropped) =
+        candidate::spawn_operation_without_early_worker_guard_for_test(8, 2, |_| async {
+            EffectObservation::Known(601)
+        });
+    let reader = owner.reader();
+    assert!(!reader.snapshot().await.coordinator_future_polled);
+
+    assert!(matches!(
+        supervisor_task.abort_and_join().await,
+        Err(SupervisorJoinError::Task(error)) if error.is_cancelled()
+    ));
+    let state = reader.snapshot().await;
+    assert!(state.coordinator_future_dropped);
+    assert!(!state.coordinator_future_polled);
+    assert!(!state.worker_abort_requested);
+    assert!(!state.worker_join_observed);
+    assert!(!state.worker_result_unobserved);
+    assert_eq!(
+        state.worker_result_disposition,
+        WorkerResultDisposition::Pending
+    );
+    assert_eq!(
+        check_worker_loss_before_observation_boundary(&reader, &owner, true).await,
+        Err(WorkerBoundaryError::WorkerAbortNotRequested),
+        "the same phase checker rejects the missing pre-poll guard"
+    );
+
+    supervisor_task.abort_worker_without_observer_for_test();
+    tokio::time::timeout(candidate::WATCHDOG, worker_dropped)
+        .await
+        .expect("sensitivity worker future drop watchdog")
+        .expect("sensitivity worker future drop signal");
+    assert!(
+        !reader.snapshot().await.worker_join_observed,
+        "the test-only cleanup abort does not manufacture JoinHandle observation"
+    );
+    drop(owner);
+    drop(reader);
+}
+
+#[tokio::test]
 async fn coordinator_abort_with_worker_pending_before_effect_leaves_result_unobserved() {
     let (worker_entered_tx, worker_entered_rx) = oneshot::channel();
     let (_release_worker_tx, release_worker_rx) = oneshot::channel::<()>();
@@ -573,7 +710,7 @@ async fn coordinator_abort_with_worker_pending_before_effect_leaves_result_unobs
     assert_eq!(state.publication, Publication::Pending);
     assert!(!state.outcome_unknown, "no worker result was recorded");
     assert_eq!(
-        check_abandoned_worker_boundary(&reader, &owner, true).await,
+        check_worker_loss_before_observation_boundary(&reader, &owner, true).await,
         Ok(())
     );
 
@@ -620,7 +757,7 @@ async fn coordinator_panic_after_synthetic_effect_discards_unobserved_worker_res
     assert!(state.observations.is_empty());
     assert!(!state.outcome_unknown);
     assert_eq!(
-        check_abandoned_worker_boundary(&reader, &owner, true).await,
+        check_worker_loss_before_observation_boundary(&reader, &owner, true).await,
         Ok(())
     );
 
@@ -668,7 +805,7 @@ async fn dropping_outer_coordinator_guard_requests_cleanup_but_leaves_join_unobs
     assert_eq!(state.publication, Publication::Pending);
     assert!(!state.outcome_unknown);
     assert_eq!(
-        check_abandoned_worker_boundary(&reader, &owner, false).await,
+        check_worker_loss_before_observation_boundary(&reader, &owner, false).await,
         Ok(())
     );
 
@@ -700,17 +837,94 @@ async fn abandoned_worker_sensitivity_detects_missing_unobserved_result_marker()
         .expect("worker cancellation observed")
         .expect("worker future drop signal");
     assert_eq!(
-        check_abandoned_worker_boundary(&reader, &owner, true).await,
+        check_worker_loss_before_observation_boundary(&reader, &owner, true).await,
         Ok(()),
         "the documented shutdown trace passes the common boundary checker"
     );
 
     reader.clear_worker_result_unobserved_for_test();
     assert_eq!(
-        check_abandoned_worker_boundary(&reader, &owner, true).await,
+        check_worker_loss_before_observation_boundary(&reader, &owner, true).await,
         Err(WorkerBoundaryError::WorkerResultNotMarkedUnobserved),
         "the same checker detects omission of the unresolved-result marker"
     );
+    drop(owner);
+    drop(reader);
+}
+
+#[tokio::test]
+async fn coordinator_loss_after_worker_join_keeps_result_observed_but_unrecorded() {
+    let (owner, mut supervisor_task, result_observed, _release_application) =
+        candidate::spawn_operation_with_join_apply_gate_for_test(8, 2, |_| async {
+            EffectObservation::Known(66)
+        });
+    let reader = owner.reader();
+    tokio::time::timeout(candidate::WATCHDOG, result_observed)
+        .await
+        .expect("coordinator obtained the worker JoinHandle result")
+        .expect("worker-result-observed barrier signal");
+
+    let paused = reader.snapshot().await;
+    assert!(paused.coordinator_future_polled);
+    assert!(!paused.coordinator_future_dropped);
+    assert!(paused.worker_join_observed);
+    assert!(!paused.worker_result_unobserved);
+    assert_eq!(
+        paused.worker_result_disposition,
+        WorkerResultDisposition::ObservedUnrecorded
+    );
+    assert!(!paused.worker_completed);
+    assert!(paused.observations.is_empty());
+
+    assert!(matches!(
+        supervisor_task.abort_and_join().await,
+        Err(SupervisorJoinError::Task(error)) if error.is_cancelled()
+    ));
+    let lost = reader.snapshot().await;
+    assert!(lost.coordinator_future_dropped);
+    assert!(lost.coordinator_join_observed);
+    assert!(lost.worker_join_observed);
+    assert!(!lost.worker_result_unobserved);
+    assert_eq!(
+        lost.worker_result_disposition,
+        WorkerResultDisposition::ObservedUnrecorded
+    );
+    assert!(!lost.worker_completed);
+    assert!(lost.observations.is_empty());
+    assert_eq!(
+        check_observed_unrecorded_boundary(&reader, &owner).await,
+        Ok(())
+    );
+    drop(owner);
+    drop(reader);
+}
+
+#[tokio::test]
+async fn false_recorded_classification_is_rejected_by_result_phase_checker() {
+    let (owner, mut supervisor_task, result_observed, _release_application) =
+        candidate::spawn_operation_with_join_apply_gate_for_test(8, 2, |_| async {
+            EffectObservation::Known(67)
+        });
+    let reader = owner.reader();
+    tokio::time::timeout(candidate::WATCHDOG, result_observed)
+        .await
+        .expect("worker join result reached application barrier")
+        .expect("worker-result-observed barrier signal");
+
+    assert!(matches!(
+        supervisor_task.abort_and_join().await,
+        Err(SupervisorJoinError::Task(error)) if error.is_cancelled()
+    ));
+    reader.classify_worker_result_for_sensitivity_test(WorkerResultDisposition::Recorded);
+    assert_eq!(
+        check_observed_unrecorded_boundary(&reader, &owner).await,
+        Err(WorkerBoundaryError::WorkerResultDispositionMismatch {
+            expected: WorkerResultDisposition::ObservedUnrecorded,
+            actual: WorkerResultDisposition::Recorded,
+        }),
+        "the same phase checker rejects a false available/recorded classification"
+    );
+
     drop(owner);
     drop(reader);
 }
@@ -738,7 +952,13 @@ async fn normal_worker_and_coordinator_results_are_both_observed() {
     let _ = release_result.send(());
     let completed = ready_snapshot(&reader).await;
     assert!(completed.worker_completed);
+    assert!(completed.coordinator_future_polled);
+    assert!(completed.worker_future_entered);
     assert!(completed.worker_join_observed);
+    assert_eq!(
+        completed.worker_result_disposition,
+        WorkerResultDisposition::Recorded
+    );
     assert!(!completed.worker_abort_requested);
     assert!(!completed.worker_result_unobserved);
     assert_eq!(completed.observations, vec![EffectObservation::Known(65)]);

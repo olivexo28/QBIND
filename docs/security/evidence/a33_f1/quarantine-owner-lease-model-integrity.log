@@ -743,3 +743,98 @@ Post-refresh verification:
   39 FAILED, all matching producing Git revisions; not an ordinary full pass.
   Revision-aware: 192 entries; 153 current; 39 matched producing Git
   revisions; 0 unverified.
+
+Worker-accounting correction:
+  Focused command:
+    cargo test -p qbind-node --test a33_f1_inprocess_owner_prototype_tests -- --nocapture
+    exit=0; 28 passed; 0 failed; 0 ignored.
+  Direct regression:
+    cargo test -p qbind-node --test a33_f1_quarantine_tokio_owner_lease_tests -- --nocapture
+    exit=0; 12 passed; 0 failed; 0 ignored.
+  Raw outputs:
+    quarantine-owner-lease-accounting-focused.log
+    quarantine-owner-lease-accounting-regression.log
+
+The W1 pre-poll test records the coordinator's first-poll flag before any
+runtime yield, then separately observes coordinator future drop, coordinator
+JoinHandle result, worker abort request, worker entry/drop when observable,
+worker result observation, and NotObserved classification. The worker guard
+is constructed before coordinator spawning and captured in the future. The
+omitted-guard sensitivity trace is rejected by the same
+check_worker_loss_before_observation_boundary checker. That checker also
+executes real admission and checks the counter is unchanged.
+
+The W2 barrier pauses after the real worker JoinHandle result is obtained and
+before owner-state application. `WorkerResultDisposition` distinguishes
+Pending, NotObserved, ObservedUnrecorded, and Recorded; result-observed alone
+does not imply a state record. Cancellation leaves ObservedUnrecorded and
+the result unavailable after the coordinator future is dropped. The
+phase-specific `check_observed_unrecorded_boundary` exercises real admission
+and checks the counter. Its false-Recorded sensitivity trace is rejected by
+the same checker. Both sensitivities are expected assertions inside passing
+tests, not separate failing-child tests.
+
+Unsuccessful diagnostic attempt, captured exactly in
+quarantine-owner-lease-accounting-diagnostic-failure.log:
+  cargo test -p qbind-node --test a33_f1_inprocess_owner_prototype_tests false_recorded_classification_is_rejected_by_result_phase_checker -- --exact --nocapture
+  exit=101; 0 passed; 1 failed; 27 filtered out. The first version called
+  the admission checker while the coordinator was held at the result barrier
+  but before cancellation/loss; admission therefore waited to the watchdog.
+  The check was corrected to run after coordinator abort and observed join.
+  This is a sequencing/diagnostic test failure, not a vulnerability finding.
+
+Whitespace evidence correction: the previous worker-observation integrity
+entry's statement that `git diff --check` passed was not a complete check of
+the raw-log delivery bytes. The user-supplied review identified terminal
+blank-line diagnostics in the preserved worker-observation baseline,
+focused, and regression logs. SHA-256 values of each file match the parent
+revision exactly, and all three retain two LF bytes at EOF; they are
+unchanged. New successful Cargo raw outputs also end in two LF bytes; the
+diagnostic failure output ends in one LF. No raw log is normalized or edited.
+
+Complete-scope formatting, whitespace, and preservation:
+  `rustfmt --edition 2021 --check crates/qbind-node/tests/support/a33_f1_inprocess_owner.rs crates/qbind-node/tests/a33_f1_inprocess_owner_prototype_tests.rs`: exit=0.
+  Byte scan: source, test, full remediation plan, correction prose, integrity
+  log, and checksum manifest each have 0 lines ending in spaces or tabs.
+  Staged `git diff --cached --check`: exit=2, with exactly two diagnostics:
+    quarantine-owner-lease-accounting-focused.log:452:
+      new blank line at EOF
+    quarantine-owner-lease-accounting-regression.log:425:
+      new blank line at EOF
+  These are the captured Cargo outputs' terminal extra LF bytes; raw logs
+  remain unmodified. `git -c core.whitespace=cr-at-eol,-blank-at-eof
+  diff --cached --check`: exit=0. The diagnostic-failure raw output ends
+  with one LF and produces no terminal-blank diagnostic.
+
+Historical worker-observation raw output verification against parent
+0c6221ee331b2f9a5849b9b76119676075c62d93:
+  baseline log: byte-identical; SHA-256
+    699beec0d7dec18212db87bb7752824f130518fd6ef88c1ab25a8b689631bb2d;
+    two LF bytes at EOF.
+  focused log: byte-identical; SHA-256
+    6cda2f256dfed4163352f5056a685c8daf92a812900ab66af19c686bc687f85a;
+    two LF bytes at EOF.
+  regression log: byte-identical; SHA-256
+    c53b4c6dc22b677a9a22a82e4c595ceb27c66b6ace53c810a917d813e0a65c12;
+    two LF bytes at EOF.
+The prior broad whitespace statement is therefore qualified: source/prose
+are clean, while raw captures preserve terminal blank-line whitespace.
+No historical output was edited.
+
+Append-only prefixes from task tip 0c6221ee331b2f9a5849b9b76119676075c62d93:
+  remediation plan: 452261 bytes;
+  SHA256SUMS: 21725 bytes;
+  integrity log: 38402 bytes.
+
+Checksum results before the final integrity-log checksum refresh:
+  Ordinary `sha256sum --check SHA256SUMS`: exit=1; 200 entries; 157 OK;
+  43 FAILED. All 43 mismatches matched producing Git revisions.
+  Revision-aware: 200 entries; 157 current; 43 matched producing Git
+  revisions; 0 unverified.
+
+After appending this result and refreshing the integrity-log digest:
+  Ordinary `sha256sum --check SHA256SUMS`: exit=1; 200 entries; 157 OK;
+  43 FAILED (preserved historical/prior-revision entries; not an ordinary
+  full pass).
+  Revision-aware: 200 entries; 157 current; 43 matched producing Git
+  revisions; 0 unverified.
