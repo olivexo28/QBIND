@@ -753,6 +753,33 @@ fn preexisting_work_blocks_mutation_until_observed_and_unknown_stays_blocked() {
 }
 
 #[test]
+fn substituted_starting_snapshot_after_ack_is_rejected_and_original_remains_usable() {
+    let starting_snapshot = sample_anchor();
+    let mut substituted_snapshot = starting_snapshot;
+    substituted_snapshot.committed_id = [0x99; 32];
+    assert_ne!(starting_snapshot, substituted_snapshot);
+
+    let acknowledged = acknowledged_intent_without_external_fences();
+    assert_eq!(acknowledged.validate(), Ok(()));
+
+    let mut substituted_trace = acknowledged.trace.clone();
+    substituted_trace.push(Event::SnapshotCaptured(substituted_snapshot));
+    assert_eq!(
+        trace_is_valid(&substituted_trace),
+        Err("starting snapshot requires a live initiator lease before publication and one capture")
+    );
+
+    let mut original_trace = acknowledged.trace;
+    for domain in EXTERNAL_DOMAINS {
+        original_trace.push(Event::ExternalOwnerAccepted(domain));
+        original_trace.push(Event::ExternalDomainFenced(domain));
+    }
+    original_trace.push(Event::TupleRevalidated(starting_snapshot));
+    original_trace.push(Event::ProtectedMutation(Owner::Initiator));
+    assert_eq!(trace_is_valid(&original_trace), Ok(()));
+}
+
+#[test]
 fn tuple_revalidation_is_post_ack_and_stales_before_a_later_mutation() {
     let mut before_ack = acknowledged_prefix_without_visibility();
     before_ack.record(Event::TupleRevalidated(sample_anchor()));

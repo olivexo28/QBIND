@@ -274,3 +274,35 @@ enforcement, signer fencing, or network delivery. No production backend,
 gate, allow/clear/resume path, or generation mechanism is selected.
 A33-F1 / E27 and remaining obligations remain **OPEN**; activation
 **DISABLED**; public DevNet **NO-GO**.
+
+## Substituted starting-snapshot sensitivity control
+
+**SUBSTITUTED-SNAPSHOT TEST — INDEPENDENT REVIEW PENDING.**
+At starting revision `0e1e99f05c5fdd231e8b394ca2d7d0c33e95509f`, the
+existing shared checker already forbids a second starting-snapshot capture
+or a capture after publication starts. The new focused test accepts the
+complete acquire/capture-A/publish/visible/acknowledged trace, then appends
+`SnapshotCaptured(B)` with a different committed block ID and requires the
+exact error:
+
+```text
+starting snapshot requires a live initiator lease before publication and one capture
+```
+
+The positive branch uses the same accepted acknowledgment prefix bound to
+A, independently accepts and fences every external domain, revalidates A,
+and performs the modeled mutation. Both branches use the existing shared
+lifecycle checker. No later outcome observation replaces the starting
+snapshot; the guard and existing model semantics were not changed.
+
+The focused target reports **17 passed, 0 failed, 9 ignored**. The new
+substitution check is a passing assertion of expected refusal, not an
+additional deliberately failing child. The nine existing ignored child
+fixtures were launched by their parent and each failed with status 101 and
+its expected diagnostic; they are not counted as passing security tests.
+Exact commands/results are appended to the focused log. Historical model
+and evidence bytes remain in Git and documentation/log prefixes are
+preserved. This closes only the requested model sensitivity-test gap.
+No production, Tokio, filesystem/durability, startup, signer, or network
+assurance is established. A33-F1 / E27 and remaining obligations remain
+**OPEN**; activation **DISABLED**; public DevNet **NO-GO**.

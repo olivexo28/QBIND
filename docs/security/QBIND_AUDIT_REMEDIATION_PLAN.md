@@ -5733,3 +5733,34 @@ Tokio behavior, filesystem durability, startup enforcement, signer fencing,
 or network delivery. No backend, gate, allow/clear/resume path, or generation
 mechanism is selected. A33-F1 / E27 and remaining obligations remain
 **OPEN**; activation **DISABLED**; public DevNet **NO-GO**.
+
+## 54. Exercise substituted starting-snapshot refusal
+
+**SUBSTITUTED-SNAPSHOT TEST — INDEPENDENT REVIEW PENDING.**
+Repository, task branch, clean worktree and HEAD were verified at
+`0e1e99f05c5fdd231e8b394ca2d7d0c33e95509f`. Direct `git ls-remote origin`
+matched that task tip and protected main
+`c9aaef40b045e896ddfa8b01bad230f6b680715e`; local main matched too.
+
+Added one focused test to the existing owner/lease target. The shared
+checker accepts the complete starting-A capture/publication/ack prefix,
+rejects a second starting snapshot B for the exact existing one-capture/
+before-publication error, and accepts a positive branch revalidating and
+using A once all external-domain preconditions hold. No checker guard,
+production source or other model semantics changed. Later outcome
+observations are not replacements for the starting snapshot.
+
+The focused target returned **17 passed, 0 failed, 9 ignored**; its parent
+launched all nine existing defective children, each exiting 101 with the
+intended rejection after valid-prefix checks. Expected child failures are
+not counted as passing security tests. Targeted rustfmt, scope, whitespace,
+append-only prefixes and revision-aware checksums are checked separately
+from ordinary checksum failures. See the appended
+[model control](evidence/a33_f1/quarantine-owner-lease-model.md),
+[focused results](evidence/a33_f1/quarantine-owner-lease-model-focused.log)
+and [integrity record](evidence/a33_f1/quarantine-owner-lease-model-integrity.log).
+Only this test sensitivity gap is addressed, not the overall obligation.
+No backend, codec, gate, clear/resume, production wiring, node/network,
+signing or activation occurred. Model evidence establishes no Tokio,
+durability, startup or signer assurance. A33-F1 / E27 and remaining
+obligations remain **OPEN**; activation **DISABLED**; public DevNet **NO-GO**.

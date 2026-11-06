@@ -493,3 +493,42 @@ resolved before mutation, publication visibility observed after cancellation
 without gaining authority, uncertain publication after owner loss, and
 pending/known outcomes retained through modeled restart. These are
 deterministic test-model traces only, not process or deployment evidence.
+
+## Substituted starting-snapshot sensitivity test
+
+Starting revision: 0e1e99f05c5fdd231e8b394ca2d7d0c33e95509f
+Exact commands (all exit 0):
+
+  rustfmt --edition 2021 crates/qbind-node/tests/a33_f1_quarantine_owner_lease_model_tests.rs
+  rustfmt --edition 2021 --check crates/qbind-node/tests/a33_f1_quarantine_owner_lease_model_tests.rs
+  cargo test -p qbind-node --test a33_f1_quarantine_owner_lease_model_tests -- --nocapture --test-threads=1
+
+Observed final output:
+
+  running 26 tests
+  test substituted_starting_snapshot_after_ack_is_rejected_and_original_remains_usable ... ok
+  test result: ok. 17 passed; 0 failed; 9 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+The accepted prefix captures A then publishes and acknowledges it.
+Appending SnapshotCaptured(B), with B != A, returns exactly:
+  starting snapshot requires a live initiator lease before publication and one capture
+The original-A branch accepts/fences all external domains, revalidates A
+and performs the modeled mutation successfully. The existing guard passed
+without modification.
+
+The nine existing deliberately defective children were actually launched by
+negative_control_children_fail_and_corrected_lifecycle_checker_passes.
+Each exited 101; the parent verified its valid prefix and exact rejection:
+
+  dropped lease reopen: no modeled transition may reopen participation
+  premature handoff: supervisor ownership transferred before acceptance
+  ABA equality: tuple equality cannot restore a lost or invalidated lease
+  late completion clearing Unknown: completion cleared unresolved or conflicting obligation
+  duplicate clearing conflict: completion cleared unresolved or conflicting obligation
+  missing post-ack revalidation: protected mutation requires post-ack tuple revalidation
+  operation cancelled after handoff: operation cancellation forbids protected mutation
+  pre-existing pending work: protected mutation lacks live owner lease or resolved obligations
+  late visible after cancellation: operation cancellation forbids protected mutation
+
+These expected child failures and nine ignored fixtures are separate from
+the 17 passing tests. No unrelated suite was run.

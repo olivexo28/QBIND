@@ -168,3 +168,77 @@ current artifact hashes are appended for those edited artifacts. The final
 ordinary check is expected to report 149 entries, 133 current-byte matches,
 and 16 preserved historical mismatches; the command is rerun after the
 append and its observed counts are reported separately.
+
+## Substituted starting-snapshot test verification
+
+Status: SUBSTITUTED-SNAPSHOT TEST — INDEPENDENT REVIEW PENDING.
+Starting task/local/direct-remote tip:
+  0e1e99f05c5fdd231e8b394ca2d7d0c33e95509f
+Protected local/tracking/direct-remote main:
+  c9aaef40b045e896ddfa8b01bad230f6b680715e
+Repository: olivexo28/QBIND
+Branch: copilot/a33-f1-bounded-eviction
+Origin: https://github.com/olivexo28/QBIND
+Entry worktree/index clean; direct ls-remote used, not only tracking refs.
+
+The only Rust edit adds
+substituted_starting_snapshot_after_ack_is_rejected_and_original_remains_usable.
+The complete A capture/publication/ack prefix passes the existing checker;
+the B capture fails for the exact existing one-capture/publication-order
+reason; the original-A mutation passes with all other preconditions.
+Existing checker and test bytes otherwise remain unchanged. No production
+source, audit register, prior snapshot contract or unrelated evidence changed.
+
+Expected six changed paths:
+  crates/qbind-node/tests/a33_f1_quarantine_owner_lease_model_tests.rs
+  docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md
+  docs/security/evidence/a33_f1/SHA256SUMS
+  docs/security/evidence/a33_f1/quarantine-owner-lease-model.md
+  docs/security/evidence/a33_f1/quarantine-owner-lease-model-focused.log
+  docs/security/evidence/a33_f1/quarantine-owner-lease-model-integrity.log
+
+Preserved starting prefixes (bytes):
+  plan: 434583
+  manifest: 16492
+  model document: 16681
+  focused log: 22090
+  integrity log: 8451
+
+Exact formatting/focused commands and observed results are appended to the
+focused log. Focused result: 17 passed; 0 failed; 9 ignored. The nine
+defective children each exited 101 with their intended diagnostics after
+the parent accepted their prefixes and checked precise refusal reasons.
+They are not counted as passing security tests.
+
+Scope, whitespace, exact-prefix preservation, local documentation links
+and code fences are checked before commit. Ordinary checksum verification
+is run separately from revision-aware verification. Five current hashes
+are appended for this task's edited artifacts; historical entries are
+preserved. The actual final ordinary counts and historical producing-revision
+verification are reported in the task result, not inferred from expected
+counts. Historical failures do not constitute an ordinary-checksum pass.
+
+This closes only a deterministic test-only sensitivity gap. No backend,
+codec, gate, clear/resume, production wiring, Tokio/process/crash/durability,
+startup, signer, network or deployment assurance is established.
+A33-F1 / E27 and remaining obligations OPEN; activation DISABLED;
+public DevNet NO-GO.
+
+Executed check results for the substituted-snapshot task:
+  PASS exact six-path scope and all five byte-prefix checks above.
+  PASS removing only the newly added test restores the exact prior Rust
+       file bytes; all existing controls/checker semantics are preserved.
+  PASS targeted rustfmt, git diff --check and git diff --cached --check.
+  PASS local documentation links/heading anchors and balanced code fences.
+  Ordinary command:
+    (cd docs/security/evidence/a33_f1 && sha256sum --check SHA256SUMS)
+    observed exit=1; total=154; OK=133; FAILED=21.
+  PASS revision-aware verification of all 154 entries: 133 match current
+       bytes; all 21 ordinary mismatches match exact producing Git
+       revisions on HEAD history. This is not a full ordinary-checksum pass.
+  The five newly stale hashes map to starting tip 0e1e99f; the other 16
+  retain their historical producers already recorded in prior evidence.
+
+This log's current hash is finalized after recording the results. The
+ordinary/revision-aware commands are rerun before commit to verify those
+same counts including the finalized log.
