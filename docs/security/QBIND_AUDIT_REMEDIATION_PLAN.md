@@ -6263,3 +6263,81 @@ No hostile namespace-race protection, other writer-path fix, crash
 durability, quarantine/currentness or signer exclusivity is established.
 The two intermediate log producing revisions remain unestablished.
 A33-F1 / E27 remain **OPEN**; activation **DISABLED**; public DevNet **NO-GO**.
+
+## 66. A33-F1 / E27 test-only ordered-planner and outcome candidate
+
+**TEST-ONLY PLANNER/OUTCOME CANDIDATE — INDEPENDENT REVIEW PENDING.**
+The entry revision was task branch `copilot/a33-f1-bounded-eviction` at
+`748ee3ab2a4c88ffa0bfe8152eebd1c695f49c95`; protected local/direct remote
+main were `c9aaef40b045e896ddfa8b01bad230f6b680715e`, and the direct remote
+task tip matched the entry tip. Only test-support code and this appended
+evidence were added. Production catch-up, legacy registration, callers,
+startup, signer, storage and network behavior are unchanged.
+
+The candidate builds on the owner-approved v3 refusal/effect-reporting
+direction and later stay-closed contract, not the earlier unselected v2
+recovery alternatives. The standalone model uses checked `N + 1`,
+`D = max(0, N + 1 - M)`, requires exactly `D` distinct victims, rejects an
+existing ID, and refuses a required missing/cyclic lineage, exhausted
+fixture work budget, arithmetic/accounting failure or incomplete safe set
+without planning-side mutation. It protects committed and lock paths,
+own-QC blocks and their ancestry, and—for this model only—the candidate's
+complete retained parent lineage. The R -> A -> P -> C witness shows
+direct-parent-only protection fails the shared invariant while full-lineage
+protection passes. With `D = 0`, it checks candidate lineage but does not
+scan unrelated graph components.
+
+Queue selection skips stale, duplicate and protected entries, then uses a
+sorted `BTreeMap` fallback; this is a deterministic synthetic choice, not
+production `HashMap` ordering or a legacy queue guarantee. Checked local
+and shared accounting releases a shared charge only after its last modeled
+owner. A snapshot/generation check rejects stale or substituted state before
+effects; model publication then rechecks ancestry and plan invariants and
+verifies post-publication accounting, queue and retained-block results.
+Injected failures after queue edit, first removal and registration are
+test controls, not asserted production paths; they preserve partial model
+state with explicit unresolved outcomes and no rollback claim.
+
+The bounded outcome model stores completed prefix and current-item phase
+separately, records signer dispositions independently from QC formation,
+distinguishes `NotObserved`, `ConfirmedNoEffect` and
+`KnownDetailsUnavailable`, and refuses participation even when marked
+`Complete`. Fixture-only limits are 4 items, 4 signers per item, 4 planned
+victims, 32 lineage visits, 8 prefix effect observations and 2
+late/conflicting evidence records. They do not bound transport or
+deserialization allocations; 128 outbound items is not an inbound bound,
+and 64-KiB production sufficiency remains unestablished.
+
+The dedicated `crates/qbind-consensus/tests/a33_f1_ordered_planner_model_tests.rs`
+imports `tests/support/a33_f1_ordered_planner.rs` explicitly as a separate
+integration-test crate. Its 11 focused tests pass: R/A/P/C, existing-ID
+refusal, protected roots/ancestors, zero/free/exact/over-limit capacity,
+unrelated-cycle behavior at `D = 0`, missing/cyclic/work-budget refusal,
+queue stale/duplicate/fallback, insufficient victims without mutation,
+checked/shared accounting, snapshot substitution, injected partial
+publication, and bounded prefix/current-item evidence.
+
+Fresh command:
+`cargo test -p qbind-consensus --test a33_f1_ordered_planner_model_tests -- --nocapture --test-threads=1`
+(exit 0; 11 passed, 0 failed, 0 ignored). `rustfmt --edition 2021 --check`
+on the two Rust files also exited 0. Toolchain/platform and complete
+captured test output, SHA-256, six retained raw test logs, earlier failed
+attempts (including the overwritten-output caveat), source contract anchors
+and scope limits are recorded in
+[`ordered-planner-outcome-candidate.md`](evidence/a33_f1/ordered-planner-outcome-candidate.md).
+The model emits no participation capability and is not an actual engine or
+caller test.
+
+This slice selects no production eviction ordering or capacity implementation,
+exclusive-owner mechanism, cancellation-safe observer, durable intent,
+startup containment, retry rule or quarantine clear authority. Already-
+admitted non-engine work and production effect propagation remain unresolved
+dependencies under the stay-closed contract. No global block-capacity
+bound, rollback, retry safety, durable quarantine, production readiness,
+authenticated remote exploit or permission to resume is established.
+Historical ordinary-checksum and whitespace non-passes remain as recorded.
+The targeted check of this slice's appended checksum entries passes, while
+the full staged whitespace check is a non-pass caused only by preserved raw
+logs; non-log source/document whitespace passes. The audit register and
+previous evidence remain unchanged. A33-F1 / E27 and all other remaining
+obligations stay **OPEN**; activation **DISABLED**; public DevNet **NO-GO**.

@@ -225,3 +225,13 @@ a178b85b3ad02c1f1c247cd60b26bc0aee6437759ff3666249410a5d840c8882  i1-marker-temp
 3540435faad0bf6e9e35654c15cf62a07677549846a0b1ce20056e445ae0b933  i1-marker-temp-baseline.log
 9c4927cb397d19f895d456c52900f358ffe310e9e6c1f8daf8b0313d2d6feea1  i1-marker-temp-focused.log
 6d1b1282c42386c2d944d96616671f30d049df31c529200d3eb33e40317aa6da  i1-marker-temp-errors.log
+40fabacee55ae0119d9b8fa0563548c3a8cce2b613754528a823d94ab65597f2  ../../../../crates/qbind-consensus/tests/a33_f1_ordered_planner_model_tests.rs
+f8566011655d4eb6e4666fa16983470201bfc2c21971281f98cf2feac5701c86  ../../../../crates/qbind-consensus/tests/support/a33_f1_ordered_planner.rs
+8ae094b8c03ca493f0e844ce755ef1b868862bc87b9fd647506ab8e25b9a65e6  ../../../../docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md
+f350bf54c05f4261f3b7ce84441b062f57cbafa9f85e1b594e210171dafa1a1f  ordered-planner-outcome-candidate.md
+c8f6a50d9104d2b9a03e90c8d3f50c863097cc788b0eaba10161b71dd0021272  ordered-planner-fallback-expectation-failure.log
+f9fb7091b9af9cd2572d2654374e12e07243591138a2d1ffcd4282677809d6ec  ordered-planner-focused-tests.log
+7db0e41f1653d1ff89f03e3d5631ba4797e7fb11add2ca364d869250504f7c19  ordered-planner-initial-compile-failure.log
+767bd5e6f3b575b84ad074898f97bc626042cf753bdea76f772a7338bc2d8036  ordered-planner-pre-exhaustion-11-test-iteration.log
+8c6c3a0d1ed698b23e9416fe5993c586cc3dbb6f32d6b33e2e36bb40a5b0d1f2  ordered-planner-pre-phase-update-11-test-iteration.log
+82ad342700d16d4b62fe38ad124561117910e7f0ebe69bee5587e1b7de284e57  ordered-planner-prior-11-test-iteration.log
