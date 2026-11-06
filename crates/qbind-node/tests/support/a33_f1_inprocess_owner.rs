@@ -78,6 +78,8 @@ impl WorkerResultDisposition {
     }
 }
 
+// Recorded means the join result was applied to owner status/overflow state;
+// it does not guarantee that the exact observation fit in the bounded list.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct Snapshot {
     pub(crate) owner: OwnerRole,
@@ -329,6 +331,24 @@ impl OperationOwner {
     #[cfg(test)]
     pub(crate) async fn hold_state_for_test(&self) -> tokio::sync::MutexGuard<'_, Snapshot> {
         self.shared.state.lock().await
+    }
+
+    #[cfg(test)]
+    // Seeds a full internal collection to exercise the defensive join-overflow branch.
+    // Normal RecordOutcome admission reserves a slot while the worker is running.
+    pub(crate) async fn fill_observations_for_capacity_boundary_test(
+        &self,
+        observations: Vec<EffectObservation>,
+        outcome_capacity: usize,
+    ) {
+        assert_eq!(observations.len(), outcome_capacity);
+        let mut state = self.shared.state.lock().await;
+        assert_eq!(state.worker_status, WorkerStatus::Running);
+        assert!(state.observations.is_empty());
+        for observation in observations {
+            add_observation(&mut state, observation);
+        }
+        publish(&self.shared, &state);
     }
 
     pub(crate) async fn retire(&self) -> Result<(), Refusal> {

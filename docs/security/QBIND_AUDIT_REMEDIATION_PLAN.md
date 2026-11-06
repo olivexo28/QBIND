@@ -6109,3 +6109,57 @@ The failed check ran while the coordinator was still deliberately paused,
 before cancellation had established the loss phase. A first formatting
 check also reported source formatting differences; `rustfmt` was applied
 and the final targeted formatting check passed.
+
+## 62. Investigate worker-result observation capacity boundary
+
+**TEST-ONLY WORKER-RESULT CAPACITY INVESTIGATION — INDEPENDENT REVIEW
+PENDING.** The source-traced scenario was supplied by the user; the reviewer
+is reported to have inspected source and retained evidence, but did not
+rerun Rust tests or the full historical checksum verification. No defect is
+assumed from that report.
+
+`apply_worker_join` sets `worker_completed` and `WorkerStatus::Completed`
+before checking the bounded observation vector. With space, it appends the
+exact returned worker observation. At capacity, it instead sets
+`outcome_overflow` and shared overflow without appending that value. The
+coordinator then sets `WorkerResultDisposition::Recorded` after
+`apply_worker_join`. This disposition means the join result was applied to
+owner status/overflow state; it does not assert exact observation retention.
+The exact returned value is absent in the overflow case. An overflowed
+Known result does not itself set `outcome_unknown`; it is unavailable rather
+than evidence of no effect. Refusal checks `outcome_overflow` before
+effect-known status and returns `CapacityUncertain`.
+
+The normal `RecordOutcome` path reserves one vector slot while
+`worker_status == Running`, so an ordinary in-process caller cannot fill the
+vector to its configured limit before worker join through that API. The
+overflow test uses an explicit test-only state fixture to establish the
+full-collection precondition, then releases a barrier-held worker and
+observes the actual worker JoinHandle result and `apply_worker_join` caller
+path. It does not claim that normal admission reaches that precondition.
+With a full collection of two repeated known observations and a distinct
+worker value, it verifies the baseline collection remains unchanged,
+`Recorded` plus `outcome_overflow` and no `outcome_unknown`, absent worker
+value, `CapacityUncertain`, and no admission-counter increment. A same
+checker sensitivity assertion requests the false “retained” expectation and
+detects that the value is absent. This is an expected rejection inside a
+passing test, not a separate failing child or security pass. A capacity-
+available control verifies retention of the distinct result and normal
+admission.
+
+A scoped search of the test-support tree found no consumer of
+`WorkerResultDisposition::Recorded` that equates it alone with exact
+observation availability. Existing admission uses overflow/unknown/conflict
+state, not the disposition. The classification therefore remains unchanged;
+its status/overflow meaning is documented beside the type and tested at
+both capacity boundaries. No production capacity or schema is selected.
+
+Exact focused and directly affected regression commands, raw outputs,
+whitespace checks, and checksum results are recorded in
+`evidence/a33_f1/quarantine-owner-lease-worker-result-capacity.md` and the
+appended integrity record. The previously accepted P1/P2,
+substituted-snapshot, retirement, and worker-observation controls remain
+unchanged. This is test-support-only evidence and establishes no production
+capacity, durable evidence, worker reclamation, startup enforcement, signer
+fencing, or activation. A33-F1 / E27 remain **OPEN**; activation **DISABLED**;
+public DevNet **NO-GO**.

@@ -198,3 +198,12 @@ a9533f8f53b0e9f274ed0457df8fed273ffc323b82915621b93d6c0ac3af0894  ../../../../do
 6254c97709c6ce4e1f21f985eeae51b2a427b8f3341a98db7a2c42522d520358  quarantine-owner-lease-accounting-regression.log
 5364938cc21485eb09adbb3f2050194295cf6546310e05a0391410828c26c0f5  quarantine-owner-lease-accounting-diagnostic-failure.log
 16c06ab9531ac3658902d4771dd51d0bd540886e72832a1da4a6d90f8fd4053d  quarantine-owner-lease-model-integrity.log
+5a2c49b4ea980ee33a4f5e9839bf429834698ebe83525353c15d6d02394784ca  ../../../../crates/qbind-node/tests/support/a33_f1_inprocess_owner.rs
+5e17fd45e646d1ff0384f4d5a5b03308977c19381b1fd7d78d4cc24066efc899  ../../../../crates/qbind-node/tests/a33_f1_inprocess_owner_prototype_tests.rs
+975984c1c3822f5028f388c3c8e8acdc07ceaefdbfa61a86664264c1c4b072e8  ../../../../docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md
+de0acf07bab433420bd689b7bd94d53c396b1d9895eece4954cf8c09103de879  quarantine-owner-lease-worker-result-capacity.md
+3e66be32c2838377b39ea42404fc400e7ed3a69f07ce78b104aae145c48497c7  quarantine-owner-lease-worker-result-capacity-focused.log
+36eb69db49a04d757332be94a4eb2603de1eac8cfb796123bd5a0fc1a16a75c1  quarantine-owner-lease-worker-result-capacity-regression.log
+a00af7bbec3fde32bf29311565fa11ec363cfb66f1db1c294b6bc483ac680cb6  quarantine-owner-lease-model-integrity.log
+e1d10145b2f99b8c7ce0bb2f96215b577bbfeb90cfaf186df572d9e1849d4e3f  quarantine-owner-lease-model-integrity.log
+9f682356169de4326dfb4f2ca400dfa375e2bebaf22c577b2dde5e4a0bd1fe2d  quarantine-owner-lease-model-integrity.log

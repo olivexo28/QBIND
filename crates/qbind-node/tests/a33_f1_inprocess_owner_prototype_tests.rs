@@ -41,6 +41,77 @@ enum WorkerBoundaryError {
     SyntheticAdmissionAccepted,
     UnexpectedAdmissionRefusal(Refusal),
     AdmissionCounterChanged,
+    WorkerResultNotObserved,
+    WorkerResultNotApplied,
+    WorkerResultOverflowNotMarked,
+    WorkerObservationRetentionMismatch,
+    UnexpectedUnknownFlag,
+}
+
+#[derive(Clone, Copy)]
+enum WorkerObservationExpectation {
+    Retained,
+    OmittedByOverflow,
+}
+
+async fn check_worker_result_capacity_boundary(
+    reader: &candidate::StateReader,
+    owner: &candidate::OperationOwner,
+    expected_observation: EffectObservation,
+    expectation: WorkerObservationExpectation,
+) -> Result<(), WorkerBoundaryError> {
+    let before = reader.snapshot().await;
+    let state_error = if !before.worker_join_observed {
+        Some(WorkerBoundaryError::WorkerResultNotObserved)
+    } else if before.worker_result_disposition != WorkerResultDisposition::Recorded
+        || !before.worker_completed
+        || before.worker_status != WorkerStatus::Completed
+    {
+        Some(WorkerBoundaryError::WorkerResultNotApplied)
+    } else {
+        let retained = before.observations.contains(&expected_observation);
+        match expectation {
+            WorkerObservationExpectation::Retained if !retained || before.outcome_overflow => {
+                Some(WorkerBoundaryError::WorkerObservationRetentionMismatch)
+            }
+            WorkerObservationExpectation::OmittedByOverflow
+                if retained || !before.outcome_overflow =>
+            {
+                Some(WorkerBoundaryError::WorkerObservationRetentionMismatch)
+            }
+            _ => None,
+        }
+    };
+
+    match (expectation, before.outcome_overflow) {
+        (WorkerObservationExpectation::OmittedByOverflow, true) if before.outcome_unknown => {
+            return Err(WorkerBoundaryError::UnexpectedUnknownFlag);
+        }
+        (WorkerObservationExpectation::Retained, false)
+            if before.outcome_unknown || before.outcome_conflict =>
+        {
+            return Err(WorkerBoundaryError::UnexpectedUnknownFlag);
+        }
+        _ => {}
+    }
+
+    let admitted = tokio::time::timeout(candidate::WATCHDOG, owner.admit_protected_operation())
+        .await
+        .map_err(|_| WorkerBoundaryError::AdmissionWaitTimedOut)?;
+    let admission_succeeded = match (before.outcome_overflow, admitted) {
+        (true, Err(Refusal::CapacityUncertain)) => false,
+        (false, Ok(())) => true,
+        (_, Ok(())) => return Err(WorkerBoundaryError::SyntheticAdmissionAccepted),
+        (_, Err(reason)) => {
+            return Err(WorkerBoundaryError::UnexpectedAdmissionRefusal(reason));
+        }
+    };
+    let after = reader.snapshot().await;
+    let expected_admissions = before.protected_admissions + usize::from(admission_succeeded);
+    if after.protected_admissions != expected_admissions {
+        return Err(WorkerBoundaryError::AdmissionCounterChanged);
+    }
+    state_error.map_or(Ok(()), Err)
 }
 
 async fn check_worker_loss_before_observation_boundary(
@@ -550,6 +621,149 @@ async fn late_unknown_conflict_and_capacity_refusal_remain_closed() {
     drop(owner);
     drop(reader);
     assert!(supervisor_task.join().await.is_ok());
+}
+
+#[tokio::test]
+async fn full_observation_capacity_applies_worker_overflow_without_retaining_value() {
+    let (worker_entered_tx, worker_entered_rx) = oneshot::channel();
+    let (release_worker_tx, release_worker_rx) = oneshot::channel();
+    let worker_value = EffectObservation::Known(599);
+    let (owner, mut supervisor_task) =
+        candidate::spawn_operation(8, 2, move |publisher| async move {
+            publisher.observe(Publication::Visible).await.unwrap();
+            publisher.observe(Publication::Acknowledged).await.unwrap();
+            let _ = worker_entered_tx.send(());
+            let _ = release_worker_rx.await;
+            worker_value
+        });
+    let reader = owner.reader();
+    tokio::time::timeout(candidate::WATCHDOG, worker_entered_rx)
+        .await
+        .expect("worker entered before capacity fill")
+        .expect("worker-entry signal");
+
+    owner
+        .fill_observations_for_capacity_boundary_test(
+            vec![EffectObservation::Known(501), EffectObservation::Known(501)],
+            2,
+        )
+        .await;
+    let full = reader.snapshot().await;
+    assert_eq!(full.observations.len(), 2);
+    assert!(!full.outcome_overflow);
+    assert!(!full.outcome_unknown);
+    assert_eq!(
+        full.worker_result_disposition,
+        WorkerResultDisposition::Pending
+    );
+    assert!(release_worker_tx.send(()).is_ok());
+
+    let completed = tokio::time::timeout(
+        candidate::WATCHDOG,
+        reader.wait_for(|state| state.worker_completed),
+    )
+    .await
+    .expect("worker join application watchdog")
+    .expect("worker join application observed");
+    assert!(completed.worker_join_observed);
+    assert_eq!(
+        completed.worker_result_disposition,
+        WorkerResultDisposition::Recorded
+    );
+    assert_eq!(completed.worker_status, WorkerStatus::Completed);
+    assert_eq!(
+        completed.observations,
+        vec![EffectObservation::Known(501), EffectObservation::Known(501)]
+    );
+    assert!(!completed.observations.contains(&worker_value));
+    assert!(completed.outcome_overflow);
+    assert!(!completed.outcome_unknown);
+    assert!(!completed.outcome_conflict);
+    assert_eq!(
+        check_worker_result_capacity_boundary(
+            &reader,
+            &owner,
+            worker_value,
+            WorkerObservationExpectation::OmittedByOverflow,
+        )
+        .await,
+        Ok(())
+    );
+    assert_eq!(
+        check_worker_result_capacity_boundary(
+            &reader,
+            &owner,
+            worker_value,
+            WorkerObservationExpectation::Retained,
+        )
+        .await,
+        Err(WorkerBoundaryError::WorkerObservationRetentionMismatch),
+        "the same checker rejects a false claim that the worker value was retained"
+    );
+    drop(owner);
+    drop(reader);
+    assert!(
+        tokio::time::timeout(candidate::WATCHDOG, supervisor_task.join())
+            .await
+            .expect("coordinator join watchdog")
+            .is_ok()
+    );
+}
+
+#[tokio::test]
+async fn available_observation_capacity_retains_distinct_worker_value() {
+    let (worker_entered_tx, worker_entered_rx) = oneshot::channel();
+    let (release_worker_tx, release_worker_rx) = oneshot::channel();
+    let worker_value = EffectObservation::Known(777);
+    let (owner, mut supervisor_task) =
+        candidate::spawn_operation(8, 2, move |publisher| async move {
+            publisher.observe(Publication::Visible).await.unwrap();
+            publisher.observe(Publication::Acknowledged).await.unwrap();
+            let _ = worker_entered_tx.send(());
+            let _ = release_worker_rx.await;
+            worker_value
+        });
+    let reader = owner.reader();
+    tokio::time::timeout(candidate::WATCHDOG, worker_entered_rx)
+        .await
+        .expect("worker entered before release")
+        .expect("worker-entry signal");
+    assert_eq!(reader.snapshot().await.observations, Vec::new());
+    assert!(release_worker_tx.send(()).is_ok());
+
+    let completed = tokio::time::timeout(
+        candidate::WATCHDOG,
+        reader.wait_for(|state| state.worker_completed),
+    )
+    .await
+    .expect("worker join application watchdog")
+    .expect("worker join application observed");
+    assert!(completed.worker_join_observed);
+    assert_eq!(
+        completed.worker_result_disposition,
+        WorkerResultDisposition::Recorded
+    );
+    assert_eq!(completed.observations, vec![worker_value]);
+    assert!(!completed.outcome_overflow);
+    assert!(!completed.outcome_unknown);
+    assert_eq!(
+        check_worker_result_capacity_boundary(
+            &reader,
+            &owner,
+            worker_value,
+            WorkerObservationExpectation::Retained,
+        )
+        .await,
+        Ok(())
+    );
+    drop(owner);
+    drop(reader);
+    assert!(
+        tokio::time::timeout(candidate::WATCHDOG, supervisor_task.join())
+            .await
+            .expect("coordinator join watchdog")
+            .is_ok()
+    );
 }
 
 #[tokio::test]

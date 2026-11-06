@@ -838,3 +838,92 @@ After appending this result and refreshing the integrity-log digest:
   full pass).
   Revision-aware: 200 entries; 157 current; 43 matched producing Git
   revisions; 0 unverified.
+
+Worker-result capacity investigation:
+  Focused command:
+    cargo test -p qbind-node --test a33_f1_inprocess_owner_prototype_tests -- --nocapture
+    exit=0; 30 passed; 0 failed; 0 ignored.
+  Direct regression:
+    cargo test -p qbind-node --test a33_f1_quarantine_tokio_owner_lease_tests -- --nocapture
+    exit=0; 12 passed; 0 failed; 0 ignored.
+  Raw outputs:
+    quarantine-owner-lease-worker-result-capacity-focused.log
+    quarantine-owner-lease-worker-result-capacity-regression.log
+
+Source semantics: when the bounded vector is full at worker join,
+apply_worker_join sets worker_completed and Completed status, then marks
+outcome_overflow instead of appending the exact returned observation. The
+coordinator subsequently sets disposition Recorded. Recorded therefore
+means the worker result was applied to owner status/overflow accounting; it
+does not prove the observation is retained. A Known returned value omitted
+by overflow does not itself set outcome_unknown. The admission path checks
+overflow and returns CapacityUncertain without changing the admission count.
+
+The normal RecordOutcome route reserves the final vector slot while
+worker_status is Running, so ordinary callers cannot reach full capacity
+before the worker join through that route. The capacity test uses an explicit
+test-only state fixture to establish the defensive join-overflow branch,
+then exercises the actual worker JoinHandle/result-application path. It
+retains a full pair of repeated Known observations, records overflow,
+leaves outcome_unknown and outcome_conflict false, and does not retain the
+distinguishable worker value. The same checker rejects a false
+retention-expected sensitivity assertion and verifies CapacityUncertain plus
+an unchanged counter. The available-capacity control retains the distinct
+worker value and verifies successful admission/counter increment. These
+sensitivity assertions run inside passing tests; no failing child is
+counted.
+
+Scoped source search found no consumer of Recorded outside the test-support
+prototype and its tests; no caller treats it alone as proof of exact
+observation availability. Existing admission uses overflow/Unknown/conflict
+state. The enum meaning is documented beside its declaration; no semantic
+classification or production code change was needed.
+
+Scope and formatting:
+  rustfmt --edition 2021 --check on the two changed Rust files: exit=0.
+  Source, full remediation plan, new evidence prose and integrity log:
+  byte scan found zero lines ending with spaces or tabs.
+  Existing worker-observation raw files are unchanged; their checksums and
+  terminal blank lines remain as previously recorded. New Cargo captures
+  retain the runner's two LF bytes at EOF. Complete staged ordinary
+  `git diff --cached --check` and terminal-blank-aware result are reported
+  after staging.
+
+Append-only prefixes from task tip 8a00f5c99e2778bd5088d6a0921d3e6b4797324c:
+  remediation plan: 457136 bytes;
+  SHA256SUMS: 22709 bytes;
+  integrity log: 43701 bytes.
+
+Complete-scope checks:
+  Ordinary staged `git diff --cached --check`: exit=2, with exactly two
+  terminal blank-line diagnostics:
+    quarantine-owner-lease-worker-result-capacity-focused.log:454
+    quarantine-owner-lease-worker-result-capacity-regression.log:425
+  These are the raw Cargo captures' final extra LF bytes; logs were not
+  edited. `git -c core.whitespace=cr-at-eol,-blank-at-eof
+  diff --cached --check`: exit=0.
+  rustfmt --edition 2021 --check on the two changed Rust files: exit=0.
+  Byte scans of modified Rust files, full plan, new evidence prose and
+  integrity record: zero lines ending with spaces or tabs.
+  Historical worker-observation baseline/focused/regression logs remain
+  byte-identical to parent commit 8a00f5c99e2778bd5088d6a0921d3e6b4797324c.
+
+Before refreshing this integrity log's checksum:
+  Ordinary `sha256sum --check SHA256SUMS`: exit=1; 207 entries; 160 OK;
+  47 FAILED. Revision-aware verification: 207 entries; 160 current; 47
+  matched producing Git revisions; 0 unverified. These historical/prior-
+  revision mismatches are not represented as an ordinary checksum pass.
+
+The supplied review's limited acceptance status is carried forward: W1/W2,
+P1/P2, substituted-snapshot, retirement and earlier worker-observation
+acceptances remain within their previously reviewed scopes. The reviewer
+did not rerun Rust tests or full historical checksum verification. The
+current tests and checksum verification above were performed in this task.
+
+Final manifest review found the older integrity-log digest
+`a00af7bbec3fde32bf29311565fa11ec363cfb66f1db1c294b6bc483ac680cb6`
+does not match any reachable or unreachable producing commit. Its exact
+46704-byte content is preserved as unreachable Git blob
+`2621fc1845a8dfcd3fb15bd70b9a47c73bf7a2d6`; this confirms the bytes, but
+not a producing revision. It remains an unverified historical manifest
+entry and is not counted among the 47 revision-matched entries.
