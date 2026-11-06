@@ -136,3 +136,9 @@ f1a24c0b1b7b0f3f8e7153b3c5cfab7a78e428ef806f95851698148ebe951aa8  quarantine-com
 197d171ad16543419df29a6e7da6189d63d05f007eea5242b6e3d5ffabefca2c  ../../../../docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md
 eea731ecd7df99a96890cc76329bd6b6c1943b16002afed68c42378e3af2c2e8  quarantine-owner-held-snapshot-contract.md
 b016130c1149d83d77b1c45c943006db7107132b9f3b5f73a101663977081198  quarantine-owner-held-snapshot-contract-integrity.log
+29d4097198dcdb429833cf73622e68d7ee71973318424645c4f40b7f339b8289  ../../../../crates/qbind-node/tests/a33_f1_quarantine_owner_lease_model_tests.rs
+2f28d5b08d32020148386f409a23cb55db89ab7036f2aaa507eeb397fdd51866  ../../../../docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md
+2cfb94cb9c78c585ed56dc37294c750f5670405784a3cf615055e7751a721cc2  quarantine-owner-held-snapshot-contract.md
+074fda155fc2cbebcf86ef52feb10e5adb43839964a52bb32e33d4e6be6e08da  quarantine-owner-lease-model.md
+b3baf57330578bd38fd07728ebccd74b5d6321c249f70877a62d6027e8d9d6e8  quarantine-owner-lease-model-focused.log
+4fb263b92c5a72a0c15f46d272ca85a2fb8eb16eb6f1524b7094cb9792f1cdfe  quarantine-owner-lease-model-integrity.log

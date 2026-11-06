@@ -360,3 +360,45 @@ anti-rollback authority, signer exclusivity, filesystem durability profile,
 complete startup coverage, clear/resume authority, or production allow state
 is selected. A33-F1 / E27 and all remaining obligations remain **OPEN**;
 activation **DISABLED**; public DevNet **NO-GO**.
+
+## User-supplied review correction — tuple and sender-binding limits
+
+This append-only correction records the user-supplied review report; no
+reviewer identity or raw artifact was provided. It supersedes any broader
+interpretation of tuple revalidation or sender binding above.
+
+**Tuple revalidation is not an event-history fence.** Equality between the
+captured and re-read `(committed ID, committed height, current view, lock)`
+detects a changed tuple at those two observations only. It cannot detect all
+intervening mutations, including an ABA transition back to equal values or
+changes outside those fields. Therefore the proposed continuous exclusive
+engine lease is the invariant that excludes engine mutations during
+publication; revalidation is only a defensive changed-tuple check. If the
+lease is lost, dropped, cancelled, or uncertain, the owner state becomes
+Lost/Unknown and mutation remains refused even when the tuple compares equal.
+A separate monotonic generation/fencing mechanism could be reviewed as an
+alternative, but is neither specified nor selected here and would require
+atomic admission/revocation, coverage of every relevant mutation, and
+overflow refusal. No production fence is claimed.
+
+**Sender binding has three distinct source modes.** The handler calls
+`bind_sender` for the self-declared response sender
+(`crates/qbind-node/src/binary_consensus_loop.rs:7393-7410`). The closure
+defined in `handle_inbound_consensus_msg` (`:6097-6160`) delegates to
+`PeerConsensusBindingGate::authorize(origin, claimed)` when a gate is
+installed. With `binding_gate == None`, the explicit fallback is
+`Ok(claimed)`; the source comment identifies that path as test-only
+(`:6061-6090`). Tests also directly call
+`handle_restore_catchup_response` (`:10078-10091,10175-10188`), bypassing
+the inbound binding closure entirely. This inspection distinguishes the
+installed-gate route, the no-gate test-only route, and direct handler tests;
+it does not establish an unauthenticated production route or prove which
+configuration any built deployment uses. The supplied reviewer’s source
+retrieval limitation is acknowledged; the citations here are from direct
+inspection at the pinned task tip.
+
+The test-only owner/lease lifecycle task adds controls for dropped-lease
+reopening, pre-acceptance transfer, ABA tuple equality, and late/duplicate
+completion clearing. All are model evidence only; they do not prove Rust
+task cancellation semantics, production scheduling, durable publication,
+filesystem behavior, or external-domain fencing.

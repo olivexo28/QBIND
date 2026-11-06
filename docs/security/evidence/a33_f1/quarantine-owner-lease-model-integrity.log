@@ -1,0 +1,104 @@
+A33-F1 / E27 owner/lease model — scope and integrity evidence
+=============================================================
+
+Repository: /workspaces/QBIND/olivexo28/QBIND
+Branch: copilot/a33-f1-bounded-eviction
+Task HEAD: 6ad3f20edaa8c63beecb296474f4ba05c378ac81
+Origin fetch URL: https://github.com/olivexo28/QBIND
+Protected local/remote main:
+  c9aaef40b045e896ddfa8b01bad230f6b680715e
+
+At entry, the local origin tracking ref was stale at
+c18443870306dade124281b1c8fa07ecaddec32a, while direct `git ls-remote
+origin` returned the expected task tip
+6ad3f20edaa8c63beecb296474f4ba05c378ac81 and expected main
+c9aaef40b045e896ddfa8b01bad230f6b680715e. The stale task tracking ref was
+23 commits behind. Only `refs/heads/copilot/a33-f1-bounded-eviction` was
+fetched. Its refreshed tracking ref equals HEAD; HEAD and the complete
+unstaged/untracked work were preserved. `git merge-base --is-ancestor`
+confirmed protected main and the refreshed task tracking ref are ancestors
+of HEAD; `git rev-list --left-right --count HEAD...origin/copilot/a33-f1-bounded-eviction`
+returned `0 0`.
+
+The entry status before fetch had no staged changes, modified plan and
+owner-held snapshot contract, and these untracked files:
+
+  crates/qbind-node/tests/a33_f1_quarantine_owner_lease_model_tests.rs
+  docs/security/evidence/a33_f1/quarantine-owner-lease-model-focused.log
+  docs/security/evidence/a33_f1/quarantine-owner-lease-model.md
+
+Final intended change scope:
+
+  crates/qbind-node/tests/a33_f1_quarantine_owner_lease_model_tests.rs
+  docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md
+  docs/security/evidence/a33_f1/SHA256SUMS
+  docs/security/evidence/a33_f1/quarantine-owner-held-snapshot-contract.md
+  docs/security/evidence/a33_f1/quarantine-owner-lease-model-focused.log
+  docs/security/evidence/a33_f1/quarantine-owner-lease-model.md
+  docs/security/evidence/a33_f1/quarantine-owner-lease-model-integrity.log
+
+Scope and documentation checks:
+
+  PASS exact allowlisted path set; no production source or audit-register
+       change.
+  PASS append-only prefix of the plan at HEAD: 428697 bytes.
+  PASS append-only prefix of SHA256SUMS at HEAD: 15213 bytes.
+  PASS append-only prefix of owner-held snapshot contract at HEAD: 23446
+       bytes.
+  PASS local links and balanced Markdown fences in the new model and plan
+       addition; referenced sender-binding source ranges exist.
+  PASS `rustfmt --edition 2021 --check
+       crates/qbind-node/tests/a33_f1_quarantine_owner_lease_model_tests.rs`.
+  PASS `git diff --check` and `git diff --cached --check`.
+
+Focused command:
+
+  cargo test -p qbind-node --test a33_f1_quarantine_owner_lease_model_tests -- --nocapture --test-threads=1
+
+Final post-edit result: 11 passed, 0 failed, 5 ignored, 0 measured. The five
+ignored entries are intentionally defective child fixtures; they are not
+counted as passing security tests. The parent test launched all five; each
+exited with status 101 and its expected checker-rejection diagnostic:
+
+  dropped lease reopens participation
+  handoff before receiver acceptance
+  ABA-equivalent tuple equality
+  late completion clears Unknown
+  duplicate completion clears conflict
+
+The final test input additionally rejects lease acquisition after
+pre-admission cancellation. The exact focused result and test-control
+diagnostics are retained in `quarantine-owner-lease-model-focused.log`.
+
+Ordinary checksum check before this task's checksum entries were appended:
+
+  (cd docs/security/evidence/a33_f1 && sha256sum --check SHA256SUMS)
+  exit=1; 138 entries; 127 OK; 11 FAILED.
+
+The ordinary failures are historical hashes, not rewritten. Each was
+verified against bytes at a producing Git revision:
+
+  authority_reset_quarantine_model_tests.rs (two entries):
+    ce2fa5f2c6239df60497ecb811fc5e38bc5f9f5a
+    9fc107c9717e6b71ac7f694a0c3472d7d2f2608d
+  pqc_reset_quarantine.rs and quarantine_read_interface_tests.rs:
+    f853ad7c301f9b5f0311792a8d85baae44c49960
+  remediation plan (six historical entries):
+    f853ad7c301f9b5f0311792a8d85baae44c49960
+    777e0659eebac8e1c7c6aa27a7bd14dd63478a4c
+    45eb183ee85348bba2efa0bf759a3255720d8c01
+    3a56674277fc7be992c81a235652dcd27a72fc15
+    35b10e210ba9c8db8ef61546aab9eb96f4438e08
+    6ad3f20edaa8c63beecb296474f4ba05c378ac81
+  owner-held snapshot contract:
+    6ad3f20edaa8c63beecb296474f4ba05c378ac81
+
+All six new/current artifact hashes are appended to SHA256SUMS after this
+record. A final ordinary checksum run is performed after that append; its
+actual result is reported separately. Revision-aware verification does not
+rewrite or relabel historical checksum entries.
+
+This is test-only deterministic model evidence. No production path, task
+scheduler, filesystem, crash/power-loss, startup, signer, node, network, or
+deployment behavior was tested. A33-F1 / E27 and remaining obligations
+remain OPEN; activation DISABLED; public DevNet NO-GO.

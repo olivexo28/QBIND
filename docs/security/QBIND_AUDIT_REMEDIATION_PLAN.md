@@ -5639,3 +5639,52 @@ identity or raw artifact is claimed. All acceptance cases are proposed and
 unexecuted. No source, tests, backend, gate, initialization, signing, node,
 or network operations changed or ran. A33-F1 / E27 and remaining
 obligations remain **OPEN**; activation **DISABLED**; public DevNet **NO-GO**.
+
+**Entry-reference correction and final verification:** the origin URL was
+`https://github.com/olivexo28/QBIND`. At entry, direct
+`git ls-remote origin` returned the expected task tip
+`6ad3f20edaa8c63beecb296474f4ba05c378ac81` and protected main
+`c9aaef40b045e896ddfa8b01bad230f6b680715e`; the cached task tracking ref
+was stale at `c18443870306dade124281b1c8fa07ecaddec32a` (23 commits behind).
+Only the task branch ref was fetched. HEAD and all in-progress files were
+preserved, and the refreshed tracking ref matched the expected tip. The
+final focused rerun includes an explicit check that cancellation before
+lease acquisition prevents a later acquisition. Exact scope, source-range,
+link, append-only-prefix and historical-checksum results are recorded in
+[the integrity log](evidence/a33_f1/quarantine-owner-lease-model-integrity.log).
+The ordinary checksum command's historical failures are not represented as a
+pass; see that log and the final task report. No production path was changed.
+
+## 52. Exercise test-only owner/lease cancellation lifecycle
+
+**TEST-ONLY OWNER/LEASE MODEL — INDEPENDENT REVIEW PENDING.** Entry checks
+matched branch `copilot/a33-f1-bounded-eviction`, task/local/remote tip
+`6ad3f20edaa8c63beecb296474f4ba05c378ac81`, clean worktree/staging, and
+protected local/remote main `c9aaef40b045e896ddfa8b01bad230f6b680715e`.
+
+Added [the isolated owner/lease lifecycle model and test matrix](evidence/a33_f1/quarantine-owner-lease-model.md), its test-only integration target, and [the append-only review correction](evidence/a33_f1/quarantine-owner-held-snapshot-contract.md#user-supplied-review-correction--tuple-and-sender-binding-limits).
+The supplied correction distinguishes tuple-change detection from a complete
+mutation fence and documents the installed-gate, no-gate test-only, and
+direct-handler sender-binding paths. The current mutable engine lease model
+does not claim to fence external effect domains.
+
+Focused model test: `cargo test -p qbind-node --test
+a33_f1_quarantine_owner_lease_model_tests -- --nocapture --test-threads=1`;
+final result **11 passed, 0 failed, 5 ignored**. The parent test ran five
+deliberately defective child traces (dropped-lease reopen, unaccepted
+handoff, ABA tuple equality, late completion clearing Unknown, duplicate
+completion clearing conflict); all five failed with their expected
+diagnostics and status 101. Exact command, focused output, and negative
+control dispositions are retained in the
+[focused log](evidence/a33_f1/quarantine-owner-lease-model-focused.log).
+Rustfmt was
+run and checked for the new test file.
+
+All task cancellation, publication, supervisor acceptance, completion, and
+restart events are deterministic model behavior only. No actual task
+scheduling/cancellation, process crash, filesystem, durable marker, startup,
+signer, network, or node tests were run. Existing source lacks a
+cancellation-safe owner lease, durable publisher, startup refusal, and
+external-domain fence; these remain implementation blockers. No production
+path was changed or wired. A33-F1 / E27 and remaining obligations remain
+**OPEN**; activation **DISABLED**; public DevNet **NO-GO**.
