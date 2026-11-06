@@ -1,0 +1,36 @@
+A33-F1 / E27 test-only Tokio owner/lease lifecycle — focused results
+=====================================================================
+
+Exact commands:
+
+  rustfmt --edition 2021 crates/qbind-node/tests/a33_f1_quarantine_tokio_owner_lease_tests.rs
+  rustfmt --edition 2021 --check crates/qbind-node/tests/a33_f1_quarantine_tokio_owner_lease_tests.rs
+  cargo test -p qbind-node --test a33_f1_quarantine_tokio_owner_lease_tests -- --nocapture --test-threads=1
+
+Final focused result:
+
+  running 7 tests
+  test accepted_supervisor_outlives_initiator_and_observes_outstanding_result ... ok
+  test cancellation_before_acceptance_does_not_transfer_responsibility ... ok
+  test operation_cancellation_after_handoff_blocks_supervisor_mutation ... ok
+  test publication_completion_before_and_after_cancellation_preserves_outcome ... ok
+  test sensitivity_controls_reject_unauthorized_mutation_handoff_and_reopen ... ok
+  test successful_application_and_cleanup_do_not_reopen_participation ... ok
+  test supervisor_abort_is_observed_and_late_external_result_stays_closed ... ok
+  test supervisor_records_publication_after_initiator_task_ends ... ok
+  test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured
+
+The qbind-node library emitted eight dead-code warnings. The focused test
+target emitted no warnings on the final run. Formatting and focused tests
+were run after the final source edit.
+
+These results concern only the isolated test model. Mock publication,
+cancellation, supervision and synthetic outcomes are not filesystem or
+crash-durability evidence. Join results do not prove OS resource reclamation.
+No production owner, signer/storage/snapshot/callback/outbound fence, startup
+enforcement, durable marker, recovery, clear, resume, network, deployment or
+activation behavior is tested.
+
+Status: TOKIO OWNER/LEASE TESTS — INDEPENDENT REVIEW PENDING.
+A33-F1 / E27 and remaining obligations OPEN; activation DISABLED;
+public DevNet NO-GO.

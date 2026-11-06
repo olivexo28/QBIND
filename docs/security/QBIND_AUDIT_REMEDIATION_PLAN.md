@@ -5764,3 +5764,39 @@ No backend, codec, gate, clear/resume, production wiring, node/network,
 signing or activation occurred. Model evidence establishes no Tokio,
 durability, startup or signer assurance. A33-F1 / E27 and remaining
 obligations remain **OPEN**; activation **DISABLED**; public DevNet **NO-GO**.
+
+## 55. Exercise Tokio owner/lease cancellation and supervision
+
+**TOKIO OWNER/LEASE TESTS — INDEPENDENT REVIEW PENDING.**
+At task entry the repository was on `copilot/a33-f1-bounded-eviction` at
+`689c7171c63112f2355230ee5311e7bdb14cb3ed`, with no staged or modified
+tracked files. Direct `git ls-remote origin` returned that exact task tip and
+protected main `c9aaef40b045e896ddfa8b01bad230f6b680715e`.
+
+Added a test-only integration harness at
+`crates/qbind-node/tests/a33_f1_quarantine_tokio_owner_lease_tests.rs`.
+It uses actual Tokio spawned tasks, abort requests and observed join
+results, with channels/oneshots and a bounded watchdog for deterministic
+stages. Its publisher and state are mocks; it does not connect to production
+consensus, quarantine, storage, startup, CLI, signing or network paths.
+Eight focused tests pass, including cancellation before handoff acceptance,
+accepted supervision after initiator completion, operation cancellation
+after handoff, publication results before/after cancellation, a supervisor
+recording visibility after the initiator task ends, pending publisher abort,
+supervisor loss and late external outcomes, successful application/ordinary
+cleanup, and unauthorized-mutation/handoff/reopen sensitivity checks.
+
+The exact command and output summary are retained in
+[the focused Tokio results](evidence/a33_f1/quarantine-owner-lease-tokio-focused.log);
+scope and limitations are recorded in
+[the Tokio harness evidence](evidence/a33_f1/quarantine-owner-lease-tokio-tests.md),
+with appended integrity and checksum records.
+
+This demonstrates only the behavior of this in-memory test harness. Mock
+publication is not filesystem or crash/power-loss evidence; task abort and
+join results do not prove OS resource reclamation; an in-memory supervisor
+does not survive process/runtime loss. No engine lease fences signer,
+storage, snapshot, callback or outbound work. No startup enforcement,
+signer exclusivity, currentness, durable marker, recovery, clear or resume
+authority is established. A33-F1 / E27 and all remaining obligations remain
+**OPEN**; activation **DISABLED**; public DevNet **NO-GO**.

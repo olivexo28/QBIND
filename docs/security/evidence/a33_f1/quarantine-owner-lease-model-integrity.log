@@ -242,3 +242,63 @@ Executed check results for the substituted-snapshot task:
 This log's current hash is finalized after recording the results. The
 ordinary/revision-aware commands are rerun before commit to verify those
 same counts including the finalized log.
+
+Tokio owner/lease harness task
+==============================
+
+Entry verification:
+  repository: /workspaces/QBIND/olivexo28/QBIND
+  branch: copilot/a33-f1-bounded-eviction
+  HEAD: 689c7171c63112f2355230ee5311e7bdb14cb3ed
+  direct task remote: 689c7171c63112f2355230ee5311e7bdb14cb3ed
+  direct protected-main remote: c9aaef40b045e896ddfa8b01bad230f6b680715e
+  staged/modified tracked files at entry: none
+  untracked in-progress task source at continuation entry:
+    crates/qbind-node/tests/a33_f1_quarantine_tokio_owner_lease_tests.rs
+
+Expected six changed paths:
+  crates/qbind-node/tests/a33_f1_quarantine_tokio_owner_lease_tests.rs
+  docs/security/QBIND_AUDIT_REMEDIATION_PLAN.md
+  docs/security/evidence/a33_f1/SHA256SUMS
+  docs/security/evidence/a33_f1/quarantine-owner-lease-tokio-focused.log
+  docs/security/evidence/a33_f1/quarantine-owner-lease-tokio-tests.md
+  docs/security/evidence/a33_f1/quarantine-owner-lease-model-integrity.log
+
+The test is test-only and uses synthetic state, mock publication, actual
+Tokio spawned tasks, channel-controlled lifecycle stages, observed join
+results and a 3-second watchdog. It has no production wiring. Eight tests
+passed, zero failed, zero ignored; exact names and commands are retained in
+quarantine-owner-lease-tokio-focused.log. The build emitted eight
+qbind-node library dead-code warnings; the test target emitted none.
+
+Starting append-only prefixes:
+  plan: 436446 bytes
+  SHA256SUMS: 17077 bytes
+  this integrity log: 12206 bytes
+
+Final scope, whitespace, prefix, documentation-link, formatting and checksum
+results are appended below after running those checks. Ordinary
+`sha256sum --check` is reported separately from historical revision-aware
+verification. This harness establishes no Tokio scheduler, OS cleanup,
+filesystem durability, process/runtime survival, production fencing,
+startup, signer, network, deployment or activation assurance.
+
+Final checks:
+  PASS exact six-path allowlist; no production source or Cargo manifest
+       change.
+  PASS byte-for-byte append-only prefixes: plan 436446 bytes,
+       SHA256SUMS 17077 bytes, prior integrity log 12206 bytes.
+  PASS targeted rustfmt and focused Tokio target:
+       8 passed, 0 failed, 0 ignored.
+  PASS Markdown evidence links/fences and git diff --check /
+       git diff --cached --check.
+  Ordinary checksum result:
+       (cd docs/security/evidence/a33_f1 && sha256sum --check SHA256SUMS)
+       exit=1; 159 entries; 136 OK; 23 FAILED (historical hashes).
+  Revision-aware SHA256SUMS verification:
+       PASS all 159 entries: 136 match current bytes; 23 match producing
+       Git revisions; zero unverified hashes.
+
+Only the isolated harness and its append-only plan/evidence/checksum entries
+changed. No PR, merge, main push, force-push, live node/network, operational
+signing, deployment or activation was performed.
